@@ -1,0 +1,21 @@
+# Optional runtime and training extras.
+# Install alongside requirements.txt only when the matching feature path is enabled.
+
+# Dashboard / HTTP ops
+fastapi>=0.115.0
+uvicorn[standard]>=0.34.0
+
+# Optional runtime accelerators / integrations
+polars_ta>=0.5.17
+prometheus-client>=0.21.0
+orjson>=3.10.0
+
+# ML / training
+joblib>=1.4.2
+lightgbm>=4.5
+xgboost>=2.1
+optuna>=4.0
+scikit-learn>=1.4
+
+# Optional regime modeling
+hmmlearn>=0.3
