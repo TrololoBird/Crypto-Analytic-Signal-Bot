@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import polars as pl
+import pytest
 
 from bot.setups.smc import (
     bos_choch,
@@ -15,6 +16,10 @@ from bot.setups.smc import (
 )
 
 DATA_DIR = Path("audit/smc_lib/tests/test_data/EURUSD")
+pytestmark = pytest.mark.skipif(
+    not DATA_DIR.exists(),
+    reason="optional integration fixture tree audit/smc_lib is not available",
+)
 
 
 def _eurusd_ohlcv() -> pl.DataFrame:

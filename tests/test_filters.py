@@ -77,7 +77,7 @@ def _signal() -> Signal:
         entry_low=100.0,
         entry_high=100.2,
         stop=99.0,
-        take_profit_1=102.0,
+        take_profit_1=102.2,
         take_profit_2=103.0,
     )
 

@@ -69,12 +69,12 @@ class SignalEngine:
         
         LOG.debug("%s: strategies can_calculate=%d/%d", symbol, can_calculate_count, len(strategies))
         
-        tasks = [
-            self._calculate_one(strategy, prepared)
-            for strategy in strategies
-        ]
-        
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        results: list[SignalResult | BaseException] = []
+        for strategy in strategies:
+            try:
+                results.append(await self._calculate_one(strategy, prepared))
+            except BaseException as exc:
+                results.append(exc)
         
         # Process results and log errors
         signal_results: list[SignalResult] = []
@@ -150,10 +150,12 @@ class SignalEngine:
         """Calculate signal from single strategy with timeout and error handling."""
         strategy_id = strategy.strategy_id
         symbol = prepared.symbol if prepared else "unknown"
+        queued_at = time.perf_counter()
         
         async with self._semaphore:
             start_time = time.perf_counter()
-            
+            queue_wait_ms = (start_time - queued_at) * 1000.0
+
             try:
                 # Check if strategy can calculate
                 if not strategy.can_calculate(prepared):
@@ -163,14 +165,18 @@ class SignalEngine:
                         setup_id=strategy_id,
                         signal=None,
                         decision=decision,
-                        metadata={"setup_id": strategy_id, "reason": decision.reason_code},
+                        metadata={
+                            "setup_id": strategy_id,
+                            "reason": decision.reason_code,
+                            "queue_wait_ms": queue_wait_ms,
+                            "compute_ms": 0.0,
+                        },
                         calculation_time_ms=0.0
                     )
                 
                 # Run calculation with timeout
-                loop = asyncio.get_running_loop()
                 result = await asyncio.wait_for(
-                    loop.run_in_executor(None, strategy.calculate, prepared),
+                    asyncio.to_thread(strategy.calculate, prepared),
                     timeout=self._timeout
                 )
                 
@@ -185,11 +191,14 @@ class SignalEngine:
                 
                 # Update result with accurate timing
                 result.calculation_time_ms = elapsed_ms
-                
+                result.metadata.setdefault("queue_wait_ms", queue_wait_ms)
+                result.metadata.setdefault("compute_ms", elapsed_ms)
+
                 LOG.debug(
-                    "Strategy %s calculated in %.2fms (signal=%s)",
+                    "Strategy %s calculated in %.2fms (queue_wait=%.2fms signal=%s)",
                     strategy_id,
                     elapsed_ms,
+                    queue_wait_ms,
                     result.signal is not None
                 )
                 
@@ -201,13 +210,14 @@ class SignalEngine:
                 self._registry.record_performance(strategy_id, elapsed_ms, error=True)
                 decision = StrategyDecision.error_result(
                     setup_id=strategy_id,
-                    reason_code="network.timeout",
+                    reason_code="engine.timeout",
                     error=f"timeout after {self._timeout}s",
                     stage="engine",
                     details={
                         "timeout_seconds": self._timeout,
                         "symbol": symbol,
-                        "error_class": "network",
+                        "error_class": "engine",
+                        "queue_wait_ms": queue_wait_ms,
                     },
                 )
                 return SignalResult(
@@ -216,7 +226,11 @@ class SignalEngine:
                     decision=decision,
                     error=decision.error,
                     calculation_time_ms=elapsed_ms,
-                    metadata={"setup_id": strategy_id},
+                    metadata={
+                        "setup_id": strategy_id,
+                        "queue_wait_ms": queue_wait_ms,
+                        "compute_ms": elapsed_ms,
+                    },
                 )
                 
             except Exception as exc:
@@ -246,7 +260,11 @@ class SignalEngine:
                     decision=decision,
                     error=decision.error,
                     calculation_time_ms=elapsed_ms,
-                    metadata={"setup_id": strategy_id},
+                    metadata={
+                        "setup_id": strategy_id,
+                        "queue_wait_ms": queue_wait_ms,
+                        "compute_ms": elapsed_ms,
+                    },
                 )
 
     def _build_skip_decision(self, strategy: Any, prepared: PreparedSymbol) -> StrategyDecision:

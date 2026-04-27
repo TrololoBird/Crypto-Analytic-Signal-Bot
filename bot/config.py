@@ -1,11 +1,7 @@
 from __future__ import annotations
 
 import math
-try:
-    import tomllib as _toml_lib
-except ModuleNotFoundError:  # pragma: no cover - fallback for Python < 3.11
-    import tomli
-    _toml_lib = tomli
+import tomllib as _toml_lib
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal, cast

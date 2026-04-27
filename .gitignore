@@ -41,6 +41,9 @@ htmlcov/
 .idea/
 .DS_Store
 Thumbs.db
+.serena/
+.qodo/
+.codex/
 
 # Local config / secrets
 .env
@@ -59,6 +62,9 @@ telemetry/
 audit/
 audit_manifest.csv
 scripts/audit_data/
+*AUDIT*.md
+audit_*.md
+plan.md
 
 # Test outputs
 test_out.txt

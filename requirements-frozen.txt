@@ -1,41 +1,37 @@
 # Frozen requirements for stable bot operation (April 2026)
-# Updated for websockets>=15.0.1,<16.0.0 compatibility with Binance SDK
+# Python target: 3.13.13
 # Install: pip install -r requirements-frozen.txt
 #
 # Optional dashboard / ML / self-learning extras live in requirements-optional.txt.
 #
-# KEY FIXES APPLIED:
-# - websockets 15.0.1 (was 16.0) - compatible with Binance SDK
-# - pydantic 2.12.5 (was 2.13.1) - compatible with aiogram 3.27.0
-# - Removed: polars_talib, numba, pandas-ta (replaced with polars_ta)
-# - Removed: unicorn-binance-websocket-api (unused)
+# NOTE:
+# - Version set aligned with current upstream releases and pyproject constraints.
+# - Keep this file synchronized with requirements*.txt and pyproject.toml.
 
 # Core async & data processing (Polars-first)
-polars==1.39.3
+polars==1.40.1
 numpy==2.4.4
-python-dotenv==1.0.1
+python-dotenv==1.2.2
 
-# Critical: pydantic <2.13 for aiogram 3.27.0 compatibility
 pydantic==2.12.5
 pydantic_core==2.41.5
 
-# Critical: websockets 15.x for Binance SDK compatibility
-# Post-April 2026: Binance requires new WS endpoints
-websockets==15.0.1
+websockets==16.0
 
-msgspec==0.19.0
-orjson==3.10.12
-tenacity==9.0.0
-prometheus-client==0.21.1
-pytest==8.3.4
-pytest-asyncio==0.25.2
+msgspec==0.21.1
+orjson==3.11.8
+tenacity==9.1.4
+prometheus-client==0.25.0
+pytest==9.0.3
+pytest-asyncio==1.3.0
+pytest-cov==7.1.0
 
 # Binance SDK (USDS-M Futures)
-binance-sdk-derivatives-trading-usds-futures==9.1.0
+binance-sdk-derivatives-trading-usds-futures==10.0.1
 
 # Alternative SDK
 binance-connector==3.12.0
-python-binance==1.0.22
+python-binance==1.0.36
 
 # Telegram & HTTP
 aiogram==3.27.0
@@ -48,5 +44,22 @@ polars_ta==0.5.17
 # Database
 aiosqlite==0.22.1
 
+# API / dashboard optional deps
+fastapi==0.136.1
+uvicorn==0.46.0
+
+# ML / regime
+joblib==1.5.3
+lightgbm==4.6.0
+xgboost==3.2.0
+optuna==4.8.0
+scikit-learn==1.8.0
+hmmlearn==0.3.3
+
 # Logging
-structlog==24.4.0
+structlog==25.5.0
+
+# Dev tools
+ruff==0.15.12
+mypy==1.20.2
+pre-commit==4.6.0

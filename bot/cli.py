@@ -70,7 +70,7 @@ def _bootstrap_env_if_missing() -> None:
     if env_path.exists():
         return
     env_path.write_text(
-        "# Required secrets - fill in your values\n"
+        "# Required Telegram runtime values\n"
         "TG_TOKEN=\n"
         "TARGET_CHAT_ID=\n",
         encoding="utf-8",

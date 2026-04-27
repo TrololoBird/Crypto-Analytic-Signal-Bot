@@ -16,10 +16,24 @@ class IntraCandleScanner:
 
     def __init__(self, bot: Any) -> None:
         self._bot = bot
+        if not hasattr(self._bot, "_intra_inflight_symbols"):
+            self._bot._intra_inflight_symbols = set()
 
     async def handle(self, event: BookTickerEvent) -> None:
         symbol = event.symbol
         now = time.monotonic()
+        freshness_cfg = getattr(getattr(getattr(self._bot, "settings", None), "ws", None), "market_ticker_freshness_seconds", None)
+        if freshness_cfg is not None and event.event_ts_ms is not None and event.event_ts_ms > 0:
+            event_age_seconds = max(0.0, (datetime.now(UTC).timestamp() * 1000.0 - float(event.event_ts_ms)) / 1000.0)
+            max_event_age_seconds = float(freshness_cfg)
+            if event_age_seconds > max_event_age_seconds:
+                LOG.debug(
+                    "intra_candle skip stale event | symbol=%s age_s=%.2f max_s=%.2f",
+                    symbol,
+                    event_age_seconds,
+                    max_event_age_seconds,
+                )
+                return
         throttle_seconds = float(
             getattr(
                 getattr(getattr(self._bot, "settings", None), "ws", None),
@@ -94,7 +108,12 @@ class IntraCandleScanner:
                 LOG.debug("intra_candle scan complete | symbol=%s", symbol)
             except Exception as exc:
                 LOG.debug("intra_candle scan failed for %s: %s", symbol, exc)
+            finally:
+                self._bot._intra_inflight_symbols.discard(symbol)
 
+        if symbol in self._bot._intra_inflight_symbols:
+            return
+        self._bot._intra_inflight_symbols.add(symbol)
         task = asyncio.create_task(_run(), name=f"intra_candle:{symbol}")
         self._bot._background_tasks.add(task)
         task.add_done_callback(self._bot._background_tasks.discard)

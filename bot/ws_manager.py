@@ -70,6 +70,7 @@ _HIGH_EVENT_LATENCY_MS = 5_000.0
 _LATENCY_WARNING_INTERVAL_SECONDS = 60.0
 _SHORT_DISCONNECT_BACKFILL_GRACE_SECONDS = 30.0
 _LATENCY_WARNING_EVENTS = {"kline", "bookTicker", "aggTrade"}
+_STALE_DROP_EVENTS = {"bookTicker", "aggTrade", "24hrTicker", "miniTicker", "markPriceUpdate"}
 _WS_PUBLIC = "public"
 _WS_MARKET = "market"
 _WS_ENDPOINTS = (_WS_PUBLIC, _WS_MARKET)
@@ -232,13 +233,13 @@ class FuturesWSManager:
         self._agg_trade_cbs: list = []               # [async cb(symbol, price, ts)]
         self._reconnect_cb: Any = None               # async cb() — fired on reconnect
 
-        # P0: Rate limiting and message buffering (Binance limit: 10 msg/sec)
-        self._incoming_rate_limiter = RateLimiter(max_per_second=_MAX_INCOMING_MSG_PER_SECOND)
+        # Message buffering with background draining.
         # Increased buffer size to handle high-volume WebSocket streams (45+ symbols)
         # without dropping messages during burst periods
         self._message_buffer = MessageBuffer(maxsize=15000)
         self._buffer_processor_task: asyncio.Task | None = None
         self._backfill_tasks: set[asyncio.Task[None]] = set()
+        self._stale_event_drop_count: int = 0
         
         # P3: Per-stream latency monitoring
         self._stream_latency_ms: dict[str, collections.deque] = {}  # stream -> deque of last 10 latencies
@@ -487,6 +488,7 @@ class FuturesWSManager:
             "market_last_message_age_seconds": self._last_message_age_seconds(_WS_MARKET),
             "ticker_cache_age_seconds": ticker_age,
             "buffer_message_count": self._message_buffer.get_stats()["size"],
+            "stale_event_drop_count": self._stale_event_drop_count,
             "fresh_tickers": fresh_tickers,
             "fresh_mark_prices": fresh_mark_prices,
             "fresh_book_tickers": fresh_book_tickers,
@@ -1400,6 +1402,9 @@ class FuturesWSManager:
                     continue
                 event_type = str(item.get("e", ""))
                 sym = str(item.get("s", "")).upper()
+                if self._should_drop_stale_event(event_type, item.get("E")):
+                    self._stale_event_drop_count += 1
+                    continue
                 # forceOrder arrives as a wrapper; inner symbol is in item["o"]["s"]
                 if event_type == "forceOrder":
                     await self._dispatch_event(item)
@@ -1428,6 +1433,9 @@ class FuturesWSManager:
             
         # Per-symbol streams and !forceOrder@arr deliver a single dict
         if isinstance(data, dict):
+            if self._should_drop_stale_event(str(data.get("e", "")), data.get("E")):
+                self._stale_event_drop_count += 1
+                return
             await self._dispatch_event(data)
             # Record latency
             latency_ms = (time.monotonic() - start_ts) * 1000
@@ -1441,24 +1449,38 @@ class FuturesWSManager:
                     LOG.warning("slow stream detected | stream=%s avg_latency_ms=%.1f", stream, avg_latency)
 
     async def _process_buffered_messages(self) -> None:
-        """P1: Background task to process buffered messages when rate limit allows."""
+        """Background task to drain buffered WS messages quickly."""
         while self._running:
             try:
-                # Wait for a slot in rate limiter
-                await self._incoming_rate_limiter.wait_for_slot()
-                
-                # Get message from buffer
-                msg = await self._message_buffer.get()
-                if msg is not None:
+                processed = 0
+                while processed < 200:
+                    msg = await self._message_buffer.get()
+                    if msg is None:
+                        break
                     await self._process_message_internal(msg)
+                    processed += 1
+                if processed == 0:
+                    await asyncio.sleep(0.01)
                 else:
-                    # Buffer empty, sleep briefly
-                    await asyncio.sleep(0.1)
+                    await asyncio.sleep(0)
             except asyncio.CancelledError:
                 break
             except Exception as exc:
                 LOG.debug("buffer processor error: %s", exc)
                 await asyncio.sleep(0.5)
+
+    def _should_drop_stale_event(self, event_type: str, event_time_ms: Any) -> bool:
+        if event_type not in _STALE_DROP_EVENTS:
+            return False
+        try:
+            event_ms = float(event_time_ms)
+        except (TypeError, ValueError):
+            return False
+        if event_ms <= 0:
+            return False
+        max_age_seconds = float(getattr(self._cfg, "market_ticker_freshness_seconds", 30.0))
+        age_ms = (time.time() * 1000.0) - event_ms
+        return age_ms > (max_age_seconds * 1000.0)
 
     async def _handle_kline(self, symbol: str, data: dict) -> None:
         """Handle closed kline (candle) events.  Acquires _data_lock to prevent

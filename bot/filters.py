@@ -231,9 +231,21 @@ def apply_global_filters(
         return _reject("stop_too_wide", updated)
     updated = replace(updated, passed_filters=tuple([*updated.passed_filters, "stop_ok"]))
 
-    # --- 6. Risk / Reward ---
-    if updated.risk_reward < settings.filters.min_risk_reward:
-        return _reject("risk_reward_too_low", updated)
+    # --- 6. Risk / Reward (runtime gate uses TP1; TP2 RR remains analytical) ---
+    risk = abs(updated.entry_mid - updated.stop)
+    reward_tp1 = abs(updated.take_profit_1 - updated.entry_mid)
+    rr_tp1 = (reward_tp1 / risk) if risk > 0 else 0.0
+    if rr_tp1 < settings.filters.min_risk_reward:
+        return _reject(
+            "risk_reward_too_low",
+            updated,
+            details={
+                "gate_rr_target": "tp1",
+                "rr_tp1": rr_tp1,
+                "rr_tp2": updated.risk_reward,
+                "min_rr_required": settings.filters.min_risk_reward,
+            },
+        )
     updated = replace(updated, passed_filters=tuple([*updated.passed_filters, "rr_ok"]))
 
     # --- 7. Scoring + ML (ConfluenceEngine — unified path) ---

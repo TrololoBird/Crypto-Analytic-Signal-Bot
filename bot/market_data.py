@@ -60,7 +60,7 @@ _CACHE_TTL = {
 }
 
 # Client-side weight estimates per operation (Binance Futures April 2026).
-# klines: limit=240 → weight=5; all others default to 1 unless listed.
+# Kline requests with `limit > 100` are billed with weight=5.
 _ENDPOINT_WEIGHTS: dict[str, int] = {
     # Official docs: GET /fapi/v1/exchangeInfo weight=1
     "exchange_information": 1,
@@ -80,6 +80,7 @@ _FUTURES_DATA_REQUEST_LIMITED_OPS: set[str] = {
     "open_interest_statistics",
     "top_trader_long_short_ratio_accounts",
 }
+_DEFAULT_KLINE_FETCH_LIMIT = 300
 
 
 class _SlidingWindowRateLimiter:
@@ -212,8 +213,6 @@ class BinanceFuturesMarketData:
         if AsyncClient is None:
             raise ImportError("binance library is required but not installed")
         self.client: Any = AsyncClient(
-            api_key=None,
-            api_secret=None,
             requests_params={"timeout": rest_timeout_seconds}
         )
         self._exchange_info_cache: tuple[float, list[SymbolMeta]] | None = None
@@ -328,7 +327,7 @@ class BinanceFuturesMarketData:
     def _estimate_weight(self, operation: str) -> int:
         """Return estimated request weight for client-side budget tracking."""
         if operation.startswith("kline_candlestick_data"):
-            return 5  # limit=240 > 100
+            return 5  # kline weight tier for limit > 100
         return _ENDPOINT_WEIGHTS.get(operation, 1)
 
     def _track_weight(self, operation: str) -> None:
@@ -738,10 +737,10 @@ class BinanceFuturesMarketData:
 
     async def _fetch_symbol_frames_rest(self, symbol: str) -> SymbolFrames:
         frame_4h, frame_1h, frame_15m, frame_5m, book_ticker = await asyncio.gather(
-            self.fetch_klines_cached(symbol, "4h", limit=240),
-            self.fetch_klines_cached(symbol, "1h", limit=240),
-            self.fetch_klines_cached(symbol, "15m", limit=240),
-            self.fetch_klines_cached(symbol, "5m", limit=240),
+            self.fetch_klines_cached(symbol, "4h", limit=_DEFAULT_KLINE_FETCH_LIMIT),
+            self.fetch_klines_cached(symbol, "1h", limit=_DEFAULT_KLINE_FETCH_LIMIT),
+            self.fetch_klines_cached(symbol, "15m", limit=_DEFAULT_KLINE_FETCH_LIMIT),
+            self.fetch_klines_cached(symbol, "5m", limit=_DEFAULT_KLINE_FETCH_LIMIT),
             self._fetch_book_ticker_rest(symbol),
         )
         bid, ask = book_ticker

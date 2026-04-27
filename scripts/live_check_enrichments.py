@@ -292,9 +292,9 @@ async def _run(symbols: list[str], warmup_seconds: float) -> None:
             )
 
             # Fetch klines
-            df_4h = await client.fetch_klines_cached(symbol, "4h", limit=240)
-            df_1h = await client.fetch_klines_cached(symbol, "1h", limit=240)
-            df_15m = await client.fetch_klines_cached(symbol, "15m", limit=240)
+            df_4h = await client.fetch_klines_cached(symbol, "4h", limit=300)
+            df_1h = await client.fetch_klines_cached(symbol, "1h", limit=300)
+            df_15m = await client.fetch_klines_cached(symbol, "15m", limit=300)
             bid_price, ask_price = await client.fetch_book_ticker(symbol)
 
             frames = SymbolFrames(

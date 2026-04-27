@@ -49,10 +49,6 @@ class CycleRunner:
                 ws_enrichments=ws_enrichments,
             )
 
-        task = asyncio.create_task(bot._ws_enrich(result), name=f"ws_enrich:{symbol}")
-        bot._background_tasks.add(task)
-        task.add_done_callback(bot._background_tasks.discard)
-
         candidates, rejected, delivered = await bot._select_and_deliver_for_symbol(symbol, result)
 
         for row in rejected:
@@ -91,10 +87,8 @@ class CycleRunner:
         if not shortlist:
             shortlist = await bot._do_refresh_shortlist()
 
-        semaphore = asyncio.Semaphore(bot.settings.runtime.analysis_concurrency)
-
         async def _analyze_one(item: UniverseSymbol) -> PipelineResult | None:
-            async with semaphore:
+            async with bot._analysis_semaphore:
                 frames = await bot._fetch_frames(item)
                 if frames is None:
                     return None
@@ -105,7 +99,6 @@ class CycleRunner:
                     trigger="emergency_fallback",
                     ws_enrichments=ws_enrichments,
                 )
-                asyncio.create_task(bot._ws_enrich(result), name=f"ws_enrich:{item.symbol}")
                 return result
 
         tasks = [asyncio.create_task(_analyze_one(item)) for item in shortlist]

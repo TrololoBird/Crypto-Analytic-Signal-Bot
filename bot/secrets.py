@@ -15,8 +15,6 @@ from dotenv import load_dotenv
 class Secrets:
     tg_token: str
     target_chat_id: str
-    binance_api_key: str
-    binance_api_secret: str
 
 
 def load_secrets() -> Secrets:
@@ -26,6 +24,4 @@ def load_secrets() -> Secrets:
     return Secrets(
         tg_token=tg_token,
         target_chat_id=target_chat_id,
-        binance_api_key=(os.getenv("BINANCE_API_KEY") or "").strip(),
-        binance_api_secret=(os.getenv("BINANCE_API_SECRET") or "").strip(),
     )

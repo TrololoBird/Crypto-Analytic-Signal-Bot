@@ -18,6 +18,14 @@ if TYPE_CHECKING:
 
 
 LOG = logging.getLogger("bot.application.bot")
+_DEFAULT_HISTORY_FETCH_LIMIT = 300
+_HISTORY_FETCH_BUFFER_BARS = 60
+
+
+def _history_fetch_limit(minimums: dict[str, int], interval: str) -> int:
+    required = int(minimums.get(interval, 0))
+    baseline = _DEFAULT_HISTORY_FETCH_LIMIT if interval in {"5m", "15m", "1h", "4h"} else 240
+    return max(baseline, required + _HISTORY_FETCH_BUFFER_BARS)
 
 
 class SymbolAnalyzer:
@@ -565,6 +573,10 @@ class SymbolAnalyzer:
             min_bars_1h=self._bot.settings.filters.min_bars_1h,
             min_bars_4h=self._bot.settings.filters.min_bars_4h,
         )
+        limit_5m = _history_fetch_limit(minimums, "5m")
+        limit_15m = _history_fetch_limit(minimums, "15m")
+        limit_1h = _history_fetch_limit(minimums, "1h")
+        limit_4h = _history_fetch_limit(minimums, "4h")
 
         ws_5m = ws_15m = ws_1h = None
         ws_bid = ws_ask = None
@@ -579,10 +591,10 @@ class SymbolAnalyzer:
 
         try:
             if isinstance(self._bot.client, BinanceFuturesMarketData):
-                df_4h = await self._bot.client.fetch_klines_cached(symbol, "4h", limit=240)
-                df_1h = ws_1h if ws_1h is not None and ws_1h.height >= minimums["1h"] else await self._bot.client.fetch_klines_cached(symbol, "1h", limit=240)
-                df_15m = ws_15m if ws_15m is not None and ws_15m.height >= minimums["15m"] else await self._bot.client.fetch_klines_cached(symbol, "15m", limit=240)
-                df_5m = ws_5m if ws_5m is not None and ws_5m.height >= minimums["5m"] else await self._bot.client.fetch_klines_cached(symbol, "5m", limit=240)
+                df_4h = await self._bot.client.fetch_klines_cached(symbol, "4h", limit=limit_4h)
+                df_1h = ws_1h if ws_1h is not None and ws_1h.height >= minimums["1h"] else await self._bot.client.fetch_klines_cached(symbol, "1h", limit=limit_1h)
+                df_15m = ws_15m if ws_15m is not None and ws_15m.height >= minimums["15m"] else await self._bot.client.fetch_klines_cached(symbol, "15m", limit=limit_15m)
+                df_5m = ws_5m if ws_5m is not None and ws_5m.height >= minimums["5m"] else await self._bot.client.fetch_klines_cached(symbol, "5m", limit=limit_5m)
 
                 bid, ask = ws_bid, ws_ask
                 if bid is None or ask is None:
@@ -619,10 +631,10 @@ class SymbolAnalyzer:
         async def _preload_one(symbol: str) -> None:
             async with sem:
                 try:
-                    await self._bot.client.fetch_klines_cached(symbol, "5m", limit=240)
-                    await self._bot.client.fetch_klines_cached(symbol, "1h", limit=240)
-                    await self._bot.client.fetch_klines_cached(symbol, "15m", limit=240)
-                    await self._bot.client.fetch_klines_cached(symbol, "4h", limit=240)
+                    await self._bot.client.fetch_klines_cached(symbol, "5m", limit=_history_fetch_limit(minimums, "5m"))
+                    await self._bot.client.fetch_klines_cached(symbol, "1h", limit=_history_fetch_limit(minimums, "1h"))
+                    await self._bot.client.fetch_klines_cached(symbol, "15m", limit=_history_fetch_limit(minimums, "15m"))
+                    await self._bot.client.fetch_klines_cached(symbol, "4h", limit=_history_fetch_limit(minimums, "4h"))
                 except Exception:
                     pass
 
@@ -648,6 +660,37 @@ class SymbolAnalyzer:
                         context_ages.append(ticker_age)
             except Exception:
                 pass
+            try:
+                mark = self._bot._ws_manager.get_mark_price_snapshot(symbol)
+                mark_age = self._bot._ws_manager.get_mark_price_age_seconds(symbol)
+                if mark:
+                    mark_price = float(mark.get("mark_price") or 0.0)
+                    if mark_price > 0:
+                        enrichments["mark_price"] = mark_price
+                    if "funding_rate" in mark:
+                        enrichments["funding_rate"] = float(mark.get("funding_rate") or 0.0)
+                    index_price = float(mark.get("index_price") or 0.0)
+                    if mark_price > 0 and index_price > 0:
+                        basis_pct = (mark_price - index_price) / index_price * 100.0
+                        enrichments["basis_pct"] = basis_pct
+                        enrichments["mark_index_spread_bps"] = basis_pct * 100.0
+                if mark_age is not None:
+                    enrichments["mark_price_age_seconds"] = mark_age
+                    context_ages.append(mark_age)
+            except Exception:
+                pass
+            try:
+                depth_imbalance = self._bot._ws_manager.get_depth_imbalance(symbol)
+                if depth_imbalance is not None:
+                    enrichments["depth_imbalance"] = float(depth_imbalance)
+                microprice_bias = self._bot._ws_manager.get_microprice_bias(symbol)
+                if microprice_bias is not None:
+                    enrichments["microprice_bias"] = float(microprice_bias)
+                liquidation = self._bot._ws_manager.get_liquidation_sentiment(symbol=symbol, window_seconds=900)
+                if liquidation is not None:
+                    enrichments["liquidation_score"] = float(liquidation)
+            except Exception:
+                pass
 
         if isinstance(self._bot.client, BinanceFuturesMarketData):
             oi_chg = self._bot.client.get_cached_oi_change(symbol)
@@ -659,6 +702,30 @@ class SymbolAnalyzer:
             taker = self._bot.client.get_cached_taker_ratio(symbol)
             if taker is not None:
                 enrichments["taker_ratio"] = taker
+            global_ls = self._bot.client.get_cached_global_ls_ratio(symbol)
+            if global_ls is not None:
+                enrichments["global_ls_ratio"] = global_ls
+            funding_trend = self._bot.client.get_cached_funding_trend(symbol)
+            if funding_trend is not None:
+                enrichments["funding_trend"] = funding_trend
+            basis_pct = self._bot.client.get_cached_basis(symbol, period="1h")
+            if basis_pct is not None:
+                enrichments["basis_pct"] = basis_pct
+            basis_stats = self._bot.client.get_cached_basis_stats(symbol, period="5m")
+            if basis_stats is not None:
+                premium_slope = basis_stats.get("premium_slope_5m")
+                premium_zscore = basis_stats.get("premium_zscore_5m")
+                mark_spread = basis_stats.get("mark_index_spread_bps")
+                if premium_slope is not None:
+                    enrichments["premium_slope_5m"] = float(premium_slope)
+                if premium_zscore is not None:
+                    enrichments["premium_zscore_5m"] = float(premium_zscore)
+                if mark_spread is not None:
+                    enrichments["mark_index_spread_bps"] = float(mark_spread)
+            top = enrichments.get("ls_ratio")
+            global_ls = enrichments.get("global_ls_ratio")
+            if isinstance(top, (int, float)) and isinstance(global_ls, (int, float)):
+                enrichments["top_vs_global_ls_gap"] = float(top) - float(global_ls)
 
         if context_ages:
             enrichments["context_snapshot_age_seconds"] = max(context_ages)

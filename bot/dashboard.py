@@ -34,6 +34,7 @@ class BotDashboard:
         self.port = port
         self._enabled = HAS_FASTAPI
         self.app: FastAPI | None = None
+        self._strategies_cache: list[dict[str, Any]] | None = None
 
         if not self._enabled:
             LOG.warning("fastapi not installed, dashboard disabled")
@@ -49,6 +50,7 @@ class BotDashboard:
         )
         self.app = app
         self._setup_routes()
+        self._cache_strategies()
 
     def _setup_routes(self) -> None:
         if not self.app:
@@ -92,40 +94,43 @@ class BotDashboard:
 
         @self.app.get("/api/strategies")
         async def strategies() -> list[dict[str, Any]]:
-            """Return list of strategies with their enabled status."""
+            """Return cached list of strategies with their enabled status."""
+            if self._strategies_cache is not None:
+                return self._strategies_cache
+            return []
+
+    def _cache_strategies(self) -> None:
+        """Pre-load and cache strategies at startup."""
+        try:
             from .strategies import STRATEGY_CLASSES
             from .config import load_settings
             import re
 
             def _camel_to_snake(name: str) -> str:
-                """Convert CamelCaseSetup to snake_case."""
-                # Remove 'Setup' suffix if present
                 if name.endswith("Setup"):
                     name = name[:-5]
-                # Convert CamelCase to snake_case
                 s1 = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", name)
                 return re.sub("([a-z0-9])([A-Z])", r"\1_\2", s1).lower()
 
-            try:
-                settings = load_settings("config.toml")
-                enabled_setups = {
-                    k: getattr(settings.setups, k, False)
-                    for k in dir(settings.setups)
-                    if not k.startswith("_")
-                }
+            settings = load_settings("config.toml")
+            enabled_setups = {
+                k: getattr(settings.setups, k, False)
+                for k in dir(settings.setups)
+                if not k.startswith("_")
+            }
 
-                result = []
-                for cls in STRATEGY_CLASSES:
-                    setup_id = _camel_to_snake(cls.__name__)
-                    result.append({
-                        "id": setup_id,
-                        "name": cls.__name__,
-                        "enabled": enabled_setups.get(setup_id, False),
-                    })
-                return result
-            except Exception as exc:
-                LOG.warning("failed to load strategies: %s", exc)
-                return []
+            self._strategies_cache = []
+            for cls in STRATEGY_CLASSES:
+                setup_id = _camel_to_snake(cls.__name__)
+                self._strategies_cache.append({
+                    "id": setup_id,
+                    "name": cls.__name__,
+                    "enabled": enabled_setups.get(setup_id, False),
+                })
+            LOG.info("dashboard cached %d strategies", len(self._strategies_cache))
+        except Exception as exc:
+            LOG.warning("failed to cache strategies: %s", exc)
+            self._strategies_cache = []
 
     def _get_html_dashboard(self) -> str:
         return """<!DOCTYPE html>
@@ -494,6 +499,20 @@ class BotDashboard:
                         <span id="avg-rr" class="metric-value">-</span>
                     </div>
                 </div>
+                <div class="card">
+                    <h2>Signal Distribution</h2>
+                    <div id="signal-chart" style="height: 200px; display: flex; align-items: flex-end; justify-content: center; gap: 8px; padding: 20px;">
+                        <div style="text-align: center; color: var(--text-secondary);">Loading chart...</div>
+                    </div>
+                </div>
+            </div>
+            <div class="card">
+                <h2>Strategy Performance</h2>
+                <div id="strategy-chart" style="min-height: 150px;">
+                    <div class="empty-state">
+                        <p>Strategy performance data will appear here</p>
+                    </div>
+                </div>
             </div>
         </div>
         
@@ -649,9 +668,24 @@ class BotDashboard:
         // Fetch strategies
         async function fetchStrategies() {
             try {
-                const res = await fetch('/api/strategies');
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 3000);
+                const res = await fetch('/api/strategies', { signal: controller.signal });
+                clearTimeout(timeoutId);
+                
+                if (!res.ok) {
+                    throw new Error('HTTP ' + res.status);
+                }
+                
                 const data = await res.json();
                 const container = document.getElementById('strategy-list');
+                
+                if (!Array.isArray(data) || data.length === 0) {
+                    container.innerHTML = '<p class="empty-state">No strategies available</p>';
+                    document.getElementById('active-strategies').textContent = '0/0';
+                    return;
+                }
+                
                 document.getElementById('active-strategies').textContent = data.filter(s => s.enabled).length + '/' + data.length;
                 
                 container.innerHTML = data.map(s => `
@@ -661,22 +695,68 @@ class BotDashboard:
                     </div>
                 `).join('');
             } catch (err) {
-                console.log('Strategies endpoint not available');
+                console.error('Failed to fetch strategies:', err);
+                const container = document.getElementById('strategy-list');
+                container.innerHTML = '<p class="empty-state">Failed to load strategies</p>';
             }
         }
         
         // Fetch analytics
         async function fetchAnalytics() {
             try {
-                const res = await fetch('/api/analytics/report?days=30');
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 5000);
+                const res = await fetch('/api/analytics/report?days=30', { signal: controller.signal });
+                clearTimeout(timeoutId);
+                
+                if (!res.ok) {
+                    throw new Error('HTTP ' + res.status);
+                }
+                
                 const data = await res.json();
                 if (data.summary) {
                     document.getElementById('total-signals').textContent = data.summary.total_signals || '-';
                     document.getElementById('win-rate').textContent = data.summary.win_rate ? (data.summary.win_rate * 100).toFixed(1) + '%' : '-';
+                    document.getElementById('avg-rr').textContent = data.summary.avg_rr ? data.summary.avg_rr.toFixed(2) : '-';
+                }
+                
+                // Render signal distribution chart
+                if (data.by_setup) {
+                    renderSignalChart(data.by_setup);
                 }
             } catch (err) {
-                console.log('Analytics not available');
+                console.error('Analytics not available:', err);
             }
+        }
+        
+        // Render signal distribution bar chart
+        function renderSignalChart(bySetup) {
+            const container = document.getElementById('signal-chart');
+            if (!bySetup || Object.keys(bySetup).length === 0) {
+                container.innerHTML = '<div style="text-align: center; color: var(--text-secondary);">No data available</div>';
+                return;
+            }
+            
+            const setups = Object.entries(bySetup)
+                .sort((a, b) => (b[1].count || 0) - (a[1].count || 0))
+                .slice(0, 10);  // Top 10 setups
+            
+            const maxCount = Math.max(...setups.map(s => s[1].count || 0), 1);
+            
+            const bars = setups.map(([name, data]) => {
+                const count = data.count || 0;
+                const height = (count / maxCount * 100) || 0;
+                const winRate = data.win_rate ? (data.win_rate * 100).toFixed(0) : '0';
+                return `
+                    <div style="display: flex; flex-direction: column; align-items: center; flex: 1; min-width: 40px;">
+                        <div style="width: 100%; background: var(--accent-blue); border-radius: 4px 4px 0 0; height: ${height}px; min-height: 4px; position: relative;" title="${name}: ${count} signals, ${winRate}% win">
+                        </div>
+                        <div style="font-size: 10px; color: var(--text-secondary); margin-top: 4px; writing-mode: vertical-rl; text-orientation: mixed; transform: rotate(180deg); height: 60px; overflow: hidden; text-overflow: ellipsis;">${name.replace('Setup', '')}</div>
+                    </div>
+                `;
+            }).join('');
+            
+            container.innerHTML = bars;
         }
         
         // Initial fetch
@@ -688,6 +768,7 @@ class BotDashboard:
         // Periodic updates
         setInterval(fetchStatus, 5000);
         setInterval(fetchSignals, 10000);
+        setInterval(fetchStrategies, 30000);  // Refresh strategies every 30s
         
         // Welcome toast
         setTimeout(() => {
@@ -700,17 +781,28 @@ class BotDashboard:
     async def _get_status(self) -> dict[str, Any]:
         bot = self.bot
         regime = bot.market_regime._last_result
-        active_signals = await bot._modern_repo.get_active_signals()
 
         ws_lag = 0
         if bot._ws_manager is not None:
             stats = bot._ws_manager.get_stats()
             ws_lag = stats.get("avg_latency_overall_ms", 0) or 0
 
+        # Quick count without full fetch - use len of cached data
+        open_signals_count = 0
+        try:
+            import asyncio
+            signals = await asyncio.wait_for(
+                bot._modern_repo.get_active_signals(),
+                timeout=1.0
+            )
+            open_signals_count = len(signals)
+        except Exception:
+            pass  # Don't block dashboard for signal count
+
         return {
             "running": not bot._shutdown.is_set(),
             "shortlist_size": len(bot._shortlist),
-            "open_signals": len(active_signals),
+            "open_signals": open_signals_count,
             "ws_latency_ms": ws_lag,
             "market_regime": regime.regime if regime else "unknown",
             "market_strength": regime.strength if regime else 0.0,
@@ -718,23 +810,35 @@ class BotDashboard:
         }
 
     async def _get_active_signals(self) -> list[dict[str, Any]]:
-        signals = await self.bot._modern_repo.get_active_signals()
-        return [
-            {
-                "symbol": sig.get("symbol"),
-                "setup_id": sig.get("setup_id"),
-                "direction": sig.get("direction"),
-                "entry_price": sig.get("entry_price"),
-                "stop_price": sig.get("stop_price"),
-                "tp1_price": sig.get("tp1_price"),
-                "tp2_price": sig.get("tp2_price"),
-                "score": sig.get("score"),
-                "risk_reward": sig.get("risk_reward"),
-                "status": sig.get("status"),
-                "tracking_id": sig.get("tracking_id"),
-            }
-            for sig in signals
-        ]
+        try:
+            # Use timeout to prevent blocking dashboard
+            import asyncio
+            signals = await asyncio.wait_for(
+                self.bot._modern_repo.get_active_signals(),
+                timeout=2.0
+            )
+            return [
+                {
+                    "symbol": sig.get("symbol"),
+                    "setup_id": sig.get("setup_id"),
+                    "direction": sig.get("direction"),
+                    "entry_price": sig.get("entry_price"),
+                    "stop_price": sig.get("stop_price"),
+                    "tp1_price": sig.get("tp1_price"),
+                    "tp2_price": sig.get("tp2_price"),
+                    "score": sig.get("score"),
+                    "risk_reward": sig.get("risk_reward"),
+                    "status": sig.get("status"),
+                    "tracking_id": sig.get("tracking_id"),
+                }
+                for sig in signals
+            ]
+        except asyncio.TimeoutError:
+            LOG.debug("timeout fetching active signals for dashboard")
+            return []
+        except Exception as exc:
+            LOG.debug("error fetching active signals: %s", exc)
+            return []
 
     def _get_recent_signals(self, limit: int = 20) -> list[dict[str, Any]]:
         telemetry_dir = self.bot.settings.telemetry_dir
@@ -763,13 +867,40 @@ class BotDashboard:
 
     async def _get_metrics(self) -> dict[str, Any]:
         bot = self.bot
-        active_signals = await bot._modern_repo.get_active_signals()
+
+        # Get signal count with timeout
+        open_signals_count = 0
+        try:
+            import asyncio
+            signals = await asyncio.wait_for(
+                bot._modern_repo.get_active_signals(),
+                timeout=1.0
+            )
+            open_signals_count = len(signals)
+        except Exception:
+            pass
+
+        # Get market regime safely
+        regime_data = None
+        try:
+            if bot.market_regime._last_result:
+                regime_data = bot.market_regime._last_result.to_dict()
+        except Exception:
+            pass
+
+        # Get engine stats safely
+        engine_stats = {}
+        try:
+            engine_stats = bot._modern_engine.get_engine_stats()
+        except Exception:
+            pass
+
         return {
             "shortlist_size": len(bot._shortlist),
-            "open_signals": len(active_signals),
+            "open_signals": open_signals_count,
             "ws_streams": len(bot._ws_manager._symbols) if bot._ws_manager else 0,
-            "market_regime": bot.market_regime._last_result.to_dict() if bot.market_regime._last_result else None,
-            "engine": bot._modern_engine.get_engine_stats(),
+            "market_regime": regime_data,
+            "engine": engine_stats,
         }
 
     def _latest_analysis_file(self, telemetry_dir: Path, filename: str) -> Path | None:
