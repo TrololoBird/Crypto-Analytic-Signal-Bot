@@ -121,7 +121,7 @@ class SignalBot:
         from bot.dashboard import BotDashboard
         self.dashboard = BotDashboard(self, settings.runtime.dashboard_port)
         if not disable_http_servers:
-            self.dashboard.start_server()
+            self.dashboard.start_server(auto_open=settings.runtime.auto_open_dashboard)
 
         # Tracking & ML - uses Modern MemoryRepository
         # Legacy stores removed - all data in SQLite

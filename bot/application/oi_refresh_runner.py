@@ -50,25 +50,27 @@ class OIRefreshRunner:
                 )
                 await self._bot._update_memory_market_context(shortlist)
 
+            # Increased interval from 15min to 30min to reduce API load
+            # 45 symbols × 3 requests = 135 requests every 30min instead of every 15min
             try:
-                await asyncio.wait_for(self._bot._shutdown.wait(), timeout=900)
+                await asyncio.wait_for(self._bot._shutdown.wait(), timeout=1800)
             except asyncio.TimeoutError:
                 continue
 
     async def _safe_fetch(self, symbol: str) -> None:
         client = self._bot.client
+        
+        # Skip if circuit breaker is open for critical operations
+        if hasattr(client, '_is_circuit_open') and client._is_circuit_open('open_interest_statistics'):
+            LOG.debug("skipping OI fetch for %s: circuit breaker open", symbol)
+            return
+        
+        # Reduced fetchers list - focus on most important metrics only
+        # Removed: taker_ratio (less reliable), global_ls_ratio (all symbols covered by ws), basis (heavy)
         fetchers = (
             lambda: client.fetch_open_interest_change(symbol, period="1h"),
-            lambda: client.fetch_open_interest_change(symbol, period="5m"),
             lambda: client.fetch_long_short_ratio(symbol, period="1h"),
-            lambda: client.fetch_long_short_ratio(symbol, period="5m"),
-            lambda: client.fetch_taker_ratio(symbol, period="1h"),
-            lambda: client.fetch_taker_ratio(symbol, period="5m"),
-            lambda: client.fetch_global_ls_ratio(symbol, period="1h"),
-            lambda: client.fetch_global_ls_ratio(symbol, period="5m"),
             lambda: client.fetch_funding_rate_history(symbol),
-            lambda: client.fetch_basis(symbol, period="1h"),
-            lambda: client.fetch_basis(symbol, period="5m"),
         )
         for fetch in fetchers:
             try:

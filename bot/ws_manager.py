@@ -234,7 +234,9 @@ class FuturesWSManager:
 
         # P0: Rate limiting and message buffering (Binance limit: 10 msg/sec)
         self._incoming_rate_limiter = RateLimiter(max_per_second=_MAX_INCOMING_MSG_PER_SECOND)
-        self._message_buffer = MessageBuffer(maxsize=2000)
+        # Increased buffer size to handle high-volume WebSocket streams (45+ symbols)
+        # without dropping messages during burst periods
+        self._message_buffer = MessageBuffer(maxsize=15000)
         self._buffer_processor_task: asyncio.Task | None = None
         self._backfill_tasks: set[asyncio.Task[None]] = set()
         
@@ -409,6 +411,10 @@ class FuturesWSManager:
     def is_running(self) -> bool:
         """Check if the WebSocket manager is currently running."""
         return self._running
+
+    def is_connected(self) -> bool:
+        """Check if WebSocket is connected and ready."""
+        return self._connected.is_set()
 
     def _active_endpoint_classes(self) -> tuple[str, ...]:
         return tuple(

@@ -1,5 +1,35 @@
 # Operations
 
+## Dashboard
+
+The bot includes a built-in web dashboard for real-time monitoring.
+
+- **URL**: http://localhost:8080 (default)
+- **Auto-open**: Enabled by default (`auto_open_dashboard = true` in config)
+- **Port**: Configurable via `dashboard_port` in `[bot.runtime]` section
+
+### Dashboard Features
+
+- **Overview Tab**: Bot status, shortlist size, open signals, WS latency, market regime
+- **Signals Tab**: Active signals with entry/stop/TP levels, scores, and risk/reward ratios
+- **Analytics Tab**: Performance metrics (total signals, win rate, avg R/R)
+- **Settings Tab**: Strategy configuration and enabled status
+
+### Keyboard Shortcuts
+
+- `1-4` — Switch between tabs (Overview, Signals, Analytics, Settings)
+- `R` — Refresh data manually
+- `?` — Show keyboard shortcuts help
+
+### API Endpoints
+
+- `GET /api/status` — Bot runtime status
+- `GET /api/signals/active` — Active trading signals
+- `GET /api/health` — Health check with WS connection status
+- `GET /api/strategies` — Strategy list with enabled status
+- `GET /api/metrics` — Detailed metrics
+- `GET /api/analytics/report?days=30` — Performance analytics
+
 ## Local commands
 
 - `make check` — full local checks.

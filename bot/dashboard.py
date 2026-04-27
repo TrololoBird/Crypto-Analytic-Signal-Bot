@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import webbrowser
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
@@ -89,77 +90,610 @@ class BotDashboard:
             reporter = StrategyAnalytics(repo=self.bot._modern_repo)
             return await reporter.generate_report(days=days)
 
+        @self.app.get("/api/strategies")
+        async def strategies() -> list[dict[str, Any]]:
+            """Return list of strategies with their enabled status."""
+            from .strategies import STRATEGY_CLASSES
+            from .config import load_settings
+            import re
+
+            def _camel_to_snake(name: str) -> str:
+                """Convert CamelCaseSetup to snake_case."""
+                # Remove 'Setup' suffix if present
+                if name.endswith("Setup"):
+                    name = name[:-5]
+                # Convert CamelCase to snake_case
+                s1 = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", name)
+                return re.sub("([a-z0-9])([A-Z])", r"\1_\2", s1).lower()
+
+            try:
+                settings = load_settings("config.toml")
+                enabled_setups = {
+                    k: getattr(settings.setups, k, False)
+                    for k in dir(settings.setups)
+                    if not k.startswith("_")
+                }
+
+                result = []
+                for cls in STRATEGY_CLASSES:
+                    setup_id = _camel_to_snake(cls.__name__)
+                    result.append({
+                        "id": setup_id,
+                        "name": cls.__name__,
+                        "enabled": enabled_setups.get(setup_id, False),
+                    })
+                return result
+            except Exception as exc:
+                LOG.warning("failed to load strategies: %s", exc)
+                return []
+
     def _get_html_dashboard(self) -> str:
         return """<!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Signal Bot Dashboard</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Signal Bot Dashboard</title>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
-        .container { max-width: 1200px; margin: 0 auto; }
-        h1 { color: #333; margin-bottom: 30px; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
-        .card { background: white; border-radius: 8px; padding: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        .card h2 { margin-top: 0; font-size: 18px; color: #666; }
-        .metric { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #eee; }
-        .metric:last-child { border-bottom: none; }
-        .value { font-weight: bold; color: #333; }
-        .neutral { color: #6b7280; }
-        .status-online { color: #22c55e; }
-        .status-offline { color: #ef4444; }
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --border-color: #30363d;
+            --text-primary: #c9d1d9;
+            --text-secondary: #8b949e;
+            --accent-blue: #58a6ff;
+            --accent-green: #3fb950;
+            --accent-red: #f85149;
+            --accent-orange: #f0883e;
+            --accent-purple: #a371f7;
+            --accent-yellow: #d29922;
+            --font-mono: 'SF Mono', Monaco, Inconsolata, 'Roboto Mono', monospace;
+            --radius: 8px;
+            --shadow: 0 4px 12px rgba(0,0,0,0.4);
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            line-height: 1.5;
+        }
+        .header {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        .header h1 {
+            font-size: 20px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .header .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+            background: var(--bg-tertiary);
+        }
+        .status-badge.online { background: rgba(63,185,80,0.15); color: var(--accent-green); }
+        .status-badge.offline { background: rgba(248,81,73,0.15); color: var(--accent-red); }
+        .status-badge::before {
+            content: '';
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: currentColor;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .nav-tabs {
+            display: flex;
+            gap: 8px;
+            background: var(--bg-tertiary);
+            padding: 6px;
+            border-radius: var(--radius);
+        }
+        .nav-tab {
+            padding: 8px 16px;
+            border: none;
+            background: transparent;
+            color: var(--text-secondary);
+            font-size: 14px;
+            cursor: pointer;
+            border-radius: 6px;
+            transition: all 0.2s;
+        }
+        .nav-tab:hover { color: var(--text-primary); }
+        .nav-tab.active { background: var(--bg-secondary); color: var(--text-primary); }
+        .main { padding: 24px; max-width: 1400px; margin: 0 auto; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 24px;
+        }
+        .card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            padding: 20px;
+            box-shadow: var(--shadow);
+        }
+        .card h2 {
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .metric-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .metric-row:last-child { border-bottom: none; }
+        .metric-label { color: var(--text-secondary); font-size: 14px; }
+        .metric-value {
+            font-family: var(--font-mono);
+            font-weight: 600;
+            font-size: 14px;
+        }
+        .metric-value.green { color: var(--accent-green); }
+        .metric-value.red { color: var(--accent-red); }
+        .metric-value.blue { color: var(--accent-blue); }
+        .metric-value.yellow { color: var(--accent-yellow); }
+        .metric-value.purple { color: var(--accent-purple); }
+        .signal-card {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            padding: 16px;
+            margin-bottom: 12px;
+            transition: all 0.2s;
+        }
+        .signal-card:hover { border-color: var(--accent-blue); }
+        .signal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        .signal-symbol {
+            font-family: var(--font-mono);
+            font-size: 16px;
+            font-weight: 600;
+        }
+        .signal-direction {
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        .signal-direction.long { background: rgba(63,185,80,0.15); color: var(--accent-green); }
+        .signal-direction.short { background: rgba(248,81,73,0.15); color: var(--accent-red); }
+        .signal-details {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+        .signal-detail {
+            text-align: center;
+        }
+        .signal-detail-label {
+            font-size: 11px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+        .signal-detail-value {
+            font-family: var(--font-mono);
+            font-size: 13px;
+            font-weight: 500;
+        }
+        .signal-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-top: 12px;
+            border-top: 1px solid var(--border-color);
+        }
+        .signal-setup {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+        .signal-score {
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .score-high { background: rgba(63,185,80,0.15); color: var(--accent-green); }
+        .score-medium { background: rgba(210,153,34,0.15); color: var(--accent-yellow); }
+        .score-low { background: rgba(248,81,73,0.15); color: var(--accent-red); }
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-secondary);
+        }
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+        .last-update {
+            position: fixed;
+            bottom: 16px;
+            right: 16px;
+            padding: 8px 16px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+        .toast-container {
+            position: fixed;
+            top: 80px;
+            right: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            z-index: 200;
+        }
+        .toast {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius);
+            padding: 16px 20px;
+            box-shadow: var(--shadow);
+            animation: slideIn 0.3s ease;
+            min-width: 280px;
+        }
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        .toast-title { font-weight: 600; margin-bottom: 4px; }
+        .toast-body { font-size: 13px; color: var(--text-secondary); }
+        .keyboard-hint {
+            position: fixed;
+            bottom: 16px;
+            left: 16px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+        .keyboard-hint kbd {
+            background: var(--bg-tertiary);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: var(--font-mono);
+        }
+        @media (max-width: 768px) {
+            .header { flex-direction: column; gap: 12px; }
+            .nav-tabs { width: 100%; overflow-x: auto; }
+            .main { padding: 16px; }
+            .signal-details { grid-template-columns: 1fr; }
+        }
     </style>
-    <script>
-        async function fetchStatus() {
-            const res = await fetch('/api/status');
-            const data = await res.json();
-            document.getElementById('status').textContent = data.running ? 'Online' : 'Offline';
-            document.getElementById('status').className = data.running ? 'status-online' : 'status-offline';
-            document.getElementById('shortlist').textContent = data.shortlist_size;
-            document.getElementById('signals').textContent = data.open_signals;
-            document.getElementById('ws-latency').textContent = data.ws_latency_ms + ' ms';
-            document.getElementById('market').textContent = data.market_regime;
-        }
-        async function fetchSignals() {
-            const res = await fetch('/api/signals/active');
-            const data = await res.json();
-            const el = document.getElementById('active-signals');
-            if (data.length === 0) {
-                el.innerHTML = '<p class="neutral">No active signals</p>';
-                return;
-            }
-            el.innerHTML = data.map(s => `
-                <div class="metric">
-                    <span>${s.symbol} ${s.direction}</span>
-                    <span class="value">${s.setup_id}</span>
-                </div>
-            `).join('');
-        }
-        setInterval(fetchStatus, 5000);
-        setInterval(fetchSignals, 10000);
-        fetchStatus();
-        fetchSignals();
-    </script>
 </head>
 <body>
-    <div class="container">
-        <h1>Signal Bot Dashboard</h1>
-        <div class="grid">
-            <div class="card">
-                <h2>Bot Status</h2>
-                <div class="metric"><span>Status</span><span id="status" class="status-offline">Loading...</span></div>
-                <div class="metric"><span>Shortlist Size</span><span id="shortlist" class="value">-</span></div>
-                <div class="metric"><span>Open Signals</span><span id="signals" class="value">-</span></div>
-                <div class="metric"><span>WS Latency</span><span id="ws-latency" class="value">-</span></div>
-                <div class="metric"><span>Market Regime</span><span id="market" class="value">-</span></div>
+    <header class="header">
+        <h1>
+            <span>Signal Bot</span>
+            <span id="status-badge" class="status-badge offline">Offline</span>
+        </h1>
+        <nav class="nav-tabs">
+            <button class="nav-tab active" data-tab="overview">Overview</button>
+            <button class="nav-tab" data-tab="signals">Signals</button>
+            <button class="nav-tab" data-tab="analytics">Analytics</button>
+            <button class="nav-tab" data-tab="settings">Settings</button>
+        </nav>
+    </header>
+    
+    <main class="main">
+        <!-- Overview Tab -->
+        <div id="tab-overview" class="tab-content active">
+            <div class="grid">
+                <div class="card">
+                    <h2>Bot Status</h2>
+                    <div class="metric-row">
+                        <span class="metric-label">Shortlist Size</span>
+                        <span id="shortlist" class="metric-value blue">-</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">Open Signals</span>
+                        <span id="signals" class="metric-value">-</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">WS Latency</span>
+                        <span id="ws-latency" class="metric-value">-</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">Market Regime</span>
+                        <span id="market" class="metric-value">-</span>
+                    </div>
+                </div>
+                <div class="card">
+                    <h2>Market Context</h2>
+                    <div class="metric-row">
+                        <span class="metric-label">BTC Bias</span>
+                        <span id="btc-bias" class="metric-value">-</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">Market Strength</span>
+                        <span id="market-strength" class="metric-value">-</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">Active Strategies</span>
+                        <span id="active-strategies" class="metric-value green">-</span>
+                    </div>
+                </div>
             </div>
             <div class="card">
-                <h2>Active Signals</h2>
-                <div id="active-signals"><p class="neutral">Loading...</p></div>
+                <h2>Recent Activity</h2>
+                <div id="recent-activity">
+                    <div class="empty-state">
+                        <div class="empty-state-icon">Activity</div>
+                        <p>No recent activity</p>
+                    </div>
+                </div>
             </div>
         </div>
+        
+        <!-- Signals Tab -->
+        <div id="tab-signals" class="tab-content">
+            <div id="active-signals-list">
+                <div class="empty-state">
+                    <div class="empty-state-icon">Radio</div>
+                    <p>No active signals</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Analytics Tab -->
+        <div id="tab-analytics" class="tab-content">
+            <div class="grid">
+                <div class="card">
+                    <h2>Performance (30d)</h2>
+                    <div class="metric-row">
+                        <span class="metric-label">Total Signals</span>
+                        <span id="total-signals" class="metric-value">-</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">Win Rate</span>
+                        <span id="win-rate" class="metric-value">-</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">Avg R/R</span>
+                        <span id="avg-rr" class="metric-value">-</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Settings Tab -->
+        <div id="tab-settings" class="tab-content">
+            <div class="card">
+                <h2>Strategy Configuration</h2>
+                <div id="strategy-list">
+                    <p class="empty-state">Loading strategies...</p>
+                </div>
+            </div>
+        </div>
+    </main>
+    
+    <div class="toast-container" id="toast-container"></div>
+    
+    <div class="last-update" id="last-update">Last update: -</div>
+    
+    <div class="keyboard-hint">
+        <kbd>?</kbd> for help
     </div>
+    
+    <script>
+        // Tab switching
+        document.querySelectorAll('.nav-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+            });
+        });
+        
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            if (e.key === '?') {
+                showToast('Keyboard Shortcuts', '1-4: Switch tabs | R: Refresh | ?: Help');
+            }
+            if (e.key >= '1' && e.key <= '4') {
+                const tabs = ['overview', 'signals', 'analytics', 'settings'];
+                document.querySelector(`[data-tab="${tabs[e.key - 1]}"]`).click();
+            }
+            if (e.key === 'r' || e.key === 'R') {
+                fetchStatus();
+                fetchSignals();
+                showToast('Refreshed', 'Data updated manually');
+            }
+        });
+        
+        // Toast notifications
+        function showToast(title, body) {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.innerHTML = `<div class="toast-title">${title}</div><div class="toast-body">${body}</div>`;
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 5000);
+        }
+        
+        // Formatters
+        const fmt = {
+            price: (v) => v ? v.toFixed(4) : '-',
+            pct: (v) => v ? (v * 100).toFixed(1) + '%' : '-',
+            score: (v) => {
+                if (!v) return { text: '-', class: '' };
+                if (v >= 0.75) return { text: (v * 100).toFixed(0) + '%', class: 'score-high' };
+                if (v >= 0.60) return { text: (v * 100).toFixed(0) + '%', class: 'score-medium' };
+                return { text: (v * 100).toFixed(0) + '%', class: 'score-low' };
+            }
+        };
+        
+        // Fetch status
+        async function fetchStatus() {
+            try {
+                const res = await fetch('/api/status');
+                const data = await res.json();
+                
+                // Update status badge
+                const badge = document.getElementById('status-badge');
+                badge.textContent = data.running ? 'Online' : 'Offline';
+                badge.className = 'status-badge ' + (data.running ? 'online' : 'offline');
+                
+                // Update metrics
+                document.getElementById('shortlist').textContent = data.shortlist_size;
+                document.getElementById('signals').textContent = data.open_signals;
+                document.getElementById('ws-latency').textContent = data.ws_latency_ms + ' ms';
+                
+                const regimeEl = document.getElementById('market');
+                regimeEl.textContent = data.market_regime;
+                regimeEl.className = 'metric-value ' + (
+                    data.market_regime === 'bull' ? 'green' : 
+                    data.market_regime === 'bear' ? 'red' : 'yellow'
+                );
+                
+                document.getElementById('market-strength').textContent = fmt.pct(data.market_strength);
+                
+                document.getElementById('last-update').textContent = 'Last update: ' + new Date().toLocaleTimeString();
+            } catch (err) {
+                console.error('Failed to fetch status:', err);
+            }
+        }
+        
+        // Fetch active signals
+        async function fetchSignals() {
+            try {
+                const res = await fetch('/api/signals/active');
+                const data = await res.json();
+                const container = document.getElementById('active-signals-list');
+                
+                if (data.length === 0) {
+                    container.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">Radio</div>
+                            <p>No active signals</p>
+                        </div>`;
+                    return;
+                }
+                
+                container.innerHTML = data.map(s => {
+                    const score = fmt.score(s.score);
+                    return `
+                        <div class="signal-card">
+                            <div class="signal-header">
+                                <span class="signal-symbol">${s.symbol}</span>
+                                <span class="signal-direction ${s.direction.toLowerCase()}">${s.direction}</span>
+                            </div>
+                            <div class="signal-details">
+                                <div class="signal-detail">
+                                    <div class="signal-detail-label">Entry</div>
+                                    <div class="signal-detail-value">${fmt.price(s.entry_price)}</div>
+                                </div>
+                                <div class="signal-detail">
+                                    <div class="signal-detail-label">Stop</div>
+                                    <div class="signal-detail-value" style="color: var(--accent-red)">${fmt.price(s.stop_price)}</div>
+                                </div>
+                                <div class="signal-detail">
+                                    <div class="signal-detail-label">TP1</div>
+                                    <div class="signal-detail-value" style="color: var(--accent-green)">${fmt.price(s.tp1_price)}</div>
+                                </div>
+                            </div>
+                            <div class="signal-footer">
+                                <span class="signal-setup">${s.setup_id}</span>
+                                <span class="signal-score ${score.class}">${score.text}</span>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (err) {
+                console.error('Failed to fetch signals:', err);
+            }
+        }
+        
+        // Fetch strategies
+        async function fetchStrategies() {
+            try {
+                const res = await fetch('/api/strategies');
+                const data = await res.json();
+                const container = document.getElementById('strategy-list');
+                document.getElementById('active-strategies').textContent = data.filter(s => s.enabled).length + '/' + data.length;
+                
+                container.innerHTML = data.map(s => `
+                    <div class="metric-row">
+                        <span class="metric-label">${s.name}</span>
+                        <span class="metric-value ${s.enabled ? 'green' : 'red'}">${s.enabled ? 'ON' : 'OFF'}</span>
+                    </div>
+                `).join('');
+            } catch (err) {
+                console.log('Strategies endpoint not available');
+            }
+        }
+        
+        // Fetch analytics
+        async function fetchAnalytics() {
+            try {
+                const res = await fetch('/api/analytics/report?days=30');
+                const data = await res.json();
+                if (data.summary) {
+                    document.getElementById('total-signals').textContent = data.summary.total_signals || '-';
+                    document.getElementById('win-rate').textContent = data.summary.win_rate ? (data.summary.win_rate * 100).toFixed(1) + '%' : '-';
+                }
+            } catch (err) {
+                console.log('Analytics not available');
+            }
+        }
+        
+        // Initial fetch
+        fetchStatus();
+        fetchSignals();
+        fetchStrategies();
+        fetchAnalytics();
+        
+        // Periodic updates
+        setInterval(fetchStatus, 5000);
+        setInterval(fetchSignals, 10000);
+        
+        // Welcome toast
+        setTimeout(() => {
+            showToast('Dashboard Ready', 'Signal Bot is running');
+        }, 1000);
+    </script>
 </body>
 </html>"""
 
@@ -249,7 +783,7 @@ class BotDashboard:
         )
         return candidates[0] if candidates else None
 
-    def start_server(self) -> None:
+    def start_server(self, *, auto_open: bool = True, delay_seconds: float = 1.5) -> None:
         if not self._enabled or not self.app:
             LOG.debug("dashboard server disabled (fastapi not installed)")
             return
@@ -272,3 +806,23 @@ class BotDashboard:
         thread = Thread(target=run_server, daemon=True)
         thread.start()
         LOG.info("dashboard server started on port %d", self.port)
+        
+        if auto_open:
+            self._schedule_browser_open(delay_seconds)
+
+    def _schedule_browser_open(self, delay_seconds: float) -> None:
+        """Open browser after server is ready."""
+        import threading
+        import time
+
+        def open_browser() -> None:
+            time.sleep(delay_seconds)
+            url = f"http://localhost:{self.port}"
+            try:
+                webbrowser.open(url, new=2)  # new=2 opens in new tab
+                LOG.info("opened dashboard in browser: %s", url)
+            except Exception as exc:
+                LOG.debug("failed to open browser: %s", exc)
+                LOG.info("dashboard available at: %s", url)
+
+        threading.Thread(target=open_browser, daemon=True).start()

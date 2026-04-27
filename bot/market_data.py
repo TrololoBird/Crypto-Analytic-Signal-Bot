@@ -694,10 +694,24 @@ class BinanceFuturesMarketData:
             if now - cached_at < 300:  # 5 min cache
                 return rows
 
-        payload = await self._call_public_http_json(
-            "ticker24hr_price_change_statistics",
-            f"{_FAPI_BASE_URL}/fapi/v1/ticker/24hr",
-        )
+        try:
+            payload = await self._call_public_http_json(
+                "ticker24hr_price_change_statistics",
+                f"{_FAPI_BASE_URL}/fapi/v1/ticker/24hr",
+            )
+        except MarketDataUnavailable as exc:
+            # Graceful degradation: return stale cache on timeout
+            if self._ticker_24h_cache is not None:
+                cached_at, stale_rows = self._ticker_24h_cache
+                stale_age = now - cached_at
+                LOG.warning(
+                    "fetch_ticker_24h failed, using stale cache | age=%.0fs | error=%s",
+                    stale_age,
+                    exc.detail,
+                )
+                return stale_rows
+            raise
+
         rows: list[dict[str, float | str]] = []
         for item in payload if isinstance(payload, list) else []:
             # Handle both dict and object items
