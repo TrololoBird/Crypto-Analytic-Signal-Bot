@@ -15,6 +15,19 @@ from ..universe import build_shortlist
 UTC = timezone.utc
 LOG = logging.getLogger("bot.application.shortlist_service")
 
+FALLBACK_REASON_WS_CACHE_COLD = "ws_cache_cold"
+FALLBACK_REASON_FULL_REFRESH_DUE = "full_refresh_due"
+FALLBACK_REASON_REFRESH_EXCEPTION = "refresh_exception"
+FALLBACK_REASON_USING_CACHED = "using_cached"
+FALLBACK_REASON_USING_PINNED = "using_pinned"
+SHORTLIST_FALLBACK_REASONS = {
+    FALLBACK_REASON_WS_CACHE_COLD: "ws light cache not ready or missing symbol metadata",
+    FALLBACK_REASON_FULL_REFRESH_DUE: "full refresh interval reached",
+    FALLBACK_REASON_REFRESH_EXCEPTION: "shortlist refresh raised exception",
+    FALLBACK_REASON_USING_CACHED: "reuse last live shortlist snapshot",
+    FALLBACK_REASON_USING_PINNED: "fallback to configured pinned shortlist",
+}
+
 
 class ShortlistService:
     """Encapsulates shortlist build/refresh lifecycle for ``SignalBot``."""
@@ -302,9 +315,12 @@ class ShortlistService:
         LOG.info("refreshing shortlist...")
 
         source = "pinned_fallback"
+        source_before = str(getattr(bot, "_shortlist_source", "startup"))
         summary: dict[str, Any] = {}
         shortlist = self.build_pinned_shortlist()
         now = datetime.now(UTC)
+        fallback_reason: str | None = FALLBACK_REASON_USING_PINNED
+        cached_shortlist_age_s: float | None = None
         full_interval = int(
             getattr(
                 bot.settings.universe,
@@ -316,6 +332,19 @@ class ShortlistService:
         full_refresh_due = (
             last_full is None or (now - last_full).total_seconds() >= full_interval
         )
+        ws = getattr(bot, "_ws_manager", None)
+        ws_cache_warm = bool(
+            ws is not None
+            and hasattr(ws, "is_ticker_cache_warm")
+            and ws.is_ticker_cache_warm()
+        )
+        has_symbol_meta = bool(getattr(bot, "_symbol_meta_by_symbol", {}))
+        LOG.info(
+            "shortlist refresh decision | full_refresh_due=%s ws_cache_warm=%s has_symbol_meta=%s",
+            full_refresh_due,
+            ws_cache_warm,
+            has_symbol_meta,
+        )
 
         try:
             live_shortlist: list[UniverseSymbol] = []
@@ -324,67 +353,105 @@ class ShortlistService:
                 live_shortlist, live_summary = await self.build_light_shortlist()
                 if live_shortlist:
                     source = "ws_light"
+                    fallback_reason = None
+                elif not ws_cache_warm or not has_symbol_meta:
+                    fallback_reason = FALLBACK_REASON_WS_CACHE_COLD
             if not live_shortlist:
+                if full_refresh_due:
+                    fallback_reason = FALLBACK_REASON_FULL_REFRESH_DUE
                 live_shortlist, live_summary = await self.build_live_shortlist()
                 if live_shortlist:
                     bot._last_shortlist_full_refresh_at = now
                     source = "rest_full"
+                    fallback_reason = fallback_reason if fallback_reason else None
             if live_shortlist:
                 shortlist = live_shortlist
                 summary = live_summary
                 bot._last_live_shortlist = list(live_shortlist)
+                bot._last_live_shortlist_at = now
             elif bot._last_live_shortlist:
                 shortlist = list(bot._last_live_shortlist)
                 source = "cached"
+                fallback_reason = FALLBACK_REASON_USING_CACHED
         except Exception as exc:
+            fallback_reason = FALLBACK_REASON_REFRESH_EXCEPTION
             if bot._last_live_shortlist:
                 shortlist = list(bot._last_live_shortlist)
                 source = "cached"
                 LOG.warning("shortlist refresh failed, using cached shortlist: %s", exc)
             else:
+                fallback_reason = FALLBACK_REASON_USING_PINNED
                 LOG.warning("shortlist refresh failed, using pinned fallback: %s", exc)
+
+        if source == "cached":
+            last_live_at = getattr(bot, "_last_live_shortlist_at", None)
+            if isinstance(last_live_at, datetime):
+                cached_shortlist_age_s = max(0.0, (now - last_live_at).total_seconds())
 
         async with bot._shortlist_lock:
             bot._shortlist = shortlist
         bot._shortlist_source = source
 
-        bot.telemetry.append_jsonl(
-            "shortlist.jsonl",
+        top_scores = [
             {
-                "ts": datetime.now(UTC).isoformat(),
-                "source": source,
-                "size": len(shortlist),
-                "symbols": [item.symbol for item in shortlist[:20]],
-                "eligible": summary.get("eligible"),
-                "dynamic_pool": summary.get("dynamic_pool"),
-                "pinned": summary.get("pinned"),
-                "mode": summary.get("mode", source),
-                "avg_score": summary.get("avg_score"),
-                "enrich_errors_by_stage": dict(
-                    getattr(bot, "_shortlist_enrich_error_counts", {})
-                ),
-                "enrich_errors_total": int(
-                    getattr(bot, "_shortlist_enrich_error_total", 0)
-                ),
-                "enrich_errors_last_cycle": dict(
-                    getattr(bot, "_shortlist_enrich_last_cycle_errors", {})
-                ),
-                "top_scores": [
-                    {
-                        "symbol": item.symbol,
-                        "score": item.shortlist_score,
-                        "reasons": list(item.shortlist_reasons[:3]),
-                        "seed_source": item.seed_source,
-                    }
-                    for item in shortlist[:5]
-                ],
-            },
+                "symbol": item.symbol,
+                "score": item.shortlist_score,
+                "reasons": list(item.shortlist_reasons[:3]),
+                "seed_source": item.seed_source,
+            }
+            for item in shortlist[:5]
+        ]
+        telemetry_manager = (
+            bot._get_telemetry_manager()
+            if hasattr(bot, "_get_telemetry_manager")
+            else None
         )
+        if telemetry_manager is not None:
+            telemetry_manager.emit_shortlist_refresh(
+                source=source,
+                source_before=source_before,
+                fallback_reason=fallback_reason,
+                cached_shortlist_age_s=cached_shortlist_age_s,
+                shortlist_size=len(shortlist),
+                shortlist_symbols=[item.symbol for item in shortlist[:20]],
+                top_scores=top_scores,
+                summary=summary,
+            )
+        else:
+            bot.telemetry.append_jsonl(
+                "shortlist.jsonl",
+                {
+                    "ts": datetime.now(UTC).isoformat(),
+                    "source": source,
+                    "source_before": source_before,
+                    "source_after": source,
+                    "fallback_reason": fallback_reason,
+                    "cached_shortlist_age_s": cached_shortlist_age_s,
+                    "size": len(shortlist),
+                    "symbols": [item.symbol for item in shortlist[:20]],
+                    "eligible": summary.get("eligible"),
+                    "dynamic_pool": summary.get("dynamic_pool"),
+                    "pinned": summary.get("pinned"),
+                    "mode": summary.get("mode", source),
+                    "avg_score": summary.get("avg_score"),
+                    "enrich_errors_by_stage": dict(
+                        getattr(bot, "_shortlist_enrich_error_counts", {})
+                    ),
+                    "enrich_errors_total": int(
+                        getattr(bot, "_shortlist_enrich_error_total", 0)
+                    ),
+                    "enrich_errors_last_cycle": dict(
+                        getattr(bot, "_shortlist_enrich_last_cycle_errors", {})
+                    ),
+                    "top_scores": top_scores,
+                },
+            )
 
         LOG.info(
-            "shortlist refresh complete | source=%s mode=%s size=%d eligible=%s dynamic_pool=%s pinned=%s avg_score=%s",
+            "shortlist refresh complete | source=%s mode=%s fallback_reason=%s size=%d eligible=%s dynamic_pool=%s pinned=%s avg_score=%s",
             source,
             summary.get("mode", source),
+            fallback_reason,
             len(shortlist),
             summary.get("eligible"),
             summary.get("dynamic_pool"),

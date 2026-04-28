@@ -13,7 +13,15 @@ import pytest
 
 from bot.application.bot import SignalBot
 from bot.application import symbol_analyzer as symbol_analyzer_module
-from bot.application.shortlist_service import ShortlistService
+from bot.application.shortlist_service import (
+    FALLBACK_REASON_FULL_REFRESH_DUE,
+    FALLBACK_REASON_REFRESH_EXCEPTION,
+    FALLBACK_REASON_USING_CACHED,
+    FALLBACK_REASON_USING_PINNED,
+    FALLBACK_REASON_WS_CACHE_COLD,
+    SHORTLIST_FALLBACK_REASONS,
+    ShortlistService,
+)
 from bot.application.symbol_analyzer import SymbolAnalyzer
 from bot.cli import _is_preformatted_log_stderr
 from bot.confluence import ConfluenceEngine  # noqa: F401
@@ -1172,6 +1180,198 @@ async def test_shortlist_refresh_prefers_ws_light_between_full_rebalances() -> N
     assert refreshed == shortlist
     assert bot._shortlist_source == "ws_light"
     service.build_light_shortlist.assert_awaited_once()
+    shortlist_row = bot.telemetry.rows[-1][1]
+    assert shortlist_row["source_before"] == ""
+    assert shortlist_row["source_after"] == "ws_light"
+    assert shortlist_row["fallback_reason"] is None
+
+
+def test_shortlist_fallback_reason_dictionary_is_fixed() -> None:
+    assert SHORTLIST_FALLBACK_REASONS == {
+        FALLBACK_REASON_WS_CACHE_COLD: "ws light cache not ready or missing symbol metadata",
+        FALLBACK_REASON_FULL_REFRESH_DUE: "full refresh interval reached",
+        FALLBACK_REASON_REFRESH_EXCEPTION: "shortlist refresh raised exception",
+        FALLBACK_REASON_USING_CACHED: "reuse last live shortlist snapshot",
+        FALLBACK_REASON_USING_PINNED: "fallback to configured pinned shortlist",
+    }
+
+
+@pytest.mark.asyncio
+async def test_shortlist_refresh_sets_ws_cache_cold_fallback_reason() -> None:
+    shortlist = [make_universe_symbol(symbol="ETHUSDT")]
+    bot = SimpleNamespace(
+        settings=SimpleNamespace(
+            universe=SimpleNamespace(
+                quote_asset="USDT",
+                pinned_symbols=("BTCUSDT",),
+                light_refresh_interval_seconds=60,
+                full_refresh_interval_seconds=7200,
+            ),
+            runtime=SimpleNamespace(shortlist_refresh_interval_seconds=7200),
+        ),
+        _shortlist_lock=asyncio.Lock(),
+        _shortlist=[],
+        _shortlist_source="ws_light",
+        _last_live_shortlist=[],
+        _symbol_meta_by_symbol={},
+        _last_shortlist_full_refresh_at=datetime.now(UTC),
+        client=SimpleNamespace(_exchange_info_cache=None),
+        telemetry=TelemetryStub(),
+    )
+    service = ShortlistService(bot)
+    service.build_light_shortlist = AsyncMock(return_value=([], {"mode": "ws_light"}))
+    service.build_live_shortlist = AsyncMock(return_value=(shortlist, {"mode": "rest_full"}))
+
+    await service.do_refresh_shortlist()
+
+    shortlist_row = bot.telemetry.rows[-1][1]
+    assert shortlist_row["source"] == "rest_full"
+    assert shortlist_row["fallback_reason"] == FALLBACK_REASON_WS_CACHE_COLD
+
+
+@pytest.mark.asyncio
+async def test_shortlist_refresh_sets_full_refresh_due_reason() -> None:
+    shortlist = [make_universe_symbol(symbol="BTCUSDT")]
+    bot = SimpleNamespace(
+        settings=SimpleNamespace(
+            universe=SimpleNamespace(
+                quote_asset="USDT",
+                pinned_symbols=("BTCUSDT",),
+                light_refresh_interval_seconds=60,
+                full_refresh_interval_seconds=1,
+            ),
+            runtime=SimpleNamespace(shortlist_refresh_interval_seconds=1),
+        ),
+        _shortlist_lock=asyncio.Lock(),
+        _shortlist=[],
+        _shortlist_source="ws_light",
+        _last_live_shortlist=[],
+        _symbol_meta_by_symbol={
+            "BTCUSDT": SimpleNamespace(
+                symbol="BTCUSDT", base_asset="BTC", quote_asset="USDT"
+            )
+        },
+        _last_shortlist_full_refresh_at=datetime.now(UTC) - timedelta(seconds=60),
+        telemetry=TelemetryStub(),
+    )
+    service = ShortlistService(bot)
+    service.build_light_shortlist = AsyncMock(
+        side_effect=AssertionError("ws light should be skipped when full refresh is due")
+    )
+    service.build_live_shortlist = AsyncMock(return_value=(shortlist, {"mode": "rest_full"}))
+
+    await service.do_refresh_shortlist()
+
+    shortlist_row = bot.telemetry.rows[-1][1]
+    assert shortlist_row["source"] == "rest_full"
+    assert shortlist_row["fallback_reason"] == FALLBACK_REASON_FULL_REFRESH_DUE
+
+
+@pytest.mark.asyncio
+async def test_shortlist_refresh_sets_using_cached_reason_and_cache_age() -> None:
+    cached_shortlist = [make_universe_symbol(symbol="BTCUSDT")]
+    bot = SimpleNamespace(
+        settings=SimpleNamespace(
+            universe=SimpleNamespace(
+                quote_asset="USDT",
+                pinned_symbols=("BTCUSDT",),
+                light_refresh_interval_seconds=60,
+                full_refresh_interval_seconds=7200,
+            ),
+            runtime=SimpleNamespace(shortlist_refresh_interval_seconds=7200),
+        ),
+        _shortlist_lock=asyncio.Lock(),
+        _shortlist=[],
+        _shortlist_source="rest_full",
+        _last_live_shortlist=list(cached_shortlist),
+        _last_live_shortlist_at=datetime.now(UTC) - timedelta(seconds=42),
+        _symbol_meta_by_symbol={
+            "BTCUSDT": SimpleNamespace(
+                symbol="BTCUSDT", base_asset="BTC", quote_asset="USDT"
+            )
+        },
+        _last_shortlist_full_refresh_at=datetime.now(UTC),
+        telemetry=TelemetryStub(),
+    )
+    service = ShortlistService(bot)
+    service.build_light_shortlist = AsyncMock(return_value=([], {"mode": "ws_light"}))
+    service.build_live_shortlist = AsyncMock(return_value=([], {"mode": "rest_full"}))
+
+    await service.do_refresh_shortlist()
+
+    shortlist_row = bot.telemetry.rows[-1][1]
+    assert shortlist_row["source"] == "cached"
+    assert shortlist_row["fallback_reason"] == FALLBACK_REASON_USING_CACHED
+    assert shortlist_row["cached_shortlist_age_s"] is not None
+    assert shortlist_row["cached_shortlist_age_s"] >= 40
+
+
+@pytest.mark.asyncio
+async def test_shortlist_refresh_sets_refresh_exception_reason_when_cache_exists() -> None:
+    cached_shortlist = [make_universe_symbol(symbol="BTCUSDT")]
+    bot = SimpleNamespace(
+        settings=SimpleNamespace(
+            universe=SimpleNamespace(
+                quote_asset="USDT",
+                pinned_symbols=("BTCUSDT",),
+                light_refresh_interval_seconds=60,
+                full_refresh_interval_seconds=7200,
+            ),
+            runtime=SimpleNamespace(shortlist_refresh_interval_seconds=7200),
+        ),
+        _shortlist_lock=asyncio.Lock(),
+        _shortlist=[],
+        _shortlist_source="rest_full",
+        _last_live_shortlist=list(cached_shortlist),
+        _last_live_shortlist_at=datetime.now(UTC) - timedelta(seconds=10),
+        _symbol_meta_by_symbol={},
+        _last_shortlist_full_refresh_at=datetime.now(UTC),
+        client=SimpleNamespace(_exchange_info_cache=None),
+        telemetry=TelemetryStub(),
+    )
+    service = ShortlistService(bot)
+    service.build_light_shortlist = AsyncMock(
+        side_effect=RuntimeError("ws cache unavailable")
+    )
+
+    await service.do_refresh_shortlist()
+
+    shortlist_row = bot.telemetry.rows[-1][1]
+    assert shortlist_row["source"] == "cached"
+    assert shortlist_row["fallback_reason"] == FALLBACK_REASON_REFRESH_EXCEPTION
+
+
+@pytest.mark.asyncio
+async def test_shortlist_refresh_sets_using_pinned_reason_when_no_cache() -> None:
+    bot = SimpleNamespace(
+        settings=SimpleNamespace(
+            universe=SimpleNamespace(
+                quote_asset="USDT",
+                pinned_symbols=("BTCUSDT",),
+                light_refresh_interval_seconds=60,
+                full_refresh_interval_seconds=7200,
+            ),
+            runtime=SimpleNamespace(shortlist_refresh_interval_seconds=7200),
+        ),
+        _shortlist_lock=asyncio.Lock(),
+        _shortlist=[],
+        _shortlist_source="startup",
+        _last_live_shortlist=[],
+        _symbol_meta_by_symbol={},
+        _last_shortlist_full_refresh_at=datetime.now(UTC),
+        client=SimpleNamespace(_exchange_info_cache=None),
+        telemetry=TelemetryStub(),
+    )
+    service = ShortlistService(bot)
+    service.build_light_shortlist = AsyncMock(
+        side_effect=RuntimeError("ws cache unavailable")
+    )
+
+    await service.do_refresh_shortlist()
+
+    shortlist_row = bot.telemetry.rows[-1][1]
+    assert shortlist_row["source"] == "pinned_fallback"
+    assert shortlist_row["fallback_reason"] == FALLBACK_REASON_USING_PINNED
 
 
 def test_build_pinned_shortlist_resolves_assets_from_meta_and_safe_quote_parsing(
