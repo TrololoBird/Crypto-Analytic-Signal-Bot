@@ -103,9 +103,10 @@ class OIRefreshRunner:
                 await fetch()
             except Exception as exc:
                 LOG.warning(
-                    "oi refresh degraded | symbol=%s stage=%s source=%s reason=%s",
+                    "oi refresh degraded | symbol=%s stage=%s source=%s reason=%s exception_type=%s",
                     symbol,
                     stage,
                     source,
                     exc,
+                    type(exc).__name__,
                 )
