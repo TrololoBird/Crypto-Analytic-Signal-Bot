@@ -40,6 +40,7 @@ from bot.strategies.funding_reversal import FundingReversalSetup
 from bot.strategies.hidden_divergence import HiddenDivergenceSetup
 from bot.strategies.squeeze_setup import SqueezeSetup
 from bot.strategies.structure_pullback import StructurePullbackSetup
+from bot.strategies.turtle_soup import TurtleSoupSetup
 from bot.strategies.wick_trap_reversal import WickTrapReversalSetup
 from bot.setups import _build_signal
 from bot.setups.utils import build_structural_targets
@@ -1093,6 +1094,157 @@ def test_wick_trap_params_keep_backward_compatible_alias() -> None:
 
     assert params["wick_through_atr_mult"] == pytest.approx(0.77)
     assert params["wick_atr_threshold"] == pytest.approx(0.77)
+
+
+def test_wick_trap_long_targets_are_directional_and_signal_valid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    setup = WickTrapReversalSetup()
+    settings = SimpleNamespace(
+        filters=SimpleNamespace(setups={"wick_trap_reversal": {"min_rr": 1.2}})
+    )
+
+    base_time = datetime(2026, 4, 23, 0, 0, tzinfo=UTC)
+    work_1h = pl.DataFrame(
+        {
+            "time": [base_time + timedelta(hours=i) for i in range(10)],
+            "close_time": [base_time + timedelta(hours=i) for i in range(10)],
+            "open": [103.0, 102.0, 101.0, 100.0, 99.0, 98.0, 99.0, 100.0, 101.0, 102.0],
+            "high": [104.0, 103.0, 102.0, 101.0, 100.0, 99.0, 101.0, 103.0, 106.0, 105.0],
+            "low": [101.0, 100.0, 99.0, 98.0, 97.0, 95.0, 97.0, 99.0, 100.0, 101.0],
+            "close": [102.0, 101.0, 100.0, 99.0, 98.0, 96.0, 100.0, 102.0, 104.0, 103.0],
+            "volume": [1000.0] * 10,
+            "atr14": [2.0] * 10,
+            "volume_ratio20": [1.2] * 10,
+            "rsi14": [52.0] * 10,
+            "supertrend_dir": [1.0] * 10,
+        }
+    )
+    work_15m_start = base_time + timedelta(hours=6)
+    work_15m = pl.DataFrame(
+        {
+            "time": [work_15m_start + timedelta(minutes=15 * i) for i in range(12)],
+            "close_time": [work_15m_start + timedelta(minutes=15 * i) for i in range(12)],
+            "open": [100.0, 100.2, 100.4, 100.3, 100.5, 100.4, 100.1, 99.9, 99.8, 100.3, 100.8, 101.0],
+            "high": [100.5, 100.7, 100.9, 100.8, 101.0, 100.9, 100.3, 100.2, 100.1, 100.8, 101.3, 101.6],
+            "low": [99.7, 99.9, 100.0, 99.9, 100.0, 99.8, 94.0, 99.4, 99.6, 99.9, 100.4, 100.7],
+            "close": [100.2, 100.4, 100.3, 100.5, 100.4, 100.1, 99.7, 99.8, 100.3, 100.8, 101.0, 101.2],
+            "volume": [1000.0] * 12,
+            "atr14": [2.0] * 12,
+            "volume_ratio20": [1.1] * 12,
+            "rsi14": [54.0] * 12,
+            "supertrend_dir": [1.0] * 12,
+        }
+    )
+    prepared = make_prepared(price=101.2)
+    prepared.work_1h = work_1h
+    prepared.work_15m = work_15m
+    prepared.mark_price = 101.2
+
+    sh_mask = pl.Series("sh", [False] * 8 + [True, False], dtype=pl.Boolean)
+    sl_mask = pl.Series("sl", [False, False, False, False, False, True, False, False, False, False], dtype=pl.Boolean)
+    monkeypatch.setattr(
+        "bot.strategies.wick_trap_reversal._swing_points",
+        lambda *_args, **_kwargs: (sh_mask, sl_mask),
+    )
+
+    signal = setup.detect(prepared, settings)
+
+    assert signal is not None
+    assert signal.direction == "long"
+    assert signal.stop < signal.entry_mid
+    assert signal.take_profit_1 > signal.entry_mid
+    assert signal.take_profit_2 >= signal.take_profit_1
+
+
+def test_turtle_soup_long_now_valid_with_directional_tp_logic() -> None:
+    setup = TurtleSoupSetup()
+    settings = SimpleNamespace(filters=SimpleNamespace(setups={}))
+
+    base_time = datetime(2026, 4, 23, 0, 0, tzinfo=UTC)
+    work_1h = pl.DataFrame(
+        {
+            "time": [base_time + timedelta(hours=i) for i in range(24)],
+            "close_time": [base_time + timedelta(hours=i) for i in range(24)],
+            "open": [100.0] * 23 + [95.4],
+            "high": [102.0] * 23 + [100.8],
+            "low": [95.0] * 23 + [94.0],
+            "close": [100.0] * 23 + [95.8],
+            "volume": [1000.0] * 24,
+            "atr14": [1.0] * 24,
+            "volume_ratio20": [1.1] * 24,
+            "rsi14": [50.0] * 24,
+        }
+    )
+    work_15m = pl.DataFrame(
+        {
+            "time": [base_time + timedelta(minutes=15 * i) for i in range(4)],
+            "close_time": [base_time + timedelta(minutes=15 * i) for i in range(4)],
+            "open": [95.1, 95.0, 95.0, 95.2],
+            "high": [95.4, 95.3, 95.5, 96.0],
+            "low": [94.9, 94.8, 94.9, 95.1],
+            "close": [95.0, 95.0, 95.2, 95.9],
+            "volume": [1000.0] * 4,
+            "atr14": [1.0] * 4,
+            "volume_ratio20": [1.2] * 4,
+            "rsi14": [52.0] * 4,
+        }
+    )
+    prepared = make_prepared(price=95.8)
+    prepared.work_1h = work_1h
+    prepared.work_15m = work_15m
+    prepared.mark_price = 95.8
+
+    signal = setup.detect(prepared, settings)
+
+    assert signal is not None
+    assert signal.direction == "long"
+    assert signal.stop < signal.entry_mid
+    assert signal.take_profit_1 > signal.entry_mid
+    assert signal.take_profit_2 >= signal.take_profit_1
+
+
+def test_turtle_soup_still_rejects_invalid_15m_confirmation() -> None:
+    setup = TurtleSoupSetup()
+    settings = SimpleNamespace(filters=SimpleNamespace(setups={}))
+
+    base_time = datetime(2026, 4, 23, 0, 0, tzinfo=UTC)
+    work_1h = pl.DataFrame(
+        {
+            "time": [base_time + timedelta(hours=i) for i in range(24)],
+            "close_time": [base_time + timedelta(hours=i) for i in range(24)],
+            "open": [100.0] * 23 + [95.4],
+            "high": [102.0] * 23 + [100.8],
+            "low": [95.0] * 23 + [94.0],
+            "close": [100.0] * 23 + [95.8],
+            "volume": [1000.0] * 24,
+            "atr14": [1.0] * 24,
+            "volume_ratio20": [1.1] * 24,
+            "rsi14": [50.0] * 24,
+        }
+    )
+    work_15m = pl.DataFrame(
+        {
+            "time": [base_time + timedelta(minutes=15 * i) for i in range(4)],
+            "close_time": [base_time + timedelta(minutes=15 * i) for i in range(4)],
+            "open": [95.1, 95.0, 95.0, 95.9],
+            "high": [95.4, 95.3, 95.5, 96.0],
+            "low": [94.9, 94.8, 94.9, 95.1],
+            "close": [95.0, 95.0, 95.2, 95.6],
+            "volume": [1000.0] * 4,
+            "atr14": [1.0] * 4,
+            "volume_ratio20": [1.2] * 4,
+            "rsi14": [52.0] * 4,
+        }
+    )
+    prepared = make_prepared(price=95.8)
+    prepared.work_1h = work_1h
+    prepared.work_15m = work_15m
+    prepared.mark_price = 95.8
+
+    signal = setup.detect(prepared, settings)
+
+    assert signal is None
 
 
 def test_symbol_analyzer_does_not_hide_unexpected_frame_errors(

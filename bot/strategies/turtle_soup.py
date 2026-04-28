@@ -157,6 +157,8 @@ class TurtleSoupSetup(BaseSetup):
         # --- Compute structural SL/TP ---
         from ..features import _swing_points as _sp
 
+        range_before = max(rolling_high - rolling_low, atr)
+
         if direction == "long":
             # SL: beyond false breakout extreme + sl_buffer_atr×ATR
             stop = wick_extreme - sl_buffer_atr * atr
@@ -170,13 +172,17 @@ class TurtleSoupSetup(BaseSetup):
                     close=bar_close,
                 )
                 return None
-            # TP1: the broken level itself (rolling low that was falsely broken)
-            tp1 = rolling_low
+            # TP1/TP2 must be above entry for long to satisfy _build_signal contract.
+            tp1 = max(rolling_high, bar_close + risk * min_rr)
             sh_mask, _ = _sp(w1h, n=3, include_unconfirmed_tail=True)
             sh_prices = w1h.filter(sh_mask)["high"]
-            tp2_candidates = sh_prices.filter(sh_prices > bar_close)
+            tp2_candidates = sh_prices.filter(sh_prices > tp1)
             tp2_series = tp2_candidates.drop_nulls()
-            tp2 = _as_float(tp2_series[0]) if tp2_series.len() > 0 else None
+            tp2 = (
+                _as_float(tp2_series[0])
+                if tp2_series.len() > 0
+                else max(tp1 + range_before, bar_close + risk * (min_rr + 0.5))
+            )
         else:
             # SL: beyond false breakout extreme + sl_buffer_atr×ATR
             stop = wick_extreme + sl_buffer_atr * atr
@@ -190,12 +196,16 @@ class TurtleSoupSetup(BaseSetup):
                     close=bar_close,
                 )
                 return None
-            # TP1: the broken level itself (rolling high that was falsely broken)
-            tp1 = rolling_high
+            # TP1/TP2 must be below entry for short to satisfy _build_signal contract.
+            tp1 = min(rolling_low, bar_close - risk * min_rr)
             _, sl_mask = _sp(w1h, n=3, include_unconfirmed_tail=True)
             sl_prices = w1h.filter(sl_mask)["low"]
-            tp2_candidates = sl_prices.filter(sl_prices < bar_close)
-            tp2 = _as_float(tp2_candidates[-1]) if tp2_candidates.len() > 0 else None
+            tp2_candidates = sl_prices.filter(sl_prices < tp1)
+            tp2 = (
+                _as_float(tp2_candidates[-1])
+                if tp2_candidates.len() > 0
+                else min(tp1 - range_before, bar_close - risk * (min_rr + 0.5))
+            )
 
         # Validate: TP1 must be at least configured risk distance, else reject.
         if tp1 is None or abs(tp1 - bar_close) < risk * min_rr:
