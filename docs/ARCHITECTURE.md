@@ -35,6 +35,7 @@
 
 - Runtime market data is restricted to public Binance USDⓈ-M endpoints.
 - REST is served through the public endpoint registry in `bot/market_data.py`; private/auth/signed routes and non-USDⓈ-M hosts (including `eapi.binance.com`) are rejected at validation time.
+- Options eAPI fetchers in `bot/public_intelligence.py` are isolated behind `bot.intelligence.allow_runtime_options_eapi` and default to `false`, so runtime call paths do not touch eAPI unless explicitly opted in.
 - WebSocket routing is split intentionally:
   - `/public` for `@bookTicker`
   - `/market` for `@kline_*`, `@aggTrade`, `!ticker@arr`, `@markPrice`, `!forceOrder@arr`

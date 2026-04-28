@@ -189,6 +189,7 @@ runtime_mode = "signal_only"
 source_policy = "binance_only"
 smart_exit_mode = "heuristic_v1"
 gamma_semantics = "proxy_only"
+allow_runtime_options_eapi = false
 refresh_interval_seconds = 900
 write_hourly_reports = true
 options_expiry_count = 2

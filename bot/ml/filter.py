@@ -76,10 +76,8 @@ class MLFilter:
                     self.model_dir, model_type=self.settings.ml.model_type
                 )
                 if classifier.load():
-                    model_kind = classifier.model_kind()
-                    decision = evaluate_live_model_guardrail(
+                    decision = classifier.runtime_guardrail_decision(
                         is_live=self.enabled,
-                        model_kind=model_kind,
                         stage="load_signal_classifier_fallback",
                     )
                     self._emit_guardrail_telemetry(decision)
@@ -94,7 +92,7 @@ class MLFilter:
                     self._classifier = classifier
                     self._model_metadata = {
                         "trained_at": "signal_classifier_artifact",
-                        "model_kind": model_kind,
+                        "model_kind": decision.model_kind,
                     }
                     LOG.info(
                         "ML filter loaded SignalClassifier fallback from %s",
@@ -447,10 +445,11 @@ class MLFilter:
         if decision.disable_reason is None and count > 1:
             return
         LOG.info(
-            "ML guardrail | stage=%s model_kind=%s disable_reason=%s count=%d",
+            "ML guardrail | stage=%s model_kind=%s disable_reason=%s is_live=%s count=%d",
             decision.stage,
             decision.model_kind,
             decision.disable_reason or "none",
+            decision.is_live,
             count,
         )
 

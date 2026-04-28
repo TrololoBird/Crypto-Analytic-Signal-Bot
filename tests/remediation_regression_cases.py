@@ -29,6 +29,7 @@ from bot.core.events import BookTickerEvent  # noqa: F401
 from bot.features import _ichimoku_lines, _swing_points, _weighted_moving_average  # noqa: F401
 from bot.market_data import BinanceFuturesMarketData, MarketDataUnavailable
 from bot.ml import MLFilter
+from bot.ml.signal_classifier import SignalClassifier
 from bot.models import AggTrade, PipelineResult, PreparedSymbol, Signal, UniverseSymbol  # noqa: F401
 from bot.scoring import _crowd_position
 from bot.setup_base import BaseSetup, SetupParams
@@ -1811,3 +1812,16 @@ def test_cli_stderr_prefilter_detects_logger_timestamp_prefix_for_any_year() -> 
         "2027-01-01 00:00:00,001 | INFO    | bot.cli | run:42 | BOT SESSION STARTED"
     )
     assert not _is_preformatted_log_stderr("unstructured stderr noise from dependency")
+
+
+def test_regression_live_guardrail_blocks_baseline_but_offline_allows(tmp_path) -> None:
+    classifier = SignalClassifier(model_dir=tmp_path / "models", model_type="centroid")
+    classifier.model = classifier._build_model()
+    live = classifier.runtime_guardrail_decision(
+        is_live=True, stage="regression_live_path"
+    )
+    offline = classifier.runtime_guardrail_decision(
+        is_live=False, stage="regression_offline_path"
+    )
+    assert live.disable_reason == "live_baseline_blocked"
+    assert offline.disable_reason is None
