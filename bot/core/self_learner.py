@@ -5,6 +5,7 @@ Each setup's get_optimizable_params() provides the search space.
 
 # WINDSURF_REVIEW: unified + self-learning + Optuna
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -33,6 +34,7 @@ LOG = logging.getLogger("bot.core.self_learner")
 @dataclass
 class OptimizationResult:
     """Result of a single setup parameter optimization."""
+
     setup_id: str
     params: dict[str, float]
     win_rate: float
@@ -58,16 +60,18 @@ class SelfLearner:
         self._outcomes = OutcomeStore(db_path)
         self._walk_forward = WalkForwardOptimizer()
 
-    async def run_nightly_study(self, settings: BotSettings) -> list[OptimizationResult]:
+    async def run_nightly_study(
+        self, settings: BotSettings
+    ) -> list[OptimizationResult]:
         """Run optimization study for all setups with sufficient outcome data.
-        
+
         Returns list of OptimizationResult with optimized parameters.
         """
         if not OPTUNA_AVAILABLE:
             LOG.warning("Optuna not available, using walk-forward grid-search fallback")
 
         results: list[OptimizationResult] = []
-        
+
         for setup_instance in self.setup_registry.get_enabled():
             setup_id = setup_instance.strategy_id
             try:
@@ -79,15 +83,25 @@ class SelfLearner:
                 # Get outcomes from database for this setup
                 outcomes = await self._fetch_outcomes(setup_id)
                 if len(outcomes) < 30:  # Need minimum data
-                    LOG.info(f"Insufficient outcomes for {setup_id}: {len(outcomes)} trades")
+                    LOG.info(
+                        f"Insufficient outcomes for {setup_id}: {len(outcomes)} trades"
+                    )
                     continue
 
                 # Run Optuna study
-                regime = str(getattr(getattr(settings, "intelligence", None), "regime_detector", "legacy"))
-                result = await self._optimize_setup(setup_id, default_params, outcomes, regime=regime)
+                regime = str(
+                    getattr(
+                        getattr(settings, "intelligence", None),
+                        "regime_detector",
+                        "legacy",
+                    )
+                )
+                result = await self._optimize_setup(
+                    setup_id, default_params, outcomes, regime=regime
+                )
                 if result:
                     results.append(result)
-                    
+
             except Exception as e:
                 LOG.exception(f"Error optimizing {setup_id}: {e}")
                 continue
@@ -110,36 +124,56 @@ class SelfLearner:
         regime_bounds = RegimeAwareParams(regime=regime, db_path=self.db_path)
 
         if not OPTUNA_AVAILABLE or optuna is None:
-            search_space = self._build_fallback_search_space(default_params, regime_bounds)
-            best_params = self._walk_forward.optimize(outcomes, search_space=search_space)
+            search_space = self._build_fallback_search_space(
+                default_params, regime_bounds
+            )
+            best_params = self._walk_forward.optimize(
+                outcomes, search_space=search_space
+            )
             if not best_params:
                 return None
             best_value = float(best_params.pop("_score", 0.0))
             regime_bounds.set_params(setup_id, regime, best_params)
             return self._build_result(setup_id, outcomes, best_params, best_value)
-        
+
         def objective(trial: Any) -> float:
             """Optimization objective: maximize risk-adjusted return."""
             # Sample parameters from search space
             suggested_params = {}
             for param_name, default_value in default_params.items():
-                if "score" in param_name or "threshold" in param_name or "penalty" in param_name:
+                if (
+                    "score" in param_name
+                    or "threshold" in param_name
+                    or "penalty" in param_name
+                ):
                     # These are typically 0.0-1.0 or small ranges
                     low, high = regime_bounds.scale(param_name, float(default_value))
-                    suggested_params[param_name] = trial.suggest_float(param_name, low, high)
+                    suggested_params[param_name] = trial.suggest_float(
+                        param_name, low, high
+                    )
                 elif "min_rr" in param_name:
                     # Risk/reward ratio typically 1.0-3.0
                     low, high = regime_bounds.scale(param_name, float(default_value))
-                    suggested_params[param_name] = trial.suggest_float(param_name, max(0.8, low), min(4.0, high))
-                elif "bars" in param_name or "age" in param_name or "lookback" in param_name:
+                    suggested_params[param_name] = trial.suggest_float(
+                        param_name, max(0.8, low), min(4.0, high)
+                    )
+                elif (
+                    "bars" in param_name
+                    or "age" in param_name
+                    or "lookback" in param_name
+                ):
                     # Integer parameters
                     low, high = int(default_value * 0.5), int(default_value * 2.0)
-                    suggested_params[param_name] = trial.suggest_int(param_name, max(1, low), max(2, high))
+                    suggested_params[param_name] = trial.suggest_int(
+                        param_name, max(1, low), max(2, high)
+                    )
                 else:
                     # Generic float parameter
                     low, high = regime_bounds.scale(param_name, float(default_value))
-                    suggested_params[param_name] = trial.suggest_float(param_name, low, high)
-            
+                    suggested_params[param_name] = trial.suggest_float(
+                        param_name, low, high
+                    )
+
             # Simulate performance with these parameters
             return self._simulate_performance(outcomes, suggested_params)
 
@@ -214,9 +248,17 @@ class SelfLearner:
         total = wins + losses
         win_rate = wins / total if total > 0 else 0.0
 
-        gross_profit = sum(float(o.get("pnl", 0.0) or 0.0) for o in outcomes if o.get("outcome") == "win")
+        gross_profit = sum(
+            float(o.get("pnl", 0.0) or 0.0)
+            for o in outcomes
+            if o.get("outcome") == "win"
+        )
         gross_loss = abs(
-            sum(float(o.get("pnl", 0.0) or 0.0) for o in outcomes if o.get("outcome") == "loss")
+            sum(
+                float(o.get("pnl", 0.0) or 0.0)
+                for o in outcomes
+                if o.get("outcome") == "loss"
+            )
         )
         profit_factor = gross_profit / gross_loss if gross_loss > 0 else float("inf")
 
@@ -245,23 +287,23 @@ class SelfLearner:
         for result in results:
             try:
                 # Update settings.filters.setups[setup_id]
-                if not hasattr(settings.filters, 'setups'):
+                if not hasattr(settings.filters, "setups"):
                     settings.filters.setups = {}
-                
+
                 settings.filters.setups[result.setup_id] = result.params
-                
+
                 LOG.info(
                     f"Updated {result.setup_id} params: {result.params} "
                     f"(win_rate={result.win_rate:.2%})"
                 )
-                
+
             except Exception as e:
                 LOG.error(f"Failed to update params for {result.setup_id}: {e}")
 
     async def start_nightly_scheduler(self, settings: BotSettings) -> None:
         """Start background task for nightly optimization."""
         self._running = True
-        
+
         while self._running:
             try:
                 # Run at 00:00 UTC
@@ -269,18 +311,22 @@ class SelfLearner:
                 next_run = now.replace(hour=0, minute=0, second=0, microsecond=0)
                 if next_run <= now:
                     next_run = next_run.replace(day=next_run.day + 1)
-                
+
                 wait_seconds = (next_run - now).total_seconds()
-                LOG.info(f"Next optimization run at {next_run} (in {wait_seconds/3600:.1f} hours)")
-                
+                LOG.info(
+                    f"Next optimization run at {next_run} (in {wait_seconds / 3600:.1f} hours)"
+                )
+
                 await asyncio.sleep(wait_seconds)
-                
+
                 # Run optimization
                 LOG.info("Starting nightly optimization study...")
                 results = await self.run_nightly_study(settings)
                 await self.update_setup_params(results, settings)
-                LOG.info(f"Nightly optimization complete: {len(results)} setups optimized")
-                
+                LOG.info(
+                    f"Nightly optimization complete: {len(results)} setups optimized"
+                )
+
             except asyncio.CancelledError:
                 break
             except Exception as e:

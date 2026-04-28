@@ -8,18 +8,24 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   quality-report:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.13.13"
+          cache: "pip"
 
       - name: Install Python tooling
         run: |
@@ -27,7 +33,7 @@ jobs:
           pip install ruff vulture
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "20"
 
@@ -37,21 +43,21 @@ jobs:
       - name: Ruff (unused imports/variables report)
         run: |
           echo "# Ruff report" > reports/quality/ruff.txt
-          ruff check . --select F401,F841 >> reports/quality/ruff.txt 2>&1 || true
+          ruff check . --select F401,F841 >> reports/quality/ruff.txt 2>&1
 
       - name: Vulture (dead code report)
         run: |
           echo "# Vulture report" > reports/quality/vulture.txt
-          vulture bot scripts tests >> reports/quality/vulture.txt 2>&1 || true
+          vulture bot scripts tests >> reports/quality/vulture.txt 2>&1
 
       - name: JSCPD (duplication report)
         run: |
           echo "# JSCPD report" > reports/quality/jscpd.txt
           npx --yes jscpd@4.0.5 --min-lines 20 --min-tokens 120 --format python --reporters console \
-            --output reports/quality/jscpd-artifacts . >> reports/quality/jscpd.txt 2>&1 || true
+            --output reports/quality/jscpd-artifacts . >> reports/quality/jscpd.txt 2>&1
 
       - name: Upload reports
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: quality-reports
           path: reports/quality

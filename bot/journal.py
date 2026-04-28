@@ -6,6 +6,7 @@ and returns a structured JournalReport. No writes, no network calls.
 Also provides build_config_suggestions() which joins selected signals with their
 outcomes (tp/sl/expired) and bins by key parameters to suggest config thresholds.
 """
+
 from __future__ import annotations
 
 import json
@@ -167,16 +168,16 @@ def build_config_suggestions(telemetry_root: Path) -> list[str]:
 
     def _win_rate(items: list[tuple[dict, str]]) -> tuple[int, int, int]:
         """Return (wins, losses, expired)."""
-        w = sum(1 for _, o in items if o == "win")
-        l = sum(1 for _, o in items if o == "loss")
-        e = sum(1 for _, o in items if o == "expired")
-        return w, l, e
+        wins = sum(1 for _, o in items if o == "win")
+        losses = sum(1 for _, o in items if o == "loss")
+        expired = sum(1 for _, o in items if o == "expired")
+        return wins, losses, expired
 
-    def _wr_str(w: int, l: int) -> str:
-        total = w + l
+    def _wr_str(wins: int, losses: int) -> str:
+        total = wins + losses
         if total == 0:
             return "n/a"
-        return f"{w / total * 100:.0f}%"
+        return f"{wins / total * 100:.0f}%"
 
     # --- ATR % bins ---
     atr_bins: dict[str, list] = defaultdict(list)
@@ -200,8 +201,10 @@ def build_config_suggestions(telemetry_root: Path) -> list[str]:
     for label in ["<0.50", "0.50-0.75", "0.75-1.00", "1.00-1.50", ">1.50"]:
         items = atr_bins.get(label, [])
         if len(items) >= MIN_BIN:
-            w, l, e = _win_rate(items)
-            atr_lines.append(f"  ATR {label:>9}%  n={len(items):>3}  wr={_wr_str(w, l)}  (wins={w} sl={l} exp={e})")
+            wins, losses, expired = _win_rate(items)
+            atr_lines.append(
+                f"  ATR {label:>9}%  n={len(items):>3}  wr={_wr_str(wins, losses)}  (wins={wins} sl={losses} exp={expired})"
+            )
     if len(atr_lines) >= 2:
         suggestions.append("[SUGGEST] min_atr_pct — win rate by ATR band:")
         suggestions.extend(atr_lines)
@@ -210,12 +213,14 @@ def build_config_suggestions(telemetry_root: Path) -> list[str]:
         for label in ["<0.50", "0.50-0.75"]:
             items = atr_bins.get(label, [])
             if len(items) >= MIN_BIN:
-                w, l, _ = _win_rate(items)
-                total = w + l
-                if total > 0 and w / total < 0.40:
+                wins, losses, _ = _win_rate(items)
+                total = wins + losses
+                if total > 0 and wins / total < 0.40:
                     threshold_hint = label
         if threshold_hint:
-            suggestions.append(f"  → Low win rate in {threshold_hint} bin suggests raising min_atr_pct")
+            suggestions.append(
+                f"  → Low win rate in {threshold_hint} bin suggests raising min_atr_pct"
+            )
         suggestions.append("")
 
     # --- Score bins ---
@@ -240,8 +245,10 @@ def build_config_suggestions(telemetry_root: Path) -> list[str]:
     for label in ["0.64-0.65", "0.65-0.68", "0.68-0.72", "0.72-0.78", ">0.78"]:
         items = score_bins.get(label, [])
         if len(items) >= MIN_BIN:
-            w, l, e = _win_rate(items)
-            score_lines.append(f"  score {label:>9}  n={len(items):>3}  wr={_wr_str(w, l)}  (wins={w} sl={l} exp={e})")
+            wins, losses, expired = _win_rate(items)
+            score_lines.append(
+                f"  score {label:>9}  n={len(items):>3}  wr={_wr_str(wins, losses)}  (wins={wins} sl={losses} exp={expired})"
+            )
     if len(score_lines) >= 2:
         suggestions.append("[SUGGEST] min_score — win rate by score band:")
         suggestions.extend(score_lines)
@@ -254,7 +261,9 @@ def build_config_suggestions(telemetry_root: Path) -> list[str]:
             lt = lw + ll
             ht = hw + hl
             if lt > 0 and ht > 0 and (lw / lt) < (hw / ht) - 0.15:
-                suggestions.append(f"  → Clear quality gap (low={_wr_str(lw, ll)} vs high={_wr_str(hw, hl)}) suggests raising min_score to 0.68+")
+                suggestions.append(
+                    f"  → Clear quality gap (low={_wr_str(lw, ll)} vs high={_wr_str(hw, hl)}) suggests raising min_score to 0.68+"
+                )
         suggestions.append("")
 
     # --- RR bins ---
@@ -277,8 +286,10 @@ def build_config_suggestions(telemetry_root: Path) -> list[str]:
     for label in ["1.9-2.5", "2.5-3.5", "3.5-5.0", ">5.0"]:
         items = rr_bins.get(label, [])
         if len(items) >= MIN_BIN:
-            w, l, e = _win_rate(items)
-            rr_lines.append(f"  RR {label:>9}  n={len(items):>3}  wr={_wr_str(w, l)}  (wins={w} sl={l} exp={e})")
+            wins, losses, expired = _win_rate(items)
+            rr_lines.append(
+                f"  RR {label:>9}  n={len(items):>3}  wr={_wr_str(wins, losses)}  (wins={wins} sl={losses} exp={expired})"
+            )
     if len(rr_lines) >= 2:
         suggestions.append("[SUGGEST] min_risk_reward — win rate by RR band:")
         suggestions.extend(rr_lines)
@@ -287,7 +298,9 @@ def build_config_suggestions(telemetry_root: Path) -> list[str]:
     # --- Setup performance with regime context ---
     setup_regime_bins: dict[str, list] = defaultdict(list)
     for sig, outcome in resolved:
-        setup_id = sig.get("setup_id") or sig.get("signal", {}).get("setup_id") or "unknown"
+        setup_id = (
+            sig.get("setup_id") or sig.get("signal", {}).get("setup_id") or "unknown"
+        )
         regime = sig.get("bias_4h") or sig.get("signal", {}).get("bias_4h") or "neutral"
         key = f"{setup_id} / {regime}"
         setup_regime_bins[key].append((sig, outcome))
@@ -295,18 +308,24 @@ def build_config_suggestions(telemetry_root: Path) -> list[str]:
     setup_lines = []
     for key, items in sorted(setup_regime_bins.items(), key=lambda x: -len(x[1])):
         if len(items) >= MIN_BIN:
-            w, l, e = _win_rate(items)
-            total = w + l
-            wr_val = w / total if total > 0 else None
+            wins, losses, _ = _win_rate(items)
+            total = wins + losses
+            wr_val = wins / total if total > 0 else None
             flag = " ← LOW" if wr_val is not None and wr_val < 0.35 else ""
-            setup_lines.append(f"  {key:<35}  n={len(items):>3}  wr={_wr_str(w, l)}{flag}")
+            setup_lines.append(
+                f"  {key:<35}  n={len(items):>3}  wr={_wr_str(wins, losses)}{flag}"
+            )
     if setup_lines:
-        suggestions.append("[SUGGEST] Setup performance by regime (low wr = consider disabling):")
+        suggestions.append(
+            "[SUGGEST] Setup performance by regime (low wr = consider disabling):"
+        )
         suggestions.extend(setup_lines)
         suggestions.append("")
 
     if len(suggestions) <= 2:
-        suggestions.append("[ADVISOR] Bins too small for suggestions — keep accumulating outcomes.")
+        suggestions.append(
+            "[ADVISOR] Bins too small for suggestions — keep accumulating outcomes."
+        )
 
     return suggestions
 
@@ -345,4 +364,3 @@ def print_journal_report(report: JournalReport) -> None:
     else:
         print("  (no data)")
     print()
-

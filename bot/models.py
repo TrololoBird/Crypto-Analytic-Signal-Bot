@@ -100,7 +100,9 @@ class PreparedSymbol:
     taker_ratio: float | None = None  # taker buy/sell volume ratio (>1.0 = net buyers)
     liquidation_score: float | None = None  # -1.0 (bearish liq) … +1.0 (bullish liq)
     funding_trend: str | None = None  # "rising" | "falling" | "flat" | None
-    basis_pct: float | None = None    # (futures - index) / index * 100; + = contango, - = backwardation
+    basis_pct: float | None = (
+        None  # (futures - index) / index * 100; + = contango, - = backwardation
+    )
     global_ls_ratio: float | None = None
     global_account_ls_ratio: float | None = None
     top_trader_position_ratio: float | None = None
@@ -124,11 +126,15 @@ class PreparedSymbol:
     data_source_mix: str = "futures_only"
     market_regime: str = "neutral"  # "trending" | "neutral" | "choppy"
     # Structure-based fields (Фаза 2 рефакторинга)
-    structure_1h: str = "ranging"       # "uptrend" | "downtrend" | "ranging"
-    regime_4h_confirmed: str = "ranging"  # "uptrend" | "downtrend" | "ranging" (3+ bars) - macro only
-    regime_1h_confirmed: str = "ranging"  # "uptrend" | "downtrend" | "ranging" (3+ bars) - trading context
-    poc_1h: float | None = None         # Point of Control on 1h (highest volume price)
-    poc_15m: float | None = None        # Point of Control on 15m
+    structure_1h: str = "ranging"  # "uptrend" | "downtrend" | "ranging"
+    regime_4h_confirmed: str = (
+        "ranging"  # "uptrend" | "downtrend" | "ranging" (3+ bars) - macro only
+    )
+    regime_1h_confirmed: str = (
+        "ranging"  # "uptrend" | "downtrend" | "ranging" (3+ bars) - trading context
+    )
+    poc_1h: float | None = None  # Point of Control on 1h (highest volume price)
+    poc_15m: float | None = None  # Point of Control on 15m
     settings: BotSettings | None = None
     reject_log: list[dict[str, Any]] = field(default_factory=list)
 
@@ -141,9 +147,15 @@ class PreparedSymbol:
             self.global_account_ls_ratio = self.global_ls_ratio
         if self.global_ls_ratio is None and self.global_account_ls_ratio is not None:
             self.global_ls_ratio = self.global_account_ls_ratio
-        if self.top_position_ls_ratio is None and self.top_trader_position_ratio is not None:
+        if (
+            self.top_position_ls_ratio is None
+            and self.top_trader_position_ratio is not None
+        ):
             self.top_position_ls_ratio = self.top_trader_position_ratio
-        if self.top_trader_position_ratio is None and self.top_position_ls_ratio is not None:
+        if (
+            self.top_trader_position_ratio is None
+            and self.top_position_ls_ratio is not None
+        ):
             self.top_trader_position_ratio = self.top_position_ls_ratio
 
     @property
@@ -187,7 +199,9 @@ class Signal:
     single_target_mode: bool = False
     passed_filters: tuple[str, ...] = ()
     mark_price: float | None = None
-    volume_ratio: float | None = None  # current volume / 20-bar avg (for analytics companion)
+    volume_ratio: float | None = (
+        None  # current volume / 20-bar avg (for analytics companion)
+    )
     adx_1h: float | None = None
     risk_reward: float | None = None
     trend_direction: str | None = None
@@ -280,9 +294,16 @@ class Signal:
     def same_target(self, tolerance: float | None = None) -> bool:
         tol = tolerance
         if tol is None:
-            anchor = max(abs(self.entry_mid), abs(self.take_profit_1), abs(self.take_profit_2), 1.0)
+            anchor = max(
+                abs(self.entry_mid),
+                abs(self.take_profit_1),
+                abs(self.take_profit_2),
+                1.0,
+            )
             tol = anchor * 1e-8
-        return math.isclose(self.take_profit_1, self.take_profit_2, abs_tol=tol, rel_tol=0.0)
+        return math.isclose(
+            self.take_profit_1, self.take_profit_2, abs_tol=tol, rel_tol=0.0
+        )
 
     def to_log_row(self) -> dict[str, Any]:
         return {
@@ -321,10 +342,11 @@ class Signal:
 @dataclass(slots=True)
 class PipelineResult:
     """Result container for signal analysis pipeline.
-    
+
     Replaces legacy PipelineResult from pipeline.py for backward compatibility.
     Modern engine uses SignalResult in core/engine/base.py.
     """
+
     symbol: str
     trigger: str
     event_ts: datetime

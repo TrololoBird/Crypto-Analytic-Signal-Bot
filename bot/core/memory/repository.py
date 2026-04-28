@@ -21,7 +21,7 @@ LOG = logging.getLogger("bot.core.memory.repository")
 @dataclass
 class SignalRecord:
     """Record of generated signal."""
-    
+
     signal_id: str
     symbol: str
     strategy_id: str
@@ -32,7 +32,7 @@ class SignalRecord:
     take_profit_2: float
     score: float
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    
+
     # Context at signal time
     timeframe: str = "1h"
     atr_pct: float = 0.0
@@ -42,18 +42,18 @@ class SignalRecord:
     volume_ratio: float | None = None
     funding_rate: float | None = None
     oi_change_pct: float | None = None
-    
+
     # Metadata
     features: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
-    
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         result = asdict(self)
         # Convert datetime to ISO string
         result["created_at"] = self.created_at.isoformat()
         return result
-    
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SignalRecord:
         """Create from dictionary."""
@@ -66,42 +66,42 @@ class SignalRecord:
 @dataclass
 class OutcomeRecord:
     """Record of signal outcome after tracking."""
-    
+
     outcome_id: str
     signal_id: str
     symbol: str
-    
+
     # Price updates
     price_1h: float | None = None
     price_4h: float | None = None
     price_24h: float | None = None
-    
+
     # PnL proxy (percentage from entry)
     pnl_1h: float | None = None
     pnl_4h: float | None = None
     pnl_24h: float | None = None
-    
+
     # MAE/MFE tracking
     max_profit_pct: float = 0.0
     max_loss_pct: float = 0.0
     mae: float = 0.0  # Maximum adverse excursion
     mfe: float = 0.0  # Maximum favorable excursion
-    
+
     # Result classification
     hit_tp1: bool = False
     hit_tp2: bool = False
     hit_sl: bool = False
     result: str = ""  # "win", "loss", "breakeven", "open"
-    
+
     # Timestamps
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     closed_at: datetime | None = None
-    
+
     # Analysis
     time_to_tp1_min: int | None = None
     time_to_tp2_min: int | None = None
     time_to_sl_min: int | None = None
-    
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         result = asdict(self)
@@ -111,7 +111,7 @@ class OutcomeRecord:
         if self.closed_at:
             result["closed_at"] = self.closed_at.isoformat()
         return result
-    
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> OutcomeRecord:
         """Create from dictionary."""
@@ -125,22 +125,22 @@ class OutcomeRecord:
 
 class MemoryRepository(MemoryRepositoryExtension):
     """Unified repository for signals and outcomes.
-    
+
     Uses SQLite for metadata and Parquet for time-series data.
     Supports async operations and batch inserts.
     """
-    
+
     def __init__(self, db_path: Path | str, data_dir: Path | str):
         self._db_path = Path(db_path)
         self._data_dir = Path(data_dir)
         self._data_dir.mkdir(parents=True, exist_ok=True)
         self._conn: aiosqlite.Connection | None = None
-    
+
     async def initialize(self) -> None:
         """Initialize database tables."""
         self._conn = await aiosqlite.connect(self._db_path)
         self._conn.row_factory = aiosqlite.Row
-        
+
         # Create tables
         await self._conn.executescript("""
             CREATE TABLE IF NOT EXISTS signals (
@@ -324,7 +324,7 @@ class MemoryRepository(MemoryRepositoryExtension):
             CREATE INDEX IF NOT EXISTS idx_signal_outcomes_result ON signal_outcomes(result);
             CREATE INDEX IF NOT EXISTS idx_signal_outcomes_closed_at ON signal_outcomes(closed_at);
         """)
-        
+
         await self._ensure_table_columns(
             "active_signals",
             {
@@ -344,7 +344,9 @@ class MemoryRepository(MemoryRepositoryExtension):
         await self._conn.commit()
         LOG.info("Memory repository initialized at %s", self._db_path)
 
-    async def _ensure_table_columns(self, table_name: str, columns: dict[str, str]) -> None:
+    async def _ensure_table_columns(
+        self, table_name: str, columns: dict[str, str]
+    ) -> None:
         """Add missing columns for existing databases."""
         if not self._conn:
             raise RuntimeError("Repository not initialized")
@@ -359,43 +361,59 @@ class MemoryRepository(MemoryRepositoryExtension):
             await self._conn.execute(
                 f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}"
             )
-    
+
     async def close(self) -> None:
         """Close database connection."""
         if self._conn:
             await self._conn.close()
             self._conn = None
-    
+
     async def save_signal(self, record: SignalRecord) -> None:
         """Save signal record."""
         if not self._conn:
             raise RuntimeError("Repository not initialized")
-        
-        await self._conn.execute("""
+
+        await self._conn.execute(
+            """
             INSERT INTO signals (
                 signal_id, symbol, strategy_id, direction, entry_price,
                 stop_loss, take_profit_1, take_profit_2, score, created_at,
                 timeframe, atr_pct, spread_bps, rsi_1h, adx_1h, volume_ratio,
                 funding_rate, oi_change_pct, features, metadata
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            record.signal_id, record.symbol, record.strategy_id, record.direction,
-            record.entry_price, record.stop_loss, record.take_profit_1,
-            record.take_profit_2, record.score, record.created_at.isoformat(),
-            record.timeframe, record.atr_pct, record.spread_bps, record.rsi_1h,
-            record.adx_1h, record.volume_ratio, record.funding_rate,
-            record.oi_change_pct,
-            json.dumps(record.features) if record.features else None,
-            json.dumps(record.metadata) if record.metadata else None
-        ))
+        """,
+            (
+                record.signal_id,
+                record.symbol,
+                record.strategy_id,
+                record.direction,
+                record.entry_price,
+                record.stop_loss,
+                record.take_profit_1,
+                record.take_profit_2,
+                record.score,
+                record.created_at.isoformat(),
+                record.timeframe,
+                record.atr_pct,
+                record.spread_bps,
+                record.rsi_1h,
+                record.adx_1h,
+                record.volume_ratio,
+                record.funding_rate,
+                record.oi_change_pct,
+                json.dumps(record.features) if record.features else None,
+                json.dumps(record.metadata) if record.metadata else None,
+            ),
+        )
         await self._conn.commit()
-    
+
     async def save_outcome(self, record: OutcomeRecord) -> None:
         """Save outcome record."""
         if not self._conn:
             raise RuntimeError("Repository not initialized")
-        
-        await self._conn.execute("""
+
+        await self._conn.execute(
+            """
             INSERT INTO outcomes (
                 outcome_id, signal_id, symbol, price_1h, price_4h, price_24h,
                 pnl_1h, pnl_4h, pnl_24h, max_profit_pct, max_loss_pct, mae, mfe,
@@ -419,23 +437,39 @@ class MemoryRepository(MemoryRepositoryExtension):
                 result = excluded.result,
                 updated_at = excluded.updated_at,
                 closed_at = excluded.closed_at
-        """, (
-            record.outcome_id, record.signal_id, record.symbol,
-            record.price_1h, record.price_4h, record.price_24h,
-            record.pnl_1h, record.pnl_4h, record.pnl_24h,
-            record.max_profit_pct, record.max_loss_pct, record.mae, record.mfe,
-            int(record.hit_tp1), int(record.hit_tp2), int(record.hit_sl),
-            record.result, record.updated_at.isoformat(),
-            record.closed_at.isoformat() if record.closed_at else None,
-            record.time_to_tp1_min, record.time_to_tp2_min, record.time_to_sl_min
-        ))
+        """,
+            (
+                record.outcome_id,
+                record.signal_id,
+                record.symbol,
+                record.price_1h,
+                record.price_4h,
+                record.price_24h,
+                record.pnl_1h,
+                record.pnl_4h,
+                record.pnl_24h,
+                record.max_profit_pct,
+                record.max_loss_pct,
+                record.mae,
+                record.mfe,
+                int(record.hit_tp1),
+                int(record.hit_tp2),
+                int(record.hit_sl),
+                record.result,
+                record.updated_at.isoformat(),
+                record.closed_at.isoformat() if record.closed_at else None,
+                record.time_to_tp1_min,
+                record.time_to_tp2_min,
+                record.time_to_sl_min,
+            ),
+        )
         await self._conn.commit()
-    
+
     async def get_signal(self, signal_id: str) -> SignalRecord | None:
         """Get signal by ID."""
         if not self._conn:
             raise RuntimeError("Repository not initialized")
-        
+
         async with self._conn.execute(
             "SELECT * FROM signals WHERE signal_id = ?", (signal_id,)
         ) as cursor:
@@ -443,12 +477,12 @@ class MemoryRepository(MemoryRepositoryExtension):
             if row:
                 return self._row_to_signal_record(row)
             return None
-    
+
     async def get_outcome(self, outcome_id: str) -> OutcomeRecord | None:
         """Get outcome by ID."""
         if not self._conn:
             raise RuntimeError("Repository not initialized")
-        
+
         async with self._conn.execute(
             "SELECT * FROM outcomes WHERE outcome_id = ?", (outcome_id,)
         ) as cursor:
@@ -456,12 +490,12 @@ class MemoryRepository(MemoryRepositoryExtension):
             if row:
                 return self._row_to_outcome_record(row)
             return None
-    
+
     async def get_outcome_by_signal(self, signal_id: str) -> OutcomeRecord | None:
         """Get outcome for a signal."""
         if not self._conn:
             raise RuntimeError("Repository not initialized")
-        
+
         async with self._conn.execute(
             "SELECT * FROM outcomes WHERE signal_id = ?", (signal_id,)
         ) as cursor:
@@ -469,49 +503,46 @@ class MemoryRepository(MemoryRepositoryExtension):
             if row:
                 return self._row_to_outcome_record(row)
             return None
-    
-    async def get_signals_without_outcome(
-        self, 
-        limit: int = 100
-    ) -> list[SignalRecord]:
+
+    async def get_signals_without_outcome(self, limit: int = 100) -> list[SignalRecord]:
         """Get signals that don't have outcomes yet."""
         if not self._conn:
             raise RuntimeError("Repository not initialized")
-        
-        async with self._conn.execute("""
+
+        async with self._conn.execute(
+            """
             SELECT s.* FROM signals s
             LEFT JOIN outcomes o ON s.signal_id = o.signal_id
             WHERE o.outcome_id IS NULL
             ORDER BY s.created_at DESC
             LIMIT ?
-        """, (limit,)) as cursor:
+        """,
+            (limit,),
+        ) as cursor:
             rows = await cursor.fetchall()
             return [self._row_to_signal_record(row) for row in rows]
-    
+
     async def get_signals_by_strategy(
-        self, 
-        strategy_id: str,
-        since: datetime | None = None,
-        limit: int = 1000
+        self, strategy_id: str, since: datetime | None = None, limit: int = 1000
     ) -> list[SignalRecord]:
         """Get signals for a strategy."""
         if not self._conn:
             raise RuntimeError("Repository not initialized")
-        
+
         query = "SELECT * FROM signals WHERE strategy_id = ?"
         params: list[Any] = [strategy_id]
-        
+
         if since:
             query += " AND created_at > ?"
             params.append(since.isoformat())
-        
+
         query += " ORDER BY created_at DESC LIMIT ?"
         params.append(limit)
-        
+
         async with self._conn.execute(query, params) as cursor:
             rows = await cursor.fetchall()
             return [self._row_to_signal_record(row) for row in rows]
-    
+
     async def get_signals_for_analysis(
         self,
         since: datetime,
@@ -538,46 +569,52 @@ class MemoryRepository(MemoryRepositoryExtension):
 
         async with self._conn.execute(query, params) as cursor:
             rows = await cursor.fetchall()
-            
+
         if not rows:
             return pl.DataFrame()
-        
+
         # Convert to dicts for Polars
         data = [dict(row) for row in rows]
         return pl.DataFrame(data)
-    
+
     async def save_config_version(self, config_json: str) -> str:
         """Save config version."""
         if not self._conn:
             raise RuntimeError("Repository not initialized")
-        
+
         version_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        
-        await self._conn.execute("""
+
+        await self._conn.execute(
+            """
             INSERT INTO config_versions (version_id, config_json, created_at, is_active)
             VALUES (?, ?, ?, 1)
-        """, (version_id, config_json, datetime.now(timezone.utc).isoformat()))
-        
+        """,
+            (version_id, config_json, datetime.now(timezone.utc).isoformat()),
+        )
+
         # Deactivate previous versions
-        await self._conn.execute("""
+        await self._conn.execute(
+            """
             UPDATE config_versions SET is_active = 0
             WHERE version_id != ?
-        """, (version_id,))
-        
+        """,
+            (version_id,),
+        )
+
         await self._conn.commit()
         return version_id
-    
+
     async def get_active_config(self) -> str | None:
         """Get active config JSON."""
         if not self._conn:
             raise RuntimeError("Repository not initialized")
-        
+
         async with self._conn.execute(
             "SELECT config_json FROM config_versions WHERE is_active = 1 LIMIT 1"
         ) as cursor:
             row = await cursor.fetchone()
             return row["config_json"] if row else None
-    
+
     def _row_to_signal_record(self, row: aiosqlite.Row) -> SignalRecord:
         """Convert DB row to SignalRecord."""
         data = dict(row)
@@ -587,7 +624,7 @@ class MemoryRepository(MemoryRepositoryExtension):
         if data.get("metadata"):
             data["metadata"] = json.loads(data["metadata"])
         return SignalRecord.from_dict(data)
-    
+
     def _row_to_outcome_record(self, row: aiosqlite.Row) -> OutcomeRecord:
         """Convert DB row to OutcomeRecord."""
         data = dict(row)
@@ -596,38 +633,38 @@ class MemoryRepository(MemoryRepositoryExtension):
         data["hit_tp2"] = bool(data.get("hit_tp2", 0))
         data["hit_sl"] = bool(data.get("hit_sl", 0))
         return OutcomeRecord.from_dict(data)
-    
+
     # ------------------------------------------------------------------
     # Cooldown methods (replaces SignalCooldownStore)
     # ------------------------------------------------------------------
-    
+
     async def get_cooldown(self, cooldown_key: str) -> datetime | None:
         """Get last sent time for a cooldown key."""
         if not self._conn:
             raise RuntimeError("Repository not initialized")
-        
+
         async with self._conn.execute(
-            "SELECT last_sent_at FROM cooldowns WHERE cooldown_key = ?",
-            (cooldown_key,)
+            "SELECT last_sent_at FROM cooldowns WHERE cooldown_key = ?", (cooldown_key,)
         ) as cursor:
             row = await cursor.fetchone()
             if row:
                 return datetime.fromisoformat(row["last_sent_at"])
             return None
-    
+
     async def set_cooldown(
         self,
         cooldown_key: str,
         sent_at: datetime,
         setup_id: str | None = None,
         symbol: str | None = None,
-        cooldown_type: str = "signal_key"
+        cooldown_type: str = "signal_key",
     ) -> None:
         """Set cooldown for a key."""
         if not self._conn:
             raise RuntimeError("Repository not initialized")
-        
-        await self._conn.execute("""
+
+        await self._conn.execute(
+            """
             INSERT INTO cooldowns (cooldown_key, last_sent_at, setup_id, symbol, cooldown_type)
             VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(cooldown_key) DO UPDATE SET
@@ -635,42 +672,40 @@ class MemoryRepository(MemoryRepositoryExtension):
                 setup_id = excluded.setup_id,
                 symbol = excluded.symbol,
                 cooldown_type = excluded.cooldown_type
-        """, (cooldown_key, sent_at.isoformat(), setup_id, symbol, cooldown_type))
+        """,
+            (cooldown_key, sent_at.isoformat(), setup_id, symbol, cooldown_type),
+        )
         await self._conn.commit()
-    
+
     async def is_cooldown_active(
-        self,
-        cooldown_key: str,
-        cooldown_minutes: int,
-        now: datetime | None = None
+        self, cooldown_key: str, cooldown_minutes: int, now: datetime | None = None
     ) -> bool:
         """Check if cooldown is still active."""
         if cooldown_minutes <= 0:
             return False
-        
+
         last_sent = await self.get_cooldown(cooldown_key)
         if not last_sent:
             return False
-        
+
         now = now or datetime.now(timezone.utc)
         return (now - last_sent) < timedelta(minutes=cooldown_minutes)
-    
+
     # ------------------------------------------------------------------
     # Setup adaptive scoring (replaces setup_score_adjustments)
     # ------------------------------------------------------------------
-    
+
     async def get_setup_score_adjustment(self, setup_id: str) -> float:
         """Get current score adjustment for a setup."""
         if not self._conn:
             raise RuntimeError("Repository not initialized")
-        
+
         async with self._conn.execute(
-            "SELECT score_adjustment FROM setup_scores WHERE setup_id = ?",
-            (setup_id,)
+            "SELECT score_adjustment FROM setup_scores WHERE setup_id = ?", (setup_id,)
         ) as cursor:
             row = await cursor.fetchone()
             return row["score_adjustment"] if row else 0.0
-    
+
     async def record_setup_outcome(
         self,
         setup_id: str,
@@ -680,30 +715,29 @@ class MemoryRepository(MemoryRepositoryExtension):
         penalty: float = -0.05,
         bonus: float = 0.03,
         low_win_rate: float = 0.40,
-        high_win_rate: float = 0.60
+        high_win_rate: float = 0.60,
     ) -> float:
         """Record outcome and return new score adjustment.
-        
+
         Replaces SignalCooldownStore.record_outcome()
         """
         if not self._conn:
             raise RuntimeError("Repository not initialized")
-        
+
         # Get current window
         async with self._conn.execute(
-            "SELECT outcome_window FROM setup_scores WHERE setup_id = ?",
-            (setup_id,)
+            "SELECT outcome_window FROM setup_scores WHERE setup_id = ?", (setup_id,)
         ) as cursor:
             row = await cursor.fetchone()
             window: list[str] = []
             if row and row["outcome_window"]:
                 window = json.loads(row["outcome_window"])
-        
+
         # Add new outcome
         window.append(outcome)
         if len(window) > window_size:
             window = window[-window_size:]
-        
+
         # Calculate adjustment
         win_reasons = {"tp1_hit", "tp2_hit"}
         adjustment = 0.0
@@ -714,63 +748,107 @@ class MemoryRepository(MemoryRepositoryExtension):
                 adjustment = penalty
             elif win_rate > high_win_rate:
                 adjustment = bonus
-        
+
         # Save
-        await self._conn.execute("""
+        await self._conn.execute(
+            """
             INSERT INTO setup_scores (setup_id, score_adjustment, outcome_window, updated_at)
             VALUES (?, ?, ?, ?)
             ON CONFLICT(setup_id) DO UPDATE SET
                 score_adjustment = excluded.score_adjustment,
                 outcome_window = excluded.outcome_window,
                 updated_at = excluded.updated_at
-        """, (setup_id, adjustment, json.dumps(window), datetime.now(timezone.utc).isoformat()))
+        """,
+            (
+                setup_id,
+                adjustment,
+                json.dumps(window),
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
         await self._conn.commit()
-        
+
         return adjustment
-    
+
     # ------------------------------------------------------------------
     # Active signal tracking (replaces SignalTrackingStore)
     # ------------------------------------------------------------------
-    
+
     async def save_active_signal(self, signal_data: dict[str, Any]) -> None:
         """Save or update active signal.
-        
+
         signal_data must contain: tracking_id, tracking_ref, signal_key, symbol, setup_id, direction
         """
         if not self._conn:
             raise RuntimeError("Repository not initialized")
-        
+
         # Build columns and values
         columns = [
-            "tracking_id", "tracking_ref", "signal_key", "symbol", "setup_id",
-            "direction", "timeframe", "created_at", "pending_expires_at", "active_expires_at",
-            "entry_low", "entry_high", "entry_mid", "initial_stop", "stop",
-            "take_profit_1", "take_profit_2", "single_target_mode", "target_integrity_status",
-            "score", "risk_reward", "reasons",
-            "signal_message_id", "bias_4h", "quote_volume", "spread_bps", "atr_pct",
-            "orderflow_delta_ratio", "status", "activated_at", "activation_price",
-            "tp1_hit_at", "tp2_hit_at", "stop_price", "tp1_price", "tp2_price",
-            "last_checked_at", "last_price",
-            "closed_at", "close_reason", "close_price"
+            "tracking_id",
+            "tracking_ref",
+            "signal_key",
+            "symbol",
+            "setup_id",
+            "direction",
+            "timeframe",
+            "created_at",
+            "pending_expires_at",
+            "active_expires_at",
+            "entry_low",
+            "entry_high",
+            "entry_mid",
+            "initial_stop",
+            "stop",
+            "take_profit_1",
+            "take_profit_2",
+            "single_target_mode",
+            "target_integrity_status",
+            "score",
+            "risk_reward",
+            "reasons",
+            "signal_message_id",
+            "bias_4h",
+            "quote_volume",
+            "spread_bps",
+            "atr_pct",
+            "orderflow_delta_ratio",
+            "status",
+            "activated_at",
+            "activation_price",
+            "tp1_hit_at",
+            "tp2_hit_at",
+            "stop_price",
+            "tp1_price",
+            "tp2_price",
+            "last_checked_at",
+            "last_price",
+            "closed_at",
+            "close_reason",
+            "close_price",
         ]
-        
+
         values = []
         for col in columns:
             val = signal_data.get(col)
             if col == "reasons" and isinstance(val, (list, tuple)):
                 val = json.dumps(list(val))
             values.append(val)
-        
+
         placeholders = ", ".join(["?"] * len(columns))
-        updates = ", ".join([f"{col} = excluded.{col}" for col in columns if col != "tracking_id"])
-        
-        await self._conn.execute(f"""
-            INSERT INTO active_signals ({', '.join(columns)})
+        updates = ", ".join(
+            [f"{col} = excluded.{col}" for col in columns if col != "tracking_id"]
+        )
+
+        await self._conn.execute(
+            f"""
+            INSERT INTO active_signals ({", ".join(columns)})
             VALUES ({placeholders})
             ON CONFLICT(tracking_id) DO UPDATE SET {updates}
-        """, values)
+        """,
+            values,
+        )
         await self._conn.commit()
-    
+
     async def get_active_signals(
         self,
         symbol: str | None = None,
@@ -780,10 +858,10 @@ class MemoryRepository(MemoryRepositoryExtension):
         """Get active signals with optional filtering."""
         if not self._conn:
             raise RuntimeError("Repository not initialized")
-        
+
         query = "SELECT * FROM active_signals WHERE 1=1"
         params: list[Any] = []
-        
+
         if not include_closed and status is None:
             query += " AND status IN ('pending', 'active')"
         if symbol:
@@ -792,9 +870,9 @@ class MemoryRepository(MemoryRepositoryExtension):
         if status:
             query += " AND status = ?"
             params.append(status)
-        
+
         query += " ORDER BY created_at DESC"
-        
+
         async with self._conn.execute(query, params) as cursor:
             rows = await cursor.fetchall()
             result = []
@@ -804,51 +882,57 @@ class MemoryRepository(MemoryRepositoryExtension):
                     data["reasons"] = json.loads(data["reasons"])
                 result.append(data)
             return result
-    
+
     async def close_active_signal(
         self,
         tracking_id: str,
         close_reason: str,
         close_price: float | None = None,
-        closed_at: datetime | None = None
+        closed_at: datetime | None = None,
     ) -> None:
         """Close an active signal."""
         if not self._conn:
             raise RuntimeError("Repository not initialized")
-        
+
         closed_at = closed_at or datetime.now(timezone.utc)
-        
-        await self._conn.execute("""
+
+        await self._conn.execute(
+            """
             UPDATE active_signals
             SET status = 'closed',
                 close_reason = ?,
                 close_price = ?,
                 closed_at = ?
             WHERE tracking_id = ?
-        """, (close_reason, close_price, closed_at.isoformat(), tracking_id))
+        """,
+            (close_reason, close_price, closed_at.isoformat(), tracking_id),
+        )
         await self._conn.commit()
-    
+
     async def update_signal_status(
         self,
         tracking_id: str,
         status: str,
         activation_price: float | None = None,
-        activated_at: datetime | None = None
+        activated_at: datetime | None = None,
     ) -> None:
         """Update signal status (e.g., pending -> active)."""
         if not self._conn:
             raise RuntimeError("Repository not initialized")
-        
+
         if status == "active" and activated_at:
-            await self._conn.execute("""
+            await self._conn.execute(
+                """
                 UPDATE active_signals
                 SET status = ?, activation_price = ?, activated_at = ?
                 WHERE tracking_id = ?
-            """, (status, activation_price, activated_at.isoformat(), tracking_id))
+            """,
+                (status, activation_price, activated_at.isoformat(), tracking_id),
+            )
         else:
             await self._conn.execute(
                 "UPDATE active_signals SET status = ? WHERE tracking_id = ?",
-                (status, tracking_id)
+                (status, tracking_id),
             )
         await self._conn.commit()
 
@@ -866,15 +950,19 @@ class MemoryRepository(MemoryRepositoryExtension):
         ) as cursor:
             row = await cursor.fetchone()
 
-        stats = dict(row) if row else {
-            "signals_sent": 0,
-            "activated": 0,
-            "tp1_hit": 0,
-            "tp2_hit": 0,
-            "stop_loss": 0,
-            "expired": 0,
-            "ambiguous_exit": 0,
-        }
+        stats = (
+            dict(row)
+            if row
+            else {
+                "signals_sent": 0,
+                "activated": 0,
+                "tp1_hit": 0,
+                "tp2_hit": 0,
+                "stop_loss": 0,
+                "expired": 0,
+                "ambiguous_exit": 0,
+            }
+        )
         async with self._conn.execute(
             "SELECT COUNT(*) AS active_count FROM active_signals WHERE status IN ('pending', 'active')"
         ) as cursor:
@@ -919,7 +1007,9 @@ class MemoryRepository(MemoryRepositoryExtension):
         """Persist a completed tracked-signal outcome."""
         await self.save_signal_outcomes_batch([outcome_data])
 
-    async def save_signal_outcomes_batch(self, outcomes_data: list[dict[str, Any]]) -> None:
+    async def save_signal_outcomes_batch(
+        self, outcomes_data: list[dict[str, Any]]
+    ) -> None:
         """Persist completed tracked-signal outcomes in batch."""
         if not self._conn:
             raise RuntimeError("Repository not initialized")
@@ -963,33 +1053,35 @@ class MemoryRepository(MemoryRepositoryExtension):
         rows: list[tuple[Any, ...]] = []
         for item in outcomes_data:
             llm_was_correct = item.get("llm_was_correct")
-            rows.append((
-                item["tracking_id"],
-                item.get("signal_id", item["tracking_id"]),
-                item["tracking_ref"],
-                item["symbol"],
-                item["setup_id"],
-                item["direction"],
-                item["timeframe"],
-                item["created_at"],
-                item.get("activated_at"),
-                item.get("closed_at"),
-                item.get("entry_price"),
-                item.get("exit_price"),
-                item.get("result", ""),
-                item.get("pnl_pct", 0.0),
-                item.get("pnl_r_multiple", 0.0),
-                item.get("max_profit_pct", 0.0),
-                item.get("max_loss_pct", 0.0),
-                item.get("mae", 0.0),
-                item.get("mfe", 0.0),
-                item.get("time_to_entry_min", 0),
-                item.get("time_to_exit_min", 0),
-                json.dumps(item.get("features", {})),
-                int(bool(item.get("was_profitable", False))),
-                None if llm_was_correct is None else int(bool(llm_was_correct)),
-                item.get("setup_quality", "neutral"),
-            ))
+            rows.append(
+                (
+                    item["tracking_id"],
+                    item.get("signal_id", item["tracking_id"]),
+                    item["tracking_ref"],
+                    item["symbol"],
+                    item["setup_id"],
+                    item["direction"],
+                    item["timeframe"],
+                    item["created_at"],
+                    item.get("activated_at"),
+                    item.get("closed_at"),
+                    item.get("entry_price"),
+                    item.get("exit_price"),
+                    item.get("result", ""),
+                    item.get("pnl_pct", 0.0),
+                    item.get("pnl_r_multiple", 0.0),
+                    item.get("max_profit_pct", 0.0),
+                    item.get("max_loss_pct", 0.0),
+                    item.get("mae", 0.0),
+                    item.get("mfe", 0.0),
+                    item.get("time_to_entry_min", 0),
+                    item.get("time_to_exit_min", 0),
+                    json.dumps(item.get("features", {})),
+                    int(bool(item.get("was_profitable", False))),
+                    None if llm_was_correct is None else int(bool(llm_was_correct)),
+                    item.get("setup_quality", "neutral"),
+                )
+            )
         await self._conn.executemany(query, rows)
         await self._conn.commit()
 
@@ -1032,15 +1124,17 @@ class MemoryRepository(MemoryRepositoryExtension):
             total = int(row["total"] or 0)
             wins = int(row["wins"] or 0)
             losses = int(row["losses"] or 0)
-            result.append({
-                "setup_id": row["setup_id"],
-                "wins": wins,
-                "losses": losses,
-                "total": total,
-                "win_rate": (wins / total) if total > 0 else 0.0,
-                "avg_r_multiple": float(row["avg_r_multiple"] or 0.0),
-                "avg_pnl_pct": float(row["avg_pnl_pct"] or 0.0),
-            })
+            result.append(
+                {
+                    "setup_id": row["setup_id"],
+                    "wins": wins,
+                    "losses": losses,
+                    "total": total,
+                    "win_rate": (wins / total) if total > 0 else 0.0,
+                    "avg_r_multiple": float(row["avg_r_multiple"] or 0.0),
+                    "avg_pnl_pct": float(row["avg_pnl_pct"] or 0.0),
+                }
+            )
         return result
 
     async def get_signal_outcomes(
@@ -1093,7 +1187,9 @@ class MemoryRepository(MemoryRepositoryExtension):
                 item["features"] = {}
             item["was_profitable"] = bool(item.get("was_profitable", 0))
             llm_was_correct = item.get("llm_was_correct")
-            item["llm_was_correct"] = None if llm_was_correct is None else bool(llm_was_correct)
+            item["llm_was_correct"] = (
+                None if llm_was_correct is None else bool(llm_was_correct)
+            )
             result_rows.append(item)
         return result_rows
 
@@ -1101,7 +1197,9 @@ class MemoryRepository(MemoryRepositoryExtension):
         """Return number of persisted cooldown entries."""
         if not self._conn:
             raise RuntimeError("Repository not initialized")
-        async with self._conn.execute("SELECT COUNT(*) AS count FROM cooldowns") as cursor:
+        async with self._conn.execute(
+            "SELECT COUNT(*) AS count FROM cooldowns"
+        ) as cursor:
             row = await cursor.fetchone()
         return int(row["count"]) if row else 0
 

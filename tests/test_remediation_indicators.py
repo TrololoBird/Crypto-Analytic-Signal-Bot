@@ -26,7 +26,7 @@ def test_ws_depth_imbalance_uses_signed_delta_ratio() -> None:
     ws._agg_trades["BTCUSDT"] = collections.deque(
         [
             AggTrade("BTCUSDT", 1, 100.0, 4.0, now_ms, is_buyer_maker=False),  # buy
-            AggTrade("BTCUSDT", 2, 100.1, 1.0, now_ms, is_buyer_maker=True),   # sell
+            AggTrade("BTCUSDT", 2, 100.1, 1.0, now_ms, is_buyer_maker=True),  # sell
         ],
         maxlen=32,
     )
@@ -43,7 +43,7 @@ def test_ws_microprice_bias_keeps_signed_delta_ratio() -> None:
     ws._agg_trades["BTCUSDT"] = collections.deque(
         [
             AggTrade("BTCUSDT", 3, 100.0, 1.0, now_ms, is_buyer_maker=False),  # buy
-            AggTrade("BTCUSDT", 4, 100.1, 4.0, now_ms, is_buyer_maker=True),   # sell
+            AggTrade("BTCUSDT", 4, 100.1, 4.0, now_ms, is_buyer_maker=True),  # sell
         ],
         maxlen=32,
     )

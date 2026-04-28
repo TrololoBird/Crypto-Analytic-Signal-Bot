@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 
-import polars as pl
 
 from .config import BotSettings
 from .features import _swing_points
@@ -149,7 +148,9 @@ def _oi_momentum(prepared: PreparedSymbol, signal: Signal) -> float:
     else:
         if signal.direction == "long":
             if basis <= -0.05:
-                basis_score = 0.85  # backwardation = capitulation, good for long reversal
+                basis_score = (
+                    0.85  # backwardation = capitulation, good for long reversal
+                )
             elif basis <= 0.05:
                 basis_score = 0.5
             elif basis <= 0.15:
@@ -164,7 +165,9 @@ def _oi_momentum(prepared: PreparedSymbol, signal: Signal) -> float:
             elif basis >= -0.03:
                 basis_score = 0.5
             else:
-                basis_score = 0.35  # backwardation = capitulation already done, risky short
+                basis_score = (
+                    0.35  # backwardation = capitulation already done, risky short
+                )
 
     return round((oi_score * 0.55 + cvd_score * 0.35 + basis_score * 0.10), 4)
 
@@ -176,7 +179,9 @@ def _risk_reward_quality(signal: Signal) -> float:
     return max(0.0, min((rr - 1.9) / 2.1, 1.0))
 
 
-def _funding_contrarian(prepared: PreparedSymbol, signal: Signal, settings: BotSettings) -> float:
+def _funding_contrarian(
+    prepared: PreparedSymbol, signal: Signal, settings: BotSettings
+) -> float:
     """Contrarian funding score.
 
     Extreme funding against direction → crowding opportunity (higher score).
@@ -296,14 +301,55 @@ def _gap_score(gap: float | None, direction: str, *, contrarian: bool) -> float:
     return 0.5
 
 
-def _crowd_position(prepared: PreparedSymbol, signal: Signal, settings: BotSettings) -> float:
-    contrarian_mode = signal.strategy_family == "reversal" or signal.confirmation_profile == "countertrend_exhaustion"
+def _crowd_position(
+    prepared: PreparedSymbol, signal: Signal, settings: BotSettings
+) -> float:
+    contrarian_mode = (
+        signal.strategy_family == "reversal"
+        or signal.confirmation_profile == "countertrend_exhaustion"
+    )
     ratio_scores = []
     if not _crowding_context_stale(prepared):
-        ratio_scores.append((_ratio_score(prepared.top_account_ls_ratio or prepared.ls_ratio, signal.direction, contrarian=contrarian_mode), 0.28))
-        ratio_scores.append((_ratio_score(prepared.top_position_ls_ratio, signal.direction, contrarian=contrarian_mode), 0.30))
-        ratio_scores.append((_ratio_score(prepared.global_account_ls_ratio or prepared.global_ls_ratio, signal.direction, contrarian=contrarian_mode), 0.20))
-        ratio_scores.append((_gap_score(prepared.top_vs_global_ls_gap, signal.direction, contrarian=contrarian_mode), 0.12))
+        ratio_scores.append(
+            (
+                _ratio_score(
+                    prepared.top_account_ls_ratio or prepared.ls_ratio,
+                    signal.direction,
+                    contrarian=contrarian_mode,
+                ),
+                0.28,
+            )
+        )
+        ratio_scores.append(
+            (
+                _ratio_score(
+                    prepared.top_position_ls_ratio,
+                    signal.direction,
+                    contrarian=contrarian_mode,
+                ),
+                0.30,
+            )
+        )
+        ratio_scores.append(
+            (
+                _ratio_score(
+                    prepared.global_account_ls_ratio or prepared.global_ls_ratio,
+                    signal.direction,
+                    contrarian=contrarian_mode,
+                ),
+                0.20,
+            )
+        )
+        ratio_scores.append(
+            (
+                _gap_score(
+                    prepared.top_vs_global_ls_gap,
+                    signal.direction,
+                    contrarian=contrarian_mode,
+                ),
+                0.12,
+            )
+        )
 
     taker = getattr(prepared, "taker_ratio", None)
     if taker is None:

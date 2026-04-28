@@ -6,13 +6,12 @@ Sweep = recent bar's wick breaks the level but closes back inside.
 
 # WINDSURF_REVIEW: unified + vectorized + 1H context + graded
 """
+
 from __future__ import annotations
 
 import logging
 import math
-from typing import cast
 
-import polars as pl
 
 from ..config import BotSettings
 from ..models import PreparedSymbol, Signal
@@ -41,7 +40,9 @@ class LiquiditySweepSetup(BaseSetup):
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)
 
-    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
+    def get_optimizable_params(
+        self, settings: BotSettings | None = None
+    ) -> dict[str, float]:
         """Tunable parameters for self-learner optimization."""
         defaults = {
             "base_score": 0.50,
@@ -55,9 +56,9 @@ class LiquiditySweepSetup(BaseSetup):
             "min_rr": 1.5,
         }
         if settings is not None:
-            filters = getattr(settings, 'filters', None)
+            filters = getattr(settings, "filters", None)
             if filters:
-                setups_config = getattr(filters, 'setups', {})
+                setups_config = getattr(filters, "setups", {})
                 if isinstance(setups_config, dict) and self.setup_id in setups_config:
                     return {**defaults, **setups_config.get(self.setup_id, {})}
         return defaults
@@ -71,10 +72,18 @@ class LiquiditySweepSetup(BaseSetup):
                 dynamic_params.get("threshold_tol", defaults["equal_level_tol"]),
             )
         )
-        min_level_hits = max(2, int(dynamic_params.get("min_level_hits", defaults["min_level_hits"])))
-        sweep_atr_mult = float(dynamic_params.get("sweep_atr_mult", defaults["sweep_atr_mult"]))
-        reclaim_threshold = float(dynamic_params.get("reclaim_threshold", defaults["reclaim_threshold"]))
-        sl_buffer_atr = float(dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]))
+        min_level_hits = max(
+            2, int(dynamic_params.get("min_level_hits", defaults["min_level_hits"]))
+        )
+        sweep_atr_mult = float(
+            dynamic_params.get("sweep_atr_mult", defaults["sweep_atr_mult"])
+        )
+        reclaim_threshold = float(
+            dynamic_params.get("reclaim_threshold", defaults["reclaim_threshold"])
+        )
+        sl_buffer_atr = float(
+            dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"])
+        )
         min_rr = float(dynamic_params.get("min_rr", defaults["min_rr"]))
         base_score = float(dynamic_params.get("base_score", defaults["base_score"]))
 
@@ -148,23 +157,44 @@ class LiquiditySweepSetup(BaseSetup):
             swing_length=max(2, min_level_hits + 1),
             range_percent=equal_level_tol,
         )
-        if zone is None or zone.sweep_index != scan.height - 1 or zone.state == "invalidated":
+        if (
+            zone is None
+            or zone.sweep_index != scan.height - 1
+            or zone.state == "invalidated"
+        ):
             _reject(prepared, setup_id, "no_liquidity_sweep_detected")
             return None
 
         if zone.direction == "short":
             eq_high_level = zone.level or zone.midpoint
             if sweep_bar_h <= eq_high_level or sweep_bar_c >= eq_high_level:
-                _reject(prepared, setup_id, "short_reclaim_not_confirmed", level=eq_high_level)
+                _reject(
+                    prepared,
+                    setup_id,
+                    "short_reclaim_not_confirmed",
+                    level=eq_high_level,
+                )
                 return None
             if abs(price - sweep_bar_c) > sweep_atr_mult * atr:
-                _reject(prepared, setup_id, "short_reclaim_too_far", price=price, close=sweep_bar_c)
+                _reject(
+                    prepared,
+                    setup_id,
+                    "short_reclaim_too_far",
+                    price=price,
+                    close=sweep_bar_c,
+                )
                 return None
 
             stop = sweep_bar_h + sl_buffer_atr * atr
             risk = stop - price
             if risk <= 0:
-                _reject(prepared, setup_id, "risk_non_positive_short", stop=stop, price=price)
+                _reject(
+                    prepared,
+                    setup_id,
+                    "risk_non_positive_short",
+                    stop=stop,
+                    price=price,
+                )
                 return None
 
             rr_tp1 = price - risk * min_rr
@@ -173,10 +203,19 @@ class LiquiditySweepSetup(BaseSetup):
             _, sl_mask = _sp(w, n=3, include_unconfirmed_tail=True)
             sl_prices = w.filter(sl_mask)["low"]
             tp2_candidates = sl_prices.filter(sl_prices < price)
-            structural_tp1 = _as_float(tp2_candidates[-1]) if tp2_candidates.len() > 0 else None
+            structural_tp1 = (
+                _as_float(tp2_candidates[-1]) if tp2_candidates.len() > 0 else None
+            )
             tp1 = max(rr_tp1, structural_tp1) if structural_tp1 is not None else rr_tp1
             if tp1 >= price or abs(tp1 - price) < risk * min_rr:
-                _reject(prepared, setup_id, "tp1_too_close_or_missing", tp1=tp1, risk=risk, price=price)
+                _reject(
+                    prepared,
+                    setup_id,
+                    "tp1_too_close_or_missing",
+                    tp1=tp1,
+                    risk=risk,
+                    price=price,
+                )
                 return None
             tp2 = _as_float(tp2_candidates[-1]) if tp2_candidates.len() > 0 else None
             if tp2 is None or abs(tp2 - price) <= abs(tp1 - price):
@@ -211,16 +250,26 @@ class LiquiditySweepSetup(BaseSetup):
 
         eq_low_level = zone.level or zone.midpoint
         if sweep_bar_l >= eq_low_level or sweep_bar_c <= eq_low_level:
-            _reject(prepared, setup_id, "long_reclaim_not_confirmed", level=eq_low_level)
+            _reject(
+                prepared, setup_id, "long_reclaim_not_confirmed", level=eq_low_level
+            )
             return None
         if abs(price - sweep_bar_c) > reclaim_threshold * atr:
-            _reject(prepared, setup_id, "long_reclaim_too_far", price=price, close=sweep_bar_c)
+            _reject(
+                prepared,
+                setup_id,
+                "long_reclaim_too_far",
+                price=price,
+                close=sweep_bar_c,
+            )
             return None
 
         stop = sweep_bar_l - sl_buffer_atr * atr
         risk = price - stop
         if risk <= 0:
-            _reject(prepared, setup_id, "risk_non_positive_long", stop=stop, price=price)
+            _reject(
+                prepared, setup_id, "risk_non_positive_long", stop=stop, price=price
+            )
             return None
 
         rr_tp1 = price + risk * min_rr
@@ -229,10 +278,19 @@ class LiquiditySweepSetup(BaseSetup):
         sh_mask, _ = _sp(w, n=3, include_unconfirmed_tail=True)
         sh_prices = w.filter(sh_mask)["high"]
         tp2_candidates = sh_prices.filter(sh_prices > price)
-        structural_tp1 = _as_float(tp2_candidates[-1]) if tp2_candidates.len() > 0 else None
+        structural_tp1 = (
+            _as_float(tp2_candidates[-1]) if tp2_candidates.len() > 0 else None
+        )
         tp1 = min(rr_tp1, structural_tp1) if structural_tp1 is not None else rr_tp1
         if tp1 <= price or abs(tp1 - price) < risk * min_rr:
-            _reject(prepared, setup_id, "tp1_too_close_or_missing", tp1=tp1, risk=risk, price=price)
+            _reject(
+                prepared,
+                setup_id,
+                "tp1_too_close_or_missing",
+                tp1=tp1,
+                risk=risk,
+                price=price,
+            )
             return None
         tp2 = _as_float(tp2_candidates[-1]) if tp2_candidates.len() > 0 else None
         if tp2 is None or abs(tp2 - price) <= abs(tp1 - price):

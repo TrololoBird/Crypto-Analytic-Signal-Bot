@@ -38,7 +38,9 @@ async def migrate_db(conn: aiosqlite.Connection) -> int:
         )
         """
     )
-    async with conn.execute("SELECT COALESCE(MAX(version), 0) AS version FROM schema_version") as cursor:
+    async with conn.execute(
+        "SELECT COALESCE(MAX(version), 0) AS version FROM schema_version"
+    ) as cursor:
         row = await cursor.fetchone()
     current = int(row[0]) if row and row[0] is not None else 0
 
@@ -53,5 +55,7 @@ async def migrate_db(conn: aiosqlite.Connection) -> int:
         )
         await conn.commit()
         applied += 1
-        LOG.info("db migration applied | version=%d description=%s", version, description)
+        LOG.info(
+            "db migration applied | version=%d description=%s", version, description
+        )
     return applied

@@ -29,7 +29,10 @@ def _scaled_bucket_targets(total_slots: int) -> dict[str, int]:
     if total_slots <= 0:
         return {key: 0 for key in base}
     base_total = sum(base.values())
-    scaled = {key: int(round(total_slots * weight / base_total)) for key, weight in base.items()}
+    scaled = {
+        key: int(round(total_slots * weight / base_total))
+        for key, weight in base.items()
+    }
     assigned = sum(scaled.values())
     if assigned < total_slots:
         for key in ("trend", "breakout", "reversal"):
@@ -82,7 +85,11 @@ def _safe_float(value: Any, default: float | None = None) -> float | None:
 
 def _crowding_score(row: dict[str, Any]) -> float:
     ratios = []
-    for key in ("top_account_ls_ratio", "top_position_ls_ratio", "global_account_ls_ratio"):
+    for key in (
+        "top_account_ls_ratio",
+        "top_position_ls_ratio",
+        "global_account_ls_ratio",
+    ):
         ratio = _safe_float(row.get(key))
         if ratio is not None and ratio > 0.0:
             ratios.append(ratio)
@@ -122,7 +129,12 @@ def _oi_participation_score(row: dict[str, Any]) -> float:
             change_score = 0.5
 
     notional_score = 0.55
-    if oi_current is not None and oi_current > 0.0 and quote_volume > 0.0 and last_price > 0.0:
+    if (
+        oi_current is not None
+        and oi_current > 0.0
+        and quote_volume > 0.0
+        and last_price > 0.0
+    ):
         oi_notional_ratio = (oi_current * last_price) / quote_volume
         notional_score = _clamp(oi_notional_ratio / 1.6)
     return round(change_score * 0.65 + notional_score * 0.35, 6)
@@ -177,7 +189,9 @@ def _spread_freshness_score(row: dict[str, Any], settings: BotSettings) -> float
     for age in (ticker_age, book_age, mark_age):
         if age is not None:
             freshness_values.append(_clamp(1.0 - (age / stale_s)))
-    freshness_score = sum(freshness_values) / len(freshness_values) if freshness_values else 0.55
+    freshness_score = (
+        sum(freshness_values) / len(freshness_values) if freshness_values else 0.55
+    )
     return round(spread_score * 0.55 + freshness_score * 0.45, 6)
 
 
@@ -189,18 +203,26 @@ def _composite_score(
     eligible_count: int,
     min_onboard_ms: int,
 ) -> tuple[float, tuple[str, ...]]:
-    shortlist_bucket = _bucket_for_price_change(float(row.get("price_change_pct") or 0.0))
+    shortlist_bucket = _bucket_for_price_change(
+        float(row.get("price_change_pct") or 0.0)
+    )
     liquidity_curve = 1.0 - ((liquidity_rank - 1) / max(eligible_count - 1, 1))
-    volume_floor = max(float(getattr(settings.universe, "min_quote_volume_usd", 0.0)), 1.0)
+    volume_floor = max(
+        float(getattr(settings.universe, "min_quote_volume_usd", 0.0)), 1.0
+    )
     volume = float(row.get("quote_volume") or 0.0)
-    liquidity_depth = _clamp((math.log10(max(volume, 1.0)) - math.log10(volume_floor)) / 2.0 + 0.5)
+    liquidity_depth = _clamp(
+        (math.log10(max(volume, 1.0)) - math.log10(volume_floor)) / 2.0 + 0.5
+    )
     liquidity_score = round(liquidity_curve * 0.7 + liquidity_depth * 0.3, 6)
 
     onboard_date_ms = int(row.get("onboard_date_ms") or 0)
     age_score = 0.55
     if onboard_date_ms > 0:
         age_days = max((min_onboard_ms - onboard_date_ms) / 86_400_000.0, 0.0)
-        age_score = _clamp(age_days / max(float(settings.universe.min_listing_age_days) * 5.0, 30.0))
+        age_score = _clamp(
+            age_days / max(float(settings.universe.min_listing_age_days) * 5.0, 30.0)
+        )
 
     move = abs(float(row.get("price_change_pct") or 0.0))
     if shortlist_bucket == "trend":
@@ -258,7 +280,9 @@ def build_shortlist(
 ) -> tuple[list[UniverseSymbol], dict[str, Any]]:
     meta_map = {row.symbol: row for row in symbol_meta}
     pinned = {symbol for symbol in settings.universe.pinned_symbols}
-    min_onboard = datetime.now(UTC) - timedelta(days=settings.universe.min_listing_age_days)
+    min_onboard = datetime.now(UTC) - timedelta(
+        days=settings.universe.min_listing_age_days
+    )
     min_onboard_ms = int(min_onboard.timestamp() * 1000)
     eligible_rows: list[dict[str, Any]] = []
 
@@ -302,14 +326,18 @@ def build_shortlist(
                 "spread_bps": _safe_float(row.get("spread_bps")),
                 "ticker_age_seconds": _safe_float(row.get("ticker_age_seconds")),
                 "book_age_seconds": _safe_float(row.get("book_age_seconds")),
-                "mark_price_age_seconds": _safe_float(row.get("mark_price_age_seconds")),
+                "mark_price_age_seconds": _safe_float(
+                    row.get("mark_price_age_seconds")
+                ),
                 "oi_change_pct": _safe_float(row.get("oi_change_pct")),
                 "oi_current": _safe_float(row.get("oi_current")),
                 "funding_rate": _safe_float(row.get("funding_rate")),
                 "basis_pct": _safe_float(row.get("basis_pct")),
                 "top_account_ls_ratio": _safe_float(row.get("top_account_ls_ratio")),
                 "top_position_ls_ratio": _safe_float(row.get("top_position_ls_ratio")),
-                "global_account_ls_ratio": _safe_float(row.get("global_account_ls_ratio")),
+                "global_account_ls_ratio": _safe_float(
+                    row.get("global_account_ls_ratio")
+                ),
                 "top_vs_global_ls_gap": _safe_float(row.get("top_vs_global_ls_gap")),
             }
         )
@@ -320,7 +348,9 @@ def build_shortlist(
     previous_volume: float | None = None
     for index, row in enumerate(eligible_rows, start=1):
         row_volume = float(row["quote_volume"])
-        if previous_volume is None or not math.isclose(row_volume, previous_volume, rel_tol=0.0, abs_tol=1e-9):
+        if previous_volume is None or not math.isclose(
+            row_volume, previous_volume, rel_tol=0.0, abs_tol=1e-9
+        ):
             liquidity_rank = index
             previous_volume = row_volume
         shortlist_score, reasons = _composite_score(
@@ -359,8 +389,14 @@ def build_shortlist(
         reverse=True,
     )
     pinned_rows = [row for row in eligible if row.symbol in pinned]
-    dynamic_pool = [row for row in eligible if row.symbol not in pinned][: settings.universe.dynamic_limit]
-    bucket_pool: dict[str, list[UniverseSymbol]] = {"trend": [], "breakout": [], "reversal": []}
+    dynamic_pool = [row for row in eligible if row.symbol not in pinned][
+        : settings.universe.dynamic_limit
+    ]
+    bucket_pool: dict[str, list[UniverseSymbol]] = {
+        "trend": [],
+        "breakout": [],
+        "reversal": [],
+    }
     for row in dynamic_pool:
         bucket_pool[row.shortlist_bucket].append(row)
     for bucket in bucket_pool.values():
@@ -382,7 +418,9 @@ def build_shortlist(
         shortlist.append(row)
         seen.add(row.symbol)
 
-    targets = _scaled_bucket_targets(max(settings.universe.shortlist_limit - len(shortlist), 0))
+    targets = _scaled_bucket_targets(
+        max(settings.universe.shortlist_limit - len(shortlist), 0)
+    )
     summary = {
         "mode": seed_source,
         "eligible": len(eligible),
@@ -392,12 +430,19 @@ def build_shortlist(
         "breakout": 0,
         "reversal": 0,
         "fill": 0,
-        "avg_score": round(sum((row.shortlist_score or 0.0) for row in shortlist) / max(len(shortlist), 1), 6),
+        "avg_score": round(
+            sum((row.shortlist_score or 0.0) for row in shortlist)
+            / max(len(shortlist), 1),
+            6,
+        ),
     }
 
     for bucket in ("trend", "breakout", "reversal"):
         for row in bucket_pool[bucket]:
-            if len(shortlist) >= settings.universe.shortlist_limit or summary[bucket] >= targets[bucket]:
+            if (
+                len(shortlist) >= settings.universe.shortlist_limit
+                or summary[bucket] >= targets[bucket]
+            ):
                 break
             if row.symbol in seen:
                 continue
@@ -423,5 +468,8 @@ def build_shortlist(
             item.symbol,
         )
     )
-    summary["avg_score"] = round(sum((row.shortlist_score or 0.0) for row in shortlist) / max(len(shortlist), 1), 6)
+    summary["avg_score"] = round(
+        sum((row.shortlist_score or 0.0) for row in shortlist) / max(len(shortlist), 1),
+        6,
+    )
     return shortlist, summary

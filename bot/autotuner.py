@@ -12,7 +12,6 @@ Usage (CLI):
 
 from __future__ import annotations
 
-import json
 import logging
 import asyncio
 from datetime import datetime, timezone
@@ -54,7 +53,9 @@ def _load_outcomes(data_path: Path) -> list[dict[str, Any]]:
         finally:
             loop.close()
     except Exception as exc:
-        LOG.warning("autotuner: failed to load SQLite outcomes from %s: %s", data_path, exc)
+        LOG.warning(
+            "autotuner: failed to load SQLite outcomes from %s: %s", data_path, exc
+        )
         return []
 
 
@@ -142,13 +143,19 @@ def compute_optimal_thresholds(data_path: str | Path) -> dict[str, Any]:
     sample_count = len(records)
 
     if sample_count < MIN_OUTCOMES:
-        LOG.info("autotuner: insufficient data (%d < %d required)", sample_count, MIN_OUTCOMES)
+        LOG.info(
+            "autotuner: insufficient data (%d < %d required)",
+            sample_count,
+            MIN_OUTCOMES,
+        )
         return {"skipped": "insufficient_data", "sample_count": sample_count}
 
     LOG.info("autotuner: processing %d outcome records", sample_count)
 
     # --- Threshold recommendations ---
-    min_score = _find_threshold(records, "score") or _find_threshold(records, "base_score")
+    min_score = _find_threshold(records, "score") or _find_threshold(
+        records, "base_score"
+    )
     min_rr = _find_threshold(records, "risk_reward")
 
     result: dict[str, Any] = {

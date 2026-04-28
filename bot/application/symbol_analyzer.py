@@ -11,7 +11,13 @@ from bot.core.runtime_errors import build_runtime_error_payload, classify_runtim
 from bot.features import min_required_bars, prepare_symbol
 from bot.filters import apply_global_filters
 from bot.market_data import BinanceFuturesMarketData, MarketDataUnavailable
-from bot.models import PipelineResult, PreparedSymbol, Signal, SymbolFrames, UniverseSymbol
+from bot.models import (
+    PipelineResult,
+    PreparedSymbol,
+    Signal,
+    SymbolFrames,
+    UniverseSymbol,
+)
 
 if TYPE_CHECKING:
     from bot.application.bot import SignalBot
@@ -24,7 +30,9 @@ _HISTORY_FETCH_BUFFER_BARS = 60
 
 def _history_fetch_limit(minimums: dict[str, int], interval: str) -> int:
     required = int(minimums.get(interval, 0))
-    baseline = _DEFAULT_HISTORY_FETCH_LIMIT if interval in {"5m", "15m", "1h", "4h"} else 240
+    baseline = (
+        _DEFAULT_HISTORY_FETCH_LIMIT if interval in {"5m", "15m", "1h", "4h"} else 240
+    )
     return max(baseline, required + _HISTORY_FETCH_BUFFER_BARS)
 
 
@@ -48,13 +56,22 @@ class SymbolAnalyzer:
             numeric = float(value)
         except (TypeError, ValueError):
             return None
-        return numeric if numeric == numeric and numeric not in (float("inf"), float("-inf")) else None
+        return (
+            numeric
+            if numeric == numeric and numeric not in (float("inf"), float("-inf"))
+            else None
+        )
 
     @staticmethod
     def _crowding_flags(prepared: PreparedSymbol, direction: str) -> dict[str, Any]:
         flags = set(getattr(prepared, "data_freshness_flags", ()) or ())
         if "crowding_context_missing" in flags:
-            return {"available": False, "exhaustion": False, "trend_support": False, "headwind": False}
+            return {
+                "available": False,
+                "exhaustion": False,
+                "trend_support": False,
+                "headwind": False,
+            }
 
         top_account = prepared.top_account_ls_ratio or prepared.ls_ratio
         top_position = prepared.top_position_ls_ratio
@@ -69,7 +86,10 @@ class SymbolAnalyzer:
                 or (gap is not None and gap <= -0.1)
             )
             trend_support = bool(
-                ((top_position is not None and 1.02 <= top_position <= 1.35) or (top_account is not None and 1.0 <= top_account <= 1.3))
+                (
+                    (top_position is not None and 1.02 <= top_position <= 1.35)
+                    or (top_account is not None and 1.0 <= top_account <= 1.3)
+                )
                 and not exhaustion
                 and not (gap is not None and gap >= 0.22)
             )
@@ -86,7 +106,10 @@ class SymbolAnalyzer:
                 or (gap is not None and gap >= 0.1)
             )
             trend_support = bool(
-                ((top_position is not None and 0.7 <= top_position <= 0.98) or (top_account is not None and 0.78 <= top_account <= 1.0))
+                (
+                    (top_position is not None and 0.7 <= top_position <= 0.98)
+                    or (top_account is not None and 0.78 <= top_account <= 1.0)
+                )
                 and not exhaustion
                 and not (gap is not None and gap <= -0.22)
             )
@@ -96,7 +119,10 @@ class SymbolAnalyzer:
                 or (gap is not None and gap <= -0.22)
             )
         return {
-            "available": any(value is not None for value in (top_account, top_position, global_ratio, gap)),
+            "available": any(
+                value is not None
+                for value in (top_account, top_position, global_ratio, gap)
+            ),
             "exhaustion": exhaustion,
             "trend_support": trend_support,
             "headwind": headwind,
@@ -106,7 +132,9 @@ class SymbolAnalyzer:
             "top_vs_global_ls_gap": gap,
         }
 
-    def directional_context(self, signal: Signal, prepared: PreparedSymbol) -> dict[str, Any]:
+    def directional_context(
+        self, signal: Signal, prepared: PreparedSymbol
+    ) -> dict[str, Any]:
         work_5m = prepared.work_5m
         close_5m = self._frame_float(work_5m, "close")
         ema20_5m = self._frame_float(work_5m, "ema20")
@@ -130,28 +158,95 @@ class SymbolAnalyzer:
 
         direction = signal.direction
         if direction == "long":
-            trend_confirms = bool(close_5m is not None and ema20_5m is not None and close_5m >= ema20_5m and (supertrend_5m is None or supertrend_5m >= 0.0))
-            flow_confirms = bool((flow_proxy is not None and flow_proxy >= 0.03) or (delta_ratio_5m is not None and delta_ratio_5m >= 0.53))
-            premium_confirms = bool((premium_velocity is not None and premium_velocity >= 0.0) or (prepared.mark_index_spread_bps is not None and prepared.mark_index_spread_bps >= -4.0))
-            depth_confirms = bool((depth_imbalance is not None and depth_imbalance >= 0.05) or (microprice_bias is not None and microprice_bias >= 0.0))
-            premium_exhaustion = bool((prepared.premium_zscore_5m is not None and prepared.premium_zscore_5m <= -1.5) or (prepared.mark_index_spread_bps is not None and prepared.mark_index_spread_bps <= -8.0))
+            trend_confirms = bool(
+                close_5m is not None
+                and ema20_5m is not None
+                and close_5m >= ema20_5m
+                and (supertrend_5m is None or supertrend_5m >= 0.0)
+            )
+            flow_confirms = bool(
+                (flow_proxy is not None and flow_proxy >= 0.03)
+                or (delta_ratio_5m is not None and delta_ratio_5m >= 0.53)
+            )
+            premium_confirms = bool(
+                (premium_velocity is not None and premium_velocity >= 0.0)
+                or (
+                    prepared.mark_index_spread_bps is not None
+                    and prepared.mark_index_spread_bps >= -4.0
+                )
+            )
+            depth_confirms = bool(
+                (depth_imbalance is not None and depth_imbalance >= 0.05)
+                or (microprice_bias is not None and microprice_bias >= 0.0)
+            )
+            premium_exhaustion = bool(
+                (
+                    prepared.premium_zscore_5m is not None
+                    and prepared.premium_zscore_5m <= -1.5
+                )
+                or (
+                    prepared.mark_index_spread_bps is not None
+                    and prepared.mark_index_spread_bps <= -8.0
+                )
+            )
             crowd_exhaustion = bool(crowding["exhaustion"])
-            aggressor_reversal = bool(prepared.aggression_shift is not None and prepared.aggression_shift >= 0.03)
-            regime_opposes = prepared.regime_1h_confirmed == "downtrend" or prepared.bias_1h == "downtrend"
+            aggressor_reversal = bool(
+                prepared.aggression_shift is not None
+                and prepared.aggression_shift >= 0.03
+            )
+            regime_opposes = (
+                prepared.regime_1h_confirmed == "downtrend"
+                or prepared.bias_1h == "downtrend"
+            )
             flow_opposes = bool(flow_proxy is not None and flow_proxy <= -0.03)
         else:
-            trend_confirms = bool(close_5m is not None and ema20_5m is not None and close_5m <= ema20_5m and (supertrend_5m is None or supertrend_5m <= 0.0))
-            flow_confirms = bool((flow_proxy is not None and flow_proxy <= -0.03) or (delta_ratio_5m is not None and delta_ratio_5m <= 0.47))
-            premium_confirms = bool((premium_velocity is not None and premium_velocity <= 0.0) or (prepared.mark_index_spread_bps is not None and prepared.mark_index_spread_bps <= 4.0))
-            depth_confirms = bool((depth_imbalance is not None and depth_imbalance <= -0.05) or (microprice_bias is not None and microprice_bias <= 0.0))
-            premium_exhaustion = bool((prepared.premium_zscore_5m is not None and prepared.premium_zscore_5m >= 1.5) or (prepared.mark_index_spread_bps is not None and prepared.mark_index_spread_bps >= 8.0))
+            trend_confirms = bool(
+                close_5m is not None
+                and ema20_5m is not None
+                and close_5m <= ema20_5m
+                and (supertrend_5m is None or supertrend_5m <= 0.0)
+            )
+            flow_confirms = bool(
+                (flow_proxy is not None and flow_proxy <= -0.03)
+                or (delta_ratio_5m is not None and delta_ratio_5m <= 0.47)
+            )
+            premium_confirms = bool(
+                (premium_velocity is not None and premium_velocity <= 0.0)
+                or (
+                    prepared.mark_index_spread_bps is not None
+                    and prepared.mark_index_spread_bps <= 4.0
+                )
+            )
+            depth_confirms = bool(
+                (depth_imbalance is not None and depth_imbalance <= -0.05)
+                or (microprice_bias is not None and microprice_bias <= 0.0)
+            )
+            premium_exhaustion = bool(
+                (
+                    prepared.premium_zscore_5m is not None
+                    and prepared.premium_zscore_5m >= 1.5
+                )
+                or (
+                    prepared.mark_index_spread_bps is not None
+                    and prepared.mark_index_spread_bps >= 8.0
+                )
+            )
             crowd_exhaustion = bool(crowding["exhaustion"])
-            aggressor_reversal = bool(prepared.aggression_shift is not None and prepared.aggression_shift <= -0.03)
-            regime_opposes = prepared.regime_1h_confirmed == "uptrend" or prepared.bias_1h == "uptrend"
+            aggressor_reversal = bool(
+                prepared.aggression_shift is not None
+                and prepared.aggression_shift <= -0.03
+            )
+            regime_opposes = (
+                prepared.regime_1h_confirmed == "uptrend"
+                or prepared.bias_1h == "uptrend"
+            )
             flow_opposes = bool(flow_proxy is not None and flow_proxy >= 0.03)
         exhaustion_hits = {
             "premium_extreme": premium_exhaustion,
-            "liquidation_imbalance": bool(prepared.liquidation_score is not None and prepared.liquidation_score <= -0.35),
+            "liquidation_imbalance": bool(
+                prepared.liquidation_score is not None
+                and prepared.liquidation_score <= -0.35
+            ),
             "crowd_stretch": crowd_exhaustion,
             "aggressor_reversal": aggressor_reversal,
         }
@@ -194,9 +289,17 @@ class SymbolAnalyzer:
         details["family"] = family
         details["confirmation_profile"] = profile
         strong_opposition = details["regime_opposes"] and details["flow_opposes"]
-        if family in {"continuation", "breakout"} and strong_opposition and details["exhaustion_count"] == 0:
+        if (
+            family in {"continuation", "breakout"}
+            and strong_opposition
+            and details["exhaustion_count"] == 0
+        ):
             return False, f"family_precheck_opposes_{signal.direction}", details
-        if profile == "trend_follow" and details["flow_opposes"] and not details["trend_confirms"]:
+        if (
+            profile == "trend_follow"
+            and details["flow_opposes"]
+            and not details["trend_confirms"]
+        ):
             return False, f"flow_precheck_opposes_{signal.direction}", details
         return True, None, details
 
@@ -209,20 +312,43 @@ class SymbolAnalyzer:
         family = getattr(metadata, "family", signal.strategy_family)
         profile = getattr(metadata, "confirmation_profile", signal.confirmation_profile)
         if signal.direction == "long":
-            opposing_votes = int(prepared.regime_1h_confirmed == "downtrend") + int(prepared.bias_1h == "downtrend")
+            opposing_votes = int(prepared.regime_1h_confirmed == "downtrend") + int(
+                prepared.bias_1h == "downtrend"
+            )
         else:
-            opposing_votes = int(prepared.regime_1h_confirmed == "uptrend") + int(prepared.bias_1h == "uptrend")
-        details = {"regime_1h": prepared.regime_1h_confirmed, "bias_1h": prepared.bias_1h, "opposing_votes": opposing_votes, "applied": False, "family": family, "confirmation_profile": profile}
-        if opposing_votes == 0 or family == "reversal" or profile == "countertrend_exhaustion":
+            opposing_votes = int(prepared.regime_1h_confirmed == "uptrend") + int(
+                prepared.bias_1h == "uptrend"
+            )
+        details = {
+            "regime_1h": prepared.regime_1h_confirmed,
+            "bias_1h": prepared.bias_1h,
+            "opposing_votes": opposing_votes,
+            "applied": False,
+            "family": family,
+            "confirmation_profile": profile,
+        }
+        if (
+            opposing_votes == 0
+            or family == "reversal"
+            or profile == "countertrend_exhaustion"
+        ):
             return signal, details
         if signal.score <= 0.0:
             details["skipped_reason"] = "non_positive_score"
             return signal, details
         penalty_factor = 0.92 if opposing_votes == 1 else 0.85
-        reasons = signal.reasons if "alignment_penalty" in signal.reasons else (*signal.reasons, "alignment_penalty")
+        reasons = (
+            signal.reasons
+            if "alignment_penalty" in signal.reasons
+            else (*signal.reasons, "alignment_penalty")
+        )
         details["applied"] = True
         details["penalty_factor"] = penalty_factor
-        return replace(signal, score=round(max(signal.score * penalty_factor, 0.0), 4), reasons=reasons), details
+        return replace(
+            signal,
+            score=round(max(signal.score * penalty_factor, 0.0), 4),
+            reasons=reasons,
+        ), details
 
     def check_family_confirmation(
         self,
@@ -235,9 +361,17 @@ class SymbolAnalyzer:
         profile = getattr(metadata, "confirmation_profile", signal.confirmation_profile)
         details["family"] = family
         details["confirmation_profile"] = profile
-        if not details["used"] and details["flow_proxy"] is None and prepared.mark_index_spread_bps is None and prepared.depth_imbalance is None and prepared.microprice_bias is None:
+        if (
+            not details["used"]
+            and details["flow_proxy"] is None
+            and prepared.mark_index_spread_bps is None
+            and prepared.depth_imbalance is None
+            and prepared.microprice_bias is None
+        ):
             details["fallback"] = "context_missing"
-            strict_data_quality = bool(getattr(self._bot.settings.runtime, "strict_data_quality", True))
+            strict_data_quality = bool(
+                getattr(self._bot.settings.runtime, "strict_data_quality", True)
+            )
             if strict_data_quality and family in {"continuation", "breakout"}:
                 return False, "data.fast_context_missing", details
             return True, None, details
@@ -248,24 +382,40 @@ class SymbolAnalyzer:
             "depth_focus": details["depth_confirms"],
         }
         if details["crowding"]["available"]:
-            details["confirmation_votes"]["crowding_support"] = details["crowd_trend_support"]
-        details["confirmation_count"] = sum(1 for value in details["confirmation_votes"].values() if value)
+            details["confirmation_votes"]["crowding_support"] = details[
+                "crowd_trend_support"
+            ]
+        details["confirmation_count"] = sum(
+            1 for value in details["confirmation_votes"].values() if value
+        )
         if family == "reversal" or profile == "countertrend_exhaustion":
             if details["exhaustion_count"] > 0:
                 return True, None, details
             if details["regime_opposes"] and details["flow_opposes"]:
                 return False, f"reversal_unconfirmed_{signal.direction}", details
             return True, None, details
-        if details["crowd_headwind"] and not details["crowd_trend_support"] and details["confirmation_count"] < 3:
+        if (
+            details["crowd_headwind"]
+            and not details["crowd_trend_support"]
+            and details["confirmation_count"] < 3
+        ):
             return False, f"crowding_headwind_{signal.direction}", details
-        if family == "breakout" and details["crowding"]["available"] and not details["crowd_trend_support"] and details["confirmation_count"] < 3:
+        if (
+            family == "breakout"
+            and details["crowding"]["available"]
+            and not details["crowd_trend_support"]
+            and details["confirmation_count"] < 3
+        ):
             return False, f"breakout_crowding_unconfirmed_{signal.direction}", details
         if details["confirmation_count"] >= 2:
             return True, None, details
-        if details["regime_opposes"] and details["flow_opposes"] and details["exhaustion_count"] == 0:
+        if (
+            details["regime_opposes"]
+            and details["flow_opposes"]
+            and details["exhaustion_count"] == 0
+        ):
             return False, f"hard_context_opposes_{signal.direction}", details
         return False, f"5m_opposes_{signal.direction}", details
-
 
     async def run_modern_analysis(
         self,
@@ -391,13 +541,26 @@ class SymbolAnalyzer:
                         setattr(prepared, key, value)
                 # Debug: log enrichment status
                 if ws_enrichments.get("mark_index_spread_bps") is not None:
-                    LOG.debug("%s: enrichment mark_index_spread_bps=%.4f", item.symbol, ws_enrichments["mark_index_spread_bps"])
+                    LOG.debug(
+                        "%s: enrichment mark_index_spread_bps=%.4f",
+                        item.symbol,
+                        ws_enrichments["mark_index_spread_bps"],
+                    )
                 else:
-                    LOG.debug("%s: enrichment mark_index_spread_bps=None (ws_data_missing)", item.symbol)
-            LOG.debug("%s: prepared symbol built | work_15m_rows=%s work_1h_rows=%s",
-                      item.symbol,
-                      prepared.work_15m.height if prepared is not None and prepared.work_15m is not None else 0,
-                      prepared.work_1h.height if prepared is not None and prepared.work_1h is not None else 0)
+                    LOG.debug(
+                        "%s: enrichment mark_index_spread_bps=None (ws_data_missing)",
+                        item.symbol,
+                    )
+            LOG.debug(
+                "%s: prepared symbol built | work_15m_rows=%s work_1h_rows=%s",
+                item.symbol,
+                prepared.work_15m.height
+                if prepared is not None and prepared.work_15m is not None
+                else 0,
+                prepared.work_1h.height
+                if prepared is not None and prepared.work_1h is not None
+                else 0,
+            )
         except Exception as exc:
             self._bot._prepare_error_count += 1
             error_payload = build_runtime_error_payload(
@@ -441,15 +604,22 @@ class SymbolAnalyzer:
 
         # Log engine stats before calculation
         engine_stats = self._bot._modern_engine.get_engine_stats()
-        LOG.debug("%s: engine stats | enabled_strategies=%d total=%d",
-                  item.symbol, engine_stats.get('enabled_strategies', 0),
-                  engine_stats.get('total_strategies', 0))
+        LOG.debug(
+            "%s: engine stats | enabled_strategies=%d total=%d",
+            item.symbol,
+            engine_stats.get("enabled_strategies", 0),
+            engine_stats.get("total_strategies", 0),
+        )
         self._bot._diagnostic_trace_counts[item.symbol] = 0
 
         try:
             signal_results = await self._bot._modern_engine.calculate_all(prepared)
             funnel["detector_runs"] = len(signal_results)
-            LOG.debug("%s: engine calculated | results_count=%d", item.symbol, len(signal_results))
+            LOG.debug(
+                "%s: engine calculated | results_count=%d",
+                item.symbol,
+                len(signal_results),
+            )
         except Exception as exc:
             error_class = classify_runtime_error(exc)
             funnel["engine_error_class"] = error_class
@@ -480,7 +650,11 @@ class SymbolAnalyzer:
         signals_added = 0
 
         for result in signal_results:
-            setup_id = result.setup_id or result.metadata.get("setup_id") or getattr(result.signal, "setup_id", "unknown")
+            setup_id = (
+                result.setup_id
+                or result.metadata.get("setup_id")
+                or getattr(result.signal, "setup_id", "unknown")
+            )
             decision = result.decision
             if decision is None:
                 decision = StrategyDecision.error_result(
@@ -499,7 +673,11 @@ class SymbolAnalyzer:
                 funnel["strategy_rejects_by_setup"][setup_id] = (
                     funnel["strategy_rejects_by_setup"].get(setup_id, 0) + 1
                 )
-                rejected.append(self._bot._decision_to_reject_row(symbol=item.symbol, decision=decision))
+                rejected.append(
+                    self._bot._decision_to_reject_row(
+                        symbol=item.symbol, decision=decision
+                    )
+                )
                 LOG.debug(
                     "%s: strategy produced no signal | setup=%s status=%s reason=%s",
                     item.symbol,
@@ -520,7 +698,11 @@ class SymbolAnalyzer:
                 funnel["strategy_rejects_by_setup"][setup_id] = (
                     funnel["strategy_rejects_by_setup"].get(setup_id, 0) + 1
                 )
-                rejected.append(self._bot._decision_to_reject_row(symbol=item.symbol, decision=fallback_decision))
+                rejected.append(
+                    self._bot._decision_to_reject_row(
+                        symbol=item.symbol, decision=fallback_decision
+                    )
+                )
                 continue
 
             setup_id = signal.setup_id
@@ -533,19 +715,23 @@ class SymbolAnalyzer:
                 metadata,
             )
             if not precheck_ok:
-                rejected.append({
-                    "ts": datetime.now(UTC).isoformat(),
-                    "symbol": item.symbol,
-                    "setup_id": signal.setup_id,
-                    "direction": signal.direction,
-                    "stage": "family_precheck",
-                    "reason": precheck_reason or "family_precheck_reject",
-                    "details": precheck_details,
-                })
+                rejected.append(
+                    {
+                        "ts": datetime.now(UTC).isoformat(),
+                        "symbol": item.symbol,
+                        "setup_id": signal.setup_id,
+                        "direction": signal.direction,
+                        "stage": "family_precheck",
+                        "reason": precheck_reason or "family_precheck_reject",
+                        "details": precheck_details,
+                    }
+                )
                 funnel["family_precheck_rejects"] += 1
                 continue
 
-            signal, alignment_details = self.apply_alignment_penalty(signal, prepared, metadata)
+            signal, alignment_details = self.apply_alignment_penalty(
+                signal, prepared, metadata
+            )
             if alignment_details.get("applied"):
                 funnel["alignment_penalties"] += 1
 
@@ -555,39 +741,49 @@ class SymbolAnalyzer:
                 funnel["raw_hits_by_setup"].get(signal.setup_id, 0) + 1
             )
 
-            ltf_ok, ltf_reason, ltf_details = self.check_family_confirmation(signal, prepared, metadata)
+            ltf_ok, ltf_reason, ltf_details = self.check_family_confirmation(
+                signal, prepared, metadata
+            )
             if not ltf_ok:
-                rejected.append({
-                    "ts": datetime.now(UTC).isoformat(),
-                    "symbol": item.symbol,
-                    "setup_id": signal.setup_id,
-                    "direction": signal.direction,
-                    "stage": "confirmation",
-                    "reason": ltf_reason or "5m_confirmation_reject",
-                    "details": ltf_details,
-                })
+                rejected.append(
+                    {
+                        "ts": datetime.now(UTC).isoformat(),
+                        "symbol": item.symbol,
+                        "setup_id": signal.setup_id,
+                        "direction": signal.direction,
+                        "stage": "confirmation",
+                        "reason": ltf_reason or "5m_confirmation_reject",
+                        "details": ltf_details,
+                    }
+                )
                 funnel["confirmation_rejects"] += 1
                 continue
-            
+
             # Check performance guard using modern repo
-            score_adj = await self._bot._modern_repo.get_setup_score_adjustment(signal.setup_id)
+            score_adj = await self._bot._modern_repo.get_setup_score_adjustment(
+                signal.setup_id
+            )
             if score_adj < -0.3:  # Suppressed due to poor performance
-                rejected.append({
-                    "ts": datetime.now(UTC).isoformat(),
-                    "symbol": item.symbol,
-                    "setup_id": signal.setup_id,
-                    "direction": signal.direction,
-                    "stage": "perf_guard",
-                    "reason": "setup_underperforming",
-                })
+                rejected.append(
+                    {
+                        "ts": datetime.now(UTC).isoformat(),
+                        "symbol": item.symbol,
+                        "setup_id": signal.setup_id,
+                        "direction": signal.direction,
+                        "stage": "perf_guard",
+                        "reason": "setup_underperforming",
+                    }
+                )
                 signals_rejected_perf += 1
                 continue
 
-            passed, filtered_signal, filter_reason, scoring_result, filter_details = apply_global_filters(
-                signal,
-                prepared,
-                self._bot.settings,
-                self._bot.confluence,
+            passed, filtered_signal, filter_reason, scoring_result, filter_details = (
+                apply_global_filters(
+                    signal,
+                    prepared,
+                    self._bot.settings,
+                    self._bot.confluence,
+                )
             )
             if not passed:
                 reject_row: dict[str, Any] = {
@@ -610,13 +806,24 @@ class SymbolAnalyzer:
 
             candidates.append(filtered_signal)
             signals_added += 1
-            LOG.debug("%s: candidate signal | setup=%s dir=%s score=%.3f rr=%.2f",
-                      item.symbol, filtered_signal.setup_id, filtered_signal.direction,
-                      filtered_signal.score, filtered_signal.risk_reward or 0)
+            LOG.debug(
+                "%s: candidate signal | setup=%s dir=%s score=%.3f rr=%.2f",
+                item.symbol,
+                filtered_signal.setup_id,
+                filtered_signal.direction,
+                filtered_signal.score,
+                filtered_signal.risk_reward or 0,
+            )
 
-        LOG.info("%s: analysis complete | trigger=%s raw_strategies=%d signals_found=%d perf_rejected=%d candidates=%d",
-                 item.symbol, trigger, len(signal_results), signals_found,
-                 signals_rejected_perf, signals_added)
+        LOG.info(
+            "%s: analysis complete | trigger=%s raw_strategies=%d signals_found=%d perf_rejected=%d candidates=%d",
+            item.symbol,
+            trigger,
+            len(signal_results),
+            signals_found,
+            signals_rejected_perf,
+            signals_added,
+        )
         funnel["post_filter_candidates"] = len(candidates)
 
         return PipelineResult(
@@ -630,7 +837,6 @@ class SymbolAnalyzer:
             prepared=prepared,
             funnel=funnel,
         )
-
 
     async def fetch_frames(self, item: UniverseSymbol) -> SymbolFrames | None:
         symbol = item.symbol
@@ -657,10 +863,30 @@ class SymbolAnalyzer:
 
         try:
             if isinstance(self._bot.client, BinanceFuturesMarketData):
-                df_4h = await self._bot.client.fetch_klines_cached(symbol, "4h", limit=limit_4h)
-                df_1h = ws_1h if ws_1h is not None and ws_1h.height >= minimums["1h"] else await self._bot.client.fetch_klines_cached(symbol, "1h", limit=limit_1h)
-                df_15m = ws_15m if ws_15m is not None and ws_15m.height >= minimums["15m"] else await self._bot.client.fetch_klines_cached(symbol, "15m", limit=limit_15m)
-                df_5m = ws_5m if ws_5m is not None and ws_5m.height >= minimums["5m"] else await self._bot.client.fetch_klines_cached(symbol, "5m", limit=limit_5m)
+                df_4h = await self._bot.client.fetch_klines_cached(
+                    symbol, "4h", limit=limit_4h
+                )
+                df_1h = (
+                    ws_1h
+                    if ws_1h is not None and ws_1h.height >= minimums["1h"]
+                    else await self._bot.client.fetch_klines_cached(
+                        symbol, "1h", limit=limit_1h
+                    )
+                )
+                df_15m = (
+                    ws_15m
+                    if ws_15m is not None and ws_15m.height >= minimums["15m"]
+                    else await self._bot.client.fetch_klines_cached(
+                        symbol, "15m", limit=limit_15m
+                    )
+                )
+                df_5m = (
+                    ws_5m
+                    if ws_5m is not None and ws_5m.height >= minimums["5m"]
+                    else await self._bot.client.fetch_klines_cached(
+                        symbol, "5m", limit=limit_5m
+                    )
+                )
 
                 bid, ask = ws_bid, ws_ask
                 if bid is None or ask is None:
@@ -677,9 +903,12 @@ class SymbolAnalyzer:
                 )
 
             return await cast(Any, self._bot.client.fetch_symbol_frames(symbol))
-        except (MarketDataUnavailable, Exception) as exc:
+        except MarketDataUnavailable as exc:
             LOG.warning("frame fetch failed for %s: %s", symbol, exc)
             return None
+        except Exception:
+            LOG.exception("unexpected frame fetch failure for %s", symbol)
+            raise
 
     async def preload_shortlist_frames(self) -> None:
         await asyncio.sleep(1.0)
@@ -697,21 +926,33 @@ class SymbolAnalyzer:
 
         batch_size = int(self._bot.settings.runtime.startup_batch_size)
         batch_delay = float(self._bot.settings.runtime.startup_batch_delay_seconds)
-        sem = asyncio.Semaphore(int(self._bot.settings.runtime.max_concurrent_rest_requests))
+        sem = asyncio.Semaphore(
+            int(self._bot.settings.runtime.max_concurrent_rest_requests)
+        )
 
         async def _preload_one(symbol: str) -> None:
             async with sem:
                 try:
-                    await self._bot.client.fetch_klines_cached(symbol, "5m", limit=_history_fetch_limit(minimums, "5m"))
-                    await self._bot.client.fetch_klines_cached(symbol, "1h", limit=_history_fetch_limit(minimums, "1h"))
-                    await self._bot.client.fetch_klines_cached(symbol, "15m", limit=_history_fetch_limit(minimums, "15m"))
-                    await self._bot.client.fetch_klines_cached(symbol, "4h", limit=_history_fetch_limit(minimums, "4h"))
+                    await self._bot.client.fetch_klines_cached(
+                        symbol, "5m", limit=_history_fetch_limit(minimums, "5m")
+                    )
+                    await self._bot.client.fetch_klines_cached(
+                        symbol, "1h", limit=_history_fetch_limit(minimums, "1h")
+                    )
+                    await self._bot.client.fetch_klines_cached(
+                        symbol, "15m", limit=_history_fetch_limit(minimums, "15m")
+                    )
+                    await self._bot.client.fetch_klines_cached(
+                        symbol, "4h", limit=_history_fetch_limit(minimums, "4h")
+                    )
                 except Exception:
-                    pass
+                    LOG.exception("shortlist frame preload failed for %s", symbol)
 
         for i in range(0, len(shortlist), batch_size):
             batch = shortlist[i : i + batch_size]
-            await asyncio.gather(*[_preload_one(item.symbol) for item in batch], return_exceptions=True)
+            await asyncio.gather(
+                *[_preload_one(item.symbol) for item in batch], return_exceptions=True
+            )
             if i + batch_size < len(shortlist):
                 await asyncio.sleep(batch_delay)
 
@@ -730,7 +971,10 @@ class SymbolAnalyzer:
                     if ticker_age is not None:
                         enrichments["ticker_price_age_seconds"] = ticker_age
                         context_ages.append(ticker_age)
-                        if ticker_age > self._bot.settings.ws.market_ticker_freshness_seconds:
+                        if (
+                            ticker_age
+                            > self._bot.settings.ws.market_ticker_freshness_seconds
+                        ):
                             freshness_flags.add("ticker_price_stale")
                 else:
                     freshness_flags.add("ticker_price_missing")
@@ -744,7 +988,9 @@ class SymbolAnalyzer:
                     if mark_price > 0:
                         enrichments["mark_price"] = mark_price
                     if "funding_rate" in mark:
-                        enrichments["funding_rate"] = float(mark.get("funding_rate") or 0.0)
+                        enrichments["funding_rate"] = float(
+                            mark.get("funding_rate") or 0.0
+                        )
                     index_price = float(mark.get("index_price") or 0.0)
                     if mark_price > 0 and index_price > 0:
                         basis_pct = (mark_price - index_price) / index_price * 100.0
@@ -766,7 +1012,9 @@ class SymbolAnalyzer:
                 microprice_bias = self._bot._ws_manager.get_microprice_bias(symbol)
                 if microprice_bias is not None:
                     enrichments["microprice_bias"] = float(microprice_bias)
-                liquidation = self._bot._ws_manager.get_liquidation_sentiment(symbol=symbol, window_seconds=900)
+                liquidation = self._bot._ws_manager.get_liquidation_sentiment(
+                    symbol=symbol, window_seconds=900
+                )
                 if liquidation is not None:
                     enrichments["liquidation_score"] = float(liquidation)
             except Exception:

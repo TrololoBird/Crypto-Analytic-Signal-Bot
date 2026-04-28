@@ -31,8 +31,12 @@ class SMCZone:
     metadata: dict[str, float | int | str | None] = field(default_factory=dict)
 
 
-def _normalize_ohlcv(frame: pl.DataFrame, *, require_volume: bool = False) -> pl.DataFrame:
-    rename_map = {column: column.lower() for column in frame.columns if column.lower() != column}
+def _normalize_ohlcv(
+    frame: pl.DataFrame, *, require_volume: bool = False
+) -> pl.DataFrame:
+    rename_map = {
+        column: column.lower() for column in frame.columns if column.lower() != column
+    }
     normalized = frame.rename(rename_map) if rename_map else frame
     required = {"open", "high", "low", "close"}
     if require_volume:
@@ -244,7 +248,10 @@ def bos_choch(
                 1
                 if (
                     recent_hl == [-1.0, 1.0, -1.0, 1.0]
-                    and recent_levels[0] < recent_levels[2] < recent_levels[1] < recent_levels[3]
+                    and recent_levels[0]
+                    < recent_levels[2]
+                    < recent_levels[1]
+                    < recent_levels[3]
                 )
                 else 0
             )
@@ -254,7 +261,10 @@ def bos_choch(
                 -1
                 if (
                     recent_hl == [1.0, -1.0, 1.0, -1.0]
-                    and recent_levels[0] > recent_levels[2] > recent_levels[1] > recent_levels[3]
+                    and recent_levels[0]
+                    > recent_levels[2]
+                    > recent_levels[1]
+                    > recent_levels[3]
                 )
                 else bos[anchor]
             )
@@ -264,21 +274,31 @@ def bos_choch(
                 1
                 if (
                     recent_hl == [-1.0, 1.0, -1.0, 1.0]
-                    and recent_levels[3] > recent_levels[1] > recent_levels[0] > recent_levels[2]
+                    and recent_levels[3]
+                    > recent_levels[1]
+                    > recent_levels[0]
+                    > recent_levels[2]
                 )
                 else 0
             )
-            levels_out[anchor] = recent_levels[1] if choch[anchor] != 0 else levels_out[anchor]
+            levels_out[anchor] = (
+                recent_levels[1] if choch[anchor] != 0 else levels_out[anchor]
+            )
 
             choch[anchor] = (
                 -1
                 if (
                     recent_hl == [1.0, -1.0, 1.0, -1.0]
-                    and recent_levels[3] < recent_levels[1] < recent_levels[0] < recent_levels[2]
+                    and recent_levels[3]
+                    < recent_levels[1]
+                    < recent_levels[0]
+                    < recent_levels[2]
                 )
                 else choch[anchor]
             )
-            levels_out[anchor] = recent_levels[1] if choch[anchor] != 0 else levels_out[anchor]
+            levels_out[anchor] = (
+                recent_levels[1] if choch[anchor] != 0 else levels_out[anchor]
+            )
 
         last_positions.append(i)
 
@@ -361,12 +381,9 @@ def order_blocks(
                     mitigated_index[idx] = 0
                     percentage[idx] = 0.0
                     active_bullish.remove(idx)
-            elif (
-                (not close_mitigation and low[close_index] < bottom_arr[idx])
-                or (
-                    close_mitigation
-                    and min(open_[close_index], close[close_index]) < bottom_arr[idx]
-                )
+            elif (not close_mitigation and low[close_index] < bottom_arr[idx]) or (
+                close_mitigation
+                and min(open_[close_index], close[close_index]) < bottom_arr[idx]
             ):
                 breaker[idx] = True
                 mitigated_index[idx] = close_index - 1
@@ -428,12 +445,9 @@ def order_blocks(
                     mitigated_index[idx] = 0
                     percentage[idx] = 0.0
                     active_bearish.remove(idx)
-            elif (
-                (not close_mitigation and high[close_index] > top_arr[idx])
-                or (
-                    close_mitigation
-                    and max(open_[close_index], close[close_index]) > top_arr[idx]
-                )
+            elif (not close_mitigation and high[close_index] > top_arr[idx]) or (
+                close_mitigation
+                and max(open_[close_index], close[close_index]) > top_arr[idx]
             ):
                 breaker[idx] = True
                 mitigated_index[idx] = close_index
@@ -485,7 +499,9 @@ def order_blocks(
     top_out = np.where(~np.isnan(ob_out), top_arr, np.nan)
     bottom_out = np.where(~np.isnan(ob_out), bottom_arr, np.nan)
     volume_out = np.where(~np.isnan(ob_out), ob_volume, np.nan)
-    mitigated_out = np.where(~np.isnan(ob_out), mitigated_index.astype(np.float64), np.nan)
+    mitigated_out = np.where(
+        ~np.isnan(ob_out), mitigated_index.astype(np.float64), np.nan
+    )
     percentage_out = np.where(~np.isnan(ob_out), percentage, np.nan)
 
     return pl.DataFrame(
@@ -655,7 +671,9 @@ def _order_block_touch_indices(
         return None, None
 
     intersects = (low[start:] <= top) & (high[start:] >= bottom)
-    mitigation_index = int(np.argmax(intersects) + start) if np.any(intersects) else None
+    mitigation_index = (
+        int(np.argmax(intersects) + start) if np.any(intersects) else None
+    )
 
     if direction == "long":
         invalidation_mask = low[start:] < bottom
@@ -867,7 +885,9 @@ def latest_liquidity_sweep(
             end_index=end_index,
             sweep_index=swept_index,
             invalidation_index=invalidation_index,
-            metadata={"pool_direction": "highs" if float(raw_direction) > 0 else "lows"},
+            metadata={
+                "pool_direction": "highs" if float(raw_direction) > 0 else "lows"
+            },
         )
     return None
 

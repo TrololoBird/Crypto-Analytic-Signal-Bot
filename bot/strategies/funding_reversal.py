@@ -5,6 +5,7 @@ candle pattern is confirmed on 15m with elevated volume.
 
 # WINDSURF_REVIEW: unified + vectorized + 1H context + graded
 """
+
 from __future__ import annotations
 
 import logging
@@ -17,7 +18,6 @@ from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.utils import get_dynamic_params
 
 LOG = logging.getLogger("bot.strategies.funding_reversal")
-
 
 
 def _as_float(value: object, default: float = 0.0) -> float:
@@ -35,7 +35,9 @@ class FundingReversalSetup(BaseSetup):
     required_context = ("futures_flow",)
     requires_funding = True
 
-    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
+    def get_optimizable_params(
+        self, settings: BotSettings | None = None
+    ) -> dict[str, float]:
         """Tunable parameters for self-learner optimization."""
         defaults = {
             "base_score": 0.52,
@@ -47,9 +49,9 @@ class FundingReversalSetup(BaseSetup):
             "min_rr": 1.5,
         }
         if settings is not None:
-            filters = getattr(settings, 'filters', None)
+            filters = getattr(settings, "filters", None)
             if filters:
-                setups_config = getattr(filters, 'setups', {})
+                setups_config = getattr(filters, "setups", {})
                 if isinstance(setups_config, dict) and self.setup_id in setups_config:
                     return {**defaults, **setups_config.get(self.setup_id, {})}
         return defaults
@@ -64,16 +66,32 @@ class FundingReversalSetup(BaseSetup):
 
     def _detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         setup_id = self.setup_id
-        
+
         dynamic_params = get_dynamic_params(prepared, setup_id)
         defaults = self.get_optimizable_params(settings)
-        funding_threshold = _as_float(dynamic_params.get("funding_threshold", defaults["funding_threshold"]), defaults["funding_threshold"])
-        funding_trend_bars = int(dynamic_params.get("funding_trend_bars", defaults["funding_trend_bars"]))
-        min_delta_threshold = _as_float(dynamic_params.get("min_delta_threshold", defaults["min_delta_threshold"]), defaults["min_delta_threshold"])
-        sl_buffer_atr = _as_float(dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]), defaults["sl_buffer_atr"])
-        base_score = _as_float(dynamic_params.get("base_score", defaults["base_score"]), defaults["base_score"])
-        min_rr = _as_float(dynamic_params.get("min_rr", defaults["min_rr"]), defaults["min_rr"])
-        
+        funding_threshold = _as_float(
+            dynamic_params.get("funding_threshold", defaults["funding_threshold"]),
+            defaults["funding_threshold"],
+        )
+        funding_trend_bars = int(
+            dynamic_params.get("funding_trend_bars", defaults["funding_trend_bars"])
+        )
+        min_delta_threshold = _as_float(
+            dynamic_params.get("min_delta_threshold", defaults["min_delta_threshold"]),
+            defaults["min_delta_threshold"],
+        )
+        sl_buffer_atr = _as_float(
+            dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]),
+            defaults["sl_buffer_atr"],
+        )
+        base_score = _as_float(
+            dynamic_params.get("base_score", defaults["base_score"]),
+            defaults["base_score"],
+        )
+        min_rr = _as_float(
+            dynamic_params.get("min_rr", defaults["min_rr"]), defaults["min_rr"]
+        )
+
         if prepared.funding_rate is None:
             _reject(prepared, setup_id, "funding_rate_missing")
             return None
@@ -92,11 +110,21 @@ class FundingReversalSetup(BaseSetup):
             return None
         if fr > funding_threshold and funding_trend == "falling":
             # Funding already unwinding on its own — not a setup
-            _reject(prepared, setup_id, "funding_already_unwinding_short", funding_trend=funding_trend)
+            _reject(
+                prepared,
+                setup_id,
+                "funding_already_unwinding_short",
+                funding_trend=funding_trend,
+            )
             return None
         if fr < -funding_threshold and funding_trend == "rising":
             # Negative funding already recovering — not a setup
-            _reject(prepared, setup_id, "funding_already_unwinding_long", funding_trend=funding_trend)
+            _reject(
+                prepared,
+                setup_id,
+                "funding_already_unwinding_long",
+                funding_trend=funding_trend,
+            )
             return None
 
         w = prepared.work_15m
@@ -155,13 +183,20 @@ class FundingReversalSetup(BaseSetup):
             stop = bar_high + atr * sl_buffer_atr
             risk = stop - price
             if risk <= 0:
-                _reject(prepared, setup_id, "risk_non_positive_short", stop=stop, price=price)
+                _reject(
+                    prepared,
+                    setup_id,
+                    "risk_non_positive_short",
+                    stop=stop,
+                    price=price,
+                )
                 return None
             # TP1: funding mean-reversion level (mark price before funding spike = recent low)
             recent_lows = w["low"].slice(-(trend_window + 1), trend_window)
             tp1 = _as_float(recent_lows.min()) if recent_lows.len() > 0 else None
             # TP2: prior structural level (1h swing low)
             from ..features import _swing_points as _sp
+
             w1h = prepared.work_1h
             tp2 = None
             if w1h.height > 5:
@@ -190,13 +225,16 @@ class FundingReversalSetup(BaseSetup):
             stop = bar_low - atr * sl_buffer_atr
             risk = price - stop
             if risk <= 0:
-                _reject(prepared, setup_id, "risk_non_positive_long", stop=stop, price=price)
+                _reject(
+                    prepared, setup_id, "risk_non_positive_long", stop=stop, price=price
+                )
                 return None
             # TP1: funding mean-reversion level (mark price before funding spike = recent high)
             recent_highs = w["high"].slice(-(trend_window + 1), trend_window)
             tp1 = _as_float(recent_highs.max()) if recent_highs.len() > 0 else None
             # TP2: prior structural level (1h swing high)
             from ..features import _swing_points as _sp
+
             w1h = prepared.work_1h
             tp2 = None
             if w1h.height > 5:

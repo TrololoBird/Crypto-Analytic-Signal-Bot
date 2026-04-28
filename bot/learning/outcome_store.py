@@ -17,7 +17,9 @@ class OutcomeStore:
     def __init__(self, db_path: str | Path) -> None:
         self.db_path = str(db_path)
 
-    async def fetch_setup_outcomes(self, setup_id: str, *, limit: int = 500) -> list[dict[str, Any]]:
+    async def fetch_setup_outcomes(
+        self, setup_id: str, *, limit: int = 500
+    ) -> list[dict[str, Any]]:
         try:
             import aiosqlite
 
@@ -51,14 +53,15 @@ class OutcomeStore:
             if table is None:
                 return pl.DataFrame()
             columns = self._table_columns(conn, table)
-            ts_col = "created_at" if "created_at" in columns else ("ts" if "ts" in columns else None)
+            ts_col = (
+                "created_at"
+                if "created_at" in columns
+                else ("ts" if "ts" in columns else None)
+            )
             if ts_col is None:
                 return pl.DataFrame()
 
-            query = (
-                f"SELECT * FROM {table} "
-                f"WHERE {ts_col} >= ? AND {ts_col} < ? "
-            )
+            query = f"SELECT * FROM {table} WHERE {ts_col} >= ? AND {ts_col} < ? "
             params: list[Any] = [start.isoformat(), end.isoformat()]
             if setup_id is not None and "setup_id" in columns:
                 query += "AND setup_id = ? "
@@ -79,7 +82,9 @@ class OutcomeStore:
     @staticmethod
     def _detect_outcomes_table(conn: sqlite3.Connection) -> str | None:
         candidates = ("setup_outcomes", "signal_outcomes")
-        rows = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        rows = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
         names = {str(name) for (name,) in rows}
         for candidate in candidates:
             if candidate in names:

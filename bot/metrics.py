@@ -11,7 +11,6 @@ Provides metrics endpoint for monitoring:
 from __future__ import annotations
 
 import logging
-import time
 from importlib import import_module
 from dataclasses import dataclass
 from typing import Any, cast
@@ -30,24 +29,51 @@ try:
     HAS_PROMETHEUS = True
 except ImportError:
     HAS_PROMETHEUS = False
+
     # Stubs for when prometheus_client is not installed
     class _PromCounterClass:  # type: ignore
-        def __init__(self, *args: Any, **kwargs: Any) -> None: pass
-        def inc(self, *args: Any, **kwargs: Any) -> None: pass
-        def labels(self, *args: Any, **kwargs: Any) -> _PromCounterClass: return self
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def inc(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def labels(self, *args: Any, **kwargs: Any) -> _PromCounterClass:
+            return self
+
     class _PromGaugeClass:  # type: ignore
-        def __init__(self, *args: Any, **kwargs: Any) -> None: pass
-        def set(self, *args: Any, **kwargs: Any) -> None: pass
-        def inc(self, *args: Any, **kwargs: Any) -> None: pass
-        def dec(self, *args: Any, **kwargs: Any) -> None: pass
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def set(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def inc(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def dec(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
     class _PromHistogramClass:  # type: ignore
-        def __init__(self, *args: Any, **kwargs: Any) -> None: pass
-        def observe(self, *args: Any, **kwargs: Any) -> None: pass
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def observe(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
     class _PromInfoClass:  # type: ignore
-        def __init__(self, *args: Any, **kwargs: Any) -> None: pass
-        def info(self, *args: Any, **kwargs: Any) -> None: pass
-    def _prom_start_http_server(*args: Any, **kwargs: Any) -> None: pass
-    def generate_latest(*args: Any, **kwargs: Any) -> bytes: return b""
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def info(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+    def _prom_start_http_server(*args: Any, **kwargs: Any) -> None:
+        pass
+
+    def generate_latest(*args: Any, **kwargs: Any) -> bytes:
+        return b""
+
     REGISTRY = None  # type: ignore
 
 PromCounter = cast(Any, _PromCounterClass)
@@ -63,6 +89,7 @@ LOG = logging.getLogger("bot.metrics")
 @dataclass
 class SignalMetrics:
     """Container for signal-related metrics snapshots."""
+
     total_detected: int
     total_delivered: int
     total_rejected: int
@@ -90,105 +117,95 @@ class BotMetricsCollector:
         self.signals_detected: Any = PromCounter(
             "bot_signals_detected_total",
             "Total signals detected",
-            ["setup_id", "direction"]
+            ["setup_id", "direction"],
         )
         self.signals_delivered: Any = PromCounter(
             "bot_signals_delivered_total",
             "Total signals delivered to Telegram",
-            ["setup_id", "direction"]
+            ["setup_id", "direction"],
         )
         self.signals_rejected: Any = PromCounter(
             "bot_signals_rejected_total",
             "Total signals rejected by filters",
-            ["setup_id", "direction", "reason"]
+            ["setup_id", "direction", "reason"],
         )
 
         # Signal tracking outcomes
         self.signal_outcomes: Any = PromCounter(
             "bot_signal_outcomes_total",
             "Signal outcome results",
-            ["setup_id", "direction", "outcome"]  # outcome: tp1, tp2, sl, expired
+            ["setup_id", "direction", "outcome"],  # outcome: tp1, tp2, sl, expired
         )
 
         # WebSocket metrics
         self.ws_latency_ms: Any = PromGauge(
-            "bot_ws_latency_milliseconds",
-            "WebSocket message latency"
+            "bot_ws_latency_milliseconds", "WebSocket message latency"
         )
         self.ws_message_age_seconds: Any = PromGauge(
-            "bot_ws_message_age_seconds",
-            "Age of last WS message"
+            "bot_ws_message_age_seconds", "Age of last WS message"
         )
         self.ws_streams_active: Any = PromGauge(
-            "bot_ws_streams_active",
-            "Number of active WebSocket streams"
+            "bot_ws_streams_active", "Number of active WebSocket streams"
         )
         self.ws_reconnects: Any = PromCounter(
-            "bot_ws_reconnects_total",
-            "Total WebSocket reconnections"
+            "bot_ws_reconnects_total", "Total WebSocket reconnections"
         )
 
         # Pipeline performance
         self.pipeline_duration_seconds: Any = PromHistogram(
             "bot_pipeline_duration_seconds",
             "Pipeline processing time",
-            buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0]
+            buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0],
         )
         self.pipeline_symbols_processed: Any = PromCounter(
-            "bot_pipeline_symbols_processed_total",
-            "Total symbols processed"
+            "bot_pipeline_symbols_processed_total", "Total symbols processed"
         )
 
         # Market metrics
         self.market_regime: Any = PromGauge(
             "bot_market_regime",
-            "Current market regime (0=bear, 1=ranging, 2=bull, 3=volatile)"
+            "Current market regime (0=bear, 1=ranging, 2=bull, 3=volatile)",
         )
         self.market_regime_strength: Any = PromGauge(
-            "bot_market_regime_strength",
-            "Market regime strength (0.0-1.0)"
+            "bot_market_regime_strength", "Market regime strength (0.0-1.0)"
         )
         self.altcoin_season_index: Any = PromGauge(
-            "bot_altcoin_season_index",
-            "Altcoin season index (0-100)"
+            "bot_altcoin_season_index", "Altcoin season index (0-100)"
         )
 
         # Bot state
         self.shortlist_size: Any = PromGauge(
-            "bot_shortlist_size",
-            "Number of symbols in shortlist"
+            "bot_shortlist_size", "Number of symbols in shortlist"
         )
         self.open_signals: Any = PromGauge(
-            "bot_open_signals",
-            "Number of currently tracked signals"
+            "bot_open_signals", "Number of currently tracked signals"
         )
         self.memory_blacklist_size: Any = PromGauge(
-            "bot_memory_blacklist_size",
-            "Number of blacklisted symbols"
+            "bot_memory_blacklist_size", "Number of blacklisted symbols"
         )
 
         # Scoring metrics
         self.signal_score_histogram: Any = PromHistogram(
             "bot_signal_score",
             "Distribution of signal scores",
-            buckets=[0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+            buckets=[0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
         )
         self.signal_risk_reward: Any = PromHistogram(
             "bot_signal_risk_reward",
             "Distribution of risk/reward ratios",
-            buckets=[1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0]
+            buckets=[1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0],
         )
 
         # ML metrics
         self.ml_predictions: Any = PromCounter(
             "bot_ml_predictions_total",
             "ML predictions made",
-            ["confidence_bucket"]  # low, medium, high
+            ["confidence_bucket"],  # low, medium, high
         )
         self.ml_score_adjustment: Any = PromHistogram(
             "bot_ml_score_adjustment",
             "ML score adjustments applied",
-            buckets=[-0.2, -0.1, 0, 0.1, 0.2]
+            buckets=[-0.2, -0.1, 0, 0.1, 0.2],
         )
 
         LOG.info("metrics collector initialized on port %d", port)
@@ -236,9 +253,7 @@ class BotMetricsCollector:
         # Truncate reason to avoid label explosion
         short_reason = reason[:50] if len(reason) > 50 else reason
         self.signals_rejected.labels(
-            setup_id=setup_id,
-            direction=direction,
-            reason=short_reason
+            setup_id=setup_id, direction=direction, reason=short_reason
         ).inc()
 
     def record_signal_outcome(
@@ -251,9 +266,7 @@ class BotMetricsCollector:
         if not self._enabled:
             return
         self.signal_outcomes.labels(
-            setup_id=setup_id,
-            direction=direction,
-            outcome=outcome
+            setup_id=setup_id, direction=direction, outcome=outcome
         ).inc()
 
     def record_ws_latency(self, latency_ms: float) -> None:

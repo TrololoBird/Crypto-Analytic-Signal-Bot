@@ -24,7 +24,9 @@ class OIRefreshRunner:
             if shortlist and isinstance(self._bot.client, BinanceFuturesMarketData):
                 batch_size = self._bot.settings.runtime.startup_batch_size
                 batch_delay = self._bot.settings.runtime.startup_batch_delay_seconds
-                rest_concurrency = max(1, int(self._bot.settings.runtime.max_concurrent_rest_requests))
+                rest_concurrency = max(
+                    1, int(self._bot.settings.runtime.max_concurrent_rest_requests)
+                )
                 sem = asyncio.Semaphore(rest_concurrency)
 
                 async def _fetch_one(symbol: str, limiter: asyncio.Semaphore) -> None:
@@ -33,7 +35,7 @@ class OIRefreshRunner:
 
                 processed = 0
                 for i in range(0, len(shortlist), batch_size):
-                    batch = shortlist[i:i + batch_size]
+                    batch = shortlist[i : i + batch_size]
                     await asyncio.gather(
                         *[_fetch_one(item.symbol, sem) for item in batch],
                         return_exceptions=True,
@@ -59,12 +61,14 @@ class OIRefreshRunner:
 
     async def _safe_fetch(self, symbol: str) -> None:
         client = self._bot.client
-        
+
         # Skip if circuit breaker is open for critical operations
-        if hasattr(client, '_is_circuit_open') and client._is_circuit_open('open_interest_statistics'):
+        if hasattr(client, "_is_circuit_open") and client._is_circuit_open(
+            "open_interest_statistics"
+        ):
             LOG.debug("skipping OI fetch for %s: circuit breaker open", symbol)
             return
-        
+
         # Public-only derivatives context warmup. Keep it bounded, but include the
         # crowding ratios that the runtime can consume from cache.
         fetchers = (

@@ -1,80 +1,55 @@
-name: CI
+name: Auto Fix & Format
 
 on:
   push:
-  pull_request:
+    branches: [main, develop]
+    paths:
+      - "bot/**"
+      - "tests/**"
+      - "pyproject.toml"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: autofix-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  lint:
+  auto-format:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          python-version: '3.13'
-      
-      - uses: astral-sh/ruff-action@v3
+          fetch-depth: 0
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
-          args: "check --fix bot/ tests/"
-      
-      - uses: astral-sh/ruff-action@v3
-        with:
-          args: "format bot/ tests/"
-      
-      # Commit fixes back if on a branch (not on main)
-      - name: Commit lint fixes
-        if: github.ref != 'refs/heads/main'
+          python-version: "3.13.13"
+          cache: "pip"
+
+      - name: Install ruff
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add bot/ tests/
-          git diff --quiet && git diff --staged --quiet || git commit -m "chore: auto-format with ruff"
-          git push
-        continue-on-error: true
+          python -m pip install --upgrade pip
+          pip install ruff
 
-  typecheck:
-    runs-on: ubuntu-latest
-    needs: lint
-    steps:
-      - uses: actions/checkout@v4
-      
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-      
-      - run: pip install -e '.[dev]'
-      
-      - run: mypy bot/ml/filter.py bot/confluence.py --follow-imports=skip --ignore-missing-imports
+      - name: Fix with ruff
+        run: |
+          ruff check --fix bot/ tests/
+          ruff format bot/ tests/
 
-  typecheck-full-report:
-    runs-on: ubuntu-latest
-    needs: lint
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      
-      - uses: actions/setup-python@v5
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@c5a7806660adbe173f04e3e038b0ccdcd758773c # v6
         with:
-          python-version: '3.13'
-      
-      - run: pip install -e '.[dev]'
-      
-      - run: mypy bot/ --ignore-missing-imports --strict
-
-  test:
-    runs-on: ubuntu-latest
-    needs: lint
-    steps:
-      - uses: actions/checkout@v4
-      
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-      
-      - run: pip install -e '.[dev,test]'
-      
-      - run: pytest tests/ -v --cov=bot --cov-report=xml
-      
-      - uses: codecov/codecov-action@v5
+          commit-message: "chore: auto-format with ruff"
+          title: "🤖 Auto: format with ruff"
+          body: |
+            Automatic formatting and linting fixes:
+            - Fixed import sorting
+            - Fixed style issues
+            - Applied formatting rules
+          branch: chore/auto-format
+          delete-branch: true
+          labels: automated,formatting

@@ -91,13 +91,17 @@ def test_outcome_store_get_outcomes_returns_polars_frame(tmp_path) -> None:
     conn.close()
 
     store = OutcomeStore(db_path)
-    frame = store.get_outcomes("ema_bounce", now - timedelta(days=1), now + timedelta(minutes=1))
+    frame = store.get_outcomes(
+        "ema_bounce", now - timedelta(days=1), now + timedelta(minutes=1)
+    )
     assert frame.height == 1
     assert set(frame.columns) >= {"setup_id", "outcome", "score", "created_at"}
 
 
 @pytest.mark.asyncio
-async def test_self_learner_uses_walk_forward_fallback_when_optuna_missing(monkeypatch, tmp_path) -> None:
+async def test_self_learner_uses_walk_forward_fallback_when_optuna_missing(
+    monkeypatch, tmp_path
+) -> None:
     class _Setup:
         strategy_id = "ema_bounce"
 
@@ -116,6 +120,7 @@ async def test_self_learner_uses_walk_forward_fallback_when_optuna_missing(monke
 
     monkeypatch.setattr("bot.core.self_learner.OPTUNA_AVAILABLE", False)
     monkeypatch.setattr("bot.core.self_learner.optuna", None)
+
     async def _fake_fetch(_setup_id: str):
         return _sample_outcomes(90)
 
@@ -130,7 +135,9 @@ async def test_self_learner_uses_walk_forward_fallback_when_optuna_missing(monke
     assert results[0].setup_id == "ema_bounce"
     assert "base_score" in results[0].params
 
-    stored = RegimeAwareParams(regime="composite", db_path=str(tmp_path / "learner.db")).get_params(
+    stored = RegimeAwareParams(
+        regime="composite", db_path=str(tmp_path / "learner.db")
+    ).get_params(
         "ema_bounce",
         "composite",
     )

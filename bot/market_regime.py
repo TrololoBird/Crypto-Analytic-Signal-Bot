@@ -10,8 +10,6 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-import numpy as np
-import polars as pl
 
 from .regime.composite_regime import CompositeRegimeAnalyzer
 
@@ -132,7 +130,9 @@ class MarketRegimeAnalyzer:
             self._last_update_ts = now
             return mapped
 
-        result = self._calculate_regime(ticker_data, funding_rates, open_interest, benchmark_context)
+        result = self._calculate_regime(
+            ticker_data, funding_rates, open_interest, benchmark_context
+        )
         self._last_result = result
         self._last_update_ts = now
         return result
@@ -193,14 +193,14 @@ class MarketRegimeAnalyzer:
         bottom_10 = sorted_changes[-10:]
 
         top_gainer_pct = sum(c for _, c in top_10) / len(top_10) if top_10 else 0.0
-        top_loser_pct = sum(c for _, c in bottom_10) / len(bottom_10) if bottom_10 else 0.0
+        top_loser_pct = (
+            sum(c for _, c in bottom_10) / len(bottom_10) if bottom_10 else 0.0
+        )
 
         # Calculate altcoin season index
         # Higher when alts outperform BTC
         if btc_change != 0:
-            alt_perf = [
-                c for s, c in all_changes if s not in ("BTCUSDT", "ETHUSDT")
-            ]
+            alt_perf = [c for s, c in all_changes if s not in ("BTCUSDT", "ETHUSDT")]
             if alt_perf:
                 avg_alt_change = sum(alt_perf) / len(alt_perf)
                 # Index: 50 = neutral, >50 = alts leading, <50 = BTC leading
@@ -303,7 +303,9 @@ class MarketRegimeAnalyzer:
 
         if altcoin_season_index >= 60 and dominance_24h < 0:
             risk_on_off = "risk_on"
-        elif dominance_24h > 1.5 or (funding_sentiment == "long_heavy" and regime in {"bear", "volatile"}):
+        elif dominance_24h > 1.5 or (
+            funding_sentiment == "long_heavy" and regime in {"bear", "volatile"}
+        ):
             risk_on_off = "risk_off"
         else:
             risk_on_off = "neutral"

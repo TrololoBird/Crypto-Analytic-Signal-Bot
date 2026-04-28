@@ -8,6 +8,7 @@ Requires 1H trend alignment (continuation signal).
 
 # WINDSURF_REVIEW: unified + vectorized + 1H context + graded
 """
+
 from __future__ import annotations
 
 import logging
@@ -29,7 +30,9 @@ class HiddenDivergenceSetup(BaseSetup):
     confirmation_profile = "trend_follow"
     required_context = ("futures_flow",)
 
-    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
+    def get_optimizable_params(
+        self, settings: BotSettings | None = None
+    ) -> dict[str, float]:
         """Tunable parameters for self-learner optimization."""
         defaults = {
             "base_score": 0.50,
@@ -43,9 +46,9 @@ class HiddenDivergenceSetup(BaseSetup):
             "sl_buffer_atr": 0.5,
         }
         if settings is not None:
-            filters = getattr(settings, 'filters', None)
+            filters = getattr(settings, "filters", None)
             if filters:
-                setups_config = getattr(filters, 'setups', {})
+                setups_config = getattr(filters, "setups", {})
                 if isinstance(setups_config, dict) and self.setup_id in setups_config:
                     return {**defaults, **setups_config.get(self.setup_id, {})}
         return defaults
@@ -68,11 +71,23 @@ class HiddenDivergenceSetup(BaseSetup):
         setup_id = self.setup_id
         dynamic_params = get_dynamic_params(prepared, setup_id)
         defaults = self.get_optimizable_params(settings)
-        
-        rsi_divergence_lookback = int(dynamic_params.get("rsi_divergence_lookback", defaults["rsi_divergence_lookback"]))
-        rsi_divergence_threshold = float(dynamic_params.get("rsi_divergence_threshold", defaults["rsi_divergence_threshold"]))
-        min_delta_threshold = float(dynamic_params.get("min_delta_threshold", defaults["min_delta_threshold"]))
-        sl_buffer_atr = float(dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]))
+
+        rsi_divergence_lookback = int(
+            dynamic_params.get(
+                "rsi_divergence_lookback", defaults["rsi_divergence_lookback"]
+            )
+        )
+        rsi_divergence_threshold = float(
+            dynamic_params.get(
+                "rsi_divergence_threshold", defaults["rsi_divergence_threshold"]
+            )
+        )
+        min_delta_threshold = float(
+            dynamic_params.get("min_delta_threshold", defaults["min_delta_threshold"])
+        )
+        sl_buffer_atr = float(
+            dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"])
+        )
 
         w1h = prepared.work_1h
         if w1h.height < 20:
@@ -99,15 +114,17 @@ class HiddenDivergenceSetup(BaseSetup):
             return None
 
         # 1H context for 15M signals (not 4H - too lagging for <4h trades)
-        bias_1h = getattr(prepared, 'bias_1h', prepared.bias_4h)
-        sh_mask, sl_mask = _swing_points(w1h, n=max(2, rsi_divergence_lookback), include_unconfirmed_tail=True)
+        bias_1h = getattr(prepared, "bias_1h", prepared.bias_4h)
+        sh_mask, sl_mask = _swing_points(
+            w1h, n=max(2, rsi_divergence_lookback), include_unconfirmed_tail=True
+        )
         sh_prices = w1h.filter(sh_mask)["high"]
         sh_rsi = w1h.filter(sh_mask)["rsi14"] if "rsi14" in w1h.columns else None
         sl_prices = w1h.filter(sl_mask)["low"]
         sl_rsi = w1h.filter(sl_mask)["rsi14"] if "rsi14" in w1h.columns else None
 
         # Use 1H context for 15M signals (not 4H - too lagging for <4h trades)
-        bias_1h = getattr(prepared, 'bias_1h', prepared.bias_4h)
+        bias_1h = getattr(prepared, "bias_1h", prepared.bias_4h)
         direction = None
         stop_price = None
         swing_ref = None
@@ -116,9 +133,12 @@ class HiddenDivergenceSetup(BaseSetup):
         # Hidden Bullish: price HL (sl[-1] > sl[-2]) + RSI LL (rsi_sl[-1] < rsi_sl[-2])
         impulse_size = None
         swing_ref = None
-        if (bias_1h in ("uptrend", "neutral")
-                and sl_prices.len() >= 2
-                and sl_rsi is not None and sl_rsi.len() >= 2):
+        if (
+            bias_1h in ("uptrend", "neutral")
+            and sl_prices.len() >= 2
+            and sl_rsi is not None
+            and sl_rsi.len() >= 2
+        ):
             sl_v = sl_prices.to_numpy()
             sl_r = sl_rsi.to_numpy()
             rsi_separation = float(sl_r[-2] - sl_r[-1])
@@ -127,12 +147,17 @@ class HiddenDivergenceSetup(BaseSetup):
                 swing_ref = float(sl_v[-1])
                 # Compute last impulse wave size for Fib extensions
                 if sh_prices.len() >= 1:
-                    impulse_size = abs(float(sh_prices.to_numpy()[-1]) - float(sl_v[-1]))
+                    impulse_size = abs(
+                        float(sh_prices.to_numpy()[-1]) - float(sl_v[-1])
+                    )
 
         # Hidden Bearish: price LH (sh[-1] < sh[-2]) + RSI HH (rsi_sh[-1] > rsi_sh[-2])
-        if direction is None and (bias_1h in ("downtrend", "neutral")
-                and sh_prices.len() >= 2
-                and sh_rsi is not None and sh_rsi.len() >= 2):
+        if direction is None and (
+            bias_1h in ("downtrend", "neutral")
+            and sh_prices.len() >= 2
+            and sh_rsi is not None
+            and sh_rsi.len() >= 2
+        ):
             sh_v = sh_prices.to_numpy()
             sh_r = sh_rsi.to_numpy()
             rsi_separation = float(sh_r[-1] - sh_r[-2])
@@ -140,7 +165,9 @@ class HiddenDivergenceSetup(BaseSetup):
                 direction = "short"
                 swing_ref = float(sh_v[-1])
                 if sl_prices.len() >= 1:
-                    impulse_size = abs(float(sh_v[-1]) - float(sl_prices.to_numpy()[-1]))
+                    impulse_size = abs(
+                        float(sh_v[-1]) - float(sl_prices.to_numpy()[-1])
+                    )
 
         if direction is None or swing_ref is None:
             _reject(prepared, setup_id, "no_hidden_divergence_detected")
@@ -161,7 +188,11 @@ class HiddenDivergenceSetup(BaseSetup):
             if delta_series.len() > 0:
                 latest_delta_ratio = float(delta_series[-1])
                 delta_shift = latest_delta_ratio - 0.5
-        if direction == "long" and latest_delta_ratio is not None and delta_shift < min_delta_threshold:
+        if (
+            direction == "long"
+            and latest_delta_ratio is not None
+            and delta_shift < min_delta_threshold
+        ):
             _reject(
                 prepared,
                 setup_id,
@@ -170,7 +201,11 @@ class HiddenDivergenceSetup(BaseSetup):
                 min_delta_threshold=min_delta_threshold,
             )
             return None
-        if direction == "short" and latest_delta_ratio is not None and delta_shift > -min_delta_threshold:
+        if (
+            direction == "short"
+            and latest_delta_ratio is not None
+            and delta_shift > -min_delta_threshold
+        ):
             _reject(
                 prepared,
                 setup_id,
@@ -186,7 +221,13 @@ class HiddenDivergenceSetup(BaseSetup):
             stop_price = swing_ref - atr * sl_buffer_atr
             risk = price - stop_price
             if risk <= 0:
-                _reject(prepared, setup_id, "risk_non_positive_long", stop=stop_price, price=price)
+                _reject(
+                    prepared,
+                    setup_id,
+                    "risk_non_positive_long",
+                    stop=stop_price,
+                    price=price,
+                )
                 return None
             # TP1/TP2: Fibonacci 1.272× and 1.618× extension of last impulse wave
             if impulse_size and impulse_size > 0:
@@ -200,7 +241,13 @@ class HiddenDivergenceSetup(BaseSetup):
             stop_price = swing_ref + atr * sl_buffer_atr
             risk = stop_price - price
             if risk <= 0:
-                _reject(prepared, setup_id, "risk_non_positive_short", stop=stop_price, price=price)
+                _reject(
+                    prepared,
+                    setup_id,
+                    "risk_non_positive_short",
+                    stop=stop_price,
+                    price=price,
+                )
                 return None
             # TP1/TP2: Fibonacci extensions of last impulse wave
             if impulse_size and impulse_size > 0:
@@ -212,7 +259,14 @@ class HiddenDivergenceSetup(BaseSetup):
 
         # Validate: TP1 must be at least 1.5× risk distance, else reject
         if tp1 is None or abs(tp1 - price) < risk * 1.5:
-            _reject(prepared, setup_id, "tp1_too_close_or_missing", tp1=tp1, risk=risk, price=price)
+            _reject(
+                prepared,
+                setup_id,
+                "tp1_too_close_or_missing",
+                tp1=tp1,
+                risk=risk,
+                price=price,
+            )
             return None  # Reject this hidden divergence setup
         if tp2 is None or abs(tp2 - price) <= abs(tp1 - price):
             tp2 = tp1  # Use TP1 as TP2 if no extended target found

@@ -10,6 +10,7 @@ from .config import AlertConfig, BotSettings
 from .messaging import DeliveryResult, MessageBroadcaster
 from .models import PreparedSymbol, Signal
 from .telemetry import TelemetryStore
+
 LOG = logging.getLogger("bot.alerts")
 
 
@@ -61,7 +62,9 @@ def _fmt_pct(value: float) -> str:
     return f"{value * 100:.2f}%"
 
 
-def _make_ref_id(*, symbol: str, setup_id: str, level_name: str, direction: str, ts: datetime) -> str:
+def _make_ref_id(
+    *, symbol: str, setup_id: str, level_name: str, direction: str, ts: datetime
+) -> str:
     setup_short = {
         "structure_pullback": "PULL",
         "structure_break_retest": "BREAK",
@@ -120,26 +123,39 @@ class AlertCoordinator:
         async with self._lock:
             active_count = len(self._active_by_symbol)
             if active_count > 0:
-                LOG.info("alert coordinator closing | %d active watch(s) will be dropped", active_count)
+                LOG.info(
+                    "alert coordinator closing | %d active watch(s) will be dropped",
+                    active_count,
+                )
             self._candidates_by_symbol.clear()
             self._active_by_symbol.clear()
             self._last_armed_key_by_symbol.clear()
 
-    async def refresh_candidates(self, prepared: PreparedSymbol, *, observed_at: datetime) -> None:
+    async def refresh_candidates(
+        self, prepared: PreparedSymbol, *, observed_at: datetime
+    ) -> None:
         if not self._cfg.enabled:
             return
         if self._closed:
             return
         # Guard against accidental dict passage (PreparedFeatureSnapshot mix-up).
         if isinstance(prepared, dict):
-            LOG.warning("refresh_candidates received dict instead of PreparedSymbol, skipping | symbol=%s", prepared.get("symbol", "unknown"))
+            LOG.warning(
+                "refresh_candidates received dict instead of PreparedSymbol, skipping | symbol=%s",
+                prepared.get("symbol", "unknown"),
+            )
             return
         # Idempotent fast-path: if the same candidate key is already armed and active,
         # skip re-processing. The watch is already telemetry-tracked.
         existing_candidate = self._candidates_by_symbol.get(prepared.symbol)
         if existing_candidate is not None:
             active = self._active_by_symbol.get(prepared.symbol)
-            if active is not None and active.status in {"watch_sent", "watch_sending", "entry_sent", "entry_sending"}:
+            if active is not None and active.status in {
+                "watch_sent",
+                "watch_sending",
+                "entry_sent",
+                "entry_sending",
+            }:
                 # Already an active watch — no need to re-arm.
                 return
         # Keep it intentionally narrow: only "pullback to a structural level" watches for now.
@@ -184,12 +200,16 @@ class AlertCoordinator:
                         else chosen.invalidate_above,
                         "context": dict(ctx),
                         "bias_4h": ctx.get("bias_4h", "unknown"),
-                        "regime_4h_confirmed": ctx.get("regime_4h_confirmed", "unknown"),
+                        "regime_4h_confirmed": ctx.get(
+                            "regime_4h_confirmed", "unknown"
+                        ),
                         "market_regime": ctx.get("market_regime", "unknown"),
                     },
                 )
 
-    async def on_confirmed_signals(self, signals: list[Signal], *, observed_at: datetime) -> None:
+    async def on_confirmed_signals(
+        self, signals: list[Signal], *, observed_at: datetime
+    ) -> None:
         if not self._cfg.enabled:
             return
         async with self._lock:
@@ -201,7 +221,9 @@ class AlertCoordinator:
                 if state.entry_price is not None and signal.entry_mid:
                     try:
                         early_entry_advantage_bps = round(
-                            (float(state.entry_price) - float(signal.entry_mid)) / float(signal.entry_mid) * 10_000.0,
+                            (float(state.entry_price) - float(signal.entry_mid))
+                            / float(signal.entry_mid)
+                            * 10_000.0,
                             1,
                         )
                     except (TypeError, ValueError, ZeroDivisionError):
@@ -229,7 +251,9 @@ class AlertCoordinator:
                     },
                 )
 
-    async def on_tick(self, symbol: str, price: float, *, observed_at: datetime, dry_run: bool) -> None:
+    async def on_tick(
+        self, symbol: str, price: float, *, observed_at: datetime, dry_run: bool
+    ) -> None:
         if not self._cfg.enabled:
             return
         action: dict[str, object] | None = None
@@ -279,15 +303,22 @@ class AlertCoordinator:
                                 "watch_key": state.candidate.key,
                                 "ref_id": state.candidate.ref_id,
                                 "ref": state.candidate.ref_id,
-                                "age_s": (observed_at - state.watch_sent_at).total_seconds(),
+                                "age_s": (
+                                    observed_at - state.watch_sent_at
+                                ).total_seconds(),
                             },
                         )
                         return
-                invalid_action = self._build_invalidation_action(state, price, observed_at=observed_at)
+                invalid_action = self._build_invalidation_action(
+                    state, price, observed_at=observed_at
+                )
                 if invalid_action is not None:
                     action = invalid_action
                 elif self._cfg.enable_entry_zone and state.status == "watch_sent":
-                    if candidate.entry_low <= price <= candidate.entry_high and self._can_send_entry(symbol, observed_at):
+                    if (
+                        candidate.entry_low <= price <= candidate.entry_high
+                        and self._can_send_entry(symbol, observed_at)
+                    ):
                         state.status = "entry_sending"
                         state.entry_sent_at = observed_at
                         self._last_entry_by_symbol[symbol] = observed_at
@@ -305,12 +336,22 @@ class AlertCoordinator:
         if not isinstance(cand, WatchCandidate):
             return
         raw_action_price = action.get("price")
-        current_price = float(raw_action_price) if isinstance(raw_action_price, (int, float)) else price
+        current_price = (
+            float(raw_action_price)
+            if isinstance(raw_action_price, (int, float))
+            else price
+        )
         if action_type == "watch":
             ref_id = cand.ref_id
-            latency_ms = int(max(0.0, (observed_at - cand.created_at).total_seconds() * 1000.0))
-            text = self._format_watch(cand, current_price=current_price, now=observed_at, ref_id=ref_id)
-            message_id = await self._send(text, dry_run=dry_run, reply_to_message_id=None)
+            latency_ms = int(
+                max(0.0, (observed_at - cand.created_at).total_seconds() * 1000.0)
+            )
+            text = self._format_watch(
+                cand, current_price=current_price, now=observed_at, ref_id=ref_id
+            )
+            message_id = await self._send(
+                text, dry_run=dry_run, reply_to_message_id=None
+            )
             async with self._lock:
                 st = self._active_by_symbol.get(symbol)
                 if st and st.status == "watch_sending" and st.candidate.key == cand.key:
@@ -332,7 +373,9 @@ class AlertCoordinator:
                     "interest_low": cand.interest_low,
                     "interest_high": cand.interest_high,
                     "entry_zone": [cand.entry_low, cand.entry_high],
-                    "invalidation": cand.invalidate_below if cand.invalidate_below is not None else cand.invalidate_above,
+                    "invalidation": cand.invalidate_below
+                    if cand.invalidate_below is not None
+                    else cand.invalidate_above,
                     "context": dict(cand.context or {}),
                     "price": current_price,
                     "latency_ms": latency_ms,
@@ -344,9 +387,15 @@ class AlertCoordinator:
             ref_id = cand.ref_id
             reply_to = action.get("reply_to_message_id")
             reply_to_message_id = int(reply_to) if isinstance(reply_to, int) else None
-            latency_ms = int(max(0.0, (observed_at - cand.created_at).total_seconds() * 1000.0))
-            text = self._format_entry_zone(cand, current_price=current_price, now=observed_at, ref_id=ref_id)
-            message_id = await self._send(text, dry_run=dry_run, reply_to_message_id=reply_to_message_id)
+            latency_ms = int(
+                max(0.0, (observed_at - cand.created_at).total_seconds() * 1000.0)
+            )
+            text = self._format_entry_zone(
+                cand, current_price=current_price, now=observed_at, ref_id=ref_id
+            )
+            message_id = await self._send(
+                text, dry_run=dry_run, reply_to_message_id=reply_to_message_id
+            )
             async with self._lock:
                 st = self._active_by_symbol.get(symbol)
                 if st and st.status == "entry_sending" and st.candidate.key == cand.key:
@@ -376,7 +425,9 @@ class AlertCoordinator:
             reply_to = action.get("reply_to_message_id")
             reply_to_message_id = int(reply_to) if isinstance(reply_to, int) else None
             ref_id = str(action.get("ref_id") or "")
-            latency_ms = int(max(0.0, (observed_at - cand.created_at).total_seconds() * 1000.0))
+            latency_ms = int(
+                max(0.0, (observed_at - cand.created_at).total_seconds() * 1000.0)
+            )
             text = self._format_invalidated(
                 cand,
                 current_price=current_price,
@@ -384,7 +435,9 @@ class AlertCoordinator:
                 reason=reason,
                 ref_id=ref_id,
             )
-            message_id = await self._send(text, dry_run=dry_run, reply_to_message_id=reply_to_message_id)
+            message_id = await self._send(
+                text, dry_run=dry_run, reply_to_message_id=reply_to_message_id
+            )
             self._telemetry.append_jsonl(
                 "alerts.jsonl",
                 {
@@ -412,7 +465,10 @@ class AlertCoordinator:
 
     def _can_send_watch(self, symbol: str, now: datetime) -> bool:
         self._prune_watch_sent_times(now)
-        if self._cfg.max_watch_alerts_per_hour > 0 and len(self._watch_sent_times) >= self._cfg.max_watch_alerts_per_hour:
+        if (
+            self._cfg.max_watch_alerts_per_hour > 0
+            and len(self._watch_sent_times) >= self._cfg.max_watch_alerts_per_hour
+        ):
             return False
         last = self._last_watch_by_symbol.get(symbol)
         if last is None:
@@ -481,16 +537,26 @@ class AlertCoordinator:
             "ref_id": ref_id,
         }
 
-    async def _send(self, text: str, *, dry_run: bool, reply_to_message_id: int | None) -> int | None:
+    async def _send(
+        self, text: str, *, dry_run: bool, reply_to_message_id: int | None
+    ) -> int | None:
         if dry_run:
             LOG.info("dry-run alert message\n%s", text)
             return None
-        result: DeliveryResult = await self._broadcaster.send_html(text, reply_to_message_id=reply_to_message_id)
+        result: DeliveryResult = await self._broadcaster.send_html(
+            text, reply_to_message_id=reply_to_message_id
+        )
         if result.status != "sent":
-            LOG.info("alert delivery failed | status=%s reason=%s", result.status, result.reason)
+            LOG.info(
+                "alert delivery failed | status=%s reason=%s",
+                result.status,
+                result.reason,
+            )
         return result.message_id
 
-    def _pullback_watch_candidates(self, prepared: PreparedSymbol, *, observed_at: datetime) -> list[WatchCandidate]:
+    def _pullback_watch_candidates(
+        self, prepared: PreparedSymbol, *, observed_at: datetime
+    ) -> list[WatchCandidate]:
         """Build watch candidates using only already-prepared frames.
 
         This must stay cheap: it runs on each 15m refresh per symbol and is used
@@ -518,7 +584,12 @@ class AlertCoordinator:
         mid = None
         if prepared.mark_price and prepared.mark_price > 0:
             mid = float(prepared.mark_price)
-        elif prepared.bid_price and prepared.ask_price and prepared.bid_price > 0 and prepared.ask_price > 0:
+        elif (
+            prepared.bid_price
+            and prepared.ask_price
+            and prepared.bid_price > 0
+            and prepared.ask_price > 0
+        ):
             mid = (float(prepared.bid_price) + float(prepared.ask_price)) / 2.0
         elif prepared.universe.last_price and prepared.universe.last_price > 0:
             mid = float(prepared.universe.last_price)
@@ -538,7 +609,9 @@ class AlertCoordinator:
         }
         if not prepared.work_15m.is_empty():
             context["rsi_15m"] = float(prepared.work_15m.item(-1, "rsi14") or 0.0)
-            context["volume_ratio_15m"] = float(prepared.work_15m.item(-1, "volume_ratio20") or 0.0)
+            context["volume_ratio_15m"] = float(
+                prepared.work_15m.item(-1, "volume_ratio20") or 0.0
+            )
         candidates: list[WatchCandidate] = []
         for name, level in levels:
             if level <= 0:
@@ -580,7 +653,9 @@ class AlertCoordinator:
         candidates.sort(key=lambda item: abs(mid - item.level_price))
         return candidates
 
-    def _format_watch(self, cand: WatchCandidate, *, current_price: float, now: datetime, ref_id: str) -> str:
+    def _format_watch(
+        self, cand: WatchCandidate, *, current_price: float, now: datetime, ref_id: str
+    ) -> str:
         direction = "LONG" if cand.direction == "long" else "SHORT"
         return "\n".join(
             [
@@ -596,7 +671,9 @@ class AlertCoordinator:
             ]
         )
 
-    def _format_entry_zone(self, cand: WatchCandidate, *, current_price: float, now: datetime, ref_id: str) -> str:
+    def _format_entry_zone(
+        self, cand: WatchCandidate, *, current_price: float, now: datetime, ref_id: str
+    ) -> str:
         direction = "LONG" if cand.direction == "long" else "SHORT"
         return "\n".join(
             [

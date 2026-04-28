@@ -8,7 +8,9 @@ from bot.models import SymbolMeta
 from bot.universe import build_shortlist
 
 
-def _settings(*, quote_asset: str, pinned_symbols: tuple[str, ...] = ()) -> SimpleNamespace:
+def _settings(
+    *, quote_asset: str, pinned_symbols: tuple[str, ...] = ()
+) -> SimpleNamespace:
     return SimpleNamespace(
         universe=SimpleNamespace(
             quote_asset=quote_asset,

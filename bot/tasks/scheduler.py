@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Callable, Coroutine
 from enum import Enum
 
@@ -18,6 +18,7 @@ def _utcnow_naive() -> datetime:
 
 class TaskPriority(Enum):
     """Task priority levels."""
+
     HIGH = 1
     NORMAL = 2
     LOW = 3
@@ -26,6 +27,7 @@ class TaskPriority(Enum):
 @dataclass
 class ScheduledTask:
     """Scheduled task definition."""
+
     name: str
     coro: Callable[[], Coroutine[Any, Any, Any]]
     interval_seconds: float
@@ -40,28 +42,31 @@ class ScheduledTask:
 
 class TaskScheduler:
     """Async task scheduler with priority support.
-    
+
     Features:
     - Periodic task execution
     - Priority-based scheduling
     - Error tracking and backoff
     - Graceful shutdown
     """
-    
+
     def __init__(self):
         self._tasks: dict[str, ScheduledTask] = {}
         self._running = False
         self._task_handles: dict[str, asyncio.Task] = {}
         self._shutdown_event = asyncio.Event()
-        self._alert_handler: Callable[[str, Exception, int], Coroutine[Any, Any, None] | None] | None = None
+        self._alert_handler: (
+            Callable[[str, Exception, int], Coroutine[Any, Any, None] | None] | None
+        ) = None
 
     def set_alert_handler(
         self,
-        handler: Callable[[str, Exception, int], Coroutine[Any, Any, None] | None] | None,
+        handler: Callable[[str, Exception, int], Coroutine[Any, Any, None] | None]
+        | None,
     ) -> None:
         """Set optional repeated-failure alert handler."""
         self._alert_handler = handler
-    
+
     def register(
         self,
         name: str,
@@ -73,7 +78,7 @@ class TaskScheduler:
     ) -> None:
         """Register a periodic task."""
         now = _utcnow_naive()
-        
+
         self._tasks[name] = ScheduledTask(
             name=name,
             coro=coro,
@@ -86,18 +91,20 @@ class TaskScheduler:
             enabled=True,
             consecutive_failures_for_alert=max(1, int(consecutive_failures_for_alert)),
         )
-        
+
         LOG.info(
             "Registered task: %s (interval=%.1fs, priority=%s)",
-            name, interval_seconds, priority.name
+            name,
+            interval_seconds,
+            priority.name,
         )
-    
+
     def unregister(self, name: str) -> None:
         """Unregister a task."""
         if name in self._tasks:
             del self._tasks[name]
             LOG.info("Unregistered task: %s", name)
-    
+
     def enable(self, name: str) -> bool:
         """Enable a task."""
         if name not in self._tasks:
@@ -105,7 +112,7 @@ class TaskScheduler:
         self._tasks[name].enabled = True
         LOG.info("Enabled task: %s", name)
         return True
-    
+
     def disable(self, name: str) -> bool:
         """Disable a task."""
         if name not in self._tasks:
@@ -113,65 +120,59 @@ class TaskScheduler:
         self._tasks[name].enabled = False
         LOG.info("Disabled task: %s", name)
         return True
-    
+
     def run_once(self, name: str) -> asyncio.Task | None:
         """Manually trigger a task to run once."""
         if name not in self._tasks:
             return None
-        
+
         task = self._tasks[name]
-        return asyncio.create_task(
-            self._execute_task(task),
-            name=f"manual_{name}"
-        )
-    
+        return asyncio.create_task(self._execute_task(task), name=f"manual_{name}")
+
     async def start(self) -> None:
         """Start the scheduler."""
         if self._running:
             LOG.warning("Scheduler already running")
             return
-        
+
         self._running = True
         self._shutdown_event.clear()
-        
+
         LOG.info("Starting task scheduler with %d tasks", len(self._tasks))
-        
+
         # Start all enabled tasks
         for task in self._tasks.values():
             if task.enabled:
                 self._schedule_task(task)
-        
+
         # Wait for shutdown
         await self._shutdown_event.wait()
-    
+
     async def stop(self) -> None:
         """Stop the scheduler gracefully."""
         if not self._running:
             return
-        
+
         LOG.info("Stopping task scheduler...")
         self._running = False
         self._shutdown_event.set()
-        
+
         # Cancel all running tasks
         for handle in list(self._task_handles.values()):
             handle.cancel()
-        
+
         # Wait for cancellation
         if self._task_handles:
-            await asyncio.gather(
-                *self._task_handles.values(),
-                return_exceptions=True
-            )
-        
+            await asyncio.gather(*self._task_handles.values(), return_exceptions=True)
+
         self._task_handles.clear()
         LOG.info("Task scheduler stopped")
-    
+
     def _schedule_task(self, task: ScheduledTask) -> None:
         """Schedule next execution of a task."""
         if not self._running or not task.enabled:
             return
-        
+
         # Calculate delay based on priority
         base_delay = task.interval_seconds
         if task.priority == TaskPriority.HIGH:
@@ -180,48 +181,49 @@ class TaskScheduler:
             delay = base_delay * 1.1  # Slight delay
         else:
             delay = base_delay
-        
+
         # Error backoff
         if task.error_count > 0:
-            backoff = min(2 ** task.error_count, 300)  # Max 5 min backoff
+            backoff = min(2**task.error_count, 300)  # Max 5 min backoff
             delay += backoff
             LOG.warning(
                 "Task %s error backoff: +%ds (errors=%d)",
-                task.name, backoff, task.error_count
+                task.name,
+                backoff,
+                task.error_count,
             )
-        
+
         # Create task
         handle = asyncio.create_task(
-            self._run_with_delay(task, delay),
-            name=f"scheduler_{task.name}"
+            self._run_with_delay(task, delay), name=f"scheduler_{task.name}"
         )
-        
+
         self._task_handles[task.name] = handle
-    
+
     async def _run_with_delay(self, task: ScheduledTask, delay: float) -> None:
         """Wait then execute task."""
         try:
             await asyncio.sleep(delay)
-            
+
             if not self._running:
                 return
-            
+
             await self._execute_task(task)
-            
+
             # Reschedule
             if self._running:
                 self._schedule_task(task)
-                
+
         except asyncio.CancelledError:
             LOG.debug("Task %s cancelled", task.name)
         except Exception as exc:
             LOG.error("Task %s scheduler error: %s", task.name, exc)
             task.error_count += 1
-            
+
             if task.error_count < task.max_errors:
                 # Retry
                 self._schedule_task(task)
-    
+
     async def _execute_task(self, task: ScheduledTask) -> None:
         """Execute a single task with error handling."""
         task.last_run = _utcnow_naive()
@@ -234,7 +236,9 @@ class TaskScheduler:
 
                 # Reset error count on success
                 if task.error_count > 0:
-                    LOG.info("Task %s recovered after %d errors", task.name, task.error_count)
+                    LOG.info(
+                        "Task %s recovered after %d errors", task.name, task.error_count
+                    )
                     task.error_count = 0
                 return
             except asyncio.CancelledError:
@@ -243,7 +247,10 @@ class TaskScheduler:
                 if attempt < 3:
                     LOG.warning(
                         "Task %s attempt %d failed, retrying in %.1fs: %s",
-                        task.name, attempt, delay, exc,
+                        task.name,
+                        attempt,
+                        delay,
+                        exc,
                     )
                     await asyncio.sleep(delay)
                     delay = min(delay * 2, 60.0)
@@ -256,15 +263,20 @@ class TaskScheduler:
                     task.max_errors,
                     exc,
                 )
-                if task.error_count >= task.consecutive_failures_for_alert and self._alert_handler is not None:
+                if (
+                    task.error_count >= task.consecutive_failures_for_alert
+                    and self._alert_handler is not None
+                ):
                     maybe_coro = self._alert_handler(task.name, exc, task.error_count)
                     if asyncio.iscoroutine(maybe_coro):
                         await maybe_coro
                 if task.error_count >= task.max_errors:
-                    LOG.error("Task %s disabled after %d errors", task.name, task.error_count)
+                    LOG.error(
+                        "Task %s disabled after %d errors", task.name, task.error_count
+                    )
                     task.enabled = False
                 return
-    
+
     def get_status(self) -> dict[str, Any]:
         """Get scheduler status."""
         return {

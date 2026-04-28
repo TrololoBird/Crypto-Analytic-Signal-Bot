@@ -183,15 +183,29 @@ def test_train_cli_rejects_invalid_metric_threshold(tmp_path, monkeypatch) -> No
 def test_aggregate_metrics_weighted_by_test_rows() -> None:
     report = train_module._aggregate_report_metrics(
         [
-            {"accuracy": 1.0, "precision": 1.0, "recall": 1.0, "f1": 1.0, "test_rows": 100},
-            {"accuracy": 0.0, "precision": 0.0, "recall": 0.0, "f1": 0.0, "test_rows": 1},
+            {
+                "accuracy": 1.0,
+                "precision": 1.0,
+                "recall": 1.0,
+                "f1": 1.0,
+                "test_rows": 100,
+            },
+            {
+                "accuracy": 0.0,
+                "precision": 0.0,
+                "recall": 0.0,
+                "f1": 0.0,
+                "test_rows": 1,
+            },
         ]
     )
     assert report["accuracy"] > 0.9
     assert report["f1"] > 0.9
 
 
-def test_train_cli_reports_multiple_gate_failures(tmp_path, monkeypatch, capsys) -> None:
+def test_train_cli_reports_multiple_gate_failures(
+    tmp_path, monkeypatch, capsys
+) -> None:
     base = datetime(2025, 1, 1, tzinfo=UTC)
     data = pl.DataFrame(
         {

@@ -121,7 +121,13 @@ def apply_global_filters(
         scoring: ScoringResult | None = None,
         details: dict[str, Any] | None = None,
     ) -> tuple[bool, Signal, str | None, ScoringResult | None, dict[str, Any] | None]:
-        return False, replace(updated_signal, passed_filters=tuple(passed)), reason, scoring, details
+        return (
+            False,
+            replace(updated_signal, passed_filters=tuple(passed)),
+            reason,
+            scoring,
+            details,
+        )
 
     # --- 1. Data freshness ---
     if not _frame_is_fresh(
@@ -149,7 +155,9 @@ def apply_global_filters(
         and prepared.ticker_price is not None
         and prepared.ticker_price > 0
     ):
-        deviation = abs(prepared.mark_price - prepared.ticker_price) / prepared.ticker_price
+        deviation = (
+            abs(prepared.mark_price - prepared.ticker_price) / prepared.ticker_price
+        )
         mark_price_details = {
             "mark_price": prepared.mark_price,
             "comparison_price": prepared.ticker_price,
@@ -173,7 +181,9 @@ def apply_global_filters(
     if prepared.work_15m.is_empty() or "atr_pct" not in prepared.work_15m.columns:
         return _reject("atr_unavailable", replace(base, atr_pct=0.0))
     atr_pct_raw = prepared.work_15m.item(-1, "atr_pct")
-    if atr_pct_raw is None or (isinstance(atr_pct_raw, float) and math.isnan(atr_pct_raw)):
+    if atr_pct_raw is None or (
+        isinstance(atr_pct_raw, float) and math.isnan(atr_pct_raw)
+    ):
         return _reject("atr_nan", replace(base, atr_pct=0.0))
     atr_pct = float(atr_pct_raw)
     if atr_pct < settings.filters.min_atr_pct:
@@ -200,7 +210,9 @@ def apply_global_filters(
                 "setup_id": signal.setup_id,
                 "strategy_family": signal.strategy_family,
             }
-            return _reject("regime_not_suitable", replace(base, atr_pct=atr_pct), details=details)
+            return _reject(
+                "regime_not_suitable", replace(base, atr_pct=atr_pct), details=details
+            )
         adx_penalty_applied = True
         passed.append("adx_1h_penalized")
     else:
@@ -235,13 +247,17 @@ def apply_global_filters(
         return _reject("stop_too_tight", updated)
     if updated.stop_distance_pct > settings.tracking.max_stop_distance_pct:
         return _reject("stop_too_wide", updated)
-    updated = replace(updated, passed_filters=tuple([*updated.passed_filters, "stop_ok"]))
+    updated = replace(
+        updated, passed_filters=tuple([*updated.passed_filters, "stop_ok"])
+    )
 
     # --- 6. Risk / Reward (runtime gate uses TP1; TP2 RR remains analytical) ---
     risk = abs(updated.entry_mid - updated.stop)
     reward_tp1 = abs(updated.take_profit_1 - updated.entry_mid)
     rr_tp1 = (reward_tp1 / risk) if risk > 0 else 0.0
-    effective_min_rr = float(setup_overrides.get("min_rr", settings.filters.min_risk_reward))
+    effective_min_rr = float(
+        setup_overrides.get("min_rr", settings.filters.min_risk_reward)
+    )
     if rr_tp1 < effective_min_rr:
         return _reject(
             "risk_reward_too_low",
@@ -283,7 +299,10 @@ def apply_global_filters(
                     "adx_policy_penalty": penalty_delta,
                 },
             )
-        updated = replace(updated, passed_filters=tuple([*updated.passed_filters, "adx_penalty_applied"]))
+        updated = replace(
+            updated,
+            passed_filters=tuple([*updated.passed_filters, "adx_penalty_applied"]),
+        )
 
     # --- 9. Minimum score gate (final gate after ALL adjustments) ---
     if settings.filters.min_score > 0.0 and updated.score < settings.filters.min_score:

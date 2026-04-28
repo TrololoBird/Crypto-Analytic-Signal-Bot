@@ -17,7 +17,9 @@ class _ConfluenceStub:
             self.ml_probability = None
 
         def to_scoring_result(self) -> ScoringResult:
-            return ScoringResult(base_score=0.7, adjustments={}, final_score=self.final_score)
+            return ScoringResult(
+                base_score=0.7, adjustments={}, final_score=self.final_score
+            )
 
     def score(self, signal: Signal, prepared: PreparedSymbol) -> _Result:
         return _ConfluenceStub._Result(score=signal.score)

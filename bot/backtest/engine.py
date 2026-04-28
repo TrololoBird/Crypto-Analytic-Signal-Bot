@@ -48,7 +48,9 @@ class VectorizedBacktester:
         self.settings = settings
 
     def _load_ohlcv(self, symbol: str, timeframe: str) -> pl.DataFrame:
-        parquet_path = self.settings.data_dir / "parquet" / f"{symbol}_{timeframe}.parquet"
+        parquet_path = (
+            self.settings.data_dir / "parquet" / f"{symbol}_{timeframe}.parquet"
+        )
         if parquet_path.exists():
             return pl.read_parquet(parquet_path)
         return pl.DataFrame()
@@ -65,14 +67,20 @@ class VectorizedBacktester:
     ) -> BacktestResult:
         setup = (setup_id or "ema_cross").strip().lower()
         if setup not in self.SUPPORTED_SETUPS:
-            raise ValueError(f"unsupported setup_id={setup!r}, supported={sorted(self.SUPPORTED_SETUPS)}")
+            raise ValueError(
+                f"unsupported setup_id={setup!r}, supported={sorted(self.SUPPORTED_SETUPS)}"
+            )
 
         df = self._load_ohlcv(symbol, timeframe)
         if not df.is_empty() and "close_time" in df.columns:
-            df = df.filter((pl.col("close_time") >= start) & (pl.col("close_time") <= end))
+            df = df.filter(
+                (pl.col("close_time") >= start) & (pl.col("close_time") <= end)
+            )
 
         if df.is_empty() or "close" not in df.columns:
-            empty = pl.DataFrame({"ts": [datetime.now(UTC)], "equity": [float(initial_equity)]})
+            empty = pl.DataFrame(
+                {"ts": [datetime.now(UTC)], "equity": [float(initial_equity)]}
+            )
             return BacktestResult(
                 total_return=0.0,
                 sharpe_ratio=0.0,
@@ -87,13 +95,21 @@ class VectorizedBacktester:
 
         work = self._prepare_frame(df)
         if work.is_empty():
-            empty = pl.DataFrame({"ts": [datetime.now(UTC)], "equity": [float(initial_equity)]})
-            return BacktestResult(0.0, 0.0, 0.0, 0.0, 0.0, pl.DataFrame(), empty, 0, 0.0)
+            empty = pl.DataFrame(
+                {"ts": [datetime.now(UTC)], "equity": [float(initial_equity)]}
+            )
+            return BacktestResult(
+                0.0, 0.0, 0.0, 0.0, 0.0, pl.DataFrame(), empty, 0, 0.0
+            )
 
         signal_rows = self._materialize_signals(work, setup_id=setup, signals=signals)
         if not signal_rows:
-            empty = pl.DataFrame({"ts": [datetime.now(UTC)], "equity": [float(initial_equity)]})
-            return BacktestResult(0.0, 0.0, 0.0, 0.0, 0.0, pl.DataFrame(), empty, 0, 0.0)
+            empty = pl.DataFrame(
+                {"ts": [datetime.now(UTC)], "equity": [float(initial_equity)]}
+            )
+            return BacktestResult(
+                0.0, 0.0, 0.0, 0.0, 0.0, pl.DataFrame(), empty, 0, 0.0
+            )
 
         trades, equity_curve = self._simulate_lifecycle(
             work,
@@ -115,7 +131,9 @@ class VectorizedBacktester:
             signal_frame = signals
 
         if signal_frame is not None and not signal_frame.is_empty():
-            return self._signals_from_explicit_rows(frame, signal_frame, default_setup_id=setup_id)
+            return self._signals_from_explicit_rows(
+                frame, signal_frame, default_setup_id=setup_id
+            )
         return self._signals_from_signal_columns(frame, setup_id=setup_id)
 
     def _signals_from_explicit_rows(
@@ -135,8 +153,16 @@ class VectorizedBacktester:
             signal_index = index_by_ts.get(created_at)
             if signal_index is None:
                 continue
-            entry_low = float(row.get("entry_low", row.get("entry", frame.item(signal_index, "close"))))
-            entry_high = float(row.get("entry_high", row.get("entry", frame.item(signal_index, "close"))))
+            entry_low = float(
+                row.get(
+                    "entry_low", row.get("entry", frame.item(signal_index, "close"))
+                )
+            )
+            entry_high = float(
+                row.get(
+                    "entry_high", row.get("entry", frame.item(signal_index, "close"))
+                )
+            )
             stop = float(row.get("stop", entry_low))
             tp1 = float(row.get("take_profit_1", row.get("tp1", entry_high)))
             tp2 = float(row.get("take_profit_2", row.get("tp2", tp1)))
@@ -150,20 +176,32 @@ class VectorizedBacktester:
                     entry_high=max(entry_low, entry_high),
                     stop=stop,
                     take_profit_1=tp1,
-                    take_profit_2=max(tp1, tp2) if str(row.get("direction") or "long") == "long" else min(tp1, tp2),
+                    take_profit_2=max(tp1, tp2)
+                    if str(row.get("direction") or "long") == "long"
+                    else min(tp1, tp2),
                 )
             )
         return rows
 
-    def _signals_from_signal_columns(self, frame: pl.DataFrame, *, setup_id: str) -> list[_LifecycleSignal]:
+    def _signals_from_signal_columns(
+        self, frame: pl.DataFrame, *, setup_id: str
+    ) -> list[_LifecycleSignal]:
         if "signal_long" not in frame.columns and "signal_short" not in frame.columns:
             return []
 
         closes = frame.get_column("close").cast(pl.Float64).to_list()
         atrs = frame.get_column("atr14").cast(pl.Float64).to_list()
         close_times = frame.get_column("close_time").to_list()
-        signal_long = frame.get_column("signal_long").to_list() if "signal_long" in frame.columns else [0] * frame.height
-        signal_short = frame.get_column("signal_short").to_list() if "signal_short" in frame.columns else [0] * frame.height
+        signal_long = (
+            frame.get_column("signal_long").to_list()
+            if "signal_long" in frame.columns
+            else [0] * frame.height
+        )
+        signal_short = (
+            frame.get_column("signal_short").to_list()
+            if "signal_short" in frame.columns
+            else [0] * frame.height
+        )
 
         rows: list[_LifecycleSignal] = []
         for index, price in enumerate(closes):
@@ -222,8 +260,14 @@ class VectorizedBacktester:
             exit_price: float | None = None
             status = "expired"
 
-            for bar_index in range(signal.signal_index + 1, min(frame.height, signal.signal_index + pending_bars + 1)):
-                if lows[bar_index] <= signal.entry_high and highs[bar_index] >= signal.entry_low:
+            for bar_index in range(
+                signal.signal_index + 1,
+                min(frame.height, signal.signal_index + pending_bars + 1),
+            ):
+                if (
+                    lows[bar_index] <= signal.entry_high
+                    and highs[bar_index] >= signal.entry_low
+                ):
                     activated = True
                     activation_index = bar_index
                     break
@@ -237,7 +281,9 @@ class VectorizedBacktester:
                         status="expired",
                         entry_ts=signal.created_at,
                         activation_ts=None,
-                        exit_ts=close_times[min(frame.height - 1, signal.signal_index + pending_bars)],
+                        exit_ts=close_times[
+                            min(frame.height - 1, signal.signal_index + pending_bars)
+                        ],
                         exit_price=None,
                         ret=0.0,
                         resolution_bars=pending_bars,
@@ -245,7 +291,10 @@ class VectorizedBacktester:
                 )
                 continue
 
-            for bar_index in range(activation_index, min(frame.height, activation_index + max_holding_bars + 1)):
+            for bar_index in range(
+                activation_index,
+                min(frame.height, activation_index + max_holding_bars + 1),
+            ):
                 low = lows[bar_index]
                 high = highs[bar_index]
                 if signal.direction == "long":
@@ -274,11 +323,15 @@ class VectorizedBacktester:
 
             if exit_index is None:
                 if tp1_hit:
-                    exit_index = min(frame.height - 1, activation_index + max_holding_bars)
+                    exit_index = min(
+                        frame.height - 1, activation_index + max_holding_bars
+                    )
                     exit_price = signal.take_profit_1
                     status = "tp1"
                 else:
-                    exit_index = min(frame.height - 1, activation_index + max_holding_bars)
+                    exit_index = min(
+                        frame.height - 1, activation_index + max_holding_bars
+                    )
                     exit_price = None
                     status = "expired"
 
@@ -360,9 +413,13 @@ class VectorizedBacktester:
             ]
         )
         if "ema20" not in frame.columns:
-            frame = frame.with_columns([pl.col("close").ewm_mean(span=20, adjust=False).alias("ema20")])
+            frame = frame.with_columns(
+                [pl.col("close").ewm_mean(span=20, adjust=False).alias("ema20")]
+            )
         if "ema50" not in frame.columns:
-            frame = frame.with_columns([pl.col("close").ewm_mean(span=50, adjust=False).alias("ema50")])
+            frame = frame.with_columns(
+                [pl.col("close").ewm_mean(span=50, adjust=False).alias("ema50")]
+            )
         if "atr14" not in frame.columns:
             tr = pl.max_horizontal(
                 [
@@ -373,7 +430,14 @@ class VectorizedBacktester:
             ).alias("tr")
             frame = (
                 frame.with_columns([tr])
-                .with_columns([pl.col("tr").rolling_mean(window_size=14).fill_null(0.0).alias("atr14")])
+                .with_columns(
+                    [
+                        pl.col("tr")
+                        .rolling_mean(window_size=14)
+                        .fill_null(0.0)
+                        .alias("atr14")
+                    ]
+                )
                 .drop("tr")
             )
         return frame

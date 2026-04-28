@@ -1,4 +1,5 @@
 """Signal cycle execution helpers for SignalBot."""
+
 from __future__ import annotations
 
 import asyncio
@@ -49,7 +50,9 @@ class CycleRunner:
                 ws_enrichments=ws_enrichments,
             )
 
-        candidates, rejected, delivered = await bot._select_and_deliver_for_symbol(symbol, result)
+        candidates, rejected, delivered = await bot._select_and_deliver_for_symbol(
+            symbol, result
+        )
 
         for row in rejected:
             bot.telemetry.append_jsonl("rejected.jsonl", row)
@@ -111,7 +114,11 @@ class CycleRunner:
         bias_counter: Counter[str] = Counter()
 
         for res in results:
-            if res is None or isinstance(res, Exception) or not isinstance(res, PipelineResult):
+            if (
+                res is None
+                or isinstance(res, Exception)
+                or not isinstance(res, PipelineResult)
+            ):
                 continue
             pipeline_results.append(res)
             rejected_by_symbol.setdefault(res.symbol, [])
@@ -136,14 +143,20 @@ class CycleRunner:
             all_candidates,
             max_signals=bot.settings.runtime.max_signals_per_cycle,
         )
-        delivered, cooldown_rejected, delivery_status_counts = await bot._select_and_deliver(
+        (
+            delivered,
+            cooldown_rejected,
+            delivery_status_counts,
+        ) = await bot._select_and_deliver(
             selected,
             prepared_by_tracking_id=prepared_by_tracking_id,
         )
         all_rejected.extend(cooldown_rejected)
         for row in cooldown_rejected:
             bot.telemetry.append_jsonl("rejected.jsonl", row)
-            rejected_by_symbol.setdefault(str(row.get("symbol") or "unknown"), []).append(row)
+            rejected_by_symbol.setdefault(
+                str(row.get("symbol") or "unknown"), []
+            ).append(row)
 
         selected_by_symbol: dict[str, list[Signal]] = {}
         for signal in selected:
@@ -155,13 +168,17 @@ class CycleRunner:
 
         delivery_status_counts_by_symbol: dict[str, Counter[str]] = {}
         for signal in delivered:
-            counter = delivery_status_counts_by_symbol.setdefault(signal.symbol, Counter())
+            counter = delivery_status_counts_by_symbol.setdefault(
+                signal.symbol, Counter()
+            )
             counter["sent"] += 1
         for res in pipeline_results:
             if res.funnel:
                 res.funnel["selected"] = len(selected_by_symbol.get(res.symbol, []))
                 res.funnel["delivered"] = len(delivered_by_symbol.get(res.symbol, []))
-                res.funnel["delivery_status_counts"] = dict(delivery_status_counts_by_symbol.get(res.symbol, Counter()))
+                res.funnel["delivery_status_counts"] = dict(
+                    delivery_status_counts_by_symbol.get(res.symbol, Counter())
+                )
 
         now_ts = datetime.now(UTC).isoformat()
         for candidates in all_candidates.values():
@@ -201,5 +218,7 @@ class CycleRunner:
             "delivery_status_counts": dict(delivery_status_counts),
         }
         bot.last_cycle_summary = summary
-        LOG.info("emergency cycle | %s", " ".join(f"{k}={v}" for k, v in summary.items()))
+        LOG.info(
+            "emergency cycle | %s", " ".join(f"{k}={v}" for k, v in summary.items())
+        )
         return summary

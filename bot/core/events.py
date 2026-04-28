@@ -2,6 +2,7 @@
 
 All events are immutable (frozen msgspec.Struct) for safe concurrent dispatch.
 """
+
 from __future__ import annotations
 
 import msgspec
@@ -47,4 +48,10 @@ class BookTickerEvent(msgspec.Struct, frozen=True):
 
 
 # Union type for dispatcher type routing
-AnyEvent = KlineCloseEvent | ShortlistUpdatedEvent | ReconnectEvent | OIRefreshDueEvent | BookTickerEvent
+AnyEvent = (
+    KlineCloseEvent
+    | ShortlistUpdatedEvent
+    | ReconnectEvent
+    | OIRefreshDueEvent
+    | BookTickerEvent
+)

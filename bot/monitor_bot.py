@@ -46,6 +46,15 @@ class HealthMonitor:
                     self._failure_streak,
                     exc,
                 )
-                if self._failure_streak >= self._alert_after_failures and self._alert is not None:
-                    await self._alert(exc, {"component": "health_monitor", "failure_streak": self._failure_streak})
+                if (
+                    self._failure_streak >= self._alert_after_failures
+                    and self._alert is not None
+                ):
+                    await self._alert(
+                        exc,
+                        {
+                            "component": "health_monitor",
+                            "failure_streak": self._failure_streak,
+                        },
+                    )
             await asyncio.sleep(self._interval_seconds)

@@ -32,7 +32,9 @@ def test_swing_points_with_unconfirmed_tail_marks_recent_bars() -> None:
     sh, sl = _swing_points(frame, n=2, include_unconfirmed_tail=True)
     assert sh.len() == frame.height
     assert sl.len() == frame.height
-    assert any(bool(v) for v in sh.tail(2).to_list()) or any(bool(v) for v in sl.tail(2).to_list())
+    assert any(bool(v) for v in sh.tail(2).to_list()) or any(
+        bool(v) for v in sl.tail(2).to_list()
+    )
 
 
 def test_adx_no_inf_no_nan() -> None:
@@ -90,7 +92,14 @@ def test_strategy_registry_contains_extended_setups() -> None:
 async def test_strategy_analytics_report_shape() -> None:
     class RepoStub:
         async def get_setup_stats(self, *, last_days: int = 30):
-            return [{"setup_id": "ema_bounce", "total": 2, "win_rate": 0.5, "avg_r_multiple": 0.2}]
+            return [
+                {
+                    "setup_id": "ema_bounce",
+                    "total": 2,
+                    "win_rate": 0.5,
+                    "avg_r_multiple": 0.2,
+                }
+            ]
 
         async def get_signal_outcomes(self, *, last_days: int = 30):
             return [
@@ -123,5 +132,11 @@ def test_market_regime_exposes_extended_phase_fields() -> None:
     payload = result.to_dict()
     assert payload["volatility_regime"] in {"expanding", "contracting", "stable"}
     assert payload["risk_on_off"] in {"risk_on", "risk_off", "neutral"}
-    assert payload["btc_phase"] in {"accumulation", "markup", "distribution", "decline", "sideways"}
+    assert payload["btc_phase"] in {
+        "accumulation",
+        "markup",
+        "distribution",
+        "decline",
+        "sideways",
+    }
     assert 0.0 <= payload["confidence"] <= 1.0

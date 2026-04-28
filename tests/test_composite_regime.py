@@ -12,7 +12,9 @@ import polars as pl
 
 def test_composite_regime_uses_hmm_and_gmm_votes(monkeypatch) -> None:
     analyzer = CompositeRegimeAnalyzer()
-    monkeypatch.setattr(analyzer.gmm, "current_regime", lambda _features: ("calm_down", 0.8))
+    monkeypatch.setattr(
+        analyzer.gmm, "current_regime", lambda _features: ("calm_down", 0.8)
+    )
     monkeypatch.setattr(
         analyzer.hmm,
         "predict",
@@ -32,7 +34,9 @@ def test_composite_regime_uses_hmm_and_gmm_votes(monkeypatch) -> None:
 
 def test_composite_regime_confidence_blends_models(monkeypatch) -> None:
     analyzer = CompositeRegimeAnalyzer()
-    monkeypatch.setattr(analyzer.gmm, "current_regime", lambda _features: ("contagion", 0.7))
+    monkeypatch.setattr(
+        analyzer.gmm, "current_regime", lambda _features: ("contagion", 0.7)
+    )
     monkeypatch.setattr(
         analyzer.hmm,
         "predict",
@@ -65,18 +69,29 @@ def test_rule_based_detector_fit_predict_does_not_fail() -> None:
     )
     detector.fit(df)
     pred = detector.predict(df)
-    assert pred.regime in {"high_vol_choppy", "low_vol_uptrend", "low_vol_downtrend", "ranging"}
+    assert pred.regime in {
+        "high_vol_choppy",
+        "low_vol_uptrend",
+        "low_vol_downtrend",
+        "ranging",
+    }
     assert 0.0 <= pred.confidence <= 1.0
 
 
 def test_centroid_detector_fit_predict_does_not_fail() -> None:
     detector = CentroidRegimeDetector(n_regimes=3)
     rows = [
-        {"price_change_percent": float((i % 9) - 4), "quote_volume": float(1000 + i * 10), "funding_rate": 0.0001}
+        {
+            "price_change_percent": float((i % 9) - 4),
+            "quote_volume": float(1000 + i * 10),
+            "funding_rate": 0.0001,
+        }
         for i in range(90)
     ]
     detector.fit(rows)
-    regime, confidence = detector.current_regime({"returns": 0.5, "vol": 0.02, "funding_rate": 0.0001})
+    regime, confidence = detector.current_regime(
+        {"returns": 0.5, "vol": 0.02, "funding_rate": 0.0001}
+    )
     assert regime in {"contagion", "calm_up", "calm_down", "neutral"}
     assert 0.0 <= confidence <= 1.0
 
@@ -85,7 +100,9 @@ def test_composite_regime_uses_history_frame_when_available(monkeypatch) -> None
     analyzer = CompositeRegimeAnalyzer()
     captured = {}
 
-    monkeypatch.setattr(analyzer.centroid, "current_regime", lambda _features: ("neutral", 0.4))
+    monkeypatch.setattr(
+        analyzer.centroid, "current_regime", lambda _features: ("neutral", 0.4)
+    )
 
     def _fake_predict(df):
         captured["height"] = df.height
@@ -104,7 +121,13 @@ def test_composite_regime_uses_history_frame_when_available(monkeypatch) -> None
     analyzer.analyze(
         ticker_data=[],
         funding_rates={"BTCUSDT": 0.0},
-        benchmark_context={"BTCUSDT": {"basis_pct": 0.0, "premium_slope_5m": 0.01, "regime_frame_4h": history}},
+        benchmark_context={
+            "BTCUSDT": {
+                "basis_pct": 0.0,
+                "premium_slope_5m": 0.01,
+                "regime_frame_4h": history,
+            }
+        },
     )
 
     assert captured["height"] == 3

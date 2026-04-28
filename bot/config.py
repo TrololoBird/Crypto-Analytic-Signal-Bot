@@ -43,7 +43,9 @@ class RuntimeConfig(BaseModel):
 class UniverseConfig(BaseModel):
     quote_asset: str = "USDT"
     dynamic_limit: int = Field(default=60, ge=10, le=200)
-    shortlist_limit: int = Field(default=45, ge=5, le=100)  # Reduced from 60 to prevent WS overload
+    shortlist_limit: int = Field(
+        default=45, ge=5, le=100
+    )  # Reduced from 60 to prevent WS overload
     min_quote_volume_usd: float = Field(default=10_000_000.0, ge=0.0)
     min_listing_age_days: int = Field(default=14, ge=0, le=3650)
     light_refresh_interval_seconds: int = Field(default=75, ge=15, le=900)
@@ -59,8 +61,12 @@ class UniverseConfig(BaseModel):
 
     @field_validator("pinned_symbols")
     @classmethod
-    def _normalize_pins(cls, value: tuple[str, ...] | list[str] | None) -> tuple[str, ...]:
-        return tuple(str(item).strip().upper() for item in (value or ()) if str(item).strip())
+    def _normalize_pins(
+        cls, value: tuple[str, ...] | list[str] | None
+    ) -> tuple[str, ...]:
+        return tuple(
+            str(item).strip().upper() for item in (value or ()) if str(item).strip()
+        )
 
 
 class FilterConfig(BaseModel):
@@ -303,7 +309,9 @@ class SpotCompanionConfig(BaseModel):
     def _normalize_lead_symbols(
         cls, value: tuple[str, ...] | list[str] | None
     ) -> tuple[str, ...]:
-        return tuple(str(item).strip().upper() for item in (value or ()) if str(item).strip())
+        return tuple(
+            str(item).strip().upper() for item in (value or ()) if str(item).strip()
+        )
 
 
 class IntelligenceConfig(BaseModel):
@@ -334,14 +342,18 @@ class IntelligenceConfig(BaseModel):
     def _normalize_benchmark_symbols(
         cls, value: tuple[str, ...] | list[str] | None
     ) -> tuple[str, ...]:
-        return tuple(str(item).strip().upper() for item in (value or ()) if str(item).strip())
+        return tuple(
+            str(item).strip().upper() for item in (value or ()) if str(item).strip()
+        )
 
     @field_validator("option_underlyings")
     @classmethod
     def _normalize_option_underlyings(
         cls, value: tuple[str, ...] | list[str] | None
     ) -> tuple[str, ...]:
-        return tuple(str(item).strip().upper() for item in (value or ()) if str(item).strip())
+        return tuple(
+            str(item).strip().upper() for item in (value or ()) if str(item).strip()
+        )
 
     @field_validator("macro_symbols")
     @classmethod
@@ -370,8 +382,12 @@ class WSConfig(BaseModel):
     subscription_scope: str = "shortlist"
     subscribe_book_ticker: bool = True
     subscribe_agg_trade: bool = True
-    subscribe_chunk_size: int = Field(default=10, ge=5, le=200)  # Reduced for Binance limits
-    subscribe_chunk_delay_ms: int = Field(default=500, ge=50, le=2000)  # Increased for stability
+    subscribe_chunk_size: int = Field(
+        default=10, ge=5, le=200
+    )  # Reduced for Binance limits
+    subscribe_chunk_delay_ms: int = Field(
+        default=500, ge=50, le=2000
+    )  # Increased for stability
     health_check_silence_seconds: float = Field(default=60.0, ge=10.0, le=300.0)
     market_reconnect_grace_seconds: float = Field(default=90.0, ge=60.0, le=120.0)
     agg_trade_window_seconds: int = Field(default=300, ge=10, le=3600)
@@ -407,17 +423,23 @@ class WSConfig(BaseModel):
     def _normalize_subscription_scope(cls, value: str) -> str:
         raw = str(value or "shortlist").strip().lower()
         if raw not in {"tracked_only", "shortlist"}:
-            raise ValueError("ws.subscription_scope must be one of: tracked_only, shortlist")
+            raise ValueError(
+                "ws.subscription_scope must be one of: tracked_only, shortlist"
+            )
         return raw
 
     @field_validator("kline_intervals")
     @classmethod
-    def _normalize_intervals(cls, value: tuple[str, ...] | list[str] | None) -> tuple[str, ...]:
+    def _normalize_intervals(
+        cls, value: tuple[str, ...] | list[str] | None
+    ) -> tuple[str, ...]:
         return tuple(str(v).strip() for v in (value or ()) if str(v).strip())
 
     @model_validator(mode="after")
     def _resolve_endpoint_urls(self) -> "WSConfig":
-        normalized_root = str(self.base_url or "wss://fstream.binance.com").strip().rstrip("/")
+        normalized_root = (
+            str(self.base_url or "wss://fstream.binance.com").strip().rstrip("/")
+        )
         for suffix in ("/public", "/market"):
             if normalized_root.endswith(suffix):
                 normalized_root = normalized_root[: -len(suffix)]
@@ -500,7 +522,9 @@ class BotSettings(BaseModel):
         # Telegram tokens format: 123456789:ABCdefGHIjklMNOpqrsTUVwxyZ
         # Allow alphanumerics, underscore, hyphen, and colon
         if token:
-            allowed_chars = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_:-")
+            allowed_chars = set(
+                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_:-"
+            )
             if not all(c in allowed_chars for c in token):
                 raise ValueError("tg_token contains invalid characters")
         return token
@@ -532,11 +556,29 @@ class BotSettings(BaseModel):
     @model_validator(mode="after")
     def _validate_kline_intervals(self) -> "BotSettings":
         """Validate kline intervals are supported by Binance."""
-        valid_intervals = {"1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "3d", "1w", "1M"}
+        valid_intervals = {
+            "1m",
+            "3m",
+            "5m",
+            "15m",
+            "30m",
+            "1h",
+            "2h",
+            "4h",
+            "6h",
+            "8h",
+            "12h",
+            "1d",
+            "3d",
+            "1w",
+            "1M",
+        }
         intervals = cast(list[str], self.ws.kline_intervals)
         for interval in intervals:
             if interval not in valid_intervals:
-                raise ValueError(f"Invalid kline interval: {interval}. Valid: {valid_intervals}")
+                raise ValueError(
+                    f"Invalid kline interval: {interval}. Valid: {valid_intervals}"
+                )
         return self
 
     def validate_for_runtime(self, *, require_telegram: bool) -> None:
@@ -562,7 +604,9 @@ class BotSettings(BaseModel):
         for label, url in ws_urls.items():
             lowered = str(url or "").strip().lower()
             if any(token in lowered for token in forbidden_tokens):
-                raise ValueError(f"{label} must point to Binance public market streams only: {url}")
+                raise ValueError(
+                    f"{label} must point to Binance public market streams only: {url}"
+                )
             if any(token in lowered for token in unsupported_path_tokens):
                 raise ValueError(
                     f"{label} must use canonical websocket root without endpoint path modifiers: {url}"
@@ -626,7 +670,9 @@ def _convert_toml_dict(d: dict[Any, Any]) -> dict[str, Any]:
         if isinstance(v, dict):
             result[key] = _convert_toml_dict(v)
         elif isinstance(v, list):
-            result[key] = [_convert_toml_dict(i) if isinstance(i, dict) else i for i in v]
+            result[key] = [
+                _convert_toml_dict(i) if isinstance(i, dict) else i for i in v
+            ]
         else:
             result[key] = v
     return result

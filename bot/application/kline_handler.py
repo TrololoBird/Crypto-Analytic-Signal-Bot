@@ -28,7 +28,9 @@ class KlineHandler:
         async with self._bot._shortlist_lock:
             shortlist = list(self._bot._shortlist)
 
-        tracking_events = await self._bot.tracker.review_open_signals_for_symbol(symbol, dry_run=False)
+        tracking_events = await self._bot.tracker.review_open_signals_for_symbol(
+            symbol, dry_run=False
+        )
         if tracking_events:
             await self._bot._deliver_tracking(tracking_events)
 
@@ -68,7 +70,11 @@ class KlineHandler:
                 if result.prepared is not None
                 else None
             )
-            delivered, cooldown_rejected, delivery_status_counts = await self._bot._select_and_deliver(
+            (
+                delivered,
+                cooldown_rejected,
+                delivery_status_counts,
+            ) = await self._bot._select_and_deliver(
                 selected,
                 prepared_by_tracking_id=prepared_by_tracking_id,
             )

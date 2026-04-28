@@ -23,9 +23,15 @@ class RegimeAwareParams:
             width = 0.5
 
         if "min_rr" in param_name:
-            return (max(0.8, default_value * (1.0 - width)), min(4.0, default_value * (1.0 + width)))
+            return (
+                max(0.8, default_value * (1.0 - width)),
+                min(4.0, default_value * (1.0 + width)),
+            )
         if any(token in param_name for token in ("score", "threshold", "penalty")):
-            return (max(0.0, default_value * (1.0 - width)), min(1.0, default_value * (1.0 + width)))
+            return (
+                max(0.0, default_value * (1.0 - width)),
+                min(1.0, default_value * (1.0 + width)),
+            )
         return (default_value * (1.0 - width), default_value * (1.0 + width))
 
     def get_params(self, setup_id: str, regime: str | None = None) -> dict[str, float]:
@@ -49,13 +55,19 @@ class RegimeAwareParams:
             parsed = json.loads(str(row[0]))
             if not isinstance(parsed, dict):
                 return {}
-            return {str(k): float(v) for k, v in parsed.items() if isinstance(v, (int, float))}
+            return {
+                str(k): float(v)
+                for k, v in parsed.items()
+                if isinstance(v, (int, float))
+            }
         finally:
             conn.close()
 
     def set_params(self, setup_id: str, regime: str, params: dict[str, float]) -> None:
         """Upsert optimized params for setup/regime into SQLite."""
-        clean = {str(k): float(v) for k, v in params.items() if isinstance(v, (int, float))}
+        clean = {
+            str(k): float(v) for k, v in params.items() if isinstance(v, (int, float))
+        }
         if not clean:
             return
         conn = sqlite3.connect(str(self.db_path))

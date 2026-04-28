@@ -10,6 +10,7 @@ from typing import Any
 
 LOG = logging.getLogger("bot.ws_manager")
 
+
 def build_stream_url(manager: Any, endpoint: str) -> str:
     base = manager._cfg.endpoint_base_url(endpoint).rstrip("/")
     if base.endswith("/ws"):

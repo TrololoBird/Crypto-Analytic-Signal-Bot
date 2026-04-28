@@ -27,8 +27,12 @@ class StrategyAnalytics:
         for setup in setup_rows:
             setup_id = str(setup.get("setup_id") or "unknown")
             rows = by_setup.get(setup_id, [])
-            gross_profit = sum(max(float(r.get("pnl_r_multiple") or 0.0), 0.0) for r in rows)
-            gross_loss = sum(abs(min(float(r.get("pnl_r_multiple") or 0.0), 0.0)) for r in rows)
+            gross_profit = sum(
+                max(float(r.get("pnl_r_multiple") or 0.0), 0.0) for r in rows
+            )
+            gross_loss = sum(
+                abs(min(float(r.get("pnl_r_multiple") or 0.0), 0.0)) for r in rows
+            )
             profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else None
 
             curve = 0.0
@@ -46,7 +50,9 @@ class StrategyAnalytics:
                     "trades": int(setup.get("total") or 0),
                     "win_rate": round(float(setup.get("win_rate") or 0.0), 4),
                     "expectancy_r": round(expectancy, 4),
-                    "profit_factor": None if profit_factor is None else round(profit_factor, 4),
+                    "profit_factor": None
+                    if profit_factor is None
+                    else round(profit_factor, 4),
                     "max_drawdown_r": round(max_drawdown, 4),
                 }
             )

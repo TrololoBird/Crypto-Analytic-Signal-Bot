@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import polars as pl
@@ -68,7 +67,9 @@ class MLFilter:
                 # Fallback to lightweight signal classifier artifact
                 from .signal_classifier import SignalClassifier
 
-                classifier = SignalClassifier(self.model_dir, model_type=self.settings.ml.model_type)
+                classifier = SignalClassifier(
+                    self.model_dir, model_type=self.settings.ml.model_type
+                )
                 if classifier.load():
                     model_kind = classifier.model_kind()
                     if model_kind in {"centroid_baseline", "linear_baseline"}:
@@ -79,10 +80,18 @@ class MLFilter:
                         self.enabled = False
                         return
                     self._classifier = classifier
-                    self._model_metadata = {"trained_at": "signal_classifier_artifact", "model_kind": model_kind}
-                    LOG.info("ML filter loaded SignalClassifier fallback from %s", classifier.model_path)
+                    self._model_metadata = {
+                        "trained_at": "signal_classifier_artifact",
+                        "model_kind": model_kind,
+                    }
+                    LOG.info(
+                        "ML filter loaded SignalClassifier fallback from %s",
+                        classifier.model_path,
+                    )
                     return
-                LOG.warning("No trained model found in %s, ML filter disabled", self.model_dir)
+                LOG.warning(
+                    "No trained model found in %s, ML filter disabled", self.model_dir
+                )
                 self.enabled = False
                 return
 
@@ -110,16 +119,22 @@ class MLFilter:
             metadata.setdefault("model_kind", type(self._model).__name__.lower())
 
             # Try to load feature importance to determine feature columns
-            feature_file = latest_file.parent / f"feature_importance_{latest_file.stem}.csv"
+            feature_file = (
+                latest_file.parent / f"feature_importance_{latest_file.stem}.csv"
+            )
             if feature_file.exists():
                 df = pl.read_csv(feature_file)
                 self._feature_columns = df["feature"].to_list()
             else:
                 # Fallback to extracting from model
                 if hasattr(self._model, "feature_names_in_"):
-                    self._feature_columns = list(cast(Any, self._model).feature_names_in_)
+                    self._feature_columns = list(
+                        cast(Any, self._model).feature_names_in_
+                    )
                 else:
-                    LOG.warning("Could not determine feature columns, ML may not work correctly")
+                    LOG.warning(
+                        "Could not determine feature columns, ML may not work correctly"
+                    )
                     self._feature_columns = None
 
             LOG.info(
@@ -169,13 +184,21 @@ class MLFilter:
 
         if prepared.work_15m.height > 0:
             features["rsi_15m"] = float(prepared.work_15m.item(-1, "rsi14") or 50.0)
-            features["volume_ratio_15m"] = float(prepared.work_15m.item(-1, "volume_ratio20") or 1.0)
-            features["macd_histogram_15m"] = float(prepared.work_15m.item(-1, "macd_hist") or 0.0)
+            features["volume_ratio_15m"] = float(
+                prepared.work_15m.item(-1, "volume_ratio20") or 1.0
+            )
+            features["macd_histogram_15m"] = float(
+                prepared.work_15m.item(-1, "macd_hist") or 0.0
+            )
             ema20_15m = float(prepared.work_15m.item(-1, "ema20") or 0.0)
             ema50_15m = float(prepared.work_15m.item(-1, "ema50") or 0.0)
             ema200_15m = float(prepared.work_15m.item(-1, "ema200") or 0.0)
-            features["ema20_above_ema50_15m"] = 1.0 if ema20_15m > ema50_15m > 0 else 0.0
-            features["ema50_above_ema200_15m"] = 1.0 if ema50_15m > ema200_15m > 0 else 0.0
+            features["ema20_above_ema50_15m"] = (
+                1.0 if ema20_15m > ema50_15m > 0 else 0.0
+            )
+            features["ema50_above_ema200_15m"] = (
+                1.0 if ema50_15m > ema200_15m > 0 else 0.0
+            )
 
         # Bias one-hot — match dataset bias_4h_* columns
         bias = getattr(prepared, "bias_4h", None) or signal.bias_4h or "neutral"
@@ -211,27 +234,49 @@ class MLFilter:
         # These are saved in outcomes but were previously missing from live inference.
         # They must be present so the trained model's feature set aligns at inference.
         if prepared.work_15m.height > 0:
-            features["supertrend_dir_15m"] = float(prepared.work_15m.item(-1, "supertrend_dir") or 0.0)
-            features["obv_above_ema_15m"] = float(prepared.work_15m.item(-1, "obv_above_ema") or 0.0)
-            features["bb_pct_b_15m"] = float(prepared.work_15m.item(-1, "bb_pct_b") or 0.5)
-            features["bb_width_15m"] = float(prepared.work_15m.item(-1, "bb_width") or 0.0)
+            features["supertrend_dir_15m"] = float(
+                prepared.work_15m.item(-1, "supertrend_dir") or 0.0
+            )
+            features["obv_above_ema_15m"] = float(
+                prepared.work_15m.item(-1, "obv_above_ema") or 0.0
+            )
+            features["bb_pct_b_15m"] = float(
+                prepared.work_15m.item(-1, "bb_pct_b") or 0.5
+            )
+            features["bb_width_15m"] = float(
+                prepared.work_15m.item(-1, "bb_width") or 0.0
+            )
 
         if prepared.work_1h.height > 0:
-            features["supertrend_dir_1h"] = float(prepared.work_1h.item(-1, "supertrend_dir") or 0.0)
+            features["supertrend_dir_1h"] = float(
+                prepared.work_1h.item(-1, "supertrend_dir") or 0.0
+            )
 
         # Market context features from PreparedSymbol
         features["funding_rate"] = float(getattr(prepared, "funding_rate", 0.0) or 0.0)
         features["oi_current"] = float(getattr(prepared, "oi_current", 0.0) or 0.0)
-        features["oi_change_pct"] = float(getattr(prepared, "oi_change_pct", 0.0) or 0.0)
+        features["oi_change_pct"] = float(
+            getattr(prepared, "oi_change_pct", 0.0) or 0.0
+        )
         features["ls_ratio"] = float(getattr(prepared, "ls_ratio", 1.0) or 1.0)
-        features["liquidation_score"] = float(getattr(prepared, "liquidation_score", 0.0) or 0.0)
-        features["market_regime_trending"] = 1.0 if getattr(prepared, "market_regime", "") == "trending" else 0.0
-        features["market_regime_choppy"] = 1.0 if getattr(prepared, "market_regime", "") == "choppy" else 0.0
-        features["market_regime_neutral"] = 1.0 if getattr(prepared, "market_regime", "") in ("neutral", "") else 0.0
+        features["liquidation_score"] = float(
+            getattr(prepared, "liquidation_score", 0.0) or 0.0
+        )
+        features["market_regime_trending"] = (
+            1.0 if getattr(prepared, "market_regime", "") == "trending" else 0.0
+        )
+        features["market_regime_choppy"] = (
+            1.0 if getattr(prepared, "market_regime", "") == "choppy" else 0.0
+        )
+        features["market_regime_neutral"] = (
+            1.0 if getattr(prepared, "market_regime", "") in ("neutral", "") else 0.0
+        )
 
         return features
 
-    def predict(self, signal: "Signal", prepared: "PreparedSymbol") -> MLInferenceResult:
+    def predict(
+        self, signal: "Signal", prepared: "PreparedSymbol"
+    ) -> MLInferenceResult:
         """Run ML inference on a signal.
 
         Args:
@@ -262,7 +307,9 @@ class MLFilter:
                     probability=round(probability, 4),
                     confidence=round(confidence, 4),
                     feature_vector=features,
-                    model_version=metadata.get("trained_at", "signal_classifier_artifact"),
+                    model_version=metadata.get(
+                        "trained_at", "signal_classifier_artifact"
+                    ),
                 )
 
             if self._model is None:
@@ -341,19 +388,31 @@ class MLFilter:
         mapped.setdefault("adx14", float(features.get("adx_1h", 0.0)))
         mapped.setdefault("rsi14", float(features.get("rsi_15m", 50.0)))
         mapped.setdefault("macd_hist", float(features.get("macd_histogram_15m", 0.0)))
-        mapped.setdefault("volume_ratio20", float(features.get("volume_ratio_15m", 1.0)))
+        mapped.setdefault(
+            "volume_ratio20", float(features.get("volume_ratio_15m", 1.0))
+        )
         mapped.setdefault("delta_ratio", float(features.get("delta_ratio", 0.5)))
         mapped.setdefault("oi_change_pct", float(features.get("oi_change_pct", 0.0)))
         mapped.setdefault("funding_rate", float(features.get("funding_rate", 0.0)))
-        mapped.setdefault("mark_index_spread_bps", float(features.get("mark_index_spread_bps", 0.0)))
-        mapped.setdefault("premium_zscore_5m", float(features.get("premium_zscore_5m", 0.0)))
+        mapped.setdefault(
+            "mark_index_spread_bps", float(features.get("mark_index_spread_bps", 0.0))
+        )
+        mapped.setdefault(
+            "premium_zscore_5m", float(features.get("premium_zscore_5m", 0.0))
+        )
         mapped.setdefault("ls_ratio", float(features.get("ls_ratio", 1.0)))
         mapped.setdefault("taker_ratio", float(features.get("delta_ratio", 0.5)))
         mapped.setdefault("close_position", float(features.get("close_position", 0.5)))
         mapped.setdefault("bb_pct_b", float(features.get("bb_pct_b_15m", 0.5)))
-        mapped.setdefault("supertrend_dir", float(features.get("supertrend_dir_15m", 0.0)))
-        mapped.setdefault("regime_confidence", float(features.get("market_regime_trending", 0.0)))
-        mapped.setdefault("mtf_alignment_score", float(features.get("ema20_above_ema50_1h", 0.0)))
+        mapped.setdefault(
+            "supertrend_dir", float(features.get("supertrend_dir_15m", 0.0))
+        )
+        mapped.setdefault(
+            "regime_confidence", float(features.get("market_regime_trending", 0.0))
+        )
+        mapped.setdefault(
+            "mtf_alignment_score", float(features.get("ema20_above_ema50_1h", 0.0))
+        )
         return mapped
 
     def get_status(self) -> dict[str, Any]:

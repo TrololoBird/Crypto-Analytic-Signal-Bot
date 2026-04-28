@@ -3,13 +3,13 @@
 No dry-run, no once, no self-check. To verify connectivity, read the logs
 and telemetry. To test, run the bot and watch real data.
 """
+
 from __future__ import annotations
 
 import argparse
 import asyncio
 import contextlib
 import ctypes
-import errno
 import json
 import logging
 import logging.handlers
@@ -71,9 +71,30 @@ def _run_doctor_check(settings: BotSettings) -> None:
                 "market_base_url": settings.ws.market_base_url,
                 "subscribe_book_ticker": settings.ws.subscribe_book_ticker,
             },
-            "setups_enabled": {k: getattr(settings.setups, k) for k in ("structure_pullback", "structure_break_retest", "wick_trap_reversal", "squeeze_setup", "ema_bounce", "order_block", "breaker_block", "fvg_setup", "bos_choch", "liquidity_sweep", "turtle_soup", "cvd_divergence", "hidden_divergence", "funding_reversal", "session_killzone")},
+            "setups_enabled": {
+                k: getattr(settings.setups, k)
+                for k in (
+                    "structure_pullback",
+                    "structure_break_retest",
+                    "wick_trap_reversal",
+                    "squeeze_setup",
+                    "ema_bounce",
+                    "order_block",
+                    "breaker_block",
+                    "fvg_setup",
+                    "bos_choch",
+                    "liquidity_sweep",
+                    "turtle_soup",
+                    "cvd_divergence",
+                    "hidden_divergence",
+                    "funding_reversal",
+                    "session_killzone",
+                )
+            },
         }
-        logging.getLogger("bot.cli").info("DOCTOR OK | %s", json.dumps(report, default=str))
+        logging.getLogger("bot.cli").info(
+            "DOCTOR OK | %s", json.dumps(report, default=str)
+        )
     except Exception as exc:
         logging.getLogger("bot.cli").warning("DOCTOR DEGRADED: %s", exc)
 
@@ -83,12 +104,11 @@ def _bootstrap_env_if_missing() -> None:
     if env_path.exists():
         return
     env_path.write_text(
-        "# Required Telegram runtime values\n"
-        "TG_TOKEN=\n"
-        "TARGET_CHAT_ID=\n",
+        "# Required Telegram runtime values\nTG_TOKEN=\nTARGET_CHAT_ID=\n",
         encoding="utf-8",
     )
     print("[INFO] .env not found - created with empty TG_TOKEN and TARGET_CHAT_ID")
+
 
 def _rotate_session_log(log_path: Path, *, stamp: str) -> None:
     if not log_path.exists():
@@ -101,32 +121,38 @@ def _rotate_session_log(log_path: Path, *, stamp: str) -> None:
     target = log_path.with_name(f"{log_path.stem}_{stamp}{log_path.suffix}")
     counter = 1
     while target.exists():
-        target = log_path.with_name(f"{log_path.stem}_{stamp}.{counter}{log_path.suffix}")
+        target = log_path.with_name(
+            f"{log_path.stem}_{stamp}.{counter}{log_path.suffix}"
+        )
         counter += 1
     try:
         shutil.move(str(log_path), str(target))
     except OSError as exc:
-        sys.stderr.write(f"[WARN] failed to rotate previous session log {log_path}: {exc}\n")
+        sys.stderr.write(
+            f"[WARN] failed to rotate previous session log {log_path}: {exc}\n"
+        )
 
 
 def configure_logging(settings: BotSettings, *, debug_mode: bool = False) -> None:
     session_dt = datetime.now(timezone.utc)
     session_stamp = session_dt.strftime("%Y%m%d_%H%M%S")
     handlers: list[logging.Handler] = [logging.StreamHandler()]
-    
+
     # Per-session log file with unique name
     log_path = settings.logs_dir / f"bot_{session_stamp}_{os.getpid()}.log"
     try:
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        handlers.append(
-            logging.FileHandler(log_path, encoding="utf-8", mode="w")
-        )
+        handlers.append(logging.FileHandler(log_path, encoding="utf-8", mode="w"))
     except OSError as exc:
         sys.stderr.write(f"[WARN] file logging disabled for {log_path}: {exc}\n")
-    
+
     # Use DEBUG level for full traces
-    log_level = logging.DEBUG if debug_mode else getattr(logging, settings.log_level, logging.INFO)
-    
+    log_level = (
+        logging.DEBUG
+        if debug_mode
+        else getattr(logging, settings.log_level, logging.INFO)
+    )
+
     logging.basicConfig(
         level=log_level,
         format="%(asctime)s | %(levelname)-7s | %(name)s | %(funcName)s:%(lineno)d | %(message)s",
@@ -134,16 +160,18 @@ def configure_logging(settings: BotSettings, *, debug_mode: bool = False) -> Non
         force=True,
     )
     configure_structlog(log_level)
-    
+
     # Keep asyncio debug disabled to avoid slow-task spam (tracemalloc handles coroutine tracking)
     loop = _get_or_create_event_loop()
     loop.set_debug(False)
-    
+
     # Reduce noise from external libraries but keep warnings
     logging.getLogger("websockets").setLevel(logging.INFO)
     logging.getLogger("hpack").setLevel(logging.WARNING)
-    logging.getLogger("asyncio").setLevel(logging.WARNING)  # Only real warnings, not debug spam
-    
+    logging.getLogger("asyncio").setLevel(
+        logging.WARNING
+    )  # Only real warnings, not debug spam
+
     # Log file location
     start_time = session_dt.strftime("%Y-%m-%d %H:%M:%S UTC")
     logger = logging.getLogger("bot.cli")
@@ -160,7 +188,9 @@ def _pid_is_alive(pid: int) -> bool:
         return False
     if os.name == "nt":
         process_query_limited_information = 0x1000
-        handle = ctypes.windll.kernel32.OpenProcess(process_query_limited_information, False, pid)
+        handle = ctypes.windll.kernel32.OpenProcess(
+            process_query_limited_information, False, pid
+        )
         if handle:
             ctypes.windll.kernel32.CloseHandle(handle)
             return True
@@ -183,7 +213,7 @@ async def _acquire_pid_lock(pid_file: Path) -> None:
     """Acquire PID lock asynchronously without blocking event loop."""
     # Run blocking filesystem operations in thread pool
     await asyncio.to_thread(pid_file.parent.mkdir, parents=True, exist_ok=True)
-    
+
     flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
     if hasattr(os, "O_BINARY"):
         flags |= os.O_BINARY
@@ -201,8 +231,14 @@ async def _acquire_pid_lock(pid_file: Path) -> None:
             return
         except FileExistsError:
             existing_pid = await asyncio.to_thread(_read_pid_value, pid_file)
-            if existing_pid and existing_pid != os.getpid() and _pid_is_alive(existing_pid):
-                raise SystemExit(f"another bot process is already running with pid {existing_pid}")
+            if (
+                existing_pid
+                and existing_pid != os.getpid()
+                and _pid_is_alive(existing_pid)
+            ):
+                raise SystemExit(
+                    f"another bot process is already running with pid {existing_pid}"
+                )
             # Race hardening for empty/initializing PID file:
             # never unlink immediately; first give other process enough time
             # to finish writing its PID.
@@ -221,7 +257,9 @@ async def _acquire_pid_lock(pid_file: Path) -> None:
             except FileNotFoundError:
                 continue
             except OSError as exc:
-                raise SystemExit(f"failed to remove stale pid lock {pid_file}: {exc}") from exc
+                raise SystemExit(
+                    f"failed to remove stale pid lock {pid_file}: {exc}"
+                ) from exc
             # After successful unlink, retry the lock acquisition
             continue
 
@@ -243,14 +281,17 @@ def _setup_signal_handlers(bot: SignalBot) -> None:
         try:
             bot.request_shutdown()
         except Exception as exc:
-            logging.getLogger("bot.cli").warning("failed to request shutdown: %s", repr(exc))
+            logging.getLogger("bot.cli").warning(
+                "failed to request shutdown: %s", repr(exc)
+            )
 
     for sig in (signal.SIGTERM, signal.SIGINT):
         try:
             loop.add_signal_handler(sig, _request_shutdown)
         except (NotImplementedError, TypeError) as exc:
             logging.getLogger("bot.cli").debug(
-                "asyncio signal handler unavailable (%s), using signal.signal", repr(exc)
+                "asyncio signal handler unavailable (%s), using signal.signal",
+                repr(exc),
             )
             try:
                 signal.signal(sig, lambda _signum, _frame: _request_shutdown())
@@ -259,7 +300,9 @@ def _setup_signal_handlers(bot: SignalBot) -> None:
                     "signal.signal unavailable for %s (%s)", sig, repr(exc2)
                 )
         except Exception as exc:
-            logging.getLogger("bot.cli").warning("signal handler setup failed: %s", repr(exc))
+            logging.getLogger("bot.cli").warning(
+                "signal handler setup failed: %s", repr(exc)
+            )
 
 
 async def _main() -> None:
@@ -279,17 +322,19 @@ async def _main() -> None:
 
     debug_mode = os.getenv("DEBUG_BOT", "0") in ("1", "true", "yes")
     configure_logging(settings, debug_mode=debug_mode)
-    
+
     # Capture all warnings as log entries
     logging.captureWarnings(True)
-    
+
     # Redirect stderr to logger while preserving original output
     _orig_stderr = sys.stderr
+
     class _StderrToLog:
         def __init__(self, logger_name: str, orig) -> None:
             self.logger = logging.getLogger(logger_name)
             self._orig = orig
             self._buf = ""
+
         def write(self, msg: str) -> None:
             self._orig.write(msg)  # Always write to original stderr
             self._orig.flush()
@@ -301,21 +346,26 @@ async def _main() -> None:
                     if line.strip() and not _is_preformatted_log_stderr(line):
                         self.logger.warning("STDERR: %s", line)
                 self._buf = lines[-1]
+
         def flush(self) -> None:
             self._orig.flush()
             if self._buf.strip():
                 self.logger.warning("STDERR: %s", self._buf)
                 self._buf = ""
-    
+
     sys.stderr = _StderrToLog("stderr", _orig_stderr)  # type: ignore[assignment]
-    
+
     # Hook to log unhandled exceptions
     def _log_exception(loop, context):
         msg = context.get("exception", context["message"])
-        logging.getLogger("asyncio").exception("Unhandled exception: %s", msg, exc_info=msg if isinstance(msg, BaseException) else None)
-    
+        logging.getLogger("asyncio").exception(
+            "Unhandled exception: %s",
+            msg,
+            exc_info=msg if isinstance(msg, BaseException) else None,
+        )
+
     asyncio.get_running_loop().set_exception_handler(_log_exception)
-    
+
     _run_doctor_check(settings)
     run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S") + f"_{os.getpid()}"
     telemetry = TelemetryStore(settings.telemetry_dir, run_id=run_id)
@@ -352,7 +402,9 @@ def run() -> None:
     sub.add_parser("run", help="Run live bot runtime (default)")
     sub.add_parser("status", help="Show runtime/db status")
     sub.add_parser("stop", help="Stop running bot by pid-file")
-    backtest = sub.add_parser("backtest", help="Compute outcome stats from SQLite history")
+    backtest = sub.add_parser(
+        "backtest", help="Compute outcome stats from SQLite history"
+    )
     backtest.add_argument("--days", type=int, default=30)
     backtest.add_argument("--setup", type=str, default="")
     replay = sub.add_parser("replay", help="Show latest replay telemetry rows")
@@ -360,7 +412,9 @@ def run() -> None:
     db = sub.add_parser("db", help="DB maintenance")
     db_sub = db.add_subparsers(dest="db_command")
     db_sub.add_parser("migrate", help="Apply forward migrations")
-    db_clean = db_sub.add_parser("clean", help="Cleanup old outcomes by retention window")
+    db_clean = db_sub.add_parser(
+        "clean", help="Cleanup old outcomes by retention window"
+    )
     db_clean.add_argument("--days", type=int, default=30)
     args = parser.parse_args()
 
@@ -374,7 +428,9 @@ def run() -> None:
         _run_stop_command()
         return
     if args.command == "backtest":
-        _run_backtest_command(days=max(1, int(args.days)), setup_id=str(args.setup or "").strip())
+        _run_backtest_command(
+            days=max(1, int(args.days)), setup_id=str(args.setup or "").strip()
+        )
         return
     if args.command == "replay":
         _run_replay_command(tail=max(1, int(args.tail)))
@@ -392,13 +448,14 @@ def run() -> None:
 
 def _run_runtime() -> None:
     debug_mode = os.getenv("DEBUG_BOT", "0") in ("1", "true", "yes")
-    
+
     if debug_mode:
         # Enable tracemalloc to track unawaited coroutines (without asyncio spam)
         import tracemalloc
+
         tracemalloc.start(25)
         sys.stderr.write("[DEBUG] tracemalloc enabled | logging level=DEBUG\n")
-    
+
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     try:
@@ -408,8 +465,13 @@ def _run_runtime() -> None:
     finally:
         if debug_mode:
             import tracemalloc
+
             current, peak = tracemalloc.get_traced_memory()
-            logging.getLogger("bot.cli").debug("Memory: current=%.2fMB peak=%.2fMB", current/1024/1024, peak/1024/1024)
+            logging.getLogger("bot.cli").debug(
+                "Memory: current=%.2fMB peak=%.2fMB",
+                current / 1024 / 1024,
+                peak / 1024 / 1024,
+            )
 
 
 def _run_status_command() -> None:
@@ -421,7 +483,9 @@ def _run_status_command() -> None:
         with sqlite3.connect(settings.db_path) as conn:
             cursor = conn.execute("SELECT COUNT(*) FROM signal_outcomes")
             totals["outcomes"] = int(cursor.fetchone()[0] or 0)
-            cursor = conn.execute("SELECT COUNT(*) FROM active_signals WHERE status IN ('pending','active')")
+            cursor = conn.execute(
+                "SELECT COUNT(*) FROM active_signals WHERE status IN ('pending','active')"
+            )
             totals["active_signals"] = int(cursor.fetchone()[0] or 0)
     print(
         json.dumps(
@@ -455,7 +519,9 @@ def _run_stop_command() -> None:
             check=False,
         )
         if completed.returncode != 0:
-            detail = (completed.stderr or completed.stdout or "").strip() or f"exit={completed.returncode}"
+            detail = (
+                completed.stderr or completed.stdout or ""
+            ).strip() or f"exit={completed.returncode}"
             raise SystemExit(f"failed to stop pid {pid} via taskkill: {detail}")
         print(f"Stopped pid {pid} via taskkill.")
         return
@@ -494,7 +560,13 @@ def _run_backtest_command(*, days: int, setup_id: str = "") -> None:
                 "avg_pnl_pct": round(float(avg_pnl or 0.0), 4),
             }
         )
-    print(json.dumps({"window_days": days, "setup_filter": setup_id or None, "results": payload}, ensure_ascii=True, indent=2))
+    print(
+        json.dumps(
+            {"window_days": days, "setup_filter": setup_id or None, "results": payload},
+            ensure_ascii=True,
+            indent=2,
+        )
+    )
 
 
 def _run_replay_command(*, tail: int) -> None:
@@ -503,7 +575,9 @@ def _run_replay_command(*, tail: int) -> None:
     if not replay_dir.exists():
         raise SystemExit(f"replay dir not found: {replay_dir}")
     rows: list[str] = []
-    for path in sorted(replay_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True):
+    for path in sorted(
+        replay_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True
+    ):
         data = path.read_text(encoding="utf-8", errors="ignore").splitlines()
         for line in reversed([ln for ln in data if ln.strip()]):
             rows.append(line)
@@ -523,17 +597,32 @@ async def _db_migrate_command() -> None:
     settings.db_path.parent.mkdir(parents=True, exist_ok=True)
     async with aiosqlite.connect(settings.db_path) as conn:
         applied = await migrate_db(conn)
-    print(json.dumps({"db_path": str(settings.db_path), "migrations_applied": applied}, ensure_ascii=True))
+    print(
+        json.dumps(
+            {"db_path": str(settings.db_path), "migrations_applied": applied},
+            ensure_ascii=True,
+        )
+    )
 
 
 async def _db_clean_command(*, days: int) -> None:
     from datetime import timedelta
 
     from .core.memory import MemoryRepository
+
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     settings = load_settings("config.toml")
     repo = MemoryRepository(settings.db_path)
     await repo.initialize()
     deleted = await repo.cleanup_signal_outcomes_before(cutoff.isoformat())
     await repo.close()
-    print(json.dumps({"db_path": str(settings.db_path), "days": days, "deleted_outcomes": deleted}, ensure_ascii=True))
+    print(
+        json.dumps(
+            {
+                "db_path": str(settings.db_path),
+                "days": days,
+                "deleted_outcomes": deleted,
+            },
+            ensure_ascii=True,
+        )
+    )

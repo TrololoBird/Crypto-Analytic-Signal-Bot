@@ -1,4 +1,5 @@
 """Trading setup utilities and signal builders."""
+
 from __future__ import annotations
 
 import logging
@@ -40,7 +41,16 @@ __all__ = [
 ]
 
 
-_ALLOWED_REASON_PREFIXES = {"data", "indicator", "pattern", "targets", "context", "filter", "runtime", "delivery"}
+_ALLOWED_REASON_PREFIXES = {
+    "data",
+    "indicator",
+    "pattern",
+    "targets",
+    "context",
+    "filter",
+    "runtime",
+    "delivery",
+}
 _CURRENT_DECISION_CAPTURE: ContextVar["_DecisionCapture | None"] = ContextVar(
     "bot_setups_current_decision_capture",
     default=None,
@@ -115,7 +125,12 @@ def _sanitize_reason_slug(reason: str) -> str:
 def _infer_reason_category(slug: str) -> str:
     if slug.startswith("data_") or "missing" in slug or "nan" in slug:
         return "data"
-    if slug.startswith("runtime_") or "exception" in slug or "timeout" in slug or "error" in slug:
+    if (
+        slug.startswith("runtime_")
+        or "exception" in slug
+        or "timeout" in slug
+        or "error" in slug
+    ):
         return "runtime"
     if (
         "target" in slug
@@ -169,13 +184,17 @@ def _normalize_reason(reason: str, *, stage: str | None = None) -> tuple[str, st
     if "." in raw:
         prefix, _, suffix = raw.partition(".")
         if prefix in _ALLOWED_REASON_PREFIXES:
-            return stage or _category_stage(prefix), f"{prefix}.{_sanitize_reason_slug(suffix)}"
+            return stage or _category_stage(
+                prefix
+            ), f"{prefix}.{_sanitize_reason_slug(suffix)}"
     slug = _sanitize_reason_slug(raw)
     category = _infer_reason_category(slug)
     return stage or _category_stage(category), f"{category}.{slug}"
 
 
-def _sanitize_details(values: dict[str, object]) -> tuple[dict[str, Any], tuple[str, ...], tuple[str, ...]]:
+def _sanitize_details(
+    values: dict[str, object],
+) -> tuple[dict[str, Any], tuple[str, ...], tuple[str, ...]]:
     details: dict[str, Any] = {}
     missing_fields: list[str] = []
     invalid_fields: list[str] = []
@@ -195,10 +214,16 @@ def _sanitize_details(values: dict[str, object]) -> tuple[dict[str, Any], tuple[
             details[field_name] = numeric
             continue
         details[field_name] = value
-    return details, tuple(sorted(set(missing_fields))), tuple(sorted(set(invalid_fields)))
+    return (
+        details,
+        tuple(sorted(set(missing_fields))),
+        tuple(sorted(set(invalid_fields))),
+    )
 
 
-def _frame_metric(frame: pl.DataFrame | None, column: str) -> tuple[float | None, tuple[str, ...], tuple[str, ...]]:
+def _frame_metric(
+    frame: pl.DataFrame | None, column: str
+) -> tuple[float | None, tuple[str, ...], tuple[str, ...]]:
     if frame is None or frame.is_empty() or column not in frame.columns:
         return None, (column,), ()
     value = frame.item(-1, column)
@@ -213,7 +238,9 @@ def _frame_metric(frame: pl.DataFrame | None, column: str) -> tuple[float | None
     return numeric, (), ()
 
 
-def _attr_metric(prepared: PreparedSymbol, field_name: str) -> tuple[Any | None, tuple[str, ...], tuple[str, ...]]:
+def _attr_metric(
+    prepared: PreparedSymbol, field_name: str
+) -> tuple[Any | None, tuple[str, ...], tuple[str, ...]]:
     value = getattr(prepared, field_name, None)
     if value is None:
         return None, (field_name,), ()
@@ -227,7 +254,9 @@ def _attr_metric(prepared: PreparedSymbol, field_name: str) -> tuple[Any | None,
     return value, (), ()
 
 
-def _decision_snapshot(prepared: PreparedSymbol) -> tuple[dict[str, Any], tuple[str, ...], tuple[str, ...]]:
+def _decision_snapshot(
+    prepared: PreparedSymbol,
+) -> tuple[dict[str, Any], tuple[str, ...], tuple[str, ...]]:
     snapshot: dict[str, Any] = {}
     missing_fields: list[str] = []
     invalid_fields: list[str] = []
@@ -248,13 +277,23 @@ def _decision_snapshot(prepared: PreparedSymbol) -> tuple[dict[str, Any], tuple[
             snapshot[key] = value
         missing_fields.extend(missing)
         invalid_fields.extend(invalid)
-    for attr_name in ("bias_4h", "bias_1h", "market_regime", "structure_1h", "regime_1h_confirmed"):
+    for attr_name in (
+        "bias_4h",
+        "bias_1h",
+        "market_regime",
+        "structure_1h",
+        "regime_1h_confirmed",
+    ):
         value = getattr(prepared, attr_name, None)
         if value not in (None, ""):
             snapshot[attr_name] = value
         else:
             missing_fields.append(attr_name)
-    return snapshot, tuple(sorted(set(missing_fields))), tuple(sorted(set(invalid_fields)))
+    return (
+        snapshot,
+        tuple(sorted(set(missing_fields))),
+        tuple(sorted(set(invalid_fields))),
+    )
 
 
 def _merge_field_names(*groups: tuple[str, ...] | list[str] | None) -> tuple[str, ...]:
@@ -311,7 +350,13 @@ def _build_signal(
             tp2=tp2,
         )
         return None
-    normalized_stop, normalized_tp1, normalized_tp2, single_target_mode, integrity_status = normalized_levels
+    (
+        normalized_stop,
+        normalized_tp1,
+        normalized_tp2,
+        single_target_mode,
+        integrity_status,
+    ) = normalized_levels
     entry_pad = max(atr * entry_pad_atr_mult, price_anchor * 0.0005)
     entry_low = price_anchor - entry_pad
     entry_high = price_anchor + entry_pad
@@ -393,8 +438,12 @@ def _reject(
     snapshot, snapshot_missing, snapshot_invalid = _decision_snapshot(prepared)
     if snapshot:
         details = {**details, "snapshot": snapshot}
-    merged_missing = _merge_field_names(missing_fields, detail_missing, snapshot_missing)
-    merged_invalid = _merge_field_names(invalid_fields, detail_invalid, snapshot_invalid)
+    merged_missing = _merge_field_names(
+        missing_fields, detail_missing, snapshot_missing
+    )
+    merged_invalid = _merge_field_names(
+        invalid_fields, detail_invalid, snapshot_invalid
+    )
     decision = StrategyDecision.reject(
         setup_id=detector,
         stage=normalized_stage,
@@ -405,8 +454,16 @@ def _reject(
     )
     _capture_decision(decision)
     if details:
-        detail_text = " ".join(f"{key}={value}" for key, value in details.items() if key != "snapshot")
-        LOG.debug("%s: %s rejected | reason=%s %s", prepared.symbol, detector, reason_code, detail_text)
+        detail_text = " ".join(
+            f"{key}={value}" for key, value in details.items() if key != "snapshot"
+        )
+        LOG.debug(
+            "%s: %s rejected | reason=%s %s",
+            prepared.symbol,
+            detector,
+            reason_code,
+            detail_text,
+        )
     else:
         LOG.debug("%s: %s rejected | reason=%s", prepared.symbol, detector, reason_code)
 
@@ -418,12 +475,18 @@ def _last_swing_prices(
     sh, sl = _swing_points(work, n=n, include_unconfirmed_tail=True)
     sh_prices = work.filter(sh)["high"] if sh is not None else None
     sl_prices = work.filter(sl)["low"] if sl is not None else None
-    last_high = float(sh_prices[-1]) if sh_prices is not None and sh_prices.len() > 0 else None
-    last_low = float(sl_prices[-1]) if sl_prices is not None and sl_prices.len() > 0 else None
+    last_high = (
+        float(sh_prices[-1]) if sh_prices is not None and sh_prices.len() > 0 else None
+    )
+    last_low = (
+        float(sl_prices[-1]) if sl_prices is not None and sl_prices.len() > 0 else None
+    )
     return last_high, last_low
 
 
-def _pullback_levels(prepared: PreparedSymbol, direction: str) -> list[tuple[str, float]]:
+def _pullback_levels(
+    prepared: PreparedSymbol, direction: str
+) -> list[tuple[str, float]]:
     levels: list[tuple[str, float]] = []
     if prepared.work_1h.is_empty():
         return levels

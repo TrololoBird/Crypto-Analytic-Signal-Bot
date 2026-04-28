@@ -35,3 +35,4 @@ Family and confirmation profile metadata are attached per strategy and used by s
   - `cvd_divergence`: `min_delta_threshold`, `sl_buffer_atr`
   - `hidden_divergence`: `rsi_divergence_lookback`, `rsi_divergence_threshold`, `min_delta_threshold`, `sl_buffer_atr`
   - `squeeze_setup`: `bb_squeeze_threshold`, `min_bb_compression_width`, `bb_pct_b_threshold`, `volume_threshold`, `sl_buffer_atr`
+  - `wick_trap_reversal`: `wick_through_atr_mult`, `closed_back_threshold`, `sl_buffer_atr`

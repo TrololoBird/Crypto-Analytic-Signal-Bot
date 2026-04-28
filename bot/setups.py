@@ -3,16 +3,15 @@
 Used by all strategy modules in ``bot/strategies/``.
 No detect_* functions — those live in individual strategy files.
 """
+
 from __future__ import annotations
 
 import logging
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
-from typing import Any
 
 import polars as pl
 
-from .config import BotSettings
 from .core.engine.base import StrategyDecision
 from .features import _swing_points  # shared swing detection helper
 from .models import PreparedSymbol, Signal
@@ -82,6 +81,7 @@ def finalize_strategy_decision(
         details={"symbol": prepared.symbol, "fallback": "silent_none"},
     )
 
+
 def _build_signal(
     *,
     prepared: PreparedSymbol,
@@ -114,7 +114,9 @@ def _build_signal(
     volume_ratio: float | None = None
     if not prepared.work_15m.is_empty():
         try:
-            volume_ratio = float(prepared.work_15m.item(-1, "volume_ratio20") or 0.0) or None
+            volume_ratio = (
+                float(prepared.work_15m.item(-1, "volume_ratio20") or 0.0) or None
+            )
         except (TypeError, ValueError):
             pass
     return Signal(
@@ -182,20 +184,30 @@ def _last_swing_prices(
     sh, sl = _swing_points(work, n=n, include_unconfirmed_tail=True)
     sh_prices = work.filter(sh)["high"] if sh is not None else None
     sl_prices = work.filter(sl)["low"] if sl is not None else None
-    last_high = float(sh_prices[-1]) if sh_prices is not None and sh_prices.len() > 0 else None
-    last_low = float(sl_prices[-1]) if sl_prices is not None and sl_prices.len() > 0 else None
+    last_high = (
+        float(sh_prices[-1]) if sh_prices is not None and sh_prices.len() > 0 else None
+    )
+    last_low = (
+        float(sl_prices[-1]) if sl_prices is not None and sl_prices.len() > 0 else None
+    )
     return last_high, last_low
 
 
-def _reject(prepared: PreparedSymbol, detector: str, reason: str, **values: object) -> None:
+def _reject(
+    prepared: PreparedSymbol, detector: str, reason: str, **values: object
+) -> None:
     if values:
         details = " ".join(f"{key}={value}" for key, value in values.items())
-        LOG.debug("%s: %s rejected | reason=%s %s", prepared.symbol, detector, reason, details)
+        LOG.debug(
+            "%s: %s rejected | reason=%s %s", prepared.symbol, detector, reason, details
+        )
     else:
         LOG.debug("%s: %s rejected | reason=%s", prepared.symbol, detector, reason)
 
 
-def _pullback_levels(prepared: PreparedSymbol, direction: str) -> list[tuple[str, float]]:
+def _pullback_levels(
+    prepared: PreparedSymbol, direction: str
+) -> list[tuple[str, float]]:
     levels: list[tuple[str, float]] = []
     if prepared.work_1h.is_empty():
         return levels
