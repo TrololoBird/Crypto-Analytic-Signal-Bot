@@ -16,7 +16,6 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 import polars as pl
-import websockets
 from websockets import exceptions as ws_exceptions
 
 # Use orjson for faster JSON parsing if available
@@ -1257,14 +1256,7 @@ class FuturesWSManager:
         return ws_connection.get_ws_url_version(self, endpoint)
 
     def _clear_endpoint_connection_state(self, endpoint: str) -> None:
-        """Reset volatile state for a disconnected endpoint."""
-        self._ws_conns[endpoint] = None
-        self._connected_urls[endpoint] = None
-        self._connected_at_by_endpoint[endpoint] = 0.0
-        self._connected_endpoints[endpoint].clear()
-        self._refresh_connected_event()
-        if endpoint == _WS_MARKET:
-            self._ws_conn = None
+        ws_connection.clear_endpoint_connection_state(self, endpoint)
 
     async def _run_stream(self, endpoint: str) -> None:
         delay = 1.0
@@ -1273,7 +1265,6 @@ class FuturesWSManager:
         while self._running:
             connect_start = time.monotonic()
             backoff_reset = False
-            reconnect_reason: str | None = None
             try:
                 LOG.info(
                     "ws connecting | endpoint=%s url=%s streams=%d",
@@ -1281,74 +1272,22 @@ class FuturesWSManager:
                     url,
                     len(self._intended_streams_by_endpoint.get(endpoint, set())),
                 )
-                ws = await asyncio.wait_for(
-                    websockets.connect(
-                        url,
-                        ping_interval=20.0,
-                        ping_timeout=20.0,
-                        close_timeout=10.0,
-                    ),
-                    timeout=10.0,
+                backoff_reset, proactive_reconnect = (
+                    await ws_connection.run_stream_session(
+                        self,
+                        endpoint=endpoint,
+                        url=url,
+                        connect_start=connect_start,
+                        backoff_reset_after_seconds=_BACKOFF_RESET_AFTER_SECONDS,
+                        proactive_reconnect_after_seconds=_PROACTIVE_RECONNECT_AFTER_SECONDS,
+                        parse_message=(
+                            _json.loads if _USE_ORJSON else json.loads
+                        ),
+                    )
                 )
-                LOG.info(
-                    "ws connection established | endpoint=%s url=%s", endpoint, url
-                )
-                async with ws:
-                    ws_connection.apply_connected_state(
-                        self, endpoint=endpoint, ws=ws, url=url
-                    )
-                    await self._resubscribe_all(endpoint, ws)
-                    stream_count = len(
-                        self._intended_streams_by_endpoint.get(endpoint, set())
-                    )
-                    if stream_count > 120:
-                        LOG.info(
-                            "high stream count | endpoint=%s streams=%d shortlist=%d",
-                            endpoint,
-                            stream_count,
-                            len(self._symbols),
-                        )
-                    health_task = asyncio.create_task(
-                        self._health_monitor(ws, endpoint),
-                        name=f"ws_manager_health:{endpoint}",
-                    )
-                    try:
-                        async for raw in ws:
-                            if not self._running:
-                                return
-                            elapsed = time.monotonic() - connect_start
-                            if (
-                                not backoff_reset
-                                and elapsed >= _BACKOFF_RESET_AFTER_SECONDS
-                            ):
-                                delay = 1.0
-                                backoff_reset = True
-                                self._short_lived_streak = 0
-                            if elapsed >= _PROACTIVE_RECONNECT_AFTER_SECONDS:
-                                reconnect_reason = "24h_proactive"
-                                break
-                            try:
-                                msg = (
-                                    _json.loads(raw) if _USE_ORJSON else json.loads(raw)
-                                )
-                            except (json.JSONDecodeError, UnicodeDecodeError):
-                                continue
-                            await self._handle_message(msg, endpoint)
-                    finally:
-                        health_task.cancel()
-                        try:
-                            await health_task
-                        except asyncio.CancelledError:
-                            pass
-                self._clear_endpoint_connection_state(endpoint)
-                if reconnect_reason == "24h_proactive":
-                    self._last_reconnect_reason = f"{endpoint}:{reconnect_reason}"
-                    self._last_reconnect_reason_by_endpoint[endpoint] = reconnect_reason
-                    LOG.info(
-                        "ws proactive reconnect | endpoint=%s uptime=%.1fh",
-                        endpoint,
-                        (time.monotonic() - connect_start) / 3600,
-                    )
+                if backoff_reset:
+                    delay = 1.0
+                if proactive_reconnect:
                     delay = 1.0
                     self._short_lived_streak = 0
                     if endpoint == _WS_MARKET:
@@ -1358,7 +1297,6 @@ class FuturesWSManager:
                             stale_symbols=stale,
                         )
                     continue
-                raise ConnectionError("stream closed without explicit close frame")
             except asyncio.CancelledError:
                 self._clear_endpoint_connection_state(endpoint)
                 return
