@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import Counter
 from datetime import datetime, timezone
 from typing import Any
 
@@ -29,9 +30,44 @@ class ShortlistService:
             return None
         return ((ask - bid) / mid) * 10_000.0
 
+    def _record_enrich_error(self, *, stage: str, symbol: str, exc: Exception, per_cycle: Counter[str]) -> None:
+        bot = self._bot
+        stage_key = str(stage).strip().lower() or "unknown"
+        symbol_key = str(symbol).strip().upper() or "UNKNOWN"
+        exception_type = type(exc).__name__
+        reason = str(exc)
+
+        per_cycle[stage_key] += 1
+
+        stage_totals = getattr(bot, "_shortlist_enrich_error_counts", None)
+        if not isinstance(stage_totals, Counter):
+            stage_totals = Counter()
+            bot._shortlist_enrich_error_counts = stage_totals
+        stage_totals[stage_key] += 1
+        bot._shortlist_enrich_error_total = int(getattr(bot, "_shortlist_enrich_error_total", 0)) + 1
+
+        log_counts = getattr(bot, "_shortlist_enrich_error_log_counts", None)
+        if not isinstance(log_counts, Counter):
+            log_counts = Counter()
+            bot._shortlist_enrich_error_log_counts = log_counts
+        log_key = (stage_key, symbol_key, exception_type)
+        log_counts[log_key] += 1
+        seen = log_counts[log_key]
+
+        if seen == 1 or seen % 50 == 0:
+            LOG.warning(
+                "shortlist enrich degraded | stage=%s symbol=%s exception_type=%s seen=%d reason=%s",
+                stage_key,
+                symbol_key,
+                exception_type,
+                seen,
+                reason,
+            )
+
     def _enrich_shortlist_rows(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         bot = self._bot
         enriched: list[dict[str, Any]] = []
+        cycle_errors: Counter[str] = Counter()
         ws = getattr(bot, "_ws_manager", None)
         client = bot.client
         open_interest_cache = getattr(client, "_open_interest_cache", {}) if isinstance(client, BinanceFuturesMarketData) else {}
@@ -47,8 +83,8 @@ class ShortlistService:
                     ticker_age = ws.get_ticker_age_seconds(symbol)
                     if ticker_age is not None:
                         row["ticker_age_seconds"] = float(ticker_age)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    self._record_enrich_error(stage="ticker_age", symbol=symbol, exc=exc, per_cycle=cycle_errors)
                 try:
                     mark = ws.get_mark_price_snapshot(symbol)
                     mark_age = ws.get_mark_price_age_seconds(symbol)
@@ -62,8 +98,8 @@ class ShortlistService:
                         index_price = float(mark.get("index_price") or 0.0)
                         if mark_price > 0.0 and index_price > 0.0:
                             row["basis_pct"] = ((mark_price - index_price) / index_price) * 100.0
-                except Exception:
-                    pass
+                except Exception as exc:
+                    self._record_enrich_error(stage="mark", symbol=symbol, exc=exc, per_cycle=cycle_errors)
                 try:
                     bid, ask = ws.get_book_snapshot(symbol)
                     spread_bps = self._spread_bps(bid, ask)
@@ -72,8 +108,8 @@ class ShortlistService:
                     book_age = ws.get_book_ticker_age_seconds(symbol)
                     if book_age is not None:
                         row["book_age_seconds"] = float(book_age)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    self._record_enrich_error(stage="book", symbol=symbol, exc=exc, per_cycle=cycle_errors)
 
             if isinstance(client, BinanceFuturesMarketData):
                 oi_change = client.get_cached_oi_change(symbol)
@@ -98,6 +134,7 @@ class ShortlistService:
                     _ts, oi_value = cached_oi
                     row["oi_current"] = float(oi_value)
             enriched.append(row)
+        bot._shortlist_enrich_last_cycle_errors = dict(cycle_errors)
         return enriched
 
     async def fetch_symbols_with_retry(self, *, max_retries: int = 1) -> list[Any]:
@@ -271,6 +308,9 @@ class ShortlistService:
                 "pinned": summary.get("pinned"),
                 "mode": summary.get("mode", source),
                 "avg_score": summary.get("avg_score"),
+                "enrich_errors_by_stage": dict(getattr(bot, "_shortlist_enrich_error_counts", {})),
+                "enrich_errors_total": int(getattr(bot, "_shortlist_enrich_error_total", 0)),
+                "enrich_errors_last_cycle": dict(getattr(bot, "_shortlist_enrich_last_cycle_errors", {})),
                 "top_scores": [
                     {
                         "symbol": item.symbol,
