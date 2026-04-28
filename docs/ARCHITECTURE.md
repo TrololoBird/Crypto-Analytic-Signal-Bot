@@ -21,7 +21,11 @@
 - `bot/market_regime.py` + `bot/regime/`: market regime analyzers.
 - `bot/confluence.py`: score blending and optional ML adjustment.
 - `bot/learning/`: walk-forward optimization, regime-aware param bounds, and outcome store adapters.
-- `bot/websocket/`: extracted WebSocket helper submodules (e.g., enrichment math in `enrichment.py`).
+- `bot/websocket/`: extracted WebSocket helper submodules:
+  - `connection.py` — endpoint URL/connection lifecycle and session loop helpers.
+  - `subscriptions.py` — intended-stream planning + subscribe/resubscribe chunking.
+  - `health.py` — silence/recovery health checks and stale-stream backfill triggers.
+  - `cache.py`, `enrichment.py`, `reconnect.py` — cache updates, enrichment metrics, reconnect backoff.
 - `bot/features_microstructure.py`: isolated microstructure feature builder used by `bot/features.py`.
 - `bot/features_structure.py`: extracted structure/indicator helpers (Ichimoku/WMA/HMA) used by `bot/features.py`.
 
