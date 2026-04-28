@@ -88,3 +88,10 @@ def test_ml_filter_sets_disable_reason_for_blocked_live_baseline(
     assert ml_filter.enabled is False
     assert status["disable_reason"] == "live_baseline_blocked"
     assert any("load_signal_classifier_fallback:centroid_baseline" in key for key in status["guardrail_counts"])
+    decision = status["last_guardrail_decision"]
+    assert decision == {
+        "model_kind": "centroid_baseline",
+        "disable_reason": "live_baseline_blocked",
+        "is_live": True,
+        "stage": "load_signal_classifier_fallback",
+    }

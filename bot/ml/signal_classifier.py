@@ -5,7 +5,11 @@ from pathlib import Path
 from typing import Any
 
 import polars as pl
-from .guardrails import LiveModelGuardrailDecision, evaluate_live_model_guardrail
+from .guardrails import (
+    LiveModelGuardrailDecision,
+    evaluate_live_model_guardrail,
+    normalize_model_kind,
+)
 
 try:
     import pandas as pd
@@ -187,9 +191,8 @@ class SignalClassifier:
             return "centroid_baseline"
         if isinstance(self.model, _LinearFallbackModel):
             return "linear_baseline"
-        return (
-            type(self.model).__name__.lower() if self.model is not None else "unloaded"
-        )
+        inferred = type(self.model).__name__ if self.model is not None else "unloaded"
+        return normalize_model_kind(inferred)
 
     def runtime_guardrail_decision(
         self, *, is_live: bool, stage: str
