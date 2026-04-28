@@ -14,7 +14,7 @@ Public runtime import surface at package boundary is intentionally minimal:
 - `bot.BotSettings`
 - `bot.load_settings`
 
-This surface is defined via `bot.__all__` and covered by guard tests.
+This surface is defined via `bot.__all__` and mirrored in `bot/runtime_contract.py::RUNTIME_PUBLIC_IMPORT_CONTRACT`, then covered by guard tests.
 
 ## 2) Public feature payload contract
 
@@ -42,7 +42,7 @@ Current denylist checks include:
 - `bot.telegram_bot`
 - module names containing: `scaffold`, `experimental`, `prototype`
 
-Guard tests parse imports on the runtime call path modules and fail if blocked names appear.
+Guard checks live in `bot/runtime_contract.py` (`assert_runtime_call_path_is_clean`, `assert_runtime_import_contract`). Tests fail fast if blocked names appear on the runtime call path.
 
 ## 4) Extension policy (how to evolve safely)
 
@@ -57,3 +57,13 @@ When adding a new public feature field:
 Compatibility note:
 
 - Uncoordinated growth of payload keys is considered a breaking change and must be blocked by tests.
+
+
+## 5) Runtime contract extension checklist
+
+When extending runtime surface intentionally:
+
+1. Update `bot/runtime_contract.py` constants (`RUNTIME_CALL_PATH_FILES`, denylist, or public import tuple).
+2. Keep `bot.__all__` aligned with `RUNTIME_PUBLIC_IMPORT_CONTRACT`.
+3. Add/adjust both positive and negative contract tests in `tests/test_feature_contracts.py`.
+4. Document the reason and blast radius in this file (and ADR if breaking).
