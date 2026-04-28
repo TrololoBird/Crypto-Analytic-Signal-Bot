@@ -1,6 +1,6 @@
 # Crypto Analytic Signal Bot
 
-Event-driven cryptocurrency trading signal bot with real-time WebSocket market data, multi-timeframe analysis, and integrated web dashboard.
+Event-driven cryptocurrency signal bot with public-only Binance USDⓈ-M market data, multi-timeframe analysis, and an integrated web dashboard.
 
 ## Quick Start
 
@@ -29,8 +29,10 @@ See [docs/OPERATIONS.md](docs/OPERATIONS.md) for detailed documentation.
 
 ## Architecture
 
+- **Public-only Binance data plane**: only public USDⓈ-M REST market-data endpoints and market/public WebSocket streams; no auth, no account/trade endpoints, no user-data streams
 - **Event-driven runtime**: WebSocket kline events → EventBus → Strategy analysis
 - **Multi-timeframe analysis**: 5m, 15m, 1h, 4h timeframes with confluence scoring
+- **Shortlist engine**: full REST rebalance plus light WS rerank with composite liquidity/freshness/OI/crowding scoring
 - **Risk management**: Automated stop-loss, take-profit, and position sizing
 - **ML integration**: Optional ML filtering for signal quality
 - **SQLite persistence**: All data stored locally with no external dependencies
@@ -44,4 +46,3 @@ See [docs/OPERATIONS.md](docs/OPERATIONS.md) for detailed documentation.
 ## License
 
 MIT
-

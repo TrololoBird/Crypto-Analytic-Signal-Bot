@@ -5,11 +5,15 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Coroutine
 from enum import Enum
 
 LOG = logging.getLogger("bot.tasks.scheduler")
+
+
+def _utcnow_naive() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class TaskPriority(Enum):
@@ -68,7 +72,7 @@ class TaskScheduler:
         consecutive_failures_for_alert: int = 3,
     ) -> None:
         """Register a periodic task."""
-        now = datetime.utcnow()
+        now = _utcnow_naive()
         
         self._tasks[name] = ScheduledTask(
             name=name,
@@ -220,7 +224,7 @@ class TaskScheduler:
     
     async def _execute_task(self, task: ScheduledTask) -> None:
         """Execute a single task with error handling."""
-        task.last_run = datetime.utcnow()
+        task.last_run = _utcnow_naive()
 
         delay = max(0.5, task.interval_seconds * 0.25)
         for attempt in range(1, 4):

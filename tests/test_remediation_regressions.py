@@ -15,7 +15,7 @@ import pytest
 from bot.application.bot import SignalBot
 from bot.cli import _is_preformatted_log_stderr
 from bot.confluence import ConfluenceEngine
-from bot.config import WSConfig, load_settings
+from bot.config import BotSettings, WSConfig, load_settings
 from bot.core.engine import SignalEngine, StrategyRegistry
 from bot.core.engine.base import StrategyDecision
 from bot.core.events import BookTickerEvent
@@ -23,16 +23,22 @@ from bot.features import _ichimoku_lines, _swing_points, _weighted_moving_averag
 from bot.market_data import BinanceFuturesMarketData, MarketDataUnavailable
 from bot.ml import MLFilter
 from bot.models import AggTrade, PipelineResult, PreparedSymbol, Signal, UniverseSymbol
+from bot.scoring import _crowd_position
 from bot.setup_base import BaseSetup, SetupParams
+from bot.strategies.cvd_divergence import CVDDivergenceSetup
 from bot.strategies.ema_bounce import EmaBounceSetup
 from bot.strategies.fvg import FVGSetup
 from bot.strategies.funding_reversal import FundingReversalSetup
+from bot.strategies.hidden_divergence import HiddenDivergenceSetup
+from bot.strategies.squeeze_setup import SqueezeSetup
 from bot.strategies.structure_pullback import StructurePullbackSetup
 from bot.setups import _build_signal
 from bot.setups.utils import build_structural_targets
 from bot.tracked_signals import TrackedSignalState
 from bot.tracking import SignalTracker
+from bot.websocket import subscriptions as ws_subscriptions
 from bot.ws_manager import FuturesWSManager
+from bot.application.shortlist_service import ShortlistService
 
 UTC = timezone.utc
 
@@ -144,6 +150,64 @@ def make_indicator_frame(price: float = 100.0) -> pl.DataFrame:
             "obv_above_ema": [1.0],
             "bb_pct_b": [0.62],
             "bb_width": [4.2],
+        }
+    )
+
+
+def make_feature_frame(
+    closes: list[float],
+    *,
+    opens: list[float] | None = None,
+    highs: list[float] | None = None,
+    lows: list[float] | None = None,
+    volume_ratios: list[float] | None = None,
+    rsi_values: list[float] | None = None,
+    delta_ratios: list[float] | None = None,
+    bb_widths: list[float] | None = None,
+    bb_pct_bs: list[float] | None = None,
+    kc_uppers: list[float] | None = None,
+    kc_lowers: list[float] | None = None,
+    atr: float = 2.0,
+) -> pl.DataFrame:
+    count = len(closes)
+    assert count > 0
+    opens = opens or list(closes)
+    highs = highs or [max(o, c) + 1.0 for o, c in zip(opens, closes, strict=False)]
+    lows = lows or [min(o, c) - 1.0 for o, c in zip(opens, closes, strict=False)]
+    volume_ratios = volume_ratios or [1.4] * count
+    rsi_values = rsi_values or [55.0] * count
+    delta_ratios = delta_ratios or [0.5] * count
+    bb_widths = bb_widths or [0.018] * count
+    bb_pct_bs = bb_pct_bs or [0.5] * count
+    kc_uppers = kc_uppers or [c + 1.0 for c in closes]
+    kc_lowers = kc_lowers or [c - 1.0 for c in closes]
+    start = datetime(2026, 4, 23, 0, 0, tzinfo=UTC)
+    times = [start + timedelta(minutes=15 * idx) for idx in range(count)]
+    return pl.DataFrame(
+        {
+            "time": times,
+            "close_time": times,
+            "open": opens,
+            "high": highs,
+            "low": lows,
+            "close": closes,
+            "volume": [1_000.0] * count,
+            "atr14": [atr] * count,
+            "atr_pct": [atr] * count,
+            "rsi14": rsi_values,
+            "adx14": [25.0] * count,
+            "volume_ratio20": volume_ratios,
+            "macd_hist": [0.25] * count,
+            "ema20": [c - 1.0 for c in closes],
+            "ema50": [c - 2.0 for c in closes],
+            "ema200": [c - 5.0 for c in closes],
+            "supertrend_dir": [1.0] * count,
+            "obv_above_ema": [1.0] * count,
+            "bb_pct_b": bb_pct_bs,
+            "bb_width": bb_widths,
+            "kc_upper": kc_uppers,
+            "kc_lower": kc_lowers,
+            "delta_ratio": delta_ratios,
         }
     )
 
@@ -289,15 +353,14 @@ def make_tracker(market_data: object) -> tuple[SignalTracker, DummyMemoryRepo, T
 @pytest.mark.asyncio
 async def test_agg_trade_rest_paths_accept_dict_rows() -> None:
     market_data = BinanceFuturesMarketData.__new__(BinanceFuturesMarketData)
-    market_data.client = SimpleNamespace(futures_aggregate_trades=object())
 
-    async def fake_call_rest(*args, **kwargs):
+    async def fake_call_public_http_json(*args, **kwargs):
         return [
             {"a": 11, "p": "100.5", "q": "2.0", "T": 1_000, "m": False},
             {"a": 12, "p": "100.0", "q": "1.0", "T": 1_050, "m": True},
         ]
 
-    market_data._call_rest = fake_call_rest
+    market_data._call_public_http_json = fake_call_public_http_json
 
     snapshot = await market_data._fetch_agg_trade_snapshot_rest("BTCUSDT", limit=2)
     trades, complete = await market_data.fetch_agg_trades(
@@ -313,6 +376,26 @@ async def test_agg_trade_rest_paths_accept_dict_rows() -> None:
     assert snapshot.sell_qty == pytest.approx(1.0)
     assert [trade.trade_id for trade in trades] == [11, 12]
     assert complete is True
+
+
+def test_signal_entry_mid_remains_raw_when_mark_price_is_close() -> None:
+    signal = Signal(
+        symbol="BTCUSDT",
+        setup_id="ema_bounce",
+        direction="long",
+        score=0.8,
+        timeframe="15m",
+        entry_low=100.0,
+        entry_high=100.4,
+        stop=99.0,
+        take_profit_1=102.0,
+        take_profit_2=104.0,
+        mark_price=100.21,
+    )
+
+    assert signal.entry_mid_raw == pytest.approx(100.2)
+    assert signal.entry_mid == pytest.approx(100.2)
+    assert signal.entry_reference_price == pytest.approx(100.21)
 
 
 @pytest.mark.asyncio
@@ -518,6 +601,224 @@ def test_funding_reversal_defaults_cover_runtime_params() -> None:
     assert "sl_buffer_atr" in defaults
 
 
+def test_funding_reversal_runtime_params_gate_delta_and_stop() -> None:
+    settings = SimpleNamespace(
+        filters=SimpleNamespace(
+            setups={
+                "funding_reversal": {
+                    "min_delta_threshold": 0.15,
+                    "sl_buffer_atr": 1.0,
+                    "funding_trend_bars": 2.0,
+                }
+            }
+        )
+    )
+    prepared = make_prepared(price=100.0)
+    prepared.settings = settings
+    prepared.funding_trend = "rising"
+    prepared.work_15m = make_feature_frame(
+        [103.0, 101.0, 100.0, 99.0, 100.0],
+        opens=[102.0, 102.0, 101.0, 100.0, 104.0],
+        highs=[104.0, 103.0, 102.0, 101.0, 110.0],
+        lows=[85.0, 84.0, 82.0, 80.0, 99.0],
+        delta_ratios=[0.55, 0.53, 0.52, 0.50, 0.45],
+        volume_ratios=[1.3] * 5,
+    )
+    setup = FundingReversalSetup()
+
+    assert setup.detect(prepared, settings) is None
+
+    prepared.work_15m = make_feature_frame(
+        [103.0, 101.0, 100.0, 99.0, 100.0],
+        opens=[102.0, 102.0, 101.0, 100.0, 104.0],
+        highs=[104.0, 103.0, 102.0, 101.0, 110.0],
+        lows=[85.0, 84.0, 82.0, 80.0, 99.0],
+        delta_ratios=[0.55, 0.53, 0.52, 0.50, 0.20],
+        volume_ratios=[1.3] * 5,
+    )
+
+    signal = setup.detect(prepared, settings)
+    assert signal is not None
+    assert signal.stop == pytest.approx(112.0)
+
+
+def test_cvd_divergence_respects_min_delta_threshold() -> None:
+    settings = SimpleNamespace(
+        filters=SimpleNamespace(
+            setups={"cvd_divergence": {"min_delta_threshold": 0.2, "sl_buffer_atr": 0.5}}
+        )
+    )
+    prepared = make_prepared(price=105.0)
+    prepared.settings = settings
+    prepared.bias_1h = "neutral"
+    prepared.work_15m = make_feature_frame(
+        [95.0, 96.0, 97.0, 98.0, 99.0, 99.5, 100.0, 99.8, 99.9, 100.0, 100.5, 101.0, 101.5, 102.0, 102.5, 103.0, 103.5, 104.0, 104.5, 105.0],
+        delta_ratios=[0.72] * 15 + [0.62] * 5,
+        volume_ratios=[1.3] * 20,
+    )
+    setup = CVDDivergenceSetup()
+
+    assert setup.detect(prepared, settings) is None
+
+    prepared.work_15m = make_feature_frame(
+        [95.0, 96.0, 97.0, 98.0, 99.0, 99.5, 100.0, 99.8, 99.9, 100.0, 100.5, 101.0, 101.5, 102.0, 102.5, 103.0, 103.5, 104.0, 104.5, 105.0],
+        delta_ratios=[0.72] * 15 + [0.32] * 5,
+        volume_ratios=[1.3] * 20,
+    )
+
+    signal = setup.detect(prepared, settings)
+    assert signal is not None
+    assert signal.direction == "short"
+    assert signal.stop == pytest.approx(106.0)
+
+
+def test_hidden_divergence_respects_rsi_and_delta_thresholds(monkeypatch: pytest.MonkeyPatch) -> None:
+    import bot.strategies.hidden_divergence as hidden_divergence_module
+
+    def fake_swing_points(frame: pl.DataFrame, n: int, include_unconfirmed_tail: bool = True) -> tuple[pl.Series, pl.Series]:
+        assert n == 4
+        size = frame.height
+        sh = [False] * size
+        sl = [False] * size
+        sh[10] = True
+        sl[5] = True
+        sl[15] = True
+        return pl.Series("sh", sh, dtype=pl.Boolean), pl.Series("sl", sl, dtype=pl.Boolean)
+
+    monkeypatch.setattr(hidden_divergence_module, "_swing_points", fake_swing_points)
+    settings = SimpleNamespace(
+        filters=SimpleNamespace(
+            setups={
+                "hidden_divergence": {
+                    "rsi_divergence_lookback": 4.0,
+                    "rsi_divergence_threshold": 6.0,
+                    "min_delta_threshold": 0.1,
+                    "sl_buffer_atr": 0.75,
+                }
+            }
+        )
+    )
+    prepared = make_prepared(price=100.0)
+    prepared.settings = settings
+    prepared.bias_1h = "uptrend"
+    prepared.work_1h = make_feature_frame(
+        [100.0 + (idx * 0.2) for idx in range(20)],
+        highs=[101.0, 102.0, 103.0, 104.0, 103.0, 102.0, 103.0, 104.0, 105.0, 106.0, 110.0, 107.0, 106.0, 105.0, 104.0, 103.0, 104.0, 105.0, 106.0, 107.0],
+        lows=[98.0, 97.5, 97.0, 96.5, 95.0, 94.0, 95.5, 96.0, 96.5, 97.0, 98.0, 98.5, 99.0, 98.0, 97.0, 96.0, 97.0, 98.0, 99.0, 100.0],
+        rsi_values=[50.0, 49.0, 48.0, 47.0, 45.0, 40.0, 44.0, 46.0, 48.0, 50.0, 55.0, 54.0, 53.0, 52.0, 50.0, 33.0, 45.0, 47.0, 49.0, 51.0],
+    )
+    prepared.work_15m = make_feature_frame(
+        [99.0, 99.5, 100.0, 100.5, 100.0],
+        volume_ratios=[1.2] * 5,
+        delta_ratios=[0.52, 0.53, 0.54, 0.55, 0.55],
+    )
+    setup = HiddenDivergenceSetup()
+
+    assert setup.detect(prepared, settings) is None
+
+    prepared.work_15m = make_feature_frame(
+        [99.0, 99.5, 100.0, 100.5, 100.0],
+        volume_ratios=[1.2] * 5,
+        delta_ratios=[0.52, 0.53, 0.54, 0.55, 0.70],
+    )
+
+    signal = setup.detect(prepared, settings)
+    assert signal is not None
+    assert signal.direction == "long"
+    assert signal.stop == pytest.approx(94.5)
+
+
+def test_squeeze_setup_runtime_params_drive_breakout_and_stop(monkeypatch: pytest.MonkeyPatch) -> None:
+    import bot.features as features_module
+
+    def fake_swing_points(frame: pl.DataFrame, n: int, include_unconfirmed_tail: bool = False) -> tuple[pl.Series, pl.Series]:
+        size = frame.height
+        sh = [False] * size
+        sl = [False] * size
+        sl[10] = True
+        return pl.Series("sh", sh, dtype=pl.Boolean), pl.Series("sl", sl, dtype=pl.Boolean)
+
+    monkeypatch.setattr(features_module, "_swing_points", fake_swing_points)
+    closes = [100.0 + (idx * 0.2) for idx in range(29)] + [97.0]
+    highs = [104.0] * 19 + [106.0] * 10 + [100.0]
+    lows = [92.0] * 10 + [80.0] + [93.0] * 19
+    bb_widths = [0.03] * 29 + [0.018]
+    bb_pct_bs = [0.5] * 29 + [0.15]
+    kc_uppers = [c + 0.5 for c in closes]
+    kc_lowers = [c - 0.5 for c in closes[:-1]] + [98.0]
+    prepared = make_prepared(price=97.0)
+    prepared.work_15m = make_feature_frame(
+        closes,
+        highs=highs,
+        lows=lows,
+        volume_ratios=[1.25] * 30,
+        bb_widths=bb_widths,
+        bb_pct_bs=bb_pct_bs,
+        kc_uppers=kc_uppers,
+        kc_lowers=kc_lowers,
+        rsi_values=[55.0] * 30,
+    )
+    prepared.funding_rate = 0.0006
+
+    strict_settings = SimpleNamespace(
+        filters=SimpleNamespace(
+            setups={
+                "squeeze_setup": {
+                    "bb_pct_b_threshold": 0.9,
+                    "min_bb_compression_width": 0.02,
+                    "volume_threshold": 1.2,
+                    "sl_buffer_atr": 0.5,
+                }
+            }
+        )
+    )
+    prepared.settings = strict_settings
+    setup = SqueezeSetup()
+    assert setup.detect(prepared, strict_settings) is None
+
+    relaxed_settings = SimpleNamespace(
+        filters=SimpleNamespace(
+            setups={
+                "squeeze_setup": {
+                    "bb_pct_b_threshold": 0.8,
+                    "min_bb_compression_width": 0.02,
+                    "volume_threshold": 1.2,
+                    "sl_buffer_atr": 0.5,
+                }
+            }
+        )
+    )
+    prepared.settings = relaxed_settings
+
+    signal = setup.detect(prepared, relaxed_settings)
+    assert signal is not None
+    assert signal.direction == "short"
+    assert signal.stop == pytest.approx(107.0)
+
+
+def test_shortlist_service_uses_book_ticker_age_contract() -> None:
+    class WSStub:
+        def get_ticker_age_seconds(self, symbol: str) -> float | None:
+            return None
+
+        def get_mark_price_snapshot(self, symbol: str) -> dict[str, float]:
+            return {}
+
+        def get_mark_price_age_seconds(self, symbol: str) -> float | None:
+            return None
+
+        def get_book_snapshot(self, symbol: str) -> tuple[float, float]:
+            return 99.0, 101.0
+
+        def get_book_ticker_age_seconds(self, symbol: str) -> float | None:
+            return 0.25
+
+    service = ShortlistService(SimpleNamespace(_ws_manager=WSStub(), client=SimpleNamespace()))
+    enriched = service._enrich_shortlist_rows([{"symbol": "BTCUSDT"}])
+
+    assert enriched[0]["book_age_seconds"] == pytest.approx(0.25)
+
+
 def test_build_structural_targets_prefers_nearest_long_resistance() -> None:
     work_1h = pl.DataFrame(
         {
@@ -544,6 +845,117 @@ def test_build_structural_targets_prefers_nearest_long_resistance() -> None:
     assert stop == pytest.approx(92.0)
     assert tp1 == pytest.approx(120.0)
     assert tp2 == pytest.approx(120.0)
+
+
+def test_build_structural_targets_short_uses_resistance_above_entry_for_stop_anchor() -> None:
+    work_1h = pl.DataFrame(
+        {
+            "time": [
+                datetime(2026, 4, 23, 0, 0, tzinfo=UTC),
+                datetime(2026, 4, 23, 1, 0, tzinfo=UTC),
+                datetime(2026, 4, 23, 2, 0, tzinfo=UTC),
+            ],
+            "high": [96.0, 103.0, 108.0],
+            "low": [92.0, 90.0, 88.0],
+        }
+    )
+    sh_mask = pl.Series("sh", [True, True, True], dtype=pl.Boolean)
+    sl_mask = pl.Series("sl", [True, True, True], dtype=pl.Boolean)
+
+    stop, tp1, tp2 = build_structural_targets(
+        direction="short",
+        price_anchor=100.0,
+        stop_basis=95.0,
+        atr=1.0,
+        work_1h=work_1h,
+        sh_mask=sh_mask,
+        sl_mask=sl_mask,
+    )
+
+    assert stop == pytest.approx(104.5)
+    assert tp1 == pytest.approx(92.0)
+    assert tp2 == pytest.approx(92.0)
+
+
+def test_crowd_position_respects_strategy_family() -> None:
+    prepared = make_prepared(price=100.0)
+    prepared.top_account_ls_ratio = 1.18
+    prepared.top_position_ls_ratio = 1.12
+    prepared.global_account_ls_ratio = 1.05
+    prepared.global_ls_ratio = 1.05
+    prepared.top_vs_global_ls_gap = 0.13
+    prepared.taker_ratio = 1.15
+    prepared.data_freshness_flags = ()
+
+    continuation_signal = Signal(
+        symbol="BTCUSDT",
+        setup_id="structure_pullback",
+        direction="long",
+        score=0.8,
+        timeframe="15m",
+        entry_low=99.5,
+        entry_high=100.5,
+        stop=98.0,
+        take_profit_1=103.0,
+        take_profit_2=105.0,
+        strategy_family="continuation",
+        confirmation_profile="trend_follow",
+    )
+    reversal_signal = Signal(
+        symbol="BTCUSDT",
+        setup_id="wick_trap_reversal",
+        direction="long",
+        score=0.8,
+        timeframe="15m",
+        entry_low=99.5,
+        entry_high=100.5,
+        stop=98.0,
+        take_profit_1=103.0,
+        take_profit_2=105.0,
+        strategy_family="reversal",
+        confirmation_profile="countertrend_exhaustion",
+    )
+
+    continuation_score = _crowd_position(prepared, continuation_signal, SimpleNamespace())
+    reversal_score = _crowd_position(prepared, reversal_signal, SimpleNamespace())
+
+    assert continuation_score > reversal_score
+    assert continuation_score > 0.55
+    assert reversal_score < 0.5
+
+
+@pytest.mark.asyncio
+async def test_shortlist_refresh_prefers_ws_light_between_full_rebalances() -> None:
+    from bot.application.shortlist_service import ShortlistService
+
+    shortlist = [make_universe_symbol(symbol="BTCUSDT")]
+    bot = SimpleNamespace(
+        settings=SimpleNamespace(
+            universe=SimpleNamespace(
+                quote_asset="USDT",
+                pinned_symbols=("BTCUSDT",),
+                light_refresh_interval_seconds=60,
+                full_refresh_interval_seconds=7200,
+            ),
+            runtime=SimpleNamespace(shortlist_refresh_interval_seconds=7200),
+        ),
+        _shortlist_lock=asyncio.Lock(),
+        _shortlist=[],
+        _shortlist_source="",
+        _last_live_shortlist=[],
+        _symbol_meta_by_symbol={"BTCUSDT": SimpleNamespace(symbol="BTCUSDT", base_asset="BTC", quote_asset="USDT")},
+        _last_shortlist_full_refresh_at=datetime.now(UTC),
+        telemetry=TelemetryStub(),
+    )
+    service = ShortlistService(bot)
+    service.build_light_shortlist = AsyncMock(return_value=(shortlist, {"mode": "ws_light", "eligible": 1, "dynamic_pool": 1, "pinned": 0, "avg_score": 0.8}))
+    service.build_live_shortlist = AsyncMock(side_effect=AssertionError("full refresh should not run"))
+
+    refreshed = await service.do_refresh_shortlist()
+
+    assert refreshed == shortlist
+    assert bot._shortlist_source == "ws_light"
+    service.build_light_shortlist.assert_awaited_once()
 
 
 def test_build_pinned_shortlist_resolves_assets_from_meta_and_safe_quote_parsing(caplog: pytest.LogCaptureFixture) -> None:
@@ -861,6 +1273,29 @@ min_adx = 18.0
     assert overrides["min_adx"] == pytest.approx(24.0)
 
 
+def test_runtime_validation_rejects_private_ws_routes(tmp_path: Path) -> None:
+    settings = BotSettings(
+        tg_token="",
+        target_chat_id="",
+        data_dir=tmp_path / "data",
+        ws={"base_url": "wss://fstream.binance.com/private"},
+    )
+
+    with pytest.raises(ValueError, match="public market streams only"):
+        settings.validate_for_runtime(require_telegram=False)
+
+
+def test_ws_stream_endpoint_class_keeps_public_market_split() -> None:
+    assert ws_subscriptions.stream_endpoint_class("btcusdt@bookTicker") == "public"
+    assert ws_subscriptions.stream_endpoint_class("btcusdt@kline_15m") == "market"
+    assert ws_subscriptions.stream_endpoint_class("btcusdt@aggTrade") == "market"
+    assert ws_subscriptions.stream_endpoint_class("btcusdt@markPrice@1s") == "market"
+    assert ws_subscriptions.stream_endpoint_class("!ticker@arr") == "market"
+
+    with pytest.raises(ValueError, match="private/auth websocket streams are not allowed"):
+        ws_subscriptions.stream_endpoint_class("listenKey")
+
+
 @pytest.mark.asyncio
 async def test_single_target_price_tick_closes_once_without_tp2_event() -> None:
     tracker, repo, _ = make_tracker(SimpleNamespace())
@@ -972,6 +1407,45 @@ async def test_parallel_strategy_rejections_keep_distinct_reason_codes() -> None
 
     assert reason_by_setup["reject_a"] == "indicator.atr_invalid"
     assert reason_by_setup["reject_b"] == "data.price_missing"
+
+
+@pytest.mark.asyncio
+async def test_engine_calculate_all_runs_strategies_concurrently() -> None:
+    class SlowSetupA(BaseSetup):
+        setup_id = "slow_a"
+        min_history_bars = 1
+
+        def get_optimizable_params(self, settings=None) -> dict[str, float]:
+            return {}
+
+        def detect(self, prepared: PreparedSymbol, settings):
+            time.sleep(0.15)
+            return None
+
+    class SlowSetupB(BaseSetup):
+        setup_id = "slow_b"
+        min_history_bars = 1
+
+        def get_optimizable_params(self, settings=None) -> dict[str, float]:
+            return {}
+
+        def detect(self, prepared: PreparedSymbol, settings):
+            time.sleep(0.15)
+            return None
+
+    registry = StrategyRegistry()
+    settings = make_runtime_settings()
+    settings.runtime.analysis_concurrency = 2
+    registry.register(SlowSetupA(SetupParams(enabled=True), settings), enabled=True)
+    registry.register(SlowSetupB(SetupParams(enabled=True), settings), enabled=True)
+    engine = SignalEngine(registry, settings)
+
+    started = time.perf_counter()
+    results = await engine.calculate_all(make_prepared())
+    elapsed = time.perf_counter() - started
+
+    assert len(results) == 2
+    assert elapsed < 0.33
 
 
 @pytest.mark.asyncio

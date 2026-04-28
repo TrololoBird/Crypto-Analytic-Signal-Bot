@@ -27,8 +27,22 @@ def public_streams_for_symbols(manager: Any, symbols: list[str]) -> list[str]:
 
 
 def stream_endpoint_class(stream: str) -> str:
-    if "@bookTicker" in stream or "@depth" in stream:
+    normalized = str(stream or "").strip().lower()
+    if any(token in normalized for token in ("listenkey", "/private", "userdatastream", "@account", "@order")):
+        raise ValueError(f"private/auth websocket streams are not allowed: {stream}")
+    if "@bookticker" in normalized or "@depth" in normalized:
         return "public"
+    allowed_market = (
+        "@kline_",
+        "@aggtrade",
+        "@markprice",
+        "!markprice@arr",
+        "!ticker@arr",
+        "!miniticker@arr",
+        "!forceorder@arr",
+    )
+    if any(token in normalized for token in allowed_market):
+        return "market"
     return "market"
 
 

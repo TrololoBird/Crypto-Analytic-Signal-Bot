@@ -69,12 +69,11 @@ class SignalEngine:
         
         LOG.debug("%s: strategies can_calculate=%d/%d", symbol, can_calculate_count, len(strategies))
         
-        results: list[SignalResult | BaseException] = []
-        for strategy in strategies:
-            try:
-                results.append(await self._calculate_one(strategy, prepared))
-            except BaseException as exc:
-                results.append(exc)
+        pending = [
+            asyncio.create_task(self._calculate_one(strategy, prepared), name=f"engine:{symbol}:{strategy.strategy_id}")
+            for strategy in strategies
+        ]
+        results = await asyncio.gather(*pending, return_exceptions=True)
         
         # Process results and log errors
         signal_results: list[SignalResult] = []

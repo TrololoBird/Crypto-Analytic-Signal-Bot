@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import polars as pl
@@ -13,6 +13,10 @@ import numpy as np
 from ..memory.repository import MemoryRepository
 
 LOG = logging.getLogger("bot.core.analyzer.metrics")
+
+
+def _utcnow_naive() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def _as_float(value: object, default: float = 0.0) -> float:
@@ -102,13 +106,17 @@ class WinRateCalculator:
         """
         # Default to last 30 days if not specified
         if since is None:
-            since = datetime.utcnow() - timedelta(days=30)
+            since = _utcnow_naive() - timedelta(days=30)
         
         # Get signals with outcomes as DataFrame
         df = await self._repo.get_signals_for_analysis(since, min_score)
         
         if df.is_empty():
             return PerformanceMetrics()
+        if until is not None:
+            df = df.filter(pl.col("created_at") <= until.isoformat())
+            if df.is_empty():
+                return PerformanceMetrics()
         
         # Filter by strategy if specified
         if strategy_id:
@@ -183,7 +191,7 @@ class WinRateCalculator:
     ) -> dict[str, PerformanceMetrics]:
         """Calculate metrics for each strategy."""
         if since is None:
-            since = datetime.utcnow() - timedelta(days=30)
+            since = _utcnow_naive() - timedelta(days=30)
         
         df = await self._repo.get_signals_for_analysis(since)
         
@@ -215,7 +223,7 @@ class WinRateCalculator:
         Returns:
             List of period metrics
         """
-        end = datetime.utcnow()
+        end = _utcnow_naive()
         results = []
         
         for i in range(periods):

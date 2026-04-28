@@ -28,6 +28,10 @@ dynamic_limit = 120
 shortlist_limit = 45
 min_quote_volume_usd = 10_000_000
 min_listing_age_days = 14
+light_refresh_interval_seconds = 75
+full_refresh_interval_seconds = 7200
+shortlist_spread_max_bps = 15.0
+shortlist_book_stale_seconds = 90.0
 pinned_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"]
 
 [bot.filters]

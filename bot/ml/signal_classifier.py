@@ -5,6 +5,10 @@ from pathlib import Path
 from typing import Any
 
 import polars as pl
+try:
+    import pandas as pd
+except Exception:  # pragma: no cover - optional dependency
+    pd = None
 
 try:
     import joblib
@@ -183,7 +187,11 @@ class SignalClassifier:
         vector = [float(feature_vector.get(name, 0.0)) for name in self._feature_names]
         if self.model is None:
             return 0.5
-        pred = self.model.predict_proba([vector])[0][1]
+        if pd is not None and hasattr(self.model, "feature_names_in_"):
+            model_input: Any = pd.DataFrame([{name: value for name, value in zip(self._feature_names, vector, strict=False)}])
+        else:
+            model_input = [vector]
+        pred = self.model.predict_proba(model_input)[0][1]
         return float(max(0.0, min(1.0, pred)))
 
     def get_feature_importance(self) -> dict[str, float]:
@@ -221,6 +229,7 @@ class SignalClassifier:
                     subsample=0.9,
                     colsample_bytree=0.9,
                     random_state=42,
+                    verbosity=-1,
                 )
             except Exception:
                 return self._build_model_fallback()

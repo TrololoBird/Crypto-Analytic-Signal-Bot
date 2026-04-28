@@ -31,6 +31,27 @@
 - Persistence: `MemoryRepository` (SQLite-backed).
 - Telemetry: JSONL appenders in telemetry directory.
 
+## Market-data contract
+
+- Runtime market data is restricted to public Binance USDⓈ-M endpoints.
+- REST is served through the public endpoint registry in `bot/market_data.py`; private/auth/signed routes are rejected at validation time.
+- WebSocket routing is split intentionally:
+  - `/public` for `@bookTicker`
+  - `/market` for `@kline_*`, `@aggTrade`, `!ticker@arr`, `@markPrice`, `!forceOrder@arr`
+- Shortlist maintenance is two-speed:
+  - `rest_full`: infrequent full rebalance from exchange metadata + `ticker/24hr`
+  - `ws_light`: frequent rerank from cached public WS ticker context plus cached public derivatives metrics
+- Shortlist enrichment pulls freshness only from public WS caches:
+  - `ticker_age_seconds`
+  - `mark_price_age_seconds`
+  - `book_age_seconds` from bookTicker cache age
+
+## Signal-context contract
+
+- Crowd positioning is family-aware: continuation/breakout setups consume crowd support/headwind differently from reversal setups.
+- Missing or stale crowd context should degrade to neutral handling, not hard dependency, unless fast-context strictness already applies.
+- Structural short stops anchor to resistance above entry rather than to the nearest arbitrary level below entry.
+
 ## Design boundaries
 
 - Strategy logic should stay in strategies/setup helpers, not in orchestration.

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any
 
@@ -12,6 +12,10 @@ from .metrics import PerformanceMetrics, WinRateCalculator
 from ..memory.repository import MemoryRepository
 
 LOG = logging.getLogger("bot.core.analyzer.reporter")
+
+
+def _utcnow_naive() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class ReportFormat(Enum):
@@ -100,6 +104,7 @@ class DailyReport:
             "strategies": {
                 k: v.to_dict() for k, v in self.strategy_metrics.items()
             },
+            "top_signals": self.top_signals,
             "alerts": self.alerts,
         }
 
@@ -130,7 +135,7 @@ class DailyReporter:
             DailyReport with metrics and alerts
         """
         if date is None:
-            date = datetime.utcnow()
+            date = _utcnow_naive()
         
         # Calculate day bounds
         day_start = date.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -147,17 +152,59 @@ class DailyReporter:
         
         # Detect degradation alerts
         alerts = await self._check_alerts(by_strategy)
+        top_signals = await self._get_top_signals(day_start, day_end)
         
         report = DailyReport(
             date=date,
             overall_metrics=overall,
             strategy_metrics=by_strategy,
-            top_signals=[],  # TODO: Add top performing signals
+            top_signals=top_signals,
             alerts=alerts,
         )
         
         LOG.info("Generated daily report for %s", date.strftime("%Y-%m-%d"))
         return report
+
+    async def _get_top_signals(
+        self,
+        day_start: datetime,
+        day_end: datetime,
+        *,
+        limit: int = 5,
+    ) -> list[dict[str, Any]]:
+        rows = await self._repo.get_signal_outcomes(last_days=None, limit=max(limit * 4, limit))
+        filtered: list[dict[str, Any]] = []
+        for row in rows:
+            closed_raw = row.get("closed_at") or row.get("created_at")
+            try:
+                closed_at = datetime.fromisoformat(str(closed_raw))
+            except (TypeError, ValueError):
+                continue
+            if not (day_start <= closed_at < day_end):
+                continue
+            filtered.append(row)
+
+        filtered.sort(
+            key=lambda item: (
+                float(item.get("pnl_r_multiple") or 0.0),
+                float(item.get("pnl_pct") or 0.0),
+            ),
+            reverse=True,
+        )
+        top_rows: list[dict[str, Any]] = []
+        for row in filtered[:limit]:
+            top_rows.append(
+                {
+                    "symbol": str(row.get("symbol") or ""),
+                    "setup_id": str(row.get("setup_id") or ""),
+                    "direction": str(row.get("direction") or ""),
+                    "result": str(row.get("result") or ""),
+                    "pnl_r_multiple": round(float(row.get("pnl_r_multiple") or 0.0), 4),
+                    "pnl_pct": round(float(row.get("pnl_pct") or 0.0), 4),
+                    "tracking_ref": row.get("tracking_ref"),
+                }
+            )
+        return top_rows
     
     async def _check_alerts(
         self,

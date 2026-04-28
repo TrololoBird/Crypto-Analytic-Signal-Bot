@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 from ..core.analyzer import DailyReporter, ReportFormat
 from ..core.diagnostics import AlertManager, AlertSeverity
 
 LOG = logging.getLogger("bot.tasks.reporter")
+
+
+def _utcnow_naive() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class ReportTask:
@@ -36,7 +40,7 @@ class ReportTask:
         """
         try:
             report = await self._reporter.generate(
-                date=datetime.utcnow(),
+                date=_utcnow_naive(),
                 format=ReportFormat.MARKDOWN,
             )
             

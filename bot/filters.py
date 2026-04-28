@@ -235,7 +235,8 @@ def apply_global_filters(
     risk = abs(updated.entry_mid - updated.stop)
     reward_tp1 = abs(updated.take_profit_1 - updated.entry_mid)
     rr_tp1 = (reward_tp1 / risk) if risk > 0 else 0.0
-    if rr_tp1 < settings.filters.min_risk_reward:
+    effective_min_rr = float(setup_overrides.get("min_rr", settings.filters.min_risk_reward))
+    if rr_tp1 < effective_min_rr:
         return _reject(
             "risk_reward_too_low",
             updated,
@@ -243,7 +244,9 @@ def apply_global_filters(
                 "gate_rr_target": "tp1",
                 "rr_tp1": rr_tp1,
                 "rr_tp2": updated.risk_reward,
-                "min_rr_required": settings.filters.min_risk_reward,
+                "min_rr_required": effective_min_rr,
+                "global_min_rr": settings.filters.min_risk_reward,
+                "setup_id": signal.setup_id,
             },
         )
     updated = replace(updated, passed_filters=tuple([*updated.passed_filters, "rr_ok"]))

@@ -95,7 +95,11 @@ def test_reversal_family_uses_score_penalty_on_low_adx() -> None:
         tg_token="",
         target_chat_id="",
         scoring={"enabled": False},
-        filters={"min_adx_1h": 20.0, "min_score": 0.0},
+        filters={
+            "min_adx_1h": 20.0,
+            "min_score": 0.0,
+            "setups": {"wick_trap_reversal": {"min_rr": 1.0}},
+        },
     )
 
     passed, signal, reason, _scoring, _details = apply_global_filters(

@@ -13,6 +13,7 @@ delivery, and tracking.
 from __future__ import annotations
 
 import asyncio
+from collections import Counter
 import contextlib
 import html
 import inspect
@@ -20,18 +21,15 @@ import logging
 import os
 from dataclasses import replace
 from datetime import datetime, timezone
-from typing import Any, cast
+from typing import Any
 
 from ..config import BotSettings
 from ..core.events import BookTickerEvent, KlineCloseEvent, ReconnectEvent
 from ..core.engine import StrategyDecision, StrategyRegistry
 from ..feature_flags import FeatureFlags
-from ..features import min_required_bars, prepare_symbol
-from ..filters import apply_global_filters
-from ..market_data import BinanceFuturesMarketData, MarketDataUnavailable
+from ..market_data import BinanceFuturesMarketData
 from ..models import PreparedSymbol, Signal, SymbolFrames, UniverseSymbol, PipelineResult
 from ..monitor_bot import HealthMonitor
-from ..outcomes import build_prepared_feature_snapshot, extract_features_from_signal
 from ..setup_base import SetupParams
 from ..strategies import STRATEGY_CLASSES
 from ..telemetry import TelemetryStore
@@ -638,7 +636,7 @@ class SignalBot:
     def _build_pinned_shortlist(self) -> list[UniverseSymbol]:
         return self._get_shortlist_service().build_pinned_shortlist()
 
-    async def _build_live_shortlist(self) -> tuple[list[UniverseSymbol], dict[str, int]]:
+    async def _build_live_shortlist(self) -> tuple[list[UniverseSymbol], dict[str, Any]]:
         return await self._get_shortlist_service().build_live_shortlist()
 
     async def _sync_ws_tracked_symbols(self) -> None:

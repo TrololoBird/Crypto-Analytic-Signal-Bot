@@ -102,3 +102,25 @@ def test_apply_global_filters_rejects_stale_15m() -> None:
 
     assert accepted is False
     assert reason == "stale_15m"
+
+
+def test_apply_global_filters_uses_setup_level_min_rr_override() -> None:
+    settings = BotSettings(
+        tg_token="1" * 30,
+        target_chat_id="123",
+        filters={
+            "min_risk_reward": 2.5,
+            "setups": {"ema_bounce": {"min_rr": 1.5}},
+        },
+    )
+
+    accepted, _updated, reason, _scoring, details = apply_global_filters(
+        _signal(),
+        _prepared(),
+        settings,
+        _ConfluenceStub(),
+    )
+
+    assert accepted is True
+    assert reason is None
+    assert details is None

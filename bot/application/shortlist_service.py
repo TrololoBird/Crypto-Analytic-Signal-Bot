@@ -6,6 +6,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from ..market_data import BinanceFuturesMarketData
 from ..models import UniverseSymbol
 from ..universe import build_shortlist
 
@@ -18,6 +19,86 @@ class ShortlistService:
 
     def __init__(self, bot: Any) -> None:
         self._bot = bot
+
+    @staticmethod
+    def _spread_bps(bid: float | None, ask: float | None) -> float | None:
+        if bid is None or ask is None or bid <= 0.0 or ask <= 0.0 or ask < bid:
+            return None
+        mid = (bid + ask) / 2.0
+        if mid <= 0.0:
+            return None
+        return ((ask - bid) / mid) * 10_000.0
+
+    def _enrich_shortlist_rows(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        bot = self._bot
+        enriched: list[dict[str, Any]] = []
+        ws = getattr(bot, "_ws_manager", None)
+        client = bot.client
+        open_interest_cache = getattr(client, "_open_interest_cache", {}) if isinstance(client, BinanceFuturesMarketData) else {}
+
+        for raw in rows:
+            row = dict(raw)
+            symbol = str(row.get("symbol") or "").strip().upper()
+            if not symbol:
+                continue
+
+            if ws is not None:
+                try:
+                    ticker_age = ws.get_ticker_age_seconds(symbol)
+                    if ticker_age is not None:
+                        row["ticker_age_seconds"] = float(ticker_age)
+                except Exception:
+                    pass
+                try:
+                    mark = ws.get_mark_price_snapshot(symbol)
+                    mark_age = ws.get_mark_price_age_seconds(symbol)
+                    if mark_age is not None:
+                        row["mark_price_age_seconds"] = float(mark_age)
+                    if mark:
+                        funding_rate = mark.get("funding_rate")
+                        if funding_rate is not None:
+                            row["funding_rate"] = float(funding_rate)
+                        mark_price = float(mark.get("mark_price") or 0.0)
+                        index_price = float(mark.get("index_price") or 0.0)
+                        if mark_price > 0.0 and index_price > 0.0:
+                            row["basis_pct"] = ((mark_price - index_price) / index_price) * 100.0
+                except Exception:
+                    pass
+                try:
+                    bid, ask = ws.get_book_snapshot(symbol)
+                    spread_bps = self._spread_bps(bid, ask)
+                    if spread_bps is not None:
+                        row["spread_bps"] = spread_bps
+                    book_age = ws.get_book_ticker_age_seconds(symbol)
+                    if book_age is not None:
+                        row["book_age_seconds"] = float(book_age)
+                except Exception:
+                    pass
+
+            if isinstance(client, BinanceFuturesMarketData):
+                oi_change = client.get_cached_oi_change(symbol)
+                if oi_change is not None:
+                    row["oi_change_pct"] = float(oi_change)
+                ls_ratio = client.get_cached_ls_ratio(symbol)
+                if ls_ratio is not None:
+                    row["top_account_ls_ratio"] = float(ls_ratio)
+                top_position = client.get_cached_top_position_ls_ratio(symbol)
+                if top_position is not None:
+                    row["top_position_ls_ratio"] = float(top_position)
+                global_ratio = client.get_cached_global_ls_ratio(symbol)
+                if global_ratio is not None:
+                    row["global_account_ls_ratio"] = float(global_ratio)
+                if "top_account_ls_ratio" in row and "global_account_ls_ratio" in row:
+                    row["top_vs_global_ls_gap"] = float(row["top_account_ls_ratio"]) - float(row["global_account_ls_ratio"])
+                basis_pct = client.get_cached_basis(symbol, period="1h")
+                if basis_pct is not None:
+                    row["basis_pct"] = float(basis_pct)
+                cached_oi = open_interest_cache.get(symbol)
+                if cached_oi is not None:
+                    _ts, oi_value = cached_oi
+                    row["oi_current"] = float(oi_value)
+            enriched.append(row)
+        return enriched
 
     async def fetch_symbols_with_retry(self, *, max_retries: int = 1) -> list[Any]:
         for attempt in range(max_retries + 1):
@@ -92,11 +173,14 @@ class ShortlistService:
                     price_change_pct=0.0,
                     last_price=0.0,
                     shortlist_bucket="pinned",
+                    shortlist_score=1.0,
+                    shortlist_reasons=("pinned_symbol",),
+                    seed_source="pinned_fallback",
                 )
             )
         return shortlist
 
-    async def build_live_shortlist(self) -> tuple[list[UniverseSymbol], dict[str, int]]:
+    async def build_live_shortlist(self) -> tuple[list[UniverseSymbol], dict[str, Any]]:
         bot = self._bot
         timeout_s = max(10.0, float(bot.settings.ws.rest_timeout_seconds) * 2.0)
         symbol_meta_list, tickers_24h = await asyncio.wait_for(
@@ -109,7 +193,27 @@ class ShortlistService:
         bot._symbol_meta_by_symbol = {
             str(getattr(row, "symbol", "")).strip().upper(): row for row in symbol_meta_list
         }
-        shortlist, summary = build_shortlist(symbol_meta_list, tickers_24h, bot.settings)
+        shortlist, summary = build_shortlist(
+            symbol_meta_list,
+            self._enrich_shortlist_rows(list(tickers_24h)),
+            bot.settings,
+            seed_source="rest_full",
+        )
+        return shortlist, summary
+
+    async def build_light_shortlist(self) -> tuple[list[UniverseSymbol], dict[str, Any]]:
+        bot = self._bot
+        ws = getattr(bot, "_ws_manager", None)
+        if ws is None or not bot._symbol_meta_by_symbol or not ws.is_ticker_cache_warm():
+            return [], {"mode": "ws_light", "eligible": 0, "dynamic_pool": 0, "pinned": 0}
+
+        tickers = self._enrich_shortlist_rows(ws.get_global_ticker_data())
+        shortlist, summary = build_shortlist(
+            list(bot._symbol_meta_by_symbol.values()),
+            tickers,
+            bot.settings,
+            seed_source="ws_light",
+        )
         return shortlist, summary
 
     async def do_refresh_shortlist(self) -> list[UniverseSymbol]:
@@ -119,13 +223,26 @@ class ShortlistService:
         source = "pinned_fallback"
         summary: dict[str, Any] = {}
         shortlist = self.build_pinned_shortlist()
+        now = datetime.now(UTC)
+        full_interval = int(getattr(bot.settings.universe, "full_refresh_interval_seconds", bot.settings.runtime.shortlist_refresh_interval_seconds))
+        last_full = getattr(bot, "_last_shortlist_full_refresh_at", None)
+        full_refresh_due = last_full is None or (now - last_full).total_seconds() >= full_interval
 
         try:
-            live_shortlist, live_summary = await self.build_live_shortlist()
+            live_shortlist: list[UniverseSymbol] = []
+            live_summary: dict[str, Any] = {}
+            if not full_refresh_due:
+                live_shortlist, live_summary = await self.build_light_shortlist()
+                if live_shortlist:
+                    source = "ws_light"
+            if not live_shortlist:
+                live_shortlist, live_summary = await self.build_live_shortlist()
+                if live_shortlist:
+                    bot._last_shortlist_full_refresh_at = now
+                    source = "rest_full"
             if live_shortlist:
                 shortlist = live_shortlist
                 summary = live_summary
-                source = "live"
                 bot._last_live_shortlist = list(live_shortlist)
             elif bot._last_live_shortlist:
                 shortlist = list(bot._last_live_shortlist)
@@ -152,16 +269,29 @@ class ShortlistService:
                 "eligible": summary.get("eligible"),
                 "dynamic_pool": summary.get("dynamic_pool"),
                 "pinned": summary.get("pinned"),
+                "mode": summary.get("mode", source),
+                "avg_score": summary.get("avg_score"),
+                "top_scores": [
+                    {
+                        "symbol": item.symbol,
+                        "score": item.shortlist_score,
+                        "reasons": list(item.shortlist_reasons[:3]),
+                        "seed_source": item.seed_source,
+                    }
+                    for item in shortlist[:5]
+                ],
             },
         )
 
         LOG.info(
-            "shortlist refresh complete | source=%s size=%d eligible=%s dynamic_pool=%s pinned=%s",
+            "shortlist refresh complete | source=%s mode=%s size=%d eligible=%s dynamic_pool=%s pinned=%s avg_score=%s",
             source,
+            summary.get("mode", source),
             len(shortlist),
             summary.get("eligible"),
             summary.get("dynamic_pool"),
             summary.get("pinned"),
+            summary.get("avg_score"),
         )
         return shortlist
 
@@ -173,7 +303,10 @@ class ShortlistService:
             try:
                 await asyncio.wait_for(
                     bot._shutdown.wait(),
-                    timeout=bot.settings.runtime.shortlist_refresh_interval_seconds,
+                    timeout=max(
+                        15,
+                        int(getattr(bot.settings.universe, "light_refresh_interval_seconds", 75)),
+                    ),
                 )
             except asyncio.TimeoutError:
                 continue

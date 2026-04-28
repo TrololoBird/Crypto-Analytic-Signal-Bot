@@ -12,20 +12,13 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import cast
-
-import polars as pl
 
 from ..setup_base import BaseSetup
 from ..config import BotSettings
 from ..models import PreparedSymbol, Signal
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..features import _swing_points
-from ..setups.utils import (
-    build_structural_targets,
-    validate_rr_or_penalty,
-    get_dynamic_params,
-)
+from ..setups.utils import get_dynamic_params
 
 LOG = logging.getLogger("bot.strategies.hidden_divergence")
 
@@ -77,6 +70,7 @@ class HiddenDivergenceSetup(BaseSetup):
         defaults = self.get_optimizable_params(settings)
         
         rsi_divergence_lookback = int(dynamic_params.get("rsi_divergence_lookback", defaults["rsi_divergence_lookback"]))
+        rsi_divergence_threshold = float(dynamic_params.get("rsi_divergence_threshold", defaults["rsi_divergence_threshold"]))
         min_delta_threshold = float(dynamic_params.get("min_delta_threshold", defaults["min_delta_threshold"]))
         sl_buffer_atr = float(dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]))
 
@@ -106,9 +100,7 @@ class HiddenDivergenceSetup(BaseSetup):
 
         # 1H context for 15M signals (not 4H - too lagging for <4h trades)
         bias_1h = getattr(prepared, 'bias_1h', prepared.bias_4h)
-        regime_1h = getattr(prepared, 'regime_1h_confirmed', prepared.regime_4h_confirmed)
-
-        sh_mask, sl_mask = _swing_points(w1h, n=3, include_unconfirmed_tail=True)
+        sh_mask, sl_mask = _swing_points(w1h, n=max(2, rsi_divergence_lookback), include_unconfirmed_tail=True)
         sh_prices = w1h.filter(sh_mask)["high"]
         sh_rsi = w1h.filter(sh_mask)["rsi14"] if "rsi14" in w1h.columns else None
         sl_prices = w1h.filter(sl_mask)["low"]
@@ -119,6 +111,7 @@ class HiddenDivergenceSetup(BaseSetup):
         direction = None
         stop_price = None
         swing_ref = None
+        rsi_separation = 0.0
 
         # Hidden Bullish: price HL (sl[-1] > sl[-2]) + RSI LL (rsi_sl[-1] < rsi_sl[-2])
         impulse_size = None
@@ -128,7 +121,8 @@ class HiddenDivergenceSetup(BaseSetup):
                 and sl_rsi is not None and sl_rsi.len() >= 2):
             sl_v = sl_prices.to_numpy()
             sl_r = sl_rsi.to_numpy()
-            if sl_v[-1] > sl_v[-2] and sl_r[-1] < sl_r[-2]:
+            rsi_separation = float(sl_r[-2] - sl_r[-1])
+            if sl_v[-1] > sl_v[-2] and rsi_separation >= rsi_divergence_threshold:
                 direction = "long"
                 swing_ref = float(sl_v[-1])
                 # Compute last impulse wave size for Fib extensions
@@ -141,7 +135,8 @@ class HiddenDivergenceSetup(BaseSetup):
                 and sh_rsi is not None and sh_rsi.len() >= 2):
             sh_v = sh_prices.to_numpy()
             sh_r = sh_rsi.to_numpy()
-            if sh_v[-1] < sh_v[-2] and sh_r[-1] > sh_r[-2]:
+            rsi_separation = float(sh_r[-1] - sh_r[-2])
+            if sh_v[-1] < sh_v[-2] and rsi_separation >= rsi_divergence_threshold:
                 direction = "short"
                 swing_ref = float(sh_v[-1])
                 if sl_prices.len() >= 1:
@@ -157,6 +152,32 @@ class HiddenDivergenceSetup(BaseSetup):
             return None
         if direction == "short" and bias_1h == "uptrend":
             _reject(prepared, setup_id, "context_bias_blocks_short", bias_1h=bias_1h)
+            return None
+
+        latest_delta_ratio: float | None = None
+        delta_shift = 0.0
+        if "delta_ratio" in w15m.columns:
+            delta_series = w15m["delta_ratio"].drop_nulls()
+            if delta_series.len() > 0:
+                latest_delta_ratio = float(delta_series[-1])
+                delta_shift = latest_delta_ratio - 0.5
+        if direction == "long" and latest_delta_ratio is not None and delta_shift < min_delta_threshold:
+            _reject(
+                prepared,
+                setup_id,
+                "delta_confirmation_missing_long",
+                delta_ratio=latest_delta_ratio,
+                min_delta_threshold=min_delta_threshold,
+            )
+            return None
+        if direction == "short" and latest_delta_ratio is not None and delta_shift > -min_delta_threshold:
+            _reject(
+                prepared,
+                setup_id,
+                "delta_confirmation_missing_short",
+                delta_ratio=latest_delta_ratio,
+                min_delta_threshold=min_delta_threshold,
+            )
             return None
 
         # --- Compute structural SL/TP ---
@@ -206,8 +227,8 @@ class HiddenDivergenceSetup(BaseSetup):
         )
 
         reasons = [
-            f"Hidden div {direction}: swing_ref={swing_ref:.4f}",
-            f"vol_ratio_15m={vol_ratio_15m:.2f} 4h={bias_1h}",
+            f"Hidden div {direction}: swing_ref={swing_ref:.4f} rsi_sep={rsi_separation:.2f}",
+            f"vol_ratio_15m={vol_ratio_15m:.2f} delta_shift={delta_shift:.3f} 1h={bias_1h}",
         ]
 
         return _build_signal(

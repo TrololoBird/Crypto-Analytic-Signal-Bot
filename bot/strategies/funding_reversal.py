@@ -68,10 +68,10 @@ class FundingReversalSetup(BaseSetup):
         
         dynamic_params = get_dynamic_params(prepared, setup_id)
         defaults = self.get_optimizable_params(settings)
-        funding_threshold = dynamic_params.get("funding_threshold", defaults["funding_threshold"])
+        funding_threshold = _as_float(dynamic_params.get("funding_threshold", defaults["funding_threshold"]), defaults["funding_threshold"])
         funding_trend_bars = int(dynamic_params.get("funding_trend_bars", defaults["funding_trend_bars"]))
-        min_delta_threshold = dynamic_params.get("min_delta_threshold", defaults["min_delta_threshold"])
-        sl_buffer_atr = dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"])
+        min_delta_threshold = _as_float(dynamic_params.get("min_delta_threshold", defaults["min_delta_threshold"]), defaults["min_delta_threshold"])
+        sl_buffer_atr = _as_float(dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]), defaults["sl_buffer_atr"])
         
         if prepared.funding_rate is None:
             _reject(prepared, setup_id, "funding_rate_missing")
@@ -118,11 +118,20 @@ class FundingReversalSetup(BaseSetup):
             _reject(prepared, setup_id, "volume_too_low", vol_ratio=vol_ratio)
             return None
 
+        latest_delta_ratio: float | None = None
+        delta_shift = 0.0
+        if "delta_ratio" in w.columns:
+            delta_series = w["delta_ratio"].drop_nulls()
+            if delta_series.len() > 0:
+                latest_delta_ratio = _as_float(delta_series[-1], 0.5)
+                delta_shift = latest_delta_ratio - 0.5
+
         bar_open = _as_float(w.item(-1, "open"))
         bar_close = _as_float(w.item(-1, "close"))
         bar_high = _as_float(w.item(-1, "high"))
         bar_low = _as_float(w.item(-1, "low"))
         body = abs(bar_close - bar_open)
+        trend_window = max(6, funding_trend_bars * 3)
 
         if fr > _FUNDING_THRESHOLD:
             # Extreme longs → look for short reversal
@@ -131,15 +140,24 @@ class FundingReversalSetup(BaseSetup):
             if not (bar_close < bar_open and body > 0 and upper_wick >= body * 1.5):
                 _reject(prepared, setup_id, "reversal_candle_missing_short")
                 return None
+            if latest_delta_ratio is not None and delta_shift > -min_delta_threshold:
+                _reject(
+                    prepared,
+                    setup_id,
+                    "delta_confirmation_missing_short",
+                    delta_ratio=latest_delta_ratio,
+                    min_delta_threshold=min_delta_threshold,
+                )
+                return None
             direction = "short"
-            # SL: beyond the extreme funding candle's wick tip + 0.1×ATR
-            stop = bar_high + atr * 0.1
+            # SL: beyond the extreme funding candle's wick tip + configured ATR buffer
+            stop = bar_high + atr * sl_buffer_atr
             risk = stop - price
             if risk <= 0:
                 _reject(prepared, setup_id, "risk_non_positive_short", stop=stop, price=price)
                 return None
             # TP1: funding mean-reversion level (mark price before funding spike = recent low)
-            recent_lows = w["low"].slice(-10, 9)  # last 10 excluding current
+            recent_lows = w["low"].slice(-(trend_window + 1), trend_window)
             tp1 = _as_float(recent_lows.min()) if recent_lows.len() > 0 else None
             # TP2: prior structural level (1h swing low)
             from ..features import _swing_points as _sp
@@ -157,15 +175,24 @@ class FundingReversalSetup(BaseSetup):
             if not (bar_close > bar_open and body > 0 and lower_wick >= body * 1.5):
                 _reject(prepared, setup_id, "reversal_candle_missing_long")
                 return None
+            if latest_delta_ratio is not None and delta_shift < min_delta_threshold:
+                _reject(
+                    prepared,
+                    setup_id,
+                    "delta_confirmation_missing_long",
+                    delta_ratio=latest_delta_ratio,
+                    min_delta_threshold=min_delta_threshold,
+                )
+                return None
             direction = "long"
-            # SL: beyond the extreme funding candle's wick tip + 0.1×ATR
-            stop = bar_low - atr * 0.1
+            # SL: beyond the extreme funding candle's wick tip + configured ATR buffer
+            stop = bar_low - atr * sl_buffer_atr
             risk = price - stop
             if risk <= 0:
                 _reject(prepared, setup_id, "risk_non_positive_long", stop=stop, price=price)
                 return None
             # TP1: funding mean-reversion level (mark price before funding spike = recent high)
-            recent_highs = w["high"].slice(-10, 9)  # last 10 excluding current
+            recent_highs = w["high"].slice(-(trend_window + 1), trend_window)
             tp1 = _as_float(recent_highs.max()) if recent_highs.len() > 0 else None
             # TP2: prior structural level (1h swing high)
             from ..features import _swing_points as _sp
@@ -194,7 +221,8 @@ class FundingReversalSetup(BaseSetup):
 
         reasons = [
             f"Funding reversal {direction}: fr={fr:.5f} trend={funding_trend or 'unknown'}",
-            f"vol_ratio={vol_ratio:.2f} reversal_candle=yes",
+            f"vol_ratio={vol_ratio:.2f} delta_shift={delta_shift:.3f} trend_window={trend_window}",
+            f"sl_buffer_atr={sl_buffer_atr:.2f} reversal_candle=yes",
         ]
 
         return _build_signal(

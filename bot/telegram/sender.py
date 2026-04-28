@@ -160,11 +160,12 @@ class TelegramSender:
         """Send message with retry logic."""
         if self._bot is None:
             raise RuntimeError("Bot not initialized")
+        loop = asyncio.get_running_loop()
         
         # Check circuit breaker
         if self._circuit_open:
             if self._last_failure:
-                elapsed = asyncio.get_event_loop().time() - self._last_failure
+                elapsed = loop.time() - self._last_failure
                 if elapsed < self.RECOVERY_TIMEOUT:
                     raise Exception("Circuit breaker open")
             # Try to close circuit
@@ -224,7 +225,7 @@ class TelegramSender:
     def _record_failure(self) -> None:
         """Record failure for circuit breaker."""
         self._failures += 1
-        self._last_failure = asyncio.get_event_loop().time()
+        self._last_failure = asyncio.get_running_loop().time()
         
         if self._failures >= self.FAILURE_THRESHOLD:
             self._circuit_open = True

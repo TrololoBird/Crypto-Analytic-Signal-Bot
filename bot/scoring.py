@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
 import polars as pl
 
@@ -206,46 +207,104 @@ def _funding_contrarian(prepared: PreparedSymbol, signal: Signal, settings: BotS
     return 0.5
 
 
+def _crowding_context_stale(prepared: PreparedSymbol) -> bool:
+    flags = getattr(prepared, "data_freshness_flags", ()) or ()
+    return "crowding_context_missing" in flags
+
+
+def _ratio_score(ratio: float | None, direction: str, *, contrarian: bool) -> float:
+    if ratio is None or not math.isfinite(ratio) or ratio <= 0.0:
+        return 0.5
+    if contrarian:
+        if direction == "long":
+            if ratio <= 0.7:
+                return 0.95
+            if ratio <= 0.9:
+                return 0.75
+            if ratio >= 1.8:
+                return 0.12
+            if ratio >= 1.45:
+                return 0.28
+            if ratio >= 1.1:
+                return 0.4
+            return 0.5
+        if ratio >= 1.35:
+            return 0.95
+        if ratio >= 1.1:
+            return 0.75
+        if ratio <= 0.55:
+            return 0.12
+        if ratio <= 0.8:
+            return 0.28
+        if ratio <= 0.92:
+            return 0.4
+        return 0.5
+    if direction == "long":
+        if 1.02 <= ratio <= 1.35:
+            return 0.88
+        if 0.94 <= ratio < 1.02:
+            return 0.62
+        if 1.35 < ratio <= 1.65:
+            return 0.55
+        if ratio > 1.65:
+            return 0.2
+        if ratio < 0.8:
+            return 0.12
+        return 0.35
+    if 0.7 <= ratio <= 0.98:
+        return 0.88
+    if 0.98 < ratio <= 1.06:
+        return 0.62
+    if 0.5 <= ratio < 0.7:
+        return 0.55
+    if ratio < 0.5:
+        return 0.2
+    if ratio > 1.25:
+        return 0.12
+    return 0.35
+
+
+def _gap_score(gap: float | None, direction: str, *, contrarian: bool) -> float:
+    if gap is None or not math.isfinite(gap):
+        return 0.5
+    if contrarian:
+        if direction == "long":
+            if gap <= -0.12:
+                return 0.9
+            if gap <= -0.05:
+                return 0.72
+            if gap >= 0.22:
+                return 0.15
+            return 0.5
+        if gap >= 0.12:
+            return 0.9
+        if gap >= 0.05:
+            return 0.72
+        if gap <= -0.22:
+            return 0.15
+        return 0.5
+    if direction == "long":
+        if 0.0 <= gap <= 0.18:
+            return 0.82
+        if gap < -0.08 or gap >= 0.3:
+            return 0.18
+        return 0.5
+    if -0.18 <= gap <= 0.0:
+        return 0.82
+    if gap > 0.08 or gap <= -0.3:
+        return 0.18
+    return 0.5
+
+
 def _crowd_position(prepared: PreparedSymbol, signal: Signal, settings: BotSettings) -> float:
-    """Score based on L/S ratio and taker buy/sell pressure.
+    contrarian_mode = signal.strategy_family == "reversal" or signal.confirmation_profile == "countertrend_exhaustion"
+    ratio_scores = []
+    if not _crowding_context_stale(prepared):
+        ratio_scores.append((_ratio_score(prepared.top_account_ls_ratio or prepared.ls_ratio, signal.direction, contrarian=contrarian_mode), 0.28))
+        ratio_scores.append((_ratio_score(prepared.top_position_ls_ratio, signal.direction, contrarian=contrarian_mode), 0.30))
+        ratio_scores.append((_ratio_score(prepared.global_account_ls_ratio or prepared.global_ls_ratio, signal.direction, contrarian=contrarian_mode), 0.20))
+        ratio_scores.append((_gap_score(prepared.top_vs_global_ls_gap, signal.direction, contrarian=contrarian_mode), 0.12))
 
-    L/S ratio component (weight 0.60):
-      ls_ratio > 1.5 → crowd is very long → bullish for SHORT, bearish for LONG
-      ls_ratio < 0.7 → crowd is very short → bearish for SHORT, bullish for LONG
-    Taker ratio component (weight 0.40):
-      taker_ratio > 1.3 → aggressive net buyers → confirms LONG, penalises SHORT
-      taker_ratio < 0.7 → aggressive net sellers → confirms SHORT, penalises LONG
-    """
-    # --- L/S ratio component (top trader positioning) ---
-    ls = prepared.ls_ratio
-    if ls is None:
-        ls_score = 0.5
-    else:
-        if signal.direction == "long":
-            # Very long crowd (ls > 1.5) → contrarian bearish → penalise long
-            if ls >= 2.0:
-                ls_score = 0.10
-            elif ls >= 1.5:
-                ls_score = 0.30
-            elif ls <= 0.5:
-                ls_score = 1.0
-            elif ls <= 0.7:
-                ls_score = 0.85  # crowd short → long entry good
-            else:
-                ls_score = 0.5
-        else:
-            if ls <= 0.5:
-                ls_score = 0.10  # crowd very short → contrarian bullish → penalise short
-            elif ls <= 0.7:
-                ls_score = 0.30
-            elif ls >= 2.0:
-                ls_score = 1.0
-            elif ls >= 1.5:
-                ls_score = 0.85  # crowd long → short entry good
-            else:
-                ls_score = 0.5
-
-    # --- Taker ratio component (directional pressure from aggressor side) ---
     taker = getattr(prepared, "taker_ratio", None)
     if taker is None:
         taker_score = 0.5
@@ -274,5 +333,13 @@ def _crowd_position(prepared: PreparedSymbol, signal: Signal, settings: BotSetti
                 taker_score = 0.35
             else:
                 taker_score = 0.5
+    ratio_scores.append((taker_score, 0.10 if contrarian_mode else 0.20))
 
-    return round(ls_score * 0.60 + taker_score * 0.40, 4)
+    weighted_total = 0.0
+    total_weight = 0.0
+    for score, weight in ratio_scores:
+        weighted_total += score * weight
+        total_weight += weight
+    if total_weight <= 0.0:
+        return 0.5
+    return round(weighted_total / total_weight, 4)

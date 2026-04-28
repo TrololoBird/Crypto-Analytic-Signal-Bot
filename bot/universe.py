@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import re
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from .config import BotSettings
 from .models import SymbolMeta, UniverseSymbol
@@ -65,16 +66,201 @@ def _bucket_priority(item: UniverseSymbol) -> tuple[float, float, str]:
     return quality, item.quote_volume, item.symbol
 
 
+def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
+    return max(low, min(high, value))
+
+
+def _safe_float(value: Any, default: float | None = None) -> float | None:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return default
+    if not math.isfinite(numeric):
+        return default
+    return numeric
+
+
+def _crowding_score(row: dict[str, Any]) -> float:
+    ratios = []
+    for key in ("top_account_ls_ratio", "top_position_ls_ratio", "global_account_ls_ratio"):
+        ratio = _safe_float(row.get(key))
+        if ratio is not None and ratio > 0.0:
+            ratios.append(ratio)
+    gap = _safe_float(row.get("top_vs_global_ls_gap"))
+    if not ratios and gap is None:
+        return 0.55
+
+    penalties: list[float] = []
+    for ratio in ratios:
+        deviation = abs(ratio - 1.0)
+        penalties.append(_clamp((deviation - 0.12) / 0.95))
+    if gap is not None:
+        penalties.append(_clamp((abs(gap) - 0.05) / 0.45))
+    penalty = sum(penalties) / len(penalties) if penalties else 0.0
+    return round(_clamp(1.0 - penalty), 6)
+
+
+def _oi_participation_score(row: dict[str, Any]) -> float:
+    oi_change = _safe_float(row.get("oi_change_pct"))
+    oi_current = _safe_float(row.get("oi_current"))
+    quote_volume = float(row.get("quote_volume") or 0.0)
+    last_price = float(row.get("last_price") or 0.0)
+
+    change_score = 0.55
+    if oi_change is not None:
+        if oi_change >= 12.0:
+            change_score = 1.0
+        elif oi_change >= 5.0:
+            change_score = 0.82
+        elif oi_change >= 1.5:
+            change_score = 0.65
+        elif oi_change <= -8.0:
+            change_score = 0.18
+        elif oi_change <= -2.0:
+            change_score = 0.35
+        else:
+            change_score = 0.5
+
+    notional_score = 0.55
+    if oi_current is not None and oi_current > 0.0 and quote_volume > 0.0 and last_price > 0.0:
+        oi_notional_ratio = (oi_current * last_price) / quote_volume
+        notional_score = _clamp(oi_notional_ratio / 1.6)
+    return round(change_score * 0.65 + notional_score * 0.35, 6)
+
+
+def _funding_basis_sanity_score(row: dict[str, Any]) -> float:
+    funding_rate = _safe_float(row.get("funding_rate"))
+    basis_pct = _safe_float(row.get("basis_pct"))
+    if funding_rate is None and basis_pct is None:
+        return 0.55
+
+    funding_score = 0.7
+    if funding_rate is not None:
+        funding_abs = abs(funding_rate)
+        if funding_abs <= 0.0004:
+            funding_score = 0.9
+        elif funding_abs <= 0.0008:
+            funding_score = 0.72
+        elif funding_abs <= 0.0012:
+            funding_score = 0.45
+        else:
+            funding_score = 0.15
+
+    basis_score = 0.7
+    if basis_pct is not None:
+        basis_abs = abs(basis_pct)
+        if basis_abs <= 0.05:
+            basis_score = 0.9
+        elif basis_abs <= 0.12:
+            basis_score = 0.72
+        elif basis_abs <= 0.2:
+            basis_score = 0.45
+        else:
+            basis_score = 0.15
+    return round(funding_score * 0.5 + basis_score * 0.5, 6)
+
+
+def _spread_freshness_score(row: dict[str, Any], settings: BotSettings) -> float:
+    universe = settings.universe
+    max_spread = float(getattr(universe, "shortlist_spread_max_bps", 15.0))
+    stale_s = float(getattr(universe, "shortlist_book_stale_seconds", 90.0))
+    spread_bps = _safe_float(row.get("spread_bps"))
+    book_age = _safe_float(row.get("book_age_seconds"))
+    mark_age = _safe_float(row.get("mark_price_age_seconds"))
+    ticker_age = _safe_float(row.get("ticker_age_seconds"))
+
+    spread_score = 0.55
+    if spread_bps is not None and spread_bps > 0.0:
+        spread_score = _clamp(1.0 - (spread_bps / max_spread))
+
+    freshness_values: list[float] = []
+    for age in (ticker_age, book_age, mark_age):
+        if age is not None:
+            freshness_values.append(_clamp(1.0 - (age / stale_s)))
+    freshness_score = sum(freshness_values) / len(freshness_values) if freshness_values else 0.55
+    return round(spread_score * 0.55 + freshness_score * 0.45, 6)
+
+
+def _composite_score(
+    *,
+    row: dict[str, Any],
+    settings: BotSettings,
+    liquidity_rank: int,
+    eligible_count: int,
+    min_onboard_ms: int,
+) -> tuple[float, tuple[str, ...]]:
+    shortlist_bucket = _bucket_for_price_change(float(row.get("price_change_pct") or 0.0))
+    liquidity_curve = 1.0 - ((liquidity_rank - 1) / max(eligible_count - 1, 1))
+    volume_floor = max(float(getattr(settings.universe, "min_quote_volume_usd", 0.0)), 1.0)
+    volume = float(row.get("quote_volume") or 0.0)
+    liquidity_depth = _clamp((math.log10(max(volume, 1.0)) - math.log10(volume_floor)) / 2.0 + 0.5)
+    liquidity_score = round(liquidity_curve * 0.7 + liquidity_depth * 0.3, 6)
+
+    onboard_date_ms = int(row.get("onboard_date_ms") or 0)
+    age_score = 0.55
+    if onboard_date_ms > 0:
+        age_days = max((min_onboard_ms - onboard_date_ms) / 86_400_000.0, 0.0)
+        age_score = _clamp(age_days / max(float(settings.universe.min_listing_age_days) * 5.0, 30.0))
+
+    move = abs(float(row.get("price_change_pct") or 0.0))
+    if shortlist_bucket == "trend":
+        bucket_fit = max(0.0, 1.0 - min(move, 2.0) / 2.0)
+    elif shortlist_bucket == "breakout":
+        bucket_fit = max(0.0, 1.0 - min(abs(move - 4.5) / 4.5, 1.0))
+    else:
+        bucket_fit = max(0.0, 1.0 - min(abs(move - 11.0) / 12.0, 1.0))
+
+    tradability_score = 1.0
+    if row.get("status") != "TRADING" or row.get("contract_type") != "PERPETUAL":
+        tradability_score = 0.0
+    elif float(row.get("last_price") or 0.0) <= 0.0:
+        tradability_score = 0.0
+    else:
+        tradability_score = 0.75 + bucket_fit * 0.25
+
+    freshness_score = _spread_freshness_score(row, settings)
+    oi_score = _oi_participation_score(row)
+    sanity_score = _funding_basis_sanity_score(row)
+    crowding_score = _crowding_score(row)
+
+    score = (
+        liquidity_score * 0.32
+        + age_score * 0.12
+        + tradability_score * 0.18
+        + freshness_score * 0.14
+        + oi_score * 0.10
+        + sanity_score * 0.08
+        + crowding_score * 0.06
+    )
+
+    reasons: list[str] = [f"bucket:{shortlist_bucket}"]
+    if liquidity_rank <= 10:
+        reasons.append(f"liquidity_rank:{liquidity_rank}")
+    if freshness_score >= 0.72:
+        reasons.append("spread_freshness_strong")
+    if oi_score >= 0.72:
+        reasons.append("oi_participation_strong")
+    if sanity_score >= 0.72:
+        reasons.append("funding_basis_sane")
+    if crowding_score <= 0.35:
+        reasons.append("crowding_penalty")
+    if age_score >= 0.8:
+        reasons.append("seasoned_listing")
+    return round(score, 6), tuple(reasons[:4])
+
+
 def build_shortlist(
     symbol_meta: list[SymbolMeta],
     tickers_24h: list[dict[str, float | str]],
     settings: BotSettings,
-) -> tuple[list[UniverseSymbol], dict[str, int]]:
+    *,
+    seed_source: str = "rest_full",
+) -> tuple[list[UniverseSymbol], dict[str, Any]]:
     meta_map = {row.symbol: row for row in symbol_meta}
     pinned = {symbol for symbol in settings.universe.pinned_symbols}
     min_onboard = datetime.now(UTC) - timedelta(days=settings.universe.min_listing_age_days)
     min_onboard_ms = int(min_onboard.timestamp() * 1000)
-    eligible: list[UniverseSymbol] = []
+    eligible_rows: list[dict[str, Any]] = []
 
     for row in tickers_24h:
         symbol = str(row.get("symbol") or "").strip().upper()
@@ -101,29 +287,92 @@ def build_shortlist(
                 continue
             if meta.onboard_date_ms and meta.onboard_date_ms > min_onboard_ms:
                 continue
+        eligible_rows.append(
+            {
+                "symbol": symbol,
+                "base_asset": meta.base_asset,
+                "quote_asset": meta.quote_asset,
+                "contract_type": meta.contract_type,
+                "status": meta.status,
+                "onboard_date_ms": meta.onboard_date_ms,
+                "quote_volume": quote_volume,
+                "price_change_pct": price_change_pct,
+                "last_price": last_price,
+                "shortlist_bucket": _bucket_for_price_change(price_change_pct),
+                "spread_bps": _safe_float(row.get("spread_bps")),
+                "ticker_age_seconds": _safe_float(row.get("ticker_age_seconds")),
+                "book_age_seconds": _safe_float(row.get("book_age_seconds")),
+                "mark_price_age_seconds": _safe_float(row.get("mark_price_age_seconds")),
+                "oi_change_pct": _safe_float(row.get("oi_change_pct")),
+                "oi_current": _safe_float(row.get("oi_current")),
+                "funding_rate": _safe_float(row.get("funding_rate")),
+                "basis_pct": _safe_float(row.get("basis_pct")),
+                "top_account_ls_ratio": _safe_float(row.get("top_account_ls_ratio")),
+                "top_position_ls_ratio": _safe_float(row.get("top_position_ls_ratio")),
+                "global_account_ls_ratio": _safe_float(row.get("global_account_ls_ratio")),
+                "top_vs_global_ls_gap": _safe_float(row.get("top_vs_global_ls_gap")),
+            }
+        )
+
+    eligible_rows.sort(key=lambda item: float(item["quote_volume"]), reverse=True)
+    eligible: list[UniverseSymbol] = []
+    liquidity_rank = 0
+    previous_volume: float | None = None
+    for index, row in enumerate(eligible_rows, start=1):
+        row_volume = float(row["quote_volume"])
+        if previous_volume is None or not math.isclose(row_volume, previous_volume, rel_tol=0.0, abs_tol=1e-9):
+            liquidity_rank = index
+            previous_volume = row_volume
+        shortlist_score, reasons = _composite_score(
+            row=row,
+            settings=settings,
+            liquidity_rank=liquidity_rank,
+            eligible_count=len(eligible_rows),
+            min_onboard_ms=min_onboard_ms,
+        )
         eligible.append(
             UniverseSymbol(
-                symbol=symbol,
-                base_asset=meta.base_asset,
-                quote_asset=meta.quote_asset,
-                contract_type=meta.contract_type,
-                status=meta.status,
-                onboard_date_ms=meta.onboard_date_ms,
-                quote_volume=quote_volume,
-                price_change_pct=price_change_pct,
-                last_price=last_price,
-                shortlist_bucket=_bucket_for_price_change(price_change_pct),
+                symbol=str(row["symbol"]),
+                base_asset=str(row["base_asset"]),
+                quote_asset=str(row["quote_asset"]),
+                contract_type=str(row["contract_type"]),
+                status=str(row["status"]),
+                onboard_date_ms=int(row["onboard_date_ms"]),
+                quote_volume=float(row["quote_volume"]),
+                price_change_pct=float(row["price_change_pct"]),
+                last_price=float(row["last_price"]),
+                shortlist_bucket=str(row["shortlist_bucket"]),
+                shortlist_score=shortlist_score,
+                shortlist_reasons=reasons,
+                seed_source=seed_source,
+                liquidity_rank=liquidity_rank,
             )
         )
 
-    eligible.sort(key=lambda item: _bucket_priority(item), reverse=True)
+    eligible.sort(
+        key=lambda item: (
+            item.shortlist_score or 0.0,
+            _bucket_priority(item)[0],
+            item.quote_volume,
+            item.symbol,
+        ),
+        reverse=True,
+    )
     pinned_rows = [row for row in eligible if row.symbol in pinned]
     dynamic_pool = [row for row in eligible if row.symbol not in pinned][: settings.universe.dynamic_limit]
     bucket_pool: dict[str, list[UniverseSymbol]] = {"trend": [], "breakout": [], "reversal": []}
     for row in dynamic_pool:
         bucket_pool[row.shortlist_bucket].append(row)
     for bucket in bucket_pool.values():
-        bucket.sort(key=lambda item: _bucket_priority(item), reverse=True)
+        bucket.sort(
+            key=lambda item: (
+                item.shortlist_score or 0.0,
+                _bucket_priority(item)[0],
+                item.quote_volume,
+                item.symbol,
+            ),
+            reverse=True,
+        )
 
     shortlist: list[UniverseSymbol] = []
     seen: set[str] = set()
@@ -135,6 +384,7 @@ def build_shortlist(
 
     targets = _scaled_bucket_targets(max(settings.universe.shortlist_limit - len(shortlist), 0))
     summary = {
+        "mode": seed_source,
         "eligible": len(eligible),
         "dynamic_pool": len(dynamic_pool),
         "pinned": len(pinned_rows),
@@ -142,6 +392,7 @@ def build_shortlist(
         "breakout": 0,
         "reversal": 0,
         "fill": 0,
+        "avg_score": round(sum((row.shortlist_score or 0.0) for row in shortlist) / max(len(shortlist), 1), 6),
     }
 
     for bucket in ("trend", "breakout", "reversal"):
@@ -166,9 +417,11 @@ def build_shortlist(
     shortlist.sort(
         key=lambda item: (
             item.symbol not in pinned,
+            -(item.shortlist_score or 0.0),
             -_bucket_priority(item)[0],
             -item.quote_volume,
             item.symbol,
         )
     )
+    summary["avg_score"] = round(sum((row.shortlist_score or 0.0) for row in shortlist) / max(len(shortlist), 1), 6)
     return shortlist, summary

@@ -139,6 +139,39 @@ def select_structural_target(
     return best_price
 
 
+def select_structural_stop_anchor(
+    work: pl.DataFrame,
+    *,
+    sh_mask: pl.Series | None,
+    sl_mask: pl.Series | None,
+    price_anchor: float,
+    stop_basis: float,
+    direction: str,
+) -> float:
+    anchor = float(stop_basis)
+    if direction == "long":
+        structural_support = select_structural_target(
+            work,
+            mask=sl_mask,
+            column="low",
+            price_anchor=price_anchor,
+            direction="short",
+        )
+        if structural_support is not None:
+            anchor = min(anchor, structural_support)
+        return anchor
+    structural_resistance = select_structural_target(
+        work,
+        mask=sh_mask,
+        column="high",
+        price_anchor=price_anchor,
+        direction="long",
+    )
+    if structural_resistance is not None:
+        anchor = max(anchor, structural_resistance)
+    return max(anchor, price_anchor)
+
+
 def build_structural_targets(
     direction: str,
     price_anchor: float,
@@ -173,10 +206,18 @@ def build_structural_targets(
         Tuple of (stop, tp1, tp2) where tp1/tp2 may be None
     """
     stop_buffer = max(0.05, float(sl_buffer_atr))
+    stop_anchor = select_structural_stop_anchor(
+        work_1h,
+        sh_mask=sh_mask,
+        sl_mask=sl_mask,
+        price_anchor=price_anchor,
+        stop_basis=stop_basis,
+        direction=direction,
+    )
 
     if direction == "long":
         # SL: below stop_basis + configurable ATR noise buffer.
-        stop = stop_basis - atr * stop_buffer
+        stop = stop_anchor - atr * stop_buffer
         
         # TP1: next 1h resistance (swing high above entry)
         tp1 = None
@@ -205,7 +246,7 @@ def build_structural_targets(
                 tp2 = last_4h_high
     else:
         # SL: above stop_basis + configurable ATR noise buffer.
-        stop = stop_basis + atr * stop_buffer
+        stop = stop_anchor + atr * stop_buffer
         
         # TP1: next 1h support (swing low below entry)
         tp1 = None

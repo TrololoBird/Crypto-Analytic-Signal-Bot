@@ -1046,7 +1046,12 @@ class FuturesWSManager:
                 LOG.debug("shortlist WS cache cold, signaling REST fallback needed")
                 tickers = []
 
-            shortlist, summary = build_shortlist(symbol_meta, tickers, settings)
+            shortlist, summary = build_shortlist(
+                symbol_meta,
+                tickers,
+                settings,
+                seed_source="ws_light",
+            )
             self._last_shortlist = shortlist
             self._last_shortlist_summary = summary
             return shortlist, summary

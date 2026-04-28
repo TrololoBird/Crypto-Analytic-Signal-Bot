@@ -515,19 +515,28 @@ class MemoryRepository(MemoryRepositoryExtension):
     async def get_signals_for_analysis(
         self,
         since: datetime,
-        min_score: float = 0.0
+        min_score: float = 0.0,
+        until: datetime | None = None,
     ) -> pl.DataFrame:
         """Get signals as Polars DataFrame for analysis."""
         if not self._conn:
             raise RuntimeError("Repository not initialized")
-        
-        async with self._conn.execute("""
+
+        query = """
             SELECT s.*, o.result, o.pnl_24h, o.max_profit_pct, o.max_loss_pct
             FROM signals s
             LEFT JOIN outcomes o ON s.signal_id = o.signal_id
             WHERE s.created_at > ? AND s.score >= ?
+        """
+        params: list[Any] = [since.isoformat(), min_score]
+        if until is not None:
+            query += " AND s.created_at <= ?"
+            params.append(until.isoformat())
+        query += """
             ORDER BY s.created_at DESC
-        """, (since.isoformat(), min_score)) as cursor:
+        """
+
+        async with self._conn.execute(query, params) as cursor:
             rows = await cursor.fetchall()
             
         if not rows:

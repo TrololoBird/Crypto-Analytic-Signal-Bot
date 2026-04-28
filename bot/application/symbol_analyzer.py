@@ -50,6 +50,62 @@ class SymbolAnalyzer:
             return None
         return numeric if numeric == numeric and numeric not in (float("inf"), float("-inf")) else None
 
+    @staticmethod
+    def _crowding_flags(prepared: PreparedSymbol, direction: str) -> dict[str, Any]:
+        flags = set(getattr(prepared, "data_freshness_flags", ()) or ())
+        if "crowding_context_missing" in flags:
+            return {"available": False, "exhaustion": False, "trend_support": False, "headwind": False}
+
+        top_account = prepared.top_account_ls_ratio or prepared.ls_ratio
+        top_position = prepared.top_position_ls_ratio
+        global_ratio = prepared.global_account_ls_ratio or prepared.global_ls_ratio
+        gap = prepared.top_vs_global_ls_gap
+
+        if direction == "long":
+            exhaustion = bool(
+                (global_ratio is not None and global_ratio <= 0.9)
+                or (top_account is not None and top_account <= 0.88)
+                or (top_position is not None and top_position <= 0.9)
+                or (gap is not None and gap <= -0.1)
+            )
+            trend_support = bool(
+                ((top_position is not None and 1.02 <= top_position <= 1.35) or (top_account is not None and 1.0 <= top_account <= 1.3))
+                and not exhaustion
+                and not (gap is not None and gap >= 0.22)
+            )
+            headwind = bool(
+                (top_account is not None and top_account >= 1.7)
+                or (top_position is not None and top_position >= 1.75)
+                or (gap is not None and gap >= 0.22)
+            )
+        else:
+            exhaustion = bool(
+                (global_ratio is not None and global_ratio >= 1.1)
+                or (top_account is not None and top_account >= 1.12)
+                or (top_position is not None and top_position >= 1.1)
+                or (gap is not None and gap >= 0.1)
+            )
+            trend_support = bool(
+                ((top_position is not None and 0.7 <= top_position <= 0.98) or (top_account is not None and 0.78 <= top_account <= 1.0))
+                and not exhaustion
+                and not (gap is not None and gap <= -0.22)
+            )
+            headwind = bool(
+                (top_account is not None and top_account <= 0.62)
+                or (top_position is not None and top_position <= 0.58)
+                or (gap is not None and gap <= -0.22)
+            )
+        return {
+            "available": any(value is not None for value in (top_account, top_position, global_ratio, gap)),
+            "exhaustion": exhaustion,
+            "trend_support": trend_support,
+            "headwind": headwind,
+            "top_account_ls_ratio": top_account,
+            "top_position_ls_ratio": top_position,
+            "global_account_ls_ratio": global_ratio,
+            "top_vs_global_ls_gap": gap,
+        }
+
     def directional_context(self, signal: Signal, prepared: PreparedSymbol) -> dict[str, Any]:
         work_5m = prepared.work_5m
         close_5m = self._frame_float(work_5m, "close")
@@ -70,6 +126,7 @@ class SymbolAnalyzer:
             premium_velocity = prepared.mark_index_spread_bps
         depth_imbalance = prepared.depth_imbalance
         microprice_bias = prepared.microprice_bias
+        crowding = self._crowding_flags(prepared, signal.direction)
 
         direction = signal.direction
         if direction == "long":
@@ -78,7 +135,7 @@ class SymbolAnalyzer:
             premium_confirms = bool((premium_velocity is not None and premium_velocity >= 0.0) or (prepared.mark_index_spread_bps is not None and prepared.mark_index_spread_bps >= -4.0))
             depth_confirms = bool((depth_imbalance is not None and depth_imbalance >= 0.05) or (microprice_bias is not None and microprice_bias >= 0.0))
             premium_exhaustion = bool((prepared.premium_zscore_5m is not None and prepared.premium_zscore_5m <= -1.5) or (prepared.mark_index_spread_bps is not None and prepared.mark_index_spread_bps <= -8.0))
-            crowd_exhaustion = bool((prepared.global_ls_ratio is not None and prepared.global_ls_ratio <= 0.9) or (prepared.top_vs_global_ls_gap is not None and prepared.top_vs_global_ls_gap <= -0.1))
+            crowd_exhaustion = bool(crowding["exhaustion"])
             aggressor_reversal = bool(prepared.aggression_shift is not None and prepared.aggression_shift >= 0.03)
             regime_opposes = prepared.regime_1h_confirmed == "downtrend" or prepared.bias_1h == "downtrend"
             flow_opposes = bool(flow_proxy is not None and flow_proxy <= -0.03)
@@ -86,9 +143,9 @@ class SymbolAnalyzer:
             trend_confirms = bool(close_5m is not None and ema20_5m is not None and close_5m <= ema20_5m and (supertrend_5m is None or supertrend_5m <= 0.0))
             flow_confirms = bool((flow_proxy is not None and flow_proxy <= -0.03) or (delta_ratio_5m is not None and delta_ratio_5m <= 0.47))
             premium_confirms = bool((premium_velocity is not None and premium_velocity <= 0.0) or (prepared.mark_index_spread_bps is not None and prepared.mark_index_spread_bps <= 4.0))
-            depth_confirms = bool((depth_imbalance is not None and depth_imbalance >= 0.05) or (microprice_bias is not None and microprice_bias <= 0.0))
+            depth_confirms = bool((depth_imbalance is not None and depth_imbalance <= -0.05) or (microprice_bias is not None and microprice_bias <= 0.0))
             premium_exhaustion = bool((prepared.premium_zscore_5m is not None and prepared.premium_zscore_5m >= 1.5) or (prepared.mark_index_spread_bps is not None and prepared.mark_index_spread_bps >= 8.0))
-            crowd_exhaustion = bool((prepared.global_ls_ratio is not None and prepared.global_ls_ratio >= 1.1) or (prepared.top_vs_global_ls_gap is not None and prepared.top_vs_global_ls_gap >= 0.1))
+            crowd_exhaustion = bool(crowding["exhaustion"])
             aggressor_reversal = bool(prepared.aggression_shift is not None and prepared.aggression_shift <= -0.03)
             regime_opposes = prepared.regime_1h_confirmed == "uptrend" or prepared.bias_1h == "uptrend"
             flow_opposes = bool(flow_proxy is not None and flow_proxy >= 0.03)
@@ -118,6 +175,9 @@ class SymbolAnalyzer:
             "depth_confirms": depth_confirms,
             "regime_opposes": regime_opposes,
             "flow_opposes": flow_opposes,
+            "crowding": crowding,
+            "crowd_trend_support": crowding["trend_support"],
+            "crowd_headwind": crowding["headwind"],
             "exhaustion_hits": exhaustion_hits,
             "exhaustion_count": sum(1 for value in exhaustion_hits.values() if value),
         }
@@ -187,6 +247,8 @@ class SymbolAnalyzer:
             "premium_slope": details["premium_confirms"],
             "depth_focus": details["depth_confirms"],
         }
+        if details["crowding"]["available"]:
+            details["confirmation_votes"]["crowding_support"] = details["crowd_trend_support"]
         details["confirmation_count"] = sum(1 for value in details["confirmation_votes"].values() if value)
         if family == "reversal" or profile == "countertrend_exhaustion":
             if details["exhaustion_count"] > 0:
@@ -194,6 +256,10 @@ class SymbolAnalyzer:
             if details["regime_opposes"] and details["flow_opposes"]:
                 return False, f"reversal_unconfirmed_{signal.direction}", details
             return True, None, details
+        if details["crowd_headwind"] and not details["crowd_trend_support"] and details["confirmation_count"] < 3:
+            return False, f"crowding_headwind_{signal.direction}", details
+        if family == "breakout" and details["crowding"]["available"] and not details["crowd_trend_support"] and details["confirmation_count"] < 3:
+            return False, f"breakout_crowding_unconfirmed_{signal.direction}", details
         if details["confirmation_count"] >= 2:
             return True, None, details
         if details["regime_opposes"] and details["flow_opposes"] and details["exhaustion_count"] == 0:
@@ -619,6 +685,11 @@ class SymbolAnalyzer:
         await asyncio.sleep(1.0)
         if not isinstance(self._bot.client, BinanceFuturesMarketData):
             return
+        minimums = min_required_bars(
+            min_bars_15m=self._bot.settings.filters.min_bars_15m,
+            min_bars_1h=self._bot.settings.filters.min_bars_1h,
+            min_bars_4h=self._bot.settings.filters.min_bars_4h,
+        )
         async with self._bot._shortlist_lock:
             shortlist = list(self._bot._shortlist)
         if not shortlist:
@@ -647,6 +718,7 @@ class SymbolAnalyzer:
     def ws_cache_enrichments(self, symbol: str) -> dict[str, Any]:
         enrichments: dict[str, Any] = {}
         context_ages: list[float] = []
+        freshness_flags: set[str] = set()
         if self._bot._ws_manager is not None:
             try:
                 ticker = self._bot._ws_manager.get_ticker_snapshot(symbol)
@@ -658,6 +730,10 @@ class SymbolAnalyzer:
                     if ticker_age is not None:
                         enrichments["ticker_price_age_seconds"] = ticker_age
                         context_ages.append(ticker_age)
+                        if ticker_age > self._bot.settings.ws.market_ticker_freshness_seconds:
+                            freshness_flags.add("ticker_price_stale")
+                else:
+                    freshness_flags.add("ticker_price_missing")
             except Exception:
                 pass
             try:
@@ -677,6 +753,10 @@ class SymbolAnalyzer:
                 if mark_age is not None:
                     enrichments["mark_price_age_seconds"] = mark_age
                     context_ages.append(mark_age)
+                    if mark_age > self._bot.settings.ws.market_ticker_freshness_seconds:
+                        freshness_flags.add("mark_price_stale")
+                elif not mark:
+                    freshness_flags.add("mark_price_missing")
             except Exception:
                 pass
             try:
@@ -699,12 +779,18 @@ class SymbolAnalyzer:
             ls = self._bot.client.get_cached_ls_ratio(symbol)
             if ls is not None:
                 enrichments["ls_ratio"] = ls
+                enrichments["top_account_ls_ratio"] = ls
+            top_position_ls = self._bot.client.get_cached_top_position_ls_ratio(symbol)
+            if top_position_ls is not None:
+                enrichments["top_position_ls_ratio"] = top_position_ls
+                enrichments["top_trader_position_ratio"] = top_position_ls
             taker = self._bot.client.get_cached_taker_ratio(symbol)
             if taker is not None:
                 enrichments["taker_ratio"] = taker
             global_ls = self._bot.client.get_cached_global_ls_ratio(symbol)
             if global_ls is not None:
                 enrichments["global_ls_ratio"] = global_ls
+                enrichments["global_account_ls_ratio"] = global_ls
             funding_trend = self._bot.client.get_cached_funding_trend(symbol)
             if funding_trend is not None:
                 enrichments["funding_trend"] = funding_trend
@@ -726,9 +812,13 @@ class SymbolAnalyzer:
             global_ls = enrichments.get("global_ls_ratio")
             if isinstance(top, (int, float)) and isinstance(global_ls, (int, float)):
                 enrichments["top_vs_global_ls_gap"] = float(top) - float(global_ls)
+            else:
+                freshness_flags.add("crowding_context_missing")
 
         if context_ages:
             enrichments["context_snapshot_age_seconds"] = max(context_ages)
+        if freshness_flags:
+            enrichments["data_freshness_flags"] = tuple(sorted(freshness_flags))
         enrichments.setdefault("data_source_mix", "futures_only")
         return enrichments
 

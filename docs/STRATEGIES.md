@@ -21,9 +21,17 @@ Each strategy produces a `StrategyDecision` that can be accepted, rejected, skip
 - `reversal`
 
 Family and confirmation profile metadata are attached per strategy and used by symbol-level context checks.
+- Continuation/breakout families treat crowd positioning as confirmation/headwind context.
+- Reversal families treat crowd positioning as exhaustion context and should not be rejected by continuation-style crowd rules.
 
 ## Operational notes
 
 - Keep strategy params in `[bot.filters.setups]` config scope.
 - Keep setup enable flags in `[bot.setups]`.
 - Add regression coverage when changing decision contracts or metadata.
+- When changing structural target logic, preserve the short-side rule that stop anchors come from resistance above entry, not from the nearest arbitrary structure.
+- Runtime params must affect detection or target construction, not just defaults:
+  - `funding_reversal`: `funding_trend_bars`, `min_delta_threshold`, `sl_buffer_atr`
+  - `cvd_divergence`: `min_delta_threshold`, `sl_buffer_atr`
+  - `hidden_divergence`: `rsi_divergence_lookback`, `rsi_divergence_threshold`, `min_delta_threshold`, `sl_buffer_atr`
+  - `squeeze_setup`: `bb_squeeze_threshold`, `min_bb_compression_width`, `bb_pct_b_threshold`, `volume_threshold`, `sl_buffer_atr`

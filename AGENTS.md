@@ -28,6 +28,8 @@ Keep context small. Read the nearest `AGENTS.md` and only the files on the activ
 - Keep `config.toml.example` aligned when config surface changes.
 - Persistence changes should go through `MemoryRepository`, not ad hoc files or duplicate stores.
 - Never hardcode secrets or paste real API keys/tokens.
+- Binance integration boundary is public USDⓈ-M market data only. Do not add signed REST endpoints, account/trade endpoints, `listenKey`, or user-data streams.
+- Shortlist changes must preserve the `rest_full` vs `ws_light` split and keep fallback behavior explicit in telemetry.
 
 ## Routing
 

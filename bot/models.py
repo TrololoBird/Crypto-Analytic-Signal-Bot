@@ -37,6 +37,10 @@ class UniverseSymbol:
     price_change_pct: float
     last_price: float
     shortlist_bucket: str = ""
+    shortlist_score: float | None = None
+    shortlist_reasons: tuple[str, ...] = ()
+    seed_source: str = "unknown"
+    liquidity_rank: int | None = None
 
 
 @dataclass(slots=True)
@@ -92,12 +96,15 @@ class PreparedSymbol:
     oi_current: float | None = None
     oi_change_pct: float | None = None
     ls_ratio: float | None = None
+    top_account_ls_ratio: float | None = None
     taker_ratio: float | None = None  # taker buy/sell volume ratio (>1.0 = net buyers)
     liquidation_score: float | None = None  # -1.0 (bearish liq) … +1.0 (bullish liq)
     funding_trend: str | None = None  # "rising" | "falling" | "flat" | None
     basis_pct: float | None = None    # (futures - index) / index * 100; + = contango, - = backwardation
     global_ls_ratio: float | None = None
+    global_account_ls_ratio: float | None = None
     top_trader_position_ratio: float | None = None
+    top_position_ls_ratio: float | None = None
     top_vs_global_ls_gap: float | None = None
     mark_index_spread_bps: float | None = None
     premium_zscore_5m: float | None = None
@@ -113,6 +120,7 @@ class PreparedSymbol:
     ticker_price_age_seconds: float | None = None
     book_ticker_age_seconds: float | None = None
     context_snapshot_age_seconds: float | None = None
+    data_freshness_flags: tuple[str, ...] = ()
     data_source_mix: str = "futures_only"
     market_regime: str = "neutral"  # "trending" | "neutral" | "choppy"
     # Structure-based fields (Фаза 2 рефакторинга)
@@ -123,6 +131,20 @@ class PreparedSymbol:
     poc_15m: float | None = None        # Point of Control on 15m
     settings: BotSettings | None = None
     reject_log: list[dict[str, Any]] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if self.top_account_ls_ratio is None and self.ls_ratio is not None:
+            self.top_account_ls_ratio = self.ls_ratio
+        if self.ls_ratio is None and self.top_account_ls_ratio is not None:
+            self.ls_ratio = self.top_account_ls_ratio
+        if self.global_account_ls_ratio is None and self.global_ls_ratio is not None:
+            self.global_account_ls_ratio = self.global_ls_ratio
+        if self.global_ls_ratio is None and self.global_account_ls_ratio is not None:
+            self.global_ls_ratio = self.global_account_ls_ratio
+        if self.top_position_ls_ratio is None and self.top_trader_position_ratio is not None:
+            self.top_position_ls_ratio = self.top_trader_position_ratio
+        if self.top_trader_position_ratio is None and self.top_position_ls_ratio is not None:
+            self.top_trader_position_ratio = self.top_position_ls_ratio
 
     @property
     def symbol(self) -> str:
@@ -183,8 +205,16 @@ class Signal:
             object.__setattr__(self, "risk_reward", computed)
 
     @property
+    def entry_mid_raw(self) -> float:
+        return (self.entry_low + self.entry_high) / 2.0
+
+    @property
     def entry_mid(self) -> float:
-        mid = (self.entry_low + self.entry_high) / 2.0
+        return self.entry_mid_raw
+
+    @property
+    def entry_reference_price(self) -> float:
+        mid = self.entry_mid_raw
         if self.mark_price and self.mark_price > 0 and mid > 0:
             if abs(mid - self.mark_price) / mid < 0.002:
                 return self.mark_price
@@ -264,6 +294,8 @@ class Signal:
             "entry_low": round(self.entry_low, 8),
             "entry_high": round(self.entry_high, 8),
             "entry_mid": round(self.entry_mid, 8),
+            "entry_mid_raw": round(self.entry_mid_raw, 8),
+            "entry_reference_price": round(self.entry_reference_price, 8),
             "stop": round(self.stop, 8),
             "take_profit_1": round(self.take_profit_1, 8),
             "take_profit_2": round(self.take_profit_2, 8),

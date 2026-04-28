@@ -1,26 +1,15 @@
 [build-system]
-requires = ["setuptools", "wheel"]
+requires = ["setuptools>=69", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-<<<<<<< Updated upstream
-name = "YourProjectName"
-version = "0.1.0"
-description = "Your project description"
-authors = [{ name="Your Name", email="youremail@example.com" }]
-license = "MIT"
-dependencies = [
-    "some-package",
-    # other dependencies without duplicates
-]
-
-[tool.setuptools]
-packages = ["your_package_name"]
-include_package_data = true
-=======
 name = "crypto-signal-bot"
 version = "8.0.0"
-requires-python = ">=3.13.13,<3.14"
+description = "Event-driven cryptocurrency signal bot using Binance USD-M public market data."
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+license = { text = "MIT" }
+authors = [{ name = "Crypto Signal Bot" }]
 dependencies = [
     "python-dotenv>=1.2.2",
     "polars>=1.40.1",
@@ -59,4 +48,14 @@ ml = [
     "xgboost>=3.2.0",
     "optuna>=4.8.0",
 ]
->>>>>>> Stashed changes
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["bot*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+

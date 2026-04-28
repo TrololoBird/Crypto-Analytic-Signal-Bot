@@ -7,23 +7,15 @@ Detects divergence between price direction and order flow delta.
 """
 from __future__ import annotations
 
-from typing import cast
-
 import logging
 import math
-
-import polars as pl
 
 from ..config import BotSettings
 from ..features import _swing_points
 from ..models import PreparedSymbol, Signal
 from ..setup_base import BaseSetup
 from ..setups import _build_signal, _compute_dynamic_score, _reject
-from ..setups.utils import (
-    build_structural_targets,
-    validate_rr_or_penalty,
-    get_dynamic_params,
-)
+from ..setups.utils import get_dynamic_params
 
 LOG = logging.getLogger("bot.strategies.cvd_divergence")
 
@@ -115,9 +107,19 @@ class CVDDivergenceSetup(BaseSetup):
         price_ll = float(min(window_b)) < float(min(window_a))
         delta_mean_a = float(delta_a.mean())
         delta_mean_b = float(delta_b.mean())
+        delta_shift = delta_mean_b - delta_mean_a
 
         if math.isnan(delta_mean_a) or math.isnan(delta_mean_b):
             _reject(prepared, self.setup_id, "delta_mean_invalid", delta_mean_a=delta_mean_a, delta_mean_b=delta_mean_b)
+            return None
+        if abs(delta_shift) < min_delta_threshold:
+            _reject(
+                prepared,
+                self.setup_id,
+                "delta_shift_too_small",
+                delta_shift=delta_shift,
+                min_delta_threshold=min_delta_threshold,
+            )
             return None
 
         direction = None
@@ -128,15 +130,17 @@ class CVDDivergenceSetup(BaseSetup):
         # Bearish divergence: price HH, delta declining
         if price_hh and delta_mean_b < delta_mean_a:
             # Don't short in 1H uptrend unless delta very extreme
-            if bias_1h == "uptrend" and (delta_mean_b - delta_mean_a) > -0.2:
-                _reject(prepared, self.setup_id, "context_bias_blocks_short", bias_1h=bias_1h, delta_shift=delta_mean_b - delta_mean_a)
+            bias_override_threshold = max(0.2, min_delta_threshold)
+            if bias_1h == "uptrend" and delta_shift > -bias_override_threshold:
+                _reject(prepared, self.setup_id, "context_bias_blocks_short", bias_1h=bias_1h, delta_shift=delta_shift)
                 return None
             direction = "short"
 
         # Bullish divergence: price LL, delta rising
         elif price_ll and delta_mean_b > delta_mean_a:
-            if bias_1h == "downtrend" and (delta_mean_b - delta_mean_a) < 0.2:
-                _reject(prepared, self.setup_id, "context_bias_blocks_long", bias_1h=bias_1h, delta_shift=delta_mean_b - delta_mean_a)
+            bias_override_threshold = max(0.2, min_delta_threshold)
+            if bias_1h == "downtrend" and delta_shift < bias_override_threshold:
+                _reject(prepared, self.setup_id, "context_bias_blocks_long", bias_1h=bias_1h, delta_shift=delta_shift)
                 return None
             direction = "long"
 
@@ -200,7 +204,7 @@ class CVDDivergenceSetup(BaseSetup):
 
         reasons = [
             f"CVD divergence {direction}",
-            f"delta_a={delta_mean_a:.3f} delta_b={delta_mean_b:.3f}",
+            f"delta_a={delta_mean_a:.3f} delta_b={delta_mean_b:.3f} shift={delta_shift:.3f}",
             f"bias_1h={bias_1h}",
         ]
 

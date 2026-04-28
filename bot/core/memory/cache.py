@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from datetime import datetime, timedelta
 from typing import Any
 
 import polars as pl
 
 LOG = logging.getLogger("bot.core.memory.cache")
+
+
+def _utcnow_naive() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class ParquetCache:
@@ -124,7 +128,7 @@ class ParquetCache:
         lookback: timedelta
     ) -> pl.DataFrame:
         """Read recent data for symbol/timeframe."""
-        since = datetime.utcnow() - lookback
+        since = _utcnow_naive() - lookback
         return self.read(symbol, timeframe, since=since)
     
     def compact(self, max_age_days: int = 30) -> None:
@@ -132,7 +136,7 @@ class ParquetCache:
         
         This reduces file count for old data while maintaining query performance.
         """
-        cutoff = datetime.utcnow() - timedelta(days=max_age_days)
+        cutoff = _utcnow_naive() - timedelta(days=max_age_days)
         
         # Find all daily chunks older than cutoff
         for chunk in self._cache_dir.glob("*.parquet"):
@@ -197,7 +201,7 @@ class TimeSeriesCache:
         bars = lookback_bars or self._memory_bars
         
         # Update access time
-        self._access_times[key] = datetime.utcnow()
+        self._access_times[key] = _utcnow_naive()
         
         # Check memory cache
         if key in self._memory:
@@ -224,7 +228,7 @@ class TimeSeriesCache:
         # Persist to disk
         self._disk.append(symbol, timeframe, df)
         
-        self._access_times[key] = datetime.utcnow()
+        self._access_times[key] = _utcnow_naive()
     
     def _store_in_memory(self, key: str, df: pl.DataFrame) -> None:
         """Store in memory with LRU eviction."""
@@ -232,7 +236,7 @@ class TimeSeriesCache:
         while len(self._memory) >= self._max_symbols and self._memory:
             oldest_key = min(
                 self._access_times,
-                key=lambda item_key: self._access_times.get(item_key, datetime.utcnow()),
+                key=lambda item_key: self._access_times.get(item_key, _utcnow_naive()),
             )
             del self._memory[oldest_key]
             del self._access_times[oldest_key]

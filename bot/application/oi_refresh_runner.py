@@ -65,11 +65,13 @@ class OIRefreshRunner:
             LOG.debug("skipping OI fetch for %s: circuit breaker open", symbol)
             return
         
-        # Reduced fetchers list - focus on most important metrics only
-        # Removed: taker_ratio (less reliable), global_ls_ratio (all symbols covered by ws), basis (heavy)
+        # Public-only derivatives context warmup. Keep it bounded, but include the
+        # crowding ratios that the runtime can consume from cache.
         fetchers = (
             lambda: client.fetch_open_interest_change(symbol, period="1h"),
             lambda: client.fetch_long_short_ratio(symbol, period="1h"),
+            lambda: client.fetch_top_position_ls_ratio(symbol, period="1h"),
+            lambda: client.fetch_global_ls_ratio(symbol, period="1h"),
             lambda: client.fetch_funding_rate_history(symbol),
         )
         for fetch in fetchers:

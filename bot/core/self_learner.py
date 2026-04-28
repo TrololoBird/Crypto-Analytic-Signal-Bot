@@ -160,7 +160,7 @@ class SelfLearner:
 
         # Run optimization
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, study.optimize, objective, self.n_trials)
         except Exception as e:
             LOG.error(f"Optimization failed for {setup_id}: {e}")

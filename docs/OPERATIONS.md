@@ -58,6 +58,13 @@ The bot includes a built-in web dashboard for real-time monitoring.
 - data quality and strategy decision JSONL traces
 - emergency fallback checks (`fallback_checks.jsonl`)
 - cycle/symbol telemetry emitted via `TelemetryManager`
+- shortlist telemetry distinguishes `rest_full`, `ws_light`, `cached`, and `pinned_fallback` sources and includes top composite-score reasons
+
+## Binance boundary checks
+
+- Keep runtime on public USDⓈ-M market-data endpoints only.
+- Treat any `/private`, signed/auth route, `listenKey`, or user-data stream as a configuration/code regression.
+- After market-data changes, rerun the endpoint grep plus `tests/test_remediation_regressions.py` to confirm the public-only guardrails still hold.
 
 ## ML training quality gates
 

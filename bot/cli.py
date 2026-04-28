@@ -16,6 +16,7 @@ import logging.handlers
 import os
 import signal
 import sqlite3
+import subprocess
 import sys
 import time
 from datetime import datetime, timezone
@@ -32,6 +33,18 @@ from .telemetry import TelemetryStore
 _LOGGER_STDERR_PREFIX_RE = re.compile(
     r"^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?:,\d{3})?\s+\|"
 )
+
+
+def _get_or_create_event_loop() -> asyncio.AbstractEventLoop:
+    try:
+        return asyncio.get_running_loop()
+    except RuntimeError:
+        try:
+            return asyncio.get_event_loop_policy().get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            return loop
 
 
 def _is_preformatted_log_stderr(line: str) -> bool:
@@ -123,7 +136,8 @@ def configure_logging(settings: BotSettings, *, debug_mode: bool = False) -> Non
     configure_structlog(log_level)
     
     # Keep asyncio debug disabled to avoid slow-task spam (tracemalloc handles coroutine tracking)
-    asyncio.get_event_loop().set_debug(False)
+    loop = _get_or_create_event_loop()
+    loop.set_debug(False)
     
     # Reduce noise from external libraries but keep warnings
     logging.getLogger("websockets").setLevel(logging.INFO)
@@ -137,7 +151,7 @@ def configure_logging(settings: BotSettings, *, debug_mode: bool = False) -> Non
     logger.info("BOT SESSION STARTED | %s", start_time)
     logger.info("LOG FILE | %s", log_path)
     logger.info("DEBUG MODE | %s", debug_mode)
-    logger.info("ASYNCIO DEBUG | %s", asyncio.get_event_loop().get_debug())
+    logger.info("ASYNCIO DEBUG | %s", loop.get_debug())
     logger.info("=" * 80)
 
 
@@ -432,6 +446,18 @@ def _run_stop_command() -> None:
         return
     if not _pid_is_alive(pid):
         print(f"Process {pid} is not running.")
+        return
+    if os.name == "nt":
+        completed = subprocess.run(
+            ["taskkill", "/PID", str(pid), "/T", "/F"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout or "").strip() or f"exit={completed.returncode}"
+            raise SystemExit(f"failed to stop pid {pid} via taskkill: {detail}")
+        print(f"Stopped pid {pid} via taskkill.")
         return
     os.kill(pid, signal.SIGTERM)
     print(f"Sent SIGTERM to pid {pid}.")

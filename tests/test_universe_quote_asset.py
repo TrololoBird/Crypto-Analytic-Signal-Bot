@@ -17,6 +17,8 @@ def _settings(*, quote_asset: str, pinned_symbols: tuple[str, ...] = ()) -> Simp
             min_quote_volume_usd=0.0,
             dynamic_limit=20,
             shortlist_limit=20,
+            shortlist_spread_max_bps=15.0,
+            shortlist_book_stale_seconds=90.0,
         ),
     )
 
@@ -74,3 +76,49 @@ def test_build_shortlist_filters_by_meta_quote_asset() -> None:
     )
 
     assert shortlist == []
+
+
+def test_build_shortlist_prefers_fresh_tight_symbol_with_same_liquidity() -> None:
+    settings = _settings(quote_asset="USDT")
+    shortlist, _summary = build_shortlist(
+        [
+            _meta("AAAUSDT", "AAA", "USDT"),
+            _meta("BBBUSDT", "BBB", "USDT"),
+        ],
+        [
+            {
+                "symbol": "AAAUSDT",
+                "quote_volume": 20_000_000.0,
+                "last_price": 100.0,
+                "price_change_percent": 1.5,
+                "spread_bps": 1.5,
+                "ticker_age_seconds": 4.0,
+                "book_age_seconds": 4.0,
+                "mark_price_age_seconds": 4.0,
+                "oi_change_pct": 6.0,
+                "funding_rate": 0.0002,
+                "basis_pct": 0.03,
+            },
+            {
+                "symbol": "BBBUSDT",
+                "quote_volume": 20_000_000.0,
+                "last_price": 100.0,
+                "price_change_percent": 1.5,
+                "spread_bps": 18.0,
+                "ticker_age_seconds": 120.0,
+                "book_age_seconds": 120.0,
+                "mark_price_age_seconds": 120.0,
+                "oi_change_pct": -5.0,
+                "funding_rate": 0.0015,
+                "basis_pct": 0.24,
+            },
+        ],
+        settings,
+        seed_source="ws_light",
+    )
+
+    assert [row.symbol for row in shortlist[:2]] == ["AAAUSDT", "BBBUSDT"]
+    assert shortlist[0].shortlist_score is not None
+    assert shortlist[1].shortlist_score is not None
+    assert shortlist[0].shortlist_score > shortlist[1].shortlist_score
+    assert shortlist[0].seed_source == "ws_light"

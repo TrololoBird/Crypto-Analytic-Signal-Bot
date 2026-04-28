@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 import asyncio
 import logging
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
-from datetime import datetime, timedelta
 
 from ..engine.registry import StrategyRegistry
 from ..analyzer.metrics import WinRateCalculator, PerformanceMetrics
 
 LOG = logging.getLogger("bot.core.diagnostics.health")
+
+
+def _utcnow_naive() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class HealthStatus(Enum):
@@ -68,7 +72,7 @@ class HealthChecker:
                 continue
             health_results.append(result)
         
-        self._last_check = datetime.utcnow()
+        self._last_check = _utcnow_naive()
         return health_results
     
     async def _check_strategies(self) -> ComponentHealth:
@@ -112,10 +116,8 @@ class HealthChecker:
     
     async def _check_performance(self) -> ComponentHealth:
         """Check overall performance health."""
-        from datetime import datetime, timedelta
-        
         metrics = await self._calc.calculate_metrics(
-            since=datetime.utcnow() - timedelta(days=7)
+            since=_utcnow_naive() - timedelta(days=7)
         )
         
         # Check minimum thresholds

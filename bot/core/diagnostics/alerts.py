@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Callable
 from collections import deque
@@ -13,6 +13,10 @@ from collections import deque
 from .health import HealthStatus, ComponentHealth
 
 LOG = logging.getLogger("bot.core.diagnostics.alerts")
+
+
+def _utcnow_naive() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class AlertSeverity(Enum):
@@ -74,7 +78,7 @@ class AlertManager:
         alert_id = f"{component}:{hash(message) % 10000000}"
         
         # Check cooldown
-        now = datetime.utcnow()
+        now = _utcnow_naive()
         last_sent = self._recent_alerts.get(alert_id)
         
         if last_sent and (now - last_sent).total_seconds() < self._cooldown:

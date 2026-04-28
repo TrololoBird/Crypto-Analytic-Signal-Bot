@@ -7,22 +7,19 @@ import random
 import time
 from collections import deque
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, cast
 
 import polars as pl
 import aiohttp
-try:
-    from binance import AsyncClient
-    from binance.exceptions import BinanceAPIException as BinanceNetworkError
-except ImportError:
-    AsyncClient = None  # type: ignore
-    BinanceNetworkError = Exception  # type: ignore
 
 from .models import AggTrade, AggTradeSnapshot, SymbolFrames, SymbolMeta
 
 if TYPE_CHECKING:
     from .ws_manager import FuturesWSManager
+
+BinanceNetworkError = Exception
 
 
 UTC = timezone.utc
@@ -66,21 +63,58 @@ _ENDPOINT_WEIGHTS: dict[str, int] = {
     "exchange_information": 1,
     "ticker24hr_price_change_statistics": 40,
     "symbol_order_book_ticker": 1,
-    "compressed_aggregate_trades_list:snapshot": 2,
-    "compressed_aggregate_trades_list:history": 2,
+    "compressed_aggregate_trades_list": 2,
     "open_interest": 1,
     # /futures/data/openInterestHist has request weight=0; it is constrained by an IP request limit instead.
     "open_interest_statistics": 0,
     "top_trader_long_short_ratio_accounts": 1,
+    "top_trader_long_short_ratio_positions": 1,
+    "global_long_short_account_ratio": 1,
+    "taker_long_short_ratio": 0,
+    "basis": 0,
     "premium_index": 1,
+    "funding_rate_history": 1,
 }
 
 _FUTURES_DATA_REQUEST_LIMITED_OPS: set[str] = {
     # /futures/data/*
     "open_interest_statistics",
     "top_trader_long_short_ratio_accounts",
+    "top_trader_long_short_ratio_positions",
+    "global_long_short_account_ratio",
+    "taker_long_short_ratio",
+    "basis",
 }
 _DEFAULT_KLINE_FETCH_LIMIT = 300
+
+
+@dataclass(frozen=True, slots=True)
+class _PublicEndpointSpec:
+    path: str
+    source: str = "rest"
+    weight_key: str | None = None
+    ip_limited: bool = False
+
+
+_PUBLIC_ENDPOINT_REGISTRY: dict[str, _PublicEndpointSpec] = {
+    "exchange_information": _PublicEndpointSpec("/fapi/v1/exchangeInfo"),
+    "ticker24hr_price_change_statistics": _PublicEndpointSpec("/fapi/v1/ticker/24hr"),
+    "kline_candlestick_data": _PublicEndpointSpec("/fapi/v1/klines"),
+    "symbol_order_book_ticker": _PublicEndpointSpec("/fapi/v1/ticker/bookTicker"),
+    "compressed_aggregate_trades_list": _PublicEndpointSpec("/fapi/v1/aggTrades"),
+    "premium_index": _PublicEndpointSpec("/fapi/v1/premiumIndex"),
+    "open_interest": _PublicEndpointSpec("/fapi/v1/openInterest"),
+    "funding_rate_history": _PublicEndpointSpec("/fapi/v1/fundingRate"),
+    "open_interest_statistics": _PublicEndpointSpec("/futures/data/openInterestHist", ip_limited=True),
+    "top_trader_long_short_ratio_accounts": _PublicEndpointSpec("/futures/data/topLongShortAccountRatio", ip_limited=True),
+    "top_trader_long_short_ratio_positions": _PublicEndpointSpec("/futures/data/topLongShortPositionRatio", ip_limited=True),
+    "global_long_short_account_ratio": _PublicEndpointSpec("/futures/data/globalLongShortAccountRatio", ip_limited=True),
+    "taker_long_short_ratio": _PublicEndpointSpec("/futures/data/takerlongshortRatio", ip_limited=True),
+    "basis": _PublicEndpointSpec("/futures/data/basis", ip_limited=True),
+}
+
+_PUBLIC_PATH_PREFIXES = ("/fapi/v1/", "/futures/data/")
+_FORBIDDEN_PUBLIC_PATH_MARKERS = ("/private", "listenkey", "/ws-api", "/sapi", "/papi", "signature=", "timestamp=")
 
 
 class _SlidingWindowRateLimiter:
@@ -92,7 +126,8 @@ class _SlidingWindowRateLimiter:
         self._times: deque[float] = deque()
         self._lock = asyncio.Lock()
 
-    async def acquire(self, *, label: str) -> None:
+    async def acquire(self, *, label: str) -> float:
+        waited_s = 0.0
         async with self._lock:
             now = time.monotonic()
             cutoff = now - self._window_seconds
@@ -109,11 +144,13 @@ class _SlidingWindowRateLimiter:
                     self._window_seconds,
                 )
                 await asyncio.sleep(sleep_s)
+                waited_s += sleep_s
                 now = time.monotonic()
                 cutoff = now - self._window_seconds
                 while self._times and self._times[0] < cutoff:
                     self._times.popleft()
             self._times.append(time.monotonic())
+        return waited_s
 
 
 class MarketDataUnavailable(RuntimeError):
@@ -201,6 +238,16 @@ def _coerce_rest_row(item: Any) -> Mapping[str, Any]:
     raise TypeError(f"Unsupported REST row payload type: {type(item)!r}")
 
 
+def _validate_public_endpoint_registry() -> None:
+    for endpoint_name, spec in _PUBLIC_ENDPOINT_REGISTRY.items():
+        path = spec.path.strip()
+        lowered = path.lower()
+        if not path.startswith(_PUBLIC_PATH_PREFIXES):
+            raise ValueError(f"endpoint {endpoint_name} is not on an allowed public Binance path: {path}")
+        if any(marker in lowered for marker in _FORBIDDEN_PUBLIC_PATH_MARKERS):
+            raise ValueError(f"endpoint {endpoint_name} contains a forbidden private/auth marker: {path}")
+
+
 class BinanceFuturesMarketData:
     def __init__(
         self,
@@ -209,12 +256,8 @@ class BinanceFuturesMarketData:
         rest_timeout_seconds: float = 8.0,
     ) -> None:
         self._rest_timeout = rest_timeout_seconds
-        # AsyncClient for public market data (no API keys needed)
-        if AsyncClient is None:
-            raise ImportError("binance library is required but not installed")
-        self.client: Any = AsyncClient(
-            requests_params={"timeout": rest_timeout_seconds}
-        )
+        _validate_public_endpoint_registry()
+        self.client: Any = None
         self._exchange_info_cache: tuple[float, list[SymbolMeta]] | None = None
         self._ticker_24h_cache: tuple[float, list[dict[str, float | str]]] | None = None
         self._funding_rate_cache: dict[str, tuple[float, float]] = {}
@@ -223,6 +266,7 @@ class BinanceFuturesMarketData:
         self._long_short_ratio_cache: dict[tuple[str, str], tuple[float, float]] = {}
         self._taker_ratio_cache: dict[tuple[str, str], tuple[float, float]] = {}
         self._global_ls_ratio_cache: dict[tuple[str, str], tuple[float, float]] = {}
+        self._top_position_ls_ratio_cache: dict[tuple[str, str], tuple[float, float]] = {}
         self._funding_history_cache: dict[str, tuple[float, list[dict]]] = {}
         self._basis_cache: dict[tuple[str, str], tuple[float, float | None]] = {}
         self._basis_stats_cache: dict[tuple[str, str], tuple[float, dict[str, float | None]]] = {}
@@ -248,6 +292,12 @@ class BinanceFuturesMarketData:
         self._circuit_open_until: dict[str, float] = {}
         self._circuit_failure_threshold = 3
         self._circuit_open_duration_seconds = 30.0
+        self._last_endpoint_name: str | None = None
+        self._last_endpoint_source: str | None = None
+        self._last_endpoint_cache_hit: bool = False
+        self._last_endpoint_fallback_used: bool = False
+        self._last_endpoint_limiter_wait_ms: float = 0.0
+        self._last_endpoint_response_age_s: float | None = None
 
     @staticmethod
     def _header_value(headers: Any, name: str) -> str | None:
@@ -388,6 +438,33 @@ class BinanceFuturesMarketData:
                 )
                 self._set_rate_limit_pause(1.0)
 
+    def _endpoint_spec(self, operation: str) -> _PublicEndpointSpec:
+        try:
+            return _PUBLIC_ENDPOINT_REGISTRY[operation]
+        except KeyError as exc:
+            raise ValueError(f"unsupported public endpoint operation={operation}") from exc
+
+    def _endpoint_url(self, operation: str) -> str:
+        spec = self._endpoint_spec(operation)
+        return f"{_FAPI_BASE_URL}{spec.path}"
+
+    def _record_endpoint_snapshot(
+        self,
+        endpoint_name: str,
+        *,
+        source: str,
+        cache_hit: bool,
+        fallback_used: bool,
+        limiter_wait_ms: float = 0.0,
+        response_age_s: float | None = None,
+    ) -> None:
+        self._last_endpoint_name = endpoint_name
+        self._last_endpoint_source = source
+        self._last_endpoint_cache_hit = bool(cache_hit)
+        self._last_endpoint_fallback_used = bool(fallback_used)
+        self._last_endpoint_limiter_wait_ms = max(0.0, float(limiter_wait_ms))
+        self._last_endpoint_response_age_s = None if response_age_s is None else max(0.0, float(response_age_s))
+
     async def _call_rest(self, operation: str, func: Any, /, **kwargs: Any) -> Any:
         # Circuit breaker check
         if self._is_circuit_open(operation):
@@ -504,7 +581,6 @@ class BinanceFuturesMarketData:
     async def _call_public_http_json(
         self,
         operation: str,
-        url: str,
         *,
         params: dict[str, Any] | None = None,
         symbol: str | None = None,
@@ -514,12 +590,18 @@ class BinanceFuturesMarketData:
         Used for foundational endpoints where third-party SDK behavior is less predictable
         under cancellation / shutdown (stability-first path).
         """
+        spec = self._endpoint_spec(operation)
+        url = self._endpoint_url(operation)
         if self._is_circuit_open(operation):
             raise MarketDataUnavailable(
                 operation=operation,
                 detail=f"circuit breaker open for {self._circuit_open_duration_seconds}s",
                 symbol=symbol,
             )
+
+        limiter_wait_s = 0.0
+        if spec.ip_limited:
+            limiter_wait_s = await self._futures_data_limiter.acquire(label=operation)
 
         pause_remaining = self._rate_limit_pause_until - time.monotonic()
         if pause_remaining > 0:
@@ -605,6 +687,14 @@ class BinanceFuturesMarketData:
             self._capture_response_metadata(_ResponseStub(headers), operation=operation)
             self._track_weight(operation)
             self._record_circuit_success(operation)
+            self._record_endpoint_snapshot(
+                operation,
+                source=spec.source,
+                cache_hit=False,
+                fallback_used=False,
+                limiter_wait_ms=limiter_wait_s * 1000.0,
+                response_age_s=0.0,
+            )
             return payload
         except (asyncio.TimeoutError, TimeoutError, asyncio.CancelledError) as exc:
             if isinstance(exc, asyncio.CancelledError):
@@ -639,9 +729,7 @@ class BinanceFuturesMarketData:
         return cast(aiohttp.ClientSession, self._http_session)
 
     async def close(self) -> None:
-        """Close AsyncClient session."""
-        if self.client:
-            await self.client.close_connection()
+        """Close aiohttp session."""
         if self._http_session is not None and not self._http_session.closed:
             await self._http_session.close()
             self._http_session = None
@@ -654,9 +742,16 @@ class BinanceFuturesMarketData:
             "rest_response_time_ms": self._last_rest_response_time_ms,
             "circuit_breakers_open": open_circuits,
             "circuit_failure_counts": sum(self._circuit_failures.values()),
+            "endpoint_name": self._last_endpoint_name,
+            "source": self._last_endpoint_source,
+            "cache_hit": self._last_endpoint_cache_hit,
+            "fallback_used": self._last_endpoint_fallback_used,
+            "limiter_wait_ms": self._last_endpoint_limiter_wait_ms,
+            "response_age_s": self._last_endpoint_response_age_s,
         }
 
     async def preflight_check(self) -> None:
+        _validate_public_endpoint_registry()
         await self.fetch_exchange_symbols()
         await self.fetch_ticker_24h()
 
@@ -665,11 +760,17 @@ class BinanceFuturesMarketData:
         if self._exchange_info_cache is not None:
             cached_at, rows = self._exchange_info_cache
             if now - cached_at < 3600:
+                self._record_endpoint_snapshot(
+                    "exchange_information",
+                    source="rest",
+                    cache_hit=True,
+                    fallback_used=False,
+                    response_age_s=now - cached_at,
+                )
                 return rows
 
         payload = await self._call_public_http_json(
             "exchange_information",
-            f"{_FAPI_BASE_URL}/fapi/v1/exchangeInfo",
         )
         symbols = payload.get('symbols', []) if isinstance(payload, dict) else getattr(payload, 'symbols', [])
         rows = [
@@ -691,18 +792,31 @@ class BinanceFuturesMarketData:
         if self._ticker_24h_cache is not None:
             cached_at, rows = self._ticker_24h_cache
             if now - cached_at < 300:  # 5 min cache
+                self._record_endpoint_snapshot(
+                    "ticker24hr_price_change_statistics",
+                    source="rest",
+                    cache_hit=True,
+                    fallback_used=False,
+                    response_age_s=now - cached_at,
+                )
                 return rows
 
         try:
             payload = await self._call_public_http_json(
                 "ticker24hr_price_change_statistics",
-                f"{_FAPI_BASE_URL}/fapi/v1/ticker/24hr",
             )
         except MarketDataUnavailable as exc:
             # Graceful degradation: return stale cache on timeout
             if self._ticker_24h_cache is not None:
                 cached_at, stale_rows = self._ticker_24h_cache
                 stale_age = now - cached_at
+                self._record_endpoint_snapshot(
+                    "ticker24hr_price_change_statistics",
+                    source="rest",
+                    cache_hit=True,
+                    fallback_used=True,
+                    response_age_s=stale_age,
+                )
                 LOG.warning(
                     "fetch_ticker_24h failed, using stale cache | age=%.0fs | error=%s",
                     stale_age,
@@ -755,20 +869,11 @@ class BinanceFuturesMarketData:
         )
 
     async def fetch_klines(self, symbol: str, interval: str, *, limit: int) -> pl.DataFrame:
-        response = await self._call_rest(
-            f"kline_candlestick_data:{interval}",
-            self.client.futures_klines,
+        rows = await self._call_public_http_json(
+            "kline_candlestick_data",
+            params={"symbol": symbol, "interval": interval, "limit": limit},
             symbol=symbol,
-            interval=interval,
-            limit=limit,
         )
-        # Handle both dict and object responses
-        if isinstance(response, dict):
-            rows = response
-        elif hasattr(response, 'data'):
-            rows = response.data() if callable(response.data) else response.data
-        else:
-            rows = response
         frame = _drop_incomplete_ohlcv_tail(_klines_to_frame(rows), interval)
         return frame
 
@@ -779,6 +884,13 @@ class BinanceFuturesMarketData:
         now = time.monotonic()
         cached = self._klines_cache.get(key)
         if cached is not None and (now - cached[0]) < ttl:
+            self._record_endpoint_snapshot(
+                "kline_candlestick_data",
+                source="rest",
+                cache_hit=True,
+                fallback_used=False,
+                response_age_s=now - cached[0],
+            )
             return cached[1]
         lock = self._klines_locks.get(key)
         if lock is None:
@@ -789,6 +901,13 @@ class BinanceFuturesMarketData:
                 now = time.monotonic()
                 cached = self._klines_cache.get(key)
                 if cached is not None and (now - cached[0]) < ttl:
+                    self._record_endpoint_snapshot(
+                        "kline_candlestick_data",
+                        source="rest",
+                        cache_hit=True,
+                        fallback_used=False,
+                        response_age_s=now - cached[0],
+                    )
                     frame = cached[1]
                 else:
                     frame = await self.fetch_klines(symbol, interval, limit=limit)
@@ -805,19 +924,11 @@ class BinanceFuturesMarketData:
         max_attempts = 3
         for attempt in range(1, max_attempts + 1):
             try:
-                response = await self._call_rest(
+                payload = await self._call_public_http_json(
                     "symbol_order_book_ticker",
-                    self.client.futures_orderbook_ticker,
+                    params={"symbol": symbol},
                     symbol=symbol,
                 )
-                # Handle both dict and object responses
-                if isinstance(response, dict):
-                    payload = response
-                elif hasattr(response, 'data'):
-                    raw = response.data() if callable(response.data) else response.data
-                    payload = _unwrap_model(raw)
-                else:
-                    payload = _unwrap_model(response)
                 if isinstance(payload, Mapping):
                     bid_raw = payload.get("bidPrice") or payload.get("bid_price")
                     ask_raw = payload.get("askPrice") or payload.get("ask_price")
@@ -850,19 +961,11 @@ class BinanceFuturesMarketData:
         return None, None
 
     async def _fetch_agg_trade_snapshot_rest(self, symbol: str, *, limit: int = 100) -> AggTradeSnapshot:
-        response = await self._call_rest(
-            "compressed_aggregate_trades_list:snapshot",
-            self.client.futures_aggregate_trades,
+        payload = await self._call_public_http_json(
+            "compressed_aggregate_trades_list",
+            params={"symbol": symbol, "limit": limit},
             symbol=symbol,
-            limit=limit,
         )
-        # Handle both dict and object responses
-        if isinstance(response, dict):
-            payload = response
-        elif hasattr(response, 'data'):
-            payload = response.data() if callable(response.data) else response.data
-        else:
-            payload = response
         buy_qty = 0.0
         sell_qty = 0.0
         trade_count = 0
@@ -930,22 +1033,15 @@ class BinanceFuturesMarketData:
             while pages < page_limit:
                 kwargs: dict[str, Any] = {"symbol": symbol, "limit": page_size}
                 if next_from_id is None:
-                    kwargs["start_time"] = window_start_ms
-                    kwargs["end_time"] = window_end_ms
+                    kwargs["startTime"] = window_start_ms
+                    kwargs["endTime"] = window_end_ms
                 else:
-                    kwargs["from_id"] = next_from_id
-                response = await self._call_rest(
-                    "compressed_aggregate_trades_list:history",
-                    self.client.futures_aggregate_trades,
-                    **kwargs,
+                    kwargs["fromId"] = next_from_id
+                payload = await self._call_public_http_json(
+                    "compressed_aggregate_trades_list",
+                    params=kwargs,
+                    symbol=symbol,
                 )
-                # Handle both dict and object responses
-                if isinstance(response, dict):
-                    payload = response
-                elif hasattr(response, 'data'):
-                    payload = response.data() if callable(response.data) else response.data
-                else:
-                    payload = response
                 batch: list[AggTrade] = []
                 payload_rows = cast(list[Any], payload)
                 for item in payload_rows:
@@ -992,29 +1088,32 @@ class BinanceFuturesMarketData:
         now = time.monotonic()
         cached = self._funding_rate_cache.get(symbol)
         if cached is not None and now - cached[0] < 300:
+            self._record_endpoint_snapshot(
+                "premium_index",
+                source="rest",
+                cache_hit=True,
+                fallback_used=False,
+                response_age_s=now - cached[0],
+            )
             return cached[1]
 
         try:
-            session = await self._get_http_session()
-            async with session.get(
-                "https://fapi.binance.com/fapi/v1/premiumIndex",
+            payload = await self._call_public_http_json(
+                "premium_index",
                 params={"symbol": symbol},
-            ) as response:
-                response.raise_for_status()
-                self._track_weight("premium_index")
-                payload = await response.json()
-        except asyncio.TimeoutError as exc:
-            raise MarketDataUnavailable(
-                operation="premium_index",
-                detail=f"timeout after {self._rest_timeout}s",
                 symbol=symbol,
-            ) from exc
-        except (aiohttp.ClientError, ValueError) as exc:
-            raise MarketDataUnavailable(
-                operation="premium_index",
-                detail=str(exc),
-                symbol=symbol,
-            ) from exc
+            )
+        except MarketDataUnavailable:
+            if cached is not None:
+                self._record_endpoint_snapshot(
+                    "premium_index",
+                    source="rest",
+                    cache_hit=True,
+                    fallback_used=True,
+                    response_age_s=now - cached[0],
+                )
+                return cached[1]
+            raise
 
         value_raw = payload.get("lastFundingRate") or payload.get("last_funding_rate")
         value = float(value_raw) if value_raw is not None else None
@@ -1027,22 +1126,22 @@ class BinanceFuturesMarketData:
         # Use extended TTL (10 min) for non-critical OI data
         cached = self._open_interest_cache.get(symbol)
         if self._is_cache_valid(cached, _CACHE_TTL["open_interest"]):
+            assert cached is not None
+            self._record_endpoint_snapshot(
+                "open_interest",
+                source="rest",
+                cache_hit=True,
+                fallback_used=False,
+                response_age_s=now - cached[0],
+            )
             return cached[1] if cached else None
 
         try:
-            response = await self._call_rest(
+            payload = await self._call_public_http_json(
                 "open_interest",
-                self.client.futures_open_interest,
+                params={"symbol": symbol},
                 symbol=symbol,
             )
-            # Handle both dict and object responses
-            if isinstance(response, dict):
-                raw_payload = response
-            elif hasattr(response, 'data'):
-                raw_payload = response.data() if callable(response.data) else response.data
-            else:
-                raw_payload = response
-            payload = _unwrap_model(raw_payload)
             row = payload.model_dump() if hasattr(payload, "model_dump") else dict(payload)
             value_raw = row.get("open_interest") or row.get("openInterest")
             value = float(value_raw) if value_raw is not None else None
@@ -1052,6 +1151,13 @@ class BinanceFuturesMarketData:
         except MarketDataUnavailable:
             # Graceful degradation: return stale cache if available
             if cached is not None:
+                self._record_endpoint_snapshot(
+                    "open_interest",
+                    source="rest",
+                    cache_hit=True,
+                    fallback_used=True,
+                    response_age_s=now - cached[0],
+                )
                 LOG.debug("OI graceful degradation | symbol=%s using stale cache", symbol)
                 return cached[1]
             return None
@@ -1061,24 +1167,22 @@ class BinanceFuturesMarketData:
         now = time.monotonic()
         cached = self._open_interest_change_cache.get(cache_key)
         if self._is_cache_valid(cached, _CACHE_TTL["open_interest_change"]):
+            assert cached is not None
+            self._record_endpoint_snapshot(
+                "open_interest_statistics",
+                source="rest",
+                cache_hit=True,
+                fallback_used=False,
+                response_age_s=now - cached[0],
+            )
             return cached[1] if cached else None
 
         try:
-            response = await self._call_rest(
+            payload = await self._call_public_http_json(
                 "open_interest_statistics",
-                self.client.futures_open_interest_hist,
+                params={"symbol": symbol, "period": period, "limit": 2},
                 symbol=symbol,
-                period=period,
-                limit=2,
             )
-            # Handle both dict and object responses
-            if isinstance(response, dict):
-                raw_payload = response
-            elif hasattr(response, 'data'):
-                raw_payload = response.data() if callable(response.data) else response.data
-            else:
-                raw_payload = response
-            payload = _unwrap_model(raw_payload)
             if not payload:
                 return None
             rows = [
@@ -1100,6 +1204,13 @@ class BinanceFuturesMarketData:
         except MarketDataUnavailable:
             # Graceful degradation: return stale cache if available
             if cached is not None:
+                self._record_endpoint_snapshot(
+                    "open_interest_statistics",
+                    source="rest",
+                    cache_hit=True,
+                    fallback_used=True,
+                    response_age_s=now - cached[0],
+                )
                 LOG.debug("OI change graceful degradation | symbol=%s period=%s using stale cache", symbol, period)
                 return cached[1]
             return None
@@ -1109,24 +1220,22 @@ class BinanceFuturesMarketData:
         now = time.monotonic()
         cached = self._long_short_ratio_cache.get(cache_key)
         if self._is_cache_valid(cached, _CACHE_TTL["long_short_ratio"]):
+            assert cached is not None
+            self._record_endpoint_snapshot(
+                "top_trader_long_short_ratio_accounts",
+                source="rest",
+                cache_hit=True,
+                fallback_used=False,
+                response_age_s=now - cached[0],
+            )
             return cached[1] if cached else None
 
         try:
-            response = await self._call_rest(
+            payload = await self._call_public_http_json(
                 "top_trader_long_short_ratio_accounts",
-                self.client.futures_top_longshort_account_ratio,
+                params={"symbol": symbol, "period": period, "limit": 1},
                 symbol=symbol,
-                period=period,
-                limit=1,
             )
-            # Handle both dict and object responses
-            if isinstance(response, dict):
-                raw_payload = response
-            elif hasattr(response, 'data'):
-                raw_payload = response.data() if callable(response.data) else response.data
-            else:
-                raw_payload = response
-            payload = _unwrap_model(raw_payload)
             if not payload:
                 return None
             item = payload[0]
@@ -1139,6 +1248,13 @@ class BinanceFuturesMarketData:
         except MarketDataUnavailable:
             # Graceful degradation: return stale cache if available
             if cached is not None:
+                self._record_endpoint_snapshot(
+                    "top_trader_long_short_ratio_accounts",
+                    source="rest",
+                    cache_hit=True,
+                    fallback_used=True,
+                    response_age_s=now - cached[0],
+                )
                 LOG.debug("L/S ratio graceful degradation | symbol=%s period=%s using stale cache", symbol, period)
                 return cached[1]
             return None
@@ -1169,6 +1285,62 @@ class BinanceFuturesMarketData:
             return None
         return value
 
+    async def fetch_top_position_ls_ratio(self, symbol: str, *, period: str = "1h") -> float | None:
+        cache_key = (symbol, period)
+        now = time.monotonic()
+        cached = self._top_position_ls_ratio_cache.get(cache_key)
+        if self._is_cache_valid(cached, _CACHE_TTL["long_short_ratio"]):
+            assert cached is not None
+            self._record_endpoint_snapshot(
+                "top_trader_long_short_ratio_positions",
+                source="rest",
+                cache_hit=True,
+                fallback_used=False,
+                response_age_s=now - cached[0],
+            )
+            return cached[1]
+
+        try:
+            payload = await self._call_public_http_json(
+                "top_trader_long_short_ratio_positions",
+                params={"symbol": symbol, "period": period, "limit": 1},
+                symbol=symbol,
+            )
+            if not payload:
+                return None
+            item = payload[0]
+            row = item.model_dump() if hasattr(item, "model_dump") else dict(item)
+            value_raw = row.get("longShortRatio") or row.get("long_short_ratio")
+            value = float(value_raw) if value_raw is not None else None
+            if value is not None:
+                self._top_position_ls_ratio_cache[cache_key] = (now, value)
+            return value
+        except MarketDataUnavailable:
+            if cached is not None:
+                self._record_endpoint_snapshot(
+                    "top_trader_long_short_ratio_positions",
+                    source="rest",
+                    cache_hit=True,
+                    fallback_used=True,
+                    response_age_s=now - cached[0],
+                )
+                return cached[1]
+            return None
+
+    def get_cached_top_position_ls_ratio(
+        self,
+        symbol: str,
+        period: str = "1h",
+        max_age_s: float = 1800.0,
+    ) -> float | None:
+        cached = self._top_position_ls_ratio_cache.get((symbol, period))
+        if cached is None:
+            return None
+        cached_at, value = cached
+        if time.monotonic() - cached_at > max_age_s:
+            return None
+        return value
+
     async def fetch_taker_ratio(self, symbol: str, *, period: str = "1h") -> float | None:
         """Fetch taker buy/sell volume ratio from /futures/data/takerlongshortRatio.
 
@@ -1180,21 +1352,31 @@ class BinanceFuturesMarketData:
         now = time.monotonic()
         cached = self._taker_ratio_cache.get(cache_key)
         if cached is not None and now - cached[0] < 1200:
+            self._record_endpoint_snapshot(
+                "taker_long_short_ratio",
+                source="rest",
+                cache_hit=True,
+                fallback_used=False,
+                response_age_s=now - cached[0],
+            )
             return cached[1]
 
-        await self._futures_data_limiter.acquire(label="futures_data:takerlongshortRatio")
         try:
-            session = await self._get_http_session()
-            async with session.get(
-                "https://fapi.binance.com/futures/data/takerlongshortRatio",
+            payload = await self._call_public_http_json(
+                "taker_long_short_ratio",
                 params={"symbol": symbol, "period": period, "limit": 1},
-            ) as response:
-                response.raise_for_status()
-                self._track_weight("taker_long_short_ratio")
-                payload = await response.json()
-        except asyncio.TimeoutError:
-            return None
-        except (aiohttp.ClientError, ValueError):
+                symbol=symbol,
+            )
+        except MarketDataUnavailable:
+            if cached is not None:
+                self._record_endpoint_snapshot(
+                    "taker_long_short_ratio",
+                    source="rest",
+                    cache_hit=True,
+                    fallback_used=True,
+                    response_age_s=now - cached[0],
+                )
+                return cached[1]
             return None
 
         if not payload:
@@ -1217,21 +1399,31 @@ class BinanceFuturesMarketData:
         now = time.monotonic()
         cached = self._global_ls_ratio_cache.get(cache_key)
         if cached is not None and now - cached[0] < 1200:
+            self._record_endpoint_snapshot(
+                "global_long_short_account_ratio",
+                source="rest",
+                cache_hit=True,
+                fallback_used=False,
+                response_age_s=now - cached[0],
+            )
             return cached[1]
 
-        await self._futures_data_limiter.acquire(label="futures_data:globalLongShortAccountRatio")
         try:
-            session = await self._get_http_session()
-            async with session.get(
-                "https://fapi.binance.com/futures/data/globalLongShortAccountRatio",
+            payload = await self._call_public_http_json(
+                "global_long_short_account_ratio",
                 params={"symbol": symbol, "period": period, "limit": 1},
-            ) as response:
-                response.raise_for_status()
-                self._track_weight("global_long_short_account_ratio")
-                payload = await response.json()
-        except asyncio.TimeoutError:
-            return None
-        except (aiohttp.ClientError, ValueError):
+                symbol=symbol,
+            )
+        except MarketDataUnavailable:
+            if cached is not None:
+                self._record_endpoint_snapshot(
+                    "global_long_short_account_ratio",
+                    source="rest",
+                    cache_hit=True,
+                    fallback_used=True,
+                    response_age_s=now - cached[0],
+                )
+                return cached[1]
             return None
 
         if not payload:
@@ -1272,20 +1464,31 @@ class BinanceFuturesMarketData:
         now = time.monotonic()
         cached = self._funding_history_cache.get(symbol)
         if cached is not None and now - cached[0] < 900:
+            self._record_endpoint_snapshot(
+                "funding_rate_history",
+                source="rest",
+                cache_hit=True,
+                fallback_used=False,
+                response_age_s=now - cached[0],
+            )
             return cached[1]
 
         try:
-            session = await self._get_http_session()
-            async with session.get(
-                "https://fapi.binance.com/fapi/v1/fundingRate",
+            payload = await self._call_public_http_json(
+                "funding_rate_history",
                 params={"symbol": symbol, "limit": limit},
-            ) as response:
-                response.raise_for_status()
-                self._track_weight("funding_rate_history")
-                payload = await response.json()
-        except asyncio.TimeoutError:
-            return []
-        except (aiohttp.ClientError, ValueError):
+                symbol=symbol,
+            )
+        except MarketDataUnavailable:
+            if cached is not None:
+                self._record_endpoint_snapshot(
+                    "funding_rate_history",
+                    source="rest",
+                    cache_hit=True,
+                    fallback_used=True,
+                    response_age_s=now - cached[0],
+                )
+                return cached[1]
             return []
 
         if not isinstance(payload, list):
@@ -1343,21 +1546,31 @@ class BinanceFuturesMarketData:
         now = time.monotonic()
         cached = self._basis_cache.get(cache_key)
         if cached is not None and now - cached[0] < 900:
+            self._record_endpoint_snapshot(
+                "basis",
+                source="rest",
+                cache_hit=True,
+                fallback_used=False,
+                response_age_s=now - cached[0],
+            )
             return cached[1]
 
-        await self._futures_data_limiter.acquire(label="futures_data:basis")
         try:
-            session = await self._get_http_session()
-            async with session.get(
-                "https://fapi.binance.com/futures/data/basis",
+            payload = await self._call_public_http_json(
+                "basis",
                 params={"pair": symbol, "contractType": "PERPETUAL", "period": period, "limit": limit},
-            ) as response:
-                response.raise_for_status()
-                self._track_weight("basis")
-                payload = await response.json()
-        except asyncio.TimeoutError:
-            return None
-        except (aiohttp.ClientError, ValueError):
+                symbol=symbol,
+            )
+        except MarketDataUnavailable:
+            if cached is not None:
+                self._record_endpoint_snapshot(
+                    "basis",
+                    source="rest",
+                    cache_hit=True,
+                    fallback_used=True,
+                    response_age_s=now - cached[0],
+                )
+                return cached[1]
             return None
 
         if not isinstance(payload, list) or not payload:
@@ -1452,11 +1665,12 @@ class BinanceFuturesMarketData:
             if cached is not None:
                 basis_pct = cached[1]  # Use existing basis
             else:
-                basis_pct = 0.0
+                basis_pct = None
             mark_index_spread_bps = None  # Can't calculate without index
 
         # Update caches
-        self._basis_cache[cache_key] = (now, basis_pct)
+        if basis_pct is not None:
+            self._basis_cache[cache_key] = (now, basis_pct)
 
         # For stats, we need history for zscore/slope - use simple values
         stats = {
