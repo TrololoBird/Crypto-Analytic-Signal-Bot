@@ -62,9 +62,9 @@ order_block = { base_score = 0.50, threshold_volume = 1.2, sl_buffer_atr = 0.5, 
 liquidity_sweep = { base_score = 0.50, threshold_tol = 0.0015, sl_buffer_atr = 0.5, min_rr = 1.5 }
 bos_choch = { base_score = 0.55, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.2, min_rr = 1.5, min_swings = 6 }
 hidden_divergence = { base_score = 0.50, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.5, min_rr = 1.5 }
-funding_reversal = { base_score = 0.50, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.6, min_rr = 1.5, adx_penalty_factor = 0.85 }
+funding_reversal = { base_score = 0.50, funding_threshold = 0.0005, funding_trend_bars = 3, min_delta_threshold = 0.02, sl_buffer_atr = 0.6, min_rr = 1.5 }
 cvd_divergence = { base_score = 0.50, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.5, min_rr = 1.5 }
-session_killzone = { base_score = 0.55, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.5, min_rr = 1.5 }
+session_killzone = { base_score = 0.55, min_volume_ratio = 1.2, min_adx_1h = 18.0, min_rr = 1.5 }
 breaker_block = { base_score = 0.50, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.2, min_rr = 1.5 }
 turtle_soup = { base_score = 0.50, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.5, min_rr = 1.5, adx_penalty_factor = 0.85 }
 
