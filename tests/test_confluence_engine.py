@@ -10,9 +10,16 @@ from bot.models import PreparedSymbol, Signal, UniverseSymbol
 
 
 class _StubMLFilter:
-    def __init__(self, *, enabled: bool, result: object | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        enabled: bool,
+        result: object | None = None,
+        disable_reason: str | None = None,
+    ) -> None:
         self.enabled = enabled
         self._result = result
+        self.disable_reason = disable_reason
 
     def predict(self, signal: Signal, prepared: PreparedSymbol) -> object:
         _ = (signal, prepared)
@@ -104,3 +111,13 @@ def test_confluence_applies_ml_and_clears_skip_reason() -> None:
     assert result.ml_applied is True
     assert result.ml_skip_reason is None
     assert result.to_dict()["ml_skip_reason"] is None
+
+
+def test_confluence_uses_filter_disable_reason_when_ml_disabled() -> None:
+    settings = BotSettings(tg_token="0" * 30, target_chat_id="0")
+    result = _engine(
+        settings,
+        ml_filter=_StubMLFilter(enabled=False, disable_reason="live_baseline_blocked"),
+    ).score(_signal(), _prepared())
+    assert result.ml_applied is False
+    assert result.ml_skip_reason == "live_baseline_blocked"

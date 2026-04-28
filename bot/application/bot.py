@@ -108,6 +108,14 @@ class SignalBot:
         from bot.ml import MLFilter
 
         self.ml_filter = MLFilter(settings)
+        ml_status = self.ml_filter.get_status()
+        LOG.info(
+            "ML runtime status | stage=%s model_kind=%s disable_reason=%s count=%d",
+            "orchestrator_init",
+            ml_status.get("model_kind") or "unknown",
+            ml_status.get("disable_reason") or "none",
+            1,
+        )
         self.confluence = ConfluenceEngine(settings, ml_filter=self.ml_filter)
 
         # Market regime analyzer

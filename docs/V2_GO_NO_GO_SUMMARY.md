@@ -5,7 +5,7 @@
 
 ## 1) Критично
 
-### C1. Live-ML guardrails остаются незавершёнными (baseline fallback safety)
+### C1. Live-ML guardrails закрыты (baseline fallback safety)
 - **Где найдено:** `docs/REMEDIATION_PLAN.md` (Task 3 = In progress), `docs/remediation_ledger.md` (live ML fallback закрыт частично).
 - **Риск:** модельная деградация в проде может происходить без ожидаемого уровня качества сигналов при переключении на baseline-классификатор.
 - **Влияние:** ложные сигналы/пропуск сигналов, ухудшение PnL и доверия к системе фильтрации в live-режиме.
@@ -14,14 +14,15 @@
   2. В телеметрии фиксируется `model_kind`, причина disable и частота срабатывания guardrail.
   3. В regression/integration тестах есть отдельные кейсы для live-disable и для offline-режима.
 - **Статус верификации:**
-  - ✅ **Подтверждено статически:** контракт и статус «в процессе» отражены в плане/ledger.
-  - ⚠️ **Гипотеза до runtime-проверки:** в реальной сессии guardrails всегда срабатывают корректно на всех путях загрузки модели.
+  - ✅ **Подтверждено статически:** выбор baseline в live централизован в `evaluate_live_model_guardrail`, а runtime-пути (`MLFilter` + `ConfluenceEngine` + orchestrator init) используют единый disable reason.
+  - ✅ **Подтверждено тестами:** добавлены unit/integration/regression кейсы на live-disable и offline-разрешённый baseline сценарий.
+  - ⚠️ **Осталось runtime-подтверждение:** собрать артефакты из dry-run/live-sim с guardrail telemetry счётчиками.
 
 **Инженерная задача T1: Довести ML guardrails до production-grade**
-1. Проследить все live code paths выбора классификатора и унифицировать точку принятия решения `is_live && is_baseline => disable`.
-2. Добавить структурированную телеметрию (model kind, disable reason, stage).
-3. Добавить тесты: unit (classifier selection), integration (end-to-end filter behavior), regression (no silent fallback).
-4. Провести runtime dry-run (paper/live-sim) и снять артефакты по guardrail-событиям.
+1. ✅ Прослежены и выровнены live code paths выбора модели (`filter`/`signal_classifier`/`confluence`/orchestrator).
+2. ✅ Добавлена структурированная telemetry-логика guardrail (`model_kind`, `disable_reason`, `stage`, `count`).
+3. ✅ Добавлены unit/integration/regression тесты на live-disable и offline baseline allow.
+4. ⏳ Провести runtime dry-run (paper/live-sim) и приложить артефакты guardrail-событий.
 
 ---
 

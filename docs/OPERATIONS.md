@@ -75,7 +75,8 @@ The bot includes a built-in web dashboard for real-time monitoring.
   - `--min-accuracy`, `--min-precision`, `--min-recall`, `--min-f1` (all bounded in `[0.0, 1.0]`).
 - CLI exits with code `2` when any enabled gate fails and includes failure reasons in `quality_gate.failures`.
 - Runtime ML integration should import `MLFilter` from `bot.ml` (canonical path). The top-level module `bot.ml_filter` is kept only as a backward-compatible shim.
-- If runtime fallback resolves to `centroid_baseline`, live ML scoring is auto-disabled as a safety guardrail.
+- Live-guardrail decision is centralized via `bot.ml.guardrails.evaluate_live_model_guardrail` (`is_live && model_kind in {centroid_baseline, linear_baseline} => disable`).
+- Guardrail telemetry is emitted as structured fields in logs: `stage`, `model_kind`, `disable_reason`, `count` (including orchestrator init status row).
 
 ## Incident checklist
 
