@@ -12,8 +12,10 @@ LOG = logging.getLogger("bot.ws_manager")
 
 def build_stream_url(manager: Any, endpoint: str) -> str:
     base = manager._cfg.endpoint_base_url(endpoint).rstrip("/")
-    if base.endswith("/stream") or base.endswith("/ws"):
-        return base
+    if base.endswith("/ws"):
+        base = base.removesuffix("/ws")
+    if base.endswith("/stream"):
+        base = base.removesuffix("/stream")
     return f"{base}/stream"
 
 
@@ -23,12 +25,10 @@ def get_ws_fallback_urls(manager: Any, endpoint: str) -> list[str]:
 
 
 def get_ws_url_version(manager: Any, endpoint: str) -> str:
-    base = manager._cfg.endpoint_base_url(endpoint)
-    if "/public" in base:
-        return "public"
-    if "/market" in base:
-        return "market"
-    return "legacy"
+    _ = manager
+    if endpoint in {"public", "market"}:
+        return endpoint
+    return "unknown"
 
 
 def apply_tcp_keepalive(manager: Any, ws: Any) -> None:
