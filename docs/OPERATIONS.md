@@ -67,6 +67,7 @@ The bot includes a built-in web dashboard for real-time monitoring.
 
 - Keep runtime on public USDⓈ-M market-data endpoints only.
 - Runtime boundary explicitly denies non-USDⓈ-M Binance REST hosts (for example `eapi.binance.com`), even when endpoints are public.
+- `bot.intelligence.allow_runtime_options_eapi` must remain `false` for production runtime; enabling it is an explicit non-default exception and must be treated as a boundary override.
 - Treat any `/private`, signed/auth route, `listenKey`, or user-data stream as a configuration/code regression.
 - After market-data changes, rerun endpoint grep plus the contract-focused suites (`tests/test_regression_suite_contracts.py`, `tests/test_regression_suite_tracking_delivery.py`) to confirm public-only guardrails still hold.
 

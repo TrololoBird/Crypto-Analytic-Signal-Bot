@@ -322,6 +322,7 @@ class IntelligenceConfig(BaseModel):
     source_policy: Literal["binance_only"] = "binance_only"
     smart_exit_mode: Literal["heuristic_v1"] = "heuristic_v1"
     gamma_semantics: Literal["proxy_only"] = "proxy_only"
+    allow_runtime_options_eapi: bool = False
     refresh_interval_seconds: int = Field(default=900, ge=60, le=86400)
     write_hourly_reports: bool = True
     options_expiry_count: int = Field(default=2, ge=1, le=8)
