@@ -91,6 +91,47 @@ class TelemetryManager:
         if decision.status in {"signal", "reject", "error"}:
             self.append_symbol_trace(symbol=symbol, row=row)
 
+    def emit_shortlist_refresh(
+        self,
+        *,
+        source: str,
+        source_before: str,
+        fallback_reason: str | None,
+        cached_shortlist_age_s: float | None,
+        shortlist_size: int,
+        shortlist_symbols: list[str],
+        top_scores: list[dict[str, Any]],
+        summary: dict[str, Any],
+    ) -> None:
+        self._bot.telemetry.append_jsonl(
+            "shortlist.jsonl",
+            {
+                "ts": datetime.now(UTC).isoformat(),
+                "source": source,
+                "source_before": source_before,
+                "source_after": source,
+                "fallback_reason": fallback_reason,
+                "cached_shortlist_age_s": cached_shortlist_age_s,
+                "size": shortlist_size,
+                "symbols": shortlist_symbols,
+                "eligible": summary.get("eligible"),
+                "dynamic_pool": summary.get("dynamic_pool"),
+                "pinned": summary.get("pinned"),
+                "mode": summary.get("mode", source),
+                "avg_score": summary.get("avg_score"),
+                "enrich_errors_by_stage": dict(
+                    getattr(self._bot, "_shortlist_enrich_error_counts", {})
+                ),
+                "enrich_errors_total": int(
+                    getattr(self._bot, "_shortlist_enrich_error_total", 0)
+                ),
+                "enrich_errors_last_cycle": dict(
+                    getattr(self._bot, "_shortlist_enrich_last_cycle_errors", {})
+                ),
+                "top_scores": top_scores,
+            },
+        )
+
     def emit_telemetry_mismatch(
         self,
         *,
