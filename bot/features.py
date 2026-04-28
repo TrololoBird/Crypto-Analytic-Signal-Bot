@@ -31,6 +31,7 @@ from .features_structure import (
 )
 from . import features_advanced as _features_advanced
 from . import features_core as _features_core
+from . import features_oscillators as _features_oscillators
 
 
 # Optional polars_ta import. All strategy-critical indicators keep pure-Polars
@@ -52,6 +53,32 @@ else:
     _HAS_TALIB = False
 
 LOG = structlog.get_logger("bot.features")
+
+CORE_API = {
+    "ema": _features_core.ema,
+    "rsi": _features_core.rsi,
+    "atr": _features_core.atr,
+    "adx": _features_core.adx,
+    "vwap": _features_core.vwap,
+    "roc": _features_core.roc,
+    "realized_volatility": _features_core.realized_volatility,
+    "safe_close_position": _features_core.safe_close_position,
+    "add_core_features": _features_core.add_core_features,
+}
+ADVANCED_API = {
+    "supertrend": _features_advanced.supertrend,
+    "add_advanced_indicators": _features_advanced.add_advanced_indicators,
+}
+OSCILLATORS_API = {
+    "stochastic": _features_oscillators.stochastic,
+    "cci": _features_oscillators.cci,
+    "mfi": _features_oscillators.mfi,
+    "cmf": _features_oscillators.cmf,
+    "ultimate_oscillator": _features_oscillators.ultimate_oscillator,
+    "add_oscillator_features": _features_oscillators.add_oscillator_features,
+}
+
+__all__ = ["CORE_API", "ADVANCED_API", "OSCILLATORS_API", "prepare_symbol", "_prepare_frame"]
 _ADVANCED_FALLBACKS_LOGGED: set[str] = set()
 
 # ---------------------------------------------------------------------------
@@ -177,57 +204,13 @@ def has_minimum_bars(frames: SymbolFrames, *, minimums: dict[str, int]) -> bool:
 
 
 def _ema(df: pl.DataFrame, period: int) -> pl.Series:
-    """Exponential Moving Average using polars_talib or pure Polars."""
-    if _HAS_TALIB:
-        return _materialize_series(
-            plta.EMA(pl.col("close"), timeperiod=float(period)),
-            df=df,
-            name=f"ema{period}",
-        )
-    return _materialize_series(
-        df["close"].ewm_mean(span=period, adjust=False), df=df, name=f"ema{period}"
-    )
+    """Legacy wrapper for core EMA implementation."""
+    return _features_core.ema(df, period, plta=plta, has_talib=_HAS_TALIB)
 
 
 def _rsi(df: pl.DataFrame, period: int = 14) -> pl.Series:
-    """Wilder's RSI — same calculation as TA-Lib."""
-    if _HAS_TALIB:
-        return _materialize_series(
-            plta.RSI(pl.col("close"), timeperiod=float(period)),
-            df=df,
-            name=f"rsi{period}",
-        )
-
-    # Pure Polars Wilder's RSI (alpha = 1/period)
-    close = df["close"]
-    delta = close.diff()
-    gains = delta.clip(lower_bound=0.0)
-    losses = (-delta).clip(lower_bound=0.0)
-
-    avg_gain = _materialize_series(
-        gains.ewm_mean(alpha=1.0 / period, adjust=False), df=df, name="avg_gain"
-    )
-    avg_loss = _materialize_series(
-        losses.ewm_mean(alpha=1.0 / period, adjust=False), df=df, name="avg_loss"
-    )
-
-    rs = avg_gain / avg_loss
-    rsi = (100.0 - (100.0 / (1.0 + rs))).fill_nan(50.0)
-    values: list[float] = []
-    for gain, loss, current in zip(
-        avg_gain.to_list(), avg_loss.to_list(), rsi.to_list(), strict=False
-    ):
-        gain_val = float(gain or 0.0)
-        loss_val = float(loss or 0.0)
-        if loss_val == 0.0 and gain_val > 0.0:
-            values.append(100.0)
-        elif gain_val == 0.0 and loss_val > 0.0:
-            values.append(0.0)
-        elif gain_val == 0.0 and loss_val == 0.0:
-            values.append(50.0)
-        else:
-            values.append(float(current or 50.0))
-    return pl.Series(f"rsi{period}", values, dtype=pl.Float64)
+    """Legacy wrapper for core RSI implementation."""
+    return _features_core.rsi(df, period, plta=plta, has_talib=_HAS_TALIB)
 
 
 def _atr(df: pl.DataFrame, period: int = 14) -> pl.Series:
