@@ -46,6 +46,14 @@
   - `mark_price_age_seconds`
   - `book_age_seconds` from bookTicker cache age
 
+
+## Runtime feature contract (orchestrator -> analyzer -> strategies)
+
+- Public feature payload schema is fixed by `bot/feature_contract.py` (`PUBLIC_FEATURE_FIELDS`, schema `v1`).
+- `bot/outcomes.py::build_prepared_feature_snapshot(...)` must emit **exactly** this field set in stable order.
+- Missing fields and unexpected additions are treated as contract violations and rejected by validator.
+- Runtime call-path modules (`bot/application/bot.py`, `bot/application/symbol_analyzer.py`, `bot/core/engine/engine.py`, `bot/strategies/__init__.py`) must not import experimental/scaffold modules.
+
 ## Signal-context contract
 
 - Crowd positioning is family-aware: continuation/breakout setups consume crowd support/headwind differently from reversal setups.

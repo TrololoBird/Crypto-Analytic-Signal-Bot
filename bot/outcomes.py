@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 
+from .feature_contract import PUBLIC_FEATURE_FIELDS, normalize_public_feature_payload
 from .models import Signal
 from .tracked_signals import TrackedSignalState, parse_state_dt
 
@@ -46,7 +47,7 @@ def _normalized_bool(value: Any) -> bool | None:
 def build_prepared_feature_snapshot(prepared: Any) -> dict[str, Any]:
     """Build a normalized feature snapshot from PreparedSymbol-like data."""
     if prepared is None:
-        return {}
+        return normalize_public_feature_payload({name: None for name in PUBLIC_FEATURE_FIELDS})
 
     features: dict[str, Any] = {}
 
@@ -166,7 +167,7 @@ def build_prepared_feature_snapshot(prepared: Any) -> dict[str, Any]:
         getattr(prepared, "market_regime", "neutral") or "neutral"
     )
 
-    return features
+    return normalize_public_feature_payload(features)
 
 
 @dataclass(frozen=True, slots=True)
