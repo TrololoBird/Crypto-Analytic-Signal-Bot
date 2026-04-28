@@ -66,3 +66,12 @@ def test_signal_classifier_runtime_guardrail_blocks_live_baseline(tmp_path) -> N
     )
     assert decision.model_kind == "centroid_baseline"
     assert decision.disable_reason == "live_baseline_blocked"
+
+
+def test_signal_classifier_model_kind_normalizes_runtime_aliases(tmp_path) -> None:
+    classifier = SignalClassifier(model_dir=tmp_path, model_type="rf")
+
+    class CentroidModel: ...
+
+    classifier.model = CentroidModel()
+    assert classifier.model_kind() == "centroid_baseline"

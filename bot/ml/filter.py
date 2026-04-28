@@ -48,6 +48,7 @@ class MLFilter:
     def __init__(self, settings: BotSettings) -> None:
         self.settings = settings
         self.enabled = settings.ml.enabled and settings.ml.use_ml_in_live
+        self._is_live = bool(settings.ml.use_ml_in_live)
         self.confidence_threshold = settings.ml.ml_confidence_threshold
         self.model_dir = settings.ml_dir / "models"
         self._model: Any | None = None
@@ -56,6 +57,7 @@ class MLFilter:
         self._classifier: Any | None = None
         self._disable_reason: str | None = None
         self._guardrail_counts: Counter[str] = Counter()
+        self._last_guardrail_decision: LiveModelGuardrailDecision | None = None
 
         if self.enabled:
             self._load_model()
@@ -77,7 +79,7 @@ class MLFilter:
                 )
                 if classifier.load():
                     decision = classifier.runtime_guardrail_decision(
-                        is_live=self.enabled,
+                        is_live=self._is_live,
                         stage="load_signal_classifier_fallback",
                     )
                     self._emit_guardrail_telemetry(decision)
@@ -128,7 +130,7 @@ class MLFilter:
             metadata = self._model_metadata or {}
             metadata.setdefault("model_kind", type(self._model).__name__.lower())
             decision = evaluate_live_model_guardrail(
-                is_live=self.enabled,
+                is_live=self._is_live,
                 model_kind=str(metadata.get("model_kind", "unknown")),
                 stage="load_primary_model",
             )
@@ -439,6 +441,7 @@ class MLFilter:
         return mapped
 
     def _emit_guardrail_telemetry(self, decision: LiveModelGuardrailDecision) -> None:
+        self._last_guardrail_decision = decision
         key = f"{decision.stage}:{decision.model_kind}:{decision.disable_reason or 'allowed'}"
         self._guardrail_counts[key] += 1
         count = self._guardrail_counts[key]
@@ -470,4 +473,14 @@ class MLFilter:
             "confidence_threshold": self.confidence_threshold,
             "disable_reason": self._disable_reason,
             "guardrail_counts": dict(self._guardrail_counts),
+            "last_guardrail_decision": (
+                {
+                    "model_kind": self._last_guardrail_decision.model_kind,
+                    "disable_reason": self._last_guardrail_decision.disable_reason,
+                    "is_live": self._last_guardrail_decision.is_live,
+                    "stage": self._last_guardrail_decision.stage,
+                }
+                if self._last_guardrail_decision is not None
+                else None
+            ),
         }
