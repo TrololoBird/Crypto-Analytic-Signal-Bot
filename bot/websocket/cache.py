@@ -36,9 +36,13 @@ def get_stats(manager: Any) -> dict[str, Any]:
             stream_latencies[stream] = round(sum(latencies) / len(latencies), 2)
     if stream_latencies:
         stats["avg_latency_per_stream"] = stream_latencies
-        all_latencies = [sum(v) / len(v) for v in manager._stream_latency_ms.values() if v]
+        all_latencies = [
+            sum(v) / len(v) for v in manager._stream_latency_ms.values() if v
+        ]
         if all_latencies:
-            stats["avg_latency_overall_ms"] = round(sum(all_latencies) / len(all_latencies), 2)
+            stats["avg_latency_overall_ms"] = round(
+                sum(all_latencies) / len(all_latencies), 2
+            )
     return stats
 
 
@@ -138,12 +142,18 @@ def should_throttle_mark_price_update(manager: Any, symbol: str) -> bool:
     last_update = manager._mark_price_update_times.get(symbol, 0.0)
     elapsed_ms = (now - last_update) * 1000
     if elapsed_ms < 50.0:
-        last_logged = getattr(manager, "_last_markprice_throttle_log", {}).get(symbol, 0.0)
+        last_logged = getattr(manager, "_last_markprice_throttle_log", {}).get(
+            symbol, 0.0
+        )
         if now - last_logged >= 30.0:
             if not hasattr(manager, "_last_markprice_throttle_log"):
                 manager._last_markprice_throttle_log = {}
             manager._last_markprice_throttle_log[symbol] = now
-            LOG.debug("mark_price throttled | symbol=%s elapsed=%.0fms min=50ms", symbol, elapsed_ms)
+            LOG.debug(
+                "mark_price throttled | symbol=%s elapsed=%.0fms min=50ms",
+                symbol,
+                elapsed_ms,
+            )
         return True
     manager._mark_price_update_times[symbol] = now
     return False
@@ -178,7 +188,9 @@ def handle_mini_ticker(manager: Any, symbol: str, data: dict) -> None:
     try:
         close_price = float(data.get("c") or 0.0)
         open_price = float(data.get("o") or 0.0)
-        price_change_pct = ((close_price - open_price) / open_price * 100.0) if open_price > 0 else 0.0
+        price_change_pct = (
+            ((close_price - open_price) / open_price * 100.0) if open_price > 0 else 0.0
+        )
         manager._ticker_cache[symbol] = {
             "symbol": symbol,
             "last_price": close_price,
@@ -264,7 +276,9 @@ async def handle_agg_trade(manager: Any, symbol: str, data: dict) -> None:
 
     async with manager._data_lock:
         if symbol not in manager._agg_trades:
-            manager._agg_trades[symbol] = collections.deque(maxlen=manager._cfg.max_agg_trade_buffer)
+            manager._agg_trades[symbol] = collections.deque(
+                maxlen=manager._cfg.max_agg_trade_buffer
+            )
         manager._agg_trades[symbol].append(trade)
 
     if manager._agg_trade_cbs:

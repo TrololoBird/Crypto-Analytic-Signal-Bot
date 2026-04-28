@@ -32,7 +32,14 @@ def test_prepare_frame_emits_expected_columns_without_nan() -> None:
     prepared = _prepare_frame(_ohlcv())
 
     assert prepared.height > 0
-    for col in ["ema20", "ema50", "ema200", "atr_pct", "delta_ratio", "vwap_deviation_pct"]:
+    for col in [
+        "ema20",
+        "ema50",
+        "ema200",
+        "atr_pct",
+        "delta_ratio",
+        "vwap_deviation_pct",
+    ]:
         assert col in prepared.columns
     assert prepared["ema200"].null_count() == 0
     assert prepared["atr_pct"].null_count() == 0

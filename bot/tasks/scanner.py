@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any
 
@@ -16,13 +15,13 @@ LOG = logging.getLogger("bot.tasks.scanner")
 
 class SymbolScanner:
     """Scanner task that periodically checks symbols for signals.
-    
+
     Coordinates with:
     - SignalEngine for strategy calculations
     - MemoryRepository for signal persistence
     - BotMetrics for telemetry
     """
-    
+
     def __init__(
         self,
         engine: SignalEngine,
@@ -38,23 +37,26 @@ class SymbolScanner:
         self._metrics = metrics
         self._symbols = symbols_provider
         self._min_score = min_score
-    
+
     async def scan_all(self) -> list[Signal]:
         """Scan all available symbols.
-        
+
         Returns:
             List of signals generated
         """
         # Get symbols to scan (from provider)
         symbols = await self._get_symbols_to_scan()
-        
+
         if not symbols:
             LOG.debug("No symbols to scan")
             return []
-        
-        LOG.info("Scanning %d symbols with %d strategies", 
-                len(symbols), len(self._registry.get_enabled()))
-        
+
+        LOG.info(
+            "Scanning %d symbols with %d strategies",
+            len(symbols),
+            len(self._registry.get_enabled()),
+        )
+
         signals = []
         for symbol_data in symbols:
             try:
@@ -62,43 +64,47 @@ class SymbolScanner:
                 if signal:
                     signals.append(signal)
             except Exception as exc:
-                LOG.error("Scan failed for %s: %s", getattr(symbol_data, 'symbol', '?'), exc)
-        
-        LOG.info("Scan complete: %d signals from %d symbols", len(signals), len(symbols))
+                LOG.error(
+                    "Scan failed for %s: %s", getattr(symbol_data, "symbol", "?"), exc
+                )
+
+        LOG.info(
+            "Scan complete: %d signals from %d symbols", len(signals), len(symbols)
+        )
         return signals
-    
+
     async def _scan_one(self, prepared: PreparedSymbol) -> Signal | None:
         """Scan a single symbol."""
         # Run all strategies
         results = await self._engine.calculate_all(prepared)
-        
+
         # Get best signal above threshold
         signals = self._engine.get_signals_above_threshold(results, self._min_score)
-        
+
         if not signals:
             return None
-        
+
         # Take highest scored signal
         best = signals[0]
-        
+
         # Record metrics
         strategy_id = best.metadata.get("strategy", "unknown")
         self._metrics.record_signal(strategy_id, best.score)
-        
+
         # Persist to memory
         await self._persist_signal(prepared, best, results)
-        
+
         return best
-    
+
     async def _get_symbols_to_scan(self) -> list[PreparedSymbol]:
         """Get list of symbols to scan.
-        
+
         This should integrate with your data source (ws_manager, etc.)
         """
         # Placeholder - integrate with your symbol provider
         # Return list of PreparedSymbol objects
         return []
-    
+
     async def _persist_signal(
         self,
         prepared: PreparedSymbol,
@@ -108,7 +114,7 @@ class SymbolScanner:
         """Persist signal to repository."""
         import uuid
         from datetime import datetime, timezone
-        
+
         record = SignalRecord(
             signal_id=str(uuid.uuid4()),
             symbol=prepared.symbol,
@@ -132,12 +138,14 @@ class SymbolScanner:
                     }
                     for r in all_results
                     if r.is_valid and r.signal
-                ] if all_results else [],
-            }
+                ]
+                if all_results
+                else [],
+            },
         )
-        
+
         await self._repo.save_signal(record)
-    
+
     async def run(self) -> None:
         """Execute one scan cycle."""
         await self.scan_all()

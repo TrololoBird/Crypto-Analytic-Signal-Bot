@@ -5,6 +5,7 @@ Detects divergence between price direction and order flow delta.
 
 # WINDSURF_REVIEW: unified + vectorized + 1H context + graded
 """
+
 from __future__ import annotations
 
 import logging
@@ -26,7 +27,9 @@ class CVDDivergenceSetup(BaseSetup):
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)
 
-    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
+    def get_optimizable_params(
+        self, settings: BotSettings | None = None
+    ) -> dict[str, float]:
         """Tunable parameters for self-learner optimization."""
         defaults = {
             "base_score": 0.50,
@@ -38,9 +41,9 @@ class CVDDivergenceSetup(BaseSetup):
             "sl_buffer_atr": 0.5,
         }
         if settings is not None:
-            filters = getattr(settings, 'filters', None)
+            filters = getattr(settings, "filters", None)
             if filters:
-                setups_config = getattr(filters, 'setups', {})
+                setups_config = getattr(filters, "setups", {})
                 if isinstance(setups_config, dict) and self.setup_id in setups_config:
                     return {**defaults, **setups_config.get(self.setup_id, {})}
         return defaults
@@ -62,10 +65,16 @@ class CVDDivergenceSetup(BaseSetup):
     def _detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         dynamic_params = get_dynamic_params(prepared, self.setup_id)
         defaults = self.get_optimizable_params(settings)
-        divergence_lookback = int(dynamic_params.get("divergence_lookback", defaults["divergence_lookback"]))
-        min_delta_threshold = float(dynamic_params.get("min_delta_threshold", defaults["min_delta_threshold"]))
-        sl_buffer_atr = float(dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]))
-        
+        divergence_lookback = int(
+            dynamic_params.get("divergence_lookback", defaults["divergence_lookback"])
+        )
+        min_delta_threshold = float(
+            dynamic_params.get("min_delta_threshold", defaults["min_delta_threshold"])
+        )
+        sl_buffer_atr = float(
+            dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"])
+        )
+
         w = prepared.work_15m
         if w.height < 20:
             _reject(prepared, self.setup_id, "insufficient_15m_bars", bars=w.height)
@@ -76,7 +85,12 @@ class CVDDivergenceSetup(BaseSetup):
             return None
         delta_series = w["delta_ratio"].drop_nulls()
         if delta_series.len() < 10:
-            _reject(prepared, self.setup_id, "delta_history_insufficient", samples=delta_series.len())
+            _reject(
+                prepared,
+                self.setup_id,
+                "delta_history_insufficient",
+                samples=delta_series.len(),
+            )
             return None
 
         atr = float(w.item(-1, "atr14") or 0.0)
@@ -114,7 +128,13 @@ class CVDDivergenceSetup(BaseSetup):
         delta_shift = delta_mean_b - delta_mean_a
 
         if math.isnan(delta_mean_a) or math.isnan(delta_mean_b):
-            _reject(prepared, self.setup_id, "delta_mean_invalid", delta_mean_a=delta_mean_a, delta_mean_b=delta_mean_b)
+            _reject(
+                prepared,
+                self.setup_id,
+                "delta_mean_invalid",
+                delta_mean_a=delta_mean_a,
+                delta_mean_b=delta_mean_b,
+            )
             return None
         if abs(delta_shift) < min_delta_threshold:
             _reject(
@@ -129,14 +149,20 @@ class CVDDivergenceSetup(BaseSetup):
         direction = None
 
         # Use 1H context for 15M signals (not 4H - too lagging for <4h trades)
-        bias_1h = getattr(prepared, 'bias_1h', prepared.bias_4h)
+        bias_1h = getattr(prepared, "bias_1h", prepared.bias_4h)
 
         # Bearish divergence: price HH, delta declining
         if price_hh and delta_mean_b < delta_mean_a:
             # Don't short in 1H uptrend unless delta very extreme
             bias_override_threshold = max(0.2, min_delta_threshold)
             if bias_1h == "uptrend" and delta_shift > -bias_override_threshold:
-                _reject(prepared, self.setup_id, "context_bias_blocks_short", bias_1h=bias_1h, delta_shift=delta_shift)
+                _reject(
+                    prepared,
+                    self.setup_id,
+                    "context_bias_blocks_short",
+                    bias_1h=bias_1h,
+                    delta_shift=delta_shift,
+                )
                 return None
             direction = "short"
 
@@ -144,7 +170,13 @@ class CVDDivergenceSetup(BaseSetup):
         elif price_ll and delta_mean_b > delta_mean_a:
             bias_override_threshold = max(0.2, min_delta_threshold)
             if bias_1h == "downtrend" and delta_shift < bias_override_threshold:
-                _reject(prepared, self.setup_id, "context_bias_blocks_long", bias_1h=bias_1h, delta_shift=delta_shift)
+                _reject(
+                    prepared,
+                    self.setup_id,
+                    "context_bias_blocks_long",
+                    bias_1h=bias_1h,
+                    delta_shift=delta_shift,
+                )
                 return None
             direction = "long"
 
@@ -159,7 +191,13 @@ class CVDDivergenceSetup(BaseSetup):
             stop = div_extreme - atr * sl_buffer_atr
             risk = price - stop
             if risk <= 0:
-                _reject(prepared, self.setup_id, "risk_non_positive_long", stop=stop, price=price)
+                _reject(
+                    prepared,
+                    self.setup_id,
+                    "risk_non_positive_long",
+                    stop=stop,
+                    price=price,
+                )
                 return None
             # TP1: first leg retrace target from the prior divergence segment on close prices.
             tp1 = float(max(window_a))
@@ -167,7 +205,9 @@ class CVDDivergenceSetup(BaseSetup):
             w1h = prepared.work_1h
             tp2 = None
             if w1h.height > 5:
-                sh_mask, sl_mask = _swing_points(w1h, n=3, include_unconfirmed_tail=True)
+                sh_mask, sl_mask = _swing_points(
+                    w1h, n=3, include_unconfirmed_tail=True
+                )
                 sh_prices = w1h.filter(sh_mask)["high"]
                 tp2_cands = sh_prices.filter(sh_prices > price)
                 tp2 = float(tp2_cands[0]) if tp2_cands.len() > 0 else None
@@ -177,7 +217,13 @@ class CVDDivergenceSetup(BaseSetup):
             stop = div_extreme + atr * sl_buffer_atr
             risk = stop - price
             if risk <= 0:
-                _reject(prepared, self.setup_id, "risk_non_positive_short", stop=stop, price=price)
+                _reject(
+                    prepared,
+                    self.setup_id,
+                    "risk_non_positive_short",
+                    stop=stop,
+                    price=price,
+                )
                 return None
             # TP1: first leg retrace target from the prior divergence segment on close prices.
             tp1 = float(min(window_a))
@@ -192,7 +238,14 @@ class CVDDivergenceSetup(BaseSetup):
 
         # Validate: TP1 must be at least 1.5× risk distance, else reject
         if tp1 is None or abs(tp1 - price) < risk * 1.5:
-            _reject(prepared, self.setup_id, "tp1_too_close_or_missing", tp1=tp1, risk=risk, price=price)
+            _reject(
+                prepared,
+                self.setup_id,
+                "tp1_too_close_or_missing",
+                tp1=tp1,
+                risk=risk,
+                price=price,
+            )
             return None  # Reject this CVD divergence setup
         if tp2 is None:
             tp2 = tp1  # Use TP1 as TP2 if no extended target found

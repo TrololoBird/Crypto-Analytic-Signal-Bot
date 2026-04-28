@@ -45,9 +45,13 @@ async def test_run_modern_analysis_delegates_to_symbol_analyzer() -> None:
         price_change_pct=0.0,
         last_price=100.0,
     )
-    frames = SymbolFrames(symbol="BTCUSDT", df_1h=None, df_15m=None, bid_price=None, ask_price=None)  # type: ignore[arg-type]
+    frames = SymbolFrames(
+        symbol="BTCUSDT", df_1h=None, df_15m=None, bid_price=None, ask_price=None
+    )  # type: ignore[arg-type]
 
-    result = await bot._run_modern_analysis(item, frames, trigger="kline_close", ws_enrichments={"x": 1})
+    result = await bot._run_modern_analysis(
+        item, frames, trigger="kline_close", ws_enrichments={"x": 1}
+    )
 
     assert result is expected
     assert len(recorder.calls) == 1

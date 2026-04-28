@@ -43,7 +43,9 @@ class MarketContextUpdater:
                 async with self._bot._shortlist_lock:
                     shortlist = list(self._bot._shortlist)
                 if shortlist and self._bot.intelligence is not None:
-                    snapshot = await self._bot.intelligence.collect([item.symbol for item in shortlist])
+                    snapshot = await self._bot.intelligence.collect(
+                        [item.symbol for item in shortlist]
+                    )
                     await self.update_memory_market_context(shortlist)
                     await self.apply_public_guardrails(snapshot)
                     LOG.info(
@@ -54,14 +56,19 @@ class MarketContextUpdater:
                         cast(dict[str, Any], snapshot.get("barrier") or {}).get(
                             "short_barrier_triggered"
                         ),
-                        cast(dict[str, Any], snapshot.get("macro") or {}).get("risk_mode"),
+                        cast(dict[str, Any], snapshot.get("macro") or {}).get(
+                            "risk_mode"
+                        ),
                     )
             except Exception as exc:
                 LOG.warning("public intelligence update failed: %s", exc, exc_info=True)
             try:
                 await asyncio.wait_for(
                     self._bot._shutdown.wait(),
-                    timeout=max(60, int(self._bot.settings.intelligence.refresh_interval_seconds)),
+                    timeout=max(
+                        60,
+                        int(self._bot.settings.intelligence.refresh_interval_seconds),
+                    ),
                 )
             except TimeoutError:
                 continue
@@ -69,7 +76,9 @@ class MarketContextUpdater:
     async def apply_public_guardrails(self, snapshot: dict[str, Any]) -> None:
         if self._bot.intelligence is None:
             return
-        open_rows = await self._bot._modern_repo.get_active_signals(include_closed=False)
+        open_rows = await self._bot._modern_repo.get_active_signals(
+            include_closed=False
+        )
         if not open_rows:
             return
 
@@ -127,7 +136,9 @@ class MarketContextUpdater:
                     continue
                 symbol = str(row.get("symbol") or "")
                 direction = str(row.get("direction") or "")
-                smart_exit = await self._bot.intelligence.evaluate_smart_exit(symbol, direction)
+                smart_exit = await self._bot.intelligence.evaluate_smart_exit(
+                    symbol, direction
+                )
                 if not bool(smart_exit.get("triggered")):
                     continue
                 smart_exit_events.extend(
@@ -135,7 +146,9 @@ class MarketContextUpdater:
                         [tracking_id],
                         reason="smart_exit",
                         occurred_at=datetime.now(UTC),
-                        note=";".join(cast(list[str], smart_exit.get("reasons") or [])[:6]),
+                        note=";".join(
+                            cast(list[str], smart_exit.get("reasons") or [])[:6]
+                        ),
                     )
                 )
 
@@ -143,7 +156,9 @@ class MarketContextUpdater:
         if combined_events:
             await self._bot._deliver_tracking(combined_events)
 
-    async def update_memory_market_context(self, shortlist: list[UniverseSymbol]) -> None:
+    async def update_memory_market_context(
+        self, shortlist: list[UniverseSymbol]
+    ) -> None:
         try:
             if not isinstance(self._bot.client, BinanceFuturesMarketData):
                 return
@@ -166,7 +181,10 @@ class MarketContextUpdater:
             btc_bias = "neutral"
             eth_bias = "neutral"
             if self._bot._ws_manager is not None:
-                for sym, bias_attr in [("BTCUSDT", "btc_bias"), ("ETHUSDT", "eth_bias")]:
+                for sym, bias_attr in [
+                    ("BTCUSDT", "btc_bias"),
+                    ("ETHUSDT", "eth_bias"),
+                ]:
                     bias = self.compute_price_bias(sym)
                     if bias_attr == "btc_bias":
                         btc_bias = bias
@@ -176,8 +194,12 @@ class MarketContextUpdater:
             benchmark_context: dict[str, dict[str, Any]] = {}
             for sym, bias in [("BTCUSDT", btc_bias), ("ETHUSDT", eth_bias)]:
                 payload: dict[str, Any] = {"bias": bias}
-                payload["oi_change_pct"] = self._bot.client.get_cached_oi_change(sym, period="1h")
-                payload["basis_pct"] = self._bot.client.get_cached_basis(sym, period="1h")
+                payload["oi_change_pct"] = self._bot.client.get_cached_oi_change(
+                    sym, period="1h"
+                )
+                payload["basis_pct"] = self._bot.client.get_cached_basis(
+                    sym, period="1h"
+                )
                 basis_stats = self._bot.client.get_cached_basis_stats(sym, period="5m")
                 if basis_stats is not None:
                     payload["premium_slope_5m"] = basis_stats.get("premium_slope_5m")
@@ -186,7 +208,9 @@ class MarketContextUpdater:
 
             ticker_data: list[dict[str, Any]] = []
             all_tickers = await self._bot.client.fetch_ticker_24h()
-            ticker_dict = {t.get("symbol"): t for t in all_tickers if isinstance(t, dict)}
+            ticker_dict = {
+                t.get("symbol"): t for t in all_tickers if isinstance(t, dict)
+            }
             for item in shortlist:
                 ticker = ticker_dict.get(item.symbol)
                 if ticker:
@@ -205,15 +229,23 @@ class MarketContextUpdater:
                         "previous_regime": self._last_regime,
                         "new_regime": regime_result.regime,
                         "strength": float(regime_result.strength),
-                        "confidence": float(getattr(regime_result, "confidence", 0.0) or 0.0),
+                        "confidence": float(
+                            getattr(regime_result, "confidence", 0.0) or 0.0
+                        ),
                         "detector": str(
-                            getattr(self._bot.settings.intelligence, "regime_detector", "legacy")
+                            getattr(
+                                self._bot.settings.intelligence,
+                                "regime_detector",
+                                "legacy",
+                            )
                         ),
                     },
                 )
                 self._last_regime = regime_result.regime
             intelligence_snapshot = (
-                self._bot.intelligence.latest_snapshot if self._bot.intelligence is not None else None
+                self._bot.intelligence.latest_snapshot
+                if self._bot.intelligence is not None
+                else None
             )
             macro_risk_mode = (
                 "disabled_binance_only"
@@ -221,8 +253,12 @@ class MarketContextUpdater:
                 else "unknown"
             )
             if intelligence_snapshot:
-                macro_snapshot = cast(dict[str, Any], intelligence_snapshot.get("macro") or {})
-                macro_risk_mode = str(macro_snapshot.get("risk_mode") or macro_risk_mode)
+                macro_snapshot = cast(
+                    dict[str, Any], intelligence_snapshot.get("macro") or {}
+                )
+                macro_risk_mode = str(
+                    macro_snapshot.get("risk_mode") or macro_risk_mode
+                )
             await self._bot._modern_repo.update_market_context(
                 btc_bias,
                 eth_bias,
@@ -254,14 +290,22 @@ class MarketContextUpdater:
                 c2 = float(klines[-1]["close"])
                 if c1 > 0 and c2 > 0:
                     pct = (c2 - c1) / c1
-                    return "uptrend" if pct > 0.008 else ("downtrend" if pct < -0.008 else "neutral")
+                    return (
+                        "uptrend"
+                        if pct > 0.008
+                        else ("downtrend" if pct < -0.008 else "neutral")
+                    )
             except (KeyError, TypeError, ValueError):
                 pass
         ticker = self._bot._ws_manager.get_ticker_snapshot(symbol)
         if ticker:
             try:
                 pct_24h = float(ticker.get("price_change_percent") or 0.0) / 100.0
-                return "uptrend" if pct_24h > 0.02 else ("downtrend" if pct_24h < -0.02 else "neutral")
+                return (
+                    "uptrend"
+                    if pct_24h > 0.02
+                    else ("downtrend" if pct_24h < -0.02 else "neutral")
+                )
             except (TypeError, ValueError):
                 pass
         return "neutral"

@@ -20,7 +20,9 @@ class Secrets:
 def load_secrets() -> Secrets:
     load_dotenv()
     tg_token = (os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
-    target_chat_id = (os.getenv("TARGET_CHAT_ID") or os.getenv("TELEGRAM_CHAT_ID") or "").strip()
+    target_chat_id = (
+        os.getenv("TARGET_CHAT_ID") or os.getenv("TELEGRAM_CHAT_ID") or ""
+    ).strip()
     return Secrets(
         tg_token=tg_token,
         target_chat_id=target_chat_id,

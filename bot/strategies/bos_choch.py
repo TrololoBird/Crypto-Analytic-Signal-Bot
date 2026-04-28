@@ -5,6 +5,7 @@ Focuses on CHoCH signals (structure reversal) as entry triggers.
 
 # WINDSURF_REVIEW: unified + vectorized + 1H context + graded
 """
+
 from __future__ import annotations
 
 import logging
@@ -20,7 +21,7 @@ from ..setups.utils import get_dynamic_params
 
 LOG = logging.getLogger("bot.strategies.bos_choch")
 
-_MIN_SWINGS = 6   # Need 3+ of each type for trend context
+_MIN_SWINGS = 6  # Need 3+ of each type for trend context
 
 
 class BOSCHOCHSetup(BaseSetup):
@@ -31,7 +32,9 @@ class BOSCHOCHSetup(BaseSetup):
     confirmation_profile = "breakout_acceptance"
     required_context = ("futures_flow",)
 
-    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
+    def get_optimizable_params(
+        self, settings: BotSettings | None = None
+    ) -> dict[str, float]:
         """Tunable parameters for self-learner optimization."""
         defaults = {
             "base_score": 0.55,
@@ -45,9 +48,9 @@ class BOSCHOCHSetup(BaseSetup):
             "min_swings": 6,
         }
         if settings is not None:
-            filters = getattr(settings, 'filters', None)
+            filters = getattr(settings, "filters", None)
             if filters:
-                setups_config = getattr(filters, 'setups', {})
+                setups_config = getattr(filters, "setups", {})
                 if isinstance(setups_config, dict) and self.setup_id in setups_config:
                     return {**defaults, **setups_config.get(self.setup_id, {})}
         return defaults
@@ -67,15 +70,23 @@ class BOSCHOCHSetup(BaseSetup):
             )
             return None
 
-    def _detect(self, prepared: PreparedSymbol, _settings: BotSettings) -> Signal | None:
+    def _detect(
+        self, prepared: PreparedSymbol, _settings: BotSettings
+    ) -> Signal | None:
         setup_id = self.setup_id
         dynamic_params = get_dynamic_params(prepared, setup_id)
         defaults = self.get_optimizable_params(_settings)
 
-        bos_lookback = max(2, int(dynamic_params.get("bos_lookback", defaults["bos_lookback"])))
-        choch_lookback = max(2, int(dynamic_params.get("choch_lookback", defaults["choch_lookback"])))
+        bos_lookback = max(
+            2, int(dynamic_params.get("bos_lookback", defaults["bos_lookback"]))
+        )
+        choch_lookback = max(
+            2, int(dynamic_params.get("choch_lookback", defaults["choch_lookback"]))
+        )
         swing_lookback = max(bos_lookback, choch_lookback)
-        sl_buffer_atr = float(dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]))
+        sl_buffer_atr = float(
+            dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"])
+        )
         min_rr = float(dynamic_params.get("min_rr", defaults["min_rr"]))
         base_score = float(dynamic_params.get("base_score", defaults["base_score"]))
 
@@ -133,7 +144,13 @@ class BOSCHOCHSetup(BaseSetup):
             stop_price = pivot_level - sl_buffer_atr * atr
             risk = price - stop_price
             if risk <= 0:
-                _reject(prepared, setup_id, "risk_non_positive_long", stop=stop_price, price=price)
+                _reject(
+                    prepared,
+                    setup_id,
+                    "risk_non_positive_long",
+                    stop=stop_price,
+                    price=price,
+                )
                 return None
             # TP1: last swing high before the structural break
             tp1 = float(sh_vals[-2]) if sh_vals[-2] > price else None
@@ -151,7 +168,13 @@ class BOSCHOCHSetup(BaseSetup):
             stop_price = pivot_level + sl_buffer_atr * atr
             risk = stop_price - price
             if risk <= 0:
-                _reject(prepared, setup_id, "risk_non_positive_short", stop=stop_price, price=price)
+                _reject(
+                    prepared,
+                    setup_id,
+                    "risk_non_positive_short",
+                    stop=stop_price,
+                    price=price,
+                )
                 return None
             # TP1: last swing low before the structural break
             tp1 = float(sl_vals[-2]) if sl_vals[-2] < price else None
@@ -166,7 +189,14 @@ class BOSCHOCHSetup(BaseSetup):
 
         # Validate: TP1 must be at least min_rr × risk distance, else reject.
         if tp1 is None or abs(tp1 - price) < risk * min_rr:
-            _reject(prepared, setup_id, "tp1_too_close_or_missing", tp1=tp1, risk=risk, price=price)
+            _reject(
+                prepared,
+                setup_id,
+                "tp1_too_close_or_missing",
+                tp1=tp1,
+                risk=risk,
+                price=price,
+            )
             return None  # Reject this CHoCH setup
         if tp2 is None:
             tp2 = tp1  # Use TP1 as TP2 if no extended target found

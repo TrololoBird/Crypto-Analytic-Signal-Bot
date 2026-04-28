@@ -5,16 +5,14 @@ Price breaks above/below the range but closes back inside = sweep setup.
 
 # WINDSURF_REVIEW: unified + vectorized + 1H context + graded
 """
+
 from __future__ import annotations
 
-from typing import cast
 
 import logging
 import math
-import polars as pl
 
 from ..config import BotSettings
-from ..features import _swing_points
 from ..models import PreparedSymbol, Signal
 from ..setup_base import BaseSetup
 from ..setups import _build_signal, _compute_dynamic_score, _reject
@@ -37,7 +35,9 @@ class TurtleSoupSetup(BaseSetup):
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)
 
-    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
+    def get_optimizable_params(
+        self, settings: BotSettings | None = None
+    ) -> dict[str, float]:
         """Tunable parameters for self-learner optimization."""
         defaults = {
             "base_score": 0.52,
@@ -49,9 +49,9 @@ class TurtleSoupSetup(BaseSetup):
             "min_rr": 1.5,
         }
         if settings is not None:
-            filters = getattr(settings, 'filters', None)
+            filters = getattr(settings, "filters", None)
             if filters:
-                setups_config = getattr(filters, 'setups', {})
+                setups_config = getattr(filters, "setups", {})
                 if isinstance(setups_config, dict) and self.setup_id in setups_config:
                     return {**defaults, **setups_config.get(self.setup_id, {})}
         return defaults
@@ -66,16 +66,22 @@ class TurtleSoupSetup(BaseSetup):
 
     def _detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         setup_id = self.setup_id
-        
+
         dynamic_params = get_dynamic_params(prepared, setup_id)
         defaults = self.get_optimizable_params(settings)
         roll_bars = max(5, int(dynamic_params.get("roll_bars", defaults["roll_bars"])))
-        break_atr_mult = float(dynamic_params.get("break_atr_mult", defaults["break_atr_mult"]))
-        sl_buffer_atr = float(dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]))
-        volume_threshold = float(dynamic_params.get("volume_threshold", defaults["volume_threshold"]))
+        break_atr_mult = float(
+            dynamic_params.get("break_atr_mult", defaults["break_atr_mult"])
+        )
+        sl_buffer_atr = float(
+            dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"])
+        )
+        volume_threshold = float(
+            dynamic_params.get("volume_threshold", defaults["volume_threshold"])
+        )
         min_rr = float(dynamic_params.get("min_rr", defaults["min_rr"]))
         base_score = float(dynamic_params.get("base_score", defaults["base_score"]))
-        
+
         w1h = prepared.work_1h
         if w1h.height < roll_bars + 3:
             _reject(prepared, setup_id, "insufficient_1h_bars", bars=w1h.height)
@@ -108,7 +114,9 @@ class TurtleSoupSetup(BaseSetup):
             wick_extreme = bar_low
 
         # Short setup: price swept highs (bar.high > rolling_high + break_atr_mult*atr) but close back below
-        elif bar_high > rolling_high + break_atr_mult * atr and bar_close < rolling_high:
+        elif (
+            bar_high > rolling_high + break_atr_mult * atr and bar_close < rolling_high
+        ):
             direction = "short"
             wick_extreme = bar_high
 
@@ -125,21 +133,42 @@ class TurtleSoupSetup(BaseSetup):
         bar15_open = _as_float(w15m.item(-1, "open"))
         bar15_close = _as_float(w15m.item(-1, "close"))
 
-        if direction == "long" and not (bar15_close > bar15_open and vol_ratio_15m >= volume_threshold):
-            _reject(prepared, setup_id, "15m_confirmation_missing_long", vol_ratio_15m=vol_ratio_15m)
+        if direction == "long" and not (
+            bar15_close > bar15_open and vol_ratio_15m >= volume_threshold
+        ):
+            _reject(
+                prepared,
+                setup_id,
+                "15m_confirmation_missing_long",
+                vol_ratio_15m=vol_ratio_15m,
+            )
             return None
-        if direction == "short" and not (bar15_close < bar15_open and vol_ratio_15m >= volume_threshold):
-            _reject(prepared, setup_id, "15m_confirmation_missing_short", vol_ratio_15m=vol_ratio_15m)
+        if direction == "short" and not (
+            bar15_close < bar15_open and vol_ratio_15m >= volume_threshold
+        ):
+            _reject(
+                prepared,
+                setup_id,
+                "15m_confirmation_missing_short",
+                vol_ratio_15m=vol_ratio_15m,
+            )
             return None
 
         # --- Compute structural SL/TP ---
         from ..features import _swing_points as _sp
+
         if direction == "long":
             # SL: beyond false breakout extreme + sl_buffer_atr×ATR
             stop = wick_extreme - sl_buffer_atr * atr
             risk = bar_close - stop
             if risk <= 0:
-                _reject(prepared, setup_id, "risk_non_positive_long", stop=stop, close=bar_close)
+                _reject(
+                    prepared,
+                    setup_id,
+                    "risk_non_positive_long",
+                    stop=stop,
+                    close=bar_close,
+                )
                 return None
             # TP1: the broken level itself (rolling low that was falsely broken)
             tp1 = rolling_low
@@ -153,7 +182,13 @@ class TurtleSoupSetup(BaseSetup):
             stop = wick_extreme + sl_buffer_atr * atr
             risk = stop - bar_close
             if risk <= 0:
-                _reject(prepared, setup_id, "risk_non_positive_short", stop=stop, close=bar_close)
+                _reject(
+                    prepared,
+                    setup_id,
+                    "risk_non_positive_short",
+                    stop=stop,
+                    close=bar_close,
+                )
                 return None
             # TP1: the broken level itself (rolling high that was falsely broken)
             tp1 = rolling_high

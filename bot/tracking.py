@@ -1,4 +1,5 @@
 """Signal tracking module for monitoring signal lifecycle and outcomes."""
+
 from __future__ import annotations
 
 import asyncio
@@ -91,7 +92,9 @@ class SignalTracker:
         self.market_data = market_data
         self.telemetry = telemetry
         self.memory_repo = memory_repo
-        self._features_file: Path | None = getattr(settings, "features_store_file", None)
+        self._features_file: Path | None = getattr(
+            settings, "features_store_file", None
+        )
         if features_store is not None:
             self.features_store = features_store
         else:
@@ -177,7 +180,9 @@ class SignalTracker:
         self.features_store[tracking_id] = features
         self._persist_features_store()
 
-    async def set_signal_features_async(self, tracking_id: str, features: SignalFeatures) -> None:
+    async def set_signal_features_async(
+        self, tracking_id: str, features: SignalFeatures
+    ) -> None:
         """Async runtime path that avoids blocking the event loop on file I/O."""
         self.features_store[tracking_id] = features
         await self._persist_features_store_async()
@@ -204,7 +209,9 @@ class SignalTracker:
     async def _stats_snapshot(self) -> dict[str, int]:
         return await self.memory_repo.get_tracking_stats()
 
-    async def _active_signals(self, *, symbol: str | None = None) -> list[TrackedSignalState]:
+    async def _active_signals(
+        self, *, symbol: str | None = None
+    ) -> list[TrackedSignalState]:
         rows = await self.memory_repo.get_active_signals(symbol=symbol)
         return [self._tracked_from_payload(row) for row in rows]
 
@@ -213,7 +220,9 @@ class SignalTracker:
         # Here we only flush pending batched outcomes so callers that expect
         # an explicit "persist" step do not lose queued outcomes on shutdown.
         await self._flush_pending_outcomes()
-        retention_days = int(getattr(self.settings.tracking, "outcome_retention_days", 90) or 90)
+        retention_days = int(
+            getattr(self.settings.tracking, "outcome_retention_days", 90) or 90
+        )
         await self._cleanup_old_outcomes(retention_days)
 
     async def _cleanup_old_outcomes(self, retention_days: int = 90) -> None:
@@ -252,8 +261,14 @@ class SignalTracker:
             direction=signal.direction,
             timeframe=signal.timeframe,
             created_at=created_at.isoformat(),
-            pending_expires_at=(created_at + timedelta(minutes=self.settings.tracking.pending_expiry_minutes)).isoformat(),
-            active_expires_at=(created_at + timedelta(minutes=self.settings.tracking.active_expiry_minutes)).isoformat(),
+            pending_expires_at=(
+                created_at
+                + timedelta(minutes=self.settings.tracking.pending_expiry_minutes)
+            ).isoformat(),
+            active_expires_at=(
+                created_at
+                + timedelta(minutes=self.settings.tracking.active_expiry_minutes)
+            ).isoformat(),
             entry_low=signal.entry_low,
             entry_high=signal.entry_high,
             entry_mid=signal.entry_mid,
@@ -425,7 +440,9 @@ class SignalTracker:
             try:
                 symbol_events = await self._review_symbol(symbol, symbol_rows, now=now)
             except Exception:
-                LOG.exception("tracking review failed for %s; using time fallback", symbol)
+                LOG.exception(
+                    "tracking review failed for %s; using time fallback", symbol
+                )
                 symbol_events = await self._apply_time_fallback_rows(
                     symbol_rows,
                     now=now,
@@ -439,7 +456,9 @@ class SignalTracker:
             try:
                 await self._persist_tracking_state()
             except (OSError, IOError):
-                LOG.exception("tracking state persist failed (continuing without persistence)")
+                LOG.exception(
+                    "tracking state persist failed (continuing without persistence)"
+                )
         for event in events:
             self.telemetry.append_jsonl(
                 "tracking_events.jsonl",
@@ -466,7 +485,12 @@ class SignalTracker:
         for tracked in tracked_rows:
             if tracked.tracking_id not in wanted:
                 continue
-            price = tracked.last_price or tracked.close_price or tracked.activation_price or tracked.entry_mid
+            price = (
+                tracked.last_price
+                or tracked.close_price
+                or tracked.activation_price
+                or tracked.entry_mid
+            )
             events.append(
                 await self._close_event(
                     tracked,
@@ -482,10 +506,14 @@ class SignalTracker:
             try:
                 await self._persist_tracking_state()
             except (OSError, IOError):
-                LOG.exception("tracking state persist failed for forced close (continuing)")
+                LOG.exception(
+                    "tracking state persist failed for forced close (continuing)"
+                )
         stats = await self._stats_snapshot()
         for event in events:
-            self.telemetry.append_jsonl("tracking_events.jsonl", event.to_log_row(stats=stats))
+            self.telemetry.append_jsonl(
+                "tracking_events.jsonl", event.to_log_row(stats=stats)
+            )
         return events
 
     async def _review_symbol(
@@ -497,7 +525,11 @@ class SignalTracker:
     ) -> list[SignalTrackingEvent]:
         oldest_check = now
         for tracked in tracked_rows:
-            last_checked = parse_state_dt(tracked.last_checked_at) or parse_state_dt(tracked.created_at) or now
+            last_checked = (
+                parse_state_dt(tracked.last_checked_at)
+                or parse_state_dt(tracked.created_at)
+                or now
+            )
             if last_checked < oldest_check:
                 oldest_check = last_checked
         start_time_ms = int(oldest_check.timestamp() * 1000)
@@ -519,14 +551,22 @@ class SignalTracker:
             trades = []
             complete = False
         except MarketDataUnavailable as exc:
-            LOG.debug("agg trades unavailable for %s; falling back to candles: %s", symbol, exc)
+            LOG.debug(
+                "agg trades unavailable for %s; falling back to candles: %s",
+                symbol,
+                exc,
+            )
             trades = []
             complete = False
         except (ValueError, TypeError):
             trades = []
             complete = False
         except Exception as exc:
-            LOG.warning("agg trades review failed for %s; falling back to candles: %s", symbol, exc)
+            LOG.warning(
+                "agg trades review failed for %s; falling back to candles: %s",
+                symbol,
+                exc,
+            )
             trades = []
             complete = False
 
@@ -534,22 +574,36 @@ class SignalTracker:
             events: list[SignalTrackingEvent] = []
             trade_times = [trade.trade_time for trade in trades]
             for tracked in tracked_rows:
-                events.extend(await self._apply_trade_rows(tracked, trades, trade_times=trade_times, now=now))
+                events.extend(
+                    await self._apply_trade_rows(
+                        tracked, trades, trade_times=trade_times, now=now
+                    )
+                )
             return events
 
         lookback_minutes = max(30, int((now - oldest_check).total_seconds() / 60.0) + 5)
         lookback_limit = min(max(lookback_minutes, 60), 1000)
         try:
-            candles = await self.market_data.fetch_klines(symbol, "1m", limit=lookback_limit)
+            candles = await self.market_data.fetch_klines(
+                symbol, "1m", limit=lookback_limit
+            )
         except MarketDataUnavailable as exc:
-            LOG.warning("tracking candles unavailable for %s; using time fallback: %s", symbol, exc)
+            LOG.warning(
+                "tracking candles unavailable for %s; using time fallback: %s",
+                symbol,
+                exc,
+            )
             return await self._apply_time_fallback_rows(
                 tracked_rows,
                 now=now,
                 precision_mode="time_fallback",
             )
         except Exception as exc:
-            LOG.warning("tracking candle review failed for %s; using time fallback: %s", symbol, exc)
+            LOG.warning(
+                "tracking candle review failed for %s; using time fallback: %s",
+                symbol,
+                exc,
+            )
             return await self._apply_time_fallback_rows(
                 tracked_rows,
                 now=now,
@@ -584,7 +638,11 @@ class SignalTracker:
         now: datetime,
     ) -> list[SignalTrackingEvent]:
         events: list[SignalTrackingEvent] = []
-        last_checked = parse_state_dt(tracked.last_checked_at) or parse_state_dt(tracked.created_at) or now
+        last_checked = (
+            parse_state_dt(tracked.last_checked_at)
+            or parse_state_dt(tracked.created_at)
+            or now
+        )
         pending_expires_at = parse_state_dt(tracked.pending_expires_at) or now
         active_expires_at = parse_state_dt(tracked.active_expires_at) or now
         last_price = tracked.last_price
@@ -670,7 +728,9 @@ class SignalTracker:
                 )
             )
             return events
-        await self._mark_checked(tracked, checked_at=now, last_price=last_price, precision_mode="trade")
+        await self._mark_checked(
+            tracked, checked_at=now, last_price=last_price, precision_mode="trade"
+        )
         return events
 
     async def _apply_candle_rows(
@@ -681,7 +741,11 @@ class SignalTracker:
         now: datetime,
     ) -> list[SignalTrackingEvent]:
         events: list[SignalTrackingEvent] = []
-        last_checked = parse_state_dt(tracked.last_checked_at) or parse_state_dt(tracked.created_at) or now
+        last_checked = (
+            parse_state_dt(tracked.last_checked_at)
+            or parse_state_dt(tracked.created_at)
+            or now
+        )
         pending_expires_at = parse_state_dt(tracked.pending_expires_at) or now
         active_expires_at = parse_state_dt(tracked.active_expires_at) or now
         last_price = tracked.last_price
@@ -693,7 +757,9 @@ class SignalTracker:
         for row in relevant.iter_rows(named=True):
             bar_close_time = row["close_time"]
             if isinstance(bar_close_time, str):
-                bar_close_time = datetime.fromisoformat(bar_close_time.replace('Z', '+00:00'))
+                bar_close_time = datetime.fromisoformat(
+                    bar_close_time.replace("Z", "+00:00")
+                )
             bar_high = float(row["high"])
             bar_low = float(row["low"])
             bar_close = float(row["close"])
@@ -759,7 +825,9 @@ class SignalTracker:
                     )
                 )
                 return events
-            if (tp2_touched and stop_touched) or (tracked.tp1_hit_at is None and tp1_touched and stop_touched):
+            if (tp2_touched and stop_touched) or (
+                tracked.tp1_hit_at is None and tp1_touched and stop_touched
+            ):
                 events.append(
                     await self._close_event(
                         tracked,
@@ -880,7 +948,12 @@ class SignalTracker:
     ) -> list[SignalTrackingEvent]:
         pending_expires_at = parse_state_dt(tracked.pending_expires_at) or now
         active_expires_at = parse_state_dt(tracked.active_expires_at) or now
-        last_price = tracked.last_price or tracked.close_price or tracked.activation_price or tracked.entry_mid
+        last_price = (
+            tracked.last_price
+            or tracked.close_price
+            or tracked.activation_price
+            or tracked.entry_mid
+        )
 
         if tracked.activated_at is None and now > pending_expires_at:
             return [
@@ -1106,7 +1179,16 @@ class SignalTracker:
         # Update adaptive scoring window for the closed setup.
         setup_outcome = (
             event_type
-            if event_type in {"tp1_hit", "tp2_hit", "stop_loss", "expired", "ambiguous_exit", "smart_exit", "superseded"}
+            if event_type
+            in {
+                "tp1_hit",
+                "tp2_hit",
+                "stop_loss",
+                "expired",
+                "ambiguous_exit",
+                "smart_exit",
+                "superseded",
+            }
             else "ambiguous_exit"
         )
         try:
@@ -1120,7 +1202,7 @@ class SignalTracker:
         try:
             task = asyncio.create_task(
                 self._queue_outcome_for_batch(tracked, event_type),
-                name=f"outcome_batch:{tracked.tracking_id}"
+                name=f"outcome_batch:{tracked.tracking_id}",
             )
             task.add_done_callback(lambda t: None)
         except RuntimeError:
@@ -1158,11 +1240,26 @@ class SignalTracker:
         if entry_price and entry_price > 0.0:
             direction_sign = 1.0 if tracked.direction == "long" else -1.0
             if tracked.tp2_price is not None:
-                max_profit_pct = direction_sign * (tracked.tp2_price - entry_price) / entry_price * 100.0
+                max_profit_pct = (
+                    direction_sign
+                    * (tracked.tp2_price - entry_price)
+                    / entry_price
+                    * 100.0
+                )
             elif tracked.tp1_price is not None:
-                max_profit_pct = direction_sign * (tracked.tp1_price - entry_price) / entry_price * 100.0
+                max_profit_pct = (
+                    direction_sign
+                    * (tracked.tp1_price - entry_price)
+                    / entry_price
+                    * 100.0
+                )
             if tracked.stop_price is not None:
-                max_loss_pct = direction_sign * (tracked.stop_price - entry_price) / entry_price * 100.0
+                max_loss_pct = (
+                    direction_sign
+                    * (tracked.stop_price - entry_price)
+                    / entry_price
+                    * 100.0
+                )
 
         outcome = create_outcome_from_tracked(
             tracked,
@@ -1178,9 +1275,13 @@ class SignalTracker:
                 tracked.tracking_id,
             )
         else:
-            task = loop.create_task(self.memory_repo.save_signal_outcome(outcome.to_dict()))
+            task = loop.create_task(
+                self.memory_repo.save_signal_outcome(outcome.to_dict())
+            )
             task.add_done_callback(
-                lambda done: LOG.debug("save_signal_outcome failed: %s", done.exception())
+                lambda done: LOG.debug(
+                    "save_signal_outcome failed: %s", done.exception()
+                )
                 if not done.cancelled() and done.exception() is not None
                 else None
             )
@@ -1189,7 +1290,9 @@ class SignalTracker:
         self.features_store.pop(tracked.tracking_id, None)
         self._persist_features_store()
 
-    async def _queue_outcome_for_batch(self, tracked: TrackedSignalState, event_type: str) -> None:
+    async def _queue_outcome_for_batch(
+        self, tracked: TrackedSignalState, event_type: str
+    ) -> None:
         """Queue outcome for batched I/O."""
         features = self.features_store.get(tracked.tracking_id)
         if not features:
@@ -1211,18 +1314,38 @@ class SignalTracker:
         if entry_price and entry_price > 0.0:
             direction_sign = 1.0 if tracked.direction == "long" else -1.0
             if tracked.tp2_price is not None:
-                max_profit_pct = direction_sign * (tracked.tp2_price - entry_price) / entry_price * 100.0
+                max_profit_pct = (
+                    direction_sign
+                    * (tracked.tp2_price - entry_price)
+                    / entry_price
+                    * 100.0
+                )
             elif tracked.tp1_price is not None:
-                max_profit_pct = direction_sign * (tracked.tp1_price - entry_price) / entry_price * 100.0
+                max_profit_pct = (
+                    direction_sign
+                    * (tracked.tp1_price - entry_price)
+                    / entry_price
+                    * 100.0
+                )
             if tracked.stop_price is not None:
-                max_loss_pct = direction_sign * (tracked.stop_price - entry_price) / entry_price * 100.0
+                max_loss_pct = (
+                    direction_sign
+                    * (tracked.stop_price - entry_price)
+                    / entry_price
+                    * 100.0
+                )
 
         from .outcomes import create_outcome_from_tracked
-        outcome = create_outcome_from_tracked(tracked, features, max_profit_pct, max_loss_pct)
+
+        outcome = create_outcome_from_tracked(
+            tracked, features, max_profit_pct, max_loss_pct
+        )
 
         async with self._pending_outcomes_lock:
             self._pending_outcomes.append(outcome.to_dict())
-            should_flush = len(self._pending_outcomes) >= self._pending_outcomes_flush_size
+            should_flush = (
+                len(self._pending_outcomes) >= self._pending_outcomes_flush_size
+            )
 
         if should_flush:
             await self._flush_pending_outcomes()
@@ -1251,7 +1374,8 @@ class SignalTracker:
 
         # Find existing open signals for this symbol
         existing_signals = [
-            r for r in await self._active_signals(symbol=new_signal.symbol)
+            r
+            for r in await self._active_signals(symbol=new_signal.symbol)
             if r.activated_at is None
         ]
 
@@ -1277,7 +1401,9 @@ class SignalTracker:
             try:
                 await self._persist_tracking_state()
             except (OSError, IOError):
-                LOG.exception("tracking state persist failed for supersede (continuing)")
+                LOG.exception(
+                    "tracking state persist failed for supersede (continuing)"
+                )
 
             for event in events:
                 self.telemetry.append_jsonl(
@@ -1323,7 +1449,10 @@ class SignalTracker:
             try:
                 await self._persist_tracking_state()
             except (OSError, IOError):
-                LOG.exception("tracking state persist failed for %s (continuing without persistence)", symbol)
+                LOG.exception(
+                    "tracking state persist failed for %s (continuing without persistence)",
+                    symbol,
+                )
         for event in events:
             self.telemetry.append_jsonl(
                 "tracking_events.jsonl",
@@ -1347,7 +1476,8 @@ class SignalTracker:
         if not self.settings.tracking.enabled:
             return []
         active_rows = [
-            r for r in await self._active_signals(symbol=symbol)
+            r
+            for r in await self._active_signals(symbol=symbol)
             if r.activated_at is not None
         ]
         if not active_rows:
@@ -1369,7 +1499,10 @@ class SignalTracker:
             try:
                 await self._persist_tracking_state()
             except (OSError, IOError):
-                LOG.exception("tracking state persist failed for realtime trade %s (continuing without persistence)", symbol)
+                LOG.exception(
+                    "tracking state persist failed for realtime trade %s (continuing without persistence)",
+                    symbol,
+                )
             for event in events:
                 self.telemetry.append_jsonl(
                     "tracking_events.jsonl",
@@ -1400,7 +1533,7 @@ def _bar_hits_tp2(tracked: TrackedSignalState, *, high: float, low: float) -> bo
 
 def _bar_hits_stop(tracked: TrackedSignalState, *, high: float, low: float) -> bool:
     """Stop hit detection (immediate trigger price hit).
-    
+
     In real Binance futures trading, stop-limit orders trigger when
     price reaches the stop price, not waiting for candle close.
     """

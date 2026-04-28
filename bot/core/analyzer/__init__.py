@@ -7,7 +7,7 @@ from .reporter import DailyReporter, ReportFormat
 __all__ = [
     "OutcomeTracker",
     "PriceSnapshot",
-    "PerformanceMetrics", 
+    "PerformanceMetrics",
     "WinRateCalculator",
     "DailyReporter",
     "ReportFormat",

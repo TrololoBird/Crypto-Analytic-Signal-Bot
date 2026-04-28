@@ -21,20 +21,32 @@ class DeliveryOrchestrator:
     def __init__(self, bot: SignalBot) -> None:
         self._bot = bot
 
-    def select_and_rank(self, all_candidates: dict[str, list[Signal]], max_signals: int) -> list[Signal]:
+    def select_and_rank(
+        self, all_candidates: dict[str, list[Signal]], max_signals: int
+    ) -> list[Signal]:
         flat_candidates: list[Signal] = []
         for symbol_candidates in all_candidates.values():
             flat_candidates.extend(symbol_candidates)
         if not flat_candidates:
             return []
-        ranked = sorted(flat_candidates, key=lambda s: (s.score, s.risk_reward or 0.0), reverse=True)
+        ranked = sorted(
+            flat_candidates, key=lambda s: (s.score, s.risk_reward or 0.0), reverse=True
+        )
         selected = ranked[:max_signals]
-        LOG.debug("select_and_rank | candidates=%d selected=%d", len(flat_candidates), len(selected))
+        LOG.debug(
+            "select_and_rank | candidates=%d selected=%d",
+            len(flat_candidates),
+            len(selected),
+        )
         return selected
 
-    async def close_superseded_signal(self, new_signal: Signal) -> list[SignalTrackingEvent] | None:
+    async def close_superseded_signal(
+        self, new_signal: Signal
+    ) -> list[SignalTrackingEvent] | None:
         try:
-            return await self._bot.tracker.supersede_open_signal(new_signal, dry_run=False)
+            return await self._bot.tracker.supersede_open_signal(
+                new_signal, dry_run=False
+            )
         except Exception as exc:
             LOG.debug("supersede failed for %s: %s", new_signal.symbol, exc)
             return None
@@ -66,7 +78,9 @@ class DeliveryOrchestrator:
         await self._bot._wait_noncritical(
             label="tracking delivery",
             timeout=self._bot._delivery_timeout_seconds,
-            operation=self._bot.delivery.deliver_tracking_updates(events, dry_run=False),
+            operation=self._bot.delivery.deliver_tracking_updates(
+                events, dry_run=False
+            ),
         )
 
     async def select_and_deliver(
@@ -88,7 +102,9 @@ class DeliveryOrchestrator:
                 pause_hours=self._bot.settings.intelligence.stop_loss_pause_hours,
             )
             if is_blacklisted:
-                sl_streak = await self._bot._modern_repo.get_consecutive_sl(signal.symbol)
+                sl_streak = await self._bot._modern_repo.get_consecutive_sl(
+                    signal.symbol
+                )
                 rejected_rows.append(
                     {
                         "ts": datetime.now(UTC).isoformat(),
@@ -102,18 +118,28 @@ class DeliveryOrchestrator:
                 )
                 continue
 
-            active_signals = await self._bot._modern_repo.get_active_signals(symbol=signal.symbol)
+            active_signals = await self._bot._modern_repo.get_active_signals(
+                symbol=signal.symbol
+            )
             existing = next(
                 (
                     r
                     for r in active_signals
-                    if r.get("symbol") == signal.symbol and r.get("status") in ("pending", "active")
+                    if r.get("symbol") == signal.symbol
+                    and r.get("status") in ("pending", "active")
                 ),
                 None,
             )
             if existing is not None:
-                score_raw = existing.get("score") if isinstance(existing, dict) else getattr(existing, "score", None)
-                if score_raw is not None and signal.score >= float(score_raw or 0.0) + 0.10:
+                score_raw = (
+                    existing.get("score")
+                    if isinstance(existing, dict)
+                    else getattr(existing, "score", None)
+                )
+                if (
+                    score_raw is not None
+                    and signal.score >= float(score_raw or 0.0) + 0.10
+                ):
                     closed = await self.close_superseded_signal(signal)
                     if closed:
                         await self.deliver_tracking(closed)
@@ -167,7 +193,9 @@ class DeliveryOrchestrator:
             ok, results = await self._bot._wait_noncritical(
                 label=f"deliver {signal.symbol}/{signal.setup_id}",
                 timeout=self._bot._delivery_timeout_seconds,
-                operation=self._bot.delivery.deliver([signal], dry_run=False, btc_bias=btc_bias),
+                operation=self._bot.delivery.deliver(
+                    [signal], dry_run=False, btc_bias=btc_bias
+                ),
             )
             if not ok or not results:
                 continue
@@ -177,7 +205,11 @@ class DeliveryOrchestrator:
                 if item.status != "sent":
                     continue
                 delivered.append(item.signal)
-                prepared = prepared_by_tracking_id.get(item.signal.tracking_id) if prepared_by_tracking_id else None
+                prepared = (
+                    prepared_by_tracking_id.get(item.signal.tracking_id)
+                    if prepared_by_tracking_id
+                    else None
+                )
                 await self._bot.tracker.set_signal_features_async(
                     item.signal.tracking_id,
                     extract_features_from_signal(
@@ -203,12 +235,16 @@ class DeliveryOrchestrator:
                     ),
                 )
                 asyncio.create_task(
-                    self._bot.delivery.send_analytics_companion(item.signal, btc_bias=btc_bias, eth_bias=eth_bias),
+                    self._bot.delivery.send_analytics_companion(
+                        item.signal, btc_bias=btc_bias, eth_bias=eth_bias
+                    ),
                     name=f"analytics:{item.signal.symbol}",
                 )
 
         try:
-            await self._bot.alerts.on_confirmed_signals(delivered, observed_at=datetime.now(UTC))
+            await self._bot.alerts.on_confirmed_signals(
+                delivered, observed_at=datetime.now(UTC)
+            )
         except Exception as exc:
             LOG.debug("alerts.on_confirmed_signals failed: %s", exc)
         if delivered:

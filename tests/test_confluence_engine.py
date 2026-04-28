@@ -62,7 +62,9 @@ def _prepared(*, regime: str = "neutral") -> PreparedSymbol:
 
 def _engine(settings: BotSettings, ml_filter) -> ConfluenceEngine:
     engine = ConfluenceEngine(settings, ml_filter=ml_filter)
-    engine._compute_components = lambda *_args, **_kwargs: [ComponentScore("stub", 1.0, 0.3, 0.3)]  # type: ignore[method-assign]
+    engine._compute_components = lambda *_args, **_kwargs: [
+        ComponentScore("stub", 1.0, 0.3, 0.3)
+    ]  # type: ignore[method-assign]
     return engine
 
 
@@ -75,8 +77,12 @@ def test_confluence_sets_skip_reason_when_ml_filter_absent() -> None:
 
 def test_confluence_sets_skip_reason_when_gate_blocks_ml() -> None:
     settings = BotSettings(tg_token="0" * 30, target_chat_id="0")
-    ml_result = SimpleNamespace(error=None, is_confident=True, probability=0.8, confidence=0.9)
-    result = _engine(settings, ml_filter=_StubMLFilter(enabled=True, result=ml_result)).score(
+    ml_result = SimpleNamespace(
+        error=None, is_confident=True, probability=0.8, confidence=0.9
+    )
+    result = _engine(
+        settings, ml_filter=_StubMLFilter(enabled=True, result=ml_result)
+    ).score(
         _signal(),
         _prepared(regime="bull"),
     )
@@ -86,8 +92,12 @@ def test_confluence_sets_skip_reason_when_gate_blocks_ml() -> None:
 
 def test_confluence_applies_ml_and_clears_skip_reason() -> None:
     settings = BotSettings(tg_token="0" * 30, target_chat_id="0")
-    ml_result = SimpleNamespace(error=None, is_confident=True, probability=0.9, confidence=0.95)
-    result = _engine(settings, ml_filter=_StubMLFilter(enabled=True, result=ml_result)).score(
+    ml_result = SimpleNamespace(
+        error=None, is_confident=True, probability=0.9, confidence=0.95
+    )
+    result = _engine(
+        settings, ml_filter=_StubMLFilter(enabled=True, result=ml_result)
+    ).score(
         _signal(),
         _prepared(regime="neutral"),
     )

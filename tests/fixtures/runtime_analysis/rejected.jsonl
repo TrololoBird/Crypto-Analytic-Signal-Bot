@@ -1,0 +1,4 @@
+{"symbol":"BTCUSDT","stage":"filters","setup_id":"breakout","reason":"adx_low"}
+{"symbol":"ETHUSDT","stage":"filters","setup_id":"breakout","reason":"adx_low"}
+not a json line
+{"symbol":"XRPUSDT","stage":"setups","setup_id":"mean_reversion","reason":"no_signal"}

@@ -59,7 +59,8 @@ async def evaluate_endpoint_health(manager: Any, ws: Any, endpoint: str) -> bool
             connected_at = manager._connected_at_by_endpoint.get(endpoint, 0.0)
             if (
                 connected_at > 0.0
-                and time.monotonic() - connected_at >= manager._cfg.market_reconnect_grace_seconds
+                and time.monotonic() - connected_at
+                >= manager._cfg.market_reconnect_grace_seconds
             ):
                 LOG.warning(
                     "ws public recovery failed | endpoint=%s fresh_book_tickers=0 - forcing reconnect",

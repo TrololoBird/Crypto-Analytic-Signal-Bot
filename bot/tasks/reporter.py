@@ -18,10 +18,10 @@ def _utcnow_naive() -> datetime:
 
 class ReportTask:
     """Task that generates and sends periodic reports.
-    
+
     Supports multiple output formats and destinations.
     """
-    
+
     def __init__(
         self,
         reporter: DailyReporter,
@@ -31,10 +31,10 @@ class ReportTask:
         self._reporter = reporter
         self._alerts = alert_manager
         self._telegram = telegram_sender
-    
+
     async def generate_daily(self) -> str | None:
         """Generate daily report.
-        
+
         Returns:
             Formatted report text or None on error
         """
@@ -43,7 +43,7 @@ class ReportTask:
                 date=_utcnow_naive(),
                 format=ReportFormat.MARKDOWN,
             )
-            
+
             # Check for degradation alerts
             if report.alerts:
                 for alert_msg in report.alerts:
@@ -52,16 +52,18 @@ class ReportTask:
                         component="daily_report",
                         message=alert_msg,
                     )
-            
+
             # Format report
             formatted = self._reporter.format_report(report, ReportFormat.MARKDOWN)
-            
-            LOG.info("Generated daily report: %d signals, %.1f%% win rate",
-                    report.overall_metrics.total_signals,
-                    report.overall_metrics.win_rate * 100)
-            
+
+            LOG.info(
+                "Generated daily report: %d signals, %.1f%% win rate",
+                report.overall_metrics.total_signals,
+                report.overall_metrics.win_rate * 100,
+            )
+
             return formatted
-            
+
         except Exception as exc:
             LOG.error("Failed to generate daily report: %s", exc)
             self._alerts.create_alert(
@@ -70,18 +72,18 @@ class ReportTask:
                 message=f"Daily report generation failed: {exc}",
             )
             return None
-    
+
     async def send_report(self, report_text: str) -> bool:
         """Send report to configured destinations.
-        
+
         Args:
             report_text: Formatted report
-            
+
         Returns:
             True if sent successfully
         """
         success = True
-        
+
         # Send via Telegram if configured
         if self._telegram:
             try:
@@ -90,14 +92,14 @@ class ReportTask:
             except Exception as exc:
                 LOG.error("Failed to send report via Telegram: %s", exc)
                 success = False
-        
+
         # Could add other channels here (email, Slack, etc.)
-        
+
         return success
-    
+
     async def run(self) -> None:
         """Execute one report cycle."""
         report = await self.generate_daily()
-        
+
         if report and self._telegram:
             await self.send_report(report)

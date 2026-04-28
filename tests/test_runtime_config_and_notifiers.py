@@ -25,7 +25,9 @@ def test_bot_settings_rejects_too_small_sl_buffer_atr() -> None:
 
 
 @pytest.mark.asyncio
-async def test_build_message_broadcaster_supports_webhook_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_build_message_broadcaster_supports_webhook_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     sent: list[tuple[str, dict, dict]] = []
 
     class _Response:

@@ -1,8 +1,15 @@
 """Core modules - EventBus, events, engine, memory, analyzer, diagnostics."""
+
 from __future__ import annotations
 
 from .event_bus import EventBus
-from .events import AnyEvent, KlineCloseEvent, OIRefreshDueEvent, ReconnectEvent, ShortlistUpdatedEvent
+from .events import (
+    AnyEvent,
+    KlineCloseEvent,
+    OIRefreshDueEvent,
+    ReconnectEvent,
+    ShortlistUpdatedEvent,
+)
 
 # New architecture modules
 from .engine import (

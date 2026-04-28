@@ -122,11 +122,13 @@ class BotDashboard:
             self._strategies_cache = []
             for cls in STRATEGY_CLASSES:
                 setup_id = _camel_to_snake(cls.__name__)
-                self._strategies_cache.append({
-                    "id": setup_id,
-                    "name": cls.__name__,
-                    "enabled": enabled_setups.get(setup_id, False),
-                })
+                self._strategies_cache.append(
+                    {
+                        "id": setup_id,
+                        "name": cls.__name__,
+                        "enabled": enabled_setups.get(setup_id, False),
+                    }
+                )
             LOG.info("dashboard cached %d strategies", len(self._strategies_cache))
         except Exception as exc:
             LOG.warning("failed to cache strategies: %s", exc)
@@ -791,9 +793,9 @@ class BotDashboard:
         open_signals_count = 0
         try:
             import asyncio
+
             signals = await asyncio.wait_for(
-                bot._modern_repo.get_active_signals(),
-                timeout=1.0
+                bot._modern_repo.get_active_signals(), timeout=1.0
             )
             open_signals_count = len(signals)
         except Exception:
@@ -813,9 +815,9 @@ class BotDashboard:
         try:
             # Use timeout to prevent blocking dashboard
             import asyncio
+
             signals = await asyncio.wait_for(
-                self.bot._modern_repo.get_active_signals(),
-                timeout=2.0
+                self.bot._modern_repo.get_active_signals(), timeout=2.0
             )
             return [
                 {
@@ -872,9 +874,9 @@ class BotDashboard:
         open_signals_count = 0
         try:
             import asyncio
+
             signals = await asyncio.wait_for(
-                bot._modern_repo.get_active_signals(),
-                timeout=1.0
+                bot._modern_repo.get_active_signals(), timeout=1.0
             )
             open_signals_count = len(signals)
         except Exception:
@@ -914,7 +916,9 @@ class BotDashboard:
         )
         return candidates[0] if candidates else None
 
-    def start_server(self, *, auto_open: bool = True, delay_seconds: float = 1.5) -> None:
+    def start_server(
+        self, *, auto_open: bool = True, delay_seconds: float = 1.5
+    ) -> None:
         if not self._enabled or not self.app:
             LOG.debug("dashboard server disabled (fastapi not installed)")
             return
@@ -930,14 +934,16 @@ class BotDashboard:
                 LOG.warning("dashboard server failed to import uvicorn: %s", exc)
                 return
             try:
-                uvicorn.run(self.app, host="0.0.0.0", port=self.port, log_level="warning")
+                uvicorn.run(
+                    self.app, host="0.0.0.0", port=self.port, log_level="warning"
+                )
             except Exception as exc:
                 LOG.warning("dashboard server crashed: %s", exc)
 
         thread = Thread(target=run_server, daemon=True)
         thread.start()
         LOG.info("dashboard server started on port %d", self.port)
-        
+
         if auto_open:
             self._schedule_browser_open(delay_seconds)
 

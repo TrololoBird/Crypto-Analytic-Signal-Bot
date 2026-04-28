@@ -1,12 +1,17 @@
 """Base classes for all trading setup detectors."""
+
 from __future__ import annotations
 
 from abc import abstractmethod
 from dataclasses import dataclass
-from typing import Any
 
 from .config import BotSettings
-from .core.engine.base import AbstractStrategy, SignalResult, StrategyDecision, StrategyMetadata
+from .core.engine.base import (
+    AbstractStrategy,
+    SignalResult,
+    StrategyDecision,
+    StrategyMetadata,
+)
 from .models import PreparedSymbol, Signal
 from .setups import (
     begin_strategy_decision_capture,
@@ -18,6 +23,7 @@ from .setups import (
 @dataclass(frozen=True)
 class SetupParams:
     """Per-setup configuration parameters."""
+
     enabled: bool = True
 
 
@@ -32,7 +38,9 @@ class BaseSetup(AbstractStrategy):
     requires_funding: bool = False
     min_history_bars: int = 50
 
-    def __init__(self, params: SetupParams | None = None, settings: BotSettings | None = None) -> None:
+    def __init__(
+        self, params: SetupParams | None = None, settings: BotSettings | None = None
+    ) -> None:
         super().__init__(settings)
         self.params = params or SetupParams()
 
@@ -63,7 +71,9 @@ class BaseSetup(AbstractStrategy):
         ...
 
     @abstractmethod
-    def get_optimizable_params(self, settings: "BotSettings | None" = None) -> dict[str, float]:
+    def get_optimizable_params(
+        self, settings: "BotSettings | None" = None
+    ) -> dict[str, float]:
         """Return tunable parameters for self-learner Optuna optimization."""
         ...
 

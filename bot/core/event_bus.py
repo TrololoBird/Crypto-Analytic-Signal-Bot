@@ -1,4 +1,5 @@
 """Bounded in-memory EventBus with coalescing for hot-path events."""
+
 from __future__ import annotations
 
 import asyncio
@@ -112,7 +113,11 @@ class EventBus:
 
                 event_type = type(event).__name__
                 handlers = self._subscribers.get(type(event), [])
-                LOG.debug("event bus dispatching | type=%s handlers=%d", event_type, len(handlers))
+                LOG.debug(
+                    "event bus dispatching | type=%s handlers=%d",
+                    event_type,
+                    len(handlers),
+                )
                 if not handlers:
                     LOG.debug("event bus no handlers for | type=%s", event_type)
                 for handler in handlers:
@@ -137,7 +142,12 @@ class EventBus:
             return token, self._pending_events.get(token)
 
     def _event_token(self, event: AnyEvent) -> tuple[object, bool]:
-        from .events import BookTickerEvent, KlineCloseEvent, OIRefreshDueEvent, ShortlistUpdatedEvent
+        from .events import (
+            BookTickerEvent,
+            KlineCloseEvent,
+            OIRefreshDueEvent,
+            ShortlistUpdatedEvent,
+        )
 
         if isinstance(event, KlineCloseEvent):
             return ("kline_close", event.symbol, event.interval), True
@@ -155,7 +165,9 @@ class EventBus:
             queued = self._pending_events.get(token)
             if queued is not None and type(queued) is type(event):
                 self._drop_queued_token(index, queued)
-                LOG.debug("event bus evicted oldest %s to admit newer event", event_name)
+                LOG.debug(
+                    "event bus evicted oldest %s to admit newer event", event_name
+                )
                 return True
 
         for index, token in enumerate(self._queue):

@@ -1,4 +1,5 @@
 """Dependency container for SignalBot runtime."""
+
 from __future__ import annotations
 
 import logging
@@ -67,7 +68,10 @@ def build_application_container(
         ws_manager.set_event_bus(bus)
         if hasattr(client, "_ws"):
             client._ws = ws_manager
-        LOG.info("ws_manager initialized | pinned_symbols=%d", len(settings.universe.pinned_symbols))
+        LOG.info(
+            "ws_manager initialized | pinned_symbols=%d",
+            len(settings.universe.pinned_symbols),
+        )
 
     tg = broadcaster or build_message_broadcaster(settings)
     delivery = SignalDelivery(

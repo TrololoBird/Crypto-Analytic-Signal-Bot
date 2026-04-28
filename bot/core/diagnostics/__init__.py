@@ -7,7 +7,7 @@ from .alerts import AlertManager, AlertSeverity
 __all__ = [
     "MetricsExporter",
     "BotMetrics",
-    "HealthChecker", 
+    "HealthChecker",
     "HealthStatus",
     "AlertManager",
     "AlertSeverity",

@@ -47,7 +47,7 @@ class TelegramSignalBot:
         """Handle /start command."""
         if not message.from_user:
             return
-        
+
         welcome_text = (
             f"👋 Welcome, {message.from_user.first_name}!\n\n"
             "🤖 <b>Crypto Signal Bot</b>\n"
@@ -63,7 +63,7 @@ class TelegramSignalBot:
             "• Liquidity sweeps\n"
             "• ML scoring\n"
         )
-        
+
         await message.answer(welcome_text, parse_mode="HTML")
 
     async def _cmd_status(self, message: types.Message) -> None:
@@ -91,14 +91,14 @@ class TelegramSignalBot:
             "<code>DOGEUSDT</code> 📈 LONG @ 0.182 (Score: 0.75)\n\n"
             "⚠️ This is educational only. Not financial advice."
         )
-        
+
         keyboard = InlineKeyboardBuilder()
-        keyboard.add(InlineKeyboardButton(text="📊 View Dashboard", url="http://localhost:8080"))
-        
+        keyboard.add(
+            InlineKeyboardButton(text="📊 View Dashboard", url="http://localhost:8080")
+        )
+
         await message.answer(
-            signals_text, 
-            parse_mode="HTML",
-            reply_markup=keyboard.as_markup()
+            signals_text, parse_mode="HTML", reply_markup=keyboard.as_markup()
         )
 
     async def _cmd_market(self, message: types.Message) -> None:
@@ -135,9 +135,9 @@ class TelegramSignalBot:
         await message.answer(help_text, parse_mode="HTML")
 
     async def send_signal_alert(
-        self, 
-        chat_id: int | str, 
-        symbol: str, 
+        self,
+        chat_id: int | str,
+        symbol: str,
         direction: str,
         entry: float,
         score: float,
@@ -148,7 +148,7 @@ class TelegramSignalBot:
         safe_symbol = escape(symbol)
         safe_direction = escape(direction.upper())
         safe_setup_type = escape(setup_type)
-        
+
         text = (
             f"🎯 <b>New Signal: {safe_symbol}</b>\n\n"
             f"{emoji} <b>Direction:</b> {safe_direction}\n"
@@ -158,7 +158,7 @@ class TelegramSignalBot:
             f"⏰ {datetime.now(UTC).strftime('%H:%M:%S')} UTC\n\n"
             "⚠️ Educational only. DYOR."
         )
-        
+
         await self.bot.send_message(chat_id, text, parse_mode="HTML")
 
     async def start(self) -> None:
@@ -178,27 +178,27 @@ async def setup_telegram_bot(settings: BotSettings) -> TelegramSignalBot | None:
     if not (settings.tg_token and settings.tg_token.strip()):
         LOG.warning("No TG_TOKEN provided, Telegram bot disabled")
         return None
-    
+
     bot = TelegramSignalBot(settings)
     return bot
 
 
 if __name__ == "__main__":
     import asyncio
-    
+
     # Test mode
     logging.basicConfig(level=logging.INFO)
-    
+
     # Example usage
     async def test() -> None:
         from .config import load_settings
-        
+
         settings = load_settings()
         bot = await setup_telegram_bot(settings)
-        
+
         if bot:
             await bot.start()
-    
+
     try:
         asyncio.run(test())
     except KeyboardInterrupt:

@@ -31,13 +31,19 @@ class CompositeRegimeAnalyzer:
         btc = benchmark_context.get("BTCUSDT", {})
         returns = float(btc.get("basis_pct") or 0.0)
         vol = abs(float(btc.get("premium_slope_5m") or 0.0))
-        funding = float(next(iter((funding_rates or {"x": 0.0}).values()))) if funding_rates else 0.0
+        funding = (
+            float(next(iter((funding_rates or {"x": 0.0}).values())))
+            if funding_rates
+            else 0.0
+        )
 
         centroid_regime, centroid_conf = self.centroid.current_regime(
             {"returns": returns, "vol": vol, "funding_rate": funding}
         )
         rule_based_pred = self.rule_based.predict(
-            self._build_rule_based_frame(benchmark_context=benchmark_context, returns=returns, vol=vol)
+            self._build_rule_based_frame(
+                benchmark_context=benchmark_context, returns=returns, vol=vol
+            )
         )
 
         centroid_vote = self._map_centroid(centroid_regime)
@@ -45,16 +51,22 @@ class CompositeRegimeAnalyzer:
         legacy_vote = self._legacy_vote(returns, vol, funding)
 
         vote_weights = {"centroid": 0.4, "rule_based": 0.4, "legacy": 0.2}
-        weighted_scores: dict[str, float] = {"bull": 0.0, "bear": 0.0, "ranging": 0.0, "volatile": 0.0}
+        weighted_scores: dict[str, float] = {
+            "bull": 0.0,
+            "bear": 0.0,
+            "ranging": 0.0,
+            "volatile": 0.0,
+        }
         weighted_scores[centroid_vote] += vote_weights["centroid"]
         weighted_scores[rule_based_vote] += vote_weights["rule_based"]
         weighted_scores[legacy_vote] += vote_weights["legacy"]
 
         regime = max(weighted_scores.items(), key=lambda item: item[1])[0]
         strength = max(0.45, min(0.9, weighted_scores[regime]))
-        confidence = min(0.95, (centroid_conf * 0.5) + (rule_based_pred.confidence * 0.5))
+        confidence = min(
+            0.95, (centroid_conf * 0.5) + (rule_based_pred.confidence * 0.5)
+        )
         return RegimeResult(regime=regime, strength=strength, confidence=confidence)
-
 
     @property
     def gmm(self) -> CentroidRegimeDetector:

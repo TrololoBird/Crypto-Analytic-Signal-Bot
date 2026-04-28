@@ -1,4 +1,5 @@
 """Shortlist refresh helpers for SignalBot."""
+
 from __future__ import annotations
 
 import asyncio
@@ -30,7 +31,9 @@ class ShortlistService:
             return None
         return ((ask - bid) / mid) * 10_000.0
 
-    def _record_enrich_error(self, *, stage: str, symbol: str, exc: Exception, per_cycle: Counter[str]) -> None:
+    def _record_enrich_error(
+        self, *, stage: str, symbol: str, exc: Exception, per_cycle: Counter[str]
+    ) -> None:
         bot = self._bot
         stage_key = str(stage).strip().lower() or "unknown"
         symbol_key = str(symbol).strip().upper() or "UNKNOWN"
@@ -44,7 +47,9 @@ class ShortlistService:
             stage_totals = Counter()
             bot._shortlist_enrich_error_counts = stage_totals
         stage_totals[stage_key] += 1
-        bot._shortlist_enrich_error_total = int(getattr(bot, "_shortlist_enrich_error_total", 0)) + 1
+        bot._shortlist_enrich_error_total = (
+            int(getattr(bot, "_shortlist_enrich_error_total", 0)) + 1
+        )
 
         log_counts = getattr(bot, "_shortlist_enrich_error_log_counts", None)
         if not isinstance(log_counts, Counter):
@@ -64,13 +69,19 @@ class ShortlistService:
                 reason,
             )
 
-    def _enrich_shortlist_rows(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _enrich_shortlist_rows(
+        self, rows: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
         bot = self._bot
         enriched: list[dict[str, Any]] = []
         cycle_errors: Counter[str] = Counter()
         ws = getattr(bot, "_ws_manager", None)
         client = bot.client
-        open_interest_cache = getattr(client, "_open_interest_cache", {}) if isinstance(client, BinanceFuturesMarketData) else {}
+        open_interest_cache = (
+            getattr(client, "_open_interest_cache", {})
+            if isinstance(client, BinanceFuturesMarketData)
+            else {}
+        )
 
         for raw in rows:
             row = dict(raw)
@@ -84,7 +95,12 @@ class ShortlistService:
                     if ticker_age is not None:
                         row["ticker_age_seconds"] = float(ticker_age)
                 except Exception as exc:
-                    self._record_enrich_error(stage="ticker_age", symbol=symbol, exc=exc, per_cycle=cycle_errors)
+                    self._record_enrich_error(
+                        stage="ticker_age",
+                        symbol=symbol,
+                        exc=exc,
+                        per_cycle=cycle_errors,
+                    )
                 try:
                     mark = ws.get_mark_price_snapshot(symbol)
                     mark_age = ws.get_mark_price_age_seconds(symbol)
@@ -97,9 +113,13 @@ class ShortlistService:
                         mark_price = float(mark.get("mark_price") or 0.0)
                         index_price = float(mark.get("index_price") or 0.0)
                         if mark_price > 0.0 and index_price > 0.0:
-                            row["basis_pct"] = ((mark_price - index_price) / index_price) * 100.0
+                            row["basis_pct"] = (
+                                (mark_price - index_price) / index_price
+                            ) * 100.0
                 except Exception as exc:
-                    self._record_enrich_error(stage="mark", symbol=symbol, exc=exc, per_cycle=cycle_errors)
+                    self._record_enrich_error(
+                        stage="mark", symbol=symbol, exc=exc, per_cycle=cycle_errors
+                    )
                 try:
                     bid, ask = ws.get_book_snapshot(symbol)
                     spread_bps = self._spread_bps(bid, ask)
@@ -109,7 +129,9 @@ class ShortlistService:
                     if book_age is not None:
                         row["book_age_seconds"] = float(book_age)
                 except Exception as exc:
-                    self._record_enrich_error(stage="book", symbol=symbol, exc=exc, per_cycle=cycle_errors)
+                    self._record_enrich_error(
+                        stage="book", symbol=symbol, exc=exc, per_cycle=cycle_errors
+                    )
 
             if isinstance(client, BinanceFuturesMarketData):
                 oi_change = client.get_cached_oi_change(symbol)
@@ -125,7 +147,9 @@ class ShortlistService:
                 if global_ratio is not None:
                     row["global_account_ls_ratio"] = float(global_ratio)
                 if "top_account_ls_ratio" in row and "global_account_ls_ratio" in row:
-                    row["top_vs_global_ls_gap"] = float(row["top_account_ls_ratio"]) - float(row["global_account_ls_ratio"])
+                    row["top_vs_global_ls_gap"] = float(
+                        row["top_account_ls_ratio"]
+                    ) - float(row["global_account_ls_ratio"])
                 basis_pct = client.get_cached_basis(symbol, period="1h")
                 if basis_pct is not None:
                     row["basis_pct"] = float(basis_pct)
@@ -145,13 +169,22 @@ class ShortlistService:
                     timeout=10.0,
                 )
             except asyncio.TimeoutError:
-                LOG.warning("fetch_exchange_symbols attempt %d/%d timed out", attempt + 1, max_retries + 1)
+                LOG.warning(
+                    "fetch_exchange_symbols attempt %d/%d timed out",
+                    attempt + 1,
+                    max_retries + 1,
+                )
                 if attempt < max_retries:
                     await asyncio.sleep(1.0)
                 else:
                     raise
             except Exception as exc:
-                LOG.warning("fetch_exchange_symbols attempt %d/%d failed: %s", attempt + 1, max_retries + 1, exc)
+                LOG.warning(
+                    "fetch_exchange_symbols attempt %d/%d failed: %s",
+                    attempt + 1,
+                    max_retries + 1,
+                    exc,
+                )
                 if attempt < max_retries:
                     await asyncio.sleep(1.0)
                 else:
@@ -167,8 +200,7 @@ class ShortlistService:
             if exchange_cache is not None:
                 _cached_at, rows = exchange_cache
                 cache_map = {
-                    str(getattr(row, "symbol", "")).strip().upper(): row
-                    for row in rows
+                    str(getattr(row, "symbol", "")).strip().upper(): row for row in rows
                 }
                 bot._symbol_meta_by_symbol.update(cache_map)
                 meta = bot._symbol_meta_by_symbol.get(sym)
@@ -228,7 +260,8 @@ class ShortlistService:
             timeout=timeout_s,
         )
         bot._symbol_meta_by_symbol = {
-            str(getattr(row, "symbol", "")).strip().upper(): row for row in symbol_meta_list
+            str(getattr(row, "symbol", "")).strip().upper(): row
+            for row in symbol_meta_list
         }
         shortlist, summary = build_shortlist(
             symbol_meta_list,
@@ -238,11 +271,22 @@ class ShortlistService:
         )
         return shortlist, summary
 
-    async def build_light_shortlist(self) -> tuple[list[UniverseSymbol], dict[str, Any]]:
+    async def build_light_shortlist(
+        self,
+    ) -> tuple[list[UniverseSymbol], dict[str, Any]]:
         bot = self._bot
         ws = getattr(bot, "_ws_manager", None)
-        if ws is None or not bot._symbol_meta_by_symbol or not ws.is_ticker_cache_warm():
-            return [], {"mode": "ws_light", "eligible": 0, "dynamic_pool": 0, "pinned": 0}
+        if (
+            ws is None
+            or not bot._symbol_meta_by_symbol
+            or not ws.is_ticker_cache_warm()
+        ):
+            return [], {
+                "mode": "ws_light",
+                "eligible": 0,
+                "dynamic_pool": 0,
+                "pinned": 0,
+            }
 
         tickers = self._enrich_shortlist_rows(ws.get_global_ticker_data())
         shortlist, summary = build_shortlist(
@@ -261,9 +305,17 @@ class ShortlistService:
         summary: dict[str, Any] = {}
         shortlist = self.build_pinned_shortlist()
         now = datetime.now(UTC)
-        full_interval = int(getattr(bot.settings.universe, "full_refresh_interval_seconds", bot.settings.runtime.shortlist_refresh_interval_seconds))
+        full_interval = int(
+            getattr(
+                bot.settings.universe,
+                "full_refresh_interval_seconds",
+                bot.settings.runtime.shortlist_refresh_interval_seconds,
+            )
+        )
         last_full = getattr(bot, "_last_shortlist_full_refresh_at", None)
-        full_refresh_due = last_full is None or (now - last_full).total_seconds() >= full_interval
+        full_refresh_due = (
+            last_full is None or (now - last_full).total_seconds() >= full_interval
+        )
 
         try:
             live_shortlist: list[UniverseSymbol] = []
@@ -308,9 +360,15 @@ class ShortlistService:
                 "pinned": summary.get("pinned"),
                 "mode": summary.get("mode", source),
                 "avg_score": summary.get("avg_score"),
-                "enrich_errors_by_stage": dict(getattr(bot, "_shortlist_enrich_error_counts", {})),
-                "enrich_errors_total": int(getattr(bot, "_shortlist_enrich_error_total", 0)),
-                "enrich_errors_last_cycle": dict(getattr(bot, "_shortlist_enrich_last_cycle_errors", {})),
+                "enrich_errors_by_stage": dict(
+                    getattr(bot, "_shortlist_enrich_error_counts", {})
+                ),
+                "enrich_errors_total": int(
+                    getattr(bot, "_shortlist_enrich_error_total", 0)
+                ),
+                "enrich_errors_last_cycle": dict(
+                    getattr(bot, "_shortlist_enrich_last_cycle_errors", {})
+                ),
                 "top_scores": [
                     {
                         "symbol": item.symbol,
@@ -345,7 +403,13 @@ class ShortlistService:
                     bot._shutdown.wait(),
                     timeout=max(
                         15,
-                        int(getattr(bot.settings.universe, "light_refresh_interval_seconds", 75)),
+                        int(
+                            getattr(
+                                bot.settings.universe,
+                                "light_refresh_interval_seconds",
+                                75,
+                            )
+                        ),
                     ),
                 )
             except asyncio.TimeoutError:

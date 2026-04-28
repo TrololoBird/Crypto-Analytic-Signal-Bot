@@ -5,7 +5,12 @@ import asyncio
 import pytest
 
 from bot.core.event_bus import EventBus
-from bot.core.events import BookTickerEvent, KlineCloseEvent, OIRefreshDueEvent, ShortlistUpdatedEvent
+from bot.core.events import (
+    BookTickerEvent,
+    KlineCloseEvent,
+    OIRefreshDueEvent,
+    ShortlistUpdatedEvent,
+)
 
 
 @pytest.mark.asyncio

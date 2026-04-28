@@ -2,6 +2,7 @@
 
 # WINDSURF_REVIEW: unified + vectorized + 1H context + graded
 """
+
 from __future__ import annotations
 
 from dataclasses import replace
@@ -52,11 +53,17 @@ def normalize_target_pair(
 
     if direction == "long":
         ordered_tp1, ordered_tp2 = sorted((target_a, target_b))
-        if ordered_tp1 <= price_anchor + tolerance or ordered_tp2 <= price_anchor + tolerance:
+        if (
+            ordered_tp1 <= price_anchor + tolerance
+            or ordered_tp2 <= price_anchor + tolerance
+        ):
             return None
     elif direction == "short":
         ordered_tp1, ordered_tp2 = sorted((target_a, target_b), reverse=True)
-        if ordered_tp1 >= price_anchor - tolerance or ordered_tp2 >= price_anchor - tolerance:
+        if (
+            ordered_tp1 >= price_anchor - tolerance
+            or ordered_tp2 >= price_anchor - tolerance
+        ):
             return None
     else:
         return None
@@ -65,7 +72,9 @@ def normalize_target_pair(
         math.isclose(target_a, ordered_tp1, abs_tol=tolerance, rel_tol=0.0)
         and math.isclose(target_b, ordered_tp2, abs_tol=tolerance, rel_tol=0.0)
     )
-    single_target_mode = math.isclose(ordered_tp1, ordered_tp2, abs_tol=tolerance, rel_tol=0.0)
+    single_target_mode = math.isclose(
+        ordered_tp1, ordered_tp2, abs_tol=tolerance, rel_tol=0.0
+    )
     if single_target_mode:
         ordered_tp1 = ordered_tp2
 
@@ -187,7 +196,7 @@ def build_structural_targets(
     broken_level: float | None = None,
 ) -> tuple[float, float | None, float | None]:
     """Calculate unified structural SL/TP targets.
-    
+
     Args:
         direction: 'long' or 'short'
         price_anchor: Entry price reference
@@ -201,7 +210,7 @@ def build_structural_targets(
         sl_mask: Swing low boolean mask (for short TP1)
         breakout_bar_idx: Index of breakout bar (for TP2 measured move)
         broken_level: Level that was broken (for TP2 projection)
-    
+
     Returns:
         Tuple of (stop, tp1, tp2) where tp1/tp2 may be None
     """
@@ -218,7 +227,7 @@ def build_structural_targets(
     if direction == "long":
         # SL: below stop_basis + configurable ATR noise buffer.
         stop = stop_anchor - atr * stop_buffer
-        
+
         # TP1: next 1h resistance (swing high above entry)
         tp1 = None
         if sh_mask is not None and sh_mask.sum() > 0:
@@ -229,15 +238,17 @@ def build_structural_targets(
                 price_anchor=price_anchor,
                 direction="long",
             )
-        
+
         # TP2: measured move = prior range projected from breakout point
         tp2 = None
-        if breakout_bar_idx is not None and breakout_bar_idx > 0 and broken_level is not None:
+        if (
+            breakout_bar_idx is not None
+            and breakout_bar_idx > 0
+            and broken_level is not None
+        ):
             high_before = _safe_float(work_1h["high"].slice(0, breakout_bar_idx).max())
             low_before = _safe_float(work_1h["low"].slice(0, breakout_bar_idx).min())
-            range_before = float(
-                high_before - low_before
-            )
+            range_before = float(high_before - low_before)
             tp2 = broken_level + range_before
         elif work_4h is not None and not work_4h.is_empty():
             # Fallback to 4H resistance if no measured move
@@ -247,7 +258,7 @@ def build_structural_targets(
     else:
         # SL: above stop_basis + configurable ATR noise buffer.
         stop = stop_anchor + atr * stop_buffer
-        
+
         # TP1: next 1h support (swing low below entry)
         tp1 = None
         if sl_mask is not None and sl_mask.sum() > 0:
@@ -258,22 +269,24 @@ def build_structural_targets(
                 price_anchor=price_anchor,
                 direction="short",
             )
-        
+
         # TP2: measured move downward from breakout point
         tp2 = None
-        if breakout_bar_idx is not None and breakout_bar_idx > 0 and broken_level is not None:
+        if (
+            breakout_bar_idx is not None
+            and breakout_bar_idx > 0
+            and broken_level is not None
+        ):
             high_before = _safe_float(work_1h["high"].slice(0, breakout_bar_idx).max())
             low_before = _safe_float(work_1h["low"].slice(0, breakout_bar_idx).min())
-            range_before = float(
-                high_before - low_before
-            )
+            range_before = float(high_before - low_before)
             tp2 = broken_level - range_before
         elif work_4h is not None and not work_4h.is_empty():
             # Fallback to 4H support if no measured move
             last_4h_low = float(work_4h["low"][-1])
             if last_4h_low < price_anchor * 0.98:  # At least 2% below
                 tp2 = last_4h_low
-    
+
     # Fallback: if tp2 is None, use tp1 as tp2
     if tp2 is None:
         tp2 = tp1
@@ -295,7 +308,7 @@ def validate_rr_or_penalty(
     min_rr: float = 1.5,
 ) -> tuple[bool, float | None]:
     """Validate risk/reward ratio and return (is_valid, adjusted_tp1).
-    
+
     Returns:
         Tuple of (is_valid, tp1_or_none). If RR < min_rr, returns (False, None).
         Caller should apply penalty to score instead of rejecting signal.
@@ -303,17 +316,17 @@ def validate_rr_or_penalty(
     risk = abs(price_anchor - stop)
     if risk <= 0:
         return False, None
-    
+
     if tp1 is None:
         return False, None
-    
+
     reward = abs(tp1 - price_anchor)
     rr = reward / risk if risk > 0 else 0
-    
+
     if rr < min_rr:
         # Return invalid - caller should apply penalty, not reject
         return False, tp1
-    
+
     return True, tp1
 
 
@@ -324,16 +337,16 @@ def apply_graded_penalty(
     reason: str = "",
 ) -> "Signal":
     """Apply graded penalty to signal score if condition is True.
-    
+
     Instead of rejecting signal completely, reduce score by penalty factor.
     This allows more signals to pass through with lower confidence.
-    
+
     Args:
         signal: Signal to potentially penalize
         condition: If True, apply penalty
         penalty: Multiplier for score (0.75 = reduce by 25%)
         reason: Reason for penalty (added to signal reasons)
-    
+
     Returns:
         Modified signal with updated score and reasons
     """
@@ -348,14 +361,14 @@ def apply_graded_penalty(
 
 def get_dynamic_params(prepared: "PreparedSymbol", setup_id: str) -> dict[str, float]:
     """Get dynamic parameters from prepared symbol for specific setup.
-    
+
     This retrieves setup-specific configuration from settings or falls back
     to defaults. Used for making base_score and thresholds configurable.
-    
+
     Args:
         prepared: Prepared symbol with attached settings
         setup_id: Setup identifier (e.g., 'ema_bounce', 'fvg')
-    
+
     Returns:
         Dictionary of dynamic parameters
     """
@@ -363,12 +376,12 @@ def get_dynamic_params(prepared: "PreparedSymbol", setup_id: str) -> dict[str, f
     settings = prepared.settings
     if settings is None:
         return {}
-    
+
     # Get setup-specific filters from settings
     filters = settings.filters
     if filters is None:
         return {}
-    
+
     # Try to get setup-specific config
     setups_config = filters.setups
     if isinstance(setups_config, dict) and setup_id in setups_config:
@@ -377,5 +390,5 @@ def get_dynamic_params(prepared: "PreparedSymbol", setup_id: str) -> dict[str, f
         legacy_key = setup_id.removesuffix("_setup")
         if legacy_key in setups_config:
             return setups_config.get(legacy_key, {})
-    
+
     return {}

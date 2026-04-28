@@ -18,7 +18,9 @@ class TelemetryManager:
     def __init__(self, bot: Any) -> None:
         self._bot = bot
 
-    def decision_to_reject_row(self, *, symbol: str, decision: StrategyDecision) -> dict[str, Any]:
+    def decision_to_reject_row(
+        self, *, symbol: str, decision: StrategyDecision
+    ) -> dict[str, Any]:
         row: dict[str, Any] = {
             "ts": datetime.now(UTC).isoformat(),
             "symbol": symbol,
@@ -40,14 +42,22 @@ class TelemetryManager:
         return row
 
     def append_symbol_trace(self, *, symbol: str, row: dict[str, Any]) -> None:
-        limit = int(getattr(getattr(self._bot.settings, "runtime", None), "diagnostic_trace_limit_per_symbol", 20))
+        limit = int(
+            getattr(
+                getattr(self._bot.settings, "runtime", None),
+                "diagnostic_trace_limit_per_symbol",
+                20,
+            )
+        )
         if limit <= 0 or not hasattr(self._bot.telemetry, "append_symbol_jsonl"):
             return
         count = self._bot._diagnostic_trace_counts.get(symbol, 0)
         if count >= limit:
             return
         self._bot._diagnostic_trace_counts[symbol] = count + 1
-        self._bot.telemetry.append_symbol_jsonl("analysis", symbol, "strategy_traces.jsonl", row)
+        self._bot.telemetry.append_symbol_jsonl(
+            "analysis", symbol, "strategy_traces.jsonl", row
+        )
 
     def append_strategy_decision(
         self,
@@ -143,7 +153,9 @@ class TelemetryManager:
             "rejected_count": len(rejected),
             "shortlist_source": self._bot._shortlist_source,
             "setup_counts": dict(Counter(s.setup_id for s in candidates)),
-            "selected_setup_counts": dict(Counter(s.setup_id for s in (delivered or []))),
+            "selected_setup_counts": dict(
+                Counter(s.setup_id for s in (delivered or []))
+            ),
             "delivery_status_counts": delivery_status_counts,
             "tracking_events": [e.event_type for e in tracking_events],
             "dry_run": False,
@@ -153,9 +165,13 @@ class TelemetryManager:
         if result.funnel:
             cycle_row["funnel"] = result.funnel
             if result.funnel.get("prepare_error_stage") is not None:
-                cycle_row["prepare_error_stage"] = result.funnel.get("prepare_error_stage")
+                cycle_row["prepare_error_stage"] = result.funnel.get(
+                    "prepare_error_stage"
+                )
             if result.funnel.get("prepare_error_exception_type") is not None:
-                cycle_row["prepare_error_exception_type"] = result.funnel.get("prepare_error_exception_type")
+                cycle_row["prepare_error_exception_type"] = result.funnel.get(
+                    "prepare_error_exception_type"
+                )
         if result.error:
             cycle_row["error"] = result.error
         if self._bot._ws_manager is not None:
@@ -189,10 +205,18 @@ class TelemetryManager:
         if result.prepared is not None:
             symbol_row.update(
                 {
-                    "work_rows_15m": int(result.prepared.work_15m.height) if result.prepared.work_15m is not None else 0,
-                    "work_rows_1h": int(result.prepared.work_1h.height) if result.prepared.work_1h is not None else 0,
-                    "work_rows_5m": int(result.prepared.work_5m.height) if result.prepared.work_5m is not None else 0,
-                    "work_rows_4h": int(result.prepared.work_4h.height) if result.prepared.work_4h is not None else 0,
+                    "work_rows_15m": int(result.prepared.work_15m.height)
+                    if result.prepared.work_15m is not None
+                    else 0,
+                    "work_rows_1h": int(result.prepared.work_1h.height)
+                    if result.prepared.work_1h is not None
+                    else 0,
+                    "work_rows_5m": int(result.prepared.work_5m.height)
+                    if result.prepared.work_5m is not None
+                    else 0,
+                    "work_rows_4h": int(result.prepared.work_4h.height)
+                    if result.prepared.work_4h is not None
+                    else 0,
                     "spread_bps": result.prepared.spread_bps,
                     "bias_4h": result.prepared.bias_4h,
                     "bias_1h": result.prepared.bias_1h,
@@ -209,9 +233,13 @@ class TelemetryManager:
         if result.funnel:
             symbol_row["funnel"] = result.funnel
             if result.funnel.get("prepare_error_stage") is not None:
-                symbol_row["prepare_error_stage"] = result.funnel.get("prepare_error_stage")
+                symbol_row["prepare_error_stage"] = result.funnel.get(
+                    "prepare_error_stage"
+                )
             if result.funnel.get("prepare_error_exception_type") is not None:
-                symbol_row["prepare_error_exception_type"] = result.funnel.get("prepare_error_exception_type")
+                symbol_row["prepare_error_exception_type"] = result.funnel.get(
+                    "prepare_error_exception_type"
+                )
         self._bot.telemetry.append_jsonl("symbol_analysis.jsonl", symbol_row)
         if delivery_sent_count != delivered_count:
             self.emit_telemetry_mismatch(
@@ -223,6 +251,10 @@ class TelemetryManager:
             )
         LOG.info(
             "cycle | symbol=%s detector_runs=%d candidates=%d delivered=%d rejected=%d status=%s",
-            symbol, result.raw_setups, len(candidates),
-            delivered_count, len(rejected), result.status or "ok",
+            symbol,
+            result.raw_setups,
+            len(candidates),
+            delivered_count,
+            len(rejected),
+            result.status or "ok",
         )

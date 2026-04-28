@@ -19,7 +19,9 @@ LOCAL_TZ = datetime.now().astimezone().tzinfo or UTC
 
 class SignalBroadcaster(Protocol):
     async def preflight_check(self) -> None: ...
-    async def send_html(self, text: str, *, reply_to_message_id: int | None = None) -> DeliveryResult: ...
+    async def send_html(
+        self, text: str, *, reply_to_message_id: int | None = None
+    ) -> DeliveryResult: ...
     async def edit_html(self, message_id: int, text: str) -> None: ...
     async def close(self) -> None: ...
 
@@ -130,7 +132,9 @@ def _status_line_for_tracked(tracked: SignalTrackingEvent | object) -> str:
         is_break_even = False
         if moved_to_break_even_at and break_even and stop_px:
             try:
-                is_break_even = abs(float(stop_px) - float(break_even)) <= (float(break_even) * 1e-6)
+                is_break_even = abs(float(stop_px) - float(break_even)) <= (
+                    float(break_even) * 1e-6
+                )
             except (TypeError, ValueError):
                 is_break_even = False
         label = "stopped (break-even)" if is_break_even else "stopped"
@@ -174,7 +178,9 @@ def _trailing_stop_instructions(stop_distance_pct: float) -> str:
     """Trailing stop hint based on stop distance."""
     trigger1 = round(stop_distance_pct * 2, 1)
     trigger2 = round(stop_distance_pct * 3, 1)
-    return f"📌 Трейлинг: +{trigger1}% → SL в безубыток | +{trigger2}% → фиксировать 30%"
+    return (
+        f"📌 Трейлинг: +{trigger1}% → SL в безубыток | +{trigger2}% → фиксировать 30%"
+    )
 
 
 def _compute_tp3(entry_mid: float, take_profit_2: float, direction: str) -> float:
@@ -245,7 +251,9 @@ def _render_signal_card(
     trigger_text = _trigger_text(reasons)
     if trigger_text != "n/a":
         lines.append(f"<b>Trigger</b> {html.escape(trigger_text)}")
-    lines.append(f'<b>Chart</b> <a href="{html.escape(tradingview_chart_url(symbol, timeframe), quote=True)}">TradingView</a>')
+    lines.append(
+        f'<b>Chart</b> <a href="{html.escape(tradingview_chart_url(symbol, timeframe), quote=True)}">TradingView</a>'
+    )
     if expiry_dt:
         lines.append(f"👁 Ожидать входа: до <code>{_fmt_dt(expiry_dt)}</code>")
     else:
@@ -253,7 +261,9 @@ def _render_signal_card(
     return "\n".join(lines)
 
 
-def _market_context_line(oi_change_pct: float | None, funding_rate: float | None) -> str | None:
+def _market_context_line(
+    oi_change_pct: float | None, funding_rate: float | None
+) -> str | None:
     parts = []
     if oi_change_pct is not None:
         sign = "+" if oi_change_pct >= 0 else ""
@@ -264,8 +274,12 @@ def _market_context_line(oi_change_pct: float | None, funding_rate: float | None
     return " | ".join(parts) if parts else None
 
 
-def format_signal_text(signal: Signal, *, pending_expiry_minutes: int, btc_bias: str | None = None) -> str:
-    wait_until = signal.created_at.astimezone(UTC) + timedelta(minutes=pending_expiry_minutes)
+def format_signal_text(
+    signal: Signal, *, pending_expiry_minutes: int, btc_bias: str | None = None
+) -> str:
+    wait_until = signal.created_at.astimezone(UTC) + timedelta(
+        minutes=pending_expiry_minutes
+    )
     return _render_signal_card(
         symbol=signal.symbol,
         direction=signal.direction,
@@ -289,7 +303,9 @@ def format_signal_text(signal: Signal, *, pending_expiry_minutes: int, btc_bias:
     )
 
 
-def format_analytics_companion(signal: Signal, *, btc_bias: str | None = None, eth_bias: str | None = None) -> str:
+def format_analytics_companion(
+    signal: Signal, *, btc_bias: str | None = None, eth_bias: str | None = None
+) -> str:
     """Build actionable context companion — answers WHY this signal, WHY now, WHAT invalidates."""
     sym = html.escape(signal.symbol)
     direction = signal.direction
@@ -339,29 +355,47 @@ def format_analytics_companion(signal: Signal, *, btc_bias: str | None = None, e
     if signal.orderflow_delta_ratio is not None:
         dr = signal.orderflow_delta_ratio
         if direction == "long":
-            of_verdict = "покупатели агрессивны" if dr >= 0.55 else ("нейтральный поток" if dr >= 0.45 else "продавцы давят — риск")
+            of_verdict = (
+                "покупатели агрессивны"
+                if dr >= 0.55
+                else ("нейтральный поток" if dr >= 0.45 else "продавцы давят — риск")
+            )
         else:
-            of_verdict = "продавцы агрессивны" if dr <= 0.45 else ("нейтральный поток" if dr <= 0.55 else "покупатели давят — риск")
+            of_verdict = (
+                "продавцы агрессивны"
+                if dr <= 0.45
+                else ("нейтральный поток" if dr <= 0.55 else "покупатели давят — риск")
+            )
         lines.append(f"• Ордерфлоу: <code>{dr:.2f}</code> → {of_verdict}")
 
     # --- Crowd positioning contrast (funding rate as contrarian signal) ---
     if signal.funding_rate is not None:
         fr_pct = signal.funding_rate * 100
         if direction == "long" and fr_pct <= -0.04:
-            lines.append(f"• Фандинг: <code>{fr_pct:+.4f}%</code> — толпа в шортах → попутный ветер для лонга")
+            lines.append(
+                f"• Фандинг: <code>{fr_pct:+.4f}%</code> — толпа в шортах → попутный ветер для лонга"
+            )
         elif direction == "short" and fr_pct >= 0.04:
-            lines.append(f"• Фандинг: <code>{fr_pct:+.4f}%</code> — толпа в лонгах → попутный ветер для шорта")
+            lines.append(
+                f"• Фандинг: <code>{fr_pct:+.4f}%</code> — толпа в лонгах → попутный ветер для шорта"
+            )
         elif abs(fr_pct) >= 0.04:
-            lines.append(f"• Фандинг: <code>{fr_pct:+.4f}%</code> — перекос против направления, учитывай")
+            lines.append(
+                f"• Фандинг: <code>{fr_pct:+.4f}%</code> — перекос против направления, учитывай"
+            )
 
     # --- BTC as market tailwind/headwind (15m momentum context) ---
     btc_map = {"uptrend": "растёт ↑", "downtrend": "падает ↓", "neutral": "нейтральный"}
     if btc_bias and btc_bias != "neutral":
         btc_label = btc_map.get(btc_bias, btc_bias)
-        if (direction == "long" and btc_bias == "uptrend") or (direction == "short" and btc_bias == "downtrend"):
+        if (direction == "long" and btc_bias == "uptrend") or (
+            direction == "short" and btc_bias == "downtrend"
+        ):
             lines.append(f"• BTC: {html.escape(btc_label)} — попутный ветер")
         else:
-            lines.append(f"• BTC: {html.escape(btc_label)} — встречный ветер, будь готов к волатильности")
+            lines.append(
+                f"• BTC: {html.escape(btc_label)} — встречный ветер, будь готов к волатильности"
+            )
 
     # --- Invalidation condition ---
     stop_pct = signal.stop_distance_pct
@@ -382,7 +416,9 @@ def format_analytics_companion(signal: Signal, *, btc_bias: str | None = None, e
         "funding_reversal": "фандинг не нормализуется за 2 свечи",
         "session_killzone": "выход за границы сессионного диапазона",
     }.get(signal.setup_id, "пробой стопа")
-    lines.append(f"• Аннулирование: {setup_invalidation} (стоп {stop_pct:.1f}% от входа)")
+    lines.append(
+        f"• Аннулирование: {setup_invalidation} (стоп {stop_pct:.1f}% от входа)"
+    )
 
     return "\n".join(lines)
 
@@ -394,7 +430,9 @@ def format_tracked_signal_text(tracked: SignalTrackingEvent | object) -> str:
     risk = abs(entry_mid - stop)
     reward = abs(getattr(state, "take_profit_2") - entry_mid)
     risk_reward = (reward / risk) if risk > 0 else 0.0
-    stop_distance_pct = abs(entry_mid - stop) / entry_mid * 100.0 if entry_mid > 0 else 0.0
+    stop_distance_pct = (
+        abs(entry_mid - stop) / entry_mid * 100.0 if entry_mid > 0 else 0.0
+    )
     return _render_signal_card(
         symbol=getattr(state, "symbol"),
         direction=getattr(state, "direction"),
@@ -428,9 +466,13 @@ def format_tracking_event_text(event: SignalTrackingEvent) -> str:
         "ambiguous_exit": "Analytical Exit (Ambiguous)",
         "superseded": "Tracking Superseded",
     }
-    if event.event_type == "stop_loss" and getattr(tracked, "moved_to_break_even_at", None):
+    if event.event_type == "stop_loss" and getattr(
+        tracked, "moved_to_break_even_at", None
+    ):
         try:
-            break_even = float(getattr(tracked, "activation_price", None) or tracked.entry_mid)
+            break_even = float(
+                getattr(tracked, "activation_price", None) or tracked.entry_mid
+            )
             stop_px = float(event.event_price or tracked.stop)
             if break_even > 0 and abs(stop_px - break_even) <= (break_even * 1e-6):
                 event_titles["stop_loss"] = "Stop (Break-even)"
@@ -489,7 +531,11 @@ class SignalDelivery:
             )
             if dry_run:
                 LOG.info("dry-run signal\n%s", text)
-                delivered.append(DeliveredSignal(signal=signal, status="sent", message_id=None, reason="dry_run"))
+                delivered.append(
+                    DeliveredSignal(
+                        signal=signal, status="sent", message_id=None, reason="dry_run"
+                    )
+                )
                 continue
             result = await self.broadcaster.send_html(text)
             if result.status == "sent":
@@ -521,7 +567,9 @@ class SignalDelivery:
     ) -> None:
         """Send a short analytics narrative as a follow-up message after a signal."""
         try:
-            text = format_analytics_companion(signal, btc_bias=btc_bias, eth_bias=eth_bias)
+            text = format_analytics_companion(
+                signal, btc_bias=btc_bias, eth_bias=eth_bias
+            )
             await self.broadcaster.send_html(text)
         except Exception as exc:
             LOG.debug("analytics companion send failed: %s", exc)
@@ -546,11 +594,16 @@ class SignalDelivery:
                 )
             if not dry_run and final_event.tracked.signal_message_id:
                 try:
-                    await self.broadcaster.edit_html(final_event.tracked.signal_message_id, tracked_card)
+                    await self.broadcaster.edit_html(
+                        final_event.tracked.signal_message_id, tracked_card
+                    )
                     LOG.info("telegram signal card edited\n%s", tracked_card)
                     edited = True
                 except Exception:
-                    LOG.exception("telegram signal card edit failed for %s", final_event.tracked.tracking_ref)
+                    LOG.exception(
+                        "telegram signal card edit failed for %s",
+                        final_event.tracked.tracking_ref,
+                    )
             elif dry_run:
                 LOG.info("dry-run signal card edit\n%s", tracked_card)
                 edited = True
@@ -562,8 +615,14 @@ class SignalDelivery:
             if dry_run:
                 LOG.info("dry-run tracking update\n%s", text)
                 continue
-            reply_to_message_id = final_event.tracked.signal_message_id if final_event.tracked.signal_message_id else None
-            result = await self.broadcaster.send_html(text, reply_to_message_id=reply_to_message_id)
+            reply_to_message_id = (
+                final_event.tracked.signal_message_id
+                if final_event.tracked.signal_message_id
+                else None
+            )
+            result = await self.broadcaster.send_html(
+                text, reply_to_message_id=reply_to_message_id
+            )
             if result.status == "sent":
                 LOG.info("telegram tracking update sent\n%s", text)
             else:
@@ -576,7 +635,9 @@ class SignalDelivery:
                 )
 
     @staticmethod
-    def _coalesce_tracking_events(events: list[SignalTrackingEvent]) -> list[list[SignalTrackingEvent]]:
+    def _coalesce_tracking_events(
+        events: list[SignalTrackingEvent],
+    ) -> list[list[SignalTrackingEvent]]:
         grouped: "OrderedDict[str, list[SignalTrackingEvent]]" = OrderedDict()
         for event in events:
             grouped.setdefault(event.tracked.tracking_id, []).append(event)

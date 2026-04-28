@@ -2,11 +2,9 @@
 
 # WINDSURF_REVIEW: unified + vectorized + 1H context + graded
 """
+
 from __future__ import annotations
 
-from typing import cast
-
-import polars as pl
 
 from ..config import BotSettings
 from ..models import PreparedSymbol, Signal
@@ -34,7 +32,9 @@ class StructurePullbackSetup(BaseSetup):
     confirmation_profile = "trend_follow"
     required_context = ("futures_flow",)
 
-    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
+    def get_optimizable_params(
+        self, settings: BotSettings | None = None
+    ) -> dict[str, float]:
         """Tunable parameters for self-learner optimization."""
         defaults = {
             "base_score": 0.55,
@@ -48,9 +48,9 @@ class StructurePullbackSetup(BaseSetup):
             "min_adx_1h": 15.0,
         }
         if settings is not None:
-            filters = getattr(settings, 'filters', None)
+            filters = getattr(settings, "filters", None)
             if filters:
-                setups_config = getattr(filters, 'setups', {})
+                setups_config = getattr(filters, "setups", {})
                 if isinstance(setups_config, dict) and self.setup_id in setups_config:
                     return {**defaults, **setups_config.get(self.setup_id, {})}
         return defaults
@@ -62,9 +62,15 @@ class StructurePullbackSetup(BaseSetup):
 
         dynamic_params = get_dynamic_params(prepared, self.setup_id)
         defaults = self.get_optimizable_params(settings)
-        min_trend_score = dynamic_params.get("min_trend_score", defaults["min_trend_score"])
-        ema_proximity_pct = dynamic_params.get("ema_proximity_pct", defaults["ema_proximity_pct"])
-        pullback_lookback = int(dynamic_params.get("pullback_lookback", defaults["pullback_lookback"]))
+        min_trend_score = dynamic_params.get(
+            "min_trend_score", defaults["min_trend_score"]
+        )
+        ema_proximity_pct = dynamic_params.get(
+            "ema_proximity_pct", defaults["ema_proximity_pct"]
+        )
+        pullback_lookback = int(
+            dynamic_params.get("pullback_lookback", defaults["pullback_lookback"])
+        )
         sl_buffer_atr = dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"])
         min_rr = dynamic_params.get("min_rr", defaults["min_rr"])
 
@@ -78,11 +84,19 @@ class StructurePullbackSetup(BaseSetup):
         bias_1h = prepared.bias_1h
         structure = prepared.structure_1h
 
-        if regime_1h in {"uptrend", "downtrend"} and structure in {"uptrend", "downtrend"} and structure != regime_1h:
-            _reject(prepared, "structure_pullback", "structure_contradicts_regime",
-                    regime=regime_1h, structure=structure)
+        if (
+            regime_1h in {"uptrend", "downtrend"}
+            and structure in {"uptrend", "downtrend"}
+            and structure != regime_1h
+        ):
+            _reject(
+                prepared,
+                "structure_pullback",
+                "structure_contradicts_regime",
+                regime=regime_1h,
+                structure=structure,
+            )
             return None
-        atr_1h = _as_float(work_1h.item(-1, "atr14"))
         ema20_1h = _as_float(work_1h.item(-1, "ema20"))
         close_1h = _as_float(work_1h.item(-1, "close"))
         if ema20_1h <= 0.0:
@@ -131,11 +145,21 @@ class StructurePullbackSetup(BaseSetup):
             short_score += 0.15
             short_reasons.append("price_near_ema20")
 
-        if max(long_score, short_score) < float(min_trend_score) or abs(long_score - short_score) < 0.03:
-            _reject(prepared, "structure_pullback", "trend_score_too_low",
-                    long_score=round(long_score, 3), short_score=round(short_score, 3),
-                    regime=regime_1h, structure=structure,
-                    close=round(close_1h, 4), ema20=round(float(ema20_1h), 4))
+        if (
+            max(long_score, short_score) < float(min_trend_score)
+            or abs(long_score - short_score) < 0.03
+        ):
+            _reject(
+                prepared,
+                "structure_pullback",
+                "trend_score_too_low",
+                long_score=round(long_score, 3),
+                short_score=round(short_score, 3),
+                regime=regime_1h,
+                structure=structure,
+                close=round(close_1h, 4),
+                ema20=round(float(ema20_1h), 4),
+            )
             return None
 
         if long_score > short_score:
@@ -150,7 +174,13 @@ class StructurePullbackSetup(BaseSetup):
         setup_params = self.get_optimizable_params(settings)
         min_adx = setup_params.get("min_adx_1h", settings.filters.min_adx_1h)
         if adx_1h > 0.0 and adx_1h < min_adx:
-            _reject(prepared, "structure_pullback", "adx_too_low_1h", adx_1h=round(adx_1h, 2), min_adx=min_adx)
+            _reject(
+                prepared,
+                "structure_pullback",
+                "adx_too_low_1h",
+                adx_1h=round(adx_1h, 2),
+                min_adx=min_adx,
+            )
             return None
 
         prev_low = _as_float(work_15m.item(-2, "low"))
@@ -177,7 +207,9 @@ class StructurePullbackSetup(BaseSetup):
                 touched = max(prev_high, local_high) >= level - touch_tolerance
                 bounced = trig_close < level
             if touched and bounced:
-                if selected_level is None or abs(trig_close - level) < abs(trig_close - selected_level):
+                if selected_level is None or abs(trig_close - level) < abs(
+                    trig_close - selected_level
+                ):
                     selected_level_name = level_name
                     selected_level = level
 
@@ -188,15 +220,29 @@ class StructurePullbackSetup(BaseSetup):
         level = selected_level
         vol_ratio = _as_float(work_15m.item(-1, "volume_ratio20"), 1.0)
         if vol_ratio < 0.8:
-            _reject(prepared, "structure_pullback", "volume_too_low", vol_ratio=vol_ratio)
+            _reject(
+                prepared, "structure_pullback", "volume_too_low", vol_ratio=vol_ratio
+            )
             return None
 
         rsi = _as_float(work_15m.item(-1, "rsi14"), 50.0)
         if direction == "long" and not (25.0 <= rsi <= 80.0):
-            _reject(prepared, "structure_pullback", "rsi_out_of_range", direction=direction, rsi=rsi)
+            _reject(
+                prepared,
+                "structure_pullback",
+                "rsi_out_of_range",
+                direction=direction,
+                rsi=rsi,
+            )
             return None
         if direction == "short" and not (15.0 <= rsi <= 75.0):
-            _reject(prepared, "structure_pullback", "rsi_out_of_range", direction=direction, rsi=rsi)
+            _reject(
+                prepared,
+                "structure_pullback",
+                "rsi_out_of_range",
+                direction=direction,
+                rsi=rsi,
+            )
             return None
 
         bb_pct_b = work_15m.item(-1, "bb_pct_b")
@@ -207,10 +253,20 @@ class StructurePullbackSetup(BaseSetup):
                 bb_pct_b = None
         if bb_pct_b is not None:
             if direction == "long" and bb_pct_b > 0.90:
-                _reject(prepared, "structure_pullback", "bb_extreme_long", bb_pct_b=round(bb_pct_b, 4))
+                _reject(
+                    prepared,
+                    "structure_pullback",
+                    "bb_extreme_long",
+                    bb_pct_b=round(bb_pct_b, 4),
+                )
                 return None
             if direction == "short" and bb_pct_b < 0.10:
-                _reject(prepared, "structure_pullback", "bb_extreme_short", bb_pct_b=round(bb_pct_b, 4))
+                _reject(
+                    prepared,
+                    "structure_pullback",
+                    "bb_extreme_short",
+                    bb_pct_b=round(bb_pct_b, 4),
+                )
                 return None
 
         reasons = [
@@ -221,20 +277,27 @@ class StructurePullbackSetup(BaseSetup):
             f"vol_ratio={vol_ratio:.2f}",
             f"rsi={rsi:.1f}",
         ]
-        if regime_1h in {"uptrend", "downtrend"} and regime_4h in {"uptrend", "downtrend"} and regime_1h != regime_4h:
+        if (
+            regime_1h in {"uptrend", "downtrend"}
+            and regime_4h in {"uptrend", "downtrend"}
+            and regime_1h != regime_4h
+        ):
             reasons.append(f"macro_4h_conflict={regime_4h}")
 
         price_anchor = trig_close
 
         # --- Compute structural SL/TP ---
         from ..features import _swing_points as _sp
+
         work_15m_tail = work_15m.tail(10)
         _sh15, _sl15 = _sp(work_15m_tail, n=2)
 
         if direction == "long":
             # SL: below pullback swing low (last 3-5 15m bars) + 0.15×ATR noise buffer
             last_10_lows = work_15m_tail["low"]
-            sl_candidates = last_10_lows.filter(_sl15) if _sl15 is not None else last_10_lows
+            sl_candidates = (
+                last_10_lows.filter(_sl15) if _sl15 is not None else last_10_lows
+            )
             fallback_low = work_15m.tail(5)["low"].min()
             pullback_low = (
                 _as_float(sl_candidates.min())
@@ -268,7 +331,9 @@ class StructurePullbackSetup(BaseSetup):
         else:
             # SL: above pullback swing high + 0.4×ATR noise buffer
             last_10_highs = work_15m_tail["high"]
-            sh_candidates = last_10_highs.filter(_sh15) if _sh15 is not None else last_10_highs
+            sh_candidates = (
+                last_10_highs.filter(_sh15) if _sh15 is not None else last_10_highs
+            )
             fallback_high = work_15m.tail(5)["high"].max()
             pullback_high = (
                 _as_float(sh_candidates.max())
@@ -318,12 +383,23 @@ class StructurePullbackSetup(BaseSetup):
 
         score = _compute_dynamic_score(
             direction=direction,
-            base_score=0.60, vol_ratio=vol_ratio, rsi=rsi, structure_clarity=0.6,
+            base_score=0.60,
+            vol_ratio=vol_ratio,
+            rsi=rsi,
+            structure_clarity=0.6,
         )
 
         return _build_signal(
-            prepared=prepared, setup_id="structure_pullback", direction=direction,
-            score=score, timeframe="15m+1h", reasons=reasons,
-            strategy_family=self.family, stop=stop, tp1=tp1, tp2=tp2,
-            price_anchor=price_anchor, atr=atr,
+            prepared=prepared,
+            setup_id="structure_pullback",
+            direction=direction,
+            score=score,
+            timeframe="15m+1h",
+            reasons=reasons,
+            strategy_family=self.family,
+            stop=stop,
+            tp1=tp1,
+            tp2=tp2,
+            price_anchor=price_anchor,
+            atr=atr,
         )

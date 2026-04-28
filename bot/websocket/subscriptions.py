@@ -11,6 +11,7 @@ from websockets import exceptions as ws_exceptions
 
 LOG = logging.getLogger("bot.ws_manager")
 
+
 def base_streams_for_symbols(manager: Any, symbols: list[str]) -> list[str]:
     streams: list[str] = []
     for symbol in symbols:
@@ -28,7 +29,10 @@ def public_streams_for_symbols(manager: Any, symbols: list[str]) -> list[str]:
 
 def stream_endpoint_class(stream: str) -> str:
     normalized = str(stream or "").strip().lower()
-    if any(token in normalized for token in ("listenkey", "/private", "userdatastream", "@account", "@order")):
+    if any(
+        token in normalized
+        for token in ("listenkey", "/private", "userdatastream", "@account", "@order")
+    ):
         raise ValueError(f"private/auth websocket streams are not allowed: {stream}")
     if "@bookticker" in normalized or "@depth" in normalized:
         return "public"
@@ -93,7 +97,9 @@ async def send_subscription_command(
         if manager._ws_conns.get(endpoint) is None:
             break
         chunk = streams[offset : offset + chunk_size]
-        message = json.dumps({"method": method, "params": chunk, "id": manager._subscribe_id})
+        message = json.dumps(
+            {"method": method, "params": chunk, "id": manager._subscribe_id}
+        )
         manager._subscribe_id += 1
         try:
             await ws_conn.send(message)
@@ -104,8 +110,15 @@ async def send_subscription_command(
                 offset,
                 len(chunk),
             )
-        except (ws_exceptions.ConnectionClosed, ConnectionError, OSError, AttributeError) as exc:
-            LOG.debug("ws %s failed (non-fatal) | endpoint=%s error=%s", method, endpoint, exc)
+        except (
+            ws_exceptions.ConnectionClosed,
+            ConnectionError,
+            OSError,
+            AttributeError,
+        ) as exc:
+            LOG.debug(
+                "ws %s failed (non-fatal) | endpoint=%s error=%s", method, endpoint, exc
+            )
             break
         if offset + chunk_size < len(streams):
             await asyncio.sleep(delay_seconds)
@@ -134,7 +147,9 @@ async def resubscribe_all(manager: Any, endpoint: str, ws: Any) -> None:
         manager._ws_conns[endpoint] = restored_conn
         if endpoint == "market":
             manager._ws_conn = restored_conn
-    chunk_count = (len(streams) + manager._cfg.subscribe_chunk_size - 1) // manager._cfg.subscribe_chunk_size
+    chunk_count = (
+        len(streams) + manager._cfg.subscribe_chunk_size - 1
+    ) // manager._cfg.subscribe_chunk_size
     LOG.info(
         "ws resubscribe sent | endpoint=%s streams=%d chunks=%d",
         endpoint,

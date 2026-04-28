@@ -22,7 +22,11 @@ class HMMRegimePrediction:
 class RuleBasedRegimeDetector:
     """Rule-based market state detector (lightweight fallback path)."""
 
-    def __init__(self, n_states: int = 3, features: tuple[str, ...] = ("log_returns", "realized_vol", "atr_pct")) -> None:
+    def __init__(
+        self,
+        n_states: int = 3,
+        features: tuple[str, ...] = ("log_returns", "realized_vol", "atr_pct"),
+    ) -> None:
         self.n_states = n_states
         self.features = features
         self._last_prediction = HMMRegimePrediction(regime="ranging", confidence=0.0)
@@ -69,7 +73,9 @@ class RuleBasedRegimeDetector:
                     probs = self._hmm_model.predict_proba(matrix)
                     confidence = float(probs[-1][state]) if probs.shape[0] else 0.5
                     regime = self._state_to_regime.get(state, "ranging")
-                    return HMMRegimePrediction(regime=regime, confidence=max(0.0, min(0.99, confidence)))
+                    return HMMRegimePrediction(
+                        regime=regime, confidence=max(0.0, min(0.99, confidence))
+                    )
             except Exception:
                 pass
 
@@ -91,11 +97,17 @@ class RuleBasedRegimeDetector:
         high_vol = vol_now > max(vol_ref * 1.25, 1e-6)
 
         if high_vol:
-            return HMMRegimePrediction(regime="high_vol_choppy", confidence=min(0.95, 0.5 + vol_now))
+            return HMMRegimePrediction(
+                regime="high_vol_choppy", confidence=min(0.95, 0.5 + vol_now)
+            )
         if ret > 0:
-            return HMMRegimePrediction(regime="low_vol_uptrend", confidence=min(0.95, 0.55 + abs(ret) * 20))
+            return HMMRegimePrediction(
+                regime="low_vol_uptrend", confidence=min(0.95, 0.55 + abs(ret) * 20)
+            )
         if ret < 0:
-            return HMMRegimePrediction(regime="low_vol_downtrend", confidence=min(0.95, 0.55 + abs(ret) * 20))
+            return HMMRegimePrediction(
+                regime="low_vol_downtrend", confidence=min(0.95, 0.55 + abs(ret) * 20)
+            )
         return HMMRegimePrediction(regime="ranging", confidence=0.5)
 
     def _feature_matrix(self, df_4h: pl.DataFrame) -> NDArray[np.float64]:
@@ -105,8 +117,12 @@ class RuleBasedRegimeDetector:
             if col.size == 0:
                 col = np.zeros(df_4h.height, dtype=float)
             matrix_cols.append(col)
-        matrix = np.vstack(matrix_cols).T if matrix_cols else np.empty((0, 0), dtype=float)
-        matrix = np.nan_to_num(matrix, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float64, copy=False)
+        matrix = (
+            np.vstack(matrix_cols).T if matrix_cols else np.empty((0, 0), dtype=float)
+        )
+        matrix = np.nan_to_num(matrix, nan=0.0, posinf=0.0, neginf=0.0).astype(
+            np.float64, copy=False
+        )
         return matrix
 
     @staticmethod
@@ -119,7 +135,9 @@ class RuleBasedRegimeDetector:
             if subset.size == 0:
                 continue
             mean_ret = float(np.mean(subset[:, 0]))
-            mean_vol = float(np.mean(np.abs(subset[:, 1]))) if subset.shape[1] > 1 else 0.0
+            mean_vol = (
+                float(np.mean(np.abs(subset[:, 1]))) if subset.shape[1] > 1 else 0.0
+            )
             if mean_vol > 0.02:
                 mapping[int(state)] = "high_vol_choppy"
             elif mean_ret > 0:

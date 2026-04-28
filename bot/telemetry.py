@@ -44,7 +44,9 @@ def rotate_file_if_needed(path: Path, max_size_mb: int) -> None:
 
 
 class TelemetryStore:
-    def __init__(self, base_dir: Path, run_id: str | None = None, rotation_max_mb: int = 50) -> None:
+    def __init__(
+        self, base_dir: Path, run_id: str | None = None, rotation_max_mb: int = 50
+    ) -> None:
         self.root_dir = base_dir
         self.run_id = run_id
         self.rotation_max_mb = max(1, int(rotation_max_mb))
@@ -62,7 +64,10 @@ class TelemetryStore:
         if run_id:
             metadata_path = self.base_dir / "run_metadata.json"
             if not metadata_path.exists():
-                metadata_path.write_text(json.dumps({"run_id": run_id}, indent=2, ensure_ascii=True), encoding="utf-8")
+                metadata_path.write_text(
+                    json.dumps({"run_id": run_id}, indent=2, ensure_ascii=True),
+                    encoding="utf-8",
+                )
 
     def append_jsonl(self, relative_name: str, row: dict[str, Any]) -> None:
         path = self.analysis_dir / relative_name
@@ -80,7 +85,9 @@ class TelemetryStore:
         path = self.replay_dir / relative_name
         self._append_jsonl_path(path, row)
 
-    def append_symbol_jsonl(self, bucket: str, symbol: str, relative_name: str, row: dict[str, Any]) -> None:
+    def append_symbol_jsonl(
+        self, bucket: str, symbol: str, relative_name: str, row: dict[str, Any]
+    ) -> None:
         if bucket == "analysis":
             base_dir = self.analysis_dir
         elif bucket == "raw":
@@ -103,7 +110,9 @@ class TelemetryStore:
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(row, ensure_ascii=True, default=str) + "\n")
 
-    def write_rejection_summary(self, cycle_id: str, rejections: dict[str, int]) -> None:
+    def write_rejection_summary(
+        self, cycle_id: str, rejections: dict[str, int]
+    ) -> None:
         self.append_jsonl(
             "rejections.jsonl",
             {
@@ -113,12 +122,16 @@ class TelemetryStore:
             },
         )
 
-    def append_calibration_snapshot(self, symbol: str, snapshot: dict[str, Any]) -> None:
+    def append_calibration_snapshot(
+        self, symbol: str, snapshot: dict[str, Any]
+    ) -> None:
         row = {
             "ts": datetime.now(UTC).isoformat(),
             "symbol": symbol,
             "funding_rate": snapshot.get("funding_rate"),
-            "liquidation_notional_usd": snapshot.get("liquidation_notional_usd", snapshot.get("liquidation_notional")),
+            "liquidation_notional_usd": snapshot.get(
+                "liquidation_notional_usd", snapshot.get("liquidation_notional")
+            ),
             "oi_growth_pct": snapshot.get("oi_growth_pct"),
             "volume_ratio_15m": snapshot.get("volume_ratio_15m"),
             "spread_bps": snapshot.get("spread_bps"),
@@ -127,12 +140,20 @@ class TelemetryStore:
         }
         if all(
             row[key] is None
-            for key in ("funding_rate", "liquidation_notional_usd", "oi_growth_pct", "volume_ratio_15m", "spread_bps")
+            for key in (
+                "funding_rate",
+                "liquidation_notional_usd",
+                "oi_growth_pct",
+                "volume_ratio_15m",
+                "spread_bps",
+            )
         ):
             return
         self._append_jsonl_path(self.root_dir / "calibration_snapshots.jsonl", row)
 
-    def persist_candles(self, symbol: str, timeframe: str, df: pl.DataFrame, max_rows: int) -> None:
+    def persist_candles(
+        self, symbol: str, timeframe: str, df: pl.DataFrame, max_rows: int
+    ) -> None:
         out_dir = self.market_dir / symbol_storage_dirname(symbol)
         out_dir.mkdir(parents=True, exist_ok=True)
         path = out_dir / f"{timeframe}.csv"
@@ -150,7 +171,9 @@ class TelemetryStore:
             frame.write_csv(path)
             return
 
-        tail_rows = min(max_rows if max_rows > 0 else len(frame), max(len(frame) * 3, 256))
+        tail_rows = min(
+            max_rows if max_rows > 0 else len(frame), max(len(frame) * 3, 256)
+        )
         existing_tail = self._read_csv_tail(path, tail_rows)
         if existing_tail is None or existing_tail.is_empty():
             combined = frame
@@ -160,7 +183,9 @@ class TelemetryStore:
         # Write only new rows that don't exist in the file
         if existing_tail is not None and not existing_tail.is_empty():
             known_times = set(existing_tail["time"].cast(pl.Utf8).to_list())
-            append_rows = combined.filter(~pl.col("time").cast(pl.Utf8).is_in(list(known_times)))
+            append_rows = combined.filter(
+                ~pl.col("time").cast(pl.Utf8).is_in(list(known_times))
+            )
         else:
             append_rows = combined
         if not append_rows.is_empty():

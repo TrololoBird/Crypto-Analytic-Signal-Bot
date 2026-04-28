@@ -13,28 +13,42 @@ def test_signal_classifier_model_kind_reports_centroid_baseline(tmp_path: Path) 
     assert classifier.model_kind() == "centroid_baseline"
 
 
-def test_ml_filter_disables_live_when_only_centroid_baseline_available(monkeypatch, tmp_path: Path) -> None:
+def test_ml_filter_disables_live_when_only_centroid_baseline_available(
+    monkeypatch, tmp_path: Path
+) -> None:
     settings = BotSettings(tg_token="1" * 30, target_chat_id="123")
     settings.ml.enabled = True
     settings.ml.use_ml_in_live = True
     settings.data_dir = tmp_path
 
-    monkeypatch.setattr("bot.ml.signal_classifier.SignalClassifier.load", lambda self: True)
-    monkeypatch.setattr("bot.ml.signal_classifier.SignalClassifier.model_kind", lambda self: "centroid_baseline")
+    monkeypatch.setattr(
+        "bot.ml.signal_classifier.SignalClassifier.load", lambda self: True
+    )
+    monkeypatch.setattr(
+        "bot.ml.signal_classifier.SignalClassifier.model_kind",
+        lambda self: "centroid_baseline",
+    )
     monkeypatch.setattr("pathlib.Path.glob", lambda self, pattern: [])
 
     ml_filter = MLFilter(settings)
     assert ml_filter.enabled is False
 
 
-def test_ml_filter_disables_live_when_only_linear_baseline_available(monkeypatch, tmp_path: Path) -> None:
+def test_ml_filter_disables_live_when_only_linear_baseline_available(
+    monkeypatch, tmp_path: Path
+) -> None:
     settings = BotSettings(tg_token="1" * 30, target_chat_id="123")
     settings.ml.enabled = True
     settings.ml.use_ml_in_live = True
     settings.data_dir = tmp_path
 
-    monkeypatch.setattr("bot.ml.signal_classifier.SignalClassifier.load", lambda self: True)
-    monkeypatch.setattr("bot.ml.signal_classifier.SignalClassifier.model_kind", lambda self: "linear_baseline")
+    monkeypatch.setattr(
+        "bot.ml.signal_classifier.SignalClassifier.load", lambda self: True
+    )
+    monkeypatch.setattr(
+        "bot.ml.signal_classifier.SignalClassifier.model_kind",
+        lambda self: "linear_baseline",
+    )
     monkeypatch.setattr("pathlib.Path.glob", lambda self, pattern: [])
 
     ml_filter = MLFilter(settings)

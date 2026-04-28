@@ -26,8 +26,12 @@ class WindowTrainingReport:
 
 
 class MLTrainingPipeline:
-    def __init__(self, classifier: SignalClassifier | None = None, model_dir: Path | None = None) -> None:
-        self.classifier = classifier or SignalClassifier(model_dir=model_dir or Path("data/bot/ml/models"))
+    def __init__(
+        self, classifier: SignalClassifier | None = None, model_dir: Path | None = None
+    ) -> None:
+        self.classifier = classifier or SignalClassifier(
+            model_dir=model_dir or Path("data/bot/ml/models")
+        )
 
     def generate_labels(
         self,
@@ -51,24 +55,32 @@ class MLTrainingPipeline:
                 .alias("label")
             )
         if "pnl" in tracking_data.columns:
-            return tracking_data.get_column("pnl").cast(pl.Float64).map_elements(
-                lambda v: 1 if float(v or 0.0) > 0 else 0,
-                return_dtype=pl.Int8,
-            ).alias("label")
+            return (
+                tracking_data.get_column("pnl")
+                .cast(pl.Float64)
+                .map_elements(
+                    lambda v: 1 if float(v or 0.0) > 0 else 0,
+                    return_dtype=pl.Int8,
+                )
+                .alias("label")
+            )
         if "close" in tracking_data.columns:
             if not allow_offline_ohlcv_labels:
                 raise ValueError(
                     "raw OHLCV label generation is offline-only; pass "
                     "allow_offline_ohlcv_labels=True to opt in explicitly"
                 )
-            future_ret = (
-                (pl.col("close").shift(-horizon_bars) / pl.col("close")) - 1.0
-            )
+            future_ret = (pl.col("close").shift(-horizon_bars) / pl.col("close")) - 1.0
             frame = tracking_data.with_columns([future_ret.alias("future_ret")])
-            return frame.get_column("future_ret").fill_null(0.0).map_elements(
-                lambda v: 1 if float(v or 0.0) > 0 else 0,
-                return_dtype=pl.Int8,
-            ).alias("label")
+            return (
+                frame.get_column("future_ret")
+                .fill_null(0.0)
+                .map_elements(
+                    lambda v: 1 if float(v or 0.0) > 0 else 0,
+                    return_dtype=pl.Int8,
+                )
+                .alias("label")
+            )
         return pl.Series("label", [0] * tracking_data.height, dtype=pl.Int8)
 
     def walk_forward_train(
@@ -81,7 +93,11 @@ class MLTrainingPipeline:
     ) -> list[dict[str, float | int | str]]:
         if dataset is None or dataset.is_empty():
             return []
-        ts_col = "created_at" if "created_at" in dataset.columns else ("ts" if "ts" in dataset.columns else "")
+        ts_col = (
+            "created_at"
+            if "created_at" in dataset.columns
+            else ("ts" if "ts" in dataset.columns else "")
+        )
         if not ts_col:
             return []
 
@@ -94,8 +110,12 @@ class MLTrainingPipeline:
             train_start = cursor
             train_end = cursor + window
             test_end = min(train_end + step, end_date)
-            train_df = dataset.filter((pl.col(ts_col) >= train_start) & (pl.col(ts_col) < train_end))
-            test_df = dataset.filter((pl.col(ts_col) >= train_end) & (pl.col(ts_col) < test_end))
+            train_df = dataset.filter(
+                (pl.col(ts_col) >= train_start) & (pl.col(ts_col) < train_end)
+            )
+            test_df = dataset.filter(
+                (pl.col(ts_col) >= train_end) & (pl.col(ts_col) < test_end)
+            )
             if train_df.height < 30 or test_df.height < 10:
                 cursor += step
                 continue
@@ -140,15 +160,35 @@ class MLTrainingPipeline:
         return result.select(SignalClassifier.FEATURES).cast(pl.Float64).fill_null(0.0)
 
     @staticmethod
-    def _classification_metrics(y_true: list[int], y_pred: list[int]) -> dict[str, float]:
+    def _classification_metrics(
+        y_true: list[int], y_pred: list[int]
+    ) -> dict[str, float]:
         n = max(len(y_true), 1)
-        correct = sum(1 for p, y in zip(y_pred, y_true, strict=False) if int(p) == int(y))
-        tp = sum(1 for p, y in zip(y_pred, y_true, strict=False) if int(p) == 1 and int(y) == 1)
-        fp = sum(1 for p, y in zip(y_pred, y_true, strict=False) if int(p) == 1 and int(y) == 0)
-        fn = sum(1 for p, y in zip(y_pred, y_true, strict=False) if int(p) == 0 and int(y) == 1)
+        correct = sum(
+            1 for p, y in zip(y_pred, y_true, strict=False) if int(p) == int(y)
+        )
+        tp = sum(
+            1
+            for p, y in zip(y_pred, y_true, strict=False)
+            if int(p) == 1 and int(y) == 1
+        )
+        fp = sum(
+            1
+            for p, y in zip(y_pred, y_true, strict=False)
+            if int(p) == 1 and int(y) == 0
+        )
+        fn = sum(
+            1
+            for p, y in zip(y_pred, y_true, strict=False)
+            if int(p) == 0 and int(y) == 1
+        )
         precision = tp / max(tp + fp, 1)
         recall = tp / max(tp + fn, 1)
-        f1 = 0.0 if (precision + recall) == 0 else (2 * precision * recall) / (precision + recall)
+        f1 = (
+            0.0
+            if (precision + recall) == 0
+            else (2 * precision * recall) / (precision + recall)
+        )
         return {
             "accuracy": correct / n,
             "precision": precision,

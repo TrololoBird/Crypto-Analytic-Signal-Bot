@@ -20,7 +20,9 @@ from .tracked_signals import parse_state_dt
 
 UTC = timezone.utc
 MSK = timezone(timedelta(hours=3))
-_SESSION_MARKER_RE = re.compile(r"BOT SESSION STARTED \| (?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC)")
+_SESSION_MARKER_RE = re.compile(
+    r"BOT SESSION STARTED \| (?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC)"
+)
 
 
 @dataclass(slots=True)
@@ -145,7 +147,9 @@ def _analysis_run_has_data(run_dir: Path) -> bool:
     return False
 
 
-def _load_context(repo_root: Path, event: str, report_ts: datetime) -> StartupReportContext:
+def _load_context(
+    repo_root: Path, event: str, report_ts: datetime
+) -> StartupReportContext:
     bot_dir = repo_root / "data" / "bot"
     reports_dir = bot_dir / "session" / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
@@ -171,7 +175,11 @@ def _load_context(repo_root: Path, event: str, report_ts: datetime) -> StartupRe
         except OSError:
             latest_run_dir = None
 
-    analysis_dir = (latest_run_dir / "analysis") if latest_run_dir else (telemetry_root / "analysis")
+    analysis_dir = (
+        (latest_run_dir / "analysis")
+        if latest_run_dir
+        else (telemetry_root / "analysis")
+    )
 
     # Logs: runtime uses per-session `bot_*.log`. Prefer the newest file.
     logs_dir = bot_dir / "logs"
@@ -222,14 +230,18 @@ def _previous_session_start(bot_log: Path) -> datetime | None:
         if not match:
             continue
         try:
-            value = datetime.strptime(match.group("ts"), "%Y-%m-%d %H:%M:%S UTC").replace(tzinfo=UTC)
+            value = datetime.strptime(
+                match.group("ts"), "%Y-%m-%d %H:%M:%S UTC"
+            ).replace(tzinfo=UTC)
         except ValueError:
             continue
         latest = value
     return latest
 
 
-def _filter_rows_since(rows: list[dict[str, Any]], since: datetime | None) -> list[dict[str, Any]]:
+def _filter_rows_since(
+    rows: list[dict[str, Any]], since: datetime | None
+) -> list[dict[str, Any]]:
     if since is None:
         return rows
     filtered: list[dict[str, Any]] = []
@@ -240,23 +252,34 @@ def _filter_rows_since(rows: list[dict[str, Any]], since: datetime | None) -> li
     return filtered
 
 
-def _load_sqlite_tracking_snapshot(db_path: Path, bot_dir: Path, since: datetime | None) -> dict[str, Any]:
+def _load_sqlite_tracking_snapshot(
+    db_path: Path, bot_dir: Path, since: datetime | None
+) -> dict[str, Any]:
     async def _read() -> dict[str, Any]:
         repo = MemoryRepository(db_path=db_path, data_dir=bot_dir / "parquet")
         await repo.initialize()
         try:
             last_days: int | None = None
             if since is not None:
-                delta_days = max(1, int((datetime.now(UTC) - since).total_seconds() / 86400) + 1)
+                delta_days = max(
+                    1, int((datetime.now(UTC) - since).total_seconds() / 86400) + 1
+                )
                 last_days = delta_days
             outcomes = await repo.get_signal_outcomes(last_days=last_days)
             if since is not None:
                 outcomes = [
-                    row for row in outcomes
-                    if (parse_state_dt(row.get("closed_at")) or parse_state_dt(row.get("created_at")) or since) >= since
+                    row
+                    for row in outcomes
+                    if (
+                        parse_state_dt(row.get("closed_at"))
+                        or parse_state_dt(row.get("created_at"))
+                        or since
+                    )
+                    >= since
                 ]
             tracked_open = [
-                row for row in await repo.get_active_signals(include_closed=False)
+                row
+                for row in await repo.get_active_signals(include_closed=False)
                 if row.get("status") in ("pending", "active")
             ]
             cooldown_entries = await repo.get_cooldown_count()
@@ -292,17 +315,37 @@ def _load_sqlite_tracking_snapshot(db_path: Path, bot_dir: Path, since: datetime
 def _collect_snapshot(context: StartupReportContext) -> dict[str, Any]:
     session_start = _previous_session_start(context.bot_log)
     cycles = _filter_rows_since(_read_jsonl(context.cycles_file), session_start)
-    shortlist_rows = _filter_rows_since(_read_jsonl(context.shortlist_file), session_start)
-    selected_rows = _filter_rows_since(_read_jsonl(context.selected_file), session_start)
-    rejected_rows = _filter_rows_since(_read_jsonl(context.rejected_file), session_start)
-    symbol_rows = _filter_rows_since(_read_jsonl(context.symbol_analysis_file), session_start)
-    delivery_rows = _filter_rows_since(_read_jsonl(context.delivery_file), session_start)
-    decision_rows = _filter_rows_since(_read_jsonl(context.strategy_decisions_file), session_start)
-    data_quality_rows = _filter_rows_since(_read_jsonl(context.data_quality_file), session_start)
-    telemetry_mismatch_rows = _filter_rows_since(_read_jsonl(context.telemetry_mismatch_file), session_start)
-    tracking_rows = _filter_rows_since(_read_jsonl(context.tracking_events_file), session_start)
+    shortlist_rows = _filter_rows_since(
+        _read_jsonl(context.shortlist_file), session_start
+    )
+    selected_rows = _filter_rows_since(
+        _read_jsonl(context.selected_file), session_start
+    )
+    rejected_rows = _filter_rows_since(
+        _read_jsonl(context.rejected_file), session_start
+    )
+    symbol_rows = _filter_rows_since(
+        _read_jsonl(context.symbol_analysis_file), session_start
+    )
+    delivery_rows = _filter_rows_since(
+        _read_jsonl(context.delivery_file), session_start
+    )
+    decision_rows = _filter_rows_since(
+        _read_jsonl(context.strategy_decisions_file), session_start
+    )
+    data_quality_rows = _filter_rows_since(
+        _read_jsonl(context.data_quality_file), session_start
+    )
+    telemetry_mismatch_rows = _filter_rows_since(
+        _read_jsonl(context.telemetry_mismatch_file), session_start
+    )
+    tracking_rows = _filter_rows_since(
+        _read_jsonl(context.tracking_events_file), session_start
+    )
     health_rows = _filter_rows_since(_read_jsonl(context.health_file), session_start)
-    sqlite_snapshot = _load_sqlite_tracking_snapshot(context.db_path, context.bot_dir, session_start)
+    sqlite_snapshot = _load_sqlite_tracking_snapshot(
+        context.db_path, context.bot_dir, session_start
+    )
     outcomes = sqlite_snapshot["outcomes"]
 
     latest_cycle = cycles[-1] if cycles else {}
@@ -330,9 +373,13 @@ def _collect_snapshot(context: StartupReportContext) -> dict[str, Any]:
 
     for row in cycles:
         if isinstance(row.get("setup_counts"), dict):
-            cycle_setup_counts.update({str(k): int(v) for k, v in row["setup_counts"].items()})
+            cycle_setup_counts.update(
+                {str(k): int(v) for k, v in row["setup_counts"].items()}
+            )
         if isinstance(row.get("selected_setup_counts"), dict):
-            selected_setup_counts.update({str(k): int(v) for k, v in row["selected_setup_counts"].items()})
+            selected_setup_counts.update(
+                {str(k): int(v) for k, v in row["selected_setup_counts"].items()}
+            )
     for row in rejected_rows:
         rejection_reason_counts.update([str(row.get("reason") or "unknown")])
         rejection_stage_counts.update([str(row.get("stage") or "unknown")])
@@ -403,15 +450,25 @@ def _collect_snapshot(context: StartupReportContext) -> dict[str, Any]:
     latest_cycle_ts = _parse_dt(latest_cycle.get("ts"))
     cycle_age_minutes = None
     if latest_cycle_ts is not None:
-        cycle_age_minutes = round((context.report_ts - latest_cycle_ts).total_seconds() / 60.0, 1)
+        cycle_age_minutes = round(
+            (context.report_ts - latest_cycle_ts).total_seconds() / 60.0, 1
+        )
 
     tracked_open = sqlite_snapshot["tracked_open"]
-    open_by_status = Counter(str(item.get("status") or "unknown") for item in tracked_open)
-    open_by_setup = Counter(str(item.get("setup_id") or "unknown") for item in tracked_open)
+    open_by_status = Counter(
+        str(item.get("status") or "unknown") for item in tracked_open
+    )
+    open_by_setup = Counter(
+        str(item.get("setup_id") or "unknown") for item in tracked_open
+    )
     cooldown_entries = int(sqlite_snapshot["cooldown_entries"])
     market_context = sqlite_snapshot["market_context"]
     shortlist_payload = latest_shortlist if isinstance(latest_shortlist, dict) else {}
-    shortlist_symbols: list[Any] = shortlist_payload["symbols"] if isinstance(shortlist_payload.get("symbols"), list) else []
+    shortlist_symbols: list[Any] = (
+        shortlist_payload["symbols"]
+        if isinstance(shortlist_payload.get("symbols"), list)
+        else []
+    )
     latest_health = health_rows[-1] if health_rows else {}
 
     return {
@@ -517,7 +574,9 @@ def _derive_suspicious_modules(snapshot: dict[str, Any]) -> list[dict[str, str]]
             }
         )
     elif snapshot["symbol_rows"]:
-        zero_ratio = snapshot["zero_detector_symbols"] / max(len(snapshot["symbol_rows"]), 1)
+        zero_ratio = snapshot["zero_detector_symbols"] / max(
+            len(snapshot["symbol_rows"]), 1
+        )
         if zero_ratio >= 0.8:
             modules.append(
                 {
@@ -533,14 +592,19 @@ def _derive_suspicious_modules(snapshot: dict[str, Any]) -> list[dict[str, str]]
                 "reason": f"latest cycle recorded reconnect_reason={latest_cycle.get('reconnect_reason')}",
             }
         )
-    if latest_cycle.get("rest_weight_1m") is not None and float(latest_cycle.get("rest_weight_1m") or 0) >= 1000:
+    if (
+        latest_cycle.get("rest_weight_1m") is not None
+        and float(latest_cycle.get("rest_weight_1m") or 0) >= 1000
+    ):
         modules.append(
             {
                 "module": "bot.market_data",
                 "reason": "rest_weight_1m was high in the latest persisted cycle",
             }
         )
-    if snapshot["delivery_status_counts"] and set(snapshot["delivery_status_counts"]) != {"sent"}:
+    if snapshot["delivery_status_counts"] and set(
+        snapshot["delivery_status_counts"]
+    ) != {"sent"}:
         modules.append(
             {
                 "module": "bot.delivery",
@@ -548,7 +612,10 @@ def _derive_suspicious_modules(snapshot: dict[str, Any]) -> list[dict[str, str]]
             }
         )
     if snapshot["open_by_status"]:
-        if snapshot["open_by_status"].get("pending", 0) > 0 or snapshot["open_by_status"].get("active", 0) > 0:
+        if (
+            snapshot["open_by_status"].get("pending", 0) > 0
+            or snapshot["open_by_status"].get("active", 0) > 0
+        ):
             modules.append(
                 {
                     "module": "bot.tracking",
@@ -577,7 +644,9 @@ def _derive_recommended_fixes(snapshot: dict[str, Any]) -> list[dict[str, str]]:
             }
         )
     elif snapshot["symbol_rows"]:
-        zero_ratio = snapshot["zero_detector_symbols"] / max(len(snapshot["symbol_rows"]), 1)
+        zero_ratio = snapshot["zero_detector_symbols"] / max(
+            len(snapshot["symbol_rows"]), 1
+        )
         if zero_ratio >= 0.8:
             fixes.append(
                 {
@@ -605,7 +674,10 @@ def _derive_recommended_fixes(snapshot: dict[str, Any]) -> list[dict[str, str]]:
             }
         )
     latest_cycle = snapshot["latest_cycle"]
-    if latest_cycle.get("rest_weight_1m") is not None and float(latest_cycle.get("rest_weight_1m") or 0) >= 1000:
+    if (
+        latest_cycle.get("rest_weight_1m") is not None
+        and float(latest_cycle.get("rest_weight_1m") or 0) >= 1000
+    ):
         fixes.append(
             {
                 "priority": "medium",
@@ -613,7 +685,9 @@ def _derive_recommended_fixes(snapshot: dict[str, Any]) -> list[dict[str, str]]:
                 "action": "Reduce bursty REST usage or add adaptive backoff when Binance used weight approaches the minute limit.",
             }
         )
-    if snapshot["delivery_status_counts"] and set(snapshot["delivery_status_counts"]) != {"sent"}:
+    if snapshot["delivery_status_counts"] and set(
+        snapshot["delivery_status_counts"]
+    ) != {"sent"}:
         fixes.append(
             {
                 "priority": "medium",
@@ -661,7 +735,11 @@ def _live_intelligence_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
 def _build_current_market_state(snapshot: dict[str, Any]) -> dict[str, Any]:
     market_context = _live_market_context(snapshot)
     intelligence_snapshot = _live_intelligence_snapshot(snapshot)
-    policy = intelligence_snapshot.get("policy", {}) if isinstance(intelligence_snapshot, dict) else {}
+    policy = (
+        intelligence_snapshot.get("policy", {})
+        if isinstance(intelligence_snapshot, dict)
+        else {}
+    )
     high_funding = market_context.get("high_funding_symbols", [])
     low_funding = market_context.get("low_funding_symbols", [])
     funding_sentiment = "neutral"
@@ -672,8 +750,16 @@ def _build_current_market_state(snapshot: dict[str, Any]) -> dict[str, Any]:
     market_regime = "unknown"
     if bool(market_context.get("market_regime_confirmed")):
         market_regime = str(market_context.get("market_regime") or "unknown")
-    barrier = intelligence_snapshot.get("barrier") if isinstance(intelligence_snapshot, dict) else {}
-    macro = intelligence_snapshot.get("macro") if isinstance(intelligence_snapshot, dict) else {}
+    barrier = (
+        intelligence_snapshot.get("barrier")
+        if isinstance(intelligence_snapshot, dict)
+        else {}
+    )
+    macro = (
+        intelligence_snapshot.get("macro")
+        if isinstance(intelligence_snapshot, dict)
+        else {}
+    )
     macro_risk_mode = (
         str(macro.get("risk_mode") or market_context.get("macro_risk_mode"))
         if isinstance(macro, dict)
@@ -703,11 +789,15 @@ def _build_current_market_state(snapshot: dict[str, Any]) -> dict[str, Any]:
         "context_updated_at": market_context.get("updated_at"),
         "high_funding_count": len(high_funding),
         "low_funding_count": len(low_funding),
-        "public_intelligence_available": bool(
-            intelligence_snapshot.get("ts")
-        ) if isinstance(intelligence_snapshot, dict) else False,
-        "hard_barrier_long": bool(barrier.get("long_barrier_triggered")) if isinstance(barrier, dict) else False,
-        "hard_barrier_short": bool(barrier.get("short_barrier_triggered")) if isinstance(barrier, dict) else False,
+        "public_intelligence_available": bool(intelligence_snapshot.get("ts"))
+        if isinstance(intelligence_snapshot, dict)
+        else False,
+        "hard_barrier_long": bool(barrier.get("long_barrier_triggered"))
+        if isinstance(barrier, dict)
+        else False,
+        "hard_barrier_short": bool(barrier.get("short_barrier_triggered"))
+        if isinstance(barrier, dict)
+        else False,
     }
 
 
@@ -720,11 +810,24 @@ def _build_runtime_readiness(snapshot: dict[str, Any]) -> dict[str, Any]:
     latest_health = snapshot.get("latest_health", {})
     latest_shortlist = snapshot.get("latest_shortlist", {})
     intelligence_snapshot = _live_intelligence_snapshot(snapshot)
-    policy = intelligence_snapshot.get("policy", {}) if isinstance(intelligence_snapshot, dict) else {}
-    macro = intelligence_snapshot.get("macro") if isinstance(intelligence_snapshot, dict) else {}
+    policy = (
+        intelligence_snapshot.get("policy", {})
+        if isinstance(intelligence_snapshot, dict)
+        else {}
+    )
+    macro = (
+        intelligence_snapshot.get("macro")
+        if isinstance(intelligence_snapshot, dict)
+        else {}
+    )
     return {
         "shortlist_source": latest_shortlist.get("source", "unknown"),
-        "shortlist_size": latest_shortlist.get("size", latest_cycle.get("shortlist_size") if (latest_cycle := snapshot.get("latest_cycle", {})) else None),
+        "shortlist_size": latest_shortlist.get(
+            "size",
+            latest_cycle.get("shortlist_size")
+            if (latest_cycle := snapshot.get("latest_cycle", {}))
+            else None,
+        ),
         "shortlist_preview": snapshot.get("shortlist_symbols", []),
         "required_frame_readiness": {
             "15m_ready_symbols": ready_15m,
@@ -733,12 +836,20 @@ def _build_runtime_readiness(snapshot: dict[str, Any]) -> dict[str, Any]:
             "4h_macro_symbols": ready_4h,
         },
         "ws_health": {
-            "active_stream_count": latest_health.get("active_stream_count", snapshot.get("latest_cycle", {}).get("active_stream_count")),
+            "active_stream_count": latest_health.get(
+                "active_stream_count",
+                snapshot.get("latest_cycle", {}).get("active_stream_count"),
+            ),
             "buffer_message_count": latest_health.get("buffer_message_count"),
-            "reconnect_reason": latest_health.get("reconnect_reason", snapshot.get("latest_cycle", {}).get("reconnect_reason")),
+            "reconnect_reason": latest_health.get(
+                "reconnect_reason",
+                snapshot.get("latest_cycle", {}).get("reconnect_reason"),
+            ),
             "ws_last_message_age_s": latest_health.get("ws_last_message_age_s"),
         },
-        "public_intelligence_ts": intelligence_snapshot.get("ts") if isinstance(intelligence_snapshot, dict) else None,
+        "public_intelligence_ts": intelligence_snapshot.get("ts")
+        if isinstance(intelligence_snapshot, dict)
+        else None,
         "intelligence_policy": {
             "runtime_mode": policy.get("runtime_mode"),
             "source_policy": policy.get("source_policy"),
@@ -753,7 +864,9 @@ def _build_runtime_readiness(snapshot: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _build_structured_summary(context: StartupReportContext, snapshot: dict[str, Any]) -> dict[str, Any]:
+def _build_structured_summary(
+    context: StartupReportContext, snapshot: dict[str, Any]
+) -> dict[str, Any]:
     latest_cycle = snapshot["latest_cycle"]
     runtime_policy = _load_runtime_policy(context.repo_root)
     confirmed_facts: list[str] = []
@@ -766,24 +879,44 @@ def _build_structured_summary(context: StartupReportContext, snapshot: dict[str,
     ]
 
     if snapshot["session_start"] is None:
-        confirmed_facts.append("No previous BOT SESSION STARTED marker was found in bot.log.")
+        confirmed_facts.append(
+            "No previous BOT SESSION STARTED marker was found in bot.log."
+        )
     else:
         confirmed_facts.append(
             f"Previous session started at {snapshot['session_start'].astimezone(UTC).isoformat()}."
         )
-    confirmed_facts.append(f"Observed cycles in previous session window: {snapshot['cycle_count']}.")
+    confirmed_facts.append(
+        f"Observed cycles in previous session window: {snapshot['cycle_count']}."
+    )
     confirmed_facts.append(f"Total detector runs: {snapshot['detector_runs_total']}.")
-    confirmed_facts.append(f"Total post-filter candidates: {snapshot['post_filter_candidates_total']}.")
-    confirmed_facts.append(f"Selected signals logged: {len(snapshot['selected_rows'])}.")
-    confirmed_facts.append(f"Structured strategy decisions logged: {len(snapshot['decision_rows'])}.")
-    confirmed_facts.append(f"Data-quality violations logged: {len(snapshot['data_quality_rows'])}.")
+    confirmed_facts.append(
+        f"Total post-filter candidates: {snapshot['post_filter_candidates_total']}."
+    )
+    confirmed_facts.append(
+        f"Selected signals logged: {len(snapshot['selected_rows'])}."
+    )
+    confirmed_facts.append(
+        f"Structured strategy decisions logged: {len(snapshot['decision_rows'])}."
+    )
+    confirmed_facts.append(
+        f"Data-quality violations logged: {len(snapshot['data_quality_rows'])}."
+    )
     confirmed_facts.append(f"Closed outcomes available: {len(snapshot['outcomes'])}.")
-    confirmed_facts.append(f"Open tracked signals at startup: {len(snapshot['tracked_open'])}.")
-    confirmed_facts.append(f"Cooldown entries persisted at startup: {snapshot['cooldown_entries']}.")
+    confirmed_facts.append(
+        f"Open tracked signals at startup: {len(snapshot['tracked_open'])}."
+    )
+    confirmed_facts.append(
+        f"Cooldown entries persisted at startup: {snapshot['cooldown_entries']}."
+    )
     if snapshot["zero_hit_setups"]:
-        confirmed_facts.append(f"Zero-hit setups in the analyzed run: {', '.join(snapshot['zero_hit_setups'])}.")
+        confirmed_facts.append(
+            f"Zero-hit setups in the analyzed run: {', '.join(snapshot['zero_hit_setups'])}."
+        )
     if snapshot["telemetry_mismatch_rows"]:
-        confirmed_facts.append(f"Telemetry mismatch rows observed: {len(snapshot['telemetry_mismatch_rows'])}.")
+        confirmed_facts.append(
+            f"Telemetry mismatch rows observed: {len(snapshot['telemetry_mismatch_rows'])}."
+        )
     if runtime_policy.get("config_loaded"):
         confirmed_facts.append(
             "Configured runtime policy: "
@@ -807,9 +940,13 @@ def _build_structured_summary(context: StartupReportContext, snapshot: dict[str,
         )
 
     if snapshot["cycle_count"] > 0 and snapshot["detector_runs_total"] == 0:
-        inferred_focus.append("Detector surface produced no detector runs in the previous session window.")
+        inferred_focus.append(
+            "Detector surface produced no detector runs in the previous session window."
+        )
     elif snapshot["symbol_rows"]:
-        zero_ratio = snapshot["zero_detector_symbols"] / max(len(snapshot["symbol_rows"]), 1)
+        zero_ratio = snapshot["zero_detector_symbols"] / max(
+            len(snapshot["symbol_rows"]), 1
+        )
         if zero_ratio >= 0.8:
             inferred_focus.append(
                 "Most analyzed symbols ended with detector_runs=0; detector conditions may be too strict or market regime mismatch dominated."
@@ -817,21 +954,37 @@ def _build_structured_summary(context: StartupReportContext, snapshot: dict[str,
     _top_focus = snapshot["rejection_reason_counts"].most_common(1)
     if _top_focus:
         top_reason, top_count = _top_focus[0]
-        inferred_focus.append(f"Primary rejection pressure came from `{top_reason}` ({top_count} rows).")
+        inferred_focus.append(
+            f"Primary rejection pressure came from `{top_reason}` ({top_count} rows)."
+        )
     _top_decision_focus = snapshot["decision_reason_counts"].most_common(1)
     if _top_decision_focus:
         top_reason, top_count = _top_decision_focus[0]
-        inferred_focus.append(f"Decision-level pressure was led by `{top_reason}` ({top_count} rows).")
+        inferred_focus.append(
+            f"Decision-level pressure was led by `{top_reason}` ({top_count} rows)."
+        )
     if snapshot["runtime_errors"]:
-        inferred_focus.append("Runtime symbol-analysis errors were observed and should be reviewed before blaming strategies.")
+        inferred_focus.append(
+            "Runtime symbol-analysis errors were observed and should be reviewed before blaming strategies."
+        )
     if snapshot["data_quality_rows"]:
-        inferred_focus.append("Strict data-quality rows were persisted; missing/invalid inputs now appear as explicit evidence.")
-    if snapshot["delivery_status_counts"] and set(snapshot["delivery_status_counts"]) != {"sent"}:
-        inferred_focus.append("Delivery path had non-sent statuses in the previous session window.")
+        inferred_focus.append(
+            "Strict data-quality rows were persisted; missing/invalid inputs now appear as explicit evidence."
+        )
+    if snapshot["delivery_status_counts"] and set(
+        snapshot["delivery_status_counts"]
+    ) != {"sent"}:
+        inferred_focus.append(
+            "Delivery path had non-sent statuses in the previous session window."
+        )
     if snapshot["telemetry_mismatch_rows"]:
-        inferred_focus.append("Telemetry mismatch rows indicate file-level parity issues that should be resolved before tuning thresholds.")
+        inferred_focus.append(
+            "Telemetry mismatch rows indicate file-level parity issues that should be resolved before tuning thresholds."
+        )
     if not inferred_focus:
-        inferred_focus.append("No single dominant failure mode was detected from persisted telemetry alone.")
+        inferred_focus.append(
+            "No single dominant failure mode was detected from persisted telemetry alone."
+        )
 
     latest_cycle_summary = {
         "ts": latest_cycle.get("ts"),
@@ -850,9 +1003,15 @@ def _build_structured_summary(context: StartupReportContext, snapshot: dict[str,
     current_runtime_readiness = _build_runtime_readiness(snapshot)
     if runtime_policy.get("config_loaded"):
         current_market_state.setdefault("runtime_mode", runtime_policy["runtime_mode"])
-        current_market_state.setdefault("source_policy", runtime_policy["source_policy"])
-        current_market_state.setdefault("smart_exit_mode", runtime_policy["smart_exit_mode"])
-        current_market_state.setdefault("gamma_semantics", runtime_policy["gamma_semantics"])
+        current_market_state.setdefault(
+            "source_policy", runtime_policy["source_policy"]
+        )
+        current_market_state.setdefault(
+            "smart_exit_mode", runtime_policy["smart_exit_mode"]
+        )
+        current_market_state.setdefault(
+            "gamma_semantics", runtime_policy["gamma_semantics"]
+        )
         if current_market_state.get("runtime_mode") == "unknown":
             current_market_state["runtime_mode"] = runtime_policy["runtime_mode"]
         if current_market_state.get("source_policy") == "unknown":
@@ -904,15 +1063,31 @@ def _build_structured_summary(context: StartupReportContext, snapshot: dict[str,
         "top_decision_stages": _top_counter(snapshot["decision_stage_counts"]),
         "percentages": {
             "cycle_setup_counts": _counter_percentages(snapshot["cycle_setup_counts"]),
-            "selected_setup_counts": _counter_percentages(snapshot["selected_setup_counts"]),
-            "outcome_setup_counts": _counter_percentages(snapshot["outcome_setup_counts"]),
-            "outcome_result_counts": _counter_percentages(snapshot["outcome_result_counts"]),
-            "outcome_quality_counts": _counter_percentages(snapshot["outcome_quality_counts"]),
-            "rejection_reasons": _counter_percentages(snapshot["rejection_reason_counts"]),
-            "rejection_stages": _counter_percentages(snapshot["rejection_stage_counts"]),
-            "decision_reasons": _counter_percentages(snapshot["decision_reason_counts"]),
+            "selected_setup_counts": _counter_percentages(
+                snapshot["selected_setup_counts"]
+            ),
+            "outcome_setup_counts": _counter_percentages(
+                snapshot["outcome_setup_counts"]
+            ),
+            "outcome_result_counts": _counter_percentages(
+                snapshot["outcome_result_counts"]
+            ),
+            "outcome_quality_counts": _counter_percentages(
+                snapshot["outcome_quality_counts"]
+            ),
+            "rejection_reasons": _counter_percentages(
+                snapshot["rejection_reason_counts"]
+            ),
+            "rejection_stages": _counter_percentages(
+                snapshot["rejection_stage_counts"]
+            ),
+            "decision_reasons": _counter_percentages(
+                snapshot["decision_reason_counts"]
+            ),
             "decision_stages": _counter_percentages(snapshot["decision_stage_counts"]),
-            "delivery_statuses": _counter_percentages(snapshot["delivery_status_counts"]),
+            "delivery_statuses": _counter_percentages(
+                snapshot["delivery_status_counts"]
+            ),
             "tracking_events": _counter_percentages(snapshot["tracking_event_counts"]),
         },
         "setup_counts": {
@@ -957,11 +1132,17 @@ def _render_markdown(
 ) -> str:
     latest_cycle_summary = summary["latest_cycle_summary"]
     lines: list[str] = []
-    lines.append(f"# Startup Report {context.report_ts.astimezone(MSK).strftime('%Y-%m-%d %H:%M:%S MSK')}")
+    lines.append(
+        f"# Startup Report {context.report_ts.astimezone(MSK).strftime('%Y-%m-%d %H:%M:%S MSK')}"
+    )
     lines.append("")
     lines.append("## Purpose")
-    lines.append("- Analyze the persisted evidence from the previous bot run before the new runtime starts.")
-    lines.append("- Preserve an AI-readable handoff for debugging strategy, filters, tracking, delivery, and transport.")
+    lines.append(
+        "- Analyze the persisted evidence from the previous bot run before the new runtime starts."
+    )
+    lines.append(
+        "- Preserve an AI-readable handoff for debugging strategy, filters, tracking, delivery, and transport."
+    )
     lines.append("")
     lines.append("## Data Sources")
     lines.append(f"- Bot log: `{context.bot_log}`")
@@ -989,66 +1170,142 @@ def _render_markdown(
         lines.append(f"- `{item['module']}`: {item['reason']}")
     lines.append("")
     lines.append("## Previous Run Metrics")
-    lines.append(f"- Runtime policy: `{json.dumps(summary.get('runtime_policy', {}), ensure_ascii=True, sort_keys=True)}`")
+    lines.append(
+        f"- Runtime policy: `{json.dumps(summary.get('runtime_policy', {}), ensure_ascii=True, sort_keys=True)}`"
+    )
     lines.append(f"- Cycle count: `{summary['metrics']['cycle_count']}`")
     lines.append(f"- Cycle age minutes: `{summary['metrics']['cycle_age_minutes']}`")
-    lines.append(f"- Detector runs total: `{summary['metrics']['detector_runs_total']}`")
-    lines.append(f"- Post-filter candidates total: `{summary['metrics']['post_filter_candidates_total']}`")
+    lines.append(
+        f"- Detector runs total: `{summary['metrics']['detector_runs_total']}`"
+    )
+    lines.append(
+        f"- Post-filter candidates total: `{summary['metrics']['post_filter_candidates_total']}`"
+    )
     lines.append(f"- Selected total: `{summary['metrics']['selected_total']}`")
     lines.append(f"- Rejected total: `{summary['metrics']['rejected_total']}`")
-    lines.append(f"- Strategy decision rows: `{summary['metrics']['decision_rows_total']}`")
-    lines.append(f"- Data-quality rows: `{summary['metrics']['data_quality_rows_total']}`")
-    lines.append(f"- Telemetry mismatches: `{summary['metrics']['telemetry_mismatch_total']}`")
+    lines.append(
+        f"- Strategy decision rows: `{summary['metrics']['decision_rows_total']}`"
+    )
+    lines.append(
+        f"- Data-quality rows: `{summary['metrics']['data_quality_rows_total']}`"
+    )
+    lines.append(
+        f"- Telemetry mismatches: `{summary['metrics']['telemetry_mismatch_total']}`"
+    )
     lines.append(f"- Outcomes total: `{summary['metrics']['outcomes_total']}`")
     lines.append(f"- Open tracked total: `{summary['metrics']['open_tracked_total']}`")
     lines.append(f"- Cooldown entries: `{summary['metrics']['cooldown_entries']}`")
     lines.append("")
     lines.append("## Strategy Analytics")
-    lines.append(f"- Cycle setup counts: `{json.dumps(summary['setup_counts']['cycle_setup_counts'], ensure_ascii=True, sort_keys=True)}`")
-    lines.append(f"- Selected setup counts: `{json.dumps(summary['setup_counts']['selected_setup_counts'], ensure_ascii=True, sort_keys=True)}`")
-    lines.append(f"- Outcome setup counts: `{json.dumps(summary['setup_counts']['outcome_setup_counts'], ensure_ascii=True, sort_keys=True)}`")
-    lines.append(f"- Outcome result counts: `{json.dumps(summary['outcome_result_counts'], ensure_ascii=True, sort_keys=True)}`")
-    lines.append(f"- Outcome quality counts: `{json.dumps(summary['outcome_quality_counts'], ensure_ascii=True, sort_keys=True)}`")
-    lines.append(f"- Cycle setup percentages: `{json.dumps(summary['percentages']['cycle_setup_counts'], ensure_ascii=True)}`")
-    lines.append(f"- Selected setup percentages: `{json.dumps(summary['percentages']['selected_setup_counts'], ensure_ascii=True)}`")
-    lines.append(f"- Outcome setup percentages: `{json.dumps(summary['percentages']['outcome_setup_counts'], ensure_ascii=True)}`")
-    lines.append(f"- Outcome result percentages: `{json.dumps(summary['percentages']['outcome_result_counts'], ensure_ascii=True)}`")
+    lines.append(
+        f"- Cycle setup counts: `{json.dumps(summary['setup_counts']['cycle_setup_counts'], ensure_ascii=True, sort_keys=True)}`"
+    )
+    lines.append(
+        f"- Selected setup counts: `{json.dumps(summary['setup_counts']['selected_setup_counts'], ensure_ascii=True, sort_keys=True)}`"
+    )
+    lines.append(
+        f"- Outcome setup counts: `{json.dumps(summary['setup_counts']['outcome_setup_counts'], ensure_ascii=True, sort_keys=True)}`"
+    )
+    lines.append(
+        f"- Outcome result counts: `{json.dumps(summary['outcome_result_counts'], ensure_ascii=True, sort_keys=True)}`"
+    )
+    lines.append(
+        f"- Outcome quality counts: `{json.dumps(summary['outcome_quality_counts'], ensure_ascii=True, sort_keys=True)}`"
+    )
+    lines.append(
+        f"- Cycle setup percentages: `{json.dumps(summary['percentages']['cycle_setup_counts'], ensure_ascii=True)}`"
+    )
+    lines.append(
+        f"- Selected setup percentages: `{json.dumps(summary['percentages']['selected_setup_counts'], ensure_ascii=True)}`"
+    )
+    lines.append(
+        f"- Outcome setup percentages: `{json.dumps(summary['percentages']['outcome_setup_counts'], ensure_ascii=True)}`"
+    )
+    lines.append(
+        f"- Outcome result percentages: `{json.dumps(summary['percentages']['outcome_result_counts'], ensure_ascii=True)}`"
+    )
     lines.append("")
     lines.append("## Filter Analytics")
-    lines.append(f"- Top rejection reasons: `{json.dumps(summary['top_rejection_reasons'], ensure_ascii=True)}`")
-    lines.append(f"- Top rejection stages: `{json.dumps(summary['top_rejection_stages'], ensure_ascii=True)}`")
-    lines.append(f"- Top decision reasons: `{json.dumps(summary['top_decision_reasons'], ensure_ascii=True)}`")
-    lines.append(f"- Top decision stages: `{json.dumps(summary['top_decision_stages'], ensure_ascii=True)}`")
-    lines.append(f"- Rejection reason percentages: `{json.dumps(summary['percentages']['rejection_reasons'], ensure_ascii=True)}`")
-    lines.append(f"- Rejection stage percentages: `{json.dumps(summary['percentages']['rejection_stages'], ensure_ascii=True)}`")
-    lines.append(f"- Decision reason percentages: `{json.dumps(summary['percentages']['decision_reasons'], ensure_ascii=True)}`")
-    lines.append(f"- Decision stage percentages: `{json.dumps(summary['percentages']['decision_stages'], ensure_ascii=True)}`")
+    lines.append(
+        f"- Top rejection reasons: `{json.dumps(summary['top_rejection_reasons'], ensure_ascii=True)}`"
+    )
+    lines.append(
+        f"- Top rejection stages: `{json.dumps(summary['top_rejection_stages'], ensure_ascii=True)}`"
+    )
+    lines.append(
+        f"- Top decision reasons: `{json.dumps(summary['top_decision_reasons'], ensure_ascii=True)}`"
+    )
+    lines.append(
+        f"- Top decision stages: `{json.dumps(summary['top_decision_stages'], ensure_ascii=True)}`"
+    )
+    lines.append(
+        f"- Rejection reason percentages: `{json.dumps(summary['percentages']['rejection_reasons'], ensure_ascii=True)}`"
+    )
+    lines.append(
+        f"- Rejection stage percentages: `{json.dumps(summary['percentages']['rejection_stages'], ensure_ascii=True)}`"
+    )
+    lines.append(
+        f"- Decision reason percentages: `{json.dumps(summary['percentages']['decision_reasons'], ensure_ascii=True)}`"
+    )
+    lines.append(
+        f"- Decision stage percentages: `{json.dumps(summary['percentages']['decision_stages'], ensure_ascii=True)}`"
+    )
     lines.append("")
     lines.append("## Runtime Analytics")
-    lines.append(f"- Latest cycle summary: `{json.dumps(latest_cycle_summary, ensure_ascii=True, sort_keys=True)}`")
-    lines.append(f"- Delivery status counts: `{json.dumps(summary['delivery_status_counts'], ensure_ascii=True, sort_keys=True)}`")
-    lines.append(f"- Decision status counts: `{json.dumps(summary['decision_status_counts'], ensure_ascii=True, sort_keys=True)}`")
-    lines.append(f"- Zero-hit setups: `{json.dumps(summary['zero_hit_setups'], ensure_ascii=True)}`")
-    lines.append(f"- Data quality: `{json.dumps(summary['data_quality'], ensure_ascii=True, sort_keys=True)}`")
-    lines.append(f"- Telemetry mismatch counts: `{json.dumps(summary['telemetry_mismatch_counts'], ensure_ascii=True, sort_keys=True)}`")
-    lines.append(f"- Tracking event counts: `{json.dumps(summary['tracking_event_counts'], ensure_ascii=True, sort_keys=True)}`")
-    lines.append(f"- Open signal counts: `{json.dumps(summary['open_signal_counts'], ensure_ascii=True, sort_keys=True)}`")
-    lines.append(f"- Delivery status percentages: `{json.dumps(summary['percentages']['delivery_statuses'], ensure_ascii=True)}`")
-    lines.append(f"- Tracking event percentages: `{json.dumps(summary['percentages']['tracking_events'], ensure_ascii=True)}`")
+    lines.append(
+        f"- Latest cycle summary: `{json.dumps(latest_cycle_summary, ensure_ascii=True, sort_keys=True)}`"
+    )
+    lines.append(
+        f"- Delivery status counts: `{json.dumps(summary['delivery_status_counts'], ensure_ascii=True, sort_keys=True)}`"
+    )
+    lines.append(
+        f"- Decision status counts: `{json.dumps(summary['decision_status_counts'], ensure_ascii=True, sort_keys=True)}`"
+    )
+    lines.append(
+        f"- Zero-hit setups: `{json.dumps(summary['zero_hit_setups'], ensure_ascii=True)}`"
+    )
+    lines.append(
+        f"- Data quality: `{json.dumps(summary['data_quality'], ensure_ascii=True, sort_keys=True)}`"
+    )
+    lines.append(
+        f"- Telemetry mismatch counts: `{json.dumps(summary['telemetry_mismatch_counts'], ensure_ascii=True, sort_keys=True)}`"
+    )
+    lines.append(
+        f"- Tracking event counts: `{json.dumps(summary['tracking_event_counts'], ensure_ascii=True, sort_keys=True)}`"
+    )
+    lines.append(
+        f"- Open signal counts: `{json.dumps(summary['open_signal_counts'], ensure_ascii=True, sort_keys=True)}`"
+    )
+    lines.append(
+        f"- Delivery status percentages: `{json.dumps(summary['percentages']['delivery_statuses'], ensure_ascii=True)}`"
+    )
+    lines.append(
+        f"- Tracking event percentages: `{json.dumps(summary['percentages']['tracking_events'], ensure_ascii=True)}`"
+    )
     lines.append("")
     lines.append("## Current Market State")
-    lines.append(f"- Market state: `{json.dumps(summary['current_market_state'], ensure_ascii=True, sort_keys=True)}`")
+    lines.append(
+        f"- Market state: `{json.dumps(summary['current_market_state'], ensure_ascii=True, sort_keys=True)}`"
+    )
     lines.append("")
     lines.append("## Current Runtime Readiness")
-    lines.append(f"- Runtime readiness: `{json.dumps(summary['current_runtime_readiness'], ensure_ascii=True, sort_keys=True)}`")
+    lines.append(
+        f"- Runtime readiness: `{json.dumps(summary['current_runtime_readiness'], ensure_ascii=True, sort_keys=True)}`"
+    )
     if summary["runtime_errors"]:
         lines.append("")
         lines.append("## Runtime Errors")
         for row in summary["runtime_errors"]:
-            lines.append(f"- `{row.get('symbol')}` status=`{row.get('status')}` error=`{row.get('error')}`")
+            lines.append(
+                f"- `{row.get('symbol')}` status=`{row.get('status')}` error=`{row.get('error')}`"
+            )
     lines.append("")
     lines.append("## Shortlist Preview")
-    shortlist_preview = ", ".join(summary["shortlist_preview"]) if summary["shortlist_preview"] else "n/a"
+    shortlist_preview = (
+        ", ".join(summary["shortlist_preview"])
+        if summary["shortlist_preview"]
+        else "n/a"
+    )
     lines.append(f"- {shortlist_preview}")
     lines.append("")
     lines.append("## AI Handoff JSON")
@@ -1071,9 +1328,21 @@ def _build_telegram_message(summary: dict[str, Any]) -> str:
     runtime_policy = summary.get("runtime_policy", {})
     ws_health = readiness["ws_health"]
     frame_readiness = readiness["required_frame_readiness"]
-    confirmed = html.escape(summary["confirmed_facts"][0] if summary["confirmed_facts"] else "No confirmed facts.")
-    focus = html.escape(summary["inferred_focus_areas"][0] if summary["inferred_focus_areas"] else "No dominant focus area.")
-    fix = html.escape(summary["recommended_fixes"][0]["action"] if summary["recommended_fixes"] else "No specific action.")
+    confirmed = html.escape(
+        summary["confirmed_facts"][0]
+        if summary["confirmed_facts"]
+        else "No confirmed facts."
+    )
+    focus = html.escape(
+        summary["inferred_focus_areas"][0]
+        if summary["inferred_focus_areas"]
+        else "No dominant focus area."
+    )
+    fix = html.escape(
+        summary["recommended_fixes"][0]["action"]
+        if summary["recommended_fixes"]
+        else "No specific action."
+    )
     return "\n".join(
         [
             "<b>Startup Report</b>",
@@ -1136,9 +1405,13 @@ def generate_startup_report(
         telemetry_root = context.bot_dir / "telemetry"
         suggestions = build_config_suggestions(telemetry_root)
         # Only include lines that contain real suggestions (skip "Not enough data" messages).
-        real_suggestions = [s for s in suggestions if "[SUGGEST]" in s or "[ADVISOR]" in s]
+        real_suggestions = [
+            s for s in suggestions if "[SUGGEST]" in s or "[ADVISOR]" in s
+        ]
         if real_suggestions and not any("Not enough" in s for s in suggestions[:2]):
-            advisor_text = "\n\n<b>CONFIG ADVISOR</b>\n" + html.escape("\n".join(real_suggestions))
+            advisor_text = "\n\n<b>CONFIG ADVISOR</b>\n" + html.escape(
+                "\n".join(real_suggestions)
+            )
             telegram_message = telegram_message + advisor_text
     except Exception:
         pass
@@ -1148,7 +1421,9 @@ def generate_startup_report(
     json_path = context.reports_dir / f"startup_report_{stamp}.json"
     report_path.write_text(markdown, encoding="utf-8")
     context.latest_report_path.write_text(markdown, encoding="utf-8")
-    json_path.write_text(json.dumps(summary, ensure_ascii=True, indent=2), encoding="utf-8")
+    json_path.write_text(
+        json.dumps(summary, ensure_ascii=True, indent=2), encoding="utf-8"
+    )
     context.latest_report_path.with_suffix(".json").write_text(
         json.dumps(summary, ensure_ascii=True, indent=2),
         encoding="utf-8",

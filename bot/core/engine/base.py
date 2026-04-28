@@ -6,7 +6,6 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
-import polars as pl
 
 from ...models import PreparedSymbol, Signal
 from ...config import BotSettings
@@ -15,7 +14,7 @@ from ...config import BotSettings
 @dataclass(frozen=True, slots=True)
 class StrategyMetadata:
     """Metadata for strategy registration."""
-    
+
     strategy_id: str
     name: str
     description: str = ""
@@ -29,7 +28,7 @@ class StrategyMetadata:
     requires_oi: bool = False  # Requires open interest data
     requires_funding: bool = False  # Requires funding rate data
     min_history_bars: int = 50  # Minimum bars needed for calculation
-    
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "strategy_id": self.strategy_id,
@@ -64,7 +63,9 @@ class StrategyDecision:
 
     @property
     def is_signal(self) -> bool:
-        return self.status == "signal" and self.signal is not None and self.error is None
+        return (
+            self.status == "signal" and self.signal is not None and self.error is None
+        )
 
     @property
     def is_reject(self) -> bool:
@@ -194,7 +195,11 @@ class SignalResult:
                     reason_code="pattern.no_raw_hit",
                     details=dict(self.metadata),
                 )
-        if self.error is None and self.decision is not None and self.decision.error is not None:
+        if (
+            self.error is None
+            and self.decision is not None
+            and self.decision.error is not None
+        ):
             self.error = self.decision.error
 
     @property
@@ -204,65 +209,65 @@ class SignalResult:
 
 class AbstractStrategy(ABC):
     """Abstract base class for all trading strategies.
-    
+
     All strategies must inherit from this class and implement:
     - metadata property
     - calculate() method
     - can_calculate() method
     """
-    
+
     def __init__(self, settings: BotSettings | None = None):
         self._settings = settings
         self._parameters: dict[str, Any] = {}
-    
+
     @property
     @abstractmethod
     def metadata(self) -> StrategyMetadata:
         """Return strategy metadata for registration."""
         pass
-    
+
     @abstractmethod
     def calculate(self, prepared: PreparedSymbol) -> SignalResult:
         """Calculate signal for given prepared symbol data.
-        
+
         Args:
             prepared: Prepared symbol data with indicators
-            
+
         Returns:
             SignalResult with signal or None if no setup
         """
         pass
-    
+
     def can_calculate(self, prepared: PreparedSymbol) -> bool:
         """Check if strategy can calculate with available data.
-        
+
         Override for custom validation (OI data, funding, etc.)
         """
         if prepared.work_1h is None or prepared.work_1h.is_empty():
             return False
-            
+
         if prepared.work_1h.height < self.metadata.min_history_bars:
             return False
-            
+
         if self.metadata.requires_oi and prepared.oi_current is None:
             return False
-            
+
         if self.metadata.requires_funding and prepared.funding_rate is None:
             return False
-            
+
         return True
-    
+
     def update_parameters(self, parameters: dict[str, Any]) -> None:
         """Hot-update strategy parameters from optimizer."""
         self._parameters.update(parameters)
-    
+
     def get_parameter(self, name: str, default: Any = None) -> Any:
         """Get parameter value with default."""
         return self._parameters.get(name, default)
-    
+
     @property
     def strategy_id(self) -> str:
         return self.metadata.strategy_id
-    
+
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__} id={self.strategy_id}>"

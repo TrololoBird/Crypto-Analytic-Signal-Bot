@@ -67,12 +67,20 @@ def test_ml_filter_uses_signal_classifier_fallback(tmp_path) -> None:
     # train lightweight classifier artifact (fallback path)
     rows = 120
     features = pl.DataFrame(
-        {name: [0.2 + (i / rows) for i in range(rows)] for name in SignalClassifier.FEATURES}
+        {
+            name: [0.2 + (i / rows) for i in range(rows)]
+            for name in SignalClassifier.FEATURES
+        }
     )
-    labels = pl.Series("label", [0 if i < (rows // 2) else 1 for i in range(rows)], dtype=pl.Int8)
+    labels = pl.Series(
+        "label", [0 if i < (rows // 2) else 1 for i in range(rows)], dtype=pl.Int8
+    )
     SignalClassifier(model_dir=model_dir, model_type="rf").train(features, labels)
 
     ml_filter = MLFilter(settings)
     result = ml_filter.predict(_signal_stub(), _prepared_stub())
-    assert ml_filter.get_status()["signal_classifier_loaded"] is True
+    status = ml_filter.get_status()
+    # Safety guardrail: baseline fallback models must not be enabled in live mode.
+    assert status["signal_classifier_loaded"] is False
+    assert ml_filter.enabled is False
     assert 0.0 <= result.probability <= 1.0

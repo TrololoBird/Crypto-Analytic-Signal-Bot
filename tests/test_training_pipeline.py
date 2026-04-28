@@ -38,7 +38,9 @@ def test_walk_forward_train_produces_reports(tmp_path) -> None:
     assert "accuracy" in reports[0]
 
 
-def test_generate_labels_rejects_raw_ohlcv_without_explicit_offline_opt_in(tmp_path) -> None:
+def test_generate_labels_rejects_raw_ohlcv_without_explicit_offline_opt_in(
+    tmp_path,
+) -> None:
     data = _dataset().drop("outcome")
     pipeline = MLTrainingPipeline(model_dir=tmp_path / "ml")
 
@@ -47,7 +49,9 @@ def test_generate_labels_rejects_raw_ohlcv_without_explicit_offline_opt_in(tmp_p
     except ValueError as exc:
         assert "offline-only" in str(exc)
     else:
-        raise AssertionError("expected generate_labels() to reject lookahead OHLCV labels by default")
+        raise AssertionError(
+            "expected generate_labels() to reject lookahead OHLCV labels by default"
+        )
 
 
 def test_generate_labels_allows_raw_ohlcv_only_with_explicit_opt_in(tmp_path) -> None:

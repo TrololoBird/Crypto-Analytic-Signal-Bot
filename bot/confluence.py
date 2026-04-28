@@ -1,4 +1,5 @@
 """ConfluenceEngine — unified signal quality scoring."""
+
 from __future__ import annotations
 
 import logging
@@ -28,6 +29,7 @@ LOG = logging.getLogger("bot.confluence")
 @dataclass(frozen=True, slots=True)
 class ComponentScore:
     """Score contribution from a single factor."""
+
     name: str
     raw: float
     weight: float
@@ -37,6 +39,7 @@ class ComponentScore:
 @dataclass(frozen=True)
 class ConfluenceResult:
     """Full quality assessment of a signal."""
+
     setup_prior: float
     components: tuple[ComponentScore, ...]
     final_score: float
@@ -64,7 +67,12 @@ class ConfluenceResult:
         return {
             "setup_prior": self.setup_prior,
             "components": [
-                {"name": c.name, "raw": c.raw, "weight": c.weight, "contribution": c.contribution}
+                {
+                    "name": c.name,
+                    "raw": c.raw,
+                    "weight": c.weight,
+                    "contribution": c.contribution,
+                }
                 for c in self.components
             ],
             "weighted_model_score": self.weighted_model_score,
@@ -85,7 +93,9 @@ class ConfluenceEngine:
         result = engine.score(signal, prepared)
     """
 
-    def __init__(self, settings: BotSettings, ml_filter: "MLFilter | None" = None) -> None:
+    def __init__(
+        self, settings: BotSettings, ml_filter: "MLFilter | None" = None
+    ) -> None:
         self.settings = settings
         self._ml_filter = ml_filter
         self._volatility_gate = VolatilityGate()
@@ -126,12 +136,20 @@ class ConfluenceEngine:
                     ml_skip_reason = None
                     LOG.debug(
                         "ML applied | symbol=%s setup=%s regime=%s ml_prob=%.3f confidence=%.3f final_score=%.3f",
-                        signal.symbol, signal.setup_id, regime, ml_probability, ml_confidence, final
+                        signal.symbol,
+                        signal.setup_id,
+                        regime,
+                        ml_probability,
+                        ml_confidence,
+                        final,
                     )
                 if not ml_applied and ml_skip_reason is not None:
                     LOG.debug(
                         "ML skipped | symbol=%s setup=%s regime=%s reason=%s",
-                        signal.symbol, signal.setup_id, regime, ml_skip_reason,
+                        signal.symbol,
+                        signal.setup_id,
+                        regime,
+                        ml_skip_reason,
                     )
             except Exception as exc:
                 LOG.warning("ML prediction failed for %s: %s", signal.symbol, exc)
@@ -157,18 +175,41 @@ class ConfluenceEngine:
         prepared: PreparedSymbol,
         cfg: Any,
     ) -> list[ComponentScore]:
-        funding_weight = max(0.0, min(cfg.weight_crowd_position * 0.5, cfg.weight_crowd_position))
+        funding_weight = max(
+            0.0, min(cfg.weight_crowd_position * 0.5, cfg.weight_crowd_position)
+        )
         crowd_weight = max(0.0, cfg.weight_crowd_position - funding_weight)
         specs = [
-            ("mtf_alignment",     cfg.weight_mtf_alignment,    _mtf_alignment(prepared, signal)),
-            ("volume_quality",    cfg.weight_volume_quality,   _volume_quality(prepared)),
-            ("structure_clarity", cfg.weight_structure_clarity, _structure_clarity(prepared, signal)),
-            ("risk_reward",       cfg.weight_risk_reward,      _risk_reward_quality(signal)),
-            ("funding_score",     funding_weight,              _funding_contrarian(prepared, signal, self.settings)),
-            ("crowd_position",    crowd_weight,                _crowd_position(prepared, signal, self.settings)),
-            ("oi_momentum",       cfg.weight_oi_momentum,      _oi_momentum(prepared, signal)),
+            (
+                "mtf_alignment",
+                cfg.weight_mtf_alignment,
+                _mtf_alignment(prepared, signal),
+            ),
+            ("volume_quality", cfg.weight_volume_quality, _volume_quality(prepared)),
+            (
+                "structure_clarity",
+                cfg.weight_structure_clarity,
+                _structure_clarity(prepared, signal),
+            ),
+            ("risk_reward", cfg.weight_risk_reward, _risk_reward_quality(signal)),
+            (
+                "funding_score",
+                funding_weight,
+                _funding_contrarian(prepared, signal, self.settings),
+            ),
+            (
+                "crowd_position",
+                crowd_weight,
+                _crowd_position(prepared, signal, self.settings),
+            ),
+            ("oi_momentum", cfg.weight_oi_momentum, _oi_momentum(prepared, signal)),
         ]
         return [
-            ComponentScore(name=name, raw=round(raw, 4), weight=weight, contribution=round(weight * raw, 4))
+            ComponentScore(
+                name=name,
+                raw=round(raw, 4),
+                weight=weight,
+                contribution=round(weight * raw, 4),
+            )
             for name, weight, raw in specs
         ]
