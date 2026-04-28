@@ -136,6 +136,12 @@ def apply_global_filters(
     ):
         return _reject("stale_1h", base)
     passed.append("fresh_1h")
+    if prepared.work_4h is None or not _frame_is_fresh(
+        prepared.work_4h,
+        timedelta(hours=settings.filters.freshness_4h_hours),
+    ):
+        return _reject("stale_4h", base)
+    passed.append("fresh_4h")
     # --- 2. Mark price sanity ---
     if (
         prepared.mark_price is not None
