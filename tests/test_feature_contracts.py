@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import ast
 from dataclasses import fields
-from pathlib import Path
-
 import pytest
 
 from bot.feature_contract import (
@@ -14,37 +11,11 @@ from bot.feature_contract import (
 )
 from bot.models import PreparedSymbol
 from bot.outcomes import build_prepared_feature_snapshot
-
-RUNTIME_CALL_PATH_FILES: tuple[Path, ...] = (
-    Path("main.py"),
-    Path("bot/cli.py"),
-    Path("bot/__init__.py"),
-    Path("bot/application/bot.py"),
+from bot.runtime_contract import (
+    RUNTIME_PUBLIC_IMPORT_CONTRACT,
+    assert_runtime_call_path_is_clean,
+    assert_runtime_import_contract,
 )
-
-RUNTIME_PUBLIC_IMPORT_CONTRACT: tuple[str, ...] = (
-    "SignalBot",
-    "BotSettings",
-    "load_settings",
-)
-
-SCaffold_BLOCKLIST = (
-    "bot.telegram_bot",
-    "scaffold",
-    "experimental",
-    "prototype",
-)
-
-
-def _imported_module_names(file_path: Path) -> set[str]:
-    tree = ast.parse(file_path.read_text(encoding="utf-8"))
-    imported_names: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            imported_names.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            imported_names.add(node.module)
-    return imported_names
 
 
 def test_public_feature_contract_matches_prepared_symbol_snapshot_surface() -> None:
@@ -108,12 +79,12 @@ def test_build_prepared_feature_snapshot_enforces_exact_schema() -> None:
 
 
 def test_runtime_call_path_has_no_scaffold_imports() -> None:
-    imported_names: set[str] = set()
-    for file_path in RUNTIME_CALL_PATH_FILES:
-        imported_names.update(_imported_module_names(file_path))
+    assert_runtime_call_path_is_clean()
 
-    for blocked in SCaffold_BLOCKLIST:
-        assert all(blocked not in name for name in imported_names)
+
+def test_runtime_import_contract_rejects_scaffold_fragment() -> None:
+    with pytest.raises(ValueError, match="blocked import fragment"):
+        assert_runtime_import_contract({"bot.experimental.pipeline"})
 
 
 def test_runtime_public_import_contract_is_explicit_and_stable() -> None:
