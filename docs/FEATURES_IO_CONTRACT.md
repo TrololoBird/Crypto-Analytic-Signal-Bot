@@ -24,9 +24,12 @@ For full pipeline (`_prepare_frame`) input frame must include:
 
 Legacy wrappers in `bot.features` remain available and delegate to grouped modules (`bot.features_core`, `bot.features_advanced`, `bot.features_oscillators`).
 
+Shared dataframe/helper primitives are centralized in `bot.features_shared` (for example: `materialize_series`, `clean_non_finite`, `true_range`, `atr_from_true_range`, and input validators), and group modules consume those helpers directly.
+
 ## Regression parity
 
 Parity is validated with decomposition regression tests:
 
 - `tests/test_features_decomposition_parity.py`
 - `tests/test_features_group_contracts.py`
+- `tests/test_features_group_modules.py`
