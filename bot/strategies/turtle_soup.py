@@ -16,7 +16,7 @@ from ..config import BotSettings
 from ..models import PreparedSymbol, Signal
 from ..setup_base import BaseSetup
 from ..setups import _build_signal, _compute_dynamic_score, _reject
-from ..setups.utils import get_dynamic_params
+from ..setups.utils import get_dynamic_params, normalize_trade_levels
 
 LOG = logging.getLogger("bot.strategies.turtle_soup")
 
@@ -233,6 +233,26 @@ class TurtleSoupSetup(BaseSetup):
                 price_anchor=bar_close,
             )
             return None
+        normalized_levels = normalize_trade_levels(
+            direction=direction,
+            price_anchor=bar_close,
+            stop=stop,
+            tp1=tp1,
+            tp2=tp2,
+        )
+        if normalized_levels is None:
+            _reject(
+                prepared,
+                setup_id,
+                "invalid_trade_levels",
+                direction=direction,
+                stop=stop,
+                tp1=tp1,
+                tp2=tp2,
+                price_anchor=bar_close,
+            )
+            return None
+        stop, tp1, tp2, _, _ = normalized_levels
 
         vol_ratio = float(w1h.item(-1, "volume_ratio20") or 1.0)
         rsi = float(w1h.item(-1, "rsi14") or 50.0)

@@ -13,7 +13,7 @@ from ..features import _swing_points
 from ..models import PreparedSymbol, Signal
 from ..setup_base import BaseSetup
 from ..setups import _build_signal, _compute_dynamic_score, _last_swing_prices, _reject
-from ..setups.utils import get_dynamic_params
+from ..setups.utils import get_dynamic_params, normalize_trade_levels
 
 
 def _as_float(value: object, default: float = 0.0) -> float:
@@ -318,6 +318,26 @@ class WickTrapReversalSetup(BaseSetup):
             return None
         if tp2 is None:
             tp2 = tp1  # Use TP1 as TP2 if no extended target found
+        normalized_levels = normalize_trade_levels(
+            direction=direction,
+            price_anchor=price_anchor,
+            stop=stop,
+            tp1=tp1,
+            tp2=tp2,
+        )
+        if normalized_levels is None:
+            _reject(
+                prepared,
+                "wick_trap_reversal",
+                "invalid_trade_levels",
+                direction=direction,
+                stop=stop,
+                tp1=tp1,
+                tp2=tp2,
+                price_anchor=price_anchor,
+            )
+            return None
+        stop, tp1, tp2, _, _ = normalized_levels
 
         score = _compute_dynamic_score(
             direction=direction,
