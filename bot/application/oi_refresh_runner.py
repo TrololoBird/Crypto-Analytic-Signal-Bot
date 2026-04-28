@@ -7,6 +7,7 @@ from typing import Any
 from ..market_data import BinanceFuturesMarketData
 
 LOG = logging.getLogger("bot.application.oi_refresh_runner")
+_DEGRADATION_ERRORS = (RuntimeError, ValueError, TypeError, AttributeError, KeyError)
 
 
 class OIRefreshRunner:
@@ -99,14 +100,22 @@ class OIRefreshRunner:
             ),
         )
         for source, stage, fetch in fetchers:
+            degraded = False
+            degrade_reason: str | None = None
+            fallback_used = "none"
             try:
                 await fetch()
-            except Exception as exc:
+            except _DEGRADATION_ERRORS as exc:
+                degraded = True
+                degrade_reason = str(exc)
+                fallback_used = "skip_stage"
                 LOG.warning(
-                    "oi refresh degraded | symbol=%s stage=%s source=%s reason=%s exception_type=%s",
+                    "oi refresh degraded | symbol=%s stage=%s source=%s degraded=%s degrade_reason=%s fallback_used=%s exception_type=%s",
                     symbol,
                     stage,
                     source,
-                    exc,
+                    degraded,
+                    degrade_reason,
+                    fallback_used,
                     type(exc).__name__,
                 )

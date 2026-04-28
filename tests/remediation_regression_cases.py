@@ -13,6 +13,7 @@ import pytest
 
 from bot.application.bot import SignalBot
 from bot.application import symbol_analyzer as symbol_analyzer_module
+from bot.application.oi_refresh_runner import OIRefreshRunner
 from bot.application.shortlist_service import (
     FALLBACK_REASON_LIVE_EMPTY,
     FALLBACK_REASON_USING_CACHED,
@@ -1127,6 +1128,67 @@ def test_symbol_analyzer_does_not_hide_unexpected_frame_errors(
         "unexpected frame fetch failure for BTCUSDT" in record.message
         for record in caplog.records
     )
+
+
+def test_symbol_analyzer_ws_enrichment_degradation_sets_telemetry_flags(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    ws_manager = SimpleNamespace(
+        get_ticker_snapshot=lambda _symbol: (_ for _ in ()).throw(
+            RuntimeError("ticker boom")
+        ),
+        get_ticker_age_seconds=lambda _symbol: None,
+        get_mark_price_snapshot=lambda _symbol: {},
+        get_mark_price_age_seconds=lambda _symbol: None,
+        get_depth_imbalance=lambda _symbol: None,
+        get_microprice_bias=lambda _symbol: None,
+        get_liquidation_sentiment=lambda symbol, window_seconds: None,
+    )
+    bot = SimpleNamespace(
+        _ws_manager=ws_manager,
+        client=SimpleNamespace(),
+        settings=SimpleNamespace(
+            ws=SimpleNamespace(market_ticker_freshness_seconds=5),
+        ),
+    )
+    analyzer = SymbolAnalyzer(bot)
+
+    with caplog.at_level("WARNING", logger="bot.application.bot"):
+        enrichments = analyzer.ws_cache_enrichments("BTCUSDT")
+
+    assert enrichments["degraded"] is True
+    assert enrichments["degrade_reason"].startswith("ticker_snapshot:")
+    assert enrichments["fallback_used"] == "skip_ticker_enrichment"
+    assert any("enrichment degraded | symbol=BTCUSDT" in rec.message for rec in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_oi_refresh_runner_logs_controlled_degradation_without_silent_failures(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class _Client:
+        async def fetch_open_interest_change(self, symbol: str, period: str = "1h") -> None:
+            raise RuntimeError("oi failed")
+
+        async def fetch_long_short_ratio(self, symbol: str, period: str = "1h") -> None:
+            return None
+
+        async def fetch_top_position_ls_ratio(self, symbol: str, period: str = "1h") -> None:
+            return None
+
+        async def fetch_global_ls_ratio(self, symbol: str, period: str = "1h") -> None:
+            return None
+
+        async def fetch_funding_rate_history(self, symbol: str) -> None:
+            return None
+
+    bot = SimpleNamespace(client=_Client())
+    runner = OIRefreshRunner(bot)
+
+    with caplog.at_level("WARNING", logger="bot.application.oi_refresh_runner"):
+        await runner._safe_fetch("BTCUSDT")
+
+    assert any("oi refresh degraded | symbol=BTCUSDT stage=oi_change_1h source=rest" in rec.message for rec in caplog.records)
 
 
 
