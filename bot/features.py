@@ -214,103 +214,22 @@ def _rsi(df: pl.DataFrame, period: int = 14) -> pl.Series:
 
 
 def _atr(df: pl.DataFrame, period: int = 14) -> pl.Series:
-    """Average True Range using polars_talib or pure Polars."""
-    if _HAS_TALIB:
-        return _materialize_series(
-            plta.ATR(
-                pl.col("high"), pl.col("low"), pl.col("close"), timeperiod=float(period)
-            ),
-            df=df,
-            name=f"atr{period}",
-        )
-
-    # Pure Polars ATR
-    high = df["high"]
-    low = df["low"]
-    close = df["close"]
-    prev_close = close.shift(1)
-
-    tr = pl.max_horizontal(
-        (high - low).abs(),
-        (high - prev_close).abs(),
-        (low - prev_close).abs(),
-    )
-
-    return _materialize_series(
-        tr.ewm_mean(alpha=1.0 / period, adjust=False), df=df, name=f"atr{period}"
-    )
+    """Legacy wrapper for core ATR implementation."""
+    return _features_core.atr(df, period, plta=plta, has_talib=_HAS_TALIB)
 
 
 def _adx(df: pl.DataFrame, period: int = 14) -> pl.Series:
-    """Average Directional Index."""
-    if _HAS_TALIB:
-        return _materialize_series(
-            plta.ADX(
-                pl.col("high"), pl.col("low"), pl.col("close"), timeperiod=float(period)
-            ),
-            df=df,
-            name=f"adx{period}",
-        )
-
-    # Pure Polars ADX (simplified — full implementation is complex)
-    # For production, prefer polars_talib
-    high = df["high"]
-    low = df["low"]
-
-    up_move = high.diff()
-    down_move = -low.diff()
-
-    plus_dm = _materialize_series(
-        pl.when((up_move > down_move) & (up_move > 0.0)).then(up_move).otherwise(0.0),
-        df=df,
-        name="plus_dm",
-    )
-    minus_dm = _materialize_series(
-        pl.when((down_move > up_move) & (down_move > 0.0))
-        .then(down_move)
-        .otherwise(0.0),
-        df=df,
-        name="minus_dm",
-    )
-
-    atr = _atr(df, period)
-    atr_safe = _clean_non_finite(atr, fill=1e-9).replace(0.0, 1e-9)
-    plus_di = 100.0 * plus_dm.ewm_mean(alpha=1.0 / period, adjust=False) / atr_safe
-    minus_di = 100.0 * minus_dm.ewm_mean(alpha=1.0 / period, adjust=False) / atr_safe
-
-    dx = 100.0 * (plus_di - minus_di).abs() / (plus_di + minus_di)
-    return _materialize_series(
-        _clean_non_finite(dx.ewm_mean(alpha=1.0 / period, adjust=False), fill=0.0),
-        df=df,
-        name=f"adx{period}",
-    )
+    """Legacy wrapper for core ADX implementation."""
+    return _features_core.adx(df, period, plta=plta, has_talib=_HAS_TALIB)
 
 
 def _vwap(df: pl.DataFrame) -> pl.Series:
-    """Volume Weighted Average Price — cumulative with shift(1) to prevent lookahead."""
-    typical_price = (df["high"] + df["low"] + df["close"]) / 3.0
-    pv = typical_price * df["volume"]
-
-    cumulative_pv = pv.cum_sum().shift(1)
-    cumulative_volume = df["volume"].cum_sum().shift(1)
-
-    vwap = (cumulative_pv / cumulative_volume).forward_fill()
-    return _materialize_series(vwap, df=df, name="vwap")
+    """Legacy wrapper for core VWAP implementation."""
+    return _features_core.vwap(df)
 
 
 def _roc(df: pl.DataFrame, period: int = 10) -> pl.Series:
-    if _HAS_TALIB:
-        return _materialize_series(
-            plta.ROC(pl.col("close"), timeperiod=float(period)),
-            df=df,
-            name=f"roc{period}",
-        )
-    prev_close = df["close"].shift(period)
-    return (
-        (((df["close"] / prev_close) - 1.0) * 100.0)
-        .fill_nan(0.0)
-        .rename(f"roc{period}")
-    )
+    return _features_core.roc(df, period, plta=plta, has_talib=_HAS_TALIB)
 
 
 def _stochastic(
@@ -319,143 +238,33 @@ def _stochastic(
     smooth_k: int = 3,
     smooth_d: int = 3,
 ) -> tuple[pl.Series, pl.Series]:
-    rolling_low = df["low"].rolling_min(window_size=period)
-    rolling_high = df["high"].rolling_max(window_size=period)
-    width = rolling_high - rolling_low
-    raw_k = _clean_non_finite(((df["close"] - rolling_low) / width) * 100.0, fill=50.0)
-    k = _clean_non_finite(raw_k.rolling_mean(window_size=smooth_k), fill=50.0).rename(
-        "stoch_k14"
-    )
-    d = _clean_non_finite(k.rolling_mean(window_size=smooth_d), fill=50.0).rename(
-        "stoch_d14"
-    )
-    return k, d
+    return _features_oscillators.stochastic(df, period, smooth_k, smooth_d)
 
 
 def _cci(df: pl.DataFrame, period: int = 20) -> pl.Series:
-    if _HAS_TALIB:
-        return _materialize_series(
-            plta.CCI(
-                pl.col("high"), pl.col("low"), pl.col("close"), timeperiod=float(period)
-            ),
-            df=df,
-            name=f"cci{period}",
-        )
-    typical_price = (df["high"] + df["low"] + df["close"]) / 3.0
-    sma = typical_price.rolling_mean(window_size=period)
-    mean_dev = (typical_price - sma).abs().rolling_mean(window_size=period)
-    return _clean_non_finite(
-        (typical_price - sma) / (0.015 * mean_dev), fill=0.0
-    ).rename(f"cci{period}")
+    return _features_oscillators.cci(df, period, plta=plta, has_talib=_HAS_TALIB)
 
 
 def _mfi(df: pl.DataFrame, period: int = 14) -> pl.Series:
-    if _HAS_TALIB:
-        return _materialize_series(
-            plta.MFI(
-                pl.col("high"),
-                pl.col("low"),
-                pl.col("close"),
-                pl.col("volume"),
-                timeperiod=float(period),
-            ),
-            df=df,
-            name=f"mfi{period}",
-        )
-    typical_price = (df["high"] + df["low"] + df["close"]) / 3.0
-    money_flow = typical_price * df["volume"]
-    delta = typical_price.diff()
-    positive_flow = pl.Series(
-        "positive_flow",
-        [
-            float(mf or 0.0) if float(chg or 0.0) > 0.0 else 0.0
-            for mf, chg in zip(money_flow, delta, strict=False)
-        ],
-        dtype=pl.Float64,
-    )
-    negative_flow = pl.Series(
-        "negative_flow",
-        [
-            float(mf or 0.0) if float(chg or 0.0) < 0.0 else 0.0
-            for mf, chg in zip(money_flow, delta, strict=False)
-        ],
-        dtype=pl.Float64,
-    )
-    pos_sum = positive_flow.rolling_sum(window_size=period)
-    neg_sum = negative_flow.rolling_sum(window_size=period)
-    values: list[float] = []
-    for pos, neg in zip(pos_sum, neg_sum, strict=False):
-        pos_val = float(pos or 0.0)
-        neg_val = float(neg or 0.0)
-        if neg_val <= 0.0 and pos_val <= 0.0:
-            values.append(50.0)
-        elif neg_val <= 0.0:
-            values.append(100.0)
-        else:
-            ratio = pos_val / neg_val
-            values.append(100.0 - (100.0 / (1.0 + ratio)))
-    return pl.Series(f"mfi{period}", values, dtype=pl.Float64)
+    return _features_oscillators.mfi(df, period, plta=plta, has_talib=_HAS_TALIB)
 
 
 def _cmf(df: pl.DataFrame, period: int = 20) -> pl.Series:
-    multipliers: list[float] = []
-    for high, low, close in zip(df["high"], df["low"], df["close"], strict=False):
-        high_val = float(high or 0.0)
-        low_val = float(low or 0.0)
-        close_val = float(close or 0.0)
-        width = high_val - low_val
-        if width <= 0.0:
-            multipliers.append(0.0)
-            continue
-        multipliers.append(((close_val - low_val) - (high_val - close_val)) / width)
-    money_flow_multiplier = pl.Series(
-        "money_flow_multiplier", multipliers, dtype=pl.Float64
-    )
-    money_flow_volume = money_flow_multiplier * df["volume"]
-    volume_sum = df["volume"].rolling_sum(window_size=period)
-    return (
-        (money_flow_volume.rolling_sum(window_size=period) / volume_sum)
-        .fill_nan(0.0)
-        .rename(f"cmf{period}")
-    )
+    return _features_oscillators.cmf(df, period)
 
 
 def _ultimate_oscillator(
     df: pl.DataFrame, p1: int = 7, p2: int = 14, p3: int = 28
 ) -> pl.Series:
-    prev_close = df["close"].shift(1)
-    min_low = _materialize_series(
-        pl.min_horizontal(df["low"], prev_close), df=df, name="uo_min_low"
-    )
-    max_high = _materialize_series(
-        pl.max_horizontal(df["high"], prev_close), df=df, name="uo_max_high"
-    )
-    bp = (df["close"] - min_low).rename("uo_bp")
-    tr = (max_high - min_low).rename("uo_tr")
-    avg1 = bp.rolling_sum(window_size=p1) / tr.rolling_sum(window_size=p1)
-    avg2 = bp.rolling_sum(window_size=p2) / tr.rolling_sum(window_size=p2)
-    avg3 = bp.rolling_sum(window_size=p3) / tr.rolling_sum(window_size=p3)
-    uo = (100.0 * ((4.0 * avg1) + (2.0 * avg2) + avg3) / 7.0).rename("uo")
-    return _clean_non_finite(uo, fill=50.0)
+    return _features_oscillators.ultimate_oscillator(df, p1, p2, p3)
 
 
 def _realized_volatility(df: pl.DataFrame, period: int = 20) -> pl.Series:
-    log_returns = df["close"].log() - df["close"].shift(1).log()
-    return (
-        (log_returns.rolling_std(window_size=period) * np.sqrt(period) * 100.0)
-        .fill_nan(0.0)
-        .rename(f"realized_vol_{period}")
-    )
+    return _features_core.realized_volatility(df, period)
 
 
 def _safe_close_position(df: pl.DataFrame, window: int = 20) -> pl.Series:
-    """Close position within rolling high-low range (0-1)."""
-    rolling_low = df["low"].rolling_min(window_size=window)
-    rolling_high = df["high"].rolling_max(window_size=window)
-    width = rolling_high - rolling_low
-
-    value = _clean_non_finite((df["close"] - rolling_low) / width, fill=0.5)
-    return value.clip(0.0, 1.0).rename("close_position")
+    return _features_core.safe_close_position(df, window)
 
 
 def _ichimoku_lines(
@@ -472,68 +281,7 @@ def _ichimoku_lines(
 def _supertrend(
     df: pl.DataFrame, period: int = 10, multiplier: float = 3.0
 ) -> tuple[pl.Series, pl.Series]:
-    """SuperTrend indicator using canonical iterative band state updates."""
-    high = df["high"]
-    low = df["low"]
-    close = df["close"]
-
-    # ATR for SuperTrend
-    prev_close = close.shift(1)
-    tr = pl.max_horizontal(
-        (high - low).abs(),
-        (high - prev_close).abs(),
-        (low - prev_close).abs(),
-    )
-    atr = _materialize_series(
-        tr.ewm_mean(alpha=1.0 / period, adjust=False), df=df, name="supertrend_atr"
-    )
-
-    hl2 = (high + low) / 2.0
-    basic_upper = hl2 + multiplier * atr
-    basic_lower = hl2 - multiplier * atr
-
-    close_vals = close.to_list()
-    upper_vals = basic_upper.to_list()
-    lower_vals = basic_lower.to_list()
-    size = len(close_vals)
-    if size == 0:
-        empty = pl.Series("supertrend", [], dtype=pl.Float64)
-        return empty, pl.Series("supertrend_dir", [], dtype=pl.Float64)
-
-    final_upper: list[float] = [float(upper_vals[0])]
-    final_lower: list[float] = [float(lower_vals[0])]
-    supertrend: list[float] = [float(upper_vals[0])]
-
-    for idx in range(1, size):
-        bu = float(upper_vals[idx])
-        bl = float(lower_vals[idx])
-        prev_close = float(close_vals[idx - 1])
-        prev_fu = final_upper[idx - 1]
-        prev_fl = final_lower[idx - 1]
-
-        fu = bu if (bu < prev_fu or prev_close > prev_fu) else prev_fu
-        fl = bl if (bl > prev_fl or prev_close < prev_fl) else prev_fl
-        final_upper.append(fu)
-        final_lower.append(fl)
-
-        prev_st = supertrend[idx - 1]
-        curr_close = float(close_vals[idx])
-        if prev_st == prev_fu:
-            st = fu if curr_close <= fu else fl
-        else:
-            st = fl if curr_close >= fl else fu
-        supertrend.append(st)
-
-    st_series = pl.Series("supertrend", supertrend, dtype=pl.Float64)
-    direction = pl.Series(
-        "supertrend_dir",
-        [
-            1.0 if float(c) >= float(s) else -1.0
-            for c, s in zip(close_vals, supertrend, strict=False)
-        ],
-        dtype=pl.Float64,
-    )
-    return st_series, direction
+    return _features_advanced.supertrend(df, period, multiplier)
 
 
 def _bollinger_bands(
