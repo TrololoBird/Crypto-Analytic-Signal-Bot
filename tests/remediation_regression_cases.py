@@ -1321,6 +1321,40 @@ def test_build_signal_reads_adx14_and_preserves_zero_metrics() -> None:
     assert signal.ls_ratio == pytest.approx(0.0)
 
 
+def test_build_signal_rejects_directional_tp_mismatch() -> None:
+    prepared = make_prepared(price=100.0)
+
+    long_signal = _build_signal(
+        prepared=prepared,
+        setup_id="breaker_block",
+        direction="long",
+        score=0.71,
+        reasons=["test"],
+        stop=95.0,
+        tp1=99.0,
+        tp2=101.0,
+        price_anchor=100.0,
+        atr=2.0,
+    )
+    short_signal = _build_signal(
+        prepared=prepared,
+        setup_id="breaker_block",
+        direction="short",
+        score=0.71,
+        reasons=["test"],
+        stop=105.0,
+        tp1=99.0,
+        tp2=101.0,
+        price_anchor=100.0,
+        atr=2.0,
+    )
+
+    assert long_signal is None
+    assert short_signal is None
+
+
+
+
 def test_ema_bounce_emits_1h_timeframe() -> None:
     setup = EmaBounceSetup()
     settings = SimpleNamespace(filters=SimpleNamespace(setups={}))

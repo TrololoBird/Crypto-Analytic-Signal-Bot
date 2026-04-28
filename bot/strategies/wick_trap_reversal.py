@@ -39,6 +39,7 @@ class WickTrapReversalSetup(BaseSetup):
             "bias_mismatch_penalty": 0.75,
             "tp_too_close_penalty": 0.75,
             "min_rr": 1.5,
+            "sl_buffer_atr": 0.5,
             "wick_through_atr_mult": 0.3,
             # Backward-compatible alias (legacy config key)
             "wick_atr_threshold": 0.3,
@@ -258,12 +259,18 @@ class WickTrapReversalSetup(BaseSetup):
         defaults = self.get_optimizable_params(settings)
         min_rr_raw = dynamic_params.get("min_rr", defaults.get("min_rr", 1.5))
         min_rr = float(min_rr_raw) if isinstance(min_rr_raw, (int, float)) else 1.5
+        sl_buffer_raw = dynamic_params.get(
+            "sl_buffer_atr", defaults.get("sl_buffer_atr", 0.5)
+        )
+        sl_buffer_atr = (
+            float(sl_buffer_raw) if isinstance(sl_buffer_raw, (int, float)) else 0.5
+        )
 
         # --- Compute structural SL/TP ---
         if direction == "long":
             # SL: beyond wick extreme (absolute tip of sweep wick) + 0.5×ATR (was 0.1)
             wick_bar_low = float(work_15m.item(wick_bar_idx, "low"))
-            stop = wick_bar_low - atr * 0.5
+            stop = wick_bar_low - atr * sl_buffer_atr
             # TP1/TP2 must be above entry for long.
             structural_distance = max(price_anchor - float(level), atr * 0.5)
             risk = price_anchor - stop
@@ -273,11 +280,15 @@ class WickTrapReversalSetup(BaseSetup):
             tp1 = price_anchor + max(structural_distance, risk * min_rr)
             # TP2: next 1h swing high beyond TP1, fallback to extended projection.
             last_sh, _ = _last_swing_prices(work_1h)
-            tp2 = last_sh if (last_sh and last_sh > tp1) else (tp1 + structural_distance)
+            tp2 = (
+                last_sh
+                if (last_sh is not None and last_sh > price_anchor and last_sh > tp1)
+                else (tp1 + structural_distance)
+            )
         else:
             # SL: beyond wick extreme + 0.5×ATR (was 0.1)
             wick_bar_high = float(work_15m.item(wick_bar_idx, "high"))
-            stop = wick_bar_high + atr * 0.5
+            stop = wick_bar_high + atr * sl_buffer_atr
             # TP1/TP2 must be below entry for short.
             structural_distance = max(float(level) - price_anchor, atr * 0.5)
             risk = stop - price_anchor
@@ -287,7 +298,11 @@ class WickTrapReversalSetup(BaseSetup):
             tp1 = price_anchor - max(structural_distance, risk * min_rr)
             # TP2: next 1h swing low beyond TP1, fallback to extended projection.
             _, last_sl = _last_swing_prices(work_1h)
-            tp2 = last_sl if (last_sl and last_sl < tp1) else (tp1 - structural_distance)
+            tp2 = (
+                last_sl
+                if (last_sl is not None and last_sl < price_anchor and last_sl < tp1)
+                else (tp1 - structural_distance)
+            )
 
         # Validate: TP1 must be at least min_rr × risk distance.
         risk = abs(price_anchor - stop)
