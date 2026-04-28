@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 from dataclasses import fields
 from pathlib import Path
 
@@ -7,10 +8,43 @@ import pytest
 
 from bot.feature_contract import (
     PUBLIC_FEATURE_FIELDS,
+    PUBLIC_FEATURE_SCHEMA_VERSION,
+    normalize_public_feature_payload,
     validate_public_feature_payload,
 )
 from bot.models import PreparedSymbol
 from bot.outcomes import build_prepared_feature_snapshot
+
+RUNTIME_CALL_PATH_FILES: tuple[Path, ...] = (
+    Path("main.py"),
+    Path("bot/cli.py"),
+    Path("bot/__init__.py"),
+    Path("bot/application/bot.py"),
+)
+
+RUNTIME_PUBLIC_IMPORT_CONTRACT: tuple[str, ...] = (
+    "SignalBot",
+    "BotSettings",
+    "load_settings",
+)
+
+SCaffold_BLOCKLIST = (
+    "bot.telegram_bot",
+    "scaffold",
+    "experimental",
+    "prototype",
+)
+
+
+def _imported_module_names(file_path: Path) -> set[str]:
+    tree = ast.parse(file_path.read_text(encoding="utf-8"))
+    imported_names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported_names.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported_names.add(node.module)
+    return imported_names
 
 
 def test_public_feature_contract_matches_prepared_symbol_snapshot_surface() -> None:
@@ -59,6 +93,14 @@ def test_validate_public_feature_payload_rejects_extra_field() -> None:
         validate_public_feature_payload(payload)
 
 
+def test_normalize_public_feature_payload_rejects_incompatible_schema_growth() -> None:
+    incompatible = {name: None for name in PUBLIC_FEATURE_FIELDS}
+    incompatible["v2_only_new_feature"] = 123
+
+    with pytest.raises(ValueError, match="schema mismatch"):
+        normalize_public_feature_payload(incompatible)
+
+
 def test_build_prepared_feature_snapshot_enforces_exact_schema() -> None:
     payload = build_prepared_feature_snapshot(None)
 
@@ -66,22 +108,19 @@ def test_build_prepared_feature_snapshot_enforces_exact_schema() -> None:
 
 
 def test_runtime_call_path_has_no_scaffold_imports() -> None:
-    import ast
-
-    runtime_files = [
-        Path("bot/application/bot.py"),
-        Path("bot/application/symbol_analyzer.py"),
-        Path("bot/core/engine/engine.py"),
-        Path("bot/strategies/__init__.py"),
-    ]
-
     imported_names: set[str] = set()
-    for file_path in runtime_files:
-        tree = ast.parse(file_path.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                imported_names.update(alias.name for alias in node.names)
-            elif isinstance(node, ast.ImportFrom) and node.module:
-                imported_names.add(node.module)
+    for file_path in RUNTIME_CALL_PATH_FILES:
+        imported_names.update(_imported_module_names(file_path))
 
-    assert all("scaffold" not in name and "experimental" not in name for name in imported_names)
+    for blocked in SCaffold_BLOCKLIST:
+        assert all(blocked not in name for name in imported_names)
+
+
+def test_runtime_public_import_contract_is_explicit_and_stable() -> None:
+    import bot
+
+    assert tuple(bot.__all__) == RUNTIME_PUBLIC_IMPORT_CONTRACT
+
+
+def test_feature_contract_version_is_pinned_for_compatibility() -> None:
+    assert PUBLIC_FEATURE_SCHEMA_VERSION == "v1"
