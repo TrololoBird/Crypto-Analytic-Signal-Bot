@@ -20,7 +20,7 @@ startup_batch_delay_seconds = 2.0
 max_concurrent_rest_requests = 5
 # Dashboard settings
 dashboard_port = 8080
-auto_open_dashboard = true
+auto_open_dashboard = false
 
 [bot.universe]
 quote_asset = "USDT"
@@ -160,6 +160,7 @@ intra_candle_min_move_bps = 0.0
 use_ml_in_live = false
 
 [bot.notifiers]
+# Signal-only notifier pipeline: deliver alerts to Telegram only.
 provider = "telegram"
 
 [bot.notifiers.slack]
@@ -182,6 +183,7 @@ lead_symbols = []
 refresh_interval_seconds = 60
 
 [bot.intelligence]
+# Explicit public-data policy for signal-only runtime.
 enabled = true
 runtime_mode = "signal_only"
 source_policy = "binance_only"
