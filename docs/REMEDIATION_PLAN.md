@@ -16,7 +16,7 @@ Close remaining architecture and reliability gaps from the v3 review while keepi
 | Task 6: Test decomposition | ✅ Completed | Remediation regressions are split into thematic `test_regression_suite_*` suites, including dedicated runtime/intra-candle and indicators suites plus legacy compatibility shims. |
 | Task 7: Backtest | ✅ Completed | Already present and unchanged in this sequence. |
 | Task 8: Docs | ✅ Completed | Architecture/operations/remediation docs are synchronized with current module/test topology and CI doc-change guardrails. |
-| ws_manager decomposition | 🟡 In progress | Enrichment + cache/update helpers extracted; connection/subscriptions extraction remains. |
+| ws_manager decomposition | ✅ Completed | Connection/session loop + subscription/resubscribe planning extracted to `bot/websocket/{connection,subscriptions}.py` with reconnect/recovery tests. |
 | features decomposition | 🟡 In progress | Microstructure + structure helpers extracted; core/advanced/oscillator splits remain. |
 
 ## Execution phases
@@ -26,7 +26,7 @@ Close remaining architecture and reliability gaps from the v3 review while keepi
    - Maintain targeted regression tests for each extracted component.
 
 2. **Monolith splitting by seams**
-   - Continue extracting `ws_manager.py` into `bot/websocket/{connection,subscriptions,cache,enrichment}.py`.
+   - `ws_manager.py` extraction into `bot/websocket/{connection,subscriptions,cache,enrichment}.py` is complete; keep new behavior changes inside helper modules with contract tests.
    - Continue extracting `features.py` into thematic modules (`core`, `advanced`, `oscillators`, `structure`, `microstructure`).
 
 3. **Cleanup and consolidation**

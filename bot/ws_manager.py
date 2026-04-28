@@ -1246,93 +1246,24 @@ class FuturesWSManager:
         ws_connection.clear_endpoint_connection_state(self, endpoint)
 
     async def _run_stream(self, endpoint: str) -> None:
-        delay = 1.0
-        max_delay = self._cfg.reconnect_max_delay_seconds
-        url = self._build_stream_url(endpoint)
-        while self._running:
-            connect_start = time.monotonic()
-            backoff_reset = False
-            try:
-                LOG.info(
-                    "ws connecting | endpoint=%s url=%s streams=%d",
-                    endpoint,
-                    url,
-                    len(self._intended_streams_by_endpoint.get(endpoint, set())),
-                )
-                backoff_reset, proactive_reconnect = (
-                    await ws_connection.run_stream_session(
-                        self,
-                        endpoint=endpoint,
-                        url=url,
-                        connect_start=connect_start,
-                        backoff_reset_after_seconds=_BACKOFF_RESET_AFTER_SECONDS,
-                        proactive_reconnect_after_seconds=_PROACTIVE_RECONNECT_AFTER_SECONDS,
-                        parse_message=(
-                            _json.loads if _USE_ORJSON else json.loads
-                        ),
-                    )
-                )
-                if backoff_reset:
-                    delay = 1.0
-                if proactive_reconnect:
-                    delay = 1.0
-                    self._short_lived_streak = 0
-                    if endpoint == _WS_MARKET:
-                        stale = self._stale_symbols()
-                        await self._maybe_backfill_after_disconnect(
-                            elapsed=time.monotonic() - connect_start,
-                            stale_symbols=stale,
-                        )
-                    continue
-            except asyncio.CancelledError:
-                self._clear_endpoint_connection_state(endpoint)
-                return
-            except (
+        await ws_connection.run_endpoint_loop(
+            self,
+            endpoint=endpoint,
+            backoff_reset_after_seconds=_BACKOFF_RESET_AFTER_SECONDS,
+            proactive_reconnect_after_seconds=_PROACTIVE_RECONNECT_AFTER_SECONDS,
+            parse_message=(_json.loads if _USE_ORJSON else json.loads),
+            market_endpoint=_WS_MARKET,
+            stale_symbols=self._stale_symbols,
+            maybe_backfill_after_disconnect=self._maybe_backfill_after_disconnect,
+            compute_disconnect_delay=ws_reconnect.compute_disconnect_delay,
+            connection_exceptions=(
                 ws_exceptions.ConnectionClosed,
                 ws_exceptions.InvalidStatus,
                 ConnectionError,
                 TimeoutError,
                 OSError,
-            ) as exc:
-                self._clear_endpoint_connection_state(endpoint)
-                if not self._running:
-                    return
-
-                elapsed = time.monotonic() - connect_start
-                delay = ws_reconnect.compute_disconnect_delay(
-                    self,
-                    endpoint=endpoint,
-                    url=url,
-                    exc=exc,
-                    elapsed=elapsed,
-                    delay=delay,
-                )
-                try:
-                    await asyncio.sleep(delay)
-                except asyncio.CancelledError:
-                    return
-                delay = min(delay * 2.0, max_delay)
-                if endpoint == _WS_MARKET:
-                    stale = self._stale_symbols()
-                    await self._maybe_backfill_after_disconnect(
-                        elapsed=elapsed,
-                        stale_symbols=stale,
-                    )
-            except Exception as exc:
-                LOG.error(
-                    "ws unexpected error during connection | endpoint=%s error=%s (%s)",
-                    endpoint,
-                    exc,
-                    type(exc).__name__,
-                )
-                self._clear_endpoint_connection_state(endpoint)
-                if not self._running:
-                    return
-                delay = min(max(delay, 1.0) * 2.0, max_delay)
-                try:
-                    await asyncio.sleep(delay)
-                except asyncio.CancelledError:
-                    return
+            ),
+        )
 
     def _handle_ws_response(self, msg: dict, endpoint: str) -> None:
         if msg.get("error"):
