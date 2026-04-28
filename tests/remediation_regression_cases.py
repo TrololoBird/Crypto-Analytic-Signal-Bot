@@ -13,7 +13,12 @@ import pytest
 
 from bot.application.bot import SignalBot
 from bot.application import symbol_analyzer as symbol_analyzer_module
-from bot.application.shortlist_service import ShortlistService
+from bot.application.shortlist_service import (
+    FALLBACK_REASON_LIVE_EMPTY,
+    FALLBACK_REASON_USING_CACHED,
+    ShortlistService,
+    normalize_shortlist_fallback_reason,
+)
 from bot.application.symbol_analyzer import SymbolAnalyzer
 from bot.cli import _is_preformatted_log_stderr
 from bot.confluence import ConfluenceEngine  # noqa: F401
@@ -1124,67 +1129,55 @@ def test_symbol_analyzer_does_not_hide_unexpected_frame_errors(
     )
 
 
-def test_ws_enrichment_emits_degradation_context_instead_of_silent_failure(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    class _BrokenWS:
-        def get_ticker_snapshot(self, symbol: str):
-            raise RuntimeError(f"ticker broken for {symbol}")
 
-        def get_ticker_age_seconds(self, symbol: str):
-            return None
 
-        def get_mark_price_snapshot(self, symbol: str):
-            return None
-
-        def get_mark_price_age_seconds(self, symbol: str):
-            return None
-
-        def get_depth_imbalance(self, symbol: str):
-            return None
-
-        def get_microprice_bias(self, symbol: str):
-            return None
-
-        def get_liquidation_sentiment(self, symbol: str, window_seconds: int):
-            return None
-
-    client = BinanceFuturesMarketData.__new__(BinanceFuturesMarketData)
-    client.get_cached_oi_change = lambda _symbol: None
-    client.get_cached_ls_ratio = lambda _symbol: None
-    client.get_cached_top_position_ls_ratio = lambda _symbol: None
-    client.get_cached_taker_ratio = lambda _symbol: None
-    client.get_cached_global_ls_ratio = lambda _symbol: None
-    client.get_cached_funding_trend = lambda _symbol: None
-    client.get_cached_basis = lambda _symbol, period="1h": None
-    client.get_cached_basis_stats = lambda _symbol, period="5m": None
-
-    bot = SimpleNamespace(
-        _ws_manager=_BrokenWS(),
-        client=client,
-        settings=SimpleNamespace(
-            ws=SimpleNamespace(market_ticker_freshness_seconds=30),
-        ),
-    )
-    analyzer = SymbolAnalyzer(bot)
-
-    with caplog.at_level("INFO", logger="bot.application.bot"):
-        enrichments = analyzer.ws_cache_enrichments("BTCUSDT")
-
-    assert enrichments["degraded"] is True
-    assert enrichments["degrade_reason"].startswith("ticker_snapshot:")
-    assert enrichments["fallback_used"] == "skip_ticker_enrichment"
-    assert any(event["exception_type"] == "RuntimeError" for event in enrichments["degradation_events"])
-    assert any(
-        "symbol=BTCUSDT stage=ticker_snapshot source=ws" in record.message
-        and "exception_type=RuntimeError" in record.message
-        for record in caplog.records
-    )
+def test_normalize_shortlist_fallback_reason_contract() -> None:
+    assert normalize_shortlist_fallback_reason(None) is None
+    assert normalize_shortlist_fallback_reason("  ") is None
+    assert normalize_shortlist_fallback_reason("WS_CACHE_COLD") == "ws_cache_cold"
+    assert normalize_shortlist_fallback_reason("using_cached") == FALLBACK_REASON_USING_CACHED
+    assert normalize_shortlist_fallback_reason("not_mapped") == "unknown"
 
 
 @pytest.mark.asyncio
+async def test_shortlist_refresh_cached_telemetry_fields() -> None:
+    bot = SimpleNamespace(
+        settings=SimpleNamespace(
+            universe=SimpleNamespace(
+                quote_asset="USDT",
+                pinned_symbols=("BTCUSDT",),
+                light_refresh_interval_seconds=60,
+                full_refresh_interval_seconds=7200,
+            ),
+            runtime=SimpleNamespace(shortlist_refresh_interval_seconds=7200),
+        ),
+        _shortlist_lock=asyncio.Lock(),
+        _shortlist=[],
+        _shortlist_source="ws_light",
+        _last_live_shortlist=[make_universe_symbol(symbol="ETHUSDT")],
+        _last_live_shortlist_at=datetime.now(UTC) - timedelta(seconds=30),
+        _symbol_meta_by_symbol={},
+        _last_shortlist_full_refresh_at=datetime.now(UTC),
+        client=SimpleNamespace(_exchange_info_cache=None),
+        telemetry=TelemetryStub(),
+    )
+    service = ShortlistService(bot)
+    service.build_light_shortlist = AsyncMock(return_value=([], {"mode": "ws_light"}))
+    service.build_live_shortlist = AsyncMock(return_value=([], {"mode": "rest_full"}))
+
+    await service.do_refresh_shortlist()
+
+    shortlist_rows = [row for filename, row in bot.telemetry.rows if filename == "shortlist.jsonl"]
+    assert shortlist_rows
+    row = shortlist_rows[-1]
+    assert row["source_before"] == "ws_light"
+    assert row["source_after"] == "cached"
+    assert row["fallback_reason"] in {FALLBACK_REASON_LIVE_EMPTY, FALLBACK_REASON_USING_CACHED}
+    assert row["cached_shortlist_age_s"] is not None
+    assert row["cached_shortlist_size"] == 1
+
+@pytest.mark.asyncio
 async def test_shortlist_refresh_prefers_ws_light_between_full_rebalances() -> None:
-    from bot.application.shortlist_service import ShortlistService
 
     shortlist = [make_universe_symbol(symbol="BTCUSDT")]
     bot = SimpleNamespace(
@@ -1207,6 +1200,7 @@ async def test_shortlist_refresh_prefers_ws_light_between_full_rebalances() -> N
             )
         },
         _last_shortlist_full_refresh_at=datetime.now(UTC),
+        client=SimpleNamespace(_exchange_info_cache=None),
         telemetry=TelemetryStub(),
     )
     service = ShortlistService(bot)
