@@ -48,6 +48,7 @@ class SymbolAnalyzer:
         source: str,
         reason: str,
         fallback_used: str,
+        exception_type: str | None = None,
     ) -> dict[str, Any]:
         return {
             "degraded": True,
@@ -56,6 +57,7 @@ class SymbolAnalyzer:
             "degrade_symbol": symbol,
             "degrade_stage": stage,
             "degrade_source": source,
+            "exception_type": exception_type,
         }
 
     @staticmethod
@@ -67,15 +69,17 @@ class SymbolAnalyzer:
         source: str,
         reason: str,
         fallback_used: str,
+        exception_type: str | None = None,
     ) -> None:
         LOG.log(
             level,
-            "enrichment degraded | symbol=%s stage=%s source=%s reason=%s fallback_used=%s",
+            "enrichment degraded | symbol=%s stage=%s source=%s reason=%s fallback_used=%s exception_type=%s",
             symbol,
             stage,
             source,
             reason,
             fallback_used,
+            exception_type,
         )
 
     @staticmethod
@@ -86,7 +90,7 @@ class SymbolAnalyzer:
             return None
         try:
             value = frame.item(-1, column)
-        except Exception:
+        except (IndexError, TypeError, ValueError):
             return None
         try:
             if value is None:
@@ -983,8 +987,16 @@ class SymbolAnalyzer:
                     await self._bot.client.fetch_klines_cached(
                         symbol, "4h", limit=_history_fetch_limit(minimums, "4h")
                     )
-                except Exception:
-                    LOG.exception("shortlist frame preload failed for %s", symbol)
+                except (MarketDataUnavailable, RuntimeError, ValueError, TypeError) as exc:
+                    self._log_degradation(
+                        level=logging.WARNING,
+                        symbol=symbol,
+                        stage="shortlist_preload",
+                        source="rest",
+                        reason=str(exc),
+                        fallback_used="skip_symbol_preload",
+                        exception_type=type(exc).__name__,
+                    )
 
         for i in range(0, len(shortlist), batch_size):
             batch = shortlist[i : i + batch_size]
@@ -1025,6 +1037,7 @@ class SymbolAnalyzer:
                         source="ws",
                         reason=type(exc).__name__,
                         fallback_used="skip_ticker_enrichment",
+                        exception_type=type(exc).__name__,
                     )
                 )
                 self._log_degradation(
@@ -1034,6 +1047,7 @@ class SymbolAnalyzer:
                     source="ws",
                     reason=str(exc),
                     fallback_used="skip_ticker_enrichment",
+                    exception_type=type(exc).__name__,
                 )
             try:
                 mark = self._bot._ws_manager.get_mark_price_snapshot(symbol)
@@ -1066,6 +1080,7 @@ class SymbolAnalyzer:
                                 source="ws",
                                 reason=degrade_reason,
                                 fallback_used="rest_cached_funding",
+                                exception_type="stale_cache",
                             )
                         )
                         self._log_degradation(
@@ -1075,6 +1090,7 @@ class SymbolAnalyzer:
                             source="ws",
                             reason=degrade_reason,
                             fallback_used="rest_cached_funding",
+                            exception_type="stale_cache",
                         )
                 elif not mark:
                     freshness_flags.add("mark_price_missing")
@@ -1086,6 +1102,7 @@ class SymbolAnalyzer:
                         source="ws",
                         reason=type(exc).__name__,
                         fallback_used="rest_cached_funding",
+                        exception_type=type(exc).__name__,
                     )
                 )
                 self._log_degradation(
@@ -1095,6 +1112,7 @@ class SymbolAnalyzer:
                     source="ws",
                     reason=str(exc),
                     fallback_used="rest_cached_funding",
+                    exception_type=type(exc).__name__,
                 )
             try:
                 depth_imbalance = self._bot._ws_manager.get_depth_imbalance(symbol)
@@ -1116,6 +1134,7 @@ class SymbolAnalyzer:
                         source="ws",
                         reason=type(exc).__name__,
                         fallback_used="skip_microstructure_enrichment",
+                        exception_type=type(exc).__name__,
                     )
                 )
                 self._log_degradation(
@@ -1125,6 +1144,7 @@ class SymbolAnalyzer:
                     source="ws",
                     reason=str(exc),
                     fallback_used="skip_microstructure_enrichment",
+                    exception_type=type(exc).__name__,
                 )
 
         if isinstance(self._bot.client, BinanceFuturesMarketData):
@@ -1139,15 +1159,17 @@ class SymbolAnalyzer:
                         source="rest_cache",
                         reason="oi_change_missing",
                         fallback_used="skip_oi_context",
+                        exception_type="stale_cache",
                     )
                 )
                 self._log_degradation(
-                    level=logging.WARNING,
+                    level=logging.INFO,
                     symbol=symbol,
                     stage="oi_cache",
                     source="rest_cache",
                     reason="oi_change_missing",
                     fallback_used="skip_oi_context",
+                    exception_type="stale_cache",
                 )
             ls = self._bot.client.get_cached_ls_ratio(symbol)
             if ls is not None:
@@ -1161,15 +1183,17 @@ class SymbolAnalyzer:
                         source="rest_cache",
                         reason="ls_ratio_missing",
                         fallback_used="skip_ls_context",
+                        exception_type="stale_cache",
                     )
                 )
                 self._log_degradation(
-                    level=logging.WARNING,
+                    level=logging.INFO,
                     symbol=symbol,
                     stage="ls_cache",
                     source="rest_cache",
                     reason="ls_ratio_missing",
                     fallback_used="skip_ls_context",
+                    exception_type="stale_cache",
                 )
             top_position_ls = self._bot.client.get_cached_top_position_ls_ratio(symbol)
             if top_position_ls is not None:
@@ -1193,6 +1217,7 @@ class SymbolAnalyzer:
                         source="rest_cache",
                         reason="funding_trend_missing",
                         fallback_used="skip_funding_context",
+                        exception_type="stale_cache",
                     )
                 )
                 self._log_degradation(
@@ -1202,6 +1227,7 @@ class SymbolAnalyzer:
                     source="rest_cache",
                     reason="funding_trend_missing",
                     fallback_used="skip_funding_context",
+                    exception_type="stale_cache",
                 )
             basis_pct = self._bot.client.get_cached_basis(symbol, period="1h")
             if basis_pct is not None:

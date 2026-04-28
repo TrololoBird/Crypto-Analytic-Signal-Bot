@@ -1123,6 +1123,64 @@ def test_symbol_analyzer_does_not_hide_unexpected_frame_errors(
     )
 
 
+def test_ws_enrichment_emits_degradation_context_instead_of_silent_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class _BrokenWS:
+        def get_ticker_snapshot(self, symbol: str):
+            raise RuntimeError(f"ticker broken for {symbol}")
+
+        def get_ticker_age_seconds(self, symbol: str):
+            return None
+
+        def get_mark_price_snapshot(self, symbol: str):
+            return None
+
+        def get_mark_price_age_seconds(self, symbol: str):
+            return None
+
+        def get_depth_imbalance(self, symbol: str):
+            return None
+
+        def get_microprice_bias(self, symbol: str):
+            return None
+
+        def get_liquidation_sentiment(self, symbol: str, window_seconds: int):
+            return None
+
+    client = BinanceFuturesMarketData.__new__(BinanceFuturesMarketData)
+    client.get_cached_oi_change = lambda _symbol: None
+    client.get_cached_ls_ratio = lambda _symbol: None
+    client.get_cached_top_position_ls_ratio = lambda _symbol: None
+    client.get_cached_taker_ratio = lambda _symbol: None
+    client.get_cached_global_ls_ratio = lambda _symbol: None
+    client.get_cached_funding_trend = lambda _symbol: None
+    client.get_cached_basis = lambda _symbol, period="1h": None
+    client.get_cached_basis_stats = lambda _symbol, period="5m": None
+
+    bot = SimpleNamespace(
+        _ws_manager=_BrokenWS(),
+        client=client,
+        settings=SimpleNamespace(
+            ws=SimpleNamespace(market_ticker_freshness_seconds=30),
+        ),
+    )
+    analyzer = SymbolAnalyzer(bot)
+
+    with caplog.at_level("INFO", logger="bot.application.bot"):
+        enrichments = analyzer.ws_cache_enrichments("BTCUSDT")
+
+    assert enrichments["degraded"] is True
+    assert enrichments["degrade_reason"].startswith("ticker_snapshot:")
+    assert enrichments["fallback_used"] == "skip_ticker_enrichment"
+    assert any(event["exception_type"] == "RuntimeError" for event in enrichments["degradation_events"])
+    assert any(
+        "symbol=BTCUSDT stage=ticker_snapshot source=ws" in record.message
+        and "exception_type=RuntimeError" in record.message
+        for record in caplog.records
+    )
+
+
 @pytest.mark.asyncio
 async def test_shortlist_refresh_prefers_ws_light_between_full_rebalances() -> None:
     from bot.application.shortlist_service import ShortlistService
