@@ -172,3 +172,96 @@ async def run_stream_session(
         )
         return backoff_reset, True
     raise ConnectionError("stream closed without explicit close frame")
+
+
+async def run_endpoint_loop(
+    manager: Any,
+    *,
+    endpoint: str,
+    backoff_reset_after_seconds: float,
+    proactive_reconnect_after_seconds: float,
+    parse_message: Any,
+    market_endpoint: str,
+    stale_symbols: Any,
+    maybe_backfill_after_disconnect: Any,
+    compute_disconnect_delay: Any,
+    connection_exceptions: tuple[type[BaseException], ...],
+) -> None:
+    """Run reconnect loop for a websocket endpoint."""
+    delay = 1.0
+    max_delay = manager._cfg.reconnect_max_delay_seconds
+    url = build_stream_url(manager, endpoint)
+    while manager._running:
+        connect_start = time.monotonic()
+        backoff_reset = False
+        try:
+            LOG.info(
+                "ws connecting | endpoint=%s url=%s streams=%d",
+                endpoint,
+                url,
+                len(manager._intended_streams_by_endpoint.get(endpoint, set())),
+            )
+            backoff_reset, proactive_reconnect = await run_stream_session(
+                manager,
+                endpoint=endpoint,
+                url=url,
+                connect_start=connect_start,
+                backoff_reset_after_seconds=backoff_reset_after_seconds,
+                proactive_reconnect_after_seconds=proactive_reconnect_after_seconds,
+                parse_message=parse_message,
+            )
+            if backoff_reset:
+                delay = 1.0
+            if proactive_reconnect:
+                delay = 1.0
+                manager._short_lived_streak = 0
+                if endpoint == market_endpoint:
+                    stale = stale_symbols()
+                    await maybe_backfill_after_disconnect(
+                        elapsed=time.monotonic() - connect_start,
+                        stale_symbols=stale,
+                    )
+                continue
+        except asyncio.CancelledError:
+            clear_endpoint_connection_state(manager, endpoint)
+            return
+        except connection_exceptions as exc:
+            clear_endpoint_connection_state(manager, endpoint)
+            if not manager._running:
+                return
+
+            elapsed = time.monotonic() - connect_start
+            delay = compute_disconnect_delay(
+                manager,
+                endpoint=endpoint,
+                url=url,
+                exc=exc,
+                elapsed=elapsed,
+                delay=delay,
+            )
+            try:
+                await asyncio.sleep(delay)
+            except asyncio.CancelledError:
+                return
+            delay = min(delay * 2.0, max_delay)
+            if endpoint == market_endpoint:
+                stale = stale_symbols()
+                await maybe_backfill_after_disconnect(
+                    elapsed=elapsed,
+                    stale_symbols=stale,
+                )
+        except Exception as exc:
+            LOG.error(
+                "ws unexpected error during connection | endpoint=%s error=%s (%s)",
+                endpoint,
+                exc,
+                type(exc).__name__,
+            )
+            clear_endpoint_connection_state(manager, endpoint)
+            if not manager._running:
+                return
+            delay = min(max(delay, 1.0) * 2.0, max_delay)
+            try:
+                await asyncio.sleep(delay)
+            except asyncio.CancelledError:
+                return

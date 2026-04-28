@@ -121,3 +121,80 @@ async def test_monitor_connection_silence_triggers_close_when_streams_intended()
 
     assert triggered is True
     close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_run_endpoint_loop_resets_delay_and_backfills_on_proactive_reconnect() -> None:
+    from bot.websocket import connection as ws_connection
+
+    manager = SimpleNamespace(
+        _cfg=SimpleNamespace(reconnect_max_delay_seconds=16, endpoint_base_url=lambda _e: "wss://fstream.binance.com"),
+        _running=True,
+        _short_lived_streak=5,
+        _intended_streams_by_endpoint={"market": {"btcusdt@kline_15m"}},
+    )
+    manager._stale_symbols = lambda: ["BTCUSDT"]
+    manager._maybe_backfill_after_disconnect = AsyncMock()
+
+    calls = {"n": 0}
+
+    async def fake_run_stream_session(*args, **kwargs):
+        calls["n"] += 1
+        manager._running = False
+        return True, True
+
+    with patch("bot.websocket.connection.run_stream_session", side_effect=fake_run_stream_session):
+        await ws_connection.run_endpoint_loop(
+            manager,
+            endpoint="market",
+            backoff_reset_after_seconds=30.0,
+            proactive_reconnect_after_seconds=999.0,
+            parse_message=lambda raw: raw,
+            market_endpoint="market",
+            stale_symbols=manager._stale_symbols,
+            maybe_backfill_after_disconnect=manager._maybe_backfill_after_disconnect,
+            compute_disconnect_delay=lambda *a, **k: 1.0,
+            connection_exceptions=(ConnectionError,),
+        )
+
+    assert calls["n"] == 1
+    assert manager._short_lived_streak == 0
+    manager._maybe_backfill_after_disconnect.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_run_endpoint_loop_reconnects_and_triggers_stale_recovery_on_disconnect() -> None:
+    from bot.websocket import connection as ws_connection
+
+    manager = SimpleNamespace(
+        _cfg=SimpleNamespace(reconnect_max_delay_seconds=16, endpoint_base_url=lambda _e: "wss://fstream.binance.com"),
+        _running=True,
+        _short_lived_streak=0,
+        _intended_streams_by_endpoint={"market": {"btcusdt@kline_15m"}},
+    )
+    manager._stale_symbols = lambda: ["BTCUSDT"]
+    manager._maybe_backfill_after_disconnect = AsyncMock()
+
+    async def fail_once(*args, **kwargs):
+        raise ConnectionError("boom")
+
+    with (
+        patch("bot.websocket.connection.run_stream_session", side_effect=fail_once),
+        patch("bot.websocket.connection.clear_endpoint_connection_state") as clear_state,
+        patch("bot.websocket.connection.asyncio.sleep", new=AsyncMock(side_effect=lambda *_a, **_k: setattr(manager, "_running", False))),
+    ):
+        await ws_connection.run_endpoint_loop(
+            manager,
+            endpoint="market",
+            backoff_reset_after_seconds=30.0,
+            proactive_reconnect_after_seconds=999.0,
+            parse_message=lambda raw: raw,
+            market_endpoint="market",
+            stale_symbols=manager._stale_symbols,
+            maybe_backfill_after_disconnect=manager._maybe_backfill_after_disconnect,
+            compute_disconnect_delay=lambda *a, **k: 0.25,
+            connection_exceptions=(ConnectionError,),
+        )
+
+    clear_state.assert_called_once_with(manager, "market")
+    manager._maybe_backfill_after_disconnect.assert_awaited_once()
