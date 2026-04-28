@@ -108,7 +108,7 @@ class PublicIntelligenceService:
             ],
         }
 
-    def _options_eapi_runtime_enabled(self) -> bool:
+    def _options_eapi_research_enabled(self) -> bool:
         return bool(
             getattr(self._settings.intelligence, "allow_runtime_options_eapi", False)
         )
@@ -398,124 +398,29 @@ class PublicIntelligenceService:
         inferences: list[str] = []
         assumptions: list[str] = []
         gamma_semantics = self._settings.intelligence.gamma_semantics
-        if not self._options_eapi_runtime_enabled():
-            for asset in self._settings.intelligence.option_underlyings:
-                by_underlying[asset] = {
-                    "available": False,
-                    "reason": "runtime_boundary_disallows_binance_eapi",
-                    "gamma_semantics": gamma_semantics,
-                }
-            assumptions.append(
-                "options_eapi_disabled_by_default_under_runtime_usdm_public_boundary"
-            )
-            return {
-                "enabled": False,
-                "by_underlying": by_underlying,
-                "confirmed_facts": confirmed_facts,
-                "inferences": inferences,
-                "assumptions": assumptions,
-            }
-
         for asset in self._settings.intelligence.option_underlyings:
-            (
-                meta_rows,
-                selected_expiries,
-                oi_rows,
-                mark_rows,
-            ) = await self._fetch_options_runtime_inputs(asset)
-            if not meta_rows:
-                by_underlying[asset] = {
-                    "available": False,
-                    "reason": "no_public_option_symbols",
-                    "gamma_semantics": gamma_semantics,
-                }
-                continue
-
-            meta_by_symbol = {str(row["symbol"]): row for row in meta_rows}
-            mark_by_symbol = {str(row["symbol"]): row for row in mark_rows}
-            call_oi_usd = 0.0
-            put_oi_usd = 0.0
-            call_oi_contracts = 0.0
-            put_oi_contracts = 0.0
-            weighted_iv_numerator = 0.0
-            weighted_iv_denominator = 0.0
-            gamma_balance_proxy = 0.0
-            gamma_abs_proxy = 0.0
-
-            for row in oi_rows:
-                symbol = str(row.get("symbol") or "")
-                if not symbol:
-                    continue
-                meta = meta_by_symbol.get(symbol, {})
-                mark = mark_by_symbol.get(symbol, {})
-                side = str(meta.get("side") or "").upper()
-                oi_contracts = _safe_float(row.get("sumOpenInterest")) or 0.0
-                oi_usd = _safe_float(row.get("sumOpenInterestUsd")) or 0.0
-                gamma = _safe_float(mark.get("gamma")) or 0.0
-                mark_iv = _safe_float(mark.get("markIV"))
-                unit = _safe_float(meta.get("unit")) or 1.0
-
-                if side == "CALL":
-                    call_oi_usd += oi_usd
-                    call_oi_contracts += oi_contracts
-                    gamma_balance_proxy += gamma * oi_contracts * unit
-                elif side == "PUT":
-                    put_oi_usd += oi_usd
-                    put_oi_contracts += oi_contracts
-                    gamma_balance_proxy -= gamma * oi_contracts * unit
-                gamma_abs_proxy += abs(gamma * oi_contracts * unit)
-
-                if mark_iv is not None and oi_usd > 0.0:
-                    weighted_iv_numerator += mark_iv * oi_usd
-                    weighted_iv_denominator += oi_usd
-
-            put_call_oi_ratio = None
-            if call_oi_usd > 0.0:
-                put_call_oi_ratio = round(put_oi_usd / call_oi_usd, 4)
-            gamma_balance_ratio = 0.0
-            if gamma_abs_proxy > 0.0:
-                gamma_balance_ratio = gamma_balance_proxy / gamma_abs_proxy
-            gamma_positioning_proxy = "flat_proxy"
-            if gamma_balance_ratio >= 0.10:
-                gamma_positioning_proxy = "positive_gamma_proxy"
-            elif gamma_balance_ratio <= -0.10:
-                gamma_positioning_proxy = "negative_gamma_proxy"
-
             by_underlying[asset] = {
-                "available": True,
-                "expiries_used": selected_expiries,
-                "call_oi_contracts": round(call_oi_contracts, 4),
-                "put_oi_contracts": round(put_oi_contracts, 4),
-                "call_oi_usd": round(call_oi_usd, 2),
-                "put_oi_usd": round(put_oi_usd, 2),
-                "put_call_oi_ratio": put_call_oi_ratio,
-                "weighted_mark_iv": round(
-                    weighted_iv_numerator / weighted_iv_denominator, 6
-                )
-                if weighted_iv_denominator > 0.0
-                else None,
-                "gamma_balance_proxy": round(gamma_balance_proxy, 8),
-                "gamma_balance_ratio": round(gamma_balance_ratio, 6),
-                "gamma_positioning_proxy": gamma_positioning_proxy,
+                "available": False,
+                "reason": "runtime_boundary_disallows_binance_eapi",
                 "gamma_semantics": gamma_semantics,
-                "mark_rows": len(mark_rows),
-                "oi_rows": len(oi_rows),
             }
-            confirmed_facts.append(f"{asset}_public_options_mark_and_oi_available")
-            inferences.append(
-                f"{asset}_gamma_positioning_proxy_is_derived_from_public_gamma_and_oi"
-            )
-            assumptions.append(
-                f"{asset}_gamma_proxy_is_sign_based_and_does_not_observe_real_dealer_inventory"
-            )
+        assumptions.append(
+            "options_eapi_disabled_by_default_under_runtime_usdm_public_boundary"
+        )
 
         return {
-            "enabled": True,
+            "enabled": False,
             "by_underlying": by_underlying,
             "confirmed_facts": confirmed_facts,
             "inferences": inferences,
             "assumptions": assumptions,
         }
+
+    async def build_options_research_snapshot(self) -> dict[str, Any]:
+        """Optional non-runtime helper for offline options analytics."""
+        if not self._options_eapi_research_enabled():
+            return {"enabled": False, "reason": "allow_runtime_options_eapi_false"}
+        return {"enabled": True, "note": "research utility path only"}
 
     async def _fetch_options_runtime_inputs(
         self, asset: str
@@ -973,7 +878,7 @@ class PublicIntelligenceService:
     async def _fetch_options_exchange_info(
         self, underlying_asset: str
     ) -> list[dict[str, Any]]:
-        if not self._options_eapi_runtime_enabled():
+        if not self._options_eapi_research_enabled():
             return []
         asset = str(underlying_asset or "").strip().upper()
         now = time.monotonic()
@@ -1008,7 +913,7 @@ class PublicIntelligenceService:
         underlying_asset: str,
         expiry_code: str,
     ) -> list[dict[str, Any]]:
-        if not self._options_eapi_runtime_enabled():
+        if not self._options_eapi_research_enabled():
             return []
         validate_runtime_public_rest_url("https://eapi.binance.com/eapi/v1/openInterest")
         payload = await self._fetch_json(
@@ -1023,7 +928,7 @@ class PublicIntelligenceService:
         return []
 
     async def _fetch_options_mark_rows(self, underlying: str) -> list[dict[str, Any]]:
-        if not self._options_eapi_runtime_enabled():
+        if not self._options_eapi_research_enabled():
             return []
         validate_runtime_public_rest_url("https://eapi.binance.com/eapi/v1/mark")
         payload = await self._fetch_json(

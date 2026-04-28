@@ -156,6 +156,11 @@ def validate_runtime_public_rest_url(url: str) -> None:
         raise ValueError(
             f"runtime boundary forbids non-USDⓈ-M Binance hosts; got {url!r}"
         )
+    if not path.startswith(_PUBLIC_PATH_PREFIXES):
+        raise ValueError(
+            "runtime boundary requires public USDⓈ-M endpoint paths "
+            f"{_PUBLIC_PATH_PREFIXES}; got {url!r}"
+        )
     if any(marker in path for marker in _FORBIDDEN_PUBLIC_PATH_MARKERS):
         raise ValueError(
             f"runtime boundary forbids private/auth Binance REST routes; got {url!r}"
