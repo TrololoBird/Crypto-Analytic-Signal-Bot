@@ -40,9 +40,10 @@ from bot.strategies.funding_reversal import FundingReversalSetup
 from bot.strategies.hidden_divergence import HiddenDivergenceSetup
 from bot.strategies.squeeze_setup import SqueezeSetup
 from bot.strategies.structure_pullback import StructurePullbackSetup
+from bot.strategies.turtle_soup import TurtleSoupSetup
 from bot.strategies.wick_trap_reversal import WickTrapReversalSetup
 from bot.setups import _build_signal
-from bot.setups.utils import build_structural_targets
+from bot.setups.utils import build_structural_targets, normalize_trade_levels
 from bot.tracked_signals import TrackedSignalState
 from bot.tracking import SignalTracker
 from bot.websocket import subscriptions as ws_subscriptions
@@ -1093,6 +1094,66 @@ def test_wick_trap_params_keep_backward_compatible_alias() -> None:
 
     assert params["wick_through_atr_mult"] == pytest.approx(0.77)
     assert params["wick_atr_threshold"] == pytest.approx(0.77)
+
+
+def test_wick_trap_reversal_rejects_invalid_normalized_trade_levels(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    setup = WickTrapReversalSetup()
+    prepared = make_prepared(price=100.0)
+    monkeypatch.setattr(
+        "bot.strategies.wick_trap_reversal.normalize_trade_levels",
+        lambda **_: None,
+    )
+
+    signal = setup.detect(prepared, load_settings())
+
+    assert signal is None
+
+
+def test_turtle_soup_rejects_invalid_normalized_trade_levels(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    setup = TurtleSoupSetup()
+    prepared = make_prepared(price=100.0)
+    monkeypatch.setattr(
+        "bot.strategies.turtle_soup.normalize_trade_levels",
+        lambda **_: None,
+    )
+
+    signal = setup.detect(prepared, load_settings())
+
+    assert signal is None
+
+
+def test_normalize_trade_levels_accepts_valid_directional_targets() -> None:
+    normalized = normalize_trade_levels(
+        direction="long",
+        price_anchor=100.0,
+        stop=98.0,
+        tp1=103.0,
+        tp2=106.0,
+    )
+
+    assert normalized is not None
+    stop, tp1, tp2, single_target_mode, status = normalized
+    assert stop == pytest.approx(98.0)
+    assert tp1 == pytest.approx(103.0)
+    assert tp2 == pytest.approx(106.0)
+    assert single_target_mode is False
+    assert status == "valid"
+
+
+def test_normalize_trade_levels_rejects_directional_mismatch_targets() -> None:
+    normalized = normalize_trade_levels(
+        direction="short",
+        price_anchor=100.0,
+        stop=102.0,
+        tp1=103.0,
+        tp2=99.0,
+    )
+
+    assert normalized is None
 
 
 def test_symbol_analyzer_does_not_hide_unexpected_frame_errors(
