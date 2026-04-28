@@ -19,6 +19,27 @@ cp config.toml.example config.toml
 python main.py
 ```
 
+## Windows 11 + Python 3.13 Quickstart (signal-only)
+
+```powershell
+# 1) In PowerShell (Windows 11), create and activate venv
+py -3.13 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+
+# 2) Install dependencies
+pip install -r requirements.txt
+
+# 3) Use dedicated signal-only preset
+Copy-Item config.signal_only.toml.example config.toml
+
+# 4) Put Telegram credentials into .env (from env.example), then run
+python .\main.py
+```
+
+Notes:
+- This preset keeps runtime in public-data signal mode (`runtime_mode = "signal_only"`, `source_policy = "binance_only"`).
+- Dashboard auto-open is disabled by default (`auto_open_dashboard = false`) to keep runtime headless-friendly.
+
 ## Dashboard
 
 The bot automatically opens a web dashboard at http://localhost:8080 with:

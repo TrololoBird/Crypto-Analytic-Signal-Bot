@@ -20,7 +20,7 @@ class RuntimeConfig(BaseModel):
     circuit_breaker_failure_threshold: int = Field(default=5, ge=0, le=100)
     metrics_port: int = Field(default=9090, ge=1000, le=65535)
     dashboard_port: int = Field(default=8080, ge=1000, le=65535)
-    auto_open_dashboard: bool = True
+    auto_open_dashboard: bool = False
     circuit_breaker_cooldown_seconds: int = Field(default=60, ge=0, le=3600)
     telemetry_subdir: str = "telemetry"
     log_level: str = "INFO"
