@@ -417,7 +417,12 @@ class PublicIntelligenceService:
             }
 
         for asset in self._settings.intelligence.option_underlyings:
-            meta_rows = await self._fetch_options_exchange_info(asset)
+            (
+                meta_rows,
+                selected_expiries,
+                oi_rows,
+                mark_rows,
+            ) = await self._fetch_options_runtime_inputs(asset)
             if not meta_rows:
                 by_underlying[asset] = {
                     "available": False,
@@ -425,21 +430,6 @@ class PublicIntelligenceService:
                     "gamma_semantics": gamma_semantics,
                 }
                 continue
-
-            expiries = sorted(
-                {
-                    str(row["symbol"]).split("-")[1]
-                    for row in meta_rows
-                    if str(row.get("symbol"))
-                }
-            )
-            selected_expiries = expiries[
-                : max(1, int(self._settings.intelligence.options_expiry_count))
-            ]
-            oi_rows: list[dict[str, Any]] = []
-            for expiry in selected_expiries:
-                oi_rows.extend(await self._fetch_options_open_interest(asset, expiry))
-            mark_rows = await self._fetch_options_mark_rows(f"{asset}USDT")
 
             meta_by_symbol = {str(row["symbol"]): row for row in meta_rows}
             mark_by_symbol = {str(row["symbol"]): row for row in mark_rows}
@@ -526,6 +516,33 @@ class PublicIntelligenceService:
             "inferences": inferences,
             "assumptions": assumptions,
         }
+
+    async def _fetch_options_runtime_inputs(
+        self, asset: str
+    ) -> tuple[
+        list[dict[str, Any]],
+        list[str],
+        list[dict[str, Any]],
+        list[dict[str, Any]],
+    ]:
+        meta_rows = await self._fetch_options_exchange_info(asset)
+        if not meta_rows:
+            return [], [], [], []
+        expiries = sorted(
+            {
+                str(row["symbol"]).split("-")[1]
+                for row in meta_rows
+                if str(row.get("symbol"))
+            }
+        )
+        selected_expiries = expiries[
+            : max(1, int(self._settings.intelligence.options_expiry_count))
+        ]
+        oi_rows: list[dict[str, Any]] = []
+        for expiry in selected_expiries:
+            oi_rows.extend(await self._fetch_options_open_interest(asset, expiry))
+        mark_rows = await self._fetch_options_mark_rows(f"{asset}USDT")
+        return meta_rows, selected_expiries, oi_rows, mark_rows
 
     async def _build_macro_snapshot(self) -> dict[str, Any]:
         by_symbol: dict[str, Any] = {}

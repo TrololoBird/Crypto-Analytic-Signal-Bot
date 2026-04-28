@@ -56,6 +56,7 @@ _Date:_ 2026-04-28 (UTC)
 
 - REST registry validator allows only public prefixes: `/fapi/v1/`, `/futures/data/`.
 - Runtime REST host validator allows only `https://fapi.binance.com`; non-USDⓈ-M hosts like `eapi.binance.com` are rejected.
+- Runtime options eAPI fetchers are isolated in `bot/public_intelligence.py::_fetch_options_runtime_inputs(...)` and are reachable only when `bot.intelligence.allow_runtime_options_eapi=true` (default `false`).
 - REST registry validator forbids private/auth markers: `/private`, `listenkey`, `/ws-api`, `/sapi`, `/papi`, `signature=`, `timestamp=`.
 - WS stream classifier rejects private/auth stream tokens: `listenkey`, `/private`, `userdatastream`, `@account`, `@order`.
 - Runtime WS config validator forbids `/private`, `listenkey`, `/ws-api`, `/sapi`, `/papi` in configured WS URLs.
@@ -81,7 +82,7 @@ _Date:_ 2026-04-28 (UTC)
 
 | Severity | Finding | Module source |
 |---|---|---|
-| None | No active non-USDⓈ-M runtime endpoint usage found in current runtime fetch path. | N/A |
+| Low (guarded) | eAPI option endpoints exist only behind explicit feature flag `allow_runtime_options_eapi` and remain disabled by default. | `bot/public_intelligence.py` |
 
 ## Compliance verdict
 
