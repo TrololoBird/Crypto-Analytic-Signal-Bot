@@ -64,4 +64,9 @@ include = ["bot*"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "regression_remediation: remediation regression coverage umbrella",
+    "regression_remediation_runtime: remediation runtime/intra-candle flow checks",
+    "regression_remediation_indicators: remediation indicators and market microstructure checks",
+]
 
