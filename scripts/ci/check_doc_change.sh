@@ -16,16 +16,16 @@ if [[ -z "$changed_files" ]]; then
   exit 0
 fi
 
-if ! printf '%s\n' "$changed_files" | rg -q '^(bot/application/|bot/websocket/|bot/features($|_|/)|bot/ml($|_|/))'; then
-  echo "No architecture-contract paths changed; doc-change gate not required."
+if ! printf '%s\n' "$changed_files" | rg -q '^(bot/application/|bot/core/|bot/tasks/|bot/telegram/|bot/websocket/|bot/features($|_|/)|bot/ml($|_|/)|bot/market_data.py|bot/ws_manager.py|bot/config.py|main.py)'; then
+  echo "No critical runtime paths changed; docs parity gate not required."
   exit 0
 fi
 
 if printf '%s\n' "$changed_files" | rg -q '^docs/'; then
-  echo "Architecture-contract paths changed and docs/ updates are present."
+  echo "Critical runtime paths changed and docs/ updates are present."
   exit 0
 fi
 
-echo "Architecture-contract paths changed but docs/ was not updated."
+echo "Critical runtime paths changed but docs/ was not updated."
 echo "Please add/update documentation in docs/ for this PR."
 exit 1

@@ -10,4 +10,4 @@
 
 - [ ] Config surface changed (`config.toml` / `config.toml.example`) is kept in sync.
 - [ ] Public-market-data boundary is preserved (no private/auth Binance routes).
-- [ ] If architecture or a runtime contract changed, a docs update is included in this PR.
+- [ ] If architecture or critical runtime paths changed, a docs update is included in this PR (same PR required).

@@ -37,13 +37,17 @@ The bot includes a built-in web dashboard for real-time monitoring.
 - `make test` — run tests.
 - `make run` — start bot runtime.
 - `make dry-run` — run without sending live deliveries.
-- Targeted remediation suites:
-  - `pytest -q tests/test_remediation_intra_candle.py`
-  - `pytest -q tests/test_remediation_indicators.py`
+- Targeted remediation suites (`test_regression_suite_*` naming):
+  - `pytest -q tests/test_regression_suite_remediation_intra_candle.py`
+  - `pytest -q tests/test_regression_suite_remediation_indicators.py`
   - `pytest -q tests/test_regression_suite_tracking_delivery.py`
   - `pytest -q tests/test_regression_suite_strategies.py`
   - `pytest -q tests/test_regression_suite_contracts.py`
   - `pytest -q tests/test_regression_suite_engine.py`
+- Fast triage by suite markers:
+  - `pytest -q -m regression_remediation`
+  - `pytest -q -m regression_remediation_runtime`
+  - `pytest -q -m regression_remediation_indicators`
 
 ## Recommended routine
 
@@ -102,6 +106,6 @@ The bot includes a built-in web dashboard for real-time monitoring.
 
 ## PR doc-change gate
 
-- CI now enforces a lightweight doc-change check for pull requests that touch architecture-contract paths: `bot/application`, `bot/websocket`, `bot/features*`, `bot/ml*`.
+- CI now enforces a docs-parity check for pull requests that touch critical runtime paths: `main.py`, `bot/application`, `bot/core`, `bot/tasks`, `bot/telegram`, `bot/websocket`, `bot/features*`, `bot/ml*`, `bot/market_data.py`, `bot/ws_manager.py`, `bot/config.py`.
 - If any of those paths change, at least one file under `docs/` must also change in the same PR.
 - The same expectation is reflected in the pull-request checklist template.
