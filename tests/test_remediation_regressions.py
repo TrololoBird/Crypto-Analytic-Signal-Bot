@@ -22,9 +22,14 @@ from bot.config import WSConfig  # noqa: F401
 from bot.core.engine import SignalEngine, StrategyRegistry
 from bot.core.events import BookTickerEvent  # noqa: F401
 from bot.features import _ichimoku_lines, _swing_points, _weighted_moving_average  # noqa: F401
-from bot.market_data import BinanceFuturesMarketData, MarketDataUnavailable
+from bot.market_data import (
+    BinanceFuturesMarketData,
+    MarketDataUnavailable,
+    validate_runtime_public_rest_url,
+)
 from bot.ml import MLFilter
 from bot.models import AggTrade, PipelineResult, PreparedSymbol, Signal, UniverseSymbol  # noqa: F401
+from bot.public_intelligence import PublicIntelligenceService
 from bot.scoring import _crowd_position
 from bot.setup_base import BaseSetup, SetupParams
 from bot.strategies.cvd_divergence import CVDDivergenceSetup
@@ -1561,6 +1566,33 @@ def test_ws_stream_endpoint_class_keeps_public_market_split() -> None:
         ValueError, match="private/auth websocket streams are not allowed"
     ):
         ws_subscriptions.stream_endpoint_class("listenKey")
+
+
+def test_runtime_rest_boundary_rejects_binance_eapi_host() -> None:
+    with pytest.raises(ValueError, match="public USDⓈ-M REST host"):
+        validate_runtime_public_rest_url("https://eapi.binance.com/eapi/v1/mark")
+
+
+@pytest.mark.asyncio
+async def test_public_intelligence_runtime_guard_disables_options_eapi_calls() -> None:
+    service = PublicIntelligenceService.__new__(PublicIntelligenceService)
+    service._settings = SimpleNamespace(
+        intelligence=SimpleNamespace(
+            gamma_semantics="proxy",
+            option_underlyings=["BTC", "ETH"],
+            allow_runtime_options_eapi=False,
+        )
+    )
+
+    snapshot = await service._build_options_snapshot()
+
+    assert snapshot["enabled"] is False
+    assert snapshot["by_underlying"]["BTC"]["reason"] == (
+        "runtime_boundary_disallows_binance_eapi"
+    )
+    assert snapshot["by_underlying"]["ETH"]["reason"] == (
+        "runtime_boundary_disallows_binance_eapi"
+    )
 
 
 @pytest.mark.asyncio
