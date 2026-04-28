@@ -82,5 +82,6 @@ def test_ml_filter_uses_signal_classifier_fallback(tmp_path) -> None:
     status = ml_filter.get_status()
     # Safety guardrail: baseline fallback models must not be enabled in live mode.
     assert status["signal_classifier_loaded"] is False
+    assert status["disable_reason"] == "live_baseline_blocked"
     assert ml_filter.enabled is False
     assert 0.0 <= result.probability <= 1.0

@@ -7,6 +7,7 @@ probability predictions. ML scoring is integrated into ConfluenceEngine.
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
@@ -15,6 +16,8 @@ import polars as pl
 if TYPE_CHECKING:
     from ..config import BotSettings
     from ..models import PreparedSymbol, Signal
+
+from .guardrails import LiveModelGuardrailDecision, evaluate_live_model_guardrail
 
 LOG = logging.getLogger("bot.ml.filter")
 
@@ -51,6 +54,8 @@ class MLFilter:
         self._model_metadata: dict[str, Any] | None = None
         self._feature_columns: list[str] | None = None
         self._classifier: Any | None = None
+        self._disable_reason: str | None = None
+        self._guardrail_counts: Counter[str] = Counter()
 
         if self.enabled:
             self._load_model()
@@ -72,12 +77,19 @@ class MLFilter:
                 )
                 if classifier.load():
                     model_kind = classifier.model_kind()
-                    if model_kind in {"centroid_baseline", "linear_baseline"}:
+                    decision = evaluate_live_model_guardrail(
+                        is_live=self.enabled,
+                        model_kind=model_kind,
+                        stage="load_signal_classifier_fallback",
+                    )
+                    self._emit_guardrail_telemetry(decision)
+                    if decision.should_disable:
                         LOG.warning(
-                            "ML filter fallback resolved to offline baseline model; "
+                            "ML filter fallback resolved to blocked model kind; "
                             "live ML scoring is disabled for safety"
                         )
                         self.enabled = False
+                        self._disable_reason = decision.disable_reason
                         return
                     self._classifier = classifier
                     self._model_metadata = {
@@ -117,6 +129,19 @@ class MLFilter:
             self._model_metadata = data.get("metrics", {})
             metadata = self._model_metadata or {}
             metadata.setdefault("model_kind", type(self._model).__name__.lower())
+            decision = evaluate_live_model_guardrail(
+                is_live=self.enabled,
+                model_kind=str(metadata.get("model_kind", "unknown")),
+                stage="load_primary_model",
+            )
+            self._emit_guardrail_telemetry(decision)
+            if decision.should_disable:
+                LOG.warning(
+                    "ML filter primary model blocked by live guardrail; disabling ML"
+                )
+                self.enabled = False
+                self._disable_reason = decision.disable_reason
+                return
 
             # Try to load feature importance to determine feature columns
             feature_file = (
@@ -415,6 +440,24 @@ class MLFilter:
         )
         return mapped
 
+    def _emit_guardrail_telemetry(self, decision: LiveModelGuardrailDecision) -> None:
+        key = f"{decision.stage}:{decision.model_kind}:{decision.disable_reason or 'allowed'}"
+        self._guardrail_counts[key] += 1
+        count = self._guardrail_counts[key]
+        if decision.disable_reason is None and count > 1:
+            return
+        LOG.info(
+            "ML guardrail | stage=%s model_kind=%s disable_reason=%s count=%d",
+            decision.stage,
+            decision.model_kind,
+            decision.disable_reason or "none",
+            count,
+        )
+
+    @property
+    def disable_reason(self) -> str | None:
+        return self._disable_reason
+
     def get_status(self) -> dict[str, Any]:
         """Get current ML filter status for diagnostics."""
         metadata = self._model_metadata or {}
@@ -426,4 +469,6 @@ class MLFilter:
             "model_version": metadata.get("trained_at"),
             "feature_count": len(self._feature_columns) if self._feature_columns else 0,
             "confidence_threshold": self.confidence_threshold,
+            "disable_reason": self._disable_reason,
+            "guardrail_counts": dict(self._guardrail_counts),
         }

@@ -157,7 +157,9 @@ class ConfluenceEngine:
         elif self._ml_filter is None:
             ml_skip_reason = "ml_filter_absent"
         elif not self._ml_filter.enabled:
-            ml_skip_reason = "ml_disabled"
+            ml_skip_reason = (
+                getattr(self._ml_filter, "disable_reason", None) or "ml_disabled"
+            )
 
         return ConfluenceResult(
             setup_prior=signal.score,
