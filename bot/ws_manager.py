@@ -758,24 +758,11 @@ class FuturesWSManager:
         ws_connection.apply_tcp_keepalive(self, ws)
 
     async def _health_monitor(self, ws: Any, endpoint: str) -> None:
-        """Monitor WebSocket health and reconnect on message silence."""
-        silence_limit = self._cfg.health_check_silence_seconds
+        """Monitor WebSocket health and reconnect on silence/recovery failures."""
         while True:
             await asyncio.sleep(_HEALTH_CHECK_INTERVAL_SECONDS)
-            last_message_ts = self._last_message_ts_by_endpoint.get(endpoint, 0.0)
-            if last_message_ts != 0.0:
-                silence = time.monotonic() - last_message_ts
-                if silence > silence_limit and self._intended_streams_by_endpoint.get(
-                    endpoint
-                ):
-                    LOG.info(
-                        "ws health: no message for %.0fs with %d streams - forcing reconnect | endpoint=%s",
-                        silence,
-                        len(self._intended_streams_by_endpoint.get(endpoint, set())),
-                        endpoint,
-                    )
-                    await ws.close()
-                    return
+            if await ws_health.monitor_connection_silence(self, ws, endpoint):
+                return
             if await ws_health.evaluate_endpoint_health(self, ws, endpoint):
                 return
 
