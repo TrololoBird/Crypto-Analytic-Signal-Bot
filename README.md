@@ -5,8 +5,11 @@ Event-driven cryptocurrency signal bot with public-only Binance USDⓈ-M market 
 ## Quick Start
 
 ```bash
-# Install dependencies
+# Install minimal runtime dependencies (production)
 pip install -r requirements.txt
+
+# Optional: dev/test/live-check toolchain
+# pip install -r requirements.txt -r requirements-dev-live.txt
 
 # Configure
 cp config.toml.example config.toml
