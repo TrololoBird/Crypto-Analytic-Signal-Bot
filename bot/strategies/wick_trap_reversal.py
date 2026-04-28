@@ -255,39 +255,50 @@ class WickTrapReversalSetup(BaseSetup):
 
         price_anchor = trig_close
 
+        defaults = self.get_optimizable_params(settings)
+        min_rr_raw = dynamic_params.get("min_rr", defaults.get("min_rr", 1.5))
+        min_rr = float(min_rr_raw) if isinstance(min_rr_raw, (int, float)) else 1.5
+
         # --- Compute structural SL/TP ---
         if direction == "long":
             # SL: beyond wick extreme (absolute tip of sweep wick) + 0.5×ATR (was 0.1)
             wick_bar_low = float(work_15m.item(wick_bar_idx, "low"))
             stop = wick_bar_low - atr * 0.5
-            # TP1: the swept level itself (price returns through what was pierced)
-            tp1 = float(level)
-            # TP2: next 1h swing beyond swept level
+            # TP1/TP2 must be above entry for long.
+            structural_distance = max(price_anchor - float(level), atr * 0.5)
+            risk = price_anchor - stop
+            if risk <= 0.0:
+                _reject(prepared, "wick_trap_reversal", "invalid_stop", stop=stop)
+                return None
+            tp1 = price_anchor + max(structural_distance, risk * min_rr)
+            # TP2: next 1h swing high beyond TP1, fallback to extended projection.
             last_sh, _ = _last_swing_prices(work_1h)
-            tp2 = last_sh if (last_sh and last_sh > price_anchor) else None
+            tp2 = last_sh if (last_sh and last_sh > tp1) else (tp1 + structural_distance)
         else:
             # SL: beyond wick extreme + 0.5×ATR (was 0.1)
             wick_bar_high = float(work_15m.item(wick_bar_idx, "high"))
             stop = wick_bar_high + atr * 0.5
-            # TP1: the swept level
-            tp1 = float(level)
-            # TP2: next 1h swing beyond
+            # TP1/TP2 must be below entry for short.
+            structural_distance = max(float(level) - price_anchor, atr * 0.5)
+            risk = stop - price_anchor
+            if risk <= 0.0:
+                _reject(prepared, "wick_trap_reversal", "invalid_stop", stop=stop)
+                return None
+            tp1 = price_anchor - max(structural_distance, risk * min_rr)
+            # TP2: next 1h swing low beyond TP1, fallback to extended projection.
             _, last_sl = _last_swing_prices(work_1h)
-            tp2 = last_sl if (last_sl and last_sl < price_anchor) else None
+            tp2 = last_sl if (last_sl and last_sl < tp1) else (tp1 - structural_distance)
 
-        # Validate: TP1 must be at least 1.5× risk distance, else reject
+        # Validate: TP1 must be at least min_rr × risk distance.
         risk = abs(price_anchor - stop)
-        if risk <= 0:
-            _reject(prepared, "wick_trap_reversal", "invalid_stop", stop=stop)
-            return None
-        if tp1 is None or abs(tp1 - price_anchor) < risk * 1.5:
+        if tp1 is None or abs(tp1 - price_anchor) < risk * min_rr:
             _reject(
                 prepared,
                 "wick_trap_reversal",
                 "tp1_too_close_or_missing",
                 tp1=tp1,
                 risk=risk,
-                min_required=risk * 1.5,
+                min_required=risk * min_rr,
             )
             return None
         if tp2 is None:

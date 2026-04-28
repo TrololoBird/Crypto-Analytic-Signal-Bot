@@ -34,7 +34,7 @@
 ## Market-data contract
 
 - Runtime market data is restricted to public Binance USDⓈ-M endpoints.
-- REST is served through the public endpoint registry in `bot/market_data.py`; private/auth/signed routes are rejected at validation time.
+- REST is served through the public endpoint registry in `bot/market_data.py`; private/auth/signed routes and non-USDⓈ-M hosts (including `eapi.binance.com`) are rejected at validation time.
 - WebSocket routing is split intentionally:
   - `/public` for `@bookTicker`
   - `/market` for `@kline_*`, `@aggTrade`, `!ticker@arr`, `@markPrice`, `!forceOrder@arr`
@@ -45,6 +45,14 @@
   - `ticker_age_seconds`
   - `mark_price_age_seconds`
   - `book_age_seconds` from bookTicker cache age
+
+
+## Runtime feature contract (orchestrator -> analyzer -> strategies)
+
+- Public feature payload schema is fixed by `bot/feature_contract.py` (`PUBLIC_FEATURE_FIELDS`, schema `v1`).
+- `bot/outcomes.py::build_prepared_feature_snapshot(...)` must emit **exactly** this field set in stable order.
+- Missing fields and unexpected additions are treated as contract violations and rejected by validator.
+- Runtime call-path modules (`bot/application/bot.py`, `bot/application/symbol_analyzer.py`, `bot/core/engine/engine.py`, `bot/strategies/__init__.py`) must not import experimental/scaffold modules.
 
 ## Signal-context contract
 
