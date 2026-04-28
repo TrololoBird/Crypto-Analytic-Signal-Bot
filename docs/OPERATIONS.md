@@ -73,7 +73,7 @@ The bot includes a built-in web dashboard for real-time monitoring.
 - `fallback_reason` is normalized to: `ws_cache_cold`, `full_refresh_due`, `refresh_exception`, `live_empty`, `using_cached`, `using_pinned`, or `unknown`.
 - `source_before`/`source_after` capture the transition of shortlist source for each cycle (for example `ws_light -> cached`).
 - `cached_shortlist_age_s` and `cached_shortlist_size` are populated when `source_after="cached"`; otherwise they stay `null`.
-- `decision-state` (`full_refresh_due`, `ws_cache_warm`, `has_symbol_meta`) is logged before branching and should be correlated with `fallback_reason` during incident review.
+- `decision-state` (`full_refresh_due`, `ws_cache_warm`, `has_symbol_meta`) is emitted directly into `shortlist.jsonl` (and also logged before branching) to correlate branch choice with `fallback_reason` during incident review.
 
 ## Binance boundary checks
 

@@ -29,6 +29,15 @@ SHORTLIST_FALLBACK_REASONS = {
     FALLBACK_REASON_USING_CACHED: "reuse last live shortlist snapshot",
     FALLBACK_REASON_USING_PINNED: "fallback to configured pinned shortlist",
 }
+SHORTLIST_FALLBACK_REASON_ALIASES = {
+    "cache_cold": FALLBACK_REASON_WS_CACHE_COLD,
+    "full_due": FALLBACK_REASON_FULL_REFRESH_DUE,
+    "exception": FALLBACK_REASON_REFRESH_EXCEPTION,
+    "refresh_failed": FALLBACK_REASON_REFRESH_EXCEPTION,
+    "empty": FALLBACK_REASON_LIVE_EMPTY,
+    "cached": FALLBACK_REASON_USING_CACHED,
+    "pinned": FALLBACK_REASON_USING_PINNED,
+}
 
 
 def normalize_shortlist_fallback_reason(reason: str | None) -> str | None:
@@ -37,7 +46,9 @@ def normalize_shortlist_fallback_reason(reason: str | None) -> str | None:
     normalized = str(reason).strip().lower()
     if not normalized:
         return None
-    return normalized if normalized in SHORTLIST_FALLBACK_REASONS else "unknown"
+    if normalized in SHORTLIST_FALLBACK_REASONS:
+        return normalized
+    return SHORTLIST_FALLBACK_REASON_ALIASES.get(normalized, "unknown")
 
 
 class ShortlistService:
@@ -427,7 +438,11 @@ class ShortlistService:
             telemetry_manager.emit_shortlist_refresh(
                 source=source,
                 source_before=source_before,
+                source_after=source,
                 fallback_reason=fallback_reason,
+                full_refresh_due=full_refresh_due,
+                ws_cache_warm=ws_cache_warm,
+                has_symbol_meta=has_symbol_meta,
                 cached_shortlist_age_s=cached_shortlist_age_s,
                 cached_shortlist_size=cached_shortlist_size,
                 shortlist_size=len(shortlist),
@@ -444,6 +459,9 @@ class ShortlistService:
                     "source_before": source_before,
                     "source_after": source,
                     "fallback_reason": fallback_reason,
+                    "full_refresh_due": full_refresh_due,
+                    "ws_cache_warm": ws_cache_warm,
+                    "has_symbol_meta": has_symbol_meta,
                     "cached_shortlist_age_s": cached_shortlist_age_s,
                     "cached_shortlist_size": cached_shortlist_size,
                     "size": len(shortlist),
