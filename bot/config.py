@@ -355,15 +355,16 @@ class WSConfig(BaseModel):
     """WebSocket configuration.
 
     Runtime policy:
-    - `bookTicker` is routed over `/public`
-    - klines, aggTrade, mark price, ticker, and liquidation streams are routed over `/market`
+    - `public` / `market` are logical endpoint classes used for subscription routing
+    - both endpoint classes share the same canonical Binance websocket root
     - aggTrade, when enabled, is restricted to tracked/active symbols only
     """
 
     enabled: bool = True
     base_url: str = "wss://fstream.binance.com"
-    public_base_url: str = "wss://fstream.binance.com/public"
-    market_base_url: str = "wss://fstream.binance.com/market"
+    # Backward-compatible fields retained as logical aliases to `base_url`.
+    public_base_url: str = "wss://fstream.binance.com"
+    market_base_url: str = "wss://fstream.binance.com"
     # 4h stays REST-authoritative; WS carries 5m/15m/1h live trigger/context data.
     kline_intervals: tuple[str, ...] = ("5m", "15m", "1h")
     subscription_scope: str = "shortlist"
@@ -416,28 +417,26 @@ class WSConfig(BaseModel):
 
     @model_validator(mode="after")
     def _resolve_endpoint_urls(self) -> "WSConfig":
-        default_root = "wss://fstream.binance.com"
-        default_public = f"{default_root}/public"
-        default_market = f"{default_root}/market"
-        root = self.base_url
-        derived_public = self.public_base_url
-        derived_market = self.market_base_url
-        if root != default_root:
-            if "/public" in root:
-                root_base = root.replace("/public", "")
-                derived_public = root
-                derived_market = f"{root_base}/market"
-            elif "/market" in root:
-                root_base = root.replace("/market", "")
-                derived_public = f"{root_base}/public"
-                derived_market = root
-            else:
-                derived_public = f"{root}/public"
-                derived_market = f"{root}/market"
-        if self.public_base_url == default_public:
-            self.public_base_url = derived_public
-        if self.market_base_url == default_market:
-            self.market_base_url = derived_market
+        normalized_root = str(self.base_url or "wss://fstream.binance.com").strip().rstrip("/")
+        for suffix in ("/public", "/market"):
+            if normalized_root.endswith(suffix):
+                normalized_root = normalized_root[: -len(suffix)]
+                break
+        self.base_url = normalized_root
+
+        # Keep backward compatibility for legacy configs that still set endpoint
+        # class URLs with /public or /market path suffixes.
+        for field_name in ("public_base_url", "market_base_url"):
+            value = str(getattr(self, field_name) or "").strip().rstrip("/")
+            if value.endswith("/public"):
+                value = value.removesuffix("/public")
+            elif value.endswith("/market"):
+                value = value.removesuffix("/market")
+            setattr(self, field_name, value or normalized_root)
+
+        # Runtime uses one canonical websocket root for all endpoint classes.
+        self.public_base_url = normalized_root
+        self.market_base_url = normalized_root
         return self
 
     def endpoint_base_url(self, endpoint_class: str) -> str:
@@ -559,10 +558,15 @@ class BotSettings(BaseModel):
             "ws.market_base_url": self.ws.market_base_url,
         }
         forbidden_tokens = ("/private", "listenkey", "/ws-api", "/sapi", "/papi")
+        unsupported_path_tokens = ("/public", "/market")
         for label, url in ws_urls.items():
             lowered = str(url or "").strip().lower()
             if any(token in lowered for token in forbidden_tokens):
                 raise ValueError(f"{label} must point to Binance public market streams only: {url}")
+            if any(token in lowered for token in unsupported_path_tokens):
+                raise ValueError(
+                    f"{label} must use canonical websocket root without endpoint path modifiers: {url}"
+                )
 
         if require_telegram:
             if not self.tg_token.strip():

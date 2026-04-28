@@ -127,11 +127,11 @@ watch_expiry_minutes = 60
 
 [bot.ws]
 enabled = true
-# Root Binance Futures WS endpoint. Manager routes bookTicker to /public and
-# market streams to /market internally.
+# Canonical Binance Futures WS root. Runtime always uses combined stream:
+# {base_url}/stream. Endpoint classes (public/market) are logical only.
 base_url = "wss://fstream.binance.com"
-public_base_url = "wss://fstream.binance.com/public"
-market_base_url = "wss://fstream.binance.com/market"
+public_base_url = "wss://fstream.binance.com"
+market_base_url = "wss://fstream.binance.com"
 kline_intervals = ["5m", "15m", "1h"]
 subscription_scope = "shortlist"
 subscribe_book_ticker = true

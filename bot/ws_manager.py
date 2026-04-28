@@ -1129,7 +1129,7 @@ class FuturesWSManager:
         """Return the WebSocket URL list for a single endpoint class.
 
         Cross-endpoint fallback is intentionally disabled so market streams
-        cannot drift onto `/public` and public streams cannot drift onto `/market`.
+        cannot drift onto `public` and public streams cannot drift onto `market`.
         """
         return ws_connection.get_ws_fallback_urls(self, endpoint)
 
