@@ -1118,9 +1118,31 @@ def test_wick_trap_long_targets_are_directional_and_signal_valid(
             "time": [base_time + timedelta(hours=i) for i in range(10)],
             "close_time": [base_time + timedelta(hours=i) for i in range(10)],
             "open": [103.0, 102.0, 101.0, 100.0, 99.0, 98.0, 99.0, 100.0, 101.0, 102.0],
-            "high": [104.0, 103.0, 102.0, 101.0, 100.0, 99.0, 101.0, 103.0, 106.0, 105.0],
+            "high": [
+                104.0,
+                103.0,
+                102.0,
+                101.0,
+                100.0,
+                99.0,
+                101.0,
+                103.0,
+                106.0,
+                105.0,
+            ],
             "low": [101.0, 100.0, 99.0, 98.0, 97.0, 95.0, 97.0, 99.0, 100.0, 101.0],
-            "close": [102.0, 101.0, 100.0, 99.0, 98.0, 96.0, 100.0, 102.0, 104.0, 103.0],
+            "close": [
+                102.0,
+                101.0,
+                100.0,
+                99.0,
+                98.0,
+                96.0,
+                100.0,
+                102.0,
+                104.0,
+                103.0,
+            ],
             "volume": [1000.0] * 10,
             "atr14": [2.0] * 10,
             "volume_ratio20": [1.2] * 10,
@@ -1132,11 +1154,65 @@ def test_wick_trap_long_targets_are_directional_and_signal_valid(
     work_15m = pl.DataFrame(
         {
             "time": [work_15m_start + timedelta(minutes=15 * i) for i in range(12)],
-            "close_time": [work_15m_start + timedelta(minutes=15 * i) for i in range(12)],
-            "open": [100.0, 100.2, 100.4, 100.3, 100.5, 100.4, 100.1, 99.9, 99.8, 100.3, 100.8, 101.0],
-            "high": [100.5, 100.7, 100.9, 100.8, 101.0, 100.9, 100.3, 100.2, 100.1, 100.8, 101.3, 101.6],
-            "low": [99.7, 99.9, 100.0, 99.9, 100.0, 99.8, 94.0, 99.4, 99.6, 99.9, 100.4, 100.7],
-            "close": [100.2, 100.4, 100.3, 100.5, 100.4, 100.1, 99.7, 99.8, 100.3, 100.8, 101.0, 101.2],
+            "close_time": [
+                work_15m_start + timedelta(minutes=15 * i) for i in range(12)
+            ],
+            "open": [
+                100.0,
+                100.2,
+                100.4,
+                100.3,
+                100.5,
+                100.4,
+                100.1,
+                99.9,
+                99.8,
+                100.3,
+                100.8,
+                101.0,
+            ],
+            "high": [
+                100.5,
+                100.7,
+                100.9,
+                100.8,
+                101.0,
+                100.9,
+                100.3,
+                100.2,
+                100.1,
+                100.8,
+                101.3,
+                101.6,
+            ],
+            "low": [
+                99.7,
+                99.9,
+                100.0,
+                99.9,
+                100.0,
+                99.8,
+                94.0,
+                99.4,
+                99.6,
+                99.9,
+                100.4,
+                100.7,
+            ],
+            "close": [
+                100.2,
+                100.4,
+                100.3,
+                100.5,
+                100.4,
+                100.1,
+                99.7,
+                99.8,
+                100.3,
+                100.8,
+                101.0,
+                101.2,
+            ],
             "volume": [1000.0] * 12,
             "atr14": [2.0] * 12,
             "volume_ratio20": [1.1] * 12,
@@ -1150,7 +1226,11 @@ def test_wick_trap_long_targets_are_directional_and_signal_valid(
     prepared.mark_price = 101.2
 
     sh_mask = pl.Series("sh", [False] * 8 + [True, False], dtype=pl.Boolean)
-    sl_mask = pl.Series("sl", [False, False, False, False, False, True, False, False, False, False], dtype=pl.Boolean)
+    sl_mask = pl.Series(
+        "sl",
+        [False, False, False, False, False, True, False, False, False, False],
+        dtype=pl.Boolean,
+    )
     monkeypatch.setattr(
         "bot.strategies.wick_trap_reversal._swing_points",
         lambda *_args, **_kwargs: (sh_mask, sl_mask),
@@ -1380,7 +1460,9 @@ def test_ws_cache_enrichments_reports_degradation_without_silent_pass(
     bot = SimpleNamespace(
         client=_DummyBinance(),
         _ws_manager=_WS(),
-        settings=SimpleNamespace(ws=SimpleNamespace(market_ticker_freshness_seconds=10)),
+        settings=SimpleNamespace(
+            ws=SimpleNamespace(market_ticker_freshness_seconds=10)
+        ),
     )
     analyzer = SymbolAnalyzer(bot)
 
@@ -1428,7 +1510,9 @@ def test_ws_cache_enrichments_logs_stale_cache_fallback_for_oi_ls_funding(
     monkeypatch.setattr(
         symbol_analyzer_module, "BinanceFuturesMarketData", _DummyBinance
     )
-    bot = SimpleNamespace(client=_DummyBinance(), _ws_manager=None, settings=SimpleNamespace())
+    bot = SimpleNamespace(
+        client=_DummyBinance(), _ws_manager=None, settings=SimpleNamespace()
+    )
     analyzer = SymbolAnalyzer(bot)
 
     with caplog.at_level("INFO", logger="bot.application.bot"):
@@ -1562,7 +1646,9 @@ async def test_shortlist_refresh_sets_ws_cache_cold_fallback_reason() -> None:
     )
     service = ShortlistService(bot)
     service.build_light_shortlist = AsyncMock(return_value=([], {"mode": "ws_light"}))
-    service.build_live_shortlist = AsyncMock(return_value=(shortlist, {"mode": "rest_full"}))
+    service.build_live_shortlist = AsyncMock(
+        return_value=(shortlist, {"mode": "rest_full"})
+    )
 
     await service.do_refresh_shortlist()
 
@@ -1598,9 +1684,13 @@ async def test_shortlist_refresh_sets_full_refresh_due_reason() -> None:
     )
     service = ShortlistService(bot)
     service.build_light_shortlist = AsyncMock(
-        side_effect=AssertionError("ws light should be skipped when full refresh is due")
+        side_effect=AssertionError(
+            "ws light should be skipped when full refresh is due"
+        )
     )
-    service.build_live_shortlist = AsyncMock(return_value=(shortlist, {"mode": "rest_full"}))
+    service.build_live_shortlist = AsyncMock(
+        return_value=(shortlist, {"mode": "rest_full"})
+    )
 
     await service.do_refresh_shortlist()
 
@@ -1649,7 +1739,9 @@ async def test_shortlist_refresh_sets_using_cached_reason_and_cache_age() -> Non
 
 
 @pytest.mark.asyncio
-async def test_shortlist_refresh_sets_refresh_exception_reason_when_cache_exists() -> None:
+async def test_shortlist_refresh_sets_refresh_exception_reason_when_cache_exists() -> (
+    None
+):
     cached_shortlist = [make_universe_symbol(symbol="BTCUSDT")]
     bot = SimpleNamespace(
         settings=SimpleNamespace(

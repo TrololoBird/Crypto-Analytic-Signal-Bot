@@ -1272,18 +1272,17 @@ class FuturesWSManager:
                     url,
                     len(self._intended_streams_by_endpoint.get(endpoint, set())),
                 )
-                backoff_reset, proactive_reconnect = (
-                    await ws_connection.run_stream_session(
-                        self,
-                        endpoint=endpoint,
-                        url=url,
-                        connect_start=connect_start,
-                        backoff_reset_after_seconds=_BACKOFF_RESET_AFTER_SECONDS,
-                        proactive_reconnect_after_seconds=_PROACTIVE_RECONNECT_AFTER_SECONDS,
-                        parse_message=(
-                            _json.loads if _USE_ORJSON else json.loads
-                        ),
-                    )
+                (
+                    backoff_reset,
+                    proactive_reconnect,
+                ) = await ws_connection.run_stream_session(
+                    self,
+                    endpoint=endpoint,
+                    url=url,
+                    connect_start=connect_start,
+                    backoff_reset_after_seconds=_BACKOFF_RESET_AFTER_SECONDS,
+                    proactive_reconnect_after_seconds=_PROACTIVE_RECONNECT_AFTER_SECONDS,
+                    parse_message=(_json.loads if _USE_ORJSON else json.loads),
                 )
                 if backoff_reset:
                     delay = 1.0

@@ -993,7 +993,9 @@ class PublicIntelligenceService:
     ) -> list[dict[str, Any]]:
         if not self._options_eapi_runtime_enabled():
             return []
-        validate_runtime_public_rest_url("https://eapi.binance.com/eapi/v1/openInterest")
+        validate_runtime_public_rest_url(
+            "https://eapi.binance.com/eapi/v1/openInterest"
+        )
         payload = await self._fetch_json(
             "https://eapi.binance.com/eapi/v1/openInterest",
             params={

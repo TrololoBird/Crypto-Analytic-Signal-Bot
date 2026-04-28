@@ -19,7 +19,9 @@ class _DummyWS:
 
 
 @pytest.mark.asyncio
-async def test_resubscribe_all_uses_intended_streams_without_changing_market_binding() -> None:
+async def test_resubscribe_all_uses_intended_streams_without_changing_market_binding() -> (
+    None
+):
     ws = _DummyWS()
     previous_market_ws = object()
     manager = SimpleNamespace(
@@ -55,7 +57,9 @@ async def test_recovery_backfill_skips_short_disconnect_when_cache_is_present() 
 
 
 @pytest.mark.asyncio
-async def test_recovery_backfill_triggers_after_short_disconnect_when_cache_missing() -> None:
+async def test_recovery_backfill_triggers_after_short_disconnect_when_cache_missing() -> (
+    None
+):
     manager = FuturesWSManager(rest_client=SimpleNamespace(), config=WSConfig())
     manager._backfill = AsyncMock()
     manager._klines = {}
