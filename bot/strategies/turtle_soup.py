@@ -213,6 +213,26 @@ class TurtleSoupSetup(BaseSetup):
             return None  # Reject this turtle soup setup
         if tp2 is None:
             tp2 = tp1  # Use TP1 as TP2 if no extended target found
+        if direction == "long" and (tp1 <= bar_close or tp2 <= bar_close):
+            _reject(
+                prepared,
+                setup_id,
+                "tp_direction_mismatch_long",
+                tp1=tp1,
+                tp2=tp2,
+                price_anchor=bar_close,
+            )
+            return None
+        if direction == "short" and (tp1 >= bar_close or tp2 >= bar_close):
+            _reject(
+                prepared,
+                setup_id,
+                "tp_direction_mismatch_short",
+                tp1=tp1,
+                tp2=tp2,
+                price_anchor=bar_close,
+            )
+            return None
 
         vol_ratio = float(w1h.item(-1, "volume_ratio20") or 1.0)
         rsi = float(w1h.item(-1, "rsi14") or 50.0)
