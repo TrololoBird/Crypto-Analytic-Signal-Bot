@@ -43,7 +43,11 @@ def _frame(minutes_ago: int, atr_pct: float = 1.0, adx14: float = 30.0) -> pl.Da
     )
 
 
-def _prepared(minutes_ago_15m: int = 5, minutes_ago_1h: int = 30) -> PreparedSymbol:
+def _prepared(
+    minutes_ago_15m: int = 5,
+    minutes_ago_1h: int = 30,
+    minutes_ago_4h: int = 120,
+) -> PreparedSymbol:
     universe = UniverseSymbol(
         symbol="BTCUSDT",
         base_asset="BTC",
@@ -59,6 +63,7 @@ def _prepared(minutes_ago_15m: int = 5, minutes_ago_1h: int = 30) -> PreparedSym
         universe=universe,
         work_1h=_frame(minutes_ago_1h),
         work_15m=_frame(minutes_ago_15m),
+        work_4h=_frame(minutes_ago_4h),
         bid_price=99.9,
         ask_price=100.1,
         spread_bps=5.0,
@@ -102,6 +107,15 @@ def test_apply_global_filters_rejects_stale_15m() -> None:
 
     assert accepted is False
     assert reason == "stale_15m"
+
+
+def test_apply_global_filters_rejects_stale_4h() -> None:
+    accepted, _, reason, _, _ = apply_global_filters(
+        _signal(), _prepared(minutes_ago_4h=60 * 24), _settings(), _ConfluenceStub()
+    )
+
+    assert accepted is False
+    assert reason == "stale_4h"
 
 
 def test_apply_global_filters_uses_setup_level_min_rr_override() -> None:
