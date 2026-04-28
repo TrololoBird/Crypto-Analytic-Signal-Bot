@@ -124,6 +124,9 @@ class PreparedSymbol:
     context_snapshot_age_seconds: float | None = None
     data_freshness_flags: tuple[str, ...] = ()
     data_source_mix: str = "futures_only"
+    degraded: bool = False
+    degrade_reason: str | None = None
+    fallback_used: str | None = None
     market_regime: str = "neutral"  # "trending" | "neutral" | "choppy"
     # Structure-based fields (Фаза 2 рефакторинга)
     structure_1h: str = "ranging"  # "uptrend" | "downtrend" | "ranging"

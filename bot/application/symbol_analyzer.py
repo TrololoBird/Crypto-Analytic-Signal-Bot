@@ -41,6 +41,44 @@ class SymbolAnalyzer:
         self._bot = bot
 
     @staticmethod
+    def _degrade_event(
+        *,
+        symbol: str,
+        stage: str,
+        source: str,
+        reason: str,
+        fallback_used: str,
+    ) -> dict[str, Any]:
+        return {
+            "degraded": True,
+            "degrade_reason": f"{stage}:{reason}",
+            "fallback_used": fallback_used,
+            "degrade_symbol": symbol,
+            "degrade_stage": stage,
+            "degrade_source": source,
+        }
+
+    @staticmethod
+    def _log_degradation(
+        *,
+        level: int,
+        symbol: str,
+        stage: str,
+        source: str,
+        reason: str,
+        fallback_used: str,
+    ) -> None:
+        LOG.log(
+            level,
+            "enrichment degraded | symbol=%s stage=%s source=%s reason=%s fallback_used=%s",
+            symbol,
+            stage,
+            source,
+            reason,
+            fallback_used,
+        )
+
+    @staticmethod
     def _frame_float(frame: Any, column: str) -> float | None:
         if frame is None or getattr(frame, "is_empty", lambda: True)():
             return None
@@ -960,6 +998,7 @@ class SymbolAnalyzer:
         enrichments: dict[str, Any] = {}
         context_ages: list[float] = []
         freshness_flags: set[str] = set()
+        degradation_events: list[dict[str, Any]] = []
         if self._bot._ws_manager is not None:
             try:
                 ticker = self._bot._ws_manager.get_ticker_snapshot(symbol)
@@ -978,8 +1017,24 @@ class SymbolAnalyzer:
                             freshness_flags.add("ticker_price_stale")
                 else:
                     freshness_flags.add("ticker_price_missing")
-            except Exception:
-                pass
+            except Exception as exc:
+                degradation_events.append(
+                    self._degrade_event(
+                        symbol=symbol,
+                        stage="ticker_snapshot",
+                        source="ws",
+                        reason=type(exc).__name__,
+                        fallback_used="skip_ticker_enrichment",
+                    )
+                )
+                self._log_degradation(
+                    level=logging.WARNING,
+                    symbol=symbol,
+                    stage="ticker_snapshot",
+                    source="ws",
+                    reason=str(exc),
+                    fallback_used="skip_ticker_enrichment",
+                )
             try:
                 mark = self._bot._ws_manager.get_mark_price_snapshot(symbol)
                 mark_age = self._bot._ws_manager.get_mark_price_age_seconds(symbol)
@@ -1001,10 +1056,46 @@ class SymbolAnalyzer:
                     context_ages.append(mark_age)
                     if mark_age > self._bot.settings.ws.market_ticker_freshness_seconds:
                         freshness_flags.add("mark_price_stale")
+                        degrade_reason = "mark_price_stale"
+                        if "funding_rate" not in mark:
+                            degrade_reason = "mark_price_stale_funding_missing"
+                        degradation_events.append(
+                            self._degrade_event(
+                                symbol=symbol,
+                                stage="mark_snapshot",
+                                source="ws",
+                                reason=degrade_reason,
+                                fallback_used="rest_cached_funding",
+                            )
+                        )
+                        self._log_degradation(
+                            level=logging.INFO,
+                            symbol=symbol,
+                            stage="mark_snapshot",
+                            source="ws",
+                            reason=degrade_reason,
+                            fallback_used="rest_cached_funding",
+                        )
                 elif not mark:
                     freshness_flags.add("mark_price_missing")
-            except Exception:
-                pass
+            except Exception as exc:
+                degradation_events.append(
+                    self._degrade_event(
+                        symbol=symbol,
+                        stage="mark_snapshot",
+                        source="ws",
+                        reason=type(exc).__name__,
+                        fallback_used="rest_cached_funding",
+                    )
+                )
+                self._log_degradation(
+                    level=logging.WARNING,
+                    symbol=symbol,
+                    stage="mark_snapshot",
+                    source="ws",
+                    reason=str(exc),
+                    fallback_used="rest_cached_funding",
+                )
             try:
                 depth_imbalance = self._bot._ws_manager.get_depth_imbalance(symbol)
                 if depth_imbalance is not None:
@@ -1017,17 +1108,69 @@ class SymbolAnalyzer:
                 )
                 if liquidation is not None:
                     enrichments["liquidation_score"] = float(liquidation)
-            except Exception:
-                pass
+            except Exception as exc:
+                degradation_events.append(
+                    self._degrade_event(
+                        symbol=symbol,
+                        stage="microstructure_snapshot",
+                        source="ws",
+                        reason=type(exc).__name__,
+                        fallback_used="skip_microstructure_enrichment",
+                    )
+                )
+                self._log_degradation(
+                    level=logging.WARNING,
+                    symbol=symbol,
+                    stage="microstructure_snapshot",
+                    source="ws",
+                    reason=str(exc),
+                    fallback_used="skip_microstructure_enrichment",
+                )
 
         if isinstance(self._bot.client, BinanceFuturesMarketData):
             oi_chg = self._bot.client.get_cached_oi_change(symbol)
             if oi_chg is not None:
                 enrichments["oi_change_pct"] = oi_chg
+            else:
+                degradation_events.append(
+                    self._degrade_event(
+                        symbol=symbol,
+                        stage="oi_cache",
+                        source="rest_cache",
+                        reason="oi_change_missing",
+                        fallback_used="skip_oi_context",
+                    )
+                )
+                self._log_degradation(
+                    level=logging.WARNING,
+                    symbol=symbol,
+                    stage="oi_cache",
+                    source="rest_cache",
+                    reason="oi_change_missing",
+                    fallback_used="skip_oi_context",
+                )
             ls = self._bot.client.get_cached_ls_ratio(symbol)
             if ls is not None:
                 enrichments["ls_ratio"] = ls
                 enrichments["top_account_ls_ratio"] = ls
+            else:
+                degradation_events.append(
+                    self._degrade_event(
+                        symbol=symbol,
+                        stage="ls_cache",
+                        source="rest_cache",
+                        reason="ls_ratio_missing",
+                        fallback_used="skip_ls_context",
+                    )
+                )
+                self._log_degradation(
+                    level=logging.WARNING,
+                    symbol=symbol,
+                    stage="ls_cache",
+                    source="rest_cache",
+                    reason="ls_ratio_missing",
+                    fallback_used="skip_ls_context",
+                )
             top_position_ls = self._bot.client.get_cached_top_position_ls_ratio(symbol)
             if top_position_ls is not None:
                 enrichments["top_position_ls_ratio"] = top_position_ls
@@ -1042,6 +1185,24 @@ class SymbolAnalyzer:
             funding_trend = self._bot.client.get_cached_funding_trend(symbol)
             if funding_trend is not None:
                 enrichments["funding_trend"] = funding_trend
+            else:
+                degradation_events.append(
+                    self._degrade_event(
+                        symbol=symbol,
+                        stage="funding_cache",
+                        source="rest_cache",
+                        reason="funding_trend_missing",
+                        fallback_used="skip_funding_context",
+                    )
+                )
+                self._log_degradation(
+                    level=logging.INFO,
+                    symbol=symbol,
+                    stage="funding_cache",
+                    source="rest_cache",
+                    reason="funding_trend_missing",
+                    fallback_used="skip_funding_context",
+                )
             basis_pct = self._bot.client.get_cached_basis(symbol, period="1h")
             if basis_pct is not None:
                 enrichments["basis_pct"] = basis_pct
@@ -1067,6 +1228,12 @@ class SymbolAnalyzer:
             enrichments["context_snapshot_age_seconds"] = max(context_ages)
         if freshness_flags:
             enrichments["data_freshness_flags"] = tuple(sorted(freshness_flags))
+        if degradation_events:
+            primary = degradation_events[0]
+            enrichments["degraded"] = True
+            enrichments["degrade_reason"] = primary["degrade_reason"]
+            enrichments["fallback_used"] = primary["fallback_used"]
+            enrichments["degradation_events"] = tuple(degradation_events)
         enrichments.setdefault("data_source_mix", "futures_only")
         return enrichments
 
@@ -1108,5 +1275,12 @@ class SymbolAnalyzer:
                 p.universe.symbol,
                 period="5m",
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            self._log_degradation(
+                level=logging.WARNING,
+                symbol=p.universe.symbol,
+                stage="oi_enrich_live",
+                source="rest",
+                reason=str(exc),
+                fallback_used="cached_oi_context_only",
+            )
