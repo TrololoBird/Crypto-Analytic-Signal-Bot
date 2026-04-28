@@ -66,3 +66,9 @@
 - Persistence goes through repository abstractions.
 - Async I/O boundaries are preserved in runtime modules.
 - `SignalBot` should delegate long-running loops and event-path specifics to application components rather than re-introducing inline monolithic handlers.
+
+## Repo quality gates
+
+- Pull requests include a checklist item requiring docs updates whenever architecture or runtime contracts change.
+- CI enforces this with `scripts/ci/check_doc_change.sh` for PRs touching: `bot/application`, `bot/websocket`, `bot/features*`, `bot/ml*`.
+- The gate passes when the PR includes at least one changed file under `docs/`.

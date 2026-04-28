@@ -12,8 +12,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  doc-change-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Require docs update for architecture-contract path changes
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || '' }}
+        run: bash scripts/ci/check_doc_change.sh
+
   lint:
     runs-on: ubuntu-latest
+    needs: doc-change-gate
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -109,5 +124,6 @@ jobs:
             tests/test_event_bus.py \
             tests/test_config_intelligence.py \
             tests/test_filters.py \
-            tests/test_remediation_regressions.py \
+            tests/test_regression_suite_tracking_delivery.py \
+            tests/test_regression_suite_contracts.py \
             --maxfail=1

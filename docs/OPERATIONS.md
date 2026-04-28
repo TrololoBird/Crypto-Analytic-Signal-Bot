@@ -40,7 +40,10 @@ The bot includes a built-in web dashboard for real-time monitoring.
 - Targeted remediation suites:
   - `pytest -q tests/test_remediation_intra_candle.py`
   - `pytest -q tests/test_remediation_indicators.py`
-  - `pytest -q tests/test_remediation_regressions.py`
+  - `pytest -q tests/test_regression_suite_tracking_delivery.py`
+  - `pytest -q tests/test_regression_suite_strategies.py`
+  - `pytest -q tests/test_regression_suite_contracts.py`
+  - `pytest -q tests/test_regression_suite_engine.py`
 
 ## Recommended routine
 
@@ -65,7 +68,7 @@ The bot includes a built-in web dashboard for real-time monitoring.
 - Keep runtime on public USDⓈ-M market-data endpoints only.
 - Runtime boundary explicitly denies non-USDⓈ-M Binance REST hosts (for example `eapi.binance.com`), even when endpoints are public.
 - Treat any `/private`, signed/auth route, `listenKey`, or user-data stream as a configuration/code regression.
-- After market-data changes, rerun the endpoint grep plus `tests/test_remediation_regressions.py` to confirm the public-only guardrails still hold.
+- After market-data changes, rerun endpoint grep plus the contract-focused suites (`tests/test_regression_suite_contracts.py`, `tests/test_regression_suite_tracking_delivery.py`) to confirm public-only guardrails still hold.
 
 ## ML training quality gates
 
@@ -86,3 +89,9 @@ The bot includes a built-in web dashboard for real-time monitoring.
 3. Inspect reject reasons in telemetry.
 4. Validate cooldown/blacklist status in repository.
 5. Restart only after root cause is identified.
+
+## PR doc-change gate
+
+- CI now enforces a lightweight doc-change check for pull requests that touch architecture-contract paths: `bot/application`, `bot/websocket`, `bot/features*`, `bot/ml*`.
+- If any of those paths change, at least one file under `docs/` must also change in the same PR.
+- The same expectation is reflected in the pull-request checklist template.

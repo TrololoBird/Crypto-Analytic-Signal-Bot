@@ -8,7 +8,7 @@ from unittest.mock import Mock
 import polars as pl
 import pytest
 
-from test_remediation_regressions import (
+from tests.test_remediation_regressions import (
     AggTrade,
     ConfluenceEngine,
     FuturesWSManager,
