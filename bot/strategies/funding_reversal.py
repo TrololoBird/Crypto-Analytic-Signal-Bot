@@ -1,6 +1,6 @@
 """Extreme Funding Rate Reversal setup detector.
 
-Triggers when funding rate is extreme (abs > 0.05%) and a reversal
+Triggers when funding rate is extreme (configurable threshold) and a reversal
 candle pattern is confirmed on 15m with elevated volume.
 
 # WINDSURF_REVIEW: unified + vectorized + 1H context + graded
@@ -18,7 +18,6 @@ from ..setups.utils import get_dynamic_params
 
 LOG = logging.getLogger("bot.strategies.funding_reversal")
 
-_FUNDING_THRESHOLD = 0.0005  # 0.05%
 
 
 def _as_float(value: object, default: float = 0.0) -> float:
@@ -72,6 +71,8 @@ class FundingReversalSetup(BaseSetup):
         funding_trend_bars = int(dynamic_params.get("funding_trend_bars", defaults["funding_trend_bars"]))
         min_delta_threshold = _as_float(dynamic_params.get("min_delta_threshold", defaults["min_delta_threshold"]), defaults["min_delta_threshold"])
         sl_buffer_atr = _as_float(dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]), defaults["sl_buffer_atr"])
+        base_score = _as_float(dynamic_params.get("base_score", defaults["base_score"]), defaults["base_score"])
+        min_rr = _as_float(dynamic_params.get("min_rr", defaults["min_rr"]), defaults["min_rr"])
         
         if prepared.funding_rate is None:
             _reject(prepared, setup_id, "funding_rate_missing")
@@ -89,11 +90,11 @@ class FundingReversalSetup(BaseSetup):
         if funding_trend == "flat":
             _reject(prepared, setup_id, "funding_trend_flat")
             return None
-        if fr > _FUNDING_THRESHOLD and funding_trend == "falling":
+        if fr > funding_threshold and funding_trend == "falling":
             # Funding already unwinding on its own — not a setup
             _reject(prepared, setup_id, "funding_already_unwinding_short", funding_trend=funding_trend)
             return None
-        if fr < -_FUNDING_THRESHOLD and funding_trend == "rising":
+        if fr < -funding_threshold and funding_trend == "rising":
             # Negative funding already recovering — not a setup
             _reject(prepared, setup_id, "funding_already_unwinding_long", funding_trend=funding_trend)
             return None
@@ -133,7 +134,7 @@ class FundingReversalSetup(BaseSetup):
         body = abs(bar_close - bar_open)
         trend_window = max(6, funding_trend_bars * 3)
 
-        if fr > _FUNDING_THRESHOLD:
+        if fr > funding_threshold:
             # Extreme longs → look for short reversal
             # Confirm: close < open, upper wick > body * 1.5
             upper_wick = bar_high - max(bar_open, bar_close)
@@ -204,8 +205,8 @@ class FundingReversalSetup(BaseSetup):
                 tp2_cands = sh_prices.filter(sh_prices > price)
                 tp2 = _as_float(tp2_cands[0]) if tp2_cands.len() > 0 else None
 
-        # Validate: TP1 must be at least 1.5× risk distance, else reject
-        if tp1 is None or abs(tp1 - price) < risk * 1.5:
+        # Validate: TP1 must satisfy configured risk/reward floor, else reject
+        if tp1 is None or abs(tp1 - price) < risk * min_rr:
             _reject(prepared, setup_id, "tp1_too_close_or_missing", tp1=tp1, risk=risk)
             return None  # Reject this funding reversal setup
         if tp2 is None:
@@ -214,7 +215,7 @@ class FundingReversalSetup(BaseSetup):
         rsi = _as_float(w.item(-1, "rsi14"), 50.0)
         score = _compute_dynamic_score(
             direction=direction,
-            base_score=0.50,
+            base_score=base_score,
             vol_ratio=vol_ratio,
             rsi=rsi,
         )
@@ -222,7 +223,7 @@ class FundingReversalSetup(BaseSetup):
         reasons = [
             f"Funding reversal {direction}: fr={fr:.5f} trend={funding_trend or 'unknown'}",
             f"vol_ratio={vol_ratio:.2f} delta_shift={delta_shift:.3f} trend_window={trend_window}",
-            f"sl_buffer_atr={sl_buffer_atr:.2f} reversal_candle=yes",
+            f"sl_buffer_atr={sl_buffer_atr:.2f} min_rr={min_rr:.2f} reversal_candle=yes",
         ]
 
         return _build_signal(

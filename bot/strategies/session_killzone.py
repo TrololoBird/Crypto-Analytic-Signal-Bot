@@ -57,6 +57,7 @@ class SessionKillzoneSetup(BaseSetup):
         defaults = {
             "base_score": 0.55,
             "min_volume_ratio": 1.2,
+            "min_adx_1h": 18.0,
             "bias_mismatch_penalty": 0.75,
             "min_rr": 1.5,
         }
@@ -81,6 +82,13 @@ class SessionKillzoneSetup(BaseSetup):
 
     def _detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         setup_id = self.setup_id
+        dynamic_params = get_dynamic_params(prepared, setup_id)
+        defaults = self.get_optimizable_params(settings)
+        base_score = _as_float(dynamic_params.get("base_score", defaults["base_score"]), defaults["base_score"])
+        min_volume_ratio = _as_float(dynamic_params.get("min_volume_ratio", defaults["min_volume_ratio"]), defaults["min_volume_ratio"])
+        min_adx_1h = _as_float(dynamic_params.get("min_adx_1h", defaults.get("min_adx_1h", 18.0)), defaults.get("min_adx_1h", 18.0))
+        min_rr = _as_float(dynamic_params.get("min_rr", defaults["min_rr"]), defaults["min_rr"])
+
         last_bar_time = prepared.work_15m.item(-1, "time")
         now_utc = last_bar_time if isinstance(last_bar_time, datetime) else datetime.now(timezone.utc)
         if not _in_killzone(now_utc.hour):
@@ -108,7 +116,7 @@ class SessionKillzoneSetup(BaseSetup):
             _reject(prepared, setup_id, "insufficient_1h_bars", bars=w1h.height)
             return None
         adx_1h = _as_float(w1h.item(-1, "adx14"))
-        if adx_1h < 18:
+        if adx_1h < min_adx_1h:
             _reject(prepared, setup_id, "adx_too_low", adx_1h=adx_1h)
             return None
 
@@ -125,7 +133,7 @@ class SessionKillzoneSetup(BaseSetup):
             _reject(prepared, setup_id, "volume_ratio_nan")
             return None
         avg_vol_ratio = float(sum(vol_ratios) / len(vol_ratios))
-        if avg_vol_ratio < 1.15:
+        if avg_vol_ratio < min_volume_ratio:
             _reject(prepared, setup_id, "average_volume_too_low", avg_vol_ratio=avg_vol_ratio)
             return None
 
@@ -187,8 +195,8 @@ class SessionKillzoneSetup(BaseSetup):
             killzone_range = session_high - session_low
             tp2 = session_low - killzone_range * 0.5 if killzone_range > 0 else None
 
-        # Validate: TP1 must be at least 1.5× risk distance, else reject
-        if tp1 is None or abs(tp1 - price) < risk * 1.5:
+        # Validate: TP1 must satisfy configured risk/reward floor, else reject
+        if tp1 is None or abs(tp1 - price) < risk * min_rr:
             _reject(prepared, setup_id, "tp1_too_close_or_missing", tp1=tp1, risk=risk)
             return None  # Reject this session killzone setup
         if tp2 is None:
@@ -198,7 +206,7 @@ class SessionKillzoneSetup(BaseSetup):
         vol_ratio = float(w.item(-1, "volume_ratio20") or 1.0)
         score = _compute_dynamic_score(
             direction=direction,
-            base_score=0.48,
+            base_score=base_score,
             vol_ratio=vol_ratio,
             rsi=rsi,
         )
@@ -214,7 +222,7 @@ class SessionKillzoneSetup(BaseSetup):
 
         reasons = [
             f"Session killzone {direction}: {session_name} {now_utc.strftime('%H:%M')}UTC",
-            f"adx1h={adx_1h:.1f} avg_vol={avg_vol_ratio:.2f}",
+            f"adx1h={adx_1h:.1f}/{min_adx_1h:.1f} avg_vol={avg_vol_ratio:.2f}/{min_volume_ratio:.2f}",
         ]
 
         return _build_signal(
