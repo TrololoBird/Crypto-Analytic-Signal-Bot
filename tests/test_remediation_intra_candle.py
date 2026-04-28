@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from test_remediation_regressions import (
+from tests.remediation_regression_cases import (
     BookTickerEvent,
     PipelineResult,
     SignalBot,
