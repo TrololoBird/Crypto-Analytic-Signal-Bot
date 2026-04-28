@@ -16,6 +16,7 @@ from bot.application import symbol_analyzer as symbol_analyzer_module
 from bot.application.oi_refresh_runner import OIRefreshRunner
 from bot.application.shortlist_service import (
     FALLBACK_REASON_LIVE_EMPTY,
+    FALLBACK_REASON_REFRESH_EXCEPTION,
     FALLBACK_REASON_USING_CACHED,
     ShortlistService,
     normalize_shortlist_fallback_reason,
@@ -1259,6 +1260,8 @@ def test_normalize_shortlist_fallback_reason_contract() -> None:
     assert normalize_shortlist_fallback_reason("  ") is None
     assert normalize_shortlist_fallback_reason("WS_CACHE_COLD") == "ws_cache_cold"
     assert normalize_shortlist_fallback_reason("using_cached") == FALLBACK_REASON_USING_CACHED
+    assert normalize_shortlist_fallback_reason("cached") == FALLBACK_REASON_USING_CACHED
+    assert normalize_shortlist_fallback_reason("refresh_failed") == FALLBACK_REASON_REFRESH_EXCEPTION
     assert normalize_shortlist_fallback_reason("not_mapped") == "unknown"
 
 
@@ -1296,6 +1299,9 @@ async def test_shortlist_refresh_cached_telemetry_fields() -> None:
     assert row["source_before"] == "ws_light"
     assert row["source_after"] == "cached"
     assert row["fallback_reason"] in {FALLBACK_REASON_LIVE_EMPTY, FALLBACK_REASON_USING_CACHED}
+    assert row["full_refresh_due"] is False
+    assert row["ws_cache_warm"] is False
+    assert row["has_symbol_meta"] is False
     assert row["cached_shortlist_age_s"] is not None
     assert row["cached_shortlist_size"] == 1
 
