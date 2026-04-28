@@ -8,6 +8,8 @@ import logging
 import time
 from typing import Any
 
+import websockets
+
 LOG = logging.getLogger("bot.ws_manager")
 
 
@@ -81,3 +83,92 @@ def apply_connected_state(manager: Any, *, endpoint: str, ws: Any, url: str) -> 
     )
     manager._last_reconnect_reason = f"{endpoint}:connected"
     manager._last_reconnect_reason_by_endpoint[endpoint] = "connected"
+
+
+def clear_endpoint_connection_state(manager: Any, endpoint: str) -> None:
+    """Reset volatile state for a disconnected endpoint."""
+    manager._ws_conns[endpoint] = None
+    manager._connected_urls[endpoint] = None
+    manager._connected_at_by_endpoint[endpoint] = 0.0
+    manager._connected_endpoints[endpoint].clear()
+    manager._refresh_connected_event()
+    if endpoint == "market":
+        manager._ws_conn = None
+
+
+async def run_stream_session(
+    manager: Any,
+    *,
+    endpoint: str,
+    url: str,
+    connect_start: float,
+    backoff_reset_after_seconds: float,
+    proactive_reconnect_after_seconds: float,
+    parse_message: Any,
+) -> tuple[bool, bool]:
+    """Run one websocket session.
+
+    Returns:
+        Tuple (backoff_reset, proactive_reconnect_triggered).
+    """
+    ws = await asyncio.wait_for(
+        websockets.connect(
+            url,
+            ping_interval=20.0,
+            ping_timeout=20.0,
+            close_timeout=10.0,
+        ),
+        timeout=10.0,
+    )
+    LOG.info("ws connection established | endpoint=%s url=%s", endpoint, url)
+    backoff_reset = False
+    reconnect_reason: str | None = None
+    async with ws:
+        apply_connected_state(manager, endpoint=endpoint, ws=ws, url=url)
+        await manager._resubscribe_all(endpoint, ws)
+        stream_count = len(manager._intended_streams_by_endpoint.get(endpoint, set()))
+        if stream_count > 120:
+            LOG.info(
+                "high stream count | endpoint=%s streams=%d shortlist=%d",
+                endpoint,
+                stream_count,
+                len(manager._symbols),
+            )
+        health_task = asyncio.create_task(
+            manager._health_monitor(ws, endpoint),
+            name=f"ws_manager_health:{endpoint}",
+        )
+        try:
+            async for raw in ws:
+                if not manager._running:
+                    return backoff_reset, False
+                elapsed = time.monotonic() - connect_start
+                if not backoff_reset and elapsed >= backoff_reset_after_seconds:
+                    backoff_reset = True
+                    manager._short_lived_streak = 0
+                if elapsed >= proactive_reconnect_after_seconds:
+                    reconnect_reason = "24h_proactive"
+                    break
+                try:
+                    msg = parse_message(raw)
+                except Exception:
+                    continue
+                await manager._handle_message(msg, endpoint)
+        finally:
+            health_task.cancel()
+            try:
+                await health_task
+            except asyncio.CancelledError:
+                pass
+
+    clear_endpoint_connection_state(manager, endpoint)
+    if reconnect_reason == "24h_proactive":
+        manager._last_reconnect_reason = f"{endpoint}:{reconnect_reason}"
+        manager._last_reconnect_reason_by_endpoint[endpoint] = reconnect_reason
+        LOG.info(
+            "ws proactive reconnect | endpoint=%s uptime=%.1fh",
+            endpoint,
+            (time.monotonic() - connect_start) / 3600,
+        )
+        return backoff_reset, True
+    raise ConnectionError("stream closed without explicit close frame")
