@@ -72,14 +72,40 @@ class OIRefreshRunner:
         # Public-only derivatives context warmup. Keep it bounded, but include the
         # crowding ratios that the runtime can consume from cache.
         fetchers = (
-            lambda: client.fetch_open_interest_change(symbol, period="1h"),
-            lambda: client.fetch_long_short_ratio(symbol, period="1h"),
-            lambda: client.fetch_top_position_ls_ratio(symbol, period="1h"),
-            lambda: client.fetch_global_ls_ratio(symbol, period="1h"),
-            lambda: client.fetch_funding_rate_history(symbol),
+            (
+                "rest",
+                "oi_change_1h",
+                lambda: client.fetch_open_interest_change(symbol, period="1h"),
+            ),
+            (
+                "rest",
+                "top_account_ls_ratio_1h",
+                lambda: client.fetch_long_short_ratio(symbol, period="1h"),
+            ),
+            (
+                "rest",
+                "top_position_ls_ratio_1h",
+                lambda: client.fetch_top_position_ls_ratio(symbol, period="1h"),
+            ),
+            (
+                "rest",
+                "global_ls_ratio_1h",
+                lambda: client.fetch_global_ls_ratio(symbol, period="1h"),
+            ),
+            (
+                "rest",
+                "funding_rate_history",
+                lambda: client.fetch_funding_rate_history(symbol),
+            ),
         )
-        for fetch in fetchers:
+        for source, stage, fetch in fetchers:
             try:
                 await fetch()
-            except Exception:
-                pass
+            except Exception as exc:
+                LOG.warning(
+                    "oi refresh degraded | symbol=%s stage=%s source=%s reason=%s",
+                    symbol,
+                    stage,
+                    source,
+                    exc,
+                )

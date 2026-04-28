@@ -12,6 +12,7 @@ import polars as pl
 import pytest
 
 from bot.application.bot import SignalBot
+from bot.application.oi_refresh_runner import OIRefreshRunner
 from bot.application import symbol_analyzer as symbol_analyzer_module
 from bot.application.shortlist_service import ShortlistService
 from bot.application.symbol_analyzer import SymbolAnalyzer
@@ -1119,6 +1120,190 @@ def test_symbol_analyzer_does_not_hide_unexpected_frame_errors(
     asyncio.run(_run())
     assert any(
         "unexpected frame fetch failure for BTCUSDT" in record.message
+        for record in caplog.records
+    )
+
+
+@pytest.mark.asyncio
+async def test_oi_refresh_runner_logs_degradation_context_in_safe_fetch(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class _Client:
+        def _is_circuit_open(self, *_args, **_kwargs) -> bool:
+            return False
+
+        async def fetch_open_interest_change(self, *_args, **_kwargs):
+            raise RuntimeError("oi unavailable")
+
+        async def fetch_long_short_ratio(self, *_args, **_kwargs):
+            return 1.1
+
+        async def fetch_top_position_ls_ratio(self, *_args, **_kwargs):
+            return 1.0
+
+        async def fetch_global_ls_ratio(self, *_args, **_kwargs):
+            return 0.9
+
+        async def fetch_funding_rate_history(self, *_args, **_kwargs):
+            return []
+
+    runner = OIRefreshRunner(SimpleNamespace(client=_Client()))
+    with caplog.at_level("WARNING", logger="bot.application.oi_refresh_runner"):
+        await runner._safe_fetch("BTCUSDT")
+
+    assert any(
+        "symbol=BTCUSDT stage=oi_change_1h source=rest reason=oi unavailable"
+        in record.message
+        for record in caplog.records
+    )
+
+
+def test_ws_cache_enrichments_reports_degradation_without_silent_pass(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class _DummyBinance:
+        def get_cached_oi_change(self, *_args, **_kwargs):
+            return 2.5
+
+        def get_cached_ls_ratio(self, *_args, **_kwargs):
+            return 1.05
+
+        def get_cached_top_position_ls_ratio(self, *_args, **_kwargs):
+            return 1.02
+
+        def get_cached_taker_ratio(self, *_args, **_kwargs):
+            return None
+
+        def get_cached_global_ls_ratio(self, *_args, **_kwargs):
+            return 0.96
+
+        def get_cached_funding_trend(self, *_args, **_kwargs):
+            return "flat"
+
+        def get_cached_basis(self, *_args, **_kwargs):
+            return None
+
+        def get_cached_basis_stats(self, *_args, **_kwargs):
+            return None
+
+    class _WS:
+        def get_ticker_snapshot(self, *_args, **_kwargs):
+            return None
+
+        def get_ticker_age_seconds(self, *_args, **_kwargs):
+            return None
+
+        def get_mark_price_snapshot(self, *_args, **_kwargs):
+            raise RuntimeError("mark stream broken")
+
+        def get_mark_price_age_seconds(self, *_args, **_kwargs):
+            return None
+
+        def get_depth_imbalance(self, *_args, **_kwargs):
+            return None
+
+        def get_microprice_bias(self, *_args, **_kwargs):
+            return None
+
+        def get_liquidation_sentiment(self, *_args, **_kwargs):
+            return None
+
+    monkeypatch.setattr(
+        symbol_analyzer_module, "BinanceFuturesMarketData", _DummyBinance
+    )
+    bot = SimpleNamespace(
+        client=_DummyBinance(),
+        _ws_manager=_WS(),
+        settings=SimpleNamespace(ws=SimpleNamespace(market_ticker_freshness_seconds=10)),
+    )
+    analyzer = SymbolAnalyzer(bot)
+
+    with caplog.at_level("WARNING", logger="bot.application.bot"):
+        enrichments = analyzer.ws_cache_enrichments("BTCUSDT")
+
+    assert enrichments["degraded"] is True
+    assert enrichments["fallback_used"] == "rest_cached_funding"
+    assert any(
+        "symbol=BTCUSDT stage=mark_snapshot source=ws reason=mark stream broken"
+        in record.message
+        for record in caplog.records
+    )
+
+
+def test_ws_cache_enrichments_logs_stale_cache_fallback_for_oi_ls_funding(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class _DummyBinance:
+        def get_cached_oi_change(self, *_args, **_kwargs):
+            return None
+
+        def get_cached_ls_ratio(self, *_args, **_kwargs):
+            return None
+
+        def get_cached_top_position_ls_ratio(self, *_args, **_kwargs):
+            return None
+
+        def get_cached_taker_ratio(self, *_args, **_kwargs):
+            return None
+
+        def get_cached_global_ls_ratio(self, *_args, **_kwargs):
+            return None
+
+        def get_cached_funding_trend(self, *_args, **_kwargs):
+            return None
+
+        def get_cached_basis(self, *_args, **_kwargs):
+            return None
+
+        def get_cached_basis_stats(self, *_args, **_kwargs):
+            return None
+
+    monkeypatch.setattr(
+        symbol_analyzer_module, "BinanceFuturesMarketData", _DummyBinance
+    )
+    bot = SimpleNamespace(client=_DummyBinance(), _ws_manager=None, settings=SimpleNamespace())
+    analyzer = SymbolAnalyzer(bot)
+
+    with caplog.at_level("INFO", logger="bot.application.bot"):
+        enrichments = analyzer.ws_cache_enrichments("ETHUSDT")
+
+    assert enrichments["degraded"] is True
+    assert "oi_cache:oi_change_missing" in enrichments["degrade_reason"]
+    assert any("stage=oi_cache" in record.message for record in caplog.records)
+    assert any("stage=ls_cache" in record.message for record in caplog.records)
+    assert any("stage=funding_cache" in record.message for record in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_ws_enrich_logs_degradation_instead_of_silent_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class _Client:
+        async def fetch_open_interest(self, *_args, **_kwargs):
+            return 1000.0
+
+        async def fetch_open_interest_change(self, *_args, **_kwargs):
+            raise RuntimeError("oi change failed")
+
+    bot = SimpleNamespace(client=_Client())
+    analyzer = SymbolAnalyzer(bot)
+    result = PipelineResult(
+        symbol="BTCUSDT",
+        trigger="test",
+        event_ts=datetime.now(UTC),
+        raw_setups=0,
+        candidates=[],
+        rejected=[],
+        prepared=make_prepared(),
+    )
+
+    with caplog.at_level("WARNING", logger="bot.application.bot"):
+        await analyzer.ws_enrich(result)
+
+    assert any(
+        "stage=oi_enrich_live source=rest reason=oi change failed" in record.message
         for record in caplog.records
     )
 
