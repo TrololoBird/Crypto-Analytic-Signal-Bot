@@ -2,6 +2,31 @@
 
 This ledger records the remediation items implemented directly in the live repo, the current status, and any intentionally deferred work.
 
+## Scope v1
+
+- **Mode:** analytics/signals only (no authorization flows, no auto-trading).
+- **Target platform:** Windows 11 + Python 3.13.
+
+### Priority zones and Pass/Fail criteria
+
+| Zone | Pass criteria | Fail criteria |
+| --- | --- | --- |
+| WS | Uses public market-data streams only; reconnect/degradation telemetry is explicit. | User-data/auth streams are added, or WS degradation happens without explicit telemetry. |
+| REST | Uses public market-data endpoints only with explicit retry/degrade behavior. | Any signed/account/trade REST call is introduced, or failures are silently ignored. |
+| Binance endpoints | Endpoint set stays within public USDⓈ-M market-data boundary. | Includes signed endpoints, account/trade endpoints, `listenKey`, or user-data streams. |
+| Strategies | Strategy logic remains signal-generation only; no order execution side effects. | Strategy path performs order placement, account mutation, or hidden execution actions. |
+| Filters | Filter decisions are explicit and observable in logs/telemetry. | Silent fallback or implicit bypass of filter gates occurs. |
+| Shortlist | `rest_full` vs `ws_light` split is preserved with explicit fallback telemetry. | Split is removed/blurred, or fallback path is silent. |
+| Data processing | Processing remains deterministic and auditable with explicit error/degradation paths. | Hidden mutation, silent drop, or non-observable degradation path is present. |
+| Indicators | Indicator calculations are reproducible and remain non-execution analytics. | Indicator path introduces trading/execution behavior or untracked fallback changes. |
+| Dependencies | Dependency set is runtime-compatible with Windows 11 + Python 3.13 and constrained to analytics/signal scope. | Dependencies force execution/account features or break the target platform baseline. |
+
+## Out of scope
+
+- Execution and auto-trading flows.
+- Trading/account operations (orders, balances, positions, account mutation).
+- User-data streams and any `listenKey` lifecycle handling.
+
 | Audit claim | Code status | Resolution |
 | --- | --- | --- |
 | Event bus backlog was unbounded and could amplify hot-path events. | Confirmed in prior `bot/core/event_bus.py`. | Replaced with a bounded bus that coalesces `KlineCloseEvent`, `BookTickerEvent`, `ShortlistUpdatedEvent`, and `OIRefreshDueEvent`, and exposes queue telemetry (`current_depth`, `high_water_mark`, `coalesced_count`, `dropped_count`). |
