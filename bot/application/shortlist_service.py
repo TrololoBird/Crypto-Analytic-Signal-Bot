@@ -20,13 +20,24 @@ FALLBACK_REASON_FULL_REFRESH_DUE = "full_refresh_due"
 FALLBACK_REASON_REFRESH_EXCEPTION = "refresh_exception"
 FALLBACK_REASON_USING_CACHED = "using_cached"
 FALLBACK_REASON_USING_PINNED = "using_pinned"
+FALLBACK_REASON_LIVE_EMPTY = "live_empty"
 SHORTLIST_FALLBACK_REASONS = {
     FALLBACK_REASON_WS_CACHE_COLD: "ws light cache not ready or missing symbol metadata",
     FALLBACK_REASON_FULL_REFRESH_DUE: "full refresh interval reached",
     FALLBACK_REASON_REFRESH_EXCEPTION: "shortlist refresh raised exception",
+    FALLBACK_REASON_LIVE_EMPTY: "live refresh returned empty shortlist",
     FALLBACK_REASON_USING_CACHED: "reuse last live shortlist snapshot",
     FALLBACK_REASON_USING_PINNED: "fallback to configured pinned shortlist",
 }
+
+
+def normalize_shortlist_fallback_reason(reason: str | None) -> str | None:
+    if reason is None:
+        return None
+    normalized = str(reason).strip().lower()
+    if not normalized:
+        return None
+    return normalized if normalized in SHORTLIST_FALLBACK_REASONS else "unknown"
 
 
 class ShortlistService:
@@ -321,6 +332,7 @@ class ShortlistService:
         now = datetime.now(UTC)
         fallback_reason: str | None = FALLBACK_REASON_USING_PINNED
         cached_shortlist_age_s: float | None = None
+        cached_shortlist_size: int | None = None
         full_interval = int(
             getattr(
                 bot.settings.universe,
@@ -369,7 +381,9 @@ class ShortlistService:
                 summary = live_summary
                 bot._last_live_shortlist = list(live_shortlist)
                 bot._last_live_shortlist_at = now
-            elif bot._last_live_shortlist:
+            else:
+                fallback_reason = fallback_reason or FALLBACK_REASON_LIVE_EMPTY
+            if not live_shortlist and bot._last_live_shortlist:
                 shortlist = list(bot._last_live_shortlist)
                 source = "cached"
                 fallback_reason = FALLBACK_REASON_USING_CACHED
@@ -387,6 +401,9 @@ class ShortlistService:
             last_live_at = getattr(bot, "_last_live_shortlist_at", None)
             if isinstance(last_live_at, datetime):
                 cached_shortlist_age_s = max(0.0, (now - last_live_at).total_seconds())
+            cached_shortlist_size = len(getattr(bot, "_last_live_shortlist", []))
+
+        fallback_reason = normalize_shortlist_fallback_reason(fallback_reason)
 
         async with bot._shortlist_lock:
             bot._shortlist = shortlist
@@ -412,6 +429,7 @@ class ShortlistService:
                 source_before=source_before,
                 fallback_reason=fallback_reason,
                 cached_shortlist_age_s=cached_shortlist_age_s,
+                cached_shortlist_size=cached_shortlist_size,
                 shortlist_size=len(shortlist),
                 shortlist_symbols=[item.symbol for item in shortlist[:20]],
                 top_scores=top_scores,
@@ -427,6 +445,7 @@ class ShortlistService:
                     "source_after": source,
                     "fallback_reason": fallback_reason,
                     "cached_shortlist_age_s": cached_shortlist_age_s,
+                    "cached_shortlist_size": cached_shortlist_size,
                     "size": len(shortlist),
                     "symbols": [item.symbol for item in shortlist[:20]],
                     "eligible": summary.get("eligible"),
