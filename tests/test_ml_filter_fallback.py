@@ -85,3 +85,13 @@ def test_ml_filter_uses_signal_classifier_fallback(tmp_path) -> None:
     assert status["disable_reason"] == "live_baseline_blocked"
     assert ml_filter.enabled is False
     assert 0.0 <= result.probability <= 1.0
+
+
+def test_signal_classifier_baseline_allowed_when_not_live(tmp_path) -> None:
+    clf = SignalClassifier(model_dir=tmp_path, model_type="centroid")
+    clf.model = clf._build_model()
+    decision = clf.runtime_guardrail_decision(
+        is_live=False, stage="integration_offline"
+    )
+    assert decision.should_disable is False
+    assert decision.disable_reason is None

@@ -110,10 +110,11 @@ class SignalBot:
         self.ml_filter = MLFilter(settings)
         ml_status = self.ml_filter.get_status()
         LOG.info(
-            "ML runtime status | stage=%s model_kind=%s disable_reason=%s count=%d",
+            "ML runtime status | stage=%s model_kind=%s disable_reason=%s is_live=%s count=%d",
             "orchestrator_init",
             ml_status.get("model_kind") or "unknown",
             ml_status.get("disable_reason") or "none",
+            bool(settings.ml.enabled and settings.ml.use_ml_in_live),
             1,
         )
         self.confluence = ConfluenceEngine(settings, ml_filter=self.ml_filter)

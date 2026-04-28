@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import polars as pl
+from .guardrails import LiveModelGuardrailDecision, evaluate_live_model_guardrail
 
 try:
     import pandas as pd
@@ -188,6 +189,14 @@ class SignalClassifier:
             return "linear_baseline"
         return (
             type(self.model).__name__.lower() if self.model is not None else "unloaded"
+        )
+
+    def runtime_guardrail_decision(
+        self, *, is_live: bool, stage: str
+    ) -> LiveModelGuardrailDecision:
+        """Centralized runtime guardrail decision for classifier artifacts."""
+        return evaluate_live_model_guardrail(
+            is_live=is_live, model_kind=self.model_kind(), stage=stage
         )
 
     def predict_proba(self, feature_vector: dict[str, float]) -> float:
