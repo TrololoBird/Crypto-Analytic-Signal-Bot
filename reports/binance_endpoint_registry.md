@@ -18,7 +18,6 @@ _Date:_ 2026-04-28 (UTC)
 | Protocol | Base URL | Source |
 |---|---|---|
 | REST (USDⓈ-M Futures) | `https://fapi.binance.com` | `bot/market_data.py::_FAPI_BASE_URL` |
-| REST (Options) | `https://eapi.binance.com` | `bot/public_intelligence.py` options fetchers |
 | WS (Futures streams root) | `wss://fstream.binance.com` (normalized) | `bot/config.py::WSConfig` + `bot/websocket/connection.py::build_stream_url` |
 
 > Effective WS connect URL is `<base>/stream`.
@@ -41,10 +40,6 @@ _Date:_ 2026-04-28 (UTC)
 | `GET /futures/data/globalLongShortAccountRatio` | Global account L/S | Public (IP-rate-limited) | No |
 | `GET /futures/data/takerlongshortRatio` | Taker buy/sell ratio | Public (IP-rate-limited) | No |
 | `GET /futures/data/basis` | Basis (% contango/backwardation proxy) | Public (IP-rate-limited) | No |
-| `GET /eapi/v1/exchangeInfo` | Options instrument metadata (public intelligence) | Public | No |
-| `GET /eapi/v1/openInterest` | Options OI snapshot | Public | No |
-| `GET /eapi/v1/mark` | Options mark data | Public | No |
-
 ## WS stream names
 
 | Stream name pattern | Purpose | Signed/Public | API key required |
@@ -60,6 +55,7 @@ _Date:_ 2026-04-28 (UTC)
 ## Explicit guardrails found in code
 
 - REST registry validator allows only public prefixes: `/fapi/v1/`, `/futures/data/`.
+- Runtime REST host validator allows only `https://fapi.binance.com`; non-USDⓈ-M hosts like `eapi.binance.com` are rejected.
 - REST registry validator forbids private/auth markers: `/private`, `listenkey`, `/ws-api`, `/sapi`, `/papi`, `signature=`, `timestamp=`.
 - WS stream classifier rejects private/auth stream tokens: `listenkey`, `/private`, `userdatastream`, `@account`, `@order`.
 - Runtime WS config validator forbids `/private`, `listenkey`, `/ws-api`, `/sapi`, `/papi` in configured WS URLs.
@@ -85,15 +81,15 @@ _Date:_ 2026-04-28 (UTC)
 
 | Severity | Finding | Module source |
 |---|---|---|
-| Medium | Options REST endpoints (`/eapi/v1/*`) are in active use, while repository policy states Binance boundary should be public USDⓈ-M market data only. | `bot/public_intelligence.py::PublicIntelligenceService._fetch_options_exchange_info`, `_fetch_options_open_interest`, `_fetch_options_mark_rows` |
+| None | No active non-USDⓈ-M runtime endpoint usage found in current runtime fetch path. | N/A |
 
 ## Compliance verdict
 
-**Non-compliant**.
+**Compliant**.
 
 ### Blocking items
 
-1. Options (`eapi`) public endpoints are outside the stated USDⓈ-M-only integration boundary.
+1. None.
 
 ### Compliant items
 

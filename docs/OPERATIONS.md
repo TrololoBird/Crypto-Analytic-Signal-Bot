@@ -63,6 +63,7 @@ The bot includes a built-in web dashboard for real-time monitoring.
 ## Binance boundary checks
 
 - Keep runtime on public USDⓈ-M market-data endpoints only.
+- Runtime boundary explicitly denies non-USDⓈ-M Binance REST hosts (for example `eapi.binance.com`), even when endpoints are public.
 - Treat any `/private`, signed/auth route, `listenKey`, or user-data stream as a configuration/code regression.
 - After market-data changes, rerun the endpoint grep plus `tests/test_remediation_regressions.py` to confirm the public-only guardrails still hold.
 

@@ -10,6 +10,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, cast
+from urllib.parse import urlparse
 
 import polars as pl
 import aiohttp
@@ -133,6 +134,32 @@ _FORBIDDEN_PUBLIC_PATH_MARKERS = (
     "signature=",
     "timestamp=",
 )
+_ALLOWED_RUNTIME_REST_HOSTS = ("fapi.binance.com",)
+_FORBIDDEN_RUNTIME_HOST_MARKERS = (
+    "eapi.binance.com",
+    "dapi.binance.com",
+    "vapi.binance.com",
+)
+
+
+def validate_runtime_public_rest_url(url: str) -> None:
+    """Validate runtime REST URL stays inside the public USDⓈ-M boundary."""
+    parsed = urlparse(str(url or "").strip())
+    host = parsed.netloc.lower().strip()
+    path = parsed.path.lower().strip()
+    if parsed.scheme != "https" or host not in _ALLOWED_RUNTIME_REST_HOSTS:
+        raise ValueError(
+            "runtime boundary requires public USDⓈ-M REST host "
+            f"{_ALLOWED_RUNTIME_REST_HOSTS}; got {url!r}"
+        )
+    if any(marker in host for marker in _FORBIDDEN_RUNTIME_HOST_MARKERS):
+        raise ValueError(
+            f"runtime boundary forbids non-USDⓈ-M Binance hosts; got {url!r}"
+        )
+    if any(marker in path for marker in _FORBIDDEN_PUBLIC_PATH_MARKERS):
+        raise ValueError(
+            f"runtime boundary forbids private/auth Binance REST routes; got {url!r}"
+        )
 
 
 class _SlidingWindowRateLimiter:
@@ -265,6 +292,7 @@ def _validate_public_endpoint_registry() -> None:
     for endpoint_name, spec in _PUBLIC_ENDPOINT_REGISTRY.items():
         path = spec.path.strip()
         lowered = path.lower()
+        validate_runtime_public_rest_url(f"{_FAPI_BASE_URL}{path}")
         if not path.startswith(_PUBLIC_PATH_PREFIXES):
             raise ValueError(
                 f"endpoint {endpoint_name} is not on an allowed public Binance path: {path}"

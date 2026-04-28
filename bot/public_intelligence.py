@@ -12,7 +12,7 @@ import structlog
 
 from .config import BotSettings
 from .features import _cached_prepare_frame, _swing_points, _to_polars
-from .market_data import BinanceFuturesMarketData
+from .market_data import BinanceFuturesMarketData, validate_runtime_public_rest_url
 from .telemetry import TelemetryStore
 
 LOG = structlog.get_logger("bot.public_intelligence")
@@ -108,6 +108,11 @@ class PublicIntelligenceService:
             ],
         }
 
+    def _options_eapi_runtime_enabled(self) -> bool:
+        return bool(
+            getattr(self._settings.intelligence, "allow_runtime_options_eapi", False)
+        )
+
     async def collect(self, shortlist_symbols: Iterable[str]) -> dict[str, Any]:
         symbols = [
             str(item).strip().upper() for item in shortlist_symbols if str(item).strip()
@@ -147,6 +152,7 @@ class PublicIntelligenceService:
         )
         macro_enabled = bool(cast(dict[str, Any], macro).get("enabled", True))
 
+        options_enabled = bool(options.get("enabled", True))
         snapshot: dict[str, Any] = {
             "ts": datetime.now(UTC).isoformat(),
             "runtime_mode": policy["runtime_mode"],
@@ -160,7 +166,7 @@ class PublicIntelligenceService:
             "uncertainty": summary["uncertainty"],
             "sources": {
                 "binance_futures_public": True,
-                "binance_options_public": True,
+                "binance_options_public": options_enabled,
                 "yahoo_macro_public": macro_enabled,
                 "external_macro_public": macro_enabled,
                 "external_news_public": False,
@@ -392,6 +398,23 @@ class PublicIntelligenceService:
         inferences: list[str] = []
         assumptions: list[str] = []
         gamma_semantics = self._settings.intelligence.gamma_semantics
+        if not self._options_eapi_runtime_enabled():
+            for asset in self._settings.intelligence.option_underlyings:
+                by_underlying[asset] = {
+                    "available": False,
+                    "reason": "runtime_boundary_disallows_binance_eapi",
+                    "gamma_semantics": gamma_semantics,
+                }
+            assumptions.append(
+                "options_eapi_disabled_by_default_under_runtime_usdm_public_boundary"
+            )
+            return {
+                "enabled": False,
+                "by_underlying": by_underlying,
+                "confirmed_facts": confirmed_facts,
+                "inferences": inferences,
+                "assumptions": assumptions,
+            }
 
         for asset in self._settings.intelligence.option_underlyings:
             meta_rows = await self._fetch_options_exchange_info(asset)
@@ -497,6 +520,7 @@ class PublicIntelligenceService:
             )
 
         return {
+            "enabled": True,
             "by_underlying": by_underlying,
             "confirmed_facts": confirmed_facts,
             "inferences": inferences,
@@ -932,12 +956,17 @@ class PublicIntelligenceService:
     async def _fetch_options_exchange_info(
         self, underlying_asset: str
     ) -> list[dict[str, Any]]:
+        if not self._options_eapi_runtime_enabled():
+            return []
         asset = str(underlying_asset or "").strip().upper()
         now = time.monotonic()
         cached = self._options_exchange_cache.get(asset)
         if cached is not None and now - cached[0] < _OPTIONS_EXCHANGE_INFO_TTL_S:
             return cached[1]
 
+        validate_runtime_public_rest_url(
+            "https://eapi.binance.com/eapi/v1/exchangeInfo"
+        )
         payload = await self._fetch_json(
             "https://eapi.binance.com/eapi/v1/exchangeInfo"
         )
@@ -962,6 +991,9 @@ class PublicIntelligenceService:
         underlying_asset: str,
         expiry_code: str,
     ) -> list[dict[str, Any]]:
+        if not self._options_eapi_runtime_enabled():
+            return []
+        validate_runtime_public_rest_url("https://eapi.binance.com/eapi/v1/openInterest")
         payload = await self._fetch_json(
             "https://eapi.binance.com/eapi/v1/openInterest",
             params={
@@ -974,6 +1006,9 @@ class PublicIntelligenceService:
         return []
 
     async def _fetch_options_mark_rows(self, underlying: str) -> list[dict[str, Any]]:
+        if not self._options_eapi_runtime_enabled():
+            return []
+        validate_runtime_public_rest_url("https://eapi.binance.com/eapi/v1/mark")
         payload = await self._fetch_json(
             "https://eapi.binance.com/eapi/v1/mark",
             params={"underlying": str(underlying or "").strip().upper()},
@@ -1124,7 +1159,7 @@ class PublicIntelligenceService:
             f"# Public Intelligence {snapshot['ts']}",
             "",
             "## Scope",
-            "- Binance public futures/options endpoints only for this phase.",
+            "- Binance public USDⓈ-M futures endpoints only for runtime mode.",
             f"- Runtime mode: `{snapshot.get('runtime_mode') or policy.get('runtime_mode') or 'unknown'}`.",
             f"- Source policy: `{snapshot.get('source_policy') or policy.get('source_policy') or 'unknown'}`.",
             (

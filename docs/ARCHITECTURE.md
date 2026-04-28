@@ -34,7 +34,7 @@
 ## Market-data contract
 
 - Runtime market data is restricted to public Binance USDⓈ-M endpoints.
-- REST is served through the public endpoint registry in `bot/market_data.py`; private/auth/signed routes are rejected at validation time.
+- REST is served through the public endpoint registry in `bot/market_data.py`; private/auth/signed routes and non-USDⓈ-M hosts (including `eapi.binance.com`) are rejected at validation time.
 - WebSocket routing is split intentionally:
   - `/public` for `@bookTicker`
   - `/market` for `@kline_*`, `@aggTrade`, `!ticker@arr`, `@markPrice`, `!forceOrder@arr`
