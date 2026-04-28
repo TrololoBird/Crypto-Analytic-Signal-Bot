@@ -38,6 +38,9 @@ The bot includes a built-in web dashboard for real-time monitoring.
 - `make run` — start bot runtime.
 - `make dry-run` — run without sending live deliveries.
 - Targeted remediation suites (`test_regression_suite_*` naming):
+  - `pytest -q tests/test_regression_suite_runtime_boundary.py`
+  - `pytest -q tests/test_regression_suite_setups_contracts.py`
+  - `pytest -q tests/test_regression_suite_ml_and_features.py`
   - `pytest -q tests/test_regression_suite_remediation_intra_candle.py`
   - `pytest -q tests/test_regression_suite_remediation_indicators.py`
   - `pytest -q tests/test_regression_suite_tracking_delivery.py`
@@ -48,6 +51,9 @@ The bot includes a built-in web dashboard for real-time monitoring.
   - `pytest -q -m regression_remediation`
   - `pytest -q -m regression_remediation_runtime`
   - `pytest -q -m regression_remediation_indicators`
+  - `pytest -q tests/test_regression_suite_runtime_boundary.py -x`
+  - `pytest -q tests/test_regression_suite_setups_contracts.py -x`
+  - `pytest -q tests/test_regression_suite_ml_and_features.py -x`
 
 ## Recommended routine
 
