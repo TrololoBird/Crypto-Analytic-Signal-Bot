@@ -90,12 +90,16 @@ class CVDDivergenceSetup(BaseSetup):
             return None
 
         closes = w["close"].to_numpy()
+        highs = w["high"].to_numpy()
+        lows = w["low"].to_numpy()
         delta_vals = w["delta_ratio"].to_numpy()
 
         split = max(2, divergence_lookback)
         compare = split * 2
         window_a = closes[-compare:-split]
         window_b = closes[-split:]
+        high_window_b = highs[-split:]
+        low_window_b = lows[-split:]
         delta_a = delta_vals[-compare:-split]
         delta_b = delta_vals[-split:]
 
@@ -150,14 +154,14 @@ class CVDDivergenceSetup(BaseSetup):
 
         # --- Compute structural SL/TP ---
         if direction == "long":
-            # SL: beyond divergence extreme (lowest low of window_b) + 0.15×ATR
-            div_extreme = float(min(window_b))
+            # SL: below the most recent price-action low in window_b + ATR buffer.
+            div_extreme = float(min(low_window_b))
             stop = div_extreme - atr * sl_buffer_atr
             risk = price - stop
             if risk <= 0:
                 _reject(prepared, self.setup_id, "risk_non_positive_long", stop=stop, price=price)
                 return None
-            # TP1: price level where CVD divergence began (high of window_a = reversal target)
+            # TP1: first leg retrace target from the prior divergence segment on close prices.
             tp1 = float(max(window_a))
             # TP2: prior structural level (1h swing high)
             w1h = prepared.work_1h
@@ -168,14 +172,14 @@ class CVDDivergenceSetup(BaseSetup):
                 tp2_cands = sh_prices.filter(sh_prices > price)
                 tp2 = float(tp2_cands[0]) if tp2_cands.len() > 0 else None
         else:
-            # SL: beyond divergence extreme (highest high of window_b) + 0.15×ATR
-            div_extreme = float(max(window_b))
+            # SL: above the most recent price-action high in window_b + ATR buffer.
+            div_extreme = float(max(high_window_b))
             stop = div_extreme + atr * sl_buffer_atr
             risk = stop - price
             if risk <= 0:
                 _reject(prepared, self.setup_id, "risk_non_positive_short", stop=stop, price=price)
                 return None
-            # TP1: price level where divergence began (low of window_a)
+            # TP1: first leg retrace target from the prior divergence segment on close prices.
             tp1 = float(min(window_a))
             # TP2: prior structural level (1h swing low)
             w1h = prepared.work_1h
