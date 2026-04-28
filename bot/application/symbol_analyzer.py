@@ -24,6 +24,14 @@ if TYPE_CHECKING:
 
 
 LOG = logging.getLogger("bot.application.bot")
+_DEGRADATION_ERRORS = (
+    MarketDataUnavailable,
+    RuntimeError,
+    ValueError,
+    TypeError,
+    AttributeError,
+    KeyError,
+)
 _DEFAULT_HISTORY_FETCH_LIMIT = 300
 _HISTORY_FETCH_BUFFER_BARS = 60
 
@@ -1029,7 +1037,7 @@ class SymbolAnalyzer:
                             freshness_flags.add("ticker_price_stale")
                 else:
                     freshness_flags.add("ticker_price_missing")
-            except Exception as exc:
+            except _DEGRADATION_ERRORS as exc:
                 degradation_events.append(
                     self._degrade_event(
                         symbol=symbol,
@@ -1094,7 +1102,7 @@ class SymbolAnalyzer:
                         )
                 elif not mark:
                     freshness_flags.add("mark_price_missing")
-            except Exception as exc:
+            except _DEGRADATION_ERRORS as exc:
                 degradation_events.append(
                     self._degrade_event(
                         symbol=symbol,
@@ -1126,7 +1134,7 @@ class SymbolAnalyzer:
                 )
                 if liquidation is not None:
                     enrichments["liquidation_score"] = float(liquidation)
-            except Exception as exc:
+            except _DEGRADATION_ERRORS as exc:
                 degradation_events.append(
                     self._degrade_event(
                         symbol=symbol,
@@ -1301,7 +1309,7 @@ class SymbolAnalyzer:
                 p.universe.symbol,
                 period="5m",
             )
-        except Exception as exc:
+        except _DEGRADATION_ERRORS as exc:
             self._log_degradation(
                 level=logging.WARNING,
                 symbol=p.universe.symbol,
