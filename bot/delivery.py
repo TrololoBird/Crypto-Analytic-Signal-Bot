@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
 from dataclasses import dataclass
 import html
 import logging
@@ -15,13 +17,15 @@ from .tracking import SignalTrackingEvent
 LOG = logging.getLogger("bot.delivery")
 UTC = timezone.utc
 LOCAL_TZ = datetime.now().astimezone().tzinfo or UTC
+_AUDIT_BATCH_LABELS = {"RAW", "CANDIDATE"}
+_AUDIT_BATCH_INTERVAL_SECONDS = 5.0
+_AUDIT_BATCH_MAX_LINES = 20
+_AUDIT_BATCH_MAX_CHARS = 3500
 
 
 class SignalBroadcaster(Protocol):
     async def preflight_check(self) -> None: ...
-    async def send_html(
-        self, text: str, *, reply_to_message_id: int | None = None
-    ) -> DeliveryResult: ...
+    async def send_html(self, text: str, *, reply_to_message_id: int | None = None) -> DeliveryResult: ...
     async def edit_html(self, message_id: int, text: str) -> None: ...
     async def close(self) -> None: ...
 
@@ -72,6 +76,40 @@ def _direction_label(direction: str) -> str:
 
 def _humanize_token(value: str) -> str:
     return html.escape(str(value or "").replace("_", " ").strip())
+
+
+def _fmt_audit_metric(name: str, value: float | None, suffix: str = "") -> str | None:
+    if value is None:
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    return f"{name}={numeric:.2f}{suffix}"
+
+
+def _format_signal_audit_text(label: str, signal: Signal, *, final: bool = False) -> str:
+    normalized_label = str(label or "").strip().upper()
+    parts = [
+        f"[{normalized_label}]",
+        f"#{signal.tracking_ref}",
+        signal.symbol,
+        signal.setup_id,
+        signal.direction,
+        f"{float(signal.score):.2f}",
+    ]
+    if normalized_label == "CANDIDATE":
+        metrics = [
+            _fmt_audit_metric("ADX", signal.adx_1h),
+            _fmt_audit_metric("ATR", signal.atr_pct, "%"),
+        ]
+        parts.extend(metric for metric in metrics if metric)
+        if signal.passed_filters:
+            parts.append("filters_passed=" + ",".join(signal.passed_filters))
+    if final:
+        parts.append("FINAL")
+    parts.append(signal.created_at.astimezone(UTC).strftime("%H:%M:%S"))
+    return " ".join(parts)
 
 
 def _trigger_text(reasons: tuple[str, ...] | list[str]) -> str:
@@ -132,9 +170,7 @@ def _status_line_for_tracked(tracked: SignalTrackingEvent | object) -> str:
         is_break_even = False
         if moved_to_break_even_at and break_even and stop_px:
             try:
-                is_break_even = abs(float(stop_px) - float(break_even)) <= (
-                    float(break_even) * 1e-6
-                )
+                is_break_even = abs(float(stop_px) - float(break_even)) <= (float(break_even) * 1e-6)
             except (TypeError, ValueError):
                 is_break_even = False
         label = "stopped (break-even)" if is_break_even else "stopped"
@@ -178,9 +214,7 @@ def _trailing_stop_instructions(stop_distance_pct: float) -> str:
     """Trailing stop hint based on stop distance."""
     trigger1 = round(stop_distance_pct * 2, 1)
     trigger2 = round(stop_distance_pct * 3, 1)
-    return (
-        f"📌 Трейлинг: +{trigger1}% → SL в безубыток | +{trigger2}% → фиксировать 30%"
-    )
+    return f"📌 Трейлинг: +{trigger1}% → SL в безубыток | +{trigger2}% → фиксировать 30%"
 
 
 def _compute_tp3(entry_mid: float, take_profit_2: float, direction: str) -> float:
@@ -251,9 +285,7 @@ def _render_signal_card(
     trigger_text = _trigger_text(reasons)
     if trigger_text != "n/a":
         lines.append(f"<b>Trigger</b> {html.escape(trigger_text)}")
-    lines.append(
-        f'<b>Chart</b> <a href="{html.escape(tradingview_chart_url(symbol, timeframe), quote=True)}">TradingView</a>'
-    )
+    lines.append(f'<b>Chart</b> <a href="{html.escape(tradingview_chart_url(symbol, timeframe), quote=True)}">TradingView</a>')
     if expiry_dt:
         lines.append(f"👁 Ожидать входа: до <code>{_fmt_dt(expiry_dt)}</code>")
     else:
@@ -261,9 +293,7 @@ def _render_signal_card(
     return "\n".join(lines)
 
 
-def _market_context_line(
-    oi_change_pct: float | None, funding_rate: float | None
-) -> str | None:
+def _market_context_line(oi_change_pct: float | None, funding_rate: float | None) -> str | None:
     parts = []
     if oi_change_pct is not None:
         sign = "+" if oi_change_pct >= 0 else ""
@@ -274,12 +304,8 @@ def _market_context_line(
     return " | ".join(parts) if parts else None
 
 
-def format_signal_text(
-    signal: Signal, *, pending_expiry_minutes: int, btc_bias: str | None = None
-) -> str:
-    wait_until = signal.created_at.astimezone(UTC) + timedelta(
-        minutes=pending_expiry_minutes
-    )
+def format_signal_text(signal: Signal, *, pending_expiry_minutes: int, btc_bias: str | None = None) -> str:
+    wait_until = signal.created_at.astimezone(UTC) + timedelta(minutes=pending_expiry_minutes)
     return _render_signal_card(
         symbol=signal.symbol,
         direction=signal.direction,
@@ -303,9 +329,7 @@ def format_signal_text(
     )
 
 
-def format_analytics_companion(
-    signal: Signal, *, btc_bias: str | None = None, eth_bias: str | None = None
-) -> str:
+def format_analytics_companion(signal: Signal, *, btc_bias: str | None = None, eth_bias: str | None = None) -> str:
     """Build actionable context companion — answers WHY this signal, WHY now, WHAT invalidates."""
     sym = html.escape(signal.symbol)
     direction = signal.direction
@@ -355,47 +379,29 @@ def format_analytics_companion(
     if signal.orderflow_delta_ratio is not None:
         dr = signal.orderflow_delta_ratio
         if direction == "long":
-            of_verdict = (
-                "покупатели агрессивны"
-                if dr >= 0.55
-                else ("нейтральный поток" if dr >= 0.45 else "продавцы давят — риск")
-            )
+            of_verdict = "покупатели агрессивны" if dr >= 0.55 else ("нейтральный поток" if dr >= 0.45 else "продавцы давят — риск")
         else:
-            of_verdict = (
-                "продавцы агрессивны"
-                if dr <= 0.45
-                else ("нейтральный поток" if dr <= 0.55 else "покупатели давят — риск")
-            )
+            of_verdict = "продавцы агрессивны" if dr <= 0.45 else ("нейтральный поток" if dr <= 0.55 else "покупатели давят — риск")
         lines.append(f"• Ордерфлоу: <code>{dr:.2f}</code> → {of_verdict}")
 
     # --- Crowd positioning contrast (funding rate as contrarian signal) ---
     if signal.funding_rate is not None:
         fr_pct = signal.funding_rate * 100
         if direction == "long" and fr_pct <= -0.04:
-            lines.append(
-                f"• Фандинг: <code>{fr_pct:+.4f}%</code> — толпа в шортах → попутный ветер для лонга"
-            )
+            lines.append(f"• Фандинг: <code>{fr_pct:+.4f}%</code> — толпа в шортах → попутный ветер для лонга")
         elif direction == "short" and fr_pct >= 0.04:
-            lines.append(
-                f"• Фандинг: <code>{fr_pct:+.4f}%</code> — толпа в лонгах → попутный ветер для шорта"
-            )
+            lines.append(f"• Фандинг: <code>{fr_pct:+.4f}%</code> — толпа в лонгах → попутный ветер для шорта")
         elif abs(fr_pct) >= 0.04:
-            lines.append(
-                f"• Фандинг: <code>{fr_pct:+.4f}%</code> — перекос против направления, учитывай"
-            )
+            lines.append(f"• Фандинг: <code>{fr_pct:+.4f}%</code> — перекос против направления, учитывай")
 
     # --- BTC as market tailwind/headwind (15m momentum context) ---
     btc_map = {"uptrend": "растёт ↑", "downtrend": "падает ↓", "neutral": "нейтральный"}
     if btc_bias and btc_bias != "neutral":
         btc_label = btc_map.get(btc_bias, btc_bias)
-        if (direction == "long" and btc_bias == "uptrend") or (
-            direction == "short" and btc_bias == "downtrend"
-        ):
+        if (direction == "long" and btc_bias == "uptrend") or (direction == "short" and btc_bias == "downtrend"):
             lines.append(f"• BTC: {html.escape(btc_label)} — попутный ветер")
         else:
-            lines.append(
-                f"• BTC: {html.escape(btc_label)} — встречный ветер, будь готов к волатильности"
-            )
+            lines.append(f"• BTC: {html.escape(btc_label)} — встречный ветер, будь готов к волатильности")
 
     # --- Invalidation condition ---
     stop_pct = signal.stop_distance_pct
@@ -416,9 +422,7 @@ def format_analytics_companion(
         "funding_reversal": "фандинг не нормализуется за 2 свечи",
         "session_killzone": "выход за границы сессионного диапазона",
     }.get(signal.setup_id, "пробой стопа")
-    lines.append(
-        f"• Аннулирование: {setup_invalidation} (стоп {stop_pct:.1f}% от входа)"
-    )
+    lines.append(f"• Аннулирование: {setup_invalidation} (стоп {stop_pct:.1f}% от входа)")
 
     return "\n".join(lines)
 
@@ -430,9 +434,7 @@ def format_tracked_signal_text(tracked: SignalTrackingEvent | object) -> str:
     risk = abs(entry_mid - stop)
     reward = abs(getattr(state, "take_profit_2") - entry_mid)
     risk_reward = (reward / risk) if risk > 0 else 0.0
-    stop_distance_pct = (
-        abs(entry_mid - stop) / entry_mid * 100.0 if entry_mid > 0 else 0.0
-    )
+    stop_distance_pct = abs(entry_mid - stop) / entry_mid * 100.0 if entry_mid > 0 else 0.0
     return _render_signal_card(
         symbol=getattr(state, "symbol"),
         direction=getattr(state, "direction"),
@@ -466,18 +468,14 @@ def format_tracking_event_text(event: SignalTrackingEvent) -> str:
         "ambiguous_exit": "Analytical Exit (Ambiguous)",
         "superseded": "Tracking Superseded",
     }
-    if event.event_type == "stop_loss" and getattr(
-        tracked, "moved_to_break_even_at", None
-    ):
+    if event.event_type == "stop_loss" and getattr(tracked, "moved_to_break_even_at", None):
         try:
-            break_even = float(
-                getattr(tracked, "activation_price", None) or tracked.entry_mid
-            )
+            break_even = float(getattr(tracked, "activation_price", None) or tracked.entry_mid)
             stop_px = float(event.event_price or tracked.stop)
             if break_even > 0 and abs(stop_px - break_even) <= (break_even * 1e-6):
                 event_titles["stop_loss"] = "Stop (Break-even)"
-        except (TypeError, ValueError):
-            pass
+        except (TypeError, ValueError) as exc:
+            LOG.debug("stop-loss display adjustment skipped: %s", exc)
     lines = [
         f"<b>{html.escape(tracked.symbol)} {_direction_label(tracked.direction)}</b> <code>#{tracked.tracking_ref}</code> | <b>{event_titles.get(event.event_type, event.event_type)}</b>",
         (
@@ -511,9 +509,138 @@ class SignalDelivery:
         self.broadcaster = broadcaster
         self.pending_expiry_minutes = pending_expiry_minutes
         self.tracking_reply_freshness_minutes = tracking_reply_freshness_minutes
+        self._audit_batch_lock = asyncio.Lock()
+        self._audit_batch_lines: list[str] = []
+        self._audit_batch_task: asyncio.Task[None] | None = None
 
     async def preflight_check(self) -> None:
         await self.broadcaster.preflight_check()
+
+    async def close(self) -> None:
+        await self.flush_signal_audits()
+
+    async def send_signal_audit(
+        self,
+        label: str,
+        signal: Signal,
+        *,
+        final: bool = False,
+    ) -> DeliveryResult:
+        normalized_label = str(label or "").strip().upper()
+        text = html.escape(_format_signal_audit_text(normalized_label, signal, final=final))
+        if normalized_label in _AUDIT_BATCH_LABELS and not final:
+            return await self._queue_signal_audit(text, label=normalized_label, signal=signal)
+
+        await self.flush_signal_audits()
+        result = await self.broadcaster.send_html(text)
+        if result.status == "sent":
+            LOG.info(
+                "telegram signal audit sent | label=%s symbol=%s setup=%s message_id=%s",
+                label,
+                signal.symbol,
+                signal.setup_id,
+                result.message_id,
+            )
+        else:
+            LOG.debug(
+                "signal audit not delivered | label=%s status=%s reason=%s symbol=%s setup=%s",
+                label,
+                result.status,
+                result.reason,
+                signal.symbol,
+                signal.setup_id,
+            )
+        return result
+
+    async def _queue_signal_audit(
+        self,
+        text: str,
+        *,
+        label: str,
+        signal: Signal,
+    ) -> DeliveryResult:
+        should_flush = False
+        async with self._audit_batch_lock:
+            self._audit_batch_lines.append(text)
+            total_chars = sum(len(line) for line in self._audit_batch_lines)
+            should_flush = (
+                len(self._audit_batch_lines) >= _AUDIT_BATCH_MAX_LINES
+                or total_chars >= _AUDIT_BATCH_MAX_CHARS
+            )
+            if self._audit_batch_task is None or self._audit_batch_task.done():
+                self._audit_batch_task = asyncio.create_task(
+                    self._flush_signal_audits_later(),
+                    name="telegram_signal_audit_batch_flush",
+                )
+
+        LOG.debug(
+            "signal audit queued | label=%s symbol=%s setup=%s",
+            label,
+            signal.symbol,
+            signal.setup_id,
+        )
+        if should_flush:
+            await self.flush_signal_audits()
+        return DeliveryResult(status="queued", reason="batched_audit")
+
+    async def _flush_signal_audits_later(self) -> None:
+        try:
+            await asyncio.sleep(_AUDIT_BATCH_INTERVAL_SECONDS)
+            await self.flush_signal_audits()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            LOG.exception("signal audit batch flush failed")
+
+    async def flush_signal_audits(self) -> None:
+        async with self._audit_batch_lock:
+            lines = list(self._audit_batch_lines)
+            self._audit_batch_lines.clear()
+            task = self._audit_batch_task
+            self._audit_batch_task = None
+
+        current_task = asyncio.current_task()
+        if task is not None and task is not current_task and not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        if not lines:
+            return
+
+        for chunk in self._chunk_audit_batch(lines):
+            result = await self.broadcaster.send_html(chunk)
+            if result.status == "sent":
+                LOG.info(
+                    "telegram signal audit batch sent | rows=%d message_id=%s",
+                    chunk.count("<code>"),
+                    result.message_id,
+                )
+            else:
+                LOG.debug(
+                    "signal audit batch not delivered | status=%s reason=%s rows=%d",
+                    result.status,
+                    result.reason,
+                    chunk.count("<code>"),
+                )
+
+    @staticmethod
+    def _chunk_audit_batch(lines: list[str]) -> list[str]:
+        header = "<b>Signal audit batch</b>"
+        chunks: list[str] = []
+        current: list[str] = []
+        current_len = len(header)
+        for line in lines:
+            rendered = f"<code>{line}</code>"
+            rendered_len = len(rendered) + 1
+            if current and current_len + rendered_len > _AUDIT_BATCH_MAX_CHARS:
+                chunks.append(header + "\n" + "\n".join(current))
+                current = []
+                current_len = len(header)
+            current.append(rendered)
+            current_len += rendered_len
+        if current:
+            chunks.append(header + "\n" + "\n".join(current))
+        return chunks
 
     async def deliver(
         self,
@@ -531,18 +658,16 @@ class SignalDelivery:
             )
             if dry_run:
                 LOG.info("dry-run signal\n%s", text)
-                delivered.append(
-                    DeliveredSignal(
-                        signal=signal, status="sent", message_id=None, reason="dry_run"
-                    )
-                )
+                delivered.append(DeliveredSignal(signal=signal, status="sent", message_id=None, reason="dry_run"))
                 continue
             result = await self.broadcaster.send_html(text)
             if result.status == "sent":
                 LOG.info("telegram signal sent\n%s", text)
+            elif result.status == "logged":
+                LOG.info("local signal logged\n%s", text)
             else:
                 LOG.debug(
-                    "telegram signal not delivered | status=%s reason=%s symbol=%s setup=%s",
+                    "signal not delivered | status=%s reason=%s symbol=%s setup=%s",
                     result.status,
                     result.reason,
                     signal.symbol,
@@ -567,9 +692,7 @@ class SignalDelivery:
     ) -> None:
         """Send a short analytics narrative as a follow-up message after a signal."""
         try:
-            text = format_analytics_companion(
-                signal, btc_bias=btc_bias, eth_bias=eth_bias
-            )
+            text = format_analytics_companion(signal, btc_bias=btc_bias, eth_bias=eth_bias)
             await self.broadcaster.send_html(text)
         except Exception as exc:
             LOG.debug("analytics companion send failed: %s", exc)
@@ -594,16 +717,11 @@ class SignalDelivery:
                 )
             if not dry_run and final_event.tracked.signal_message_id:
                 try:
-                    await self.broadcaster.edit_html(
-                        final_event.tracked.signal_message_id, tracked_card
-                    )
+                    await self.broadcaster.edit_html(final_event.tracked.signal_message_id, tracked_card)
                     LOG.info("telegram signal card edited\n%s", tracked_card)
                     edited = True
                 except Exception:
-                    LOG.exception(
-                        "telegram signal card edit failed for %s",
-                        final_event.tracked.tracking_ref,
-                    )
+                    LOG.exception("telegram signal card edit failed for %s", final_event.tracked.tracking_ref)
             elif dry_run:
                 LOG.info("dry-run signal card edit\n%s", tracked_card)
                 edited = True
@@ -615,14 +733,8 @@ class SignalDelivery:
             if dry_run:
                 LOG.info("dry-run tracking update\n%s", text)
                 continue
-            reply_to_message_id = (
-                final_event.tracked.signal_message_id
-                if final_event.tracked.signal_message_id
-                else None
-            )
-            result = await self.broadcaster.send_html(
-                text, reply_to_message_id=reply_to_message_id
-            )
+            reply_to_message_id = final_event.tracked.signal_message_id if final_event.tracked.signal_message_id else None
+            result = await self.broadcaster.send_html(text, reply_to_message_id=reply_to_message_id)
             if result.status == "sent":
                 LOG.info("telegram tracking update sent\n%s", text)
             else:
@@ -635,9 +747,7 @@ class SignalDelivery:
                 )
 
     @staticmethod
-    def _coalesce_tracking_events(
-        events: list[SignalTrackingEvent],
-    ) -> list[list[SignalTrackingEvent]]:
+    def _coalesce_tracking_events(events: list[SignalTrackingEvent]) -> list[list[SignalTrackingEvent]]:
         grouped: "OrderedDict[str, list[SignalTrackingEvent]]" = OrderedDict()
         for event in events:
             grouped.setdefault(event.tracked.tracking_id, []).append(event)

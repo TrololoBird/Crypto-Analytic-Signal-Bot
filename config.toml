@@ -3,7 +3,12 @@
 
 [bot.runtime]
 analysis_concurrency = 8
-max_signals_per_cycle = 3
+# Strategy executor budget inside SignalEngine.
+# Keep lower than analysis_concurrency to avoid thread oversubscription/timeouts.
+strategy_concurrency = 4
+# Per-strategy compute timeout (seconds) excluding queue wait.
+strategy_timeout_seconds = 12.0
+max_signals_per_cycle = 50
 event_bus_max_size = 512
 event_bus_warn_depth = 384
 event_bus_drop_log_interval = 25
@@ -17,6 +22,7 @@ diagnostic_trace_limit_per_symbol = 20
 startup_batch_size = 3
 startup_batch_delay_seconds = 2.0
 max_concurrent_rest_requests = 5
+min_restart_interval_seconds = 120
 
 [bot.universe]
 quote_asset = "USDT"
@@ -34,14 +40,14 @@ pinned_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"]
 cooldown_minutes = 60
 symbol_cooldown_minutes = 120
 max_spread_bps = 8.0
-# Empirical note (2026-04-14): reverted from 0.30 to 0.50.
-# Low ATR allows choppy/sideways markets through — lowers signal quality.
-# Accept fewer signals over low-quality ones.
-min_atr_pct = 0.50
+# Keep ATR gate above extreme-noise floor, but avoid over-pruning low-volatility majors.
+min_atr_pct = 0.18
 max_atr_pct = 10.0
 min_adx_1h = 18.0
 min_risk_reward = 1.9
-min_score = 0.66
+# Lower bound for post-confluence score; tuned to restore candidate flow while
+# preserving RR/spread/stop hard-gates.
+min_score = 0.55
 freshness_15m_minutes = 16
 freshness_1h_hours = 2
 freshness_4h_hours = 10
@@ -55,18 +61,18 @@ max_mark_price_deviation_pct = 0.005
 ema_bounce = { base_score = 0.55, min_adx_1h = 15.0, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.5, min_rr = 1.5 }
 structure_pullback = { base_score = 0.55, bias_mismatch_penalty = 0.75, tp_too_close_penalty = 0.75, sl_buffer_atr = 0.5, min_rr = 1.5 }
 structure_break_retest = { base_score = 0.55, threshold_adx = 18.0, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.5, min_rr = 1.5 }
-wick_trap_reversal = { base_score = 0.50, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.5, min_rr = 1.5, wick_through_atr_mult = 0.3 }
-squeeze_setup = { base_score = 0.55, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.4, min_rr = 1.5 }
-fvg_setup = { base_score = 0.60, threshold_gap = 0.001, sl_buffer_atr = 0.5, min_rr = 1.5, tp_too_close_penalty = 0.8 }
+wick_trap_reversal = { base_score = 0.50, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.8, min_rr = 1.5, adx_penalty_factor = 0.85 }
+squeeze_setup = { base_score = 0.55, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.8, min_rr = 1.5 }
+fvg_setup = { base_score = 0.60, threshold_gap = 0.001, sl_buffer_atr = 0.8, min_rr = 1.5, tp_too_close_penalty = 0.8 }
 order_block = { base_score = 0.50, threshold_volume = 1.2, sl_buffer_atr = 0.5, min_rr = 1.5 }
-liquidity_sweep = { base_score = 0.50, threshold_tol = 0.0015, sl_buffer_atr = 0.5, min_rr = 1.5 }
-bos_choch = { base_score = 0.55, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.2, min_rr = 1.5, min_swings = 6 }
-hidden_divergence = { base_score = 0.50, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.5, min_rr = 1.5 }
-funding_reversal = { base_score = 0.50, funding_threshold = 0.0005, funding_trend_bars = 3, min_delta_threshold = 0.02, sl_buffer_atr = 0.6, min_rr = 1.5 }
-cvd_divergence = { base_score = 0.50, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.5, min_rr = 1.5 }
-session_killzone = { base_score = 0.55, min_volume_ratio = 1.2, min_adx_1h = 18.0, min_rr = 1.5 }
-breaker_block = { base_score = 0.50, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.2, min_rr = 1.5 }
-turtle_soup = { base_score = 0.50, bias_mismatch_penalty = 0.75, roll_bars = 20, break_atr_mult = 0.1, sl_buffer_atr = 0.5, volume_threshold = 1.0, min_rr = 1.5 }
+liquidity_sweep = { base_score = 0.50, threshold_tol = 0.0015, sl_buffer_atr = 0.7, min_rr = 1.5 }
+bos_choch = { base_score = 0.55, bias_mismatch_penalty = 0.75, sl_buffer_atr = 1.0, min_rr = 1.5, swing_lookback = 6, min_swings = 3 }
+hidden_divergence = { base_score = 0.50, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.5, min_rr = 1.5, min_volume_ratio = 0.55 }
+funding_reversal = { base_score = 0.50, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.6, min_rr = 1.5, adx_penalty_factor = 0.85 }
+cvd_divergence = { base_score = 0.50, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.8, min_rr = 1.5 }
+session_killzone = { base_score = 0.55, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.8, min_rr = 1.5 }
+breaker_block = { base_score = 0.50, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.8, min_rr = 1.5 }
+turtle_soup = { base_score = 0.50, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.5, min_rr = 1.5, adx_penalty_factor = 0.85 }
 
 [bot.tracking]
 enabled = true
@@ -125,14 +131,23 @@ watch_expiry_minutes = 60
 
 [bot.ws]
 enabled = true
-# Canonical Binance Futures WS root. Runtime always uses combined stream:
-# {base_url}/stream. Endpoint classes (public/market) are logical only.
+# Root Binance Futures WS endpoint. Manager routes bookTicker to /public and
+# market streams to /market internally.
 base_url = "wss://fstream.binance.com"
-public_base_url = "wss://fstream.binance.com"
-market_base_url = "wss://fstream.binance.com"
-kline_intervals = ["5m", "15m", "1h"]
+public_base_url = "wss://fstream.binance.com/public"
+market_base_url = "wss://fstream.binance.com/market"
+# Keep only the execution interval on WS to prevent sustained stream overload.
+# 5m/1h context is fetched through the bounded REST cache path when needed.
+kline_intervals = ["15m"]
 subscription_scope = "shortlist"
 subscribe_book_ticker = true
+# Use all-book stream (`!bookTicker`) to reduce WS pressure.
+# Set to "symbol" only if you explicitly need per-symbol real-time updates.
+book_ticker_stream_mode = "all"
+# Publish bookTicker events to the strategy trigger path at most once per symbol
+# per Binance all-book cadence, and only after a meaningful mid-price move.
+book_ticker_publish_interval_seconds = 5.0
+book_ticker_publish_min_move_bps = 1.0
 # NOTE: aggTrade is subscribed only for tracked/active symbols.
 # It is never attached to the full shortlist.
 subscribe_agg_trade = false
@@ -150,7 +165,7 @@ subscribe_market_streams = true
 market_ticker_freshness_seconds = 120.0
 force_order_window_seconds = 60
 # Intra-candle analysis frequency (lower = more real-time, higher = less CPU load)
-intra_candle_throttle_seconds = 10.0  # Default: 60s. Set to 5-10s for aggressive real-time mode
+intra_candle_throttle_seconds = 60.0
 # Optional noise gate for intra-candle scans. 0 disables gating.
 intra_candle_min_move_bps = 0.0
 
@@ -158,7 +173,6 @@ intra_candle_min_move_bps = 0.0
 use_ml_in_live = false
 
 [bot.notifiers]
-# Signal-only notifier pipeline: deliver alerts to Telegram only.
 provider = "telegram"
 
 [bot.notifiers.slack]
@@ -181,13 +195,11 @@ lead_symbols = []
 refresh_interval_seconds = 60
 
 [bot.intelligence]
-# Explicit public-data policy for signal-only runtime.
 enabled = true
 runtime_mode = "signal_only"
 source_policy = "binance_only"
 smart_exit_mode = "heuristic_v1"
 gamma_semantics = "proxy_only"
-allow_runtime_options_eapi = false
 refresh_interval_seconds = 900
 write_hourly_reports = true
 options_expiry_count = 2

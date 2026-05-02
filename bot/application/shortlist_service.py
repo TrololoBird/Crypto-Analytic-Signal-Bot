@@ -1,10 +1,8 @@
 """Shortlist refresh helpers for SignalBot."""
-
 from __future__ import annotations
 
 import asyncio
 import logging
-from collections import Counter
 from datetime import datetime, timezone
 from typing import Any
 
@@ -15,47 +13,32 @@ from ..universe import build_shortlist
 UTC = timezone.utc
 LOG = logging.getLogger("bot.application.shortlist_service")
 
-FALLBACK_REASON_WS_CACHE_COLD = "ws_cache_cold"
-FALLBACK_REASON_FULL_REFRESH_DUE = "full_refresh_due"
-FALLBACK_REASON_REFRESH_EXCEPTION = "refresh_exception"
-FALLBACK_REASON_USING_CACHED = "using_cached"
-FALLBACK_REASON_USING_PINNED = "using_pinned"
-FALLBACK_REASON_LIVE_EMPTY = "live_empty"
-SHORTLIST_FALLBACK_REASONS = {
-    FALLBACK_REASON_WS_CACHE_COLD: "ws light cache not ready or missing symbol metadata",
-    FALLBACK_REASON_FULL_REFRESH_DUE: "full refresh interval reached",
-    FALLBACK_REASON_REFRESH_EXCEPTION: "shortlist refresh raised exception",
-    FALLBACK_REASON_LIVE_EMPTY: "live refresh returned empty shortlist",
-    FALLBACK_REASON_USING_CACHED: "reuse last live shortlist snapshot",
-    FALLBACK_REASON_USING_PINNED: "fallback to configured pinned shortlist",
-}
-SHORTLIST_FALLBACK_REASON_ALIASES = {
-    "cache_cold": FALLBACK_REASON_WS_CACHE_COLD,
-    "full_due": FALLBACK_REASON_FULL_REFRESH_DUE,
-    "exception": FALLBACK_REASON_REFRESH_EXCEPTION,
-    "refresh_failed": FALLBACK_REASON_REFRESH_EXCEPTION,
-    "empty": FALLBACK_REASON_LIVE_EMPTY,
-    "cached": FALLBACK_REASON_USING_CACHED,
-    "pinned": FALLBACK_REASON_USING_PINNED,
-}
-
-
-def normalize_shortlist_fallback_reason(reason: str | None) -> str | None:
-    if reason is None:
-        return None
-    normalized = str(reason).strip().lower()
-    if not normalized:
-        return None
-    if normalized in SHORTLIST_FALLBACK_REASONS:
-        return normalized
-    return SHORTLIST_FALLBACK_REASON_ALIASES.get(normalized, "unknown")
-
 
 class ShortlistService:
     """Encapsulates shortlist build/refresh lifecycle for ``SignalBot``."""
 
     def __init__(self, bot: Any) -> None:
         self._bot = bot
+
+    def _schedule_context_preload(self) -> None:
+        bot = self._bot
+        if not isinstance(getattr(bot, "client", None), BinanceFuturesMarketData):
+            return
+        preload = getattr(bot, "_preload_shortlist_frames", None)
+        if not callable(preload):
+            return
+        current_task = getattr(bot, "_context_preload_task", None)
+        if current_task is not None and not current_task.done():
+            return
+        try:
+            task = asyncio.create_task(preload(), name="preload_frames:shortlist_refresh")
+        except RuntimeError:
+            return
+        bot._context_preload_task = task
+        background_tasks = getattr(bot, "_background_tasks", None)
+        if isinstance(background_tasks, set):
+            background_tasks.add(task)
+            task.add_done_callback(background_tasks.discard)
 
     @staticmethod
     def _spread_bps(bid: float | None, ask: float | None) -> float | None:
@@ -66,57 +49,12 @@ class ShortlistService:
             return None
         return ((ask - bid) / mid) * 10_000.0
 
-    def _record_enrich_error(
-        self, *, stage: str, symbol: str, exc: Exception, per_cycle: Counter[str]
-    ) -> None:
-        bot = self._bot
-        stage_key = str(stage).strip().lower() or "unknown"
-        symbol_key = str(symbol).strip().upper() or "UNKNOWN"
-        exception_type = type(exc).__name__
-        reason = str(exc)
-
-        per_cycle[stage_key] += 1
-
-        stage_totals = getattr(bot, "_shortlist_enrich_error_counts", None)
-        if not isinstance(stage_totals, Counter):
-            stage_totals = Counter()
-            bot._shortlist_enrich_error_counts = stage_totals
-        stage_totals[stage_key] += 1
-        bot._shortlist_enrich_error_total = (
-            int(getattr(bot, "_shortlist_enrich_error_total", 0)) + 1
-        )
-
-        log_counts = getattr(bot, "_shortlist_enrich_error_log_counts", None)
-        if not isinstance(log_counts, Counter):
-            log_counts = Counter()
-            bot._shortlist_enrich_error_log_counts = log_counts
-        log_key = (stage_key, symbol_key, exception_type)
-        log_counts[log_key] += 1
-        seen = log_counts[log_key]
-
-        if seen == 1 or seen % 50 == 0:
-            LOG.warning(
-                "shortlist enrich degraded | stage=%s symbol=%s exception_type=%s seen=%d reason=%s",
-                stage_key,
-                symbol_key,
-                exception_type,
-                seen,
-                reason,
-            )
-
-    def _enrich_shortlist_rows(
-        self, rows: list[dict[str, Any]]
-    ) -> list[dict[str, Any]]:
+    def _enrich_shortlist_rows(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         bot = self._bot
         enriched: list[dict[str, Any]] = []
-        cycle_errors: Counter[str] = Counter()
         ws = getattr(bot, "_ws_manager", None)
         client = bot.client
-        open_interest_cache = (
-            getattr(client, "_open_interest_cache", {})
-            if isinstance(client, BinanceFuturesMarketData)
-            else {}
-        )
+        open_interest_cache = getattr(client, "_open_interest_cache", {}) if isinstance(client, BinanceFuturesMarketData) else {}
 
         for raw in rows:
             row = dict(raw)
@@ -130,12 +68,7 @@ class ShortlistService:
                     if ticker_age is not None:
                         row["ticker_age_seconds"] = float(ticker_age)
                 except Exception as exc:
-                    self._record_enrich_error(
-                        stage="ticker_age",
-                        symbol=symbol,
-                        exc=exc,
-                        per_cycle=cycle_errors,
-                    )
+                    LOG.debug("shortlist ticker age unavailable | symbol=%s error=%s", symbol, exc)
                 try:
                     mark = ws.get_mark_price_snapshot(symbol)
                     mark_age = ws.get_mark_price_age_seconds(symbol)
@@ -148,13 +81,9 @@ class ShortlistService:
                         mark_price = float(mark.get("mark_price") or 0.0)
                         index_price = float(mark.get("index_price") or 0.0)
                         if mark_price > 0.0 and index_price > 0.0:
-                            row["basis_pct"] = (
-                                (mark_price - index_price) / index_price
-                            ) * 100.0
+                            row["basis_pct"] = ((mark_price - index_price) / index_price) * 100.0
                 except Exception as exc:
-                    self._record_enrich_error(
-                        stage="mark", symbol=symbol, exc=exc, per_cycle=cycle_errors
-                    )
+                    LOG.debug("shortlist mark price unavailable | symbol=%s error=%s", symbol, exc)
                 try:
                     bid, ask = ws.get_book_snapshot(symbol)
                     spread_bps = self._spread_bps(bid, ask)
@@ -164,9 +93,7 @@ class ShortlistService:
                     if book_age is not None:
                         row["book_age_seconds"] = float(book_age)
                 except Exception as exc:
-                    self._record_enrich_error(
-                        stage="book", symbol=symbol, exc=exc, per_cycle=cycle_errors
-                    )
+                    LOG.debug("shortlist book snapshot unavailable | symbol=%s error=%s", symbol, exc)
 
             if isinstance(client, BinanceFuturesMarketData):
                 oi_change = client.get_cached_oi_change(symbol)
@@ -182,9 +109,7 @@ class ShortlistService:
                 if global_ratio is not None:
                     row["global_account_ls_ratio"] = float(global_ratio)
                 if "top_account_ls_ratio" in row and "global_account_ls_ratio" in row:
-                    row["top_vs_global_ls_gap"] = float(
-                        row["top_account_ls_ratio"]
-                    ) - float(row["global_account_ls_ratio"])
+                    row["top_vs_global_ls_gap"] = float(row["top_account_ls_ratio"]) - float(row["global_account_ls_ratio"])
                 basis_pct = client.get_cached_basis(symbol, period="1h")
                 if basis_pct is not None:
                     row["basis_pct"] = float(basis_pct)
@@ -193,8 +118,25 @@ class ShortlistService:
                     _ts, oi_value = cached_oi
                     row["oi_current"] = float(oi_value)
             enriched.append(row)
-        bot._shortlist_enrich_last_cycle_errors = dict(cycle_errors)
         return enriched
+
+    @staticmethod
+    def _merge_premium_index_rows(
+        rows: list[dict[str, Any]],
+        premium_by_symbol: dict[str, dict[str, float]],
+    ) -> list[dict[str, Any]]:
+        if not premium_by_symbol:
+            return rows
+        merged: list[dict[str, Any]] = []
+        for raw in rows:
+            row = dict(raw)
+            symbol = str(row.get("symbol") or "").strip().upper()
+            premium = premium_by_symbol.get(symbol)
+            if premium:
+                row["funding_rate"] = premium.get("funding_rate")
+                row["basis_pct"] = premium.get("basis_pct")
+            merged.append(row)
+        return merged
 
     async def fetch_symbols_with_retry(self, *, max_retries: int = 1) -> list[Any]:
         for attempt in range(max_retries + 1):
@@ -204,22 +146,13 @@ class ShortlistService:
                     timeout=10.0,
                 )
             except asyncio.TimeoutError:
-                LOG.warning(
-                    "fetch_exchange_symbols attempt %d/%d timed out",
-                    attempt + 1,
-                    max_retries + 1,
-                )
+                LOG.warning("fetch_exchange_symbols attempt %d/%d timed out", attempt + 1, max_retries + 1)
                 if attempt < max_retries:
                     await asyncio.sleep(1.0)
                 else:
                     raise
             except Exception as exc:
-                LOG.warning(
-                    "fetch_exchange_symbols attempt %d/%d failed: %s",
-                    attempt + 1,
-                    max_retries + 1,
-                    exc,
-                )
+                LOG.warning("fetch_exchange_symbols attempt %d/%d failed: %s", attempt + 1, max_retries + 1, exc)
                 if attempt < max_retries:
                     await asyncio.sleep(1.0)
                 else:
@@ -235,7 +168,8 @@ class ShortlistService:
             if exchange_cache is not None:
                 _cached_at, rows = exchange_cache
                 cache_map = {
-                    str(getattr(row, "symbol", "")).strip().upper(): row for row in rows
+                    str(getattr(row, "symbol", "")).strip().upper(): row
+                    for row in rows
                 }
                 bot._symbol_meta_by_symbol.update(cache_map)
                 meta = bot._symbol_meta_by_symbol.get(sym)
@@ -287,41 +221,32 @@ class ShortlistService:
     async def build_live_shortlist(self) -> tuple[list[UniverseSymbol], dict[str, Any]]:
         bot = self._bot
         timeout_s = max(10.0, float(bot.settings.ws.rest_timeout_seconds) * 2.0)
-        symbol_meta_list, tickers_24h = await asyncio.wait_for(
+        symbol_meta_list, tickers_24h, premium_by_symbol = await asyncio.wait_for(
             asyncio.gather(
                 self.fetch_symbols_with_retry(max_retries=1),
                 bot.client.fetch_ticker_24h(),
+                bot.client.fetch_premium_index_all(),
             ),
             timeout=timeout_s,
         )
         bot._symbol_meta_by_symbol = {
-            str(getattr(row, "symbol", "")).strip().upper(): row
-            for row in symbol_meta_list
+            str(getattr(row, "symbol", "")).strip().upper(): row for row in symbol_meta_list
         }
         shortlist, summary = build_shortlist(
             symbol_meta_list,
-            self._enrich_shortlist_rows(list(tickers_24h)),
+            self._enrich_shortlist_rows(
+                self._merge_premium_index_rows(list(tickers_24h), premium_by_symbol)
+            ),
             bot.settings,
             seed_source="rest_full",
         )
         return shortlist, summary
 
-    async def build_light_shortlist(
-        self,
-    ) -> tuple[list[UniverseSymbol], dict[str, Any]]:
+    async def build_light_shortlist(self) -> tuple[list[UniverseSymbol], dict[str, Any]]:
         bot = self._bot
         ws = getattr(bot, "_ws_manager", None)
-        if (
-            ws is None
-            or not bot._symbol_meta_by_symbol
-            or not ws.is_ticker_cache_warm()
-        ):
-            return [], {
-                "mode": "ws_light",
-                "eligible": 0,
-                "dynamic_pool": 0,
-                "pinned": 0,
-            }
+        if ws is None or not bot._symbol_meta_by_symbol or not ws.is_ticker_cache_warm():
+            return [], {"mode": "ws_light", "eligible": 0, "dynamic_pool": 0, "pinned": 0}
 
         tickers = self._enrich_shortlist_rows(ws.get_global_ticker_data())
         shortlist, summary = build_shortlist(
@@ -337,37 +262,12 @@ class ShortlistService:
         LOG.info("refreshing shortlist...")
 
         source = "pinned_fallback"
-        source_before = str(getattr(bot, "_shortlist_source", "startup"))
         summary: dict[str, Any] = {}
         shortlist = self.build_pinned_shortlist()
         now = datetime.now(UTC)
-        fallback_reason: str | None = FALLBACK_REASON_USING_PINNED
-        cached_shortlist_age_s: float | None = None
-        cached_shortlist_size: int | None = None
-        full_interval = int(
-            getattr(
-                bot.settings.universe,
-                "full_refresh_interval_seconds",
-                bot.settings.runtime.shortlist_refresh_interval_seconds,
-            )
-        )
+        full_interval = int(getattr(bot.settings.universe, "full_refresh_interval_seconds", bot.settings.runtime.shortlist_refresh_interval_seconds))
         last_full = getattr(bot, "_last_shortlist_full_refresh_at", None)
-        full_refresh_due = (
-            last_full is None or (now - last_full).total_seconds() >= full_interval
-        )
-        ws = getattr(bot, "_ws_manager", None)
-        ws_cache_warm = bool(
-            ws is not None
-            and hasattr(ws, "is_ticker_cache_warm")
-            and ws.is_ticker_cache_warm()
-        )
-        has_symbol_meta = bool(getattr(bot, "_symbol_meta_by_symbol", {}))
-        LOG.info(
-            "shortlist refresh decision | full_refresh_due=%s ws_cache_warm=%s has_symbol_meta=%s",
-            full_refresh_due,
-            ws_cache_warm,
-            has_symbol_meta,
-        )
+        full_refresh_due = last_full is None or (now - last_full).total_seconds() >= full_interval
 
         try:
             live_shortlist: list[UniverseSymbol] = []
@@ -376,125 +276,72 @@ class ShortlistService:
                 live_shortlist, live_summary = await self.build_light_shortlist()
                 if live_shortlist:
                     source = "ws_light"
-                    fallback_reason = None
-                elif not ws_cache_warm or not has_symbol_meta:
-                    fallback_reason = FALLBACK_REASON_WS_CACHE_COLD
-            if not live_shortlist:
-                if full_refresh_due:
-                    fallback_reason = FALLBACK_REASON_FULL_REFRESH_DUE
+                elif bot._last_live_shortlist:
+                    live_shortlist = list(bot._last_live_shortlist)
+                    live_summary = {"mode": "cached"}
+                    source = "cached"
+            if full_refresh_due or (not live_shortlist and not bot._last_live_shortlist):
                 live_shortlist, live_summary = await self.build_live_shortlist()
                 if live_shortlist:
                     bot._last_shortlist_full_refresh_at = now
                     source = "rest_full"
-                    fallback_reason = fallback_reason if fallback_reason else None
             if live_shortlist:
                 shortlist = live_shortlist
                 summary = live_summary
                 bot._last_live_shortlist = list(live_shortlist)
-                bot._last_live_shortlist_at = now
-            else:
-                fallback_reason = fallback_reason or FALLBACK_REASON_LIVE_EMPTY
-            if not live_shortlist and bot._last_live_shortlist:
+            elif bot._last_live_shortlist:
                 shortlist = list(bot._last_live_shortlist)
                 source = "cached"
-                fallback_reason = FALLBACK_REASON_USING_CACHED
         except Exception as exc:
-            fallback_reason = FALLBACK_REASON_REFRESH_EXCEPTION
             if bot._last_live_shortlist:
                 shortlist = list(bot._last_live_shortlist)
                 source = "cached"
                 LOG.warning("shortlist refresh failed, using cached shortlist: %s", exc)
             else:
-                fallback_reason = FALLBACK_REASON_USING_PINNED
                 LOG.warning("shortlist refresh failed, using pinned fallback: %s", exc)
-
-        if source == "cached":
-            last_live_at = getattr(bot, "_last_live_shortlist_at", None)
-            if isinstance(last_live_at, datetime):
-                cached_shortlist_age_s = max(0.0, (now - last_live_at).total_seconds())
-            cached_shortlist_size = len(getattr(bot, "_last_live_shortlist", []))
-
-        fallback_reason = normalize_shortlist_fallback_reason(fallback_reason)
 
         async with bot._shortlist_lock:
             bot._shortlist = shortlist
         bot._shortlist_source = source
 
-        top_scores = [
+        bot.telemetry.append_jsonl(
+            "shortlist.jsonl",
             {
-                "symbol": item.symbol,
-                "score": item.shortlist_score,
-                "reasons": list(item.shortlist_reasons[:3]),
-                "seed_source": item.seed_source,
-            }
-            for item in shortlist[:5]
-        ]
-        telemetry_manager = (
-            bot._get_telemetry_manager()
-            if hasattr(bot, "_get_telemetry_manager")
-            else None
+                "ts": datetime.now(UTC).isoformat(),
+                "source": source,
+                "size": len(shortlist),
+                "symbols": [item.symbol for item in shortlist[:20]],
+                "eligible": summary.get("eligible"),
+                "dynamic_pool": summary.get("dynamic_pool"),
+                "pinned": summary.get("pinned"),
+                "mode": summary.get("mode", source),
+                "avg_score": summary.get("avg_score"),
+                "strategy_seed": summary.get("strategy_seed"),
+                "strategy_fit_counts": summary.get("strategy_fit_counts"),
+                "top_scores": [
+                    {
+                        "symbol": item.symbol,
+                        "score": item.shortlist_score,
+                        "reasons": list(item.shortlist_reasons[:3]),
+                        "strategy_fits": list(item.strategy_fits),
+                        "seed_source": item.seed_source,
+                    }
+                    for item in shortlist[:5]
+                ],
+            },
         )
-        if telemetry_manager is not None:
-            telemetry_manager.emit_shortlist_refresh(
-                source=source,
-                source_before=source_before,
-                source_after=source,
-                fallback_reason=fallback_reason,
-                full_refresh_due=full_refresh_due,
-                ws_cache_warm=ws_cache_warm,
-                has_symbol_meta=has_symbol_meta,
-                cached_shortlist_age_s=cached_shortlist_age_s,
-                cached_shortlist_size=cached_shortlist_size,
-                shortlist_size=len(shortlist),
-                shortlist_symbols=[item.symbol for item in shortlist[:20]],
-                top_scores=top_scores,
-                summary=summary,
-            )
-        else:
-            bot.telemetry.append_jsonl(
-                "shortlist.jsonl",
-                {
-                    "ts": datetime.now(UTC).isoformat(),
-                    "source": source,
-                    "source_before": source_before,
-                    "source_after": source,
-                    "fallback_reason": fallback_reason,
-                    "full_refresh_due": full_refresh_due,
-                    "ws_cache_warm": ws_cache_warm,
-                    "has_symbol_meta": has_symbol_meta,
-                    "cached_shortlist_age_s": cached_shortlist_age_s,
-                    "cached_shortlist_size": cached_shortlist_size,
-                    "size": len(shortlist),
-                    "symbols": [item.symbol for item in shortlist[:20]],
-                    "eligible": summary.get("eligible"),
-                    "dynamic_pool": summary.get("dynamic_pool"),
-                    "pinned": summary.get("pinned"),
-                    "mode": summary.get("mode", source),
-                    "avg_score": summary.get("avg_score"),
-                    "enrich_errors_by_stage": dict(
-                        getattr(bot, "_shortlist_enrich_error_counts", {})
-                    ),
-                    "enrich_errors_total": int(
-                        getattr(bot, "_shortlist_enrich_error_total", 0)
-                    ),
-                    "enrich_errors_last_cycle": dict(
-                        getattr(bot, "_shortlist_enrich_last_cycle_errors", {})
-                    ),
-                    "top_scores": top_scores,
-                },
-            )
 
         LOG.info(
-            "shortlist refresh complete | source=%s mode=%s fallback_reason=%s size=%d eligible=%s dynamic_pool=%s pinned=%s avg_score=%s",
+            "shortlist refresh complete | source=%s mode=%s size=%d eligible=%s dynamic_pool=%s pinned=%s avg_score=%s",
             source,
             summary.get("mode", source),
-            fallback_reason,
             len(shortlist),
             summary.get("eligible"),
             summary.get("dynamic_pool"),
             summary.get("pinned"),
             summary.get("avg_score"),
         )
+        self._schedule_context_preload()
         return shortlist
 
     async def refresh_shortlist_periodic(self) -> None:
@@ -507,13 +354,7 @@ class ShortlistService:
                     bot._shutdown.wait(),
                     timeout=max(
                         15,
-                        int(
-                            getattr(
-                                bot.settings.universe,
-                                "light_refresh_interval_seconds",
-                                75,
-                            )
-                        ),
+                        int(getattr(bot.settings.universe, "light_refresh_interval_seconds", 75)),
                     ),
                 )
             except asyncio.TimeoutError:

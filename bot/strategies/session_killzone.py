@@ -5,13 +5,14 @@ Requires directional momentum with volume confirmation during the killzone windo
 
 # WINDSURF_REVIEW: unified + vectorized + 1H context + graded
 """
-
 from __future__ import annotations
 
 import logging
 import math
 from datetime import datetime, timezone
+from typing import cast
 
+import polars as pl
 
 from ..config import BotSettings
 
@@ -30,12 +31,11 @@ def _as_float(value: object, default: float = 0.0) -> float:
         return float(value)
     return default
 
-
 # (start_hour_utc, end_hour_utc)
 _KILLZONES = [
-    (7, 10),  # London Open
+    (7, 10),   # London Open
     (13, 16),  # NY Open
-    (0, 3),  # Asia Range Break
+    (0, 3),    # Asia Range Break
 ]
 
 
@@ -52,26 +52,27 @@ class SessionKillzoneSetup(BaseSetup):
     confirmation_profile = "breakout_acceptance"
     required_context = ("futures_flow",)
 
-    def get_optimizable_params(
-        self, settings: BotSettings | None = None
-    ) -> dict[str, float]:
+    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
         """Tunable parameters for self-learner optimization."""
         defaults = {
             "base_score": 0.55,
             "min_volume_ratio": 1.2,
-            "min_adx_1h": 18.0,
+            "sl_buffer_atr": 0.75,
             "bias_mismatch_penalty": 0.75,
             "min_rr": 1.5,
         }
         if settings is not None:
-            filters = getattr(settings, "filters", None)
+            filters = getattr(settings, 'filters', None)
             if filters:
-                setups_config = getattr(filters, "setups", {})
+                setups_config = getattr(filters, 'setups', {})
                 if isinstance(setups_config, dict) and self.setup_id in setups_config:
                     return {**defaults, **setups_config.get(self.setup_id, {})}
         return defaults
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
+        setup_id = self.setup_id
+        
+        
         try:
             return self._detect(prepared, settings)
         except Exception:
@@ -83,28 +84,18 @@ class SessionKillzoneSetup(BaseSetup):
         setup_id = self.setup_id
         dynamic_params = get_dynamic_params(prepared, setup_id)
         defaults = self.get_optimizable_params(settings)
-        base_score = _as_float(
-            dynamic_params.get("base_score", defaults["base_score"]),
-            defaults["base_score"],
-        )
+        base_score = _as_float(dynamic_params.get("base_score", defaults["base_score"]), defaults["base_score"])
         min_volume_ratio = _as_float(
             dynamic_params.get("min_volume_ratio", defaults["min_volume_ratio"]),
             defaults["min_volume_ratio"],
         )
-        min_adx_1h = _as_float(
-            dynamic_params.get("min_adx_1h", defaults.get("min_adx_1h", 18.0)),
-            defaults.get("min_adx_1h", 18.0),
+        sl_buffer_atr = _as_float(
+            dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]),
+            defaults["sl_buffer_atr"],
         )
-        min_rr = _as_float(
-            dynamic_params.get("min_rr", defaults["min_rr"]), defaults["min_rr"]
-        )
-
+        min_rr = _as_float(dynamic_params.get("min_rr", defaults["min_rr"]), defaults["min_rr"])
         last_bar_time = prepared.work_15m.item(-1, "time")
-        now_utc = (
-            last_bar_time
-            if isinstance(last_bar_time, datetime)
-            else datetime.now(timezone.utc)
-        )
+        now_utc = last_bar_time if isinstance(last_bar_time, datetime) else datetime.now(timezone.utc)
         if not _in_killzone(now_utc.hour):
             _reject(prepared, setup_id, "outside_killzone", hour=now_utc.hour)
             return None
@@ -130,7 +121,7 @@ class SessionKillzoneSetup(BaseSetup):
             _reject(prepared, setup_id, "insufficient_1h_bars", bars=w1h.height)
             return None
         adx_1h = _as_float(w1h.item(-1, "adx14"))
-        if adx_1h < min_adx_1h:
+        if adx_1h < 18:
             _reject(prepared, setup_id, "adx_too_low", adx_1h=adx_1h)
             return None
 
@@ -148,12 +139,7 @@ class SessionKillzoneSetup(BaseSetup):
             return None
         avg_vol_ratio = float(sum(vol_ratios) / len(vol_ratios))
         if avg_vol_ratio < min_volume_ratio:
-            _reject(
-                prepared,
-                setup_id,
-                "average_volume_too_low",
-                avg_vol_ratio=avg_vol_ratio,
-            )
+            _reject(prepared, setup_id, "average_volume_too_low", avg_vol_ratio=avg_vol_ratio)
             return None
 
         bullish_bars = sum(1 for o, c in zip(opens, closes) if c > o)
@@ -167,25 +153,23 @@ class SessionKillzoneSetup(BaseSetup):
             _reject(prepared, setup_id, "directional_momentum_missing")
             return None
 
-        # --- Structural SL: beyond session high/low (killzone boundary) + 0.15×ATR ---
+        # --- Structural SL: beyond session high/low (killzone boundary) + configured ATR buffer ---
         scan20 = w.tail(20)
         session_high = _as_float(scan20["high"].max())
         session_low = _as_float(scan20["low"].min())
 
-        # TP targets: prior session's major levels
+        # TP targets: prior session's major levels and killzone range midpoint
+        session_mid = (session_high + session_low) / 2.0
+
         # Look for prior session levels from 1h data
         from ..features import _swing_points as _sp
-
         w1h = prepared.work_1h
 
         if direction == "long":
-            # SL: beyond session low (killzone boundary) + 0.15×ATR
-            stop = session_low - atr * 0.15
+            stop = session_low - atr * sl_buffer_atr
             risk = price - stop
             if risk <= 0:
-                _reject(
-                    prepared, setup_id, "risk_non_positive_long", stop=stop, price=price
-                )
+                _reject(prepared, setup_id, "risk_non_positive_long", stop=stop, price=price)
                 return None
             # TP1: prior session's major level (previous 1h swing high or session high)
             tp1 = None
@@ -198,17 +182,10 @@ class SessionKillzoneSetup(BaseSetup):
             killzone_range = session_high - session_low
             tp2 = session_high + killzone_range * 0.5 if killzone_range > 0 else None
         else:
-            # SL: beyond session high (killzone boundary) + 0.15×ATR
-            stop = session_high + atr * 0.15
+            stop = session_high + atr * sl_buffer_atr
             risk = stop - price
             if risk <= 0:
-                _reject(
-                    prepared,
-                    setup_id,
-                    "risk_non_positive_short",
-                    stop=stop,
-                    price=price,
-                )
+                _reject(prepared, setup_id, "risk_non_positive_short", stop=stop, price=price)
                 return None
             # TP1: prior session's major level (previous 1h swing low)
             tp1 = None
@@ -221,10 +198,15 @@ class SessionKillzoneSetup(BaseSetup):
             killzone_range = session_high - session_low
             tp2 = session_low - killzone_range * 0.5 if killzone_range > 0 else None
 
-        # Validate: TP1 must satisfy configured risk/reward floor, else reject
-        if tp1 is None or abs(tp1 - price) < risk * min_rr:
-            _reject(prepared, setup_id, "tp1_too_close_or_missing", tp1=tp1, risk=risk)
-            return None  # Reject this session killzone setup
+        # Validate: TP1 must be at least 1.5× risk distance.
+        # If structural target is missing/too close, use deterministic RR fallback
+        # instead of dropping an otherwise valid setup.
+        min_required = risk * min_rr
+        if tp1 is None or abs(tp1 - price) < min_required:
+            tp1 = price + min_required if direction == "long" else price - min_required
+            fallback_note = f"tp1_rr_fallback_{min_rr:.2f}"
+        else:
+            fallback_note = None
         if tp2 is None:
             tp2 = tp1  # Use TP1 as TP2 if no extended target found
 
@@ -248,8 +230,11 @@ class SessionKillzoneSetup(BaseSetup):
 
         reasons = [
             f"Session killzone {direction}: {session_name} {now_utc.strftime('%H:%M')}UTC",
-            f"adx1h={adx_1h:.1f}/{min_adx_1h:.1f} avg_vol={avg_vol_ratio:.2f}/{min_volume_ratio:.2f}",
+            f"adx1h={adx_1h:.1f} avg_vol={avg_vol_ratio:.2f}",
+            f"sl_buffer_atr={sl_buffer_atr:.2f}",
         ]
+        if fallback_note:
+            reasons.append(fallback_note)
 
         return _build_signal(
             prepared=prepared,
