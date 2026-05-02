@@ -10,6 +10,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, cast
+from urllib.parse import urlparse
 
 import polars as pl
 import aiohttp
@@ -125,6 +126,21 @@ _PUBLIC_ENDPOINT_REGISTRY: dict[str, _PublicEndpointSpec] = {
 
 _PUBLIC_PATH_PREFIXES = ("/fapi/v1/", "/futures/data/")
 _FORBIDDEN_PUBLIC_PATH_MARKERS = ("/private", "listenkey", "/ws-api", "/sapi", "/papi", "signature=", "timestamp=")
+
+
+def validate_runtime_public_rest_url(url: str) -> None:
+    """Validate that a runtime REST URL stays inside public USD-M market data."""
+    parsed = urlparse(str(url or "").strip())
+    host = parsed.netloc.lower()
+    path = parsed.path.lower()
+    query = parsed.query.lower()
+    if parsed.scheme.lower() != "https" or host != "fapi.binance.com":
+        raise ValueError(f"runtime REST URL must target Binance USD-M Futures public host: {url}")
+    combined = f"{path}?{query}" if query else path
+    if any(marker in combined for marker in _FORBIDDEN_PUBLIC_PATH_MARKERS):
+        raise ValueError(f"runtime REST URL contains private/auth endpoint paths: {url}")
+    if not any(path.startswith(prefix) for prefix in _PUBLIC_PATH_PREFIXES):
+        raise ValueError(f"runtime REST URL must use public USD-M endpoint paths: {url}")
 
 
 class _SlidingWindowRateLimiter:

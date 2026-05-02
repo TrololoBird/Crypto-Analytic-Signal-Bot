@@ -651,6 +651,24 @@ class MemoryRepository(MemoryRepositoryExtension):
                 return datetime.fromisoformat(row["last_sent_at"])
             return None
 
+    async def purge_cooldowns_older_than(
+        self, *, max_age_minutes: int, now: datetime | None = None
+    ) -> int:
+        """Delete persisted cooldown rows older than the cleanup age."""
+        if not self._conn:
+            raise RuntimeError("Repository not initialized")
+
+        now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        cutoff = now - timedelta(minutes=max(1, int(max_age_minutes)))
+        cursor = await self._conn.execute(
+            "DELETE FROM cooldowns WHERE last_sent_at < ?",
+            (cutoff.isoformat(),),
+        )
+        changed = int(cursor.rowcount or 0)
+        await cursor.close()
+        await self._conn.commit()
+        return changed
+
     async def set_cooldown(
         self,
         cooldown_key: str,
@@ -908,6 +926,34 @@ class MemoryRepository(MemoryRepositoryExtension):
             (close_reason, close_price, closed_at.isoformat(), tracking_id),
         )
         await self._conn.commit()
+
+    async def expire_open_signals_older_than(
+        self, *, max_age_minutes: int, now: datetime | None = None
+    ) -> int:
+        """Close pending/active signals older than a hard runtime age limit."""
+        if not self._conn:
+            raise RuntimeError("Repository not initialized")
+
+        now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        cutoff = now - timedelta(minutes=max(1, int(max_age_minutes)))
+        cursor = await self._conn.execute(
+            """
+            UPDATE active_signals
+            SET status = 'closed',
+                close_reason = 'expired',
+                close_price = COALESCE(last_price, activation_price, entry_mid, close_price),
+                closed_at = ?
+            WHERE status IN ('pending', 'active')
+              AND created_at < ?
+            """,
+            (now.isoformat(), cutoff.isoformat()),
+        )
+        changed = int(cursor.rowcount or 0)
+        await cursor.close()
+        await self._conn.commit()
+        if changed:
+            await self.increment_tracking_stats(expired=changed)
+        return changed
 
     async def update_signal_status(
         self,

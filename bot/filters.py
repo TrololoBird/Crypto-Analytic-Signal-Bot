@@ -258,7 +258,8 @@ def apply_global_filters(
     effective_min_rr = float(
         setup_overrides.get("min_rr", settings.filters.min_risk_reward)
     )
-    if rr_tp1 < effective_min_rr:
+    rr_epsilon = 1e-9
+    if rr_tp1 + rr_epsilon < effective_min_rr:
         return _reject(
             "risk_reward_too_low",
             updated,

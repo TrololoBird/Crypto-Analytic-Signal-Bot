@@ -126,7 +126,7 @@ class FilterConfig(BaseModel):
 class TrackingConfig(BaseModel):
     enabled: bool = True
     pending_expiry_minutes: int = Field(default=180, ge=15, le=1440)
-    active_expiry_minutes: int = Field(default=720, ge=30, le=10080)
+    active_expiry_minutes: int = Field(default=240, ge=30, le=240)
     outcome_retention_days: int = Field(default=90, ge=7, le=3650)
     move_stop_to_break_even_on_tp1: bool = True
     min_stop_distance_pct: float = Field(default=0.5, ge=0.0, le=100.0)
@@ -369,15 +369,14 @@ class WSConfig(BaseModel):
 
     Runtime policy:
     - `public` / `market` are logical endpoint classes used for subscription routing
-    - both endpoint classes share the same canonical Binance websocket root
+    - routed Binance endpoints must stay split by stream class
     - aggTrade, when enabled, is restricted to tracked/active symbols only
     """
 
     enabled: bool = True
     base_url: str = "wss://fstream.binance.com"
-    # Backward-compatible fields retained as logical aliases to `base_url`.
-    public_base_url: str = "wss://fstream.binance.com"
-    market_base_url: str = "wss://fstream.binance.com"
+    public_base_url: str = "wss://fstream.binance.com/public"
+    market_base_url: str = "wss://fstream.binance.com/market"
     # 4h stays REST-authoritative; WS carries 5m/15m/1h live trigger/context data.
     kline_intervals: tuple[str, ...] = ("5m", "15m", "1h")
     subscription_scope: str = "shortlist"
@@ -447,19 +446,24 @@ class WSConfig(BaseModel):
                 break
         self.base_url = normalized_root
 
-        # Keep backward compatibility for legacy configs that still set endpoint
-        # class URLs with /public or /market path suffixes.
-        for field_name in ("public_base_url", "market_base_url"):
+        def routed_endpoint(field_name: str, suffix: str) -> str:
             value = str(getattr(self, field_name) or "").strip().rstrip("/")
-            if value.endswith("/public"):
-                value = value.removesuffix("/public")
-            elif value.endswith("/market"):
-                value = value.removesuffix("/market")
-            setattr(self, field_name, value or normalized_root)
+            if not value:
+                return f"{normalized_root}{suffix}"
+            if value.endswith("/stream"):
+                value = value.removesuffix("/stream")
+            if value.endswith("/ws"):
+                value = value.removesuffix("/ws")
+            if value.endswith(suffix):
+                return value
+            for other_suffix in ("/public", "/market"):
+                if value.endswith(other_suffix):
+                    value = value[: -len(other_suffix)]
+                    break
+            return f"{value}{suffix}"
 
-        # Runtime uses one canonical websocket root for all endpoint classes.
-        self.public_base_url = normalized_root
-        self.market_base_url = normalized_root
+        self.public_base_url = routed_endpoint("public_base_url", "/public")
+        self.market_base_url = routed_endpoint("market_base_url", "/market")
         return self
 
     def endpoint_base_url(self, endpoint_class: str) -> str:
@@ -601,17 +605,20 @@ class BotSettings(BaseModel):
             "ws.market_base_url": self.ws.market_base_url,
         }
         forbidden_tokens = ("/private", "listenkey", "/ws-api", "/sapi", "/papi")
-        unsupported_path_tokens = ("/public", "/market")
         for label, url in ws_urls.items():
             lowered = str(url or "").strip().lower()
             if any(token in lowered for token in forbidden_tokens):
                 raise ValueError(
                     f"{label} must point to Binance public market streams only: {url}"
                 )
-            if any(token in lowered for token in unsupported_path_tokens):
-                raise ValueError(
-                    f"{label} must use canonical websocket root without endpoint path modifiers: {url}"
-                )
+        if str(self.ws.public_base_url).rstrip("/").lower().endswith("/public") is False:
+            raise ValueError(
+                f"ws.public_base_url must use Binance /public routed endpoint: {self.ws.public_base_url}"
+            )
+        if str(self.ws.market_base_url).rstrip("/").lower().endswith("/market") is False:
+            raise ValueError(
+                f"ws.market_base_url must use Binance /market routed endpoint: {self.ws.market_base_url}"
+            )
 
         if require_telegram:
             if not self.tg_token.strip():

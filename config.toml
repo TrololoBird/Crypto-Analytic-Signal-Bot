@@ -8,7 +8,7 @@ analysis_concurrency = 8
 strategy_concurrency = 4
 # Per-strategy compute timeout (seconds) excluding queue wait.
 strategy_timeout_seconds = 12.0
-max_signals_per_cycle = 50
+max_signals_per_cycle = 10
 event_bus_max_size = 512
 event_bus_warn_depth = 384
 event_bus_drop_log_interval = 25
@@ -34,7 +34,7 @@ light_refresh_interval_seconds = 75
 full_refresh_interval_seconds = 7200
 shortlist_spread_max_bps = 15.0
 shortlist_book_stale_seconds = 90.0
-pinned_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"]
+pinned_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "XAUUSDT", "XAGUSDT"]
 
 [bot.filters]
 cooldown_minutes = 60
@@ -45,9 +45,9 @@ min_atr_pct = 0.18
 max_atr_pct = 10.0
 min_adx_1h = 18.0
 min_risk_reward = 1.9
-# Lower bound for post-confluence score; tuned to restore candidate flow while
-# preserving RR/spread/stop hard-gates.
-min_score = 0.55
+# Lower bound for post-confluence score; calibrated from live reject telemetry
+# while preserving RR/spread/stop hard-gates.
+min_score = 0.53
 freshness_15m_minutes = 16
 freshness_1h_hours = 2
 freshness_4h_hours = 10
@@ -61,12 +61,12 @@ max_mark_price_deviation_pct = 0.005
 ema_bounce = { base_score = 0.55, min_adx_1h = 15.0, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.5, min_rr = 1.5 }
 structure_pullback = { base_score = 0.55, bias_mismatch_penalty = 0.75, tp_too_close_penalty = 0.75, sl_buffer_atr = 0.5, min_rr = 1.5 }
 structure_break_retest = { base_score = 0.55, threshold_adx = 18.0, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.5, min_rr = 1.5 }
-wick_trap_reversal = { base_score = 0.50, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.8, min_rr = 1.5, adx_penalty_factor = 0.85 }
+wick_trap_reversal = { base_score = 0.50, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.8, min_rr = 1.5, wick_through_atr_mult = 0.3, adx_penalty_factor = 0.85 }
 squeeze_setup = { base_score = 0.55, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.8, min_rr = 1.5 }
 fvg_setup = { base_score = 0.60, threshold_gap = 0.001, sl_buffer_atr = 0.8, min_rr = 1.5, tp_too_close_penalty = 0.8 }
 order_block = { base_score = 0.50, threshold_volume = 1.2, sl_buffer_atr = 0.5, min_rr = 1.5 }
 liquidity_sweep = { base_score = 0.50, threshold_tol = 0.0015, sl_buffer_atr = 0.7, min_rr = 1.5 }
-bos_choch = { base_score = 0.55, bias_mismatch_penalty = 0.75, sl_buffer_atr = 1.0, min_rr = 1.5, swing_lookback = 6, min_swings = 3 }
+bos_choch = { base_score = 0.55, bias_mismatch_penalty = 0.75, sl_buffer_atr = 1.0, min_rr = 1.5, swing_lookback = 6, external_swing_lookback = 20, min_swings = 3 }
 hidden_divergence = { base_score = 0.50, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.5, min_rr = 1.5, min_volume_ratio = 0.55 }
 funding_reversal = { base_score = 0.50, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.6, min_rr = 1.5, adx_penalty_factor = 0.85 }
 cvd_divergence = { base_score = 0.50, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.8, min_rr = 1.5 }
@@ -77,7 +77,7 @@ turtle_soup = { base_score = 0.50, bias_mismatch_penalty = 0.75, sl_buffer_atr =
 [bot.tracking]
 enabled = true
 pending_expiry_minutes = 180
-active_expiry_minutes = 720
+active_expiry_minutes = 240
 move_stop_to_break_even_on_tp1 = true
 min_stop_distance_pct = 0.5
 max_stop_distance_pct = 15.0

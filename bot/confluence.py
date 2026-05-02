@@ -193,7 +193,11 @@ class ConfluenceEngine:
                 cfg.weight_structure_clarity,
                 _structure_clarity(prepared, signal),
             ),
-            ("risk_reward", cfg.weight_risk_reward, _risk_reward_quality(signal)),
+            (
+                "risk_reward",
+                cfg.weight_risk_reward,
+                _risk_reward_quality(signal, self.settings),
+            ),
             (
                 "funding_score",
                 funding_weight,

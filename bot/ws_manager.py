@@ -268,7 +268,7 @@ class FuturesWSManager:
         # Message buffering with background draining.
         # Increased buffer size to handle high-volume WebSocket streams (45+ symbols)
         # without dropping messages during burst periods
-        self._message_buffer = MessageBuffer(maxsize=15000)
+        self._message_buffer = MessageBuffer(maxsize=100000)
         self._buffer_processor_task: asyncio.Task | None = None
         self._backfill_tasks: set[asyncio.Task[None]] = set()
         self._stale_event_drop_count: int = 0
@@ -1467,7 +1467,7 @@ class FuturesWSManager:
         while self._running:
             try:
                 processed = 0
-                while processed < 200:
+                while processed < 1000:
                     msg = await self._message_buffer.get()
                     if msg is None:
                         break

@@ -15,7 +15,7 @@ from ..config import BotSettings
 from ..models import PreparedSymbol, Signal
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..features import _swing_points
-from ..setups.smc import latest_structure_break
+from ..setups.smc import latest_structure_break, swing_highs_lows
 from ..setups.utils import get_dynamic_params
 
 LOG = logging.getLogger("bot.strategies.bos_choch")
@@ -36,6 +36,7 @@ class BOSCHOCHSetup(BaseSetup):
         defaults = {
             "base_score": 0.55,
             "swing_lookback": 6,
+            "external_swing_lookback": 20,
             "bos_lookback": 6,  # Backward-compatible alias.
             "choch_lookback": 6,  # Backward-compatible alias.
             "sl_buffer_atr": 0.2,
@@ -76,6 +77,10 @@ class BOSCHOCHSetup(BaseSetup):
         bos_lookback = int(dynamic_params.get("bos_lookback", configured_swing_lookback))
         choch_lookback = int(dynamic_params.get("choch_lookback", configured_swing_lookback))
         swing_lookback = max(2, max(bos_lookback, choch_lookback, configured_swing_lookback))
+        external_swing_lookback = max(
+            swing_lookback + 1,
+            int(dynamic_params.get("external_swing_lookback", defaults["external_swing_lookback"])),
+        )
         sl_buffer_atr = float(dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]))
         min_rr = float(dynamic_params.get("min_rr", defaults["min_rr"]))
         base_score = float(dynamic_params.get("base_score", defaults["base_score"]))
@@ -127,10 +132,47 @@ class BOSCHOCHSetup(BaseSetup):
         stop_price = None
         pivot_level = None
 
+        external_swings = swing_highs_lows(
+            w,
+            swing_length=external_swing_lookback,
+            mode="live_safe",
+        )
+        external_markers = external_swings["HighLow"].to_list()
+        external_levels = external_swings["Level"].to_list()
+        external_search_end = min(
+            int(structure_zone.broken_index or (w.height - 1)),
+            len(external_levels) - 1,
+        )
+
+        def _last_external_level(marker: float, *, above_price: bool) -> float | None:
+            for idx in range(external_search_end, -1, -1):
+                raw_marker = external_markers[idx]
+                if raw_marker is None or float(raw_marker) != marker:
+                    continue
+                raw_level = external_levels[idx]
+                if raw_level is None:
+                    continue
+                level = float(raw_level)
+                if not math.isfinite(level) or level <= 0.0:
+                    continue
+                if above_price and level > price:
+                    return level
+                if not above_price and level < price:
+                    return level
+            return None
+
         # --- Compute structural SL/TP ---
         if direction == "long":
-            # SL: beyond BOS/CHoCH structural pivot (last swing low) + sl_buffer_atr×ATR.
-            pivot_level = float(sl_vals[-1])
+            # SL uses external SMC swing structure only; internal CHoCH swings are not stop anchors.
+            pivot_level = _last_external_level(-1.0, above_price=False)
+            if pivot_level is None:
+                _reject(
+                    prepared,
+                    setup_id,
+                    "external_swing_stop_missing_long",
+                    external_swing_lookback=external_swing_lookback,
+                )
+                return None
             stop_price = pivot_level - sl_buffer_atr * atr
             risk = price - stop_price
             if risk <= 0:
@@ -147,8 +189,16 @@ class BOSCHOCHSetup(BaseSetup):
                 tp2_cands = sh4_prices.filter(sh4_prices > price)
                 tp2 = float(tp2_cands[0]) if tp2_cands.len() > 0 else None
         else:
-            # SL: beyond BOS/CHoCH structural pivot (last swing high) + sl_buffer_atr×ATR.
-            pivot_level = float(sh_vals[-1])
+            # SL uses external SMC swing structure only; internal CHoCH swings are not stop anchors.
+            pivot_level = _last_external_level(1.0, above_price=True)
+            if pivot_level is None:
+                _reject(
+                    prepared,
+                    setup_id,
+                    "external_swing_stop_missing_short",
+                    external_swing_lookback=external_swing_lookback,
+                )
+                return None
             stop_price = pivot_level + sl_buffer_atr * atr
             risk = stop_price - price
             if risk <= 0:
@@ -183,6 +233,7 @@ class BOSCHOCHSetup(BaseSetup):
 
         reasons = [
             f"CHoCH {direction}: structure reversal level={structure_zone.level:.4f}",
+            f"external_swing_sl={pivot_level:.4f}",
             f"sh[-3]={sh_vals[-3]:.4f} sh[-2]={sh_vals[-2]:.4f} sh[-1]={sh_vals[-1]:.4f}",
             f"sl[-3]={sl_vals[-3]:.4f} sl[-2]={sl_vals[-2]:.4f} sl[-1]={sl_vals[-1]:.4f}",
         ]

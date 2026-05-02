@@ -41,6 +41,7 @@ class UniverseSymbol:
     shortlist_reasons: tuple[str, ...] = ()
     seed_source: str = "unknown"
     liquidity_rank: int | None = None
+    strategy_fits: tuple[str, ...] = ()
 
 
 @dataclass(slots=True)

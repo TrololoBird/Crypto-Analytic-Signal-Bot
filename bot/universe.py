@@ -11,6 +11,7 @@ from .models import SymbolMeta, UniverseSymbol
 
 UTC = timezone.utc
 STABLE_BASE_ASSETS = {"USDC", "BUSD", "FDUSD", "TUSD", "USDP", "USDS", "DAI"}
+SUPPORTED_USDM_CONTRACT_TYPES = {"PERPETUAL", "TRADIFI_PERPETUAL"}
 _ASCII_CONTRACT_RE = re.compile(r"^[A-Z0-9]{4,24}$")
 _ASCII_ASSET_RE = re.compile(r"^[A-Z0-9]{2,16}$")
 _ALL_SETUP_IDS = (
@@ -290,7 +291,11 @@ def _composite_score(
         bucket_fit = max(0.0, 1.0 - min(abs(move - 11.0) / 12.0, 1.0))
 
     tradability_score = 1.0
-    if row.get("status") != "TRADING" or row.get("contract_type") != "PERPETUAL":
+    if (
+        row.get("status") != "TRADING"
+        or str(row.get("contract_type") or "").upper()
+        not in SUPPORTED_USDM_CONTRACT_TYPES
+    ):
         tradability_score = 0.0
     elif float(row.get("last_price") or 0.0) <= 0.0:
         tradability_score = 0.0
@@ -350,7 +355,7 @@ def build_shortlist(
             continue
         if meta.status.upper() != "TRADING":
             continue
-        if meta.contract_type.upper() != "PERPETUAL":
+        if meta.contract_type.upper() not in SUPPORTED_USDM_CONTRACT_TYPES:
             continue
         if meta.quote_asset.upper() != settings.universe.quote_asset:
             continue

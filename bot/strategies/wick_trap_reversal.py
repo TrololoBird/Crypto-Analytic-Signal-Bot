@@ -37,6 +37,7 @@ class WickTrapReversalSetup(BaseSetup):
             "sl_buffer_atr": 0.8,
             "min_rr": 1.5,
             "wick_atr_threshold": 0.3,
+            "wick_through_atr_mult": 0.3,
         }
         if settings is not None:
             filters = getattr(settings, 'filters', None)
@@ -62,8 +63,15 @@ class WickTrapReversalSetup(BaseSetup):
             _reject(prepared, setup_id, "atr_non_positive", atr=atr)
             return None
 
-        # Config-driven parameters (from config_strategies.toml)
-        wick_through_atr_mult = dynamic_params.get("wick_through_atr_mult", 0.3)
+        defaults = self.get_optimizable_params(settings)
+        wick_through_atr_mult = float(
+            dynamic_params.get(
+                "wick_through_atr_mult",
+                dynamic_params.get(
+                    "wick_atr_threshold", defaults["wick_through_atr_mult"]
+                ),
+            )
+        )
         closed_back_threshold = dynamic_params.get("closed_back_threshold", 0.0)
         
         sh_mask, sl_mask = _swing_points(work_1h, n=3, include_unconfirmed_tail=True)
@@ -186,7 +194,6 @@ class WickTrapReversalSetup(BaseSetup):
 
         price_anchor = trig_close
 
-        defaults = self.get_optimizable_params(settings)
         sl_buffer_atr = float(dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]))
 
         # --- Compute structural SL/TP ---
@@ -227,7 +234,10 @@ class WickTrapReversalSetup(BaseSetup):
 
         score = _compute_dynamic_score(
             direction=direction,
-            base_score=0.60, vol_ratio=vol_ratio, rsi=rsi, structure_clarity=0.5,
+            base_score=float(dynamic_params.get("base_score", defaults["base_score"])),
+            vol_ratio=vol_ratio,
+            rsi=rsi,
+            structure_clarity=0.5,
         )
 
         return _build_signal(

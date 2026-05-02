@@ -430,6 +430,22 @@ class SignalBot:
             LOG.warning("modern repository init failed (non-fatal): %s", exc)
 
         try:
+            expired_count = await self._modern_repo.expire_open_signals_older_than(
+                max_age_minutes=240
+            )
+            purged_cooldowns = await self._modern_repo.purge_cooldowns_older_than(
+                max_age_minutes=120
+            )
+            if expired_count or purged_cooldowns:
+                LOG.info(
+                    "startup stale state cleanup | expired_open_signals=%d purged_cooldowns=%d",
+                    expired_count,
+                    purged_cooldowns,
+                )
+        except Exception as exc:
+            LOG.warning("startup stale state cleanup failed (non-fatal): %s", exc)
+
+        try:
             startup_tracking_events = await self.tracker.review_open_signals(
                 dry_run=False
             )

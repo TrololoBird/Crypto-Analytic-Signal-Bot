@@ -10,6 +10,17 @@ from ..models import PipelineResult, Signal
 from ..tracking import SignalTrackingEvent
 
 LOG = logging.getLogger("bot.application.telemetry_manager")
+_INDICATOR_COLUMNS = (
+    "rsi14",
+    "stoch_k14",
+    "stoch_d14",
+    "cci20",
+    "willr14",
+    "obv",
+    "obv_ema20",
+    "obv_above_ema",
+    "mfi14",
+)
 
 
 class TelemetryManager:
@@ -17,6 +28,42 @@ class TelemetryManager:
 
     def __init__(self, bot: Any) -> None:
         self._bot = bot
+
+    @staticmethod
+    def _frame_indicator_snapshot(frame: Any) -> dict[str, float]:
+        if frame is None or getattr(frame, "is_empty", lambda: True)():
+            return {}
+        columns = set(getattr(frame, "columns", []) or [])
+        snapshot: dict[str, float] = {}
+        for column in _INDICATOR_COLUMNS:
+            if column not in columns:
+                continue
+            try:
+                value = frame.item(-1, column)
+            except (IndexError, TypeError, ValueError):
+                continue
+            if value is None:
+                continue
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError):
+                continue
+            if numeric == numeric and numeric not in (float("inf"), float("-inf")):
+                snapshot[column] = numeric
+        return snapshot
+
+    def _indicator_snapshot(self, prepared: Any) -> dict[str, dict[str, float]]:
+        frames = {
+            "5m": getattr(prepared, "work_5m", None),
+            "15m": getattr(prepared, "work_15m", None),
+            "1h": getattr(prepared, "work_1h", None),
+            "4h": getattr(prepared, "work_4h", None),
+        }
+        return {
+            interval: values
+            for interval, frame in frames.items()
+            if (values := self._frame_indicator_snapshot(frame))
+        }
 
     def decision_to_reject_row(
         self, *, symbol: str, decision: StrategyDecision
@@ -253,6 +300,7 @@ class TelemetryManager:
             "delivery_status_counts": delivery_status_counts,
         }
         if result.prepared is not None:
+            indicators = self._indicator_snapshot(result.prepared)
             symbol_row.update(
                 {
                     "work_rows_15m": int(result.prepared.work_15m.height)
@@ -281,8 +329,20 @@ class TelemetryManager:
                     "premium_slope_5m": result.prepared.premium_slope_5m,
                     "oi_slope_5m": result.prepared.oi_slope_5m,
                     "top_vs_global_ls_gap": result.prepared.top_vs_global_ls_gap,
+                    "indicators": indicators,
                 }
             )
+            if indicators:
+                self._bot.telemetry.append_feature_jsonl(
+                    "indicator_snapshots.jsonl",
+                    {
+                        "ts": datetime.now(UTC).isoformat(),
+                        "symbol": symbol,
+                        "event_ts": event_ts.isoformat(),
+                        "trigger": result.trigger,
+                        "indicators": indicators,
+                    },
+                )
         if result.funnel:
             symbol_row["funnel"] = result.funnel
             if result.funnel.get("prepare_error_stage") is not None:

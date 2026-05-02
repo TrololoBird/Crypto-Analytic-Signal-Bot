@@ -15,8 +15,8 @@ Date: 2026-04-28
 
 ### Confirmed facts
 
-- В `WSConfig` endpoint-классы `public` и `market` логические: обе ветки нормализуются к одному canonical root (`base_url`) в `model_validator`, даже если в конфиге заданы `.../public` или `.../market`. Это снижает риск endpoint drift.  
-- Фактический stream URL строится как `f"{base}/stream"`, где `base` очищается от суффиксов `/ws` и `/stream`.  
+- В `WSConfig` endpoint-классы `public` и `market` физически разделены: `public_base_url` должен оканчиваться на `/public`, `market_base_url` должен оканчиваться на `/market`. Это соответствует Binance routed endpoint split.
+- Фактический stream URL строится как `f"{base}/stream"`, где `base` очищается от суффиксов `/ws` и `/stream`, но сохраняет routed suffix `/public` или `/market`.
 - Классификация потока делается через `stream_endpoint_class(...)`:
   - `@bookTicker`/`@depth` → `public`;
   - `@kline_*`, `@aggTrade`, `!ticker@arr`, `!markPrice@arr`, `!miniTicker@arr`, `!forceOrder@arr` → `market`;
@@ -25,7 +25,7 @@ Date: 2026-04-28
 
 ### Assumptions / inferences
 
-- Код сознательно закладывает «single-root + logical split» вместо двух разных физических URL, чтобы не допустить cross-endpoint drift. Это inference по комментариям и нормализации, а не по отдельному design doc.
+- Код сознательно закладывает раздельные физические routed URLs для public/market streams. Это подтверждено `WSConfig._resolve_endpoint_urls(...)` и `endpoint_base_url(...)`.
 
 ## 2) Подписки, дубликаты и рассинхронизация
 

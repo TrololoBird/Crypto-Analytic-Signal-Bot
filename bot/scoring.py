@@ -172,11 +172,12 @@ def _oi_momentum(prepared: PreparedSymbol, signal: Signal) -> float:
     return round((oi_score * 0.55 + cvd_score * 0.35 + basis_score * 0.10), 4)
 
 
-def _risk_reward_quality(signal: Signal) -> float:
+def _risk_reward_quality(signal: Signal, settings: BotSettings) -> float:
     rr = signal.risk_reward
-    # Range starts at 1.9 (the filter minimum) so signals that just pass the gate
-    # don't get near-zero scores.  RR 1.9 → 0.0, RR 4.0 → 1.0.
-    return max(0.0, min((rr - 1.9) / 2.1, 1.0))
+    setup_overrides = settings.filters.setups.get(signal.setup_id, {})
+    min_rr = float(setup_overrides.get("min_rr", settings.filters.min_risk_reward))
+    max_rr = max(min_rr + 0.1, 4.0)
+    return max(0.0, min((rr - min_rr) / (max_rr - min_rr), 1.0))
 
 
 def _funding_contrarian(

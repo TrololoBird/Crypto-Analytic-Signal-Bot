@@ -267,7 +267,9 @@ class SignalTracker:
             ).isoformat(),
             active_expires_at=(
                 created_at
-                + timedelta(minutes=self.settings.tracking.active_expiry_minutes)
+                + timedelta(
+                    minutes=min(self.settings.tracking.active_expiry_minutes, 240)
+                )
             ).isoformat(),
             entry_low=signal.entry_low,
             entry_high=signal.entry_high,
