@@ -510,6 +510,113 @@ Project audit checks:
   418. The script was changed to safe lite-context by default. No further live
   Binance REST verification was run in this pass because of the ban window.
 
+## 2026-05-03 Current Session Addendum
+
+Git/GitHub:
+
+- Confirmed branch: `main`.
+- Confirmed remote: `https://github.com/TrololoBird/Crypto-Analytic-Signal-Bot.git`.
+- `git push origin main` returned `Everything up-to-date`; there were no
+  pre-existing local changes to push before this session's audit work.
+
+Fresh project scan:
+
+- Required local `AGENTS.md` files read for root, `bot/`, `bot/strategies/`,
+  `bot/setups/`, `scripts/`, and `tests/`.
+- `rg --files bot scripts tests docs data logs config.toml config.toml.example PROJECT_MAP.md AGENTS.md pyproject.toml requirements.txt`
+  returned 287 tracked/audited paths in the requested surface.
+- Confirmed mismatch with the prompt: there is no `bot/filters/` directory in
+  the current repository; filter logic is in `bot/filters.py`.
+- Runtime import check still reports 21 strategy classes, not the 15 listed in
+  the prompt.
+
+Fresh Binance verification:
+
+- Official docs checked on 2026-05-03:
+  - `https://developers.binance.com/docs/derivatives/usds-margined-futures/websocket-market-streams`
+  - `https://developers.binance.com/docs/derivatives/usds-margined-futures/websocket-market-streams/Live-Subscribing-Unsubscribing-to-streams`
+  - `https://developers.binance.com/docs/derivatives/usds-margined-futures/market-data/rest-api/Order-Book`
+  - `https://developers.binance.com/docs/derivatives/usds-margined-futures/market-data/rest-api/Compressed-Aggregate-Trades-List`
+- Live REST smoke:
+  - `/fapi/v1/time` -> HTTP 200, keys `serverTime`.
+  - `/fapi/v1/depth?symbol=BTCUSDT&limit=5` -> HTTP 200, keys
+    `lastUpdateId`, `E`, `T`, `bids`, `asks`.
+  - `/fapi/v1/aggTrades?symbol=BTCUSDT&limit=1` -> HTTP 200, list payload.
+  - `/fapi/v1/premiumIndex?symbol=BTCUSDT` -> HTTP 200, mark/funding keys.
+- Live WS smoke:
+  - `wss://fstream.binance.com/public/stream?streams=btcusdt@depth5@100ms`
+    emitted combined payload keys `stream` and `data`.
+  - `wss://fstream.binance.com/market/stream?streams=btcusdt@markPrice`
+    emitted combined payload keys `stream` and `data`.
+- Live `exchangeInfo` confirmed priority symbols:
+  `BTCUSDT`, `ETHUSDT`, `XAUUSDT`, `XAGUSDT`; XAU/XAG are
+  `TRADIFI_PERPETUAL` contracts.
+
+Fresh runtime/live checks:
+
+- `python scripts\validate_config.py` -> passed.
+- `python -m pytest -q tests\test_strategies.py::test_bos_choch_external_stop_selector_reports_side_filtering tests\test_strategies.py::test_bos_choch_external_stop_selector_diagnoses_missing_anchor tests\test_smc_helpers.py`
+  -> 9 passed.
+- `python scripts\live_check_strategies.py --symbols BTCUSDT ETHUSDT XAUUSDT XAGUSDT --limit 4 --concurrency 2`
+  -> prepared_ok=4, detector_runs=84, strategy_errors=[].
+- `python scripts\live_check_binance_api.py --symbols BTCUSDT ETHUSDT XAUUSDT XAGUSDT --warmup-seconds 6 --reconnect-wait-seconds 6`
+  -> REST checks passed, fresh WS ticker/mark/book/kline caches populated, and
+  forced market reconnect recovered.
+- `python scripts\live_check_pipeline.py --symbols BTCUSDT ETHUSDT XAUUSDT XAGUSDT --limit 4 --concurrency 2 --no-warm-context`
+  -> prepared_ok=4, detector_runs=84, raw_hits=12, candidates=0,
+  dry_selected=0. This is a calibration fact, not a runtime failure.
+- `python scripts\live_check_enrichments.py --symbols BTCUSDT ETHUSDT --warmup 8`
+  -> 12/12 critical fields populated for BTC/ETH. Premium slope/zscore were
+  not required in this run and remained `None`.
+
+Fresh bug fix:
+
+- Confirmed `_FrameCache` bug with a red test: two frames with the same
+  `(symbol, interval, close_time)` but different historical windows returned
+  the first cached prepared frame.
+- Fixed `bot/features.py` cache keys to include symbol, interval, frame row
+  count, first close time, and last close time.
+- Added regression test
+  `tests/test_features.py::test_cached_prepare_frame_distinguishes_same_close_time_with_different_history`.
+- Verification:
+  - Red before fix: the new test failed with both prepared heights equal.
+  - Green after fix: the new test passed.
+  - `python -m ruff check bot\features.py tests\test_features.py` -> passed.
+
+BOS/CHoCH recheck:
+
+- Parsed run `20260502_110946_22548`; counts remain:
+  `data.external_swing_stop_missing_short=113`,
+  `data.external_swing_stop_missing_long=5`,
+  `pattern.no_choch_detected=85`,
+  `pattern.insufficient_swing_points=74`,
+  `pattern.raw_hit=225`.
+- The old telemetry run lacks the new selector diagnostic fields except
+  `external_swing_lookback` and a market snapshot, so it cannot prove whether
+  side-filtering or absent external markers dominated the historical 113 rejects.
+- Current code path still supports the previous inference: short candidates
+  require a valid external swing high above current price before the structure
+  break index. I did not relax this live policy without replay evidence because
+  that would change risk semantics.
+
+Unused-feature recheck:
+
+- `ichi_*` columns are still not referenced directly by strategy files.
+- They are referenced by public-intelligence/feature-surface code and tests, so
+  deleting them in this pass would be a contract change, not a safe
+  performance-only cleanup.
+- Session features are still duplicated with `session_killzone` direct time
+  checks, but `session_overlap` exists and overlap killzone tests pass.
+
+Competitor study:
+
+- Added `docs/competitor_study_2026-05-03.md`.
+- GitHub metadata was collected for the 10 prompt-named projects plus 10
+  additional current/topical projects. Full README pulls were blocked by
+  unauthenticated GitHub API rate limiting for most repositories, so the study
+  is explicitly marked as metadata/README-summary level rather than deep code
+  audit.
+
 External references checked:
 
 - Binance USD-M Futures Websocket Market Streams official docs:

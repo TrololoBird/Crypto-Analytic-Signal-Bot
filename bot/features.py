@@ -79,33 +79,36 @@ LOG = structlog.get_logger("bot.features")
 _ADVANCED_FALLBACKS_LOGGED: set[str] = set()
 
 # ---------------------------------------------------------------------------
-# Frame-level indicator cache — LRU with unique (symbol, interval, close_time) keys.
+# Frame-level indicator cache — LRU with unique frame-window keys.
 # ---------------------------------------------------------------------------
 
 _MAX_CACHE_ENTRIES = 500
+_FrameCacheKey = tuple[str, str, int, int, int]
 
 
 class _FrameCache:
     """Thread-safe LRU cache for prepared frames.
 
-    Keys are (symbol, interval, close_time_ns) to avoid cross-symbol collisions.
+    Keys include symbol, interval, row count, first close time, and last close
+    time. `_prepare_frame` depends on the whole history window, not only the
+    latest candle timestamp.
     """
 
     __slots__ = ("_store", "_max_size", "_lock")
 
     def __init__(self, max_size: int = 500) -> None:
-        self._store: OrderedDict[tuple[str, str, int], pl.DataFrame] = OrderedDict()
+        self._store: OrderedDict[_FrameCacheKey, pl.DataFrame] = OrderedDict()
         self._max_size = max_size
         self._lock = threading.RLock()
 
-    def get(self, key: tuple[str, str, int]) -> pl.DataFrame | None:
+    def get(self, key: _FrameCacheKey) -> pl.DataFrame | None:
         with self._lock:
             if key not in self._store:
                 return None
             self._store.move_to_end(key)
             return self._store[key]
 
-    def put(self, key: tuple[str, str, int], value: pl.DataFrame) -> None:
+    def put(self, key: _FrameCacheKey, value: pl.DataFrame) -> None:
         with self._lock:
             if key in self._store:
                 self._store.move_to_end(key)
@@ -125,6 +128,16 @@ def _clean_non_finite(series: pl.Series, *, fill: float) -> pl.Series:
         .fill_nan(fill)
         .fill_null(fill)
     )
+
+
+def _timestamp_ns(value: object) -> int:
+    if isinstance(value, str):
+        from datetime import datetime
+
+        value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if hasattr(value, "timestamp"):
+        return int(value.timestamp() * 1e9)
+    return int(value)
 
 
 def _log_indicator_fallback(indicator: str, exc: Exception) -> None:
@@ -1296,17 +1309,14 @@ def _cached_prepare_frame(
         return _prepare_frame(frame)
     
     last = frame.row(-1, named=True)
+    first = frame.row(0, named=True)
     try:
-        # Convert timestamp to nanoseconds for key
-        close_time = last["close_time"]
-        if isinstance(close_time, str):
-            from datetime import datetime
-            close_time = datetime.fromisoformat(close_time.replace('Z', '+00:00'))
-        close_time_ns = int(close_time.timestamp() * 1e9)
-    except Exception:
+        first_close_time_ns = _timestamp_ns(first["close_time"])
+        close_time_ns = _timestamp_ns(last["close_time"])
+    except (KeyError, TypeError, ValueError, OverflowError):
         return _prepare_frame(frame)
     
-    key = (symbol, interval, close_time_ns)
+    key = (symbol, interval, frame.height, first_close_time_ns, close_time_ns)
     target_cache = cache or _FRAME_CACHE
     cached = target_cache.get(key)
     if cached is not None:

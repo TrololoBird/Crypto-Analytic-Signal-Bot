@@ -4,11 +4,14 @@ from datetime import UTC, datetime, timedelta
 
 import polars as pl
 
-from bot.features import _prepare_frame
+from bot.features import _cached_prepare_frame, _FrameCache, _prepare_frame
 
 
-def _ohlcv(rows: int = 260) -> pl.DataFrame:
-    base = datetime(2026, 1, 1, tzinfo=UTC)
+def _ohlcv(rows: int = 260, *, end_time: datetime | None = None) -> pl.DataFrame:
+    if end_time is None:
+        base = datetime(2026, 1, 1, tzinfo=UTC)
+    else:
+        base = end_time - timedelta(minutes=15 * (rows - 1))
     times = [base + timedelta(minutes=15 * i) for i in range(rows)]
     closes = [100.0 + (i * 0.1) for i in range(rows)]
     return pl.DataFrame(
@@ -57,3 +60,26 @@ def test_prepare_frame_keeps_rsi_adx_on_indicator_scale() -> None:
     assert rsi > 1.0
     assert 0.0 <= adx <= 100.0
     assert adx > 1.0
+
+
+def test_cached_prepare_frame_distinguishes_same_close_time_with_different_history() -> None:
+    end_time = datetime(2026, 2, 1, tzinfo=UTC)
+    short_frame = _ohlcv(260, end_time=end_time)
+    long_frame = _ohlcv(280, end_time=end_time)
+    cache = _FrameCache(max_size=4)
+
+    short_prepared = _cached_prepare_frame(
+        short_frame,
+        symbol="BTCUSDT",
+        interval="15m",
+        cache=cache,
+    )
+    long_prepared = _cached_prepare_frame(
+        long_frame,
+        symbol="BTCUSDT",
+        interval="15m",
+        cache=cache,
+    )
+
+    assert short_prepared.height != long_prepared.height
+    assert long_prepared.height == _prepare_frame(long_frame).height
