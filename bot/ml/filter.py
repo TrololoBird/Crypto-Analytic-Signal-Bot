@@ -82,6 +82,13 @@ class MLFilter:
                         is_live=self._is_live,
                         stage="load_signal_classifier_fallback",
                     )
+                    if self._is_live and not decision.should_disable:
+                        decision = LiveModelGuardrailDecision(
+                            model_kind=decision.model_kind,
+                            stage=decision.stage,
+                            is_live=decision.is_live,
+                            disable_reason="live_baseline_blocked",
+                        )
                     self._emit_guardrail_telemetry(decision)
                     if decision.should_disable:
                         LOG.warning(

@@ -23,6 +23,87 @@ LOG = logging.getLogger("bot.strategies.bos_choch")
 _MIN_SWINGS = 6   # Need 3+ of each type for trend context
 
 
+def _select_external_stop_level(
+    *,
+    markers: list[object],
+    levels: list[object],
+    search_end: int,
+    marker: float,
+    price: float,
+    above_price: bool,
+) -> tuple[float | None, dict[str, object]]:
+    """Select the latest external swing stop anchor and return reject diagnostics."""
+    bounded_end = min(search_end, len(markers) - 1, len(levels) - 1)
+    details: dict[str, object] = {
+        "external_search_end": bounded_end,
+        "external_marker": marker,
+        "external_side_above_price": above_price,
+    }
+    if bounded_end < 0:
+        details.update(
+            external_marker_candidates=0,
+            external_invalid_markers=0,
+            external_invalid_levels=0,
+            external_side_filtered=0,
+        )
+        return None, details
+
+    marker_candidates = 0
+    invalid_markers = 0
+    invalid_levels = 0
+    side_filtered = 0
+    for idx in range(bounded_end, -1, -1):
+        raw_marker = markers[idx]
+        try:
+            marker_value = float(raw_marker) if raw_marker is not None else 0.0
+        except (TypeError, ValueError):
+            invalid_markers += 1
+            continue
+        if raw_marker is None or marker_value != marker:
+            continue
+        marker_candidates += 1
+        raw_level = levels[idx]
+        if raw_level is None:
+            invalid_levels += 1
+            continue
+        try:
+            level = float(raw_level)
+        except (TypeError, ValueError):
+            invalid_levels += 1
+            continue
+        if not math.isfinite(level) or level <= 0.0:
+            invalid_levels += 1
+            continue
+        if above_price and level > price:
+            details.update(
+                external_marker_candidates=marker_candidates,
+                external_invalid_markers=invalid_markers,
+                external_invalid_levels=invalid_levels,
+                external_side_filtered=side_filtered,
+            )
+            details["external_selected_index"] = idx
+            details["external_selected_level"] = level
+            return level, details
+        if not above_price and level < price:
+            details.update(
+                external_marker_candidates=marker_candidates,
+                external_invalid_markers=invalid_markers,
+                external_invalid_levels=invalid_levels,
+                external_side_filtered=side_filtered,
+            )
+            details["external_selected_index"] = idx
+            details["external_selected_level"] = level
+            return level, details
+        side_filtered += 1
+    details.update(
+        external_marker_candidates=marker_candidates,
+        external_invalid_markers=invalid_markers,
+        external_invalid_levels=invalid_levels,
+        external_side_filtered=side_filtered,
+    )
+    return None, details
+
+
 class BOSCHOCHSetup(BaseSetup):
     """BOS/CHoCH strategy detector for structural break signals."""
 
@@ -141,36 +222,28 @@ class BOSCHOCHSetup(BaseSetup):
         external_levels = external_swings["Level"].to_list()
         external_search_end = min(
             int(structure_zone.broken_index or (w.height - 1)),
+            len(external_markers) - 1,
             len(external_levels) - 1,
         )
-
-        def _last_external_level(marker: float, *, above_price: bool) -> float | None:
-            for idx in range(external_search_end, -1, -1):
-                raw_marker = external_markers[idx]
-                if raw_marker is None or float(raw_marker) != marker:
-                    continue
-                raw_level = external_levels[idx]
-                if raw_level is None:
-                    continue
-                level = float(raw_level)
-                if not math.isfinite(level) or level <= 0.0:
-                    continue
-                if above_price and level > price:
-                    return level
-                if not above_price and level < price:
-                    return level
-            return None
 
         # --- Compute structural SL/TP ---
         if direction == "long":
             # SL uses external SMC swing structure only; internal CHoCH swings are not stop anchors.
-            pivot_level = _last_external_level(-1.0, above_price=False)
+            pivot_level, stop_details = _select_external_stop_level(
+                markers=external_markers,
+                levels=external_levels,
+                search_end=external_search_end,
+                marker=-1.0,
+                price=price,
+                above_price=False,
+            )
             if pivot_level is None:
                 _reject(
                     prepared,
                     setup_id,
                     "external_swing_stop_missing_long",
                     external_swing_lookback=external_swing_lookback,
+                    **stop_details,
                 )
                 return None
             stop_price = pivot_level - sl_buffer_atr * atr
@@ -190,13 +263,21 @@ class BOSCHOCHSetup(BaseSetup):
                 tp2 = float(tp2_cands[0]) if tp2_cands.len() > 0 else None
         else:
             # SL uses external SMC swing structure only; internal CHoCH swings are not stop anchors.
-            pivot_level = _last_external_level(1.0, above_price=True)
+            pivot_level, stop_details = _select_external_stop_level(
+                markers=external_markers,
+                levels=external_levels,
+                search_end=external_search_end,
+                marker=1.0,
+                price=price,
+                above_price=True,
+            )
             if pivot_level is None:
                 _reject(
                     prepared,
                     setup_id,
                     "external_swing_stop_missing_short",
                     external_swing_lookback=external_swing_lookback,
+                    **stop_details,
                 )
                 return None
             stop_price = pivot_level + sl_buffer_atr * atr

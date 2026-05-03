@@ -8,6 +8,7 @@ from bot import features_advanced, features_core, features_oscillators
 from bot.features_microstructure import add_microstructure_features
 from bot.features import (
     _HAS_TALIB,
+    _add_session_features,
     _adx,
     _prepare_frame,
     _stochastic,
@@ -66,7 +67,10 @@ def test_prepare_frame_parity_with_decomposed_pipeline() -> None:
             .fill_nan(0.0)
             .alias("vwap_deviation_z20"),
         ]
-    ).filter(pl.col("ema200").is_not_null() & pl.col("donchian_low20").is_not_null())
+    )
+    work = _add_session_features(work).filter(
+        pl.col("ema200").is_not_null() & pl.col("donchian_low20").is_not_null()
+    )
 
     assert expected.columns == work.columns
     assert expected.equals(work, null_equal=True)

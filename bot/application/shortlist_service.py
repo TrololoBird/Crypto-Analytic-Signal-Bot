@@ -13,6 +13,36 @@ from ..universe import build_shortlist
 UTC = timezone.utc
 LOG = logging.getLogger("bot.application.shortlist_service")
 
+FALLBACK_REASON_WS_CACHE_COLD = "ws_cache_cold"
+FALLBACK_REASON_FULL_REFRESH_DUE = "full_refresh_due"
+FALLBACK_REASON_REFRESH_EXCEPTION = "refresh_exception"
+FALLBACK_REASON_LIVE_EMPTY = "live_empty"
+FALLBACK_REASON_USING_CACHED = "using_cached"
+FALLBACK_REASON_USING_PINNED = "using_pinned"
+FALLBACK_REASON_UNKNOWN = "unknown"
+
+
+def normalize_shortlist_fallback_reason(value: object) -> str | None:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return None
+    aliases = {
+        "cached": FALLBACK_REASON_USING_CACHED,
+        "using_cache": FALLBACK_REASON_USING_CACHED,
+        "using_cached": FALLBACK_REASON_USING_CACHED,
+        "refresh_failed": FALLBACK_REASON_REFRESH_EXCEPTION,
+        "refresh_exception": FALLBACK_REASON_REFRESH_EXCEPTION,
+        "exception": FALLBACK_REASON_REFRESH_EXCEPTION,
+        "live_empty": FALLBACK_REASON_LIVE_EMPTY,
+        "empty_live": FALLBACK_REASON_LIVE_EMPTY,
+        "ws_cache_cold": FALLBACK_REASON_WS_CACHE_COLD,
+        "full_refresh_due": FALLBACK_REASON_FULL_REFRESH_DUE,
+        "using_pinned": FALLBACK_REASON_USING_PINNED,
+        "pinned": FALLBACK_REASON_USING_PINNED,
+        "pinned_fallback": FALLBACK_REASON_USING_PINNED,
+    }
+    return aliases.get(raw, FALLBACK_REASON_UNKNOWN)
+
 
 class ShortlistService:
     """Encapsulates shortlist build/refresh lifecycle for ``SignalBot``."""
@@ -261,6 +291,7 @@ class ShortlistService:
         bot = self._bot
         LOG.info("refreshing shortlist...")
 
+        source_before = str(getattr(bot, "_shortlist_source", "") or "")
         source = "pinned_fallback"
         summary: dict[str, Any] = {}
         shortlist = self.build_pinned_shortlist()
@@ -268,6 +299,20 @@ class ShortlistService:
         full_interval = int(getattr(bot.settings.universe, "full_refresh_interval_seconds", bot.settings.runtime.shortlist_refresh_interval_seconds))
         last_full = getattr(bot, "_last_shortlist_full_refresh_at", None)
         full_refresh_due = last_full is None or (now - last_full).total_seconds() >= full_interval
+        ws = getattr(bot, "_ws_manager", None)
+        try:
+            ws_cache_warm = bool(ws is not None and ws.is_ticker_cache_warm())
+        except Exception:
+            ws_cache_warm = False
+        has_symbol_meta = bool(getattr(bot, "_symbol_meta_by_symbol", None))
+        cached_shortlist = list(getattr(bot, "_last_live_shortlist", []) or [])
+        cached_at = getattr(bot, "_last_live_shortlist_at", None)
+        cached_shortlist_age_s = (
+            max(0.0, (now - cached_at).total_seconds())
+            if isinstance(cached_at, datetime)
+            else None
+        )
+        fallback_reason: str | None = None
 
         try:
             live_shortlist: list[UniverseSymbol] = []
@@ -276,39 +321,62 @@ class ShortlistService:
                 live_shortlist, live_summary = await self.build_light_shortlist()
                 if live_shortlist:
                     source = "ws_light"
-                elif bot._last_live_shortlist:
-                    live_shortlist = list(bot._last_live_shortlist)
+                elif cached_shortlist:
+                    live_shortlist = list(cached_shortlist)
                     live_summary = {"mode": "cached"}
                     source = "cached"
-            if full_refresh_due or (not live_shortlist and not bot._last_live_shortlist):
+                    fallback_reason = FALLBACK_REASON_USING_CACHED
+                elif not ws_cache_warm or not has_symbol_meta:
+                    fallback_reason = FALLBACK_REASON_WS_CACHE_COLD
+            if full_refresh_due or (not live_shortlist and not cached_shortlist):
+                if full_refresh_due:
+                    fallback_reason = FALLBACK_REASON_FULL_REFRESH_DUE
                 live_shortlist, live_summary = await self.build_live_shortlist()
                 if live_shortlist:
                     bot._last_shortlist_full_refresh_at = now
                     source = "rest_full"
+                elif fallback_reason is None:
+                    fallback_reason = FALLBACK_REASON_LIVE_EMPTY
             if live_shortlist:
                 shortlist = live_shortlist
                 summary = live_summary
                 bot._last_live_shortlist = list(live_shortlist)
-            elif bot._last_live_shortlist:
-                shortlist = list(bot._last_live_shortlist)
+                if source in {"rest_full", "ws_light"}:
+                    bot._last_live_shortlist_at = now
+                    fallback_reason = None
+            elif cached_shortlist:
+                shortlist = list(cached_shortlist)
                 source = "cached"
+                fallback_reason = FALLBACK_REASON_USING_CACHED
         except Exception as exc:
-            if bot._last_live_shortlist:
-                shortlist = list(bot._last_live_shortlist)
+            if cached_shortlist:
+                shortlist = list(cached_shortlist)
                 source = "cached"
+                fallback_reason = FALLBACK_REASON_REFRESH_EXCEPTION
                 LOG.warning("shortlist refresh failed, using cached shortlist: %s", exc)
             else:
+                fallback_reason = FALLBACK_REASON_REFRESH_EXCEPTION
                 LOG.warning("shortlist refresh failed, using pinned fallback: %s", exc)
 
         async with bot._shortlist_lock:
             bot._shortlist = shortlist
         bot._shortlist_source = source
+        if source == "pinned_fallback" and fallback_reason is None:
+            fallback_reason = FALLBACK_REASON_USING_PINNED
 
         bot.telemetry.append_jsonl(
             "shortlist.jsonl",
             {
                 "ts": datetime.now(UTC).isoformat(),
                 "source": source,
+                "source_before": source_before,
+                "source_after": source,
+                "fallback_reason": normalize_shortlist_fallback_reason(fallback_reason),
+                "full_refresh_due": full_refresh_due,
+                "ws_cache_warm": ws_cache_warm,
+                "has_symbol_meta": has_symbol_meta,
+                "cached_shortlist_age_s": cached_shortlist_age_s,
+                "cached_shortlist_size": len(cached_shortlist),
                 "size": len(shortlist),
                 "symbols": [item.symbol for item in shortlist[:20]],
                 "eligible": summary.get("eligible"),

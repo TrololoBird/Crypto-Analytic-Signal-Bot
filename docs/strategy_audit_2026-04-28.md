@@ -2,6 +2,52 @@
 
 Scope: `bot/strategies/`, `bot/setups.py`, `bot/setups/`, `bot/models.py`, `config.toml`, `config.toml.example`.
 
+Historical note: sections below the 2026-05-03 recheck preserve the original
+2026-04-28 audit context. Where they conflict with the recheck, the recheck is
+the current repository fact.
+
+## 2026-05-03 recheck
+
+Confirmed current state:
+
+- Active import target for `bot.setups` is `bot/setups/__init__.py`, not the
+  legacy same-name file `bot/setups.py`.
+- Active `_build_signal(...)` already uses `normalize_trade_levels(...)`,
+  finite checks, target normalization, `target_integrity_status`, and
+  single-target metadata.
+- `turtle_soup` no longer has the original TP contradiction: current code places
+  long TP above entry and short TP below entry before calling `_build_signal`.
+- `wick_trap_reversal` still starts from the swept level as TP1, but current code
+  applies deterministic RR fallback before build when the swept level is too
+  close; live strategy surface check on BTC/ETH/XAU/XAG produced no strategy
+  errors.
+- `session_killzone` pre-guard indexed access was fixed in this pass: the
+  strategy now checks `work_15m.height < 20` and `time` column presence before
+  reading `item(-1, "time")`.
+- `session_killzone` killzone windows are now config-driven numeric parameters
+  under `[bot.filters.setups.session_killzone]`, and `Overlap` is a first-class
+  session window.
+- `bos_choch` now records external stop-anchor diagnostics in rejection details:
+  marker candidates, invalid markers/levels, side-filtered anchors, selected
+  index/level when present.
+- `bot.features` now emits `session_overlap` and `session_overlap_vol_20`, and
+  keeps runtime indicator generation on the deterministic pure-Polars path even
+  when `polars_ta` is installed.
+- Regression checks passed after the fix:
+  `tests/test_strategies.py`,
+  `tests/test_regression_suite_setups_contracts.py`,
+  `tests/test_regression_suite_contracts.py`, and
+  `tests/test_regression_suite_tracking_delivery.py`.
+
+Residual risks:
+
+- The duplicate legacy file `bot/setups.py` remains in the tree and is stale
+  relative to the active package implementation. It should be removed or made an
+  explicit compatibility shim in a separate cleanup pass.
+- Full SMC parity against an external reference is still not proven; current
+  tests cover schema, length, selected invalidation behavior, and signal-level
+  contracts rather than every ICT edge case.
+
 ## 1) Contract check: `setup_id`, `detect()` signature, expected input schema
 
 ### 1.1 Strategy contract compliance
@@ -41,7 +87,11 @@ Risk: many strategies guard bar count, but not always explicit column presence b
 
 ### 2.2 Type caveats
 
-- `_build_signal` validates `<= 0`, but does **not** reject non-finite values (`NaN`, `inf`) for `stop/tp/atr/price_anchor`. This allows invalid numeric values to pass helper-level checks if upstream guards missed them.
+- Historical finding: the legacy sibling file `bot/setups.py` only checked
+  positive numeric values.
+- Current active runtime fact: `bot/setups/__init__.py::_build_signal(...)`
+  validates finite ATR/trade levels and normalizes targets before constructing
+  `Signal`.
 
 ## 3) Guards: empty data, insufficient history, NaN/None
 
@@ -53,27 +103,26 @@ Risk: many strategies guard bar count, but not always explicit column presence b
 ### 3.2 Guard gaps / ordering issues
 
 1. **Pre-guard indexed access in `session_killzone`**
-   - `prepared.work_15m.item(-1, "time")` is read before checking `w.height < 20`.
-   - On empty/too-short frame this can raise before graceful reject path.
+   - Historical finding, fixed on 2026-05-03.
+   - Regression: `test_session_killzone_rejects_empty_15m_before_time_lookup`.
 
 2. **Non-finite value gap in shared `_build_signal`**
-   - Helper checks sign but not finite-ness, so `NaN` can bypass helper-level validation.
+   - Historical finding for the legacy sibling file; not true for the active
+     `bot/setups/__init__.py` runtime import target.
 
 ## 4) Logical defects (indexing / confirmation contradictions / RR)
 
-### 4.1 Critical: `wick_trap_reversal` target contradiction (effectively no valid signals)
+### 4.1 Historical: `wick_trap_reversal` target contradiction
 
-- Long branch requires `trig_close > level`, then sets `tp1 = level`.
-- Short branch requires `trig_close < level`, then sets `tp1 = level`.
-- `_build_signal` rejects long if `tp1 <= price_anchor`, and rejects short if `tp1 >= price_anchor`.
-- Net effect: both branches are internally contradictory with helper validation, so setup is expected to reject all candidates at build stage.
+- Original finding is no longer current.
+- Current code applies a deterministic RR fallback when the swept level is too
+  close to `price_anchor`.
 
-### 4.2 Critical: `turtle_soup` target contradiction (effectively no valid signals)
+### 4.2 Historical: `turtle_soup` target contradiction
 
-- Long branch confirms close back above `rolling_low`, then sets `tp1 = rolling_low` (below/at entry).
-- Short branch confirms close back below `rolling_high`, then sets `tp1 = rolling_high` (above/at entry).
-- `_build_signal` enforces directional TP placement and rejects these constructions.
-- Net effect: both directions are structurally invalid at signal build stage.
+- Original finding is no longer current.
+- Current code places long TP above entry and short TP below entry before
+  calling `_build_signal(...)`.
 
 ### 4.3 RR semantics inconsistency
 
@@ -103,8 +152,8 @@ Config supplies `sl_buffer_atr`, `min_rr`, `adx_penalty_factor`, etc., but detec
 
 ## Priority remediation list
 
-1. Fix TP construction contradictions in `wick_trap_reversal` and `turtle_soup` (highest priority).
-2. Move `session_killzone` `item(-1, "time")` read below minimum-bar guard.
-3. Harden `_build_signal` with finite checks (`math.isfinite`) for `atr`, `stop`, `tp1`, `tp2`, `price_anchor`.
-4. Normalize config contracts for `wick_trap_reversal` and `turtle_soup` (remove dead params or wire them into logic).
-5. Optionally introduce a shared preflight helper for required columns + min history to reduce duplicated guard gaps.
+1. Historical TP construction contradictions in `wick_trap_reversal` and `turtle_soup`: fixed before/current as of 2026-05-03 recheck.
+2. `session_killzone` `item(-1, "time")` pre-guard read: fixed on 2026-05-03.
+3. Active `_build_signal` finite checks: present in `bot/setups/__init__.py`; legacy sibling remains stale.
+4. Config contracts: `session_killzone` now exposes killzone hour parameters and overlap; `wick_trap_reversal`/`turtle_soup` still need a separate config-usage cleanup.
+5. Shared preflight helper for required columns + min history remains a useful follow-up; do not bundle it with strategy behavior changes without targeted regressions.

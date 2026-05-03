@@ -52,7 +52,12 @@ class UniverseConfig(BaseModel):
     full_refresh_interval_seconds: int = Field(default=7200, ge=60, le=86_400)
     shortlist_spread_max_bps: float = Field(default=15.0, ge=0.5, le=100.0)
     shortlist_book_stale_seconds: float = Field(default=90.0, ge=5.0, le=3600.0)
-    pinned_symbols: tuple[str, ...] = ("BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT")
+    pinned_symbols: tuple[str, ...] = (
+        "BTCUSDT",
+        "ETHUSDT",
+        "XAUUSDT",
+        "XAGUSDT",
+    )
 
     @field_validator("quote_asset")
     @classmethod

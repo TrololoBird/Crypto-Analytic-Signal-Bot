@@ -44,7 +44,16 @@ class WickTrapReversalSetup(BaseSetup):
             if filters:
                 setups_config = getattr(filters, 'setups', {})
                 if isinstance(setups_config, dict) and self.setup_id in setups_config:
-                    return {**defaults, **setups_config.get(self.setup_id, {})}
+                    overrides = setups_config.get(self.setup_id, {})
+                    if not isinstance(overrides, dict):
+                        return defaults
+                    params = {**defaults, **overrides}
+                    if (
+                        "wick_atr_threshold" in overrides
+                        and "wick_through_atr_mult" not in overrides
+                    ):
+                        params["wick_through_atr_mult"] = params["wick_atr_threshold"]
+                    return params
         return defaults
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:

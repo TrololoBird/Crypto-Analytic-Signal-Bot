@@ -2,6 +2,25 @@
 
 _Date:_ 2026-04-28 (UTC)
 
+_Rechecked:_ 2026-05-03 (UTC)
+
+Current official Binance USD-M WS docs describe routed market-stream endpoints:
+
+- root: `wss://fstream.binance.com`
+- high-frequency public market data: `wss://fstream.binance.com/public`
+- regular market data: `wss://fstream.binance.com/market`
+- private/user data: `wss://fstream.binance.com/private`
+
+The runtime remains compliant with the project public-only policy because
+`WSConfig` routes public stream classes to `/public` and market stream classes to
+`/market`, while validators reject `/private`, `listenKey`, user-data, account,
+order, and signed/auth markers. Live smoke check on 2026-05-03 connected to:
+
+- `wss://fstream.binance.com/public/stream`
+- `wss://fstream.binance.com/market/stream`
+
+with subscription acknowledgements and fresh ticker/mark/book/kline data.
+
 ## Scope
 
 - Scanned `bot/` for Binance REST/WS base URLs, endpoint paths, and WS stream names.

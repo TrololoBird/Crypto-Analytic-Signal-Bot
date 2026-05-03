@@ -1,7 +1,8 @@
-"""Technical analysis feature preparation (Polars-first, optional `polars_ta`).
+"""Technical analysis feature preparation (pure-Polars runtime path).
 
-Indicators stay Polars-native. When `polars_ta` is installed we use its Expr
-implementations; otherwise we fall back to pure-Polars series math.
+Indicators stay Polars-native. `polars_ta` may be installed for research or
+optional experiments, but the runtime path defaults to deterministic pure-Polars
+series math to avoid TA-Lib/native-backend drift on Windows/Python 3.13.
 
 Key indicators (actually used by strategies):
   - Core: ema20/50/200, rsi14, adx14, atr14, macd_*, donchian_*, vwap
@@ -16,12 +17,15 @@ import importlib
 from importlib import util as importlib_util
 from collections import OrderedDict
 import threading
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
 import numpy as np
 import polars as pl
 import structlog
 
+from . import features_advanced as _features_advanced_module
+from . import features_core as _features_core_module
+from . import features_oscillators as _features_oscillators_module
 from .models import PreparedSymbol, SymbolFrames, UniverseSymbol
 from .features_microstructure import add_microstructure_features
 from .features_structure import (
@@ -40,6 +44,36 @@ if _plta_module is not None:
 else:
     plta = cast(Any, None)
     _HAS_POLARS_TA = False
+_USE_POLARS_TA_BACKEND = False
+
+# Compatibility name for the decomposed feature modules/tests. This tracks the
+# native TA-Lib path, which the project deliberately disables on Windows/Python
+# 3.13; optional `polars_ta` availability is tracked separately above.
+_HAS_TALIB = False
+
+CORE_API = {
+    "add_core_features": _features_core_module.add_core_features,
+    "adx": _features_core_module.adx,
+    "atr": _features_core_module.atr,
+    "ema": _features_core_module.ema,
+    "realized_volatility": _features_core_module.realized_volatility,
+    "roc": _features_core_module.roc,
+    "rsi": _features_core_module.rsi,
+    "safe_close_position": _features_core_module.safe_close_position,
+    "vwap": _features_core_module.vwap,
+}
+ADVANCED_API = {
+    "add_advanced_indicators": _features_advanced_module.add_advanced_indicators,
+    "supertrend": _features_advanced_module.supertrend,
+}
+OSCILLATORS_API = {
+    "add_oscillator_features": _features_oscillators_module.add_oscillator_features,
+    "cci": _features_oscillators_module.cci,
+    "cmf": _features_oscillators_module.cmf,
+    "mfi": _features_oscillators_module.mfi,
+    "stochastic": _features_oscillators_module.stochastic,
+    "ultimate_oscillator": _features_oscillators_module.ultimate_oscillator,
+}
 
 LOG = structlog.get_logger("bot.features")
 _ADVANCED_FALLBACKS_LOGGED: set[str] = set()
@@ -161,7 +195,7 @@ def has_minimum_bars(frames: SymbolFrames, *, minimums: dict[str, int]) -> bool:
 
 def _ema(df: pl.DataFrame, period: int) -> pl.Series:
     """Exponential Moving Average using polars_ta or pure Polars."""
-    if _HAS_POLARS_TA and hasattr(plta, "EMA"):
+    if _USE_POLARS_TA_BACKEND and _HAS_POLARS_TA and hasattr(plta, "EMA"):
         try:
             return _materialize_series(
                 plta.EMA(pl.col("close"), timeperiod=int(period)),
@@ -175,7 +209,7 @@ def _ema(df: pl.DataFrame, period: int) -> pl.Series:
 
 def _rsi(df: pl.DataFrame, period: int = 14) -> pl.Series:
     """Wilder's RSI."""
-    if _HAS_POLARS_TA and hasattr(plta, "RSI"):
+    if _USE_POLARS_TA_BACKEND and _HAS_POLARS_TA and hasattr(plta, "RSI"):
         try:
             return _materialize_series(
                 plta.RSI(pl.col("close"), timeperiod=int(period)),
@@ -217,7 +251,7 @@ def _rsi(df: pl.DataFrame, period: int = 14) -> pl.Series:
 
 def _atr(df: pl.DataFrame, period: int = 14) -> pl.Series:
     """Average True Range using polars_ta or pure Polars."""
-    if _HAS_POLARS_TA and hasattr(plta, "ATR"):
+    if _USE_POLARS_TA_BACKEND and _HAS_POLARS_TA and hasattr(plta, "ATR"):
         try:
             return _materialize_series(
                 plta.ATR(pl.col("high"), pl.col("low"), pl.col("close"), timeperiod=int(period)),
@@ -292,7 +326,7 @@ def _vwap(df: pl.DataFrame) -> pl.Series:
 
 
 def _roc(df: pl.DataFrame, period: int = 10) -> pl.Series:
-    if _HAS_POLARS_TA and hasattr(plta, "ROC"):
+    if _USE_POLARS_TA_BACKEND and _HAS_POLARS_TA and hasattr(plta, "ROC"):
         try:
             return _materialize_series(
                 plta.ROC(pl.col("close"), timeperiod=int(period)),
@@ -400,9 +434,11 @@ def _add_session_features(work: pl.DataFrame, period: int = 20) -> pl.DataFrame:
             pl.lit(0.0).alias("session_asia"),
             pl.lit(0.0).alias("session_london"),
             pl.lit(0.0).alias("session_ny"),
+            pl.lit(0.0).alias("session_overlap"),
             pl.lit(0.0).alias("session_asia_vol_20"),
             pl.lit(0.0).alias("session_london_vol_20"),
             pl.lit(0.0).alias("session_ny_vol_20"),
+            pl.lit(0.0).alias("session_overlap_vol_20"),
         ])
 
     hour = pl.col("close_time").dt.hour()
@@ -411,6 +447,7 @@ def _add_session_features(work: pl.DataFrame, period: int = 20) -> pl.DataFrame:
         hour.is_between(0, 8, closed="left").cast(pl.Float64).alias("session_asia"),
         hour.is_between(7, 16, closed="left").cast(pl.Float64).alias("session_london"),
         hour.is_between(13, 22, closed="left").cast(pl.Float64).alias("session_ny"),
+        hour.is_between(13, 16, closed="left").cast(pl.Float64).alias("session_overlap"),
     ])
     scale = float(np.sqrt(period) * 100.0)
     return work.with_columns([
@@ -435,6 +472,13 @@ def _add_session_features(work: pl.DataFrame, period: int = 20) -> pl.DataFrame:
             .rolling_std(window_size=period)
             * scale
         ).fill_null(0.0).fill_nan(0.0).alias("session_ny_vol_20"),
+        (
+            pl.when(pl.col("session_overlap") == 1.0)
+            .then(log_return)
+            .otherwise(None)
+            .rolling_std(window_size=period)
+            * scale
+        ).fill_null(0.0).fill_nan(0.0).alias("session_overlap_vol_20"),
     ])
 
 
@@ -725,7 +769,7 @@ def _add_advanced_indicators(df: pl.DataFrame) -> pl.DataFrame:
     
     # --- OBV ---------------------------------------------------------------
     try:
-        if _HAS_POLARS_TA and hasattr(plta, "OBV"):
+        if _USE_POLARS_TA_BACKEND and _HAS_POLARS_TA and hasattr(plta, "OBV"):
             obv = _materialize_series(plta.OBV(pl.col("close"), pl.col("volume")), df=df, name="obv")
         else:
             close_diff = df["close"].diff()

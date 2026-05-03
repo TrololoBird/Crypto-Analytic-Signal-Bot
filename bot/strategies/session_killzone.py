@@ -10,9 +10,6 @@ from __future__ import annotations
 import logging
 import math
 from datetime import datetime, timezone
-from typing import cast
-
-import polars as pl
 
 from ..config import BotSettings
 
@@ -31,19 +28,71 @@ def _as_float(value: object, default: float = 0.0) -> float:
         return float(value)
     return default
 
-# (start_hour_utc, end_hour_utc)
-_KILLZONES = [
-    (7, 10),   # London Open
-    (13, 16),  # NY Open
-    (0, 3),    # Asia Range Break
-]
+_DEFAULT_KILLZONE_WINDOWS: tuple[tuple[str, int, int], ...] = (
+    ("Overlap", 13, 16),
+    ("London", 7, 10),
+    ("NY", 13, 16),
+    ("Asia", 0, 3),
+)
 
 
-def _in_killzone(hour: int) -> bool:
-    for start, end in _KILLZONES:
-        if start <= hour < end:
-            return True
-    return False
+def _hour_param(params: dict[str, object], key: str, default: int) -> int:
+    value = params.get(key, default)
+    try:
+        hour = int(float(value))
+    except (TypeError, ValueError):
+        return default
+    return max(0, min(hour, 24))
+
+
+def _session_windows_from_params(
+    params: dict[str, object] | None = None,
+) -> tuple[tuple[str, int, int], ...]:
+    raw = params or {}
+    return (
+        (
+            "Overlap",
+            _hour_param(raw, "overlap_start_hour_utc", 13),
+            _hour_param(raw, "overlap_end_hour_utc", 16),
+        ),
+        (
+            "London",
+            _hour_param(raw, "london_start_hour_utc", 7),
+            _hour_param(raw, "london_end_hour_utc", 10),
+        ),
+        (
+            "NY",
+            _hour_param(raw, "ny_start_hour_utc", 13),
+            _hour_param(raw, "ny_end_hour_utc", 16),
+        ),
+        (
+            "Asia",
+            _hour_param(raw, "asia_start_hour_utc", 0),
+            _hour_param(raw, "asia_end_hour_utc", 3),
+        ),
+    )
+
+
+def _hour_in_window(hour: int, start: int, end: int) -> bool:
+    if start == end:
+        return False
+    if start < end:
+        return start <= hour < end
+    return hour >= start or hour < end
+
+
+def _active_killzone_name(
+    hour: int,
+    params: dict[str, object] | None = None,
+) -> str | None:
+    for name, start, end in _session_windows_from_params(params):
+        if _hour_in_window(hour, start, end):
+            return name
+    return None
+
+
+def _in_killzone(hour: int, params: dict[str, object] | None = None) -> bool:
+    return _active_killzone_name(hour, params) is not None
 
 
 class SessionKillzoneSetup(BaseSetup):
@@ -60,6 +109,14 @@ class SessionKillzoneSetup(BaseSetup):
             "sl_buffer_atr": 0.75,
             "bias_mismatch_penalty": 0.75,
             "min_rr": 1.5,
+            "asia_start_hour_utc": 0,
+            "asia_end_hour_utc": 3,
+            "london_start_hour_utc": 7,
+            "london_end_hour_utc": 10,
+            "ny_start_hour_utc": 13,
+            "ny_end_hour_utc": 16,
+            "overlap_start_hour_utc": 13,
+            "overlap_end_hour_utc": 16,
         }
         if settings is not None:
             filters = getattr(settings, 'filters', None)
@@ -70,9 +127,6 @@ class SessionKillzoneSetup(BaseSetup):
         return defaults
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
-        setup_id = self.setup_id
-        
-        
         try:
             return self._detect(prepared, settings)
         except Exception:
@@ -94,15 +148,18 @@ class SessionKillzoneSetup(BaseSetup):
             defaults["sl_buffer_atr"],
         )
         min_rr = _as_float(dynamic_params.get("min_rr", defaults["min_rr"]), defaults["min_rr"])
-        last_bar_time = prepared.work_15m.item(-1, "time")
-        now_utc = last_bar_time if isinstance(last_bar_time, datetime) else datetime.now(timezone.utc)
-        if not _in_killzone(now_utc.hour):
-            _reject(prepared, setup_id, "outside_killzone", hour=now_utc.hour)
-            return None
-
         w = prepared.work_15m
         if w.height < 20:
             _reject(prepared, setup_id, "insufficient_15m_bars", bars=w.height)
+            return None
+        if "time" not in w.columns:
+            _reject(prepared, setup_id, "time_missing")
+            return None
+        last_bar_time = w.item(-1, "time")
+        now_utc = last_bar_time if isinstance(last_bar_time, datetime) else datetime.now(timezone.utc)
+        session_name = _active_killzone_name(now_utc.hour, dynamic_params)
+        if session_name is None:
+            _reject(prepared, setup_id, "outside_killzone", hour=now_utc.hour)
             return None
 
         atr = _as_float(w.item(-1, "atr14"))
@@ -157,9 +214,6 @@ class SessionKillzoneSetup(BaseSetup):
         scan20 = w.tail(20)
         session_high = _as_float(scan20["high"].max())
         session_low = _as_float(scan20["low"].min())
-
-        # TP targets: prior session's major levels and killzone range midpoint
-        session_mid = (session_high + session_low) / 2.0
 
         # Look for prior session levels from 1h data
         from ..features import _swing_points as _sp
@@ -218,15 +272,6 @@ class SessionKillzoneSetup(BaseSetup):
             vol_ratio=vol_ratio,
             rsi=rsi,
         )
-
-        session_name = "unknown"
-        h = now_utc.hour
-        if 7 <= h < 10:
-            session_name = "London"
-        elif 13 <= h < 16:
-            session_name = "NY"
-        elif 0 <= h < 3:
-            session_name = "Asia"
 
         reasons = [
             f"Session killzone {direction}: {session_name} {now_utc.strftime('%H:%M')}UTC",

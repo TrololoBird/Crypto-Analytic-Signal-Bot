@@ -18,7 +18,14 @@ For full pipeline (`_prepare_frame`) input frame must include:
 
 ## Output contract
 
-`_prepare_frame` returns a Polars DataFrame with core + advanced + oscillator + microstructure columns and drops warm-up rows where long-window features are not available (`ema200`, `donchian_low20`).
+`_prepare_frame` returns a Polars DataFrame with core + advanced + oscillator + microstructure + session columns and drops warm-up rows where long-window features are not available (`ema200`, `donchian_low20`).
+
+Session fields currently emitted by the runtime feature path:
+
+- `session_asia`, `session_london`, `session_ny`, `session_overlap`
+- `session_asia_vol_20`, `session_london_vol_20`, `session_ny_vol_20`, `session_overlap_vol_20`
+
+The runtime indicator path is deterministic pure Polars on Windows/Python 3.13. `polars_ta` can be installed, but `_USE_POLARS_TA_BACKEND` remains disabled unless a future audit intentionally enables and revalidates it.
 
 ## Backward compatibility
 

@@ -174,8 +174,19 @@ def _oi_momentum(prepared: PreparedSymbol, signal: Signal) -> float:
 
 def _risk_reward_quality(signal: Signal, settings: BotSettings) -> float:
     rr = signal.risk_reward
-    setup_overrides = settings.filters.setups.get(signal.setup_id, {})
-    min_rr = float(setup_overrides.get("min_rr", settings.filters.min_risk_reward))
+    filters = getattr(settings, "filters", None)
+    setup_overrides = getattr(filters, "setups", {}) if filters is not None else {}
+    if not isinstance(setup_overrides, dict):
+        setup_overrides = {}
+    min_risk_reward = (
+        float(getattr(filters, "min_risk_reward", 1.9))
+        if filters is not None
+        else 1.9
+    )
+    setup_params = setup_overrides.get(signal.setup_id, {})
+    if not isinstance(setup_params, dict):
+        setup_params = {}
+    min_rr = float(setup_params.get("min_rr", min_risk_reward))
     max_rr = max(min_rr + 0.1, 4.0)
     return max(0.0, min((rr - min_rr) / (max_rr - min_rr), 1.0))
 

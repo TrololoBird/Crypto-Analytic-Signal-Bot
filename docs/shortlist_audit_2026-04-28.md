@@ -1,5 +1,29 @@
 # Shortlist audit (2026-04-28)
 
+## 2026-05-03 recheck
+
+Confirmed current state:
+
+- `rest_full`, `ws_light`, `cached`, and `pinned_fallback` sources are still
+  distinct in `bot/application/shortlist_service.py`.
+- The regression import contract for shortlist fallback constants had drifted:
+  `FALLBACK_REASON_LIVE_EMPTY`, `FALLBACK_REASON_REFRESH_EXCEPTION`,
+  `FALLBACK_REASON_USING_CACHED`, and
+  `normalize_shortlist_fallback_reason(...)` were referenced by regression
+  suites but missing from the active module.
+- This pass restored that public test contract and emits structured
+  `source_before`, `source_after`, `fallback_reason`, `full_refresh_due`,
+  `ws_cache_warm`, `has_symbol_meta`, `cached_shortlist_age_s`, and
+  `cached_shortlist_size` fields into `shortlist.jsonl`.
+- Regression check passed:
+  `python -m pytest -q tests/test_regression_suite_tracking_delivery.py`.
+
+Residual risk:
+
+- This recheck validates fallback telemetry contract and live WS smoke on
+  BTC/ETH, but it does not prove that every degraded live market condition is
+  represented by a perfect reason code.
+
 ## Scope
 
 Проверка выполнена по call-path shortlist в рантайме:

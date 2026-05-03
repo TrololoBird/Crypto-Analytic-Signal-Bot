@@ -63,12 +63,12 @@ def rsi(df: pl.DataFrame, period: int = 14, *, plta: Any = None, has_talib: bool
     values: list[float] = []
     for gain, loss, current in zip(avg_gain.to_list(), avg_loss.to_list(), raw.to_list(), strict=False):
         g = float(gain or 0.0)
-        l = float(loss or 0.0)
-        if l == 0.0 and g > 0.0:
+        loss_value = float(loss or 0.0)
+        if loss_value == 0.0 and g > 0.0:
             values.append(100.0)
-        elif g == 0.0 and l > 0.0:
+        elif g == 0.0 and loss_value > 0.0:
             values.append(0.0)
-        elif g == 0.0 and l == 0.0:
+        elif g == 0.0 and loss_value == 0.0:
             values.append(50.0)
         else:
             values.append(float(current or 50.0))
@@ -164,12 +164,18 @@ def add_core_features(df: pl.DataFrame, *, plta: Any = None, has_talib: bool = F
         (pl.col("macd_line") - macd_signal).alias("macd_hist"),
         pl.col("low").rolling_min(window_size=20).alias("donchian_low20"),
         pl.col("high").rolling_max(window_size=20).alias("donchian_high20"),
-        pl.col("volume").rolling_mean(window_size=20).alias("volume_mean20"),
     ])
     work = work.with_columns([
         pl.col("donchian_low20").shift(1).alias("prev_donchian_low20"),
         pl.col("donchian_high20").shift(1).alias("prev_donchian_high20"),
+    ])
+    work = work.with_columns([
+        pl.col("volume").rolling_mean(window_size=20).alias("volume_mean20"),
+    ])
+    work = work.with_columns([
         (pl.col("volume") / pl.col("volume_mean20")).alias("volume_ratio20"),
+    ])
+    work = work.with_columns([
         vwap(work).alias("vwap"),
     ])
     price_dev_sq = (work["close"] - work["vwap"]) ** 2
@@ -181,11 +187,15 @@ def add_core_features(df: pl.DataFrame, *, plta: Any = None, has_talib: bool = F
         (pl.col("vwap") + 2.0 * vwap_std).alias("vwap_upper2"),
         (pl.col("vwap") - 2.0 * vwap_std).alias("vwap_lower2"),
         (((pl.col("close") - pl.col("vwap")) / pl.col("vwap")) * 100.0).fill_nan(0.0).alias("vwap_deviation_pct"),
-        ((pl.col("atr14") / pl.col("close")) * 100.0).clip(lower_bound=0.001).alias("atr_pct"),
-        safe_close_position(work, window=20).alias("close_position"),
     ])
     if "taker_buy_base_volume" in work.columns:
         work = work.with_columns([((pl.col("taker_buy_base_volume") / pl.col("volume")).rolling_mean(window_size=5).clip(0.0, 1.0).alias("delta_ratio"))])
     else:
         work = work.with_columns([pl.lit(0.5).alias("delta_ratio")])
+    work = work.with_columns([
+        ((pl.col("atr14") / pl.col("close")) * 100.0).clip(lower_bound=0.001).alias("atr_pct"),
+    ])
+    work = work.with_columns([
+        safe_close_position(work, window=20).alias("close_position"),
+    ])
     return work

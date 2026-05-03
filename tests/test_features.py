@@ -38,6 +38,8 @@ def test_prepare_frame_emits_expected_columns_without_nan() -> None:
         "ema200",
         "atr_pct",
         "delta_ratio",
+        "session_overlap",
+        "session_overlap_vol_20",
         "vwap_deviation_pct",
     ]:
         assert col in prepared.columns

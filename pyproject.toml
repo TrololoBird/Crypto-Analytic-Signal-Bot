@@ -43,16 +43,20 @@ live = [
     "prometheus-client>=0.25.0",
     "orjson>=3.11.8",
     "polars_ta>=0.5.17",
+    "psutil>=7.2.2",
 ]
 regime = [
     "hmmlearn>=0.3.3",
     "scikit-learn>=1.8.0",
+    "statsmodels>=0.14.6",
 ]
 ml = [
     "joblib>=1.5.3",
     "lightgbm>=4.6.0",
     "xgboost>=3.2.0",
     "optuna>=4.8.0",
+    "pandas>=2.3.3",
+    "pyarrow>=24.0.0",
 ]
 
 [tool.setuptools]
