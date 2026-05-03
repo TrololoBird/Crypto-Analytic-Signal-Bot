@@ -39,7 +39,8 @@ _REST_GLOBAL_SEMAPHORE = asyncio.Semaphore(5)
 # /futures/data/* request-based IP limit (not weight-based).
 # Docs example (Open Interest Statistics): "IP rate limit 1000 requests/5min".
 _FUTURES_DATA_IP_LIMIT_WINDOW_S = 300.0
-_FUTURES_DATA_IP_LIMIT_MAX = 1000
+_FUTURES_DATA_IP_LIMIT_OFFICIAL_MAX = 1000
+_FUTURES_DATA_IP_LIMIT_DEFAULT = 300
 
 # Cache TTL settings for graceful degradation (seconds)
 _CACHE_TTL = {
@@ -280,8 +281,16 @@ class BinanceFuturesMarketData:
         *,
         ws_manager: FuturesWSManager | None = None,
         rest_timeout_seconds: float = 8.0,
+        futures_data_request_limit_per_5m: int = _FUTURES_DATA_IP_LIMIT_DEFAULT,
     ) -> None:
         self._rest_timeout = rest_timeout_seconds
+        self._futures_data_limit_per_5m = max(
+            30,
+            min(
+                int(futures_data_request_limit_per_5m),
+                _FUTURES_DATA_IP_LIMIT_OFFICIAL_MAX,
+            ),
+        )
         _validate_public_endpoint_registry()
         self.client: Any = None
         self._exchange_info_cache: tuple[float, list[SymbolMeta]] | None = None
@@ -307,7 +316,7 @@ class BinanceFuturesMarketData:
         self._weight_window_start: float = 0.0
         # Request-based limiter for /futures/data/*
         self._futures_data_limiter = _SlidingWindowRateLimiter(
-            max_requests=_FUTURES_DATA_IP_LIMIT_MAX,
+            max_requests=self._futures_data_limit_per_5m,
             window_seconds=_FUTURES_DATA_IP_LIMIT_WINDOW_S,
         )
         # Shared aiohttp session for manual REST endpoints (avoid per-call session churn)
@@ -776,6 +785,7 @@ class BinanceFuturesMarketData:
             "fallback_used": self._last_endpoint_fallback_used,
             "limiter_wait_ms": self._last_endpoint_limiter_wait_ms,
             "response_age_s": self._last_endpoint_response_age_s,
+            "futures_data_limit_per_5m": self._futures_data_limit_per_5m,
         }
 
     async def preflight_check(self) -> None:

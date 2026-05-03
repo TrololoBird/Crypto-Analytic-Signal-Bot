@@ -1,3 +1,4 @@
+# ruff: noqa: E402
 from __future__ import annotations
 
 import argparse
@@ -18,7 +19,10 @@ LOG = configure_script_logging("scripts.live_check_binance_api")
 
 async def _run(symbols: Sequence[str], warmup_seconds: float, reconnect_wait_seconds: float) -> None:
     settings = load_settings()
-    client = BinanceFuturesMarketData(rest_timeout_seconds=settings.ws.rest_timeout_seconds)
+    client = BinanceFuturesMarketData(
+        rest_timeout_seconds=settings.ws.rest_timeout_seconds,
+        futures_data_request_limit_per_5m=settings.runtime.futures_data_request_limit_per_5m,
+    )
     ws_manager = FuturesWSManager(client, settings.ws)
     try:
         exchange_symbols = await client.fetch_exchange_symbols()

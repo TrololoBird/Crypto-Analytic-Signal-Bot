@@ -8,7 +8,7 @@ It distinguishes implemented/reachable behavior from unverified trading validity
 
 ## Reflection
 
-Tentative answer: the project has 15 strategy classes, an SMC helper layer, a
+Tentative answer: the project has 21 strategy classes, an SMC helper layer, a
 public Binance USD-M market-data boundary, and an event-driven Telegram signal
 pipeline.
 
@@ -18,7 +18,7 @@ against source, counted the exported strategies at runtime, checked config keys,
 read strategy tests, parsed telemetry for the BOS/CHoCH anomaly, and checked the
 Binance WS and package metadata externally.
 
-Revised conclusion: the 15 strategies are implemented and reachable by the
+Revised conclusion: the 21 strategies are implemented and reachable by the
 runtime registry. Their profitability and live-market correctness are not proven
 by this audit.
 
@@ -75,6 +75,11 @@ Local fit:
   close_timeout=10.0)`, and `websockets` 16.0 documents these parameters.
 - `bot/ws_manager.py` proactively reconnects before 24h and keeps a conservative
   stream/message limit below the Binance hard limit.
+- `WSConfig.subscribe_chunk_delay_ms` now validates at `>=100ms`, matching the
+  10 incoming control messages/sec Binance limit.
+- `/futures/data/*` REST calls now use a configurable shared-IP safety budget:
+  `runtime.futures_data_request_limit_per_5m`, default `300`, clamped to the
+  official `1000/5m` ceiling.
 
 ## Dependency Map
 
@@ -110,11 +115,11 @@ Residual uncertainty:
 
 Confirmed facts:
 
-- `bot/strategies/__init__.py` exports 15 concrete strategy classes.
-- Runtime import check returned 15 classes.
-- All 15 have `[bot.setups]` enable flags in `config.toml` and
+- `bot/strategies/__init__.py` exports 21 concrete strategy classes.
+- Runtime import check returned 21 classes after the phase 5.3 expansion.
+- All 21 have `[bot.setups]` enable flags in `config.toml` and
   `config.toml.example`.
-- All 15 have `[bot.filters.setups]` parameter blocks in `config.toml` and
+- All 21 have `[bot.filters.setups]` parameter blocks in `config.toml` and
   `config.toml.example`.
 - Each strategy implements `detect()` and `get_optimizable_params()`.
 - `tests/test_strategies.py` parametrizes all exported strategies and checks the
@@ -137,6 +142,12 @@ Confirmed facts:
 | 13 | `session_killzone` | breakout / breakout_acceptance | Implemented, registered, config-backed | Hardcoded killzone windows plus momentum/volume checks |
 | 14 | `breaker_block` | breakout / breakout_acceptance | Implemented, registered, config-backed | Uses `latest_breaker_block()` |
 | 15 | `turtle_soup` | reversal / countertrend_exhaustion | Implemented, registered, config-backed | False-breakout detection and 15m confirmation |
+| 16 | `vwap_trend` | continuation / trend_follow | Implemented, registered, config-backed | VWAP reclaim continuation with 1h bias, ADX, volume, structural targets |
+| 17 | `supertrend_follow` | continuation / trend_follow | Implemented, registered, config-backed | SuperTrend 15m+1h alignment plus EMA pullback and structural targets |
+| 18 | `price_velocity` | breakout / breakout_acceptance | Implemented, registered, config-backed | ROC/body velocity breakout with volume and RSI guard |
+| 19 | `volume_anomaly` | breakout / breakout_acceptance | Implemented, registered, config-backed | Volume spike impulse candle with close-position guard |
+| 20 | `volume_climax_reversal` | reversal / countertrend_exhaustion | Implemented, registered, config-backed | Donchian sweep/reclaim, wick ATR, volume climax, RSI exhaustion |
+| 21 | `keltner_breakout` | breakout / breakout_acceptance | Implemented, registered, config-backed | Keltner channel breakout with ADX, volume, 1h bias, structural targets |
 
 Inference:
 
@@ -355,9 +366,14 @@ Markdown corpus review:
 
 Codebase scan:
 
-- Python files scanned/enumerated: 204 after requirements-file deletion and
+- Python files scanned/enumerated: 210 after the phase-5.3 strategy expansion and
   current ignored paths.
-- Groups: `bot/` 134, `tests/` 52, `scripts/` 14, root scripts 4.
+- Groups: `bot/` 140, `tests/` 55, `scripts/` 15, root scripts 4.
+- Routing files found: root plus 8 nested `AGENTS.md` files
+  (`bot/`, `bot/application/`, `bot/setups/`, `bot/strategies/`, `bot/tasks/`,
+  `bot/telegram/`, `scripts/`, `tests/`).
+- Source/config/data inventory command covered 278 files:
+  `rg --files bot scripts tests docs data config.toml config.toml.example requirements.txt CODEX.md PROJECT_MAP.md AGENTS.md README.md`.
 - Active import target for `bot.setups` is confirmed as
   `bot/setups/__init__.py`; the sibling `bot/setups.py` remains a legacy/stale
   file in the tree and is not the import target.
@@ -366,9 +382,9 @@ Skill/phase matrix:
 
 | Phase / skill | Status | Evidence |
 |---|---|---|
-| `code_audit` | executed | Python corpus enumerated; runtime import path checked; strategy registry count 15. |
+| `code_audit` | executed | Python/Markdown corpus enumerated; runtime import path checked; strategy registry count 21. |
 | `api_verify` | executed | Official Binance WS docs checked; live WS smoke connected to `/public/stream` and `/market/stream`. |
-| `strategy_analyze` | executed | All 15 strategies imported/config-aligned; live strategy smoke on BTC/ETH/XAU/XAG produced no strategy errors in the previous run. |
+| `strategy_analyze` | executed | Original 15 strategies plus 6 phase-5.3 strategies imported/config-aligned; synthetic strategy tests pass. |
 | `config_audit` | executed | `python scripts/validate_config.py` passed after config changes. |
 | `telemetry_review` | executed | Runtime audit parsed run `20260502_110946_22548`; BOS/CHoCH 113:5 source confirmed. |
 | `smc_verify` | executed | SMC helper tests passed; BOS/CHoCH stop selector now has focused tests. |
@@ -376,6 +392,36 @@ Skill/phase matrix:
 
 Code changes from the recheck:
 
+- `bot/features.py`, `bot/features_core.py`: fixed pure-Polars ADX scale. The
+  old path let the first `NaN` in `dx` propagate through `ewm_mean()`, then
+  filled the whole ADX series with `0.0`. This made ADX-based strategies and
+  diagnostics misread live trend strength.
+- `bot/config.py`: `strategy_concurrency` and `strategy_timeout_seconds` are now
+  declared in `RuntimeConfig`; previously `config.toml` contained these keys but
+  Pydantic ignored them, so `SignalEngine` used fallback defaults.
+- `bot/config.py`: phase-5.3 setup ids are now declared in `_ALL_SETUP_IDS` and
+  `SetupConfig`; without this, new strategy files/config rows were present but
+  disabled at runtime.
+- `bot/strategies/vwap_trend.py`, `supertrend_follow.py`,
+  `price_velocity.py`, `volume_anomaly.py`, `volume_climax_reversal.py`, and
+  `keltner_breakout.py`: implemented six new signal-only setup detectors.
+- `bot/universe.py`: shortlist `strategy_fits` now routes trend, breakout,
+  top-liquidity, and reversal symbols into the new phase-5.3 strategies.
+- `bot/market_data.py`: `/futures/data/*` request pacing is configurable via
+  `runtime.futures_data_request_limit_per_5m` and defaults to 300/5m rather
+  than the official 1000/5m ceiling.
+- `bot/application/symbol_analyzer.py`: funnel telemetry now includes
+  `rejects_by_stage`, `rejects_by_setup`, `reject_reasons_by_stage`, and
+  `reject_reasons_by_setup`.
+- `bot/application/oi_refresh_runner.py`, `bot/application/cycle_runner.py`:
+  emergency fallback analysis now performs a bounded OI/L-S/funding context
+  warmup when the public REST cache is cold/stale, reusing the existing
+  rate-limited OI refresh runner.
+- `scripts/live_check_pipeline.py`: added read-only live pipeline smoke for
+  `prepare -> strategy -> confirmation -> filters` without Telegram delivery.
+- `scripts/live_check_enrichments.py`: premium basis stats and depth/microprice
+  checks are opt-in so the script does not fail by default on data streams the
+  runtime intentionally keeps restricted.
 - `bot/features.py`: restored `_HAS_TALIB=False`, disabled runtime
   `polars_ta` backend, restored `CORE_API`/`ADVANCED_API`/`OSCILLATORS_API`,
   and added `session_overlap` and `session_overlap_vol_20`.
@@ -432,9 +478,9 @@ Prompt file checks:
 
 Project audit checks:
 
-- `from bot.strategies import STRATEGY_CLASSES; len(STRATEGY_CLASSES)` -> 15.
+- `from bot.strategies import STRATEGY_CLASSES; len(STRATEGY_CLASSES)` -> 21.
 - Strategy metadata print confirmed family/profile/context/min bars.
-- TOML parse confirmed all 15 strategy ids exist in `[bot.setups]` and
+- TOML parse confirmed all 21 strategy ids exist in `[bot.setups]` and
   `[bot.filters.setups]` for both `config.toml` and `config.toml.example`.
 - `rg` scan confirmed no direct strategy use of `ichi_*`.
 - `rg` scan confirmed session feature and session-killzone duplication; code
@@ -448,11 +494,34 @@ Project audit checks:
 - `python -m pytest -q` -> 225 passed.
 - `python scripts\live_check_strategies.py --symbols BTCUSDT ETHUSDT XAUUSDT XAGUSDT --limit 4 --concurrency 2`
   -> detector_runs=60, prepared_ok=4, strategy_errors=[].
+- `python scripts\live_check_strategies.py --symbols-from-run 20260502_110946_22548 --limit 45 --concurrency 3`
+  -> detector_runs=675, prepared_ok=45, strategy_errors=[], strategy hits
+  across BOS/CHoCH, structure_pullback, FVG, breaker_block, CVD, EMA bounce,
+  wick trap, and turtle soup.
+- `python -m pytest tests\test_features.py::test_prepare_frame_keeps_rsi_adx_on_indicator_scale tests\test_features_group_contracts.py::test_group_contract_outputs tests\test_config_runtime.py -q`
+  -> 3 passed after the ADX/config fixes.
+- `python -m pytest tests\test_config_runtime.py tests\test_market_data_limits.py tests\test_symbol_analyzer_telemetry.py tests\test_strategies.py tests\test_sanity.py::test_strategy_registry_contains_extended_setups tests\test_backtest_engine.py::test_backtester_supports_lifecycle_metrics_for_all_live_setups -q`
+  -> 39 passed after the phase-5.3 strategy, REST, WS, and telemetry changes.
+- `rg --files bot scripts tests docs data config.toml config.toml.example requirements.txt CODEX.md PROJECT_MAP.md AGENTS.md README.md`
+  -> 278 files in the audited surface.
+- `python scripts\live_check_pipeline.py --symbols BTCUSDT ETHUSDT XAUUSDT XAGUSDT --limit 4 --concurrency 2`
+  exposed two issues before completing: the script used a missing runtime
+  attribute and the eager `/futures/data/basis` warmup triggered Binance HTTP
+  418. The script was changed to safe lite-context by default. No further live
+  Binance REST verification was run in this pass because of the ban window.
 
 External references checked:
 
 - Binance USD-M Futures Websocket Market Streams official docs:
   https://developers.binance.com/docs/derivatives/usds-margined-futures/websocket-market-streams
+- Binance USD-M Futures REST market data docs:
+  https://developers.binance.com/docs/derivatives/usds-margined-futures/market-data/rest-api
+- Binance USD-M Futures Open Interest Statistics docs:
+  https://developers.binance.com/docs/derivatives/usds-margined-futures/market-data/rest-api/Open-Interest-Statistics
+- Binance USD-M Futures L/S Ratio docs:
+  https://developers.binance.com/docs/derivatives/usds-margined-futures/market-data/rest-api/Long-Short-Ratio
+- Binance USD-M Futures Basis docs:
+  https://developers.binance.com/docs/derivatives/usds-margined-futures/market-data/rest-api/Basis
 - Binance live subscribe/unsubscribe docs:
   https://developers.binance.com/docs/derivatives/usds-margined-futures/websocket-market-streams/Live-Subscribing-Unsubscribing-to-streams
 - `websockets` 16.0 client docs:
@@ -465,6 +534,8 @@ External references checked:
 ## Residual Risk
 
 - This audit did not run a full live bot session.
+- Fresh post-filter candidate proof is still incomplete because live Binance
+  REST checks hit HTTP 418 after an overly aggressive diagnostic basis warmup.
 - This audit did not prove trading edge, expectancy, or low false-positive rate.
 - SMC parity against an external reference remains partially tested, not proven.
 - Dependency resolution was checked on the current Python 3.13 Windows

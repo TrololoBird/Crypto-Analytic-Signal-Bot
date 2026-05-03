@@ -30,6 +30,12 @@ _ALL_SETUP_IDS = (
     "session_killzone",
     "breaker_block",
     "turtle_soup",
+    "vwap_trend",
+    "supertrend_follow",
+    "price_velocity",
+    "volume_anomaly",
+    "volume_climax_reversal",
+    "keltner_breakout",
 )
 
 
@@ -206,7 +212,16 @@ def _strategy_fits_for_row(
     crowd_extreme = crowding <= 0.45
 
     if spread_ok and volume_multiple >= 1.0 and trending_move:
-        fits.extend(("ema_bounce", "structure_pullback", "fvg_setup", "cvd_divergence"))
+        fits.extend(
+            (
+                "ema_bounce",
+                "structure_pullback",
+                "vwap_trend",
+                "supertrend_follow",
+                "fvg_setup",
+                "cvd_divergence",
+            )
+        )
     if spread_ok and volume_multiple >= 1.5 and (breakout_move or oi_rising):
         fits.extend((
             "structure_break_retest",
@@ -216,6 +231,9 @@ def _strategy_fits_for_row(
             "order_block",
             "breaker_block",
             "session_killzone",
+            "price_velocity",
+            "volume_anomaly",
+            "keltner_breakout",
         ))
     if spread_ok and liquid_enough and (reversal_move or crowd_extreme or oi_extreme):
         fits.extend((
@@ -223,6 +241,7 @@ def _strategy_fits_for_row(
             "hidden_divergence",
             "turtle_soup",
             "liquidity_sweep",
+            "volume_climax_reversal",
         ))
     if (
         (funding_rate is not None and abs(funding_rate) >= 0.0004)
@@ -232,10 +251,18 @@ def _strategy_fits_for_row(
         fits.append("funding_reversal")
 
     if top_liquidity and liquid_enough and spread_ok:
-        fits.append("liquidity_sweep")
+        fits.extend(("liquidity_sweep", "vwap_trend", "keltner_breakout"))
 
     if not fits and spread_ok and quote_volume >= volume_floor:
-        fits.extend(("structure_pullback", "fvg_setup", "cvd_divergence"))
+        fits.extend(
+            (
+                "structure_pullback",
+                "vwap_trend",
+                "fvg_setup",
+                "cvd_divergence",
+                "price_velocity",
+            )
+        )
 
     return tuple(dict.fromkeys(fits))
 

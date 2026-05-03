@@ -162,6 +162,12 @@ def test_backtester_supports_lifecycle_metrics_for_all_live_setups(tmp_path) -> 
         "session_killzone",
         "breaker_block",
         "turtle_soup",
+        "vwap_trend",
+        "supertrend_follow",
+        "price_velocity",
+        "volume_anomaly",
+        "volume_climax_reversal",
+        "keltner_breakout",
     ]
     signal_rows = []
     for index, setup_id in enumerate(live_setups, start=20):

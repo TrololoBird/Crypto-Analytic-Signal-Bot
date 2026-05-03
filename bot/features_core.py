@@ -106,8 +106,13 @@ def adx(df: pl.DataFrame, period: int = 14, *, plta: Any = None, has_talib: bool
     atr_safe = clean_non_finite(atr_series, fill=1e-9).replace(0.0, 1e-9)
     plus_di = 100.0 * plus_dm.ewm_mean(alpha=1.0 / period, adjust=False) / atr_safe
     minus_di = 100.0 * minus_dm.ewm_mean(alpha=1.0 / period, adjust=False) / atr_safe
-    dx = 100.0 * (plus_di - minus_di).abs() / (plus_di + minus_di)
-    return materialize_series(clean_non_finite(dx.ewm_mean(alpha=1.0 / period, adjust=False), fill=0.0), df=df, name=f"adx{period}")
+    di_sum = (plus_di + minus_di).replace(0.0, None)
+    dx = clean_non_finite(100.0 * (plus_di - minus_di).abs() / di_sum, fill=0.0)
+    return materialize_series(
+        clean_non_finite(dx.ewm_mean(alpha=1.0 / period, adjust=False), fill=0.0).clip(0.0, 100.0),
+        df=df,
+        name=f"adx{period}",
+    )
 
 
 def vwap(df: pl.DataFrame) -> pl.Series:

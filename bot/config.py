@@ -13,6 +13,8 @@ from .secrets import load_secrets
 
 class RuntimeConfig(BaseModel):
     analysis_concurrency: int = Field(default=6, ge=1, le=20)
+    strategy_concurrency: int = Field(default=4, ge=1, le=20)
+    strategy_timeout_seconds: float = Field(default=12.0, ge=0.5, le=120.0)
     max_signals_per_cycle: int = Field(default=3, ge=1, le=10)
     event_bus_max_size: int = Field(default=512, ge=16, le=50_000)
     event_bus_warn_depth: int = Field(default=384, ge=8, le=50_000)
@@ -32,6 +34,7 @@ class RuntimeConfig(BaseModel):
     startup_batch_size: int = Field(default=3, ge=1, le=10)
     startup_batch_delay_seconds: float = Field(default=2.0, ge=0.5, le=10.0)
     max_concurrent_rest_requests: int = Field(default=5, ge=1, le=20)
+    futures_data_request_limit_per_5m: int = Field(default=300, ge=30, le=1000)
     heartbeat_seconds: float = Field(default=60.0, ge=5.0, le=3600.0)
 
     @field_validator("log_level")
@@ -158,6 +161,13 @@ _ALL_SETUP_IDS: tuple[str, ...] = (
     "session_killzone",
     "breaker_block",
     "turtle_soup",
+    # Phase 5.3 expansion
+    "vwap_trend",
+    "supertrend_follow",
+    "price_velocity",
+    "volume_anomaly",
+    "volume_climax_reversal",
+    "keltner_breakout",
 )
 
 
@@ -179,6 +189,13 @@ class SetupConfig(BaseModel):
     session_killzone: bool = True
     breaker_block: bool = True
     turtle_soup: bool = True
+    # Phase 5.3 expansion
+    vwap_trend: bool = True
+    supertrend_follow: bool = True
+    price_velocity: bool = True
+    volume_anomaly: bool = True
+    volume_climax_reversal: bool = True
+    keltner_breakout: bool = True
 
     def enabled_setup_ids(self) -> tuple[str, ...]:
         enabled: list[str] = []
@@ -391,8 +408,8 @@ class WSConfig(BaseModel):
         default=10, ge=5, le=200
     )  # Reduced for Binance limits
     subscribe_chunk_delay_ms: int = Field(
-        default=500, ge=50, le=2000
-    )  # Increased for stability
+        default=500, ge=100, le=2000
+    )  # Binance allows 10 incoming control messages/sec per connection.
     health_check_silence_seconds: float = Field(default=60.0, ge=10.0, le=300.0)
     market_reconnect_grace_seconds: float = Field(default=90.0, ge=60.0, le=120.0)
     agg_trade_window_seconds: int = Field(default=300, ge=10, le=3600)

@@ -8,8 +8,6 @@ from unittest.mock import Mock
 import polars as pl
 import pytest
 
-pytestmark = [pytest.mark.regression_remediation, pytest.mark.regression_remediation_indicators]
-
 from tests.test_remediation_regressions import (
     AggTrade,
     ConfluenceEngine,
@@ -20,6 +18,11 @@ from tests.test_remediation_regressions import (
     make_prepared,
     make_signal,
 )
+
+pytestmark = [
+    pytest.mark.regression_remediation,
+    pytest.mark.regression_remediation_indicators,
+]
 
 
 def test_ws_depth_imbalance_uses_signed_delta_ratio() -> None:

@@ -45,3 +45,15 @@ def test_prepare_frame_emits_expected_columns_without_nan() -> None:
         assert col in prepared.columns
     assert prepared["ema200"].null_count() == 0
     assert prepared["atr_pct"].null_count() == 0
+
+
+def test_prepare_frame_keeps_rsi_adx_on_indicator_scale() -> None:
+    prepared = _prepare_frame(_ohlcv())
+
+    rsi = float(prepared["rsi14"].tail(1).item())
+    adx = float(prepared["adx14"].tail(1).item())
+
+    assert 0.0 <= rsi <= 100.0
+    assert rsi > 1.0
+    assert 0.0 <= adx <= 100.0
+    assert adx > 1.0

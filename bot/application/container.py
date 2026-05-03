@@ -55,6 +55,7 @@ def build_application_container(
 
     client = market_data or BinanceFuturesMarketData(
         rest_timeout_seconds=settings.ws.rest_timeout_seconds,
+        futures_data_request_limit_per_5m=settings.runtime.futures_data_request_limit_per_5m,
     )
 
     bus = EventBus(

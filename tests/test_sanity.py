@@ -84,8 +84,14 @@ def test_strategy_registry_contains_extended_setups() -> None:
     assert "breaker_block" in strategy_ids
     assert "cvd_divergence" in strategy_ids
     assert "hidden_divergence" in strategy_ids
+    assert "keltner_breakout" in strategy_ids
+    assert "price_velocity" in strategy_ids
     assert "session_killzone" in strategy_ids
     assert "squeeze_setup" in strategy_ids
+    assert "supertrend_follow" in strategy_ids
+    assert "volume_anomaly" in strategy_ids
+    assert "volume_climax_reversal" in strategy_ids
+    assert "vwap_trend" in strategy_ids
 
 
 @pytest.mark.asyncio

@@ -89,6 +89,22 @@ class CycleRunner:
             shortlist = list(bot._shortlist)
         if not shortlist:
             shortlist = await bot._do_refresh_shortlist()
+        if shortlist:
+            try:
+                warmed = await bot._get_oi_refresh_runner().refresh_once(
+                    shortlist,
+                    max_age_seconds=300.0,
+                )
+                if warmed:
+                    LOG.info(
+                        "emergency cycle context warmup | symbols=%d",
+                        warmed,
+                    )
+            except Exception as exc:
+                LOG.warning(
+                    "emergency cycle context warmup failed (non-fatal): %s",
+                    exc,
+                )
 
         async def _analyze_one(item: UniverseSymbol) -> PipelineResult | None:
             async with bot._analysis_semaphore:

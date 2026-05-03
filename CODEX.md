@@ -1051,9 +1051,9 @@ and current package metadata.
 
 | Skill | Status | Evidence |
 |---|---|---|
-| `code_audit` | executed | 206 Python files scanned by AST/import inventory; runtime call path checked from `main.py` to strategies and Telegram delivery. |
+| `code_audit` | executed | Python/Markdown corpus scanned; runtime call path checked from `main.py` to strategies and Telegram delivery. |
 | `api_verify` | executed | `scripts/live_check_binance_api.py --symbols BTCUSDT ETHUSDT --warmup-seconds 12 --reconnect-wait-seconds 8` passed. |
-| `strategy_analyze` | executed | 15 strategy classes imported, config-aligned, and live-checked on BTC/ETH/XAU/XAG with no strategy errors. |
+| `strategy_analyze` | executed | Original 15 strategy classes were live-checked earlier; 6 phase-5.3 strategies were added and synthetic-contract tested. |
 | `config_audit` | executed | `python scripts/validate_config.py` passed. |
 | `telemetry_review` | executed | `scripts/runtime_audit.py --run 20260502_110946_22548` parsed the run and confirmed zero delivered candidates after filters. |
 | `smc_verify` | executed | `tests/test_smc_helpers.py` and setup contract regressions passed; full external SMC parity remains unproven. |
@@ -1099,3 +1099,95 @@ python -m pytest -q tests/test_strategies.py tests/test_regression_suite_setups_
 python -m pytest -q tests/test_regression_suite_tracking_delivery.py
 python -m pytest -q
 ```
+
+### 19.5. Additional Root-Cause Pass — 2026-05-03
+
+Confirmed facts:
+
+- The latest full telemetry run `20260502_110946_22548` did not have silent
+  strategies: it had 455 raw hits and 568 strategy-level signals, but 0
+  post-filter candidates.
+- The largest confirmed post-hit losses in that run were
+  `filter.trend_score_too_low`, `risk_reward_too_low`, `spread_too_wide`, and
+  `score_too_low`.
+- Historical indicator snapshots from that run show RSI in `0..1` scale and
+  ADX stuck at `0.0`. Current code now keeps RSI in `0..100` and fixes the ADX
+  pure-Polars calculation.
+- `config.toml` already declared `strategy_concurrency` and
+  `strategy_timeout_seconds`, but `RuntimeConfig` did not expose them. The
+  engine therefore used fallback defaults. This is now fixed.
+- A live diagnostic pipeline attempt triggered Binance HTTP 418 after eager
+  `/futures/data/basis` warmup. Follow-up live Binance REST checks must wait for
+  the ban window or use very small symbol sets and lite context only.
+
+Code corrections added in this pass:
+
+- `bot/features.py` and `bot/features_core.py`: clean `dx` before ADX
+  `ewm_mean()` so one seed `NaN` cannot zero the whole ADX series.
+- `bot/config.py`: load runtime strategy executor concurrency and timeout from
+  TOML.
+- `bot/application/oi_refresh_runner.py` and `bot/application/cycle_runner.py`:
+  emergency fallback can warm public OI/L-S/funding context before analysis when
+  caches are cold/stale.
+- `scripts/live_check_pipeline.py`: read-only prepare/strategy/confirmation/
+  filters smoke without Telegram delivery.
+- `scripts/live_check_enrichments.py`: premium basis stats and depth/microprice
+  requirements are opt-in rather than default hard requirements.
+
+Verification from this pass:
+
+```powershell
+python -m pytest tests\test_features.py::test_prepare_frame_keeps_rsi_adx_on_indicator_scale tests\test_features_group_contracts.py::test_group_contract_outputs tests\test_config_runtime.py -q
+python -m py_compile scripts\live_check_pipeline.py scripts\live_check_enrichments.py bot\application\oi_refresh_runner.py bot\application\cycle_runner.py bot\config.py
+python scripts\live_check_strategies.py --symbols-from-run 20260502_110946_22548 --limit 45 --concurrency 3
+```
+
+Unverified after the HTTP 418 event:
+
+- Fresh live post-filter candidate count after the ADX/config/context fixes.
+- Full live REST/WS reconnect smoke after the diagnostic REST burst.
+
+### 19.6. Forced Phase 4/5/6 Execution Pass — 2026-05-03
+
+Reflection:
+
+- First draft risk: adding strategy files without wiring them into
+  `SetupConfig` would create dead code.
+- Correction: `bot.config._ALL_SETUP_IDS`, `SetupConfig`, `STRATEGY_CLASSES`,
+  `config.toml`, `config.toml.example`, shortlist `strategy_fits`, and backtest
+  live setup coverage were updated together.
+- Verification: targeted pytest confirmed strategy contracts, config visibility,
+  WS subscribe pacing validation, REST limiter config, rejection telemetry, and
+  backtest lifecycle coverage.
+
+Code added or changed:
+
+- New setup detectors: `vwap_trend`, `supertrend_follow`, `price_velocity`,
+  `volume_anomaly`, `volume_climax_reversal`, `keltner_breakout`.
+- Runtime setup count increased from 15 to 21.
+- New setup parameters live only under `[bot.filters.setups]`; enable flags
+  live under `[bot.setups]`.
+- Shortlist routing now assigns trend/top-liquidity/breakout/reversal symbols
+  to the new phase-5.3 setup families.
+- Binance REST `/futures/data/*` pacing is configurable through
+  `runtime.futures_data_request_limit_per_5m` and defaults to 300/5m, below the
+  official 1000/5m ceiling.
+- WS subscription pacing now rejects `subscribe_chunk_delay_ms < 100`, matching
+  Binance's 10 incoming control messages/sec limit.
+- Symbol funnel telemetry now records rejection rollups by stage, setup, and
+  reason so `score_too_low`, `risk_reward_too_low`, `trend_score_too_low`, and
+  similar causes are not hidden in aggregate counts.
+
+Fresh verification:
+
+```powershell
+python -m py_compile bot\strategies\vwap_trend.py bot\strategies\supertrend_follow.py bot\strategies\price_velocity.py bot\strategies\volume_anomaly.py bot\strategies\volume_climax_reversal.py bot\strategies\keltner_breakout.py bot\strategies\__init__.py bot\config.py bot\universe.py
+python -m pytest tests\test_config_runtime.py tests\test_market_data_limits.py tests\test_symbol_analyzer_telemetry.py tests\test_strategies.py tests\test_sanity.py::test_strategy_registry_contains_extended_setups tests\test_backtest_engine.py::test_backtester_supports_lifecycle_metrics_for_all_live_setups -q
+rg --files bot scripts tests docs data config.toml config.toml.example requirements.txt CODEX.md PROJECT_MAP.md AGENTS.md README.md
+```
+
+Current limitation:
+
+- The new phase-5.3 strategies are implementation-real and tested on synthetic
+  frames, but their live expectancy is not proven. A fresh Binance live
+  post-filter candidate check is still blocked by the earlier HTTP 418 event.

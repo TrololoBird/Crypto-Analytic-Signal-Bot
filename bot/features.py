@@ -303,9 +303,12 @@ def _adx(df: pl.DataFrame, period: int = 14) -> pl.Series:
     plus_di = 100.0 * plus_dm.ewm_mean(alpha=1.0 / period, adjust=False) / atr_safe
     minus_di = 100.0 * minus_dm.ewm_mean(alpha=1.0 / period, adjust=False) / atr_safe
     
-    dx = 100.0 * (plus_di - minus_di).abs() / (plus_di + minus_di)
+    di_sum = (plus_di + minus_di).replace(0.0, None)
+    dx = _clean_non_finite(100.0 * (plus_di - minus_di).abs() / di_sum, fill=0.0)
     return _materialize_series(
-        _clean_non_finite(dx.ewm_mean(alpha=1.0 / period, adjust=False), fill=0.0),
+        _clean_non_finite(
+            dx.ewm_mean(alpha=1.0 / period, adjust=False), fill=0.0
+        ).clip(0.0, 100.0),
         df=df,
         name=f"adx{period}",
     )

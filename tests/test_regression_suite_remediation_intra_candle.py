@@ -7,8 +7,6 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-pytestmark = [pytest.mark.regression_remediation, pytest.mark.regression_remediation_runtime]
-
 from tests.test_remediation_regressions import (
     BookTickerEvent,
     PipelineResult,
@@ -19,6 +17,11 @@ from tests.test_remediation_regressions import (
     make_signal,
     make_universe_symbol,
 )
+
+pytestmark = [
+    pytest.mark.regression_remediation,
+    pytest.mark.regression_remediation_runtime,
+]
 
 
 @pytest.mark.asyncio

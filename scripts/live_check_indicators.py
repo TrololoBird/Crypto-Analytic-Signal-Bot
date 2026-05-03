@@ -1,3 +1,4 @@
+# ruff: noqa: E402
 from __future__ import annotations
 
 import argparse
@@ -46,7 +47,10 @@ async def _run(symbols: list[str], concurrency: int) -> None:
         min_bars_1h=settings.filters.min_bars_1h,
         min_bars_4h=settings.filters.min_bars_4h,
     )
-    client = BinanceFuturesMarketData(rest_timeout_seconds=settings.ws.rest_timeout_seconds)
+    client = BinanceFuturesMarketData(
+        rest_timeout_seconds=settings.ws.rest_timeout_seconds,
+        futures_data_request_limit_per_5m=settings.runtime.futures_data_request_limit_per_5m,
+    )
     try:
         exchange_symbols = await client.fetch_exchange_symbols()
         ticker_rows = await client.fetch_ticker_24h()

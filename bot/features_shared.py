@@ -1,16 +1,19 @@
 from __future__ import annotations
 
-from typing import Any
 
 import polars as pl
 
 REQUIRED_OHLCV_COLUMNS: tuple[str, ...] = ("open", "high", "low", "close", "volume")
 
 
-def ensure_columns(df: pl.DataFrame, required: tuple[str, ...], *, fn_name: str) -> None:
+def ensure_columns(
+    df: pl.DataFrame, required: tuple[str, ...], *, fn_name: str
+) -> None:
     missing = [name for name in required if name not in df.columns]
     if missing:
-        raise ValueError(f"{fn_name} requires columns={required}, missing={tuple(missing)}")
+        raise ValueError(
+            f"{fn_name} requires columns={required}, missing={tuple(missing)}"
+        )
 
 
 def clean_non_finite(series: pl.Series, *, fill: float) -> pl.Series:

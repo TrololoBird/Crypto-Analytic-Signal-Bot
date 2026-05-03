@@ -1,3 +1,4 @@
+# ruff: noqa: E402
 from __future__ import annotations
 
 import argparse
@@ -69,7 +70,10 @@ async def _run(symbols: list[str], concurrency: int) -> None:
     for strategy_class in STRATEGY_CLASSES:
         registry.register(strategy_class(SetupParams(enabled=True), settings))
     engine = SignalEngine(registry, settings)
-    client = BinanceFuturesMarketData(rest_timeout_seconds=settings.ws.rest_timeout_seconds)
+    client = BinanceFuturesMarketData(
+        rest_timeout_seconds=settings.ws.rest_timeout_seconds,
+        futures_data_request_limit_per_5m=settings.runtime.futures_data_request_limit_per_5m,
+    )
     try:
         exchange_symbols = await client.fetch_exchange_symbols()
         ticker_rows = await client.fetch_ticker_24h()

@@ -197,14 +197,23 @@ def _collect_ws_enrichments(
     return enrichments
 
 
-async def _run(symbols: list[str], warmup_seconds: float) -> None:
+async def _run(
+    symbols: list[str],
+    warmup_seconds: float,
+    *,
+    include_premium_stats: bool,
+    require_depth: bool,
+) -> None:
     settings = load_settings()
     minimums = min_required_bars(
         min_bars_15m=settings.filters.min_bars_15m,
         min_bars_1h=settings.filters.min_bars_1h,
         min_bars_4h=settings.filters.min_bars_4h,
     )
-    client = BinanceFuturesMarketData(rest_timeout_seconds=settings.ws.rest_timeout_seconds)
+    client = BinanceFuturesMarketData(
+        rest_timeout_seconds=settings.ws.rest_timeout_seconds,
+        futures_data_request_limit_per_5m=settings.runtime.futures_data_request_limit_per_5m,
+    )
     ws_manager = FuturesWSManager(client, settings.ws)
 
     try:
@@ -228,9 +237,11 @@ async def _run(symbols: list[str], warmup_seconds: float) -> None:
                 await client.fetch_long_short_ratio(symbol)
                 # Fetch funding rate
                 await client.fetch_funding_rate(symbol)
-                # Fetch basis with higher limit to ensure enough data for zscore/slope
-                basis_result = await client.fetch_basis(symbol, period="1h", limit=10)
-                LOG.info("fetch_basis_result | symbol=%s basis=%s", symbol, basis_result)
+                if include_premium_stats:
+                    # /futures/data/basis is useful but heavier than premiumIndex.
+                    # Keep it opt-in for operator checks to avoid REST bursts.
+                    basis_result = await client.fetch_basis(symbol, period="1h", limit=10)
+                    LOG.info("fetch_basis_result | symbol=%s basis=%s", symbol, basis_result)
                 # Fetch global LS ratio
                 await client.fetch_global_ls_ratio(symbol)
             except Exception as exc:
@@ -254,10 +265,6 @@ async def _run(symbols: list[str], warmup_seconds: float) -> None:
         # Critical fields to check
         critical_fields = [
             "mark_index_spread_bps",
-            "premium_zscore_5m",
-            "premium_slope_5m",
-            "depth_imbalance",
-            "microprice_bias",
             "basis_pct",
             "funding_rate",
             "oi_change_pct",
@@ -266,6 +273,10 @@ async def _run(symbols: list[str], warmup_seconds: float) -> None:
             # Note: risk_reward is a Signal property, not PreparedSymbol field
             # Note: trend_direction doesn't exist on PreparedSymbol
         ]
+        if include_premium_stats:
+            critical_fields.extend(["premium_zscore_5m", "premium_slope_5m"])
+        if require_depth:
+            critical_fields.extend(["depth_imbalance", "microprice_bias"])
 
         all_results: list[dict[str, Any]] = []
 
@@ -401,10 +412,27 @@ def main() -> None:
         default=30.0,
         help="WebSocket warmup seconds"
     )
+    parser.add_argument(
+        "--include-premium-stats",
+        action="store_true",
+        help="Warm /futures/data/basis and require premium z-score/slope",
+    )
+    parser.add_argument(
+        "--require-depth",
+        action="store_true",
+        help="Require depth/microprice fields. Off by default because aggTrade is tracked-symbol only.",
+    )
     args = parser.parse_args()
 
     _configure_logging()
-    asyncio.run(_run(args.symbols, args.warmup))
+    asyncio.run(
+        _run(
+            args.symbols,
+            args.warmup,
+            include_premium_stats=args.include_premium_stats,
+            require_depth=args.require_depth,
+        )
+    )
 
 
 if __name__ == "__main__":

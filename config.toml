@@ -22,6 +22,7 @@ diagnostic_trace_limit_per_symbol = 20
 startup_batch_size = 3
 startup_batch_delay_seconds = 2.0
 max_concurrent_rest_requests = 5
+futures_data_request_limit_per_5m = 300
 min_restart_interval_seconds = 120
 
 [bot.universe]
@@ -73,6 +74,12 @@ cvd_divergence = { base_score = 0.50, bias_mismatch_penalty = 0.75, sl_buffer_at
 session_killzone = { base_score = 0.55, min_volume_ratio = 1.2, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.8, min_rr = 1.5, asia_start_hour_utc = 0, asia_end_hour_utc = 3, london_start_hour_utc = 7, london_end_hour_utc = 10, ny_start_hour_utc = 13, ny_end_hour_utc = 16, overlap_start_hour_utc = 13, overlap_end_hour_utc = 16 }
 breaker_block = { base_score = 0.50, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.8, min_rr = 1.5 }
 turtle_soup = { base_score = 0.50, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.5, min_rr = 1.5, adx_penalty_factor = 0.85 }
+vwap_trend = { base_score = 0.55, min_adx_1h = 15.0, min_volume_ratio = 1.05, vwap_reclaim_tolerance_pct = 0.0008, sl_buffer_atr = 0.7, min_rr = 1.5 }
+supertrend_follow = { base_score = 0.56, min_adx_1h = 14.0, min_volume_ratio = 1.0, ema_pullback_atr = 0.65, sl_buffer_atr = 0.65, min_rr = 1.5 }
+price_velocity = { base_score = 0.53, min_roc10_abs_pct = 0.75, min_body_atr = 0.55, min_volume_ratio = 1.35, max_rsi_long = 82.0, min_rsi_short = 18.0, sl_buffer_atr = 0.55, min_rr = 1.5 }
+volume_anomaly = { base_score = 0.52, min_volume_ratio = 2.0, min_body_atr = 0.75, min_close_position_long = 0.72, max_close_position_short = 0.28, max_rsi_long = 78.0, min_rsi_short = 22.0, sl_buffer_atr = 0.6, min_rr = 1.5 }
+volume_climax_reversal = { base_score = 0.52, min_volume_ratio = 2.3, min_wick_atr = 0.45, max_rsi_long = 42.0, min_rsi_short = 58.0, sl_buffer_atr = 0.45, min_rr = 1.5 }
+keltner_breakout = { base_score = 0.54, min_volume_ratio = 1.25, min_adx_1h = 14.0, sl_buffer_atr = 0.6, min_rr = 1.5 }
 
 [bot.tracking]
 enabled = true
@@ -102,6 +109,12 @@ cvd_divergence = true
 session_killzone = true
 breaker_block = true
 turtle_soup = true
+vwap_trend = true
+supertrend_follow = true
+price_velocity = true
+volume_anomaly = true
+volume_climax_reversal = true
+keltner_breakout = true
 
 
 [bot.scoring]

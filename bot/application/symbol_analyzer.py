@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import Counter
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
@@ -42,6 +43,29 @@ def _history_fetch_limit(minimums: dict[str, int], interval: str) -> int:
         _DEFAULT_HISTORY_FETCH_LIMIT if interval in {"5m", "15m", "1h", "4h"} else 240
     )
     return max(baseline, required + _HISTORY_FETCH_BUFFER_BARS)
+
+
+def _attach_rejection_rollups(
+    funnel: dict[str, Any],
+    rejected: list[dict[str, Any]],
+) -> None:
+    """Attach stage/setup reason rollups to the symbol funnel."""
+    by_stage: Counter[str] = Counter()
+    by_setup: Counter[str] = Counter()
+    by_stage_reason: Counter[str] = Counter()
+    by_setup_reason: Counter[str] = Counter()
+    for row in rejected:
+        stage = str(row.get("stage") or "unknown")
+        setup_id = str(row.get("setup_id") or "unknown")
+        reason = str(row.get("reason") or "unknown")
+        by_stage[stage] += 1
+        by_setup[setup_id] += 1
+        by_stage_reason[f"{stage}:{reason}"] += 1
+        by_setup_reason[f"{setup_id}:{reason}"] += 1
+    funnel["rejects_by_stage"] = dict(by_stage)
+    funnel["rejects_by_setup"] = dict(by_setup)
+    funnel["reject_reasons_by_stage"] = dict(by_stage_reason)
+    funnel["reject_reasons_by_setup"] = dict(by_setup_reason)
 
 
 class SymbolAnalyzer:
@@ -564,6 +588,7 @@ class SymbolAnalyzer:
                 rows_4h,
                 minimums["4h"],
             )
+            _attach_rejection_rollups(funnel, rejected)
             return PipelineResult(
                 symbol=item.symbol,
                 trigger=trigger,
@@ -624,6 +649,7 @@ class SymbolAnalyzer:
             funnel["prepare_error_exception_type"] = type(exc).__name__
             funnel["prepare_error_class"] = error_payload["error_class"]
             LOG.warning("%s: failed to build prepared symbol: %s", item.symbol, exc)
+            _attach_rejection_rollups(funnel, rejected)
             return PipelineResult(
                 symbol=item.symbol,
                 trigger=trigger,
@@ -640,6 +666,7 @@ class SymbolAnalyzer:
         # Run modern engine (replaces pipeline analysis)
         if prepared is None:
             LOG.warning("%s: prepared symbol is None", item.symbol)
+            _attach_rejection_rollups(funnel, rejected)
             return PipelineResult(
                 symbol=item.symbol,
                 trigger=trigger,
@@ -679,6 +706,7 @@ class SymbolAnalyzer:
                 exc,
                 error_class,
             )
+            _attach_rejection_rollups(funnel, rejected)
             return PipelineResult(
                 symbol=item.symbol,
                 trigger=trigger,
@@ -875,6 +903,7 @@ class SymbolAnalyzer:
             signals_added,
         )
         funnel["post_filter_candidates"] = len(candidates)
+        _attach_rejection_rollups(funnel, rejected)
 
         return PipelineResult(
             symbol=item.symbol,
