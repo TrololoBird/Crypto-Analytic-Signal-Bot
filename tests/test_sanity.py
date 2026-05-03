@@ -92,6 +92,22 @@ def test_strategy_registry_contains_extended_setups() -> None:
     assert "volume_anomaly" in strategy_ids
     assert "volume_climax_reversal" in strategy_ids
     assert "vwap_trend" in strategy_ids
+    assert "whale_walls" in strategy_ids
+    assert "spread_strategy" in strategy_ids
+    assert "depth_imbalance" in strategy_ids
+    assert "absorption" in strategy_ids
+    assert "aggression_shift" in strategy_ids
+    assert "liquidation_heatmap" in strategy_ids
+    assert "stop_hunt_detection" in strategy_ids
+    assert "multi_tf_trend" in strategy_ids
+    assert "rsi_divergence_bottom" in strategy_ids
+    assert "wyckoff_spring" in strategy_ids
+    assert "bb_squeeze" in strategy_ids
+    assert "atr_expansion" in strategy_ids
+    assert "ls_ratio_extreme" in strategy_ids
+    assert "oi_divergence" in strategy_ids
+    assert "btc_correlation" in strategy_ids
+    assert "altcoin_season_index" in strategy_ids
 
 
 @pytest.mark.asyncio

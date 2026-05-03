@@ -218,14 +218,19 @@ def _strategy_fits_for_row(
                 "structure_pullback",
                 "vwap_trend",
                 "supertrend_follow",
+                "multi_tf_trend",
                 "fvg_setup",
                 "cvd_divergence",
+                "btc_correlation",
+                "altcoin_season_index",
             )
         )
     if spread_ok and volume_multiple >= 1.5 and (breakout_move or oi_rising):
         fits.extend((
             "structure_break_retest",
             "squeeze_setup",
+            "bb_squeeze",
+            "atr_expansion",
             "bos_choch",
             "fvg_setup",
             "order_block",
@@ -234,13 +239,22 @@ def _strategy_fits_for_row(
             "price_velocity",
             "volume_anomaly",
             "keltner_breakout",
+            "spread_strategy",
+            "depth_imbalance",
+            "whale_walls",
+            "aggression_shift",
         ))
     if spread_ok and liquid_enough and (reversal_move or crowd_extreme or oi_extreme):
         fits.extend((
             "wick_trap_reversal",
             "hidden_divergence",
+            "rsi_divergence_bottom",
             "turtle_soup",
             "liquidity_sweep",
+            "stop_hunt_detection",
+            "wyckoff_spring",
+            "liquidation_heatmap",
+            "absorption",
             "volume_climax_reversal",
         ))
     if (
@@ -249,9 +263,18 @@ def _strategy_fits_for_row(
         or (oi_change_pct is not None and abs(oi_change_pct) >= 1.5)
     ):
         fits.append("funding_reversal")
+        fits.append("ls_ratio_extreme")
+        fits.append("oi_divergence")
 
     if top_liquidity and liquid_enough and spread_ok:
-        fits.extend(("liquidity_sweep", "vwap_trend", "keltner_breakout"))
+        fits.extend((
+            "liquidity_sweep",
+            "vwap_trend",
+            "keltner_breakout",
+            "whale_walls",
+            "spread_strategy",
+            "depth_imbalance",
+        ))
 
     if not fits and spread_ok and quote_volume >= volume_floor:
         fits.extend(
@@ -261,6 +284,8 @@ def _strategy_fits_for_row(
                 "fvg_setup",
                 "cvd_divergence",
                 "price_velocity",
+                "multi_tf_trend",
+                "spread_strategy",
             )
         )
 

@@ -168,6 +168,23 @@ _ALL_SETUP_IDS: tuple[str, ...] = (
     "volume_anomaly",
     "volume_climax_reversal",
     "keltner_breakout",
+    # Roadmap expansion
+    "whale_walls",
+    "spread_strategy",
+    "depth_imbalance",
+    "absorption",
+    "aggression_shift",
+    "liquidation_heatmap",
+    "stop_hunt_detection",
+    "multi_tf_trend",
+    "rsi_divergence_bottom",
+    "wyckoff_spring",
+    "bb_squeeze",
+    "atr_expansion",
+    "ls_ratio_extreme",
+    "oi_divergence",
+    "btc_correlation",
+    "altcoin_season_index",
 )
 
 
@@ -196,6 +213,23 @@ class SetupConfig(BaseModel):
     volume_anomaly: bool = True
     volume_climax_reversal: bool = True
     keltner_breakout: bool = True
+    # Roadmap expansion
+    whale_walls: bool = True
+    spread_strategy: bool = True
+    depth_imbalance: bool = True
+    absorption: bool = True
+    aggression_shift: bool = True
+    liquidation_heatmap: bool = True
+    stop_hunt_detection: bool = True
+    multi_tf_trend: bool = True
+    rsi_divergence_bottom: bool = True
+    wyckoff_spring: bool = True
+    bb_squeeze: bool = True
+    atr_expansion: bool = True
+    ls_ratio_extreme: bool = True
+    oi_divergence: bool = True
+    btc_correlation: bool = True
+    altcoin_season_index: bool = True
 
     def enabled_setup_ids(self) -> tuple[str, ...]:
         enabled: list[str] = []

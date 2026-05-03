@@ -40,22 +40,33 @@ def test_phase_53_strategy_flags_are_runtime_visible(
     settings = load_settings(Path("config.toml"))
     enabled = set(settings.setups.enabled_setup_ids())
 
-    assert {
+    roadmap_ids = {
         "vwap_trend",
         "supertrend_follow",
         "price_velocity",
         "volume_anomaly",
         "volume_climax_reversal",
         "keltner_breakout",
-    }.issubset(enabled)
-    for setup_id in (
-        "vwap_trend",
-        "supertrend_follow",
-        "price_velocity",
-        "volume_anomaly",
-        "volume_climax_reversal",
-        "keltner_breakout",
-    ):
+        "whale_walls",
+        "spread_strategy",
+        "depth_imbalance",
+        "absorption",
+        "aggression_shift",
+        "liquidation_heatmap",
+        "stop_hunt_detection",
+        "multi_tf_trend",
+        "rsi_divergence_bottom",
+        "wyckoff_spring",
+        "bb_squeeze",
+        "atr_expansion",
+        "ls_ratio_extreme",
+        "oi_divergence",
+        "btc_correlation",
+        "altcoin_season_index",
+    }
+
+    assert roadmap_ids.issubset(enabled)
+    for setup_id in roadmap_ids:
         assert setup_id in settings.filters.setups
 
 

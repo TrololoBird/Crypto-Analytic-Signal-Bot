@@ -626,6 +626,29 @@ class SymbolAnalyzer:
                         "%s: enrichment mark_index_spread_bps=None (ws_data_missing)",
                         item.symbol,
                     )
+            if prepared is not None:
+                try:
+                    market_ctx = await self._bot._modern_repo.get_market_context()
+                except _DEGRADATION_ERRORS as exc:
+                    self._log_degradation(
+                        level=logging.INFO,
+                        symbol=item.symbol,
+                        stage="market_context",
+                        source="memory",
+                        reason=str(exc),
+                        fallback_used="skip_multi_asset_context",
+                        exception_type=type(exc).__name__,
+                    )
+                else:
+                    for key in (
+                        "btc_bias",
+                        "eth_bias",
+                        "altcoin_season_index",
+                        "btc_phase",
+                    ):
+                        value = market_ctx.get(key)
+                        if value is not None and hasattr(prepared, key):
+                            setattr(prepared, key, value)
             LOG.debug(
                 "%s: prepared symbol built | work_15m_rows=%s work_1h_rows=%s",
                 item.symbol,

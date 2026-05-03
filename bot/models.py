@@ -119,6 +119,10 @@ class PreparedSymbol:
     aggression_shift: float | None = None
     spot_lead_return_1m: float | None = None
     spot_futures_spread_bps: float | None = None
+    btc_bias: str | None = None
+    eth_bias: str | None = None
+    altcoin_season_index: float | None = None
+    btc_phase: str | None = None
     mark_price_age_seconds: float | None = None
     ticker_price_age_seconds: float | None = None
     book_ticker_age_seconds: float | None = None

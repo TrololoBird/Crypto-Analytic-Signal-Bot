@@ -168,6 +168,22 @@ def test_backtester_supports_lifecycle_metrics_for_all_live_setups(tmp_path) -> 
         "volume_anomaly",
         "volume_climax_reversal",
         "keltner_breakout",
+        "whale_walls",
+        "spread_strategy",
+        "depth_imbalance",
+        "absorption",
+        "aggression_shift",
+        "liquidation_heatmap",
+        "stop_hunt_detection",
+        "multi_tf_trend",
+        "rsi_divergence_bottom",
+        "wyckoff_spring",
+        "bb_squeeze",
+        "atr_expansion",
+        "ls_ratio_extreme",
+        "oi_divergence",
+        "btc_correlation",
+        "altcoin_season_index",
     ]
     signal_rows = []
     for index, setup_id in enumerate(live_setups, start=20):
