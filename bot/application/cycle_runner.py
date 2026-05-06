@@ -91,14 +91,21 @@ class CycleRunner:
             shortlist = await bot._do_refresh_shortlist()
         if shortlist:
             try:
+                runtime = bot.settings.runtime
                 warmed = await bot._get_oi_refresh_runner().refresh_once(
                     shortlist,
                     max_age_seconds=300.0,
+                    time_budget_seconds=runtime.emergency_context_warmup_timeout_seconds,
+                    symbol_limit=runtime.emergency_context_warmup_symbol_limit,
+                    include_funding_history=False,
+                    per_symbol_timeout_seconds=runtime.emergency_context_fetch_timeout_seconds,
                 )
                 if warmed:
                     LOG.info(
-                        "emergency cycle context warmup | symbols=%d",
+                        "emergency cycle context warmup | symbols=%d budget_s=%.1f symbol_limit=%d funding_history=false",
                         warmed,
+                        runtime.emergency_context_warmup_timeout_seconds,
+                        runtime.emergency_context_warmup_symbol_limit,
                     )
             except Exception as exc:
                 LOG.warning(
@@ -225,10 +232,12 @@ class CycleRunner:
             "shortlist_size": len(shortlist),
             "detector_runs": sum(r.raw_setups for r in pipeline_results),
             "post_filter_candidates": sum(len(r.candidates) for r in pipeline_results),
-            "selected_signals": len(delivered),
+            "selected_signals": len(selected),
+            "delivered_signals": len(delivered),
             "raw_setups": sum(r.raw_setups for r in pipeline_results),
             "candidates": sum(len(r.candidates) for r in pipeline_results),
-            "selected": len(delivered),
+            "selected": len(selected),
+            "delivered": len(delivered),
             "rejected": len(all_rejected),
             "bias": dict(bias_counter),
             "delivery_status_counts": dict(delivery_status_counts),

@@ -68,6 +68,35 @@ def _attach_rejection_rollups(
     funnel["reject_reasons_by_setup"] = dict(by_setup_reason)
 
 
+def _apply_setup_score_adjustment(
+    signal: Signal, score_adjustment: float
+) -> tuple[Signal, dict[str, Any]]:
+    """Apply adaptive setup scoring without converting mild penalties into hard blocks."""
+    try:
+        adjustment = float(score_adjustment)
+    except (TypeError, ValueError):
+        adjustment = 0.0
+    if not adjustment:
+        return signal, {"applied": False, "adjustment": 0.0}
+
+    adjusted_score = round(min(1.0, max(0.0, float(signal.score) + adjustment)), 4)
+    if adjusted_score == signal.score:
+        return signal, {"applied": False, "adjustment": adjustment}
+
+    reason = "setup_performance_bonus" if adjustment > 0 else "setup_performance_penalty"
+    reasons = signal.reasons if reason in signal.reasons else (*signal.reasons, reason)
+    return (
+        replace(signal, score=adjusted_score, reasons=reasons),
+        {
+            "applied": True,
+            "adjustment": adjustment,
+            "score_before": signal.score,
+            "score_after": adjusted_score,
+            "reason": reason,
+        },
+    )
+
+
 class SymbolAnalyzer:
     def __init__(self, bot: SignalBot) -> None:
         self._bot = bot
@@ -860,23 +889,26 @@ class SymbolAnalyzer:
                 funnel["confirmation_rejects"] += 1
                 continue
 
-            # Check performance guard using modern repo
+            # Apply adaptive setup scoring using modern repo. A -0.05 penalty is
+            # calibration input, not enough evidence to suppress every signal.
             score_adj = await self._bot._modern_repo.get_setup_score_adjustment(
                 signal.setup_id
             )
-            if score_adj < -0.3:  # Suppressed due to poor performance
-                rejected.append(
-                    {
+            signal, perf_details = _apply_setup_score_adjustment(signal, score_adj)
+            if perf_details.get("applied"):
+                funnel["performance_adjustments"] = (
+                    funnel.get("performance_adjustments", 0) + 1
+                )
+                self._bot._append_symbol_trace(
+                    symbol=item.symbol,
+                    row={
                         "ts": datetime.now(UTC).isoformat(),
                         "symbol": item.symbol,
                         "setup_id": signal.setup_id,
-                        "direction": signal.direction,
-                        "stage": "perf_guard",
-                        "reason": "setup_underperforming",
-                    }
+                        "stage": "performance_adjustment",
+                        "details": perf_details,
+                    },
                 )
-                signals_rejected_perf += 1
-                continue
 
             passed, filtered_signal, filter_reason, scoring_result, filter_details = (
                 apply_global_filters(

@@ -31,6 +31,17 @@ futures_data_request_limit_per_5m = 240
     assert settings.runtime.futures_data_request_limit_per_5m == 240
 
 
+def test_config_example_supports_disabled_notifier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TG_TOKEN", "")
+    monkeypatch.setenv("TARGET_CHAT_ID", "")
+
+    settings = load_settings(Path("config.toml.example"))
+
+    assert settings.notifiers.provider == "none"
+
+
 def test_phase_53_strategy_flags_are_runtime_visible(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

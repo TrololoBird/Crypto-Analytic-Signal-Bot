@@ -3,7 +3,12 @@ from __future__ import annotations
 import pytest
 
 from bot.config import BotSettings
-from bot.messaging import DeliveryResult, WebhookBroadcaster, build_message_broadcaster
+from bot.messaging import (
+    DeliveryResult,
+    DisabledBroadcaster,
+    WebhookBroadcaster,
+    build_message_broadcaster,
+)
 
 
 def test_bot_settings_accepts_fractional_sl_buffer_atr() -> None:
@@ -22,6 +27,17 @@ def test_bot_settings_rejects_too_small_sl_buffer_atr() -> None:
             target_chat_id="123",
             filters={"setups": {"ema_bounce": {"sl_buffer_atr": 0.01}}},
         )
+
+
+@pytest.mark.asyncio
+async def test_build_message_broadcaster_supports_disabled_provider() -> None:
+    settings = BotSettings(tg_token="", target_chat_id="", notifiers={"provider": "none"})
+    broadcaster = build_message_broadcaster(settings)
+
+    assert isinstance(broadcaster, DisabledBroadcaster)
+    assert await broadcaster.send_html("<b>Hello</b>") == DeliveryResult(
+        status="logged", message_id=None, reason="notifier_disabled"
+    )
 
 
 @pytest.mark.asyncio

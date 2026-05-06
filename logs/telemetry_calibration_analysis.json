@@ -1,0 +1,884 @@
+{
+  "run_id": "20260504_045105_36740",
+  "record_count": 27724,
+  "strategy_performance": [
+    {
+      "strategy_id": "absorption",
+      "rows": 0,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {},
+      "top_reject_reason": "",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "aggression_shift",
+      "rows": 0,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {},
+      "top_reject_reason": "",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "altcoin_season_index",
+      "rows": 0,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {},
+      "top_reject_reason": "",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "atr_expansion",
+      "rows": 0,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {},
+      "top_reject_reason": "",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "bb_squeeze",
+      "rows": 0,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {},
+      "top_reject_reason": "",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "bos_choch",
+      "rows": 0,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {},
+      "top_reject_reason": "",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "breaker_block",
+      "rows": 0,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {},
+      "top_reject_reason": "",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "btc_correlation",
+      "rows": 0,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {},
+      "top_reject_reason": "",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "cvd_divergence",
+      "rows": 0,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {},
+      "top_reject_reason": "",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "depth_imbalance",
+      "rows": 0,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {},
+      "top_reject_reason": "",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "ema_bounce",
+      "rows": 0,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {},
+      "top_reject_reason": "",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "funding_reversal",
+      "rows": 0,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {},
+      "top_reject_reason": "",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "fvg_setup",
+      "rows": 0,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {},
+      "top_reject_reason": "",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "hidden_divergence",
+      "rows": 0,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {},
+      "top_reject_reason": "",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "keltner_breakout",
+      "rows": 0,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {},
+      "top_reject_reason": "",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "liquidation_heatmap",
+      "rows": 0,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {},
+      "top_reject_reason": "",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "liquidity_sweep",
+      "rows": 0,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {},
+      "top_reject_reason": "",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "ls_ratio_extreme",
+      "rows": 0,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {},
+      "top_reject_reason": "",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "multi_tf_trend",
+      "rows": 0,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {},
+      "top_reject_reason": "",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "oi_divergence",
+      "rows": 0,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {},
+      "top_reject_reason": "",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "order_block",
+      "rows": 0,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {},
+      "top_reject_reason": "",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "price_velocity",
+      "rows": 0,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {},
+      "top_reject_reason": "",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "rsi_divergence_bottom",
+      "rows": 0,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {},
+      "top_reject_reason": "",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "session_killzone",
+      "rows": 0,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {},
+      "top_reject_reason": "",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "spread_strategy",
+      "rows": 0,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {},
+      "top_reject_reason": "",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "squeeze_setup",
+      "rows": 0,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {},
+      "top_reject_reason": "",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "stop_hunt_detection",
+      "rows": 0,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {},
+      "top_reject_reason": "",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "structure_break_retest",
+      "rows": 0,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {},
+      "top_reject_reason": "",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "structure_pullback",
+      "rows": 0,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {},
+      "top_reject_reason": "",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "supertrend_follow",
+      "rows": 0,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {},
+      "top_reject_reason": "",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "turtle_soup",
+      "rows": 0,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {},
+      "top_reject_reason": "",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "volume_anomaly",
+      "rows": 0,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {},
+      "top_reject_reason": "",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "volume_climax_reversal",
+      "rows": 0,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {},
+      "top_reject_reason": "",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "vwap_trend",
+      "rows": 0,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {},
+      "top_reject_reason": "",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "whale_walls",
+      "rows": 0,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {},
+      "top_reject_reason": "",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "wick_trap_reversal",
+      "rows": 0,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {},
+      "top_reject_reason": "",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "wyckoff_spring",
+      "rows": 0,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {},
+      "top_reject_reason": "",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    }
+  ],
+  "calibration_issues": [
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "absorption",
+      "detail": "585 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "absorption",
+      "detail": "585/585 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "aggression_shift",
+      "detail": "479 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "aggression_shift",
+      "detail": "479/479 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "altcoin_season_index",
+      "detail": "1160 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "altcoin_season_index",
+      "detail": "1160/1160 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "atr_expansion",
+      "detail": "493 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "atr_expansion",
+      "detail": "493/493 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "bb_squeeze",
+      "detail": "228 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "bb_squeeze",
+      "detail": "228/228 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "bos_choch",
+      "detail": "481 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "bos_choch",
+      "detail": "481/481 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "breaker_block",
+      "detail": "476 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "breaker_block",
+      "detail": "476/476 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "btc_correlation",
+      "detail": "904 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "btc_correlation",
+      "detail": "904/904 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "cvd_divergence",
+      "detail": "1035 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "cvd_divergence",
+      "detail": "1035/1035 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "depth_imbalance",
+      "detail": "1040 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "depth_imbalance",
+      "detail": "1040/1040 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "ema_bounce",
+      "detail": "1007 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "ema_bounce",
+      "detail": "1007/1007 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "funding_reversal",
+      "detail": "495 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "funding_reversal",
+      "detail": "495/495 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "fvg_setup",
+      "detail": "1316 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "fvg_setup",
+      "detail": "1316/1316 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "hidden_divergence",
+      "detail": "453 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "hidden_divergence",
+      "detail": "453/453 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "keltner_breakout",
+      "detail": "1061 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "keltner_breakout",
+      "detail": "1061/1061 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "liquidation_heatmap",
+      "detail": "804 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "liquidation_heatmap",
+      "detail": "804/804 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "liquidity_sweep",
+      "detail": "1103 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "liquidity_sweep",
+      "detail": "1103/1103 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "ls_ratio_extreme",
+      "detail": "568 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "ls_ratio_extreme",
+      "detail": "568/568 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "multi_tf_trend",
+      "detail": "1106 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "multi_tf_trend",
+      "detail": "1106/1106 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "oi_divergence",
+      "detail": "399 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "oi_divergence",
+      "detail": "399/399 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "order_block",
+      "detail": "478 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "order_block",
+      "detail": "478/478 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "price_velocity",
+      "detail": "531 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "price_velocity",
+      "detail": "531/531 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "rsi_divergence_bottom",
+      "detail": "348 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "rsi_divergence_bottom",
+      "detail": "348/348 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "session_killzone",
+      "detail": "168 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "session_killzone",
+      "detail": "168/168 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "spread_strategy",
+      "detail": "1188 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "spread_strategy",
+      "detail": "1188/1188 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "squeeze_setup",
+      "detail": "476 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "squeeze_setup",
+      "detail": "476/476 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "stop_hunt_detection",
+      "detail": "333 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "stop_hunt_detection",
+      "detail": "333/333 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "structure_break_retest",
+      "detail": "483 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "structure_break_retest",
+      "detail": "483/483 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "structure_pullback",
+      "detail": "1149 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "structure_pullback",
+      "detail": "1149/1149 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "supertrend_follow",
+      "detail": "1084 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "supertrend_follow",
+      "detail": "1084/1084 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "turtle_soup",
+      "detail": "222 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "turtle_soup",
+      "detail": "222/222 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "volume_anomaly",
+      "detail": "248 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "volume_anomaly",
+      "detail": "248/248 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "volume_climax_reversal",
+      "detail": "589 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "volume_climax_reversal",
+      "detail": "589/589 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "vwap_trend",
+      "detail": "1538 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "vwap_trend",
+      "detail": "1538/1538 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "whale_walls",
+      "detail": "613 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "whale_walls",
+      "detail": "613/613 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "wick_trap_reversal",
+      "detail": "602 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "wick_trap_reversal",
+      "detail": "602/602 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "wyckoff_spring",
+      "detail": "586 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "wyckoff_spring",
+      "detail": "586/586 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "priority_asset_zero_signals",
+      "subject": "BTCUSDT",
+      "detail": "620 rows, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "priority_asset_zero_signals",
+      "subject": "ETHUSDT",
+      "detail": "603 rows, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "priority_asset_zero_signals",
+      "subject": "XAUUSDT",
+      "detail": "551 rows, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "priority_asset_zero_signals",
+      "subject": "XAGUSDT",
+      "detail": "569 rows, 0 signals",
+      "severity": "medium"
+    }
+  ],
+  "threshold_recommendations": []
+}

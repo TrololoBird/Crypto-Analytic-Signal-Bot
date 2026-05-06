@@ -121,21 +121,52 @@ class MessageBuffer:
         self._buffer: asyncio.Queue[Any] = asyncio.Queue(maxsize=maxsize)
         self._dropped_count = 0
         self._processed_count = 0
+        self._last_compaction_log_count = 0
+
+    def _drop_oldest_batch(self) -> int:
+        maxsize = max(1, self._buffer.maxsize)
+        target = max(1, maxsize // 4)
+        dropped = 0
+        for _ in range(target):
+            try:
+                self._buffer.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            dropped += 1
+        return dropped
 
     async def put(self, msg: Any) -> bool:
-        """Add message to buffer. Returns False if buffer is full (backpressure)."""
+        """Add message to buffer, dropping oldest queued data under backpressure."""
         try:
             self._buffer.put_nowait(msg)
             return True
         except asyncio.QueueFull:
-            self._dropped_count += 1
-            if self._dropped_count % 1000 == 1:
-                LOG.warning(
-                    "message buffer full | dropped=%d processed=%d",
+            dropped = self._drop_oldest_batch()
+            if dropped <= 0:
+                self._dropped_count += 1
+                LOG.debug(
+                    "message buffer compact failed | dropped_oldest=%d processed=%d",
                     self._dropped_count,
                     self._processed_count,
                 )
-            return False
+                return False
+            self._dropped_count += dropped
+            try:
+                self._buffer.put_nowait(msg)
+            except asyncio.QueueFull:
+                self._dropped_count += 1
+                buffered = False
+            else:
+                buffered = True
+            if self._dropped_count - self._last_compaction_log_count >= 10000:
+                self._last_compaction_log_count = self._dropped_count
+                LOG.debug(
+                    "message buffer compacted | dropped_oldest=%d processed=%d size=%d",
+                    self._dropped_count,
+                    self._processed_count,
+                    self._buffer.qsize(),
+                )
+            return buffered
 
     async def get(self) -> Any | None:
         """Get message from buffer. Returns None if empty."""

@@ -13,6 +13,7 @@ from .registry import StrategyRegistry
 from .base import SignalResult, StrategyDecision
 from ...models import PreparedSymbol, Signal
 from ...config import BotSettings
+from ...strategy_asset_fit import asset_fit_reject_reason, market_context_from_prepared
 from ..runtime_errors import classify_runtime_error
 
 LOG = logging.getLogger("bot.core.engine.engine")
@@ -309,7 +310,18 @@ class SignalEngine:
         details: dict[str, Any] = {"required_context": required_context}
         reason_code = "data.insufficient_input"
 
-        if prepared.work_1h is None or prepared.work_1h.is_empty():
+        asset_fit_reason = asset_fit_reject_reason(
+            strategy_id,
+            prepared.symbol,
+            market_context_from_prepared(prepared),
+            settings=self._settings,
+        )
+        if asset_fit_reason is not None:
+            reason_code = asset_fit_reason
+            asset_fit = getattr(strategy, "asset_fit", None)
+            if hasattr(asset_fit, "to_dict"):
+                details["asset_fit"] = asset_fit.to_dict()
+        elif prepared.work_1h is None or prepared.work_1h.is_empty():
             missing_fields.append("work_1h")
             reason_code = "data.work_1h_missing"
         elif int(prepared.work_1h.height) < int(min_history_bars):

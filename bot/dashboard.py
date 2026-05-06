@@ -103,30 +103,26 @@ class BotDashboard:
         """Pre-load and cache strategies at startup."""
         try:
             from .strategies import STRATEGY_CLASSES
-            from .config import load_settings
-            import re
 
-            def _camel_to_snake(name: str) -> str:
-                if name.endswith("Setup"):
-                    name = name[:-5]
-                s1 = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", name)
-                return re.sub("([a-z0-9])([A-Z])", r"\1_\2", s1).lower()
-
-            settings = load_settings("config.toml")
-            enabled_setups = {
-                k: getattr(settings.setups, k, False)
-                for k in dir(settings.setups)
-                if not k.startswith("_")
-            }
+            settings = getattr(self.bot, "settings", None)
+            setups = getattr(settings, "setups", None)
+            if hasattr(setups, "enabled_setup_ids"):
+                enabled_setups = set(setups.enabled_setup_ids())
+            else:
+                enabled_setups = {
+                    key
+                    for key in dir(setups or object())
+                    if not key.startswith("_") and bool(getattr(setups, key, False))
+                }
 
             self._strategies_cache = []
             for cls in STRATEGY_CLASSES:
-                setup_id = _camel_to_snake(cls.__name__)
+                setup_id = str(getattr(cls, "setup_id", "") or cls.__name__)
                 self._strategies_cache.append(
                     {
                         "id": setup_id,
                         "name": cls.__name__,
-                        "enabled": enabled_setups.get(setup_id, False),
+                        "enabled": setup_id in enabled_setups,
                     }
                 )
             LOG.info("dashboard cached %d strategies", len(self._strategies_cache))
@@ -666,6 +662,37 @@ class BotDashboard:
                 console.error('Failed to fetch signals:', err);
             }
         }
+
+        // Fetch recent activity
+        async function fetchRecentActivity() {
+            try {
+                const res = await fetch('/api/signals/recent?limit=10');
+                const data = await res.json();
+                const container = document.getElementById('recent-activity');
+
+                if (!Array.isArray(data) || data.length === 0) {
+                    container.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">Activity</div>
+                            <p>No recent activity</p>
+                        </div>`;
+                    return;
+                }
+
+                container.innerHTML = data.map(s => {
+                    const score = fmt.score(s.score);
+                    const when = s.ts || s.created_at || '';
+                    return `
+                        <div class="metric-row">
+                            <span class="metric-label">${s.symbol || '-'} ${s.setup_id || ''} ${s.direction || ''}</span>
+                            <span class="metric-value ${score.class}" title="${when}">${score.text}</span>
+                        </div>
+                    `;
+                }).join('');
+            } catch (err) {
+                console.error('Failed to fetch recent activity:', err);
+            }
+        }
         
         // Fetch strategies
         async function fetchStrategies() {
@@ -726,6 +753,10 @@ class BotDashboard:
                 if (data.by_setup) {
                     renderSignalChart(data.by_setup);
                 }
+
+                if (data.setup_reports) {
+                    renderStrategyPerformance(data.setup_reports);
+                }
             } catch (err) {
                 console.error('Analytics not available:', err);
             }
@@ -760,17 +791,46 @@ class BotDashboard:
             
             container.innerHTML = bars;
         }
+
+        function renderStrategyPerformance(setupReports) {
+            const container = document.getElementById('strategy-chart');
+            if (!Array.isArray(setupReports) || setupReports.length === 0) {
+                container.innerHTML = '<div class="empty-state"><p>No strategy performance data</p></div>';
+                return;
+            }
+
+            const rows = setupReports
+                .slice()
+                .sort((a, b) => (b.trades || 0) - (a.trades || 0))
+                .slice(0, 12)
+                .map(row => {
+                    const winRate = ((row.win_rate || 0) * 100).toFixed(1) + '%';
+                    const rr = Number(row.expectancy_r || 0).toFixed(2);
+                    const valueClass = row.expectancy_r > 0 ? 'green' : (row.expectancy_r < 0 ? 'red' : 'yellow');
+                    return `
+                        <div class="metric-row">
+                            <span class="metric-label">${row.setup_id}</span>
+                            <span class="metric-value ${valueClass}">${row.trades || 0} / ${winRate} / ${rr}R</span>
+                        </div>
+                    `;
+                }).join('');
+
+            container.innerHTML = rows;
+        }
         
         // Initial fetch
         fetchStatus();
         fetchSignals();
+        fetchRecentActivity();
         fetchStrategies();
         fetchAnalytics();
         
         // Periodic updates
         setInterval(fetchStatus, 5000);
         setInterval(fetchSignals, 10000);
+        setInterval(fetchRecentActivity, 10000);
         setInterval(fetchStrategies, 30000);  // Refresh strategies every 30s
+        setInterval(fetchAnalytics, 30000);
         
         // Welcome toast
         setTimeout(() => {
@@ -824,14 +884,17 @@ class BotDashboard:
                     "symbol": sig.get("symbol"),
                     "setup_id": sig.get("setup_id"),
                     "direction": sig.get("direction"),
-                    "entry_price": sig.get("entry_price"),
-                    "stop_price": sig.get("stop_price"),
-                    "tp1_price": sig.get("tp1_price"),
-                    "tp2_price": sig.get("tp2_price"),
+                    "entry_price": sig.get("activation_price")
+                    or sig.get("entry_price")
+                    or sig.get("entry_mid"),
+                    "stop_price": sig.get("stop_price") or sig.get("stop"),
+                    "tp1_price": sig.get("tp1_price") or sig.get("take_profit_1"),
+                    "tp2_price": sig.get("tp2_price") or sig.get("take_profit_2"),
                     "score": sig.get("score"),
                     "risk_reward": sig.get("risk_reward"),
                     "status": sig.get("status"),
                     "tracking_id": sig.get("tracking_id"),
+                    "tracking_ref": sig.get("tracking_ref"),
                 }
                 for sig in signals
             ]

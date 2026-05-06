@@ -1,0 +1,1108 @@
+{
+  "run_id": "20260504_045105_36740",
+  "record_count": 27724,
+  "strategy_performance": [
+    {
+      "strategy_id": "absorption",
+      "rows": 585,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {
+        "pattern.absorption_not_confirmed": 564,
+        "pattern.raw_hit": 21
+      },
+      "top_reject_reason": "pattern.absorption_not_confirmed",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "aggression_shift",
+      "rows": 479,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {
+        "pattern.volume_too_low": 293,
+        "pattern.aggression_shift_too_small": 184,
+        "pattern.raw_hit": 2
+      },
+      "top_reject_reason": "pattern.volume_too_low",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "altcoin_season_index",
+      "rows": 1160,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {
+        "data.altcoin_season_index_missing": 1120,
+        "pattern.not_altcoin": 40
+      },
+      "top_reject_reason": "data.altcoin_season_index_missing",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "atr_expansion",
+      "rows": 493,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {
+        "indicator.atr_expansion_too_low": 462,
+        "unknown": 15,
+        "pattern.raw_hit": 15,
+        "5m_opposes_short": 1
+      },
+      "top_reject_reason": "indicator.atr_expansion_too_low",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "bb_squeeze",
+      "rows": 228,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {
+        "indicator.bb_squeeze_not_active": 149,
+        "pattern.squeeze_breakout_unconfirmed": 68,
+        "unknown": 7,
+        "pattern.raw_hit": 3,
+        "consecutive_sl_blacklist": 1
+      },
+      "top_reject_reason": "indicator.bb_squeeze_not_active",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "bos_choch",
+      "rows": 481,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {
+        "pattern.raw_hit": 418,
+        "data.swing_stop_missing_short": 24,
+        "crowding_headwind_long": 11,
+        "unknown": 9,
+        "score_too_low": 5,
+        "breakout_crowding_unconfirmed_short": 4,
+        "5m_opposes_long": 3,
+        "breakout_crowding_unconfirmed_long": 3,
+        "risk_reward_too_low": 2,
+        "5m_opposes_short": 1,
+        "family_precheck_opposes_short": 1
+      },
+      "top_reject_reason": "pattern.raw_hit",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "breaker_block",
+      "rows": 476,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {
+        "pattern.no_breaker_block_detected": 474,
+        "crowding_headwind_long": 1,
+        "pattern.raw_hit": 1
+      },
+      "top_reject_reason": "pattern.no_breaker_block_detected",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "btc_correlation",
+      "rows": 904,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {
+        "data.btc_context_missing": 692,
+        "pattern.volume_too_low": 76,
+        "pattern.raw_hit": 49,
+        "pattern.benchmark_symbol": 41,
+        "pattern.btc_correlation_not_aligned": 29,
+        "unknown": 16,
+        "flow_precheck_opposes_long": 1
+      },
+      "top_reject_reason": "data.btc_context_missing",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "cvd_divergence",
+      "rows": 1035,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {
+        "pattern.no_cvd_divergence_detected": 661,
+        "data.tp1_too_close_or_missing": 248,
+        "context.context_bias_blocks_long": 52,
+        "context.context_bias_blocks_short": 32,
+        "unknown": 27,
+        "pattern.raw_hit": 11,
+        "score_too_low": 2,
+        "stop_too_tight": 1,
+        "stale_15m": 1
+      },
+      "top_reject_reason": "pattern.no_cvd_divergence_detected",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "depth_imbalance",
+      "rows": 1040,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {
+        "data.depth_imbalance_missing": 1039,
+        "engine.timeout": 1
+      },
+      "top_reject_reason": "data.depth_imbalance_missing",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "ema_bounce",
+      "rows": 1007,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {
+        "pattern.no_bounce_pattern": 941,
+        "indicator.adx_too_low": 42,
+        "pattern.raw_hit": 20,
+        "spread_too_wide": 2,
+        "risk_reward_too_low": 1,
+        "5m_opposes_long": 1
+      },
+      "top_reject_reason": "pattern.no_bounce_pattern",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "funding_reversal",
+      "rows": 495,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {
+        "indicator.funding_not_extreme": 456,
+        "indicator.funding_trend_flat": 15,
+        "pattern.volume_too_low": 13,
+        "data.reversal_candle_missing_short": 10,
+        "engine.timeout": 1
+      },
+      "top_reject_reason": "indicator.funding_not_extreme",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "fvg_setup",
+      "rows": 1316,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {
+        "pattern.no_fvg_detected": 592,
+        "pattern.fvg_constraints_failed": 362,
+        "pattern.raw_hit": 246,
+        "pattern.impulse_volume_below_threshold": 97,
+        "risk_reward_too_low": 5,
+        "flow_precheck_opposes_long": 4,
+        "5m_opposes_long": 3,
+        "flow_precheck_opposes_short": 3,
+        "regime_not_suitable": 2,
+        "crowding_headwind_long": 1,
+        "family_precheck_opposes_short": 1
+      },
+      "top_reject_reason": "pattern.no_fvg_detected",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "hidden_divergence",
+      "rows": 453,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {
+        "pattern.volume_too_low": 275,
+        "pattern.no_hidden_divergence_detected": 155,
+        "data.delta_confirmation_missing_long": 23
+      },
+      "top_reject_reason": "pattern.volume_too_low",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "keltner_breakout",
+      "rows": 1061,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {
+        "pattern.volume_too_low": 844,
+        "pattern.no_keltner_breakout": 151,
+        "pattern.raw_hit": 52,
+        "unknown": 12,
+        "risk_reward_too_low": 1,
+        "crowding_headwind_long": 1
+      },
+      "top_reject_reason": "pattern.volume_too_low",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "liquidation_heatmap",
+      "rows": 804,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {
+        "unknown": 228,
+        "pattern.raw_hit": 211,
+        "data.liquidation_score_missing": 208,
+        "pattern.liquidation_cluster_not_actionable": 149,
+        "score_too_low": 6,
+        "stop_too_tight": 1,
+        "symbol_has_open_signal": 1
+      },
+      "top_reject_reason": "unknown",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "liquidity_sweep",
+      "rows": 1103,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {
+        "pattern.no_liquidity_sweep_detected": 1103
+      },
+      "top_reject_reason": "pattern.no_liquidity_sweep_detected",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "ls_ratio_extreme",
+      "rows": 568,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {
+        "pattern.ls_ratio_not_extreme": 282,
+        "data.ls_ratio_missing": 144,
+        "unknown": 72,
+        "pattern.raw_hit": 65,
+        "stop_too_tight": 3,
+        "symbol_has_open_signal": 2
+      },
+      "top_reject_reason": "pattern.ls_ratio_not_extreme",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "multi_tf_trend",
+      "rows": 1106,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {
+        "pattern.volume_too_low": 544,
+        "indicator.adx_too_low": 362,
+        "pattern.multi_tf_not_aligned": 107,
+        "pattern.raw_hit": 69,
+        "unknown": 21,
+        "symbol_has_open_signal": 2,
+        "5m_opposes_long": 1
+      },
+      "top_reject_reason": "pattern.volume_too_low",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "oi_divergence",
+      "rows": 399,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {
+        "indicator.oi_price_divergence_too_small": 263,
+        "data.oi_change_missing": 136
+      },
+      "top_reject_reason": "indicator.oi_price_divergence_too_small",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "order_block",
+      "rows": 478,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {
+        "pattern.no_order_block_detected": 431,
+        "data.order_block_impulse_missing": 24,
+        "pattern.order_block_too_old": 23
+      },
+      "top_reject_reason": "pattern.no_order_block_detected",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "price_velocity",
+      "rows": 531,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {
+        "pattern.volume_too_low": 296,
+        "pattern.velocity_too_low": 105,
+        "unknown": 52,
+        "pattern.raw_hit": 51,
+        "pattern.direction_not_confirmed": 25,
+        "breakout_crowding_unconfirmed_short": 1,
+        "consecutive_sl_blacklist": 1
+      },
+      "top_reject_reason": "pattern.volume_too_low",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "rsi_divergence_bottom",
+      "rows": 348,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {
+        "data.rsi_divergence_missing": 333,
+        "pattern.raw_hit": 9,
+        "unknown": 4,
+        "score_too_low": 1,
+        "stop_too_tight": 1
+      },
+      "top_reject_reason": "data.rsi_divergence_missing",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "session_killzone",
+      "rows": 168,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {
+        "pattern.average_volume_too_low": 110,
+        "context.outside_killzone": 32,
+        "indicator.adx_too_low": 15,
+        "pattern.raw_hit": 4,
+        "data.directional_momentum_missing": 3,
+        "risk_reward_too_low": 2,
+        "crowding_headwind_long": 1,
+        "breakout_crowding_unconfirmed_long": 1
+      },
+      "top_reject_reason": "pattern.average_volume_too_low",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "spread_strategy",
+      "rows": 1188,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {
+        "pattern.volume_too_low": 674,
+        "filter.spread_too_wide": 182,
+        "unknown": 163,
+        "pattern.raw_hit": 131,
+        "context.momentum_too_low": 25,
+        "crowding_headwind_long": 3,
+        "score_too_low": 3,
+        "stop_too_tight": 2,
+        "5m_opposes_long": 2,
+        "symbol_has_open_signal": 1,
+        "crowding_headwind_short": 1,
+        "consecutive_sl_blacklist": 1
+      },
+      "top_reject_reason": "pattern.volume_too_low",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "squeeze_setup",
+      "rows": 476,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {
+        "indicator.no_bb_kc_squeeze": 476
+      },
+      "top_reject_reason": "indicator.no_bb_kc_squeeze",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "stop_hunt_detection",
+      "rows": 333,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {
+        "pattern.volume_too_low": 239,
+        "targets.stop_hunt_not_detected": 94
+      },
+      "top_reject_reason": "pattern.volume_too_low",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "structure_break_retest",
+      "rows": 483,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {
+        "pattern.no_breakout_detected": 483
+      },
+      "top_reject_reason": "pattern.no_breakout_detected",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "structure_pullback",
+      "rows": 1149,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {
+        "filter.trend_score_too_low": 308,
+        "pattern.volume_too_low": 246,
+        "pattern.no_valid_pullback_level": 222,
+        "pattern.raw_hit": 163,
+        "pattern.structure_contradicts_regime": 113,
+        "indicator.adx_too_low_1h": 59,
+        "indicator.bb_extreme_long": 19,
+        "indicator.bb_extreme_short": 10,
+        "flow_precheck_opposes_short": 3,
+        "regime_not_suitable": 3,
+        "flow_precheck_opposes_long": 1,
+        "spread_too_wide": 1,
+        "crowding_headwind_long": 1
+      },
+      "top_reject_reason": "filter.trend_score_too_low",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "supertrend_follow",
+      "rows": 1084,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {
+        "pattern.volume_too_low": 713,
+        "indicator.adx_too_low": 158,
+        "indicator.no_supertrend_pullback": 151,
+        "pattern.raw_hit": 58,
+        "risk_reward_too_low": 3,
+        "crowding_headwind_long": 1
+      },
+      "top_reject_reason": "pattern.volume_too_low",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "turtle_soup",
+      "rows": 222,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {
+        "pattern.no_false_breakout_detected": 205,
+        "unknown": 8,
+        "pattern.raw_hit": 4,
+        "data.15m_confirmation_missing_short": 2,
+        "symbol_has_open_signal": 2,
+        "cooldown_active": 1
+      },
+      "top_reject_reason": "pattern.no_false_breakout_detected",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "volume_anomaly",
+      "rows": 248,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {
+        "data.volume_spike_missing": 213,
+        "unknown": 27,
+        "pattern.candle_close_not_decisive": 3,
+        "pattern.body_too_small": 2,
+        "pattern.raw_hit": 2,
+        "consecutive_sl_blacklist": 1
+      },
+      "top_reject_reason": "data.volume_spike_missing",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "volume_climax_reversal",
+      "rows": 589,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {
+        "data.volume_climax_missing": 544,
+        "pattern.no_volume_climax_reclaim": 45
+      },
+      "top_reject_reason": "data.volume_climax_missing",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "vwap_trend",
+      "rows": 1538,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {
+        "pattern.volume_too_low": 959,
+        "pattern.no_vwap_reclaim": 399,
+        "indicator.adx_too_low": 179,
+        "pattern.raw_hit": 1
+      },
+      "top_reject_reason": "pattern.volume_too_low",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "whale_walls",
+      "rows": 613,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {
+        "data.orderbook_context_missing": 613
+      },
+      "top_reject_reason": "data.orderbook_context_missing",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "wick_trap_reversal",
+      "rows": 602,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {
+        "pattern.no_wick_trap_detected": 422,
+        "context.supertrend_opposes_15m": 151,
+        "unknown": 13,
+        "context.no_confirmation": 8,
+        "pattern.raw_hit": 7,
+        "risk_reward_too_low": 1
+      },
+      "top_reject_reason": "pattern.no_wick_trap_detected",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    },
+    {
+      "strategy_id": "wyckoff_spring",
+      "rows": 586,
+      "signal_count": 0,
+      "signal_rate_per_hour": 0.0,
+      "reject_breakdown": {
+        "pattern.volume_too_low": 438,
+        "data.wyckoff_spring_upthrust_missing": 148
+      },
+      "top_reject_reason": "pattern.volume_too_low",
+      "avg_confidence": null,
+      "symbol_distribution": {},
+      "timeframe_distribution": {}
+    }
+  ],
+  "calibration_issues": [
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "absorption",
+      "detail": "585 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "absorption",
+      "detail": "585/585 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "aggression_shift",
+      "detail": "479 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "aggression_shift",
+      "detail": "479/479 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "altcoin_season_index",
+      "detail": "1160 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "altcoin_season_index",
+      "detail": "1160/1160 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "atr_expansion",
+      "detail": "493 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "atr_expansion",
+      "detail": "493/493 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "bb_squeeze",
+      "detail": "228 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "bb_squeeze",
+      "detail": "228/228 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "bos_choch",
+      "detail": "481 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "bos_choch",
+      "detail": "481/481 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "breaker_block",
+      "detail": "476 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "breaker_block",
+      "detail": "476/476 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "btc_correlation",
+      "detail": "904 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "btc_correlation",
+      "detail": "904/904 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "cvd_divergence",
+      "detail": "1035 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "cvd_divergence",
+      "detail": "1035/1035 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "depth_imbalance",
+      "detail": "1040 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "depth_imbalance",
+      "detail": "1040/1040 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "ema_bounce",
+      "detail": "1007 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "ema_bounce",
+      "detail": "1007/1007 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "funding_reversal",
+      "detail": "495 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "funding_reversal",
+      "detail": "495/495 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "fvg_setup",
+      "detail": "1316 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "fvg_setup",
+      "detail": "1316/1316 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "hidden_divergence",
+      "detail": "453 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "hidden_divergence",
+      "detail": "453/453 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "keltner_breakout",
+      "detail": "1061 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "keltner_breakout",
+      "detail": "1061/1061 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "liquidation_heatmap",
+      "detail": "804 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "liquidation_heatmap",
+      "detail": "804/804 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "liquidity_sweep",
+      "detail": "1103 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "liquidity_sweep",
+      "detail": "1103/1103 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "ls_ratio_extreme",
+      "detail": "568 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "ls_ratio_extreme",
+      "detail": "568/568 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "multi_tf_trend",
+      "detail": "1106 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "multi_tf_trend",
+      "detail": "1106/1106 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "oi_divergence",
+      "detail": "399 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "oi_divergence",
+      "detail": "399/399 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "order_block",
+      "detail": "478 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "order_block",
+      "detail": "478/478 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "price_velocity",
+      "detail": "531 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "price_velocity",
+      "detail": "531/531 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "rsi_divergence_bottom",
+      "detail": "348 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "rsi_divergence_bottom",
+      "detail": "348/348 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "session_killzone",
+      "detail": "168 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "session_killzone",
+      "detail": "168/168 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "spread_strategy",
+      "detail": "1188 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "spread_strategy",
+      "detail": "1188/1188 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "squeeze_setup",
+      "detail": "476 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "squeeze_setup",
+      "detail": "476/476 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "stop_hunt_detection",
+      "detail": "333 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "stop_hunt_detection",
+      "detail": "333/333 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "structure_break_retest",
+      "detail": "483 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "structure_break_retest",
+      "detail": "483/483 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "structure_pullback",
+      "detail": "1149 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "structure_pullback",
+      "detail": "1149/1149 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "supertrend_follow",
+      "detail": "1084 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "supertrend_follow",
+      "detail": "1084/1084 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "turtle_soup",
+      "detail": "222 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "turtle_soup",
+      "detail": "222/222 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "volume_anomaly",
+      "detail": "248 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "volume_anomaly",
+      "detail": "248/248 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "volume_climax_reversal",
+      "detail": "589 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "volume_climax_reversal",
+      "detail": "589/589 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "vwap_trend",
+      "detail": "1538 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "vwap_trend",
+      "detail": "1538/1538 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "whale_walls",
+      "detail": "613 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "whale_walls",
+      "detail": "613/613 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "wick_trap_reversal",
+      "detail": "602 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "wick_trap_reversal",
+      "detail": "602/602 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "zero_signal_strategy",
+      "subject": "wyckoff_spring",
+      "detail": "586 decisions, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "high_reject_rate",
+      "subject": "wyckoff_spring",
+      "detail": "586/586 rejects",
+      "severity": "medium"
+    },
+    {
+      "kind": "priority_asset_zero_signals",
+      "subject": "BTCUSDT",
+      "detail": "620 rows, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "priority_asset_zero_signals",
+      "subject": "ETHUSDT",
+      "detail": "603 rows, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "priority_asset_zero_signals",
+      "subject": "XAUUSDT",
+      "detail": "551 rows, 0 signals",
+      "severity": "medium"
+    },
+    {
+      "kind": "priority_asset_zero_signals",
+      "subject": "XAGUSDT",
+      "detail": "569 rows, 0 signals",
+      "severity": "medium"
+    }
+  ],
+  "threshold_recommendations": []
+}

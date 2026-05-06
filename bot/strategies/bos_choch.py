@@ -10,6 +10,8 @@ from __future__ import annotations
 import logging
 import math
 
+import polars as pl
+
 from ..setup_base import BaseSetup
 from ..config import BotSettings
 from ..models import PreparedSymbol, Signal
@@ -102,6 +104,78 @@ def _select_external_stop_level(
         external_side_filtered=side_filtered,
     )
     return None, details
+
+
+def _prefix_stop_details(prefix: str, details: dict[str, object]) -> dict[str, object]:
+    prefixed: dict[str, object] = {}
+    for key, value in details.items():
+        suffix = key.removeprefix("external_")
+        prefixed[f"{prefix}_{suffix}"] = value
+    return prefixed
+
+
+def _select_stop_level_with_fallback(
+    *,
+    frame: pl.DataFrame,
+    external_markers: list[object],
+    external_levels: list[object],
+    internal_markers: list[object],
+    internal_levels: list[object],
+    search_end: int,
+    marker: float,
+    price: float,
+    break_level: float,
+    atr: float,
+    above_price: bool,
+) -> tuple[float | None, str | None, dict[str, object]]:
+    external_level, external_details = _select_external_stop_level(
+        markers=external_markers,
+        levels=external_levels,
+        search_end=search_end,
+        marker=marker,
+        price=price,
+        above_price=above_price,
+    )
+    details = _prefix_stop_details("external", external_details)
+    if external_level is not None:
+        details["stop_source"] = "external_swing"
+        return external_level, "external_swing", details
+
+    if atr > 0.0 and math.isfinite(atr):
+        atr_level = break_level + 2.0 * atr if above_price else break_level - 2.0 * atr
+        if atr_level > price if above_price else atr_level < price:
+            details["stop_source"] = "atr_stop"
+            details["fallback_used"] = "atr_2x_stop"
+            details["atr_stop_level"] = atr_level
+            details["atr_stop_atr"] = atr
+            return atr_level, "atr_stop", details
+
+    if frame.height >= 2:
+        previous_level = float(frame.item(-2, "high" if above_price else "low"))
+        if math.isfinite(previous_level) and previous_level > 0.0:
+            if previous_level > price if above_price else previous_level < price:
+                details["stop_source"] = "previous_candle"
+                details["fallback_used"] = "previous_candle_stop"
+                details["previous_candle_stop_level"] = previous_level
+                return previous_level, "previous_candle", details
+
+    internal_level, internal_details = _select_external_stop_level(
+        markers=internal_markers,
+        levels=internal_levels,
+        search_end=search_end,
+        marker=marker,
+        price=price,
+        above_price=above_price,
+    )
+    details.update(_prefix_stop_details("internal", internal_details))
+    if internal_level is not None:
+        details["stop_source"] = "internal_swing"
+        details["fallback_used"] = "internal_swing_stop"
+        return internal_level, "internal_swing", details
+
+    details["stop_source"] = "none"
+    details["fallback_used"] = "none"
+    return None, None, details
 
 
 class BOSCHOCHSetup(BaseSetup):
@@ -220,33 +294,47 @@ class BOSCHOCHSetup(BaseSetup):
         )
         external_markers = external_swings["HighLow"].to_list()
         external_levels = external_swings["Level"].to_list()
+        internal_swings = swing_highs_lows(
+            w,
+            swing_length=swing_lookback,
+            mode="live_safe",
+        )
+        internal_markers = internal_swings["HighLow"].to_list()
+        internal_levels = internal_swings["Level"].to_list()
         external_search_end = min(
             int(structure_zone.broken_index or (w.height - 1)),
             len(external_markers) - 1,
             len(external_levels) - 1,
+            len(internal_markers) - 1,
+            len(internal_levels) - 1,
         )
 
         # --- Compute structural SL/TP ---
         if direction == "long":
-            # SL uses external SMC swing structure only; internal CHoCH swings are not stop anchors.
-            pivot_level, stop_details = _select_external_stop_level(
-                markers=external_markers,
-                levels=external_levels,
+            pivot_level, stop_source, stop_details = _select_stop_level_with_fallback(
+                frame=w,
+                external_markers=external_markers,
+                external_levels=external_levels,
+                internal_markers=internal_markers,
+                internal_levels=internal_levels,
                 search_end=external_search_end,
                 marker=-1.0,
                 price=price,
+                break_level=float(structure_zone.level or price),
+                atr=atr,
                 above_price=False,
             )
             if pivot_level is None:
                 _reject(
                     prepared,
                     setup_id,
-                    "external_swing_stop_missing_long",
+                    "swing_stop_missing_long",
                     external_swing_lookback=external_swing_lookback,
+                    swing_lookback=swing_lookback,
                     **stop_details,
                 )
                 return None
-            stop_price = pivot_level - sl_buffer_atr * atr
+            stop_price = pivot_level if stop_source in {"atr_stop", "previous_candle"} else pivot_level - sl_buffer_atr * atr
             risk = price - stop_price
             if risk <= 0:
                 _reject(prepared, setup_id, "risk_non_positive_long", stop=stop_price, price=price)
@@ -262,25 +350,30 @@ class BOSCHOCHSetup(BaseSetup):
                 tp2_cands = sh4_prices.filter(sh4_prices > price)
                 tp2 = float(tp2_cands[0]) if tp2_cands.len() > 0 else None
         else:
-            # SL uses external SMC swing structure only; internal CHoCH swings are not stop anchors.
-            pivot_level, stop_details = _select_external_stop_level(
-                markers=external_markers,
-                levels=external_levels,
+            pivot_level, stop_source, stop_details = _select_stop_level_with_fallback(
+                frame=w,
+                external_markers=external_markers,
+                external_levels=external_levels,
+                internal_markers=internal_markers,
+                internal_levels=internal_levels,
                 search_end=external_search_end,
                 marker=1.0,
                 price=price,
+                break_level=float(structure_zone.level or price),
+                atr=atr,
                 above_price=True,
             )
             if pivot_level is None:
                 _reject(
                     prepared,
                     setup_id,
-                    "external_swing_stop_missing_short",
+                    "swing_stop_missing_short",
                     external_swing_lookback=external_swing_lookback,
+                    swing_lookback=swing_lookback,
                     **stop_details,
                 )
                 return None
-            stop_price = pivot_level + sl_buffer_atr * atr
+            stop_price = pivot_level if stop_source in {"atr_stop", "previous_candle"} else pivot_level + sl_buffer_atr * atr
             risk = stop_price - price
             if risk <= 0:
                 _reject(prepared, setup_id, "risk_non_positive_short", stop=stop_price, price=price)
@@ -314,7 +407,7 @@ class BOSCHOCHSetup(BaseSetup):
 
         reasons = [
             f"CHoCH {direction}: structure reversal level={structure_zone.level:.4f}",
-            f"external_swing_sl={pivot_level:.4f}",
+            f"{stop_source}_sl={pivot_level:.4f}",
             f"sh[-3]={sh_vals[-3]:.4f} sh[-2]={sh_vals[-2]:.4f} sh[-1]={sh_vals[-1]:.4f}",
             f"sl[-3]={sl_vals[-3]:.4f} sl[-2]={sl_vals[-2]:.4f} sl[-1]={sl_vals[-1]:.4f}",
         ]

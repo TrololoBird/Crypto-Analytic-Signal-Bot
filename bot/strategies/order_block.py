@@ -189,20 +189,14 @@ class OrderBlockSetup(BaseSetup):
             rsi=rsi,
         )
 
-        if direction == "long" and bias_1h == "downtrend":
-            score *= dynamic_params.get(
-                "bias_mismatch_penalty", defaults["bias_mismatch_penalty"]
-            )
-        if direction == "short" and bias_1h == "uptrend":
-            score *= dynamic_params.get(
-                "bias_mismatch_penalty", defaults["bias_mismatch_penalty"]
-            )
-
-        if direction == "long" and structure_1h == "downtrend":
-            score *= dynamic_params.get(
-                "bias_mismatch_penalty", defaults["bias_mismatch_penalty"]
-            )
-        if direction == "short" and structure_1h == "uptrend":
+        context_mismatch = (
+            direction == "long"
+            and (bias_1h == "downtrend" or structure_1h == "downtrend")
+        ) or (
+            direction == "short"
+            and (bias_1h == "uptrend" or structure_1h == "uptrend")
+        )
+        if context_mismatch:
             score *= dynamic_params.get(
                 "bias_mismatch_penalty", defaults["bias_mismatch_penalty"]
             )

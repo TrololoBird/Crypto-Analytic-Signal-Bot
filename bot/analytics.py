@@ -27,6 +27,8 @@ class StrategyAnalytics:
         for setup in setup_rows:
             setup_id = str(setup.get("setup_id") or "unknown")
             rows = by_setup.get(setup_id, [])
+            trades = int(setup.get("total") or 0)
+            win_rate = float(setup.get("win_rate") or 0.0)
             gross_profit = sum(
                 max(float(r.get("pnl_r_multiple") or 0.0), 0.0) for r in rows
             )
@@ -47,9 +49,11 @@ class StrategyAnalytics:
             setup_reports.append(
                 {
                     "setup_id": setup_id,
-                    "trades": int(setup.get("total") or 0),
-                    "win_rate": round(float(setup.get("win_rate") or 0.0), 4),
+                    "trades": trades,
+                    "count": trades,
+                    "win_rate": round(win_rate, 4),
                     "expectancy_r": round(expectancy, 4),
+                    "avg_rr": round(expectancy, 4),
                     "profit_factor": None
                     if profit_factor is None
                     else round(profit_factor, 4),
@@ -57,9 +61,27 @@ class StrategyAnalytics:
                 }
             )
 
+        setup_reports = sorted(setup_reports, key=lambda r: r["setup_id"])
+        total_trades = sum(int(r["trades"]) for r in setup_reports)
+        weighted_wins = sum(
+            float(r["win_rate"]) * int(r["trades"]) for r in setup_reports
+        )
+        weighted_expectancy = sum(
+            float(r["expectancy_r"]) * int(r["trades"]) for r in setup_reports
+        )
+
         return {
             "generated_at": datetime.now(UTC).isoformat(),
             "window_days": int(days),
-            "setup_reports": sorted(setup_reports, key=lambda r: r["setup_id"]),
-            "total_trades": sum(int(r["trades"]) for r in setup_reports),
+            "summary": {
+                "total_signals": total_trades,
+                "total_trades": total_trades,
+                "win_rate": (weighted_wins / total_trades) if total_trades else 0.0,
+                "avg_rr": (weighted_expectancy / total_trades)
+                if total_trades
+                else 0.0,
+            },
+            "by_setup": {str(row["setup_id"]): row for row in setup_reports},
+            "setup_reports": setup_reports,
+            "total_trades": total_trades,
         }

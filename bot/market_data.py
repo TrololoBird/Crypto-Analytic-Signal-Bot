@@ -36,7 +36,8 @@ _FAPI_BASE_URL = "https://fapi.binance.com"
 # Global semaphore to prevent REST API flood during startup
 _REST_GLOBAL_SEMAPHORE = asyncio.Semaphore(5)
 
-# /futures/data/* request-based IP limit (not weight-based).
+# Request-count based IP limit for public endpoints capped separately from the
+# USD-M request-weight budget.
 # Docs example (Open Interest Statistics): "IP rate limit 1000 requests/5min".
 _FUTURES_DATA_IP_LIMIT_WINDOW_S = 300.0
 _FUTURES_DATA_IP_LIMIT_OFFICIAL_MAX = 1000
@@ -75,13 +76,13 @@ _ENDPOINT_WEIGHTS: dict[str, int] = {
     "exchange_information": 1,
     "ticker24hr_price_change_statistics": 40,
     "symbol_order_book_ticker": 2,
-    "compressed_aggregate_trades_list": 2,
+    "compressed_aggregate_trades_list": 20,
     "open_interest": 1,
     # /futures/data/openInterestHist has request weight=0; it is constrained by an IP request limit instead.
     "open_interest_statistics": 0,
-    "top_trader_long_short_ratio_accounts": 1,
-    "top_trader_long_short_ratio_positions": 1,
-    "global_long_short_account_ratio": 1,
+    "top_trader_long_short_ratio_accounts": 0,
+    "top_trader_long_short_ratio_positions": 0,
+    "global_long_short_account_ratio": 0,
     "taker_long_short_ratio": 0,
     "basis": 0,
     "premium_index": 1,
@@ -89,13 +90,16 @@ _ENDPOINT_WEIGHTS: dict[str, int] = {
 }
 
 _FUTURES_DATA_REQUEST_LIMITED_OPS: set[str] = {
-    # /futures/data/*
+    # /futures/data/* public endpoints: official request weight 0, separate IP caps.
     "open_interest_statistics",
     "top_trader_long_short_ratio_accounts",
     "top_trader_long_short_ratio_positions",
     "global_long_short_account_ratio",
     "taker_long_short_ratio",
     "basis",
+    # /fapi/v1/fundingRate is public and weight=1, but has its own
+    # 500 requests / 5 minutes / IP cap. The default limiter value is lower.
+    "funding_rate_history",
 }
 _DEFAULT_KLINE_FETCH_LIMIT = 300
 
@@ -116,7 +120,7 @@ _PUBLIC_ENDPOINT_REGISTRY: dict[str, _PublicEndpointSpec] = {
     "compressed_aggregate_trades_list": _PublicEndpointSpec("/fapi/v1/aggTrades"),
     "premium_index": _PublicEndpointSpec("/fapi/v1/premiumIndex"),
     "open_interest": _PublicEndpointSpec("/fapi/v1/openInterest"),
-    "funding_rate_history": _PublicEndpointSpec("/fapi/v1/fundingRate"),
+    "funding_rate_history": _PublicEndpointSpec("/fapi/v1/fundingRate", ip_limited=True),
     "open_interest_statistics": _PublicEndpointSpec("/futures/data/openInterestHist", ip_limited=True),
     "top_trader_long_short_ratio_accounts": _PublicEndpointSpec("/futures/data/topLongShortAccountRatio", ip_limited=True),
     "top_trader_long_short_ratio_positions": _PublicEndpointSpec("/futures/data/topLongShortPositionRatio", ip_limited=True),
@@ -126,11 +130,22 @@ _PUBLIC_ENDPOINT_REGISTRY: dict[str, _PublicEndpointSpec] = {
 }
 
 _PUBLIC_PATH_PREFIXES = ("/fapi/v1/", "/futures/data/")
-_FORBIDDEN_PUBLIC_PATH_MARKERS = ("/private", "listenkey", "/ws-api", "/sapi", "/papi", "signature=", "timestamp=")
+_ALLOWED_PUBLIC_REST_PATHS = frozenset(
+    spec.path.lower() for spec in _PUBLIC_ENDPOINT_REGISTRY.values()
+)
+_FORBIDDEN_PUBLIC_PATH_MARKERS = (
+    "/private",
+    "listenkey",
+    "/ws-api",
+    "/sapi",
+    "/papi",
+    "signature=",
+    "timestamp=",
+)
 
 
 def validate_runtime_public_rest_url(url: str) -> None:
-    """Validate that a runtime REST URL stays inside public USD-M market data."""
+    """Validate that a runtime REST URL stays inside registered public USD-M data."""
     parsed = urlparse(str(url or "").strip())
     host = parsed.netloc.lower()
     path = parsed.path.lower()
@@ -140,8 +155,10 @@ def validate_runtime_public_rest_url(url: str) -> None:
     combined = f"{path}?{query}" if query else path
     if any(marker in combined for marker in _FORBIDDEN_PUBLIC_PATH_MARKERS):
         raise ValueError(f"runtime REST URL contains private/auth endpoint paths: {url}")
-    if not any(path.startswith(prefix) for prefix in _PUBLIC_PATH_PREFIXES):
-        raise ValueError(f"runtime REST URL must use public USD-M endpoint paths: {url}")
+    if path not in _ALLOWED_PUBLIC_REST_PATHS:
+        raise ValueError(
+            f"runtime REST URL must use registered public USD-M endpoint paths: {url}"
+        )
 
 
 class _SlidingWindowRateLimiter:
@@ -555,14 +572,13 @@ class BinanceFuturesMarketData:
             self._track_weight(operation)
             self._record_circuit_success(operation)
             return result
-        except (asyncio.TimeoutError, TimeoutError, asyncio.CancelledError) as exc:
-            if isinstance(exc, asyncio.CancelledError):
-                task = asyncio.current_task()
-                if task is None or task.cancelled():
-                    raise
+        except asyncio.CancelledError:
+            raise
+        except (asyncio.TimeoutError, TimeoutError) as exc:
             symbol = kwargs.get("symbol")
             self._record_circuit_failure(operation)
-            LOG.warning(
+            log_timeout = LOG.info if operation == "symbol_order_book_ticker" else LOG.warning
+            log_timeout(
                 "rest timeout | operation=%s symbol=%s timeout=%.1fs",
                 operation,
                 symbol,
@@ -733,13 +749,12 @@ class BinanceFuturesMarketData:
                 response_age_s=0.0,
             )
             return payload
-        except (asyncio.TimeoutError, TimeoutError, asyncio.CancelledError) as exc:
-            if isinstance(exc, asyncio.CancelledError):
-                task = asyncio.current_task()
-                if task is None or task.cancelled():
-                    raise
+        except asyncio.CancelledError:
+            raise
+        except (asyncio.TimeoutError, TimeoutError) as exc:
             self._record_circuit_failure(operation)
-            LOG.warning(
+            log_timeout = LOG.info if operation == "symbol_order_book_ticker" else LOG.warning
+            log_timeout(
                 "rest timeout | operation=%s symbol=%s timeout=%.1fs",
                 operation,
                 symbol,
@@ -999,7 +1014,7 @@ class BinanceFuturesMarketData:
                 detail = (exc.detail or "").lower()
                 if attempt < max_attempts and "timeout" in detail:
                     backoff = min(2.0, 0.5 * (2 ** (attempt - 1))) * random.uniform(0.9, 1.1)
-                    LOG.warning(
+                    LOG.info(
                         "book ticker retry | symbol=%s attempt=%d/%d backoff=%.2fs detail=%s",
                         symbol,
                         attempt,
@@ -1009,7 +1024,7 @@ class BinanceFuturesMarketData:
                     )
                     await asyncio.sleep(backoff)
                     continue
-                LOG.warning(
+                LOG.info(
                     "book ticker unavailable, returning None prices | symbol=%s detail=%s",
                     symbol,
                     detail,

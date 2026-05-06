@@ -526,8 +526,12 @@ def create_outcome_from_tracked(
         else:
             pnl_pct = (entry_price - exit_price) / entry_price * 100.0
 
-        # PnL в R множителях
-        risk = abs(entry_price - tracked.stop)
+        # R must use the original planned stop. Runtime tracking may move
+        # tracked.stop to break-even after TP1, which would distort analytics.
+        risk_stop = (
+            tracked.initial_stop if tracked.initial_stop is not None else tracked.stop
+        )
+        risk = abs(entry_price - risk_stop)
         if risk > 0:
             pnl_r_multiple = pnl_pct / (risk / entry_price * 100.0) if risk > 0 else 0.0
 

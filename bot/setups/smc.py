@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -655,6 +656,37 @@ def _fvg_invalidation_index(
     return int(np.argmax(mask) + start)
 
 
+def _fvg_fill_metrics(
+    frame: pl.DataFrame,
+    *,
+    direction: str,
+    top: float,
+    bottom: float,
+    created_index: int,
+) -> dict[str, float | int]:
+    """Measure FVG fill percentage and age-based confidence decay."""
+    width = max(abs(float(top) - float(bottom)), 0.0)
+    age_bars = max(int(frame.height) - int(created_index) - 1, 0)
+    if width <= 0.0 or created_index >= frame.height - 1:
+        fill_pct = 0.0
+    elif direction == "long":
+        after_lows = frame["low"].slice(created_index + 1)
+        lowest = float(after_lows.min()) if after_lows.len() else float(top)
+        fill_pct = (float(top) - lowest) / width
+    else:
+        after_highs = frame["high"].slice(created_index + 1)
+        highest = float(after_highs.max()) if after_highs.len() else float(bottom)
+        fill_pct = (highest - float(bottom)) / width
+    fill_pct = max(0.0, min(1.0, fill_pct))
+    fill_penalty = 0.75 if fill_pct > 0.50 else 1.0
+    age_decay = math.exp(-max(age_bars - 20, 0) / 20.0)
+    return {
+        "fvg_fill_pct": round(fill_pct, 6),
+        "age_bars": age_bars,
+        "confidence_multiplier": round(max(0.0, min(1.0, fill_penalty * age_decay)), 6),
+    }
+
+
 def _order_block_touch_indices(
     frame: pl.DataFrame,
     *,
@@ -752,6 +784,13 @@ def latest_fvg_zone(
             width=high - low,
             mitigation_index=mitigation_index,
             invalidation_index=invalidation_index,
+            metadata=_fvg_fill_metrics(
+                frame,
+                direction=direction,
+                top=high,
+                bottom=low,
+                created_index=idx,
+            ),
         )
     return None
 
@@ -803,6 +842,8 @@ def latest_order_block(
             metadata={
                 "ob_volume": float(zones.item(idx, "OBVolume")),
                 "strength_pct": float(zones.item(idx, "Percentage")),
+                "age_bars": frame.height - idx - 1,
+                "mitigation_state": state,
             },
         )
     return None

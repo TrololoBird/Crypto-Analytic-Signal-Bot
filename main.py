@@ -5,8 +5,6 @@ Usage:
     python main.py
 """
 
-import sys
-
 from bot.cli import run
 
 

@@ -5,8 +5,9 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from .config import BotSettings
+from .config import BotSettings, _ALL_SETUP_IDS
 from .models import SymbolMeta, UniverseSymbol
+from .strategy_asset_fit import calculate_strategy_fit_score
 
 
 UTC = timezone.utc
@@ -14,31 +15,6 @@ STABLE_BASE_ASSETS = {"USDC", "BUSD", "FDUSD", "TUSD", "USDP", "USDS", "DAI"}
 SUPPORTED_USDM_CONTRACT_TYPES = {"PERPETUAL", "TRADIFI_PERPETUAL"}
 _ASCII_CONTRACT_RE = re.compile(r"^[A-Z0-9]{4,24}$")
 _ASCII_ASSET_RE = re.compile(r"^[A-Z0-9]{2,16}$")
-_ALL_SETUP_IDS = (
-    "structure_pullback",
-    "structure_break_retest",
-    "wick_trap_reversal",
-    "squeeze_setup",
-    "ema_bounce",
-    "fvg_setup",
-    "order_block",
-    "liquidity_sweep",
-    "bos_choch",
-    "hidden_divergence",
-    "funding_reversal",
-    "cvd_divergence",
-    "session_killzone",
-    "breaker_block",
-    "turtle_soup",
-    "vwap_trend",
-    "supertrend_follow",
-    "price_velocity",
-    "volume_anomaly",
-    "volume_climax_reversal",
-    "keltner_breakout",
-)
-
-
 def _bucket_for_price_change(price_change_pct: float) -> str:
     move = abs(float(price_change_pct))
     if move >= 8.0:
@@ -198,6 +174,7 @@ def _strategy_fits_for_row(
     price_change_pct = abs(float(row.get("price_change_pct") or 0.0))
     spread_bps = _safe_float(row.get("spread_bps"))
     crowding = _crowding_score(row)
+    symbol = str(row.get("symbol") or "").strip().upper()
 
     volume_floor = max(float(settings.universe.min_quote_volume_usd), 1.0)
     volume_multiple = quote_volume / volume_floor
@@ -276,6 +253,9 @@ def _strategy_fits_for_row(
             "depth_imbalance",
         ))
 
+    if symbol in set(settings.universe.pinned_symbols):
+        fits.extend(_ALL_SETUP_IDS)
+
     if not fits and spread_ok and quote_volume >= volume_floor:
         fits.extend(
             (
@@ -289,7 +269,34 @@ def _strategy_fits_for_row(
             )
         )
 
-    return tuple(dict.fromkeys(fits))
+    market_context = {
+        "symbol": symbol,
+        "base_asset": str(row.get("base_asset") or "").strip().upper(),
+        "liquidity_rank": liquidity_rank,
+        "price_change_pct": price_change_pct,
+        "spread_bps": spread_bps,
+        "book_age_seconds": _safe_float(row.get("book_age_seconds")),
+        "funding_rate": funding_rate,
+        "oi_current": _safe_float(row.get("oi_current")),
+        "oi_change_pct": oi_change_pct,
+    }
+    setups_config = getattr(settings, "setups", None)
+    if setups_config is not None and hasattr(setups_config, "enabled_setup_ids"):
+        enabled = set(setups_config.enabled_setup_ids())
+    else:
+        enabled = set(_ALL_SETUP_IDS)
+    return tuple(
+        setup_id
+        for setup_id in dict.fromkeys(fits)
+        if setup_id in enabled
+        and calculate_strategy_fit_score(
+            symbol,
+            setup_id,
+            market_context,
+            settings=settings,
+        )
+        > 0.0
+    )
 
 
 def _spread_freshness_score(row: dict[str, Any], settings: BotSettings) -> float:

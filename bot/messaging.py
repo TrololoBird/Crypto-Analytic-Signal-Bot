@@ -5,6 +5,7 @@ import html
 import hashlib
 import logging
 import re
+import time
 from dataclasses import dataclass
 from collections import deque
 from datetime import datetime, timedelta, timezone
@@ -111,8 +112,36 @@ class DeliveryResult:
     reason: str | None = None
 
 
+class DisabledBroadcaster:
+    """No-op broadcaster for runtime modes with external delivery disabled."""
+
+    async def preflight_check(self) -> None:
+        return None
+
+    async def send_html(
+        self, text: str, *, reply_to_message_id: int | None = None
+    ) -> DeliveryResult:
+        return DeliveryResult(status="logged", reason="notifier_disabled")
+
+    async def edit_html(self, message_id: int, text: str) -> None:
+        return None
+
+    async def send_photo(
+        self,
+        photo_bytes: bytes,
+        caption: str,
+        *,
+        reply_to_message_id: int | None = None,
+    ) -> None:
+        return None
+
+    async def close(self) -> None:
+        return None
+
+
 class TelegramBroadcaster:
     duplicate_window_seconds = TELEGRAM_DUPLICATE_WINDOW_SECONDS
+    min_send_interval_seconds = 1.25
 
     def __init__(self, token: str, target_chat_id: str) -> None:
         if not _HAS_AIogram:
@@ -131,6 +160,7 @@ class TelegramBroadcaster:
         self._recent_message_hashes: dict[str, datetime] = {}
         self._send_buffer: deque[str] = deque(maxlen=50)
         self._rate_limit_until: datetime | None = None
+        self._last_send_monotonic: float = 0.0
 
     async def preflight_check(self) -> None:
         """Verify bot token and chat access."""
@@ -236,6 +266,7 @@ class TelegramBroadcaster:
                 if BufferedInputFile is None:
                     raise RuntimeError("BufferedInputFile is unavailable")
                 photo_file = BufferedInputFile(photo_bytes, filename="chart.png")
+                await self._respect_min_send_interval()
                 await self.bot.send_photo(
                     chat_id=self.target_chat_id,
                     photo=photo_file,
@@ -243,6 +274,7 @@ class TelegramBroadcaster:
                     parse_mode="HTML",
                     reply_to_message_id=reply_to_message_id,
                 )
+                self._mark_send_timestamp()
             except Exception as exc:
                 error_str = str(exc).lower()
                 # Try plain text fallback if HTML parsing failed
@@ -264,12 +296,14 @@ class TelegramBroadcaster:
                         photo_file = BufferedInputFile(
                             photo_bytes, filename="chart.png"
                         )
+                        await self._respect_min_send_interval()
                         await self.bot.send_photo(
                             chat_id=self.target_chat_id,
                             photo=photo_file,
                             caption=fallback_caption,
                             reply_to_message_id=reply_to_message_id,
                         )
+                        self._mark_send_timestamp()
                     except Exception as fallback_exc:
                         LOG.error(
                             "telegram photo send failed (fallback): %s", fallback_exc
@@ -309,6 +343,7 @@ class TelegramBroadcaster:
     ) -> int | None:
         """Send message using aiogram Bot."""
         try:
+            await self._respect_min_send_interval()
             result = await self.bot.send_message(
                 chat_id=self.target_chat_id,
                 text=text,
@@ -328,6 +363,7 @@ class TelegramBroadcaster:
                 plain_text = self._plain_text_fallback(text, exc)
                 if plain_text:
                     try:
+                        await self._respect_min_send_interval()
                         result = await self.bot.send_message(
                             chat_id=self.target_chat_id,
                             text=plain_text,
@@ -359,6 +395,7 @@ class TelegramBroadcaster:
     async def _edit_immediate(self, message_id: int, text: str) -> None:
         """Edit message using aiogram Bot."""
         try:
+            await self._respect_min_send_interval()
             await self.bot.edit_message_text(
                 chat_id=self.target_chat_id,
                 message_id=message_id,
@@ -376,6 +413,7 @@ class TelegramBroadcaster:
                 plain_text = self._plain_text_fallback(text, exc)
                 if plain_text:
                     try:
+                        await self._respect_min_send_interval()
                         await self.bot.edit_message_text(
                             chat_id=self.target_chat_id,
                             message_id=message_id,
@@ -388,6 +426,9 @@ class TelegramBroadcaster:
                             return
                         raise
             raise
+
+    def _mark_send_timestamp(self) -> None:
+        self._last_send_monotonic = time.monotonic()
 
     def _build_payload(
         self,
@@ -416,6 +457,7 @@ class TelegramBroadcaster:
         self._circuit_reset_time = None
         self._rate_limit_until = None
         self._recent_message_hashes[message_hash] = datetime.now(UTC)
+        self._mark_send_timestamp()
 
     def _record_send_failure(self, exc: Exception) -> None:
         # Extract retry_after from aiogram exception or use fallback
@@ -449,6 +491,17 @@ class TelegramBroadcaster:
         LOG.info("telegram send throttled by retry_after | sleep=%.1fs", remaining)
         await asyncio.sleep(remaining)
         self._rate_limit_until = None
+
+    async def _respect_min_send_interval(self) -> None:
+        interval = max(0.0, float(type(self).min_send_interval_seconds))
+        if interval <= 0.0 or self._last_send_monotonic <= 0.0:
+            return
+        elapsed = time.monotonic() - self._last_send_monotonic
+        delay = interval - elapsed
+        if delay <= 0.0:
+            return
+        LOG.debug("telegram send paced", sleep_seconds=round(delay, 3))
+        await asyncio.sleep(delay)
 
     @staticmethod
     def _plain_text_fallback(text: str, exc: Exception | None = None) -> str | None:
@@ -636,6 +689,8 @@ def build_message_broadcaster(settings: Any) -> MessageBroadcaster:
         getattr(getattr(settings, "notifiers", None), "provider", "telegram")
         or "telegram"
     ).lower()
+    if provider == "none":
+        return DisabledBroadcaster()
     if provider == "telegram":
         return TelegramBroadcaster(settings.tg_token, settings.target_chat_id)
 

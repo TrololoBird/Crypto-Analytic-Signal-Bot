@@ -13,6 +13,12 @@ from .core.engine.base import (
     StrategyMetadata,
 )
 from .models import PreparedSymbol, Signal
+from .strategy_asset_fit import (
+    DEFAULT_ASSET_FIT,
+    AssetFit,
+    asset_fit_reject_reason,
+    market_context_from_prepared,
+)
 from .setups import (
     begin_strategy_decision_capture,
     finalize_strategy_decision,
@@ -37,6 +43,7 @@ class BaseSetup(AbstractStrategy):
     requires_oi: bool = False
     requires_funding: bool = False
     min_history_bars: int = 50
+    asset_fit: AssetFit = DEFAULT_ASSET_FIT
 
     def __init__(
         self, params: SetupParams | None = None, settings: BotSettings | None = None
@@ -59,6 +66,7 @@ class BaseSetup(AbstractStrategy):
             requires_oi=self.requires_oi,
             requires_funding=self.requires_funding,
             min_history_bars=self.min_history_bars,
+            asset_fit=self.asset_fit.to_dict(),
         )
 
     @abstractmethod
@@ -117,4 +125,14 @@ class BaseSetup(AbstractStrategy):
         )
 
     def can_calculate(self, prepared: PreparedSymbol) -> bool:
-        return self.is_enabled() and super().can_calculate(prepared)
+        if not self.is_enabled():
+            return False
+        reason = asset_fit_reject_reason(
+            self.setup_id,
+            prepared.symbol,
+            market_context_from_prepared(prepared),
+            settings=self._settings,
+        )
+        if reason is not None:
+            return False
+        return super().can_calculate(prepared)

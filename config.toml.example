@@ -23,11 +23,14 @@ diagnostic_trace_limit_per_symbol = 20
 startup_batch_size = 3
 startup_batch_delay_seconds = 2.0
 max_concurrent_rest_requests = 5
+emergency_context_warmup_timeout_seconds = 15.0
+emergency_context_warmup_symbol_limit = 12
+emergency_context_fetch_timeout_seconds = 3.0
 futures_data_request_limit_per_5m = 300
 min_restart_interval_seconds = 120
 # Dashboard settings
 dashboard_port = 8080
-auto_open_dashboard = true
+auto_open_dashboard = false
 
 [bot.universe]
 quote_asset = "USDT"
@@ -40,6 +43,30 @@ full_refresh_interval_seconds = 7200
 shortlist_spread_max_bps = 15.0
 shortlist_book_stale_seconds = 90.0
 pinned_symbols = ["BTCUSDT", "ETHUSDT", "XAUUSDT", "XAGUSDT"]
+
+[bot.assets.BTCUSDT]
+primary_timeframe = "15m"
+context_timeframes = ["1h", "4h"]
+excluded_strategies = ["altcoin_season_index"]
+deep_analysis = true
+
+[bot.assets.ETHUSDT]
+primary_timeframe = "15m"
+context_timeframes = ["1h", "4h"]
+excluded_strategies = ["altcoin_season_index"]
+deep_analysis = true
+
+[bot.assets.XAUUSDT]
+primary_timeframe = "1h"
+context_timeframes = ["4h"]
+excluded_strategies = ["btc_correlation", "altcoin_season_index", "funding_reversal", "whale_walls", "spread_strategy", "depth_imbalance", "absorption", "aggression_shift"]
+deep_analysis = true
+
+[bot.assets.XAGUSDT]
+primary_timeframe = "1h"
+context_timeframes = ["4h"]
+excluded_strategies = ["btc_correlation", "altcoin_season_index", "funding_reversal", "whale_walls", "spread_strategy", "depth_imbalance", "absorption", "aggression_shift"]
+deep_analysis = true
 
 [bot.filters]
 cooldown_minutes = 60
@@ -63,7 +90,7 @@ max_mark_price_deviation_pct = 0.005
 
 [bot.filters.setups]
 ema_bounce = { base_score = 0.55, min_adx_1h = 15.0, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.5, min_rr = 1.5 }
-structure_pullback = { base_score = 0.55, bias_mismatch_penalty = 0.75, tp_too_close_penalty = 0.75, sl_buffer_atr = 0.5, min_rr = 1.5 }
+structure_pullback = { base_score = 0.55, bias_mismatch_penalty = 0.75, tp_too_close_penalty = 0.75, sl_buffer_atr = 0.65, min_rr = 1.5 }
 structure_break_retest = { base_score = 0.55, threshold_adx = 18.0, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.5, min_rr = 1.5 }
 wick_trap_reversal = { base_score = 0.50, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.8, min_rr = 1.5, wick_through_atr_mult = 0.3, adx_penalty_factor = 0.85 }
 squeeze_setup = { base_score = 0.55, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.8, min_rr = 1.5 }
@@ -84,11 +111,11 @@ volume_anomaly = { base_score = 0.52, min_volume_ratio = 2.0, min_body_atr = 0.7
 volume_climax_reversal = { base_score = 0.52, min_volume_ratio = 2.3, min_wick_atr = 0.45, max_rsi_long = 42.0, min_rsi_short = 58.0, sl_buffer_atr = 0.45, min_rr = 1.5 }
 keltner_breakout = { base_score = 0.54, min_volume_ratio = 1.25, min_adx_1h = 14.0, sl_buffer_atr = 0.6, min_rr = 1.5 }
 whale_walls = { base_score = 0.52, min_depth_imbalance = 0.28, min_microprice_bias = 0.00008, max_spread_bps = 8.0, sl_buffer_atr = 0.65, min_rr = 1.5 }
-spread_strategy = { base_score = 0.52, max_spread_bps = 3.0, min_volume_ratio = 1.15, min_roc10_abs_pct = 0.20, sl_buffer_atr = 0.65, min_rr = 1.5 }
+spread_strategy = { base_score = 0.52, max_spread_bps = 2.5, min_volume_ratio = 1.35, min_roc10_abs_pct = 0.35, sl_buffer_atr = 0.85, min_rr = 1.5 }
 depth_imbalance = { base_score = 0.52, min_depth_imbalance = 0.18, min_close_position_long = 0.55, max_close_position_short = 0.45, sl_buffer_atr = 0.65, min_rr = 1.5 }
 absorption = { base_score = 0.52, min_abs_flow_delta = 0.12, min_close_position_long = 0.62, max_close_position_short = 0.38, min_wick_atr = 0.25, sl_buffer_atr = 0.65, min_rr = 1.5 }
 aggression_shift = { base_score = 0.52, min_shift = 0.10, min_volume_ratio = 1.05, sl_buffer_atr = 0.65, min_rr = 1.5 }
-liquidation_heatmap = { base_score = 0.52, min_liquidation_score = 0.30, min_close_position_long = 0.55, max_close_position_short = 0.45, sl_buffer_atr = 0.65, min_rr = 1.5 }
+liquidation_heatmap = { base_score = 0.52, min_liquidation_score = 0.40, min_close_position_long = 0.58, max_close_position_short = 0.42, sl_buffer_atr = 0.80, min_rr = 1.5 }
 stop_hunt_detection = { base_score = 0.52, sweep_tolerance_pct = 0.0004, min_volume_ratio = 1.20, min_close_position_long = 0.58, max_close_position_short = 0.42, sl_buffer_atr = 0.65, min_rr = 1.5 }
 multi_tf_trend = { base_score = 0.54, min_adx_1h = 18.0, min_volume_ratio = 0.90, sl_buffer_atr = 0.65, min_rr = 1.5 }
 rsi_divergence_bottom = { base_score = 0.52, divergence_window = 12, min_rsi_delta = 3.0, min_price_delta_pct = 0.10, sl_buffer_atr = 0.65, min_rr = 1.5 }

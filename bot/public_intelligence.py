@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import math
 import time
@@ -182,8 +183,8 @@ class PublicIntelligenceService:
 
         self._latest_snapshot = snapshot
         self._telemetry.append_jsonl("public_intelligence.jsonl", snapshot)
-        self._write_latest_snapshot(snapshot)
-        self._maybe_write_hourly_report(snapshot)
+        await self._write_latest_snapshot(snapshot)
+        await self._maybe_write_hourly_report(snapshot)
         return snapshot
 
     async def evaluate_smart_exit(self, symbol: str, direction: str) -> dict[str, Any]:
@@ -1043,16 +1044,23 @@ class PublicIntelligenceService:
             response.raise_for_status()
             return await response.json()
 
-    def _write_latest_snapshot(self, snapshot: dict[str, Any]) -> None:
+    async def _write_latest_snapshot(self, snapshot: dict[str, Any]) -> None:
         latest_json = self._reports_dir / "latest_public_intelligence.json"
         latest_md = self._reports_dir / "latest_public_intelligence.md"
-        latest_json.write_text(
-            _dump_json(snapshot, indent=2),
-            encoding="utf-8",
+        await asyncio.gather(
+            asyncio.to_thread(
+                latest_json.write_text,
+                _dump_json(snapshot, indent=2),
+                encoding="utf-8",
+            ),
+            asyncio.to_thread(
+                latest_md.write_text,
+                self._render_markdown(snapshot),
+                encoding="utf-8",
+            ),
         )
-        latest_md.write_text(self._render_markdown(snapshot), encoding="utf-8")
 
-    def _maybe_write_hourly_report(self, snapshot: dict[str, Any]) -> None:
+    async def _maybe_write_hourly_report(self, snapshot: dict[str, Any]) -> None:
         if not bool(self._settings.intelligence.write_hourly_reports):
             return
         ts = datetime.fromisoformat(str(snapshot["ts"]))
@@ -1063,11 +1071,18 @@ class PublicIntelligenceService:
         stamp = ts.astimezone(UTC).strftime("%Y%m%d_%H0000")
         json_path = self._reports_dir / f"hourly_public_intelligence_{stamp}.json"
         md_path = self._reports_dir / f"hourly_public_intelligence_{stamp}.md"
-        json_path.write_text(
-            _dump_json(snapshot, indent=2),
-            encoding="utf-8",
+        await asyncio.gather(
+            asyncio.to_thread(
+                json_path.write_text,
+                _dump_json(snapshot, indent=2),
+                encoding="utf-8",
+            ),
+            asyncio.to_thread(
+                md_path.write_text,
+                self._render_markdown(snapshot),
+                encoding="utf-8",
+            ),
         )
-        md_path.write_text(self._render_markdown(snapshot), encoding="utf-8")
 
     def _render_markdown(self, snapshot: dict[str, Any]) -> str:
         barrier = cast(dict[str, Any], snapshot.get("barrier") or {})

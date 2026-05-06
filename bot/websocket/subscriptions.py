@@ -47,7 +47,7 @@ def stream_endpoint_class(stream: str) -> str:
     )
     if any(token in normalized for token in allowed_market):
         return "market"
-    return "market"
+    raise ValueError(f"unsupported public websocket stream: {stream}")
 
 
 def tracked_agg_trade_streams(manager: Any, symbols: list[str]) -> list[str]:

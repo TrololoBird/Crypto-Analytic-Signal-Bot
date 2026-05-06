@@ -54,7 +54,7 @@ See [docs/OPERATIONS.md](docs/OPERATIONS.md) for detailed documentation.
 - **Event-driven runtime**: WebSocket kline events → EventBus → Strategy analysis
 - **Multi-timeframe analysis**: 5m, 15m, 1h, 4h timeframes with confluence scoring
 - **Shortlist engine**: full REST rebalance plus light WS rerank with composite liquidity/freshness/OI/crowding scoring
-- **Risk management**: Automated stop-loss, take-profit, and position sizing
+- **Signal risk analytics**: Stop-loss, take-profit, and sizing levels are computed for signal context only; the bot does not execute orders or manage positions
 - **ML integration**: Optional ML filtering for signal quality
 - **SQLite persistence**: All data stored locally with no external dependencies
 

@@ -3,6 +3,7 @@ import pytest
 from bot.config import BotSettings
 from bot.market_data import validate_runtime_public_rest_url
 from bot.public_intelligence import PublicIntelligenceService
+from bot.websocket import subscriptions as ws_subscriptions
 
 
 def test_runtime_boundary_allows_usdm_public_endpoint() -> None:
@@ -31,6 +32,16 @@ def test_runtime_boundary_rejects_private_routes() -> None:
 def test_runtime_boundary_rejects_non_public_usdm_paths() -> None:
     with pytest.raises(ValueError, match="endpoint paths"):
         validate_runtime_public_rest_url("https://fapi.binance.com/eapi/v1/openInterest")
+
+
+def test_runtime_boundary_rejects_registered_private_fapi_path() -> None:
+    with pytest.raises(ValueError, match="endpoint paths"):
+        validate_runtime_public_rest_url("https://fapi.binance.com/fapi/v1/order")
+
+
+def test_ws_stream_endpoint_class_rejects_unknown_streams() -> None:
+    with pytest.raises(ValueError, match="unsupported public websocket stream"):
+        ws_subscriptions.stream_endpoint_class("btcusdt@balance")
 
 
 @pytest.mark.asyncio

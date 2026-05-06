@@ -83,15 +83,28 @@ _ADVANCED_FALLBACKS_LOGGED: set[str] = set()
 # ---------------------------------------------------------------------------
 
 _MAX_CACHE_ENTRIES = 500
-_FrameCacheKey = tuple[str, str, int, int, int]
+_FrameCacheValue = float | None
+_FrameCacheKey = tuple[str, str, int, int, int, tuple[_FrameCacheValue, ...]]
+_FRAME_CACHE_TAIL_COLUMNS = (
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "quote_volume",
+    "num_trades",
+    "taker_buy_base_volume",
+    "taker_buy_quote_volume",
+)
 
 
 class _FrameCache:
     """Thread-safe LRU cache for prepared frames.
 
-    Keys include symbol, interval, row count, first close time, and last close
-    time. `_prepare_frame` depends on the whole history window, not only the
-    latest candle timestamp.
+    Keys include symbol, interval, row count, first/last close time, and the
+    latest OHLCV-like values. `_prepare_frame` depends on the whole history
+    window, and live partial kline updates keep the same close time while the
+    current candle values change.
     """
 
     __slots__ = ("_store", "_max_size", "_lock")
@@ -138,6 +151,22 @@ def _timestamp_ns(value: object) -> int:
     if hasattr(value, "timestamp"):
         return int(value.timestamp() * 1e9)
     return int(value)
+
+
+def _tail_value_signature(row: dict[str, object]) -> tuple[_FrameCacheValue, ...]:
+    values: list[_FrameCacheValue] = []
+    for column in _FRAME_CACHE_TAIL_COLUMNS:
+        raw = row.get(column)
+        if raw is None:
+            values.append(None)
+            continue
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            values.append(None)
+            continue
+        values.append(None if value != value else value)
+    return tuple(values)
 
 
 def _log_indicator_fallback(indicator: str, exc: Exception) -> None:
@@ -1316,7 +1345,15 @@ def _cached_prepare_frame(
     except (KeyError, TypeError, ValueError, OverflowError):
         return _prepare_frame(frame)
     
-    key = (symbol, interval, frame.height, first_close_time_ns, close_time_ns)
+    tail_signature = _tail_value_signature(last)
+    key = (
+        symbol,
+        interval,
+        frame.height,
+        first_close_time_ns,
+        close_time_ns,
+        tail_signature,
+    )
     target_cache = cache or _FRAME_CACHE
     cached = target_cache.get(key)
     if cached is not None:

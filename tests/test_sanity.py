@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import polars as pl
 import pytest
 
-from bot.features import _adx, _supertrend, _swing_points
+from bot.features import (
+    _FrameCache,
+    _adx,
+    _cached_prepare_frame,
+    _supertrend,
+    _swing_points,
+)
 from bot.market_regime import MarketRegimeAnalyzer
 from bot.models import Signal
 from bot.strategies import STRATEGY_CLASSES
@@ -76,6 +84,60 @@ def test_signal_post_init_respects_explicit_risk_reward() -> None:
         risk_reward=5.0,
     )
     assert signal.risk_reward == 5.0
+
+
+def test_signal_post_init_uses_tp1_for_default_risk_reward() -> None:
+    signal = Signal(
+        symbol="BTCUSDT",
+        setup_id="sanity",
+        direction="long",
+        score=0.7,
+        timeframe="1h",
+        entry_low=99.0,
+        entry_high=101.0,
+        stop=95.0,
+        take_profit_1=110.0,
+        take_profit_2=130.0,
+    )
+    assert signal.risk_reward == pytest.approx(2.0)
+
+
+def test_cached_prepare_frame_invalidates_when_current_candle_updates() -> None:
+    now = datetime(2026, 5, 4, tzinfo=timezone.utc)
+    rows = 240
+    frame = pl.DataFrame(
+        {
+            "time": [now + timedelta(minutes=15 * idx) for idx in range(rows)],
+            "open": [100.0] * rows,
+            "high": [101.0] * rows,
+            "low": [99.0] * rows,
+            "close": [100.0] * rows,
+            "volume": [1000.0] * rows,
+            "close_time": [
+                now + timedelta(minutes=15 * idx + 14, seconds=59)
+                for idx in range(rows)
+            ],
+            "quote_volume": [100_000.0] * rows,
+            "num_trades": [100] * rows,
+            "taker_buy_base_volume": [500.0] * rows,
+            "taker_buy_quote_volume": [50_000.0] * rows,
+        }
+    )
+    cache = _FrameCache(max_size=4)
+    first = _cached_prepare_frame(frame, symbol="BTCUSDT", interval="15m", cache=cache)
+
+    updated = frame.with_columns(
+        [
+            pl.when(pl.arange(0, pl.len()) == rows - 1)
+            .then(105.0)
+            .otherwise(pl.col("close"))
+            .alias("close"),
+        ]
+    )
+    second = _cached_prepare_frame(updated, symbol="BTCUSDT", interval="15m", cache=cache)
+
+    assert first.item(-1, "close") == pytest.approx(100.0)
+    assert second.item(-1, "close") == pytest.approx(105.0)
 
 
 def test_strategy_registry_contains_extended_setups() -> None:

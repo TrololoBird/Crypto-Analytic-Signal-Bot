@@ -39,6 +39,7 @@ from .volume_anomaly import VolumeAnomalySetup
 from .volume_climax_reversal import VolumeClimaxReversalSetup
 from .vwap_trend import VWAPTrendSetup
 from .wick_trap_reversal import WickTrapReversalSetup
+from ..strategy_asset_fit import ASSET_FIT_PROFILES
 
 STRATEGY_CLASSES = (
     StructurePullbackSetup,
@@ -79,6 +80,9 @@ STRATEGY_CLASSES = (
     BTCCorrelationSetup,
     AltcoinSeasonIndexSetup,
 )
+
+for _strategy_class in STRATEGY_CLASSES:
+    _strategy_class.asset_fit = ASSET_FIT_PROFILES[_strategy_class.setup_id]
 
 __all__ = [
     "AbsorptionSetup",

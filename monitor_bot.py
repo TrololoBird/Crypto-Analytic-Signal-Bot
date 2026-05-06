@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 """Monitor bot startup and log all output"""
 import sys
-import subprocess
-import os
 from datetime import datetime
 
 log_file = "bot_monitor.log"
@@ -26,14 +24,14 @@ try:
     # Try importing bot
     log("Testing imports...")
     from bot.config import BotSettings
-    log("[OK] BotSettings imported")
+    log(f"[OK] {BotSettings.__name__} imported")
     
     from bot.models import Signal
     log(f"[OK] Signal has adx_1h: {hasattr(Signal, 'adx_1h')}")
     log(f"[OK] Signal has risk_reward: {hasattr(Signal, 'risk_reward')}")
     
     from bot.setups import _build_signal
-    log("[OK] _build_signal imported")
+    log(f"[OK] _build_signal imported callable={callable(_build_signal)}")
     
     log("\nAll imports successful! Starting bot...")
     log("=" * 60)

@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 """Check if all dependencies are installed"""
 import sys
-import os
 
 log_file = "check_result.txt"
 

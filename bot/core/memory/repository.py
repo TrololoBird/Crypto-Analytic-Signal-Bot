@@ -729,7 +729,7 @@ class MemoryRepository(MemoryRepositoryExtension):
         setup_id: str,
         outcome: str,
         window_size: int = 20,
-        min_outcomes: int = 15,
+        min_outcomes: int = 8,
         penalty: float = -0.05,
         bonus: float = 0.03,
         low_win_rate: float = 0.40,

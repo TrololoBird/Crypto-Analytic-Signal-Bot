@@ -8,7 +8,10 @@ import pytest
 from bot.config import BotSettings
 from bot.models import PreparedSymbol, UniverseSymbol
 from bot.strategies import STRATEGY_CLASSES
-from bot.strategies.bos_choch import _select_external_stop_level
+from bot.strategies.bos_choch import (
+    _select_external_stop_level,
+    _select_stop_level_with_fallback,
+)
 from bot.strategies.keltner_breakout import KeltnerBreakoutSetup
 from bot.strategies.price_velocity import PriceVelocitySetup
 from bot.strategies.session_killzone import SessionKillzoneSetup, _active_killzone_name
@@ -229,6 +232,28 @@ def test_bos_choch_external_stop_selector_diagnoses_missing_anchor() -> None:
     assert level is None
     assert details["external_marker_candidates"] == 2
     assert details["external_side_filtered"] == 2
+
+
+def test_bos_choch_stop_selector_falls_back_to_internal_anchor() -> None:
+    level, source, details = _select_stop_level_with_fallback(
+        frame=pl.DataFrame(),
+        external_markers=[1.0, 1.0],
+        external_levels=[98.0, 99.0],
+        internal_markers=[-1.0, 1.0],
+        internal_levels=[97.0, 101.0],
+        search_end=1,
+        marker=1.0,
+        price=100.0,
+        break_level=100.0,
+        atr=0.0,
+        above_price=True,
+    )
+
+    assert level == pytest.approx(101.0)
+    assert source == "internal_swing"
+    assert details["fallback_used"] == "internal_swing_stop"
+    assert details["external_side_filtered"] == 2
+    assert details["internal_selected_index"] == 1
 
 
 def test_vwap_trend_detects_long_reclaim() -> None:

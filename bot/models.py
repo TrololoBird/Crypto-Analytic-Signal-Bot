@@ -222,7 +222,7 @@ class Signal:
     def __post_init__(self) -> None:
         if self.risk_reward is None:
             risk = abs(self.entry_mid - self.stop)
-            reward = abs(self.take_profit_2 - self.entry_mid)
+            reward = abs(self.take_profit_1 - self.entry_mid)
             computed = (reward / risk) if risk > 0 else 0.0
             object.__setattr__(self, "risk_reward", computed)
 

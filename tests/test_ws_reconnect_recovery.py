@@ -8,7 +8,7 @@ import pytest
 
 from bot.config import WSConfig
 from bot.websocket import subscriptions as ws_subscriptions
-from bot.ws_manager import FuturesWSManager
+from bot.ws_manager import FuturesWSManager, MessageBuffer
 
 
 class _DummyWS:
@@ -17,6 +17,19 @@ class _DummyWS:
 
     async def send(self, message: str) -> None:
         self.sent.append(message)
+
+
+@pytest.mark.asyncio
+async def test_message_buffer_keeps_newest_message_under_backpressure() -> None:
+    buffer = MessageBuffer(maxsize=1)
+
+    assert await buffer.put({"stream": "old"}) is True
+    assert await buffer.put({"stream": "new"}) is True
+
+    assert await buffer.get() == {"stream": "new"}
+    stats = buffer.get_stats()
+    assert stats["dropped"] == 1
+    assert stats["processed"] == 1
 
 
 @pytest.mark.asyncio

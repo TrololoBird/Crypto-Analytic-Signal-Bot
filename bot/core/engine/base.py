@@ -28,6 +28,7 @@ class StrategyMetadata:
     requires_oi: bool = False  # Requires open interest data
     requires_funding: bool = False  # Requires funding rate data
     min_history_bars: int = 50  # Minimum bars needed for calculation
+    asset_fit: dict[str, object] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -44,6 +45,7 @@ class StrategyMetadata:
             "requires_oi": self.requires_oi,
             "requires_funding": self.requires_funding,
             "min_history_bars": self.min_history_bars,
+            "asset_fit": self.asset_fit,
         }
 
 

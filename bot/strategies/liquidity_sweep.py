@@ -148,10 +148,6 @@ class LiquiditySweepSetup(BaseSetup):
             _reject(prepared, setup_id, "scan_window_insufficient", bars=n)
             return None
 
-        sweep_bar_h = highs[-1]
-        sweep_bar_l = lows[-1]
-        sweep_bar_c = closes[-1]
-
         zone = latest_liquidity_sweep(
             scan,
             swing_length=max(2, min_level_hits + 1),
@@ -159,15 +155,27 @@ class LiquiditySweepSetup(BaseSetup):
         )
         if (
             zone is None
-            or zone.sweep_index != scan.height - 1
+            or zone.sweep_index is None
+            or zone.sweep_index < scan.height - 2
+            or zone.sweep_index > scan.height - 1
             or zone.state == "invalidated"
         ):
             _reject(prepared, setup_id, "no_liquidity_sweep_detected")
             return None
 
+        sweep_index = int(zone.sweep_index)
+        sweep_bar_h = float(highs[sweep_index])
+        sweep_bar_l = float(lows[sweep_index])
+        sweep_bar_c = float(closes[sweep_index])
+        confirmation_close = float(closes[-1])
+
         if zone.direction == "short":
             eq_high_level = zone.level or zone.midpoint
-            if sweep_bar_h <= eq_high_level or sweep_bar_c >= eq_high_level:
+            if (
+                sweep_bar_h <= eq_high_level
+                or sweep_bar_c >= eq_high_level
+                or confirmation_close >= eq_high_level
+            ):
                 _reject(
                     prepared,
                     setup_id,
@@ -175,13 +183,13 @@ class LiquiditySweepSetup(BaseSetup):
                     level=eq_high_level,
                 )
                 return None
-            if abs(price - sweep_bar_c) > sweep_atr_mult * atr:
+            if abs(price - confirmation_close) > sweep_atr_mult * atr:
                 _reject(
                     prepared,
                     setup_id,
                     "short_reclaim_too_far",
                     price=price,
-                    close=sweep_bar_c,
+                    close=confirmation_close,
                 )
                 return None
 
@@ -236,7 +244,10 @@ class LiquiditySweepSetup(BaseSetup):
             )
             reasons = [
                 f"Liquidity sweep short: eq_high={eq_high_level:.4f} state={zone.state}",
-                f"wick={sweep_bar_h:.4f} close={sweep_bar_c:.4f}",
+                (
+                    f"wick={sweep_bar_h:.4f} close={sweep_bar_c:.4f} "
+                    f"confirm={confirmation_close:.4f}"
+                ),
             ]
             return _build_signal(
                 prepared=prepared,
@@ -249,23 +260,27 @@ class LiquiditySweepSetup(BaseSetup):
                 stop=stop,
                 tp1=tp1,
                 tp2=tp2,
-                price_anchor=sweep_bar_c,
+                price_anchor=confirmation_close,
                 atr=atr,
             )
 
         eq_low_level = zone.level or zone.midpoint
-        if sweep_bar_l >= eq_low_level or sweep_bar_c <= eq_low_level:
+        if (
+            sweep_bar_l >= eq_low_level
+            or sweep_bar_c <= eq_low_level
+            or confirmation_close <= eq_low_level
+        ):
             _reject(
                 prepared, setup_id, "long_reclaim_not_confirmed", level=eq_low_level
             )
             return None
-        if abs(price - sweep_bar_c) > reclaim_threshold * atr:
+        if abs(price - confirmation_close) > reclaim_threshold * atr:
             _reject(
                 prepared,
                 setup_id,
                 "long_reclaim_too_far",
                 price=price,
-                close=sweep_bar_c,
+                close=confirmation_close,
             )
             return None
 
@@ -316,7 +331,10 @@ class LiquiditySweepSetup(BaseSetup):
         )
         reasons = [
             f"Liquidity sweep long: eq_low={eq_low_level:.4f} state={zone.state}",
-            f"wick={sweep_bar_l:.4f} close={sweep_bar_c:.4f}",
+            (
+                f"wick={sweep_bar_l:.4f} close={sweep_bar_c:.4f} "
+                f"confirm={confirmation_close:.4f}"
+            ),
         ]
         return _build_signal(
             prepared=prepared,
@@ -329,6 +347,6 @@ class LiquiditySweepSetup(BaseSetup):
             stop=stop,
             tp1=tp1,
             tp2=tp2,
-            price_anchor=sweep_bar_c,
+            price_anchor=confirmation_close,
             atr=atr,
         )

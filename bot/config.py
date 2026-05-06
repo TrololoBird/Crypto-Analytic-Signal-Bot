@@ -34,6 +34,9 @@ class RuntimeConfig(BaseModel):
     startup_batch_size: int = Field(default=3, ge=1, le=10)
     startup_batch_delay_seconds: float = Field(default=2.0, ge=0.5, le=10.0)
     max_concurrent_rest_requests: int = Field(default=5, ge=1, le=20)
+    emergency_context_warmup_timeout_seconds: float = Field(default=15.0, ge=1.0, le=120.0)
+    emergency_context_warmup_symbol_limit: int = Field(default=12, ge=1, le=100)
+    emergency_context_fetch_timeout_seconds: float = Field(default=3.0, ge=0.5, le=30.0)
     futures_data_request_limit_per_5m: int = Field(default=300, ge=30, le=1000)
     heartbeat_seconds: float = Field(default=60.0, ge=5.0, le=3600.0)
 
@@ -74,6 +77,26 @@ class UniverseConfig(BaseModel):
     ) -> tuple[str, ...]:
         return tuple(
             str(item).strip().upper() for item in (value or ()) if str(item).strip()
+        )
+
+
+class AssetConfig(BaseModel):
+    """Per-symbol calibration overrides for priority asset routing."""
+
+    primary_timeframe: Literal["5m", "15m", "1h", "4h"] = "15m"
+    context_timeframes: tuple[Literal["5m", "15m", "1h", "4h"], ...] = ("1h", "4h")
+    excluded_strategies: tuple[str, ...] = ()
+    deep_analysis: bool = False
+
+    @field_validator("excluded_strategies")
+    @classmethod
+    def _normalize_excluded_strategies(
+        cls, value: tuple[str, ...] | list[str] | None
+    ) -> tuple[str, ...]:
+        return tuple(
+            str(item).strip()
+            for item in (value or ())
+            if str(item).strip()
         )
 
 
@@ -344,7 +367,7 @@ class NotifierWebhookConfig(BaseModel):
 
 
 class NotifierConfig(BaseModel):
-    provider: Literal["telegram", "slack", "discord", "webhook"] = "telegram"
+    provider: Literal["none", "telegram", "slack", "discord", "webhook"] = "telegram"
     slack: NotifierWebhookConfig = Field(default_factory=NotifierWebhookConfig)
     discord: NotifierWebhookConfig = Field(default_factory=NotifierWebhookConfig)
     webhook: NotifierWebhookConfig = Field(default_factory=NotifierWebhookConfig)
@@ -547,6 +570,7 @@ class BotSettings(BaseModel):
     notifiers: NotifierConfig = Field(default_factory=NotifierConfig)
     spot_companion: SpotCompanionConfig = Field(default_factory=SpotCompanionConfig)
     intelligence: IntelligenceConfig = Field(default_factory=IntelligenceConfig)
+    assets: dict[str, AssetConfig] = Field(default_factory=dict)
 
     @property
     def telemetry_dir(self) -> Path:
@@ -640,6 +664,11 @@ class BotSettings(BaseModel):
                 raise ValueError(
                     f"Invalid kline interval: {interval}. Valid: {valid_intervals}"
                 )
+        return self
+
+    @model_validator(mode="after")
+    def _normalize_asset_overrides(self) -> "BotSettings":
+        self.assets = {str(symbol).strip().upper(): config for symbol, config in self.assets.items()}
         return self
 
     def validate_for_runtime(self, *, require_telegram: bool) -> None:
