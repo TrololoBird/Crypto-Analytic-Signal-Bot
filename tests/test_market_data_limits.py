@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 from bot.market_data import BinanceFuturesMarketData
 
 
@@ -27,3 +29,29 @@ def test_funding_history_uses_public_request_limiter() -> None:
     assert spec.path == "/fapi/v1/fundingRate"
     assert spec.ip_limited is True
     assert client._estimate_weight("funding_rate_history") == 1
+
+
+def test_public_context_cache_accessors_do_not_make_rest_calls() -> None:
+    client = BinanceFuturesMarketData()
+    now = time.monotonic()
+    client._funding_rate_cache["BTCUSDT"] = (now, 0.0001)
+    client._premium_index_all_cache = (
+        now,
+        {
+            "BTCUSDT": {
+                "funding_rate": 0.0001,
+                "basis_pct": 0.02,
+                "mark_price": 100.0,
+                "index_price": 99.98,
+            }
+        },
+    )
+
+    assert client.get_cached_funding_rate("BTCUSDT") == 0.0001
+    assert client.get_cached_premium_index("BTCUSDT") == {
+        "funding_rate": 0.0001,
+        "basis_pct": 0.02,
+        "mark_price": 100.0,
+        "index_price": 99.98,
+    }
+    assert client.get_cached_premium_index("ETHUSDT") is None

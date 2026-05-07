@@ -567,6 +567,8 @@ def build_shortlist(
                 break
             if row.symbol in seen:
                 continue
+            if not row.strategy_fits:
+                continue
             shortlist.append(row)
             seen.add(row.symbol)
             summary[bucket] += 1
@@ -575,6 +577,8 @@ def build_shortlist(
         if len(shortlist) >= settings.universe.shortlist_limit:
             break
         if row.symbol in seen:
+            continue
+        if not row.strategy_fits:
             continue
         shortlist.append(row)
         seen.add(row.symbol)

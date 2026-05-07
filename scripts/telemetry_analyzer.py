@@ -58,7 +58,9 @@ class TelemetryAnalyzer:
         max_lines_per_file: int = 500,
     ) -> None:
         self.telemetry_dir = telemetry_dir
+        self._requested_run_id = run_id
         self.run_dir = self._resolve_run_dir(run_id)
+        self.analysis_dir = self._resolve_analysis_dir()
         self.max_lines_per_file = max(1, int(max_lines_per_file))
         self.records = self._load_records()
 
@@ -196,7 +198,7 @@ class TelemetryAnalyzer:
         lines = [
             "# Telemetry Calibration Analysis",
             "",
-            f"Run: `{self.run_dir.name}`",
+            f"Run: `{self._source_label()}`",
             f"Records: {len(self.records)}",
             f"Generated: {datetime.now(timezone.utc).isoformat(timespec='seconds')}",
             "",
@@ -227,7 +229,8 @@ class TelemetryAnalyzer:
         output.with_suffix(".json").write_text(
             json.dumps(
                 {
-                    "run_id": self.run_dir.name,
+                    "run_id": self._source_label(),
+                    "analysis_dir": str(self.analysis_dir),
                     "record_count": len(self.records),
                     "strategy_performance": performances,
                     "calibration_issues": [asdict(issue) for issue in issues],
@@ -249,11 +252,25 @@ class TelemetryAnalyzer:
             return runs_dir / "missing"
         return max(candidates, key=lambda path: path.stat().st_mtime)
 
+    def _resolve_analysis_dir(self) -> Path:
+        run_analysis_dir = self.run_dir / "analysis"
+        if run_analysis_dir.exists():
+            return run_analysis_dir
+        direct_analysis_dir = self.telemetry_dir / "analysis"
+        if self._requested_run_id is None and direct_analysis_dir.exists():
+            return direct_analysis_dir
+        return run_analysis_dir
+
+    def _source_label(self) -> str:
+        if self.analysis_dir == self.telemetry_dir / "analysis":
+            return "direct-analysis"
+        return self.run_dir.name
+
     def _load_records(self) -> list[dict[str, Any]]:
         records: list[dict[str, Any]] = []
-        if not self.run_dir.exists():
+        if not self.analysis_dir.exists():
             return records
-        for path in (self.run_dir / "analysis").rglob("*.jsonl"):
+        for path in self.analysis_dir.rglob("*.jsonl"):
             for line in _tail_jsonl_lines(path, max_lines=self.max_lines_per_file):
                 try:
                     row = json.loads(line)
@@ -282,6 +299,8 @@ class TelemetryAnalyzer:
 
     @staticmethod
     def _is_signal(row: Mapping[str, Any]) -> bool:
+        if row.get("status") == "signal":
+            return True
         if row.get("decision") == "signal":
             return True
         if row.get("signal_emitted") is True:

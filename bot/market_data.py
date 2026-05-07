@@ -1406,6 +1406,31 @@ class BinanceFuturesMarketData:
             return None
         return value
 
+    def get_cached_funding_rate(
+        self, symbol: str, max_age_s: float = 1800.0
+    ) -> float | None:
+        """Return cached current funding rate if fresh, else None (no REST call)."""
+        cached = self._funding_rate_cache.get(symbol)
+        if cached is None:
+            return None
+        cached_at, value = cached
+        if time.monotonic() - cached_at > max_age_s:
+            return None
+        return value
+
+    def get_cached_premium_index(
+        self, symbol: str, max_age_s: float = 300.0
+    ) -> dict[str, float] | None:
+        """Return cached premium-index context if fresh, else None (no REST call)."""
+        cached = self._premium_index_all_cache
+        if cached is None:
+            return None
+        cached_at, rows = cached
+        if time.monotonic() - cached_at > max_age_s:
+            return None
+        row = rows.get(symbol)
+        return dict(row) if row is not None else None
+
     async def fetch_top_position_ls_ratio(self, symbol: str, *, period: str = "1h") -> float | None:
         cache_key = (symbol, period)
         now = time.monotonic()

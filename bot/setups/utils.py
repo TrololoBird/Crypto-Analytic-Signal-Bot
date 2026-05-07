@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
+from ..runtime_policy import is_deep_analysis_symbol
+
 if TYPE_CHECKING:
     from ..models import PreparedSymbol, Signal
 
@@ -359,6 +361,28 @@ def apply_graded_penalty(
     return replace(signal, score=signal.score * penalty, reasons=reasons)
 
 
+def _relax_deep_asset_thresholds(
+    prepared: "PreparedSymbol",
+    params: dict[str, float],
+) -> dict[str, float]:
+    if not params or not is_deep_analysis_symbol(prepared):
+        return params
+
+    adjusted = dict(params)
+    primary_timeframe = str(getattr(prepared, "primary_timeframe", "15m") or "15m")
+    floor = 0.45 if primary_timeframe in {"1h", "4h"} else 0.55
+    cap = 0.75 if primary_timeframe in {"1h", "4h"} else 0.85
+    for key in ("min_volume_ratio", "volume_threshold"):
+        raw_value = adjusted.get(key)
+        if not isinstance(raw_value, int | float) or not math.isfinite(float(raw_value)):
+            continue
+        value = float(raw_value)
+        if value <= floor:
+            continue
+        adjusted[key] = max(floor, min(cap, value * 0.65))
+    return adjusted
+
+
 def get_dynamic_params(prepared: "PreparedSymbol", setup_id: str) -> dict[str, float]:
     """Get dynamic parameters from prepared symbol for specific setup.
 
@@ -384,11 +408,12 @@ def get_dynamic_params(prepared: "PreparedSymbol", setup_id: str) -> dict[str, f
 
     # Try to get setup-specific config
     setups_config = filters.setups
+    params: dict[str, float] = {}
     if isinstance(setups_config, dict) and setup_id in setups_config:
-        return setups_config.get(setup_id, {})
-    if isinstance(setups_config, dict) and setup_id.endswith("_setup"):
+        params = dict(setups_config.get(setup_id, {}) or {})
+    elif isinstance(setups_config, dict) and setup_id.endswith("_setup"):
         legacy_key = setup_id.removesuffix("_setup")
         if legacy_key in setups_config:
-            return setups_config.get(legacy_key, {})
+            params = dict(setups_config.get(legacy_key, {}) or {})
 
-    return {}
+    return _relax_deep_asset_thresholds(prepared, params)

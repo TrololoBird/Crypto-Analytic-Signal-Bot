@@ -17,8 +17,6 @@
 | `live_smoke_bot.py` | Smoke-запуск `SignalBot` с fake broadcaster и проверкой startup-sweep. | active | `--tracking-id`, `--warmup-seconds` | `python scripts/live_smoke_bot.py --tracking-id demo --warmup-seconds 30` |
 | `migrate_configs.py` | Legacy one-off мигратор конфигов стратегий. | deprecated | `--help` (wrapper) | `python scripts/migrate_configs.py` |
 | `monitor_runtime.py` | Legacy runtime monitor под старый ручной/Windows поток запуска. | deprecated | `--help` (wrapper) | `python scripts/monitor_runtime.py` |
-| `phase0_forensics.py` | Генерирует Phase 0 forensic-аудит файлов, конфигов, БД, логов и telemetry. | active | `--include-git` | `python scripts/phase0_forensics.py` |
-| `phase1_analysis.py` | Собирает evidence-backed Phase 1 analysis и master plan из Phase 0 артефактов. | active | нет | `python scripts/phase1_analysis.py` |
 | `recompute_outcome_r_multiples.py` | Пересчитывает R-multiple и max-loss по закрытым исходам; применение требует `--apply`. | active | `--db`, `--report`, `--apply` | `python scripts/recompute_outcome_r_multiples.py --report logs/21_outcome_r_recompute.md` |
 | `runtime_audit.py` | Глубокий runtime-аудит telemetry/DB с аналитикой воронки. | active | `--run-id`, `--db-path`, `--telemetry-dir` | `python scripts/runtime_audit.py --run-id <RUN_ID>` |
 | `telemetry_analyzer.py` | Анализирует tail-limited telemetry JSONL и формирует calibration report. | active | `--telemetry-dir`, `--run-id`, `--hours`, `--output`, `--max-lines-per-file` | `python scripts/telemetry_analyzer.py --hours 72` |

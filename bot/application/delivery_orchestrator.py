@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import Counter
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -21,6 +22,26 @@ class DeliveryOrchestrator:
     def __init__(self, bot: SignalBot) -> None:
         self._bot = bot
 
+    @staticmethod
+    def _rank_key(signal: Signal) -> tuple[float, float]:
+        return (float(signal.score), float(signal.risk_reward or 0.0))
+
+    @staticmethod
+    def _apply_same_direction_confluence(signals: list[Signal]) -> Signal:
+        ranked = sorted(signals, key=DeliveryOrchestrator._rank_key, reverse=True)
+        best = ranked[0]
+        setup_count = len({signal.setup_id for signal in ranked})
+        if setup_count <= 1:
+            return best
+        boost = min(0.05, 0.015 * float(setup_count - 1))
+        reason = f"confluence_{setup_count}_setups"
+        reasons = best.reasons if reason in best.reasons else (*best.reasons, reason)
+        return replace(
+            best,
+            score=round(min(1.0, float(best.score) + boost), 4),
+            reasons=reasons,
+        )
+
     def select_and_rank(
         self, all_candidates: dict[str, list[Signal]], max_signals: int
     ) -> list[Signal]:
@@ -29,13 +50,27 @@ class DeliveryOrchestrator:
             flat_candidates.extend(symbol_candidates)
         if not flat_candidates:
             return []
-        ranked = sorted(
-            flat_candidates, key=lambda s: (s.score, s.risk_reward or 0.0), reverse=True
-        )
+
+        same_direction: dict[tuple[str, str], list[Signal]] = {}
+        for signal in flat_candidates:
+            same_direction.setdefault((signal.symbol, signal.direction), []).append(signal)
+
+        best_by_direction = [
+            self._apply_same_direction_confluence(signals)
+            for signals in same_direction.values()
+        ]
+        best_by_symbol: dict[str, Signal] = {}
+        for signal in sorted(
+            best_by_direction, key=self._rank_key, reverse=True
+        ):
+            best_by_symbol.setdefault(signal.symbol, signal)
+
+        ranked = sorted(best_by_symbol.values(), key=self._rank_key, reverse=True)
         selected = ranked[:max_signals]
         LOG.debug(
-            "select_and_rank | candidates=%d selected=%d",
+            "select_and_rank | candidates=%d deduped_symbols=%d selected=%d",
             len(flat_candidates),
+            len(best_by_symbol),
             len(selected),
         )
         return selected

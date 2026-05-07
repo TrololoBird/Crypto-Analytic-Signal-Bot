@@ -13,6 +13,7 @@ from .registry import StrategyRegistry
 from .base import SignalResult, StrategyDecision
 from ...models import PreparedSymbol, Signal
 from ...config import BotSettings
+from ...runtime_policy import is_deep_analysis_symbol
 from ...strategy_asset_fit import asset_fit_reject_reason, market_context_from_prepared
 from ..runtime_errors import classify_runtime_error
 
@@ -87,6 +88,13 @@ class SignalEngine:
                 for strategy in strategies
                 if strategy.strategy_id in strategy_fits
             ]
+        elif (
+            getattr(getattr(prepared, "universe", None), "shortlist_score", None)
+            is not None
+            and not is_deep_analysis_symbol(prepared, self._settings)
+        ):
+            LOG.info("%s: calculate_all skipped | no strategy_fits", symbol)
+            return []
         
         LOG.info("%s: calculate_all called | strategies=%d", symbol, len(strategies))
         

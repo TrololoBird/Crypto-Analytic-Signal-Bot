@@ -126,8 +126,22 @@ class TelemetryManager:
             "invalid_fields": list(decision.invalid_fields),
         }
         if decision.signal is not None:
-            row["direction"] = decision.signal.direction
-            row["score"] = round(decision.signal.score, 4)
+            signal = decision.signal
+            row["direction"] = signal.direction
+            row["score"] = round(signal.score, 4)
+            row["timeframe"] = signal.timeframe
+            row["risk_reward"] = round(float(signal.risk_reward or 0.0), 6)
+            row["stop_distance_pct"] = round(float(signal.stop_distance_pct), 6)
+            for field_name in (
+                "spread_bps",
+                "atr_pct",
+                "oi_change_pct",
+                "funding_rate",
+                "ls_ratio",
+            ):
+                value = getattr(signal, field_name, None)
+                if value is not None:
+                    row[field_name] = value
         if decision.details:
             row["details"] = decision.details
         if decision.error is not None:

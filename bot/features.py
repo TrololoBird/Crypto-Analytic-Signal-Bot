@@ -27,6 +27,10 @@ from . import features_advanced as _features_advanced_module
 from . import features_core as _features_core_module
 from . import features_oscillators as _features_oscillators_module
 from .models import PreparedSymbol, SymbolFrames, UniverseSymbol
+from .runtime_policy import (
+    configured_context_timeframes,
+    configured_primary_timeframe,
+)
 from .features_microstructure import add_microstructure_features
 from .features_structure import (
     hull_moving_average as _hull_moving_average_external,
@@ -1444,9 +1448,31 @@ def prepare_symbol(
         )
         return None
 
+    configured_primary = configured_primary_timeframe(settings, sym)
+    context_timeframes = configured_context_timeframes(settings, sym)
+    primary_timeframe = configured_primary
+    primary_work = work_15m
+    if configured_primary == "1h":
+        primary_work = work_1h
+    elif configured_primary == "4h" and work_4h is not None and work_len_4h >= 30:
+        primary_work = work_4h
+    elif configured_primary == "5m" and work_5m is not None and work_len_5m >= 30:
+        primary_work = work_5m
+    elif configured_primary != "15m":
+        primary_timeframe = "15m"
+        _log.warning(
+            "%s: primary timeframe fallback | requested=%s fallback=15m work_5m=%d work_4h=%d",
+            sym,
+            configured_primary,
+            work_len_5m,
+            work_len_4h,
+        )
+
     _log.info(
-        "%s: prepared symbol successfully | work_15m=%d work_1h=%d work_5m=%d optional_4h=%d",
+        "%s: prepared symbol successfully | primary_timeframe=%s work_primary=%d work_15m=%d work_1h=%d work_5m=%d optional_4h=%d",
         sym,
+        primary_timeframe,
+        len(primary_work) if primary_work is not None else 0,
         work_len_15m,
         work_len_1h,
         work_len_5m,
@@ -1471,7 +1497,7 @@ def prepare_symbol(
     return PreparedSymbol(
         universe=universe_symbol,
         work_1h=work_1h,
-        work_15m=work_15m,
+        work_15m=primary_work,
         bid_price=frames.bid_price,
         ask_price=frames.ask_price,
         spread_bps=spread_bps,
@@ -1484,6 +1510,8 @@ def prepare_symbol(
         regime_4h_confirmed=_regime_4h_confirmed(work_4h_frame),
         regime_1h_confirmed=_regime_1h_confirmed(work_1h),  # 1H context for 15M signals
         poc_1h=_volume_poc(work_1h, lookback=48),
-        poc_15m=_volume_poc(work_15m, lookback=96),
+        poc_15m=_volume_poc(primary_work, lookback=96),
+        primary_timeframe=primary_timeframe,
+        context_timeframes=context_timeframes,
         settings=settings,
     )

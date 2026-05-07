@@ -12,6 +12,7 @@ import polars as pl
 
 from .config import BotSettings
 from .models import PreparedSymbol, Signal
+from .runtime_policy import is_deep_analysis_symbol
 from .scoring import ScoringResult
 
 if TYPE_CHECKING:
@@ -50,6 +51,20 @@ def _resolve_adx_policy(signal: Signal) -> str:
     if signal.confirmation_profile == "trend_follow":
         return _ADX_POLICY_HARD_GATE
     return _ADX_POLICY_PENALTY
+
+
+def _primary_freshness_window(
+    prepared: PreparedSymbol,
+    settings: BotSettings,
+) -> tuple[str, timedelta]:
+    timeframe = str(getattr(prepared, "primary_timeframe", "15m") or "15m")
+    if timeframe == "1h":
+        return timeframe, timedelta(hours=settings.filters.freshness_1h_hours)
+    if timeframe == "4h":
+        return timeframe, timedelta(hours=settings.filters.freshness_4h_hours)
+    if timeframe == "5m":
+        return timeframe, timedelta(minutes=settings.filters.freshness_15m_minutes)
+    return "15m", timedelta(minutes=settings.filters.freshness_15m_minutes)
 
 
 def _frame_is_fresh(frame: pl.DataFrame, max_age: timedelta) -> bool:
@@ -130,12 +145,19 @@ def apply_global_filters(
         )
 
     # --- 1. Data freshness ---
-    if not _frame_is_fresh(
-        prepared.work_15m,
-        timedelta(minutes=settings.filters.freshness_15m_minutes),
-    ):
-        return _reject("stale_15m", base)
-    passed.append("fresh_15m")
+    deep_analysis_asset = is_deep_analysis_symbol(prepared, settings)
+    primary_timeframe, primary_freshness = _primary_freshness_window(
+        prepared, settings
+    )
+    if deep_analysis_asset:
+        passed.append("deep_analysis_policy")
+    if not _frame_is_fresh(prepared.work_15m, primary_freshness):
+        return _reject(f"stale_{primary_timeframe}", base)
+    passed.append(
+        "fresh_15m"
+        if primary_timeframe == "15m"
+        else f"fresh_primary_{primary_timeframe}"
+    )
     if not _frame_is_fresh(
         prepared.work_1h,
         timedelta(hours=settings.filters.freshness_1h_hours),
@@ -200,6 +222,11 @@ def apply_global_filters(
     min_adx_1h = float(setup_overrides.get("min_adx_1h", settings.filters.min_adx_1h))
     adx_penalty_factor = float(setup_overrides.get("adx_penalty_factor", 0.85))
     adx_policy = _resolve_adx_policy(signal)
+    if deep_analysis_asset:
+        min_adx_1h = min(min_adx_1h, 14.0 if primary_timeframe == "15m" else 12.0)
+        if adx_policy == _ADX_POLICY_HARD_GATE:
+            adx_policy = _ADX_POLICY_PENALTY
+            adx_penalty_factor = max(adx_penalty_factor, 0.90)
     adx_penalty_applied = False
     if adx_1h > 0.0 and adx_1h < min_adx_1h:
         if adx_policy == _ADX_POLICY_HARD_GATE:
@@ -209,6 +236,7 @@ def apply_global_filters(
                 "min_adx_1h": min_adx_1h,
                 "setup_id": signal.setup_id,
                 "strategy_family": signal.strategy_family,
+                "primary_timeframe": primary_timeframe,
             }
             return _reject(
                 "regime_not_suitable", replace(base, atr_pct=atr_pct), details=details
@@ -243,8 +271,24 @@ def apply_global_filters(
     )
 
     # --- 5. Stop distance ---
-    if updated.stop_distance_pct < settings.tracking.min_stop_distance_pct:
-        return _reject("stop_too_tight", updated)
+    min_stop_distance_pct = float(settings.tracking.min_stop_distance_pct)
+    if deep_analysis_asset:
+        min_stop_distance_pct = min(
+            min_stop_distance_pct,
+            0.20 if primary_timeframe in {"1h", "4h"} else 0.25,
+        )
+    if updated.stop_distance_pct < min_stop_distance_pct:
+        return _reject(
+            "stop_too_tight",
+            updated,
+            details={
+                "stop_distance_pct": updated.stop_distance_pct,
+                "min_stop_distance_pct": min_stop_distance_pct,
+                "global_min_stop_distance_pct": settings.tracking.min_stop_distance_pct,
+                "deep_analysis_policy": deep_analysis_asset,
+                "primary_timeframe": primary_timeframe,
+            },
+        )
     if updated.stop_distance_pct > settings.tracking.max_stop_distance_pct:
         return _reject("stop_too_wide", updated)
     updated = replace(
@@ -258,6 +302,8 @@ def apply_global_filters(
     effective_min_rr = float(
         setup_overrides.get("min_rr", settings.filters.min_risk_reward)
     )
+    if deep_analysis_asset:
+        effective_min_rr = min(effective_min_rr, 1.5)
     rr_epsilon = 1e-9
     if rr_tp1 + rr_epsilon < effective_min_rr:
         return _reject(
@@ -270,6 +316,8 @@ def apply_global_filters(
                 "min_rr_required": effective_min_rr,
                 "global_min_rr": settings.filters.min_risk_reward,
                 "setup_id": signal.setup_id,
+                "deep_analysis_policy": deep_analysis_asset,
+                "primary_timeframe": primary_timeframe,
             },
         )
     updated = replace(updated, passed_filters=tuple([*updated.passed_filters, "rr_ok"]))
@@ -306,7 +354,24 @@ def apply_global_filters(
         )
 
     # --- 9. Minimum score gate (final gate after ALL adjustments) ---
-    if settings.filters.min_score > 0.0 and updated.score < settings.filters.min_score:
-        return _reject("score_too_low", updated, scoring_result)
+    effective_min_score = float(settings.filters.min_score)
+    if deep_analysis_asset:
+        deep_score_floor = 0.48 if primary_timeframe in {"1h", "4h"} else 0.50
+        if signal.setup_id in {"bos_choch", "liquidation_heatmap"}:
+            deep_score_floor = 0.40
+        effective_min_score = min(effective_min_score, deep_score_floor)
+    if effective_min_score > 0.0 and updated.score < effective_min_score:
+        return _reject(
+            "score_too_low",
+            updated,
+            scoring_result,
+            details={
+                "score": updated.score,
+                "min_score_required": effective_min_score,
+                "global_min_score": settings.filters.min_score,
+                "deep_analysis_policy": deep_analysis_asset,
+                "primary_timeframe": primary_timeframe,
+            },
+        )
 
     return True, updated, None, scoring_result, None

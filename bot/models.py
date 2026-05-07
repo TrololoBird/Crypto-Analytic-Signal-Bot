@@ -143,6 +143,8 @@ class PreparedSymbol:
     )
     poc_1h: float | None = None  # Point of Control on 1h (highest volume price)
     poc_15m: float | None = None  # Point of Control on 15m
+    primary_timeframe: str = "15m"
+    context_timeframes: tuple[str, ...] = ("1h", "4h")
     settings: BotSettings | None = None
     reject_log: list[dict[str, Any]] = field(default_factory=list)
 

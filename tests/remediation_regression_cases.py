@@ -1448,6 +1448,10 @@ def test_build_signal_reads_adx14_and_preserves_zero_metrics() -> None:
     assert signal.premium_zscore_5m == pytest.approx(0.0)
     assert signal.premium_slope_5m == pytest.approx(0.0)
     assert signal.ls_ratio == pytest.approx(0.0)
+    assert signal.spread_bps == pytest.approx(2.0)
+    assert signal.atr_pct == pytest.approx(2.0)
+    assert signal.funding_rate == pytest.approx(0.0008)
+    assert signal.oi_change_pct == pytest.approx(3.2)
 
 
 def test_build_signal_rejects_directional_tp_mismatch() -> None:

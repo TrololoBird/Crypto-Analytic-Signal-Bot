@@ -367,6 +367,8 @@ def _build_signal(
     premium_zscore_5m = _finite_or_none(prepared.work_5m, "premium_zscore_5m")
     premium_slope_5m = _finite_or_none(prepared.work_5m, "premium_slope_5m")
     ls_ratio = _finite_or_none(prepared.work_5m, "ls_ratio")
+    if ls_ratio is None:
+        ls_ratio = getattr(prepared, "ls_ratio", None)
 
     risk = abs(entry_mid - normalized_stop)
     reward = abs(normalized_tp1 - entry_mid)
@@ -375,12 +377,18 @@ def _build_signal(
     trend_direction = getattr(prepared, "bias_1h", None)
     trend_score = getattr(prepared, "trend_score_1h", None)
 
+    signal_timeframe = str(timeframe or "15m")
+    if signal_timeframe == "15m":
+        primary_timeframe = str(getattr(prepared, "primary_timeframe", "15m") or "15m")
+        if primary_timeframe in {"5m", "1h", "4h"}:
+            signal_timeframe = primary_timeframe
+
     return Signal(
         symbol=prepared.symbol,
         setup_id=setup_id,
         direction=direction,
         score=score,
-        timeframe=str(timeframe or "15m"),
+        timeframe=signal_timeframe,
         entry_low=min(entry_low, entry_high),
         entry_high=max(entry_low, entry_high),
         stop=normalized_stop,
@@ -390,7 +398,11 @@ def _build_signal(
         strategy_family=str(strategy_family or "continuation"),
         bias_4h=prepared.bias_4h,
         quote_volume=prepared.universe.quote_volume,
+        spread_bps=prepared.spread_bps,
+        atr_pct=prepared.atr_pct,
         mark_price=prepared.mark_price,
+        funding_rate=prepared.funding_rate,
+        oi_change_pct=prepared.oi_change_pct,
         volume_ratio=volume_ratio,
         target_integrity_status=integrity_status,
         single_target_mode=single_target_mode,

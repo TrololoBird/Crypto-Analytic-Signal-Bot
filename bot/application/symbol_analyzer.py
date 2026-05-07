@@ -19,6 +19,7 @@ from bot.models import (
     SymbolFrames,
     UniverseSymbol,
 )
+from bot.runtime_policy import is_deep_analysis_symbol
 
 if TYPE_CHECKING:
     from bot.application.bot import SignalBot
@@ -462,8 +463,13 @@ class SymbolAnalyzer:
         details = self.directional_context(signal, prepared)
         family = getattr(metadata, "family", signal.strategy_family)
         profile = getattr(metadata, "confirmation_profile", signal.confirmation_profile)
+        deep_analysis_asset = is_deep_analysis_symbol(prepared, self._bot.settings)
+        primary_timeframe = str(getattr(prepared, "primary_timeframe", "15m") or "15m")
         details["family"] = family
         details["confirmation_profile"] = profile
+        details["primary_timeframe"] = primary_timeframe
+        if deep_analysis_asset:
+            details["deep_analysis_policy"] = "soft_fast_context"
         if (
             not details["used"]
             and details["flow_proxy"] is None
@@ -476,6 +482,9 @@ class SymbolAnalyzer:
                 getattr(self._bot.settings.runtime, "strict_data_quality", True)
             )
             if strict_data_quality and family in {"continuation", "breakout"}:
+                if deep_analysis_asset and primary_timeframe in {"1h", "4h"}:
+                    details["fallback"] = "deep_primary_without_fast_context"
+                    return True, None, details
                 return False, "data.fast_context_missing", details
             return True, None, details
         details["confirmation_votes"] = {
@@ -502,6 +511,12 @@ class SymbolAnalyzer:
             and not details["crowd_trend_support"]
             and details["confirmation_count"] < 3
         ):
+            if deep_analysis_asset and (
+                primary_timeframe in {"1h", "4h"}
+                or details["confirmation_count"] >= 1
+            ):
+                details["relaxed_reject"] = f"crowding_headwind_{signal.direction}"
+                return True, None, details
             return False, f"crowding_headwind_{signal.direction}", details
         if (
             family == "breakout"
@@ -509,6 +524,14 @@ class SymbolAnalyzer:
             and not details["crowd_trend_support"]
             and details["confirmation_count"] < 3
         ):
+            if deep_analysis_asset and (
+                primary_timeframe in {"1h", "4h"}
+                or details["confirmation_count"] >= 1
+            ):
+                details["relaxed_reject"] = (
+                    f"breakout_crowding_unconfirmed_{signal.direction}"
+                )
+                return True, None, details
             return False, f"breakout_crowding_unconfirmed_{signal.direction}", details
         if details["confirmation_count"] >= 2:
             return True, None, details
@@ -518,6 +541,11 @@ class SymbolAnalyzer:
             and details["exhaustion_count"] == 0
         ):
             return False, f"hard_context_opposes_{signal.direction}", details
+        if deep_analysis_asset and (
+            primary_timeframe in {"1h", "4h"} or details["confirmation_count"] >= 1
+        ):
+            details["relaxed_reject"] = f"5m_opposes_{signal.direction}"
+            return True, None, details
         return False, f"5m_opposes_{signal.direction}", details
 
     async def run_modern_analysis(
@@ -639,45 +667,6 @@ class SymbolAnalyzer:
                 minimums=minimums,
                 settings=self._bot.settings,
             )
-            if prepared is not None and ws_enrichments:
-                for key, value in ws_enrichments.items():
-                    if hasattr(prepared, key):
-                        setattr(prepared, key, value)
-                # Debug: log enrichment status
-                if ws_enrichments.get("mark_index_spread_bps") is not None:
-                    LOG.debug(
-                        "%s: enrichment mark_index_spread_bps=%.4f",
-                        item.symbol,
-                        ws_enrichments["mark_index_spread_bps"],
-                    )
-                else:
-                    LOG.debug(
-                        "%s: enrichment mark_index_spread_bps=None (ws_data_missing)",
-                        item.symbol,
-                    )
-            if prepared is not None:
-                try:
-                    market_ctx = await self._bot._modern_repo.get_market_context()
-                except _DEGRADATION_ERRORS as exc:
-                    self._log_degradation(
-                        level=logging.INFO,
-                        symbol=item.symbol,
-                        stage="market_context",
-                        source="memory",
-                        reason=str(exc),
-                        fallback_used="skip_multi_asset_context",
-                        exception_type=type(exc).__name__,
-                    )
-                else:
-                    for key in (
-                        "btc_bias",
-                        "eth_bias",
-                        "altcoin_season_index",
-                        "btc_phase",
-                    ):
-                        value = market_ctx.get(key)
-                        if value is not None and hasattr(prepared, key):
-                            setattr(prepared, key, value)
             LOG.debug(
                 "%s: prepared symbol built | work_15m_rows=%s work_1h_rows=%s",
                 item.symbol,
@@ -714,6 +703,77 @@ class SymbolAnalyzer:
                 prepared=prepared,
                 funnel=funnel,
             )
+
+        if prepared is not None and ws_enrichments:
+            try:
+                for key, value in ws_enrichments.items():
+                    if hasattr(prepared, key):
+                        setattr(prepared, key, value)
+                # Debug: log enrichment status
+                if ws_enrichments.get("mark_index_spread_bps") is not None:
+                    LOG.debug(
+                        "%s: enrichment mark_index_spread_bps=%.4f",
+                        item.symbol,
+                        ws_enrichments["mark_index_spread_bps"],
+                    )
+                else:
+                    LOG.debug(
+                        "%s: enrichment mark_index_spread_bps=None (ws_data_missing)",
+                        item.symbol,
+                    )
+            except _DEGRADATION_ERRORS as exc:
+                self._log_degradation(
+                    level=logging.INFO,
+                    symbol=item.symbol,
+                    stage="ws_enrichment_apply",
+                    source="ws_cache",
+                    reason=str(exc),
+                    fallback_used="skip_ws_enrichment",
+                    exception_type=type(exc).__name__,
+                )
+            except Exception as exc:
+                self._log_degradation(
+                    level=logging.WARNING,
+                    symbol=item.symbol,
+                    stage="ws_enrichment_apply",
+                    source="ws_cache",
+                    reason=str(exc),
+                    fallback_used="skip_ws_enrichment",
+                    exception_type=type(exc).__name__,
+                )
+
+        if prepared is not None:
+            try:
+                market_ctx = await self._bot._modern_repo.get_market_context()
+                for key in (
+                    "btc_bias",
+                    "eth_bias",
+                    "altcoin_season_index",
+                    "btc_phase",
+                ):
+                    value = market_ctx.get(key)
+                    if value is not None and hasattr(prepared, key):
+                        setattr(prepared, key, value)
+            except _DEGRADATION_ERRORS as exc:
+                self._log_degradation(
+                    level=logging.INFO,
+                    symbol=item.symbol,
+                    stage="market_context",
+                    source="memory",
+                    reason=str(exc),
+                    fallback_used="skip_multi_asset_context",
+                    exception_type=type(exc).__name__,
+                )
+            except Exception as exc:
+                self._log_degradation(
+                    level=logging.WARNING,
+                    symbol=item.symbol,
+                    stage="market_context",
+                    source="memory",
+                    reason=str(exc),
+                    fallback_used="skip_multi_asset_context",
+                    exception_type=type(exc).__name__,
+                )
 
         # Run modern engine (replaces pipeline analysis)
         if prepared is None:
@@ -1240,6 +1300,25 @@ class SymbolAnalyzer:
                 )
 
         if isinstance(self._bot.client, BinanceFuturesMarketData):
+            premium = self._bot.client.get_cached_premium_index(symbol)
+            if premium is not None:
+                mark_price = float(premium.get("mark_price") or 0.0)
+                index_price = float(premium.get("index_price") or 0.0)
+                if "funding_rate" not in enrichments:
+                    enrichments["funding_rate"] = float(
+                        premium.get("funding_rate") or 0.0
+                    )
+                if "mark_price" not in enrichments and mark_price > 0.0:
+                    enrichments["mark_price"] = mark_price
+                if "basis_pct" not in enrichments and mark_price > 0.0 and index_price > 0.0:
+                    basis_pct = (mark_price - index_price) / index_price * 100.0
+                    enrichments["basis_pct"] = basis_pct
+                    enrichments.setdefault("mark_index_spread_bps", basis_pct * 100.0)
+            elif "funding_rate" not in enrichments:
+                funding_rate = self._bot.client.get_cached_funding_rate(symbol)
+                if funding_rate is not None:
+                    enrichments["funding_rate"] = funding_rate
+
             oi_chg = self._bot.client.get_cached_oi_change(symbol)
             if oi_chg is not None:
                 enrichments["oi_change_pct"] = oi_chg
