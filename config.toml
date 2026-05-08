@@ -38,7 +38,7 @@ min_quote_volume_usd = 10_000_000
 min_listing_age_days = 14
 light_refresh_interval_seconds = 75
 full_refresh_interval_seconds = 7200
-shortlist_spread_max_bps = 15.0
+shortlist_spread_max_bps = 8.0
 shortlist_book_stale_seconds = 90.0
 pinned_symbols = ["BTCUSDT", "ETHUSDT", "XAUUSDT", "XAGUSDT"]
 
@@ -89,7 +89,7 @@ max_mark_price_deviation_pct = 0.005
 # Setup-specific optimizable parameters for self-learner
 [bot.filters.setups]
 ema_bounce = { base_score = 0.55, min_adx_1h = 15.0, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.5, min_rr = 1.5 }
-structure_pullback = { base_score = 0.55, bias_mismatch_penalty = 0.75, tp_too_close_penalty = 0.75, sl_buffer_atr = 0.65, min_rr = 1.5 }
+structure_pullback = { base_score = 0.55, bias_mismatch_penalty = 0.75, tp_too_close_penalty = 0.75, sl_buffer_atr = 0.65, min_rr = 1.5, ema_deep_pullback_pct = 0.98 }
 structure_break_retest = { base_score = 0.55, threshold_adx = 18.0, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.5, min_rr = 1.5 }
 wick_trap_reversal = { base_score = 0.50, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.8, min_rr = 1.5, wick_through_atr_mult = 0.3, adx_penalty_factor = 0.85 }
 squeeze_setup = { base_score = 0.55, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.8, min_rr = 1.5 }

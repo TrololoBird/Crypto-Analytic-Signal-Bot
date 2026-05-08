@@ -4,7 +4,13 @@ from datetime import UTC, datetime, timedelta
 
 import polars as pl
 
-from bot.features import _cached_prepare_frame, _FrameCache, _prepare_frame
+from bot.features import (
+    _FrameCache,
+    _bollinger_bands,
+    _cached_prepare_frame,
+    _prepare_frame,
+    _vwap,
+)
 
 
 def _ohlcv(rows: int = 260, *, end_time: datetime | None = None) -> pl.DataFrame:
@@ -60,6 +66,33 @@ def test_prepare_frame_keeps_rsi_adx_on_indicator_scale() -> None:
     assert rsi > 1.0
     assert 0.0 <= adx <= 100.0
     assert adx > 1.0
+
+
+def test_vwap_includes_current_bar() -> None:
+    frame = pl.DataFrame(
+        {
+            "high": [10.0, 20.0],
+            "low": [10.0, 20.0],
+            "close": [10.0, 20.0],
+            "volume": [1.0, 1.0],
+        }
+    )
+
+    values = _vwap(frame).to_list()
+
+    assert values == [10.0, 15.0]
+
+
+def test_bollinger_bands_use_sample_std() -> None:
+    upper, middle, lower = _bollinger_bands(
+        pl.Series("close", [1.0, 2.0, 3.0], dtype=pl.Float64),
+        period=3,
+        nbdev=2.0,
+    )
+
+    assert middle[-1] == 2.0
+    assert upper[-1] == 4.0
+    assert lower[-1] == 0.0
 
 
 def test_cached_prepare_frame_distinguishes_same_close_time_with_different_history() -> None:

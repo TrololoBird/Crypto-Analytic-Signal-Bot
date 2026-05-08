@@ -301,7 +301,7 @@ def _strategy_fits_for_row(
 
 def _spread_freshness_score(row: dict[str, Any], settings: BotSettings) -> float:
     universe = settings.universe
-    max_spread = float(getattr(universe, "shortlist_spread_max_bps", 15.0))
+    max_spread = float(getattr(universe, "shortlist_spread_max_bps", 8.0))
     stale_s = float(getattr(universe, "shortlist_book_stale_seconds", 90.0))
     spread_bps = _safe_float(row.get("spread_bps"))
     book_age = _safe_float(row.get("book_age_seconds"))

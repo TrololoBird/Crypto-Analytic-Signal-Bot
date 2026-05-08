@@ -22,6 +22,15 @@ def test_public_endpoint_weight_estimates_match_usdm_docs() -> None:
     assert client._estimate_weight("global_long_short_account_ratio") == 0
 
 
+def test_kline_weight_estimate_uses_limit_tiers() -> None:
+    client = BinanceFuturesMarketData()
+
+    assert client._estimate_weight("kline_candlestick_data", {"limit": 99}) == 1
+    assert client._estimate_weight("kline_candlestick_data", {"limit": 300}) == 2
+    assert client._estimate_weight("kline_candlestick_data", {"limit": 1000}) == 5
+    assert client._estimate_weight("kline_candlestick_data", {"limit": 1500}) == 10
+
+
 def test_funding_history_uses_public_request_limiter() -> None:
     client = BinanceFuturesMarketData()
     spec = client._endpoint_spec("funding_rate_history")

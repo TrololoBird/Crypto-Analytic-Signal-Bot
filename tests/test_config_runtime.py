@@ -81,6 +81,17 @@ def test_phase_53_strategy_flags_are_runtime_visible(
         assert setup_id in settings.filters.setups
 
 
+def test_shortlist_spread_is_not_looser_than_filter_spread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TG_TOKEN", "")
+    monkeypatch.setenv("TARGET_CHAT_ID", "")
+
+    for path in (Path("config.toml"), Path("config.toml.example")):
+        settings = load_settings(path)
+        assert settings.universe.shortlist_spread_max_bps <= settings.filters.max_spread_bps
+
+
 def test_ws_subscribe_delay_respects_binance_control_message_limit() -> None:
     with pytest.raises(ValueError):
         BotSettings(

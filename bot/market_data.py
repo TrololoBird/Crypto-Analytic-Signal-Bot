@@ -70,7 +70,7 @@ _PERIOD_WINDOW_SECONDS: dict[str, int] = {
 }
 
 # Client-side weight estimates per operation (Binance Futures April 2026).
-# Kline requests with `limit > 100` are billed with weight=5.
+# Kline requests are billed by LIMIT tier; see Binance USD-M kline docs.
 _ENDPOINT_WEIGHTS: dict[str, int] = {
     # Official docs: GET /fapi/v1/exchangeInfo weight=1
     "exchange_information": 1,
@@ -428,19 +428,33 @@ class BinanceFuturesMarketData:
             return entry[1] if entry else None
         return None
 
-    def _estimate_weight(self, operation: str) -> int:
+    def _estimate_weight(
+        self, operation: str, params: Mapping[str, Any] | None = None
+    ) -> int:
         """Return estimated request weight for client-side budget tracking."""
         if operation.startswith("kline_candlestick_data"):
-            return 5  # kline weight tier for limit > 100
+            try:
+                limit = int((params or {}).get("limit") or _DEFAULT_KLINE_FETCH_LIMIT)
+            except (TypeError, ValueError):
+                limit = _DEFAULT_KLINE_FETCH_LIMIT
+            if limit < 100:
+                return 1
+            if limit < 500:
+                return 2
+            if limit <= 1000:
+                return 5
+            return 10
         return _ENDPOINT_WEIGHTS.get(operation, 1)
 
-    def _track_weight(self, operation: str) -> None:
+    def _track_weight(
+        self, operation: str, params: Mapping[str, Any] | None = None
+    ) -> None:
         """Accumulate client-side weight estimate; warn when approaching hard limit."""
         now = time.monotonic()
         if now - self._weight_window_start >= 60.0:
             self._weight_window_weight = 0
             self._weight_window_start = now
-        self._weight_window_weight += self._estimate_weight(operation)
+        self._weight_window_weight += self._estimate_weight(operation, params)
         if self._weight_window_weight >= _REST_WEIGHT_HARD_LIMIT:
             LOG.warning(
                 "client-side weight budget at hard limit | estimated_1m=%d operation=%s",
@@ -547,7 +561,7 @@ class BinanceFuturesMarketData:
         if now - self._weight_window_start >= 60.0:
             self._weight_window_weight = 0
             self._weight_window_start = now
-        estimated = self._estimate_weight(operation)
+        estimated = self._estimate_weight(operation, kwargs)
         if self._weight_window_weight + estimated >= _REST_WEIGHT_SOFT_LIMIT:
             wait_secs = max(0.0, 60.0 - (now - self._weight_window_start)) + 1.0
             LOG.warning(
@@ -569,7 +583,7 @@ class BinanceFuturesMarketData:
                 )
             self._rate_limit_error_streak = 0
             self._capture_response_metadata(result, operation=operation)
-            self._track_weight(operation)
+            self._track_weight(operation, kwargs)
             self._record_circuit_success(operation)
             return result
         except asyncio.CancelledError:
@@ -669,7 +683,7 @@ class BinanceFuturesMarketData:
         if now - self._weight_window_start >= 60.0:
             self._weight_window_weight = 0
             self._weight_window_start = now
-        estimated = self._estimate_weight(operation)
+        estimated = self._estimate_weight(operation, params)
         if self._weight_window_weight + estimated >= _REST_WEIGHT_SOFT_LIMIT:
             wait_secs = max(0.0, 60.0 - (now - self._weight_window_start)) + 1.0
             LOG.warning(
@@ -738,7 +752,7 @@ class BinanceFuturesMarketData:
 
             self._rate_limit_error_streak = 0
             self._capture_response_metadata(_ResponseStub(headers), operation=operation)
-            self._track_weight(operation)
+            self._track_weight(operation, params)
             self._record_circuit_success(operation)
             self._record_endpoint_snapshot(
                 operation,

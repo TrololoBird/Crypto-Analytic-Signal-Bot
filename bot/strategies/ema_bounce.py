@@ -112,9 +112,11 @@ class EmaBounceSetup(BaseSetup):
         # Direction detection with graded scoring instead of reject
         signal_direction: str | None = None
         if bias_1h == "uptrend":
-            touch_ema = prev_close <= ema20 * (
-                1.0 + float(ema_touch_tolerance_pct)
-            ) or prev_close <= ema50 * (1.0 + float(ema_touch_tolerance_pct) * 2.0)
+            touch_ema = (
+                abs(prev_close - ema20) / ema20 <= float(ema_touch_tolerance_pct)
+                or abs(prev_close - ema50) / ema50
+                <= float(ema_touch_tolerance_pct) * 2.0
+            )
             bounce = close > prev_close * (
                 1.0 + float(bounce_threshold_pct)
             ) and close >= ema20 * (1.0 - float(ema_touch_tolerance_pct))
@@ -126,9 +128,11 @@ class EmaBounceSetup(BaseSetup):
                     f"ema50_1h={ema50:.4f}",
                 ]
         elif bias_1h == "downtrend":
-            touch_ema = prev_close >= ema20 * (
-                1.0 - float(ema_touch_tolerance_pct)
-            ) or prev_close >= ema50 * (1.0 - float(ema_touch_tolerance_pct) * 2.0)
+            touch_ema = (
+                abs(prev_close - ema20) / ema20 <= float(ema_touch_tolerance_pct)
+                or abs(prev_close - ema50) / ema50
+                <= float(ema_touch_tolerance_pct) * 2.0
+            )
             bounce = close < prev_close * (
                 1.0 - float(bounce_threshold_pct)
             ) and close <= ema20 * (1.0 + float(ema_touch_tolerance_pct))

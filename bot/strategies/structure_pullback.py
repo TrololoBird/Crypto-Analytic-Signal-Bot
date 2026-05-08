@@ -43,6 +43,7 @@ class StructurePullbackSetup(BaseSetup):
             "min_rr": 1.5,
             "min_trend_score": 0.40,
             "ema_proximity_pct": 0.995,
+            "ema_deep_pullback_pct": 0.98,
             "pullback_lookback": 12.0,
             "sl_buffer_atr": 0.5,
             "min_adx_1h": 15.0,
@@ -67,6 +68,11 @@ class StructurePullbackSetup(BaseSetup):
         )
         ema_proximity_pct = dynamic_params.get(
             "ema_proximity_pct", defaults["ema_proximity_pct"]
+        )
+        ema_deep_pullback_pct = float(
+            dynamic_params.get(
+                "ema_deep_pullback_pct", defaults["ema_deep_pullback_pct"]
+            )
         )
         pullback_lookback = int(
             dynamic_params.get("pullback_lookback", defaults["pullback_lookback"])
@@ -123,6 +129,9 @@ class StructurePullbackSetup(BaseSetup):
         elif close_1h >= ema20_1h * float(ema_proximity_pct):
             long_score += 0.15
             long_reasons.append("price_near_ema20")
+        elif close_1h >= ema20_1h * ema_deep_pullback_pct:
+            long_score += 0.05
+            long_reasons.append("deep_pullback_near_ema20")
 
         short_score = 0.0
         short_reasons: list[str] = []
@@ -144,6 +153,9 @@ class StructurePullbackSetup(BaseSetup):
         elif close_1h <= ema20_1h * (2.0 - float(ema_proximity_pct)):
             short_score += 0.15
             short_reasons.append("price_near_ema20")
+        elif close_1h <= ema20_1h * (2.0 - ema_deep_pullback_pct):
+            short_score += 0.05
+            short_reasons.append("deep_pullback_near_ema20")
 
         if (
             max(long_score, short_score) < float(min_trend_score)

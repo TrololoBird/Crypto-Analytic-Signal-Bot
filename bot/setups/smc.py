@@ -164,7 +164,7 @@ def swing_highs_lows(
     frame: pl.DataFrame,
     *,
     swing_length: int = 50,
-    mode: SMCMode = "offline_parity",
+    mode: SMCMode = "live_safe",
 ) -> pl.DataFrame:
     ohlc = _normalize_ohlcv(frame)
     highs = _series_to_float_array(ohlc["high"])

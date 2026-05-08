@@ -11,6 +11,7 @@ from .features_shared import (
     clean_non_finite,
     materialize_series,
     true_range,
+    wilder_mean,
 )
 from .features_structure import hull_moving_average, ichimoku_lines
 
@@ -73,16 +74,20 @@ def _bollinger_bands(
     close: pl.Series, period: int = 20, nbdev: float = 2.0
 ) -> tuple[pl.Series, pl.Series, pl.Series]:
     middle = close.rolling_mean(window_size=period)
-    std = close.rolling_std(window_size=period)
+    std = close.rolling_std(window_size=period, ddof=1)
     return middle + nbdev * std, middle, middle - nbdev * std
 
 
 def _keltner_channels(
-    df: pl.DataFrame, period: int = 20, multiplier: float = 2.0
+    df: pl.DataFrame, period: int = 20, multiplier: float = 2.0, atr_period: int = 10
 ) -> tuple[pl.Series, pl.Series, pl.Series]:
     typical = (df["high"] + df["low"] + df["close"]) / 3.0
-    middle = typical.rolling_mean(window_size=period).rename("kc_middle")
-    atr = atr_from_true_range(true_range(df), period=period, df=df, name="kc_atr")
+    middle = typical.ewm_mean(span=period, adjust=False).rename("kc_middle")
+    atr = materialize_series(
+        wilder_mean(true_range(df), period=atr_period, name="kc_atr"),
+        df=df,
+        name="kc_atr",
+    )
     return middle + multiplier * atr, middle, middle - multiplier * atr
 
 

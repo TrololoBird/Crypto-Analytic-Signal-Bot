@@ -32,6 +32,7 @@ from .runtime_policy import (
     configured_primary_timeframe,
 )
 from .features_microstructure import add_microstructure_features
+from .features_shared import wilder_mean
 from .features_structure import (
     hull_moving_average as _hull_moving_average_external,
     ichimoku_lines as _ichimoku_lines_external,
@@ -272,10 +273,14 @@ def _rsi(df: pl.DataFrame, period: int = 14) -> pl.Series:
     losses = (-delta).clip(lower_bound=0.0)
 
     avg_gain = _materialize_series(
-        gains.ewm_mean(alpha=1.0 / period, adjust=False), df=df, name="avg_gain"
+        wilder_mean(_materialize_series(gains, df=df, name="gain"), period=period, name="avg_gain", seed_offset=1),
+        df=df,
+        name="avg_gain",
     )
     avg_loss = _materialize_series(
-        losses.ewm_mean(alpha=1.0 / period, adjust=False), df=df, name="avg_loss"
+        wilder_mean(_materialize_series(losses, df=df, name="loss"), period=period, name="avg_loss", seed_offset=1),
+        df=df,
+        name="avg_loss",
     )
 
     rs = avg_gain / avg_loss
@@ -319,8 +324,11 @@ def _atr(df: pl.DataFrame, period: int = 14) -> pl.Series:
         (low - prev_close).abs(),
     )
     
+    tr_series = _materialize_series(tr, df=df, name="true_range")
     return _materialize_series(
-        tr.ewm_mean(alpha=1.0 / period, adjust=False), df=df, name=f"atr{period}"
+        wilder_mean(tr_series, period=period, name=f"atr{period}"),
+        df=df,
+        name=f"atr{period}",
     )
 
 
@@ -346,14 +354,14 @@ def _adx(df: pl.DataFrame, period: int = 14) -> pl.Series:
     
     atr = _atr(df, period)
     atr_safe = _clean_non_finite(atr, fill=1e-9).replace(0.0, 1e-9)
-    plus_di = 100.0 * plus_dm.ewm_mean(alpha=1.0 / period, adjust=False) / atr_safe
-    minus_di = 100.0 * minus_dm.ewm_mean(alpha=1.0 / period, adjust=False) / atr_safe
+    plus_di = 100.0 * wilder_mean(plus_dm, period=period, name="plus_dm_smoothed") / atr_safe
+    minus_di = 100.0 * wilder_mean(minus_dm, period=period, name="minus_dm_smoothed") / atr_safe
     
     di_sum = (plus_di + minus_di).replace(0.0, None)
     dx = _clean_non_finite(100.0 * (plus_di - minus_di).abs() / di_sum, fill=0.0)
     return _materialize_series(
         _clean_non_finite(
-            dx.ewm_mean(alpha=1.0 / period, adjust=False), fill=0.0
+            wilder_mean(dx, period=period, name=f"adx{period}", seed_offset=period - 1), fill=0.0
         ).clip(0.0, 100.0),
         df=df,
         name=f"adx{period}",
@@ -361,12 +369,12 @@ def _adx(df: pl.DataFrame, period: int = 14) -> pl.Series:
 
 
 def _vwap(df: pl.DataFrame) -> pl.Series:
-    """Volume Weighted Average Price — cumulative with shift(1) to prevent lookahead."""
+    """Volume Weighted Average Price — cumulative including the current bar."""
     typical_price = (df["high"] + df["low"] + df["close"]) / 3.0
     pv = typical_price * df["volume"]
     
-    cumulative_pv = pv.cum_sum().shift(1)
-    cumulative_volume = df["volume"].cum_sum().shift(1)
+    cumulative_pv = pv.cum_sum()
+    cumulative_volume = df["volume"].cum_sum()
     
     vwap = (cumulative_pv / cumulative_volume).forward_fill()
     return _materialize_series(vwap, df=df, name="vwap")
@@ -615,7 +623,7 @@ def _bollinger_bands(close: pl.Series, period: int = 20, nbdev: float = 2.0) -> 
     Returns (upper, middle, lower) bands.
     """
     middle = close.rolling_mean(window_size=period).rename("bb_middle")
-    std = close.rolling_std(window_size=period).rename("bb_std")
+    std = close.rolling_std(window_size=period, ddof=1).rename("bb_std")
     
     upper = middle + nbdev * std
     lower = middle - nbdev * std
@@ -631,13 +639,18 @@ def _hull_moving_average(close: pl.Series, period: int, *, name: str) -> pl.Seri
     return _hull_moving_average_external(close, period, name=name)
 
 
-def _keltner_channels(df: pl.DataFrame, period: int = 20, multiplier: float = 2.0) -> tuple[pl.Series, pl.Series, pl.Series]:
+def _keltner_channels(
+    df: pl.DataFrame,
+    period: int = 20,
+    multiplier: float = 2.0,
+    atr_period: int = 10,
+) -> tuple[pl.Series, pl.Series, pl.Series]:
     """Keltner Channels - pure Polars implementation using ATR.
     
     Returns (upper, middle, lower) channels.
     """
     typical_price = (df["high"] + df["low"] + df["close"]) / 3.0
-    middle = typical_price.rolling_mean(window_size=period).rename("kc_middle")
+    middle = typical_price.ewm_mean(span=period, adjust=False).rename("kc_middle")
     
     # ATR for channel width
     high = df["high"]
@@ -650,7 +663,12 @@ def _keltner_channels(df: pl.DataFrame, period: int = 20, multiplier: float = 2.
         (high - prev_close).abs(),
         (low - prev_close).abs(),
     )
-    atr = _materialize_series(tr.ewm_mean(alpha=1.0 / period, adjust=False), df=df, name="kc_atr")
+    tr_series = _materialize_series(tr, df=df, name="true_range")
+    atr = _materialize_series(
+        wilder_mean(tr_series, period=atr_period, name="kc_atr"),
+        df=df,
+        name="kc_atr",
+    )
     
     upper = middle + multiplier * atr
     lower = middle - multiplier * atr

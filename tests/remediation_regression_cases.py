@@ -1520,6 +1520,35 @@ def test_ema_bounce_emits_1h_timeframe() -> None:
     assert signal.timeframe == "1h"
 
 
+def test_ema_bounce_requires_actual_ema_touch() -> None:
+    setup = EmaBounceSetup()
+    settings = SimpleNamespace(filters=SimpleNamespace(setups={}))
+
+    t0 = datetime.now(UTC) - timedelta(hours=2)
+    prepared = make_prepared(price=99.7)
+    prepared.bias_1h = "uptrend"
+    prepared.regime_1h_confirmed = "uptrend"
+    prepared.work_1h = pl.DataFrame(
+        {
+            "time": [t0, t0 + timedelta(hours=1), t0 + timedelta(hours=2)],
+            "close_time": [t0, t0 + timedelta(hours=1), t0 + timedelta(hours=2)],
+            "open": [98.0, 94.8, 98.9],
+            "high": [100.4, 95.4, 100.2],
+            "low": [97.8, 94.4, 98.5],
+            "close": [99.5, 95.0, 99.7],
+            "volume": [900.0, 950.0, 1100.0],
+            "atr14": [1.2, 1.3, 1.4],
+            "rsi14": [52.0, 54.0, 56.0],
+            "volume_ratio20": [1.0, 1.1, 1.3],
+            "ema20": [99.5, 100.0, 100.0],
+            "ema50": [99.0, 99.0, 99.0],
+            "adx14": [21.0, 22.0, 24.0],
+        }
+    )
+
+    assert setup.detect(prepared, settings) is None
+
+
 @pytest.mark.parametrize(
     ("min_adx", "expect_signal"),
     [

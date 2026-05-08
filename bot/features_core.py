@@ -7,11 +7,11 @@ import polars as pl
 
 from .features_shared import (
     REQUIRED_OHLCV_COLUMNS,
-    atr_from_true_range,
     clean_non_finite,
     ensure_columns,
     materialize_series,
     true_range,
+    wilder_mean,
 )
 
 __all__ = [
@@ -56,8 +56,16 @@ def rsi(df: pl.DataFrame, period: int = 14, *, plta: Any = None, has_talib: bool
     delta = close.diff()
     gains = delta.clip(lower_bound=0.0)
     losses = (-delta).clip(lower_bound=0.0)
-    avg_gain = materialize_series(gains.ewm_mean(alpha=1.0 / period, adjust=False), df=df, name="avg_gain")
-    avg_loss = materialize_series(losses.ewm_mean(alpha=1.0 / period, adjust=False), df=df, name="avg_loss")
+    avg_gain = materialize_series(
+        wilder_mean(materialize_series(gains, df=df, name="gain"), period=period, name="avg_gain", seed_offset=1),
+        df=df,
+        name="avg_gain",
+    )
+    avg_loss = materialize_series(
+        wilder_mean(materialize_series(losses, df=df, name="loss"), period=period, name="avg_loss", seed_offset=1),
+        df=df,
+        name="avg_loss",
+    )
     rs = avg_gain / avg_loss
     raw = (100.0 - (100.0 / (1.0 + rs))).fill_nan(50.0)
     values: list[float] = []
@@ -84,7 +92,11 @@ def atr(df: pl.DataFrame, period: int = 14, *, plta: Any = None, has_talib: bool
             df=df,
             name=f"atr{period}",
         )
-    return atr_from_true_range(true_range(df), period=period, df=df, name=f"atr{period}")
+    return materialize_series(
+        wilder_mean(true_range(df), period=period, name=f"atr{period}"),
+        df=df,
+        name=f"atr{period}",
+    )
 
 
 def adx(df: pl.DataFrame, period: int = 14, *, plta: Any = None, has_talib: bool = False) -> pl.Series:
@@ -104,23 +116,23 @@ def adx(df: pl.DataFrame, period: int = 14, *, plta: Any = None, has_talib: bool
     minus_dm = materialize_series(pl.when((down_move > up_move) & (down_move > 0.0)).then(down_move).otherwise(0.0), df=df, name="minus_dm")
     atr_series = atr(df, period, plta=plta, has_talib=has_talib)
     atr_safe = clean_non_finite(atr_series, fill=1e-9).replace(0.0, 1e-9)
-    plus_di = 100.0 * plus_dm.ewm_mean(alpha=1.0 / period, adjust=False) / atr_safe
-    minus_di = 100.0 * minus_dm.ewm_mean(alpha=1.0 / period, adjust=False) / atr_safe
+    plus_di = 100.0 * wilder_mean(plus_dm, period=period, name="plus_dm_smoothed") / atr_safe
+    minus_di = 100.0 * wilder_mean(minus_dm, period=period, name="minus_dm_smoothed") / atr_safe
     di_sum = (plus_di + minus_di).replace(0.0, None)
     dx = clean_non_finite(100.0 * (plus_di - minus_di).abs() / di_sum, fill=0.0)
     return materialize_series(
-        clean_non_finite(dx.ewm_mean(alpha=1.0 / period, adjust=False), fill=0.0).clip(0.0, 100.0),
+        clean_non_finite(wilder_mean(dx, period=period, name=f"adx{period}", seed_offset=period - 1), fill=0.0).clip(0.0, 100.0),
         df=df,
         name=f"adx{period}",
     )
 
 
 def vwap(df: pl.DataFrame) -> pl.Series:
-    """Contract: input requires OHLCV; output shifted cumulative VWAP named `vwap`."""
+    """Contract: input requires OHLCV; output cumulative VWAP including current bar."""
     ensure_columns(df, REQUIRED_OHLCV_COLUMNS, fn_name="vwap")
     typical = (df["high"] + df["low"] + df["close"]) / 3.0
     pv = typical * df["volume"]
-    return materialize_series((pv.cum_sum().shift(1) / df["volume"].cum_sum().shift(1)).forward_fill(), df=df, name="vwap")
+    return materialize_series((pv.cum_sum() / df["volume"].cum_sum()).forward_fill(), df=df, name="vwap")
 
 
 def roc(df: pl.DataFrame, period: int = 10, *, plta: Any = None, has_talib: bool = False) -> pl.Series:

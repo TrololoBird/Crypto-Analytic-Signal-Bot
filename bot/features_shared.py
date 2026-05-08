@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 
 import polars as pl
 
@@ -36,6 +37,38 @@ def materialize_series(
     if isinstance(value, pl.Expr):
         return df.select(value.alias(name)).to_series()
     return pl.Series(name, [value] * df.height, dtype=pl.Float64)
+
+
+def finite_float(value: object, *, fill: float = 0.0) -> float:
+    try:
+        result = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return fill
+    return result if math.isfinite(result) else fill
+
+
+def wilder_mean(
+    series: pl.Series,
+    *,
+    period: int,
+    name: str,
+    seed_offset: int = 0,
+) -> pl.Series:
+    """Wilder running average seeded with a simple mean over the first window."""
+    size = len(series)
+    period = max(1, int(period))
+    values = [finite_float(value) for value in series.to_list()]
+    output: list[float | None] = [None] * size
+    seed_end = int(seed_offset) + period
+    if size < seed_end:
+        return pl.Series(name, output, dtype=pl.Float64)
+
+    average = sum(values[seed_offset:seed_end]) / period
+    output[seed_end - 1] = average
+    for idx in range(seed_end, size):
+        average = ((average * (period - 1)) + values[idx]) / period
+        output[idx] = average
+    return pl.Series(name, output, dtype=pl.Float64)
 
 
 def true_range(df: pl.DataFrame, *, name: str = "true_range") -> pl.Series:

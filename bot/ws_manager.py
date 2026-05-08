@@ -90,9 +90,7 @@ class RateLimiter:
 
     def __init__(self, max_per_second: int = _MAX_INCOMING_MSG_PER_SECOND) -> None:
         self.max_per_second = max_per_second
-        self._timestamps: collections.deque = collections.deque(
-            maxlen=max_per_second * 2
-        )
+        self._timestamps: collections.deque = collections.deque()
         self._lock = asyncio.Lock()
 
     async def acquire(self) -> bool:
