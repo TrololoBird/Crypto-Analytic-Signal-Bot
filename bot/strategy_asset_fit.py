@@ -137,6 +137,43 @@ def symbol_asset_tags(symbol: str, base_asset: str | None = None) -> frozenset[s
     return frozenset(tag for tag in tags if tag)
 
 
+def market_asset_tags(
+    symbol: str,
+    market_context: Mapping[str, object],
+) -> frozenset[str]:
+    """Return static plus market-dependent tags for strategy routing.
+
+    Static tags alone are not enough for profiles such as ``price_velocity``,
+    which explicitly targets volatile/high-volume symbols. Those tags depend on
+    the current shortlist context and must be derived before asset-fit scoring.
+    """
+    base_asset = str(market_context.get("base_asset") or "").strip().upper()
+    tags = set(symbol_asset_tags(symbol, base_asset))
+
+    rank_raw = market_context.get("liquidity_rank")
+    rank = (
+        int(rank_raw)
+        if isinstance(rank_raw, int | float) and isfinite(float(rank_raw))
+        else None
+    )
+    if rank is not None and rank <= 50:
+        tags.add("HIGH_VOLUME")
+
+    quote_volume_raw = market_context.get("quote_volume")
+    if isinstance(quote_volume_raw, int | float) and isfinite(float(quote_volume_raw)):
+        if float(quote_volume_raw) >= 30_000_000.0:
+            tags.add("HIGH_VOLUME")
+
+    move_raw = market_context.get("price_change_pct")
+    move = abs(float(move_raw)) if isinstance(move_raw, int | float) else 0.0
+    if move >= 2.0:
+        tags.add("VOLATILE")
+    if move >= 8.0:
+        tags.add("HIGH_VOLATILITY")
+
+    return frozenset(tags)
+
+
 def market_context_from_prepared(prepared: PreparedSymbol) -> dict[str, object]:
     """Extract asset-fit market context from a prepared symbol."""
     universe = prepared.universe
@@ -144,6 +181,7 @@ def market_context_from_prepared(prepared: PreparedSymbol) -> dict[str, object]:
         "symbol": prepared.symbol,
         "base_asset": universe.base_asset,
         "liquidity_rank": universe.liquidity_rank,
+        "quote_volume": universe.quote_volume,
         "price_change_pct": universe.price_change_pct,
         "funding_rate": prepared.funding_rate,
         "oi_current": prepared.oi_current,
@@ -168,8 +206,7 @@ def asset_fit_reject_reason(
     """Return a calibrated rejection reason when a strategy does not fit a symbol."""
     normalized_symbol = str(symbol or market_context.get("symbol") or "").strip().upper()
     profile = asset_fit_for_strategy(strategy_id)
-    base_asset = str(market_context.get("base_asset") or "").strip().upper()
-    tags = symbol_asset_tags(normalized_symbol, base_asset)
+    tags = market_asset_tags(normalized_symbol, market_context)
 
     assets = getattr(settings, "assets", {}) if settings is not None else {}
     asset_config = assets.get(normalized_symbol) if isinstance(assets, dict) else None

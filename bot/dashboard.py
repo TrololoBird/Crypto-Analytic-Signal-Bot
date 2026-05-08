@@ -90,7 +90,8 @@ class BotDashboard:
 
             days = max(1, min(int(days), 365))
             reporter = StrategyAnalytics(repo=self.bot._modern_repo)
-            return await reporter.generate_report(days=days)
+            report = await reporter.generate_report(days=days)
+            return self._merge_strategy_catalog(report)
 
         @self.app.get("/api/strategies")
         async def strategies() -> list[dict[str, Any]]:
@@ -123,12 +124,63 @@ class BotDashboard:
                         "id": setup_id,
                         "name": cls.__name__,
                         "enabled": setup_id in enabled_setups,
+                        "status": str(getattr(cls, "status", "beta")),
+                        "risk_profile": str(
+                            getattr(cls, "risk_profile", getattr(cls, "family", "generic"))
+                        ),
+                        "family": str(getattr(cls, "family", "generic")),
                     }
                 )
             LOG.info("dashboard cached %d strategies", len(self._strategies_cache))
         except Exception as exc:
             LOG.warning("failed to cache strategies: %s", exc)
             self._strategies_cache = []
+
+    def _merge_strategy_catalog(self, report: dict[str, Any]) -> dict[str, Any]:
+        """Attach every registered strategy to analytics, including zero-outcome rows."""
+        catalog = self._strategies_cache or []
+        by_setup = dict(report.get("by_setup") or {})
+        rows_by_setup = {
+            str(row.get("setup_id")): dict(row)
+            for row in report.get("setup_reports", [])
+            if row.get("setup_id")
+        }
+        for item in catalog:
+            setup_id = str(item.get("id") or "")
+            if not setup_id:
+                continue
+            row = rows_by_setup.setdefault(
+                setup_id,
+                {
+                    "setup_id": setup_id,
+                    "trades": 0,
+                    "count": 0,
+                    "win_rate": 0.0,
+                    "expectancy_r": 0.0,
+                    "avg_rr": 0.0,
+                    "profit_factor": None,
+                    "max_drawdown_r": 0.0,
+                },
+            )
+            row["enabled"] = bool(item.get("enabled"))
+            row["status"] = item.get("status", "beta")
+            row["risk_profile"] = item.get("risk_profile", "generic")
+            row["family"] = item.get("family", "generic")
+            by_setup[setup_id] = row
+        setup_reports = sorted(
+            rows_by_setup.values(),
+            key=lambda row: (
+                not bool(row.get("enabled", True)),
+                -int(row.get("trades") or 0),
+                str(row.get("status") or ""),
+                str(row.get("setup_id") or ""),
+            ),
+        )
+        report["by_setup"] = by_setup
+        report["setup_reports"] = setup_reports
+        report["registered_strategies"] = len(catalog)
+        report["enabled_strategies"] = sum(1 for item in catalog if item.get("enabled"))
+        return report
 
     def _get_html_dashboard(self) -> str:
         return """<!DOCTYPE html>
@@ -801,16 +853,21 @@ class BotDashboard:
 
             const rows = setupReports
                 .slice()
-                .sort((a, b) => (b.trades || 0) - (a.trades || 0))
-                .slice(0, 12)
+                .sort((a, b) => {
+                    const enabledDelta = Number(b.enabled !== false) - Number(a.enabled !== false);
+                    if (enabledDelta !== 0) return enabledDelta;
+                    return (b.trades || 0) - (a.trades || 0);
+                })
                 .map(row => {
                     const winRate = ((row.win_rate || 0) * 100).toFixed(1) + '%';
                     const rr = Number(row.expectancy_r || 0).toFixed(2);
                     const valueClass = row.expectancy_r > 0 ? 'green' : (row.expectancy_r < 0 ? 'red' : 'yellow');
+                    const status = row.status || 'beta';
+                    const suffix = row.enabled === false ? ' off' : status;
                     return `
                         <div class="metric-row">
                             <span class="metric-label">${row.setup_id}</span>
-                            <span class="metric-value ${valueClass}">${row.trades || 0} / ${winRate} / ${rr}R</span>
+                            <span class="metric-value ${valueClass}">${row.trades || 0} / ${winRate} / ${rr}R / ${suffix}</span>
                         </div>
                     `;
                 }).join('');

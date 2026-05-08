@@ -29,6 +29,7 @@ class RuntimeConfig(BaseModel):
     shortlist_refresh_interval_seconds: int = Field(default=7200, ge=300, le=86400)
     emergency_fallback_seconds: int = Field(default=1800, ge=300, le=7200)
     strict_data_quality: bool = True
+    emit_strategy_routing_skips: bool = True
     diagnostic_trace_limit_per_symbol: int = Field(default=20, ge=0, le=500)
     # Startup throttling to prevent REST API flood
     startup_batch_size: int = Field(default=3, ge=1, le=10)

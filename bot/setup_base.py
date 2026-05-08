@@ -40,10 +40,15 @@ class BaseSetup(AbstractStrategy):
     family: str = "continuation"
     confirmation_profile: str = "trend_follow"
     required_context: tuple[str, ...] = ()
+    required_features: tuple[str, ...] = ()
+    required_enrichment: tuple[str, ...] = ()
     requires_oi: bool = False
     requires_funding: bool = False
     min_history_bars: int = 50
     asset_fit: AssetFit = DEFAULT_ASSET_FIT
+    status: str = "beta"
+    score_calibration: str = "heuristic"
+    risk_profile: str = "generic"
 
     def __init__(
         self, params: SetupParams | None = None, settings: BotSettings | None = None
@@ -60,13 +65,20 @@ class BaseSetup(AbstractStrategy):
             strategy_id=self.setup_id,
             name=self.setup_id.replace("_", " ").title(),
             description=f"{self.setup_id} setup",
+            status=self.status,
             family=self.family,
             confirmation_profile=self.confirmation_profile,
             required_context=self.required_context,
-            requires_oi=self.requires_oi,
-            requires_funding=self.requires_funding,
+            required_features=self.required_features,
+            required_enrichment=self.required_enrichment,
+            requires_oi=bool(self.requires_oi or self.asset_fit.requires_oi),
+            requires_funding=bool(
+                self.requires_funding or self.asset_fit.requires_funding
+            ),
             min_history_bars=self.min_history_bars,
             asset_fit=self.asset_fit.to_dict(),
+            score_calibration=self.score_calibration,
+            risk_profile=self.risk_profile,
         )
 
     @abstractmethod

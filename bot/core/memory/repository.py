@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -714,7 +715,14 @@ class MemoryRepository(MemoryRepositoryExtension):
     # ------------------------------------------------------------------
 
     async def get_setup_score_adjustment(self, setup_id: str) -> float:
-        """Get current score adjustment for a setup."""
+        """Get current score adjustment for a setup.
+
+        The persisted rolling window is kept for fast online updates, but the
+        dashboard/outcome table is the stronger source when enough recent
+        R-multiple outcomes exist. This prevents positive smart exits from
+        being treated as losses and lets badly underperforming setups be
+        down-ranked before they keep producing more signals.
+        """
         if not self._conn:
             raise RuntimeError("Repository not initialized")
 
@@ -722,12 +730,67 @@ class MemoryRepository(MemoryRepositoryExtension):
             "SELECT score_adjustment FROM setup_scores WHERE setup_id = ?", (setup_id,)
         ) as cursor:
             row = await cursor.fetchone()
-            return row["score_adjustment"] if row else 0.0
+            window_adjustment = float(row["score_adjustment"] or 0.0) if row else 0.0
+
+        outcome_adjustment = await self._recent_outcome_score_adjustment(setup_id)
+        if outcome_adjustment < 0.0:
+            return min(window_adjustment, outcome_adjustment)
+        if outcome_adjustment > 0.0:
+            return max(window_adjustment, outcome_adjustment)
+        return window_adjustment
+
+    async def _recent_outcome_score_adjustment(
+        self,
+        setup_id: str,
+        *,
+        last_days: int = 90,
+        min_outcomes: int = 6,
+    ) -> float:
+        if not self._conn:
+            raise RuntimeError("Repository not initialized")
+
+        since = datetime.now(timezone.utc) - timedelta(days=last_days)
+        async with self._conn.execute(
+            """
+            SELECT
+                COUNT(*) AS total,
+                SUM(CASE WHEN was_profitable = 1 THEN 1 ELSE 0 END) AS wins,
+                AVG(pnl_r_multiple) AS avg_r_multiple
+            FROM signal_outcomes
+            WHERE setup_id = ?
+              AND COALESCE(closed_at, created_at) >= ?
+            """,
+            (setup_id, since.isoformat()),
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        total = int(row["total"] or 0) if row is not None else 0
+        if total < min_outcomes:
+            return 0.0
+
+        wins = int(row["wins"] or 0)
+        win_rate = wins / total if total > 0 else 0.0
+        avg_r = float(row["avg_r_multiple"] or 0.0)
+        if not math.isfinite(avg_r):
+            avg_r = 0.0
+
+        if avg_r <= -0.35 or (avg_r <= -0.15 and win_rate < 0.40):
+            return -0.18
+        if avg_r < 0.0 and win_rate < 0.35:
+            return -0.10
+        if avg_r >= 0.35 and win_rate >= 0.50:
+            return 0.06
+        if avg_r >= 0.15 and win_rate >= 0.55:
+            return 0.03
+        return 0.0
 
     async def record_setup_outcome(
         self,
         setup_id: str,
         outcome: str,
+        *,
+        pnl_r_multiple: float | None = None,
+        was_profitable: bool | None = None,
         window_size: int = 20,
         min_outcomes: int = 8,
         penalty: float = -0.05,
@@ -747,12 +810,32 @@ class MemoryRepository(MemoryRepositoryExtension):
             "SELECT outcome_window FROM setup_scores WHERE setup_id = ?", (setup_id,)
         ) as cursor:
             row = await cursor.fetchone()
-            window: list[str] = []
+            window: list[Any] = []
             if row and row["outcome_window"]:
                 window = json.loads(row["outcome_window"])
 
-        # Add new outcome
-        window.append(outcome)
+        # Add new outcome. New entries include R data; older string-only
+        # entries remain supported for existing SQLite state.
+        entry: str | dict[str, Any]
+        if pnl_r_multiple is None and was_profitable is None:
+            entry = outcome
+        else:
+            r_value = None
+            if pnl_r_multiple is not None:
+                try:
+                    parsed = float(pnl_r_multiple)
+                except (TypeError, ValueError):
+                    parsed = math.nan
+                if math.isfinite(parsed):
+                    r_value = round(parsed, 6)
+            entry = {
+                "outcome": str(outcome),
+                "pnl_r_multiple": r_value,
+                "was_profitable": bool(was_profitable)
+                if was_profitable is not None
+                else (r_value is not None and r_value > 0.0),
+            }
+        window.append(entry)
         if len(window) > window_size:
             window = window[-window_size:]
 
@@ -760,11 +843,19 @@ class MemoryRepository(MemoryRepositoryExtension):
         win_reasons = {"tp1_hit", "tp2_hit"}
         adjustment = 0.0
         if len(window) >= min_outcomes:
-            wins = sum(1 for r in window if r in win_reasons)
+            wins = sum(1 for item in window if self._setup_outcome_is_win(item, win_reasons))
             win_rate = wins / len(window)
-            if win_rate < low_win_rate:
+            r_values = [
+                r_value
+                for item in window
+                if (r_value := self._setup_outcome_r_multiple(item)) is not None
+            ]
+            avg_r = sum(r_values) / len(r_values) if r_values else 0.0
+            if avg_r <= -0.35 or (win_rate < low_win_rate and avg_r < 0.0):
+                adjustment = min(penalty * 3.0, -0.15)
+            elif win_rate < low_win_rate:
                 adjustment = penalty
-            elif win_rate > high_win_rate:
+            elif win_rate > high_win_rate or (avg_r >= 0.35 and win_rate >= 0.50):
                 adjustment = bonus
 
         # Save
@@ -787,6 +878,31 @@ class MemoryRepository(MemoryRepositoryExtension):
         await self._conn.commit()
 
         return adjustment
+
+    @staticmethod
+    def _setup_outcome_is_win(item: Any, win_reasons: set[str]) -> bool:
+        if isinstance(item, dict):
+            profitable = item.get("was_profitable")
+            if isinstance(profitable, bool):
+                return profitable
+            r_value = MemoryRepository._setup_outcome_r_multiple(item)
+            if r_value is not None:
+                return r_value > 0.0
+            return str(item.get("outcome") or "") in win_reasons
+        return str(item) in win_reasons
+
+    @staticmethod
+    def _setup_outcome_r_multiple(item: Any) -> float | None:
+        if not isinstance(item, dict):
+            return None
+        raw = item.get("pnl_r_multiple")
+        if raw is None:
+            return None
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return None
+        return value if math.isfinite(value) else None
 
     # ------------------------------------------------------------------
     # Active signal tracking (replaces SignalTrackingStore)

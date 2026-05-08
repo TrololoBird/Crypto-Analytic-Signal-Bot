@@ -379,8 +379,38 @@ class SignalTracker:
         if deltas:
             await self.memory_repo.increment_tracking_stats(**deltas)
 
-    async def _record_setup_outcome(self, setup_id: str, event_type: str) -> None:
-        await self.memory_repo.record_setup_outcome(setup_id, event_type)
+    async def _record_setup_outcome(
+        self,
+        setup_id: str,
+        event_type: str,
+        *,
+        pnl_r_multiple: float | None = None,
+        was_profitable: bool | None = None,
+    ) -> None:
+        await self.memory_repo.record_setup_outcome(
+            setup_id,
+            event_type,
+            pnl_r_multiple=pnl_r_multiple,
+            was_profitable=was_profitable,
+        )
+
+    @staticmethod
+    def _tracked_r_multiple(tracked: TrackedSignalState) -> float | None:
+        entry_price = tracked.activation_price or tracked.entry_mid
+        exit_price = tracked.close_price
+        risk_stop = (
+            tracked.initial_stop if tracked.initial_stop is not None else tracked.stop
+        )
+        if not entry_price or not exit_price:
+            return None
+        risk = abs(float(entry_price) - float(risk_stop))
+        if risk <= 0.0:
+            return None
+        if tracked.direction == "long":
+            pnl = float(exit_price) - float(entry_price)
+        else:
+            pnl = float(entry_price) - float(exit_price)
+        return pnl / risk
 
     async def arm_signals(self, signals: list[Signal], *, dry_run: bool) -> None:
         await self.arm_signals_with_messages(signals, dry_run=dry_run, message_ids={})
@@ -1194,7 +1224,15 @@ class SignalTracker:
             else "ambiguous_exit"
         )
         try:
-            await self._record_setup_outcome(tracked.setup_id, setup_outcome)
+            pnl_r_multiple = self._tracked_r_multiple(tracked)
+            await self._record_setup_outcome(
+                tracked.setup_id,
+                setup_outcome,
+                pnl_r_multiple=pnl_r_multiple,
+                was_profitable=(pnl_r_multiple > 0.0)
+                if pnl_r_multiple is not None
+                else None,
+            )
         except (OSError, IOError, ValueError):
             LOG.debug("record_outcome failed for %s (non-critical)", tracked.setup_id)
 

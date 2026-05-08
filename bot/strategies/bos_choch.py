@@ -196,6 +196,8 @@ class BOSCHOCHSetup(BaseSetup):
             "choch_lookback": 6,  # Backward-compatible alias.
             "sl_buffer_atr": 0.2,
             "breakout_threshold_atr": 0.4,
+            "max_break_age_bars": 3,
+            "min_volume_ratio": 1.05,
             "bias_mismatch_penalty": 0.75,
             "min_rr": 1.5,
             "min_swings": 3,
@@ -239,6 +241,17 @@ class BOSCHOCHSetup(BaseSetup):
         sl_buffer_atr = float(dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]))
         min_rr = float(dynamic_params.get("min_rr", defaults["min_rr"]))
         base_score = float(dynamic_params.get("base_score", defaults["base_score"]))
+        breakout_threshold_atr = float(
+            dynamic_params.get(
+                "breakout_threshold_atr", defaults["breakout_threshold_atr"]
+            )
+        )
+        max_break_age_bars = int(
+            dynamic_params.get("max_break_age_bars", defaults["max_break_age_bars"])
+        )
+        min_volume_ratio = float(
+            dynamic_params.get("min_volume_ratio", defaults["min_volume_ratio"])
+        )
 
         w = prepared.work_15m
         min_required_bars = max(30, external_swing_lookback * 2 + 1)
@@ -303,6 +316,46 @@ class BOSCHOCHSetup(BaseSetup):
             _reject(prepared, setup_id, "no_choch_detected")
             return None
         direction = structure_zone.direction
+        broken_index = int(structure_zone.broken_index or (scan.height - 1))
+        broken_index = max(0, min(broken_index, scan.height - 1))
+        break_age = scan.height - 1 - broken_index
+        if break_age > max_break_age_bars:
+            _reject(
+                prepared,
+                setup_id,
+                "choch_break_too_old",
+                break_age=break_age,
+                max_break_age_bars=max_break_age_bars,
+            )
+            return None
+        break_level = float(structure_zone.level or 0.0)
+        break_close = float(scan.item(broken_index, "close") or 0.0)
+        break_distance = (
+            break_close - break_level
+            if direction == "long"
+            else break_level - break_close
+        )
+        min_break_distance = atr * breakout_threshold_atr
+        if break_distance < min_break_distance:
+            _reject(
+                prepared,
+                setup_id,
+                "choch_break_too_weak",
+                break_distance=break_distance,
+                min_break_distance=min_break_distance,
+                breakout_threshold_atr=breakout_threshold_atr,
+            )
+            return None
+        vol_ratio = float(scan.item(broken_index, "volume_ratio20") or 1.0)
+        if vol_ratio < min_volume_ratio:
+            _reject(
+                prepared,
+                setup_id,
+                "choch_volume_too_low",
+                vol_ratio=vol_ratio,
+                min_volume_ratio=min_volume_ratio,
+            )
+            return None
         stop_price = None
         pivot_level = None
 
@@ -339,7 +392,7 @@ class BOSCHOCHSetup(BaseSetup):
                 search_end=external_search_end,
                 marker=-1.0,
                 price=price,
-                break_level=float(structure_zone.level or price),
+                break_level=break_level or price,
                 atr=atr,
                 above_price=False,
             )
@@ -378,7 +431,7 @@ class BOSCHOCHSetup(BaseSetup):
                 search_end=external_search_end,
                 marker=1.0,
                 price=price,
-                break_level=float(structure_zone.level or price),
+                break_level=break_level or price,
                 atr=atr,
                 above_price=True,
             )
@@ -415,7 +468,6 @@ class BOSCHOCHSetup(BaseSetup):
         if tp2 is None:
             tp2 = tp1  # Use TP1 as TP2 if no extended target found
 
-        vol_ratio = float(w.item(-1, "volume_ratio20") or 1.0)
         rsi = float(w.item(-1, "rsi14") or 50.0)
         score = _compute_dynamic_score(
             direction=direction,
@@ -426,6 +478,9 @@ class BOSCHOCHSetup(BaseSetup):
 
         reasons = [
             f"CHoCH {direction}: structure reversal level={structure_zone.level:.4f}",
+            f"break_close={break_close:.4f} break_age={break_age}",
+            f"break_distance_atr={break_distance / atr:.2f}",
+            f"vol_ratio={vol_ratio:.2f}",
             f"{stop_source}_sl={pivot_level:.4f}",
             f"sh[-3]={sh_vals[-3]:.4f} sh[-2]={sh_vals[-2]:.4f} sh[-1]={sh_vals[-1]:.4f}",
             f"sl[-3]={sl_vals[-3]:.4f} sl[-2]={sl_vals[-2]:.4f} sl[-1]={sl_vals[-1]:.4f}",

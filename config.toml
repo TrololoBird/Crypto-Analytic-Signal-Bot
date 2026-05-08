@@ -17,6 +17,7 @@ log_level = "INFO"
 shortlist_refresh_interval_seconds = 7200
 emergency_fallback_seconds = 1800
 strict_data_quality = true
+emit_strategy_routing_skips = true
 diagnostic_trace_limit_per_symbol = 20
 # Startup throttling to prevent REST API flood on startup
 startup_batch_size = 3
@@ -91,15 +92,15 @@ max_mark_price_deviation_pct = 0.005
 ema_bounce = { base_score = 0.55, min_adx_1h = 15.0, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.5, min_rr = 1.5 }
 structure_pullback = { base_score = 0.55, bias_mismatch_penalty = 0.75, tp_too_close_penalty = 0.75, sl_buffer_atr = 0.65, min_rr = 1.5, ema_proximity_pct = 0.990, ema_deep_pullback_pct = 0.965 }
 structure_break_retest = { base_score = 0.55, threshold_adx = 18.0, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.5, min_rr = 1.5 }
-wick_trap_reversal = { base_score = 0.50, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.8, min_rr = 1.5, wick_through_atr_mult = 0.3, closed_back_atr_mult = 0.05, min_volume_ratio = 1.5, adx_penalty_factor = 0.85 }
+wick_trap_reversal = { base_score = 0.50, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.8, min_rr = 1.5, wick_through_atr_mult = 0.3, closed_back_atr_mult = 0.05, min_volume_ratio = 1.5, max_confirmation_bars = 1, adx_penalty_factor = 0.85 }
 squeeze_setup = { base_score = 0.55, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.8, min_rr = 1.5, funding_extreme_threshold = 0.00015, liquidation_extreme_threshold = 0.20 }
 fvg_setup = { base_score = 0.60, threshold_gap = 0.001, sl_buffer_atr = 0.8, min_rr = 1.5, tp_too_close_penalty = 0.8 }
 order_block = { base_score = 0.50, threshold_volume = 1.2, sl_buffer_atr = 0.5, min_rr = 1.5 }
 liquidity_sweep = { base_score = 0.50, threshold_tol = 0.0015, sl_buffer_atr = 0.7, min_rr = 1.5 }
-bos_choch = { base_score = 0.55, bias_mismatch_penalty = 0.75, sl_buffer_atr = 1.0, min_rr = 1.5, swing_lookback = 6, external_swing_lookback = 20, min_swings = 3 }
+bos_choch = { base_score = 0.55, bias_mismatch_penalty = 0.75, sl_buffer_atr = 1.0, min_rr = 1.5, swing_lookback = 6, external_swing_lookback = 20, min_swings = 3, breakout_threshold_atr = 0.4, max_break_age_bars = 3, min_volume_ratio = 1.05 }
 hidden_divergence = { base_score = 0.50, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.5, min_rr = 1.5, min_volume_ratio = 0.55 }
 funding_reversal = { base_score = 0.50, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.6, min_rr = 1.5, adx_penalty_factor = 0.85 }
-cvd_divergence = { base_score = 0.50, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.8, min_rr = 1.5 }
+cvd_divergence = { base_score = 0.50, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.8, min_rr = 1.5, min_delta_threshold = 0.12 }
 session_killzone = { base_score = 0.55, min_volume_ratio = 1.2, min_adx_1h = 14.0, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.8, min_rr = 1.5, asia_start_hour_utc = 0, asia_end_hour_utc = 3, london_start_hour_utc = 7, london_end_hour_utc = 10, ny_start_hour_utc = 13, ny_end_hour_utc = 16, overlap_start_hour_utc = 13, overlap_end_hour_utc = 16 }
 breaker_block = { base_score = 0.50, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.8, min_rr = 1.5 }
 turtle_soup = { base_score = 0.50, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.5, min_rr = 1.5, adx_penalty_factor = 0.85 }
@@ -110,7 +111,7 @@ volume_anomaly = { base_score = 0.52, min_volume_ratio = 2.0, min_body_atr = 0.7
 volume_climax_reversal = { base_score = 0.52, min_volume_ratio = 1.8, min_wick_atr = 0.45, max_rsi_long = 42.0, min_rsi_short = 58.0, sl_buffer_atr = 0.45, min_rr = 1.5 }
 keltner_breakout = { base_score = 0.54, min_volume_ratio = 1.25, min_adx_1h = 14.0, sl_buffer_atr = 0.6, min_rr = 1.5 }
 whale_walls = { base_score = 0.52, min_depth_imbalance = 0.28, min_microprice_bias = 0.00008, max_spread_bps = 8.0, sl_buffer_atr = 0.65, min_rr = 1.5 }
-spread_strategy = { base_score = 0.52, max_spread_bps = 2.0, min_volume_ratio = 1.35, min_roc10_abs_pct = 0.35, sl_buffer_atr = 0.85, min_rr = 1.5 }
+spread_strategy = { base_score = 0.52, max_spread_bps = 1.2, min_volume_ratio = 1.35, min_roc10_abs_pct = 0.35, min_depth_imbalance = 0.08, min_microprice_bias = 0.00003, min_close_position_long = 0.55, max_close_position_short = 0.45, sl_buffer_atr = 0.85, min_rr = 1.5 }
 depth_imbalance = { base_score = 0.52, min_depth_imbalance = 0.18, min_close_position_long = 0.55, max_close_position_short = 0.45, sl_buffer_atr = 0.65, min_rr = 1.5 }
 absorption = { base_score = 0.52, min_abs_flow_delta = 0.12, min_close_position_long = 0.62, max_close_position_short = 0.38, min_wick_atr = 0.25, sl_buffer_atr = 0.65, min_rr = 1.5 }
 aggression_shift = { base_score = 0.52, min_shift = 0.10, min_volume_ratio = 1.05, sl_buffer_atr = 0.65, min_rr = 1.5 }

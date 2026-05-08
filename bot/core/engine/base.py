@@ -20,15 +20,20 @@ class StrategyMetadata:
     description: str = ""
     version: str = "1.0.0"
     author: str = ""
+    status: str = "beta"
     tags: list[str] = field(default_factory=list)
     timeframes: list[str] = field(default_factory=lambda: ["5m", "15m", "1h"])
     family: str = "continuation"
     confirmation_profile: str = "trend_follow"
     required_context: tuple[str, ...] = ()
+    required_features: tuple[str, ...] = ()
+    required_enrichment: tuple[str, ...] = ()
     requires_oi: bool = False  # Requires open interest data
     requires_funding: bool = False  # Requires funding rate data
     min_history_bars: int = 50  # Minimum bars needed for calculation
     asset_fit: dict[str, object] = field(default_factory=dict)
+    score_calibration: str = "heuristic"
+    risk_profile: str = "generic"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -37,15 +42,20 @@ class StrategyMetadata:
             "description": self.description,
             "version": self.version,
             "author": self.author,
+            "status": self.status,
             "tags": self.tags,
             "timeframes": self.timeframes,
             "family": self.family,
             "confirmation_profile": self.confirmation_profile,
             "required_context": list(self.required_context),
+            "required_features": list(self.required_features),
+            "required_enrichment": list(self.required_enrichment),
             "requires_oi": self.requires_oi,
             "requires_funding": self.requires_funding,
             "min_history_bars": self.min_history_bars,
             "asset_fit": self.asset_fit,
+            "score_calibration": self.score_calibration,
+            "risk_profile": self.risk_profile,
         }
 
 

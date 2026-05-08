@@ -37,7 +37,7 @@ class CVDDivergenceSetup(BaseSetup):
             "delta_lookback": 3,
             "bias_mismatch_penalty": 0.75,
             "min_rr": 1.5,
-            "min_delta_threshold": 0.0,
+            "min_delta_threshold": 0.12,
             "sl_buffer_atr": 0.5,
         }
         if settings is not None:
@@ -74,6 +74,8 @@ class CVDDivergenceSetup(BaseSetup):
         sl_buffer_atr = float(
             dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"])
         )
+        min_rr = float(dynamic_params.get("min_rr", defaults["min_rr"]))
+        base_score = float(dynamic_params.get("base_score", defaults["base_score"]))
 
         w = prepared.work_15m
         if w.height < 20:
@@ -236,14 +238,15 @@ class CVDDivergenceSetup(BaseSetup):
                 tp2_cands = sl_prices.filter(sl_prices < price)
                 tp2 = float(tp2_cands[-1]) if tp2_cands.len() > 0 else None
 
-        # Validate: TP1 must be at least 1.5× risk distance, else reject
-        if tp1 is None or abs(tp1 - price) < risk * 1.5:
+        # Validate: TP1 must clear the configured R threshold.
+        if tp1 is None or abs(tp1 - price) < risk * min_rr:
             _reject(
                 prepared,
                 self.setup_id,
                 "tp1_too_close_or_missing",
                 tp1=tp1,
                 risk=risk,
+                min_rr=min_rr,
                 price=price,
             )
             return None  # Reject this CVD divergence setup
@@ -254,7 +257,7 @@ class CVDDivergenceSetup(BaseSetup):
         rsi = float(w.item(-1, "rsi14") or 50.0)
         score = _compute_dynamic_score(
             direction=direction,
-            base_score=0.46,
+            base_score=base_score,
             vol_ratio=vol_ratio,
             rsi=rsi,
         )

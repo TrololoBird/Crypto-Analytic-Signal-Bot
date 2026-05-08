@@ -81,13 +81,38 @@ class SignalEngine:
         """
         symbol = prepared.symbol if prepared else "unknown"
         strategies = self._registry.get_enabled()
+        routing_skips: list[SignalResult] = []
         strategy_fits = set(getattr(getattr(prepared, "universe", None), "strategy_fits", ()) or ())
         if strategy_fits:
-            strategies = [
-                strategy
-                for strategy in strategies
-                if strategy.strategy_id in strategy_fits
-            ]
+            routed: list[Any] = []
+            emit_routing_skips = bool(
+                getattr(
+                    getattr(self._settings, "runtime", None),
+                    "emit_strategy_routing_skips",
+                    True,
+                )
+            )
+            for strategy in strategies:
+                if strategy.strategy_id in strategy_fits:
+                    routed.append(strategy)
+                elif emit_routing_skips:
+                    decision = self._build_routing_skip_decision(
+                        strategy, prepared, strategy_fits
+                    )
+                    routing_skips.append(
+                        SignalResult(
+                            setup_id=strategy.strategy_id,
+                            signal=None,
+                            decision=decision,
+                            metadata={
+                                "setup_id": strategy.strategy_id,
+                                "reason": decision.reason_code,
+                                "routed_strategy_count": len(strategy_fits),
+                            },
+                            calculation_time_ms=0.0,
+                        )
+                    )
+            strategies = routed
         elif (
             getattr(getattr(prepared, "universe", None), "shortlist_score", None)
             is not None
@@ -100,7 +125,7 @@ class SignalEngine:
         
         if not strategies:
             LOG.warning("%s: No enabled strategies to calculate", symbol)
-            return []
+            return routing_skips
         
         # Check which strategies can calculate
         can_calculate_count = 0
@@ -118,7 +143,7 @@ class SignalEngine:
         results = await asyncio.gather(*pending, return_exceptions=True)
         
         # Process results and log errors
-        signal_results: list[SignalResult] = []
+        signal_results: list[SignalResult] = list(routing_skips)
         signals_found = 0
         errors = 0
         
@@ -348,6 +373,24 @@ class SignalEngine:
             reason_code=reason_code,
             details=details,
             missing_fields=tuple(sorted(set(missing_fields))),
+        )
+
+    def _build_routing_skip_decision(
+        self,
+        strategy: Any,
+        prepared: PreparedSymbol,
+        strategy_fits: set[str],
+    ) -> StrategyDecision:
+        metadata = getattr(strategy, "metadata", None)
+        return StrategyDecision.skip(
+            setup_id=strategy.strategy_id,
+            reason_code="asset_fit.shortlist_not_routed",
+            details={
+                "symbol": prepared.symbol,
+                "routed_strategy_count": len(strategy_fits),
+                "status": getattr(metadata, "status", "unknown"),
+                "risk_profile": getattr(metadata, "risk_profile", "unknown"),
+            },
         )
 
     async def _ensure_executor_warmed(self, worker_count: int) -> None:

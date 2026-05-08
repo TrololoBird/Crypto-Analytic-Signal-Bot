@@ -273,6 +273,7 @@ def _strategy_fits_for_row(
         "symbol": symbol,
         "base_asset": str(row.get("base_asset") or "").strip().upper(),
         "liquidity_rank": liquidity_rank,
+        "quote_volume": quote_volume,
         "price_change_pct": price_change_pct,
         "spread_bps": spread_bps,
         "book_age_seconds": _safe_float(row.get("book_age_seconds")),

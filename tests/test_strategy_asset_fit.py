@@ -40,6 +40,19 @@ def test_orderbook_asset_fit_rejects_low_liquidity_alt() -> None:
     assert calculate_strategy_fit_score("SOMEALTUSDT", "whale_walls", context) == 0.0
 
 
+def test_price_velocity_asset_fit_uses_dynamic_volatility_and_liquidity_tags() -> None:
+    context = {
+        "symbol": "SOLUSDT",
+        "base_asset": "SOL",
+        "liquidity_rank": 12,
+        "quote_volume": 85_000_000.0,
+        "price_change_pct": 3.2,
+    }
+
+    assert asset_fit_reject_reason("price_velocity", "SOLUSDT", context) is None
+    assert calculate_strategy_fit_score("SOLUSDT", "price_velocity", context) > 0.0
+
+
 def test_config_example_declares_priority_asset_overrides() -> None:
     settings = load_settings("config.toml.example")
 

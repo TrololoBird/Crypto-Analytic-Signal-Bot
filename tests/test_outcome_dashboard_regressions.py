@@ -172,3 +172,76 @@ async def test_setup_performance_adjustment_penalizes_after_eight_poor_outcomes(
         assert await repo.get_setup_score_adjustment("spread_strategy") < 0.0
     finally:
         await repo.close()
+
+
+@pytest.mark.asyncio
+async def test_setup_performance_adjustment_uses_r_multiple_for_smart_exits(
+    tmp_path,
+) -> None:
+    repo = MemoryRepository(tmp_path / "bot.db", tmp_path)
+    await repo.initialize()
+    try:
+        for _ in range(8):
+            await repo.record_setup_outcome(
+                "liquidation_heatmap",
+                "smart_exit",
+                pnl_r_multiple=0.45,
+                was_profitable=True,
+            )
+
+        assert await repo.get_setup_score_adjustment("liquidation_heatmap") > 0.0
+    finally:
+        await repo.close()
+
+
+def test_dashboard_strategy_catalog_keeps_zero_outcome_strategies_visible() -> None:
+    dashboard = dashboard_module.BotDashboard.__new__(dashboard_module.BotDashboard)
+    dashboard._strategies_cache = [
+        {
+            "id": "multi_tf_trend",
+            "enabled": True,
+            "status": "production",
+            "risk_profile": "continuation",
+            "family": "continuation",
+        },
+        {
+            "id": "price_velocity",
+            "enabled": True,
+            "status": "beta",
+            "risk_profile": "breakout",
+            "family": "breakout",
+        },
+    ]
+    report = {
+        "by_setup": {
+            "multi_tf_trend": {
+                "setup_id": "multi_tf_trend",
+                "trades": 3,
+                "count": 3,
+                "win_rate": 0.66,
+                "expectancy_r": 0.4,
+                "avg_rr": 0.4,
+                "profit_factor": 2.0,
+                "max_drawdown_r": -0.2,
+            }
+        },
+        "setup_reports": [
+            {
+                "setup_id": "multi_tf_trend",
+                "trades": 3,
+                "count": 3,
+                "win_rate": 0.66,
+                "expectancy_r": 0.4,
+                "avg_rr": 0.4,
+                "profit_factor": 2.0,
+                "max_drawdown_r": -0.2,
+            }
+        ],
+    }
+
+    merged = dashboard._merge_strategy_catalog(report)
+
+    assert merged["registered_strategies"] == 2
+    assert merged["enabled_strategies"] == 2
+    assert merged["by_setup"]["price_velocity"]["trades"] == 0
+    assert merged["by_setup"]["price_velocity"]["status"] == "beta"

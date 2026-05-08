@@ -116,7 +116,7 @@ class DummyMemoryRepo:
     async def get_tracking_stats(self) -> dict[str, int]:
         return dict(self.tracking_stats)
 
-    async def record_setup_outcome(self, setup_id: str, outcome: str) -> float:
+    async def record_setup_outcome(self, setup_id: str, outcome: str, **_: object) -> float:
         self.setup_outcomes.append((setup_id, outcome))
         return 0.0
 
@@ -1931,6 +1931,61 @@ async def test_parallel_strategy_rejections_keep_distinct_reason_codes() -> None
 
     assert reason_by_setup["reject_a"] == "indicator.atr_invalid"
     assert reason_by_setup["reject_b"] == "data.price_missing"
+
+
+@pytest.mark.asyncio
+async def test_engine_emits_strategy_routing_skips_for_shortlist_fit_exclusions() -> None:
+    class RoutedSetup(BaseSetup):
+        setup_id = "routed_setup"
+        min_history_bars = 1
+
+        def get_optimizable_params(self, settings=None) -> dict[str, float]:
+            return {}
+
+        def detect(self, prepared: PreparedSymbol, settings):
+            return None
+
+    class UnroutedSetup(BaseSetup):
+        setup_id = "unrouted_setup"
+        min_history_bars = 1
+
+        def get_optimizable_params(self, settings=None) -> dict[str, float]:
+            return {}
+
+        def detect(self, prepared: PreparedSymbol, settings):
+            raise AssertionError("unrouted setup should not execute")
+
+    registry = StrategyRegistry()
+    settings = make_runtime_settings()
+    settings.runtime.emit_strategy_routing_skips = True
+    registry.register(RoutedSetup(SetupParams(enabled=True), settings), enabled=True)
+    registry.register(UnroutedSetup(SetupParams(enabled=True), settings), enabled=True)
+    engine = SignalEngine(registry, settings)
+    prepared = make_prepared()
+    prepared.universe = UniverseSymbol(
+        symbol=prepared.symbol,
+        base_asset="BTC",
+        quote_asset="USDT",
+        contract_type="PERPETUAL",
+        status="TRADING",
+        onboard_date_ms=0,
+        quote_volume=1_000_000.0,
+        price_change_pct=1.0,
+        last_price=100.0,
+        shortlist_score=0.8,
+        strategy_fits=("routed_setup",),
+    )
+
+    results = await engine.calculate_all(prepared)
+    decisions = {
+        result.setup_id: result.decision
+        for result in results
+        if result.decision is not None
+    }
+
+    assert decisions["unrouted_setup"].is_skip
+    assert decisions["unrouted_setup"].reason_code == "asset_fit.shortlist_not_routed"
+    assert decisions["routed_setup"].reason_code == "pattern.no_raw_hit"
 
 
 @pytest.mark.asyncio

@@ -40,6 +40,7 @@ class WickTrapReversalSetup(BaseSetup):
             "wick_through_atr_mult": 0.3,
             "closed_back_atr_mult": 0.05,
             "min_volume_ratio": 1.35,
+            "max_confirmation_bars": 1,
         }
         if settings is not None:
             filters = getattr(settings, 'filters', None)
@@ -156,7 +157,25 @@ class WickTrapReversalSetup(BaseSetup):
             _reject(prepared, "wick_trap_reversal", "no_wick_trap_detected")
             return None
 
-        vol_ratio = _as_float(work_15m.item(-1, "volume_ratio20"), 1.0)
+        confirmation_lag = work_15m.height - 1 - wick_bar_idx
+        max_confirmation_bars = int(
+            dynamic_params.get(
+                "max_confirmation_bars", defaults["max_confirmation_bars"]
+            )
+        )
+        if confirmation_lag > max_confirmation_bars:
+            _reject(
+                prepared,
+                "wick_trap_reversal",
+                "wick_confirmation_too_late",
+                confirmation_lag=confirmation_lag,
+                max_confirmation_bars=max_confirmation_bars,
+            )
+            return None
+
+        trigger_vol_ratio = _as_float(work_15m.item(-1, "volume_ratio20"), 1.0)
+        wick_vol_ratio = _as_float(work_15m.item(wick_bar_idx, "volume_ratio20"), 1.0)
+        vol_ratio = max(trigger_vol_ratio, wick_vol_ratio)
         min_volume_ratio = float(
             dynamic_params.get("min_volume_ratio", defaults["min_volume_ratio"])
         )
@@ -193,7 +212,10 @@ class WickTrapReversalSetup(BaseSetup):
                 return None
             if vol_ratio < min_volume_ratio and not close_strength_ok:
                 _reject(prepared, "wick_trap_reversal", "no_confirmation",
-                        vol_ratio=vol_ratio, min_volume_ratio=min_volume_ratio, close_strength_ok=close_strength_ok)
+                        wick_vol_ratio=wick_vol_ratio,
+                        trigger_vol_ratio=trigger_vol_ratio,
+                        min_volume_ratio=min_volume_ratio,
+                        close_strength_ok=close_strength_ok)
                 return None
         else:
             if trig_close >= level:
@@ -202,7 +224,10 @@ class WickTrapReversalSetup(BaseSetup):
                 return None
             if vol_ratio < min_volume_ratio and not close_strength_ok:
                 _reject(prepared, "wick_trap_reversal", "no_confirmation",
-                        vol_ratio=vol_ratio, min_volume_ratio=min_volume_ratio, close_strength_ok=close_strength_ok)
+                        wick_vol_ratio=wick_vol_ratio,
+                        trigger_vol_ratio=trigger_vol_ratio,
+                        min_volume_ratio=min_volume_ratio,
+                        close_strength_ok=close_strength_ok)
                 return None
 
         wick_bar_close = float(work_15m.item(wick_bar_idx, "close"))
@@ -210,7 +235,9 @@ class WickTrapReversalSetup(BaseSetup):
             f"wick_sweep level={level:.4f}",
             f"direction={direction}",
             f"wick_bar close={wick_bar_close:.4f}",
-            f"vol_ratio={vol_ratio:.2f}",
+            f"wick_vol_ratio={wick_vol_ratio:.2f}",
+            f"trigger_vol_ratio={trigger_vol_ratio:.2f}",
+            f"confirmation_lag={confirmation_lag}",
             f"close_strength_ok={close_strength_ok}",
             f"rsi={rsi:.1f}",
         ]

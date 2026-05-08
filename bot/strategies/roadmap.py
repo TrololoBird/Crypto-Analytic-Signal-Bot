@@ -226,9 +226,13 @@ class SpreadStrategySetup(RoadmapSetup):
     required_context = ("futures_flow",)
     DEFAULTS = {
         **RoadmapSetup.DEFAULTS,
-        "max_spread_bps": 2.0,
-        "min_volume_ratio": 1.15,
-        "min_roc10_abs_pct": 0.20,
+        "max_spread_bps": 1.2,
+        "min_volume_ratio": 1.35,
+        "min_roc10_abs_pct": 0.35,
+        "min_depth_imbalance": 0.08,
+        "min_microprice_bias": 0.00003,
+        "min_close_position_long": 0.55,
+        "max_close_position_short": 0.45,
     }
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
@@ -250,12 +254,48 @@ class SpreadStrategySetup(RoadmapSetup):
             _reject(prepared, self.setup_id, "momentum_too_low", roc10=roc10)
             return None
         direction = "long" if roc10 > 0.0 else "short"
+        depth = prepared.depth_imbalance
+        micro = prepared.microprice_bias
+        if depth is None and micro is None:
+            _reject(prepared, self.setup_id, "orderbook_context_missing")
+            return None
+        depth_value = _as_float(depth, 0.0) if depth is not None else 0.0
+        micro_value = _as_float(micro, 0.0) if micro is not None else 0.0
+        close_position = _last(work, "close_position", 0.5)
+        if direction == "long":
+            orderbook_ok = (
+                depth_value >= float(params["min_depth_imbalance"])
+                or micro_value >= float(params["min_microprice_bias"])
+            )
+            close_ok = close_position >= float(params["min_close_position_long"])
+        else:
+            orderbook_ok = (
+                depth_value <= -float(params["min_depth_imbalance"])
+                or micro_value <= -float(params["min_microprice_bias"])
+            )
+            close_ok = close_position <= float(params["max_close_position_short"])
+        if not orderbook_ok or not close_ok:
+            _reject(
+                prepared,
+                self.setup_id,
+                "orderbook_not_aligned",
+                depth_imbalance=depth_value,
+                microprice_bias=micro_value,
+                close_position=close_position,
+            )
+            return None
         return _build_atr_signal(
             prepared=prepared,
             setup_id=self.setup_id,
             direction=direction,
             params=params,
-            reasons=[f"tight_spread_{direction}", f"spread_bps={spread:.2f}", f"roc10={roc10:.2f}"],
+            reasons=[
+                f"tight_spread_{direction}",
+                f"spread_bps={spread:.2f}",
+                f"roc10={roc10:.2f}",
+                f"depth={depth_value:.3f}",
+                f"micro={micro_value:.5f}",
+            ],
             family=self.family,
             structure_clarity=min(abs(roc10) / 1.5, 1.0),
         )
