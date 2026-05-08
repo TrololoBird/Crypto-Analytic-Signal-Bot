@@ -92,7 +92,7 @@ class WickTrapReversalSetup(BaseSetup):
         def _recent_15m_positions_after(event_time: object) -> list[int]:
             positions: list[int] = []
             start_idx = max(0, work_15m.height - 12)
-            for idx in range(start_idx, work_15m.height - 1):
+            for idx in range(start_idx, work_15m.height):
                 bar_time = work_15m.item(idx, "time")
                 if isinstance(event_time, datetime) and isinstance(bar_time, datetime) and bar_time <= event_time:
                     continue

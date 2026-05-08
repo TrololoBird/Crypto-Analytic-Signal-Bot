@@ -801,20 +801,26 @@ class OIDivergenceSetup(RoadmapSetup):
         ):
             _reject(prepared, self.setup_id, "oi_price_divergence_too_small", oi_change_pct=oi_change)
             return None
-        if oi_change > 0.0 and price_change < 0.0:
-            direction = "long"
-        elif oi_change > 0.0 and price_change > 0.0:
+        if oi_change > 0.0:
+            direction = "long" if price_change > 0.0 else "short"
+            oi_context = "oi_confirms_price"
+        elif price_change > 0.0:
             direction = "short"
-        elif oi_change < 0.0 and price_change > 0.0:
-            direction = "short"
+            oi_context = "price_up_oi_contracting"
         else:
             direction = "long"
+            oi_context = "price_down_oi_contracting"
         return _build_atr_signal(
             prepared=prepared,
             setup_id=self.setup_id,
             direction=direction,
             params=params,
-            reasons=[f"oi_divergence_{direction}", f"oi_change={oi_change:.2f}", f"price_change={price_change:.2f}"],
+            reasons=[
+                f"oi_divergence_{direction}",
+                oi_context,
+                f"oi_change={oi_change:.2f}",
+                f"price_change={price_change:.2f}",
+            ],
             family=self.family,
             structure_clarity=min(abs(oi_change) / 5.0, 1.0),
         )

@@ -140,7 +140,7 @@ def fvg(
             top[i] = np.nan
             bottom[i] = np.nan
 
-    mitigated_index = np.zeros(length, dtype=np.float64)
+    mitigated_index = np.full(length, np.nan, dtype=np.float64)
     for i in np.flatnonzero(~np.isnan(gap)):
         if gap[i] == 1.0:
             mask = low[i + 2 :] <= top[i]
@@ -362,7 +362,7 @@ def order_blocks(
     low_volume = np.zeros(length, dtype=np.float64)
     high_volume = np.zeros(length, dtype=np.float64)
     percentage = np.zeros(length, dtype=np.float64)
-    mitigated_index = np.zeros(length, dtype=np.int32)
+    mitigated_index = np.full(length, np.nan, dtype=np.float64)
     breaker = np.full(length, False, dtype=bool)
 
     swing_high_indices = np.flatnonzero(swing_hl == 1.0)
@@ -379,7 +379,7 @@ def order_blocks(
                     ob_volume[idx] = 0.0
                     low_volume[idx] = 0.0
                     high_volume[idx] = 0.0
-                    mitigated_index[idx] = 0
+                    mitigated_index[idx] = np.nan
                     percentage[idx] = 0.0
                     active_bullish.remove(idx)
             elif (not close_mitigation and low[close_index] < bottom_arr[idx]) or (
@@ -443,7 +443,7 @@ def order_blocks(
                     ob_volume[idx] = 0.0
                     low_volume[idx] = 0.0
                     high_volume[idx] = 0.0
-                    mitigated_index[idx] = 0
+                    mitigated_index[idx] = np.nan
                     percentage[idx] = 0.0
                     active_bearish.remove(idx)
             elif (not close_mitigation and high[close_index] > top_arr[idx]) or (
@@ -501,7 +501,7 @@ def order_blocks(
     bottom_out = np.where(~np.isnan(ob_out), bottom_arr, np.nan)
     volume_out = np.where(~np.isnan(ob_out), ob_volume, np.nan)
     mitigated_out = np.where(
-        ~np.isnan(ob_out), mitigated_index.astype(np.float64), np.nan
+        ~np.isnan(ob_out), mitigated_index, np.nan
     )
     percentage_out = np.where(~np.isnan(ob_out), percentage, np.nan)
 
@@ -553,14 +553,14 @@ def liquidity_pools(
         start = i + 1
         if start < length:
             cond = high[start:] >= range_high
-            swept = int(start + np.argmax(cond)) if np.any(cond) else 0
+            swept = int(start + np.argmax(cond)) if np.any(cond) else None
         else:
-            swept = 0
+            swept = None
 
         for j in bull_indices:
             if j <= i:
                 continue
-            if swept and j >= swept:
+            if swept is not None and j >= swept:
                 break
             if shl_hl[j] == 1.0 and range_low <= shl_level[j] <= range_high:
                 group_levels.append(float(shl_level[j]))
@@ -571,7 +571,7 @@ def liquidity_pools(
             liquidity[i] = 1.0
             liquidity_level[i] = sum(group_levels) / len(group_levels)
             liquidity_end[i] = float(group_end)
-            liquidity_swept[i] = float(swept)
+            liquidity_swept[i] = float(swept) if swept is not None else np.nan
 
     bear_indices = np.nonzero(shl_hl == -1.0)[0]
     for i in bear_indices:
@@ -586,14 +586,14 @@ def liquidity_pools(
         start = i + 1
         if start < length:
             cond = low[start:] <= range_low
-            swept = int(start + np.argmax(cond)) if np.any(cond) else 0
+            swept = int(start + np.argmax(cond)) if np.any(cond) else None
         else:
-            swept = 0
+            swept = None
 
         for j in bear_indices:
             if j <= i:
                 continue
-            if swept and j >= swept:
+            if swept is not None and j >= swept:
                 break
             if shl_hl[j] == -1.0 and range_low <= shl_level[j] <= range_high:
                 group_levels.append(float(shl_level[j]))
@@ -604,7 +604,7 @@ def liquidity_pools(
             liquidity[i] = -1.0
             liquidity_level[i] = sum(group_levels) / len(group_levels)
             liquidity_end[i] = float(group_end)
-            liquidity_swept[i] = float(swept)
+            liquidity_swept[i] = float(swept) if swept is not None else np.nan
 
     return pl.DataFrame(
         {
@@ -617,9 +617,18 @@ def liquidity_pools(
 
 
 def _optional_index(value: float | None) -> int | None:
-    if value is None or np.isnan(value):
+    if _is_missing(value):
         return None
     return int(value)
+
+
+def _is_missing(value: object) -> bool:
+    if value is None:
+        return True
+    try:
+        return bool(np.isnan(value))
+    except (TypeError, ValueError):
+        return False
 
 
 def _zone_state(
@@ -752,7 +761,7 @@ def latest_fvg_zone(
     zones = fvg(frame, join_consecutive=join_consecutive)
     for idx in range(zones.height - 1, -1, -1):
         raw_direction = zones.item(idx, "FVG")
-        if raw_direction is None:
+        if _is_missing(raw_direction):
             continue
         top = float(zones.item(idx, "Top"))
         bottom = float(zones.item(idx, "Bottom"))
@@ -808,7 +817,7 @@ def latest_order_block(
     zones = order_blocks(frame, swings)
     for idx in range(zones.height - 1, -1, -1):
         raw_direction = zones.item(idx, "OB")
-        if raw_direction is None:
+        if _is_missing(raw_direction):
             continue
         top = float(zones.item(idx, "Top"))
         bottom = float(zones.item(idx, "Bottom"))
@@ -865,10 +874,10 @@ def latest_structure_break(
     for idx in range(structure.height - 1, -1, -1):
         raw_value = structure.item(idx, primary)
         kind = primary.lower()
-        if raw_value is None:
+        if _is_missing(raw_value):
             raw_value = structure.item(idx, secondary)
             kind = secondary.lower()
-        if raw_value is None:
+        if _is_missing(raw_value):
             continue
         level = float(structure.item(idx, "Level"))
         broken_index = _optional_index(structure.item(idx, "BrokenIndex"))
@@ -901,7 +910,7 @@ def latest_liquidity_sweep(
     pools = liquidity_pools(frame, swings, range_percent=range_percent)
     for idx in range(pools.height - 1, -1, -1):
         raw_direction = pools.item(idx, "Liquidity")
-        if raw_direction is None:
+        if _is_missing(raw_direction):
             continue
         level = float(pools.item(idx, "Level"))
         end_index = _optional_index(pools.item(idx, "End"))
@@ -945,7 +954,7 @@ def latest_breaker_block(
     zones = order_blocks(frame, swings)
     for idx in range(zones.height - 1, -1, -1):
         raw_direction = zones.item(idx, "OB")
-        if raw_direction is None:
+        if _is_missing(raw_direction):
             continue
         top = float(zones.item(idx, "Top"))
         bottom = float(zones.item(idx, "Bottom"))

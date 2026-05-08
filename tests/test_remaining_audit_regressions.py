@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from datetime import UTC, datetime, timedelta
 
 import polars as pl
@@ -10,9 +11,11 @@ from bot.models import PreparedSymbol, UniverseSymbol
 from bot.public_intelligence import PublicIntelligenceService
 from bot.setup_base import SetupParams
 from bot.setups import _compute_dynamic_score
-from bot.setups.smc import SMCZone
+from bot.setups.smc import SMCZone, fvg, latest_fvg_zone, liquidity_pools
+from bot.strategies.roadmap import OIDivergenceSetup
 from bot.strategies.liquidity_sweep import LiquiditySweepSetup
 from bot.strategies.order_block import OrderBlockSetup
+from bot.strategies.wick_trap_reversal import WickTrapReversalSetup
 
 
 class _TelemetryStub:
@@ -232,3 +235,127 @@ def test_order_block_applies_single_context_mismatch_penalty(
     )
     assert signal is not None
     assert signal.score == pytest.approx(expected_base * 0.75)
+
+
+def test_wick_trap_reversal_scans_latest_15m_bar(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = BotSettings(tg_token="0" * 30, target_chat_id="0")
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    frame_1h = _feature_frame(
+        [101.0, 100.5, 100.0, 99.5, 95.0, 99.0, 100.0, 101.0, 102.0, 103.0],
+        lows=[100.0, 99.8, 99.2, 98.8, 95.0, 98.5, 99.0, 100.0, 101.0, 102.0],
+        highs=[102.0, 101.0, 100.5, 100.0, 97.0, 100.0, 101.0, 102.0, 103.0, 104.0],
+        price=96.0,
+        atr=1.0,
+    )
+    frame_1h = frame_1h.with_columns(
+        pl.Series("time", [base + timedelta(hours=idx) for idx in range(frame_1h.height)])
+    )
+    frame_15m = _feature_frame(
+        [96.0] * 7 + [95.4],
+        lows=[95.5] * 7 + [94.4],
+        highs=[96.5] * 8,
+        price=95.4,
+        atr=1.0,
+        rsi=45.0,
+    )
+    frame_15m = frame_15m.with_columns(
+        pl.Series(
+            "time",
+            [base + timedelta(hours=5, minutes=15 * idx) for idx in range(frame_15m.height)],
+        )
+    )
+
+    def _swing_points_stub(frame: pl.DataFrame, **_kwargs):
+        return (
+            pl.Series([False] * frame.height),
+            pl.Series([idx == 4 for idx in range(frame.height)]),
+        )
+
+    monkeypatch.setattr(
+        "bot.strategies.wick_trap_reversal._swing_points",
+        _swing_points_stub,
+    )
+
+    prepared = _prepared(frame_15m, settings=settings, price=95.4)
+    prepared.work_1h = frame_1h
+    signal = WickTrapReversalSetup(SetupParams(), settings).detect(prepared, settings)
+
+    assert signal is not None
+    assert signal.direction == "long"
+    assert any("wick_sweep" in reason for reason in signal.reasons)
+
+
+def test_oi_divergence_uses_oi_as_participation_confirmation() -> None:
+    settings = BotSettings(tg_token="0" * 30, target_chat_id="0")
+    frame = _feature_frame(
+        [100.0, 100.2, 100.4, 100.6, 101.0, 101.3, 101.7, 102.0, 102.4],
+        price=102.4,
+        atr=1.0,
+    )
+    prepared = _prepared(frame, settings=settings, price=102.4)
+    prepared.oi_change_pct = 2.0
+
+    signal = OIDivergenceSetup(SetupParams(), settings).detect(prepared, settings)
+
+    assert signal is not None
+    assert signal.direction == "long"
+    assert "oi_confirms_price" in signal.reasons
+
+
+def test_oi_divergence_fades_price_move_when_oi_contracts() -> None:
+    settings = BotSettings(tg_token="0" * 30, target_chat_id="0")
+    frame = _feature_frame(
+        [100.0, 100.2, 100.4, 100.6, 101.0, 101.3, 101.7, 102.0, 102.4],
+        price=102.4,
+        atr=1.0,
+    )
+    prepared = _prepared(frame, settings=settings, price=102.4)
+    prepared.oi_change_pct = -2.0
+
+    signal = OIDivergenceSetup(SetupParams(), settings).detect(prepared, settings)
+
+    assert signal is not None
+    assert signal.direction == "short"
+    assert "price_up_oi_contracting" in signal.reasons
+
+
+def test_smc_unmitigated_fvg_and_unswept_liquidity_use_null_indices() -> None:
+    fvg_frame = pl.DataFrame(
+        {
+            "open": [10.0, 10.2, 11.2, 11.4],
+            "high": [10.2, 10.5, 11.5, 11.7],
+            "low": [9.8, 10.0, 11.0, 11.2],
+            "close": [10.1, 10.4, 11.3, 11.5],
+            "volume": [100.0, 100.0, 100.0, 100.0],
+        }
+    )
+
+    zones = fvg(fvg_frame, join_consecutive=False)
+    zone = latest_fvg_zone(fvg_frame, join_consecutive=False, allowed_states=("fresh",))
+
+    assert math.isnan(float(zones.item(1, "MitigatedIndex")))
+    assert zone is not None
+    assert zone.state == "fresh"
+    assert zone.mitigation_index is None
+
+    pool_frame = pl.DataFrame(
+        {
+            "open": [10.0, 10.1, 10.0, 10.1, 10.0],
+            "high": [10.0, 10.0, 10.0, 10.0, 10.0],
+            "low": [9.5, 9.6, 9.5, 9.6, 9.5],
+            "close": [9.8, 9.9, 9.8, 9.9, 9.8],
+            "volume": [100.0] * 5,
+        }
+    )
+    swings = pl.DataFrame(
+        {
+            "HighLow": [1.0, None, 1.0, None, None],
+            "Level": [10.0, None, 10.0, None, None],
+        }
+    )
+    pools = liquidity_pools(pool_frame, swings, range_percent=0.05)
+
+    assert pools.item(0, "Liquidity") == pytest.approx(1.0)
+    assert math.isnan(float(pools.item(0, "Swept")))

@@ -107,8 +107,7 @@ class EventBus:
             while True:
                 token, event = self._pop_next_event()
                 if event is None:
-                    self._ready.clear()
-                    await self._ready.wait()
+                    await self._wait_for_event()
                     continue
 
                 event_type = type(event).__name__
@@ -140,6 +139,13 @@ class EventBus:
                 return None, None
             token = self._queue.popleft()
             return token, self._pending_events.get(token)
+
+    async def _wait_for_event(self) -> None:
+        with self._lock:
+            if self._queue:
+                return
+            self._ready.clear()
+        await self._ready.wait()
 
     def _event_token(self, event: AnyEvent) -> tuple[object, bool]:
         from .events import (

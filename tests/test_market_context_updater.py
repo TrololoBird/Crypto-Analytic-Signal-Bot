@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from bot.application.market_context_updater import MarketContextUpdater
+from bot.core.memory.repository import MemoryRepository
 from bot.models import UniverseSymbol
 
 
@@ -15,11 +16,17 @@ class _RegimeResult:
     strength: float = 0.7
     btc_bias: str = "uptrend"
     eth_bias: str = "uptrend"
+    altcoin_season_index: float = 63.0
+    btc_phase: str = "markup"
     confidence: float = 0.8
 
 
 class _Repo:
+    def __init__(self) -> None:
+        self.calls: list[tuple[tuple, dict]] = []
+
     async def update_market_context(self, *args, **kwargs):
+        self.calls.append((args, kwargs))
         return None
 
 
@@ -57,11 +64,12 @@ async def test_logs_regime_transition_once(monkeypatch: pytest.MonkeyPatch) -> N
 
     monkeypatch.setattr(mcu_module, "BinanceFuturesMarketData", _DummyBinance)
 
+    repo = _Repo()
     bot = SimpleNamespace(
         client=_DummyBinance(),
         _ws_manager=None,
         market_regime=SimpleNamespace(analyze=lambda *args, **kwargs: _RegimeResult()),
-        _modern_repo=_Repo(),
+        _modern_repo=repo,
         telemetry=_Telemetry(),
         settings=SimpleNamespace(
             intelligence=SimpleNamespace(
@@ -94,3 +102,30 @@ async def test_logs_regime_transition_once(monkeypatch: pytest.MonkeyPatch) -> N
     ]
     assert len(transition_rows) == 1
     assert transition_rows[0]["new_regime"] == "bull"
+    assert repo.calls
+    assert repo.calls[-1][1]["altcoin_season_index"] == pytest.approx(63.0)
+    assert repo.calls[-1][1]["btc_phase"] == "markup"
+
+
+@pytest.mark.asyncio
+async def test_market_context_repository_persists_multi_asset_fields(tmp_path) -> None:
+    repo = MemoryRepository(tmp_path / "memory.sqlite", tmp_path / "data")
+    await repo.initialize()
+    try:
+        await repo.update_market_context(
+            "uptrend",
+            "downtrend",
+            ["BTCUSDT"],
+            ["ETHUSDT"],
+            market_regime="volatile",
+            market_regime_confirmed=True,
+            altcoin_season_index=37.5,
+            btc_phase="distribution",
+        )
+
+        context = await repo.get_market_context()
+
+        assert context["altcoin_season_index"] == pytest.approx(37.5)
+        assert context["btc_phase"] == "distribution"
+    finally:
+        await repo.close()

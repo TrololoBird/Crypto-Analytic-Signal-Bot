@@ -30,6 +30,8 @@ class MemoryRepositoryExtension:
                 id INTEGER PRIMARY KEY,
                 btc_bias TEXT DEFAULT 'neutral',
                 eth_bias TEXT DEFAULT 'neutral',
+                altcoin_season_index REAL DEFAULT 50.0,
+                btc_phase TEXT DEFAULT 'sideways',
                 high_funding_symbols TEXT DEFAULT '[]',
                 low_funding_symbols TEXT DEFAULT '[]',
                 updated_at TEXT,
@@ -42,6 +44,14 @@ class MemoryRepositoryExtension:
         async with conn.execute("PRAGMA table_info(market_context)") as cursor:
             existing_columns = {str(row["name"]) for row in await cursor.fetchall()}
         for column_name, column_sql in (
+            (
+                "altcoin_season_index",
+                "ALTER TABLE market_context ADD COLUMN altcoin_season_index REAL DEFAULT 50.0",
+            ),
+            (
+                "btc_phase",
+                "ALTER TABLE market_context ADD COLUMN btc_phase TEXT DEFAULT 'sideways'",
+            ),
             (
                 "market_regime",
                 "ALTER TABLE market_context ADD COLUMN market_regime TEXT DEFAULT 'unknown'",
@@ -99,6 +109,8 @@ class MemoryRepositoryExtension:
         market_regime: str = "unknown",
         market_regime_confirmed: bool = False,
         macro_risk_mode: str = "normal",
+        altcoin_season_index: float | None = None,
+        btc_phase: str | None = None,
         intelligence_snapshot: dict[str, Any] | None = None,
     ) -> None:
         """Update market context in SQLite."""
@@ -112,6 +124,8 @@ class MemoryRepositoryExtension:
                 id,
                 btc_bias,
                 eth_bias,
+                altcoin_season_index,
+                btc_phase,
                 high_funding_symbols,
                 low_funding_symbols,
                 updated_at,
@@ -120,11 +134,13 @@ class MemoryRepositoryExtension:
                 macro_risk_mode,
                 intelligence_json
             )
-            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             (
                 btc_bias,
                 eth_bias,
+                50.0 if altcoin_season_index is None else float(altcoin_season_index),
+                str(btc_phase or "sideways"),
                 json.dumps(high_funding_symbols),
                 json.dumps(low_funding_symbols),
                 datetime.now(timezone.utc).isoformat(),
@@ -158,6 +174,13 @@ class MemoryRepositoryExtension:
                 return {
                     "btc_bias": row["btc_bias"],
                     "eth_bias": row["eth_bias"],
+                    "altcoin_season_index": float(row["altcoin_season_index"])
+                    if "altcoin_season_index" in row.keys()
+                    and row["altcoin_season_index"] is not None
+                    else 50.0,
+                    "btc_phase": row["btc_phase"]
+                    if "btc_phase" in row.keys()
+                    else "sideways",
                     "high_funding_symbols": json.loads(row["high_funding_symbols"]),
                     "low_funding_symbols": json.loads(row["low_funding_symbols"]),
                     "updated_at": row["updated_at"],
@@ -175,6 +198,8 @@ class MemoryRepositoryExtension:
             return {
                 "btc_bias": "neutral",
                 "eth_bias": "neutral",
+                "altcoin_season_index": 50.0,
+                "btc_phase": "sideways",
                 "high_funding_symbols": [],
                 "low_funding_symbols": [],
                 "market_regime": "unknown",

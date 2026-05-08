@@ -241,8 +241,16 @@ class BOSCHOCHSetup(BaseSetup):
         base_score = float(dynamic_params.get("base_score", defaults["base_score"]))
 
         w = prepared.work_15m
-        if w.height < 30:
-            _reject(prepared, setup_id, "insufficient_15m_bars", bars=w.height)
+        min_required_bars = max(30, external_swing_lookback * 2 + 1)
+        if w.height < min_required_bars:
+            _reject(
+                prepared,
+                setup_id,
+                "insufficient_15m_bars",
+                bars=w.height,
+                required=min_required_bars,
+                external_swing_lookback=external_swing_lookback,
+            )
             return None
 
         atr = float(w.item(-1, "atr14") or 0.0)
