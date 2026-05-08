@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 import numpy as np
+from numpy.typing import NDArray
 import polars as pl
 
 from ..features import _swing_points
@@ -48,14 +49,14 @@ def _normalize_ohlcv(
     return normalized
 
 
-def _series_to_float_array(series: pl.Series) -> np.ndarray:
+def _series_to_float_array(series: pl.Series) -> NDArray[np.float64]:
     return series.cast(pl.Float64, strict=False).to_numpy()
 
 
 def _collapse_swing_markers(
-    markers: np.ndarray,
-    highs: np.ndarray,
-    lows: np.ndarray,
+    markers: NDArray[np.float64],
+    highs: NDArray[np.float64],
+    lows: NDArray[np.float64],
     *,
     keep_edge_adjustments: bool,
 ) -> np.ndarray:
@@ -90,13 +91,13 @@ def _collapse_swing_markers(
     if keep_edge_adjustments:
         positions = np.flatnonzero(~np.isnan(markers))
         if positions.size > 0:
-            if markers[positions[0]] == 1.0:
+            if np.isnan(markers[0]) and markers[positions[0]] == 1.0:
                 markers[0] = -1.0
-            if markers[positions[0]] == -1.0:
+            if np.isnan(markers[0]) and markers[positions[0]] == -1.0:
                 markers[0] = 1.0
-            if markers[positions[-1]] == -1.0:
+            if np.isnan(markers[-1]) and markers[positions[-1]] == -1.0:
                 markers[-1] = 1.0
-            if markers[positions[-1]] == 1.0:
+            if np.isnan(markers[-1]) and markers[positions[-1]] == 1.0:
                 markers[-1] = -1.0
 
     return markers
@@ -143,9 +144,9 @@ def fvg(
     mitigated_index = np.full(length, np.nan, dtype=np.float64)
     for i in np.flatnonzero(~np.isnan(gap)):
         if gap[i] == 1.0:
-            mask = low[i + 2 :] <= top[i]
+            mask = close[i + 2 :] <= top[i]
         else:
-            mask = high[i + 2 :] >= bottom[i]
+            mask = close[i + 2 :] >= bottom[i]
         if np.any(mask):
             mitigated_index[i] = float(np.argmax(mask) + i + 2)
     mitigated_index = np.where(np.isnan(gap), np.nan, mitigated_index)
@@ -165,13 +166,18 @@ def swing_highs_lows(
     *,
     swing_length: int = 50,
     mode: SMCMode = "live_safe",
+    include_unconfirmed_tail: bool = False,
 ) -> pl.DataFrame:
     ohlc = _normalize_ohlcv(frame)
     highs = _series_to_float_array(ohlc["high"])
     lows = _series_to_float_array(ohlc["low"])
 
     if mode == "live_safe":
-        swing_high, swing_low = _swing_points(ohlc, n=max(1, int(swing_length)))
+        swing_high, swing_low = _swing_points(
+            ohlc,
+            n=max(1, int(swing_length)),
+            include_unconfirmed_tail=include_unconfirmed_tail,
+        )
         markers = np.where(
             swing_high.to_numpy(),
             1.0,
@@ -245,58 +251,49 @@ def bos_choch(
             recent_hl = highs_lows_order[-4:]
             recent_levels = level_order[-4:]
 
-            bos[anchor] = (
-                1
-                if (
-                    recent_hl == [-1.0, 1.0, -1.0, 1.0]
-                    and recent_levels[0]
-                    < recent_levels[2]
-                    < recent_levels[1]
-                    < recent_levels[3]
+            bullish_sequence = recent_hl == [-1.0, 1.0, -1.0, 1.0]
+            bearish_sequence = recent_hl == [1.0, -1.0, 1.0, -1.0]
+            bullish_bos = bullish_sequence and (
+                recent_levels[0] < recent_levels[2] < recent_levels[1] < recent_levels[3]
+                or (
+                    recent_levels[2] > recent_levels[0]
+                    and recent_levels[3] > recent_levels[1]
                 )
-                else 0
             )
+            bearish_bos = bearish_sequence and (
+                recent_levels[0] > recent_levels[2] > recent_levels[1] > recent_levels[3]
+                or (
+                    recent_levels[2] < recent_levels[0]
+                    and recent_levels[3] < recent_levels[1]
+                )
+            )
+            bullish_choch = bullish_sequence and (
+                recent_levels[3] > recent_levels[1] > recent_levels[0] > recent_levels[2]
+                or (
+                    recent_levels[3] > recent_levels[1]
+                    and recent_levels[2] < recent_levels[0]
+                )
+            )
+            bearish_choch = bearish_sequence and (
+                recent_levels[3] < recent_levels[1] < recent_levels[0] < recent_levels[2]
+                or (
+                    recent_levels[3] < recent_levels[1]
+                    and recent_levels[2] > recent_levels[0]
+                )
+            )
+
+            bos[anchor] = 1 if bullish_bos else 0
             levels_out[anchor] = recent_levels[1] if bos[anchor] != 0 else 0.0
 
-            bos[anchor] = (
-                -1
-                if (
-                    recent_hl == [1.0, -1.0, 1.0, -1.0]
-                    and recent_levels[0]
-                    > recent_levels[2]
-                    > recent_levels[1]
-                    > recent_levels[3]
-                )
-                else bos[anchor]
-            )
+            bos[anchor] = -1 if bearish_bos else bos[anchor]
             levels_out[anchor] = recent_levels[1] if bos[anchor] != 0 else 0.0
 
-            choch[anchor] = (
-                1
-                if (
-                    recent_hl == [-1.0, 1.0, -1.0, 1.0]
-                    and recent_levels[3]
-                    > recent_levels[1]
-                    > recent_levels[0]
-                    > recent_levels[2]
-                )
-                else 0
-            )
+            choch[anchor] = 1 if bullish_choch else 0
             levels_out[anchor] = (
                 recent_levels[1] if choch[anchor] != 0 else levels_out[anchor]
             )
 
-            choch[anchor] = (
-                -1
-                if (
-                    recent_hl == [1.0, -1.0, 1.0, -1.0]
-                    and recent_levels[3]
-                    < recent_levels[1]
-                    < recent_levels[0]
-                    < recent_levels[2]
-                )
-                else choch[anchor]
-            )
+            choch[anchor] = -1 if bearish_choch else choch[anchor]
             levels_out[anchor] = (
                 recent_levels[1] if choch[anchor] != 0 else levels_out[anchor]
             )
@@ -313,17 +310,6 @@ def bos_choch(
         if np.any(mask):
             j = int(np.argmax(mask) + i + 2)
             broken[i] = j
-            for k in np.flatnonzero((bos != 0) | (choch != 0)):
-                if k < i and broken[k] >= j:
-                    bos[k] = 0
-                    choch[k] = 0
-                    levels_out[k] = 0.0
-
-    unresolved = np.flatnonzero(((bos != 0) | (choch != 0)) & (broken == 0))
-    if unresolved.size:
-        bos[unresolved] = 0
-        choch[unresolved] = 0
-        levels_out[unresolved] = 0.0
 
     bos_out = np.where(bos != 0, bos.astype(np.float64), np.nan)
     choch_out = np.where(choch != 0, choch.astype(np.float64), np.nan)
@@ -418,9 +404,9 @@ def order_blocks(
         ob[ob_index] = 1
         top_arr[ob_index] = ob_top
         bottom_arr[ob_index] = ob_bottom
-        vol_cur = volume[close_index]
-        vol_prev1 = volume[close_index - 1] if close_index >= 1 else 0.0
-        vol_prev2 = volume[close_index - 2] if close_index >= 2 else 0.0
+        vol_cur = volume[ob_index]
+        vol_prev1 = volume[ob_index - 1] if ob_index >= 1 else 0.0
+        vol_prev2 = volume[ob_index - 2] if ob_index >= 2 else 0.0
         ob_volume[ob_index] = vol_cur + vol_prev1 + vol_prev2
         low_volume[ob_index] = vol_prev2
         high_volume[ob_index] = vol_cur + vol_prev1
@@ -482,9 +468,9 @@ def order_blocks(
         ob[ob_index] = -1
         top_arr[ob_index] = ob_top
         bottom_arr[ob_index] = ob_bottom
-        vol_cur = volume[close_index]
-        vol_prev1 = volume[close_index - 1] if close_index >= 1 else 0.0
-        vol_prev2 = volume[close_index - 2] if close_index >= 2 else 0.0
+        vol_cur = volume[ob_index]
+        vol_prev1 = volume[ob_index - 1] if ob_index >= 1 else 0.0
+        vol_prev2 = volume[ob_index - 2] if ob_index >= 2 else 0.0
         ob_volume[ob_index] = vol_cur + vol_prev1 + vol_prev2
         low_volume[ob_index] = vol_cur + vol_prev1
         high_volume[ob_index] = vol_prev2
@@ -526,11 +512,30 @@ def liquidity_pools(
     ohlc = _normalize_ohlcv(frame)
     high = _series_to_float_array(ohlc["high"])
     low = _series_to_float_array(ohlc["low"])
+    close = _series_to_float_array(ohlc["close"])
     swing_high_low = _series_to_float_array(swings["HighLow"])
     swing_level = _series_to_float_array(swings["Level"])
     length = ohlc.height
 
-    pip_range = (float(np.nanmax(high)) - float(np.nanmin(low))) * float(range_percent)
+    global_range = (float(np.nanmax(high)) - float(np.nanmin(low))) * float(range_percent)
+    prev_close = np.concatenate(([close[0]], close[:-1])) if length else close
+    true_range = np.maximum.reduce(
+        (
+            np.abs(high - low),
+            np.abs(high - prev_close),
+            np.abs(low - prev_close),
+        )
+    )
+    atr_window = true_range[-min(14, length) :] if length else true_range
+    atr = float(np.nanmean(atr_window)) if atr_window.size else 0.0
+    median_price = float(np.nanmedian(close)) if length else 0.0
+    atr_cap = atr * max(0.25, min(float(range_percent) * 100.0, 2.0))
+    price_cap = abs(median_price) * float(range_percent)
+    range_candidates = [
+        value for value in (global_range, atr_cap, price_cap) if value > 0.0
+    ]
+    pip_range = min(range_candidates) if range_candidates else 0.0
+    sweep_buffer = max(pip_range * 0.10, abs(median_price) * 1e-5)
 
     shl_hl = swing_high_low.copy()
     shl_level = swing_level.copy()
@@ -552,7 +557,7 @@ def liquidity_pools(
 
         start = i + 1
         if start < length:
-            cond = high[start:] >= range_high
+            cond = high[start:] >= (range_high - sweep_buffer)
             swept = int(start + np.argmax(cond)) if np.any(cond) else None
         else:
             swept = None
@@ -585,7 +590,7 @@ def liquidity_pools(
 
         start = i + 1
         if start < length:
-            cond = low[start:] <= range_low
+            cond = low[start:] <= (range_low + sweep_buffer)
             swept = int(start + np.argmax(cond)) if np.any(cond) else None
         else:
             swept = None
@@ -617,12 +622,14 @@ def liquidity_pools(
 
 
 def _optional_index(value: float | None) -> int | None:
+    """Return ``None`` for null/NaN index values, otherwise an ``int``."""
     if _is_missing(value):
         return None
     return int(value)
 
 
 def _is_missing(value: object) -> bool:
+    """Treat Python nulls and floating NaN values as missing SMC cells."""
     if value is None:
         return True
     try:
@@ -688,7 +695,7 @@ def _fvg_fill_metrics(
         fill_pct = (highest - float(bottom)) / width
     fill_pct = max(0.0, min(1.0, fill_pct))
     fill_penalty = 0.75 if fill_pct > 0.50 else 1.0
-    age_decay = math.exp(-max(age_bars - 20, 0) / 20.0)
+    age_decay = math.exp(-max(age_bars - 40, 0) / 60.0)
     return {
         "fvg_fill_pct": round(fill_pct, 6),
         "age_bars": age_bars,
@@ -809,11 +816,17 @@ def latest_order_block(
     *,
     swing_length: int = 5,
     mode: SMCMode = "live_safe",
+    include_unconfirmed_tail: bool = False,
     allowed_states: tuple[ZoneState, ...] = ("fresh", "mitigated"),
     current_price: float | None = None,
     touch_buffer: float = 0.0,
 ) -> SMCZone | None:
-    swings = swing_highs_lows(frame, swing_length=swing_length, mode=mode)
+    swings = swing_highs_lows(
+        frame,
+        swing_length=swing_length,
+        mode=mode,
+        include_unconfirmed_tail=include_unconfirmed_tail,
+    )
     zones = order_blocks(frame, swings)
     for idx in range(zones.height - 1, -1, -1):
         raw_direction = zones.item(idx, "OB")

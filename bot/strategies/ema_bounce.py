@@ -83,8 +83,12 @@ class EmaBounceSetup(BaseSetup):
         )
 
         work_1h = prepared.work_1h
+        context_timeframe = "1h"
+        if work_1h.height < 3 and prepared.work_15m.height >= 3:
+            work_1h = prepared.work_15m
+            context_timeframe = "15m"
         if work_1h.height < 3:
-            _reject(prepared, setup_id, "insufficient_1h_bars")
+            _reject(prepared, setup_id, "insufficient_context_bars")
             return None
 
         atr = float(work_1h.item(-1, "atr14") or 0.0)
@@ -108,6 +112,11 @@ class EmaBounceSetup(BaseSetup):
 
         # 1H context for 15M signals (not 4H - too lagging for <4h trades)
         bias_1h = getattr(prepared, "bias_1h", prepared.bias_4h)
+        if context_timeframe == "15m":
+            if close > ema50 and ema20 > ema50:
+                bias_1h = "uptrend"
+            elif close < ema50 and ema20 < ema50:
+                bias_1h = "downtrend"
 
         # Direction detection with graded scoring instead of reject
         signal_direction: str | None = None
@@ -124,6 +133,7 @@ class EmaBounceSetup(BaseSetup):
                 signal_direction = "long"
                 reasons = [
                     "ema_bounce_long",
+                    f"context_tf={context_timeframe}",
                     f"ema20_1h={ema20:.4f}",
                     f"ema50_1h={ema50:.4f}",
                 ]
@@ -140,6 +150,7 @@ class EmaBounceSetup(BaseSetup):
                 signal_direction = "short"
                 reasons = [
                     "ema_bounce_short",
+                    f"context_tf={context_timeframe}",
                     f"ema20_1h={ema20:.4f}",
                     f"ema50_1h={ema50:.4f}",
                 ]
@@ -230,7 +241,7 @@ class EmaBounceSetup(BaseSetup):
             setup_id=setup_id,
             direction=signal_direction,
             score=score,
-            timeframe="1h",
+            timeframe=context_timeframe,
             reasons=reasons,
             strategy_family=self.family,
             stop=stop,

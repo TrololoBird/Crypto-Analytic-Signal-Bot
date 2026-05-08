@@ -210,6 +210,12 @@ class ConfluenceEngine:
             ),
             ("oi_momentum", cfg.weight_oi_momentum, _oi_momentum(prepared, signal)),
         ]
+        weight_total = sum(max(0.0, float(weight)) for _, weight, _ in specs)
+        if weight_total > 0.0:
+            specs = [
+                (name, max(0.0, float(weight)) / weight_total, raw)
+                for name, weight, raw in specs
+            ]
         return [
             ComponentScore(
                 name=name,

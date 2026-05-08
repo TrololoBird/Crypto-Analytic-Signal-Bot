@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from ..models import AggTrade
-from .enrichment import depth_imbalance_from_delta_ratio, microprice_bias_from_book
+from .enrichment import depth_imbalance_from_book, microprice_bias_from_book
 
 LOG = logging.getLogger("bot.ws_manager")
 
@@ -65,20 +65,26 @@ def get_global_ticker_data(manager: Any) -> list[dict]:
 
 
 def get_depth_imbalance(manager: Any, symbol: str) -> float | None:
+    bid_qty, ask_qty = manager._book_qty.get(symbol, (None, None))
     snapshot = manager.get_agg_trade_snapshot(symbol)
-    if snapshot is not None:
-        return depth_imbalance_from_delta_ratio(snapshot.delta_ratio)
-    return None
+    return depth_imbalance_from_book(
+        bid_qty=bid_qty,
+        ask_qty=ask_qty,
+        delta_ratio=None if snapshot is None else snapshot.delta_ratio,
+    )
 
 
 def get_microprice_bias(manager: Any, symbol: str) -> float | None:
     bid, ask = manager.get_book_snapshot(symbol)
     if bid is None or ask is None or bid <= 0 or ask <= 0:
         return None
+    bid_qty, ask_qty = manager._book_qty.get(symbol, (None, None))
     snapshot = manager.get_agg_trade_snapshot(symbol)
     return microprice_bias_from_book(
         bid=bid,
         ask=ask,
+        bid_qty=bid_qty,
+        ask_qty=ask_qty,
         delta_ratio=None if snapshot is None else snapshot.delta_ratio,
     )
 
@@ -243,12 +249,15 @@ async def handle_book_ticker(manager: Any, symbol: str, data: dict) -> None:
     try:
         bid = float(data["b"]) if data.get("b") is not None else None
         ask = float(data["a"]) if data.get("a") is not None else None
+        bid_qty = float(data["B"]) if data.get("B") is not None else None
+        ask_qty = float(data["A"]) if data.get("A") is not None else None
         event_ts_ms = int(data["E"]) if data.get("E") is not None else None
     except (KeyError, TypeError, ValueError):
         return
 
     async with manager._data_lock:
         manager._book[symbol] = (bid, ask)
+        manager._book_qty[symbol] = (bid_qty, ask_qty)
         manager._book_update_times[symbol] = time.monotonic()
 
     if manager._event_bus is not None:

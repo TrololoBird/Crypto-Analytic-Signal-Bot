@@ -263,9 +263,20 @@ class BOSCHOCHSetup(BaseSetup):
             _reject(prepared, setup_id, "price_missing")
             return None
 
-        sh_mask, sl_mask = _swing_points(w, n=swing_lookback)
-        sh_prices = w.filter(sh_mask)["high"]
-        sl_prices = w.filter(sl_mask)["low"]
+        scan = w.head(w.height - 1)
+        if scan.height < min_required_bars:
+            _reject(
+                prepared,
+                setup_id,
+                "insufficient_confirmed_15m_bars",
+                bars=scan.height,
+                required=min_required_bars,
+            )
+            return None
+
+        sh_mask, sl_mask = _swing_points(scan, n=swing_lookback)
+        sh_prices = scan.filter(sh_mask)["high"]
+        sl_prices = scan.filter(sl_mask)["low"]
 
         # Need at least 3 of each to determine prior trend + break
         min_swings = int(dynamic_params.get("min_swings", defaults["min_swings"]))
@@ -284,7 +295,7 @@ class BOSCHOCHSetup(BaseSetup):
         sl_vals = sl_prices.to_numpy()
 
         structure_zone = latest_structure_break(
-            w,
+            scan,
             swing_length=swing_lookback,
             prefer_kind="choch",
         )
@@ -296,21 +307,21 @@ class BOSCHOCHSetup(BaseSetup):
         pivot_level = None
 
         external_swings = swing_highs_lows(
-            w,
+            scan,
             swing_length=external_swing_lookback,
             mode="live_safe",
         )
         external_markers = external_swings["HighLow"].to_list()
         external_levels = external_swings["Level"].to_list()
         internal_swings = swing_highs_lows(
-            w,
+            scan,
             swing_length=swing_lookback,
             mode="live_safe",
         )
         internal_markers = internal_swings["HighLow"].to_list()
         internal_levels = internal_swings["Level"].to_list()
         external_search_end = min(
-            int(structure_zone.broken_index or (w.height - 1)),
+            int(structure_zone.broken_index or (scan.height - 1)),
             len(external_markers) - 1,
             len(external_levels) - 1,
             len(internal_markers) - 1,
@@ -320,7 +331,7 @@ class BOSCHOCHSetup(BaseSetup):
         # --- Compute structural SL/TP ---
         if direction == "long":
             pivot_level, stop_source, stop_details = _select_stop_level_with_fallback(
-                frame=w,
+                frame=scan,
                 external_markers=external_markers,
                 external_levels=external_levels,
                 internal_markers=internal_markers,
@@ -359,7 +370,7 @@ class BOSCHOCHSetup(BaseSetup):
                 tp2 = float(tp2_cands[0]) if tp2_cands.len() > 0 else None
         else:
             pivot_level, stop_source, stop_details = _select_stop_level_with_fallback(
-                frame=w,
+                frame=scan,
                 external_markers=external_markers,
                 external_levels=external_levels,
                 internal_markers=internal_markers,

@@ -106,6 +106,7 @@ class SessionKillzoneSetup(BaseSetup):
         defaults = {
             "base_score": 0.55,
             "min_volume_ratio": 1.2,
+            "min_adx_1h": 14.0,
             "sl_buffer_atr": 0.75,
             "bias_mismatch_penalty": 0.75,
             "min_rr": 1.5,
@@ -148,6 +149,10 @@ class SessionKillzoneSetup(BaseSetup):
             defaults["sl_buffer_atr"],
         )
         min_rr = _as_float(dynamic_params.get("min_rr", defaults["min_rr"]), defaults["min_rr"])
+        min_adx_1h = _as_float(
+            dynamic_params.get("min_adx_1h", defaults["min_adx_1h"]),
+            defaults["min_adx_1h"],
+        )
         w = prepared.work_15m
         if w.height < 20:
             _reject(prepared, setup_id, "insufficient_15m_bars", bars=w.height)
@@ -178,8 +183,14 @@ class SessionKillzoneSetup(BaseSetup):
             _reject(prepared, setup_id, "insufficient_1h_bars", bars=w1h.height)
             return None
         adx_1h = _as_float(w1h.item(-1, "adx14"))
-        if adx_1h < 18:
-            _reject(prepared, setup_id, "adx_too_low", adx_1h=adx_1h)
+        if adx_1h < min_adx_1h:
+            _reject(
+                prepared,
+                setup_id,
+                "adx_too_low",
+                adx_1h=adx_1h,
+                min_adx_1h=min_adx_1h,
+            )
             return None
 
         # Last 3 bars directional check with volume

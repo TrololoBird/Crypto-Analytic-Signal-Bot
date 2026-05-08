@@ -226,7 +226,7 @@ class SpreadStrategySetup(RoadmapSetup):
     required_context = ("futures_flow",)
     DEFAULTS = {
         **RoadmapSetup.DEFAULTS,
-        "max_spread_bps": 3.0,
+        "max_spread_bps": 2.0,
         "min_volume_ratio": 1.15,
         "min_roc10_abs_pct": 0.20,
     }
@@ -447,7 +447,7 @@ class StopHuntDetectionSetup(RoadmapSetup):
     required_context = ("futures_flow",)
     DEFAULTS = {
         **RoadmapSetup.DEFAULTS,
-        "sweep_tolerance_pct": 0.0004,
+        "sweep_tolerance_pct": 0.0010,
         "min_volume_ratio": 1.20,
         "min_close_position_long": 0.58,
         "max_close_position_short": 0.42,
@@ -603,7 +603,7 @@ class WyckoffSpringSetup(RoadmapSetup):
     required_context = ("futures_flow",)
     DEFAULTS = {
         **RoadmapSetup.DEFAULTS,
-        "sweep_tolerance_pct": 0.0006,
+        "sweep_tolerance_pct": 0.0012,
         "min_volume_ratio": 1.35,
         "min_close_position_long": 0.62,
         "max_close_position_short": 0.38,

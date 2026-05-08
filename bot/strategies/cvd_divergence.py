@@ -106,7 +106,7 @@ class CVDDivergenceSetup(BaseSetup):
         closes = w["close"].to_numpy()
         highs = w["high"].to_numpy()
         lows = w["low"].to_numpy()
-        delta_vals = w["delta_ratio"].to_numpy()
+        delta_vals = (w["delta_ratio"].to_numpy() - 0.5) * 2.0
 
         split = max(2, divergence_lookback)
         compare = split * 2

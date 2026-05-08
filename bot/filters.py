@@ -361,17 +361,28 @@ def apply_global_filters(
             deep_score_floor = 0.40
         effective_min_score = min(effective_min_score, deep_score_floor)
     if effective_min_score > 0.0 and updated.score < effective_min_score:
+        score_reason = "adx_penalty_score_too_low" if adx_penalty_applied else "score_too_low"
+        score_details = {
+            "score": updated.score,
+            "min_score_required": effective_min_score,
+            "global_min_score": settings.filters.min_score,
+            "deep_analysis_policy": deep_analysis_asset,
+            "primary_timeframe": primary_timeframe,
+        }
+        if adx_penalty_applied:
+            score_details.update(
+                {
+                    "adx_policy": adx_policy,
+                    "adx_1h": adx_1h,
+                    "min_adx_1h": min_adx_1h,
+                    "adx_penalty_factor": adx_penalty_factor,
+                }
+            )
         return _reject(
-            "score_too_low",
+            score_reason,
             updated,
             scoring_result,
-            details={
-                "score": updated.score,
-                "min_score_required": effective_min_score,
-                "global_min_score": settings.filters.min_score,
-                "deep_analysis_policy": deep_analysis_asset,
-                "primary_timeframe": primary_timeframe,
-            },
+            details=score_details,
         )
 
     return True, updated, None, scoring_result, None

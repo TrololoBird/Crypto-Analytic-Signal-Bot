@@ -84,6 +84,8 @@ class SqueezeSetup(BaseSetup):
             "sl_buffer_atr": 0.4,
             "bias_mismatch_penalty": 0.75,
             "min_rr": 1.5,
+            "funding_extreme_threshold": 0.00015,
+            "liquidation_extreme_threshold": 0.20,
         }
         if settings is not None:
             filters = getattr(settings, 'filters', None)
@@ -105,6 +107,19 @@ class SqueezeSetup(BaseSetup):
         sl_buffer_atr = _as_float(dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]), defaults["sl_buffer_atr"])
         min_rr = _as_float(dynamic_params.get("min_rr", defaults["min_rr"]), defaults["min_rr"])
         base_score = _as_float(dynamic_params.get("base_score", defaults["base_score"]), defaults["base_score"])
+        funding_extreme_threshold = _as_float(
+            dynamic_params.get(
+                "funding_extreme_threshold", defaults["funding_extreme_threshold"]
+            ),
+            defaults["funding_extreme_threshold"],
+        )
+        liquidation_extreme_threshold = _as_float(
+            dynamic_params.get(
+                "liquidation_extreme_threshold",
+                defaults["liquidation_extreme_threshold"],
+            ),
+            defaults["liquidation_extreme_threshold"],
+        )
 
         if work_15m.height < 30:
             _reject(prepared, "squeeze_setup", "insufficient_bars")
@@ -125,7 +140,7 @@ class SqueezeSetup(BaseSetup):
         crowd_aligned = False
         crowd_reason = ""
 
-        if funding is not None and abs(funding) >= 0.0003:
+        if funding is not None and abs(funding) >= funding_extreme_threshold:
             if funding > 0 and squeeze_dir == "short":
                 crowd_aligned = True
                 crowd_reason = f"funding={funding:.4f} (longs crowded)"
@@ -133,7 +148,7 @@ class SqueezeSetup(BaseSetup):
                 crowd_aligned = True
                 crowd_reason = f"funding={funding:.4f} (shorts crowded)"
 
-        if liq_score is not None and abs(liq_score) >= 0.25:
+        if liq_score is not None and abs(liq_score) >= liquidation_extreme_threshold:
             if liq_score > 0 and squeeze_dir == "short":
                 crowd_aligned = True
                 crowd_reason = f"liq_score={liq_score:.3f} (long liq pressure)"

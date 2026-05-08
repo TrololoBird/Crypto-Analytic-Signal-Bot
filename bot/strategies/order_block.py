@@ -105,6 +105,7 @@ class OrderBlockSetup(BaseSetup):
         zone = latest_order_block(
             w1h,
             swing_length=3,
+            include_unconfirmed_tail=True,
             current_price=price,
         )
         if zone is None:

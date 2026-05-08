@@ -146,7 +146,7 @@ class PreparedSymbol:
     primary_timeframe: str = "15m"
     context_timeframes: tuple[str, ...] = ("1h", "4h")
     settings: BotSettings | None = None
-    reject_log: list[dict[str, Any]] = field(default_factory=list)
+    reject_log: tuple[dict[str, Any], ...] = ()
 
     def __post_init__(self) -> None:
         if self.top_account_ls_ratio is None and self.ls_ratio is not None:
@@ -167,6 +167,8 @@ class PreparedSymbol:
             and self.top_position_ls_ratio is not None
         ):
             self.top_trader_position_ratio = self.top_position_ls_ratio
+        if not isinstance(self.reject_log, tuple):
+            self.reject_log = tuple(self.reject_log)
 
     @property
     def symbol(self) -> str:

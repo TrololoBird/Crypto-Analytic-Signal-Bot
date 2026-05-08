@@ -77,6 +77,13 @@ async def monitor_connection_silence(manager: Any, ws: Any, endpoint: str) -> bo
     last_message_ts = manager._last_message_ts_by_endpoint.get(endpoint, 0.0)
     if last_message_ts == 0.0:
         return False
+    connected_map = getattr(manager, "_connected_at_by_endpoint", {})
+    connected_at = connected_map.get(endpoint, 0.0) if isinstance(connected_map, dict) else 0.0
+    if (
+        connected_at > 0.0
+        and time.monotonic() - connected_at < manager._cfg.market_reconnect_grace_seconds
+    ):
+        return False
     silence = time.monotonic() - last_message_ts
     if silence > silence_limit and manager._intended_streams_by_endpoint.get(endpoint):
         LOG.info(

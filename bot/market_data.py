@@ -344,6 +344,7 @@ class BinanceFuturesMarketData:
         # Circuit breaker state per operation
         self._circuit_failures: dict[str, int] = {}
         self._circuit_open_until: dict[str, float] = {}
+        self._circuit_half_open: set[str] = set()
         self._circuit_failure_threshold = 3
         self._circuit_open_duration_seconds = 30.0
         self._last_endpoint_name: str | None = None
@@ -392,12 +393,30 @@ class BinanceFuturesMarketData:
     def _is_circuit_open(self, operation: str) -> bool:
         """Check if circuit breaker is open for operation."""
         open_until = self._circuit_open_until.get(operation, 0.0)
-        if time.monotonic() < open_until:
+        now = time.monotonic()
+        if now < open_until:
             return True
+        if open_until > 0.0:
+            if operation in self._circuit_half_open:
+                return True
+            self._circuit_half_open.add(operation)
+            return False
         return False
 
     def _record_circuit_failure(self, operation: str) -> None:
         """Record a failure and open circuit if threshold reached."""
+        if operation in self._circuit_half_open:
+            self._circuit_half_open.discard(operation)
+            self._circuit_open_until[operation] = (
+                time.monotonic() + self._circuit_open_duration_seconds
+            )
+            self._circuit_failures[operation] = 0
+            LOG.warning(
+                "circuit breaker half-open probe failed | operation=%s duration=%.0fs",
+                operation,
+                self._circuit_open_duration_seconds,
+            )
+            return
         failures = self._circuit_failures.get(operation, 0) + 1
         self._circuit_failures[operation] = failures
         if failures >= self._circuit_failure_threshold:
@@ -411,6 +430,8 @@ class BinanceFuturesMarketData:
 
     def _record_circuit_success(self, operation: str) -> None:
         """Reset failure count on success."""
+        self._circuit_half_open.discard(operation)
+        self._circuit_open_until.pop(operation, None)
         if operation in self._circuit_failures:
             del self._circuit_failures[operation]
 

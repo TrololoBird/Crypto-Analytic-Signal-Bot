@@ -10,7 +10,7 @@ from websockets import exceptions as ws_exceptions
 
 LOG = logging.getLogger("bot.ws_manager")
 
-_BACKOFF_RESET_AFTER_SECONDS = 30.0
+_BACKOFF_RESET_AFTER_SECONDS = 90.0
 
 
 def compute_disconnect_delay(

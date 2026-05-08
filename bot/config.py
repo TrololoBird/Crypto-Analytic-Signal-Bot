@@ -61,8 +61,6 @@ class UniverseConfig(BaseModel):
     pinned_symbols: tuple[str, ...] = (
         "BTCUSDT",
         "ETHUSDT",
-        "XAUUSDT",
-        "XAGUSDT",
     )
 
     @field_validator("quote_asset")
@@ -289,21 +287,13 @@ class ScoringConfig(BaseModel):
             "weight_oi_momentum": float(self.weight_oi_momentum),
         }
         total_weight = sum(weights.values())
-        if abs(total_weight - 1.0) > 1e-6:
-            fields_set: set[str] = set(getattr(self, "model_fields_set", set()))
-            missing_in_config = sorted(k for k in weights if k not in fields_set)
-            hint = ""
-            if missing_in_config:
-                hint = f" (missing in config: {', '.join(missing_in_config)})"
-            pretty = ", ".join(f"{k}={v:.2f}" for k, v in weights.items())
+        if total_weight <= 0.0:
             raise ValueError(
-                "ScoringConfig: model component weights "
-                "(weight_mtf_alignment, weight_volume_quality, weight_structure_clarity, "
-                "weight_risk_reward, weight_crowd_position, weight_oi_momentum) "
-                "must sum to 1.0; setup_prior_weight is validated separately. "
-                f"got {total_weight:.2f}{hint}. "
-                f"Current weights: {pretty}"
+                "ScoringConfig: model component weights must have positive total"
             )
+        if abs(total_weight - 1.0) > 1e-6:
+            for key, value in weights.items():
+                object.__setattr__(self, key, value / total_weight)
         return self
 
 

@@ -43,7 +43,7 @@ if TYPE_CHECKING:
 
 
 UTC = timezone.utc
-_BACKOFF_RESET_AFTER_SECONDS = 30.0
+_BACKOFF_RESET_AFTER_SECONDS = 90.0
 _PROACTIVE_RECONNECT_AFTER_SECONDS = 23 * 3600 + 50 * 60
 _HEALTH_CHECK_INTERVAL_SECONDS = 30.0
 
@@ -219,6 +219,7 @@ class FuturesWSManager:
 
         self._klines: dict[str, dict[str, collections.deque]] = {}
         self._book: dict[str, tuple[float | None, float | None]] = {}
+        self._book_qty: dict[str, tuple[float | None, float | None]] = {}
         self._agg_trades: dict[str, collections.deque] = {}
 
         # Global market stream caches (populated from !ticker@arr, !markPrice@arr, !forceOrder@arr)
@@ -295,9 +296,7 @@ class FuturesWSManager:
         self._reconnect_cb: Any = None  # async cb() — fired on reconnect
 
         # Message buffering with background draining.
-        # Increased buffer size to handle high-volume WebSocket streams (45+ symbols)
-        # without dropping messages during burst periods
-        self._message_buffer = MessageBuffer(maxsize=100000)
+        self._message_buffer = MessageBuffer(maxsize=10000)
         self._buffer_processor_task: asyncio.Task | None = None
         self._backfill_tasks: set[asyncio.Task[None]] = set()
         self._stale_event_drop_count: int = 0
@@ -1243,6 +1242,7 @@ class FuturesWSManager:
                 bid, ask = await self._rest.fetch_book_ticker(symbol)
             async with self._data_lock:
                 self._book[symbol] = (bid, ask)
+                self._book_qty.pop(symbol, None)
             self._backfill_cooldowns.pop(symbol, None)
         except (
             ConnectionError,
@@ -1412,6 +1412,12 @@ class FuturesWSManager:
         if "result" in msg or "error" in msg:
             self._handle_ws_response(msg, endpoint)
             return
+
+        data = msg.get("data")
+        if isinstance(data, dict) and data.get("e") == "kline":
+            kline = data.get("k", {})
+            if isinstance(kline, dict) and not kline.get("x"):
+                return
 
         buffered = await self._message_buffer.put(msg)
         if not buffered:

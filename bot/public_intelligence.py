@@ -341,7 +341,7 @@ class PublicIntelligenceService:
     ) -> dict[str, Any]:
         by_symbol: dict[str, Any] = {}
         confirmed_facts: list[str] = []
-        for symbol in benchmark_symbols:
+        for index, symbol in enumerate(benchmark_symbols):
             funding_rate = await self._client.fetch_funding_rate(symbol)
             oi_current = await self._client.fetch_open_interest(symbol)
             oi_change_pct = await self._client.fetch_open_interest_change(
@@ -387,6 +387,8 @@ class PublicIntelligenceService:
                 or taker_ratio is not None
             ):
                 confirmed_facts.append(f"{symbol}_public_futures_context_available")
+            if index < len(benchmark_symbols) - 1:
+                await asyncio.sleep(0.10)
 
         return {
             "by_symbol": by_symbol,
@@ -1033,16 +1035,29 @@ class PublicIntelligenceService:
         params: dict[str, Any] | None = None,
     ) -> Any:
         session = await self._client._get_http_session()
-        async with session.get(
-            url,
-            headers=headers,
-            params=params,
-            timeout=aiohttp.ClientTimeout(
-                total=max(5.0, float(self._settings.ws.rest_timeout_seconds))
-            ),
-        ) as response:
-            response.raise_for_status()
-            return await response.json()
+        timeout = aiohttp.ClientTimeout(
+            total=max(5.0, float(self._settings.ws.rest_timeout_seconds))
+        )
+        for attempt in range(3):
+            try:
+                async with session.get(
+                    url,
+                    headers=headers,
+                    params=params,
+                    timeout=timeout,
+                ) as response:
+                    response.raise_for_status()
+                    return await response.json()
+            except aiohttp.ClientResponseError as exc:
+                retryable = exc.status in {403, 429} or exc.status >= 500
+                if not retryable or attempt >= 2:
+                    raise
+                await asyncio.sleep(0.5 * (2**attempt))
+            except aiohttp.ClientError:
+                if attempt >= 2:
+                    raise
+                await asyncio.sleep(0.5 * (2**attempt))
+        raise RuntimeError("unreachable fetch retry state")
 
     async def _write_latest_snapshot(self, snapshot: dict[str, Any]) -> None:
         latest_json = self._reports_dir / "latest_public_intelligence.json"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date, datetime, timezone
 from typing import Any, cast
 
 import numpy as np
@@ -127,11 +128,43 @@ def adx(df: pl.DataFrame, period: int = 14, *, plta: Any = None, has_talib: bool
     )
 
 
+def _vwap_session_key(value: object) -> date | None:
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc).date() if value.tzinfo else value.date()
+    if isinstance(value, date):
+        return value
+    return None
+
+
 def vwap(df: pl.DataFrame) -> pl.Series:
-    """Contract: input requires OHLCV; output cumulative VWAP including current bar."""
+    """Contract: input requires OHLCV; output session VWAP when timestamps exist."""
     ensure_columns(df, REQUIRED_OHLCV_COLUMNS, fn_name="vwap")
     typical = (df["high"] + df["low"] + df["close"]) / 3.0
     pv = typical * df["volume"]
+    time_column = next(
+        (column for column in ("close_time", "time", "open_time") if column in df.columns),
+        None,
+    )
+    if time_column is not None:
+        values: list[float | None] = []
+        session: date | None = None
+        cumulative_pv = 0.0
+        cumulative_volume = 0.0
+        last_vwap: float | None = None
+        for ts, price_volume, volume in zip(df[time_column], pv, df["volume"], strict=False):
+            key = _vwap_session_key(ts)
+            if key is not None and key != session:
+                session = key
+                cumulative_pv = 0.0
+                cumulative_volume = 0.0
+                last_vwap = None
+            volume_value = float(volume or 0.0)
+            cumulative_pv += float(price_volume or 0.0)
+            cumulative_volume += volume_value
+            if cumulative_volume > 0.0:
+                last_vwap = cumulative_pv / cumulative_volume
+            values.append(last_vwap)
+        return pl.Series("vwap", values, dtype=pl.Float64).forward_fill()
     return materialize_series((pv.cum_sum() / df["volume"].cum_sum()).forward_fill(), df=df, name="vwap")
 
 

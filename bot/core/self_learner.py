@@ -13,6 +13,7 @@ import importlib
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import partial
 from typing import TYPE_CHECKING, Any, cast
 
 from ..learning import OutcomeStore, RegimeAwareParams, WalkForwardOptimizer
@@ -174,19 +175,23 @@ class SelfLearner:
                         param_name, low, high
                     )
 
-            # Simulate performance with these parameters
-            return self._simulate_performance(outcomes, suggested_params)
+            return WalkForwardOptimizer().evaluate(outcomes, suggested_params)
 
         # Create or load study
         study_name = f"{setup_id}_optimization"
         try:
             if optuna is None:
                 return None
-            study = cast(Any, optuna).create_study(
-                study_name=study_name,
-                storage=f"sqlite:///{self.db_path}",
-                direction="maximize",
-                load_if_exists=True,
+            loop = asyncio.get_running_loop()
+            study = await loop.run_in_executor(
+                None,
+                partial(
+                    cast(Any, optuna).create_study,
+                    study_name=study_name,
+                    storage=f"sqlite:///{self.db_path}",
+                    direction="maximize",
+                    load_if_exists=True,
+                ),
             )
         except Exception as e:
             LOG.error(f"Failed to create study for {setup_id}: {e}")
@@ -287,8 +292,12 @@ class SelfLearner:
         for result in results:
             try:
                 # Update settings.filters.setups[setup_id]
-                if not hasattr(settings.filters, "setups"):
-                    settings.filters.setups = {}
+                setups = getattr(settings.filters, "setups", None)
+                if not isinstance(setups, dict):
+                    try:
+                        settings.filters.setups = {}
+                    except Exception:
+                        object.__setattr__(settings.filters, "setups", {})
 
                 settings.filters.setups[result.setup_id] = result.params
 

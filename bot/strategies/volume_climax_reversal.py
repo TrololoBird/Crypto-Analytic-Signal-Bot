@@ -28,7 +28,7 @@ class VolumeClimaxReversalSetup(BaseSetup):
     ) -> dict[str, float]:
         defaults = {
             "base_score": 0.52,
-            "min_volume_ratio": 2.3,
+            "min_volume_ratio": 1.8,
             "min_wick_atr": 0.45,
             "max_rsi_long": 42.0,
             "min_rsi_short": 58.0,

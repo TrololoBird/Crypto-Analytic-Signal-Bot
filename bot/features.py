@@ -16,6 +16,7 @@ from __future__ import annotations
 import importlib
 from importlib import util as importlib_util
 from collections import OrderedDict
+from datetime import date, datetime, timezone
 import threading
 from typing import Any, cast
 
@@ -368,14 +369,47 @@ def _adx(df: pl.DataFrame, period: int = 14) -> pl.Series:
     )
 
 
+def _vwap_session_key(value: object) -> date | None:
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc).date() if value.tzinfo else value.date()
+    if isinstance(value, date):
+        return value
+    return None
+
+
 def _vwap(df: pl.DataFrame) -> pl.Series:
-    """Volume Weighted Average Price — cumulative including the current bar."""
+    """Volume Weighted Average Price, reset per UTC session when timestamps exist."""
     typical_price = (df["high"] + df["low"] + df["close"]) / 3.0
     pv = typical_price * df["volume"]
-    
+
+    time_column = next(
+        (column for column in ("close_time", "time", "open_time") if column in df.columns),
+        None,
+    )
+    if time_column is not None:
+        values: list[float | None] = []
+        session: date | None = None
+        cumulative_pv = 0.0
+        cumulative_volume = 0.0
+        last_vwap: float | None = None
+        for ts, price_volume, volume in zip(df[time_column], pv, df["volume"], strict=False):
+            key = _vwap_session_key(ts)
+            if key is not None and key != session:
+                session = key
+                cumulative_pv = 0.0
+                cumulative_volume = 0.0
+                last_vwap = None
+            volume_value = float(volume or 0.0)
+            cumulative_pv += float(price_volume or 0.0)
+            cumulative_volume += volume_value
+            if cumulative_volume > 0.0:
+                last_vwap = cumulative_pv / cumulative_volume
+            values.append(last_vwap)
+        return pl.Series("vwap", values, dtype=pl.Float64).forward_fill()
+
     cumulative_pv = pv.cum_sum()
     cumulative_volume = df["volume"].cum_sum()
-    
+
     vwap = (cumulative_pv / cumulative_volume).forward_fill()
     return _materialize_series(vwap, df=df, name="vwap")
 
@@ -402,8 +436,8 @@ def _stochastic(
     smooth_k: int = 3,
     smooth_d: int = 3,
 ) -> tuple[pl.Series, pl.Series]:
-    rolling_low = df["low"].rolling_min(window_size=period)
-    rolling_high = df["high"].rolling_max(window_size=period)
+    rolling_low = df["low"].shift(1).rolling_min(window_size=period)
+    rolling_high = df["high"].shift(1).rolling_max(window_size=period)
     width = rolling_high - rolling_low
     raw_k = _clean_non_finite(((df["close"] - rolling_low) / width) * 100.0, fill=50.0)
     k = _clean_non_finite(raw_k.rolling_mean(window_size=smooth_k), fill=50.0).rename("stoch_k14")
@@ -866,7 +900,8 @@ def _add_advanced_indicators(df: pl.DataFrame) -> pl.DataFrame:
     # --- Bollinger Bands - pure Polars implementation ------------------------
     upper, middle, lower = _bollinger_bands(df["close"], period=20, nbdev=2.0)
     bb_pct_b = (df["close"] - lower) / (upper - lower)
-    bb_width = (upper - lower) / middle * 100.0
+    middle_safe = _clean_non_finite(middle.abs(), fill=1e-10).clip(lower_bound=1e-10)
+    bb_width = (upper - lower) / middle_safe * 100.0
     result = result.with_columns([
         _clean_non_finite(bb_pct_b, fill=0.5).alias("bb_pct_b"),
         _clean_non_finite(bb_width, fill=0.0).alias("bb_width"),
@@ -874,7 +909,10 @@ def _add_advanced_indicators(df: pl.DataFrame) -> pl.DataFrame:
     
     # --- Keltner Channels - pure Polars implementation -----------------------
     kc_upper, kc_middle, kc_lower = _keltner_channels(df, period=20, multiplier=2.0)
-    kc_width = (kc_upper - kc_lower) / df["close"]
+    close_safe = _clean_non_finite(df["close"].abs(), fill=1e-10).clip(
+        lower_bound=1e-10
+    )
+    kc_width = (kc_upper - kc_lower) / close_safe
     result = result.with_columns([
         kc_upper.alias("kc_upper"),
         kc_lower.alias("kc_lower"),
