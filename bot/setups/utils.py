@@ -14,14 +14,26 @@ import polars as pl
 from ..runtime_policy import is_deep_analysis_symbol
 
 if TYPE_CHECKING:
+    from ..config import BotSettings
     from ..models import PreparedSymbol, Signal
 
 
 def _safe_float(value: object, default: float = 0.0) -> float:
+    """Legacy internal helper, use as_float instead."""
+    return as_float(value, default)
+
+
+def as_float(value: object, default: float = 0.0) -> float:
+    """Coerce value to float with optional default."""
     if isinstance(value, bool):
         return float(value)
     if isinstance(value, (int, float)):
         return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            pass
     return default
 
 
@@ -333,11 +345,11 @@ def validate_rr_or_penalty(
 
 
 def apply_graded_penalty(
-    signal: "Signal",
+    signal: Signal,
     condition: bool,
     penalty: float = 0.75,
     reason: str = "",
-) -> "Signal":
+) -> Signal:
     """Apply graded penalty to signal score if condition is True.
 
     Instead of rejecting signal completely, reduce score by penalty factor.
@@ -362,7 +374,7 @@ def apply_graded_penalty(
 
 
 def _relax_deep_asset_thresholds(
-    prepared: "PreparedSymbol",
+    prepared: PreparedSymbol,
     params: dict[str, float],
 ) -> dict[str, float]:
     if not params or not is_deep_analysis_symbol(prepared):
@@ -374,7 +386,9 @@ def _relax_deep_asset_thresholds(
     cap = 0.75 if primary_timeframe in {"1h", "4h"} else 0.85
     for key in ("min_volume_ratio", "volume_threshold"):
         raw_value = adjusted.get(key)
-        if not isinstance(raw_value, int | float) or not math.isfinite(float(raw_value)):
+        if not isinstance(raw_value, int | float) or not math.isfinite(
+            float(raw_value)
+        ):
             continue
         value = float(raw_value)
         if value <= floor:
@@ -383,7 +397,7 @@ def _relax_deep_asset_thresholds(
     return adjusted
 
 
-def get_dynamic_params(prepared: "PreparedSymbol", setup_id: str) -> dict[str, float]:
+def get_dynamic_params(prepared: PreparedSymbol, setup_id: str) -> dict[str, float]:
     """Get dynamic parameters from prepared symbol for specific setup.
 
     This retrieves setup-specific configuration from settings or falls back
@@ -417,3 +431,81 @@ def get_dynamic_params(prepared: "PreparedSymbol", setup_id: str) -> dict[str, f
             params = dict(setups_config.get(legacy_key, {}) or {})
 
     return _relax_deep_asset_thresholds(prepared, params)
+
+
+def get_merged_params(
+    setup_id: str,
+    defaults: dict[str, float],
+    settings: BotSettings | None,
+    prepared: PreparedSymbol | None = None,
+) -> dict[str, float]:
+    """Helper to merge default parameters with config and dynamic overrides."""
+    params = dict(defaults)
+    if settings is not None:
+        filters = getattr(settings, "filters", None)
+        if filters:
+            setups_config = getattr(filters, "setups", {})
+            if isinstance(setups_config, dict):
+                override = setups_config.get(setup_id)
+                if isinstance(override, dict):
+                    params.update(override)
+
+    if prepared is not None:
+        dynamic = get_dynamic_params(prepared, setup_id)
+        params.update(dynamic)
+
+    return params
+
+
+def validate_prepared_data(
+    prepared: PreparedSymbol,
+    setup_id: str,
+    *,
+    required_columns: tuple[str, ...],
+    min_bars: int = 30,
+) -> bool:
+    """Validate that prepared symbol has enough bars and required columns."""
+    from . import _reject
+
+    work = prepared.work_15m
+    if work.height < min_bars:
+        _reject(
+            prepared, setup_id, "insufficient_bars", bars=work.height, min_bars=min_bars
+        )
+        return False
+
+    missing = [col for col in required_columns if col not in work.columns]
+    if missing:
+        _reject(prepared, setup_id, "missing_columns", missing_fields=missing)
+        return False
+
+    return True
+
+
+def apply_standard_penalties(
+    score: float,
+    *,
+    direction: str,
+    prepared: PreparedSymbol,
+    params: dict[str, float],
+    rsi: float,
+) -> float:
+    """Apply standard bias and RSI penalties to a score."""
+    updated_score = score
+    bias_1h = getattr(prepared, "bias_1h", "neutral")
+
+    # Graded bias alignment
+    if direction == "long" and bias_1h == "downtrend":
+        updated_score *= params.get("bias_mismatch_penalty", 0.75)
+    elif direction == "short" and bias_1h == "uptrend":
+        updated_score *= params.get("bias_mismatch_penalty", 0.75)
+
+    # RSI extremes graded penalty
+    if direction == "long" and "max_rsi_long" in params:
+        if rsi > params["max_rsi_long"]:
+            updated_score *= 0.85
+    elif direction == "short" and "min_rsi_short" in params:
+        if rsi < params["min_rsi_short"]:
+            updated_score *= 0.85
+
+    return updated_score

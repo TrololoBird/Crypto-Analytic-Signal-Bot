@@ -36,7 +36,9 @@ class FakeBroadcaster:
     async def send_html(
         self, text: str, *, reply_to_message_id: int | None = None
     ) -> DeliveryResult:
-        return DeliveryResult(status="suppressed", message_id=None, reason="pipeline_check")
+        return DeliveryResult(
+            status="suppressed", message_id=None, reason="pipeline_check"
+        )
 
     async def edit_html(self, message_id: int, text: str) -> None:
         return None
@@ -94,7 +96,9 @@ async def _warm_public_context(
             lambda: client.fetch_taker_ratio(symbol, period="1h"),
             timeout=timeout,
         ),
-        _safe_call("funding_rate", lambda: client.fetch_funding_rate(symbol), timeout=timeout),
+        _safe_call(
+            "funding_rate", lambda: client.fetch_funding_rate(symbol), timeout=timeout
+        ),
         _safe_call(
             "funding_rate_history",
             lambda: client.fetch_funding_rate_history(symbol),
@@ -227,7 +231,9 @@ async def _run(
     )
     run_id = f"live_pipeline_check_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}"
     telemetry = TelemetryStore(settings.telemetry_dir, run_id=run_id)
-    bot = SignalBot(settings, market_data=client, broadcaster=FakeBroadcaster(), telemetry=telemetry)
+    bot = SignalBot(
+        settings, market_data=client, broadcaster=FakeBroadcaster(), telemetry=telemetry
+    )
     try:
         await bot._modern_repo.initialize()
         exchange_symbols = await client.fetch_exchange_symbols()
@@ -307,7 +313,9 @@ async def _run(
                 if result.prepared is not None:
                     prepared_ok += 1
                 funnel = result.funnel or {}
-                detector_runs += int(funnel.get("detector_runs") or result.raw_setups or 0)
+                detector_runs += int(
+                    funnel.get("detector_runs") or result.raw_setups or 0
+                )
                 raw_hits += int(funnel.get("raw_hits") or 0)
                 raw_hits_by_setup.update(funnel.get("raw_hits_by_setup") or {})
                 all_candidates[symbol] = list(result.candidates)
@@ -323,7 +331,9 @@ async def _run(
                     rejection_stages.update([str(row.get("stage") or "unknown")])
                     rejection_reasons.update([str(row.get("reason") or "unknown")])
 
-        await asyncio.gather(*(asyncio.create_task(analyze(symbol)) for symbol in symbols))
+        await asyncio.gather(
+            *(asyncio.create_task(analyze(symbol)) for symbol in symbols)
+        )
 
         selected = bot._select_and_rank(
             all_candidates,
@@ -345,7 +355,9 @@ async def _run(
             telemetry_run_id=run_id,
         )
         if indicator_samples:
-            LOG.info("indicator_samples", samples=dict(list(indicator_samples.items())[:10]))
+            LOG.info(
+                "indicator_samples", samples=dict(list(indicator_samples.items())[:10])
+            )
         if selected:
             LOG.info(
                 "dry_selected_candidates",
@@ -365,7 +377,9 @@ async def _run(
         if failures:
             LOG.warning("pipeline_failures", failures=failures[:20])
         if detector_runs <= 0 or prepared_ok <= 0:
-            raise RuntimeError("pipeline check did not execute any prepared detector runs")
+            raise RuntimeError(
+                "pipeline check did not execute any prepared detector runs"
+            )
     finally:
         await bot.close()
 

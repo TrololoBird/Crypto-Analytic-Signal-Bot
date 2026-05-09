@@ -7,7 +7,12 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from common import bootstrap_repo_path, configure_script_logging, load_symbols_from_run, resolve_symbols
+from common import (
+    bootstrap_repo_path,
+    configure_script_logging,
+    load_symbols_from_run,
+    resolve_symbols,
+)
 
 bootstrap_repo_path()
 
@@ -104,13 +109,23 @@ async def _run(symbols: list[str], concurrency: int) -> None:
                     symbol,
                 )
                 if prepared is None:
-                    failures.append({"symbol": symbol, "stage": "prepare", "error": "prepare_symbol returned None"})
+                    failures.append(
+                        {
+                            "symbol": symbol,
+                            "stage": "prepare",
+                            "error": "prepare_symbol returned None",
+                        }
+                    )
                     return
                 prepared_ok += 1
                 results = await engine.calculate_all(prepared)
                 detector_runs += len(results)
                 for result in results:
-                    setup_id = str(result.setup_id or result.metadata.get("setup_id") or getattr(result.signal, "setup_id", "unknown"))
+                    setup_id = str(
+                        result.setup_id
+                        or result.metadata.get("setup_id")
+                        or getattr(result.signal, "setup_id", "unknown")
+                    )
                     decision = result.decision
                     if decision is not None and decision.is_reject:
                         reject_reasons.update([decision.reason_code])
@@ -119,7 +134,9 @@ async def _run(symbols: list[str], concurrency: int) -> None:
                     elif result.signal is not None:
                         hits_by_setup.update([result.signal.setup_id])
 
-        await asyncio.gather(*[asyncio.create_task(_analyze(symbol)) for symbol in symbols])
+        await asyncio.gather(
+            *[asyncio.create_task(_analyze(symbol)) for symbol in symbols]
+        )
         LOG.info(
             "strategy_surface_summary",
             symbols=len(symbols),
@@ -132,13 +149,17 @@ async def _run(symbols: list[str], concurrency: int) -> None:
         if failures:
             LOG.warning("strategy_prepare_failures", failures=failures[:20])
         if errors_by_setup:
-            raise RuntimeError(f"strategy errors detected: {errors_by_setup.most_common()}")
+            raise RuntimeError(
+                f"strategy errors detected: {errors_by_setup.most_common()}"
+            )
     finally:
         await client.close()
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Live strategy detector-surface review")
+    parser = argparse.ArgumentParser(
+        description="Live strategy detector-surface review"
+    )
     parser.add_argument("--symbols", nargs="*", default=[])
     parser.add_argument("--symbols-from-run", default="20260421_215817_70948")
     parser.add_argument("--limit", type=int, default=12)
@@ -147,7 +168,9 @@ def main() -> None:
     fallback_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
     symbols = resolve_symbols(
         args_symbols=args.symbols,
-        symbols_from_run=load_symbols_from_run(args.symbols_from_run, Path("data") / "bot" / "telemetry"),
+        symbols_from_run=load_symbols_from_run(
+            args.symbols_from_run, Path("data") / "bot" / "telemetry"
+        ),
         fallback_symbols=fallback_symbols,
     )
     if symbols == fallback_symbols:
@@ -157,7 +180,12 @@ def main() -> None:
     try:
         asyncio.run(_run(symbols, args.concurrency))
     except MarketDataUnavailable as exc:
-        LOG.error("live_strategies_unavailable", operation=exc.operation, detail=exc.detail, symbol=exc.symbol)
+        LOG.error(
+            "live_strategies_unavailable",
+            operation=exc.operation,
+            detail=exc.detail,
+            symbol=exc.symbol,
+        )
         raise SystemExit(2) from exc
 
 

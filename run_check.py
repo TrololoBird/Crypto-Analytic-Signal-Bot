@@ -1,13 +1,16 @@
 #!/usr/bin/env python
 """Check if all dependencies are installed"""
+
 import sys
 
 log_file = "check_result.txt"
+
 
 def log(msg):
     with open(log_file, "a", encoding="utf-8") as f:
         f.write(msg + "\n")
     print(msg)
+
 
 # Clear old log
 with open(log_file, "w", encoding="utf-8") as f:
@@ -17,14 +20,7 @@ log("=" * 50)
 log("CHECKING DEPENDENCIES")
 log("=" * 50)
 
-modules = [
-    "polars",
-    "aiohttp", 
-    "toml",
-    "numpy",
-    "pandas",
-    "pydantic"
-]
+modules = ["polars", "aiohttp", "toml", "numpy", "pandas", "pydantic"]
 
 all_ok = True
 for mod in modules:

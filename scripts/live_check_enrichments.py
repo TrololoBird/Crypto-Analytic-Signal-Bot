@@ -18,6 +18,7 @@ correctly populated with live data:
 Usage:
     python scripts/live_check_enrichments.py --symbols BTCUSDT ETHUSDT SOLUSDT --warmup 30
 """
+
 from __future__ import annotations
 
 import argparse
@@ -46,7 +47,7 @@ def _configure_logging() -> None:
 
 def _check_field(prepared: Any, field: str) -> dict[str, Any]:
     """Check if a field is populated on prepared symbol.
-    
+
     Special handling for adx_1h which is computed from work_1h DataFrame,
     not set via enrichment.
     """
@@ -65,7 +66,7 @@ def _check_field(prepared: Any, field: str) -> dict[str, Any]:
                     }
         except Exception:
             pass
-    
+
     value = getattr(prepared, field, None)
     return {
         "field": field,
@@ -162,7 +163,9 @@ def _collect_ws_enrichments(
         )
         if ws_basis_stats:
             if ws_basis_stats.get("mark_index_spread_bps") is not None:
-                enrichments["mark_index_spread_bps"] = ws_basis_stats["mark_index_spread_bps"]
+                enrichments["mark_index_spread_bps"] = ws_basis_stats[
+                    "mark_index_spread_bps"
+                ]
             if ws_basis_stats.get("latest_basis_pct") is not None:
                 enrichments["basis_pct"] = ws_basis_stats["latest_basis_pct"]
 
@@ -173,10 +176,17 @@ def _collect_ws_enrichments(
     # Try both 5m and 1h periods for basis stats
     for period in ["5m", "1h"]:
         basis_stats = client.get_cached_basis_stats(symbol, period=period)
-        LOG.debug("basis_stats_check | symbol=%s period=%s stats=%s", symbol, period, basis_stats)
+        LOG.debug(
+            "basis_stats_check | symbol=%s period=%s stats=%s",
+            symbol,
+            period,
+            basis_stats,
+        )
         if basis_stats is not None:
             if enrichments.get("mark_index_spread_bps") is None:
-                enrichments["mark_index_spread_bps"] = basis_stats.get("mark_index_spread_bps")
+                enrichments["mark_index_spread_bps"] = basis_stats.get(
+                    "mark_index_spread_bps"
+                )
             if enrichments.get("premium_slope_5m") is None:
                 enrichments["premium_slope_5m"] = basis_stats.get("premium_slope_5m")
             if enrichments.get("premium_zscore_5m") is None:
@@ -240,8 +250,12 @@ async def _run(
                 if include_premium_stats:
                     # /futures/data/basis is useful but heavier than premiumIndex.
                     # Keep it opt-in for operator checks to avoid REST bursts.
-                    basis_result = await client.fetch_basis(symbol, period="1h", limit=10)
-                    LOG.info("fetch_basis_result | symbol=%s basis=%s", symbol, basis_result)
+                    basis_result = await client.fetch_basis(
+                        symbol, period="1h", limit=10
+                    )
+                    LOG.info(
+                        "fetch_basis_result | symbol=%s basis=%s", symbol, basis_result
+                    )
                 # Fetch global LS ratio
                 await client.fetch_global_ls_ratio(symbol)
             except Exception as exc:
@@ -319,7 +333,9 @@ async def _run(
             )
 
             # Create prepared symbol
-            prepared = prepare_symbol(item, frames, minimums=minimums, settings=settings)
+            prepared = prepare_symbol(
+                item, frames, minimums=minimums, settings=settings
+            )
             if prepared is None:
                 LOG.error("prepare_symbol_failed | symbol=%s", symbol)
                 continue
@@ -327,8 +343,9 @@ async def _run(
             # Get enrichments and apply them
             ws_enrichments = _collect_ws_enrichments(symbol, ws_manager, client)
 
-            LOG.info("ws_enrichments | symbol=%s fields=%d",
-                     symbol, len(ws_enrichments))
+            LOG.info(
+                "ws_enrichments | symbol=%s fields=%d", symbol, len(ws_enrichments)
+            )
             for key, value in ws_enrichments.items():
                 if key.endswith("_age_seconds") or key == "data_source_mix":
                     continue
@@ -347,17 +364,24 @@ async def _run(
                 field_results.append(result)
                 if result["is_populated"]:
                     populated_count += 1
-                LOG.info("field_check | symbol=%s field=%s populated=%s value=%s",
-                         symbol, field, result["is_populated"], result["value"])
+                LOG.info(
+                    "field_check | symbol=%s field=%s populated=%s value=%s",
+                    symbol,
+                    field,
+                    result["is_populated"],
+                    result["value"],
+                )
 
-            all_results.append({
-                "symbol": symbol,
-                "total_fields": len(critical_fields),
-                "populated_count": populated_count,
-                "null_count": len(critical_fields) - populated_count,
-                "fields": field_results,
-                "enrichments_available": len(ws_enrichments),
-            })
+            all_results.append(
+                {
+                    "symbol": symbol,
+                    "total_fields": len(critical_fields),
+                    "populated_count": populated_count,
+                    "null_count": len(critical_fields) - populated_count,
+                    "fields": field_results,
+                    "enrichments_available": len(ws_enrichments),
+                }
+            )
 
         # Final summary
         LOG.info("=" * 60)
@@ -368,21 +392,34 @@ async def _run(
         total_populated = sum(r["populated_count"] for r in all_results)
         total_null = sum(r["null_count"] for r in all_results)
 
-        LOG.info("overall | total_fields=%d populated=%d null=%d rate=%.1f%%",
-                 total_fields_all, total_populated, total_null,
-                 100.0 * total_populated / total_fields_all if total_fields_all > 0 else 0)
+        LOG.info(
+            "overall | total_fields=%d populated=%d null=%d rate=%.1f%%",
+            total_fields_all,
+            total_populated,
+            total_null,
+            100.0 * total_populated / total_fields_all if total_fields_all > 0 else 0,
+        )
 
         for result in all_results:
             symbol = result["symbol"]
             rate = 100.0 * result["populated_count"] / result["total_fields"]
-            LOG.info("symbol=%s | populated=%d/%d (%.1f%%) | enrichments=%d",
-                     symbol, result["populated_count"], result["total_fields"],
-                     rate, result["enrichments_available"])
+            LOG.info(
+                "symbol=%s | populated=%d/%d (%.1f%%) | enrichments=%d",
+                symbol,
+                result["populated_count"],
+                result["total_fields"],
+                rate,
+                result["enrichments_available"],
+            )
 
             # List null fields
-            null_fields = [f["field"] for f in result["fields"] if not f["is_populated"]]
+            null_fields = [
+                f["field"] for f in result["fields"] if not f["is_populated"]
+            ]
             if null_fields:
-                LOG.warning("  null_fields | symbol=%s: %s", symbol, ", ".join(null_fields))
+                LOG.warning(
+                    "  null_fields | symbol=%s: %s", symbol, ", ".join(null_fields)
+                )
 
         # Check if all critical fields are now populated
         all_populated = total_null == 0
@@ -404,13 +441,10 @@ def main() -> None:
         "--symbols",
         nargs="+",
         default=["BTCUSDT", "ETHUSDT", "SOLUSDT"],
-        help="Symbols to check"
+        help="Symbols to check",
     )
     parser.add_argument(
-        "--warmup",
-        type=float,
-        default=30.0,
-        help="WebSocket warmup seconds"
+        "--warmup", type=float, default=30.0, help="WebSocket warmup seconds"
     )
     parser.add_argument(
         "--include-premium-stats",

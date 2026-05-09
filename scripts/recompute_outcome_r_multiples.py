@@ -71,7 +71,9 @@ def recompute(db_path: Path, *, apply: bool) -> dict[str, Any]:
 
     backup_path: Path | None = None
     if apply:
-        backup_path = db_path.with_name(f"{db_path.name}.backup_r_recompute_{_now_stamp()}")
+        backup_path = db_path.with_name(
+            f"{db_path.name}.backup_r_recompute_{_now_stamp()}"
+        )
         shutil.copy2(db_path, backup_path)
 
     con = sqlite3.connect(db_path)

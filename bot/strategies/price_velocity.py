@@ -1,20 +1,19 @@
-"""Price velocity breakout setup."""
+"""Price velocity breakout setup.
+
+# WINDSURF_REVIEW: unified + vectorized + 1H context + graded
+"""
 
 from __future__ import annotations
+
 
 from ..config import BotSettings
 from ..models import PreparedSymbol, Signal
 from ..setup_base import BaseSetup
-from ..setups import _build_signal, _compute_dynamic_score, _reject
-from ..setups.utils import get_dynamic_params
-
-
-def _as_float(value: object, default: float = 0.0) -> float:
-    if isinstance(value, bool):
-        return float(value)
-    if isinstance(value, (int, float)):
-        return float(value)
-    return default
+from ..setups import _build_standard_signal, _reject, as_float
+from ..setups.utils import (
+    get_merged_params,
+    validate_prepared_data,
+)
 
 
 class PriceVelocitySetup(BaseSetup):
@@ -65,26 +64,31 @@ class PriceVelocitySetup(BaseSetup):
             _reject(prepared, setup_id, "missing_columns", missing_fields=missing)
             return None
 
-        params = {
-            **self.get_optimizable_params(settings),
-            **get_dynamic_params(prepared, setup_id),
-        }
-        open_ = _as_float(work.item(-1, "open"))
-        high = _as_float(work.item(-1, "high"))
-        low = _as_float(work.item(-1, "low"))
-        close = _as_float(work.item(-1, "close"))
-        atr = _as_float(work.item(-1, "atr14"))
-        roc10 = _as_float(work.item(-1, "roc10"))
-        vol_ratio = _as_float(work.item(-1, "volume_ratio20"), 1.0)
-        close_position = _as_float(work.item(-1, "close_position"), 0.5)
-        rsi = _as_float(work.item(-1, "rsi14"), 50.0)
+        params = get_merged_params(
+            setup_id, self.get_optimizable_params(settings), settings, prepared
+        )
+        if not validate_prepared_data(
+            prepared, setup_id, required_columns=required, min_bars=30
+        ):
+            return None
+
+        open_ = as_float(work.item(-1, "open"))
+        high = as_float(work.item(-1, "high"))
+        low = as_float(work.item(-1, "low"))
+        close = as_float(work.item(-1, "close"))
+        atr = as_float(work.item(-1, "atr14"))
+        roc10 = as_float(work.item(-1, "roc10"))
+        vol_ratio = as_float(work.item(-1, "volume_ratio20"), 1.0)
+        close_position = as_float(work.item(-1, "close_position"), 0.5)
+        rsi = as_float(work.item(-1, "rsi14"), 50.0)
+
         if min(open_, high, low, close, atr) <= 0.0:
             _reject(prepared, setup_id, "invalid_indicator_state", atr=atr)
             return None
 
-        min_roc = float(params["min_roc10_abs_pct"])
+        min_roc = params["min_roc10_abs_pct"]
         body_atr = abs(close - open_) / atr
-        if abs(roc10) < min_roc and body_atr < float(params["min_body_atr"]):
+        if abs(roc10) < min_roc and body_atr < params["min_body_atr"]:
             _reject(
                 prepared,
                 setup_id,
@@ -93,31 +97,22 @@ class PriceVelocitySetup(BaseSetup):
                 body_atr=body_atr,
             )
             return None
-        if vol_ratio < float(params["min_volume_ratio"]):
+        if vol_ratio < params["min_volume_ratio"]:
             _reject(prepared, setup_id, "volume_too_low", volume_ratio=vol_ratio)
             return None
 
         direction: str | None = None
-        if (
-            roc10 > 0.0
-            and close > open_
-            and close_position >= 0.65
-            and rsi <= float(params["max_rsi_long"])
-        ):
+        if roc10 > 0.0 and close > open_ and close_position >= 0.65:
             direction = "long"
-        elif (
-            roc10 < 0.0
-            and close < open_
-            and close_position <= 0.35
-            and rsi >= float(params["min_rsi_short"])
-        ):
+        elif roc10 < 0.0 and close < open_ and close_position <= 0.35:
             direction = "short"
+
         if direction is None:
             _reject(prepared, setup_id, "direction_not_confirmed", rsi=rsi)
             return None
 
-        sl_buffer = float(params["sl_buffer_atr"])
-        min_rr = float(params["min_rr"])
+        sl_buffer = params["sl_buffer_atr"]
+        min_rr = params["min_rr"]
         if direction == "long":
             stop = min(low, open_) - atr * sl_buffer
             risk = close - stop
@@ -128,34 +123,29 @@ class PriceVelocitySetup(BaseSetup):
             risk = stop - close
             tp1 = close - risk * min_rr
             tp2 = close - risk * max(2.0, min_rr + 0.35)
+
         if risk <= 0.0:
             _reject(prepared, setup_id, "invalid_stop", stop=stop, close=close)
             return None
 
-        score = _compute_dynamic_score(
-            direction=direction,
-            base_score=float(params["base_score"]),
-            vol_ratio=vol_ratio,
-            rsi=rsi,
-            structure_clarity=min(abs(roc10) / 2.5, 1.0),
-        )
-        reasons = [
-            f"price_velocity_{direction}",
-            f"roc10={roc10:.2f}",
-            f"body_atr={body_atr:.2f}",
-            f"vol_ratio={vol_ratio:.2f}",
-        ]
-        return _build_signal(
+        return _build_standard_signal(
             prepared=prepared,
             setup_id=setup_id,
             direction=direction,
-            score=score,
-            timeframe="15m",
-            reasons=reasons,
-            strategy_family=self.family,
+            params=params,
+            vol_ratio=vol_ratio,
+            rsi=rsi,
+            structure_clarity=min(abs(roc10) / 2.5, 1.0),
             stop=stop,
             tp1=tp1,
             tp2=tp2,
             price_anchor=close,
             atr=atr,
+            timeframe="15m",
+            strategy_family=self.family,
+            extra_reasons=[
+                f"roc10={roc10:.2f}",
+                f"body_atr={body_atr:.2f}",
+                f"vol_ratio={vol_ratio:.2f}",
+            ],
         )

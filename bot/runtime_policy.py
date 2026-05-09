@@ -48,7 +48,9 @@ def configured_context_timeframes(
     return tuple(values or default)
 
 
-def is_deep_analysis_symbol(prepared_or_symbol: Any, settings: Any | None = None) -> bool:
+def is_deep_analysis_symbol(
+    prepared_or_symbol: Any, settings: Any | None = None
+) -> bool:
     """Return True only for symbols explicitly configured for deep live analysis."""
     symbol = getattr(prepared_or_symbol, "symbol", prepared_or_symbol)
     resolved_settings = settings or getattr(prepared_or_symbol, "settings", None)

@@ -15,10 +15,12 @@ def run_import_smoke_check() -> None:
 
     print("\n1. Testing config import...")
     from bot.config import BotSettings
+
     print("   [OK] BotSettings imported:", BotSettings is not None)
 
     print("\n2. Testing models import...")
     from bot.models import PreparedSymbol, Signal
+
     print("   [OK] Signal has adx_1h:", hasattr(Signal, "adx_1h"))
     print("   [OK] Signal has risk_reward:", hasattr(Signal, "risk_reward"))
     print("   [OK] Signal has trend_direction:", hasattr(Signal, "trend_direction"))
@@ -26,10 +28,12 @@ def run_import_smoke_check() -> None:
 
     print("\n3. Testing setups import...")
     from bot.setups import _build_signal
+
     print("   [OK] _build_signal imported:", _build_signal is not None)
 
     print("\n4. Testing strategies import...")
     from bot.strategies.wick_trap_reversal import WickTrapReversal
+
     print("   [OK] WickTrapReversal imported:", WickTrapReversal is not None)
 
     print("\n" + "=" * 60)

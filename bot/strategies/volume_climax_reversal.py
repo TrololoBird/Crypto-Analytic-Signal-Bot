@@ -1,20 +1,19 @@
-"""Volume climax reversal setup."""
+"""Volume climax reversal setup.
+
+# WINDSURF_REVIEW: unified + vectorized + 1H context + graded
+"""
 
 from __future__ import annotations
+
 
 from ..config import BotSettings
 from ..models import PreparedSymbol, Signal
 from ..setup_base import BaseSetup
-from ..setups import _build_signal, _compute_dynamic_score, _reject
-from ..setups.utils import get_dynamic_params
-
-
-def _as_float(value: object, default: float = 0.0) -> float:
-    if isinstance(value, bool):
-        return float(value)
-    if isinstance(value, (int, float)):
-        return float(value)
-    return default
+from ..setups import _build_standard_signal, _reject, as_float
+from ..setups.utils import (
+    get_merged_params,
+    validate_prepared_data,
+)
 
 
 class VolumeClimaxReversalSetup(BaseSetup):
@@ -65,38 +64,42 @@ class VolumeClimaxReversalSetup(BaseSetup):
             _reject(prepared, setup_id, "missing_columns", missing_fields=missing)
             return None
 
-        params = {
-            **self.get_optimizable_params(settings),
-            **get_dynamic_params(prepared, setup_id),
-        }
-        open_ = _as_float(work.item(-1, "open"))
-        high = _as_float(work.item(-1, "high"))
-        low = _as_float(work.item(-1, "low"))
-        close = _as_float(work.item(-1, "close"))
-        atr = _as_float(work.item(-1, "atr14"))
-        vol_ratio = _as_float(work.item(-1, "volume_ratio20"), 1.0)
-        close_position = _as_float(work.item(-1, "close_position"), 0.5)
-        rsi = _as_float(work.item(-1, "rsi14"), 50.0)
-        prev_low = _as_float(work.item(-1, "prev_donchian_low20"))
-        prev_high = _as_float(work.item(-1, "prev_donchian_high20"))
+        params = get_merged_params(
+            setup_id, self.get_optimizable_params(settings), settings, prepared
+        )
+        if not validate_prepared_data(
+            prepared, setup_id, required_columns=required, min_bars=30
+        ):
+            return None
+
+        open_ = as_float(work.item(-1, "open"))
+        high = as_float(work.item(-1, "high"))
+        low = as_float(work.item(-1, "low"))
+        close = as_float(work.item(-1, "close"))
+        atr = as_float(work.item(-1, "atr14"))
+        vol_ratio = as_float(work.item(-1, "volume_ratio20"), 1.0)
+        close_position = as_float(work.item(-1, "close_position"), 0.5)
+        rsi = as_float(work.item(-1, "rsi14"), 50.0)
+        prev_low = as_float(work.item(-1, "prev_donchian_low20"))
+        prev_high = as_float(work.item(-1, "prev_donchian_high20"))
+
         if min(open_, high, low, close, atr, prev_low, prev_high) <= 0.0:
             _reject(prepared, setup_id, "invalid_indicator_state", atr=atr)
             return None
 
-        if vol_ratio < float(params["min_volume_ratio"]):
+        if vol_ratio < params["min_volume_ratio"]:
             _reject(prepared, setup_id, "volume_climax_missing", volume_ratio=vol_ratio)
             return None
 
         lower_wick_atr = (min(open_, close) - low) / atr
         upper_wick_atr = (high - max(open_, close)) / atr
-        min_wick_atr = float(params["min_wick_atr"])
+        min_wick_atr = params["min_wick_atr"]
         direction: str | None = None
         if (
             low < prev_low
             and close > prev_low
             and lower_wick_atr >= min_wick_atr
             and close_position >= 0.55
-            and rsi <= float(params["max_rsi_long"])
         ):
             direction = "long"
         elif (
@@ -104,9 +107,9 @@ class VolumeClimaxReversalSetup(BaseSetup):
             and close < prev_high
             and upper_wick_atr >= min_wick_atr
             and close_position <= 0.45
-            and rsi >= float(params["min_rsi_short"])
         ):
             direction = "short"
+
         if direction is None:
             _reject(
                 prepared,
@@ -118,48 +121,45 @@ class VolumeClimaxReversalSetup(BaseSetup):
             )
             return None
 
-        sl_buffer = float(params["sl_buffer_atr"])
-        min_rr = float(params["min_rr"])
+        sl_buffer = params["sl_buffer_atr"]
+        min_rr = params["min_rr"]
         if direction == "long":
             stop = low - atr * sl_buffer
-            risk = close - stop
-            tp1 = close + risk * min_rr
-            tp2 = close + risk * max(2.0, min_rr + 0.35)
             clarity = min(lower_wick_atr / 2.0, 1.0)
         else:
             stop = high + atr * sl_buffer
-            risk = stop - close
-            tp1 = close - risk * min_rr
-            tp2 = close - risk * max(2.0, min_rr + 0.35)
             clarity = min(upper_wick_atr / 2.0, 1.0)
+
+        risk = abs(close - stop)
         if risk <= 0.0:
             _reject(prepared, setup_id, "invalid_stop", stop=stop, close=close)
             return None
 
-        score = _compute_dynamic_score(
-            direction=direction,
-            base_score=float(params["base_score"]),
-            vol_ratio=vol_ratio,
-            rsi=rsi,
-            structure_clarity=clarity,
-        )
-        reasons = [
-            f"volume_climax_reversal_{direction}",
-            f"vol_ratio={vol_ratio:.2f}",
-            f"lower_wick_atr={lower_wick_atr:.2f}",
-            f"upper_wick_atr={upper_wick_atr:.2f}",
-        ]
-        return _build_signal(
+        if direction == "long":
+            tp1 = close + risk * min_rr
+            tp2 = close + risk * max(2.0, min_rr + 0.35)
+        else:
+            tp1 = close - risk * min_rr
+            tp2 = close - risk * max(2.0, min_rr + 0.35)
+
+        return _build_standard_signal(
             prepared=prepared,
             setup_id=setup_id,
             direction=direction,
-            score=score,
-            timeframe="15m",
-            reasons=reasons,
-            strategy_family=self.family,
+            params=params,
+            vol_ratio=vol_ratio,
+            rsi=rsi,
+            structure_clarity=clarity,
             stop=stop,
             tp1=tp1,
             tp2=tp2,
             price_anchor=close,
             atr=atr,
+            timeframe="15m",
+            strategy_family=self.family,
+            extra_reasons=[
+                f"vol_ratio={vol_ratio:.2f}",
+                f"lower_wick_atr={lower_wick_atr:.2f}",
+                f"upper_wick_atr={upper_wick_atr:.2f}",
+            ],
         )

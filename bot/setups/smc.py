@@ -245,28 +245,40 @@ def bos_choch(
             bullish_sequence = recent_hl == [-1.0, 1.0, -1.0, 1.0]
             bearish_sequence = recent_hl == [1.0, -1.0, 1.0, -1.0]
             bullish_bos = bullish_sequence and (
-                recent_levels[0] < recent_levels[2] < recent_levels[1] < recent_levels[3]
+                recent_levels[0]
+                < recent_levels[2]
+                < recent_levels[1]
+                < recent_levels[3]
                 or (
                     recent_levels[2] > recent_levels[0]
                     and recent_levels[3] > recent_levels[1]
                 )
             )
             bearish_bos = bearish_sequence and (
-                recent_levels[0] > recent_levels[2] > recent_levels[1] > recent_levels[3]
+                recent_levels[0]
+                > recent_levels[2]
+                > recent_levels[1]
+                > recent_levels[3]
                 or (
                     recent_levels[2] < recent_levels[0]
                     and recent_levels[3] < recent_levels[1]
                 )
             )
             bullish_choch = bullish_sequence and (
-                recent_levels[3] > recent_levels[1] > recent_levels[0] > recent_levels[2]
+                recent_levels[3]
+                > recent_levels[1]
+                > recent_levels[0]
+                > recent_levels[2]
                 or (
                     recent_levels[3] > recent_levels[1]
                     and recent_levels[2] < recent_levels[0]
                 )
             )
             bearish_choch = bearish_sequence and (
-                recent_levels[3] < recent_levels[1] < recent_levels[0] < recent_levels[2]
+                recent_levels[3]
+                < recent_levels[1]
+                < recent_levels[0]
+                < recent_levels[2]
                 or (
                     recent_levels[3] < recent_levels[1]
                     and recent_levels[2] > recent_levels[0]
@@ -477,9 +489,7 @@ def order_blocks(
     top_out = np.where(~np.isnan(ob_out), top_arr, np.nan)
     bottom_out = np.where(~np.isnan(ob_out), bottom_arr, np.nan)
     volume_out = np.where(~np.isnan(ob_out), ob_volume, np.nan)
-    mitigated_out = np.where(
-        ~np.isnan(ob_out), mitigated_index, np.nan
-    )
+    mitigated_out = np.where(~np.isnan(ob_out), mitigated_index, np.nan)
     percentage_out = np.where(~np.isnan(ob_out), percentage, np.nan)
 
     return pl.DataFrame(

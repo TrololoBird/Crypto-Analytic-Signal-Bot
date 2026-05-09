@@ -6,21 +6,41 @@ import sys
 import time
 from pathlib import Path
 
-from bot.diagnostics.runtime_analysis import aggregate_cycle_stats, find_latest_run_dir, read_jsonl
+from bot.diagnostics.runtime_analysis import (
+    aggregate_cycle_stats,
+    find_latest_run_dir,
+    read_jsonl,
+)
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Lightweight runtime monitor for bot process/artifacts")
-    parser.add_argument("--pid-file", type=Path, default=Path("data/bot/bot.pid"), help="path to PID file")
-    parser.add_argument("--db-path", type=Path, default=Path("data/bot/signals.db"), help="path to SQLite DB")
+    parser = argparse.ArgumentParser(
+        description="Lightweight runtime monitor for bot process/artifacts"
+    )
+    parser.add_argument(
+        "--pid-file",
+        type=Path,
+        default=Path("data/bot/bot.pid"),
+        help="path to PID file",
+    )
+    parser.add_argument(
+        "--db-path",
+        type=Path,
+        default=Path("data/bot/signals.db"),
+        help="path to SQLite DB",
+    )
     parser.add_argument(
         "--telemetry-dir",
         type=Path,
         default=Path("data/bot/telemetry"),
         help="path to telemetry directory",
     )
-    parser.add_argument("--watch", action="store_true", help="rerun checks continuously")
-    parser.add_argument("--interval", type=float, default=30.0, help="watch interval in seconds")
+    parser.add_argument(
+        "--watch", action="store_true", help="rerun checks continuously"
+    )
+    parser.add_argument(
+        "--interval", type=float, default=30.0, help="watch interval in seconds"
+    )
     return parser.parse_args()
 
 

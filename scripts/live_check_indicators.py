@@ -6,7 +6,12 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-from common import bootstrap_repo_path, configure_script_logging, load_symbols_from_run, resolve_symbols
+from common import (
+    bootstrap_repo_path,
+    configure_script_logging,
+    load_symbols_from_run,
+    resolve_symbols,
+)
 
 bootstrap_repo_path()
 
@@ -69,7 +74,13 @@ async def _run(symbols: list[str], concurrency: int) -> None:
             nonlocal successes
             async with semaphore:
                 if symbol not in meta_map:
-                    failures.append({"symbol": symbol, "stage": "metadata", "error": "missing_symbol_meta"})
+                    failures.append(
+                        {
+                            "symbol": symbol,
+                            "stage": "metadata",
+                            "error": "missing_symbol_meta",
+                        }
+                    )
                     return
                 item = await _build_universe_symbol(symbol, meta_map, ticker_map)
                 df_4h = await client.fetch_klines_cached(symbol, "4h", limit=300)
@@ -124,7 +135,9 @@ async def _run(symbols: list[str], concurrency: int) -> None:
                     work_rows_1h=prepared.work_1h.height,
                 )
 
-        await asyncio.gather(*[asyncio.create_task(_check_symbol(symbol)) for symbol in symbols])
+        await asyncio.gather(
+            *[asyncio.create_task(_check_symbol(symbol)) for symbol in symbols]
+        )
         LOG.info(
             "indicator_check_summary",
             symbols=len(symbols),
@@ -133,13 +146,17 @@ async def _run(symbols: list[str], concurrency: int) -> None:
         )
         if failures:
             LOG.error("indicator_check_failures", failures=failures[:20])
-            raise RuntimeError(f"indicator/prepare checks failed for {len(failures)} symbols")
+            raise RuntimeError(
+                f"indicator/prepare checks failed for {len(failures)} symbols"
+            )
     finally:
         await client.close()
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Live prepare_symbol + indicator verification")
+    parser = argparse.ArgumentParser(
+        description="Live prepare_symbol + indicator verification"
+    )
     parser.add_argument("--symbols", nargs="*", default=[])
     parser.add_argument("--symbols-from-run", default="20260421_215817_70948")
     parser.add_argument("--limit", type=int, default=0)
@@ -148,7 +165,9 @@ def main() -> None:
     fallback_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
     symbols = resolve_symbols(
         args_symbols=args.symbols,
-        symbols_from_run=load_symbols_from_run(args.symbols_from_run, Path("data") / "bot" / "telemetry"),
+        symbols_from_run=load_symbols_from_run(
+            args.symbols_from_run, Path("data") / "bot" / "telemetry"
+        ),
         fallback_symbols=fallback_symbols,
     )
     if symbols == fallback_symbols:
@@ -158,7 +177,12 @@ def main() -> None:
     try:
         asyncio.run(_run(symbols, args.concurrency))
     except MarketDataUnavailable as exc:
-        LOG.error("live_indicators_unavailable", operation=exc.operation, detail=exc.detail, symbol=exc.symbol)
+        LOG.error(
+            "live_indicators_unavailable",
+            operation=exc.operation,
+            detail=exc.detail,
+            symbol=exc.symbol,
+        )
         raise SystemExit(2) from exc
 
 

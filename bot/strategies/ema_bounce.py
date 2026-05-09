@@ -10,6 +10,8 @@ from ..models import PreparedSymbol, Signal
 from ..setup_base import BaseSetup
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.utils import (
+    apply_standard_penalties,
+    get_merged_params,
     build_structural_targets,
     validate_rr_or_penalty,
     get_dynamic_params,
@@ -90,7 +92,14 @@ class EmaBounceSetup(BaseSetup):
         if work_1h.height < 3:
             _reject(prepared, setup_id, "insufficient_context_bars")
             return None
-        required_columns = {"atr14", "ema20", "ema50", "close", "volume_ratio20", "adx14"}
+        required_columns = {
+            "atr14",
+            "ema20",
+            "ema50",
+            "close",
+            "volume_ratio20",
+            "adx14",
+        }
         missing_columns = sorted(required_columns.difference(work_1h.columns))
         if missing_columns:
             _reject(
@@ -207,22 +216,26 @@ class EmaBounceSetup(BaseSetup):
             reasons.append("stop_reanchored_above_entry")
 
         # Graded RR validation (penalty instead of reject)
-        min_rr = dynamic_params.get("min_rr", defaults["min_rr"])
+        params = get_merged_params(setup_id, defaults, settings, prepared)
+        min_rr = params["min_rr"]
         is_valid_rr, _ = validate_rr_or_penalty(price_anchor, stop, tp1, min_rr)
 
-        base_score = dynamic_params.get("base_score", defaults["base_score"])
-        score = _compute_dynamic_score(
+        score = apply_standard_penalties(
+            _compute_dynamic_score(
+                direction=signal_direction,
+                base_score=params["base_score"],
+                vol_ratio=vol_ratio,
+                structure_clarity=0.3,
+            ),
             direction=signal_direction,
-            base_score=base_score,
-            vol_ratio=vol_ratio,
-            structure_clarity=0.3,
+            prepared=prepared,
+            params=params,
+            rsi=50.0,  # RSI not used in this strategy
         )
 
         # Apply graded penalty for RR issues (not reject)
         if not is_valid_rr and tp1 is not None:
-            score *= dynamic_params.get(
-                "tp_too_close_penalty", defaults["tp_too_close_penalty"]
-            )
+            score *= params.get("tp_too_close_penalty", 0.75)
             reasons.append("tp_too_close_penalty")
 
         if tp1 is None:

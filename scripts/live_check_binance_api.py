@@ -17,7 +17,9 @@ from bot.ws_manager import FuturesWSManager
 LOG = configure_script_logging("scripts.live_check_binance_api")
 
 
-async def _run(symbols: Sequence[str], warmup_seconds: float, reconnect_wait_seconds: float) -> None:
+async def _run(
+    symbols: Sequence[str], warmup_seconds: float, reconnect_wait_seconds: float
+) -> None:
     settings = load_settings()
     client = BinanceFuturesMarketData(
         rest_timeout_seconds=settings.ws.rest_timeout_seconds,
@@ -56,7 +58,9 @@ async def _run(symbols: Sequence[str], warmup_seconds: float, reconnect_wait_sec
 
         market_ws = ws_manager._ws_conns.get("market")
         if market_ws is None:
-            raise RuntimeError("market ws connection is missing before forced reconnect")
+            raise RuntimeError(
+                "market ws connection is missing before forced reconnect"
+            )
         await market_ws.close()
         await asyncio.sleep(reconnect_wait_seconds)
 
@@ -65,9 +69,13 @@ async def _run(symbols: Sequence[str], warmup_seconds: float, reconnect_wait_sec
         if int(after.get("market_connect_count") or 0) < 2:
             raise RuntimeError(f"market reconnect was not observed: {after}")
         if int(after.get("fresh_tickers") or 0) <= 0:
-            raise RuntimeError(f"fresh_tickers were not restored after reconnect: {after}")
+            raise RuntimeError(
+                f"fresh_tickers were not restored after reconnect: {after}"
+            )
         if int(after.get("fresh_mark_prices") or 0) <= 0:
-            raise RuntimeError(f"fresh_mark_prices were not restored after reconnect: {after}")
+            raise RuntimeError(
+                f"fresh_mark_prices were not restored after reconnect: {after}"
+            )
     finally:
         await ws_manager.stop()
         await client.close()
@@ -75,14 +83,23 @@ async def _run(symbols: Sequence[str], warmup_seconds: float, reconnect_wait_sec
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Live REST/WS Binance API smoke check")
-    parser.add_argument("--symbols", nargs="+", default=["BTCUSDT", "ETHUSDT", "SOLUSDT"])
+    parser.add_argument(
+        "--symbols", nargs="+", default=["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+    )
     parser.add_argument("--warmup-seconds", type=float, default=20.0)
     parser.add_argument("--reconnect-wait-seconds", type=float, default=20.0)
     args = parser.parse_args()
     try:
-        asyncio.run(_run(args.symbols, args.warmup_seconds, args.reconnect_wait_seconds))
+        asyncio.run(
+            _run(args.symbols, args.warmup_seconds, args.reconnect_wait_seconds)
+        )
     except MarketDataUnavailable as exc:
-        LOG.error("live_binance_api_unavailable", operation=exc.operation, detail=exc.detail, symbol=exc.symbol)
+        LOG.error(
+            "live_binance_api_unavailable",
+            operation=exc.operation,
+            detail=exc.detail,
+            symbol=exc.symbol,
+        )
         raise SystemExit(2) from exc
 
 

@@ -33,9 +33,7 @@ def main() -> int:
     readme_text = README_PATH.read_text(encoding="utf-8")
     listed = _listed_scripts(readme_text)
     existing = {
-        path.name
-        for path in SCRIPTS_DIR.glob("*.py")
-        if path.name != "__init__.py"
+        path.name for path in SCRIPTS_DIR.glob("*.py") if path.name != "__init__.py"
     }
 
     missing_in_readme = sorted(existing - listed)

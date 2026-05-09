@@ -15,7 +15,9 @@ from ..core.engine.base import StrategyDecision
 from ..features import _swing_points  # shared swing detection helper
 from ..models import PreparedSymbol, Signal
 from .utils import (
+    as_float,
     apply_graded_penalty,
+    apply_standard_penalties,
     build_structural_targets,
     get_dynamic_params,
     normalize_trade_levels,
@@ -25,7 +27,9 @@ from .utils import (
 LOG = logging.getLogger("bot.setups")
 
 __all__ = [
+    "as_float",
     "apply_graded_penalty",
+    "apply_standard_penalties",
     "begin_strategy_decision_capture",
     "build_structural_targets",
     "finalize_strategy_decision",
@@ -38,6 +42,7 @@ __all__ = [
     "_last_swing_prices",
     "_pullback_levels",
     "_reject",
+    "_build_standard_signal",
 ]
 
 
@@ -413,6 +418,60 @@ def _build_signal(
         premium_zscore_5m=premium_zscore_5m,
         premium_slope_5m=premium_slope_5m,
         ls_ratio=ls_ratio,
+    )
+
+
+def _build_standard_signal(
+    *,
+    prepared: PreparedSymbol,
+    setup_id: str,
+    direction: str,
+    params: dict[str, float],
+    vol_ratio: float,
+    rsi: float,
+    structure_clarity: float,
+    stop: float,
+    tp1: float,
+    tp2: float,
+    price_anchor: float,
+    atr: float,
+    timeframe: str,
+    strategy_family: str,
+    extra_reasons: list[str],
+) -> Signal | None:
+    """Unified signal builder to reduce duplication across strategies."""
+    score = apply_standard_penalties(
+        _compute_dynamic_score(
+            direction=direction,
+            base_score=params.get("base_score", 0.5),
+            vol_ratio=vol_ratio,
+            rsi=rsi,
+            structure_clarity=structure_clarity,
+        ),
+        direction=direction,
+        prepared=prepared,
+        params=params,
+        rsi=rsi,
+    )
+    bias_1h = getattr(prepared, "bias_1h", "neutral")
+    reasons = [
+        f"{setup_id}_{direction}",
+        *extra_reasons,
+        f"bias_1h={bias_1h}",
+    ]
+    return _build_signal(
+        prepared=prepared,
+        setup_id=setup_id,
+        direction=direction,
+        score=score,
+        timeframe=timeframe,
+        reasons=reasons,
+        strategy_family=strategy_family,
+        stop=stop,
+        tp1=tp1,
+        tp2=tp2,
+        price_anchor=price_anchor,
+        atr=atr,
     )
 
 

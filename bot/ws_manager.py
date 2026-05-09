@@ -122,8 +122,9 @@ class MessageBuffer:
         self._last_compaction_log_count = 0
 
     def _drop_oldest_batch(self) -> int:
+        """Drop 50% of the oldest messages to quickly clear high-throughput bursts."""
         maxsize = max(1, self._buffer.maxsize)
-        target = max(1, maxsize // 4)
+        target = max(1, maxsize // 2)
         dropped = 0
         for _ in range(target):
             try:

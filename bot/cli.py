@@ -612,7 +612,7 @@ async def _db_clean_command(*, days: int) -> None:
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     settings = load_settings("config.toml")
-    repo = MemoryRepository(settings.db_path)
+    repo = MemoryRepository(settings.db_path, data_dir=settings.data_dir / "parquet")
     await repo.initialize()
     deleted = await repo.cleanup_signal_outcomes_before(cutoff.isoformat())
     await repo.close()
