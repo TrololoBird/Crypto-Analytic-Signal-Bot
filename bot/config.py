@@ -21,7 +21,9 @@ class RuntimeConfig(BaseModel):
     event_bus_drop_log_interval: int = Field(default=25, ge=1, le=10_000)
     circuit_breaker_failure_threshold: int = Field(default=5, ge=0, le=100)
     metrics_port: int = Field(default=9090, ge=1000, le=65535)
+    metrics_host: str = "127.0.0.1"
     dashboard_port: int = Field(default=8080, ge=1000, le=65535)
+    dashboard_host: str = "127.0.0.1"
     auto_open_dashboard: bool = False
     circuit_breaker_cooldown_seconds: int = Field(default=60, ge=0, le=3600)
     telemetry_subdir: str = "telemetry"

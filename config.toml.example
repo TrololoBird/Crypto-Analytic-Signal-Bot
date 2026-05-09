@@ -29,8 +29,11 @@ emergency_context_warmup_symbol_limit = 12
 emergency_context_fetch_timeout_seconds = 3.0
 futures_data_request_limit_per_5m = 300
 min_restart_interval_seconds = 120
-# Dashboard settings
+# Dashboard and metrics settings
 dashboard_port = 8080
+dashboard_host = "127.0.0.1"
+metrics_port = 9090
+metrics_host = "127.0.0.1"
 auto_open_dashboard = false
 
 [bot.universe]
