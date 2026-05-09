@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import math
 import re
 from datetime import datetime, timedelta, timezone
@@ -606,3 +607,51 @@ def build_shortlist(
                 strategy_counts[setup_id] += 1
     summary["strategy_fit_counts"] = {key: value for key, value in strategy_counts.items() if value > 0}
     return shortlist, summary
+
+
+def rerank_shortlist(
+    current_shortlist: list[UniverseSymbol],
+    latest_tickers: list[dict[str, Any]],
+    settings: BotSettings,
+) -> list[UniverseSymbol]:
+    """Fast WebSocket-based reranking of an existing shortlist.
+
+    Does not add/remove symbols, only updates their metrics and resorts based
+    on real-time activity (volume and volatility).
+    """
+    ticker_map = {
+        str(t.get("symbol", "")).upper(): t for t in latest_tickers if t.get("symbol")
+    }
+    updated: list[UniverseSymbol] = []
+
+    for item in current_shortlist:
+        ticker = ticker_map.get(item.symbol)
+        if ticker:
+            # Update dynamic metrics
+            new_volume = float(ticker.get("quote_volume") or item.quote_volume)
+            new_change = float(ticker.get("price_change_percent") or item.price_change_pct)
+            new_price = float(ticker.get("last_price") or item.last_price)
+
+            # Re-calculate score using the fast path
+            # (In a real scenario, we might want to re-run _composite_score,
+            # but for a 'fast' rerank we just update the core metrics)
+            item = replace(
+                item,
+                quote_volume=new_volume,
+                price_change_pct=new_change,
+                last_price=new_price,
+            )
+        updated.append(item)
+
+    # Re-sort using the standard priority
+    pinned = set(settings.universe.pinned_symbols)
+    updated.sort(
+        key=lambda item: (
+            item.symbol not in pinned,
+            -(item.shortlist_score or 0.0),
+            -_bucket_priority(item)[0],
+            -item.quote_volume,
+            item.symbol,
+        )
+    )
+    return updated

@@ -1,6 +1,11 @@
-"""VWAP reclaim trend-continuation setup."""
+"""VWAP reclaim trend-continuation setup.
+
+# WINDSURF_REVIEW: unified + vectorized + 1H context + graded
+"""
 
 from __future__ import annotations
+
+import math
 
 from ..config import BotSettings
 from ..features import _swing_points
@@ -55,7 +60,10 @@ class VWAPTrendSetup(BaseSetup):
             _reject(prepared, setup_id, "missing_columns", missing_fields=missing)
             return None
 
-        params = {**self.get_optimizable_params(settings), **get_dynamic_params(prepared, setup_id)}
+        params = self.get_optimizable_params(settings)
+        dynamic_params = get_dynamic_params(prepared, setup_id)
+        effective_params = {**params, **dynamic_params}
+
         close = _as_float(work_15m.item(-1, "close"))
         prev_close = _as_float(work_15m.item(-2, "close"))
         vwap = _as_float(work_15m.item(-1, "vwap"))
@@ -65,7 +73,8 @@ class VWAPTrendSetup(BaseSetup):
         vol_ratio = _as_float(work_15m.item(-1, "volume_ratio20"), 1.0)
         rsi = _as_float(work_15m.item(-1, "rsi14"), 50.0)
         adx_1h = _as_float(work_1h.item(-1, "adx14"))
-        if min(close, prev_close, vwap, prev_vwap, ema20, atr) <= 0.0:
+
+        if min(close, prev_close, vwap, prev_vwap, ema20, atr) <= 0.0 or math.isnan(atr):
             _reject(
                 prepared,
                 setup_id,
@@ -77,41 +86,37 @@ class VWAPTrendSetup(BaseSetup):
             )
             return None
 
-        min_adx = float(params["min_adx_1h"])
-        if adx_1h > 0.0 and adx_1h < min_adx:
-            _reject(prepared, setup_id, "adx_too_low", adx_1h=adx_1h, min_adx=min_adx)
+        if adx_1h > 0.0 and adx_1h < float(effective_params["min_adx_1h"]):
+            _reject(prepared, setup_id, "adx_too_low", adx_1h=adx_1h)
             return None
 
-        min_volume_ratio = float(params["min_volume_ratio"])
-        if vol_ratio < min_volume_ratio:
+        if vol_ratio < float(effective_params["min_volume_ratio"]):
             _reject(
                 prepared,
                 setup_id,
                 "volume_too_low",
                 volume_ratio=vol_ratio,
-                min_volume_ratio=min_volume_ratio,
             )
             return None
 
-        tolerance = float(params["vwap_reclaim_tolerance_pct"])
+        tolerance = float(effective_params["vwap_reclaim_tolerance_pct"])
         bias_1h = getattr(prepared, "bias_1h", prepared.bias_4h)
         direction: str | None = None
         if (
-            bias_1h != "downtrend"
-            and prev_close <= prev_vwap * (1.0 + tolerance)
+            prev_close <= prev_vwap * (1.0 + tolerance)
             and close > vwap * (1.0 + tolerance)
             and close > ema20
         ):
             direction = "long"
         elif (
-            bias_1h != "uptrend"
-            and prev_close >= prev_vwap * (1.0 - tolerance)
+            prev_close >= prev_vwap * (1.0 - tolerance)
             and close < vwap * (1.0 - tolerance)
             and close < ema20
         ):
             direction = "short"
+
         if direction is None:
-            _reject(prepared, setup_id, "no_vwap_reclaim", bias_1h=bias_1h)
+            _reject(prepared, setup_id, "no_vwap_reclaim", close=close, vwap=vwap)
             return None
 
         sh_mask, sl_mask = _swing_points(work_1h, n=3, include_unconfirmed_tail=True)
@@ -138,13 +143,21 @@ class VWAPTrendSetup(BaseSetup):
         if tp2 is None:
             tp2 = tp1
 
+        base_score = float(effective_params["base_score"])
         score = _compute_dynamic_score(
             direction=direction,
-            base_score=float(params["base_score"]),
+            base_score=base_score,
             vol_ratio=vol_ratio,
             rsi=rsi,
             structure_clarity=0.45,
         )
+
+        # Graded bias alignment
+        if direction == "long" and bias_1h == "downtrend":
+            score *= effective_params.get("bias_mismatch_penalty", 0.75)
+        elif direction == "short" and bias_1h == "uptrend":
+            score *= effective_params.get("bias_mismatch_penalty", 0.75)
+
         reasons = [
             f"vwap_reclaim_{direction}",
             f"bias_1h={bias_1h}",

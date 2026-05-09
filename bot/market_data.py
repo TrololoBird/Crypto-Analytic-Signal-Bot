@@ -141,6 +141,8 @@ _FORBIDDEN_PUBLIC_PATH_MARKERS = (
     "/papi",
     "signature=",
     "timestamp=",
+    "api_key=",
+    "apikey=",
 )
 
 
@@ -159,6 +161,16 @@ def validate_runtime_public_rest_url(url: str) -> None:
         raise ValueError(
             f"runtime REST URL must use registered public USD-M endpoint paths: {url}"
         )
+
+
+def _validate_rest_params(params: Mapping[str, Any] | None) -> None:
+    """Ensure no auth-related or private parameters are passed in REST calls."""
+    if not params:
+        return
+    forbidden = {"signature", "timestamp", "listenKey", "api_key", "apiKey"}
+    for key in params:
+        if str(key).lower() in forbidden:
+            raise ValueError(f"forbidden security/private parameter detected: {key}")
 
 
 class _SlidingWindowRateLimiter:
@@ -563,6 +575,10 @@ class BinanceFuturesMarketData:
                 symbol=kwargs.get("symbol"),
             )
 
+        # Security Hardening: Validate URL and params before any network activity
+        validate_runtime_public_rest_url(self._endpoint_url(operation))
+        _validate_rest_params(kwargs)
+
         # /futures/data/* request-based limiter (independent of weight)
         if operation in _FUTURES_DATA_REQUEST_LIMITED_OPS:
             await self._futures_data_limiter.acquire(label=operation)
@@ -641,19 +657,14 @@ class BinanceFuturesMarketData:
                 )
             elif status_code == 429:
                 self._rate_limit_error_streak += 1
-                retry_after = self._capture_retry_after(headers)
-                if retry_after is None:
-                    retry_after = int(
-                        self._calculate_backoff(
-                            self._rate_limit_error_streak - 1,
-                            base_delay=2.0,
-                            cap=120.0,
-                        )
-                    )
-                    self._set_rate_limit_pause(retry_after)
+                retry_after_header = self._capture_retry_after(headers)
+                # Enforce aggressive 30-minute backoff for 429 to stay well clear of IP bans
+                effective_pause = max(1800.0, float(retry_after_header or 0))
+                self._set_rate_limit_pause(effective_pause)
                 LOG.warning(
-                    "binance rate limited (429) | retry_after=%ss streak=%d operation=%s",
-                    retry_after,
+                    "binance rate limited (429) | retry_after_header=%s effective_pause=%.0fs streak=%d operation=%s",
+                    retry_after_header,
+                    effective_pause,
                     self._rate_limit_error_streak,
                     operation,
                 )
@@ -686,6 +697,10 @@ class BinanceFuturesMarketData:
                 detail=f"circuit breaker open for {self._circuit_open_duration_seconds}s",
                 symbol=symbol,
             )
+
+        # Security Hardening: Validate URL and params before any network activity
+        validate_runtime_public_rest_url(url)
+        _validate_rest_params(params)
 
         limiter_wait_s = 0.0
         if spec.ip_limited:
@@ -744,24 +759,23 @@ class BinanceFuturesMarketData:
                         raise MarketDataUnavailable(operation=operation, detail="418 ip ban", symbol=symbol)
                     if status == 429:
                         self._rate_limit_error_streak += 1
-                        retry_after = self._capture_retry_after(headers)
-                        if retry_after is None:
-                            retry_after = int(
-                                self._calculate_backoff(
-                                    self._rate_limit_error_streak - 1,
-                                    base_delay=2.0,
-                                    cap=120.0,
-                                )
-                            )
-                        self._set_rate_limit_pause(float(retry_after))
+                        retry_after_header = self._capture_retry_after(headers)
+                        # Enforce aggressive 30-minute backoff for 429
+                        effective_pause = max(1800.0, float(retry_after_header or 0))
+                        self._set_rate_limit_pause(effective_pause)
                         LOG.warning(
-                            "binance rate limited (429) | retry_after=%ss streak=%d operation=%s",
-                            retry_after,
+                            "binance rate limited (429) | retry_after_header=%s effective_pause=%.0fs streak=%d operation=%s",
+                            retry_after_header,
+                            effective_pause,
                             self._rate_limit_error_streak,
                             operation,
                         )
                         self._record_circuit_failure(operation)
-                        raise MarketDataUnavailable(operation=operation, detail="429 rate limited", symbol=symbol)
+                        raise MarketDataUnavailable(
+                            operation=operation,
+                            detail=f"429 rate limited (pause={effective_pause}s)",
+                            symbol=symbol,
+                        )
                     if status < 200 or status >= 300:
                         text = await response.text()
                         detail = (text[:240].replace("\n", " ") if text else f"http={status}")

@@ -1,6 +1,11 @@
-"""Volume anomaly momentum setup."""
+"""Volume anomaly momentum setup.
+
+# WINDSURF_REVIEW: unified + vectorized + 1H context + graded
+"""
 
 from __future__ import annotations
+
+import math
 
 from ..config import BotSettings
 from ..models import PreparedSymbol, Signal
@@ -65,7 +70,10 @@ class VolumeAnomalySetup(BaseSetup):
             _reject(prepared, setup_id, "missing_columns", missing_fields=missing)
             return None
 
-        params = {**self.get_optimizable_params(settings), **get_dynamic_params(prepared, setup_id)}
+        params = self.get_optimizable_params(settings)
+        dynamic_params = get_dynamic_params(prepared, setup_id)
+        effective_params = {**params, **dynamic_params}
+
         open_ = _as_float(work.item(-1, "open"))
         high = _as_float(work.item(-1, "high"))
         low = _as_float(work.item(-1, "low"))
@@ -74,46 +82,36 @@ class VolumeAnomalySetup(BaseSetup):
         vol_ratio = _as_float(work.item(-1, "volume_ratio20"), 1.0)
         close_position = _as_float(work.item(-1, "close_position"), 0.5)
         rsi = _as_float(work.item(-1, "rsi14"), 50.0)
-        if min(open_, high, low, close, atr) <= 0.0:
+
+        if min(open_, high, low, close, atr) <= 0.0 or math.isnan(atr):
             _reject(prepared, setup_id, "invalid_indicator_state", atr=atr, close=close)
             return None
 
-        min_volume_ratio = float(params["min_volume_ratio"])
-        if vol_ratio < min_volume_ratio:
+        if vol_ratio < float(effective_params["min_volume_ratio"]):
             _reject(
                 prepared,
                 setup_id,
                 "volume_spike_missing",
                 volume_ratio=vol_ratio,
-                min_volume_ratio=min_volume_ratio,
             )
             return None
 
         body_atr = abs(close - open_) / atr if atr > 0.0 else 0.0
-        min_body_atr = float(params["min_body_atr"])
-        if body_atr < min_body_atr:
+        if body_atr < float(effective_params["min_body_atr"]):
             _reject(
                 prepared,
                 setup_id,
                 "body_too_small",
                 body_atr=body_atr,
-                min_body_atr=min_body_atr,
             )
             return None
 
         direction: str | None = None
-        if (
-            close > open_
-            and close_position >= float(params["min_close_position_long"])
-            and rsi <= float(params["max_rsi_long"])
-        ):
+        if close > open_ and close_position >= float(effective_params["min_close_position_long"]):
             direction = "long"
-        elif (
-            close < open_
-            and close_position <= float(params["max_close_position_short"])
-            and rsi >= float(params["min_rsi_short"])
-        ):
+        elif close < open_ and close_position <= float(effective_params["max_close_position_short"]):
             direction = "short"
+
         if direction is None:
             _reject(
                 prepared,
@@ -124,8 +122,9 @@ class VolumeAnomalySetup(BaseSetup):
             )
             return None
 
-        sl_buffer = float(params["sl_buffer_atr"])
-        min_rr = float(params["min_rr"])
+        bias_1h = getattr(prepared, "bias_1h", prepared.bias_4h)
+        sl_buffer = float(effective_params["sl_buffer_atr"])
+        min_rr = float(effective_params["min_rr"])
         price_anchor = close
         if direction == "long":
             stop = min(low, open_) - atr * sl_buffer
@@ -137,17 +136,32 @@ class VolumeAnomalySetup(BaseSetup):
             risk = stop - price_anchor
             tp1 = price_anchor - risk * min_rr
             tp2 = price_anchor - risk * max(min_rr, 2.0)
+
         if risk <= 0.0:
             _reject(prepared, setup_id, "invalid_stop", stop=stop, close=close)
             return None
 
+        base_score = float(effective_params["base_score"])
         score = _compute_dynamic_score(
             direction=direction,
-            base_score=float(params["base_score"]),
+            base_score=base_score,
             vol_ratio=vol_ratio,
             rsi=rsi,
             structure_clarity=min(body_atr / 2.0, 1.0),
         )
+
+        # Graded bias alignment
+        if direction == "long" and bias_1h == "downtrend":
+            score *= effective_params.get("bias_mismatch_penalty", 0.75)
+        elif direction == "short" and bias_1h == "uptrend":
+            score *= effective_params.get("bias_mismatch_penalty", 0.75)
+
+        # RSI extremes graded penalty
+        if direction == "long" and rsi > float(effective_params["max_rsi_long"]):
+            score *= 0.85
+        elif direction == "short" and rsi < float(effective_params["min_rsi_short"]):
+            score *= 0.85
+
         reasons = [
             f"volume_anomaly_{direction}",
             f"vol_ratio={vol_ratio:.2f}",

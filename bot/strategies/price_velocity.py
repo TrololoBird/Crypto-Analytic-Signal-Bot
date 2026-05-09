@@ -1,6 +1,11 @@
-"""Price velocity breakout setup."""
+"""Price velocity breakout setup.
+
+# WINDSURF_REVIEW: unified + vectorized + 1H context + graded
+"""
 
 from __future__ import annotations
+
+import math
 
 from ..config import BotSettings
 from ..models import PreparedSymbol, Signal
@@ -65,10 +70,10 @@ class PriceVelocitySetup(BaseSetup):
             _reject(prepared, setup_id, "missing_columns", missing_fields=missing)
             return None
 
-        params = {
-            **self.get_optimizable_params(settings),
-            **get_dynamic_params(prepared, setup_id),
-        }
+        params = self.get_optimizable_params(settings)
+        dynamic_params = get_dynamic_params(prepared, setup_id)
+        effective_params = {**params, **dynamic_params}
+
         open_ = _as_float(work.item(-1, "open"))
         high = _as_float(work.item(-1, "high"))
         low = _as_float(work.item(-1, "low"))
@@ -78,13 +83,14 @@ class PriceVelocitySetup(BaseSetup):
         vol_ratio = _as_float(work.item(-1, "volume_ratio20"), 1.0)
         close_position = _as_float(work.item(-1, "close_position"), 0.5)
         rsi = _as_float(work.item(-1, "rsi14"), 50.0)
-        if min(open_, high, low, close, atr) <= 0.0:
+
+        if min(open_, high, low, close, atr) <= 0.0 or math.isnan(atr):
             _reject(prepared, setup_id, "invalid_indicator_state", atr=atr)
             return None
 
-        min_roc = float(params["min_roc10_abs_pct"])
+        min_roc = float(effective_params["min_roc10_abs_pct"])
         body_atr = abs(close - open_) / atr
-        if abs(roc10) < min_roc and body_atr < float(params["min_body_atr"]):
+        if abs(roc10) < min_roc and body_atr < float(effective_params["min_body_atr"]):
             _reject(
                 prepared,
                 setup_id,
@@ -93,31 +99,23 @@ class PriceVelocitySetup(BaseSetup):
                 body_atr=body_atr,
             )
             return None
-        if vol_ratio < float(params["min_volume_ratio"]):
+        if vol_ratio < float(effective_params["min_volume_ratio"]):
             _reject(prepared, setup_id, "volume_too_low", volume_ratio=vol_ratio)
             return None
 
         direction: str | None = None
-        if (
-            roc10 > 0.0
-            and close > open_
-            and close_position >= 0.65
-            and rsi <= float(params["max_rsi_long"])
-        ):
+        if roc10 > 0.0 and close > open_ and close_position >= 0.65:
             direction = "long"
-        elif (
-            roc10 < 0.0
-            and close < open_
-            and close_position <= 0.35
-            and rsi >= float(params["min_rsi_short"])
-        ):
+        elif roc10 < 0.0 and close < open_ and close_position <= 0.35:
             direction = "short"
+
         if direction is None:
             _reject(prepared, setup_id, "direction_not_confirmed", rsi=rsi)
             return None
 
-        sl_buffer = float(params["sl_buffer_atr"])
-        min_rr = float(params["min_rr"])
+        bias_1h = getattr(prepared, "bias_1h", prepared.bias_4h)
+        sl_buffer = float(effective_params["sl_buffer_atr"])
+        min_rr = float(effective_params["min_rr"])
         if direction == "long":
             stop = min(low, open_) - atr * sl_buffer
             risk = close - stop
@@ -132,13 +130,27 @@ class PriceVelocitySetup(BaseSetup):
             _reject(prepared, setup_id, "invalid_stop", stop=stop, close=close)
             return None
 
+        base_score = float(effective_params["base_score"])
         score = _compute_dynamic_score(
             direction=direction,
-            base_score=float(params["base_score"]),
+            base_score=base_score,
             vol_ratio=vol_ratio,
             rsi=rsi,
             structure_clarity=min(abs(roc10) / 2.5, 1.0),
         )
+
+        # Graded bias alignment
+        if direction == "long" and bias_1h == "downtrend":
+            score *= effective_params.get("bias_mismatch_penalty", 0.75)
+        elif direction == "short" and bias_1h == "uptrend":
+            score *= effective_params.get("bias_mismatch_penalty", 0.75)
+
+        # RSI extremes graded penalty
+        if direction == "long" and rsi > float(effective_params["max_rsi_long"]):
+            score *= 0.85
+        elif direction == "short" and rsi < float(effective_params["min_rsi_short"]):
+            score *= 0.85
+
         reasons = [
             f"price_velocity_{direction}",
             f"roc10={roc10:.2f}",
