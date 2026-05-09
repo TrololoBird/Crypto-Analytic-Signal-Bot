@@ -374,7 +374,9 @@ def _relax_deep_asset_thresholds(
     cap = 0.75 if primary_timeframe in {"1h", "4h"} else 0.85
     for key in ("min_volume_ratio", "volume_threshold"):
         raw_value = adjusted.get(key)
-        if not isinstance(raw_value, int | float) or not math.isfinite(float(raw_value)):
+        if not isinstance(raw_value, int | float) or not math.isfinite(
+            float(raw_value)
+        ):
             continue
         value = float(raw_value)
         if value <= floor:

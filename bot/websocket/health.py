@@ -63,10 +63,7 @@ async def evaluate_endpoint_health(manager: Any, ws: Any, endpoint: str) -> bool
         )
         if manager._symbols and manager._cfg.subscribe_book_ticker and fresh_books == 0:
             connected_at = manager._connected_at_by_endpoint.get(endpoint, 0.0)
-            if (
-                connected_at > 0.0
-                and time.monotonic() - connected_at >= grace_seconds
-            ):
+            if connected_at > 0.0 and time.monotonic() - connected_at >= grace_seconds:
                 LOG.warning(
                     "ws public recovery failed | endpoint=%s fresh_book_tickers=0 - forcing reconnect",
                     endpoint,
@@ -89,15 +86,14 @@ async def monitor_connection_silence(manager: Any, ws: Any, endpoint: str) -> bo
     if last_message_ts == 0.0:
         return False
     connected_map = getattr(manager, "_connected_at_by_endpoint", {})
-    connected_at = connected_map.get(endpoint, 0.0) if isinstance(connected_map, dict) else 0.0
+    connected_at = (
+        connected_map.get(endpoint, 0.0) if isinstance(connected_map, dict) else 0.0
+    )
     grace_seconds = max(
         60.0,
         float(getattr(manager._cfg, "market_reconnect_grace_seconds", 60.0)),
     )
-    if (
-        connected_at > 0.0
-        and time.monotonic() - connected_at < grace_seconds
-    ):
+    if connected_at > 0.0 and time.monotonic() - connected_at < grace_seconds:
         return False
     silence = time.monotonic() - last_message_ts
     if silence > silence_limit and streams:
