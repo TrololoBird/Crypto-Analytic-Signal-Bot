@@ -275,10 +275,29 @@ class BotDashboard:
             transition: all 0.2s;
         }
         .nav-tab:hover { color: var(--text-primary); }
+        .nav-tab:focus-visible {
+            outline: 2px solid var(--accent-blue);
+            outline-offset: -2px;
+        }
         .nav-tab.active { background: var(--bg-secondary); color: var(--text-primary); }
         .main { padding: 24px; max-width: 1400px; margin: 0 auto; }
-        .tab-content { display: none; }
+        .tab-content {
+            display: none;
+            animation: fadeIn 0.3s ease-out;
+        }
         .tab-content.active { display: block; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(4px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            * {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+                scroll-behavior: auto !important;
+            }
+        }
         .grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
@@ -461,19 +480,19 @@ class BotDashboard:
     <header class="header">
         <h1>
             <span>Signal Bot</span>
-            <span id="status-badge" class="status-badge offline">Offline</span>
+            <span id="status-badge" class="status-badge offline" aria-live="polite">Offline</span>
         </h1>
-        <nav class="nav-tabs">
-            <button class="nav-tab active" data-tab="overview">Overview</button>
-            <button class="nav-tab" data-tab="signals">Signals</button>
-            <button class="nav-tab" data-tab="analytics">Analytics</button>
-            <button class="nav-tab" data-tab="settings">Settings</button>
+        <nav class="nav-tabs" role="tablist" aria-label="Dashboard sections">
+            <button class="nav-tab active" role="tab" id="tab-btn-overview" aria-selected="true" aria-controls="tab-panel-overview" data-tab="overview">Overview</button>
+            <button class="nav-tab" role="tab" id="tab-btn-signals" aria-selected="false" aria-controls="tab-panel-signals" data-tab="signals">Signals</button>
+            <button class="nav-tab" role="tab" id="tab-btn-analytics" aria-selected="false" aria-controls="tab-panel-analytics" data-tab="analytics">Analytics</button>
+            <button class="nav-tab" role="tab" id="tab-btn-settings" aria-selected="false" aria-controls="tab-panel-settings" data-tab="settings">Settings</button>
         </nav>
     </header>
     
     <main class="main">
         <!-- Overview Tab -->
-        <div id="tab-overview" class="tab-content active">
+        <div id="tab-panel-overview" class="tab-content active" role="tabpanel" aria-labelledby="tab-btn-overview">
             <div class="grid">
                 <div class="card">
                     <h2>Bot Status</h2>
@@ -522,7 +541,7 @@ class BotDashboard:
         </div>
         
         <!-- Signals Tab -->
-        <div id="tab-signals" class="tab-content">
+        <div id="tab-panel-signals" class="tab-content" role="tabpanel" aria-labelledby="tab-btn-signals" aria-hidden="true">
             <div id="active-signals-list">
                 <div class="empty-state">
                     <div class="empty-state-icon">Radio</div>
@@ -532,7 +551,7 @@ class BotDashboard:
         </div>
         
         <!-- Analytics Tab -->
-        <div id="tab-analytics" class="tab-content">
+        <div id="tab-panel-analytics" class="tab-content" role="tabpanel" aria-labelledby="tab-btn-analytics" aria-hidden="true">
             <div class="grid">
                 <div class="card">
                     <h2>Performance (30d)</h2>
@@ -567,7 +586,7 @@ class BotDashboard:
         </div>
         
         <!-- Settings Tab -->
-        <div id="tab-settings" class="tab-content">
+        <div id="tab-panel-settings" class="tab-content" role="tabpanel" aria-labelledby="tab-btn-settings" aria-hidden="true">
             <div class="card">
                 <h2>Strategy Configuration</h2>
                 <div id="strategy-list">
@@ -579,7 +598,7 @@ class BotDashboard:
     
     <div class="toast-container" id="toast-container"></div>
     
-    <div class="last-update" id="last-update">Last update: -</div>
+    <div class="last-update" id="last-update" aria-live="polite">Last update: -</div>
     
     <div class="keyboard-hint">
         <kbd>?</kbd> for help
@@ -589,10 +608,23 @@ class BotDashboard:
         // Tab switching
         document.querySelectorAll('.nav-tab').forEach(tab => {
             tab.addEventListener('click', () => {
-                document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
-                document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+                const tabs = document.querySelectorAll('.nav-tab');
+                const panels = document.querySelectorAll('.tab-content');
+
+                tabs.forEach(t => {
+                    t.classList.remove('active');
+                    t.setAttribute('aria-selected', 'false');
+                });
+                panels.forEach(p => {
+                    p.classList.remove('active');
+                    p.setAttribute('aria-hidden', 'true');
+                });
+
                 tab.classList.add('active');
-                document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+                tab.setAttribute('aria-selected', 'true');
+                const activePanel = document.getElementById('tab-panel-' + tab.dataset.tab);
+                activePanel.classList.add('active');
+                activePanel.setAttribute('aria-hidden', 'false');
             });
         });
         
