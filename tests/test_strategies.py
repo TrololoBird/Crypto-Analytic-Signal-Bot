@@ -128,7 +128,9 @@ def _strategy_frame(
     )
 
 
-def _prepared_with_frames(frame_15m: pl.DataFrame, frame_1h: pl.DataFrame) -> PreparedSymbol:
+def _prepared_with_frames(
+    frame_15m: pl.DataFrame, frame_1h: pl.DataFrame
+) -> PreparedSymbol:
     universe = UniverseSymbol(
         symbol="BTCUSDT",
         base_asset="BTC",
@@ -283,7 +285,9 @@ def test_supertrend_follow_detects_long_pullback() -> None:
         last_volume_ratio=1.25,
         last_supertrend_dir=1.0,
     )
-    prepared = _prepared_with_frames(frame_15m, _strategy_frame(last_supertrend_dir=1.0))
+    prepared = _prepared_with_frames(
+        frame_15m, _strategy_frame(last_supertrend_dir=1.0)
+    )
 
     result = SuperTrendFollowSetup(settings=settings).calculate(prepared)
 

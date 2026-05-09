@@ -128,7 +128,9 @@ class KeltnerBreakoutSetup(BaseSetup):
             _reject(prepared, setup_id, "invalid_stop", stop=stop, close=close)
             return None
         if tp1 is None or abs(tp1 - close) < risk * min_rr:
-            tp1 = close + risk * min_rr if direction == "long" else close - risk * min_rr
+            tp1 = (
+                close + risk * min_rr if direction == "long" else close - risk * min_rr
+            )
         if tp2 is None:
             tp2 = tp1
 

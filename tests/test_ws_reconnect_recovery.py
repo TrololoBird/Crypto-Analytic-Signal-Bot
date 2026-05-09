@@ -58,7 +58,9 @@ async def test_message_buffer_keeps_newest_message_under_backpressure() -> None:
 
 
 @pytest.mark.asyncio
-async def test_resubscribe_all_uses_intended_streams_without_changing_market_binding() -> None:
+async def test_resubscribe_all_uses_intended_streams_without_changing_market_binding() -> (
+    None
+):
     ws = _DummyWS()
     previous_market_ws = object()
     manager = SimpleNamespace(
@@ -89,7 +91,9 @@ def test_validate_endpoint_stream_limits_rejects_unsafe_connection_size() -> Non
 
 
 @pytest.mark.asyncio
-async def test_run_stream_session_shutdown_closes_ws_and_clears_endpoint_state() -> None:
+async def test_run_stream_session_shutdown_closes_ws_and_clears_endpoint_state() -> (
+    None
+):
     from bot.websocket import connection as ws_connection
 
     ws = _IterableWS(["{}"])
@@ -162,7 +166,9 @@ async def test_recovery_backfill_skips_short_disconnect_when_cache_is_present() 
 
 
 @pytest.mark.asyncio
-async def test_recovery_backfill_triggers_after_short_disconnect_when_cache_missing() -> None:
+async def test_recovery_backfill_triggers_after_short_disconnect_when_cache_missing() -> (
+    None
+):
     manager = FuturesWSManager(rest_client=SimpleNamespace(), config=WSConfig())
     manager._backfill = AsyncMock()
     manager._klines = {}
@@ -187,7 +193,9 @@ async def test_reconnect_callback_fires_only_after_first_connect() -> None:
         _last_message_ts_by_endpoint={"market": 0.0},
         _last_message_ts=0.0,
         _last_event_lag_ms=None,
-        _connected_endpoints={"market": SimpleNamespace(set=lambda: None, clear=lambda: None)},
+        _connected_endpoints={
+            "market": SimpleNamespace(set=lambda: None, clear=lambda: None)
+        },
         _refresh_connected_event=lambda: None,
         _connect_counts={"market": 0},
         _connect_count=0,
@@ -201,17 +209,23 @@ async def test_reconnect_callback_fires_only_after_first_connect() -> None:
     with patch("bot.websocket.connection.apply_tcp_keepalive"):
         from bot.websocket import connection as ws_connection
 
-        ws_connection.apply_connected_state(manager, endpoint="market", ws=ws, url="wss://x/stream")
+        ws_connection.apply_connected_state(
+            manager, endpoint="market", ws=ws, url="wss://x/stream"
+        )
         assert reconnect_cb.await_count == 0
 
-        ws_connection.apply_connected_state(manager, endpoint="market", ws=ws, url="wss://x/stream")
+        ws_connection.apply_connected_state(
+            manager, endpoint="market", ws=ws, url="wss://x/stream"
+        )
         await asyncio.sleep(0)
 
     reconnect_cb.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_monitor_connection_silence_triggers_close_when_streams_intended() -> None:
+async def test_monitor_connection_silence_triggers_close_when_streams_intended() -> (
+    None
+):
     from bot.websocket import health as ws_health
 
     close = AsyncMock()
@@ -250,11 +264,16 @@ async def test_public_book_ticker_silence_uses_tighter_limit() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_endpoint_loop_resets_delay_and_backfills_on_proactive_reconnect() -> None:
+async def test_run_endpoint_loop_resets_delay_and_backfills_on_proactive_reconnect() -> (
+    None
+):
     from bot.websocket import connection as ws_connection
 
     manager = SimpleNamespace(
-        _cfg=SimpleNamespace(reconnect_max_delay_seconds=16, endpoint_base_url=lambda _e: "wss://fstream.binance.com"),
+        _cfg=SimpleNamespace(
+            reconnect_max_delay_seconds=16,
+            endpoint_base_url=lambda _e: "wss://fstream.binance.com",
+        ),
         _running=True,
         _short_lived_streak=5,
         _intended_streams_by_endpoint={"market": {"btcusdt@kline_15m"}},
@@ -269,7 +288,10 @@ async def test_run_endpoint_loop_resets_delay_and_backfills_on_proactive_reconne
         manager._running = False
         return True, True
 
-    with patch("bot.websocket.connection.run_stream_session", side_effect=fake_run_stream_session):
+    with patch(
+        "bot.websocket.connection.run_stream_session",
+        side_effect=fake_run_stream_session,
+    ):
         await ws_connection.run_endpoint_loop(
             manager,
             endpoint="market",
@@ -289,11 +311,16 @@ async def test_run_endpoint_loop_resets_delay_and_backfills_on_proactive_reconne
 
 
 @pytest.mark.asyncio
-async def test_run_endpoint_loop_reconnects_and_triggers_stale_recovery_on_disconnect() -> None:
+async def test_run_endpoint_loop_reconnects_and_triggers_stale_recovery_on_disconnect() -> (
+    None
+):
     from bot.websocket import connection as ws_connection
 
     manager = SimpleNamespace(
-        _cfg=SimpleNamespace(reconnect_max_delay_seconds=16, endpoint_base_url=lambda _e: "wss://fstream.binance.com"),
+        _cfg=SimpleNamespace(
+            reconnect_max_delay_seconds=16,
+            endpoint_base_url=lambda _e: "wss://fstream.binance.com",
+        ),
         _running=True,
         _short_lived_streak=0,
         _intended_streams_by_endpoint={"market": {"btcusdt@kline_15m"}},
@@ -306,8 +333,15 @@ async def test_run_endpoint_loop_reconnects_and_triggers_stale_recovery_on_disco
 
     with (
         patch("bot.websocket.connection.run_stream_session", side_effect=fail_once),
-        patch("bot.websocket.connection.clear_endpoint_connection_state") as clear_state,
-        patch("bot.websocket.connection.asyncio.sleep", new=AsyncMock(side_effect=lambda *_a, **_k: setattr(manager, "_running", False))),
+        patch(
+            "bot.websocket.connection.clear_endpoint_connection_state"
+        ) as clear_state,
+        patch(
+            "bot.websocket.connection.asyncio.sleep",
+            new=AsyncMock(
+                side_effect=lambda *_a, **_k: setattr(manager, "_running", False)
+            ),
+        ),
     ):
         await ws_connection.run_endpoint_loop(
             manager,

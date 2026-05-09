@@ -62,7 +62,9 @@ def validate_public_feature_payload(payload: Mapping[str, Any]) -> None:
             details.append(f"missing={missing}")
         if extra:
             details.append(f"extra={extra}")
-        raise ValueError("public feature payload schema mismatch: " + "; ".join(details))
+        raise ValueError(
+            "public feature payload schema mismatch: " + "; ".join(details)
+        )
 
 
 def normalize_public_feature_payload(payload: Mapping[str, Any]) -> dict[str, Any]:

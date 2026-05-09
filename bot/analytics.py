@@ -77,9 +77,7 @@ class StrategyAnalytics:
                 "total_signals": total_trades,
                 "total_trades": total_trades,
                 "win_rate": (weighted_wins / total_trades) if total_trades else 0.0,
-                "avg_rr": (weighted_expectancy / total_trades)
-                if total_trades
-                else 0.0,
+                "avg_rr": (weighted_expectancy / total_trades) if total_trades else 0.0,
             },
             "by_setup": {str(row["setup_id"]): row for row in setup_reports},
             "setup_reports": setup_reports,
