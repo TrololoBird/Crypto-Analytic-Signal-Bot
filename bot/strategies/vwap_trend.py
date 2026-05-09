@@ -54,8 +54,17 @@ class VWAPTrendSetup(BaseSetup):
             _reject(prepared, setup_id, "insufficient_bars")
             return None
 
-        required_columns = ("close", "ema20", "vwap", "atr14", "volume_ratio20", "rsi14")
-        missing = [column for column in required_columns if column not in work_15m.columns]
+        required_columns = (
+            "close",
+            "ema20",
+            "vwap",
+            "atr14",
+            "volume_ratio20",
+            "rsi14",
+        )
+        missing = [
+            column for column in required_columns if column not in work_15m.columns
+        ]
         if missing:
             _reject(prepared, setup_id, "missing_columns", missing_fields=missing)
             return None
@@ -74,7 +83,9 @@ class VWAPTrendSetup(BaseSetup):
         rsi = _as_float(work_15m.item(-1, "rsi14"), 50.0)
         adx_1h = _as_float(work_1h.item(-1, "adx14"))
 
-        if min(close, prev_close, vwap, prev_vwap, ema20, atr) <= 0.0 or math.isnan(atr):
+        if min(close, prev_close, vwap, prev_vwap, ema20, atr) <= 0.0 or math.isnan(
+            atr
+        ):
             _reject(
                 prepared,
                 setup_id,
@@ -139,7 +150,9 @@ class VWAPTrendSetup(BaseSetup):
             return None
         min_rr = float(params["min_rr"])
         if tp1 is None or abs(tp1 - close) < risk * min_rr:
-            tp1 = close + risk * min_rr if direction == "long" else close - risk * min_rr
+            tp1 = (
+                close + risk * min_rr if direction == "long" else close - risk * min_rr
+            )
         if tp2 is None:
             tp2 = tp1
 

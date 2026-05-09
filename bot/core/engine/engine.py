@@ -61,16 +61,11 @@ class SignalEngine:
         if configured_concurrency is None:
             configured_concurrency = getattr(runtime, "analysis_concurrency", 10)
         self._strategy_concurrency = max(1, int(configured_concurrency))
-        self._semaphore = asyncio.Semaphore(
-            self._strategy_concurrency
-        )
+        self._semaphore = asyncio.Semaphore(self._strategy_concurrency)
         self._executor_warmed = False
         self._executor_warm_lock = asyncio.Lock()
 
-    async def calculate_all(
-        self,
-        prepared: PreparedSymbol
-    ) -> list[SignalResult]:
+    async def calculate_all(self, prepared: PreparedSymbol) -> list[SignalResult]:
         """Calculate signals from all enabled strategies.
 
         Args:
@@ -82,7 +77,9 @@ class SignalEngine:
         symbol = prepared.symbol if prepared else "unknown"
         strategies = self._registry.get_enabled()
         routing_skips: list[SignalResult] = []
-        strategy_fits = set(getattr(getattr(prepared, "universe", None), "strategy_fits", ()) or ())
+        strategy_fits = set(
+            getattr(getattr(prepared, "universe", None), "strategy_fits", ()) or ()
+        )
         if strategy_fits:
             routed: list[Any] = []
             emit_routing_skips = bool(
@@ -113,11 +110,9 @@ class SignalEngine:
                         )
                     )
             strategies = routed
-        elif (
-            getattr(getattr(prepared, "universe", None), "shortlist_score", None)
-            is not None
-            and not is_deep_analysis_symbol(prepared, self._settings)
-        ):
+        elif getattr(
+            getattr(prepared, "universe", None), "shortlist_score", None
+        ) is not None and not is_deep_analysis_symbol(prepared, self._settings):
             LOG.info("%s: calculate_all skipped | no strategy_fits", symbol)
             return []
 
@@ -133,11 +128,21 @@ class SignalEngine:
             if s.can_calculate(prepared):
                 can_calculate_count += 1
 
-        LOG.debug("%s: strategies can_calculate=%d/%d", symbol, can_calculate_count, len(strategies))
-        await self._ensure_executor_warmed(min(len(strategies), self._strategy_concurrency))
+        LOG.debug(
+            "%s: strategies can_calculate=%d/%d",
+            symbol,
+            can_calculate_count,
+            len(strategies),
+        )
+        await self._ensure_executor_warmed(
+            min(len(strategies), self._strategy_concurrency)
+        )
 
         pending = [
-            asyncio.create_task(self._calculate_one(strategy, prepared), name=f"engine:{symbol}:{strategy.strategy_id}")
+            asyncio.create_task(
+                self._calculate_one(strategy, prepared),
+                name=f"engine:{symbol}:{strategy.strategy_id}",
+            )
             for strategy in strategies
         ]
         results = await asyncio.gather(*pending, return_exceptions=True)
@@ -164,29 +169,34 @@ class SignalEngine:
                     stage="engine",
                     details={"symbol": symbol, "error_class": error_class},
                 )
-                signal_results.append(SignalResult(
-                    setup_id=strategy.strategy_id,
-                    signal=None,
-                    decision=decision,
-                    error=decision.error,
-                    calculation_time_ms=0.0,
-                    metadata={"setup_id": strategy.strategy_id},
-                ))
+                signal_results.append(
+                    SignalResult(
+                        setup_id=strategy.strategy_id,
+                        signal=None,
+                        decision=decision,
+                        error=decision.error,
+                        calculation_time_ms=0.0,
+                        metadata={"setup_id": strategy.strategy_id},
+                    )
+                )
                 errors += 1
             else:
                 signal_results.append(result)
                 if result.signal is not None:
                     signals_found += 1
 
-        LOG.info("%s: calculate_all complete | results=%d signals=%d errors=%d",
-                  symbol, len(signal_results), signals_found, errors)
+        LOG.info(
+            "%s: calculate_all complete | results=%d signals=%d errors=%d",
+            symbol,
+            len(signal_results),
+            signals_found,
+            errors,
+        )
 
         return signal_results
 
     async def calculate_one(
-        self,
-        strategy_id: str,
-        prepared: PreparedSymbol
+        self, strategy_id: str, prepared: PreparedSymbol
     ) -> SignalResult | None:
         """Calculate signal from specific strategy.
 
@@ -211,7 +221,7 @@ class SignalEngine:
     async def _calculate_one(
         self,
         strategy: Any,  # AbstractStrategy
-        prepared: PreparedSymbol
+        prepared: PreparedSymbol,
     ) -> SignalResult:
         """Calculate signal from single strategy with timeout and error handling."""
         strategy_id = strategy.strategy_id
@@ -237,13 +247,15 @@ class SignalEngine:
                             "queue_wait_ms": queue_wait_ms,
                             "compute_ms": 0.0,
                         },
-                        calculation_time_ms=0.0
+                        calculation_time_ms=0.0,
                     )
 
                 # Run calculation with timeout
                 loop = asyncio.get_running_loop()
                 result = await asyncio.wait_for(
-                    loop.run_in_executor(_STRATEGY_EXECUTOR, strategy.calculate, prepared),
+                    loop.run_in_executor(
+                        _STRATEGY_EXECUTOR, strategy.calculate, prepared
+                    ),
                     timeout=self._timeout,
                 )
 
@@ -253,7 +265,7 @@ class SignalEngine:
                 self._registry.record_performance(
                     strategy_id,
                     elapsed_ms,
-                    error=bool(result.decision and result.decision.is_error)
+                    error=bool(result.decision and result.decision.is_error),
                 )
 
                 # Update result with accurate timing
@@ -266,14 +278,16 @@ class SignalEngine:
                     strategy_id,
                     elapsed_ms,
                     queue_wait_ms,
-                    result.signal is not None
+                    result.signal is not None,
                 )
 
                 return result
 
             except asyncio.TimeoutError:
                 elapsed_ms = (time.perf_counter() - start_time) * 1000
-                LOG.error("Strategy %s timed out after %.2fs", strategy_id, self._timeout)
+                LOG.error(
+                    "Strategy %s timed out after %.2fs", strategy_id, self._timeout
+                )
                 self._registry.record_performance(strategy_id, elapsed_ms, error=True)
                 decision = StrategyDecision.error_result(
                     setup_id=strategy_id,
@@ -334,7 +348,9 @@ class SignalEngine:
                     },
                 )
 
-    def _build_skip_decision(self, strategy: Any, prepared: PreparedSymbol) -> StrategyDecision:
+    def _build_skip_decision(
+        self, strategy: Any, prepared: PreparedSymbol
+    ) -> StrategyDecision:
         strategy_id = strategy.strategy_id
         metadata = getattr(strategy, "metadata", None)
         min_history_bars = getattr(metadata, "min_history_bars", 0)
@@ -364,7 +380,10 @@ class SignalEngine:
         elif getattr(metadata, "requires_oi", False) and prepared.oi_current is None:
             missing_fields.append("oi_current")
             reason_code = "data.oi_current_missing"
-        elif getattr(metadata, "requires_funding", False) and prepared.funding_rate is None:
+        elif (
+            getattr(metadata, "requires_funding", False)
+            and prepared.funding_rate is None
+        ):
             missing_fields.append("funding_rate")
             reason_code = "data.funding_rate_missing"
 
@@ -426,8 +445,7 @@ class SignalEngine:
             Best Signal or None if no valid signals
         """
         valid_signals = [
-            r.signal for r in results
-            if r.is_valid and r.signal is not None
+            r.signal for r in results if r.is_valid and r.signal is not None
         ]
 
         if not valid_signals:
@@ -440,9 +458,7 @@ class SignalEngine:
         return valid_signals[0]
 
     def get_signals_above_threshold(
-        self,
-        results: list[SignalResult],
-        min_score: float = 0.6
+        self, results: list[SignalResult], min_score: float = 0.6
     ) -> list[Signal]:
         """Get all signals above score threshold.
 

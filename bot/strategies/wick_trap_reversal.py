@@ -2,6 +2,7 @@
 
 # WINDSURF_REVIEW: unified + vectorized + 1H context + graded
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -28,7 +29,9 @@ class WickTrapReversalSetup(BaseSetup):
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)
 
-    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
+    def get_optimizable_params(
+        self, settings: BotSettings | None = None
+    ) -> dict[str, float]:
         """Tunable parameters for self-learner optimization."""
         defaults = {
             "base_score": 0.55,
@@ -43,9 +46,9 @@ class WickTrapReversalSetup(BaseSetup):
             "max_confirmation_bars": 1,
         }
         if settings is not None:
-            filters = getattr(settings, 'filters', None)
+            filters = getattr(settings, "filters", None)
             if filters:
-                setups_config = getattr(filters, 'setups', {})
+                setups_config = getattr(filters, "setups", {})
                 if isinstance(setups_config, dict) and self.setup_id in setups_config:
                     overrides = setups_config.get(self.setup_id, {})
                     if not isinstance(overrides, dict):
@@ -106,14 +109,20 @@ class WickTrapReversalSetup(BaseSetup):
             start_idx = max(0, work_15m.height - 12)
             for idx in range(start_idx, work_15m.height):
                 bar_time = work_15m.item(idx, "time")
-                if isinstance(event_time, datetime) and isinstance(bar_time, datetime) and bar_time <= event_time:
+                if (
+                    isinstance(event_time, datetime)
+                    and isinstance(bar_time, datetime)
+                    and bar_time <= event_time
+                ):
                     continue
                 positions.append(idx)
             return positions
 
         if sl_mask.any():
             # Get positions where sl_mask is True (swing low indices)
-            sl_positions = [idx for idx, is_swing in enumerate(sl_mask.to_list()) if is_swing]
+            sl_positions = [
+                idx for idx, is_swing in enumerate(sl_mask.to_list()) if is_swing
+            ]
             for sl_pos in reversed(sl_positions):
                 bars_ago = work_1h.height - 1 - sl_pos
                 if 3 <= bars_ago <= 20:
@@ -122,8 +131,12 @@ class WickTrapReversalSetup(BaseSetup):
                     for k in _recent_15m_positions_after(swing_time):
                         bar_low = float(work_15m.item(k, "low"))
                         bar_close = float(work_15m.item(k, "close"))
-                        wick_through = bar_low < candidate_level - atr * wick_through_atr_mult
-                        closed_back = bar_close > candidate_level + closed_back_threshold
+                        wick_through = (
+                            bar_low < candidate_level - atr * wick_through_atr_mult
+                        )
+                        closed_back = (
+                            bar_close > candidate_level + closed_back_threshold
+                        )
                         if wick_through and closed_back:
                             direction = "long"
                             wick_bar_idx = k
@@ -134,7 +147,9 @@ class WickTrapReversalSetup(BaseSetup):
 
         if direction is None and sh_mask.any():
             # Get positions where sh_mask is True (swing high indices)
-            sh_positions = [idx for idx, is_swing in enumerate(sh_mask.to_list()) if is_swing]
+            sh_positions = [
+                idx for idx, is_swing in enumerate(sh_mask.to_list()) if is_swing
+            ]
             for sh_pos in reversed(sh_positions):
                 bars_ago = work_1h.height - 1 - sh_pos
                 if 3 <= bars_ago <= 20:
@@ -143,8 +158,12 @@ class WickTrapReversalSetup(BaseSetup):
                     for k in _recent_15m_positions_after(swing_time):
                         bar_high = float(work_15m.item(k, "high"))
                         bar_close = float(work_15m.item(k, "close"))
-                        wick_through = bar_high > candidate_level + atr * wick_through_atr_mult
-                        closed_back = bar_close < candidate_level - closed_back_threshold
+                        wick_through = (
+                            bar_high > candidate_level + atr * wick_through_atr_mult
+                        )
+                        closed_back = (
+                            bar_close < candidate_level - closed_back_threshold
+                        )
                         if wick_through and closed_back:
                             direction = "short"
                             wick_bar_idx = k
@@ -199,35 +218,63 @@ class WickTrapReversalSetup(BaseSetup):
 
         if st_15m is not None:
             if direction == "long" and st_15m < 0:
-                _reject(prepared, "wick_trap_reversal", "supertrend_opposes_15m", st_dir_15m=st_15m)
+                _reject(
+                    prepared,
+                    "wick_trap_reversal",
+                    "supertrend_opposes_15m",
+                    st_dir_15m=st_15m,
+                )
                 return None
             if direction == "short" and st_15m > 0:
-                _reject(prepared, "wick_trap_reversal", "supertrend_opposes_15m", st_dir_15m=st_15m)
+                _reject(
+                    prepared,
+                    "wick_trap_reversal",
+                    "supertrend_opposes_15m",
+                    st_dir_15m=st_15m,
+                )
                 return None
 
         if direction == "long":
             if trig_close <= level:
-                _reject(prepared, "wick_trap_reversal", "trigger_close_below_level",
-                        close=trig_close, level=level)
+                _reject(
+                    prepared,
+                    "wick_trap_reversal",
+                    "trigger_close_below_level",
+                    close=trig_close,
+                    level=level,
+                )
                 return None
             if vol_ratio < min_volume_ratio and not close_strength_ok:
-                _reject(prepared, "wick_trap_reversal", "no_confirmation",
-                        wick_vol_ratio=wick_vol_ratio,
-                        trigger_vol_ratio=trigger_vol_ratio,
-                        min_volume_ratio=min_volume_ratio,
-                        close_strength_ok=close_strength_ok)
+                _reject(
+                    prepared,
+                    "wick_trap_reversal",
+                    "no_confirmation",
+                    wick_vol_ratio=wick_vol_ratio,
+                    trigger_vol_ratio=trigger_vol_ratio,
+                    min_volume_ratio=min_volume_ratio,
+                    close_strength_ok=close_strength_ok,
+                )
                 return None
         else:
             if trig_close >= level:
-                _reject(prepared, "wick_trap_reversal", "trigger_close_above_level",
-                        close=trig_close, level=level)
+                _reject(
+                    prepared,
+                    "wick_trap_reversal",
+                    "trigger_close_above_level",
+                    close=trig_close,
+                    level=level,
+                )
                 return None
             if vol_ratio < min_volume_ratio and not close_strength_ok:
-                _reject(prepared, "wick_trap_reversal", "no_confirmation",
-                        wick_vol_ratio=wick_vol_ratio,
-                        trigger_vol_ratio=trigger_vol_ratio,
-                        min_volume_ratio=min_volume_ratio,
-                        close_strength_ok=close_strength_ok)
+                _reject(
+                    prepared,
+                    "wick_trap_reversal",
+                    "no_confirmation",
+                    wick_vol_ratio=wick_vol_ratio,
+                    trigger_vol_ratio=trigger_vol_ratio,
+                    min_volume_ratio=min_volume_ratio,
+                    close_strength_ok=close_strength_ok,
+                )
                 return None
 
         wick_bar_close = float(work_15m.item(wick_bar_idx, "close"))
@@ -244,7 +291,9 @@ class WickTrapReversalSetup(BaseSetup):
 
         price_anchor = trig_close
 
-        sl_buffer_atr = float(dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]))
+        sl_buffer_atr = float(
+            dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"])
+        )
 
         # --- Compute structural SL/TP ---
         if direction == "long":
@@ -275,7 +324,11 @@ class WickTrapReversalSetup(BaseSetup):
         min_required = risk * min_rr
         fallback_note = None
         if tp1 is None or abs(tp1 - price_anchor) < min_required:
-            tp1 = price_anchor + min_required if direction == "long" else price_anchor - min_required
+            tp1 = (
+                price_anchor + min_required
+                if direction == "long"
+                else price_anchor - min_required
+            )
             fallback_note = f"tp1_rr_fallback_{min_rr:.2f}"
         if tp2 is None:
             tp2 = tp1  # Use TP1 as TP2 if no extended target found
@@ -291,10 +344,18 @@ class WickTrapReversalSetup(BaseSetup):
         )
 
         return _build_signal(
-            prepared=prepared, setup_id="wick_trap_reversal", direction=direction,
-            score=score, timeframe="15m+1h", reasons=reasons,
-            strategy_family=self.family, stop=stop, tp1=tp1, tp2=tp2,
-            price_anchor=price_anchor, atr=atr,
+            prepared=prepared,
+            setup_id="wick_trap_reversal",
+            direction=direction,
+            score=score,
+            timeframe="15m+1h",
+            reasons=reasons,
+            strategy_family=self.family,
+            stop=stop,
+            tp1=tp1,
+            tp2=tp2,
+            price_anchor=price_anchor,
+            atr=atr,
         )
 
 

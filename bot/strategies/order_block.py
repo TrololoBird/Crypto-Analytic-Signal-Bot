@@ -194,8 +194,7 @@ class OrderBlockSetup(BaseSetup):
             direction == "long"
             and (bias_1h == "downtrend" or structure_1h == "downtrend")
         ) or (
-            direction == "short"
-            and (bias_1h == "uptrend" or structure_1h == "uptrend")
+            direction == "short" and (bias_1h == "uptrend" or structure_1h == "uptrend")
         )
         if context_mismatch:
             score *= dynamic_params.get(

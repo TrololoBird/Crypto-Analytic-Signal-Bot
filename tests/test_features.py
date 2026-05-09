@@ -95,7 +95,9 @@ def test_bollinger_bands_use_sample_std() -> None:
     assert lower[-1] == 0.0
 
 
-def test_cached_prepare_frame_distinguishes_same_close_time_with_different_history() -> None:
+def test_cached_prepare_frame_distinguishes_same_close_time_with_different_history() -> (
+    None
+):
     end_time = datetime(2026, 2, 1, tzinfo=UTC)
     short_frame = _ohlcv(260, end_time=end_time)
     long_frame = _ohlcv(280, end_time=end_time)

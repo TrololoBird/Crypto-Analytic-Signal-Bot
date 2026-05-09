@@ -80,7 +80,9 @@ class _BotStub:
     def _ws_cache_enrichments(self, _symbol: str) -> dict[str, Any]:
         return {}
 
-    async def _run_modern_analysis(self, item: UniverseSymbol, *_args: Any, **_kwargs: Any) -> PipelineResult:
+    async def _run_modern_analysis(
+        self, item: UniverseSymbol, *_args: Any, **_kwargs: Any
+    ) -> PipelineResult:
         return PipelineResult(
             symbol=item.symbol,
             trigger="emergency_fallback",
@@ -90,8 +92,12 @@ class _BotStub:
             prepared=SimpleNamespace(bias_4h="neutral"),
         )
 
-    def _select_and_rank(self, all_candidates: dict[str, list[Signal]], *, max_signals: int) -> list[Signal]:
-        return [signal for signals in all_candidates.values() for signal in signals][:max_signals]
+    def _select_and_rank(
+        self, all_candidates: dict[str, list[Signal]], *, max_signals: int
+    ) -> list[Signal]:
+        return [signal for signals in all_candidates.values() for signal in signals][
+            :max_signals
+        ]
 
     async def _select_and_deliver(
         self,
