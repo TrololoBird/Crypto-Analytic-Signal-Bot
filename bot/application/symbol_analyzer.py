@@ -84,7 +84,9 @@ def _apply_setup_score_adjustment(
     if adjusted_score == signal.score:
         return signal, {"applied": False, "adjustment": adjustment}
 
-    reason = "setup_performance_bonus" if adjustment > 0 else "setup_performance_penalty"
+    reason = (
+        "setup_performance_bonus" if adjustment > 0 else "setup_performance_penalty"
+    )
     reasons = signal.reasons if reason in signal.reasons else (*signal.reasons, reason)
     return (
         replace(signal, score=adjusted_score, reasons=reasons),
@@ -537,8 +539,7 @@ class SymbolAnalyzer:
             and details["confirmation_count"] < 3
         ):
             if deep_analysis_asset and (
-                primary_timeframe in {"1h", "4h"}
-                or details["confirmation_count"] >= 1
+                primary_timeframe in {"1h", "4h"} or details["confirmation_count"] >= 1
             ):
                 details["relaxed_reject"] = f"crowding_headwind_{signal.direction}"
                 return True, None, details
@@ -550,8 +551,7 @@ class SymbolAnalyzer:
             and details["confirmation_count"] < 3
         ):
             if deep_analysis_asset and (
-                primary_timeframe in {"1h", "4h"}
-                or details["confirmation_count"] >= 1
+                primary_timeframe in {"1h", "4h"} or details["confirmation_count"] >= 1
             ):
                 details["relaxed_reject"] = (
                     f"breakout_crowding_unconfirmed_{signal.direction}"
@@ -1173,7 +1173,12 @@ class SymbolAnalyzer:
                     await self._bot.client.fetch_klines_cached(
                         symbol, "4h", limit=_history_fetch_limit(minimums, "4h")
                     )
-                except (MarketDataUnavailable, RuntimeError, ValueError, TypeError) as exc:
+                except (
+                    MarketDataUnavailable,
+                    RuntimeError,
+                    ValueError,
+                    TypeError,
+                ) as exc:
                     self._log_degradation(
                         level=logging.WARNING,
                         symbol=symbol,
@@ -1344,7 +1349,11 @@ class SymbolAnalyzer:
                     )
                 if "mark_price" not in enrichments and mark_price > 0.0:
                     enrichments["mark_price"] = mark_price
-                if "basis_pct" not in enrichments and mark_price > 0.0 and index_price > 0.0:
+                if (
+                    "basis_pct" not in enrichments
+                    and mark_price > 0.0
+                    and index_price > 0.0
+                ):
                     basis_pct = (mark_price - index_price) / index_price * 100.0
                     enrichments["basis_pct"] = basis_pct
                     enrichments.setdefault("mark_index_spread_bps", basis_pct * 100.0)

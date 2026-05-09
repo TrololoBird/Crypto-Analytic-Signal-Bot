@@ -9,7 +9,7 @@ from bot.features import (
     _bollinger_bands,
     _cached_prepare_frame,
     _prepare_frame,
-    _vwap,
+    _vwap_expr,
 )
 
 
@@ -78,7 +78,7 @@ def test_vwap_includes_current_bar() -> None:
         }
     )
 
-    values = _vwap(frame).to_list()
+    values = frame.select(_vwap_expr(frame).alias("vwap")).to_series().to_list()
 
     assert values == [10.0, 15.0]
 
@@ -95,7 +95,9 @@ def test_bollinger_bands_use_sample_std() -> None:
     assert lower[-1] == 0.0
 
 
-def test_cached_prepare_frame_distinguishes_same_close_time_with_different_history() -> None:
+def test_cached_prepare_frame_distinguishes_same_close_time_with_different_history() -> (
+    None
+):
     end_time = datetime(2026, 2, 1, tzinfo=UTC)
     short_frame = _ohlcv(260, end_time=end_time)
     long_frame = _ohlcv(280, end_time=end_time)

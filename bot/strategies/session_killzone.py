@@ -5,6 +5,7 @@ Requires directional momentum with volume confirmation during the killzone windo
 
 # WINDSURF_REVIEW: unified + vectorized + 1H context + graded
 """
+
 from __future__ import annotations
 
 import logging
@@ -27,6 +28,7 @@ def _as_float(value: object, default: float = 0.0) -> float:
     if isinstance(value, (int, float)):
         return float(value)
     return default
+
 
 _DEFAULT_KILLZONE_WINDOWS: tuple[tuple[str, int, int], ...] = (
     ("Overlap", 13, 16),
@@ -101,7 +103,9 @@ class SessionKillzoneSetup(BaseSetup):
     confirmation_profile = "breakout_acceptance"
     required_context = ("futures_flow",)
 
-    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
+    def get_optimizable_params(
+        self, settings: BotSettings | None = None
+    ) -> dict[str, float]:
         """Tunable parameters for self-learner optimization."""
         defaults = {
             "base_score": 0.55,
@@ -120,9 +124,9 @@ class SessionKillzoneSetup(BaseSetup):
             "overlap_end_hour_utc": 16,
         }
         if settings is not None:
-            filters = getattr(settings, 'filters', None)
+            filters = getattr(settings, "filters", None)
             if filters:
-                setups_config = getattr(filters, 'setups', {})
+                setups_config = getattr(filters, "setups", {})
                 if isinstance(setups_config, dict) and self.setup_id in setups_config:
                     return {**defaults, **setups_config.get(self.setup_id, {})}
         return defaults
@@ -139,7 +143,10 @@ class SessionKillzoneSetup(BaseSetup):
         setup_id = self.setup_id
         dynamic_params = get_dynamic_params(prepared, setup_id)
         defaults = self.get_optimizable_params(settings)
-        base_score = _as_float(dynamic_params.get("base_score", defaults["base_score"]), defaults["base_score"])
+        base_score = _as_float(
+            dynamic_params.get("base_score", defaults["base_score"]),
+            defaults["base_score"],
+        )
         min_volume_ratio = _as_float(
             dynamic_params.get("min_volume_ratio", defaults["min_volume_ratio"]),
             defaults["min_volume_ratio"],
@@ -148,7 +155,9 @@ class SessionKillzoneSetup(BaseSetup):
             dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]),
             defaults["sl_buffer_atr"],
         )
-        min_rr = _as_float(dynamic_params.get("min_rr", defaults["min_rr"]), defaults["min_rr"])
+        min_rr = _as_float(
+            dynamic_params.get("min_rr", defaults["min_rr"]), defaults["min_rr"]
+        )
         min_adx_1h = _as_float(
             dynamic_params.get("min_adx_1h", defaults["min_adx_1h"]),
             defaults["min_adx_1h"],
@@ -161,7 +170,11 @@ class SessionKillzoneSetup(BaseSetup):
             _reject(prepared, setup_id, "time_missing")
             return None
         last_bar_time = w.item(-1, "time")
-        now_utc = last_bar_time if isinstance(last_bar_time, datetime) else datetime.now(timezone.utc)
+        now_utc = (
+            last_bar_time
+            if isinstance(last_bar_time, datetime)
+            else datetime.now(timezone.utc)
+        )
         session_name = _active_killzone_name(now_utc.hour, dynamic_params)
         if session_name is None:
             _reject(prepared, setup_id, "outside_killzone", hour=now_utc.hour)
@@ -207,7 +220,12 @@ class SessionKillzoneSetup(BaseSetup):
             return None
         avg_vol_ratio = float(sum(vol_ratios) / len(vol_ratios))
         if avg_vol_ratio < min_volume_ratio:
-            _reject(prepared, setup_id, "average_volume_too_low", avg_vol_ratio=avg_vol_ratio)
+            _reject(
+                prepared,
+                setup_id,
+                "average_volume_too_low",
+                avg_vol_ratio=avg_vol_ratio,
+            )
             return None
 
         bullish_bars = sum(1 for o, c in zip(opens, closes) if c > o)
@@ -228,13 +246,16 @@ class SessionKillzoneSetup(BaseSetup):
 
         # Look for prior session levels from 1h data
         from ..features import _swing_points as _sp
+
         w1h = prepared.work_1h
 
         if direction == "long":
             stop = session_low - atr * sl_buffer_atr
             risk = price - stop
             if risk <= 0:
-                _reject(prepared, setup_id, "risk_non_positive_long", stop=stop, price=price)
+                _reject(
+                    prepared, setup_id, "risk_non_positive_long", stop=stop, price=price
+                )
                 return None
             # TP1: prior session's major level (previous 1h swing high or session high)
             tp1 = None
@@ -250,7 +271,13 @@ class SessionKillzoneSetup(BaseSetup):
             stop = session_high + atr * sl_buffer_atr
             risk = stop - price
             if risk <= 0:
-                _reject(prepared, setup_id, "risk_non_positive_short", stop=stop, price=price)
+                _reject(
+                    prepared,
+                    setup_id,
+                    "risk_non_positive_short",
+                    stop=stop,
+                    price=price,
+                )
                 return None
             # TP1: prior session's major level (previous 1h swing low)
             tp1 = None

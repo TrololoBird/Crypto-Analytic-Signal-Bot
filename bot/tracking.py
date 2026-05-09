@@ -1319,11 +1319,11 @@ class SignalTracker:
                 self.memory_repo.save_signal_outcome(outcome.to_dict())
             )
             task.add_done_callback(
-                lambda done: LOG.debug(
-                    "save_signal_outcome failed: %s", done.exception()
+                lambda done: (
+                    LOG.debug("save_signal_outcome failed: %s", done.exception())
+                    if not done.cancelled() and done.exception() is not None
+                    else None
                 )
-                if not done.cancelled() and done.exception() is not None
-                else None
             )
 
         # Очищаем features store

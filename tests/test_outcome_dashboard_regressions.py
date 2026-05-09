@@ -78,9 +78,12 @@ def test_dashboard_strategy_cache_uses_declared_setup_ids() -> None:
         "vwap_trend",
         "rsi_divergence_bottom",
     }
-    assert next(
-        row for row in dashboard._strategies_cache or [] if row["id"] == "fvg_setup"
-    )["enabled"] is False
+    assert (
+        next(
+            row for row in dashboard._strategies_cache or [] if row["id"] == "fvg_setup"
+        )["enabled"]
+        is False
+    )
 
 
 @pytest.mark.asyncio
@@ -132,7 +135,9 @@ async def test_dashboard_active_signal_payload_uses_persisted_tracking_prices() 
 @pytest.mark.asyncio
 async def test_strategy_analytics_report_includes_dashboard_compat_fields() -> None:
     class RepoStub:
-        async def get_setup_stats(self, *, last_days: int = 30) -> list[dict[str, object]]:
+        async def get_setup_stats(
+            self, *, last_days: int = 30
+        ) -> list[dict[str, object]]:
             return [
                 {
                     "setup_id": "ema_bounce",

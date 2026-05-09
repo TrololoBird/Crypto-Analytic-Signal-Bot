@@ -128,11 +128,16 @@ class FVGSetup(BaseSetup):
         fvg_high = zone.top
         fvg_width = zone.width
         fvg_mid = zone.midpoint
-        mitigation_pct = abs(price - fvg_mid) / fvg_width if fvg_width > 0 else 0.0
+        # mitigation_pct measures retracement depth into the gap (0.0 at entry boundary, 1.0 at opposite)
+        if direction == "long":
+            mitigation_pct = (fvg_high - price) / fvg_width if fvg_width > 0 else 0.0
+        else:
+            mitigation_pct = (price - fvg_low) / fvg_width if fvg_width > 0 else 0.0
+
         if (
             fvg_width / price < (min_gap_width_bps / 10000)
             or fvg_width < atr * float(min_fvg_size_atr)
-            or not (float(min_mitigation_pct) <= mitigation_pct <= 1.0)
+            or not (float(min_mitigation_pct) <= mitigation_pct <= 1.1)
         ):
             _reject(
                 prepared,
