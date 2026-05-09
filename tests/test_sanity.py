@@ -134,7 +134,9 @@ def test_cached_prepare_frame_invalidates_when_current_candle_updates() -> None:
             .alias("close"),
         ]
     )
-    second = _cached_prepare_frame(updated, symbol="BTCUSDT", interval="15m", cache=cache)
+    second = _cached_prepare_frame(
+        updated, symbol="BTCUSDT", interval="15m", cache=cache
+    )
 
     assert first.item(-1, "close") == pytest.approx(100.0)
     assert second.item(-1, "close") == pytest.approx(105.0)

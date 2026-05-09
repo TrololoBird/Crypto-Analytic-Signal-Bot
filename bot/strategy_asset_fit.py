@@ -198,13 +198,19 @@ def asset_fit_reject_reason(
     settings: object | None = None,
 ) -> str | None:
     """Return a calibrated rejection reason when a strategy does not fit a symbol."""
-    normalized_symbol = str(symbol or market_context.get("symbol") or "").strip().upper()
+    normalized_symbol = (
+        str(symbol or market_context.get("symbol") or "").strip().upper()
+    )
     profile = asset_fit_for_strategy(strategy_id)
     tags = market_asset_tags(normalized_symbol, market_context)
 
     assets = getattr(settings, "assets", {}) if settings is not None else {}
     asset_config = assets.get(normalized_symbol) if isinstance(assets, dict) else None
-    excluded = getattr(asset_config, "excluded_strategies", ()) if asset_config is not None else ()
+    excluded = (
+        getattr(asset_config, "excluded_strategies", ())
+        if asset_config is not None
+        else ()
+    )
     if strategy_id in set(str(item) for item in excluded):
         return "asset_fit.config_excluded"
 
@@ -214,7 +220,11 @@ def asset_fit_reject_reason(
         return "asset_fit.scope_mismatch"
 
     rank_raw = market_context.get("liquidity_rank")
-    rank = int(rank_raw) if isinstance(rank_raw, int | float) and isfinite(float(rank_raw)) else None
+    rank = (
+        int(rank_raw)
+        if isinstance(rank_raw, int | float) and isfinite(float(rank_raw))
+        else None
+    )
     if rank is not None and rank > int(profile.min_liquidity_rank):
         return "asset_fit.liquidity_rank_too_low"
 
@@ -238,18 +248,31 @@ def calculate_strategy_fit_score(
     settings: object | None = None,
 ) -> float:
     """Score symbol/strategy fit from routing, liquidity, freshness, and volatility."""
-    if asset_fit_reject_reason(strategy_id, symbol, market_context, settings=settings) is not None:
+    if (
+        asset_fit_reject_reason(strategy_id, symbol, market_context, settings=settings)
+        is not None
+    ):
         return 0.0
 
     profile = asset_fit_for_strategy(strategy_id)
     rank_raw = market_context.get("liquidity_rank")
-    rank = float(rank_raw) if isinstance(rank_raw, int | float) else float(profile.min_liquidity_rank)
-    liquidity_score = max(0.0, min(1.0, 1.0 - (rank - 1.0) / max(float(profile.min_liquidity_rank), 1.0)))
+    rank = (
+        float(rank_raw)
+        if isinstance(rank_raw, int | float)
+        else float(profile.min_liquidity_rank)
+    )
+    liquidity_score = max(
+        0.0, min(1.0, 1.0 - (rank - 1.0) / max(float(profile.min_liquidity_rank), 1.0))
+    )
 
     data_score = 1.0
     if profile.requires_funding and market_context.get("funding_rate") is None:
         data_score -= 0.5
-    if profile.requires_oi and market_context.get("oi_current") is None and market_context.get("oi_change_pct") is None:
+    if (
+        profile.requires_oi
+        and market_context.get("oi_current") is None
+        and market_context.get("oi_change_pct") is None
+    ):
         data_score -= 0.5
 
     move_raw = market_context.get("price_change_pct")
@@ -263,4 +286,13 @@ def calculate_strategy_fit_score(
     else:
         volatility_score = 1.0
 
-    return round(max(0.0, min(1.0, 0.45 * liquidity_score + 0.35 * data_score + 0.20 * volatility_score)), 6)
+    return round(
+        max(
+            0.0,
+            min(
+                1.0,
+                0.45 * liquidity_score + 0.35 * data_score + 0.20 * volatility_score,
+            ),
+        ),
+        6,
+    )

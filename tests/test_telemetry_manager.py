@@ -19,7 +19,9 @@ def test_strategy_decision_signal_telemetry_includes_signal_quality_fields() -> 
     telemetry = _CaptureTelemetry()
     bot = SimpleNamespace(
         telemetry=telemetry,
-        settings=SimpleNamespace(runtime=SimpleNamespace(diagnostic_trace_limit_per_symbol=0)),
+        settings=SimpleNamespace(
+            runtime=SimpleNamespace(diagnostic_trace_limit_per_symbol=0)
+        ),
         _diagnostic_trace_counts={},
     )
     manager = TelemetryManager(bot)

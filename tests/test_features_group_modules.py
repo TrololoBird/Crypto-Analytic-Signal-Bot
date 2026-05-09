@@ -21,10 +21,16 @@ def _frame() -> pl.DataFrame:
 def test_core_wrappers_delegate_to_core_module() -> None:
     df = _frame()
 
-    assert features._atr(df, 14).equals(features_core.atr(df, 14, plta=features.plta, has_talib=features._HAS_TALIB))
-    assert features._adx(df, 14).equals(features_core.adx(df, 14, plta=features.plta, has_talib=features._HAS_TALIB))
+    assert features._atr(df, 14).equals(
+        features_core.atr(df, 14, plta=features.plta, has_talib=features._HAS_TALIB)
+    )
+    assert features._adx(df, 14).equals(
+        features_core.adx(df, 14, plta=features.plta, has_talib=features._HAS_TALIB)
+    )
     assert features._vwap(df).equals(features_core.vwap(df))
-    assert features._roc(df, 10).equals(features_core.roc(df, 10, plta=features.plta, has_talib=features._HAS_TALIB))
+    assert features._roc(df, 10).equals(
+        features_core.roc(df, 10, plta=features.plta, has_talib=features._HAS_TALIB)
+    )
 
 
 def test_advanced_and_oscillator_wrappers_delegate_to_group_modules() -> None:

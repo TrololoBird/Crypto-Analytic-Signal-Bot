@@ -83,9 +83,7 @@ class StrategyRegistry:
         with self._lock:
             enabled_ids = tuple(self._enabled)
             strategies = dict(self._strategies)
-        return [
-            strategies[sid].metadata for sid in enabled_ids if sid in strategies
-        ]
+        return [strategies[sid].metadata for sid in enabled_ids if sid in strategies]
 
     def enable(self, strategy_id: str) -> bool:
         """Enable a strategy."""

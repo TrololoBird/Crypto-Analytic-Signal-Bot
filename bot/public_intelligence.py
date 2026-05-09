@@ -365,7 +365,9 @@ class PublicIntelligenceService:
                 await asyncio.sleep(0.2)
         return results
 
-    async def _fetch_value_batch(self, symbols: list[str], fetcher: Any) -> dict[str, Any]:
+    async def _fetch_value_batch(
+        self, symbols: list[str], fetcher: Any
+    ) -> dict[str, Any]:
         results: dict[str, Any] = {}
 
         async def _fetch_one(symbol: str) -> Any:
@@ -399,9 +401,7 @@ class PublicIntelligenceService:
         )
         oi_changes = await self._fetch_value_batch(
             shortlist_symbols,
-            lambda symbol: self._client.fetch_open_interest_change(
-                symbol, period="1h"
-            ),
+            lambda symbol: self._client.fetch_open_interest_change(symbol, period="1h"),
         )
         top_ls_ratios = await self._fetch_value_batch(
             shortlist_symbols,
@@ -991,7 +991,9 @@ class PublicIntelligenceService:
     ) -> list[dict[str, Any]]:
         if not self._options_eapi_research_enabled():
             return []
-        validate_runtime_public_rest_url("https://eapi.binance.com/eapi/v1/openInterest")
+        validate_runtime_public_rest_url(
+            "https://eapi.binance.com/eapi/v1/openInterest"
+        )
         payload = await self._fetch_json(
             "https://eapi.binance.com/eapi/v1/openInterest",
             params={

@@ -130,7 +130,9 @@ class BotDashboard:
                         "enabled": setup_id in enabled_setups,
                         "status": str(getattr(cls, "status", "beta")),
                         "risk_profile": str(
-                            getattr(cls, "risk_profile", getattr(cls, "family", "generic"))
+                            getattr(
+                                cls, "risk_profile", getattr(cls, "family", "generic")
+                            )
                         ),
                         "family": str(getattr(cls, "family", "generic")),
                     }
