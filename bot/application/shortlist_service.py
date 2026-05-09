@@ -8,7 +8,7 @@ from typing import Any
 
 from ..market_data import BinanceFuturesMarketData
 from ..models import UniverseSymbol
-from ..universe import build_shortlist
+from ..universe import build_shortlist, rerank_shortlist
 
 UTC = timezone.utc
 LOG = logging.getLogger("bot.application.shortlist_service")
@@ -417,15 +417,61 @@ class ShortlistService:
     async def refresh_shortlist_periodic(self) -> None:
         bot = self._bot
         await asyncio.sleep(5)
+        last_rerank_ts = 0.0
+        rerank_interval = 30.0  # Rerank every 30s for better real-time relevance
+
         while not bot._shutdown.is_set():
+            now = asyncio.get_event_loop().time()
+            if now - last_rerank_ts >= rerank_interval:
+                await self.do_rerank_shortlist()
+                last_rerank_ts = now
+
             await self.do_refresh_shortlist()
+
+            # Wait for either the rerank interval or the full light refresh interval
+            refresh_interval = int(
+                getattr(
+                    bot.settings.universe,
+                    "light_refresh_interval_seconds",
+                    75,
+                )
+            )
+            wait_timeout = max(5, min(rerank_interval, refresh_interval))
+
             try:
                 await asyncio.wait_for(
                     bot._shutdown.wait(),
-                    timeout=max(
-                        15,
-                        int(getattr(bot.settings.universe, "light_refresh_interval_seconds", 75)),
-                    ),
+                    timeout=wait_timeout,
                 )
             except asyncio.TimeoutError:
                 continue
+
+    async def do_rerank_shortlist(self) -> None:
+        """Lightweight reranking using WS data without full rebuild."""
+        bot = self._bot
+        ws = getattr(bot, "_ws_manager", None)
+        if ws is None or not ws.is_ticker_cache_warm():
+            return
+
+        async with bot._shortlist_lock:
+            if not bot._shortlist:
+                return
+
+            tickers = ws.get_global_ticker_data()
+            if not tickers:
+                return
+
+            original_top = [s.symbol for s in bot._shortlist[:5]]
+            bot._shortlist = rerank_shortlist(
+                bot._shortlist,
+                tickers,
+                bot.settings,
+            )
+            new_top = [s.symbol for s in bot._shortlist[:5]]
+
+            if original_top != new_top:
+                LOG.debug(
+                    "shortlist reranked | top_before=%s top_after=%s",
+                    original_top,
+                    new_top,
+                )

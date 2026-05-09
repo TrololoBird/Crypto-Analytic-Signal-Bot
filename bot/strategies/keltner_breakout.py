@@ -1,6 +1,11 @@
-"""Keltner channel breakout setup."""
+"""Keltner channel breakout setup.
+
+# WINDSURF_REVIEW: unified + vectorized + 1H context + graded
+"""
 
 from __future__ import annotations
+
+import math
 
 from ..config import BotSettings
 from ..features import _swing_points
@@ -64,10 +69,10 @@ class KeltnerBreakoutSetup(BaseSetup):
             _reject(prepared, setup_id, "missing_columns", missing_fields=missing)
             return None
 
-        params = {
-            **self.get_optimizable_params(settings),
-            **get_dynamic_params(prepared, setup_id),
-        }
+        params = self.get_optimizable_params(settings)
+        dynamic_params = get_dynamic_params(prepared, setup_id)
+        effective_params = {**params, **dynamic_params}
+
         close = _as_float(work_15m.item(-1, "close"))
         kc_upper = _as_float(work_15m.item(-1, "kc_upper"))
         kc_lower = _as_float(work_15m.item(-1, "kc_lower"))
@@ -76,26 +81,32 @@ class KeltnerBreakoutSetup(BaseSetup):
         vol_ratio = _as_float(work_15m.item(-1, "volume_ratio20"), 1.0)
         rsi = _as_float(work_15m.item(-1, "rsi14"), 50.0)
         adx_1h = _as_float(work_1h.item(-1, "adx14"))
-        if min(close, kc_upper, kc_lower, ema20, atr) <= 0.0:
+
+        if min(close, kc_upper, kc_lower, ema20, atr) <= 0.0 or math.isnan(atr):
             _reject(prepared, setup_id, "invalid_indicator_state", atr=atr)
             return None
-        if vol_ratio < float(params["min_volume_ratio"]):
+
+        if vol_ratio < float(effective_params["min_volume_ratio"]):
             _reject(prepared, setup_id, "volume_too_low", volume_ratio=vol_ratio)
             return None
-        if adx_1h > 0.0 and adx_1h < float(params["min_adx_1h"]):
+
+        if adx_1h > 0.0 and adx_1h < float(effective_params["min_adx_1h"]):
             _reject(prepared, setup_id, "adx_too_low", adx_1h=adx_1h)
             return None
 
         bias_1h = getattr(prepared, "bias_1h", prepared.bias_4h)
         direction: str | None = None
-        if close > kc_upper and bias_1h != "downtrend":
+        stop_basis: float = 0.0
+
+        if close > kc_upper:
             direction = "long"
             stop_basis = max(kc_lower, ema20)
-        elif close < kc_lower and bias_1h != "uptrend":
+        elif close < kc_lower:
             direction = "short"
             stop_basis = min(kc_upper, ema20)
+
         if direction is None:
-            _reject(prepared, setup_id, "no_keltner_breakout", bias_1h=bias_1h)
+            _reject(prepared, setup_id, "no_keltner_breakout", close=close)
             return None
 
         sh_mask, sl_mask = _swing_points(work_1h, n=3, include_unconfirmed_tail=True)
@@ -121,13 +132,21 @@ class KeltnerBreakoutSetup(BaseSetup):
         if tp2 is None:
             tp2 = tp1
 
+        base_score = float(effective_params["base_score"])
         score = _compute_dynamic_score(
             direction=direction,
-            base_score=float(params["base_score"]),
+            base_score=base_score,
             vol_ratio=vol_ratio,
             rsi=rsi,
             structure_clarity=0.6,
         )
+
+        # Graded bias alignment
+        if direction == "long" and bias_1h == "downtrend":
+            score *= effective_params.get("bias_mismatch_penalty", 0.75)
+        elif direction == "short" and bias_1h == "uptrend":
+            score *= effective_params.get("bias_mismatch_penalty", 0.75)
+
         reasons = [
             f"keltner_breakout_{direction}",
             f"bias_1h={bias_1h}",

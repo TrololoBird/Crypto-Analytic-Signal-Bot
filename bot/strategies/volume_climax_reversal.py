@@ -1,6 +1,11 @@
-"""Volume climax reversal setup."""
+"""Volume climax reversal setup.
+
+# WINDSURF_REVIEW: unified + vectorized + 1H context + graded
+"""
 
 from __future__ import annotations
+
+import math
 
 from ..config import BotSettings
 from ..models import PreparedSymbol, Signal
@@ -65,10 +70,10 @@ class VolumeClimaxReversalSetup(BaseSetup):
             _reject(prepared, setup_id, "missing_columns", missing_fields=missing)
             return None
 
-        params = {
-            **self.get_optimizable_params(settings),
-            **get_dynamic_params(prepared, setup_id),
-        }
+        params = self.get_optimizable_params(settings)
+        dynamic_params = get_dynamic_params(prepared, setup_id)
+        effective_params = {**params, **dynamic_params}
+
         open_ = _as_float(work.item(-1, "open"))
         high = _as_float(work.item(-1, "high"))
         low = _as_float(work.item(-1, "low"))
@@ -79,24 +84,24 @@ class VolumeClimaxReversalSetup(BaseSetup):
         rsi = _as_float(work.item(-1, "rsi14"), 50.0)
         prev_low = _as_float(work.item(-1, "prev_donchian_low20"))
         prev_high = _as_float(work.item(-1, "prev_donchian_high20"))
-        if min(open_, high, low, close, atr, prev_low, prev_high) <= 0.0:
+
+        if min(open_, high, low, close, atr, prev_low, prev_high) <= 0.0 or math.isnan(atr):
             _reject(prepared, setup_id, "invalid_indicator_state", atr=atr)
             return None
 
-        if vol_ratio < float(params["min_volume_ratio"]):
+        if vol_ratio < float(effective_params["min_volume_ratio"]):
             _reject(prepared, setup_id, "volume_climax_missing", volume_ratio=vol_ratio)
             return None
 
         lower_wick_atr = (min(open_, close) - low) / atr
         upper_wick_atr = (high - max(open_, close)) / atr
-        min_wick_atr = float(params["min_wick_atr"])
+        min_wick_atr = float(effective_params["min_wick_atr"])
         direction: str | None = None
         if (
             low < prev_low
             and close > prev_low
             and lower_wick_atr >= min_wick_atr
             and close_position >= 0.55
-            and rsi <= float(params["max_rsi_long"])
         ):
             direction = "long"
         elif (
@@ -104,9 +109,9 @@ class VolumeClimaxReversalSetup(BaseSetup):
             and close < prev_high
             and upper_wick_atr >= min_wick_atr
             and close_position <= 0.45
-            and rsi >= float(params["min_rsi_short"])
         ):
             direction = "short"
+
         if direction is None:
             _reject(
                 prepared,
@@ -118,8 +123,9 @@ class VolumeClimaxReversalSetup(BaseSetup):
             )
             return None
 
-        sl_buffer = float(params["sl_buffer_atr"])
-        min_rr = float(params["min_rr"])
+        bias_1h = getattr(prepared, "bias_1h", prepared.bias_4h)
+        sl_buffer = float(effective_params["sl_buffer_atr"])
+        min_rr = float(effective_params["min_rr"])
         if direction == "long":
             stop = low - atr * sl_buffer
             risk = close - stop
@@ -136,13 +142,27 @@ class VolumeClimaxReversalSetup(BaseSetup):
             _reject(prepared, setup_id, "invalid_stop", stop=stop, close=close)
             return None
 
+        base_score = float(effective_params["base_score"])
         score = _compute_dynamic_score(
             direction=direction,
-            base_score=float(params["base_score"]),
+            base_score=base_score,
             vol_ratio=vol_ratio,
             rsi=rsi,
             structure_clarity=clarity,
         )
+
+        # Graded bias alignment
+        if direction == "long" and bias_1h == "downtrend":
+            score *= effective_params.get("bias_mismatch_penalty", 0.75)
+        elif direction == "short" and bias_1h == "uptrend":
+            score *= effective_params.get("bias_mismatch_penalty", 0.75)
+
+        # RSI extremes graded penalty
+        if direction == "long" and rsi > float(effective_params["max_rsi_long"]):
+            score *= 0.85
+        elif direction == "short" and rsi < float(effective_params["min_rsi_short"]):
+            score *= 0.85
+
         reasons = [
             f"volume_climax_reversal_{direction}",
             f"vol_ratio={vol_ratio:.2f}",

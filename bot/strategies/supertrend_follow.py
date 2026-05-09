@@ -1,6 +1,11 @@
-"""SuperTrend continuation setup."""
+"""SuperTrend continuation setup.
+
+# WINDSURF_REVIEW: unified + vectorized + 1H context + graded
+"""
 
 from __future__ import annotations
+
+import math
 
 from ..config import BotSettings
 from ..features import _swing_points
@@ -66,10 +71,10 @@ class SuperTrendFollowSetup(BaseSetup):
             _reject(prepared, setup_id, "missing_columns", missing_fields=missing)
             return None
 
-        params = {
-            **self.get_optimizable_params(settings),
-            **get_dynamic_params(prepared, setup_id),
-        }
+        params = self.get_optimizable_params(settings)
+        dynamic_params = get_dynamic_params(prepared, setup_id)
+        effective_params = {**params, **dynamic_params}
+
         close = _as_float(work_15m.item(-1, "close"))
         low = _as_float(work_15m.item(-1, "low"))
         high = _as_float(work_15m.item(-1, "high"))
@@ -80,27 +85,27 @@ class SuperTrendFollowSetup(BaseSetup):
         st_15m = _as_float(work_15m.item(-1, "supertrend_dir"))
         st_1h = _as_float(work_1h.item(-1, "supertrend_dir"))
         adx_1h = _as_float(work_1h.item(-1, "adx14"))
-        if min(close, low, high, ema20, atr) <= 0.0:
+
+        if min(close, low, high, ema20, atr) <= 0.0 or math.isnan(atr):
             _reject(prepared, setup_id, "invalid_indicator_state", atr=atr)
             return None
 
-        min_adx = float(params["min_adx_1h"])
-        if adx_1h > 0.0 and adx_1h < min_adx:
+        if adx_1h > 0.0 and adx_1h < float(effective_params["min_adx_1h"]):
             _reject(prepared, setup_id, "adx_too_low", adx_1h=adx_1h)
             return None
 
-        min_volume = float(params["min_volume_ratio"])
-        if vol_ratio < min_volume:
+        if vol_ratio < float(effective_params["min_volume_ratio"]):
             _reject(prepared, setup_id, "volume_too_low", volume_ratio=vol_ratio)
             return None
 
-        pullback_atr = float(params["ema_pullback_atr"])
+        pullback_atr = float(effective_params["ema_pullback_atr"])
         bias_1h = getattr(prepared, "bias_1h", prepared.bias_4h)
         direction: str | None = None
+        stop_basis: float = 0.0
+
         if (
             st_15m > 0
             and st_1h > 0
-            and bias_1h != "downtrend"
             and low <= ema20 + atr * pullback_atr
             and close > ema20
         ):
@@ -109,18 +114,17 @@ class SuperTrendFollowSetup(BaseSetup):
         elif (
             st_15m < 0
             and st_1h < 0
-            and bias_1h != "uptrend"
             and high >= ema20 - atr * pullback_atr
             and close < ema20
         ):
             direction = "short"
             stop_basis = max(high, ema20)
-        else:
+
+        if direction is None:
             _reject(
                 prepared,
                 setup_id,
                 "no_supertrend_pullback",
-                bias_1h=bias_1h,
                 st_15m=st_15m,
                 st_1h=st_1h,
             )
@@ -149,13 +153,21 @@ class SuperTrendFollowSetup(BaseSetup):
         if tp2 is None:
             tp2 = tp1
 
+        base_score = float(effective_params["base_score"])
         score = _compute_dynamic_score(
             direction=direction,
-            base_score=float(params["base_score"]),
+            base_score=base_score,
             vol_ratio=vol_ratio,
             rsi=rsi,
             structure_clarity=0.55,
         )
+
+        # Graded bias alignment
+        if direction == "long" and bias_1h == "downtrend":
+            score *= effective_params.get("bias_mismatch_penalty", 0.75)
+        elif direction == "short" and bias_1h == "uptrend":
+            score *= effective_params.get("bias_mismatch_penalty", 0.75)
+
         reasons = [
             f"supertrend_follow_{direction}",
             f"bias_1h={bias_1h}",
