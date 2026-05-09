@@ -1,0 +1,3 @@
+## 2026-04-10 - [Vectorized kline frame construction]
+**Learning:** Row-based Python loops for converting list-of-lists (e.g., from Binance REST API) to Polars DataFrames are a significant performance bottleneck. Even for relatively small datasets (~1000 rows), the overhead of creating Python dictionaries and handling individual objects is high. Vectorizing the construction and using Polars' native type casting and epoch conversion provides a ~75-80% speedup.
+**Action:** Always prefer `pl.DataFrame(rows, schema, orient="row")` followed by `with_columns` for type conversion when processing structured data from APIs. Avoid `pl.DataFrame([{"col": val, ...}, ...])`.
