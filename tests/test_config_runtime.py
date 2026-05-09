@@ -89,7 +89,10 @@ def test_shortlist_spread_is_not_looser_than_filter_spread(
 
     for path in (Path("config.toml"), Path("config.toml.example")):
         settings = load_settings(path)
-        assert settings.universe.shortlist_spread_max_bps <= settings.filters.max_spread_bps
+        assert (
+            settings.universe.shortlist_spread_max_bps
+            <= settings.filters.max_spread_bps
+        )
 
 
 def test_ws_subscribe_delay_respects_binance_control_message_limit() -> None:
