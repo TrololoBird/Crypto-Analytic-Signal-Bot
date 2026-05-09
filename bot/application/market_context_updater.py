@@ -270,9 +270,7 @@ class MarketContextUpdater:
                 altcoin_season_index=float(
                     getattr(regime_result, "altcoin_season_index", 50.0) or 50.0
                 ),
-                btc_phase=str(
-                    getattr(regime_result, "btc_phase", "sideways") or "sideways"
-                ),
+                btc_phase=str(getattr(regime_result, "btc_phase", "sideways") or "sideways"),
                 intelligence_snapshot=intelligence_snapshot,
             )
             LOG.info(

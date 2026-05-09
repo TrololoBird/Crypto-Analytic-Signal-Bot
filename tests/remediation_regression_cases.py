@@ -116,9 +116,7 @@ class DummyMemoryRepo:
     async def get_tracking_stats(self) -> dict[str, int]:
         return dict(self.tracking_stats)
 
-    async def record_setup_outcome(
-        self, setup_id: str, outcome: str, **_: object
-    ) -> float:
+    async def record_setup_outcome(self, setup_id: str, outcome: str, **_: object) -> float:
         self.setup_outcomes.append((setup_id, outcome))
         return 0.0
 
@@ -1223,9 +1221,7 @@ def test_symbol_analyzer_ws_enrichment_degradation_sets_telemetry_flags(
     assert enrichments["degraded"] is True
     assert enrichments["degrade_reason"].startswith("ticker_snapshot:")
     assert enrichments["fallback_used"] == "skip_ticker_enrichment"
-    assert any(
-        "enrichment degraded | symbol=BTCUSDT" in rec.message for rec in caplog.records
-    )
+    assert any("enrichment degraded | symbol=BTCUSDT" in rec.message for rec in caplog.records)
 
 
 @pytest.mark.asyncio
@@ -1233,17 +1229,13 @@ async def test_oi_refresh_runner_logs_controlled_degradation_without_silent_fail
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     class _Client:
-        async def fetch_open_interest_change(
-            self, symbol: str, period: str = "1h"
-        ) -> None:
+        async def fetch_open_interest_change(self, symbol: str, period: str = "1h") -> None:
             raise RuntimeError("oi failed")
 
         async def fetch_long_short_ratio(self, symbol: str, period: str = "1h") -> None:
             return None
 
-        async def fetch_top_position_ls_ratio(
-            self, symbol: str, period: str = "1h"
-        ) -> None:
+        async def fetch_top_position_ls_ratio(self, symbol: str, period: str = "1h") -> None:
             return None
 
         async def fetch_global_ls_ratio(self, symbol: str, period: str = "1h") -> None:
@@ -1258,26 +1250,18 @@ async def test_oi_refresh_runner_logs_controlled_degradation_without_silent_fail
     with caplog.at_level("WARNING", logger="bot.application.oi_refresh_runner"):
         await runner._safe_fetch("BTCUSDT")
 
-    assert any(
-        "oi refresh degraded | symbol=BTCUSDT stage=oi_change_1h source=rest"
-        in rec.message
-        for rec in caplog.records
-    )
+    assert any("oi refresh degraded | symbol=BTCUSDT stage=oi_change_1h source=rest" in rec.message for rec in caplog.records)
+
+
 
 
 def test_normalize_shortlist_fallback_reason_contract() -> None:
     assert normalize_shortlist_fallback_reason(None) is None
     assert normalize_shortlist_fallback_reason("  ") is None
     assert normalize_shortlist_fallback_reason("WS_CACHE_COLD") == "ws_cache_cold"
-    assert (
-        normalize_shortlist_fallback_reason("using_cached")
-        == FALLBACK_REASON_USING_CACHED
-    )
+    assert normalize_shortlist_fallback_reason("using_cached") == FALLBACK_REASON_USING_CACHED
     assert normalize_shortlist_fallback_reason("cached") == FALLBACK_REASON_USING_CACHED
-    assert (
-        normalize_shortlist_fallback_reason("refresh_failed")
-        == FALLBACK_REASON_REFRESH_EXCEPTION
-    )
+    assert normalize_shortlist_fallback_reason("refresh_failed") == FALLBACK_REASON_REFRESH_EXCEPTION
     assert normalize_shortlist_fallback_reason("not_mapped") == "unknown"
 
 
@@ -1309,23 +1293,17 @@ async def test_shortlist_refresh_cached_telemetry_fields() -> None:
 
     await service.do_refresh_shortlist()
 
-    shortlist_rows = [
-        row for filename, row in bot.telemetry.rows if filename == "shortlist.jsonl"
-    ]
+    shortlist_rows = [row for filename, row in bot.telemetry.rows if filename == "shortlist.jsonl"]
     assert shortlist_rows
     row = shortlist_rows[-1]
     assert row["source_before"] == "ws_light"
     assert row["source_after"] == "cached"
-    assert row["fallback_reason"] in {
-        FALLBACK_REASON_LIVE_EMPTY,
-        FALLBACK_REASON_USING_CACHED,
-    }
+    assert row["fallback_reason"] in {FALLBACK_REASON_LIVE_EMPTY, FALLBACK_REASON_USING_CACHED}
     assert row["full_refresh_due"] is False
     assert row["ws_cache_warm"] is False
     assert row["has_symbol_meta"] is False
     assert row["cached_shortlist_age_s"] is not None
     assert row["cached_shortlist_size"] == 1
-
 
 @pytest.mark.asyncio
 async def test_shortlist_refresh_prefers_ws_light_between_full_rebalances() -> None:
@@ -1506,6 +1484,8 @@ def test_build_signal_rejects_directional_tp_mismatch() -> None:
 
     assert long_signal is None
     assert short_signal is None
+
+
 
 
 def test_ema_bounce_emits_1h_timeframe() -> None:
@@ -1955,9 +1935,7 @@ async def test_parallel_strategy_rejections_keep_distinct_reason_codes() -> None
 
 
 @pytest.mark.asyncio
-async def test_engine_emits_strategy_routing_skips_for_shortlist_fit_exclusions() -> (
-    None
-):
+async def test_engine_emits_strategy_routing_skips_for_shortlist_fit_exclusions() -> None:
     class RoutedSetup(BaseSetup):
         setup_id = "routed_setup"
         min_history_bars = 1

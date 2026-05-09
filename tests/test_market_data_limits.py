@@ -110,9 +110,7 @@ async def test_http_session_uses_connector_limit_matching_rest_semaphore() -> No
 
 
 @pytest.mark.asyncio
-async def test_fetch_agg_trades_caps_future_end_time(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_fetch_agg_trades_caps_future_end_time(monkeypatch: pytest.MonkeyPatch) -> None:
     client = BinanceFuturesMarketData()
     captured_params: list[dict] = []
 

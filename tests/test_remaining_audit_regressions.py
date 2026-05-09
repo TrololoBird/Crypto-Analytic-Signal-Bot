@@ -250,9 +250,7 @@ def test_wick_trap_reversal_scans_latest_15m_bar(
         atr=1.0,
     )
     frame_1h = frame_1h.with_columns(
-        pl.Series(
-            "time", [base + timedelta(hours=idx) for idx in range(frame_1h.height)]
-        )
+        pl.Series("time", [base + timedelta(hours=idx) for idx in range(frame_1h.height)])
     )
     frame_15m = _feature_frame(
         [96.0] * 7 + [95.4],
@@ -265,12 +263,11 @@ def test_wick_trap_reversal_scans_latest_15m_bar(
     frame_15m = frame_15m.with_columns(
         pl.Series(
             "time",
-            [
-                base + timedelta(hours=5, minutes=15 * idx)
-                for idx in range(frame_15m.height)
-            ],
+            [base + timedelta(hours=5, minutes=15 * idx) for idx in range(frame_15m.height)],
         )
-    ).with_columns(pl.Series("volume_ratio20", [1.6] * frame_15m.height))
+    ).with_columns(
+        pl.Series("volume_ratio20", [1.6] * frame_15m.height)
+    )
 
     def _swing_points_stub(frame: pl.DataFrame, **_kwargs):
         return (

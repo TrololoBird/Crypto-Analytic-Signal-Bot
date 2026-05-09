@@ -31,9 +31,7 @@ def test_bot_settings_rejects_too_small_sl_buffer_atr() -> None:
 
 @pytest.mark.asyncio
 async def test_build_message_broadcaster_supports_disabled_provider() -> None:
-    settings = BotSettings(
-        tg_token="", target_chat_id="", notifiers={"provider": "none"}
-    )
+    settings = BotSettings(tg_token="", target_chat_id="", notifiers={"provider": "none"})
     broadcaster = build_message_broadcaster(settings)
 
     assert isinstance(broadcaster, DisabledBroadcaster)

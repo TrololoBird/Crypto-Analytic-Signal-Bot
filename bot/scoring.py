@@ -129,11 +129,7 @@ def _oi_momentum(prepared: PreparedSymbol, signal: Signal) -> float:
     # --- CVD proxy component (delta_ratio from 15m candles) ---
     cvd_score = 0.5
     delta_source = signal.orderflow_delta_ratio
-    if (
-        delta_source is None
-        and not prepared.work_15m.is_empty()
-        and "delta_ratio" in prepared.work_15m.columns
-    ):
+    if delta_source is None and not prepared.work_15m.is_empty() and "delta_ratio" in prepared.work_15m.columns:
         delta_source = prepared.work_15m.item(-1, "delta_ratio")
     if delta_source is not None:
         delta = max(0.0, min(float(delta_source or 0.5), 1.0))
@@ -186,7 +182,9 @@ def _risk_reward_quality(signal: Signal, settings: BotSettings) -> float:
     if not isinstance(setup_overrides, dict):
         setup_overrides = {}
     min_risk_reward = (
-        float(getattr(filters, "min_risk_reward", 1.9)) if filters is not None else 1.9
+        float(getattr(filters, "min_risk_reward", 1.9))
+        if filters is not None
+        else 1.9
     )
     setup_params = setup_overrides.get(signal.setup_id, {})
     if not isinstance(setup_params, dict):

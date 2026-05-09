@@ -107,13 +107,9 @@ class VolumeAnomalySetup(BaseSetup):
             return None
 
         direction: str | None = None
-        if close > open_ and close_position >= float(
-            effective_params["min_close_position_long"]
-        ):
+        if close > open_ and close_position >= float(effective_params["min_close_position_long"]):
             direction = "long"
-        elif close < open_ and close_position <= float(
-            effective_params["max_close_position_short"]
-        ):
+        elif close < open_ and close_position <= float(effective_params["max_close_position_short"]):
             direction = "short"
 
         if direction is None:

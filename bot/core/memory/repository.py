@@ -843,9 +843,7 @@ class MemoryRepository(MemoryRepositoryExtension):
         win_reasons = {"tp1_hit", "tp2_hit"}
         adjustment = 0.0
         if len(window) >= min_outcomes:
-            wins = sum(
-                1 for item in window if self._setup_outcome_is_win(item, win_reasons)
-            )
+            wins = sum(1 for item in window if self._setup_outcome_is_win(item, win_reasons))
             win_rate = wins / len(window)
             r_values = [
                 r_value

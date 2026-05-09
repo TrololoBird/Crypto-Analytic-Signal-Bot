@@ -84,9 +84,7 @@ def recompute_intended_streams(manager: Any) -> None:
 
 def validate_endpoint_stream_limits(manager: Any) -> None:
     max_streams = int(
-        getattr(
-            manager, "_max_streams_per_connection", DEFAULT_MAX_STREAMS_PER_CONNECTION
-        )
+        getattr(manager, "_max_streams_per_connection", DEFAULT_MAX_STREAMS_PER_CONNECTION)
     )
     for endpoint, streams in manager._intended_streams_by_endpoint.items():
         if len(streams) > max_streams:

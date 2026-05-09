@@ -326,11 +326,7 @@ class StructurePullbackSetup(BaseSetup):
             )
 
             # TP2: next 4h swing high beyond TP1
-            if (
-                work_4h is not None
-                and not work_4h.is_empty()
-                and sh_4h_mask is not None
-            ):
+            if work_4h is not None and not work_4h.is_empty() and sh_4h_mask is not None:
                 tp2 = select_structural_target(
                     work_4h,
                     mask=sh_4h_mask,
@@ -364,11 +360,7 @@ class StructurePullbackSetup(BaseSetup):
             )
 
             # TP2: next 4h swing low beyond TP1
-            if (
-                work_4h is not None
-                and not work_4h.is_empty()
-                and sl_4h_mask is not None
-            ):
+            if work_4h is not None and not work_4h.is_empty() and sl_4h_mask is not None:
                 tp2 = select_structural_target(
                     work_4h,
                     mask=sl_4h_mask,
