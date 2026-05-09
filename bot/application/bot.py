@@ -127,7 +127,9 @@ class SignalBot:
         # Metrics collector
         from bot.metrics import BotMetricsCollector
 
-        self.metrics = BotMetricsCollector(settings.runtime.metrics_port)
+        self.metrics = BotMetricsCollector(
+            settings.runtime.metrics_port, host=settings.runtime.metrics_host
+        )
         disable_http_servers = os.getenv(
             "BOT_DISABLE_HTTP_SERVERS", "0"
         ).strip().lower() in ("1", "true", "yes")
@@ -141,7 +143,9 @@ class SignalBot:
         # Dashboard
         from bot.dashboard import BotDashboard
 
-        self.dashboard = BotDashboard(self, settings.runtime.dashboard_port)
+        self.dashboard = BotDashboard(
+            self, settings.runtime.dashboard_port, host=settings.runtime.dashboard_host
+        )
         if not disable_http_servers:
             self.dashboard.start_server(auto_open=settings.runtime.auto_open_dashboard)
 

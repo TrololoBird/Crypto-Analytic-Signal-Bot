@@ -29,9 +29,10 @@ LOG = logging.getLogger("bot.dashboard")
 class BotDashboard:
     """FastAPI dashboard bound to the current bot process."""
 
-    def __init__(self, bot: Any, port: int = 8080) -> None:
+    def __init__(self, bot: Any, port: int = 8080, host: str = "127.0.0.1") -> None:
         self.bot = bot
         self.port = port
+        self.host = host
         self._enabled = HAS_FASTAPI
         self.app: FastAPI | None = None
         self._strategies_cache: list[dict[str, Any]] | None = None
@@ -44,7 +45,7 @@ class BotDashboard:
         app.add_middleware(
             _CORSMiddleware,
             allow_origins=["*"],
-            allow_credentials=True,
+            allow_credentials=False,  # Security: Disable credentials for wildcard origin
             allow_methods=["*"],
             allow_headers=["*"],
         )
@@ -1055,7 +1056,7 @@ class BotDashboard:
                 return
             try:
                 uvicorn.run(
-                    self.app, host="0.0.0.0", port=self.port, log_level="warning"
+                    self.app, host=self.host, port=self.port, log_level="warning"
                 )
             except Exception as exc:
                 LOG.warning("dashboard server crashed: %s", exc)
