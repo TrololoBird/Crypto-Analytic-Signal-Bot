@@ -43,7 +43,11 @@ from .features_structure import (
 # Optional polars_ta import. TA-Lib itself is deliberately not imported:
 # Windows/Python 3.13 deployments are brittle with that native dependency,
 # while the pure-Polars fallbacks below are stable and deterministic.
-_plta_module = importlib_util.find_spec("polars_ta.ta")
+try:
+    _plta_module = importlib_util.find_spec("polars_ta.ta")
+except (ImportError, ModuleNotFoundError):
+    _plta_module = None
+
 if _plta_module is not None:
     plta = cast(Any, importlib.import_module("polars_ta.ta"))
     _HAS_POLARS_TA = True

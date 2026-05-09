@@ -1,4 +1,0 @@
-## 2025-05-15 - [Secure Server Binding and CORS Hardening]
-**Vulnerability:** Internal HTTP servers (Dashboard and Prometheus) were binding to `0.0.0.0` by default, exposing them to the entire network. Additionally, the dashboard used an overly permissive CORS policy (`allow_origins=["*"]`, `allow_credentials=True`).
-**Learning:** Defaulting to `0.0.0.0` is a common but risky pattern that can lead to unintentional exposure in cloud or shared network environments. Permissive CORS with credentials enabled for a wildcard origin is often a browser-level violation and a security risk.
-**Prevention:** Always default internal-only or administrative servers to bind to `127.0.0.1`. Provide explicit configuration options (`dashboard_host`, `metrics_host`) for users who deliberately need wider access. Harden CORS by setting `allow_credentials=False` when using wildcard origins.
