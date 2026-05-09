@@ -104,6 +104,7 @@ class BotMetricsCollector:
     def __init__(self, port: int = 9090, host: str = "127.0.0.1") -> None:
         self.port = port
         self.host = host
+        self.host = host
         self._enabled = HAS_PROMETHEUS
 
         if not self._enabled:

@@ -33,6 +33,7 @@ class BotDashboard:
         self.bot = bot
         self.port = port
         self.host = host
+        self.host = host
         self._enabled = HAS_FASTAPI
         self.app: FastAPI | None = None
         self._strategies_cache: list[dict[str, Any]] | None = None

@@ -24,7 +24,6 @@ class RuntimeConfig(BaseModel):
     metrics_host: str = "127.0.0.1"
     dashboard_port: int = Field(default=8080, ge=1000, le=65535)
     dashboard_host: str = "127.0.0.1"
-    auto_open_dashboard: bool = False
     circuit_breaker_cooldown_seconds: int = Field(default=60, ge=0, le=3600)
     telemetry_subdir: str = "telemetry"
     log_level: str = "INFO"
