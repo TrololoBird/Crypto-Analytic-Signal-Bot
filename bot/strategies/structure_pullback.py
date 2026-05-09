@@ -240,7 +240,7 @@ class StructurePullbackSetup(BaseSetup):
                 rsi=rsi,
             )
             return None
-        if direction == "short" and not (15.0 <= rsi <= 75.0):
+        if direction == "short" and not (55.0 <= rsi <= 75.0):
             _reject(
                 prepared,
                 "structure_pullback",
@@ -296,6 +296,11 @@ class StructurePullbackSetup(BaseSetup):
 
         work_15m_tail = work_15m.tail(10)
         _sh15, _sl15 = _sp(work_15m_tail, n=2)
+        sh_1h_mask, sl_1h_mask = _sp(work_1h, n=3, include_unconfirmed_tail=True)
+        sh_4h_mask = None
+        sl_4h_mask = None
+        if work_4h is not None and not work_4h.is_empty():
+            sh_4h_mask, sl_4h_mask = _sp(work_4h, n=2)
 
         if direction == "long":
             # SL: below pullback swing low (last 3-5 15m bars) + 0.15×ATR noise buffer
@@ -312,7 +317,6 @@ class StructurePullbackSetup(BaseSetup):
             stop = pullback_low - atr * float(sl_buffer_atr)
 
             # TP1: prior 1h swing high above entry (trend extreme before pullback)
-            sh_1h_mask, sl_mask = _sp(work_1h, n=3, include_unconfirmed_tail=True)
             tp1 = select_structural_target(
                 work_1h,
                 mask=sh_1h_mask,
@@ -322,8 +326,7 @@ class StructurePullbackSetup(BaseSetup):
             )
 
             # TP2: next 4h swing high beyond TP1
-            if work_4h is not None and not work_4h.is_empty():
-                sh_4h_mask, _ = _sp(work_4h, n=2)
+            if work_4h is not None and not work_4h.is_empty() and sh_4h_mask is not None:
                 tp2 = select_structural_target(
                     work_4h,
                     mask=sh_4h_mask,
@@ -348,7 +351,6 @@ class StructurePullbackSetup(BaseSetup):
             stop = pullback_high + atr * float(sl_buffer_atr)
 
             # TP1: prior 1h swing low below entry
-            _, sl_1h_mask = _sp(work_1h, n=3, include_unconfirmed_tail=True)
             tp1 = select_structural_target(
                 work_1h,
                 mask=sl_1h_mask,
@@ -358,8 +360,7 @@ class StructurePullbackSetup(BaseSetup):
             )
 
             # TP2: next 4h swing low beyond TP1
-            if work_4h is not None and not work_4h.is_empty():
-                _, sl_4h_mask = _sp(work_4h, n=2)
+            if work_4h is not None and not work_4h.is_empty() and sl_4h_mask is not None:
                 tp2 = select_structural_target(
                     work_4h,
                     mask=sl_4h_mask,

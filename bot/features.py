@@ -446,8 +446,8 @@ def _stochastic(
     smooth_k: int = 3,
     smooth_d: int = 3,
 ) -> tuple[pl.Series, pl.Series]:
-    rolling_low = df["low"].shift(1).rolling_min(window_size=period)
-    rolling_high = df["high"].shift(1).rolling_max(window_size=period)
+    rolling_low = df["low"].rolling_min(window_size=period)
+    rolling_high = df["high"].rolling_max(window_size=period)
     width = rolling_high - rolling_low
     raw_k = _clean_non_finite(((df["close"] - rolling_low) / width) * 100.0, fill=50.0)
     k = _clean_non_finite(raw_k.rolling_mean(window_size=smooth_k), fill=50.0).rename("stoch_k14")

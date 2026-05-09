@@ -27,6 +27,26 @@ This ledger records the remediation items implemented directly in the live repo,
 - Trading/account operations (orders, balances, positions, account mutation).
 - User-data streams and any `listenKey` lifecycle handling.
 
+## Audit Report 2 Pass (2026-05-09)
+
+Detailed item-by-item status for `audit_report (2).md` is recorded in
+[`docs/remediation_report_2.md`](remediation_report_2.md).
+
+Confirmed fixes in this pass cover WebSocket shutdown/graceful close behavior,
+stream-count safety limits, endpoint-specific public stream silence checks,
+REST limiter/session behavior, aggregate-trade future `endTime` clamping,
+stochastic current-bar inclusion, explicit supertrend branching, setup
+exception containment, Telegram token validation, shortlist premium merge
+preservation, EMA missing-column rejection, structure-pullback RSI and swing
+reuse, asset-fit shortlist-aware volume tagging, pinned-symbol volume floors,
+and signal-level orderflow scoring.
+
+Several audit claims were stale or false in the current codebase: examples
+include `Signal.stop_distance_pct`, EventBus `_safe_call`, `_ALL_SETUP_IDS`,
+query-safe REST URL validation, scoring-weight normalization, current PyPI
+availability of `numpy 2.4.4`, and current PyPI availability of
+`pytest-asyncio 1.3.0`.
+
 | Audit claim | Code status | Resolution |
 | --- | --- | --- |
 | Event bus backlog was unbounded and could amplify hot-path events. | Confirmed in prior `bot/core/event_bus.py`. | Replaced with a bounded bus that coalesces `KlineCloseEvent`, `BookTickerEvent`, `ShortlistUpdatedEvent`, and `OIRefreshDueEvent`, and exposes queue telemetry (`current_depth`, `high_water_mark`, `coalesced_count`, `dropped_count`). |

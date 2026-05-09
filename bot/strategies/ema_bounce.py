@@ -90,6 +90,17 @@ class EmaBounceSetup(BaseSetup):
         if work_1h.height < 3:
             _reject(prepared, setup_id, "insufficient_context_bars")
             return None
+        required_columns = {"atr14", "ema20", "ema50", "close", "volume_ratio20", "adx14"}
+        missing_columns = sorted(required_columns.difference(work_1h.columns))
+        if missing_columns:
+            _reject(
+                prepared,
+                setup_id,
+                "missing_columns",
+                missing_fields=missing_columns,
+                context_timeframe=context_timeframe,
+            )
+            return None
 
         atr = float(work_1h.item(-1, "atr14") or 0.0)
         ema20 = float(work_1h.item(-1, "ema20") or 0.0)

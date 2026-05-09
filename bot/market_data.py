@@ -172,13 +172,19 @@ class _SlidingWindowRateLimiter:
 
     async def acquire(self, *, label: str) -> float:
         waited_s = 0.0
-        async with self._lock:
-            now = time.monotonic()
-            cutoff = now - self._window_seconds
-            while self._times and self._times[0] < cutoff:
-                self._times.popleft()
-            if len(self._times) >= self._max_requests:
-                sleep_s = max(0.0, (self._times[0] + self._window_seconds) - now) + 0.05
+        while True:
+            sleep_s = 0.0
+            async with self._lock:
+                now = time.monotonic()
+                cutoff = now - self._window_seconds
+                while self._times and self._times[0] < cutoff:
+                    self._times.popleft()
+                if len(self._times) < self._max_requests:
+                    self._times.append(now)
+                    return waited_s
+                sleep_s = (
+                    max(0.0, (self._times[0] + self._window_seconds) - now) + 0.05
+                )
                 LOG.warning(
                     "futures-data request budget exhausted | sleeping=%.2fs label=%s used=%d limit=%d window=%.0fs",
                     sleep_s,
@@ -187,14 +193,8 @@ class _SlidingWindowRateLimiter:
                     self._max_requests,
                     self._window_seconds,
                 )
-                await asyncio.sleep(sleep_s)
-                waited_s += sleep_s
-                now = time.monotonic()
-                cutoff = now - self._window_seconds
-                while self._times and self._times[0] < cutoff:
-                    self._times.popleft()
-            self._times.append(time.monotonic())
-        return waited_s
+            await asyncio.sleep(sleep_s)
+            waited_s += sleep_s
 
 
 class MarketDataUnavailable(RuntimeError):
@@ -812,7 +812,11 @@ class BinanceFuturesMarketData:
         session = self._http_session
         if session is None or session.closed:
             timeout = aiohttp.ClientTimeout(total=self._rest_timeout)
-            self._http_session = aiohttp.ClientSession(timeout=timeout)
+            connector = aiohttp.TCPConnector(limit=5)
+            self._http_session = aiohttp.ClientSession(
+                timeout=timeout,
+                connector=connector,
+            )
         return cast(aiohttp.ClientSession, self._http_session)
 
     async def close(self) -> None:
@@ -1132,7 +1136,7 @@ class BinanceFuturesMarketData:
         pages = 0
         complete = True
         window_start_ms = max(int(start_time_ms), 0)
-        final_end_ms = max(int(end_time_ms), 0)
+        final_end_ms = min(max(int(end_time_ms), 0), int(time.time() * 1000))
         max_window_ms = 3_599_000  # Binance requires start/end span < 1 hour
         while pages < page_limit and window_start_ms <= final_end_ms:
             window_end_ms = min(window_start_ms + max_window_ms, final_end_ms)

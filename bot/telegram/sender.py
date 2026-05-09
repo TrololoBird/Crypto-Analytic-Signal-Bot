@@ -61,6 +61,8 @@ class TelegramSender:
         """Initialize bot and queue."""
         if Bot is None:
             raise RuntimeError("aiogram not installed. Install: pip install aiogram")
+        if not str(self._token or "").strip():
+            raise ValueError("telegram bot token is required")
 
         self._bot = Bot(token=self._token)
 

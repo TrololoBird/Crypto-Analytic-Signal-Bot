@@ -21,8 +21,8 @@ def stochastic(
 ) -> tuple[pl.Series, pl.Series]:
     """Contract: input requires HLC; output (`stoch_k14`, `stoch_d14`) in [0,100] with safe fill."""
     ensure_columns(df, ("high", "low", "close"), fn_name="stochastic")
-    low = df["low"].shift(1).rolling_min(window_size=period)
-    high = df["high"].shift(1).rolling_max(window_size=period)
+    low = df["low"].rolling_min(window_size=period)
+    high = df["high"].rolling_max(window_size=period)
     raw_k = clean_non_finite(((df["close"] - low) / (high - low)) * 100.0, fill=50.0)
     k = clean_non_finite(raw_k.rolling_mean(window_size=smooth_k), fill=50.0).rename(
         "stoch_k14"

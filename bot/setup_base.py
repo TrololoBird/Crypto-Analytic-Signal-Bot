@@ -12,6 +12,7 @@ from .core.engine.base import (
     StrategyDecision,
     StrategyMetadata,
 )
+from .core.runtime_errors import classify_runtime_error
 from .models import PreparedSymbol, Signal
 from .strategy_asset_fit import (
     DEFAULT_ASSET_FIT,
@@ -120,12 +121,27 @@ class BaseSetup(AbstractStrategy):
             strict_data_quality=strict_data_quality,
         )
         try:
-            outcome = self.detect(prepared, self._settings)
-            decision = finalize_strategy_decision(
-                prepared=prepared,
-                setup_id=self.setup_id,
-                outcome=outcome,
-            )
+            try:
+                outcome = self.detect(prepared, self._settings)
+            except Exception as exc:
+                error_class = classify_runtime_error(exc)
+                decision = StrategyDecision.error_result(
+                    setup_id=self.setup_id,
+                    reason_code=f"{error_class}.error",
+                    error=str(exc),
+                    stage="engine",
+                    details={
+                        "symbol": prepared.symbol,
+                        "error_class": error_class,
+                        "exception_type": type(exc).__name__,
+                    },
+                )
+            else:
+                decision = finalize_strategy_decision(
+                    prepared=prepared,
+                    setup_id=self.setup_id,
+                    outcome=outcome,
+                )
         finally:
             reset_strategy_decision_capture(token)
         return SignalResult(

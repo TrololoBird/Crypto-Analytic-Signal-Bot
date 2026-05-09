@@ -206,7 +206,18 @@ class WhaleWallsSetup(RoadmapSetup):
         ):
             direction = "short"
         else:
-            _reject(prepared, self.setup_id, "wall_proxy_not_confirmed", depth_imbalance=depth_value)
+            reason = (
+                "wall_proxy_conflict"
+                if depth_value * micro_value < 0.0
+                else "wall_proxy_too_weak"
+            )
+            _reject(
+                prepared,
+                self.setup_id,
+                reason,
+                depth_imbalance=depth_value,
+                microprice_bias=micro_value,
+            )
             return None
         return _build_atr_signal(
             prepared=prepared,

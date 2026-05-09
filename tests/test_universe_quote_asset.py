@@ -80,6 +80,26 @@ def test_build_shortlist_filters_by_meta_quote_asset() -> None:
     assert shortlist == []
 
 
+def test_build_shortlist_applies_volume_floor_to_pinned_symbols() -> None:
+    settings = _settings(quote_asset="USDT", pinned_symbols=("BTCUSDT",))
+    settings.universe.min_quote_volume_usd = 10_000_000.0
+
+    shortlist, _summary = build_shortlist(
+        [_meta("BTCUSDT", "BTC", "USDT")],
+        [
+            {
+                "symbol": "BTCUSDT",
+                "quote_volume": 1_000_000.0,
+                "last_price": 100.0,
+                "price_change_percent": 1.2,
+            }
+        ],
+        settings,
+    )
+
+    assert shortlist == []
+
+
 def test_build_shortlist_prefers_fresh_tight_symbol_with_same_liquidity() -> None:
     settings = _settings(quote_asset="USDT")
     shortlist, _summary = build_shortlist(

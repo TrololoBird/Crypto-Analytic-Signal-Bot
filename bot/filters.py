@@ -335,6 +335,8 @@ def apply_global_filters(
         updated = replace(updated, passed_filters=tuple(passed))
 
     if adx_penalty_applied:
+        # Apply the ADX penalty before the min-score gate so weak-trend
+        # signals are rejected using their final effective score.
         pre_penalty_score = updated.score
         adjusted_score = pre_penalty_score * adx_penalty_factor
         updated = replace(updated, score=adjusted_score)

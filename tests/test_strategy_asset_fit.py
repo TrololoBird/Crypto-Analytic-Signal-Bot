@@ -47,6 +47,31 @@ def test_price_velocity_asset_fit_uses_dynamic_volatility_and_liquidity_tags() -
     assert calculate_strategy_fit_score("SOLUSDT", "price_velocity", context) > 0.0
 
 
+def test_high_volume_rank_tag_uses_configured_shortlist_limit() -> None:
+    settings = BotSettings(
+        tg_token="",
+        target_chat_id="",
+        universe={"shortlist_limit": 20},
+    )
+    context = {
+        "symbol": "SOLUSDT",
+        "base_asset": "SOL",
+        "liquidity_rank": 12,
+        "quote_volume": 1_000_000.0,
+        "price_change_pct": 3.2,
+    }
+
+    assert (
+        asset_fit_reject_reason(
+            "vwap_trend",
+            "SOLUSDT",
+            context,
+            settings=settings,
+        )
+        == "asset_fit.scope_mismatch"
+    )
+
+
 def test_config_example_declares_priority_asset_overrides() -> None:
     settings = load_settings("config.toml.example")
 

@@ -19,6 +19,31 @@ class _DummyWS:
         self.sent.append(message)
 
 
+class _IterableWS:
+    def __init__(self, messages: list[str]) -> None:
+        self._messages = list(messages)
+        self.closed = False
+        self.close_code: int | None = None
+
+    async def __aenter__(self) -> "_IterableWS":
+        return self
+
+    async def __aexit__(self, *_args) -> None:
+        return None
+
+    def __aiter__(self) -> "_IterableWS":
+        return self
+
+    async def __anext__(self) -> str:
+        if not self._messages:
+            raise StopAsyncIteration
+        return self._messages.pop(0)
+
+    async def close(self) -> None:
+        self.closed = True
+        self.close_code = 1000
+
+
 @pytest.mark.asyncio
 async def test_message_buffer_keeps_newest_message_under_backpressure() -> None:
     buffer = MessageBuffer(maxsize=1)
@@ -51,6 +76,74 @@ async def test_resubscribe_all_uses_intended_streams_without_changing_market_bin
     assert len(ws.sent) == 1
     assert manager._ws_conns["market"] is ws
     assert manager._ws_conn is ws
+
+
+def test_validate_endpoint_stream_limits_rejects_unsafe_connection_size() -> None:
+    manager = SimpleNamespace(
+        _max_streams_per_connection=3,
+        _intended_streams_by_endpoint={"market": {"a", "b", "c", "d"}},
+    )
+
+    with pytest.raises(ValueError, match="stream count exceeds"):
+        ws_subscriptions.validate_endpoint_stream_limits(manager)
+
+
+@pytest.mark.asyncio
+async def test_run_stream_session_shutdown_closes_ws_and_clears_endpoint_state() -> None:
+    from bot.websocket import connection as ws_connection
+
+    ws = _IterableWS(["{}"])
+    manager = SimpleNamespace(
+        _running=False,
+        _ws_conns={"market": None},
+        _connected_urls={"market": None},
+        _connected_at_by_endpoint={"market": 0.0},
+        _ws_conn=None,
+        _last_message_ts_by_endpoint={"market": 0.0},
+        _last_message_ts=0.0,
+        _last_event_lag_ms=None,
+        _connected_endpoints={
+            "market": SimpleNamespace(set=lambda: None, clear=lambda: None)
+        },
+        _refresh_connected_event=lambda: None,
+        _connect_counts={"market": 0},
+        _connect_count=0,
+        _reconnect_cb=None,
+        _intended_streams_by_endpoint={"market": set()},
+        _last_reconnect_reason="not_started",
+        _last_reconnect_reason_by_endpoint={"market": "not_started"},
+        _resubscribe_all=AsyncMock(),
+        _symbols=[],
+        _short_lived_streak=0,
+        _handle_message=AsyncMock(),
+    )
+
+    async def _health_monitor(*_args, **_kwargs) -> None:
+        await asyncio.Future()
+
+    async def _connect(*_args, **_kwargs):
+        return ws
+
+    manager._health_monitor = _health_monitor
+
+    with (
+        patch("bot.websocket.connection.websockets.connect", side_effect=_connect),
+        patch("bot.websocket.connection.apply_tcp_keepalive"),
+    ):
+        backoff_reset, proactive = await ws_connection.run_stream_session(
+            manager,
+            endpoint="market",
+            url="wss://example.test/stream",
+            connect_start=0.0,
+            backoff_reset_after_seconds=30.0,
+            proactive_reconnect_after_seconds=3600.0,
+            parse_message=lambda raw: raw,
+        )
+
+    assert (backoff_reset, proactive) == (False, False)
+    assert ws.closed is True
+    assert manager._ws_conns["market"] is None
+    assert manager._last_reconnect_reason_by_endpoint["market"] == "graceful_close"
 
 
 @pytest.mark.asyncio
@@ -131,6 +224,26 @@ async def test_monitor_connection_silence_triggers_close_when_streams_intended()
 
     with patch("bot.websocket.health.time.monotonic", return_value=20.5):
         triggered = await ws_health.monitor_connection_silence(manager, ws, "market")
+
+    assert triggered is True
+    close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_public_book_ticker_silence_uses_tighter_limit() -> None:
+    from bot.websocket import health as ws_health
+
+    close = AsyncMock()
+    ws = SimpleNamespace(close=close)
+    manager = SimpleNamespace(
+        _cfg=SimpleNamespace(health_check_silence_seconds=60.0),
+        _last_message_ts_by_endpoint={"public": 10.0},
+        _connected_at_by_endpoint={"public": 0.0},
+        _intended_streams_by_endpoint={"public": {"btcusdt@bookTicker"}},
+    )
+
+    with patch("bot.websocket.health.time.monotonic", return_value=26.0):
+        triggered = await ws_health.monitor_connection_silence(manager, ws, "public")
 
     assert triggered is True
     close.assert_awaited_once()

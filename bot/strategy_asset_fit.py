@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+import math
 from math import isfinite
 from typing import Literal
 
@@ -150,7 +151,20 @@ def market_asset_tags(
         if isinstance(rank_raw, int | float) and isfinite(float(rank_raw))
         else None
     )
-    if rank is not None and rank <= 50:
+    shortlist_limit_raw = market_context.get("shortlist_limit")
+    shortlist_limit = (
+        int(shortlist_limit_raw)
+        if isinstance(shortlist_limit_raw, int | float)
+        and isfinite(float(shortlist_limit_raw))
+        and int(shortlist_limit_raw) > 0
+        else None
+    )
+    high_volume_rank_cutoff = (
+        max(1, int(math.ceil(shortlist_limit * 0.4)))
+        if shortlist_limit is not None
+        else 50
+    )
+    if rank is not None and rank <= high_volume_rank_cutoff:
         tags.add("HIGH_VOLUME")
 
     quote_volume_raw = market_context.get("quote_volume")
@@ -200,7 +214,11 @@ def asset_fit_reject_reason(
     """Return a calibrated rejection reason when a strategy does not fit a symbol."""
     normalized_symbol = str(symbol or market_context.get("symbol") or "").strip().upper()
     profile = asset_fit_for_strategy(strategy_id)
-    tags = market_asset_tags(normalized_symbol, market_context)
+    context = dict(market_context)
+    universe = getattr(settings, "universe", None) if settings is not None else None
+    if universe is not None and "shortlist_limit" not in context:
+        context["shortlist_limit"] = getattr(universe, "shortlist_limit", None)
+    tags = market_asset_tags(normalized_symbol, context)
 
     assets = getattr(settings, "assets", {}) if settings is not None else {}
     asset_config = assets.get(normalized_symbol) if isinstance(assets, dict) else None

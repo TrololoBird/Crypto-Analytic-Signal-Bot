@@ -10,6 +10,7 @@ from typing import Any
 from websockets import exceptions as ws_exceptions
 
 LOG = logging.getLogger("bot.ws_manager")
+DEFAULT_MAX_STREAMS_PER_CONNECTION = 300
 
 
 def base_streams_for_symbols(manager: Any, symbols: list[str]) -> list[str]:
@@ -78,6 +79,19 @@ def recompute_intended_streams(manager: Any) -> None:
     manager._intended_streams_by_endpoint["public"] = public_streams
     manager._intended_streams_by_endpoint["market"] = market_streams
     manager._intended_streams = set().union(public_streams, market_streams)
+    validate_endpoint_stream_limits(manager)
+
+
+def validate_endpoint_stream_limits(manager: Any) -> None:
+    max_streams = int(
+        getattr(manager, "_max_streams_per_connection", DEFAULT_MAX_STREAMS_PER_CONNECTION)
+    )
+    for endpoint, streams in manager._intended_streams_by_endpoint.items():
+        if len(streams) > max_streams:
+            raise ValueError(
+                "websocket stream count exceeds configured safety limit "
+                f"| endpoint={endpoint} streams={len(streams)} max={max_streams}"
+            )
 
 
 async def send_subscription_command(

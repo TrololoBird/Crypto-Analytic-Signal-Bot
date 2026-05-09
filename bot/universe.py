@@ -165,7 +165,7 @@ def _strategy_fits_for_row(
     row: dict[str, Any],
     *,
     settings: BotSettings,
-    liquidity_rank: int,
+    liquidity_rank: int | None,
 ) -> tuple[str, ...]:
     fits: list[str] = []
     funding_rate = _safe_float(row.get("funding_rate"))
@@ -181,7 +181,10 @@ def _strategy_fits_for_row(
     volume_multiple = quote_volume / volume_floor
     spread_ok = spread_bps is None or spread_bps <= float(settings.universe.shortlist_spread_max_bps)
     liquid_enough = quote_volume >= max(volume_floor * 3.0, 30_000_000.0)
-    top_liquidity = liquidity_rank <= max(int(settings.universe.shortlist_limit), 30)
+    top_liquidity = liquidity_rank is not None and liquidity_rank <= max(
+        int(settings.universe.shortlist_limit),
+        30,
+    )
     trending_move = price_change_pct <= 3.0
     breakout_move = 2.0 <= price_change_pct <= 10.0
     reversal_move = price_change_pct >= 5.0
@@ -274,6 +277,7 @@ def _strategy_fits_for_row(
         "symbol": symbol,
         "base_asset": str(row.get("base_asset") or "").strip().upper(),
         "liquidity_rank": liquidity_rank,
+        "shortlist_limit": int(settings.universe.shortlist_limit),
         "quote_volume": quote_volume,
         "price_change_pct": price_change_pct,
         "spread_bps": spread_bps,
@@ -427,9 +431,9 @@ def build_shortlist(
         price_change_pct = float(row.get("price_change_percent") or 0.0)
         if quote_volume <= 0.0 or last_price <= 0.0:
             continue
+        if quote_volume < settings.universe.min_quote_volume_usd:
+            continue
         if symbol not in pinned:
-            if quote_volume < settings.universe.min_quote_volume_usd:
-                continue
             if meta.onboard_date_ms and meta.onboard_date_ms > min_onboard_ms:
                 continue
         eligible_rows.append(

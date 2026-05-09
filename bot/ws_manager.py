@@ -221,6 +221,7 @@ class FuturesWSManager:
         self._book: dict[str, tuple[float | None, float | None]] = {}
         self._book_qty: dict[str, tuple[float | None, float | None]] = {}
         self._agg_trades: dict[str, collections.deque] = {}
+        self._max_streams_per_connection = _MAX_STREAMS_PER_CONNECTION
 
         # Global market stream caches (populated from !ticker@arr, !markPrice@arr, !forceOrder@arr)
         self._ticker_cache: dict[str, dict] = {}

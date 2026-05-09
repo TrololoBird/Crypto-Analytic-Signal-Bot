@@ -111,6 +111,18 @@ The bot includes a built-in web dashboard for real-time monitoring.
 4. Validate cooldown/blacklist status in repository.
 5. Restart only after root cause is identified.
 
+## Audit and documentation drift handling
+
+- Treat local docs, `AGENTS.md`, and generated audit reports as hypotheses
+  until verified against current code, tests, configs, logs, or official docs.
+- For each audit item, record whether it is `confirmed`, `already-fixed/false`,
+  `ambiguous`, or `deferred with reason`.
+- Do not downgrade dependencies solely from stale audit text. Check the current
+  package index first and record the verification date when the claim is
+  time-sensitive.
+- For Binance runtime behavior, verify against official Binance docs before
+  changing stream limits, endpoint routing, or REST/WebSocket boundaries.
+
 ## PR doc-change gate
 
 - CI now enforces a docs-parity check for pull requests that touch critical runtime paths: `main.py`, `bot/application`, `bot/core`, `bot/tasks`, `bot/telegram`, `bot/websocket`, `bot/features*`, `bot/ml*`, `bot/market_data.py`, `bot/ws_manager.py`, `bot/config.py`.

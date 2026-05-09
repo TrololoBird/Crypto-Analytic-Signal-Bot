@@ -78,7 +78,13 @@ async def evaluate_endpoint_health(manager: Any, ws: Any, endpoint: str) -> bool
 
 async def monitor_connection_silence(manager: Any, ws: Any, endpoint: str) -> bool:
     """Check generic silence timeout and force reconnect when needed."""
+    streams = manager._intended_streams_by_endpoint.get(endpoint, set())
     silence_limit = manager._cfg.health_check_silence_seconds
+    if endpoint == "public" and any(
+        "@bookticker" in str(stream).lower() or "@depth" in str(stream).lower()
+        for stream in streams
+    ):
+        silence_limit = min(float(silence_limit), 15.0)
     last_message_ts = manager._last_message_ts_by_endpoint.get(endpoint, 0.0)
     if last_message_ts == 0.0:
         return False
@@ -94,11 +100,11 @@ async def monitor_connection_silence(manager: Any, ws: Any, endpoint: str) -> bo
     ):
         return False
     silence = time.monotonic() - last_message_ts
-    if silence > silence_limit and manager._intended_streams_by_endpoint.get(endpoint):
+    if silence > silence_limit and streams:
         LOG.info(
             "ws health: no message for %.0fs with %d streams - forcing reconnect | endpoint=%s",
             silence,
-            len(manager._intended_streams_by_endpoint.get(endpoint, set())),
+            len(streams),
             endpoint,
         )
         await ws.close()

@@ -56,7 +56,7 @@ def _volume_quality(prepared: PreparedSymbol) -> float:
     if prepared.work_15m.is_empty():
         return 0.0
     ratio = float(prepared.work_15m.item(-1, "volume_ratio20") or 0.0)
-    return max(0.0, min(ratio / 2.5, 1.0))
+    return max(0.0, min(max(ratio, 0.5) / 1.5, 1.0))
 
 
 def _nearest_structure_level(prepared: PreparedSymbol, signal: Signal) -> float | None:
@@ -128,8 +128,11 @@ def _oi_momentum(prepared: PreparedSymbol, signal: Signal) -> float:
 
     # --- CVD proxy component (delta_ratio from 15m candles) ---
     cvd_score = 0.5
-    if not prepared.work_15m.is_empty() and "delta_ratio" in prepared.work_15m.columns:
-        delta = float(prepared.work_15m.item(-1, "delta_ratio") or 0.5)
+    delta_source = signal.orderflow_delta_ratio
+    if delta_source is None and not prepared.work_15m.is_empty() and "delta_ratio" in prepared.work_15m.columns:
+        delta_source = prepared.work_15m.item(-1, "delta_ratio")
+    if delta_source is not None:
+        delta = max(0.0, min(float(delta_source or 0.5), 1.0))
         # For LONG: buying pressure (delta_ratio > 0.5) is bullish
         # For SHORT: selling pressure (delta_ratio < 0.5) is bullish
         if signal.direction == "long":

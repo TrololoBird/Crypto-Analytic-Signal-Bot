@@ -163,8 +163,10 @@ class ShortlistService:
             symbol = str(row.get("symbol") or "").strip().upper()
             premium = premium_by_symbol.get(symbol)
             if premium:
-                row["funding_rate"] = premium.get("funding_rate")
-                row["basis_pct"] = premium.get("basis_pct")
+                if row.get("funding_rate") is None:
+                    row["funding_rate"] = premium.get("funding_rate")
+                if row.get("basis_pct") is None:
+                    row["basis_pct"] = premium.get("basis_pct")
             merged.append(row)
         return merged
 

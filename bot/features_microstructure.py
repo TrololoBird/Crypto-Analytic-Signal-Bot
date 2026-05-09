@@ -9,8 +9,10 @@ def add_microstructure_features(df: pl.DataFrame) -> pl.DataFrame:
     if "delta_ratio" in result.columns:
         result = result.with_columns(
             [
-                ((pl.col("delta_ratio") - 0.5) * 2.0)
+                ((pl.col("delta_ratio").clip(0.0, 1.0) - 0.5) * 2.0)
                 .clip(-1.0, 1.0)
+                .fill_null(0.0)
+                .fill_nan(0.0)
                 .alias("signed_order_flow"),
             ]
         )

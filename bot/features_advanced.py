@@ -51,15 +51,11 @@ def supertrend(
         final_lower.append(fl)
         prev_st = st[idx - 1]
         curr_close = float(close_vals[idx])
-        st.append(
-            fu
-            if (prev_st == prev_fu and curr_close <= fu)
-            else fl
-            if prev_st == prev_fu
-            else fl
-            if curr_close >= fl
-            else fu
-        )
+        if prev_st == prev_fu:
+            next_st = fu if curr_close <= fu else fl
+        else:
+            next_st = fl if curr_close >= fl else fu
+        st.append(next_st)
     return pl.Series("supertrend", st, dtype=pl.Float64), pl.Series(
         "supertrend_dir",
         [

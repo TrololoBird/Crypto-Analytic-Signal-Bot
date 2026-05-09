@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import socket
 import logging
 import time
@@ -123,6 +124,7 @@ async def run_stream_session(
     LOG.info("ws connection established | endpoint=%s url=%s", endpoint, url)
     backoff_reset = False
     reconnect_reason: str | None = None
+    graceful_close = False
     async with ws:
         apply_connected_state(manager, endpoint=endpoint, ws=ws, url=url)
         await manager._resubscribe_all(endpoint, ws)
@@ -141,7 +143,11 @@ async def run_stream_session(
         try:
             async for raw in ws:
                 if not manager._running:
-                    return backoff_reset, False
+                    reconnect_reason = "shutdown"
+                    graceful_close = True
+                    with contextlib.suppress(Exception):
+                        await ws.close()
+                    break
                 elapsed = time.monotonic() - connect_start
                 if not backoff_reset and elapsed >= backoff_reset_after_seconds:
                     backoff_reset = True
@@ -154,6 +160,10 @@ async def run_stream_session(
                 except Exception:
                     continue
                 await manager._handle_message(msg, endpoint)
+            else:
+                close_code = getattr(ws, "close_code", None)
+                if close_code in (1000, 1001):
+                    graceful_close = True
         finally:
             health_task.cancel()
             try:
@@ -171,6 +181,11 @@ async def run_stream_session(
             (time.monotonic() - connect_start) / 3600,
         )
         return backoff_reset, True
+    if reconnect_reason == "shutdown" or graceful_close:
+        manager._last_reconnect_reason = f"{endpoint}:graceful_close"
+        manager._last_reconnect_reason_by_endpoint[endpoint] = "graceful_close"
+        LOG.info("ws graceful close | endpoint=%s", endpoint)
+        return backoff_reset, False
     raise ConnectionError("stream closed without explicit close frame")
 
 

@@ -39,3 +39,18 @@ def test_advanced_and_oscillator_wrappers_delegate_to_group_modules() -> None:
     k_b, d_b = features_oscillators.stochastic(df)
     assert k_a.equals(k_b)
     assert d_a.equals(d_b)
+
+
+def test_stochastic_includes_current_bar_in_rolling_window() -> None:
+    df = pl.DataFrame(
+        {
+            "high": [20.0, 20.0, 100.0],
+            "low": [10.0, 10.0, 0.0],
+            "close": [15.0, 15.0, 50.0],
+        }
+    )
+
+    k, d = features_oscillators.stochastic(df, period=3, smooth_k=1, smooth_d=1)
+
+    assert k.item(-1) == 50.0
+    assert d.item(-1) == 50.0
