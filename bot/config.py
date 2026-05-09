@@ -21,7 +21,9 @@ class RuntimeConfig(BaseModel):
     event_bus_drop_log_interval: int = Field(default=25, ge=1, le=10_000)
     circuit_breaker_failure_threshold: int = Field(default=5, ge=0, le=100)
     metrics_port: int = Field(default=9090, ge=1000, le=65535)
+    metrics_host: str = "127.0.0.1"
     dashboard_port: int = Field(default=8080, ge=1000, le=65535)
+    dashboard_host: str = "127.0.0.1"
     auto_open_dashboard: bool = False
     circuit_breaker_cooldown_seconds: int = Field(default=60, ge=0, le=3600)
     telemetry_subdir: str = "telemetry"
@@ -35,7 +37,9 @@ class RuntimeConfig(BaseModel):
     startup_batch_size: int = Field(default=3, ge=1, le=10)
     startup_batch_delay_seconds: float = Field(default=2.0, ge=0.5, le=10.0)
     max_concurrent_rest_requests: int = Field(default=5, ge=1, le=20)
-    emergency_context_warmup_timeout_seconds: float = Field(default=15.0, ge=1.0, le=120.0)
+    emergency_context_warmup_timeout_seconds: float = Field(
+        default=15.0, ge=1.0, le=120.0
+    )
     emergency_context_warmup_symbol_limit: int = Field(default=12, ge=1, le=100)
     emergency_context_fetch_timeout_seconds: float = Field(default=3.0, ge=0.5, le=30.0)
     futures_data_request_limit_per_5m: int = Field(default=300, ge=30, le=1000)
@@ -93,11 +97,7 @@ class AssetConfig(BaseModel):
     def _normalize_excluded_strategies(
         cls, value: tuple[str, ...] | list[str] | None
     ) -> tuple[str, ...]:
-        return tuple(
-            str(item).strip()
-            for item in (value or ())
-            if str(item).strip()
-        )
+        return tuple(str(item).strip() for item in (value or ()) if str(item).strip())
 
 
 class FilterConfig(BaseModel):
@@ -660,7 +660,10 @@ class BotSettings(BaseModel):
 
     @model_validator(mode="after")
     def _normalize_asset_overrides(self) -> "BotSettings":
-        self.assets = {str(symbol).strip().upper(): config for symbol, config in self.assets.items()}
+        self.assets = {
+            str(symbol).strip().upper(): config
+            for symbol, config in self.assets.items()
+        }
         return self
 
     def validate_for_runtime(self, *, require_telegram: bool) -> None:
@@ -688,11 +691,17 @@ class BotSettings(BaseModel):
                 raise ValueError(
                     f"{label} must point to Binance public market streams only: {url}"
                 )
-        if str(self.ws.public_base_url).rstrip("/").lower().endswith("/public") is False:
+        if (
+            str(self.ws.public_base_url).rstrip("/").lower().endswith("/public")
+            is False
+        ):
             raise ValueError(
                 f"ws.public_base_url must use Binance /public routed endpoint: {self.ws.public_base_url}"
             )
-        if str(self.ws.market_base_url).rstrip("/").lower().endswith("/market") is False:
+        if (
+            str(self.ws.market_base_url).rstrip("/").lower().endswith("/market")
+            is False
+        ):
             raise ValueError(
                 f"ws.market_base_url must use Binance /market routed endpoint: {self.ws.market_base_url}"
             )

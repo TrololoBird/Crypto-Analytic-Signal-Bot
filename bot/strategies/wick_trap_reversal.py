@@ -94,7 +94,7 @@ class WickTrapReversalSetup(BaseSetup):
                 )
             ),
         )
-        
+
         sh_mask, sl_mask = _swing_points(work_1h, n=3, include_unconfirmed_tail=True)
 
         direction: str | None = None

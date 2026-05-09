@@ -31,14 +31,14 @@ def _executor_noop() -> None:
 
 class SignalEngine:
     """Engine for calculating signals from multiple strategies.
-    
+
     Features:
     - Parallel strategy execution with asyncio
     - Performance tracking
     - Error isolation (one strategy failure doesn't break others)
     - Configurable timeout per strategy
     """
-    
+
     def __init__(
         self,
         registry: StrategyRegistry,
@@ -66,16 +66,16 @@ class SignalEngine:
         )
         self._executor_warmed = False
         self._executor_warm_lock = asyncio.Lock()
-    
+
     async def calculate_all(
-        self, 
+        self,
         prepared: PreparedSymbol
     ) -> list[SignalResult]:
         """Calculate signals from all enabled strategies.
-        
+
         Args:
             prepared: Prepared symbol data
-            
+
         Returns:
             List of SignalResult from all strategies
         """
@@ -120,33 +120,33 @@ class SignalEngine:
         ):
             LOG.info("%s: calculate_all skipped | no strategy_fits", symbol)
             return []
-        
+
         LOG.info("%s: calculate_all called | strategies=%d", symbol, len(strategies))
-        
+
         if not strategies:
             LOG.warning("%s: No enabled strategies to calculate", symbol)
             return routing_skips
-        
+
         # Check which strategies can calculate
         can_calculate_count = 0
         for s in strategies:
             if s.can_calculate(prepared):
                 can_calculate_count += 1
-        
+
         LOG.debug("%s: strategies can_calculate=%d/%d", symbol, can_calculate_count, len(strategies))
         await self._ensure_executor_warmed(min(len(strategies), self._strategy_concurrency))
-        
+
         pending = [
             asyncio.create_task(self._calculate_one(strategy, prepared), name=f"engine:{symbol}:{strategy.strategy_id}")
             for strategy in strategies
         ]
         results = await asyncio.gather(*pending, return_exceptions=True)
-        
+
         # Process results and log errors
         signal_results: list[SignalResult] = list(routing_skips)
         signals_found = 0
         errors = 0
-        
+
         for strategy, result in zip(strategies, results, strict=True):
             if isinstance(result, BaseException):
                 error_class = classify_runtime_error(result)
@@ -177,23 +177,23 @@ class SignalEngine:
                 signal_results.append(result)
                 if result.signal is not None:
                     signals_found += 1
-        
+
         LOG.info("%s: calculate_all complete | results=%d signals=%d errors=%d",
                   symbol, len(signal_results), signals_found, errors)
-        
+
         return signal_results
-    
+
     async def calculate_one(
-        self, 
-        strategy_id: str, 
+        self,
+        strategy_id: str,
         prepared: PreparedSymbol
     ) -> SignalResult | None:
         """Calculate signal from specific strategy.
-        
+
         Args:
             strategy_id: Strategy ID to calculate
             prepared: Prepared symbol data
-            
+
         Returns:
             SignalResult or None if strategy not found/disabled
         """
@@ -201,15 +201,15 @@ class SignalEngine:
         if strategy is None:
             LOG.warning("Strategy %s not found", strategy_id)
             return None
-        
+
         if not self._registry.is_enabled(strategy_id):
             LOG.debug("Strategy %s is disabled", strategy_id)
             return None
-        
+
         return await self._calculate_one(strategy, prepared)
-    
+
     async def _calculate_one(
-        self, 
+        self,
         strategy: Any,  # AbstractStrategy
         prepared: PreparedSymbol
     ) -> SignalResult:
@@ -217,7 +217,7 @@ class SignalEngine:
         strategy_id = strategy.strategy_id
         symbol = prepared.symbol if prepared else "unknown"
         queued_at = time.perf_counter()
-        
+
         async with self._semaphore:
             start_time = time.perf_counter()
             queue_wait_ms = (start_time - queued_at) * 1000.0
@@ -239,23 +239,23 @@ class SignalEngine:
                         },
                         calculation_time_ms=0.0
                     )
-                
+
                 # Run calculation with timeout
                 loop = asyncio.get_running_loop()
                 result = await asyncio.wait_for(
                     loop.run_in_executor(_STRATEGY_EXECUTOR, strategy.calculate, prepared),
                     timeout=self._timeout,
                 )
-                
+
                 elapsed_ms = (time.perf_counter() - start_time) * 1000
-                
+
                 # Record performance
                 self._registry.record_performance(
-                    strategy_id, 
+                    strategy_id,
                     elapsed_ms,
                     error=bool(result.decision and result.decision.is_error)
                 )
-                
+
                 # Update result with accurate timing
                 result.calculation_time_ms = elapsed_ms
                 result.metadata.setdefault("queue_wait_ms", queue_wait_ms)
@@ -268,9 +268,9 @@ class SignalEngine:
                     queue_wait_ms,
                     result.signal is not None
                 )
-                
+
                 return result
-                
+
             except asyncio.TimeoutError:
                 elapsed_ms = (time.perf_counter() - start_time) * 1000
                 LOG.error("Strategy %s timed out after %.2fs", strategy_id, self._timeout)
@@ -299,7 +299,7 @@ class SignalEngine:
                         "compute_ms": elapsed_ms,
                     },
                 )
-                
+
             except Exception as exc:
                 elapsed_ms = (time.perf_counter() - start_time) * 1000
                 error_class = classify_runtime_error(exc)
@@ -415,41 +415,41 @@ class SignalEngine:
 
     def close(self) -> None:
         return None
-    
+
     def get_best_signal(self, results: list[SignalResult]) -> Signal | None:
         """Select best signal from multiple results based on score.
-        
+
         Args:
             results: List of SignalResult from strategies
-            
+
         Returns:
             Best Signal or None if no valid signals
         """
         valid_signals = [
-            r.signal for r in results 
+            r.signal for r in results
             if r.is_valid and r.signal is not None
         ]
-        
+
         if not valid_signals:
             return None
-        
+
         # Sort by score descending
         valid_signals.sort(key=lambda s: s.score, reverse=True)
-        
+
         # Return highest scored signal
         return valid_signals[0]
-    
+
     def get_signals_above_threshold(
-        self, 
+        self,
         results: list[SignalResult],
         min_score: float = 0.6
     ) -> list[Signal]:
         """Get all signals above score threshold.
-        
+
         Args:
             results: List of SignalResult
             min_score: Minimum score to include
-            
+
         Returns:
             List of Signals meeting threshold
         """
@@ -458,16 +458,16 @@ class SignalEngine:
             if result.is_valid and result.signal is not None:
                 if result.signal.score >= min_score:
                     signals.append(result.signal)
-        
+
         # Sort by score descending
         signals.sort(key=lambda s: s.score, reverse=True)
         return signals
-    
+
     def get_engine_stats(self) -> dict[str, Any]:
         """Get engine statistics."""
         enabled_count = len(self._registry.get_enabled())
         total_count = len(self._registry)
-        
+
         return {
             "enabled_strategies": enabled_count,
             "total_strategies": total_count,

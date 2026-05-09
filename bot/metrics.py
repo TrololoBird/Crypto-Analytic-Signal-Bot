@@ -101,8 +101,9 @@ class SignalMetrics:
 class BotMetricsCollector:
     """Collects and exposes Prometheus metrics for the signal bot."""
 
-    def __init__(self, port: int = 9090) -> None:
+    def __init__(self, port: int = 9090, host: str = "127.0.0.1") -> None:
         self.port = port
+        self.host = host
         self._enabled = HAS_PROMETHEUS
 
         if not self._enabled:
@@ -216,8 +217,8 @@ class BotMetricsCollector:
             LOG.debug("metrics server disabled (prometheus_client not installed)")
             return
         try:
-            prom_start_http_server(self.port)
-            LOG.info("metrics server started on port %d", self.port)
+            prom_start_http_server(self.port, addr=self.host)
+            LOG.info("metrics server started on host %s port %d", self.host, self.port)
         except Exception as exc:
             LOG.error("failed to start metrics server: %s", exc)
 

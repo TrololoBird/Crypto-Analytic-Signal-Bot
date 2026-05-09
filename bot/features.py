@@ -276,7 +276,7 @@ def _rsi(df: pl.DataFrame, period: int = 14) -> pl.Series:
             )
         except Exception as exc:
             _log_indicator_fallback("rsi_polars_ta", exc)
-    
+
     # Pure Polars Wilder's RSI (alpha = 1/period)
     close = df["close"]
     delta = close.diff()
@@ -322,19 +322,19 @@ def _atr(df: pl.DataFrame, period: int = 14) -> pl.Series:
             )
         except Exception as exc:
             _log_indicator_fallback("atr_polars_ta", exc)
-    
+
     # Pure Polars ATR
     high = df["high"]
     low = df["low"]
     close = df["close"]
     prev_close = close.shift(1)
-    
+
     tr = pl.max_horizontal(
         (high - low).abs(),
         (high - prev_close).abs(),
         (low - prev_close).abs(),
     )
-    
+
     tr_series = _materialize_series(tr, df=df, name="true_range")
     return _materialize_series(
         wilder_mean(tr_series, period=period, name=f"atr{period}"),
@@ -348,10 +348,10 @@ def _adx(df: pl.DataFrame, period: int = 14) -> pl.Series:
     # Pure Polars ADX avoids the native TA-Lib dependency.
     high = df["high"]
     low = df["low"]
-    
+
     up_move = high.diff()
     down_move = -low.diff()
-    
+
     plus_dm = _materialize_series(
         pl.when((up_move > down_move) & (up_move > 0.0)).then(up_move).otherwise(0.0),
         df=df,
@@ -362,12 +362,12 @@ def _adx(df: pl.DataFrame, period: int = 14) -> pl.Series:
         df=df,
         name="minus_dm",
     )
-    
+
     atr = _atr(df, period)
     atr_safe = _clean_non_finite(atr, fill=1e-9).replace(0.0, 1e-9)
     plus_di = 100.0 * wilder_mean(plus_dm, period=period, name="plus_dm_smoothed") / atr_safe
     minus_di = 100.0 * wilder_mean(minus_dm, period=period, name="minus_dm_smoothed") / atr_safe
-    
+
     di_sum = (plus_di + minus_di).replace(0.0, None)
     dx = _clean_non_finite(100.0 * (plus_di - minus_di).abs() / di_sum, fill=0.0)
     return _materialize_series(
@@ -588,7 +588,7 @@ def _safe_close_position(df: pl.DataFrame, window: int = 20) -> pl.Series:
     rolling_low = df["low"].rolling_min(window_size=window)
     rolling_high = df["high"].rolling_max(window_size=window)
     width = rolling_high - rolling_low
-    
+
     value = _clean_non_finite((df["close"] - rolling_low) / width, fill=0.5)
     return value.clip(0.0, 1.0).rename("close_position")
 
@@ -606,7 +606,7 @@ def _supertrend(df: pl.DataFrame, period: int = 10, multiplier: float = 3.0) -> 
     high = df["high"]
     low = df["low"]
     close = df["close"]
-    
+
     # ATR for SuperTrend
     prev_close = close.shift(1)
     tr = pl.max_horizontal(
@@ -615,7 +615,7 @@ def _supertrend(df: pl.DataFrame, period: int = 10, multiplier: float = 3.0) -> 
         (low - prev_close).abs(),
     )
     atr = _materialize_series(tr.ewm_mean(alpha=1.0 / period, adjust=False), df=df, name="supertrend_atr")
-    
+
     hl2 = (high + low) / 2.0
     basic_upper = hl2 + multiplier * atr
     basic_lower = hl2 - multiplier * atr
@@ -663,15 +663,15 @@ def _supertrend(df: pl.DataFrame, period: int = 10, multiplier: float = 3.0) -> 
 
 def _bollinger_bands(close: pl.Series, period: int = 20, nbdev: float = 2.0) -> tuple[pl.Series, pl.Series, pl.Series]:
     """Bollinger Bands - pure Polars implementation.
-    
+
     Returns (upper, middle, lower) bands.
     """
     middle = close.rolling_mean(window_size=period).rename("bb_middle")
     std = close.rolling_std(window_size=period, ddof=1).rename("bb_std")
-    
+
     upper = middle + nbdev * std
     lower = middle - nbdev * std
-    
+
     return upper, middle, lower
 
 
@@ -690,18 +690,18 @@ def _keltner_channels(
     atr_period: int = 10,
 ) -> tuple[pl.Series, pl.Series, pl.Series]:
     """Keltner Channels - pure Polars implementation using ATR.
-    
+
     Returns (upper, middle, lower) channels.
     """
     typical_price = (df["high"] + df["low"] + df["close"]) / 3.0
     middle = typical_price.ewm_mean(span=period, adjust=False).rename("kc_middle")
-    
+
     # ATR for channel width
     high = df["high"]
     low = df["low"]
     close = df["close"]
     prev_close = close.shift(1)
-    
+
     tr = pl.max_horizontal(
         (high - low).abs(),
         (high - prev_close).abs(),
@@ -713,10 +713,10 @@ def _keltner_channels(
         df=df,
         name="kc_atr",
     )
-    
+
     upper = middle + multiplier * atr
     lower = middle - multiplier * atr
-    
+
     return upper, middle, lower
 
 
@@ -870,14 +870,14 @@ def _chandelier_exit(df: pl.DataFrame, period: int = 22, atr_mult: float = 3.0) 
 def _add_advanced_indicators(df: pl.DataFrame) -> pl.DataFrame:
     """Add advanced technical indicators using pure Polars implementations."""
     result = df
-    
+
     # --- SuperTrend ---------------------------------------------------------
     st, st_dir = _supertrend(df, period=10, multiplier=3.0)
     result = result.with_columns([
         st.alias("supertrend"),
         st_dir.alias("supertrend_dir"),
     ])
-    
+
     # --- OBV ---------------------------------------------------------------
     try:
         if _USE_POLARS_TA_BACKEND and _HAS_POLARS_TA and hasattr(plta, "OBV"):
@@ -906,7 +906,7 @@ def _add_advanced_indicators(df: pl.DataFrame) -> pl.DataFrame:
             pl.lit(0.0).alias("obv_ema20"),
             pl.lit(0.0).alias("obv_above_ema"),
         ])
-    
+
     # --- Bollinger Bands - pure Polars implementation ------------------------
     upper, middle, lower = _bollinger_bands(df["close"], period=20, nbdev=2.0)
     bb_pct_b = (df["close"] - lower) / (upper - lower)
@@ -916,7 +916,7 @@ def _add_advanced_indicators(df: pl.DataFrame) -> pl.DataFrame:
         _clean_non_finite(bb_pct_b, fill=0.5).alias("bb_pct_b"),
         _clean_non_finite(bb_width, fill=0.0).alias("bb_width"),
     ])
-    
+
     # --- Keltner Channels - pure Polars implementation -----------------------
     kc_upper, kc_middle, kc_lower = _keltner_channels(df, period=20, multiplier=2.0)
     close_safe = _clean_non_finite(df["close"].abs(), fill=1e-10).clip(
@@ -928,7 +928,7 @@ def _add_advanced_indicators(df: pl.DataFrame) -> pl.DataFrame:
         kc_lower.alias("kc_lower"),
         kc_width.fill_nan(0.04).alias("kc_width"),
     ])
-    
+
     # --- HMA (Hull Moving Average) --------------------------------------------
     close = df["close"]
     hma9 = _hull_moving_average(close, 9, name="hma9")
@@ -937,7 +937,7 @@ def _add_advanced_indicators(df: pl.DataFrame) -> pl.DataFrame:
         hma9.alias("hma9"),
         hma21.alias("hma21"),
     ])
-    
+
     # --- PSAR (Parabolic SAR) -------------------------------------------------
     psar_long, psar_short, psar_reversal = _parabolic_sar(df, step=0.02, max_step=0.2)
     result = result.with_columns([
@@ -945,7 +945,7 @@ def _add_advanced_indicators(df: pl.DataFrame) -> pl.DataFrame:
         psar_short.alias("psar_short"),
         psar_reversal.alias("psar_reversal"),
     ])
-    
+
     # --- Aroon ---------------------------------------------------------------
     aroon_up, aroon_down, aroon_osc = _aroon(df, period=14)
     result = result.with_columns([
@@ -953,7 +953,7 @@ def _add_advanced_indicators(df: pl.DataFrame) -> pl.DataFrame:
         aroon_down.alias("aroon_down14"),
         aroon_osc.alias("aroon_osc14"),
     ])
-    
+
     # --- Stochastic ---------------------------------------------------------
     stoch_k, stoch_d = _stochastic(df, period=14, smooth_k=3, smooth_d=3)
     result = result.with_columns([
@@ -961,7 +961,7 @@ def _add_advanced_indicators(df: pl.DataFrame) -> pl.DataFrame:
         stoch_d.alias("stoch_d14"),
         (stoch_k - stoch_d).fill_nan(0.0).alias("stoch_h14"),
     ])
-    
+
     # --- CCI, Williams %R, MFI, CMF, Ultimate Oscillator --------------------
     rolling_high = df["high"].rolling_max(window_size=14)
     rolling_low = df["low"].rolling_min(window_size=14)
@@ -973,14 +973,14 @@ def _add_advanced_indicators(df: pl.DataFrame) -> pl.DataFrame:
         _cmf(df, 20).fill_nan(0.0).alias("cmf20"),
         _ultimate_oscillator(df, 7, 14, 28).fill_nan(50.0).alias("uo"),
     ])
-    
+
     # --- Fisher Transform -----------------------------------------------------
     fisher, fisher_signal = _fisher_transform(df, period=10)
     result = result.with_columns([
         fisher.alias("fisher"),
         fisher_signal.alias("fisher_signal"),
     ])
-    
+
     # --- Squeeze Momentum ----------------------------------------------------
     squeeze_hist, squeeze_on, squeeze_off, squeeze_no = _squeeze_momentum(df, period=20)
     result = result.with_columns([
@@ -989,7 +989,7 @@ def _add_advanced_indicators(df: pl.DataFrame) -> pl.DataFrame:
         squeeze_off.alias("squeeze_off"),
         squeeze_no.alias("squeeze_no"),
     ])
-    
+
     # --- Chandelier Exit -----------------------------------------------------
     chandelier_long, chandelier_short, chandelier_dir = _chandelier_exit(df, period=22, atr_mult=3.0)
     result = result.with_columns([
@@ -1001,14 +1001,14 @@ def _add_advanced_indicators(df: pl.DataFrame) -> pl.DataFrame:
     result = result.with_columns([
         _volume_profile(result, bins=12),
     ])
-    
+
     # --- Z-Score and Slope -------------------------------------------------
     zscore30 = ((df["close"] - df["close"].rolling_mean(window_size=30)) / df["close"].rolling_std(window_size=30)).fill_nan(0.0)
     result = result.with_columns([
         zscore30.alias("zscore30"),
         _roc(df, 5).fill_nan(0.0).alias("slope5"),
     ])
-    
+
     # --- Ichimoku Cloud - UNUSED by strategies -----------------------------
     tenkan, kijun, senkou_a, senkou_b = _ichimoku_lines(result)
     result = result.with_columns([
@@ -1017,7 +1017,7 @@ def _add_advanced_indicators(df: pl.DataFrame) -> pl.DataFrame:
         senkou_a.alias("ichi_senkou_a"),
         senkou_b.alias("ichi_senkou_b"),
     ])
-    
+
     return result
 
 
@@ -1063,7 +1063,7 @@ def _volume_profile(df: pl.DataFrame, bins: int = 12) -> pl.Expr:
 
 def _prepare_frame(df: pl.DataFrame) -> pl.DataFrame:
     """Compute all technical indicators for a single OHLCV DataFrame.
-    
+
     Returns a new DataFrame with NaN-seeded rows dropped.
     All backward-compatible column names are preserved.
     """
@@ -1076,19 +1076,19 @@ def _prepare_frame(df: pl.DataFrame) -> pl.DataFrame:
         _adx(df, 14).alias("adx14"),
         _atr(df, 14).alias("atr14"),
     ])
-    
+
     # MACD
     macd_line = _ema(work, 12) - _ema(work, 26)
     work = work.with_columns([
         macd_line.alias("macd_line"),
     ])
-    
+
     macd_signal = work["macd_line"].ewm_mean(span=9, adjust=False)
     work = work.with_columns([
         macd_signal.alias("macd_signal"),
         (pl.col("macd_line") - macd_signal).alias("macd_hist"),
     ])
-    
+
     # Donchian Channels
     work = work.with_columns([
         pl.col("low").rolling_min(window_size=20).alias("donchian_low20"),
@@ -1098,7 +1098,7 @@ def _prepare_frame(df: pl.DataFrame) -> pl.DataFrame:
         pl.col("donchian_low20").shift(1).alias("prev_donchian_low20"),
         pl.col("donchian_high20").shift(1).alias("prev_donchian_high20"),
     ])
-    
+
     # Volume metrics
     work = work.with_columns([
         pl.col("volume").rolling_mean(window_size=20).alias("volume_mean20"),
@@ -1106,12 +1106,12 @@ def _prepare_frame(df: pl.DataFrame) -> pl.DataFrame:
     work = work.with_columns([
         (pl.col("volume") / pl.col("volume_mean20")).alias("volume_ratio20"),
     ])
-    
+
     # VWAP and bands
     work = work.with_columns([
         _vwap(work).alias("vwap"),
     ])
-    
+
     price_dev_sq = (work["close"] - work["vwap"]) ** 2
     # polars Series has no cum_mean(); compute cumulative mean via cum_sum / n
     if work.height:
@@ -1127,7 +1127,7 @@ def _prepare_frame(df: pl.DataFrame) -> pl.DataFrame:
         (pl.col("vwap") - 2.0 * vwap_std).alias("vwap_lower2"),
         (((pl.col("close") - pl.col("vwap")) / pl.col("vwap")) * 100.0).fill_nan(0.0).alias("vwap_deviation_pct"),
     ])
-    
+
     # Delta ratio (if taker_buy available)
     if "taker_buy_base_volume" in work.columns:
         work = work.with_columns([
@@ -1138,19 +1138,19 @@ def _prepare_frame(df: pl.DataFrame) -> pl.DataFrame:
         ])
     else:
         work = work.with_columns([pl.lit(0.5).alias("delta_ratio")])
-    
+
     # ATR %
     work = work.with_columns([
         ((pl.col("atr14") / pl.col("close")) * 100.0)
         .clip(lower_bound=0.001)
         .alias("atr_pct"),
     ])
-    
+
     # Close position
     work = work.with_columns([
         _safe_close_position(work, window=20).alias("close_position"),
     ])
-    
+
     # Advanced indicators
     work = _add_advanced_indicators(work)
     work = add_microstructure_features(work)
@@ -1163,13 +1163,13 @@ def _prepare_frame(df: pl.DataFrame) -> pl.DataFrame:
         ).fill_nan(0.0).alias("vwap_deviation_z20"),
     ])
     work = _add_session_features(work)
-    
+
     # Drop rows with insufficient data
     # Filter where ema200 or donchian_low20 is null
     work = work.filter(
         pl.col("ema200").is_not_null() & pl.col("donchian_low20").is_not_null()
     )
-    
+
     return work
 
 
@@ -1181,13 +1181,13 @@ def _bias_4h(work_4h: pl.DataFrame) -> str:
     """Determine 4h bias from EMA alignment."""
     if work_4h.is_empty():
         return "neutral"
-    
+
     last = work_4h.row(-1, named=True)
     close = last["close"]
     ema20 = last["ema20"]
     ema50 = last["ema50"]
     ema200 = last["ema200"]
-    
+
     if close > ema50 > ema200 and ema20 > ema50:
         return "uptrend"
     if close < ema50 < ema200 and ema20 < ema50:
@@ -1199,13 +1199,13 @@ def _bias_1h(work_1h: pl.DataFrame) -> str:
     """Determine 1h bias from EMA alignment for 15M signal context."""
     if work_1h.is_empty():
         return "neutral"
-    
+
     last = work_1h.row(-1, named=True)
     close = last["close"]
     ema20 = last["ema20"]
     ema50 = last["ema50"]
     ema200 = last["ema200"]
-    
+
     if close > ema50 > ema200 and ema20 > ema50:
         return "uptrend"
     if close < ema50 < ema200 and ema20 < ema50:
@@ -1328,21 +1328,21 @@ def _market_structure_1h(work_1h: pl.DataFrame) -> str:
     """Determine 1h market structure from swing points."""
     if len(work_1h) < 20:
         return "ranging"
-    
+
     swing_high, swing_low = _swing_points(work_1h, n=3)
-    
+
     # Get swing high/low values
     high_vals = work_1h.filter(swing_high)["high"].to_list()
     low_vals = work_1h.filter(swing_low)["low"].to_list()
-    
+
     if len(high_vals) < 2 or len(low_vals) < 2:
         return "ranging"
-    
+
     hh = high_vals[-1] > high_vals[-2]  # higher high
     hl = low_vals[-1] > low_vals[-2]    # higher low
     lh = high_vals[-1] < high_vals[-2]  # lower high
     ll = low_vals[-1] < low_vals[-2]    # lower low
-    
+
     if hh and hl:
         return "uptrend"
     if lh and ll:
@@ -1354,19 +1354,19 @@ def _regime_4h_confirmed(work_4h: pl.DataFrame, min_bars: int = 3) -> str:
     """Strict 4h regime requiring consecutive bars in same trend."""
     if len(work_4h) < min_bars:
         return "ranging"
-    
+
     tail = work_4h.tail(min_bars)
-    
+
     # Check uptrend condition
     uptrend_count = tail.filter(
         (pl.col("ema20") > pl.col("ema50")) & (pl.col("ema50") > pl.col("ema200"))
     ).height
-    
+
     # Check downtrend condition
     downtrend_count = tail.filter(
         (pl.col("ema20") < pl.col("ema50")) & (pl.col("ema50") < pl.col("ema200"))
     ).height
-    
+
     if uptrend_count == min_bars:
         return "uptrend"
     if downtrend_count == min_bars:
@@ -1378,19 +1378,19 @@ def _regime_1h_confirmed(work_1h: pl.DataFrame, min_bars: int = 3) -> str:
     """Strict 1h regime requiring consecutive bars in same trend for 15M signal context."""
     if len(work_1h) < min_bars:
         return "ranging"
-    
+
     tail = work_1h.tail(min_bars)
-    
+
     # Check uptrend condition
     uptrend_count = tail.filter(
         (pl.col("ema20") > pl.col("ema50")) & (pl.col("ema50") > pl.col("ema200"))
     ).height
-    
+
     # Check downtrend condition
     downtrend_count = tail.filter(
         (pl.col("ema20") < pl.col("ema50")) & (pl.col("ema50") < pl.col("ema200"))
     ).height
-    
+
     if uptrend_count == min_bars:
         return "uptrend"
     if downtrend_count == min_bars:
@@ -1402,31 +1402,31 @@ def _volume_poc(work: pl.DataFrame, lookback: int = 96, buckets: int = 20) -> fl
     """Simplified Volume Point of Control."""
     if len(work) < 10:
         return None
-    
+
     tail = work.tail(lookback)
     price_min = _as_float_like(tail["low"].min())
     price_max = _as_float_like(tail["high"].max())
-    
+
     if price_max <= price_min:
         return None
-    
+
     bucket_size = (price_max - price_min) / buckets
     bucket_volumes = [0.0] * buckets
-    
+
     # Iterate through rows to accumulate volume
     for row in tail.iter_rows(named=True):
         bar_low = _as_float_like(row["low"])
         bar_high = _as_float_like(row["high"])
         bar_vol = _as_float_like(row["volume"])
-        
+
         b_start = max(0, int((bar_low - price_min) / bucket_size))
         b_end = min(buckets - 1, int((bar_high - price_min) / bucket_size))
         n_buckets = b_end - b_start + 1
-        
+
         if n_buckets > 0:
             for i in range(b_start, b_end + 1):
                 bucket_volumes[i] += bar_vol / n_buckets
-    
+
     poc_bucket = int(np.argmax(bucket_volumes))
     poc_price = price_min + (poc_bucket + 0.5) * bucket_size
     return float(poc_price)
@@ -1451,7 +1451,7 @@ def _cached_prepare_frame(
             symbol,
             ws_manager if interval == "15m" else None,
         )
-    
+
     last = frame.row(-1, named=True)
     first = frame.row(0, named=True)
     try:
@@ -1459,7 +1459,7 @@ def _cached_prepare_frame(
         close_time_ns = _timestamp_ns(last["close_time"])
     except (KeyError, TypeError, ValueError, OverflowError):
         return _prepare_frame(frame)
-    
+
     tail_signature = _tail_value_signature(last)
     key = (
         symbol,
@@ -1474,7 +1474,7 @@ def _cached_prepare_frame(
     cached = target_cache.get(key)
     if cached is not None:
         return cached
-    
+
     result = _enrich_with_ws_data(
         _prepare_frame(frame),
         symbol,
@@ -1601,14 +1601,14 @@ def prepare_symbol(
     ws_manager: Any | None = None,
 ) -> PreparedSymbol | None:
     """Prepare a symbol for signal detection by computing all indicators.
-    
+
     Returns None if there is insufficient historical data.
     """
     import logging
     _log = logging.getLogger("bot.features")
-    
+
     sym = universe_symbol.symbol
-    
+
     minimums = minimums or min_required_bars()
     len_4h = frames.df_4h.height if frames.df_4h is not None else 0
     len_1h = frames.df_1h.height
@@ -1629,7 +1629,7 @@ def prepare_symbol(
             minimums["4h"],
         )
         return None
-    
+
     # Convert pandas DataFrames to Polars if needed
     work_1h = _cached_prepare_frame(
         _to_polars(frames.df_1h), symbol=sym, interval="1h"
@@ -1697,7 +1697,7 @@ def prepare_symbol(
         work_len_5m,
         work_len_4h,
     )
-    
+
     # Calculate spread
     spread_bps = None
     if (

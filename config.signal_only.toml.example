@@ -20,6 +20,9 @@ startup_batch_delay_seconds = 2.0
 max_concurrent_rest_requests = 5
 # Dashboard settings
 dashboard_port = 8080
+dashboard_host = "127.0.0.1"
+metrics_port = 9090
+metrics_host = "127.0.0.1"
 auto_open_dashboard = false
 
 [bot.universe]
