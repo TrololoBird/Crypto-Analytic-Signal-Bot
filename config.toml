@@ -1,6 +1,5 @@
 # Clean runtime configuration for the active signal bot.
 # Secrets stay in .env.
-# Copy this file to config.toml and customize as needed.
 
 [bot.runtime]
 analysis_concurrency = 8
@@ -29,7 +28,6 @@ emergency_context_warmup_symbol_limit = 12
 emergency_context_fetch_timeout_seconds = 3.0
 futures_data_request_limit_per_5m = 300
 min_restart_interval_seconds = 120
-# Dashboard and metrics settings
 dashboard_port = 8080
 dashboard_host = "127.0.0.1"
 metrics_port = 9090
@@ -76,10 +74,10 @@ deep_analysis = true
 cooldown_minutes = 60
 symbol_cooldown_minutes = 120
 max_spread_bps = 8.0
-# Keep ATR gate above extreme-noise floor, but avoid over-pruning live shortlist.
+# Keep ATR gate above extreme-noise floor, but avoid over-pruning low-volatility majors.
 min_atr_pct = 0.18
 max_atr_pct = 10.0
-min_adx_1h = 22.0
+min_adx_1h = 18.0
 min_risk_reward = 1.9
 # Lower bound for post-confluence score; calibrated from live reject telemetry
 # while preserving RR/spread/stop hard-gates.
@@ -92,6 +90,7 @@ min_bars_1h = 210
 min_bars_4h = 210
 max_mark_price_deviation_pct = 0.005
 
+# Setup-specific optimizable parameters for self-learner
 [bot.filters.setups]
 ema_bounce = { base_score = 0.55, min_adx_1h = 15.0, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.5, min_rr = 1.5 }
 structure_pullback = { base_score = 0.55, bias_mismatch_penalty = 0.75, tp_too_close_penalty = 0.75, sl_buffer_atr = 0.65, min_rr = 1.5, ema_proximity_pct = 0.990, ema_deep_pullback_pct = 0.965 }
@@ -183,16 +182,17 @@ oi_divergence = true
 btc_correlation = true
 altcoin_season_index = true
 
+
 [bot.scoring]
 enabled = true
 setup_prior_weight = 0.50
 # Component weights are normalized on startup if they do not sum to 1.0.
-weight_mtf_alignment = 0.25
-weight_volume_quality = 0.20
+weight_mtf_alignment   = 0.25
+weight_volume_quality  = 0.20
 weight_structure_clarity = 0.20
-weight_risk_reward = 0.15
-weight_crowd_position = 0.10
-weight_oi_momentum = 0.10
+weight_risk_reward     = 0.15
+weight_crowd_position  = 0.10
+weight_oi_momentum     = 0.10
 funding_rate_extreme = 0.0010
 funding_rate_moderate = 0.0005
 
@@ -252,7 +252,7 @@ intra_candle_min_move_bps = 0.0
 use_ml_in_live = false
 
 [bot.notifiers]
-provider = "none"
+provider = "telegram"
 
 [bot.notifiers.slack]
 enabled = false

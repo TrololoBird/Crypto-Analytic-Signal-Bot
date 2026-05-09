@@ -65,10 +65,7 @@ class VolumeAnomalySetup(BaseSetup):
             _reject(prepared, setup_id, "missing_columns", missing_fields=missing)
             return None
 
-        params = {
-            **self.get_optimizable_params(settings),
-            **get_dynamic_params(prepared, setup_id),
-        }
+        params = {**self.get_optimizable_params(settings), **get_dynamic_params(prepared, setup_id)}
         open_ = _as_float(work.item(-1, "open"))
         high = _as_float(work.item(-1, "high"))
         low = _as_float(work.item(-1, "low"))

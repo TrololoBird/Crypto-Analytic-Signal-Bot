@@ -47,11 +47,9 @@ class MLTrainingPipeline:
                 tracking_data.get_column("outcome")
                 .cast(pl.Utf8)
                 .map_elements(
-                    lambda v: (
-                        1
-                        if str(v).lower() in {"win", "tp1_hit", "tp2_hit", "tp_hit"}
-                        else 0
-                    ),
+                    lambda v: 1
+                    if str(v).lower() in {"win", "tp1_hit", "tp2_hit", "tp_hit"}
+                    else 0,
                     return_dtype=pl.Int8,
                 )
                 .alias("label")

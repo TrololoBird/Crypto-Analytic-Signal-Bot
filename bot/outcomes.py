@@ -47,9 +47,7 @@ def _normalized_bool(value: Any) -> bool | None:
 def build_prepared_feature_snapshot(prepared: Any) -> dict[str, Any]:
     """Build a normalized feature snapshot from PreparedSymbol-like data."""
     if prepared is None:
-        return normalize_public_feature_payload(
-            {name: None for name in PUBLIC_FEATURE_FIELDS}
-        )
+        return normalize_public_feature_payload({name: None for name in PUBLIC_FEATURE_FIELDS})
 
     features: dict[str, Any] = {}
 

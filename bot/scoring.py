@@ -179,7 +179,9 @@ def _risk_reward_quality(signal: Signal, settings: BotSettings) -> float:
     if not isinstance(setup_overrides, dict):
         setup_overrides = {}
     min_risk_reward = (
-        float(getattr(filters, "min_risk_reward", 1.9)) if filters is not None else 1.9
+        float(getattr(filters, "min_risk_reward", 1.9))
+        if filters is not None
+        else 1.9
     )
     setup_params = setup_overrides.get(signal.setup_id, {})
     if not isinstance(setup_params, dict):

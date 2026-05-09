@@ -146,7 +146,9 @@ def apply_global_filters(
 
     # --- 1. Data freshness ---
     deep_analysis_asset = is_deep_analysis_symbol(prepared, settings)
-    primary_timeframe, primary_freshness = _primary_freshness_window(prepared, settings)
+    primary_timeframe, primary_freshness = _primary_freshness_window(
+        prepared, settings
+    )
     if deep_analysis_asset:
         passed.append("deep_analysis_policy")
     if not _frame_is_fresh(prepared.work_15m, primary_freshness):
@@ -359,9 +361,7 @@ def apply_global_filters(
             deep_score_floor = 0.40
         effective_min_score = min(effective_min_score, deep_score_floor)
     if effective_min_score > 0.0 and updated.score < effective_min_score:
-        score_reason = (
-            "adx_penalty_score_too_low" if adx_penalty_applied else "score_too_low"
-        )
+        score_reason = "adx_penalty_score_too_low" if adx_penalty_applied else "score_too_low"
         score_details = {
             "score": updated.score,
             "min_score_required": effective_min_score,

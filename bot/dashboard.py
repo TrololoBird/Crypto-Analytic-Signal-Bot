@@ -33,7 +33,6 @@ class BotDashboard:
         self.bot = bot
         self.port = port
         self.host = host
-        self.host = host
         self._enabled = HAS_FASTAPI
         self.app: FastAPI | None = None
         self._strategies_cache: list[dict[str, Any]] | None = None
@@ -1081,7 +1080,6 @@ class BotDashboard:
 
         def open_browser() -> None:
             time.sleep(delay_seconds)
-            # Use specific host if not binding all interfaces
             host = "localhost" if self.host in ("0.0.0.0", "127.0.0.1") else self.host
             url = f"http://{host}:{self.port}"
             try:

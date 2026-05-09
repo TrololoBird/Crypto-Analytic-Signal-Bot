@@ -53,16 +53,16 @@ class DeliveryOrchestrator:
 
         same_direction: dict[tuple[str, str], list[Signal]] = {}
         for signal in flat_candidates:
-            same_direction.setdefault((signal.symbol, signal.direction), []).append(
-                signal
-            )
+            same_direction.setdefault((signal.symbol, signal.direction), []).append(signal)
 
         best_by_direction = [
             self._apply_same_direction_confluence(signals)
             for signals in same_direction.values()
         ]
         best_by_symbol: dict[str, Signal] = {}
-        for signal in sorted(best_by_direction, key=self._rank_key, reverse=True):
+        for signal in sorted(
+            best_by_direction, key=self._rank_key, reverse=True
+        ):
             best_by_symbol.setdefault(signal.symbol, signal)
 
         ranked = sorted(best_by_symbol.values(), key=self._rank_key, reverse=True)

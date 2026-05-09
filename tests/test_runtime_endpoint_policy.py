@@ -26,16 +26,12 @@ def test_runtime_boundary_rejects_non_usdm_hosts(url: str) -> None:
 
 def test_runtime_boundary_rejects_private_routes() -> None:
     with pytest.raises(ValueError, match="endpoint paths|private/auth"):
-        validate_runtime_public_rest_url(
-            "https://fapi.binance.com/sapi/v1/accountSnapshot"
-        )
+        validate_runtime_public_rest_url("https://fapi.binance.com/sapi/v1/accountSnapshot")
 
 
 def test_runtime_boundary_rejects_non_public_usdm_paths() -> None:
     with pytest.raises(ValueError, match="endpoint paths"):
-        validate_runtime_public_rest_url(
-            "https://fapi.binance.com/eapi/v1/openInterest"
-        )
+        validate_runtime_public_rest_url("https://fapi.binance.com/eapi/v1/openInterest")
 
 
 def test_runtime_boundary_rejects_registered_private_fapi_path() -> None:
@@ -49,13 +45,9 @@ def test_ws_stream_endpoint_class_rejects_unknown_streams() -> None:
 
 
 @pytest.mark.asyncio
-async def test_public_intelligence_runtime_never_calls_eapi_fetchers(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_public_intelligence_runtime_never_calls_eapi_fetchers(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = BotSettings(tg_token="0" * 30, target_chat_id="0")
-    service = PublicIntelligenceService(
-        settings, market_data=object(), telemetry=object()
-    )
+    service = PublicIntelligenceService(settings, market_data=object(), telemetry=object())
 
     async def _unexpected_call(*_args, **_kwargs):  # type: ignore[no-untyped-def]
         raise AssertionError("runtime path must not call eAPI fetchers")

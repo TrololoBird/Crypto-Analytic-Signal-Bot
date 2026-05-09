@@ -49,25 +49,13 @@ class VWAPTrendSetup(BaseSetup):
             _reject(prepared, setup_id, "insufficient_bars")
             return None
 
-        required_columns = (
-            "close",
-            "ema20",
-            "vwap",
-            "atr14",
-            "volume_ratio20",
-            "rsi14",
-        )
-        missing = [
-            column for column in required_columns if column not in work_15m.columns
-        ]
+        required_columns = ("close", "ema20", "vwap", "atr14", "volume_ratio20", "rsi14")
+        missing = [column for column in required_columns if column not in work_15m.columns]
         if missing:
             _reject(prepared, setup_id, "missing_columns", missing_fields=missing)
             return None
 
-        params = {
-            **self.get_optimizable_params(settings),
-            **get_dynamic_params(prepared, setup_id),
-        }
+        params = {**self.get_optimizable_params(settings), **get_dynamic_params(prepared, setup_id)}
         close = _as_float(work_15m.item(-1, "close"))
         prev_close = _as_float(work_15m.item(-2, "close"))
         vwap = _as_float(work_15m.item(-1, "vwap"))
@@ -146,9 +134,7 @@ class VWAPTrendSetup(BaseSetup):
             return None
         min_rr = float(params["min_rr"])
         if tp1 is None or abs(tp1 - close) < risk * min_rr:
-            tp1 = (
-                close + risk * min_rr if direction == "long" else close - risk * min_rr
-            )
+            tp1 = close + risk * min_rr if direction == "long" else close - risk * min_rr
         if tp2 is None:
             tp2 = tp1
 

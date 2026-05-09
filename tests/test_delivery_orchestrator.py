@@ -30,9 +30,7 @@ def _signal(
     )
 
 
-def test_select_and_rank_deduplicates_symbol_and_boosts_same_direction_confluence() -> (
-    None
-):
+def test_select_and_rank_deduplicates_symbol_and_boosts_same_direction_confluence() -> None:
     orchestrator = DeliveryOrchestrator(SimpleNamespace())
 
     selected = orchestrator.select_and_rank(
@@ -41,9 +39,7 @@ def test_select_and_rank_deduplicates_symbol_and_boosts_same_direction_confluenc
                 _signal(symbol="BTCUSDT", setup_id="fvg_setup", score=0.60),
                 _signal(symbol="BTCUSDT", setup_id="bos_choch", score=0.62),
             ],
-            "ETHUSDT": [
-                _signal(symbol="ETHUSDT", setup_id="spread_strategy", score=0.61)
-            ],
+            "ETHUSDT": [_signal(symbol="ETHUSDT", setup_id="spread_strategy", score=0.61)],
         },
         max_signals=10,
     )
@@ -60,18 +56,8 @@ def test_select_and_rank_keeps_best_direction_when_symbol_conflicts() -> None:
     selected = orchestrator.select_and_rank(
         {
             "BTCUSDT": [
-                _signal(
-                    symbol="BTCUSDT",
-                    setup_id="bullish_setup",
-                    direction="long",
-                    score=0.58,
-                ),
-                _signal(
-                    symbol="BTCUSDT",
-                    setup_id="bearish_setup",
-                    direction="short",
-                    score=0.64,
-                ),
+                _signal(symbol="BTCUSDT", setup_id="bullish_setup", direction="long", score=0.58),
+                _signal(symbol="BTCUSDT", setup_id="bearish_setup", direction="short", score=0.64),
             ]
         },
         max_signals=10,

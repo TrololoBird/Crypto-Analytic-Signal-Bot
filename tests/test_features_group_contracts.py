@@ -36,9 +36,7 @@ def test_group_apis_exposed() -> None:
 
 def test_group_contract_outputs() -> None:
     frame = _frame()
-    core = features.CORE_API["add_core_features"](
-        frame, plta=features.plta, has_talib=features._HAS_TALIB
-    )
+    core = features.CORE_API["add_core_features"](frame, plta=features.plta, has_talib=features._HAS_TALIB)
     assert {"ema20", "adx14", "vwap", "close_position"}.issubset(core.columns)
     assert float(core["rsi14"].tail(1).item()) > 1.0
     assert float(core["adx14"].tail(1).item()) > 1.0

@@ -5,7 +5,6 @@ Focuses on CHoCH signals (structure reversal) as entry triggers.
 
 # WINDSURF_REVIEW: unified + vectorized + 1H context + graded
 """
-
 from __future__ import annotations
 
 import logging
@@ -23,7 +22,7 @@ from ..setups.utils import get_dynamic_params
 
 LOG = logging.getLogger("bot.strategies.bos_choch")
 
-_MIN_SWINGS = 6  # Need 3+ of each type for trend context
+_MIN_SWINGS = 6   # Need 3+ of each type for trend context
 
 
 def _select_external_stop_level(
@@ -187,9 +186,7 @@ class BOSCHOCHSetup(BaseSetup):
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)
 
-    def get_optimizable_params(
-        self, settings: BotSettings | None = None
-    ) -> dict[str, float]:
+    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
         """Tunable parameters for self-learner optimization."""
         defaults = {
             "base_score": 0.55,
@@ -206,9 +203,9 @@ class BOSCHOCHSetup(BaseSetup):
             "min_swings": 3,
         }
         if settings is not None:
-            filters = getattr(settings, "filters", None)
+            filters = getattr(settings, 'filters', None)
             if filters:
-                setups_config = getattr(filters, "setups", {})
+                setups_config = getattr(filters, 'setups', {})
                 if isinstance(setups_config, dict) and self.setup_id in setups_config:
                     return {**defaults, **setups_config.get(self.setup_id, {})}
         return defaults
@@ -228,36 +225,20 @@ class BOSCHOCHSetup(BaseSetup):
             )
             return None
 
-    def _detect(
-        self, prepared: PreparedSymbol, _settings: BotSettings
-    ) -> Signal | None:
+    def _detect(self, prepared: PreparedSymbol, _settings: BotSettings) -> Signal | None:
         setup_id = self.setup_id
         dynamic_params = get_dynamic_params(prepared, setup_id)
         defaults = self.get_optimizable_params(_settings)
 
-        configured_swing_lookback = int(
-            dynamic_params.get("swing_lookback", defaults["swing_lookback"])
-        )
-        bos_lookback = int(
-            dynamic_params.get("bos_lookback", configured_swing_lookback)
-        )
-        choch_lookback = int(
-            dynamic_params.get("choch_lookback", configured_swing_lookback)
-        )
-        swing_lookback = max(
-            2, max(bos_lookback, choch_lookback, configured_swing_lookback)
-        )
+        configured_swing_lookback = int(dynamic_params.get("swing_lookback", defaults["swing_lookback"]))
+        bos_lookback = int(dynamic_params.get("bos_lookback", configured_swing_lookback))
+        choch_lookback = int(dynamic_params.get("choch_lookback", configured_swing_lookback))
+        swing_lookback = max(2, max(bos_lookback, choch_lookback, configured_swing_lookback))
         external_swing_lookback = max(
             swing_lookback + 1,
-            int(
-                dynamic_params.get(
-                    "external_swing_lookback", defaults["external_swing_lookback"]
-                )
-            ),
+            int(dynamic_params.get("external_swing_lookback", defaults["external_swing_lookback"])),
         )
-        sl_buffer_atr = float(
-            dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"])
-        )
+        sl_buffer_atr = float(dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]))
         min_rr = float(dynamic_params.get("min_rr", defaults["min_rr"]))
         base_score = float(dynamic_params.get("base_score", defaults["base_score"]))
         breakout_threshold_atr = float(
@@ -442,20 +423,10 @@ class BOSCHOCHSetup(BaseSetup):
                     **stop_details,
                 )
                 return None
-            stop_price = (
-                pivot_level
-                if stop_source in {"atr_stop", "previous_candle"}
-                else pivot_level - sl_buffer_atr * atr
-            )
+            stop_price = pivot_level if stop_source in {"atr_stop", "previous_candle"} else pivot_level - sl_buffer_atr * atr
             risk = price - stop_price
             if risk <= 0:
-                _reject(
-                    prepared,
-                    setup_id,
-                    "risk_non_positive_long",
-                    stop=stop_price,
-                    price=price,
-                )
+                _reject(prepared, setup_id, "risk_non_positive_long", stop=stop_price, price=price)
                 return None
             # TP1: last swing high before the structural break
             tp1 = float(sh_vals[-2]) if sh_vals[-2] > price else None
@@ -491,20 +462,10 @@ class BOSCHOCHSetup(BaseSetup):
                     **stop_details,
                 )
                 return None
-            stop_price = (
-                pivot_level
-                if stop_source in {"atr_stop", "previous_candle"}
-                else pivot_level + sl_buffer_atr * atr
-            )
+            stop_price = pivot_level if stop_source in {"atr_stop", "previous_candle"} else pivot_level + sl_buffer_atr * atr
             risk = stop_price - price
             if risk <= 0:
-                _reject(
-                    prepared,
-                    setup_id,
-                    "risk_non_positive_short",
-                    stop=stop_price,
-                    price=price,
-                )
+                _reject(prepared, setup_id, "risk_non_positive_short", stop=stop_price, price=price)
                 return None
             # TP1: last swing low before the structural break
             tp1 = float(sl_vals[-2]) if sl_vals[-2] < price else None
@@ -519,9 +480,7 @@ class BOSCHOCHSetup(BaseSetup):
 
         fallback_note = None
         if tp1 is None or abs(tp1 - price) < risk * min_rr:
-            tp1 = (
-                price + risk * min_rr if direction == "long" else price - risk * min_rr
-            )
+            tp1 = price + risk * min_rr if direction == "long" else price - risk * min_rr
             fallback_note = f"tp1_rr_fallback_{min_rr:.2f}"
         if tp2 is None:
             tp2 = tp1  # Use TP1 as TP2 if no extended target found
