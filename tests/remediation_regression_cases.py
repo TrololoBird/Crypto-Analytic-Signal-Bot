@@ -1840,7 +1840,7 @@ async def test_single_target_price_tick_closes_once_without_tp2_event() -> None:
     assert repo.tracking_stats["tp2_hit"] == 0
 
 
-def test_family_confirmation_rejects_missing_fast_context_when_strict() -> None:
+def test_family_confirmation_soft_gates_missing_fast_context_when_strict() -> None:
     bot = SignalBot.__new__(SignalBot)
     bot.settings = make_runtime_settings(strict_data_quality=True)
     prepared = make_prepared()
@@ -1854,9 +1854,10 @@ def test_family_confirmation_rejects_missing_fast_context_when_strict() -> None:
         signal, prepared, metadata=None
     )
 
-    assert ok is False
-    assert reason == "data.fast_context_missing"
+    assert ok is True
+    assert reason is None
     assert details["fallback"] == "context_missing"
+    assert details["fast_context_weak"] is True
 
 
 @pytest.mark.asyncio

@@ -89,16 +89,7 @@ def _collapse_swing_markers(
         markers[positions[remove]] = np.nan
 
     if keep_edge_adjustments:
-        positions = np.flatnonzero(~np.isnan(markers))
-        if positions.size > 0:
-            if np.isnan(markers[0]) and markers[positions[0]] == 1.0:
-                markers[0] = -1.0
-            if np.isnan(markers[0]) and markers[positions[0]] == -1.0:
-                markers[0] = 1.0
-            if np.isnan(markers[-1]) and markers[positions[-1]] == -1.0:
-                markers[-1] = 1.0
-            if np.isnan(markers[-1]) and markers[positions[-1]] == 1.0:
-                markers[-1] = -1.0
+        pass
 
     return markers
 
@@ -517,7 +508,6 @@ def liquidity_pools(
     swing_level = _series_to_float_array(swings["Level"])
     length = ohlc.height
 
-    global_range = (float(np.nanmax(high)) - float(np.nanmin(low))) * float(range_percent)
     prev_close = np.concatenate(([close[0]], close[:-1])) if length else close
     true_range = np.maximum.reduce(
         (
@@ -529,12 +519,9 @@ def liquidity_pools(
     atr_window = true_range[-min(14, length) :] if length else true_range
     atr = float(np.nanmean(atr_window)) if atr_window.size else 0.0
     median_price = float(np.nanmedian(close)) if length else 0.0
-    atr_cap = atr * max(0.25, min(float(range_percent) * 100.0, 2.0))
-    price_cap = abs(median_price) * float(range_percent)
-    range_candidates = [
-        value for value in (global_range, atr_cap, price_cap) if value > 0.0
-    ]
-    pip_range = min(range_candidates) if range_candidates else 0.0
+    pip_range = atr * float(range_percent) * 2.0
+    if pip_range <= 0.0:
+        pip_range = abs(median_price) * float(range_percent)
     sweep_buffer = max(pip_range * 0.10, abs(median_price) * 1e-5)
 
     shl_hl = swing_high_low.copy()

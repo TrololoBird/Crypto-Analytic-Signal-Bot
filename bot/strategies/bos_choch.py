@@ -182,8 +182,8 @@ class BOSCHOCHSetup(BaseSetup):
     """BOS/CHoCH strategy detector for structural break signals."""
 
     setup_id = "bos_choch"
-    family = "breakout"
-    confirmation_profile = "breakout_acceptance"
+    family = "reversal"
+    confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)
 
     def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
@@ -254,14 +254,14 @@ class BOSCHOCHSetup(BaseSetup):
         )
 
         w = prepared.work_15m
-        min_required_bars = max(30, external_swing_lookback * 2 + 1)
-        if w.height < min_required_bars:
+        min_height = external_swing_lookback * 2 + 1
+        if w.height < min_height:
             _reject(
                 prepared,
                 setup_id,
-                "insufficient_15m_bars",
-                bars=w.height,
-                required=min_required_bars,
+                "insufficient_height",
+                actual=w.height,
+                required=min_height,
                 external_swing_lookback=external_swing_lookback,
             )
             return None
@@ -276,14 +276,31 @@ class BOSCHOCHSetup(BaseSetup):
             _reject(prepared, setup_id, "price_missing")
             return None
 
-        scan = w.head(w.height - 1)
-        if scan.height < min_required_bars:
+        last_bar_is_closed = True
+        if "is_closed" in w.columns:
+            last_bar_is_closed = bool(w["is_closed"].item(-1))
+        if not last_bar_is_closed:
+            unconfirmed_zone = latest_structure_break(
+                w,
+                swing_length=swing_lookback,
+                prefer_kind="choch",
+            )
+            if (
+                unconfirmed_zone is not None
+                and unconfirmed_zone.kind == "choch"
+                and int(unconfirmed_zone.broken_index or 0) >= w.height - 1
+            ):
+                _reject(prepared, setup_id, "choch_on_unconfirmed_bar")
+                return None
+
+        scan = w if last_bar_is_closed else w.head(w.height - 1)
+        if scan.height < min_height:
             _reject(
                 prepared,
                 setup_id,
                 "insufficient_confirmed_15m_bars",
                 bars=scan.height,
-                required=min_required_bars,
+                required=min_height,
             )
             return None
 

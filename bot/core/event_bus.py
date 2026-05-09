@@ -138,7 +138,9 @@ class EventBus:
             if not self._queue:
                 return None, None
             token = self._queue.popleft()
-            return token, self._pending_events.get(token)
+            event = self._pending_events.pop(token, None)
+            self._coalescing_keys.discard(token)
+            return token, event
 
     async def _wait_for_event(self) -> None:
         with self._lock:

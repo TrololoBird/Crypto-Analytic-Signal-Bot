@@ -67,12 +67,12 @@ DEFAULT_ASSET_FIT = _fit()
 ASSET_FIT_PROFILES: dict[str, AssetFit] = {
     "structure_pullback": _fit(("all",)),
     "structure_break_retest": _fit(("all",)),
-    "wick_trap_reversal": _fit(("volatile_alts", "ETHUSDT")),
+    "wick_trap_reversal": _fit(("all",)),
     "squeeze_setup": _fit(("all",)),
     "ema_bounce": _fit(("all",)),
     "fvg_setup": _fit(("all",)),
     "order_block": _fit(("all",)),
-    "liquidity_sweep": _fit(("volatile_alts",), min_liquidity_rank=60),
+    "liquidity_sweep": _fit(("all",), min_liquidity_rank=50),
     "bos_choch": _fit(("all",)),
     "hidden_divergence": _fit(("all",)),
     "funding_reversal": _fit(
@@ -91,11 +91,11 @@ ASSET_FIT_PROFILES: dict[str, AssetFit] = {
     "volume_anomaly": _fit(("all",)),
     "volume_climax_reversal": _fit(("all",)),
     "keltner_breakout": _fit(("all",)),
-    "whale_walls": _fit(("BTCUSDT", "ETHUSDT"), min_liquidity_rank=10),
-    "spread_strategy": _fit(("BTCUSDT", "ETHUSDT"), min_liquidity_rank=10),
-    "depth_imbalance": _fit(("BTCUSDT", "ETHUSDT"), min_liquidity_rank=10),
-    "absorption": _fit(("BTCUSDT", "ETHUSDT"), min_liquidity_rank=10),
-    "aggression_shift": _fit(("BTCUSDT", "ETHUSDT"), min_liquidity_rank=10),
+    "whale_walls": _fit(("all",), min_liquidity_rank=50),
+    "spread_strategy": _fit(("all",), min_liquidity_rank=50),
+    "depth_imbalance": _fit(("all",), min_liquidity_rank=50),
+    "absorption": _fit(("all",), min_liquidity_rank=50),
+    "aggression_shift": _fit(("all",), min_liquidity_rank=50),
     "liquidation_heatmap": _fit(("perp",), min_liquidity_rank=80),
     "stop_hunt_detection": _fit(("all",)),
     "multi_tf_trend": _fit(("all",), preferred_timeframes=("1h", "4h")),
@@ -105,15 +105,9 @@ ASSET_FIT_PROFILES: dict[str, AssetFit] = {
     "atr_expansion": _fit(("all",)),
     "ls_ratio_extreme": _fit(("perp",), requires_oi=True),
     "oi_divergence": _fit(("perp",), requires_oi=True),
-    "btc_correlation": _fit(
-        ("alts", "ETHUSDT"),
-        excludes=("BTCUSDT", "XAUUSDT", "XAGUSDT"),
-        preferred_timeframes=("1h", "4h"),
-    ),
+    "btc_correlation": _fit(("all",), excludes=(), preferred_timeframes=("1h", "4h")),
     "altcoin_season_index": _fit(
-        ("alts",),
-        excludes=("BTCUSDT", "ETHUSDT", "XAUUSDT", "XAGUSDT"),
-        preferred_timeframes=("1h", "4h"),
+        ("all",), excludes=(), preferred_timeframes=("1h", "4h")
     ),
 }
 

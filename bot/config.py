@@ -62,6 +62,7 @@ class UniverseConfig(BaseModel):
     pinned_symbols: tuple[str, ...] = (
         "BTCUSDT",
         "ETHUSDT",
+        "SOLUSDT",
     )
 
     @field_validator("quote_asset")

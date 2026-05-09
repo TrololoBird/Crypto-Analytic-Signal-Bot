@@ -215,6 +215,16 @@ def _as_float_like(value: object, default: float = 0.0) -> float:
     return default
 
 
+def _as_optional_float(value: object) -> float | None:
+    try:
+        numeric = float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+    if numeric is None or not np.isfinite(numeric):
+        return None
+    return numeric
+
+
 def min_required_bars(
     *,
     min_bars_15m: int = 210,
@@ -987,6 +997,10 @@ def _add_advanced_indicators(df: pl.DataFrame) -> pl.DataFrame:
         chandelier_short.alias("chandelier_short"),
         chandelier_dir.alias("chandelier_dir"),
     ])
+
+    result = result.with_columns([
+        _volume_profile(result, bins=12),
+    ])
     
     # --- Z-Score and Slope -------------------------------------------------
     zscore30 = ((df["close"] - df["close"].rolling_mean(window_size=30)) / df["close"].rolling_std(window_size=30)).fill_nan(0.0)
@@ -1005,6 +1019,42 @@ def _add_advanced_indicators(df: pl.DataFrame) -> pl.DataFrame:
     ])
     
     return result
+
+
+def _volume_profile(df: pl.DataFrame, bins: int = 12) -> pl.Expr:
+    """Return a scalar point-of-control approximation for the frame."""
+    if df.is_empty() or not {"high", "low", "volume"}.issubset(df.columns):
+        return pl.lit(None).cast(pl.Float64).alias("volume_profile")
+
+    prices = ((df["high"] + df["low"]) / 2.0).cast(pl.Float64, strict=False)
+    volumes = df["volume"].cast(pl.Float64, strict=False)
+    valid_prices = [
+        float(value)
+        for value in prices.to_list()
+        if value is not None and np.isfinite(float(value))
+    ]
+    if not valid_prices:
+        return pl.lit(None).cast(pl.Float64).alias("volume_profile")
+
+    price_min = min(valid_prices)
+    price_max = max(valid_prices)
+    if price_max <= price_min:
+        poc = price_max
+    else:
+        bucket_count = max(1, int(bins))
+        bucket_size = (price_max - price_min) / bucket_count
+        bucket_volumes = [0.0] * bucket_count
+        for price_raw, volume_raw in zip(prices, volumes, strict=False):
+            price = _as_optional_float(price_raw)
+            volume = _as_optional_float(volume_raw)
+            if price is None or volume is None or volume <= 0.0:
+                continue
+            bucket = min(bucket_count - 1, int((price - price_min) / bucket_size))
+            bucket_volumes[bucket] += volume
+        poc_bucket = int(np.argmax(bucket_volumes)) if any(bucket_volumes) else 0
+        poc = price_min + (poc_bucket + 0.5) * bucket_size
+
+    return pl.lit(float(poc)).cast(pl.Float64).alias("volume_profile")
 
 
 # ---------------------------------------------------------------------------
@@ -1392,10 +1442,15 @@ def _cached_prepare_frame(
     symbol: str = "",
     interval: str = "",
     cache: _FrameCache | None = None,
+    ws_manager: Any | None = None,
 ) -> pl.DataFrame:
     """_prepare_frame with LRU cache keyed on (symbol, interval, close_time)."""
     if frame.is_empty() or "close_time" not in frame.columns or "close" not in frame.columns:
-        return _prepare_frame(frame)
+        return _enrich_with_ws_data(
+            _prepare_frame(frame),
+            symbol,
+            ws_manager if interval == "15m" else None,
+        )
     
     last = frame.row(-1, named=True)
     first = frame.row(0, named=True)
@@ -1413,15 +1468,119 @@ def _cached_prepare_frame(
         first_close_time_ns,
         close_time_ns,
         tail_signature,
+        _ws_enrichment_signature(symbol, ws_manager if interval == "15m" else None),
     )
     target_cache = cache or _FRAME_CACHE
     cached = target_cache.get(key)
     if cached is not None:
         return cached
     
-    result = _prepare_frame(frame)
+    result = _enrich_with_ws_data(
+        _prepare_frame(frame),
+        symbol,
+        ws_manager if interval == "15m" else None,
+    )
     target_cache.put(key, result)
     return result
+
+
+def _ws_enrichment_signature(
+    symbol: str,
+    ws_manager: Any | None,
+) -> tuple[object, ...] | None:
+    if ws_manager is None or not symbol:
+        return None
+
+    book = getattr(ws_manager, "_book", {}).get(symbol)
+    qty = getattr(ws_manager, "_book_qty", {}).get(symbol)
+    snapshot = None
+    getter = getattr(ws_manager, "get_agg_trade_snapshot", None)
+    if callable(getter):
+        try:
+            snapshot = getter(symbol)
+        except Exception:
+            snapshot = None
+
+    def _rounded(value: object) -> float | None:
+        numeric = _as_optional_float(value)
+        return None if numeric is None else round(numeric, 8)
+
+    signature: list[object] = []
+    if isinstance(book, tuple):
+        signature.extend(_rounded(item) for item in book[:2])
+    else:
+        signature.extend((None, None))
+    if isinstance(qty, tuple):
+        signature.extend(_rounded(item) for item in qty[:2])
+    else:
+        signature.extend((None, None))
+    if snapshot is not None:
+        signature.extend(
+            (
+                int(getattr(snapshot, "trade_count", 0) or 0),
+                _rounded(getattr(snapshot, "buy_qty", None)),
+                _rounded(getattr(snapshot, "sell_qty", None)),
+                _rounded(getattr(snapshot, "delta_ratio", None)),
+            )
+        )
+    else:
+        signature.extend((0, None, None, None))
+    return tuple(signature)
+
+
+def _enrich_with_ws_data(
+    work: pl.DataFrame,
+    symbol: str,
+    ws_manager: Any | None,
+) -> pl.DataFrame:
+    """Merge current WebSocket bookTicker and aggTrade context into work_15m."""
+    if ws_manager is None or work.is_empty():
+        return work
+
+    book = getattr(ws_manager, "_book", {}).get(symbol, (None, None))
+    qty = getattr(ws_manager, "_book_qty", {}).get(symbol, (None, None))
+    bid_price, ask_price = book if isinstance(book, tuple) else (None, None)
+    bid_qty, ask_qty = qty if isinstance(qty, tuple) else (None, None)
+    work = work.with_columns(
+        [
+            pl.lit(_as_optional_float(bid_price)).cast(pl.Float64).alias("bid_price"),
+            pl.lit(_as_optional_float(ask_price)).cast(pl.Float64).alias("ask_price"),
+            pl.lit(_as_optional_float(bid_qty)).cast(pl.Float64).alias("bid_qty"),
+            pl.lit(_as_optional_float(ask_qty)).cast(pl.Float64).alias("ask_qty"),
+        ]
+    )
+
+    snapshot = None
+    getter = getattr(ws_manager, "get_agg_trade_snapshot", None)
+    if callable(getter):
+        try:
+            snapshot = getter(symbol)
+        except Exception:
+            snapshot = None
+    if snapshot is not None:
+        buy_qty = _as_optional_float(getattr(snapshot, "buy_qty", None)) or 0.0
+        sell_qty = _as_optional_float(getattr(snapshot, "sell_qty", None)) or 0.0
+        total = buy_qty + sell_qty
+        if total > 0.0:
+            buy_share = buy_qty / total
+            signed_flow = _as_optional_float(getattr(snapshot, "delta_ratio", None))
+            if signed_flow is None:
+                signed_flow = (buy_share - 0.5) * 2.0
+            work = work.with_columns(
+                [
+                    pl.lit(buy_share).cast(pl.Float64).alias("delta_ratio"),
+                    pl.lit(signed_flow).cast(pl.Float64).alias("signed_order_flow"),
+                ]
+            )
+
+    work = add_microstructure_features(work)
+    return work.with_columns(
+        [
+            pl.col("signed_order_flow").fill_null(0.0).fill_nan(0.0),
+            pl.col("tob_imbalance").fill_null(0.0).fill_nan(0.0),
+            pl.col("microprice_deviation_pct").fill_null(0.0).fill_nan(0.0),
+        ]
+    )
 
 
 def _to_polars(df: object) -> pl.DataFrame:
@@ -1439,6 +1598,7 @@ def prepare_symbol(
     *,
     minimums: dict[str, int] | None = None,
     settings: Any | None = None,
+    ws_manager: Any | None = None,
 ) -> PreparedSymbol | None:
     """Prepare a symbol for signal detection by computing all indicators.
     
@@ -1475,7 +1635,10 @@ def prepare_symbol(
         _to_polars(frames.df_1h), symbol=sym, interval="1h"
     )
     work_15m = _cached_prepare_frame(
-        _to_polars(frames.df_15m), symbol=sym, interval="15m"
+        _to_polars(frames.df_15m),
+        symbol=sym,
+        interval="15m",
+        ws_manager=ws_manager,
     )
     work_5m = None
     if frames.df_5m is not None and not frames.df_5m.is_empty():

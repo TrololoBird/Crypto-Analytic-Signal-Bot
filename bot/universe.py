@@ -15,6 +15,7 @@ STABLE_BASE_ASSETS = {"USDC", "BUSD", "FDUSD", "TUSD", "USDP", "USDS", "DAI"}
 SUPPORTED_USDM_CONTRACT_TYPES = {"PERPETUAL", "TRADIFI_PERPETUAL"}
 _ASCII_CONTRACT_RE = re.compile(r"^[A-Z0-9]{4,24}$")
 _ASCII_ASSET_RE = re.compile(r"^[A-Z0-9]{2,16}$")
+_RESERVED_PER_STRATEGY = 2
 def _bucket_for_price_change(price_change_pct: float) -> str:
     move = abs(float(price_change_pct))
     if move >= 8.0:
@@ -548,19 +549,18 @@ def build_shortlist(
     for setup_id in _ALL_SETUP_IDS:
         if len(shortlist) >= settings.universe.shortlist_limit:
             break
-        row = next(
-            (
-                candidate
-                for candidate in dynamic_pool
-                if candidate.symbol not in seen and setup_id in candidate.strategy_fits
-            ),
-            None,
-        )
-        if row is None:
-            continue
-        shortlist.append(row)
-        seen.add(row.symbol)
-        summary["strategy_seed"] += 1
+        candidates = [
+            candidate
+            for candidate in dynamic_pool
+            if candidate.symbol not in seen and setup_id in candidate.strategy_fits
+        ]
+        candidates.sort(key=lambda item: item.quote_volume, reverse=True)
+        for row in candidates[:_RESERVED_PER_STRATEGY]:
+            shortlist.append(row)
+            seen.add(row.symbol)
+            summary["strategy_seed"] += 1
+            if len(shortlist) >= settings.universe.shortlist_limit:
+                break
 
     for bucket in ("trend", "breakout", "reversal"):
         for row in bucket_pool[bucket]:

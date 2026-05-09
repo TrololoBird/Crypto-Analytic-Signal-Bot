@@ -5,7 +5,7 @@ from tests.remediation_regression_cases import (
     test_cvd_divergence_respects_min_delta_threshold,
     test_ema_bounce_config_min_adx_changes_outcome,
     test_ema_bounce_emits_1h_timeframe,
-    test_family_confirmation_rejects_missing_fast_context_when_strict,
+    test_family_confirmation_soft_gates_missing_fast_context_when_strict,
     test_funding_reversal_defaults_cover_runtime_params,
     test_funding_reversal_runtime_params_gate_delta_and_stop,
     test_fvg_config_mitigation_threshold_changes_outcome,

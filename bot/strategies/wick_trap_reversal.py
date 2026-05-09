@@ -38,8 +38,8 @@ class WickTrapReversalSetup(BaseSetup):
             "min_rr": 1.5,
             "wick_atr_threshold": 0.3,
             "wick_through_atr_mult": 0.3,
-            "closed_back_atr_mult": 0.05,
-            "min_volume_ratio": 1.35,
+            "closed_back_atr_mult": 0.10,
+            "min_volume_ratio": 1.50,
             "max_confirmation_bars": 1,
         }
         if settings is not None:
@@ -85,7 +85,7 @@ class WickTrapReversalSetup(BaseSetup):
             )
         )
         closed_back_threshold = max(
-            float(dynamic_params.get("closed_back_threshold", 0.0)),
+            float(dynamic_params.get("closed_back_threshold", atr * 0.1)),
             atr
             * float(
                 dynamic_params.get(

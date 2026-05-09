@@ -15,11 +15,17 @@ async def evaluate_endpoint_health(manager: Any, ws: Any, endpoint: str) -> bool
 
     Returns True if a reconnect was triggered (ws.close called), else False.
     """
+    grace_seconds = max(
+        60.0,
+        float(getattr(manager._cfg, "market_reconnect_grace_seconds", 60.0)),
+    )
     if endpoint == "market":
         connected_at = manager._connected_at_by_endpoint.get(endpoint, 0.0)
         if connected_at > 0.0:
             recovery_age = time.monotonic() - connected_at
-            if recovery_age >= manager._cfg.market_reconnect_grace_seconds:
+            if recovery_age < grace_seconds:
+                return False
+            if recovery_age >= grace_seconds:
                 snapshot = manager.state_snapshot()
                 if (
                     int(snapshot.get("fresh_tickers") or 0) == 0
@@ -59,8 +65,7 @@ async def evaluate_endpoint_health(manager: Any, ws: Any, endpoint: str) -> bool
             connected_at = manager._connected_at_by_endpoint.get(endpoint, 0.0)
             if (
                 connected_at > 0.0
-                and time.monotonic() - connected_at
-                >= manager._cfg.market_reconnect_grace_seconds
+                and time.monotonic() - connected_at >= grace_seconds
             ):
                 LOG.warning(
                     "ws public recovery failed | endpoint=%s fresh_book_tickers=0 - forcing reconnect",
@@ -79,9 +84,13 @@ async def monitor_connection_silence(manager: Any, ws: Any, endpoint: str) -> bo
         return False
     connected_map = getattr(manager, "_connected_at_by_endpoint", {})
     connected_at = connected_map.get(endpoint, 0.0) if isinstance(connected_map, dict) else 0.0
+    grace_seconds = max(
+        60.0,
+        float(getattr(manager._cfg, "market_reconnect_grace_seconds", 60.0)),
+    )
     if (
         connected_at > 0.0
-        and time.monotonic() - connected_at < manager._cfg.market_reconnect_grace_seconds
+        and time.monotonic() - connected_at < grace_seconds
     ):
         return False
     silence = time.monotonic() - last_message_ts

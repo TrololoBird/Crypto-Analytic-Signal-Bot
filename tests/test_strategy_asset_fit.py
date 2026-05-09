@@ -16,22 +16,16 @@ def test_every_registered_strategy_has_asset_fit_profile() -> None:
     assert all(hasattr(strategy, "asset_fit") for strategy in STRATEGY_CLASSES)
 
 
-def test_asset_fit_excludes_btc_from_btc_correlation() -> None:
+def test_asset_fit_allows_btc_correlation_on_btc() -> None:
     context = {"symbol": "BTCUSDT", "base_asset": "BTC", "liquidity_rank": 1}
 
-    assert (
-        asset_fit_reject_reason("btc_correlation", "BTCUSDT", context)
-        == "asset_fit.symbol_excluded"
-    )
+    assert asset_fit_reject_reason("btc_correlation", "BTCUSDT", context) is None
 
 
-def test_asset_fit_excludes_eth_from_altcoin_season() -> None:
+def test_asset_fit_allows_altcoin_season_on_eth() -> None:
     context = {"symbol": "ETHUSDT", "base_asset": "ETH", "liquidity_rank": 2}
 
-    assert (
-        asset_fit_reject_reason("altcoin_season_index", "ETHUSDT", context)
-        == "asset_fit.symbol_excluded"
-    )
+    assert asset_fit_reject_reason("altcoin_season_index", "ETHUSDT", context) is None
 
 
 def test_orderbook_asset_fit_rejects_low_liquidity_alt() -> None:

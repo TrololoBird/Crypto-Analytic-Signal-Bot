@@ -226,7 +226,7 @@ class SpreadStrategySetup(RoadmapSetup):
     required_context = ("futures_flow",)
     DEFAULTS = {
         **RoadmapSetup.DEFAULTS,
-        "max_spread_bps": 1.2,
+        "max_spread_bps": 8.0,
         "min_volume_ratio": 1.35,
         "min_roc10_abs_pct": 0.35,
         "min_depth_imbalance": 0.08,
@@ -487,7 +487,7 @@ class StopHuntDetectionSetup(RoadmapSetup):
     required_context = ("futures_flow",)
     DEFAULTS = {
         **RoadmapSetup.DEFAULTS,
-        "sweep_tolerance_pct": 0.0010,
+        "sweep_tolerance_pct": 0.0015,
         "min_volume_ratio": 1.20,
         "min_close_position_long": 0.58,
         "max_close_position_short": 0.42,
@@ -643,7 +643,7 @@ class WyckoffSpringSetup(RoadmapSetup):
     required_context = ("futures_flow",)
     DEFAULTS = {
         **RoadmapSetup.DEFAULTS,
-        "sweep_tolerance_pct": 0.0012,
+        "sweep_tolerance_pct": 0.0010,
         "min_volume_ratio": 1.35,
         "min_close_position_long": 0.62,
         "max_close_position_short": 0.38,
@@ -795,14 +795,9 @@ class LSRatioExtremeSetup(RoadmapSetup):
             _reject(prepared, self.setup_id, "ls_ratio_missing")
             return None
         ls_ratio = float(ratio)
-        close_position = _last(prepared.work_15m, "close_position", 0.5)
-        if ls_ratio >= float(params["long_crowd_threshold"]) and close_position <= float(
-            params["max_close_position_short"]
-        ):
+        if ls_ratio >= float(params["long_crowd_threshold"]):
             direction = "short"
-        elif ls_ratio <= float(params["short_crowd_threshold"]) and close_position >= float(
-            params["min_close_position_long"]
-        ):
+        elif ls_ratio <= float(params["short_crowd_threshold"]):
             direction = "long"
         else:
             _reject(prepared, self.setup_id, "ls_ratio_not_extreme", ls_ratio=ls_ratio)

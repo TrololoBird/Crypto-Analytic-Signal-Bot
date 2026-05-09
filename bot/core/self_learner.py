@@ -137,6 +137,8 @@ class SelfLearner:
             regime_bounds.set_params(setup_id, regime, best_params)
             return self._build_result(setup_id, outcomes, best_params, best_value)
 
+        outcomes_local = list(outcomes)
+
         def objective(trial: Any) -> float:
             """Optimization objective: maximize risk-adjusted return."""
             # Sample parameters from search space
@@ -175,7 +177,10 @@ class SelfLearner:
                         param_name, low, high
                     )
 
-            return WalkForwardOptimizer().evaluate(outcomes, suggested_params)
+            return SelfLearner._simulate_performance_static(
+                outcomes_local,
+                suggested_params,
+            )
 
         # Create or load study
         study_name = f"{setup_id}_optimization"
@@ -217,7 +222,14 @@ class SelfLearner:
         params: dict[str, float],
     ) -> float:
         """Simulate performance with walk-forward evaluation."""
-        return self._walk_forward.evaluate(outcomes, params)
+        return self._walk_forward.evaluate(list(outcomes), dict(params))
+
+    @staticmethod
+    def _simulate_performance_static(
+        outcomes: list[dict[str, Any]],
+        params: dict[str, float],
+    ) -> float:
+        return WalkForwardOptimizer().evaluate(list(outcomes), dict(params))
 
     @staticmethod
     def _build_fallback_search_space(

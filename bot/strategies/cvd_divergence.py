@@ -21,6 +21,21 @@ from ..setups.utils import get_dynamic_params
 LOG = logging.getLogger("bot.strategies.cvd_divergence")
 
 
+def _signed_delta_values(values: object) -> object:
+    """Normalize common public-flow encodings to signed delta [-1, 1]."""
+    raw = values
+    try:
+        min_value = float(raw.min())
+        max_value = float(raw.max())
+    except (AttributeError, TypeError, ValueError):
+        return raw
+    if min_value < 0.0:
+        return raw
+    if max_value > 1.0:
+        return (raw - 1.0) / (raw + 1.0)
+    return (raw - 0.5) * 2.0
+
+
 class CVDDivergenceSetup(BaseSetup):
     setup_id = "cvd_divergence"
     family = "reversal"
@@ -108,7 +123,7 @@ class CVDDivergenceSetup(BaseSetup):
         closes = w["close"].to_numpy()
         highs = w["high"].to_numpy()
         lows = w["low"].to_numpy()
-        delta_vals = (w["delta_ratio"].to_numpy() - 0.5) * 2.0
+        delta_vals = _signed_delta_values(w["delta_ratio"].to_numpy())
 
         split = max(2, divergence_lookback)
         compare = split * 2

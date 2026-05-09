@@ -128,7 +128,7 @@ class PublicIntelligenceService:
         )
 
         policy = self._policy_snapshot()
-        derivatives = await self._build_derivatives_snapshot(benchmark_symbols)
+        derivatives = await self._build_derivatives_snapshot(symbols)
         options = await self._build_options_snapshot()
         macro = (
             self._macro_disabled_snapshot()
@@ -336,28 +336,103 @@ class PublicIntelligenceService:
             ],
         }
 
+    async def _fetch_batch(
+        self,
+        symbols: list[str],
+        endpoint: str,
+        params_fn: Any,
+    ) -> dict[str, Any]:
+        """Fetch a public endpoint for multiple symbols with bounded bursts."""
+        results: dict[str, Any] = {}
+
+        async def _fetch_one(symbol: str) -> Any:
+            try:
+                return await self._client._call_public_http_json(
+                    endpoint,
+                    params=params_fn(symbol),
+                    symbol=symbol,
+                )
+            except Exception:
+                return None
+
+        for index in range(0, len(symbols), 10):
+            batch = symbols[index : index + 10]
+            batch_results = await asyncio.gather(
+                *[_fetch_one(symbol) for symbol in batch]
+            )
+            results.update(dict(zip(batch, batch_results, strict=False)))
+            if index + 10 < len(symbols):
+                await asyncio.sleep(0.2)
+        return results
+
+    async def _fetch_value_batch(self, symbols: list[str], fetcher: Any) -> dict[str, Any]:
+        results: dict[str, Any] = {}
+
+        async def _fetch_one(symbol: str) -> Any:
+            try:
+                return await fetcher(symbol)
+            except Exception:
+                return None
+
+        for index in range(0, len(symbols), 10):
+            batch = symbols[index : index + 10]
+            batch_results = await asyncio.gather(
+                *[_fetch_one(symbol) for symbol in batch]
+            )
+            results.update(dict(zip(batch, batch_results, strict=False)))
+            if index + 10 < len(symbols):
+                await asyncio.sleep(0.2)
+        return results
+
     async def _build_derivatives_snapshot(
-        self, benchmark_symbols: list[str]
+        self, shortlist_symbols: list[str]
     ) -> dict[str, Any]:
         by_symbol: dict[str, Any] = {}
         confirmed_facts: list[str] = []
-        for index, symbol in enumerate(benchmark_symbols):
-            funding_rate = await self._client.fetch_funding_rate(symbol)
-            oi_current = await self._client.fetch_open_interest(symbol)
-            oi_change_pct = await self._client.fetch_open_interest_change(
+        funding_rates = await self._fetch_value_batch(
+            shortlist_symbols,
+            self._client.fetch_funding_rate,
+        )
+        open_interest = await self._fetch_value_batch(
+            shortlist_symbols,
+            self._client.fetch_open_interest,
+        )
+        oi_changes = await self._fetch_value_batch(
+            shortlist_symbols,
+            lambda symbol: self._client.fetch_open_interest_change(
                 symbol, period="1h"
-            )
-            top_ls_ratio = await self._client.fetch_long_short_ratio(
-                symbol, period="1h"
-            )
-            global_ls_ratio = await self._client.fetch_global_ls_ratio(
-                symbol, period="1h"
-            )
-            taker_ratio = await self._client.fetch_taker_ratio(symbol, period="1h")
-            basis_pct = await self._client.fetch_basis(symbol, period="1h")
-            funding_history = await self._client.fetch_funding_rate_history(
-                symbol, limit=4
-            )
+            ),
+        )
+        top_ls_ratios = await self._fetch_value_batch(
+            shortlist_symbols,
+            lambda symbol: self._client.fetch_long_short_ratio(symbol, period="1h"),
+        )
+        global_ls_ratios = await self._fetch_value_batch(
+            shortlist_symbols,
+            lambda symbol: self._client.fetch_global_ls_ratio(symbol, period="1h"),
+        )
+        taker_ratios = await self._fetch_value_batch(
+            shortlist_symbols,
+            lambda symbol: self._client.fetch_taker_ratio(symbol, period="1h"),
+        )
+        basis_values = await self._fetch_value_batch(
+            shortlist_symbols,
+            lambda symbol: self._client.fetch_basis(symbol, period="1h"),
+        )
+        funding_histories = await self._fetch_value_batch(
+            shortlist_symbols,
+            lambda symbol: self._client.fetch_funding_rate_history(symbol, limit=4),
+        )
+
+        for symbol in shortlist_symbols:
+            funding_rate = funding_rates.get(symbol)
+            oi_current = open_interest.get(symbol)
+            oi_change_pct = oi_changes.get(symbol)
+            top_ls_ratio = top_ls_ratios.get(symbol)
+            global_ls_ratio = global_ls_ratios.get(symbol)
+            taker_ratio = taker_ratios.get(symbol)
+            basis_pct = basis_values.get(symbol)
+            funding_history = funding_histories.get(symbol) or []
             funding_trend = self._client.get_cached_funding_trend(symbol)
 
             flow_bias = "neutral"
@@ -387,8 +462,6 @@ class PublicIntelligenceService:
                 or taker_ratio is not None
             ):
                 confirmed_facts.append(f"{symbol}_public_futures_context_available")
-            if index < len(benchmark_symbols) - 1:
-                await asyncio.sleep(0.10)
 
         return {
             "by_symbol": by_symbol,

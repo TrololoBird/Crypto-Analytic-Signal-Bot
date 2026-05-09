@@ -279,6 +279,43 @@ def _chandelier_exit(
     )
 
 
+def _volume_profile(df: pl.DataFrame, bins: int = 12) -> pl.Expr:
+    if df.is_empty() or not {"high", "low", "volume"}.issubset(df.columns):
+        return pl.lit(None).cast(pl.Float64).alias("volume_profile")
+
+    prices = ((df["high"] + df["low"]) / 2.0).cast(pl.Float64, strict=False)
+    volumes = df["volume"].cast(pl.Float64, strict=False)
+    price_values = [
+        float(value)
+        for value in prices.to_list()
+        if value is not None and np.isfinite(float(value))
+    ]
+    if not price_values:
+        return pl.lit(None).cast(pl.Float64).alias("volume_profile")
+
+    price_min = min(price_values)
+    price_max = max(price_values)
+    if price_max <= price_min:
+        poc = price_max
+    else:
+        bucket_count = max(1, int(bins))
+        bucket_size = (price_max - price_min) / bucket_count
+        bucket_volumes = [0.0] * bucket_count
+        for price_raw, volume_raw in zip(prices, volumes, strict=False):
+            try:
+                price = float(price_raw)
+                volume = float(volume_raw)
+            except (TypeError, ValueError):
+                continue
+            if not np.isfinite(price) or not np.isfinite(volume) or volume <= 0.0:
+                continue
+            bucket = min(bucket_count - 1, int((price - price_min) / bucket_size))
+            bucket_volumes[bucket] += volume
+        poc_bucket = int(np.argmax(bucket_volumes)) if any(bucket_volumes) else 0
+        poc = price_min + (poc_bucket + 0.5) * bucket_size
+    return pl.lit(float(poc)).cast(pl.Float64).alias("volume_profile")
+
+
 def add_advanced_indicators(
     df: pl.DataFrame,
     *,
@@ -377,6 +414,7 @@ def add_advanced_indicators(
             chand_l,
             chand_s,
             chand_d,
+            _volume_profile(result, bins=12),
             (
                 (df["close"] - df["close"].rolling_mean(window_size=30))
                 / df["close"].rolling_std(window_size=30)

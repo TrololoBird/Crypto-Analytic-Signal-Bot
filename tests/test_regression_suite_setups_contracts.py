@@ -7,6 +7,6 @@ from tests.remediation_regression_cases import (
     test_build_structural_targets_prefers_nearest_long_resistance,
     test_build_structural_targets_short_uses_resistance_above_entry_for_stop_anchor,
     test_crowd_position_respects_strategy_family,
-    test_family_confirmation_rejects_missing_fast_context_when_strict,
+    test_family_confirmation_soft_gates_missing_fast_context_when_strict,
     test_load_settings_merges_legacy_strategy_overrides_once,
 )

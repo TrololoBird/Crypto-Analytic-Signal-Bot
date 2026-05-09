@@ -265,6 +265,8 @@ def test_wick_trap_reversal_scans_latest_15m_bar(
             "time",
             [base + timedelta(hours=5, minutes=15 * idx) for idx in range(frame_15m.height)],
         )
+    ).with_columns(
+        pl.Series("volume_ratio20", [1.6] * frame_15m.height)
     )
 
     def _swing_points_stub(frame: pl.DataFrame, **_kwargs):

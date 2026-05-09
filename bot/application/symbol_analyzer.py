@@ -102,6 +102,27 @@ class SymbolAnalyzer:
     def __init__(self, bot: SignalBot) -> None:
         self._bot = bot
 
+    def _minimums(self) -> dict[str, int]:
+        config_min_1h = int(self._bot.settings.filters.min_bars_1h)
+        registry = getattr(self._bot, "_modern_registry", None)
+        enabled_strategies = (
+            registry.get_enabled()
+            if registry is not None and hasattr(registry, "get_enabled")
+            else ()
+        )
+        strategies_min_1h = max(
+            (
+                int(getattr(strategy.metadata, "min_history_bars", 0) or 0)
+                for strategy in enabled_strategies
+            ),
+            default=30,
+        )
+        return min_required_bars(
+            min_bars_15m=self._bot.settings.filters.min_bars_15m,
+            min_bars_1h=max(config_min_1h, strategies_min_1h),
+            min_bars_4h=self._bot.settings.filters.min_bars_4h,
+        )
+
     @staticmethod
     def _degrade_event(
         *,
@@ -398,7 +419,10 @@ class SymbolAnalyzer:
             and strong_opposition
             and details["exhaustion_count"] == 0
         ):
-            return False, f"family_precheck_opposes_{signal.direction}", details
+            details["soft_penalty_applied"] = True
+            details["penalty_factor"] = 0.80
+            details["penalty_reason"] = f"family_precheck_opposes_{signal.direction}"
+            return True, None, details
         if (
             profile == "trend_follow"
             and details["flow_opposes"]
@@ -440,7 +464,7 @@ class SymbolAnalyzer:
         if signal.score <= 0.0:
             details["skipped_reason"] = "non_positive_score"
             return signal, details
-        penalty_factor = 0.92 if opposing_votes == 1 else 0.85
+        penalty_factor = 0.98 if opposing_votes == 1 else 0.95
         reasons = (
             signal.reasons
             if "alignment_penalty" in signal.reasons
@@ -485,7 +509,8 @@ class SymbolAnalyzer:
                 if deep_analysis_asset and primary_timeframe in {"1h", "4h"}:
                     details["fallback"] = "deep_primary_without_fast_context"
                     return True, None, details
-                return False, "data.fast_context_missing", details
+                details["fast_context_weak"] = True
+                return True, None, details
             return True, None, details
         details["confirmation_votes"] = {
             "trend_5m": details["trend_confirms"],
@@ -587,11 +612,7 @@ class SymbolAnalyzer:
         LOG.info("%s: starting modern analysis | trigger=%s", item.symbol, trigger)
         item = self._bot._refresh_universe_symbol_from_ws(item)
 
-        minimums = min_required_bars(
-            min_bars_15m=self._bot.settings.filters.min_bars_15m,
-            min_bars_1h=self._bot.settings.filters.min_bars_1h,
-            min_bars_4h=self._bot.settings.filters.min_bars_4h,
-        )
+        minimums = self._minimums()
         rows_4h = frames.df_4h.height if frames.df_4h is not None else 0
         rows_5m = frames.df_5m.height if frames.df_5m is not None else 0
         rows_1h = frames.df_1h.height
@@ -666,6 +687,7 @@ class SymbolAnalyzer:
                 frames,
                 minimums=minimums,
                 settings=self._bot.settings,
+                ws_manager=self._bot._ws_manager,
             )
             LOG.debug(
                 "%s: prepared symbol built | work_15m_rows=%s work_1h_rows=%s",
@@ -918,6 +940,18 @@ class SymbolAnalyzer:
                 )
                 funnel["family_precheck_rejects"] += 1
                 continue
+            if precheck_details.get("soft_penalty_applied"):
+                penalty_factor = float(precheck_details.get("penalty_factor", 1.0))
+                reason = str(
+                    precheck_details.get("penalty_reason") or "family_precheck_penalty"
+                )
+                signal = replace(
+                    signal,
+                    score=round(max(signal.score * penalty_factor, 0.0), 4),
+                    reasons=signal.reasons
+                    if reason in signal.reasons
+                    else (*signal.reasons, reason),
+                )
 
             signal, alignment_details = self.apply_alignment_penalty(
                 signal, prepared, metadata
@@ -948,6 +982,14 @@ class SymbolAnalyzer:
                 )
                 funnel["confirmation_rejects"] += 1
                 continue
+            if ltf_details.get("fast_context_weak"):
+                signal = replace(
+                    signal,
+                    score=round(max(signal.score * 0.95, 0.0), 4),
+                    reasons=signal.reasons
+                    if "fast_context_weak" in signal.reasons
+                    else (*signal.reasons, "fast_context_weak"),
+                )
 
             # Apply adaptive setup scoring using modern repo. A -0.05 penalty is
             # calibration input, not enough evidence to suppress every signal.
@@ -1034,11 +1076,7 @@ class SymbolAnalyzer:
 
     async def fetch_frames(self, item: UniverseSymbol) -> SymbolFrames | None:
         symbol = item.symbol
-        minimums = min_required_bars(
-            min_bars_15m=self._bot.settings.filters.min_bars_15m,
-            min_bars_1h=self._bot.settings.filters.min_bars_1h,
-            min_bars_4h=self._bot.settings.filters.min_bars_4h,
-        )
+        minimums = self._minimums()
         limit_5m = _history_fetch_limit(minimums, "5m")
         limit_15m = _history_fetch_limit(minimums, "15m")
         limit_1h = _history_fetch_limit(minimums, "1h")
@@ -1108,11 +1146,7 @@ class SymbolAnalyzer:
         await asyncio.sleep(1.0)
         if not isinstance(self._bot.client, BinanceFuturesMarketData):
             return
-        minimums = min_required_bars(
-            min_bars_15m=self._bot.settings.filters.min_bars_15m,
-            min_bars_1h=self._bot.settings.filters.min_bars_1h,
-            min_bars_4h=self._bot.settings.filters.min_bars_4h,
-        )
+        minimums = self._minimums()
         async with self._bot._shortlist_lock:
             shortlist = list(self._bot._shortlist)
         if not shortlist:
