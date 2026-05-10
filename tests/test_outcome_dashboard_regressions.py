@@ -104,6 +104,7 @@ async def test_dashboard_active_signal_payload_uses_persisted_tracking_prices() 
                     "status": "pending",
                     "tracking_id": "tid",
                     "tracking_ref": "ABC12345",
+                    "created_at": "2026-05-04T00:00:00+00:00",
                 }
             ]
 
@@ -128,6 +129,7 @@ async def test_dashboard_active_signal_payload_uses_persisted_tracking_prices() 
             "status": "pending",
             "tracking_id": "tid",
             "tracking_ref": "ABC12345",
+            "timestamp": "2026-05-04T00:00:00+00:00",
         }
     ]
 

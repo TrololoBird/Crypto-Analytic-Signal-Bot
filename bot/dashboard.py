@@ -363,6 +363,12 @@ class BotDashboard:
             font-family: var(--font-mono);
             font-size: 16px;
             font-weight: 600;
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+        .signal-symbol:hover {
+            color: var(--accent-blue);
+            text-decoration: underline;
         }
         .signal-direction {
             padding: 4px 10px;
@@ -486,10 +492,10 @@ class BotDashboard:
             <span id="status-badge" class="status-badge offline" aria-live="polite">Offline</span>
         </h1>
         <nav class="nav-tabs" role="tablist" aria-label="Dashboard sections">
-            <button class="nav-tab active" role="tab" id="tab-btn-overview" aria-selected="true" aria-controls="tab-panel-overview" data-tab="overview">Overview</button>
-            <button class="nav-tab" role="tab" id="tab-btn-signals" aria-selected="false" aria-controls="tab-panel-signals" data-tab="signals">Signals</button>
-            <button class="nav-tab" role="tab" id="tab-btn-analytics" aria-selected="false" aria-controls="tab-panel-analytics" data-tab="analytics">Analytics</button>
-            <button class="nav-tab" role="tab" id="tab-btn-settings" aria-selected="false" aria-controls="tab-panel-settings" data-tab="settings">Settings</button>
+            <button class="nav-tab active" role="tab" id="tab-btn-overview" aria-selected="true" aria-controls="tab-panel-overview" data-tab="overview">Overview [1]</button>
+            <button class="nav-tab" role="tab" id="tab-btn-signals" aria-selected="false" aria-controls="tab-panel-signals" data-tab="signals">Signals [2]</button>
+            <button class="nav-tab" role="tab" id="tab-btn-analytics" aria-selected="false" aria-controls="tab-panel-analytics" data-tab="analytics">Analytics [3]</button>
+            <button class="nav-tab" role="tab" id="tab-btn-settings" aria-selected="false" aria-controls="tab-panel-settings" data-tab="settings">Settings [4]</button>
         </nav>
     </header>
     
@@ -599,7 +605,7 @@ class BotDashboard:
         </div>
     </main>
     
-    <div class="toast-container" id="toast-container"></div>
+    <div class="toast-container" id="toast-container" role="status" aria-live="polite"></div>
     
     <div class="last-update" id="last-update" aria-live="polite">Last update: -</div>
     
@@ -666,8 +672,29 @@ class BotDashboard:
                 if (v >= 0.75) return { text: (v * 100).toFixed(0) + '%', class: 'score-high' };
                 if (v >= 0.60) return { text: (v * 100).toFixed(0) + '%', class: 'score-medium' };
                 return { text: (v * 100).toFixed(0) + '%', class: 'score-low' };
+            },
+            timeAgo: (v) => {
+                if (!v) return '-';
+                const date = new Date(v);
+                const seconds = Math.floor((new Date() - date) / 1000);
+                if (seconds < 60) return 'just now';
+                const minutes = Math.floor(seconds / 60);
+                if (minutes < 60) return minutes + 'm ago';
+                const hours = Math.floor(minutes / 60);
+                if (hours < 24) return hours + 'h ago';
+                return Math.floor(hours / 24) + 'd ago';
             }
         };
+
+        // Utility: Copy to clipboard
+        async function copyToClipboard(text, label) {
+            try {
+                await navigator.clipboard.writeText(text);
+                showToast('Copied', (label || text) + ' copied to clipboard');
+            } catch (err) {
+                console.error('Failed to copy:', err);
+            }
+        }
         
         // Fetch status
         async function fetchStatus() {
@@ -718,10 +745,11 @@ class BotDashboard:
                 
                 container.innerHTML = data.map(s => {
                     const score = fmt.score(s.score);
+                    const age = fmt.timeAgo(s.timestamp);
                     return `
                         <div class="signal-card">
                             <div class="signal-header">
-                                <span class="signal-symbol">${s.symbol}</span>
+                                <span class="signal-symbol" onclick="copyToClipboard('${s.symbol}')" title="Click to copy symbol">${s.symbol}</span>
                                 <span class="signal-direction ${s.direction.toLowerCase()}">${s.direction}</span>
                             </div>
                             <div class="signal-details">
@@ -739,7 +767,7 @@ class BotDashboard:
                                 </div>
                             </div>
                             <div class="signal-footer">
-                                <span class="signal-setup">${s.setup_id}</span>
+                                <span class="signal-setup">${s.setup_id} <span style="opacity: 0.5; margin-left: 4px;">(${age})</span></span>
                                 <span class="signal-score ${score.class}">${score.text}</span>
                             </div>
                         </div>
@@ -769,9 +797,10 @@ class BotDashboard:
                 container.innerHTML = data.map(s => {
                     const score = fmt.score(s.score);
                     const when = s.ts || s.created_at || '';
+                    const age = fmt.timeAgo(when);
                     return `
                         <div class="metric-row">
-                            <span class="metric-label">${s.symbol || '-'} ${s.setup_id || ''} ${s.direction || ''}</span>
+                            <span class="metric-label">${s.symbol || '-'} ${s.setup_id || ''} ${s.direction || ''} <span style="font-size: 11px; opacity: 0.5; margin-left: 4px;">${age}</span></span>
                             <span class="metric-value ${score.class}" title="${when}">${score.text}</span>
                         </div>
                     `;
@@ -867,9 +896,10 @@ class BotDashboard:
                 const count = data.count || 0;
                 const height = (count / maxCount * 100) || 0;
                 const winRate = data.win_rate ? (data.win_rate * 100).toFixed(0) : '0';
+                const label = `${name}: ${count} signals, ${winRate}% win rate`;
                 return `
                     <div style="display: flex; flex-direction: column; align-items: center; flex: 1; min-width: 40px;">
-                        <div style="width: 100%; background: var(--accent-blue); border-radius: 4px 4px 0 0; height: ${height}px; min-height: 4px; position: relative;" title="${name}: ${count} signals, ${winRate}% win">
+                        <div role="img" aria-label="${label}" style="width: 100%; background: var(--accent-blue); border-radius: 4px 4px 0 0; height: ${height}px; min-height: 4px; position: relative;" title="${label}">
                         </div>
                         <div style="font-size: 10px; color: var(--text-secondary); margin-top: 4px; writing-mode: vertical-rl; text-orientation: mixed; transform: rotate(180deg); height: 60px; overflow: hidden; text-overflow: ellipsis;">${name.replace('Setup', '')}</div>
                     </div>
@@ -987,6 +1017,7 @@ class BotDashboard:
                     "status": sig.get("status"),
                     "tracking_id": sig.get("tracking_id"),
                     "tracking_ref": sig.get("tracking_ref"),
+                    "timestamp": sig.get("activated_at") or sig.get("created_at"),
                 }
                 for sig in signals
             ]
