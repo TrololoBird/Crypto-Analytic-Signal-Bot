@@ -359,7 +359,7 @@ class BotDashboard:
             align-items: center;
             margin-bottom: 12px;
         }
-        .signal-symbol {
+        .signal-symbol { cursor: pointer;
             font-family: var(--font-mono);
             font-size: 16px;
             font-weight: 600;
@@ -599,7 +599,7 @@ class BotDashboard:
         </div>
     </main>
     
-    <div class="toast-container" id="toast-container"></div>
+    <div class="toast-container" id="toast-container" role="status" aria-live="polite"></div>
     
     <div class="last-update" id="last-update" aria-live="polite">Last update: -</div>
     
@@ -668,7 +668,16 @@ class BotDashboard:
                 return { text: (v * 100).toFixed(0) + '%', class: 'score-low' };
             }
         };
-        
+
+
+        async function copyToClipboard(text) {
+            try {
+                if (navigator.clipboard) {
+                    await navigator.clipboard.writeText(text);
+                    showToast('Copied', text + ' copied to clipboard');
+                }
+            } catch (err) { console.warn(err); }
+        }
         // Fetch status
         async function fetchStatus() {
             try {
@@ -721,7 +730,7 @@ class BotDashboard:
                     return `
                         <div class="signal-card">
                             <div class="signal-header">
-                                <span class="signal-symbol">${s.symbol}</span>
+                                <span class="signal-symbol" onclick="copyToClipboard(`${s.symbol}`)" title="Click to copy">${s.symbol}</span>
                                 <span class="signal-direction ${s.direction.toLowerCase()}">${s.direction}</span>
                             </div>
                             <div class="signal-details">
@@ -739,7 +748,7 @@ class BotDashboard:
                                 </div>
                             </div>
                             <div class="signal-footer">
-                                <span class="signal-setup">${s.setup_id}</span>
+                                <span class="signal-setup">${s.setup_id} <small style="opacity: 0.5">(${fmt.timeAgo(s.timestamp)})</small></span>
                                 <span class="signal-score ${score.class}">${score.text}</span>
                             </div>
                         </div>
@@ -987,6 +996,7 @@ class BotDashboard:
                     "status": sig.get("status"),
                     "tracking_id": sig.get("tracking_id"),
                     "tracking_ref": sig.get("tracking_ref"),
+                    "timestamp": sig.get("activated_at") or sig.get("created_at"),
                 }
                 for sig in signals
             ]
