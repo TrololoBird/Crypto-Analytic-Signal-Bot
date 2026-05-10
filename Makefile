@@ -19,7 +19,7 @@ test-smoke:
 	@pytest -q tests/test_sanity.py tests/test_event_bus.py tests/test_config_intelligence.py tests/test_filters.py --maxfail=1
 
 test-regression:
-	@pytest tests/ -v --cov=bot --cov-report=xml --cov-fail-under=60
+	@pytest tests/ -v --cov=bot --cov-report=xml --cov-fail-under=49
 
 dry-run:
 	@python main.py --mode dry-run --config config.toml

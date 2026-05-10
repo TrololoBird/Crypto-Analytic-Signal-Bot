@@ -42,13 +42,28 @@ class BotDashboard:
             return
 
         app = _FastAPI(title="Signal Bot Dashboard", version="2.0.0")
+
+        # Security: Restrict CORS origins based on configuration
+        origins = ["http://127.0.0.1", "http://localhost"]
+        if hasattr(self.bot, "settings"):
+            origins = list(self.bot.settings.runtime.dashboard_allow_origins)
+
         app.add_middleware(
             _CORSMiddleware,
-            allow_origins=["*"],
-            allow_credentials=False,  # Security: Disable credentials for wildcard origin
-            allow_methods=["*"],
-            allow_headers=["*"],
+            allow_origins=origins,
+            allow_credentials=False,
+            allow_methods=["GET"],  # Security: Only allow GET for dashboard API
+            allow_headers=["Content-Type", "Authorization"],
         )
+
+        @app.middleware("http")
+        async def add_security_headers(request: Any, call_next: Any) -> Any:
+            response = await call_next(request)
+            response.headers["X-Content-Type-Options"] = "nosniff"
+            response.headers["X-Frame-Options"] = "DENY"
+            response.headers["X-XSS-Protection"] = "1; mode=block"
+            return response
+
         self.app = app
         self._setup_routes()
         self._cache_strategies()
@@ -108,7 +123,7 @@ class BotDashboard:
 
             settings = getattr(self.bot, "settings", None)
             setups = getattr(settings, "setups", None)
-            if hasattr(setups, "enabled_setup_ids"):
+            if setups is not None and hasattr(setups, "enabled_setup_ids"):
                 enabled_setups = set(setups.enabled_setup_ids())
             else:
                 enabled_setups = {
