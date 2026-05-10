@@ -1262,7 +1262,7 @@ class SymbolAnalyzer:
                     if mark_age > self._bot.settings.ws.market_ticker_freshness_seconds:
                         freshness_flags.add("mark_price_stale")
                         degrade_reason = "mark_price_stale"
-                        if "funding_rate" not in mark:
+                        if mark is not None and "funding_rate" not in mark:
                             degrade_reason = "mark_price_stale_funding_missing"
                         degradation_events.append(
                             self._degrade_event(
@@ -1449,14 +1449,12 @@ class SymbolAnalyzer:
             basis_stats = self._bot.client.get_cached_basis_stats(symbol, period="5m")
             if basis_stats is not None:
                 premium_slope = basis_stats.get("premium_slope_5m")
-                premium_zscore = basis_stats.get("premium_zscore_5m")
-                mark_spread = basis_stats.get("mark_index_spread_bps")
                 if premium_slope is not None:
-                    enrichments["premium_slope_5m"] = float(premium_slope)
+                    enrichments["premium_slope_5m"] = float(cast(Any, premium_slope))
                 if premium_zscore is not None:
-                    enrichments["premium_zscore_5m"] = float(premium_zscore)
+                    enrichments["premium_zscore_5m"] = float(cast(Any, premium_zscore))
                 if mark_spread is not None:
-                    enrichments["mark_index_spread_bps"] = float(mark_spread)
+                    enrichments["mark_index_spread_bps"] = float(cast(Any, mark_spread))
             top = enrichments.get("ls_ratio")
             global_ls = enrichments.get("global_ls_ratio")
             if isinstance(top, (int, float)) and isinstance(global_ls, (int, float)):

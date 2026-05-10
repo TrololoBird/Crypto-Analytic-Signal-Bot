@@ -883,35 +883,37 @@ class PublicIntelligenceService:
             "oi_change_pct_avg": _avg(oi_change_values),
             "flow_regime": "neutral",
         }
-        if (
-            flows["taker_ratio_avg"] is not None
-            and flows["oi_change_pct_avg"] is not None
-        ):
-            if flows["taker_ratio_avg"] > 1.02 and flows["oi_change_pct_avg"] > 0:
+        taker_avg = cast(float | None, flows["taker_ratio_avg"])
+        oi_avg = cast(float | None, flows["oi_change_pct_avg"])
+
+        if taker_avg is not None and oi_avg is not None:
+            if taker_avg > 1.02 and oi_avg > 0:
                 flows["flow_regime"] = "buyers_in_control"
-            elif flows["taker_ratio_avg"] < 0.98 and flows["oi_change_pct_avg"] > 0:
+            elif taker_avg < 0.98 and oi_avg > 0:
                 flows["flow_regime"] = "sellers_in_control"
-            elif flows["oi_change_pct_avg"] < 0:
+            elif oi_avg < 0:
                 flows["flow_regime"] = "position_unwind"
 
         basis = {
             "basis_pct_avg": _avg(basis_values),
             "basis_regime": "flat",
         }
-        if basis["basis_pct_avg"] is not None:
-            if basis["basis_pct_avg"] > 0.02:
+        basis_avg = cast(float | None, basis["basis_pct_avg"])
+        if basis_avg is not None:
+            if basis_avg > 0.02:
                 basis["basis_regime"] = "contango"
-            elif basis["basis_pct_avg"] < -0.02:
+            elif basis_avg < -0.02:
                 basis["basis_regime"] = "backwardation"
 
         oi = {
             "oi_change_pct_avg": _avg(oi_change_values),
             "oi_momentum": "flat",
         }
-        if oi["oi_change_pct_avg"] is not None:
-            if oi["oi_change_pct_avg"] > 0.5:
+        oi_momentum_avg = cast(float | None, oi["oi_change_pct_avg"])
+        if oi_momentum_avg is not None:
+            if oi_momentum_avg > 0.5:
                 oi["oi_momentum"] = "expanding"
-            elif oi["oi_change_pct_avg"] < -0.5:
+            elif oi_momentum_avg < -0.5:
                 oi["oi_momentum"] = "contracting"
 
         sentiment_score = 0

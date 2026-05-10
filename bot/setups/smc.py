@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -133,7 +133,7 @@ def fvg(
             bottom[i] = np.nan
 
     mitigated_index = np.full(length, np.nan, dtype=np.float64)
-    for i in np.flatnonzero(~np.isnan(gap)):
+    for i in cast(Any, np.flatnonzero(~np.isnan(gap))):
         if gap[i] == 1.0:
             mask = close[i + 2 :] <= top[i]
         else:
@@ -305,7 +305,7 @@ def bos_choch(
 
     broken = np.zeros(length, dtype=np.int32)
     active_indices = np.flatnonzero((bos != 0) | (choch != 0))
-    for i in active_indices:
+    for i in cast(Any, active_indices):
         if bos[i] == 1 or choch[i] == 1:
             mask = breaks_source[i + 2 :] > levels_out[i]
         else:
@@ -622,7 +622,7 @@ def _optional_index(value: float | None) -> int | None:
     """Return ``None`` for null/NaN index values, otherwise an ``int``."""
     if _is_missing(value):
         return None
-    return int(value)
+    return int(cast(Any, value))
 
 
 def _is_missing(value: object) -> bool:
@@ -630,7 +630,7 @@ def _is_missing(value: object) -> bool:
     if value is None:
         return True
     try:
-        return bool(np.isnan(value))
+        return bool(np.isnan(cast(Any, value)))
     except (TypeError, ValueError):
         return False
 
@@ -684,11 +684,11 @@ def _fvg_fill_metrics(
         fill_pct = 0.0
     elif direction == "long":
         after_lows = frame["low"].slice(created_index + 1)
-        lowest = float(after_lows.min()) if after_lows.len() else float(top)
+        lowest = float(cast(Any, after_lows.min())) if after_lows.len() else float(top)
         fill_pct = (float(top) - lowest) / width
     else:
         after_highs = frame["high"].slice(created_index + 1)
-        highest = float(after_highs.max()) if after_highs.len() else float(bottom)
+        highest = float(cast(Any, after_highs.max())) if after_highs.len() else float(bottom)
         fill_pct = (highest - float(bottom)) / width
     fill_pct = max(0.0, min(1.0, fill_pct))
     fill_penalty = 0.75 if fill_pct > 0.50 else 1.0
@@ -797,16 +797,15 @@ def latest_fvg_zone(
             width=high - low,
             mitigation_index=mitigation_index,
             invalidation_index=invalidation_index,
-            metadata=_fvg_fill_metrics(
+            metadata=cast(dict[str, float | int | str | None], _fvg_fill_metrics(
                 frame,
                 direction=direction,
                 top=high,
                 bottom=low,
-                created_index=idx,
+                created_index=idx
+            )
             ),
         )
-    return None
-
 
 def latest_order_block(
     frame: pl.DataFrame,

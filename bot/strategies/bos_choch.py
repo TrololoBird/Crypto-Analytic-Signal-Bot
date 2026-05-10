@@ -8,6 +8,7 @@ Focuses on CHoCH signals (structure reversal) as entry triggers.
 
 from __future__ import annotations
 
+from typing import Any, cast
 import logging
 import math
 
@@ -58,7 +59,7 @@ def _select_external_stop_level(
     for idx in range(bounded_end, -1, -1):
         raw_marker = markers[idx]
         try:
-            marker_value = float(raw_marker) if raw_marker is not None else 0.0
+            marker_value = float(cast(Any, raw_marker)) if raw_marker is not None else 0.0
         except (TypeError, ValueError):
             invalid_markers += 1
             continue
@@ -70,7 +71,7 @@ def _select_external_stop_level(
             invalid_levels += 1
             continue
         try:
-            level = float(raw_level)
+            level = float(cast(Any, raw_level))
         except (TypeError, ValueError):
             invalid_levels += 1
             continue

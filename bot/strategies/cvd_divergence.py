@@ -9,6 +9,7 @@ Detects divergence between price direction and order flow delta.
 from __future__ import annotations
 
 import logging
+from typing import Any, cast
 import math
 
 from ..config import BotSettings
@@ -23,7 +24,7 @@ LOG = logging.getLogger("bot.strategies.cvd_divergence")
 
 def _signed_delta_values(values: object) -> object:
     """Normalize common public-flow encodings to signed delta [-1, 1]."""
-    raw = values
+    raw: Any = values
     try:
         min_value = float(raw.min())
         max_value = float(raw.max())
@@ -140,8 +141,8 @@ class CVDDivergenceSetup(BaseSetup):
 
         price_hh = float(max(window_b)) > float(max(window_a))
         price_ll = float(min(window_b)) < float(min(window_a))
-        delta_mean_a = float(delta_a.mean())
-        delta_mean_b = float(delta_b.mean())
+        delta_mean_a = float(cast(Any, delta_a).mean())
+        delta_mean_b = float(cast(Any, delta_b).mean())
         delta_shift = delta_mean_b - delta_mean_a
 
         if math.isnan(delta_mean_a) or math.isnan(delta_mean_b):

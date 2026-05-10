@@ -929,21 +929,21 @@ class BinanceFuturesMarketData:
             await self._http_session.close()
             self._http_session = None
 
-    def state_snapshot(self) -> dict[str, float | int | None]:
+    def state_snapshot(self) -> dict[str, float | int | str | None]:
         now = time.monotonic()
         open_circuits = sum(1 for v in self._circuit_open_until.values() if now < v)
         return {
-            "rest_weight_1m": self._last_rest_weight_1m,
-            "rest_response_time_ms": self._last_rest_response_time_ms,
-            "circuit_breakers_open": open_circuits,
-            "circuit_failure_counts": sum(self._circuit_failures.values()),
-            "endpoint_name": self._last_endpoint_name,
-            "source": self._last_endpoint_source,
-            "cache_hit": self._last_endpoint_cache_hit,
-            "fallback_used": self._last_endpoint_fallback_used,
-            "limiter_wait_ms": self._last_endpoint_limiter_wait_ms,
-            "response_age_s": self._last_endpoint_response_age_s,
-            "futures_data_limit_per_5m": self._futures_data_limit_per_5m,
+            "rest_weight_1m": float(cast(Any, self._last_rest_weight_1m)),
+            "rest_response_time_ms": float(cast(Any, self._last_rest_response_time_ms)),
+            "circuit_breakers_open": int(open_circuits),
+            "circuit_failure_counts": int(sum(self._circuit_failures.values())),
+            "endpoint_name": str(self._last_endpoint_name or ""),
+            "source": str(self._last_endpoint_source or ""),
+            "cache_hit": float(int(bool(self._last_endpoint_cache_hit))),
+            "fallback_used": float(int(bool(self._last_endpoint_fallback_used))),
+            "limiter_wait_ms": float(self._last_endpoint_limiter_wait_ms),
+            "response_age_s": float(cast(Any, self._last_endpoint_response_age_s)),
+            "futures_data_limit_per_5m": int(self._futures_data_limit_per_5m),
         }
 
     async def preflight_check(self) -> None:
@@ -1037,11 +1037,11 @@ class BinanceFuturesMarketData:
                 return stale_rows
             raise
 
-        rows: list[dict[str, float | str]] = []
+        new_rows: list[dict[str, float | str]] = []
         for item in payload if isinstance(payload, list) else []:
             # Handle both dict and object items
             if isinstance(item, dict):
-                rows.append(
+                new_rows.append(
                     {
                         "symbol": str(item.get("symbol", "")),
                         "last_price": float(
@@ -1057,7 +1057,7 @@ class BinanceFuturesMarketData:
                     }
                 )
             else:
-                rows.append(
+                new_rows.append(
                     {
                         "symbol": str(getattr(item, "symbol", "")),
                         "last_price": float(
@@ -1074,8 +1074,8 @@ class BinanceFuturesMarketData:
                         ),
                     }
                 )
-        self._ticker_24h_cache = (now, rows)
-        return rows
+        self._ticker_24h_cache = (now, new_rows)
+        return new_rows
 
     async def _fetch_symbol_frames_rest(self, symbol: str) -> SymbolFrames:
         frame_4h, frame_1h, frame_15m, frame_5m, book_ticker = await asyncio.gather(

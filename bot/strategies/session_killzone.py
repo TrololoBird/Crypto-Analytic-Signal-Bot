@@ -9,6 +9,8 @@ Requires directional momentum with volume confirmation during the killzone windo
 from __future__ import annotations
 
 import logging
+from typing import Any, cast
+import logging
 import math
 from datetime import datetime, timezone
 
@@ -41,7 +43,7 @@ _DEFAULT_KILLZONE_WINDOWS: tuple[tuple[str, int, int], ...] = (
 def _hour_param(params: dict[str, object], key: str, default: int) -> int:
     value = params.get(key, default)
     try:
-        hour = int(float(value))
+        hour = int(float(cast(Any, value)))
     except (TypeError, ValueError):
         return default
     return max(0, min(hour, 24))
@@ -175,7 +177,7 @@ class SessionKillzoneSetup(BaseSetup):
             if isinstance(last_bar_time, datetime)
             else datetime.now(timezone.utc)
         )
-        session_name = _active_killzone_name(now_utc.hour, dynamic_params)
+        session_name = _active_killzone_name(now_utc.hour, cast(dict[str, object], dynamic_params))
         if session_name is None:
             _reject(prepared, setup_id, "outside_killzone", hour=now_utc.hour)
             return None

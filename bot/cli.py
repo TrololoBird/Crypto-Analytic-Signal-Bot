@@ -188,11 +188,11 @@ def _pid_is_alive(pid: int) -> bool:
         return False
     if os.name == "nt":
         process_query_limited_information = 0x1000
-        handle = ctypes.windll.kernel32.OpenProcess(
-            process_query_limited_information, False, pid
-        )
+        # Access windll only if on Windows
+        kernel32 = getattr(ctypes, "windll", Any).kernel32
+        handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
         if handle:
-            ctypes.windll.kernel32.CloseHandle(handle)
+            kernel32.CloseHandle(handle)
             return True
         return ctypes.get_last_error() == 5
     try:
@@ -612,7 +612,7 @@ async def _db_clean_command(*, days: int) -> None:
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     settings = load_settings("config.toml")
-    repo = MemoryRepository(settings.db_path)
+    repo = MemoryRepository(settings.db_path, data_dir=settings.data_dir)
     await repo.initialize()
     deleted = await repo.cleanup_signal_outcomes_before(cutoff.isoformat())
     await repo.close()

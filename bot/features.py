@@ -94,7 +94,7 @@ _ADVANCED_FALLBACKS_LOGGED: set[str] = set()
 
 _MAX_CACHE_ENTRIES = 500
 _FrameCacheValue = float | None
-_FrameCacheKey = tuple[str, str, int, int, int, tuple[_FrameCacheValue, ...]]
+_FrameCacheKey = tuple[str, str, int, int, int, tuple[_FrameCacheValue, ...], tuple[object, ...] | None]
 _FRAME_CACHE_TAIL_COLUMNS = (
     "open",
     "high",
@@ -160,7 +160,7 @@ def _timestamp_ns(value: object) -> int:
         value = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if hasattr(value, "timestamp"):
         return int(value.timestamp() * 1e9)
-    return int(value)
+    return int(cast(Any, value))
 
 
 def _tail_value_signature(row: dict[str, object]) -> tuple[_FrameCacheValue, ...]:
@@ -171,7 +171,7 @@ def _tail_value_signature(row: dict[str, object]) -> tuple[_FrameCacheValue, ...
             values.append(None)
             continue
         try:
-            value = float(raw)
+            value = float(cast(Any, raw))
         except (TypeError, ValueError):
             values.append(None)
             continue
@@ -227,7 +227,7 @@ def _as_float_like(value: object, default: float = 0.0) -> float:
 
 def _as_optional_float(value: object) -> float | None:
     try:
-        numeric = float(value) if value is not None else None
+        numeric = float(cast(Any, value)) if value is not None else None
     except (TypeError, ValueError):
         return None
     if numeric is None or not np.isfinite(numeric):
@@ -462,10 +462,10 @@ def _vwap(df: pl.DataFrame) -> pl.Series:
             values.append(last_vwap)
         return pl.Series("vwap", values, dtype=pl.Float64).forward_fill()
 
-    cumulative_pv = pv.cum_sum()
-    cumulative_volume = df["volume"].cum_sum()
+    cpv: pl.Series = pv.cum_sum()
+    cv: pl.Series = df["volume"].cum_sum()
 
-    vwap = (cumulative_pv / cumulative_volume).forward_fill()
+    vwap = (cpv / cv).forward_fill()
     return _materialize_series(vwap, df=df, name="vwap")
 
 
@@ -754,7 +754,7 @@ def _supertrend(
             st = fl if curr_close >= fl else fu
         supertrend.append(st)
 
-    st_series = pl.Series("supertrend", supertrend, dtype=pl.Float64)
+    st_s = pl.Series("supertrend", supertrend, dtype=pl.Float64)
     direction = pl.Series(
         "supertrend_dir",
         [
@@ -763,7 +763,7 @@ def _supertrend(
         ],
         dtype=pl.Float64,
     )
-    return st_series, direction
+    return st_s, direction
 
 
 def _bollinger_bands(
