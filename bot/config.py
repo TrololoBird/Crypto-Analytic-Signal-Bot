@@ -24,6 +24,14 @@ class RuntimeConfig(BaseModel):
     metrics_port: int = Field(default=9090, ge=1000, le=65535)
     dashboard_host: str = "127.0.0.1"
     dashboard_port: int = Field(default=8080, ge=1000, le=65535)
+    dashboard_allow_origins: list[str] = Field(
+        default_factory=lambda: [
+            "http://127.0.0.1",
+            "http://localhost",
+            "http://127.0.0.1:8080",
+            "http://localhost:8080",
+        ]
+    )
     auto_open_dashboard: bool = False
     circuit_breaker_cooldown_seconds: int = Field(default=60, ge=0, le=3600)
     telemetry_subdir: str = "telemetry"
