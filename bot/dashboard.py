@@ -52,8 +52,8 @@ class BotDashboard:
             _CORSMiddleware,
             allow_origins=origins,
             allow_credentials=False,
-            allow_methods=["*"],
-            allow_headers=["*"],
+            allow_methods=["GET"],  # Security: Only allow GET for dashboard API
+            allow_headers=["Content-Type", "Authorization"],
         )
 
         @app.middleware("http")
@@ -123,7 +123,7 @@ class BotDashboard:
 
             settings = getattr(self.bot, "settings", None)
             setups = getattr(settings, "setups", None)
-            if hasattr(setups, "enabled_setup_ids"):
+            if setups is not None and hasattr(setups, "enabled_setup_ids"):
                 enabled_setups = set(setups.enabled_setup_ids())
             else:
                 enabled_setups = {

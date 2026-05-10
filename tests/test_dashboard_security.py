@@ -5,7 +5,7 @@ from bot.dashboard import BotDashboard
 from bot.config import BotSettings, RuntimeConfig
 
 
-def test_runtime_config_default_origins():
+def test_runtime_config_default_origins() -> None:
     config = RuntimeConfig()
     # Use sets for comparison to avoid ordering issues
     expected = {
@@ -17,10 +17,8 @@ def test_runtime_config_default_origins():
     assert set(config.dashboard_allow_origins) >= expected
 
 
-def test_dashboard_security_headers():
-    settings = BotSettings(
-        tg_token="dummy_token_for_testing_12345", target_chat_id="12345"
-    )
+def test_dashboard_security_headers() -> None:
+    settings = BotSettings(tg_token="TOKEN_FOR_TESTING", target_chat_id="12345")
     bot_mock = SimpleNamespace(settings=settings)
     dashboard = BotDashboard(bot_mock)
 
@@ -35,11 +33,9 @@ def test_dashboard_security_headers():
     assert response.headers["X-XSS-Protection"] == "1; mode=block"
 
 
-def test_dashboard_cors_restricted_origins():
-    settings = BotSettings(
-        tg_token="dummy_token_for_testing_12345", target_chat_id="12345"
-    )
-    settings.runtime.dashboard_allow_origins = ["http://trusted.test"]
+def test_dashboard_cors_restricted_origins() -> None:
+    settings = BotSettings(tg_token="TOKEN_FOR_TESTING", target_chat_id="12345")
+    settings.runtime.dashboard_allow_origins = ["https://trusted.test"]
     bot_mock = SimpleNamespace(settings=settings)
     dashboard = BotDashboard(bot_mock)
 
@@ -52,24 +48,26 @@ def test_dashboard_cors_restricted_origins():
     response = client.options(
         "/",
         headers={
-            "Origin": "http://trusted.test",
+            "Origin": "https://trusted.test",
             "Access-Control-Request-Method": "GET",
         },
     )
-    assert response.headers.get("Access-Control-Allow-Origin") == "http://trusted.test"
+    assert (
+        response.headers.get("Access-Control-Allow-Origin") == "https://trusted.test"
+    )
 
     # Untrusted origin
     response = client.options(
         "/",
         headers={
-            "Origin": "http://malicious.test",
+            "Origin": "https://malicious.test",
             "Access-Control-Request-Method": "GET",
         },
     )
     assert response.headers.get("Access-Control-Allow-Origin") is None
 
 
-def test_dashboard_initialization_without_settings():
+def test_dashboard_initialization_without_settings() -> None:
     # Ensure it doesn't crash if bot has no settings (defensive check)
     bot_mock = SimpleNamespace()
     dashboard = BotDashboard(bot_mock)
@@ -77,21 +75,19 @@ def test_dashboard_initialization_without_settings():
 
 
 @pytest.mark.asyncio
-async def test_dashboard_api_endpoints_coverage():
+async def test_dashboard_api_endpoints_coverage() -> None:
     # Mock bot with enough attributes to satisfy the API handlers
     class MockRepo:
-        async def get_active_signals(self, **kwargs):
+        async def get_active_signals(self, **kwargs: object) -> list[object]:
             return []
 
     class MockWS:
-        def get_stats(self):
+        def get_stats(self) -> dict[str, int]:
             return {"avg_latency_overall_ms": 10}
 
-        _symbols = ["BTCUSDT"]
+        _symbols: list[str] = ["BTCUSDT"]
 
-    settings = BotSettings(
-        tg_token="dummy_token_for_testing_12345", target_chat_id="12345"
-    )
+    settings = BotSettings(tg_token="TOKEN_FOR_TESTING", target_chat_id="12345")
     bot_mock = SimpleNamespace(
         settings=settings,
         _modern_repo=MockRepo(),
@@ -111,14 +107,13 @@ async def test_dashboard_api_endpoints_coverage():
     # Test various API endpoints to increase coverage
     assert client.get("/api/status").status_code == 200
     assert client.get("/api/signals/active").status_code == 200
-    assert (
-        client.get("/api/market/regime").status_code == 200
-    )  # Returns error but 200 OK json
+    # Returns error but 200 OK json
+    assert client.get("/api/market/regime").status_code == 200
     assert client.get("/api/metrics").status_code == 200
     assert client.get("/api/strategies").status_code == 200
 
     # Test health endpoint
-    async def mock_health():
+    async def mock_health() -> dict[str, str]:
         return {"status": "ok"}
 
     bot_mock.health_check = mock_health
@@ -129,10 +124,10 @@ async def test_dashboard_api_endpoints_coverage():
 
     # Test analytics/report
     class MockAnalytics:
-        def __init__(self, **kwargs):
+        def __init__(self, **kwargs: object) -> None:
             pass
 
-        async def generate_report(self, **kwargs):
+        async def generate_report(self, **kwargs: object) -> dict[str, object]:
             return {"summary": {}, "setup_reports": []}
 
     # Use a side-effect to mock the StrategyAnalytics class inside the dashboard module
