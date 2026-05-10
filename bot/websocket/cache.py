@@ -217,7 +217,8 @@ def handle_mark_price(manager: Any, symbol: str, data: dict) -> None:
         return
     try:
         funding_str = data.get("r")
-        funding_rate = float(funding_str) if funding_str not in (None, "", "0") else 0.0
+        # Ensure funding_str is not None for float() or check specifically
+        funding_rate = float(funding_str) if funding_str is not None and funding_str not in ("", "0") else 0.0
         manager._mark_price_cache[symbol] = {
             "symbol": symbol,
             "mark_price": float(data.get("p") or 0.0),

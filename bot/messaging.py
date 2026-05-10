@@ -21,7 +21,8 @@ try:
     from aiogram.client.session.aiohttp import AiohttpSession
 
     try:
-        from aiogram.exceptions import TelegramAPIError as AiogramAPIError
+        from aiogram.exceptions import TelegramAPIError as _AiogramAPIError
+        AiogramAPIError: Any = _AiogramAPIError
     except ImportError:
         from aiogram import exceptions as aiogram_exceptions
 

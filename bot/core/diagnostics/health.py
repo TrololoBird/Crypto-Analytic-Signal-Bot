@@ -7,7 +7,7 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import Any, cast
 
 from ..engine.registry import StrategyRegistry
 from ..analyzer.metrics import WinRateCalculator, PerformanceMetrics
@@ -72,7 +72,7 @@ class HealthChecker:
             if isinstance(result, Exception):
                 LOG.error("Health check failed: %s", result)
                 continue
-            health_results.append(result)
+            health_results.append(cast(ComponentHealth, result))
 
         self._last_check = _utcnow_naive()
         return health_results

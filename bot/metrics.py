@@ -38,7 +38,7 @@ except ImportError:
         def inc(self, *args: Any, **kwargs: Any) -> None:
             pass
 
-        def labels(self, *args: Any, **kwargs: Any) -> _PromCounterClass:
+        def labels(self, *args: Any, **kwargs: Any) -> Any:
             return self
 
     class _PromGaugeClass:  # type: ignore
@@ -76,10 +76,10 @@ except ImportError:
 
     REGISTRY = None  # type: ignore
 
-PromCounter = cast(Any, _PromCounterClass)
-PromGauge = cast(Any, _PromGaugeClass)
-PromHistogram = cast(Any, _PromHistogramClass)
-PromInfo = cast(Any, _PromInfoClass)
+PromCounter = _PromCounterClass
+PromGauge = _PromGaugeClass
+PromHistogram = _PromHistogramClass
+PromInfo = _PromInfoClass
 prom_start_http_server = cast(Any, _prom_start_http_server)
 
 

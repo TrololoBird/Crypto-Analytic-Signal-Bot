@@ -730,7 +730,9 @@ class MemoryRepository(MemoryRepositoryExtension):
             "SELECT score_adjustment FROM setup_scores WHERE setup_id = ?", (setup_id,)
         ) as cursor:
             row = await cursor.fetchone()
-            window_adjustment = float(row["score_adjustment"] or 0.0) if row else 0.0
+            window_adjustment = 0.0
+            if row is not None:
+                window_adjustment = float(row["score_adjustment"] or 0.0)
 
         outcome_adjustment = await self._recent_outcome_score_adjustment(setup_id)
         if outcome_adjustment < 0.0:
@@ -764,13 +766,18 @@ class MemoryRepository(MemoryRepositoryExtension):
         ) as cursor:
             row = await cursor.fetchone()
 
-        total = int(row["total"] or 0) if row is not None else 0
+        total = 0
+        wins = 0
+        avg_r = 0.0
+        if row is not None:
+            total = int(row["total"] or 0)
+            wins = int(row["wins"] or 0)
+            avg_r = float(row["avg_r_multiple"] or 0.0)
+
         if total < min_outcomes:
             return 0.0
 
-        wins = int(row["wins"] or 0)
         win_rate = wins / total if total > 0 else 0.0
-        avg_r = float(row["avg_r_multiple"] or 0.0)
         if not math.isfinite(avg_r):
             avg_r = 0.0
 
@@ -811,7 +818,7 @@ class MemoryRepository(MemoryRepositoryExtension):
         ) as cursor:
             row = await cursor.fetchone()
             window: list[Any] = []
-            if row and row["outcome_window"]:
+            if row is not None and row["outcome_window"]:
                 window = json.loads(row["outcome_window"])
 
         # Add new outcome. New entries include R data; older string-only

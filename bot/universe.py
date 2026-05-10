@@ -4,7 +4,7 @@ from dataclasses import replace
 import math
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, cast
 
 from .config import BotSettings, _ALL_SETUP_IDS
 from .models import SymbolMeta, UniverseSymbol
@@ -187,7 +187,7 @@ def _strategy_fits_for_row(
     basis_pct = _safe_float(row.get("basis_pct"))
     oi_change_pct = _safe_float(row.get("oi_change_pct"))
     quote_volume = float(row.get("quote_volume") or 0.0)
-    price_change_pct = abs(float(row.get("price_change_pct") or 0.0))
+    price_change_pct = abs(float(row.get("price_change_percent") or 0.0))
     spread_bps = _safe_float(row.get("spread_bps"))
     crowding = _crowding_score(row)
     symbol = str(row.get("symbol") or "").strip().upper()
@@ -360,7 +360,7 @@ def _composite_score(
     min_onboard_ms: int,
 ) -> tuple[float, tuple[str, ...]]:
     shortlist_bucket = _bucket_for_price_change(
-        float(row.get("price_change_pct") or 0.0)
+        float(row.get("price_change_percent") or 0.0)
     )
     liquidity_curve = 1.0 - ((liquidity_rank - 1) / max(eligible_count - 1, 1))
     volume_floor = max(
@@ -380,7 +380,7 @@ def _composite_score(
             age_days / max(float(settings.universe.min_listing_age_days) * 5.0, 30.0)
         )
 
-    move = abs(float(row.get("price_change_pct") or 0.0))
+    move = abs(float(row.get("price_change_percent") or 0.0))
     if shortlist_bucket == "trend":
         bucket_fit = max(0.0, 1.0 - min(move, 2.0) / 2.0)
     elif shortlist_bucket == "breakout":
@@ -438,7 +438,7 @@ def build_shortlist(
     *,
     seed_source: str = "rest_full",
 ) -> tuple[list[UniverseSymbol], dict[str, Any]]:
-    meta_map = {row.symbol: row for row in symbol_meta}
+    meta_map = {meta.symbol: meta for meta in symbol_meta}
     pinned = {symbol for symbol in settings.universe.pinned_symbols}
     min_onboard = datetime.now(UTC) - timedelta(
         days=settings.universe.min_listing_age_days
@@ -446,8 +446,8 @@ def build_shortlist(
     min_onboard_ms = int(min_onboard.timestamp() * 1000)
     eligible_rows: list[dict[str, Any]] = []
 
-    for row in tickers_24h:
-        symbol = str(row.get("symbol") or "").strip().upper()
+    for ticker_row in tickers_24h:
+        symbol = str(ticker_row.get("symbol") or "").strip().upper()
         meta = meta_map.get(symbol)
         if meta is None:
             continue
@@ -461,9 +461,9 @@ def build_shortlist(
             continue
         if meta.base_asset.upper() in STABLE_BASE_ASSETS:
             continue
-        quote_volume = float(row.get("quote_volume") or 0.0)
-        last_price = float(row.get("last_price") or 0.0)
-        price_change_pct = float(row.get("price_change_percent") or 0.0)
+        quote_volume = float(ticker_row.get("quote_volume") or 0.0)
+        last_price = float(ticker_row.get("last_price") or 0.0)
+        price_change_pct = float(ticker_row.get("price_change_percent") or 0.0)
         if quote_volume <= 0.0 or last_price <= 0.0:
             continue
         if quote_volume < settings.universe.min_quote_volume_usd:
@@ -483,22 +483,22 @@ def build_shortlist(
                 "price_change_pct": price_change_pct,
                 "last_price": last_price,
                 "shortlist_bucket": _bucket_for_price_change(price_change_pct),
-                "spread_bps": _safe_float(row.get("spread_bps")),
-                "ticker_age_seconds": _safe_float(row.get("ticker_age_seconds")),
-                "book_age_seconds": _safe_float(row.get("book_age_seconds")),
+                "spread_bps": _safe_float(ticker_row.get("spread_bps")),
+                "ticker_age_seconds": _safe_float(ticker_row.get("ticker_age_seconds")),
+                "book_age_seconds": _safe_float(ticker_row.get("book_age_seconds")),
                 "mark_price_age_seconds": _safe_float(
-                    row.get("mark_price_age_seconds")
+                    ticker_row.get("mark_price_age_seconds")
                 ),
-                "oi_change_pct": _safe_float(row.get("oi_change_pct")),
-                "oi_current": _safe_float(row.get("oi_current")),
-                "funding_rate": _safe_float(row.get("funding_rate")),
-                "basis_pct": _safe_float(row.get("basis_pct")),
-                "top_account_ls_ratio": _safe_float(row.get("top_account_ls_ratio")),
-                "top_position_ls_ratio": _safe_float(row.get("top_position_ls_ratio")),
+                "oi_change_pct": _safe_float(ticker_row.get("oi_change_pct")),
+                "oi_current": _safe_float(ticker_row.get("oi_current")),
+                "funding_rate": _safe_float(ticker_row.get("funding_rate")),
+                "basis_pct": _safe_float(ticker_row.get("basis_pct")),
+                "top_account_ls_ratio": _safe_float(ticker_row.get("top_account_ls_ratio")),
+                "top_position_ls_ratio": _safe_float(ticker_row.get("top_position_ls_ratio")),
                 "global_account_ls_ratio": _safe_float(
-                    row.get("global_account_ls_ratio")
+                    ticker_row.get("global_account_ls_ratio")
                 ),
-                "top_vs_global_ls_gap": _safe_float(row.get("top_vs_global_ls_gap")),
+                "top_vs_global_ls_gap": _safe_float(ticker_row.get("top_vs_global_ls_gap")),
             }
         )
 
@@ -506,15 +506,15 @@ def build_shortlist(
     eligible: list[UniverseSymbol] = []
     liquidity_rank = 0
     previous_volume: float | None = None
-    for index, row in enumerate(eligible_rows, start=1):
-        row_volume = float(row["quote_volume"])
+    for index, el_row in enumerate(eligible_rows, start=1):
+        row_volume = float(el_row["quote_volume"])
         if previous_volume is None or not math.isclose(
             row_volume, previous_volume, rel_tol=0.0, abs_tol=1e-9
         ):
             liquidity_rank = index
             previous_volume = row_volume
         shortlist_score, reasons = _composite_score(
-            row=row,
+            row=el_row,
             settings=settings,
             liquidity_rank=liquidity_rank,
             eligible_count=len(eligible_rows),
@@ -522,22 +522,22 @@ def build_shortlist(
         )
         eligible.append(
             UniverseSymbol(
-                symbol=str(row["symbol"]),
-                base_asset=str(row["base_asset"]),
-                quote_asset=str(row["quote_asset"]),
-                contract_type=str(row["contract_type"]),
-                status=str(row["status"]),
-                onboard_date_ms=int(row["onboard_date_ms"]),
-                quote_volume=float(row["quote_volume"]),
-                price_change_pct=float(row["price_change_pct"]),
-                last_price=float(row["last_price"]),
-                shortlist_bucket=str(row["shortlist_bucket"]),
+                symbol=str(el_row["symbol"]),
+                base_asset=str(el_row["base_asset"]),
+                quote_asset=str(el_row["quote_asset"]),
+                contract_type=str(el_row["contract_type"]),
+                status=str(el_row["status"]),
+                onboard_date_ms=int(el_row["onboard_date_ms"]),
+                quote_volume=float(el_row["quote_volume"]),
+                price_change_pct=float(el_row["price_change_pct"]),
+                last_price=float(el_row["last_price"]),
+                shortlist_bucket=str(el_row["shortlist_bucket"]),
                 shortlist_score=shortlist_score,
                 shortlist_reasons=reasons,
                 seed_source=seed_source,
                 liquidity_rank=liquidity_rank,
                 strategy_fits=_strategy_fits_for_row(
-                    row,
+                    el_row,
                     settings=settings,
                     liquidity_rank=liquidity_rank,
                 ),
@@ -553,8 +553,8 @@ def build_shortlist(
         ),
         reverse=True,
     )
-    pinned_rows = [row for row in eligible if row.symbol in pinned]
-    dynamic_pool = [row for row in eligible if row.symbol not in pinned][
+    pinned_rows = [p_row for p_row in eligible if p_row.symbol in pinned]
+    dynamic_pool = [d_row for d_row in eligible if d_row.symbol not in pinned][
         : settings.universe.dynamic_limit
     ]
     bucket_pool: dict[str, list[UniverseSymbol]] = {
@@ -562,8 +562,8 @@ def build_shortlist(
         "breakout": [],
         "reversal": [],
     }
-    for row in dynamic_pool:
-        bucket_pool[row.shortlist_bucket].append(row)
+    for pool_row in dynamic_pool:
+        bucket_pool[pool_row.shortlist_bucket].append(pool_row)
     for bucket in bucket_pool.values():
         bucket.sort(
             key=lambda item: (
@@ -577,16 +577,16 @@ def build_shortlist(
 
     shortlist: list[UniverseSymbol] = []
     seen: set[str] = set()
-    for row in pinned_rows:
-        if row.symbol in seen:
+    for s_row in pinned_rows:
+        if s_row.symbol in seen:
             continue
-        shortlist.append(row)
-        seen.add(row.symbol)
+        shortlist.append(s_row)
+        seen.add(s_row.symbol)
 
     targets = _scaled_bucket_targets(
         max(settings.universe.shortlist_limit - len(shortlist), 0)
     )
-    summary = {
+    summary: dict[str, Any] = {
         "mode": seed_source,
         "eligible": len(eligible),
         "dynamic_pool": len(dynamic_pool),
@@ -597,7 +597,7 @@ def build_shortlist(
         "fill": 0,
         "strategy_seed": 0,
         "avg_score": round(
-            sum((row.shortlist_score or 0.0) for row in shortlist)
+            sum((summ_row.shortlist_score or 0.0) for summ_row in shortlist)
             / max(len(shortlist), 1),
             6,
         ),
@@ -612,38 +612,38 @@ def build_shortlist(
             if candidate.symbol not in seen and setup_id in candidate.strategy_fits
         ]
         candidates.sort(key=lambda item: item.quote_volume, reverse=True)
-        for row in candidates[:_RESERVED_PER_STRATEGY]:
-            shortlist.append(row)
-            seen.add(row.symbol)
-            summary["strategy_seed"] += 1
+        for cand_row in candidates[:_RESERVED_PER_STRATEGY]:
+            shortlist.append(cand_row)
+            seen.add(cand_row.symbol)
+            summary["strategy_seed"] = cast(int, summary["strategy_seed"]) + 1
             if len(shortlist) >= settings.universe.shortlist_limit:
                 break
 
-    for bucket in ("trend", "breakout", "reversal"):
-        for row in bucket_pool[bucket]:
+    for b_name in ("trend", "breakout", "reversal"):
+        for b_row in bucket_pool[b_name]:
             if (
                 len(shortlist) >= settings.universe.shortlist_limit
-                or summary[bucket] >= targets[bucket]
+                or cast(int, summary[b_name]) >= targets[b_name]
             ):
                 break
-            if row.symbol in seen:
+            if b_row.symbol in seen:
                 continue
-            if not row.strategy_fits:
+            if not b_row.strategy_fits:
                 continue
-            shortlist.append(row)
-            seen.add(row.symbol)
-            summary[bucket] += 1
+            shortlist.append(b_row)
+            seen.add(b_row.symbol)
+            summary[b_name] = cast(int, summary[b_name]) + 1
 
-    for row in dynamic_pool:
+    for dy_row in dynamic_pool:
         if len(shortlist) >= settings.universe.shortlist_limit:
             break
-        if row.symbol in seen:
+        if dy_row.symbol in seen:
             continue
-        if not row.strategy_fits:
+        if not dy_row.strategy_fits:
             continue
-        shortlist.append(row)
-        seen.add(row.symbol)
-        summary["fill"] += 1
+        shortlist.append(dy_row)
+        seen.add(dy_row.symbol)
+        summary["fill"] = cast(int, summary["fill"]) + 1
 
     shortlist.sort(
         key=lambda item: (
@@ -655,12 +655,12 @@ def build_shortlist(
         )
     )
     summary["avg_score"] = round(
-        sum((row.shortlist_score or 0.0) for row in shortlist) / max(len(shortlist), 1),
+        sum((avg_row.shortlist_score or 0.0) for avg_row in shortlist) / max(len(shortlist), 1),
         6,
     )
     strategy_counts = {setup_id: 0 for setup_id in _ALL_SETUP_IDS}
-    for row in shortlist:
-        for setup_id in row.strategy_fits:
+    for count_row in shortlist:
+        for setup_id in count_row.strategy_fits:
             if setup_id in strategy_counts:
                 strategy_counts[setup_id] += 1
     summary["strategy_fit_counts"] = {

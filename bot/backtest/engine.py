@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 import polars as pl
 
@@ -150,7 +150,7 @@ class VectorizedBacktester:
         if isinstance(signals, list):
             signal_frame = pl.DataFrame(signals)
         else:
-            signal_frame = signals
+            signal_frame = cast(pl.DataFrame, signals)
 
         if signal_frame is not None and not signal_frame.is_empty():
             return self._signals_from_explicit_rows(

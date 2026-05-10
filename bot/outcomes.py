@@ -425,7 +425,7 @@ def extract_features_from_signal(
         spread_bps=signal.spread_bps,
         quote_volume=signal.quote_volume,
         delta_ratio=signal.orderflow_delta_ratio,
-        risk_reward=signal.risk_reward,
+        risk_reward=float(signal.risk_reward or 0.0),
         stop_distance_pct=signal.stop_distance_pct,
         entry_mid=signal.entry_mid,
         bias_4h=signal.bias_4h,
@@ -564,6 +564,7 @@ def create_outcome_from_tracked(
     elif features.llm_verdict == "NO":
         llm_was_correct = not was_profitable
 
+    res = getattr(tracked, "result", "")
     return SignalOutcome(
         signal_id=tracked.tracking_id,
         tracking_id=tracked.tracking_id,
@@ -577,7 +578,7 @@ def create_outcome_from_tracked(
         closed_at=tracked.closed_at,
         entry_price=entry_price,
         exit_price=exit_price,
-        result=outcome_result,
+        result=str(outcome_result or res),
         pnl_pct=pnl_pct,
         pnl_r_multiple=pnl_r_multiple,
         max_profit_pct=max_profit_pct,
