@@ -6,8 +6,8 @@ from datetime import UTC, datetime, timedelta
 import polars as pl
 import pytest
 
-from bot.config import BotSettings
-from bot.models import PreparedSymbol, UniverseSymbol
+from bot.domain.config import BotSettings
+from bot.domain.schemas import PreparedSymbol, UniverseSymbol
 from bot.public_intelligence import PublicIntelligenceService
 from bot.setup_base import SetupParams
 from bot.setups import _compute_dynamic_score

@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from bot.application.cycle_runner import CycleRunner
-from bot.models import PipelineResult, Signal, UniverseSymbol
+from bot.domain.schemas import PipelineResult, Signal, UniverseSymbol
 
 
 class _TrackerStub:

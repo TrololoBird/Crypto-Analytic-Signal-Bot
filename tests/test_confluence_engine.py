@@ -4,9 +4,9 @@ from types import SimpleNamespace
 
 import polars as pl
 
-from bot.config import BotSettings
+from bot.domain.config import BotSettings
 from bot.confluence import ComponentScore, ConfluenceEngine
-from bot.models import PreparedSymbol, Signal, UniverseSymbol
+from bot.domain.schemas import PreparedSymbol, Signal, UniverseSymbol
 
 
 class _StubMLFilter:

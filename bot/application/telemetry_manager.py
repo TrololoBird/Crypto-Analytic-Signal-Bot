@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from ..core.engine import StrategyDecision
-from ..models import PipelineResult, Signal
+from ..domain.schemas import PipelineResult, Signal
 from ..tracking import SignalTrackingEvent
 
 LOG = logging.getLogger("bot.application.telemetry_manager")

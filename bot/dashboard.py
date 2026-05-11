@@ -104,7 +104,9 @@ class BotDashboard:
         async def analytics_report(days: int = 30) -> dict[str, Any]:
             from .analytics import StrategyAnalytics
 
+            # TODO: [Sentinel] Validate 'days' parameter range at the schema level
             days = max(1, min(int(days), 365))
+            # TODO: [Architect] Move analytics orchestration to a dedicated Service layer
             reporter = StrategyAnalytics(repo=self.bot._modern_repo)
             report = await reporter.generate_report(days=days)
             return self._merge_strategy_catalog(report)

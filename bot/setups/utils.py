@@ -14,7 +14,7 @@ import polars as pl
 from ..runtime_policy import is_deep_analysis_symbol
 
 if TYPE_CHECKING:
-    from ..models import PreparedSymbol, Signal
+    from ..domain.schemas import PreparedSymbol, Signal
 
 
 def _safe_float(value: object, default: float = 0.0) -> float:

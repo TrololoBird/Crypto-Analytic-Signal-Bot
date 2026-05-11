@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from bot.application.bot import SignalBot
-from bot.models import PipelineResult, SymbolFrames, UniverseSymbol
+from bot.domain.schemas import PipelineResult, SymbolFrames, UniverseSymbol
 
 
 class _AsyncRecorder:

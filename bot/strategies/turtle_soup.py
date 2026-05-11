@@ -12,8 +12,8 @@ from __future__ import annotations
 import logging
 import math
 
-from ..config import BotSettings
-from ..models import PreparedSymbol, Signal
+from ..domain.config import BotSettings
+from ..domain.schemas import PreparedSymbol, Signal
 from ..setup_base import BaseSetup
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.utils import get_dynamic_params, normalize_trade_levels

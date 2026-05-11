@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from .ml.volatility_gate import VolatilityGate
-from .config import BotSettings
-from .models import PreparedSymbol, Signal
+from .domain.config import BotSettings
+from .domain.schemas import PreparedSymbol, Signal
 from .scoring import (
     ScoringResult,
     _crowd_position,

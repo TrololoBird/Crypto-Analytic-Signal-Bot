@@ -9,7 +9,7 @@ from common import bootstrap_repo_path, configure_script_logging
 
 bootstrap_repo_path()
 
-from bot.config import load_settings
+from bot.domain.config import load_settings
 from bot.market_data import BinanceFuturesMarketData, MarketDataUnavailable
 from bot.ws_manager import FuturesWSManager
 

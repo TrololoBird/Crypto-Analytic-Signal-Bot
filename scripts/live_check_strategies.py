@@ -11,11 +11,11 @@ from common import bootstrap_repo_path, configure_script_logging, load_symbols_f
 
 bootstrap_repo_path()
 
-from bot.config import load_settings
+from bot.domain.config import load_settings
 from bot.core.engine import SignalEngine, StrategyRegistry
 from bot.features import min_required_bars, prepare_symbol
 from bot.market_data import BinanceFuturesMarketData, MarketDataUnavailable
-from bot.models import SymbolFrames, UniverseSymbol
+from bot.domain.schemas import SymbolFrames, UniverseSymbol
 from bot.setup_base import SetupParams
 from bot.strategies import STRATEGY_CLASSES
 

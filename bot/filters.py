@@ -10,8 +10,8 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
-from .config import BotSettings
-from .models import PreparedSymbol, Signal
+from .domain.config import BotSettings
+from .domain.schemas import PreparedSymbol, Signal
 from .runtime_policy import is_deep_analysis_symbol
 from .scoring import ScoringResult
 

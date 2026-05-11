@@ -6,7 +6,7 @@ import polars as pl
 import pytest
 
 from bot.backtest.engine import VectorizedBacktester
-from bot.config import BotSettings
+from bot.domain.config import BotSettings
 
 
 def _synthetic_market(rows: int = 220) -> pl.DataFrame:

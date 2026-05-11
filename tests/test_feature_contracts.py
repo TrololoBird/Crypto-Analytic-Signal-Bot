@@ -3,15 +3,15 @@ from __future__ import annotations
 from dataclasses import fields
 import pytest
 
-from bot.feature_contract import (
+from bot.domain.contracts import (
     PUBLIC_FEATURE_FIELDS,
     PUBLIC_FEATURE_SCHEMA_VERSION,
     normalize_public_feature_payload,
     validate_public_feature_payload,
 )
-from bot.models import PreparedSymbol
+from bot.domain.schemas import PreparedSymbol
 from bot.outcomes import build_prepared_feature_snapshot
-from bot.runtime_contract import (
+from bot.domain.contracts import (
     RUNTIME_PUBLIC_IMPORT_CONTRACT,
     assert_runtime_call_path_is_clean,
     assert_runtime_import_contract,

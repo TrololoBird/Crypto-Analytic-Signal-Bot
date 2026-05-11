@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from bot.config import IntelligenceConfig
+from bot.domain.config import IntelligenceConfig
 
 
 @pytest.mark.parametrize("value", ["legacy", "hmm", "gmm_var", "composite"])

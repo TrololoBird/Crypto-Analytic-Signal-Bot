@@ -8,7 +8,7 @@ import math
 from math import isfinite
 from typing import Literal
 
-from .models import PreparedSymbol
+from .domain.schemas import PreparedSymbol
 
 VolatilityRegime = Literal["low", "medium", "high", "any"]
 

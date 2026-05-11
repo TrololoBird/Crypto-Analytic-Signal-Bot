@@ -24,12 +24,12 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
 
-from ..config import BotSettings
+from ..domain.config import BotSettings
 from ..core.events import BookTickerEvent, KlineCloseEvent, ReconnectEvent
 from ..core.engine import StrategyDecision, StrategyRegistry
 from ..feature_flags import FeatureFlags
 from ..market_data import BinanceFuturesMarketData
-from ..models import (
+from ..domain.schemas import (
     PreparedSymbol,
     Signal,
     SymbolFrames,

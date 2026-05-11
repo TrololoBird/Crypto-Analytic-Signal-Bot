@@ -23,10 +23,10 @@ log("=" * 60)
 try:
     # Try importing bot
     log("Testing imports...")
-    from bot.config import BotSettings
+    from bot.domain.config import BotSettings
     log(f"[OK] {BotSettings.__name__} imported")
     
-    from bot.models import Signal
+    from bot.domain.schemas import Signal
     log(f"[OK] Signal has adx_1h: {hasattr(Signal, 'adx_1h')}")
     log(f"[OK] Signal has risk_reward: {hasattr(Signal, 'risk_reward')}")
     
