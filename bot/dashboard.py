@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import logging
 import webbrowser
+import asyncio
 from datetime import datetime, timezone
+import time
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
@@ -36,6 +38,7 @@ class BotDashboard:
         self._enabled = HAS_FASTAPI
         self.app: FastAPI | None = None
         self._strategies_cache: list[dict[str, Any]] | None = None
+        self._analytics_cache: dict[int, tuple[float, dict[str, Any]]] = {}
 
         if not self._enabled:
             LOG.warning("fastapi not installed, dashboard disabled")
@@ -105,9 +108,19 @@ class BotDashboard:
             from .analytics import StrategyAnalytics
 
             days = max(1, min(int(days), 365))
+
+            # TTL Cache for analytics report (60s)
+            now = time.monotonic()
+            cached = self._analytics_cache.get(days)
+            if cached and (now - cached[0]) < 60.0:
+                return cached[1]
+
             reporter = StrategyAnalytics(repo=self.bot._modern_repo)
             report = await reporter.generate_report(days=days)
-            return self._merge_strategy_catalog(report)
+            merged = self._merge_strategy_catalog(report)
+
+            self._analytics_cache[days] = (now, merged)
+            return merged
 
         @self.app.get("/api/strategies")
         async def strategies() -> list[dict[str, Any]]:
@@ -157,19 +170,20 @@ class BotDashboard:
     def _merge_strategy_catalog(self, report: dict[str, Any]) -> dict[str, Any]:
         """Attach every registered strategy to analytics, including zero-outcome rows."""
         catalog = self._strategies_cache or []
-        by_setup = dict(report.get("by_setup") or {})
-        rows_by_setup = {
-            str(row.get("setup_id")): dict(row)
-            for row in report.get("setup_reports", [])
-            if row.get("setup_id")
-        }
+        by_setup = report.get("by_setup") or {}
+
+        enabled_count = 0
         for item in catalog:
             setup_id = str(item.get("id") or "")
             if not setup_id:
                 continue
-            row = rows_by_setup.setdefault(
-                setup_id,
-                {
+
+            is_enabled = bool(item.get("enabled"))
+            if is_enabled:
+                enabled_count += 1
+
+            if setup_id not in by_setup:
+                by_setup[setup_id] = {
                     "setup_id": setup_id,
                     "trades": 0,
                     "count": 0,
@@ -178,15 +192,16 @@ class BotDashboard:
                     "avg_rr": 0.0,
                     "profit_factor": None,
                     "max_drawdown_r": 0.0,
-                },
-            )
-            row["enabled"] = bool(item.get("enabled"))
+                }
+
+            row = by_setup[setup_id]
+            row["enabled"] = is_enabled
             row["status"] = item.get("status", "beta")
             row["risk_profile"] = item.get("risk_profile", "generic")
             row["family"] = item.get("family", "generic")
-            by_setup[setup_id] = row
+
         setup_reports = sorted(
-            rows_by_setup.values(),
+            by_setup.values(),
             key=lambda row: (
                 not bool(row.get("enabled", True)),
                 -int(row.get("trades") or 0),
@@ -197,11 +212,202 @@ class BotDashboard:
         report["by_setup"] = by_setup
         report["setup_reports"] = setup_reports
         report["registered_strategies"] = len(catalog)
-        report["enabled_strategies"] = sum(1 for item in catalog if item.get("enabled"))
+        report["enabled_strategies"] = enabled_count
         return report
 
     def _get_html_dashboard(self) -> str:
-        return """<!DOCTYPE html>
+        return DASHBOARD_HTML
+
+    async def _get_status(self) -> dict[str, Any]:
+        bot = self.bot
+        regime = bot.market_regime._last_result
+
+        ws_lag = 0
+        if bot._ws_manager is not None:
+            stats = bot._ws_manager.get_stats()
+            ws_lag = stats.get("avg_latency_overall_ms", 0) or 0
+
+        # Quick count without full fetch - use len of cached data
+        open_signals_count = 0
+        try:
+
+
+            signals = await asyncio.wait_for(
+                bot._modern_repo.get_active_signals(), timeout=1.0
+            )
+            open_signals_count = len(signals)
+        except Exception:
+            pass  # Don't block dashboard for signal count
+
+        return {
+            "running": not bot._shutdown.is_set(),
+            "shortlist_size": len(bot._shortlist),
+            "open_signals": open_signals_count,
+            "ws_latency_ms": ws_lag,
+            "market_regime": regime.regime if regime else "unknown",
+            "market_strength": regime.strength if regime else 0.0,
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
+
+    async def _get_active_signals(self) -> list[dict[str, Any]]:
+        try:
+            # Use timeout to prevent blocking dashboard
+
+
+            signals = await asyncio.wait_for(
+                self.bot._modern_repo.get_active_signals(), timeout=2.0
+            )
+            return [
+                {
+                    "symbol": sig.get("symbol"),
+                    "setup_id": sig.get("setup_id"),
+                    "direction": sig.get("direction"),
+                    "entry_price": sig.get("activation_price")
+                    or sig.get("entry_price")
+                    or sig.get("entry_mid"),
+                    "stop_price": sig.get("stop_price") or sig.get("stop"),
+                    "tp1_price": sig.get("tp1_price") or sig.get("take_profit_1"),
+                    "tp2_price": sig.get("tp2_price") or sig.get("take_profit_2"),
+                    "score": sig.get("score"),
+                    "risk_reward": sig.get("risk_reward"),
+                    "status": sig.get("status"),
+                    "tracking_id": sig.get("tracking_id"),
+                    "tracking_ref": sig.get("tracking_ref"),
+                    "timestamp": sig.get("activated_at") or sig.get("created_at"),
+                }
+                for sig in signals
+            ]
+        except asyncio.TimeoutError:
+            LOG.debug("timeout fetching active signals for dashboard")
+            return []
+        except Exception as exc:
+            LOG.debug("error fetching active signals: %s", exc)
+            return []
+
+    def _get_recent_signals(self, limit: int = 20) -> list[dict[str, Any]]:
+        telemetry_dir = self.bot.settings.telemetry_dir
+        signals: list[dict[str, Any]] = []
+
+        candidates_file = self._latest_analysis_file(telemetry_dir, "candidates.jsonl")
+        if candidates_file is None:
+            return signals
+
+        try:
+            with candidates_file.open("r", encoding="utf-8") as handle:
+                lines = handle.readlines()
+            for line in reversed(lines[-limit:]):
+                if line.strip():
+                    signals.append(json.loads(line))
+        except Exception as exc:
+            LOG.debug("failed to read recent candidates: %s", exc)
+
+        return signals
+
+    def _get_market_regime(self) -> dict[str, Any]:
+        regime = self.bot.market_regime._last_result
+        if not regime:
+            return {"error": "No market data available"}
+        return regime.to_dict()
+
+    async def _get_metrics(self) -> dict[str, Any]:
+        bot = self.bot
+
+        # Get signal count with timeout
+        open_signals_count = 0
+        try:
+
+
+            signals = await asyncio.wait_for(
+                bot._modern_repo.get_active_signals(), timeout=1.0
+            )
+            open_signals_count = len(signals)
+        except Exception:
+            pass
+
+        # Get market regime safely
+        regime_data = None
+        try:
+            if bot.market_regime._last_result:
+                regime_data = bot.market_regime._last_result.to_dict()
+        except Exception:
+            pass
+
+        # Get engine stats safely
+        engine_stats = {}
+        try:
+            engine_stats = bot._modern_engine.get_engine_stats()
+        except Exception:
+            pass
+
+        return {
+            "shortlist_size": len(bot._shortlist),
+            "open_signals": open_signals_count,
+            "ws_streams": len(bot._ws_manager._symbols) if bot._ws_manager else 0,
+            "market_regime": regime_data,
+            "engine": engine_stats,
+        }
+
+    def _latest_analysis_file(self, telemetry_dir: Path, filename: str) -> Path | None:
+        runs_dir = telemetry_dir / "runs"
+        if not runs_dir.exists():
+            return None
+        candidates = sorted(
+            runs_dir.glob(f"*/analysis/{filename}"),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+        return candidates[0] if candidates else None
+
+    def start_server(
+        self, *, auto_open: bool = True, delay_seconds: float = 1.5
+    ) -> None:
+        if not self._enabled or not self.app:
+            LOG.debug("dashboard server disabled (fastapi not installed)")
+            return
+
+        from threading import Thread
+
+        def run_server() -> None:
+            if self.app is None:
+                return
+            try:
+                import uvicorn  # type: ignore
+            except Exception as exc:
+                LOG.warning("dashboard server failed to import uvicorn: %s", exc)
+                return
+            try:
+                uvicorn.run(
+                    self.app, host=self.host, port=self.port, log_level="warning"
+                )
+            except Exception as exc:
+                LOG.warning("dashboard server crashed: %s", exc)
+
+        thread = Thread(target=run_server, daemon=True)
+        thread.start()
+        LOG.info("dashboard server started on port %d", self.port)
+
+        if auto_open:
+            self._schedule_browser_open(delay_seconds)
+
+    def _schedule_browser_open(self, delay_seconds: float) -> None:
+        """Open browser after server is ready."""
+        import threading
+        import time
+
+        def open_browser() -> None:
+            time.sleep(delay_seconds)
+            url = f"http://localhost:{self.port}"
+            try:
+                webbrowser.open(url, new=2)  # new=2 opens in new tab
+                LOG.info("opened dashboard in browser: %s", url)
+            except Exception as exc:
+                LOG.debug("failed to open browser: %s", exc)
+                LOG.info("dashboard available at: %s", url)
+
+        threading.Thread(target=open_browser, daemon=True).start()
+
+
+DASHBOARD_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="utf-8">
@@ -643,6 +849,11 @@ class BotDashboard:
                 const activePanel = document.getElementById('tab-panel-' + tab.dataset.tab);
                 activePanel.classList.add('active');
                 activePanel.setAttribute('aria-hidden', 'false');
+
+                // Context-aware fetch on tab switch
+                if (tab.dataset.tab === 'signals') fetchSignals();
+                if (tab.dataset.tab === 'analytics') fetchAnalytics();
+                if (tab.dataset.tab === 'settings') fetchStrategies();
             });
         });
         
@@ -681,6 +892,14 @@ class BotDashboard:
                 if (v >= 0.75) return { text: (v * 100).toFixed(0) + '%', class: 'score-high' };
                 if (v >= 0.60) return { text: (v * 100).toFixed(0) + '%', class: 'score-medium' };
                 return { text: (v * 100).toFixed(0) + '%', class: 'score-low' };
+            },
+            timeAgo: (v) => {
+                if (!v) return "-";
+                const seconds = Math.floor((new Date() - new Date(v)) / 1000);
+                if (seconds < 60) return "just now";
+                if (seconds < 3600) return Math.floor(seconds / 60) + "m";
+                if (seconds < 86400) return Math.floor(seconds / 3600) + "h";
+                return Math.floor(seconds / 86400) + "d";
             }
         };
 
@@ -942,11 +1161,22 @@ class BotDashboard:
         fetchAnalytics();
         
         // Periodic updates
-        setInterval(fetchStatus, 5000);
-        setInterval(fetchSignals, 10000);
-        setInterval(fetchRecentActivity, 10000);
-        setInterval(fetchStrategies, 30000);  // Refresh strategies every 30s
-        setInterval(fetchAnalytics, 30000);
+        setInterval(() => {
+            const activeTab = document.querySelector(".nav-tab.active").dataset.tab;
+            fetchStatus();
+            if (activeTab === "signals") fetchSignals();
+            if (activeTab === "overview") fetchRecentActivity();
+            if (activeTab === "settings") fetchStrategies();
+            if (activeTab === "analytics") fetchAnalytics();
+        }, 5000);
+
+        // Visibility change handling
+        document.addEventListener("visibilitychange", () => {
+            if (document.visibilityState === "visible") {
+                fetchStatus();
+                fetchSignals();
+            }
+        });
         
         // Welcome toast
         setTimeout(() => {
@@ -955,191 +1185,3 @@ class BotDashboard:
     </script>
 </body>
 </html>"""
-
-    async def _get_status(self) -> dict[str, Any]:
-        bot = self.bot
-        regime = bot.market_regime._last_result
-
-        ws_lag = 0
-        if bot._ws_manager is not None:
-            stats = bot._ws_manager.get_stats()
-            ws_lag = stats.get("avg_latency_overall_ms", 0) or 0
-
-        # Quick count without full fetch - use len of cached data
-        open_signals_count = 0
-        try:
-            import asyncio
-
-            signals = await asyncio.wait_for(
-                bot._modern_repo.get_active_signals(), timeout=1.0
-            )
-            open_signals_count = len(signals)
-        except Exception:
-            pass  # Don't block dashboard for signal count
-
-        return {
-            "running": not bot._shutdown.is_set(),
-            "shortlist_size": len(bot._shortlist),
-            "open_signals": open_signals_count,
-            "ws_latency_ms": ws_lag,
-            "market_regime": regime.regime if regime else "unknown",
-            "market_strength": regime.strength if regime else 0.0,
-            "timestamp": datetime.now(UTC).isoformat(),
-        }
-
-    async def _get_active_signals(self) -> list[dict[str, Any]]:
-        try:
-            # Use timeout to prevent blocking dashboard
-            import asyncio
-
-            signals = await asyncio.wait_for(
-                self.bot._modern_repo.get_active_signals(), timeout=2.0
-            )
-            return [
-                {
-                    "symbol": sig.get("symbol"),
-                    "setup_id": sig.get("setup_id"),
-                    "direction": sig.get("direction"),
-                    "entry_price": sig.get("activation_price")
-                    or sig.get("entry_price")
-                    or sig.get("entry_mid"),
-                    "stop_price": sig.get("stop_price") or sig.get("stop"),
-                    "tp1_price": sig.get("tp1_price") or sig.get("take_profit_1"),
-                    "tp2_price": sig.get("tp2_price") or sig.get("take_profit_2"),
-                    "score": sig.get("score"),
-                    "risk_reward": sig.get("risk_reward"),
-                    "status": sig.get("status"),
-                    "tracking_id": sig.get("tracking_id"),
-                    "tracking_ref": sig.get("tracking_ref"),
-                    "timestamp": sig.get("activated_at") or sig.get("created_at"),
-                }
-                for sig in signals
-            ]
-        except asyncio.TimeoutError:
-            LOG.debug("timeout fetching active signals for dashboard")
-            return []
-        except Exception as exc:
-            LOG.debug("error fetching active signals: %s", exc)
-            return []
-
-    def _get_recent_signals(self, limit: int = 20) -> list[dict[str, Any]]:
-        telemetry_dir = self.bot.settings.telemetry_dir
-        signals: list[dict[str, Any]] = []
-
-        candidates_file = self._latest_analysis_file(telemetry_dir, "candidates.jsonl")
-        if candidates_file is None:
-            return signals
-
-        try:
-            with candidates_file.open("r", encoding="utf-8") as handle:
-                lines = handle.readlines()
-            for line in reversed(lines[-limit:]):
-                if line.strip():
-                    signals.append(json.loads(line))
-        except Exception as exc:
-            LOG.debug("failed to read recent candidates: %s", exc)
-
-        return signals
-
-    def _get_market_regime(self) -> dict[str, Any]:
-        regime = self.bot.market_regime._last_result
-        if not regime:
-            return {"error": "No market data available"}
-        return regime.to_dict()
-
-    async def _get_metrics(self) -> dict[str, Any]:
-        bot = self.bot
-
-        # Get signal count with timeout
-        open_signals_count = 0
-        try:
-            import asyncio
-
-            signals = await asyncio.wait_for(
-                bot._modern_repo.get_active_signals(), timeout=1.0
-            )
-            open_signals_count = len(signals)
-        except Exception:
-            pass
-
-        # Get market regime safely
-        regime_data = None
-        try:
-            if bot.market_regime._last_result:
-                regime_data = bot.market_regime._last_result.to_dict()
-        except Exception:
-            pass
-
-        # Get engine stats safely
-        engine_stats = {}
-        try:
-            engine_stats = bot._modern_engine.get_engine_stats()
-        except Exception:
-            pass
-
-        return {
-            "shortlist_size": len(bot._shortlist),
-            "open_signals": open_signals_count,
-            "ws_streams": len(bot._ws_manager._symbols) if bot._ws_manager else 0,
-            "market_regime": regime_data,
-            "engine": engine_stats,
-        }
-
-    def _latest_analysis_file(self, telemetry_dir: Path, filename: str) -> Path | None:
-        runs_dir = telemetry_dir / "runs"
-        if not runs_dir.exists():
-            return None
-        candidates = sorted(
-            runs_dir.glob(f"*/analysis/{filename}"),
-            key=lambda path: path.stat().st_mtime,
-            reverse=True,
-        )
-        return candidates[0] if candidates else None
-
-    def start_server(
-        self, *, auto_open: bool = True, delay_seconds: float = 1.5
-    ) -> None:
-        if not self._enabled or not self.app:
-            LOG.debug("dashboard server disabled (fastapi not installed)")
-            return
-
-        from threading import Thread
-
-        def run_server() -> None:
-            if self.app is None:
-                return
-            try:
-                import uvicorn  # type: ignore
-            except Exception as exc:
-                LOG.warning("dashboard server failed to import uvicorn: %s", exc)
-                return
-            try:
-                uvicorn.run(
-                    self.app, host=self.host, port=self.port, log_level="warning"
-                )
-            except Exception as exc:
-                LOG.warning("dashboard server crashed: %s", exc)
-
-        thread = Thread(target=run_server, daemon=True)
-        thread.start()
-        LOG.info("dashboard server started on port %d", self.port)
-
-        if auto_open:
-            self._schedule_browser_open(delay_seconds)
-
-    def _schedule_browser_open(self, delay_seconds: float) -> None:
-        """Open browser after server is ready."""
-        import threading
-        import time
-
-        def open_browser() -> None:
-            time.sleep(delay_seconds)
-            url = f"http://localhost:{self.port}"
-            try:
-                webbrowser.open(url, new=2)  # new=2 opens in new tab
-                LOG.info("opened dashboard in browser: %s", url)
-            except Exception as exc:
-                LOG.debug("failed to open browser: %s", exc)
-                LOG.info("dashboard available at: %s", url)
-
-        threading.Thread(target=open_browser, daemon=True).start()
