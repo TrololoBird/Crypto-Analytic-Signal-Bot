@@ -1451,11 +1451,9 @@ class SymbolAnalyzer:
                 premium_slope = basis_stats.get("premium_slope_5m")
                 if premium_slope is not None:
                     enrichments["premium_slope_5m"] = float(cast(Any, premium_slope))
-
                 premium_zscore = basis_stats.get("premium_zscore_5m")
                 if premium_zscore is not None:
                     enrichments["premium_zscore_5m"] = float(cast(Any, premium_zscore))
-
                 mark_spread = basis_stats.get("mark_index_spread_bps")
                 if mark_spread is not None:
                     enrichments["mark_index_spread_bps"] = float(cast(Any, mark_spread))

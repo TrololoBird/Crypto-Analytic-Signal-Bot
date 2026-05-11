@@ -7,7 +7,7 @@ from typing import Any
 
 
 from ...domain.schemas import PreparedSymbol
-from ...domain.strategies import StrategyMetadata, SignalResult
+from ...domain.strategies import StrategyMetadata, SignalResult, StrategyDecision as StrategyDecision
 
 
 class AbstractStrategy(ABC):

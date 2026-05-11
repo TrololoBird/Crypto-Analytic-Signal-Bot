@@ -725,6 +725,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             text-align: center;
             padding: var(--space-8);
             color: var(--text-secondary);
+            margin-top: var(--space-2);
+            writing-mode: vertical-rl;
+            text-orientation: mixed;
+            transform: rotate(180deg);
+            height: 70px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
         .chart-container {
             height: 220px;
@@ -953,17 +961,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     </div>
     
     <script>
-        // Tab switching logic
+        // Tab switching
         function switchTab(tabId) {
-            tabId = tabId || 'overview';
             const tabs = document.querySelectorAll('.nav-tab');
             const panels = document.querySelectorAll('.tab-content');
-            let selectedTab = document.querySelector(`[data-tab="${tabId}"]`);
+            const selectedTab = document.querySelector(`[data-tab="${tabId}"]`);
 
-            if (!selectedTab) {
-                tabId = 'overview';
-                selectedTab = document.querySelector(`[data-tab="overview"]`);
-            }
             if (!selectedTab) return;
 
             tabs.forEach(t => {
