@@ -188,9 +188,7 @@ class BotDashboard:
                         "enabled": setup_id in enabled_setups,
                         "status": str(getattr(cls, "status", "beta")),
                         "risk_profile": str(
-                            getattr(
-                                cls, "risk_profile", getattr(cls, "family", "generic")
-                            )
+                            getattr(cls, "risk_profile", getattr(cls, "family", "generic"))
                         ),
                         "family": str(getattr(cls, "family", "generic")),
                     }
@@ -266,9 +264,7 @@ class BotDashboard:
         # Quick count without full fetch
         open_signals_count = 0
         try:
-            stats = await asyncio.wait_for(
-                bot._modern_repo.get_tracking_stats(), timeout=1.0
-            )
+            stats = await asyncio.wait_for(bot._modern_repo.get_tracking_stats(), timeout=1.0)
             open_signals_count = stats.get("active", 0)
         except Exception:
             pass
@@ -294,9 +290,7 @@ class BotDashboard:
 
         try:
             # Use timeout to prevent blocking dashboard
-            signals = await asyncio.wait_for(
-                repo.get_active_signals(), timeout=2.0
-            )
+            signals = await asyncio.wait_for(repo.get_active_signals(), timeout=2.0)
             return [
                 {
                     "symbol": sig.get("symbol"),
@@ -389,9 +383,7 @@ class BotDashboard:
         # Get signal count with timeout
         open_signals_count = 0
         try:
-            stats = await asyncio.wait_for(
-                bot._modern_repo.get_tracking_stats(), timeout=1.0
-            )
+            stats = await asyncio.wait_for(bot._modern_repo.get_tracking_stats(), timeout=1.0)
             open_signals_count = stats.get("active", 0)
         except Exception:
             pass
@@ -433,9 +425,7 @@ class BotDashboard:
         )
         return candidates[0] if candidates else None
 
-    def start_server(
-        self, *, auto_open: bool = True, delay_seconds: float = 1.5
-    ) -> None:
+    def start_server(self, *, auto_open: bool = True, delay_seconds: float = 1.5) -> None:
         if not self._enabled or not self.app:
             LOG.debug("dashboard server disabled (fastapi not installed)")
             return
@@ -451,9 +441,7 @@ class BotDashboard:
                 LOG.warning("dashboard server failed to import uvicorn: %s", exc)
                 return
             try:
-                uvicorn.run(
-                    self.app, host=self.host, port=self.port, log_level="warning"
-                )
+                uvicorn.run(self.app, host=self.host, port=self.port, log_level="warning")
             except Exception as exc:
                 LOG.warning("dashboard server crashed: %s", exc)
 
