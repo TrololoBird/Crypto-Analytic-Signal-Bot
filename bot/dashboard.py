@@ -128,6 +128,9 @@ class BotDashboard:
         async def analytics_report(days: int = 30) -> dict[str, Any]:
             try:
                 from .analytics import StrategyAnalytics
+            except ImportError as exc:
+                LOG.error("failed to import StrategyAnalytics: %s", exc)
+                return {"error": "analytics_unavailable"}
 
             days = max(1, min(int(days), 365))
 
@@ -853,31 +856,22 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     </div>
     
     <script>
-        // Tab switching
-        document.querySelectorAll('.nav-tab').forEach(tab => {
-            tab.addEventListener('click', () => {
-                const tabs = document.querySelectorAll('.nav-tab');
-                const panels = document.querySelectorAll('.tab-content');
+        // Tab switching logic
+        function switchTab(tabId) {
+            tabId = tabId || 'overview';
+            const tabs = document.querySelectorAll('.nav-tab');
+            const panels = document.querySelectorAll('.tab-content');
+            let selectedTab = document.querySelector(`[data-tab="${tabId}"]`);
 
-                tabs.forEach(t => {
-                    t.classList.remove('active');
-                    t.setAttribute('aria-selected', 'false');
-                });
-                panels.forEach(p => {
-                    p.classList.remove('active');
-                    p.setAttribute('aria-hidden', 'true');
-                });
+            if (!selectedTab) {
+                tabId = 'overview';
+                selectedTab = document.querySelector(`[data-tab="overview"]`);
+            }
+            if (!selectedTab) return;
 
-                tab.classList.add('active');
-                tab.setAttribute('aria-selected', 'true');
-                const activePanel = document.getElementById('tab-panel-' + tab.dataset.tab);
-                activePanel.classList.add('active');
-                activePanel.setAttribute('aria-hidden', 'false');
-
-                // Context-aware fetch on tab switch
-                if (tab.dataset.tab === 'signals') fetchSignals();
-                if (tab.dataset.tab === 'analytics') fetchAnalytics();
-                if (tab.dataset.tab === 'settings') fetchStrategies();
+            tabs.forEach(t => {
+                t.classList.remove('active');
+                t.setAttribute('aria-selected', 'false');
             });
             panels.forEach(p => {
                 p.classList.remove('active');
@@ -887,8 +881,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             selectedTab.classList.add('active');
             selectedTab.setAttribute('aria-selected', 'true');
             const activePanel = document.getElementById('tab-panel-' + tabId);
-            activePanel.classList.add('active');
-            activePanel.setAttribute('aria-hidden', 'false');
+            if (activePanel) {
+                activePanel.classList.add('active');
+                activePanel.setAttribute('aria-hidden', 'false');
+            }
 
             // Persist tab in URL
             window.location.hash = tabId;
@@ -1128,9 +1124,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         
         // Fetch analytics
         async function fetchAnalytics() {
+            const signalChart = document.getElementById('signal-chart');
+            const strategyChart = document.getElementById('strategy-chart');
+
             try {
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 5000);
+                const timeoutId = setTimeout(() => controller.abort(), 8000);
                 const res = await fetch('/api/analytics/report?days=30', { signal: controller.signal });
                 clearTimeout(timeoutId);
                 
@@ -1139,22 +1138,23 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 }
                 
                 const data = await res.json();
+                if (data.error) throw new Error(data.error);
+
                 if (data.summary) {
-                    document.getElementById('total-signals').textContent = data.summary.total_signals || '-';
-                    document.getElementById('win-rate').textContent = data.summary.win_rate ? (data.summary.win_rate * 100).toFixed(1) + '%' : '-';
-                    document.getElementById('avg-rr').textContent = data.summary.avg_rr ? data.summary.avg_rr.toFixed(2) : '-';
+                    document.getElementById('total-signals').textContent = data.summary.total_signals || '0';
+                    document.getElementById('win-rate').textContent = data.summary.win_rate ? (data.summary.win_rate * 100).toFixed(1) + '%' : '0%';
+                    document.getElementById('avg-rr').textContent = data.summary.avg_rr ? data.summary.avg_rr.toFixed(2) : '0.00';
                 }
                 
                 // Render signal distribution chart
-                if (data.by_setup) {
-                    renderSignalChart(data.by_setup);
-                }
+                renderSignalChart(data.by_setup || {});
+                renderStrategyPerformance(data.setup_reports || []);
 
-                if (data.setup_reports) {
-                    renderStrategyPerformance(data.setup_reports);
-                }
             } catch (err) {
-                console.error('Analytics not available:', err);
+                console.error('Analytics error:', err);
+                const errorMsg = `<div style="text-align: center; color: var(--accent-red); width: 100%;">Failed to load analytics: ${err.message}</div>`;
+                if (signalChart) signalChart.innerHTML = errorMsg;
+                if (strategyChart) strategyChart.innerHTML = `<div class="empty-state"><p style="color: var(--accent-red)">Error: ${err.message}</p></div>`;
             }
         }
         
