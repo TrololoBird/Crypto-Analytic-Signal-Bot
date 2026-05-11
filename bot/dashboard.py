@@ -85,7 +85,8 @@ class BotDashboard:
                 return await self._get_status()
             except Exception as exc:
                 LOG.error("dashboard api status error: %s", exc)
-                return {"error": "status_unavailable", "detail": str(exc)}
+                # Security: Do not leak exception details to the client
+                return {"error": "status_unavailable", "detail": "See logs for details"}
 
         @self.app.get("/api/signals/active")
         async def active_signals() -> list[dict[str, Any]]:
@@ -110,7 +111,8 @@ class BotDashboard:
                 return self._get_market_regime()
             except Exception as exc:
                 LOG.error("dashboard api market regime error: %s", exc)
-                return {"error": "regime_unavailable", "detail": str(exc)}
+                # Security: Do not leak exception details to the client
+                return {"error": "regime_unavailable", "detail": "See logs for details"}
 
         @self.app.get("/api/metrics")
         async def metrics() -> dict[str, Any]:
@@ -118,7 +120,8 @@ class BotDashboard:
                 return await self._get_metrics()
             except Exception as exc:
                 LOG.error("dashboard api metrics error: %s", exc)
-                return {"error": "metrics_unavailable", "detail": str(exc)}
+                # Security: Do not leak exception details to the client
+                return {"error": "metrics_unavailable", "detail": "See logs for details"}
 
         @self.app.get("/api/health")
         async def health() -> dict[str, Any]:
@@ -126,7 +129,8 @@ class BotDashboard:
                 return cast(dict[str, Any], await self.bot.health_check())
             except Exception as exc:
                 LOG.error("dashboard api health error: %s", exc)
-                return {"status": "error", "detail": str(exc)}
+                # Security: Do not leak exception details to the client
+                return {"status": "error", "detail": "See logs for details"}
 
         @self.app.get("/api/analytics/report")
         async def analytics_report(days: int = 30) -> dict[str, Any]:
