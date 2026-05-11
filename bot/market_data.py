@@ -871,7 +871,16 @@ class BinanceFuturesMarketData:
                             operation=operation, detail=detail, symbol=symbol
                         )
 
-                    payload = await response.json()
+                    try:
+                        payload = await response.json()
+                    except (json.JSONDecodeError, aiohttp.ContentTypeError) as exc:
+                        self._rate_limit_error_streak = 0
+                        self._record_circuit_failure(operation)
+                        raise MarketDataUnavailable(
+                            operation=operation,
+                            detail=f"invalid_json_payload: {exc}",
+                            symbol=symbol,
+                        ) from exc
 
             self._rate_limit_error_streak = 0
             self._capture_response_metadata(_ResponseStub(headers), operation=operation)
@@ -933,16 +942,16 @@ class BinanceFuturesMarketData:
         now = time.monotonic()
         open_circuits = sum(1 for v in self._circuit_open_until.values() if now < v)
         return {
-            "rest_weight_1m": float(cast(Any, self._last_rest_weight_1m)),
-            "rest_response_time_ms": float(cast(Any, self._last_rest_response_time_ms)),
+            "rest_weight_1m": float(self._last_rest_weight_1m) if self._last_rest_weight_1m is not None else 0.0,
+            "rest_response_time_ms": float(self._last_rest_response_time_ms) if self._last_rest_response_time_ms is not None else 0.0,
             "circuit_breakers_open": int(open_circuits),
             "circuit_failure_counts": int(sum(self._circuit_failures.values())),
             "endpoint_name": str(self._last_endpoint_name or ""),
             "source": str(self._last_endpoint_source or ""),
             "cache_hit": float(int(bool(self._last_endpoint_cache_hit))),
             "fallback_used": float(int(bool(self._last_endpoint_fallback_used))),
-            "limiter_wait_ms": float(self._last_endpoint_limiter_wait_ms),
-            "response_age_s": float(cast(Any, self._last_endpoint_response_age_s)),
+            "limiter_wait_ms": float(self._last_endpoint_limiter_wait_ms) if self._last_endpoint_limiter_wait_ms is not None else 0.0,
+            "response_age_s": float(self._last_endpoint_response_age_s) if self._last_endpoint_response_age_s is not None else 0.0,
             "futures_data_limit_per_5m": int(self._futures_data_limit_per_5m),
         }
 

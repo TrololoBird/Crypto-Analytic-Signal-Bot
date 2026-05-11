@@ -621,9 +621,17 @@ class MemoryRepository(MemoryRepositoryExtension):
         data = dict(row)
         # Parse JSON fields
         if data.get("features"):
-            data["features"] = json.loads(data["features"])
+            try:
+                data["features"] = json.loads(data["features"])
+            except json.JSONDecodeError as exc:
+                LOG.warning("failed to decode features for signal %s: %s", data.get("signal_id"), exc)
+                data["features"] = {}
         if data.get("metadata"):
-            data["metadata"] = json.loads(data["metadata"])
+            try:
+                data["metadata"] = json.loads(data["metadata"])
+            except json.JSONDecodeError as exc:
+                LOG.warning("failed to decode metadata for signal %s: %s", data.get("signal_id"), exc)
+                data["metadata"] = {}
         return SignalRecord.from_dict(data)
 
     def _row_to_outcome_record(self, row: aiosqlite.Row) -> OutcomeRecord:
@@ -819,7 +827,11 @@ class MemoryRepository(MemoryRepositoryExtension):
             row = await cursor.fetchone()
             window: list[Any] = []
             if row is not None and row["outcome_window"]:
-                window = json.loads(row["outcome_window"])
+                try:
+                    window = json.loads(row["outcome_window"])
+                except json.JSONDecodeError as exc:
+                    LOG.warning("failed to decode outcome window for setup %s: %s", setup_id, exc)
+                    window = []
 
         # Add new outcome. New entries include R data; older string-only
         # entries remain supported for existing SQLite state.
@@ -1016,15 +1028,23 @@ class MemoryRepository(MemoryRepositoryExtension):
 
         query += " ORDER BY created_at DESC"
 
-        async with self._conn.execute(query, params) as cursor:
-            rows = await cursor.fetchall()
-            result = []
-            for row in rows:
-                data = dict(row)
-                if data.get("reasons"):
-                    data["reasons"] = json.loads(data["reasons"])
-                result.append(data)
-            return result
+        try:
+            async with self._conn.execute(query, params) as cursor:
+                rows = await cursor.fetchall()
+                result = []
+                for row in rows:
+                    data = dict(row)
+                    if data.get("reasons"):
+                        try:
+                            data["reasons"] = json.loads(data["reasons"])
+                        except json.JSONDecodeError as exc:
+                            LOG.warning("failed to decode reasons for signal %s: %s", data.get("tracking_id"), exc)
+                            data["reasons"] = []
+                    result.append(data)
+                return result
+        except Exception as exc:
+            LOG.error("failed to get active signals: %s", exc)
+            return []
 
     async def close_active_signal(
         self,
