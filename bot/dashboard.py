@@ -485,9 +485,15 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             --accent-orange: #f0883e;
             --accent-purple: #a371f7;
             --accent-yellow: #d29922;
-            --font-mono: 'SF Mono', Monaco, Inconsolata, 'Roboto Mono', monospace;
+            --font-mono: 'SF Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
             --radius: 8px;
             --shadow: 0 4px 12px rgba(0,0,0,0.4);
+            --space-1: 4px;
+            --space-2: 8px;
+            --space-3: 12px;
+            --space-4: 16px;
+            --space-6: 24px;
+            --space-8: 32px;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -500,26 +506,28 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         .header {
             background: var(--bg-secondary);
             border-bottom: 1px solid var(--border-color);
-            padding: 16px 24px;
+            padding: var(--space-4) var(--space-6);
             display: flex;
             align-items: center;
             justify-content: space-between;
             position: sticky;
             top: 0;
             z-index: 100;
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
         }
         .header h1 {
             font-size: 20px;
             font-weight: 600;
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: var(--space-2);
         }
         .header .status-badge {
             display: inline-flex;
             align-items: center;
             gap: 6px;
-            padding: 4px 12px;
+            padding: var(--space-1) var(--space-3);
             border-radius: 20px;
             font-size: 12px;
             font-weight: 500;
@@ -541,13 +549,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         }
         .nav-tabs {
             display: flex;
-            gap: 8px;
+            gap: var(--space-2);
             background: var(--bg-tertiary);
-            padding: 6px;
+            padding: 4px;
             border-radius: var(--radius);
         }
         .nav-tab {
-            padding: 8px 16px;
+            padding: var(--space-2) var(--space-4);
             border: none;
             background: transparent;
             color: var(--text-secondary);
@@ -555,6 +563,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             cursor: pointer;
             border-radius: 6px;
             transition: all 0.2s;
+            font-weight: 500;
         }
         .nav-tab:hover { color: var(--text-primary); }
         .nav-tab:focus-visible {
@@ -562,10 +571,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             outline-offset: -2px;
         }
         .nav-tab.active { background: var(--bg-secondary); color: var(--text-primary); }
-        .main { padding: 24px; max-width: 1400px; margin: 0 auto; }
+        .main { padding: var(--space-6); max-width: 1400px; margin: 0 auto; }
         .tab-content {
             display: none;
-            animation: fadeIn 0.3s ease-out;
+            animation: fadeIn 0.2s ease-out;
         }
         .tab-content.active { display: block; }
         @keyframes fadeIn {
@@ -583,26 +592,26 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         .grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 20px;
-            margin-bottom: 24px;
+            gap: var(--space-4);
+            margin-bottom: var(--space-6);
         }
         .card {
             background: var(--bg-secondary);
             border: 1px solid var(--border-color);
             border-radius: var(--radius);
-            padding: 20px;
+            padding: var(--space-4);
             box-shadow: var(--shadow);
         }
         .card h2 {
-            font-size: 14px;
-            font-weight: 500;
+            font-size: 12px;
+            font-weight: 600;
             color: var(--text-secondary);
             text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 16px;
+            letter-spacing: 1px;
+            margin-bottom: var(--space-4);
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: var(--space-2);
         }
         .metric-row {
             display: flex;
@@ -627,11 +636,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             background: var(--bg-tertiary);
             border: 1px solid var(--border-color);
             border-radius: var(--radius);
-            padding: 16px;
-            margin-bottom: 12px;
-            transition: all 0.2s;
+            padding: var(--space-4);
+            margin-bottom: var(--space-3);
+            transition: transform 0.1s ease, border-color 0.2s ease;
         }
-        .signal-card:hover { border-color: var(--accent-blue); }
+        .signal-card:hover {
+            border-color: var(--accent-blue);
+            transform: translateY(-1px);
+        }
         .signal-header {
             display: flex;
             justify-content: space-between;
@@ -694,8 +706,47 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         .score-low { background: rgba(248,81,73,0.15); color: var(--accent-red); }
         .empty-state {
             text-align: center;
-            padding: 40px;
+            padding: var(--space-8);
             color: var(--text-secondary);
+        }
+        .chart-container {
+            height: 220px;
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+            gap: var(--space-2);
+            padding: var(--space-4) 0;
+        }
+        .chart-bar-wrapper {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            flex: 1;
+            min-width: 30px;
+            max-width: 60px;
+        }
+        .chart-bar {
+            width: 100%;
+            background: var(--accent-blue);
+            border-radius: 4px 4px 0 0;
+            min-height: 4px;
+            position: relative;
+            transition: height 0.3s ease, filter 0.2s ease;
+        }
+        .chart-bar:hover {
+            filter: brightness(1.2);
+        }
+        .chart-label {
+            font-size: 10px;
+            color: var(--text-secondary);
+            margin-top: var(--space-2);
+            writing-mode: vertical-rl;
+            text-orientation: mixed;
+            transform: rotate(180deg);
+            height: 70px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
         .empty-state-icon {
             font-size: 48px;
@@ -765,10 +816,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <span id="status-badge" class="status-badge offline" aria-live="polite">Offline</span>
         </h1>
         <nav class="nav-tabs" role="tablist" aria-label="Dashboard sections">
-            <button class="nav-tab active" role="tab" id="tab-btn-overview" aria-selected="true" aria-controls="tab-panel-overview" data-tab="overview">Overview</button>
-            <button class="nav-tab" role="tab" id="tab-btn-signals" aria-selected="false" aria-controls="tab-panel-signals" data-tab="signals">Signals</button>
-            <button class="nav-tab" role="tab" id="tab-btn-analytics" aria-selected="false" aria-controls="tab-panel-analytics" data-tab="analytics">Analytics</button>
-            <button class="nav-tab" role="tab" id="tab-btn-settings" aria-selected="false" aria-controls="tab-panel-settings" data-tab="settings">Settings</button>
+            <button class="nav-tab active" role="tab" id="tab-btn-overview" aria-selected="true" aria-controls="tab-panel-overview" data-tab="overview" onclick="switchTab('overview')">Overview</button>
+            <button class="nav-tab" role="tab" id="tab-btn-signals" aria-selected="false" aria-controls="tab-panel-signals" data-tab="signals" onclick="switchTab('signals')">Signals</button>
+            <button class="nav-tab" role="tab" id="tab-btn-analytics" aria-selected="false" aria-controls="tab-panel-analytics" data-tab="analytics" onclick="switchTab('analytics')">Analytics</button>
+            <button class="nav-tab" role="tab" id="tab-btn-settings" aria-selected="false" aria-controls="tab-panel-settings" data-tab="settings" onclick="switchTab('settings')">Settings</button>
         </nav>
     </header>
     
@@ -850,7 +901,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 </div>
                 <div class="card">
                     <h2>Signal Distribution</h2>
-                    <div id="signal-chart" style="height: 200px; display: flex; align-items: flex-end; justify-content: center; gap: 8px; padding: 20px;">
+                    <div id="signal-chart" class="chart-container">
                         <div style="text-align: center; color: var(--text-secondary);">Loading chart...</div>
                     </div>
                 </div>
@@ -885,17 +936,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     </div>
     
     <script>
-        // Tab switching logic
+        // Tab switching
         function switchTab(tabId) {
-            tabId = tabId || 'overview';
             const tabs = document.querySelectorAll('.nav-tab');
             const panels = document.querySelectorAll('.tab-content');
-            let selectedTab = document.querySelector(`[data-tab="${tabId}"]`);
+            const selectedTab = document.querySelector(`[data-tab="${tabId}"]`);
 
-            if (!selectedTab) {
-                tabId = 'overview';
-                selectedTab = document.querySelector(`[data-tab="overview"]`);
-            }
             if (!selectedTab) return;
 
             tabs.forEach(t => {
@@ -925,9 +971,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             if (tabId === 'settings') fetchStrategies();
         }
 
-        document.querySelectorAll('.nav-tab').forEach(tab => {
-            tab.addEventListener('click', () => switchTab(tab.dataset.tab));
-        });
 
         // Handle initial load and back/forward navigation
         window.addEventListener('load', () => {
@@ -994,6 +1037,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 }
             } catch (err) { console.warn(err); }
         }
+
+        function handleCopyKey(e, text) {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                copyToClipboard(text);
+            }
+        }
         // Fetch status
         async function fetchStatus() {
             try {
@@ -1040,7 +1090,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 if (data.length === 0) {
                     container.innerHTML = `
                         <div class="empty-state">
-                            <div class="empty-state-icon">Radio</div>
+                            <div class="empty-state-icon">📡</div>
                             <p>No active signals</p>
                         </div>`;
                     return;
@@ -1051,7 +1101,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     return `
                         <div class="signal-card">
                             <div class="signal-header">
-                                <span class="signal-symbol" onclick="copyToClipboard(`${s.symbol}`)" title="Click to copy">${s.symbol}</span>
+                                <span class="signal-symbol" role="button" tabindex="0" onclick="copyToClipboard('${s.symbol}')" onkeydown="handleCopyKey(event, '${s.symbol}')" title="Click to copy">${s.symbol}</span>
                                 <span class="signal-direction ${s.direction.toLowerCase()}">${s.direction}</span>
                             </div>
                             <div class="signal-details">
@@ -1092,7 +1142,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 if (!Array.isArray(data) || data.length === 0) {
                     container.innerHTML = `
                         <div class="empty-state">
-                            <div class="empty-state-icon">Activity</div>
+                            <div class="empty-state-icon">📝</div>
                             <p>No recent activity</p>
                         </div>`;
                     return;
@@ -1191,7 +1241,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         function renderSignalChart(bySetup) {
             const container = document.getElementById('signal-chart');
             if (!bySetup || Object.keys(bySetup).length === 0) {
-                container.innerHTML = '<div style="text-align: center; color: var(--text-secondary);">No data available</div>';
+                container.innerHTML = '<div class="empty-state">No data available</div>';
                 return;
             }
             
@@ -1201,20 +1251,19 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             
             const maxCount = Math.max(...setups.map(s => s[1].count || 0), 1);
             
-            const bars = setups.map(([name, data]) => {
+            container.innerHTML = setups.map(([name, data]) => {
                 const count = data.count || 0;
-                const height = (count / maxCount * 100) || 0;
+                const height = (count / maxCount * 140) || 0;
                 const winRate = data.win_rate ? (data.win_rate * 100).toFixed(0) : '0';
+                const label = name.replace('Setup', '').replace('Strategy', '');
                 return `
-                    <div style="display: flex; flex-direction: column; align-items: center; flex: 1; min-width: 40px;">
-                        <div style="width: 100%; background: var(--accent-blue); border-radius: 4px 4px 0 0; height: ${height}px; min-height: 4px; position: relative;" title="${name}: ${count} signals, ${winRate}% win">
+                    <div class="chart-bar-wrapper">
+                        <div class="chart-bar" style="height: ${height}px" title="${name}: ${count} signals, ${winRate}% win">
                         </div>
-                        <div style="font-size: 10px; color: var(--text-secondary); margin-top: 4px; writing-mode: vertical-rl; text-orientation: mixed; transform: rotate(180deg); height: 60px; overflow: hidden; text-overflow: ellipsis;">${name.replace('Setup', '')}</div>
+                        <div class="chart-label">${label}</div>
                     </div>
                 `;
             }).join('');
-            
-            container.innerHTML = bars;
         }
 
         function renderStrategyPerformance(setupReports) {
