@@ -11,9 +11,9 @@ from .domain.strategies import STRATEGY_STATUS_BY_ID, RISK_PROFILE_BY_ID
 from .core.engine.base import (
     AbstractStrategy,
     SignalResult,
-    StrategyDecision,
     StrategyMetadata,
 )
+from .domain.strategies import StrategyDecision
 from .core.runtime_errors import classify_runtime_error
 from .strategy_asset_fit import (
     ASSET_FIT_PROFILES,

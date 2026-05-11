@@ -10,7 +10,8 @@ import time
 from typing import Any
 
 from .registry import StrategyRegistry
-from .base import SignalResult, StrategyDecision
+from .base import SignalResult
+from ...domain.strategies import StrategyDecision
 from ...domain.schemas import PreparedSymbol, Signal
 from ...domain.config import BotSettings
 from ...runtime_policy import is_deep_analysis_symbol

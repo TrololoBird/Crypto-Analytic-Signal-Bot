@@ -6,8 +6,8 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 
-from ...domain.schemas import PreparedSymbol, Signal
-from ...domain.strategies import StrategyMetadata, StrategyDecision, SignalResult
+from ...domain.schemas import PreparedSymbol
+from ...domain.strategies import StrategyMetadata, SignalResult
 
 
 class AbstractStrategy(ABC):

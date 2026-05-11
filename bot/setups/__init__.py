@@ -11,7 +11,7 @@ from typing import Any
 
 import polars as pl
 
-from ..core.engine.base import StrategyDecision
+from ..domain.strategies import StrategyDecision
 from ..features import _swing_points  # shared swing detection helper
 from ..domain.schemas import PreparedSymbol, Signal
 from .utils import (
