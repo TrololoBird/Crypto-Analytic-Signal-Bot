@@ -26,7 +26,9 @@ except ImportError:
     HAS_FASTAPI = False
 
 LOG = logging.getLogger("bot.dashboard")
-GENERIC_ERROR_MSG = "See logs for details"
+
+# Security: Generic message to avoid leaking internal exception details to clients.
+_SECURE_ERROR_DETAIL = "See logs for details"
 
 
 class BotDashboard:
@@ -86,8 +88,7 @@ class BotDashboard:
                 return await self._get_status()
             except Exception as exc:
                 LOG.error("dashboard api status error: %s", exc)
-                # Security: Do not leak exception details to the client
-                return {"error": "status_unavailable", "detail": GENERIC_ERROR_MSG}
+                return {"error": "status_unavailable", "detail": _SECURE_ERROR_DETAIL}
 
         @self.app.get("/api/signals/active")
         async def active_signals() -> list[dict[str, Any]]:
@@ -112,8 +113,7 @@ class BotDashboard:
                 return self._get_market_regime()
             except Exception as exc:
                 LOG.error("dashboard api market regime error: %s", exc)
-                # Security: Do not leak exception details to the client
-                return {"error": "regime_unavailable", "detail": GENERIC_ERROR_MSG}
+                return {"error": "regime_unavailable", "detail": _SECURE_ERROR_DETAIL}
 
         @self.app.get("/api/metrics")
         async def metrics() -> dict[str, Any]:
@@ -121,8 +121,7 @@ class BotDashboard:
                 return await self._get_metrics()
             except Exception as exc:
                 LOG.error("dashboard api metrics error: %s", exc)
-                # Security: Do not leak exception details to the client
-                return {"error": "metrics_unavailable", "detail": GENERIC_ERROR_MSG}
+                return {"error": "metrics_unavailable", "detail": _SECURE_ERROR_DETAIL}
 
         @self.app.get("/api/health")
         async def health() -> dict[str, Any]:
@@ -130,8 +129,7 @@ class BotDashboard:
                 return cast(dict[str, Any], await self.bot.health_check())
             except Exception as exc:
                 LOG.error("dashboard api health error: %s", exc)
-                # Security: Do not leak exception details to the client
-                return {"status": "error", "detail": GENERIC_ERROR_MSG}
+                return {"status": "error", "detail": _SECURE_ERROR_DETAIL}
 
         @self.app.get("/api/analytics/report")
         async def analytics_report(days: int = 30) -> dict[str, Any]:
@@ -193,7 +191,9 @@ class BotDashboard:
                         "enabled": setup_id in enabled_setups,
                         "status": str(getattr(cls, "status", "beta")),
                         "risk_profile": str(
-                            getattr(cls, "risk_profile", getattr(cls, "family", "generic"))
+                            getattr(
+                                cls, "risk_profile", getattr(cls, "family", "generic")
+                            )
                         ),
                         "family": str(getattr(cls, "family", "generic")),
                     }
@@ -269,7 +269,9 @@ class BotDashboard:
         # Quick count without full fetch
         open_signals_count = 0
         try:
-            stats = await asyncio.wait_for(bot._modern_repo.get_tracking_stats(), timeout=1.0)
+            stats = await asyncio.wait_for(
+                bot._modern_repo.get_tracking_stats(), timeout=1.0
+            )
             open_signals_count = stats.get("active", 0)
         except Exception:
             pass
@@ -295,7 +297,9 @@ class BotDashboard:
 
         try:
             # Use timeout to prevent blocking dashboard
-            signals = await asyncio.wait_for(repo.get_active_signals(), timeout=2.0)
+            signals = await asyncio.wait_for(
+                repo.get_active_signals(), timeout=2.0
+            )
             return [
                 {
                     "symbol": sig.get("symbol"),
@@ -388,7 +392,9 @@ class BotDashboard:
         # Get signal count with timeout
         open_signals_count = 0
         try:
-            stats = await asyncio.wait_for(bot._modern_repo.get_tracking_stats(), timeout=1.0)
+            stats = await asyncio.wait_for(
+                bot._modern_repo.get_tracking_stats(), timeout=1.0
+            )
             open_signals_count = stats.get("active", 0)
         except Exception:
             pass
@@ -430,7 +436,9 @@ class BotDashboard:
         )
         return candidates[0] if candidates else None
 
-    def start_server(self, *, auto_open: bool = True, delay_seconds: float = 1.5) -> None:
+    def start_server(
+        self, *, auto_open: bool = True, delay_seconds: float = 1.5
+    ) -> None:
         if not self._enabled or not self.app:
             LOG.debug("dashboard server disabled (fastapi not installed)")
             return
@@ -446,7 +454,9 @@ class BotDashboard:
                 LOG.warning("dashboard server failed to import uvicorn: %s", exc)
                 return
             try:
-                uvicorn.run(self.app, host=self.host, port=self.port, log_level="warning")
+                uvicorn.run(
+                    self.app, host=self.host, port=self.port, log_level="warning"
+                )
             except Exception as exc:
                 LOG.warning("dashboard server crashed: %s", exc)
 
