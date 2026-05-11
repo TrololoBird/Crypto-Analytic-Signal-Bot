@@ -132,8 +132,9 @@ class BotDashboard:
         async def analytics_report(days: int = 30) -> dict[str, Any]:
             try:
                 from .analytics import StrategyAnalytics
-            except ImportError:
-                return {"error": "analytics_not_installed"}
+            except ImportError as exc:
+                LOG.error("failed to import StrategyAnalytics: %s", exc)
+                return {"error": "analytics_unavailable"}
 
             days = max(1, min(int(days), 365))
 
@@ -952,12 +953,17 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     </div>
     
     <script>
-        // Tab switching
+        // Tab switching logic
         function switchTab(tabId) {
+            tabId = tabId || 'overview';
             const tabs = document.querySelectorAll('.nav-tab');
             const panels = document.querySelectorAll('.tab-content');
-            const selectedTab = document.querySelector(`[data-tab="${tabId}"]`);
+            let selectedTab = document.querySelector(`[data-tab="${tabId}"]`);
 
+            if (!selectedTab) {
+                tabId = 'overview';
+                selectedTab = document.querySelector(`[data-tab="overview"]`);
+            }
             if (!selectedTab) return;
 
             tabs.forEach(t => {
