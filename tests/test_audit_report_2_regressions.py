@@ -6,9 +6,9 @@ import polars as pl
 import pytest
 
 from bot.application.shortlist_service import ShortlistService
-from bot.config import BotSettings
+from bot.domain.config import BotSettings
 from bot.features_microstructure import add_microstructure_features
-from bot.models import PreparedSymbol, Signal, UniverseSymbol
+from bot.domain.schemas import PreparedSymbol, Signal, UniverseSymbol
 from bot.setup_base import BaseSetup, SetupParams
 from bot.telegram import sender as telegram_sender
 

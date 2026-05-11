@@ -16,8 +16,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 
-from .feature_contract import PUBLIC_FEATURE_FIELDS, normalize_public_feature_payload
-from .models import Signal
+from .domain.contracts import PUBLIC_FEATURE_FIELDS, normalize_public_feature_payload
+from .domain.schemas import Signal
 from .tracked_signals import TrackedSignalState, parse_state_dt
 
 

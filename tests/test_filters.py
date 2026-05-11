@@ -4,9 +4,9 @@ from datetime import UTC, datetime, timedelta
 
 import polars as pl
 
-from bot.config import BotSettings
+from bot.domain.config import BotSettings
 from bot.filters import apply_global_filters
-from bot.models import PreparedSymbol, Signal, UniverseSymbol
+from bot.domain.schemas import PreparedSymbol, Signal, UniverseSymbol
 from bot.scoring import ScoringResult
 
 

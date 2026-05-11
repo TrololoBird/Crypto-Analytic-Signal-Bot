@@ -4,7 +4,7 @@ import argparse
 import json
 from datetime import UTC, datetime
 
-from bot.config import BotSettings
+from bot.domain.config import BotSettings
 
 from .engine import VectorizedBacktester
 

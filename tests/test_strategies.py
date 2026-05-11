@@ -5,8 +5,8 @@ from datetime import UTC, datetime
 import polars as pl
 import pytest
 
-from bot.config import BotSettings
-from bot.models import PreparedSymbol, UniverseSymbol
+from bot.domain.config import BotSettings
+from bot.domain.schemas import PreparedSymbol, UniverseSymbol
 from bot.strategies import STRATEGY_CLASSES
 from bot.strategies.bos_choch import (
     _select_external_stop_level,

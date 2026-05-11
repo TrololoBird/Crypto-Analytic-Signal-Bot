@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import polars as pl
 
-from bot.config import BotSettings
+from bot.domain.config import BotSettings
 from bot.ml.signal_classifier import SignalClassifier
 from bot.ml import MLFilter
 

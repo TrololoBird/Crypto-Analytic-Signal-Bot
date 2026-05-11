@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from bot.config import BotSettings
+from bot.domain.config import BotSettings
 from bot.confluence import ConfluenceEngine
 from bot.ml.volatility_gate import VolatilityGate
-from bot.models import Signal
+from bot.domain.schemas import Signal
 
 
 class _MLResult:

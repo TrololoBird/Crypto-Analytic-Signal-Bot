@@ -29,7 +29,7 @@ except ImportError:
     _USE_ORJSON = False
 
 from .market_data import MarketDataUnavailable
-from .models import AggTradeSnapshot, SymbolFrames
+from .domain.schemas import AggTradeSnapshot, SymbolFrames
 from .websocket import cache as ws_cache
 from .websocket import connection as ws_connection
 from .websocket import health as ws_health
@@ -37,7 +37,7 @@ from .websocket import reconnect as ws_reconnect
 from .websocket import subscriptions as ws_subscriptions
 
 if TYPE_CHECKING:
-    from .config import WSConfig
+    from .domain.config import WSConfig
     from .core.event_bus import EventBus
     from .market_data import BinanceFuturesMarketData
 

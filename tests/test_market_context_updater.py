@@ -7,7 +7,7 @@ import pytest
 
 from bot.application.market_context_updater import MarketContextUpdater
 from bot.core.memory.repository import MemoryRepository
-from bot.models import UniverseSymbol
+from bot.domain.schemas import UniverseSymbol
 
 
 @dataclass

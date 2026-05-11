@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from bot.application.delivery_orchestrator import DeliveryOrchestrator
-from bot.models import Signal
+from bot.domain.schemas import Signal
 
 
 def _signal(

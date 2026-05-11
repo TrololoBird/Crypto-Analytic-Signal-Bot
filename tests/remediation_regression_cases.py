@@ -24,15 +24,15 @@ from bot.application.shortlist_service import (
 from bot.application.symbol_analyzer import SymbolAnalyzer
 from bot.cli import _is_preformatted_log_stderr
 from bot.confluence import ConfluenceEngine  # noqa: F401
-from bot.config import BotSettings, load_settings
-from bot.config import WSConfig  # noqa: F401
+from bot.domain.config import BotSettings, load_settings
+from bot.domain.config import WSConfig  # noqa: F401
 from bot.core.engine import SignalEngine, StrategyRegistry
-from bot.core.events import BookTickerEvent  # noqa: F401
+from bot.domain.events import BookTickerEvent  # noqa: F401
 from bot.features import _ichimoku_lines, _swing_points, _weighted_moving_average  # noqa: F401
 from bot.market_data import BinanceFuturesMarketData, MarketDataUnavailable
 from bot.ml import MLFilter
 from bot.ml.signal_classifier import SignalClassifier
-from bot.models import AggTrade, PipelineResult, PreparedSymbol, Signal, UniverseSymbol  # noqa: F401
+from bot.domain.schemas import AggTrade, PipelineResult, PreparedSymbol, Signal, UniverseSymbol  # noqa: F401
 from bot.scoring import _crowd_position
 from bot.setup_base import BaseSetup, SetupParams
 from bot.strategies.cvd_divergence import CVDDivergenceSetup

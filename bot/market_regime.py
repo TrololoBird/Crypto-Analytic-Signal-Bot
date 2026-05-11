@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 from .regime.composite_regime import CompositeRegimeAnalyzer
 
 if TYPE_CHECKING:
-    from .config import BotSettings
+    from .domain.config import BotSettings
 
 LOG = logging.getLogger("bot.market_regime")
 

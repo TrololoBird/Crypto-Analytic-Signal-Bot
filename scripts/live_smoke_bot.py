@@ -12,7 +12,7 @@ from typing import Any
 import structlog
 
 from bot.application.bot import SignalBot
-from bot.config import load_settings
+from bot.domain.config import load_settings
 from bot.messaging import DeliveryResult
 
 

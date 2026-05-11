@@ -17,9 +17,9 @@ from typing import Any, Mapping
 
 import polars as pl
 
-from .config import BotSettings
+from .domain.config import BotSettings
 from .market_data import MarketDataUnavailable
-from .models import AggTrade, Signal
+from .domain.schemas import AggTrade, Signal
 from .outcomes import SignalFeatures, create_outcome_from_tracked
 from .telemetry import TelemetryStore
 from .tracked_signals import TrackedSignalState, parse_state_dt

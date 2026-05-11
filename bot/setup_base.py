@@ -5,7 +5,9 @@ from __future__ import annotations
 from abc import abstractmethod
 from dataclasses import dataclass
 
-from .config import BotSettings
+from .domain.config import BotSettings
+from .domain.schemas import PreparedSymbol, Signal
+from .domain.strategies import STRATEGY_STATUS_BY_ID, RISK_PROFILE_BY_ID
 from .core.engine.base import (
     AbstractStrategy,
     SignalResult,
@@ -13,8 +15,8 @@ from .core.engine.base import (
     StrategyMetadata,
 )
 from .core.runtime_errors import classify_runtime_error
-from .models import PreparedSymbol, Signal
 from .strategy_asset_fit import (
+    ASSET_FIT_PROFILES,
     DEFAULT_ASSET_FIT,
     AssetFit,
     asset_fit_reject_reason,
@@ -46,10 +48,7 @@ class BaseSetup(AbstractStrategy):
     requires_oi: bool = False
     requires_funding: bool = False
     min_history_bars: int = 50
-    asset_fit: AssetFit = DEFAULT_ASSET_FIT
-    status: str = "beta"
     score_calibration: str = "heuristic"
-    risk_profile: str = "generic"
 
     def __init__(
         self, params: SetupParams | None = None, settings: BotSettings | None = None
@@ -59,6 +58,18 @@ class BaseSetup(AbstractStrategy):
 
     def is_enabled(self) -> bool:
         return self.params.enabled
+
+    @property
+    def asset_fit(self) -> AssetFit:
+        return ASSET_FIT_PROFILES.get(self.setup_id, DEFAULT_ASSET_FIT)
+
+    @property
+    def status(self) -> str:
+        return STRATEGY_STATUS_BY_ID.get(self.setup_id, "beta")
+
+    @property
+    def risk_profile(self) -> str:
+        return RISK_PROFILE_BY_ID.get(self.setup_id, self.family)
 
     @property
     def metadata(self) -> StrategyMetadata:

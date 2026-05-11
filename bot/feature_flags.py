@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from .config import BotSettings
+from .domain.config import BotSettings
 
 
 @dataclass(slots=True)
