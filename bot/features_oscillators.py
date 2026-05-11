@@ -74,54 +74,38 @@ def mfi(
     typical = (df["high"] + df["low"] + df["close"]) / 3.0
     money_flow = typical * df["volume"]
     delta = typical.diff()
-    pos = pl.Series(
-        "pos",
-        [
-            float(mf or 0.0) if float(chg or 0.0) > 0.0 else 0.0
-            for mf, chg in zip(money_flow, delta, strict=False)
-        ],
-        dtype=pl.Float64,
+
+    pos_flow = pl.when(delta > 0.0).then(money_flow).otherwise(0.0)
+    neg_flow = pl.when(delta < 0.0).then(money_flow).otherwise(0.0)
+
+    pos_sum = pos_flow.rolling_sum(window_size=period)
+    neg_sum = neg_flow.rolling_sum(window_size=period)
+
+    mfi_raw = 100.0 - (100.0 / (1.0 + (pos_sum / neg_sum)))
+
+    return (
+        pl.when((neg_sum <= 0.0) & (pos_sum <= 0.0))
+        .then(50.0)
+        .when(neg_sum <= 0.0)
+        .then(100.0)
+        .otherwise(mfi_raw)
+        .alias(f"mfi{period}")
     )
-    neg = pl.Series(
-        "neg",
-        [
-            float(mf or 0.0) if float(chg or 0.0) < 0.0 else 0.0
-            for mf, chg in zip(money_flow, delta, strict=False)
-        ],
-        dtype=pl.Float64,
-    )
-    vals: list[float] = []
-    for p, n in zip(
-        pos.rolling_sum(window_size=period),
-        neg.rolling_sum(window_size=period),
-        strict=False,
-    ):
-        pv = float(p or 0.0)
-        nv = float(n or 0.0)
-        if nv <= 0.0 and pv <= 0.0:
-            vals.append(50.0)
-        elif nv <= 0.0:
-            vals.append(100.0)
-        else:
-            vals.append(100.0 - (100.0 / (1.0 + (pv / nv))))
-    return pl.Series(f"mfi{period}", vals, dtype=pl.Float64)
 
 
 def cmf(df: pl.DataFrame, period: int = 20) -> pl.Series:
     """Contract: input requires OHLCV; output CMF series named `cmf{period}` with NaN fill 0."""
     ensure_columns(df, ("high", "low", "close", "volume"), fn_name="cmf")
-    multipliers: list[float] = []
-    for high, low, close in zip(df["high"], df["low"], df["close"], strict=False):
-        high_value = float(high or 0.0)
-        low_value = float(low or 0.0)
-        close_value = float(close or 0.0)
-        width = high_value - low_value
-        multipliers.append(
-            0.0
-            if width <= 0.0
-            else ((close_value - low_value) - (high_value - close_value)) / width
-        )
-    mfv = pl.Series("mfm", multipliers, dtype=pl.Float64) * df["volume"]
+
+    width = df["high"] - df["low"]
+    # Handle zero-width bars by replacing 0 with 1 to avoid div by zero in expr,
+    # but we will then multiply by 0 where width was 0 anyway.
+    mfm = pl.when(width > 0.0).then(
+        ((df["close"] - df["low"]) - (df["high"] - df["close"])) / width
+    ).otherwise(0.0)
+
+    mfv = mfm * df["volume"]
+
     return (
         (
             mfv.rolling_sum(window_size=period)

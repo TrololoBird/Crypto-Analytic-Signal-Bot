@@ -128,6 +128,8 @@ class BotDashboard:
         async def analytics_report(days: int = 30) -> dict[str, Any]:
             try:
                 from .analytics import StrategyAnalytics
+            except ImportError:
+                return {"error": "analytics_not_installed"}
 
             days = max(1, min(int(days), 365))
 
@@ -253,17 +255,15 @@ class BotDashboard:
             stats = bot._ws_manager.get_stats()
             ws_lag = stats.get("avg_latency_overall_ms", 0) or 0
 
-        # Quick count without full fetch - use len of cached data
+        # Quick count without full fetch
         open_signals_count = 0
         try:
-
-
-            signals = await asyncio.wait_for(
-                bot._modern_repo.get_active_signals(), timeout=1.0
+            stats = await asyncio.wait_for(
+                bot._modern_repo.get_tracking_stats(), timeout=1.0
             )
-            open_signals_count = len(signals)
+            open_signals_count = stats.get("active", 0)
         except Exception:
-            pass  # Don't block dashboard for signal count
+            pass
 
         return {
             "running": not bot._shutdown.is_set(),
@@ -319,11 +319,35 @@ class BotDashboard:
             return signals
 
         try:
-            with candidates_file.open("r", encoding="utf-8") as handle:
-                lines = handle.readlines()
-            for line in reversed(lines[-limit:]):
-                if line.strip():
-                    signals.append(json.loads(line))
+            # Efficiently read only the last N lines of the file
+            with candidates_file.open("rb") as handle:
+                try:
+                    handle.seek(0, 2)
+                    size = handle.tell()
+                    block_size = 4096
+                    data = b""
+                    lines_found = 0
+                    pos = size
+                    while pos > 0 and lines_found <= limit:
+                        pos = max(0, pos - block_size)
+                        handle.seek(pos)
+                        chunk = handle.read(min(block_size, size - pos))
+                        data = chunk + data
+                        lines_found = data.count(b"\n")
+
+                    lines = data.decode("utf-8", errors="ignore").splitlines()
+                    for line in reversed(lines):
+                        if line.strip():
+                            signals.append(json.loads(line))
+                            if len(signals) >= limit:
+                                break
+                except (IOError, ValueError):
+                    # Fallback to simple read if seeking fails
+                    handle.seek(0)
+                    lines = handle.read().decode("utf-8", errors="ignore").splitlines()
+                    for line in reversed(lines[-limit:]):
+                        if line.strip():
+                            signals.append(json.loads(line))
         except Exception as exc:
             LOG.debug("failed to read recent candidates: %s", exc)
 
@@ -341,12 +365,10 @@ class BotDashboard:
         # Get signal count with timeout
         open_signals_count = 0
         try:
-
-
-            signals = await asyncio.wait_for(
-                bot._modern_repo.get_active_signals(), timeout=1.0
+            stats = await asyncio.wait_for(
+                bot._modern_repo.get_tracking_stats(), timeout=1.0
             )
-            open_signals_count = len(signals)
+            open_signals_count = stats.get("active", 0)
         except Exception:
             pass
 
@@ -1227,13 +1249,21 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         fetchAnalytics();
         
         // Periodic updates
+        let tick = 0;
         setInterval(() => {
+            tick++;
             const activeTab = document.querySelector(".nav-tab.active").dataset.tab;
+
+            // Frequent updates (every 5s)
             fetchStatus();
             if (activeTab === "signals") fetchSignals();
             if (activeTab === "overview") fetchRecentActivity();
-            if (activeTab === "settings") fetchStrategies();
-            if (activeTab === "analytics") fetchAnalytics();
+
+            // Less frequent updates (every 30s)
+            if (tick % 6 === 0) {
+                if (activeTab === "settings") fetchStrategies();
+                if (activeTab === "analytics") fetchAnalytics();
+            }
         }, 5000);
 
         // Visibility change handling
