@@ -97,8 +97,12 @@ class BotDashboard:
 
         @self.app.get("/api/signals/recent")
         async def recent_signals(limit: int = 20) -> list[dict[str, Any]]:
-            limit = max(1, min(int(limit), 100))
-            return self._get_recent_signals(limit)
+            try:
+                limit = max(1, min(int(limit), 100))
+                return self._get_recent_signals(limit)
+            except Exception as exc:
+                LOG.error("dashboard api recent signals error: %s", exc)
+                return []
 
         @self.app.get("/api/market/regime")
         async def market_regime() -> dict[str, Any]:
@@ -128,23 +132,24 @@ class BotDashboard:
         async def analytics_report(days: int = 30) -> dict[str, Any]:
             try:
                 from .analytics import StrategyAnalytics
-                days = max(1, min(int(days), 365))
+            except ImportError as exc:
+                LOG.error("failed to import StrategyAnalytics: %s", exc)
+                return {"error": "analytics_unavailable"}
 
-                # TTL Cache for analytics report (60s)
-                now = time.monotonic()
-                cached = self._analytics_cache.get(days)
-                if cached and (now - cached[0]) < 60.0:
-                    return cached[1]
+            days = max(1, min(int(days), 365))
 
-                reporter = StrategyAnalytics(repo=self.bot._modern_repo)
-                report = await reporter.generate_report(days=days)
-                merged = self._merge_strategy_catalog(report)
+            # TTL Cache for analytics report (60s)
+            now = time.monotonic()
+            cached = self._analytics_cache.get(days)
+            if cached and (now - cached[0]) < 60.0:
+                return cached[1]
 
-                self._analytics_cache[days] = (now, merged)
-                return merged
-            except Exception as exc:
-                LOG.error("dashboard api analytics report error: %s", exc)
-                return {"error": "analytics_unavailable", "detail": str(exc)}
+            reporter = StrategyAnalytics(repo=self.bot._modern_repo)
+            report = await reporter.generate_report(days=days)
+            merged = self._merge_strategy_catalog(report)
+
+            self._analytics_cache[days] = (now, merged)
+            return merged
 
         @self.app.get("/api/strategies")
         async def strategies() -> list[dict[str, Any]]:
@@ -248,42 +253,51 @@ class BotDashboard:
 
     async def _get_status(self) -> dict[str, Any]:
         bot = self.bot
-        regime = bot.market_regime._last_result
+        if bot is None:
+            return {"error": "bot_not_found"}
+
+        regime = getattr(bot.market_regime, "_last_result", None)
 
         ws_lag = 0
-        if bot._ws_manager is not None:
+        if getattr(bot, "_ws_manager", None) is not None:
             stats = bot._ws_manager.get_stats()
             ws_lag = stats.get("avg_latency_overall_ms", 0) or 0
 
         # Quick count without full fetch - use len of cached data
         open_signals_count = 0
         try:
-
-
-            signals = await asyncio.wait_for(
-                bot._modern_repo.get_active_signals(), timeout=1.0
-            )
-            open_signals_count = len(signals)
+            repo = getattr(bot, "_modern_repo", None)
+            if repo:
+                signals = await asyncio.wait_for(
+                    repo.get_active_signals(), timeout=1.0
+                )
+                open_signals_count = len(signals)
         except Exception:
             pass  # Don't block dashboard for signal count
 
         return {
-            "running": not bot._shutdown.is_set(),
-            "shortlist_size": len(bot._shortlist),
+            "running": not bot._shutdown.is_set() if hasattr(bot, "_shutdown") else False,
+            "shortlist_size": len(getattr(bot, "_shortlist", [])),
             "open_signals": open_signals_count,
             "ws_latency_ms": ws_lag,
-            "market_regime": regime.regime if regime else "unknown",
-            "market_strength": regime.strength if regime else 0.0,
+            "market_regime": getattr(regime, "regime", "unknown") if regime else "unknown",
+            "market_strength": getattr(regime, "strength", 0.0) if regime else 0.0,
             "timestamp": datetime.now(UTC).isoformat(),
         }
 
     async def _get_active_signals(self) -> list[dict[str, Any]]:
+        bot = self.bot
+        if bot is None:
+            return []
+
+        repo = getattr(bot, "_modern_repo", None)
+        if repo is None:
+            return []
+
         try:
             # Use timeout to prevent blocking dashboard
-
-
             signals = await asyncio.wait_for(
-                self.bot._modern_repo.get_active_signals(), timeout=2.0
+                repo.get_active_signals(), timeout=2.0
             )
             return [
                 {
@@ -313,7 +327,11 @@ class BotDashboard:
             return []
 
     def _get_recent_signals(self, limit: int = 20) -> list[dict[str, Any]]:
-        telemetry_dir = self.bot.settings.telemetry_dir
+        bot = self.bot
+        if bot is None or not hasattr(bot, "settings"):
+            return []
+
+        telemetry_dir = bot.settings.telemetry_dir
         signals: list[dict[str, Any]] = []
 
         candidates_file = self._latest_analysis_file(telemetry_dir, "candidates.jsonl")
@@ -325,52 +343,64 @@ class BotDashboard:
                 lines = handle.readlines()
             for line in reversed(lines[-limit:]):
                 if line.strip():
-                    signals.append(json.loads(line))
+                    try:
+                        signals.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
         except Exception as exc:
             LOG.debug("failed to read recent candidates: %s", exc)
 
         return signals
 
     def _get_market_regime(self) -> dict[str, Any]:
-        regime = self.bot.market_regime._last_result
+        bot = self.bot
+        if bot is None:
+            return {"error": "bot_not_found"}
+
+        regime = getattr(bot.market_regime, "_last_result", None)
         if not regime:
             return {"error": "No market data available"}
         return regime.to_dict()
 
     async def _get_metrics(self) -> dict[str, Any]:
         bot = self.bot
+        if bot is None:
+            return {"error": "bot_not_found"}
 
         # Get signal count with timeout
         open_signals_count = 0
         try:
-
-
-            signals = await asyncio.wait_for(
-                bot._modern_repo.get_active_signals(), timeout=1.0
-            )
-            open_signals_count = len(signals)
+            repo = getattr(bot, "_modern_repo", None)
+            if repo:
+                signals = await asyncio.wait_for(
+                    repo.get_active_signals(), timeout=1.0
+                )
+                open_signals_count = len(signals)
         except Exception:
             pass
 
         # Get market regime safely
         regime_data = None
         try:
-            if bot.market_regime._last_result:
-                regime_data = bot.market_regime._last_result.to_dict()
+            regime = getattr(bot.market_regime, "_last_result", None)
+            if regime:
+                regime_data = regime.to_dict()
         except Exception:
             pass
 
         # Get engine stats safely
         engine_stats = {}
         try:
-            engine_stats = bot._modern_engine.get_engine_stats()
+            engine = getattr(bot, "_modern_engine", None)
+            if engine:
+                engine_stats = engine.get_engine_stats()
         except Exception:
             pass
 
         return {
-            "shortlist_size": len(bot._shortlist),
+            "shortlist_size": len(getattr(bot, "_shortlist", [])),
             "open_signals": open_signals_count,
-            "ws_streams": len(bot._ws_manager._symbols) if bot._ws_manager else 0,
+            "ws_streams": len(bot._ws_manager._symbols) if getattr(bot, "_ws_manager", None) else 0,
             "market_regime": regime_data,
             "engine": engine_stats,
         }
@@ -1173,9 +1203,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         
         // Fetch analytics
         async function fetchAnalytics() {
+            const signalChart = document.getElementById('signal-chart');
+            const strategyChart = document.getElementById('strategy-chart');
+
             try {
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 5000);
+                const timeoutId = setTimeout(() => controller.abort(), 8000);
                 const res = await fetch('/api/analytics/report?days=30', { signal: controller.signal });
                 clearTimeout(timeoutId);
                 
@@ -1184,22 +1217,23 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 }
                 
                 const data = await res.json();
+                if (data.error) throw new Error(data.error);
+
                 if (data.summary) {
-                    document.getElementById('total-signals').textContent = data.summary.total_signals || '-';
-                    document.getElementById('win-rate').textContent = data.summary.win_rate ? (data.summary.win_rate * 100).toFixed(1) + '%' : '-';
-                    document.getElementById('avg-rr').textContent = data.summary.avg_rr ? data.summary.avg_rr.toFixed(2) : '-';
+                    document.getElementById('total-signals').textContent = data.summary.total_signals || '0';
+                    document.getElementById('win-rate').textContent = data.summary.win_rate ? (data.summary.win_rate * 100).toFixed(1) + '%' : '0%';
+                    document.getElementById('avg-rr').textContent = data.summary.avg_rr ? data.summary.avg_rr.toFixed(2) : '0.00';
                 }
                 
                 // Render signal distribution chart
-                if (data.by_setup) {
-                    renderSignalChart(data.by_setup);
-                }
+                renderSignalChart(data.by_setup || {});
+                renderStrategyPerformance(data.setup_reports || []);
 
-                if (data.setup_reports) {
-                    renderStrategyPerformance(data.setup_reports);
-                }
             } catch (err) {
-                console.error('Analytics not available:', err);
+                console.error('Analytics error:', err);
+                const errorMsg = `<div style="text-align: center; color: var(--accent-red); width: 100%;">Failed to load analytics: ${err.message}</div>`;
+                if (signalChart) signalChart.innerHTML = errorMsg;
+                if (strategyChart) strategyChart.innerHTML = `<div class="empty-state"><p style="color: var(--accent-red)">Error: ${err.message}</p></div>`;
             }
         }
         
