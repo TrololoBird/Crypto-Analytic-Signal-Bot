@@ -699,11 +699,16 @@ class SignalDelivery:
     ) -> list[DeliveredSignal]:
         delivered: list[DeliveredSignal] = []
         for signal in signals:
-            text = format_signal_text(
-                signal,
-                pending_expiry_minutes=self.pending_expiry_minutes,
-                btc_bias=btc_bias,
-            )
+            try:
+                text = format_signal_text(
+                    signal,
+                    pending_expiry_minutes=self.pending_expiry_minutes,
+                    btc_bias=btc_bias,
+                )
+            except Exception as exc:
+                LOG.error("failed to format signal text: %s", exc)
+                continue
+
             if dry_run:
                 LOG.info("dry-run signal\n%s", text)
                 delivered.append(

@@ -78,43 +78,76 @@ class BotDashboard:
 
         @self.app.get("/api/status")
         async def status() -> dict[str, Any]:
-            return await self._get_status()
+            try:
+                return await self._get_status()
+            except Exception as exc:
+                LOG.error("dashboard api status error: %s", exc)
+                return {"error": "status_unavailable", "detail": str(exc)}
 
         @self.app.get("/api/signals/active")
         async def active_signals() -> list[dict[str, Any]]:
-            return await self._get_active_signals()
+            try:
+                return await self._get_active_signals()
+            except Exception as exc:
+                LOG.error("dashboard api active signals error: %s", exc)
+                return []
 
         @self.app.get("/api/signals/recent")
         async def recent_signals(limit: int = 20) -> list[dict[str, Any]]:
-            return self._get_recent_signals(limit)
+            try:
+                limit = max(1, min(int(limit), 100))
+                return self._get_recent_signals(limit)
+            except Exception as exc:
+                LOG.error("dashboard api recent signals error: %s", exc)
+                return []
 
         @self.app.get("/api/market/regime")
         async def market_regime() -> dict[str, Any]:
-            return self._get_market_regime()
+            try:
+                return self._get_market_regime()
+            except Exception as exc:
+                LOG.error("dashboard api market regime error: %s", exc)
+                return {"error": "regime_unavailable", "detail": str(exc)}
 
         @self.app.get("/api/metrics")
         async def metrics() -> dict[str, Any]:
-            return await self._get_metrics()
+            try:
+                return await self._get_metrics()
+            except Exception as exc:
+                LOG.error("dashboard api metrics error: %s", exc)
+                return {"error": "metrics_unavailable", "detail": str(exc)}
 
         @self.app.get("/api/health")
         async def health() -> dict[str, Any]:
-            return await self.bot.health_check()
+            try:
+                return await self.bot.health_check()
+            except Exception as exc:
+                LOG.error("dashboard api health error: %s", exc)
+                return {"status": "error", "detail": str(exc)}
 
         @self.app.get("/api/analytics/report")
         async def analytics_report(days: int = 30) -> dict[str, Any]:
-            from .analytics import StrategyAnalytics
+            try:
+                from .analytics import StrategyAnalytics
 
-            days = max(1, min(int(days), 365))
-            reporter = StrategyAnalytics(repo=self.bot._modern_repo)
-            report = await reporter.generate_report(days=days)
-            return self._merge_strategy_catalog(report)
+                days = max(1, min(int(days), 365))
+                reporter = StrategyAnalytics(repo=self.bot._modern_repo)
+                report = await reporter.generate_report(days=days)
+                return self._merge_strategy_catalog(report)
+            except Exception as exc:
+                LOG.error("dashboard api analytics report error: %s", exc)
+                return {"error": "analytics_unavailable", "detail": str(exc)}
 
         @self.app.get("/api/strategies")
         async def strategies() -> list[dict[str, Any]]:
             """Return cached list of strategies with their enabled status."""
-            if self._strategies_cache is not None:
-                return self._strategies_cache
-            return []
+            try:
+                if self._strategies_cache is not None:
+                    return self._strategies_cache
+                return []
+            except Exception as exc:
+                LOG.error("dashboard api strategies error: %s", exc)
+                return []
 
     def _cache_strategies(self) -> None:
         """Pre-load and cache strategies at startup."""
