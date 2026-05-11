@@ -83,21 +83,17 @@ def rsi(
     )
     rs = avg_gain / avg_loss
     raw = (100.0 - (100.0 / (1.0 + rs))).fill_nan(50.0)
-    values: list[float] = []
-    for gain, loss, current in zip(
-        avg_gain.to_list(), avg_loss.to_list(), raw.to_list(), strict=False
-    ):
-        g = float(gain or 0.0)
-        loss_value = float(loss or 0.0)
-        if loss_value == 0.0 and g > 0.0:
-            values.append(100.0)
-        elif g == 0.0 and loss_value > 0.0:
-            values.append(0.0)
-        elif g == 0.0 and loss_value == 0.0:
-            values.append(50.0)
-        else:
-            values.append(float(current or 50.0))
-    return pl.Series(f"rsi{period}", values, dtype=pl.Float64)
+    return materialize_series(
+        pl.when((avg_loss == 0.0) & (avg_gain > 0.0))
+        .then(100.0)
+        .when((avg_gain == 0.0) & (avg_loss > 0.0))
+        .then(0.0)
+        .when((avg_gain == 0.0) & (avg_loss == 0.0))
+        .then(50.0)
+        .otherwise(raw),
+        df=df,
+        name=f"rsi{period}",
+    )
 
 
 def atr(
@@ -193,27 +189,16 @@ def vwap(df: pl.DataFrame) -> pl.Series:
         None,
     )
     if time_column is not None:
-        values: list[float | None] = []
-        session: date | None = None
-        cumulative_pv = 0.0
-        cumulative_volume = 0.0
-        last_vwap: float | None = None
-        for ts, price_volume, volume in zip(
-            df[time_column], pv, df["volume"], strict=False
-        ):
-            key = _vwap_session_key(ts)
-            if key is not None and key != session:
-                session = key
-                cumulative_pv = 0.0
-                cumulative_volume = 0.0
-                last_vwap = None
-            volume_value = float(volume or 0.0)
-            cumulative_pv += float(price_volume or 0.0)
-            cumulative_volume += volume_value
-            if cumulative_volume > 0.0:
-                last_vwap = cumulative_pv / cumulative_volume
-            values.append(last_vwap)
-        return pl.Series("vwap", values, dtype=pl.Float64).forward_fill()
+        # Create a session key (date) for reset
+        session_key = df[time_column].dt.date().alias("_vwap_session")
+        temp_df = df.with_columns([pv.alias("_pv"), session_key])
+
+        vwap_expr = (
+            pl.col("_pv").cum_sum().over("_vwap_session")
+            / pl.col("volume").cum_sum().over("_vwap_session")
+        ).forward_fill()
+
+        return materialize_series(vwap_expr, df=temp_df, name="vwap")
     return materialize_series(
         (pv.cum_sum() / df["volume"].cum_sum()).forward_fill(), df=df, name="vwap"
     )

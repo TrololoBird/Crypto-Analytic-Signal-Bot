@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import polars as pl
@@ -159,21 +159,27 @@ def _parabolic_sar(
 def _aroon(
     df: pl.DataFrame, period: int = 14
 ) -> tuple[pl.Series, pl.Series, pl.Series]:
-    highs = [float(v or 0.0) for v in df["high"]]
-    lows = [float(v or 0.0) for v in df["low"]]
-    up: list[float] = []
-    down: list[float] = []
-    for idx in range(len(highs)):
-        start = max(0, idx - period + 1)
-        hw = highs[start : idx + 1]
-        lw = lows[start : idx + 1]
-        high_idx = max(range(len(hw)), key=hw.__getitem__)
-        low_idx = min(range(len(lw)), key=lw.__getitem__)
-        up.append(100.0 * (period - ((len(hw) - 1) - high_idx)) / period)
-        down.append(100.0 * (period - ((len(lw) - 1) - low_idx)) / period)
-    up_s = pl.Series("aroon_up14", up, dtype=pl.Float64)
-    down_s = pl.Series("aroon_down14", down, dtype=pl.Float64)
-    return up_s, down_s, (up_s - down_s).rename("aroon_osc14")
+    """Aroon indicator - vectorized via rolling_map."""
+    high = df["high"]
+    low = df["low"]
+
+    def bars_since_argmax(s: pl.Series) -> int:
+        return len(s) - 1 - cast(int, s.arg_max())
+
+    def bars_since_argmin(s: pl.Series) -> int:
+        return len(s) - 1 - cast(int, s.arg_min())
+
+    up_days = high.rolling_map(bars_since_argmax, window_size=period + 1)
+    down_days = low.rolling_map(bars_since_argmin, window_size=period + 1)
+
+    up_s = (period - up_days) / period * 100.0
+    down_s = (period - down_days) / period * 100.0
+
+    return (
+        materialize_series(up_s, df=df, name=f"aroon_up{period}"),
+        materialize_series(down_s, df=df, name=f"aroon_down{period}"),
+        materialize_series(up_s - down_s, df=df, name=f"aroon_osc{period}"),
+    )
 
 
 def _fisher_transform(
@@ -255,23 +261,21 @@ def _chandelier_exit(
     short_exit = (df["low"].rolling_min(window_size=period) + atr * atr_mult).rename(
         "chandelier_short"
     )
-    prev_dir = 0.0
-    direction: list[float] = []
-    for close_value, long_stop, short_stop in zip(
-        [float(v or 0.0) for v in df["close"]],
-        [float(v or 0.0) for v in long_exit],
-        [float(v or 0.0) for v in short_exit],
-        strict=False,
-    ):
-        if close_value > short_stop:
-            prev_dir = 1.0
-        elif close_value < long_stop:
-            prev_dir = -1.0
-        direction.append(prev_dir)
+
+    # Vectorized direction: stay in current trend until opposite stop is hit.
+    signals = (
+        pl.when(df["close"] > short_exit)
+        .then(1.0)
+        .when(df["close"] < long_exit)
+        .then(-1.0)
+        .otherwise(None)
+    )
+    direction = signals.forward_fill().fill_null(0.0)
+
     return (
         long_exit,
         short_exit,
-        pl.Series("chandelier_dir", direction, dtype=pl.Float64),
+        materialize_series(direction, df=df, name="chandelier_dir"),
     )
 
 
@@ -281,34 +285,48 @@ def _volume_profile(df: pl.DataFrame, bins: int = 12) -> pl.Expr:
 
     prices = ((df["high"] + df["low"]) / 2.0).cast(pl.Float64, strict=False)
     volumes = df["volume"].cast(pl.Float64, strict=False)
-    price_values = [
-        float(value)
-        for value in prices.to_list()
-        if value is not None and np.isfinite(float(value))
-    ]
-    if not price_values:
+
+    # Filter valid prices and volumes
+    valid_mask = (
+        prices.is_not_null()
+        & prices.is_finite()
+        & volumes.is_not_null()
+        & (volumes > 0.0)
+    )
+    v_prices = prices.filter(valid_mask)
+    v_volumes = volumes.filter(valid_mask)
+
+    if v_prices.is_empty():
         return pl.lit(None).cast(pl.Float64).alias("volume_profile")
 
-    price_min = min(price_values)
-    price_max = max(price_values)
-    if price_max <= price_min:
-        poc = price_max
+    price_min = v_prices.min()
+    price_max = v_prices.max()
+
+    if price_min is None or price_max is None or price_max <= price_min:
+        poc = price_max if price_max is not None else price_min
     else:
         bucket_count = max(1, int(bins))
         bucket_size = (price_max - price_min) / bucket_count
-        bucket_volumes = [0.0] * bucket_count
-        for price_raw, volume_raw in zip(prices, volumes, strict=False):
-            try:
-                price = float(price_raw)
-                volume = float(volume_raw)
-            except (TypeError, ValueError):
-                continue
-            if not np.isfinite(price) or not np.isfinite(volume) or volume <= 0.0:
-                continue
-            bucket = min(bucket_count - 1, int((price - price_min) / bucket_size))
-            bucket_volumes[bucket] += volume
-        poc_bucket = int(np.argmax(bucket_volumes)) if any(bucket_volumes) else 0
-        poc = price_min + (poc_bucket + 0.5) * bucket_size
+
+        # Vectorized bucketing
+        buckets = (
+            ((v_prices - price_min) / bucket_size)
+            .floor()
+            .cast(pl.Int32)
+            .clip(0, bucket_count - 1)
+        )
+
+        vol_by_bucket = (
+            pl.DataFrame({"b": buckets, "v": v_volumes})
+            .group_by("b")
+            .agg(pl.col("v").sum())
+        )
+
+        if vol_by_bucket.is_empty():
+            poc = price_min
+        else:
+            poc_bucket = vol_by_bucket.sort("v", descending=True).row(0)[0]
+            poc = price_min + (poc_bucket + 0.5) * bucket_size
     return pl.lit(float(poc)).cast(pl.Float64).alias("volume_profile")
 
 
