@@ -5,7 +5,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from ..core.events import KlineCloseEvent
+from ..domain.events import KlineCloseEvent
 from ..domain.schemas import PipelineResult, Signal
 
 LOG = logging.getLogger("bot.application.kline_handler")

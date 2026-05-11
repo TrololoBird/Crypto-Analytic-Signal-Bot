@@ -128,21 +128,23 @@ class BotDashboard:
         async def analytics_report(days: int = 30) -> dict[str, Any]:
             try:
                 from .analytics import StrategyAnalytics
+                days = max(1, min(int(days), 365))
 
-            days = max(1, min(int(days), 365))
+                # TTL Cache for analytics report (60s)
+                now = time.monotonic()
+                cached = self._analytics_cache.get(days)
+                if cached and (now - cached[0]) < 60.0:
+                    return cached[1]
 
-            # TTL Cache for analytics report (60s)
-            now = time.monotonic()
-            cached = self._analytics_cache.get(days)
-            if cached and (now - cached[0]) < 60.0:
-                return cached[1]
+                reporter = StrategyAnalytics(repo=self.bot._modern_repo)
+                report = await reporter.generate_report(days=days)
+                merged = self._merge_strategy_catalog(report)
 
-            reporter = StrategyAnalytics(repo=self.bot._modern_repo)
-            report = await reporter.generate_report(days=days)
-            merged = self._merge_strategy_catalog(report)
-
-            self._analytics_cache[days] = (now, merged)
-            return merged
+                self._analytics_cache[days] = (now, merged)
+                return merged
+            except Exception as exc:
+                LOG.error("dashboard api analytics report error: %s", exc)
+                return {"error": "analytics_unavailable", "detail": str(exc)}
 
         @self.app.get("/api/strategies")
         async def strategies() -> list[dict[str, Any]]:
