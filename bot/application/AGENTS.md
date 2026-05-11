@@ -11,7 +11,7 @@ Work in `bot/application/`, currently centered on `bot.py`.
 ## Read Before Editing
 
 - The touched section in `bot/application/bot.py`
-- Relevant event definitions in `bot/core/events.py`
+- Relevant event definitions in `bot/domain/events.py`
 - Event dispatch in `bot/core/event_bus.py`
 - Related integration modules found by `rg`: usually `bot/ws_manager.py`, `bot/market_data.py`, `bot/tracking.py`, `bot/delivery.py`, `bot/core/memory/repository.py`
 

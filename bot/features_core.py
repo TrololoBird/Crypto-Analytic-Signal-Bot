@@ -239,10 +239,11 @@ def realized_volatility(df: pl.DataFrame, period: int = 20) -> pl.Series:
     """Contract: input requires `close`; output annualized-like rolling realized vol in %."""
     ensure_columns(df, ("close",), fn_name="realized_volatility")
     log_returns = df["close"].log() - df["close"].shift(1).log()
-    return (
-        (log_returns.rolling_std(window_size=period) * np.sqrt(period) * 100.0)
-        .fill_nan(0.0)
-        .rename(f"realized_vol_{period}")
+    return materialize_series(
+        (log_returns.rolling_std(window_size=period) * float(np.sqrt(period)) * 100.0)
+        .fill_nan(0.0),
+        df=df,
+        name=f"realized_vol_{period}",
     )
 
 

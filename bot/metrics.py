@@ -74,7 +74,7 @@ except ImportError:
     def generate_latest(*args: Any, **kwargs: Any) -> bytes:
         return b""
 
-    REGISTRY = None  # type: ignore
+    REGISTRY = None
 
 PromCounter = _PromCounterClass
 PromGauge = _PromGaugeClass
@@ -355,4 +355,4 @@ class BotMetricsCollector:
         """Get current metrics in Prometheus text format."""
         if not self._enabled or REGISTRY is None:
             return b"# prometheus_client not installed\n"
-        return generate_latest(REGISTRY)
+        return cast(bytes, generate_latest(REGISTRY))

@@ -151,7 +151,7 @@ class PublicIntelligenceService:
             barrier=barrier,
             aggregates=aggregates,
         )
-        macro_enabled = bool(cast(dict[str, Any], macro).get("enabled", True))
+        macro_enabled = bool(macro.get("enabled", True))
 
         options_enabled = bool(options.get("enabled", True))
         snapshot: dict[str, Any] = {

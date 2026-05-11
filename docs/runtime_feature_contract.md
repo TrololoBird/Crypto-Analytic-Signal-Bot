@@ -20,7 +20,7 @@ This surface is defined via `bot.__all__` and mirrored in `bot/runtime_contract.
 
 Public feature schema source of truth:
 
-- `bot/feature_contract.py`
+- `bot/domain/contracts.py`
 - `PUBLIC_FEATURE_SCHEMA_VERSION`
 - `PUBLIC_FEATURE_FIELDS`
 - `validate_public_feature_payload()`
@@ -48,7 +48,7 @@ Guard checks live in `bot/runtime_contract.py` (`assert_runtime_call_path_is_cle
 
 When adding a new public feature field:
 
-1. Add field to `PUBLIC_FEATURE_FIELDS` in `bot/feature_contract.py`.
+1. Add field to `PUBLIC_FEATURE_FIELDS` in `bot/domain/contracts.py`.
 2. Populate value in producer (`build_prepared_feature_snapshot`).
 3. Keep schema exactness validation enabled (no permissive extras).
 4. Bump `PUBLIC_FEATURE_SCHEMA_VERSION` only for explicit contract version change.

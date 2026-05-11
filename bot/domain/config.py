@@ -574,7 +574,7 @@ class BotSettings(BaseModel):
 
     @property
     def telemetry_dir(self) -> Path:
-        return self.data_dir / cast(str, self.runtime.telemetry_subdir)
+        return self.data_dir / self.runtime.telemetry_subdir
 
     @property
     def logs_dir(self) -> Path:
@@ -598,7 +598,7 @@ class BotSettings(BaseModel):
 
     @property
     def log_level(self) -> str:
-        return cast(str, self.runtime.log_level)
+        return self.runtime.log_level
 
     @field_validator("tg_token")
     @classmethod
@@ -629,8 +629,8 @@ class BotSettings(BaseModel):
 
     @model_validator(mode="after")
     def _validate_timing_coherence(self) -> "BotSettings":
-        cooldown = cast(int, self.filters.cooldown_minutes)
-        pending = cast(int, self.tracking.pending_expiry_minutes)
+        cooldown = self.filters.cooldown_minutes
+        pending = self.tracking.pending_expiry_minutes
         if cooldown > pending:
             raise ValueError(
                 f"cooldown_minutes ({cooldown}) must be <= "
@@ -725,6 +725,10 @@ class BotSettings(BaseModel):
 
 def _load_toml(path: Path) -> dict[str, Any]:
     if not path.exists():
+        if path.name == "config.toml":
+            example_path = path.with_name("config.toml.example")
+            if example_path.exists():
+                return _load_toml(example_path)
         return {}
     with path.open("rb") as handle:
         parsed = _toml_lib.load(handle)

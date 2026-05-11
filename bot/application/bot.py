@@ -649,7 +649,7 @@ class SignalBot:
         self,
         symbol: str,
         result: PipelineResult,
-    ) -> tuple[list[Signal], list[dict], list[Signal]]:
+    ) -> tuple[list[Signal], list[dict[str, Any]], list[Signal]]:
         return await self._get_kline_handler().select_and_deliver_for_symbol(
             symbol, result
         )

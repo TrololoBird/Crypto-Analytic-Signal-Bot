@@ -104,7 +104,7 @@ class TelegramQueue:
         }
 
         self._running = False
-        self._worker_task: asyncio.Task | None = None
+        self._worker_task: asyncio.Task[None] | None = None
 
     def enqueue(
         self,

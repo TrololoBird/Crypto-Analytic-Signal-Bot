@@ -7,6 +7,7 @@ import math
 import re
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
+from collections.abc import Callable
 from typing import Any
 
 import polars as pl
@@ -55,6 +56,8 @@ _CURRENT_DECISION_CAPTURE: ContextVar["_DecisionCapture | None"] = ContextVar(
     "bot_setups_current_decision_capture",
     default=None,
 )
+_DecisionCaptureToken = Token["_DecisionCapture | None"]
+_SnapshotMetric = tuple[Any | None, tuple[str, ...], tuple[str, ...]]
 
 
 @dataclass(slots=True)
@@ -70,7 +73,7 @@ def begin_strategy_decision_capture(
     prepared: PreparedSymbol,
     setup_id: str,
     strict_data_quality: bool,
-) -> Token:
+) -> _DecisionCaptureToken:
     return _CURRENT_DECISION_CAPTURE.set(
         _DecisionCapture(
             setup_id=setup_id,
@@ -80,7 +83,7 @@ def begin_strategy_decision_capture(
     )
 
 
-def reset_strategy_decision_capture(token: Token) -> None:
+def reset_strategy_decision_capture(token: _DecisionCaptureToken) -> None:
     _CURRENT_DECISION_CAPTURE.reset(token)
 
 
@@ -260,7 +263,7 @@ def _decision_snapshot(
     snapshot: dict[str, Any] = {}
     missing_fields: list[str] = []
     invalid_fields: list[str] = []
-    field_specs = [
+    field_specs: list[tuple[str, Callable[[], _SnapshotMetric]]] = [
         ("atr14", lambda: _frame_metric(prepared.work_15m, "atr14")),
         ("rsi14", lambda: _frame_metric(prepared.work_15m, "rsi14")),
         ("volume_ratio20", lambda: _frame_metric(prepared.work_15m, "volume_ratio20")),

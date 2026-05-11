@@ -44,7 +44,7 @@ def load_strategy_config(strategy_name: str) -> dict[str, Any]:
         return {}
 
 
-def get_nested(config: dict, key: str, default: Any = None) -> Any:
+def get_nested(config: dict[str, Any], key: str, default: Any = None) -> Any:
     """Get value from config, supporting nested keys like 'detection.wick_mult'.
 
     Args:

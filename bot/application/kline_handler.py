@@ -53,9 +53,9 @@ class KlineHandler:
         self,
         symbol: str,
         result: PipelineResult,
-    ) -> tuple[list[Signal], list[dict], list[Signal]]:
+    ) -> tuple[list[Signal], list[dict[str, Any]], list[Signal]]:
         candidates = result.candidates
-        rejected: list[dict] = list(result.rejected)
+        rejected: list[dict[str, Any]] = list(result.rejected)
         delivered: list[Signal] = []
 
         if candidates:

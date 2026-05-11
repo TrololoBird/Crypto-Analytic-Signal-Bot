@@ -440,7 +440,7 @@ class BOSCHOCHSetup(BaseSetup):
                     "swing_stop_missing_long",
                     external_swing_lookback=external_swing_lookback,
                     swing_lookback=swing_lookback,
-                    **stop_details,
+                    **cast(Any, stop_details),
                 )
                 return None
             stop_price = (
@@ -489,7 +489,7 @@ class BOSCHOCHSetup(BaseSetup):
                     "swing_stop_missing_short",
                     external_swing_lookback=external_swing_lookback,
                     swing_lookback=swing_lookback,
-                    **stop_details,
+                    **cast(Any, stop_details),
                 )
                 return None
             stop_price = (

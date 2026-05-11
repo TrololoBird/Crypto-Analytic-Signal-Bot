@@ -6,7 +6,7 @@ import asyncio
 import logging
 from collections import Counter
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 
 from ..domain.schemas import PipelineResult, PreparedSymbol, Signal, UniverseSymbol
 
@@ -125,7 +125,7 @@ class CycleRunner:
                     trigger="emergency_fallback",
                     ws_enrichments=ws_enrichments,
                 )
-                return result
+                return cast(PipelineResult | None, result)
 
         tasks = [asyncio.create_task(_analyze_one(item)) for item in shortlist]
         results = await asyncio.gather(*tasks, return_exceptions=True)

@@ -10,6 +10,7 @@ from .base import AbstractStrategy
 from ...domain.strategies import StrategyMetadata
 
 LOG = logging.getLogger("bot.core.engine.registry")
+__all__ = ["StrategyMetadata", "StrategyRegistry"]
 
 
 class StrategyRegistry:

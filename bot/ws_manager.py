@@ -9,32 +9,37 @@ from __future__ import annotations
 import asyncio
 import collections
 import contextlib
-import json
+import json as _stdlib_json
 import logging
 import time
+from collections.abc import Callable, Coroutine
 from datetime import datetime, timezone
+from types import ModuleType
 from typing import TYPE_CHECKING, Any
 
 import polars as pl
 from websockets import exceptions as ws_exceptions
 
-# Use orjson for faster JSON parsing if available
-try:
-    import orjson as _json
-
-    _USE_ORJSON = True
-except ImportError:
-    import json as _json
-
-    _USE_ORJSON = False
-
 from .market_data import MarketDataUnavailable
-from .domain.schemas import AggTradeSnapshot, SymbolFrames
+from .domain.schemas import AggTrade, AggTradeSnapshot, SymbolFrames
 from .websocket import cache as ws_cache
 from .websocket import connection as ws_connection
 from .websocket import health as ws_health
 from .websocket import reconnect as ws_reconnect
 from .websocket import subscriptions as ws_subscriptions
+
+# Use orjson for faster JSON parsing if available
+_json: ModuleType
+try:
+    import orjson as _orjson
+
+    _json = _orjson
+
+    _USE_ORJSON = True
+except ImportError:
+    _json = _stdlib_json
+
+    _USE_ORJSON = False
 
 if TYPE_CHECKING:
     from .domain.config import WSConfig
@@ -69,6 +74,10 @@ _INTERVAL_SECONDS: dict[str, int] = {
     "1d": 86400,
 }
 LOG = logging.getLogger("bot.ws_manager")
+JsonDict = dict[str, Any]
+KlineCloseCallback = Callable[[str, str, int], Coroutine[Any, Any, None]]
+AggTradeCallback = Callable[[str, float, datetime], Coroutine[Any, Any, None]]
+ReconnectCallback = Callable[[], Coroutine[Any, Any, None]]
 _HIGH_EVENT_LATENCY_MS = 5_000.0
 _LATENCY_WARNING_INTERVAL_SECONDS = 60.0
 _SHORT_DISCONNECT_BACKFILL_GRACE_SECONDS = 30.0
@@ -90,7 +99,7 @@ class RateLimiter:
 
     def __init__(self, max_per_second: int = _MAX_INCOMING_MSG_PER_SECOND) -> None:
         self.max_per_second = max_per_second
-        self._timestamps: collections.deque = collections.deque()
+        self._timestamps: collections.deque[float] = collections.deque()
         self._lock = asyncio.Lock()
 
     async def acquire(self) -> bool:
@@ -116,7 +125,7 @@ class MessageBuffer:
     """Buffer for WebSocket messages with backpressure handling."""
 
     def __init__(self, maxsize: int = 10000) -> None:
-        self._buffer: asyncio.Queue[Any] = asyncio.Queue(maxsize=maxsize)
+        self._buffer: asyncio.Queue[JsonDict] = asyncio.Queue(maxsize=maxsize)
         self._dropped_count = 0
         self._processed_count = 0
         self._last_compaction_log_count = 0
@@ -134,7 +143,7 @@ class MessageBuffer:
             dropped += 1
         return dropped
 
-    async def put(self, msg: Any) -> bool:
+    async def put(self, msg: JsonDict) -> bool:
         """Add message to buffer, dropping oldest queued data under backpressure."""
         try:
             self._buffer.put_nowait(msg)
@@ -167,7 +176,7 @@ class MessageBuffer:
                 )
             return buffered
 
-    async def get(self) -> Any | None:
+    async def get(self) -> JsonDict | None:
         """Get message from buffer. Returns None if empty."""
         try:
             msg = self._buffer.get_nowait()
@@ -186,7 +195,7 @@ class MessageBuffer:
         }
 
 
-def _ws_kline_to_row(k: dict) -> dict:
+def _ws_kline_to_row(k: JsonDict) -> JsonDict:
     return {
         "time": datetime.fromtimestamp(int(k["t"]) / 1000.0, tz=UTC),
         "open": float(k["o"]),
@@ -218,21 +227,23 @@ class FuturesWSManager:
         self._data_lock = asyncio.Lock()
         self._backfill_sem = asyncio.Semaphore(5)
 
-        self._klines: dict[str, dict[str, collections.deque]] = {}
+        self._klines: dict[str, dict[str, collections.deque[JsonDict]]] = {}
         self._book: dict[str, tuple[float | None, float | None]] = {}
         self._book_qty: dict[str, tuple[float | None, float | None]] = {}
-        self._agg_trades: dict[str, collections.deque] = {}
+        self._agg_trades: dict[str, collections.deque[AggTrade]] = {}
         self._max_streams_per_connection = _MAX_STREAMS_PER_CONNECTION
 
         # Global market stream caches (populated from !ticker@arr, !markPrice@arr, !forceOrder@arr)
-        self._ticker_cache: dict[str, dict] = {}
+        self._ticker_cache: dict[str, JsonDict] = {}
         self._ticker_cache_ts: float = 0.0  # monotonic time of last ticker update
-        self._mark_price_cache: dict[str, dict] = {}
+        self._mark_price_cache: dict[str, JsonDict] = {}
         # Force order buffer: (timestamp_ms, symbol, side, qty, price)
-        self._force_order_buffer: collections.deque = collections.deque(maxlen=500)
+        self._force_order_buffer: collections.deque[
+            tuple[int, str, str, float, float]
+        ] = collections.deque(maxlen=500)
 
-        self._stream_task: asyncio.Task | None = None
-        self._stream_tasks: dict[str, asyncio.Task | None] = {
+        self._stream_task: asyncio.Task[None] | None = None
+        self._stream_tasks: dict[str, asyncio.Task[None] | None] = {
             endpoint: None for endpoint in _WS_ENDPOINTS
         }
         self._running = False
@@ -292,20 +303,22 @@ class FuturesWSManager:
 
         # Event-driven callbacks (fire-and-forget via asyncio.create_task)
         self._kline_close_cbs: dict[
-            str, list
+            str, list[KlineCloseCallback]
         ] = {}  # interval -> [async cb(symbol, interval, close_ts_ms)]
-        self._agg_trade_cbs: list = []  # [async cb(symbol, price, ts)]
-        self._reconnect_cb: Any = None  # async cb() — fired on reconnect
+        self._agg_trade_cbs: list[
+            AggTradeCallback
+        ] = []  # [async cb(symbol, price, ts)]
+        self._reconnect_cb: ReconnectCallback | None = None  # fired on reconnect
 
         # Message buffering with background draining.
         self._message_buffer = MessageBuffer(maxsize=10000)
-        self._buffer_processor_task: asyncio.Task | None = None
+        self._buffer_processor_task: asyncio.Task[None] | None = None
         self._backfill_tasks: set[asyncio.Task[None]] = set()
         self._stale_event_drop_count: int = 0
 
         # P3: Per-stream latency monitoring
         self._stream_latency_ms: dict[
-            str, collections.deque
+            str, collections.deque[float]
         ] = {}  # stream -> deque of last 10 latencies
         self._slow_streams: set[str] = set()  # streams with avg latency > 5000ms
         self._stream_last_message_ts: dict[
@@ -343,21 +356,21 @@ class FuturesWSManager:
     # Event-driven callback registration
     # ------------------------------------------------------------------
 
-    def register_kline_close(self, interval: str, cb: Any) -> None:
+    def register_kline_close(self, interval: str, cb: KlineCloseCallback) -> None:
         """Register an async callback fired when a kline of *interval* closes.
 
         Callback signature: ``async def cb(symbol: str, interval: str, close_ts_ms: int) -> None``
         """
         self._kline_close_cbs.setdefault(interval, []).append(cb)
 
-    def register_agg_trade(self, cb: Any) -> None:
+    def register_agg_trade(self, cb: AggTradeCallback) -> None:
         """Register an async callback fired on every aggTrade tick.
 
         Callback signature: ``async def cb(symbol: str, price: float, ts: datetime) -> None``
         """
         self._agg_trade_cbs.append(cb)
 
-    def register_reconnect(self, cb: Any) -> None:
+    def register_reconnect(self, cb: ReconnectCallback) -> None:
         """Register an async callback fired when the WS reconnects (not on first connect).
 
         Callback signature: ``async def cb() -> None``
@@ -374,8 +387,8 @@ class FuturesWSManager:
         LOG.info("EventBus attached to ws_manager")
 
     @staticmethod
-    def _attach_task_logging(task: asyncio.Task, *, label: str) -> None:
-        def _done(done: asyncio.Task) -> None:
+    def _attach_task_logging(task: asyncio.Task[Any], *, label: str) -> None:
+        def _done(done: asyncio.Task[Any]) -> None:
             with contextlib.suppress(asyncio.CancelledError):
                 exc = done.exception()
                 if exc is not None:
@@ -598,12 +611,12 @@ class FuturesWSManager:
         """Calculate current WebSocket latency in milliseconds."""
         if not self._stream_latency_ms:
             return self._last_event_lag_ms
-        all_latencies = []
+        all_latencies: list[float] = []
         for latencies in self._stream_latency_ms.values():
             if latencies:
                 all_latencies.append(sum(latencies) / len(latencies))
         if all_latencies:
-            return round(sum(all_latencies) / len(all_latencies), 2)
+            return float(round(sum(all_latencies) / len(all_latencies), 2))
         return self._last_event_lag_ms
 
     def _last_message_age_seconds(self, endpoint: str | None = None) -> float | None:
@@ -1017,7 +1030,7 @@ class FuturesWSManager:
         """
         return ws_cache.get_stats(self)
 
-    def get_ticker_snapshot(self, symbol: str) -> dict | None:
+    def get_ticker_snapshot(self, symbol: str) -> JsonDict | None:
         """Return the latest 24hr ticker dict for *symbol*, or None."""
         return self._ticker_cache.get(symbol)
 
@@ -1027,7 +1040,7 @@ class FuturesWSManager:
             return None
         return round(time.monotonic() - updated_at, 3)
 
-    def get_kline_cache(self, symbol: str, interval: str) -> list[dict] | None:
+    def get_kline_cache(self, symbol: str, interval: str) -> list[JsonDict] | None:
         """Return the most recent kline rows for *symbol*/*interval* as a list.
 
         Returns None if no data is cached yet. Rows are dicts with keys:
@@ -1038,7 +1051,7 @@ class FuturesWSManager:
             return None
         return list(deq)
 
-    def get_global_ticker_data(self) -> list[dict]:
+    def get_global_ticker_data(self) -> list[JsonDict]:
         """Return all cached tickers in the format expected by build_shortlist.
 
         Each dict contains: symbol, quote_volume, price_change_percent,
@@ -1049,7 +1062,7 @@ class FuturesWSManager:
         """
         return ws_cache.get_global_ticker_data(self)
 
-    def get_mark_price_snapshot(self, symbol: str) -> dict | None:
+    def get_mark_price_snapshot(self, symbol: str) -> JsonDict | None:
         """Return the latest mark-price/funding dict for *symbol*, or None.
 
         Returned dict keys: ``mark_price`` (float), ``funding_rate`` (float),
@@ -1215,7 +1228,7 @@ class FuturesWSManager:
             if df.is_empty():
                 return
             rows = df.to_dicts()
-            deq: collections.deque = collections.deque(
+            deq: collections.deque[JsonDict] = collections.deque(
                 rows, maxlen=self._cfg.kline_cache_size
             )
             async with self._data_lock:
@@ -1282,7 +1295,7 @@ class FuturesWSManager:
             endpoint=endpoint,
             backoff_reset_after_seconds=_BACKOFF_RESET_AFTER_SECONDS,
             proactive_reconnect_after_seconds=_PROACTIVE_RECONNECT_AFTER_SECONDS,
-            parse_message=(_json.loads if _USE_ORJSON else json.loads),
+            parse_message=_json.loads,
             market_endpoint=_WS_MARKET,
             stale_symbols=self._stale_symbols,
             maybe_backfill_after_disconnect=self._maybe_backfill_after_disconnect,
@@ -1296,7 +1309,7 @@ class FuturesWSManager:
             ),
         )
 
-    def _handle_ws_response(self, msg: dict, endpoint: str) -> None:
+    def _handle_ws_response(self, msg: JsonDict, endpoint: str) -> None:
         if msg.get("error"):
             self._subscription_errors[endpoint] = msg["error"]
             LOG.warning(
@@ -1355,7 +1368,7 @@ class FuturesWSManager:
             self._subscription_ack_count[endpoint] += 1
             LOG.debug("ws command ack | endpoint=%s id=%s", endpoint, msg.get("id"))
 
-    async def _dispatch_event(self, data: dict) -> None:
+    async def _dispatch_event(self, data: JsonDict) -> None:
         """Dispatch a single market data event dict to the appropriate handler.
 
         kline/bookTicker/aggTrade handlers are async and acquire _data_lock to
@@ -1408,7 +1421,7 @@ class FuturesWSManager:
         elif event_type == "forceOrder":
             self._handle_force_order(data)
 
-    async def _handle_message(self, msg: dict, endpoint: str) -> None:
+    async def _handle_message(self, msg: JsonDict, endpoint: str) -> None:
         self._last_message_ts = time.monotonic()
         self._last_message_ts_by_endpoint[endpoint] = self._last_message_ts
         if "result" in msg or "error" in msg:
@@ -1426,7 +1439,7 @@ class FuturesWSManager:
             # Backpressure fallback: process directly to avoid full data starvation.
             await self._process_message_internal(msg)
 
-    async def _process_message_internal(self, msg: dict) -> None:
+    async def _process_message_internal(self, msg: JsonDict) -> None:
         """Internal message processing with latency tracking."""
         start_ts = time.monotonic()
         data = msg.get("data")
@@ -1535,7 +1548,7 @@ class FuturesWSManager:
         age_ms = (time.time() * 1000.0) - event_ms
         return age_ms > (max_age_seconds * 1000.0)
 
-    async def _handle_kline(self, symbol: str, data: dict) -> None:
+    async def _handle_kline(self, symbol: str, data: JsonDict) -> None:
         """Handle closed kline (candle) events.  Acquires _data_lock to prevent
         races with subscribe() cleanup of self._klines."""
         if self._symbols and symbol not in self._symbols:
@@ -1589,7 +1602,7 @@ class FuturesWSManager:
 
         # Publish to EventBus (primary path when SignalBot uses EventBus)
         if self._event_bus is not None:
-            from .core.events import KlineCloseEvent
+            from .domain.events import KlineCloseEvent
 
             self._event_bus.publish_nowait(
                 KlineCloseEvent(symbol=symbol, interval=interval, close_ts=close_ts_ms)
@@ -1600,15 +1613,15 @@ class FuturesWSManager:
         else:
             LOG.warning("kline NOT published - EventBus is None | symbol=%s", symbol)
 
-    async def _handle_book_ticker(self, symbol: str, data: dict) -> None:
+    async def _handle_book_ticker(self, symbol: str, data: JsonDict) -> None:
         """Handle bookTicker events.  Acquires _data_lock to prevent races."""
         await ws_cache.handle_book_ticker(self, symbol, data)
 
-    async def _handle_agg_trade(self, symbol: str, data: dict) -> None:
+    async def _handle_agg_trade(self, symbol: str, data: JsonDict) -> None:
         """Handle aggTrade events.  Acquires _data_lock to prevent races."""
         await ws_cache.handle_agg_trade(self, symbol, data)
 
-    def _handle_ticker(self, symbol: str, data: dict) -> None:
+    def _handle_ticker(self, symbol: str, data: JsonDict) -> None:
         """Handle 24hrTicker events from !ticker@arr.
 
         Binance Futures 24hr ticker fields:
@@ -1617,7 +1630,7 @@ class FuturesWSManager:
         """
         ws_cache.handle_ticker(self, symbol, data)
 
-    def _handle_mini_ticker(self, symbol: str, data: dict) -> None:
+    def _handle_mini_ticker(self, symbol: str, data: JsonDict) -> None:
         """Handle miniTicker events from !miniTicker@arr (lightweight fallback).
 
         miniTicker fields:
@@ -1626,7 +1639,7 @@ class FuturesWSManager:
         """
         ws_cache.handle_mini_ticker(self, symbol, data)
 
-    def _handle_mark_price(self, symbol: str, data: dict) -> None:
+    def _handle_mark_price(self, symbol: str, data: JsonDict) -> None:
         """Handle markPriceUpdate events from !markPrice@arr@1s.
 
         Binance Futures mark price fields:
@@ -1635,7 +1648,7 @@ class FuturesWSManager:
         """
         ws_cache.handle_mark_price(self, symbol, data)
 
-    def _handle_force_order(self, data: dict) -> None:
+    def _handle_force_order(self, data: JsonDict) -> None:
         """Handle forceOrder (liquidation) events from !forceOrder@arr.
 
         The inner order object ``o`` carries: s=symbol, S=side (BUY/SELL),

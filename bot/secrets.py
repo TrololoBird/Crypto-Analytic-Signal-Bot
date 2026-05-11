@@ -17,12 +17,17 @@ class Secrets:
     target_chat_id: str
 
 
+def _first_configured_env(*names: str) -> str:
+    for name in names:
+        if name in os.environ:
+            return os.environ[name].strip()
+    return ""
+
+
 def load_secrets() -> Secrets:
     load_dotenv()
-    tg_token = (os.getenv("TG_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
-    target_chat_id = (
-        os.getenv("TARGET_CHAT_ID") or os.getenv("TELEGRAM_CHAT_ID") or ""
-    ).strip()
+    tg_token = _first_configured_env("TG_TOKEN", "TELEGRAM_BOT_TOKEN")
+    target_chat_id = _first_configured_env("TARGET_CHAT_ID", "TELEGRAM_CHAT_ID")
     return Secrets(
         tg_token=tg_token,
         target_chat_id=target_chat_id,

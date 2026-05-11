@@ -6,22 +6,31 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
 
-try:
-    from aiogram import Bot
-    from aiogram.exceptions import TelegramRetryAfter, TelegramAPIError
-except ImportError:
-    Bot = None  # type: ignore[assignment]
-    TelegramRetryAfter = Exception
-    TelegramAPIError = Exception
+from .queue import QueuedMessage, TelegramQueue
+from ..core.diagnostics import BotMetrics
 
 if TYPE_CHECKING:
     from aiogram import Bot as AiogramBot
 else:
     AiogramBot = Any
 
-from .queue import QueuedMessage, TelegramQueue
-from ..core.diagnostics import BotMetrics
+AiogramBotClass: Any
+TelegramRetryAfter: type[Exception]
+TelegramAPIError: type[Exception]
+try:
+    from aiogram import Bot as _AiogramBotClass
+    from aiogram.exceptions import TelegramAPIError as _TelegramAPIError
+    from aiogram.exceptions import TelegramRetryAfter as _TelegramRetryAfter
+except ImportError:
+    AiogramBotClass = None
+    TelegramRetryAfter = Exception
+    TelegramAPIError = Exception
+else:
+    AiogramBotClass = _AiogramBotClass
+    TelegramRetryAfter = _TelegramRetryAfter
+    TelegramAPIError = _TelegramAPIError
 
+Bot: Any = AiogramBotClass
 LOG = logging.getLogger("bot.telegram.sender")
 
 

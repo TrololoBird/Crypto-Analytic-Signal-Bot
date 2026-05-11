@@ -17,7 +17,7 @@
 
 ## Решение
 
-1. Введён единый публичный контракт в `bot/feature_contract.py`:
+1. Введён единый публичный контракт в `bot/domain/contracts.py`:
    - `PUBLIC_FEATURE_SCHEMA_VERSION = "v1"`;
    - `PUBLIC_FEATURE_FIELDS` как канонический порядок/набор полей;
    - strict-валидация (`validate_public_feature_payload`).

@@ -52,8 +52,8 @@ class HealthManager:
                 sl_size = len(self._bot._shortlist)
             active_sigs = await self._bot._modern_repo.get_active_signals()
             open_signals = len(active_sigs)
-            ws_lag = 0
-            ws_age = 0
+            ws_lag = 0.0
+            ws_age = 0.0
             if self._bot._ws_manager is not None:
                 ws_lag = self._bot._ws_manager._get_current_latency_ms() or 0
                 ws_age = self._bot._ws_manager._last_message_age_seconds() or 0

@@ -99,7 +99,7 @@ class TimeSeriesGauge:
 class BotMetrics:
     """Collection of bot metrics."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         # Signal metrics
         self.signals_generated = Counter("signals_total", "Total signals generated")
         self.signals_by_strategy: dict[str, Counter] = {}

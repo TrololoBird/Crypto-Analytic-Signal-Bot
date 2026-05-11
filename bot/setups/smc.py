@@ -806,6 +806,7 @@ def latest_fvg_zone(
             )
             ),
         )
+    return None
 
 def latest_order_block(
     frame: pl.DataFrame,

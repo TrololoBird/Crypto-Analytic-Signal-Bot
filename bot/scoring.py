@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
+from typing import Any
 
 
 from .domain.config import BotSettings
@@ -23,7 +24,7 @@ class ScoringResult:
     def total_adjustment(self) -> float:
         return self.final_score - self.base_score
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "base_score": self.base_score,
             "adjustments": self.adjustments,
@@ -180,7 +181,7 @@ def _oi_momentum(prepared: PreparedSymbol, signal: Signal) -> float:
 
 
 def _risk_reward_quality(signal: Signal, settings: BotSettings) -> float:
-    rr = signal.risk_reward
+    rr = float(signal.risk_reward or 0.0)
     filters = getattr(settings, "filters", None)
     setup_overrides = getattr(filters, "setups", {}) if filters is not None else {}
     if not isinstance(setup_overrides, dict):

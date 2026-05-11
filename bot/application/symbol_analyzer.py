@@ -867,6 +867,7 @@ class SymbolAnalyzer:
                 or result.metadata.get("setup_id")
                 or getattr(result.signal, "setup_id", "unknown")
             )
+            setup_id = str(setup_id)
             decision = result.decision
             if decision is None:
                 decision = StrategyDecision.error_result(
@@ -1443,9 +1444,9 @@ class SymbolAnalyzer:
                     fallback_used="skip_funding_context",
                     exception_type="stale_cache",
                 )
-            basis_pct = self._bot.client.get_cached_basis(symbol, period="1h")
-            if basis_pct is not None:
-                enrichments["basis_pct"] = basis_pct
+            cached_basis_pct = self._bot.client.get_cached_basis(symbol, period="1h")
+            if cached_basis_pct is not None:
+                enrichments["basis_pct"] = cached_basis_pct
             basis_stats = self._bot.client.get_cached_basis_stats(symbol, period="5m")
             if basis_stats is not None:
                 premium_slope = basis_stats.get("premium_slope_5m")

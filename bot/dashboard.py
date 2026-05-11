@@ -9,7 +9,7 @@ import asyncio
 from datetime import datetime, timezone
 import time
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, cast
 
 UTC = timezone.utc
 
@@ -123,7 +123,7 @@ class BotDashboard:
         @self.app.get("/api/health")
         async def health() -> dict[str, Any]:
             try:
-                return await self.bot.health_check()
+                return cast(dict[str, Any], await self.bot.health_check())
             except Exception as exc:
                 LOG.error("dashboard api health error: %s", exc)
                 return {"status": "error", "detail": str(exc)}
@@ -379,7 +379,7 @@ class BotDashboard:
         regime = getattr(bot.market_regime, "_last_result", None)
         if not regime:
             return {"error": "No market data available"}
-        return regime.to_dict()
+        return cast(dict[str, Any], regime.to_dict())
 
     async def _get_metrics(self) -> dict[str, Any]:
         bot = self.bot
@@ -446,7 +446,7 @@ class BotDashboard:
             if self.app is None:
                 return
             try:
-                import uvicorn  # type: ignore
+                import uvicorn
             except Exception as exc:
                 LOG.warning("dashboard server failed to import uvicorn: %s", exc)
                 return

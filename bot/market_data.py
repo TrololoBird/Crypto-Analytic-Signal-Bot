@@ -307,6 +307,8 @@ def _ohlcv_frame_has_incomplete_tail(df: pl.DataFrame, timeframe: str) -> bool:
     if timeframe_seconds is None:
         return False
     last_open = df["time"].tail(1).item()
+    if not isinstance(last_open, datetime):
+        return False
     return datetime.now(UTC) < last_open + timedelta(seconds=timeframe_seconds)
 
 
@@ -438,7 +440,7 @@ class BinanceFuturesMarketData:
         self._top_position_ls_ratio_cache: dict[
             tuple[str, str], tuple[float, float]
         ] = {}
-        self._funding_history_cache: dict[str, tuple[float, list[dict]]] = {}
+        self._funding_history_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
         self._basis_cache: dict[tuple[str, str], tuple[float, float | None]] = {}
         self._basis_stats_cache: dict[
             tuple[str, str], tuple[float, dict[str, float | None]]
@@ -510,7 +512,7 @@ class BinanceFuturesMarketData:
     ) -> float:
         delay = base_delay * (2 ** max(attempt, 0))
         jitter = random.uniform(0.5, 1.5)
-        return min(delay * jitter, cap)
+        return float(min(delay * jitter, cap))
 
     def _is_circuit_open(self, operation: str) -> bool:
         """Check if circuit breaker is open for operation."""
@@ -1914,7 +1916,7 @@ class BinanceFuturesMarketData:
 
     async def fetch_funding_rate_history(
         self, symbol: str, *, limit: int = 10
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         validate_symbol(symbol)
         validate_limit(limit, max_val=100)
         """Fetch last `limit` funding rate records from /fapi/v1/fundingRate.
@@ -2134,6 +2136,7 @@ class BinanceFuturesMarketData:
         cache_key = (symbol, period)
         window_seconds = _PERIOD_WINDOW_SECONDS.get(period, 300)
 
+        basis_pct: float | None
         if index_price is not None and index_price > 0.0:
             basis_pct = (mark_price - index_price) / index_price * 100.0
             mark_index_spread_bps = basis_pct * 100.0  # Convert to bps

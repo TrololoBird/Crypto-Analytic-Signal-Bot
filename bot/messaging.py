@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from collections import deque
 from datetime import datetime, timedelta, timezone
 from functools import wraps
-from typing import Any, Protocol
+from typing import Any, Awaitable, Callable, ParamSpec, Protocol, TypeVar, cast
 
 import aiohttp
 import structlog
@@ -48,7 +48,10 @@ except ImportError:
 
 
 LOG = structlog.get_logger("bot.messaging")
+RETRY_LOG = logging.getLogger("bot.messaging")
 UTC = timezone.utc
+P = ParamSpec("P")
+R = TypeVar("R")
 NETWORK_RETRIES = 3
 RETRY_DELAY_SECONDS = 1.5
 TELEGRAM_DUPLICATE_WINDOW_SECONDS = 180
@@ -60,12 +63,12 @@ TELEGRAM_LOG_PREVIEW_LIMIT = 500
 # Fallback retry decorator for when tenacity is not installed
 def _simple_retry(
     max_attempts: int = 3, exceptions: tuple[type[Exception], ...] = (Exception,)
-) -> Any:
+) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
     """Simple retry decorator as fallback when tenacity is not available."""
 
-    def decorator(func: Any) -> Any:
+    def decorator(func: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
         @wraps(func)
-        async def wrapper(*args: Any, **kwargs: Any) -> Any:
+        async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
             last_exc: Exception | None = None
             for attempt in range(max_attempts):
                 try:
@@ -89,6 +92,29 @@ def _simple_retry(
         return wrapper
 
     return decorator
+
+
+def _buffered_input_file_class() -> Any:
+    try:
+        from aiogram.types import BufferedInputFile
+    except ImportError as exc:
+        raise RuntimeError("BufferedInputFile is unavailable") from exc
+    return BufferedInputFile
+
+
+def _telegram_retry() -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
+    if HAS_TENACITY:
+        return cast(
+            Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]],
+            retry(
+                stop=stop_after_attempt(3),
+                wait=wait_exponential(multiplier=1, min=2, max=10),
+                retry=retry_if_exception_type((Exception,)),
+                before_sleep=before_sleep_log(RETRY_LOG, logging.WARNING),
+                reraise=True,
+            ),
+        )
+    return _simple_retry(3, (Exception,))
 
 
 class MessageBroadcaster(Protocol):
@@ -261,12 +287,7 @@ class TelegramBroadcaster:
             html_caption, plain_caption = self._prepare_captions(caption)
 
             try:
-                try:
-                    from aiogram.types import BufferedInputFile
-                except ImportError:
-                    BufferedInputFile = None
-                if BufferedInputFile is None:
-                    raise RuntimeError("BufferedInputFile is unavailable")
+                BufferedInputFile = _buffered_input_file_class()
                 photo_file = BufferedInputFile(photo_bytes, filename="chart.png")
                 await self._respect_min_send_interval()
                 await self.bot.send_photo(
@@ -289,12 +310,7 @@ class TelegramBroadcaster:
                         self._plain_text_fallback(caption, exc) or plain_caption
                     )
                     try:
-                        try:
-                            from aiogram.types import BufferedInputFile
-                        except ImportError:
-                            BufferedInputFile = None
-                        if BufferedInputFile is None:
-                            raise RuntimeError("BufferedInputFile is unavailable")
+                        BufferedInputFile = _buffered_input_file_class()
                         photo_file = BufferedInputFile(
                             photo_bytes, filename="chart.png"
                         )
@@ -323,19 +339,7 @@ class TelegramBroadcaster:
             if (now - sent_at).total_seconds() < type(self).duplicate_window_seconds
         }
 
-    @(
-        retry(
-            stop=stop_after_attempt(3),
-            wait=wait_exponential(multiplier=1, min=2, max=10),
-            retry=retry_if_exception_type(
-                (Exception,)
-            ),  # aiogram raises various exceptions
-            before_sleep=before_sleep_log(LOG, logging.WARNING),
-            reraise=True,
-        )
-        if HAS_TENACITY
-        else _simple_retry(3, (Exception,))
-    )
+    @_telegram_retry()
     async def _send_immediate(
         self,
         text: str,
@@ -383,17 +387,7 @@ class TelegramBroadcaster:
             self._record_send_failure(exc)
             raise
 
-    @(
-        retry(
-            stop=stop_after_attempt(3),
-            wait=wait_exponential(multiplier=1, min=2, max=10),
-            retry=retry_if_exception_type((Exception,)),
-            before_sleep=before_sleep_log(LOG, logging.WARNING),
-            reraise=True,
-        )
-        if HAS_TENACITY
-        else _simple_retry(3, (Exception,))
-    )
+    @_telegram_retry()
     async def _edit_immediate(self, message_id: int, text: str) -> None:
         """Edit message using aiogram Bot."""
         try:

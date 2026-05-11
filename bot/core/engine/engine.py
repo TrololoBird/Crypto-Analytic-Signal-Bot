@@ -7,7 +7,8 @@ import concurrent.futures
 import logging
 import os
 import time
-from typing import Any
+from collections.abc import Callable
+from typing import Any, cast
 
 from .registry import StrategyRegistry
 from .base import SignalResult
@@ -282,7 +283,7 @@ class SignalEngine:
                     result.signal is not None,
                 )
 
-                return result
+                return cast(SignalResult, result)
 
             except asyncio.TimeoutError:
                 elapsed_ms = (time.perf_counter() - start_time) * 1000
@@ -369,8 +370,9 @@ class SignalEngine:
         if asset_fit_reason is not None:
             reason_code = asset_fit_reason
             asset_fit = getattr(strategy, "asset_fit", None)
-            if hasattr(asset_fit, "to_dict"):
-                details["asset_fit"] = asset_fit.to_dict()
+            to_dict = getattr(asset_fit, "to_dict", None)
+            if callable(to_dict):
+                details["asset_fit"] = cast(Callable[[], dict[str, Any]], to_dict)()
         elif prepared.work_1h is None or prepared.work_1h.is_empty():
             missing_fields.append("work_1h")
             reason_code = "data.work_1h_missing"

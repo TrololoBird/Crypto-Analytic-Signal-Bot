@@ -22,7 +22,7 @@ from ..setups.utils import get_dynamic_params
 LOG = logging.getLogger("bot.strategies.cvd_divergence")
 
 
-def _signed_delta_values(values: object) -> object:
+def _signed_delta_values(values: Any) -> Any:
     """Normalize common public-flow encodings to signed delta [-1, 1]."""
     raw: Any = values
     try:

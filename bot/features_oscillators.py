@@ -83,13 +83,16 @@ def mfi(
 
     mfi_raw = 100.0 - (100.0 / (1.0 + (pos_sum / neg_sum)))
 
-    return (
-        pl.when((neg_sum <= 0.0) & (pos_sum <= 0.0))
-        .then(50.0)
-        .when(neg_sum <= 0.0)
-        .then(100.0)
-        .otherwise(mfi_raw)
-        .alias(f"mfi{period}")
+    return materialize_series(
+        (
+            pl.when((neg_sum <= 0.0) & (pos_sum <= 0.0))
+            .then(50.0)
+            .when(neg_sum <= 0.0)
+            .then(100.0)
+            .otherwise(mfi_raw)
+        ),
+        df=df,
+        name=f"mfi{period}",
     )
 
 
@@ -106,13 +109,13 @@ def cmf(df: pl.DataFrame, period: int = 20) -> pl.Series:
 
     mfv = mfm * df["volume"]
 
-    return (
+    return materialize_series(
         (
             mfv.rolling_sum(window_size=period)
             / df["volume"].rolling_sum(window_size=period)
-        )
-        .fill_nan(0.0)
-        .rename(f"cmf{period}")
+        ).fill_nan(0.0),
+        df=df,
+        name=f"cmf{period}",
     )
 
 

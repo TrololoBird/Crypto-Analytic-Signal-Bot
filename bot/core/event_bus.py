@@ -228,7 +228,7 @@ class EventBus:
             )
 
     @staticmethod
-    def _task_done(task: asyncio.Task) -> None:
+    def _task_done(task: asyncio.Task[None]) -> None:
         with contextlib.suppress(asyncio.CancelledError):
             exc = task.exception()
             if exc is not None:

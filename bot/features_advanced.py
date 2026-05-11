@@ -9,6 +9,7 @@ from .features_oscillators import add_oscillator_features
 from .features_shared import (
     atr_from_true_range,
     clean_non_finite,
+    finite_float,
     materialize_series,
     true_range,
     wilder_mean,
@@ -299,8 +300,10 @@ def _volume_profile(df: pl.DataFrame, bins: int = 12) -> pl.Expr:
     if v_prices.is_empty():
         return pl.lit(None).cast(pl.Float64).alias("volume_profile")
 
-    price_min = v_prices.min()
-    price_max = v_prices.max()
+    raw_price_min = v_prices.min()
+    raw_price_max = v_prices.max()
+    price_min = None if raw_price_min is None else finite_float(raw_price_min)
+    price_max = None if raw_price_max is None else finite_float(raw_price_max)
 
     if price_min is None or price_max is None or price_max <= price_min:
         poc = price_max if price_max is not None else price_min
@@ -325,9 +328,9 @@ def _volume_profile(df: pl.DataFrame, bins: int = 12) -> pl.Expr:
         if vol_by_bucket.is_empty():
             poc = price_min
         else:
-            poc_bucket = vol_by_bucket.sort("v", descending=True).row(0)[0]
+            poc_bucket = int(vol_by_bucket.sort("v", descending=True).row(0)[0])
             poc = price_min + (poc_bucket + 0.5) * bucket_size
-    return pl.lit(float(poc)).cast(pl.Float64).alias("volume_profile")
+    return pl.lit(0.0 if poc is None else poc).cast(pl.Float64).alias("volume_profile")
 
 
 def add_advanced_indicators(

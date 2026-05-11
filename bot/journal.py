@@ -14,7 +14,7 @@ import logging
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator, cast
 
 LOG = logging.getLogger("bot.journal")
 
@@ -29,7 +29,11 @@ class JournalReport:
     # {hour_of_day (0-23): count of signals sent}
 
 
-def _iter_jsonl(path: Path):
+JsonRow = dict[str, Any]
+OutcomeItem = tuple[JsonRow, str]
+
+
+def _iter_jsonl(path: Path) -> Iterator[JsonRow]:
     if not path.exists():
         return
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -37,9 +41,11 @@ def _iter_jsonl(path: Path):
         if not line:
             continue
         try:
-            yield json.loads(line)
+            row = json.loads(line)
         except json.JSONDecodeError:
             continue
+        if isinstance(row, dict):
+            yield cast(JsonRow, row)
 
 
 def build_journal_report(telemetry_root: Path) -> JournalReport:
@@ -63,7 +69,7 @@ def build_journal_report(telemetry_root: Path) -> JournalReport:
     report = JournalReport()
 
     # Signals sent
-    hourly: Counter = Counter()
+    hourly: Counter[int] = Counter()
     signals_count = 0
     for analysis in analysis_dirs:
         for row in _iter_jsonl(analysis / "selected.jsonl"):
@@ -78,7 +84,7 @@ def build_journal_report(telemetry_root: Path) -> JournalReport:
     report.hourly_signal_counts = dict(sorted(hourly.items()))
 
     # Rejection reasons
-    rejection_counter: Counter = Counter()
+    rejection_counter: Counter[str] = Counter()
     for analysis in analysis_dirs:
         for row in _iter_jsonl(analysis / "rejected.jsonl"):
             reason = row.get("reason") or row.get("filter") or "unknown"
@@ -86,7 +92,7 @@ def build_journal_report(telemetry_root: Path) -> JournalReport:
     report.top_rejection_reasons = rejection_counter.most_common(10)
 
     # Tracking outcomes by setup_id
-    outcomes: dict[str, Counter] = defaultdict(Counter)
+    outcomes: dict[str, Counter[str]] = defaultdict(Counter)
     for analysis in analysis_dirs:
         for row in _iter_jsonl(analysis / "tracking_events.jsonl"):
             event = row.get("event") or row.get("type") or ""
@@ -166,7 +172,7 @@ def build_config_suggestions(telemetry_root: Path) -> list[str]:
 
     suggestions.append(f"[ADVISOR] Analysed {total_resolved} resolved signals\n")
 
-    def _win_rate(items: list[tuple[dict, str]]) -> tuple[int, int, int]:
+    def _win_rate(items: list[OutcomeItem]) -> tuple[int, int, int]:
         """Return (wins, losses, expired)."""
         wins = sum(1 for _, o in items if o == "win")
         losses = sum(1 for _, o in items if o == "loss")
@@ -180,7 +186,7 @@ def build_config_suggestions(telemetry_root: Path) -> list[str]:
         return f"{wins / total * 100:.0f}%"
 
     # --- ATR % bins ---
-    atr_bins: dict[str, list] = defaultdict(list)
+    atr_bins: dict[str, list[OutcomeItem]] = defaultdict(list)
     for sig, outcome in resolved:
         atr = sig.get("atr_pct") or sig.get("signal", {}).get("atr_pct")
         if atr is None:
@@ -224,7 +230,7 @@ def build_config_suggestions(telemetry_root: Path) -> list[str]:
         suggestions.append("")
 
     # --- Score bins ---
-    score_bins: dict[str, list] = defaultdict(list)
+    score_bins: dict[str, list[OutcomeItem]] = defaultdict(list)
     for sig, outcome in resolved:
         score = sig.get("score") or sig.get("signal", {}).get("score")
         if score is None:
@@ -267,7 +273,7 @@ def build_config_suggestions(telemetry_root: Path) -> list[str]:
         suggestions.append("")
 
     # --- RR bins ---
-    rr_bins: dict[str, list] = defaultdict(list)
+    rr_bins: dict[str, list[OutcomeItem]] = defaultdict(list)
     for sig, outcome in resolved:
         rr = sig.get("risk_reward") or sig.get("signal", {}).get("risk_reward")
         if rr is None:
@@ -296,7 +302,7 @@ def build_config_suggestions(telemetry_root: Path) -> list[str]:
         suggestions.append("")
 
     # --- Setup performance with regime context ---
-    setup_regime_bins: dict[str, list] = defaultdict(list)
+    setup_regime_bins: dict[str, list[OutcomeItem]] = defaultdict(list)
     for sig, outcome in resolved:
         setup_id = (
             sig.get("setup_id") or sig.get("signal", {}).get("setup_id") or "unknown"

@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import re
 import shutil
-from typing import Any
+from typing import Any, cast
 
 from . import BotSettings, SignalBot, load_settings
 from .logging_config import configure_structlog
@@ -189,7 +189,7 @@ def _pid_is_alive(pid: int) -> bool:
     if os.name == "nt":
         process_query_limited_information = 0x1000
         # Access windll only if on Windows
-        kernel32 = getattr(ctypes, "windll", Any).kernel32
+        kernel32 = cast(Any, ctypes).windll.kernel32
         handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
         if handle:
             kernel32.CloseHandle(handle)
@@ -330,7 +330,7 @@ async def _main() -> None:
     _orig_stderr = sys.stderr
 
     class _StderrToLog:
-        def __init__(self, logger_name: str, orig) -> None:
+        def __init__(self, logger_name: str, orig: Any) -> None:
             self.logger = logging.getLogger(logger_name)
             self._orig = orig
             self._buf = ""
@@ -353,10 +353,12 @@ async def _main() -> None:
                 self.logger.warning("STDERR: %s", self._buf)
                 self._buf = ""
 
-    sys.stderr = _StderrToLog("stderr", _orig_stderr)  # type: ignore[assignment]
+    sys.stderr = _StderrToLog("stderr", _orig_stderr)
 
     # Hook to log unhandled exceptions
-    def _log_exception(loop, context):
+    def _log_exception(
+        loop: asyncio.AbstractEventLoop, context: dict[str, Any]
+    ) -> None:
         msg = context.get("exception", context["message"])
         logging.getLogger("asyncio").exception(
             "Unhandled exception: %s",

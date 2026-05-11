@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
-from typing import Any, cast
+from typing import Any
 
 import aiosqlite
 
@@ -15,7 +15,7 @@ class MemoryRepositoryExtension:
     _conn: aiosqlite.Connection | None
 
     def _require_conn(self) -> aiosqlite.Connection:
-        conn = cast(aiosqlite.Connection | None, self._conn)
+        conn = self._conn
         if conn is None:
             raise RuntimeError("Repository not initialized")
         return conn

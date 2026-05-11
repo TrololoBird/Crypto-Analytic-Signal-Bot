@@ -333,7 +333,7 @@ def format_signal_text(
         stop=signal.stop,
         take_profit_1=signal.take_profit_1,
         take_profit_2=signal.take_profit_2,
-        risk_reward=signal.risk_reward,
+        risk_reward=float(signal.risk_reward or 0.0),
         stop_distance_pct=signal.stop_distance_pct,
         reasons=signal.reasons,
         status_line=f"👁 Ожидать входа: до <code>{_fmt_dt(wait_until)}</code>",

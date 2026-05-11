@@ -561,10 +561,11 @@ def _ultimate_oscillator(
 
 def _realized_volatility(df: pl.DataFrame, period: int = 20) -> pl.Series:
     log_returns = df["close"].log() - df["close"].shift(1).log()
-    return (
-        (log_returns.rolling_std(window_size=period) * np.sqrt(period) * 100.0)
-        .fill_nan(0.0)
-        .rename(f"realized_vol_{period}")
+    return _materialize_series(
+        (log_returns.rolling_std(window_size=period) * float(np.sqrt(period)) * 100.0)
+        .fill_nan(0.0),
+        df=df,
+        name=f"realized_vol_{period}",
     )
 
 
@@ -703,12 +704,12 @@ def _supertrend(
     for idx in range(1, size):
         bu = float(upper_vals[idx])
         bl = float(lower_vals[idx])
-        prev_close = float(close_vals[idx - 1])
+        prev_close_value = float(close_vals[idx - 1])
         prev_fu = final_upper[idx - 1]
         prev_fl = final_lower[idx - 1]
 
-        fu = bu if (bu < prev_fu or prev_close > prev_fu) else prev_fu
-        fl = bl if (bl > prev_fl or prev_close < prev_fl) else prev_fl
+        fu = bu if (bu < prev_fu or prev_close_value > prev_fu) else prev_fu
+        fl = bl if (bl > prev_fl or prev_close_value < prev_fl) else prev_fl
         final_upper.append(fu)
         final_lower.append(fl)
 
@@ -1004,13 +1005,14 @@ def _add_advanced_indicators(df: pl.DataFrame) -> pl.DataFrame:
             )
         else:
             close_diff = df["close"].diff()
-            direction = (
+            direction = _materialize_series(
                 pl.when(close_diff > 0.0)
                 .then(1.0)
                 .when(close_diff < 0.0)
                 .then(-1.0)
-                .otherwise(0.0)
-                .alias("obv_direction")
+                .otherwise(0.0),
+                df=df,
+                name="obv_direction",
             )
             obv = (direction * df["volume"]).cum_sum().rename("obv")
         obv_ema = obv.ewm_mean(span=20, adjust=False)
@@ -1199,8 +1201,8 @@ def _volume_profile(df: pl.DataFrame, bins: int = 12) -> pl.Expr:
     if v_prices.is_empty():
         return pl.lit(None).cast(pl.Float64).alias("volume_profile")
 
-    price_min = v_prices.min()
-    price_max = v_prices.max()
+    price_min = _as_optional_float(v_prices.min())
+    price_max = _as_optional_float(v_prices.max())
 
     if price_min is None or price_max is None or price_max <= price_min:
         poc = price_max if price_max is not None else price_min
@@ -1225,10 +1227,10 @@ def _volume_profile(df: pl.DataFrame, bins: int = 12) -> pl.Expr:
         if vol_by_bucket.is_empty():
             poc = price_min
         else:
-            poc_bucket = vol_by_bucket.sort("v", descending=True).row(0)[0]
+            poc_bucket = int(vol_by_bucket.sort("v", descending=True).row(0)[0])
             poc = price_min + (poc_bucket + 0.5) * bucket_size
 
-    return pl.lit(float(poc)).cast(pl.Float64).alias("volume_profile")
+    return pl.lit(0.0 if poc is None else poc).cast(pl.Float64).alias("volume_profile")
 
 
 # ---------------------------------------------------------------------------
@@ -1782,7 +1784,7 @@ def _to_polars(df: object) -> pl.DataFrame:
         return df
     if hasattr(df, "__dataframe__"):
         return pl.from_pandas(cast(Any, df))
-    return pl.DataFrame(df)
+    return pl.DataFrame(cast(Any, df))
 
 
 def prepare_symbol(

@@ -50,10 +50,10 @@ class TaskScheduler:
     - Graceful shutdown
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._tasks: dict[str, ScheduledTask] = {}
         self._running = False
-        self._task_handles: dict[str, asyncio.Task] = {}
+        self._task_handles: dict[str, asyncio.Task[None]] = {}
         self._shutdown_event = asyncio.Event()
         self._alert_handler: (
             Callable[[str, Exception, int], Coroutine[Any, Any, None] | None] | None
@@ -121,7 +121,7 @@ class TaskScheduler:
         LOG.info("Disabled task: %s", name)
         return True
 
-    def run_once(self, name: str) -> asyncio.Task | None:
+    def run_once(self, name: str) -> asyncio.Task[None] | None:
         """Manually trigger a task to run once."""
         if name not in self._tasks:
             return None

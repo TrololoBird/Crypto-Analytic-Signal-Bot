@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from ..learning import OutcomeStore, RegimeAwareParams, WalkForwardOptimizer
 
+optuna: Any
 try:
     optuna = importlib.import_module("optuna")
     OPTUNA_AVAILABLE = True

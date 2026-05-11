@@ -13,13 +13,14 @@ from ..domain.schemas import AggTrade
 from .enrichment import depth_imbalance_from_book, microprice_bias_from_book
 
 LOG = logging.getLogger("bot.ws_manager")
+JsonDict = dict[str, Any]
 
 
 def is_ticker_cache_warm(manager: Any) -> bool:
     if not manager._ticker_cache:
         return False
     age = time.monotonic() - manager._ticker_cache_ts
-    return age <= manager._cfg.market_ticker_freshness_seconds
+    return bool(age <= manager._cfg.market_ticker_freshness_seconds)
 
 
 def get_stats(manager: Any) -> dict[str, Any]:
@@ -30,7 +31,7 @@ def get_stats(manager: Any) -> dict[str, Any]:
         "slow_streams_count": len(manager._slow_streams),
         "buffer_stats": manager._message_buffer.get_stats(),
     }
-    stream_latencies = {}
+    stream_latencies: dict[str, float] = {}
     for stream, latencies in manager._stream_latency_ms.items():
         if latencies:
             stream_latencies[stream] = round(sum(latencies) / len(latencies), 2)
@@ -46,8 +47,8 @@ def get_stats(manager: Any) -> dict[str, Any]:
     return stats
 
 
-def get_global_ticker_data(manager: Any) -> list[dict]:
-    result: list[dict] = []
+def get_global_ticker_data(manager: Any) -> list[JsonDict]:
+    result: list[JsonDict] = []
     now = time.monotonic()
     for symbol, ticker in manager._ticker_cache.items():
         last_update = manager._ticker_update_times.get(symbol, 0.0)
@@ -90,11 +91,15 @@ def get_microprice_bias(manager: Any, symbol: str) -> float | None:
 
 
 def get_funding_sentiment(manager: Any) -> float | None:
-    rates = [
-        value["funding_rate"]
-        for value in manager._mark_price_cache.values()
-        if value.get("funding_rate") is not None
-    ]
+    rates: list[float] = []
+    for value in manager._mark_price_cache.values():
+        raw_rate = value.get("funding_rate")
+        if raw_rate is None:
+            continue
+        try:
+            rates.append(float(raw_rate))
+        except (TypeError, ValueError):
+            continue
     if not rates:
         return None
     return sum(rates) / len(rates)
@@ -165,7 +170,7 @@ def should_throttle_mark_price_update(manager: Any, symbol: str) -> bool:
     return False
 
 
-def handle_ticker(manager: Any, symbol: str, data: dict) -> None:
+def handle_ticker(manager: Any, symbol: str, data: JsonDict) -> None:
     if should_throttle_ticker_update(manager, symbol):
         return
     try:
@@ -184,7 +189,7 @@ def handle_ticker(manager: Any, symbol: str, data: dict) -> None:
         return
 
 
-def handle_mini_ticker(manager: Any, symbol: str, data: dict) -> None:
+def handle_mini_ticker(manager: Any, symbol: str, data: JsonDict) -> None:
     now = time.monotonic()
     last_full_update = manager._ticker_update_times.get(symbol, 0.0)
     if now - last_full_update < manager._cfg.market_ticker_freshness_seconds:
@@ -212,7 +217,7 @@ def handle_mini_ticker(manager: Any, symbol: str, data: dict) -> None:
         return
 
 
-def handle_mark_price(manager: Any, symbol: str, data: dict) -> None:
+def handle_mark_price(manager: Any, symbol: str, data: JsonDict) -> None:
     if should_throttle_mark_price_update(manager, symbol):
         return
     try:
@@ -230,7 +235,7 @@ def handle_mark_price(manager: Any, symbol: str, data: dict) -> None:
         return
 
 
-def handle_force_order(manager: Any, data: dict) -> None:
+def handle_force_order(manager: Any, data: JsonDict) -> None:
     try:
         order = data.get("o", {})
         symbol = str(order.get("s") or "").upper()
@@ -244,7 +249,7 @@ def handle_force_order(manager: Any, data: dict) -> None:
         return
 
 
-async def handle_book_ticker(manager: Any, symbol: str, data: dict) -> None:
+async def handle_book_ticker(manager: Any, symbol: str, data: JsonDict) -> None:
     if manager._symbols and symbol not in manager._symbols:
         return
     try:
@@ -262,14 +267,14 @@ async def handle_book_ticker(manager: Any, symbol: str, data: dict) -> None:
         manager._book_update_times[symbol] = time.monotonic()
 
     if manager._event_bus is not None:
-        from ..core.events import BookTickerEvent
+        from ..domain.events import BookTickerEvent
 
         manager._event_bus.publish_nowait(
             BookTickerEvent(symbol=symbol, bid=bid, ask=ask, event_ts_ms=event_ts_ms)
         )
 
 
-async def handle_agg_trade(manager: Any, symbol: str, data: dict) -> None:
+async def handle_agg_trade(manager: Any, symbol: str, data: JsonDict) -> None:
     if manager._symbols and symbol not in manager._symbols:
         return
     try:

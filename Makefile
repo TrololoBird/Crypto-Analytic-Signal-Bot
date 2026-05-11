@@ -10,7 +10,7 @@ check:
 
 lint:
 	@ruff check bot/ tests/
-	@mypy bot/ --ignore-missing-imports
+	@mypy
 
 test:
 	@pytest -q tests/
