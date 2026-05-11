@@ -6,8 +6,8 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, cast
 
-from .config import BotSettings, _ALL_SETUP_IDS
-from .models import SymbolMeta, UniverseSymbol
+from .domain.config import BotSettings, _ALL_SETUP_IDS
+from .domain.schemas import SymbolMeta, UniverseSymbol
 from .strategy_asset_fit import calculate_strategy_fit_score
 
 

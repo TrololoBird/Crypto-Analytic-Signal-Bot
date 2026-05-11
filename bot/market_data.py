@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 import polars as pl
 import aiohttp
 
-from .models import AggTrade, AggTradeSnapshot, SymbolFrames, SymbolMeta
+from .domain.schemas import AggTrade, AggTradeSnapshot, SymbolFrames, SymbolMeta
 
 if TYPE_CHECKING:
     from .ws_manager import FuturesWSManager

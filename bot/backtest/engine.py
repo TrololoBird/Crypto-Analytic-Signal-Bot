@@ -7,7 +7,7 @@ from typing import Any, cast
 import polars as pl
 
 from .metrics import BacktestResult
-from ..config import BotSettings
+from ..domain.config import BotSettings
 
 
 @dataclass(slots=True)

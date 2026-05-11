@@ -8,7 +8,7 @@ from typing import Any
 from ..core.engine import SignalEngine, StrategyRegistry
 from ..core.memory import MemoryRepository, SignalRecord
 from ..core.diagnostics import BotMetrics
-from ..models import Signal, PreparedSymbol
+from ..domain.schemas import Signal, PreparedSymbol
 
 LOG = logging.getLogger("bot.tasks.scanner")
 

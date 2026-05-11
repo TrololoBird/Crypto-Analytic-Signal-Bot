@@ -10,7 +10,7 @@ from typing import Protocol
 from collections import OrderedDict
 
 from .messaging import DeliveryResult
-from .models import Signal
+from .domain.schemas import Signal
 from .tracking import SignalTrackingEvent
 
 

@@ -6,7 +6,8 @@ import logging
 import threading
 from typing import Any
 
-from .base import AbstractStrategy, StrategyMetadata
+from .base import AbstractStrategy
+from ...domain.strategies import StrategyMetadata
 
 LOG = logging.getLogger("bot.core.engine.registry")
 

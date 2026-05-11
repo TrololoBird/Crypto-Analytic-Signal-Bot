@@ -2,7 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 from types import SimpleNamespace
 from bot.dashboard import BotDashboard
-from bot.config import BotSettings, RuntimeConfig
+from bot.domain.config import BotSettings, RuntimeConfig
 
 
 def test_runtime_config_default_origins() -> None:

@@ -12,7 +12,7 @@ from bot.core.runtime_errors import build_runtime_error_payload, classify_runtim
 from bot.features import min_required_bars, prepare_symbol
 from bot.filters import apply_global_filters
 from bot.market_data import BinanceFuturesMarketData, MarketDataUnavailable
-from bot.models import (
+from bot.domain.schemas import (
     PipelineResult,
     PreparedSymbol,
     Signal,

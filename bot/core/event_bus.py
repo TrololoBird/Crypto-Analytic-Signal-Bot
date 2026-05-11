@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, Callable, Coroutine
 from .runtime_errors import classify_runtime_error
 
 if TYPE_CHECKING:
-    from .events import AnyEvent
+    from ..domain.events import AnyEvent
 
 LOG = logging.getLogger("bot.core.event_bus")
 
@@ -150,7 +150,7 @@ class EventBus:
         await self._ready.wait()
 
     def _event_token(self, event: AnyEvent) -> tuple[object, bool]:
-        from .events import (
+        from ..domain.events import (
             BookTickerEvent,
             KlineCloseEvent,
             OIRefreshDueEvent,

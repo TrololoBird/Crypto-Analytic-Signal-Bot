@@ -15,8 +15,8 @@ import math
 import polars as pl
 
 from ..setup_base import BaseSetup
-from ..config import BotSettings
-from ..models import PreparedSymbol, Signal
+from ..domain.config import BotSettings
+from ..domain.schemas import PreparedSymbol, Signal
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..features import _swing_points
 from ..setups.smc import latest_structure_break, swing_highs_lows

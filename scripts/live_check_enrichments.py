@@ -27,10 +27,10 @@ from typing import Any
 
 import structlog
 
-from bot.config import load_settings
+from bot.domain.config import load_settings
 from bot.features import min_required_bars, prepare_symbol
 from bot.market_data import BinanceFuturesMarketData
-from bot.models import SymbolFrames, UniverseSymbol
+from bot.domain.schemas import SymbolFrames, UniverseSymbol
 from bot.ws_manager import FuturesWSManager
 
 LOG = structlog.get_logger("scripts.live_check_enrichments")
