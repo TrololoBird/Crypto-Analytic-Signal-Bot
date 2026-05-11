@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from .event_bus import EventBus
-from .events import (
+from ..domain.events import (
     AnyEvent,
     KlineCloseEvent,
     OIRefreshDueEvent,

@@ -81,31 +81,53 @@ class BotDashboard:
 
         @self.app.get("/api/status")
         async def status() -> dict[str, Any]:
-            return await self._get_status()
+            try:
+                return await self._get_status()
+            except Exception as exc:
+                LOG.error("dashboard api status error: %s", exc)
+                return {"error": "status_unavailable", "detail": str(exc)}
 
         @self.app.get("/api/signals/active")
         async def active_signals() -> list[dict[str, Any]]:
-            return await self._get_active_signals()
+            try:
+                return await self._get_active_signals()
+            except Exception as exc:
+                LOG.error("dashboard api active signals error: %s", exc)
+                return []
 
         @self.app.get("/api/signals/recent")
         async def recent_signals(limit: int = 20) -> list[dict[str, Any]]:
+            limit = max(1, min(int(limit), 100))
             return self._get_recent_signals(limit)
 
         @self.app.get("/api/market/regime")
         async def market_regime() -> dict[str, Any]:
-            return self._get_market_regime()
+            try:
+                return self._get_market_regime()
+            except Exception as exc:
+                LOG.error("dashboard api market regime error: %s", exc)
+                return {"error": "regime_unavailable", "detail": str(exc)}
 
         @self.app.get("/api/metrics")
         async def metrics() -> dict[str, Any]:
-            return await self._get_metrics()
+            try:
+                return await self._get_metrics()
+            except Exception as exc:
+                LOG.error("dashboard api metrics error: %s", exc)
+                return {"error": "metrics_unavailable", "detail": str(exc)}
 
         @self.app.get("/api/health")
         async def health() -> dict[str, Any]:
-            return await self.bot.health_check()
+            try:
+                return await self.bot.health_check()
+            except Exception as exc:
+                LOG.error("dashboard api health error: %s", exc)
+                return {"status": "error", "detail": str(exc)}
 
         @self.app.get("/api/analytics/report")
         async def analytics_report(days: int = 30) -> dict[str, Any]:
-            from .analytics import StrategyAnalytics
+            try:
+                from .analytics import StrategyAnalytics
 
             days = max(1, min(int(days), 365))
 
@@ -125,9 +147,13 @@ class BotDashboard:
         @self.app.get("/api/strategies")
         async def strategies() -> list[dict[str, Any]]:
             """Return cached list of strategies with their enabled status."""
-            if self._strategies_cache is not None:
-                return self._strategies_cache
-            return []
+            try:
+                if self._strategies_cache is not None:
+                    return self._strategies_cache
+                return []
+            except Exception as exc:
+                LOG.error("dashboard api strategies error: %s", exc)
+                return []
 
     def _cache_strategies(self) -> None:
         """Pre-load and cache strategies at startup."""
@@ -757,8 +783,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 <h2>Recent Activity</h2>
                 <div id="recent-activity">
                     <div class="empty-state">
-                        <div class="empty-state-icon">Activity</div>
-                        <p>No recent activity</p>
+                        <p>Loading recent activity...</p>
                     </div>
                 </div>
             </div>
@@ -768,8 +793,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         <div id="tab-panel-signals" class="tab-content" role="tabpanel" aria-labelledby="tab-btn-signals" aria-hidden="true">
             <div id="active-signals-list">
                 <div class="empty-state">
-                    <div class="empty-state-icon">Radio</div>
-                    <p>No active signals</p>
+                    <p>Loading active signals...</p>
                 </div>
             </div>
         </div>
@@ -855,6 +879,39 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 if (tab.dataset.tab === 'analytics') fetchAnalytics();
                 if (tab.dataset.tab === 'settings') fetchStrategies();
             });
+            panels.forEach(p => {
+                p.classList.remove('active');
+                p.setAttribute('aria-hidden', 'true');
+            });
+
+            selectedTab.classList.add('active');
+            selectedTab.setAttribute('aria-selected', 'true');
+            const activePanel = document.getElementById('tab-panel-' + tabId);
+            activePanel.classList.add('active');
+            activePanel.setAttribute('aria-hidden', 'false');
+
+            // Persist tab in URL
+            window.location.hash = tabId;
+
+            // Trigger immediate refresh for the relevant data
+            if (tabId === 'overview') { fetchStatus(); fetchRecentActivity(); }
+            if (tabId === 'signals') fetchSignals();
+            if (tabId === 'analytics') fetchAnalytics();
+            if (tabId === 'settings') fetchStrategies();
+        }
+
+        document.querySelectorAll('.nav-tab').forEach(tab => {
+            tab.addEventListener('click', () => switchTab(tab.dataset.tab));
+        });
+
+        // Handle initial load and back/forward navigation
+        window.addEventListener('load', () => {
+            const hash = window.location.hash.replace('#', '') || 'overview';
+            switchTab(hash);
+        });
+        window.addEventListener('hashchange', () => {
+            const hash = window.location.hash.replace('#', '');
+            if (hash) switchTab(hash);
         });
         
         // Keyboard shortcuts
@@ -916,6 +973,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         async function fetchStatus() {
             try {
                 const res = await fetch('/api/status');
+                if (!res.ok) throw new Error('Status fetch failed');
                 const data = await res.json();
                 
                 // Update status badge
@@ -940,15 +998,19 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 document.getElementById('last-update').textContent = 'Last update: ' + new Date().toLocaleTimeString();
             } catch (err) {
                 console.error('Failed to fetch status:', err);
+                const badge = document.getElementById('status-badge');
+                badge.textContent = 'Error';
+                badge.className = 'status-badge offline';
             }
         }
         
         // Fetch active signals
         async function fetchSignals() {
+            const container = document.getElementById('active-signals-list');
             try {
                 const res = await fetch('/api/signals/active');
+                if (!res.ok) throw new Error('Signals fetch failed');
                 const data = await res.json();
-                const container = document.getElementById('active-signals-list');
                 
                 if (data.length === 0) {
                     container.innerHTML = `
@@ -990,15 +1052,17 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 }).join('');
             } catch (err) {
                 console.error('Failed to fetch signals:', err);
+                container.innerHTML = `<div class="empty-state"><p style="color: var(--accent-red)">Failed to load signals</p></div>`;
             }
         }
 
         // Fetch recent activity
         async function fetchRecentActivity() {
+            const container = document.getElementById('recent-activity');
             try {
                 const res = await fetch('/api/signals/recent?limit=10');
+                if (!res.ok) throw new Error('Activity fetch failed');
                 const data = await res.json();
-                const container = document.getElementById('recent-activity');
 
                 if (!Array.isArray(data) || data.length === 0) {
                     container.innerHTML = `
@@ -1012,15 +1076,17 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 container.innerHTML = data.map(s => {
                     const score = fmt.score(s.score);
                     const when = s.ts || s.created_at || '';
+                    const timeStr = when ? ` <small style="opacity: 0.5">(${fmt.timeAgo(when)})</small>` : '';
                     return `
                         <div class="metric-row">
-                            <span class="metric-label">${s.symbol || '-'} ${s.setup_id || ''} ${s.direction || ''}</span>
+                            <span class="metric-label">${s.symbol || '-'} ${s.setup_id || ''} ${s.direction || ''}${timeStr}</span>
                             <span class="metric-value ${score.class}" title="${when}">${score.text}</span>
                         </div>
                     `;
                 }).join('');
             } catch (err) {
                 console.error('Failed to fetch recent activity:', err);
+                container.innerHTML = `<div class="empty-state"><p style="color: var(--accent-red)">Failed to load activity</p></div>`;
             }
         }
         

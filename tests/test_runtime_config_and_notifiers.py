@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from bot.config import BotSettings
+from bot.domain.config import BotSettings
 from bot.messaging import (
     DeliveryResult,
     DisabledBroadcaster,

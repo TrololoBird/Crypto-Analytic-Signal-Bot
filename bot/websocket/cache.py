@@ -9,7 +9,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from ..models import AggTrade
+from ..domain.schemas import AggTrade
 from .enrichment import depth_imbalance_from_book, microprice_bias_from_book
 
 LOG = logging.getLogger("bot.ws_manager")

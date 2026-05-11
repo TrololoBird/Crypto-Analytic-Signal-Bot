@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from bot.models import SymbolMeta
+from bot.domain.schemas import SymbolMeta
 from bot.universe import build_shortlist
 
 

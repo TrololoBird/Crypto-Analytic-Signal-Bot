@@ -10,10 +10,10 @@ from common import bootstrap_repo_path, configure_script_logging, load_symbols_f
 
 bootstrap_repo_path()
 
-from bot.config import load_settings
+from bot.domain.config import load_settings
 from bot.features import min_required_bars, prepare_symbol
 from bot.market_data import BinanceFuturesMarketData, MarketDataUnavailable
-from bot.models import SymbolFrames, UniverseSymbol
+from bot.domain.schemas import SymbolFrames, UniverseSymbol
 
 
 LOG = configure_script_logging("scripts.live_check_indicators")

@@ -27,7 +27,7 @@ import structlog
 from . import features_advanced as _features_advanced_module
 from . import features_core as _features_core_module
 from . import features_oscillators as _features_oscillators_module
-from .models import PreparedSymbol, SymbolFrames, UniverseSymbol
+from .domain.schemas import PreparedSymbol, SymbolFrames, UniverseSymbol
 from .runtime_policy import (
     configured_context_timeframes,
     configured_primary_timeframe,

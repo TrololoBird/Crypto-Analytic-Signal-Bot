@@ -11,7 +11,7 @@ from typing import Any, cast
 import aiohttp
 import structlog
 
-from .config import BotSettings
+from .domain.config import BotSettings
 from .features import _cached_prepare_frame, _swing_points, _to_polars
 from .market_data import BinanceFuturesMarketData, validate_runtime_public_rest_url
 from .telemetry import TelemetryStore

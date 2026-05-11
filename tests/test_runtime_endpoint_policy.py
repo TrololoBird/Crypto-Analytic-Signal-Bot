@@ -1,6 +1,6 @@
 import pytest
 
-from bot.config import BotSettings
+from bot.domain.config import BotSettings
 from bot.market_data import validate_runtime_public_rest_url
 from bot.public_intelligence import PublicIntelligenceService
 from bot.websocket import subscriptions as ws_subscriptions

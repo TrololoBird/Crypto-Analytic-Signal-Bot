@@ -6,7 +6,7 @@ import pytest
 
 from bot.analytics import StrategyAnalytics
 from bot import dashboard as dashboard_module
-from bot.config import BotSettings
+from bot.domain.config import BotSettings
 from bot.core.memory.repository import MemoryRepository
 from bot.outcomes import SignalFeatures, create_outcome_from_tracked
 from bot.strategies import STRATEGY_CLASSES

@@ -7,7 +7,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from bot.models import PreparedSymbol, Signal
+from bot.domain.schemas import PreparedSymbol, Signal
 from bot.outcomes import build_prepared_feature_snapshot, extract_features_from_signal
 from bot.tracking import SignalTrackingEvent
 

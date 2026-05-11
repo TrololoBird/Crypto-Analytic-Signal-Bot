@@ -8,7 +8,7 @@ from collections import Counter
 from datetime import datetime, timezone
 from typing import Any
 
-from ..models import PipelineResult, PreparedSymbol, Signal, UniverseSymbol
+from ..domain.schemas import PipelineResult, PreparedSymbol, Signal, UniverseSymbol
 
 UTC = timezone.utc
 LOG = logging.getLogger("bot.application.cycle_runner")

@@ -4,7 +4,7 @@ from bot.application.symbol_analyzer import (
     _apply_setup_score_adjustment,
     _attach_rejection_rollups,
 )
-from bot.models import Signal
+from bot.domain.schemas import Signal
 
 
 def test_rejection_rollups_preserve_stage_and_setup_reasons() -> None:

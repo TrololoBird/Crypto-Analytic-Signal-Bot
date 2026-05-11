@@ -14,8 +14,8 @@ from typing import TYPE_CHECKING, Any, cast
 import polars as pl
 
 if TYPE_CHECKING:
-    from ..config import BotSettings
-    from ..models import PreparedSymbol, Signal
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
 
 from .guardrails import LiveModelGuardrailDecision, evaluate_live_model_guardrail
 
