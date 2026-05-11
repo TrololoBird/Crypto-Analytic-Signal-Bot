@@ -20,7 +20,7 @@ from aiogram.filters import Command
 from aiogram.types import InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from .domain.config import BotSettings
+from ..domain.config import BotSettings
 
 LOG = logging.getLogger(__name__)
 UTC = timezone.utc
@@ -191,7 +191,7 @@ if __name__ == "__main__":
 
     # Example usage
     async def test() -> None:
-        from .domain.config import load_settings
+        from ..domain.config import load_settings
 
         settings = load_settings()
         bot = await setup_telegram_bot(settings)

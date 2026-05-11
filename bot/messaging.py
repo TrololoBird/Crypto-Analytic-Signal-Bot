@@ -15,6 +15,7 @@ from typing import Any, Protocol
 import aiohttp
 import structlog
 
+# TODO: [Sentinel] Redundant implementation - this logic should be consolidated with bot/telegram/
 # aiogram for Telegram Bot API
 try:
     from aiogram import Bot
