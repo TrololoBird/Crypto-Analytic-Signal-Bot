@@ -92,7 +92,7 @@ RUNTIME_PUBLIC_IMPORT_CONTRACT: tuple[str, ...] = (
 )
 
 SCAFFOLD_IMPORT_BLOCKLIST: tuple[str, ...] = (
-    "bot.telegram_bot",
+    "bot.telegram.bot",
     "scaffold",
     "experimental",
     "prototype",

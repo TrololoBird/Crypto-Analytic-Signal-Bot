@@ -318,22 +318,18 @@ def _rsi(df: pl.DataFrame, period: int = 14) -> pl.Series:
     )
 
     rs = avg_gain / avg_loss
-    rsi = (100.0 - (100.0 / (1.0 + rs))).fill_nan(50.0)
-    values: list[float] = []
-    for gain, loss, current in zip(
-        avg_gain.to_list(), avg_loss.to_list(), rsi.to_list(), strict=False
-    ):
-        gain_val = float(gain or 0.0)
-        loss_val = float(loss or 0.0)
-        if loss_val == 0.0 and gain_val > 0.0:
-            values.append(100.0)
-        elif gain_val == 0.0 and loss_val > 0.0:
-            values.append(0.0)
-        elif gain_val == 0.0 and loss_val == 0.0:
-            values.append(50.0)
-        else:
-            values.append(float(current or 50.0))
-    return pl.Series(f"rsi{period}", values, dtype=pl.Float64)
+    rsi_raw = (100.0 - (100.0 / (1.0 + rs))).fill_nan(50.0)
+    return _materialize_series(
+        pl.when((avg_loss == 0.0) & (avg_gain > 0.0))
+        .then(100.0)
+        .when((avg_gain == 0.0) & (avg_loss > 0.0))
+        .then(0.0)
+        .when((avg_gain == 0.0) & (avg_loss == 0.0))
+        .then(50.0)
+        .otherwise(rsi_raw),
+        df=df,
+        name=f"rsi{period}",
+    )
 
 
 def _atr(df: pl.DataFrame, period: int = 14) -> pl.Series:
@@ -440,27 +436,16 @@ def _vwap(df: pl.DataFrame) -> pl.Series:
         None,
     )
     if time_column is not None:
-        values: list[float | None] = []
-        session: date | None = None
-        cumulative_pv = 0.0
-        cumulative_volume = 0.0
-        last_vwap: float | None = None
-        for ts, price_volume, volume in zip(
-            df[time_column], pv, df["volume"], strict=False
-        ):
-            key = _vwap_session_key(ts)
-            if key is not None and key != session:
-                session = key
-                cumulative_pv = 0.0
-                cumulative_volume = 0.0
-                last_vwap = None
-            volume_value = float(volume or 0.0)
-            cumulative_pv += float(price_volume or 0.0)
-            cumulative_volume += volume_value
-            if cumulative_volume > 0.0:
-                last_vwap = cumulative_pv / cumulative_volume
-            values.append(last_vwap)
-        return pl.Series("vwap", values, dtype=pl.Float64).forward_fill()
+        # Create a session key (date) for reset
+        session_key = df[time_column].dt.date().alias("_vwap_session")
+        temp_df = df.with_columns([pv.alias("_pv"), session_key])
+
+        vwap_expr = (
+            pl.col("_pv").cum_sum().over("_vwap_session")
+            / pl.col("volume").cum_sum().over("_vwap_session")
+        ).forward_fill()
+
+        return _materialize_series(vwap_expr, df=temp_df, name="vwap")
 
     cpv: pl.Series = pv.cum_sum()
     cv: pl.Series = df["volume"].cum_sum()
@@ -519,58 +504,39 @@ def _mfi(df: pl.DataFrame, period: int = 14) -> pl.Series:
     typical_price = (df["high"] + df["low"] + df["close"]) / 3.0
     money_flow = typical_price * df["volume"]
     delta = typical_price.diff()
-    positive_flow = pl.Series(
-        "positive_flow",
-        [
-            float(mf or 0.0) if float(chg or 0.0) > 0.0 else 0.0
-            for mf, chg in zip(money_flow, delta, strict=False)
-        ],
-        dtype=pl.Float64,
+
+    pos_flow = pl.when(delta > 0.0).then(money_flow).otherwise(0.0)
+    neg_flow = pl.when(delta < 0.0).then(money_flow).otherwise(0.0)
+
+    pos_sum = pos_flow.rolling_sum(window_size=period)
+    neg_sum = neg_flow.rolling_sum(window_size=period)
+
+    mfi_raw = 100.0 - (100.0 / (1.0 + (pos_sum / neg_sum)))
+
+    return _materialize_series(
+        pl.when((neg_sum <= 0.0) & (pos_sum <= 0.0))
+        .then(50.0)
+        .when(neg_sum <= 0.0)
+        .then(100.0)
+        .otherwise(mfi_raw),
+        df=df,
+        name=f"mfi{period}",
     )
-    negative_flow = pl.Series(
-        "negative_flow",
-        [
-            float(mf or 0.0) if float(chg or 0.0) < 0.0 else 0.0
-            for mf, chg in zip(money_flow, delta, strict=False)
-        ],
-        dtype=pl.Float64,
-    )
-    pos_sum = positive_flow.rolling_sum(window_size=period)
-    neg_sum = negative_flow.rolling_sum(window_size=period)
-    values: list[float] = []
-    for pos, neg in zip(pos_sum, neg_sum, strict=False):
-        pos_val = float(pos or 0.0)
-        neg_val = float(neg or 0.0)
-        if neg_val <= 0.0 and pos_val <= 0.0:
-            values.append(50.0)
-        elif neg_val <= 0.0:
-            values.append(100.0)
-        else:
-            ratio = pos_val / neg_val
-            values.append(100.0 - (100.0 / (1.0 + ratio)))
-    return pl.Series(f"mfi{period}", values, dtype=pl.Float64)
 
 
 def _cmf(df: pl.DataFrame, period: int = 20) -> pl.Series:
-    multipliers: list[float] = []
-    for high, low, close in zip(df["high"], df["low"], df["close"], strict=False):
-        high_val = float(high or 0.0)
-        low_val = float(low or 0.0)
-        close_val = float(close or 0.0)
-        width = high_val - low_val
-        if width <= 0.0:
-            multipliers.append(0.0)
-            continue
-        multipliers.append(((close_val - low_val) - (high_val - close_val)) / width)
-    money_flow_multiplier = pl.Series(
-        "money_flow_multiplier", multipliers, dtype=pl.Float64
-    )
-    money_flow_volume = money_flow_multiplier * df["volume"]
+    width = df["high"] - df["low"]
+    mfm = pl.when(width > 0.0).then(
+        ((df["close"] - df["low"]) - (df["high"] - df["close"])) / width
+    ).otherwise(0.0)
+
+    money_flow_volume = mfm * df["volume"]
     volume_sum = df["volume"].rolling_sum(window_size=period)
-    return (
-        (money_flow_volume.rolling_sum(window_size=period) / volume_sum)
-        .fill_nan(0.0)
-        .rename(f"cmf{period}")
+
+    return _materialize_series(
+        (money_flow_volume.rolling_sum(window_size=period) / volume_sum).fill_nan(0.0),
+        df=df,
+        name=f"cmf{period}",
     )
 
 
@@ -906,24 +872,27 @@ def _parabolic_sar(
 def _aroon(
     df: pl.DataFrame, period: int = 14
 ) -> tuple[pl.Series, pl.Series, pl.Series]:
-    highs = [float(v or 0.0) for v in df["high"]]
-    lows = [float(v or 0.0) for v in df["low"]]
-    size = len(highs)
-    aroon_up: list[float] = []
-    aroon_down: list[float] = []
-    for idx in range(size):
-        start = max(0, idx - period + 1)
-        high_window = highs[start : idx + 1]
-        low_window = lows[start : idx + 1]
-        high_idx = max(range(len(high_window)), key=high_window.__getitem__)
-        low_idx = min(range(len(low_window)), key=low_window.__getitem__)
-        bars_since_high = (len(high_window) - 1) - high_idx
-        bars_since_low = (len(low_window) - 1) - low_idx
-        aroon_up.append(100.0 * (period - bars_since_high) / period)
-        aroon_down.append(100.0 * (period - bars_since_low) / period)
-    up = pl.Series("aroon_up14", aroon_up, dtype=pl.Float64)
-    down = pl.Series("aroon_down14", aroon_down, dtype=pl.Float64)
-    return up, down, (up - down).rename("aroon_osc14")
+    """Aroon indicator - vectorized via rolling_map."""
+    high = df["high"]
+    low = df["low"]
+
+    def bars_since_argmax(s: pl.Series) -> int:
+        return len(s) - 1 - cast(int, s.arg_max())
+
+    def bars_since_argmin(s: pl.Series) -> int:
+        return len(s) - 1 - cast(int, s.arg_min())
+
+    up_days = high.rolling_map(bars_since_argmax, window_size=period + 1)
+    down_days = low.rolling_map(bars_since_argmin, window_size=period + 1)
+
+    aroon_up = (period - up_days) / period * 100.0
+    aroon_down = (period - down_days) / period * 100.0
+
+    return (
+        _materialize_series(aroon_up, df=df, name=f"aroon_up{period}"),
+        _materialize_series(aroon_down, df=df, name=f"aroon_down{period}"),
+        _materialize_series(aroon_up - aroon_down, df=df, name=f"aroon_osc{period}"),
+    )
 
 
 def _fisher_transform(
@@ -997,23 +966,20 @@ def _chandelier_exit(
     short_exit = (df["low"].rolling_min(window_size=period) + atr * atr_mult).rename(
         "chandelier_short"
     )
-    close_vals = [float(v or 0.0) for v in df["close"]]
-    long_vals = [float(v or 0.0) for v in long_exit]
-    short_vals = [float(v or 0.0) for v in short_exit]
-    direction: list[float] = []
-    prev_dir = 0.0
-    for close_val, long_val, short_val in zip(
-        close_vals, long_vals, short_vals, strict=False
-    ):
-        if close_val > short_val:
-            prev_dir = 1.0
-        elif close_val < long_val:
-            prev_dir = -1.0
-        direction.append(prev_dir)
+    # Vectorized direction: stay in current trend until opposite stop is hit.
+    signals = (
+        pl.when(df["close"] > short_exit)
+        .then(1.0)
+        .when(df["close"] < long_exit)
+        .then(-1.0)
+        .otherwise(None)
+    )
+    direction = signals.forward_fill().fill_null(0.0)
+
     return (
         long_exit,
         short_exit,
-        pl.Series("chandelier_dir", direction, dtype=pl.Float64),
+        _materialize_series(direction, df=df, name="chandelier_dir"),
     )
 
 
@@ -1038,17 +1004,13 @@ def _add_advanced_indicators(df: pl.DataFrame) -> pl.DataFrame:
             )
         else:
             close_diff = df["close"].diff()
-            direction = pl.Series(
-                "obv_direction",
-                [
-                    1.0
-                    if float(delta or 0.0) > 0.0
-                    else -1.0
-                    if float(delta or 0.0) < 0.0
-                    else 0.0
-                    for delta in close_diff
-                ],
-                dtype=pl.Float64,
+            direction = (
+                pl.when(close_diff > 0.0)
+                .then(1.0)
+                .when(close_diff < 0.0)
+                .then(-1.0)
+                .otherwise(0.0)
+                .alias("obv_direction")
             )
             obv = (direction * df["volume"]).cum_sum().rename("obv")
         obv_ema = obv.ewm_mean(span=20, adjust=False)
@@ -1223,31 +1185,48 @@ def _volume_profile(df: pl.DataFrame, bins: int = 12) -> pl.Expr:
 
     prices = ((df["high"] + df["low"]) / 2.0).cast(pl.Float64, strict=False)
     volumes = df["volume"].cast(pl.Float64, strict=False)
-    valid_prices = [
-        float(value)
-        for value in prices.to_list()
-        if value is not None and np.isfinite(float(value))
-    ]
-    if not valid_prices:
+
+    # Filter valid prices and volumes
+    valid_mask = (
+        prices.is_not_null()
+        & prices.is_finite()
+        & volumes.is_not_null()
+        & (volumes > 0.0)
+    )
+    v_prices = prices.filter(valid_mask)
+    v_volumes = volumes.filter(valid_mask)
+
+    if v_prices.is_empty():
         return pl.lit(None).cast(pl.Float64).alias("volume_profile")
 
-    price_min = min(valid_prices)
-    price_max = max(valid_prices)
-    if price_max <= price_min:
-        poc = price_max
+    price_min = v_prices.min()
+    price_max = v_prices.max()
+
+    if price_min is None or price_max is None or price_max <= price_min:
+        poc = price_max if price_max is not None else price_min
     else:
         bucket_count = max(1, int(bins))
         bucket_size = (price_max - price_min) / bucket_count
-        bucket_volumes = [0.0] * bucket_count
-        for price_raw, volume_raw in zip(prices, volumes, strict=False):
-            price = _as_optional_float(price_raw)
-            volume = _as_optional_float(volume_raw)
-            if price is None or volume is None or volume <= 0.0:
-                continue
-            bucket = min(bucket_count - 1, int((price - price_min) / bucket_size))
-            bucket_volumes[bucket] += volume
-        poc_bucket = int(np.argmax(bucket_volumes)) if any(bucket_volumes) else 0
-        poc = price_min + (poc_bucket + 0.5) * bucket_size
+
+        # Vectorized bucketing
+        buckets = (
+            ((v_prices - price_min) / bucket_size)
+            .floor()
+            .cast(pl.Int32)
+            .clip(0, bucket_count - 1)
+        )
+
+        vol_by_bucket = (
+            pl.DataFrame({"b": buckets, "v": v_volumes})
+            .group_by("b")
+            .agg(pl.col("v").sum())
+        )
+
+        if vol_by_bucket.is_empty():
+            poc = price_min
+        else:
+            poc_bucket = vol_by_bucket.sort("v", descending=True).row(0)[0]
+            poc = price_min + (poc_bucket + 0.5) * bucket_size
 
     return pl.lit(float(poc)).cast(pl.Float64).alias("volume_profile")
 
@@ -1487,79 +1466,43 @@ def _swing_points(
     *,
     include_unconfirmed_tail: bool = False,
 ) -> tuple[pl.Series, pl.Series]:
-    """Detect swing highs and lows using n-bar look-around.
-
-    When ``include_unconfirmed_tail=True``, the last ``n`` bars may be marked
-    using only available right-side context (or none on the last bar). This is
-    useful for early/provisional swing detection in live signal logic.
-    """
-    height = len(work)
-    if height < 2 * n + 1:
-        zeros = [False] * height
+    """Detect swing highs and lows using n-bar look-around (vectorized)."""
+    if work.is_empty():
         return (
-            pl.Series("swing_high", zeros, dtype=pl.Boolean),
-            pl.Series("swing_low", zeros, dtype=pl.Boolean),
+            pl.Series("swing_high", [], dtype=pl.Boolean),
+            pl.Series("swing_low", [], dtype=pl.Boolean),
         )
 
-    high = work["high"].to_list()
-    low = work["low"].to_list()
-    swing_high = [False] * height
-    swing_low = [False] * height
+    high = work["high"]
+    low = work["low"]
 
-    for idx in range(n, height - n):
-        curr_high = high[idx]
-        curr_low = low[idx]
-        if curr_high is None or curr_low is None:
-            continue
-        high_ok = True
-        low_ok = True
-        for offset in range(1, n + 1):
-            prev_high = high[idx - offset]
-            next_high = high[idx + offset]
-            prev_low = low[idx - offset]
-            next_low = low[idx + offset]
-            if (
-                prev_high is None
-                or next_high is None
-                or prev_low is None
-                or next_low is None
-            ):
-                high_ok = False
-                low_ok = False
-                break
-            if curr_high <= prev_high or curr_high <= next_high:
-                high_ok = False
-            if curr_low >= prev_low or curr_low >= next_low:
-                low_ok = False
-        swing_high[idx] = high_ok
-        swing_low[idx] = low_ok
+    # Current bar is strict max/min compared to n bars before and n bars after
+    left_max = high.rolling_max(window_size=n, min_samples=1).shift(1)
+    right_max = (
+        high.reverse().rolling_max(window_size=n, min_samples=1).reverse().shift(-1)
+    )
+    swing_high = (high > left_max.fill_null(-float("inf"))) & (
+        high > right_max.fill_null(-float("inf"))
+    )
 
-    if include_unconfirmed_tail:
-        for idx in range(max(n, height - n), height):
-            curr_high = high[idx]
-            curr_low = low[idx]
-            if curr_high is None or curr_low is None:
-                continue
-            high_ok = True
-            low_ok = True
-            max_offset = min(n, idx)
-            for offset in range(1, max_offset + 1):
-                prev_high = high[idx - offset]
-                prev_low = low[idx - offset]
-                if prev_high is None or prev_low is None:
-                    high_ok = False
-                    low_ok = False
-                    break
-                if curr_high <= prev_high:
-                    high_ok = False
-                if curr_low >= prev_low:
-                    low_ok = False
-            swing_high[idx] = high_ok
-            swing_low[idx] = low_ok
+    left_min = low.rolling_min(window_size=n, min_samples=1).shift(1)
+    right_min = (
+        low.reverse().rolling_min(window_size=n, min_samples=1).reverse().shift(-1)
+    )
+    swing_low = (low < left_min.fill_null(float("inf"))) & (
+        low < right_min.fill_null(float("inf"))
+    )
+
+    if not include_unconfirmed_tail:
+        # Require full context (both sides)
+        indices = pl.Series(range(work.height))
+        mask = (indices >= n) & (indices < (work.height - n))
+        swing_high = swing_high & mask
+        swing_low = swing_low & mask
 
     return (
-        pl.Series("swing_high", swing_high, dtype=pl.Boolean),
-        pl.Series("swing_low", swing_low, dtype=pl.Boolean),
+        swing_high.fill_null(False).rename("swing_high"),
+        swing_low.fill_null(False).rename("swing_low"),
     )
 
 
@@ -1571,16 +1514,16 @@ def _market_structure_1h(work_1h: pl.DataFrame) -> str:
     swing_high, swing_low = _swing_points(work_1h, n=3)
 
     # Get swing high/low values
-    high_vals = work_1h.filter(swing_high)["high"].to_list()
-    low_vals = work_1h.filter(swing_low)["low"].to_list()
+    last_highs = work_1h.filter(swing_high)["high"].tail(2)
+    last_lows = work_1h.filter(swing_low)["low"].tail(2)
 
-    if len(high_vals) < 2 or len(low_vals) < 2:
+    if last_highs.len() < 2 or last_lows.len() < 2:
         return "ranging"
 
-    hh = high_vals[-1] > high_vals[-2]  # higher high
-    hl = low_vals[-1] > low_vals[-2]  # higher low
-    lh = high_vals[-1] < high_vals[-2]  # lower high
-    ll = low_vals[-1] < low_vals[-2]  # lower low
+    hh = last_highs[1] > last_highs[0]  # higher high
+    hl = last_lows[1] > last_lows[0]  # higher low
+    lh = last_highs[1] < last_highs[0]  # lower high
+    ll = last_lows[1] < last_lows[0]  # lower low
 
     if hh and hl:
         return "uptrend"
@@ -1640,37 +1583,41 @@ def _regime_1h_confirmed(work_1h: pl.DataFrame, min_bars: int = 3) -> str:
 def _volume_poc(
     work: pl.DataFrame, lookback: int = 96, buckets: int = 20
 ) -> float | None:
-    """Simplified Volume Point of Control."""
+    """Simplified Volume Point of Control (vectorized)."""
     if len(work) < 10:
         return None
 
     tail = work.tail(lookback)
-    price_min = _as_float_like(tail["low"].min())
-    price_max = _as_float_like(tail["high"].max())
+    price_min = _as_optional_float(tail["low"].min())
+    price_max = _as_optional_float(tail["high"].max())
 
-    if price_max <= price_min:
-        return None
+    if price_min is None or price_max is None or price_max <= price_min:
+        return price_max
 
     bucket_size = (price_max - price_min) / buckets
-    bucket_volumes = [0.0] * buckets
 
-    # Iterate through rows to accumulate volume
-    for row in tail.iter_rows(named=True):
-        bar_low = _as_float_like(row["low"])
-        bar_high = _as_float_like(row["high"])
-        bar_vol = _as_float_like(row["volume"])
+    # We need to distribute bar volume across all buckets the bar covers.
+    # This is slightly more complex to vectorize than simple close-based POC.
+    # For a simplified vectorized version, we'll use the bar midpoint for bucketing.
+    midpoints = (tail["high"] + tail["low"]) / 2.0
+    v_buckets = (
+        ((midpoints - price_min) / bucket_size)
+        .floor()
+        .cast(pl.Int32)
+        .clip(0, buckets - 1)
+    )
 
-        b_start = max(0, int((bar_low - price_min) / bucket_size))
-        b_end = min(buckets - 1, int((bar_high - price_min) / bucket_size))
-        n_buckets = b_end - b_start + 1
+    vol_by_bucket = (
+        pl.DataFrame({"b": v_buckets, "v": tail["volume"]})
+        .group_by("b")
+        .agg(pl.col("v").sum())
+    )
 
-        if n_buckets > 0:
-            for i in range(b_start, b_end + 1):
-                bucket_volumes[i] += bar_vol / n_buckets
+    if vol_by_bucket.is_empty():
+        return price_min
 
-    poc_bucket = int(np.argmax(bucket_volumes))
-    poc_price = price_min + (poc_bucket + 0.5) * bucket_size
-    return float(poc_price)
+    poc_bucket = int(vol_by_bucket.sort("v", descending=True).row(0)[0])
+    return float(price_min + (poc_bucket + 0.5) * bucket_size)
 
 
 # ---------------------------------------------------------------------------

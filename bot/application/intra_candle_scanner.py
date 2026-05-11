@@ -6,7 +6,7 @@ import time
 from datetime import UTC, datetime
 from typing import Any
 
-from ..core.events import BookTickerEvent
+from ..domain.events import BookTickerEvent
 
 LOG = logging.getLogger("bot.application.intra_candle_scanner")
 
