@@ -8,9 +8,7 @@ from bot.domain.schemas import SymbolMeta
 from bot.universe import build_shortlist
 
 
-def _settings(
-    *, quote_asset: str, pinned_symbols: tuple[str, ...] = ()
-) -> SimpleNamespace:
+def _settings(*, quote_asset: str, pinned_symbols: tuple[str, ...] = ()) -> SimpleNamespace:
     return SimpleNamespace(
         universe=SimpleNamespace(
             quote_asset=quote_asset,
@@ -181,3 +179,27 @@ def test_build_shortlist_fills_bucket_targets_before_strategy_reserve(
     assert summary["breakout"] > 0
     assert summary["reversal"] > 0
     assert summary["strategy_seed"] < settings.universe.shortlist_limit
+
+
+def test_strategy_fits_cover_price_action_setups_on_top_liquid_symbols() -> None:
+    settings = _settings(quote_asset="USDT")
+    row = {
+        "symbol": "COINUSDT",
+        "base_asset": "COIN",
+        "quote_volume": 75_000_000.0,
+        "price_change_percent": 0.6,
+        "spread_bps": 2.0,
+    }
+
+    from bot.universe import _strategy_fits_for_row
+
+    fits = set(_strategy_fits_for_row(row, settings=settings, liquidity_rank=8))
+
+    assert {
+        "bb_squeeze",
+        "bos_choch",
+        "breaker_block",
+        "turtle_soup",
+        "stop_hunt_detection",
+        "wyckoff_spring",
+    }.issubset(fits)

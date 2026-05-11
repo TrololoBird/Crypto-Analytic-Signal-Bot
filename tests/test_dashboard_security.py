@@ -1,5 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
+import json
 from types import SimpleNamespace
 from bot.dashboard import BotDashboard
 from bot.domain.config import BotSettings, RuntimeConfig
@@ -52,9 +53,7 @@ def test_dashboard_cors_restricted_origins() -> None:
             "Access-Control-Request-Method": "GET",
         },
     )
-    assert (
-        response.headers.get("Access-Control-Allow-Origin") == "https://trusted.test"
-    )
+    assert response.headers.get("Access-Control-Allow-Origin") == "https://trusted.test"
 
     # Untrusted origin
     response = client.options(
@@ -135,7 +134,50 @@ async def test_dashboard_api_endpoints_coverage() -> None:
         mp.setattr("bot.analytics.StrategyAnalytics", MockAnalytics)
         assert client.get("/api/analytics/report").status_code == 200
 
+    assert client.get("/api/analytics/strategy-decisions").status_code == 200
+
     # Test root HTML
     response = client.get("/")
     assert response.status_code == 200
     assert "Signal Bot Dashboard" in response.text
+
+
+def test_dashboard_strategy_decision_summary_reads_latest_telemetry(tmp_path) -> None:
+    settings = BotSettings(
+        tg_token="TOKEN_FOR_TESTING",
+        target_chat_id="12345",
+        data_dir=tmp_path,
+    )
+    analysis_dir = tmp_path / "telemetry" / "runs" / "run_1" / "analysis"
+    analysis_dir.mkdir(parents=True)
+    rows = [
+        {
+            "setup_id": "bb_squeeze",
+            "status": "skip",
+            "reason_code": "asset_fit.shortlist_not_routed",
+        },
+        {
+            "setup_id": "bb_squeeze",
+            "status": "signal",
+            "reason_code": "pattern.raw_hit",
+        },
+        {
+            "setup_id": "spread_strategy",
+            "status": "reject",
+            "reason_code": "filters.risk_reward_too_low",
+        },
+    ]
+    with (analysis_dir / "strategy_decisions.jsonl").open("w", encoding="utf-8") as f:
+        for row in rows:
+            f.write(json.dumps(row) + "\n")
+
+    dashboard = BotDashboard(SimpleNamespace(settings=settings))
+
+    summary = dashboard._get_strategy_decision_summary(limit_files=1, max_rows=100)
+
+    assert summary["total_rows"] == 3
+    assert summary["status_counts"] == {"skip": 1, "signal": 1, "reject": 1}
+    bb_row = summary["setups"]["bb_squeeze"]
+    assert bb_row["total"] == 2
+    assert bb_row["signal_rate"] == 0.5
+    assert bb_row["top_reasons"][0]["reason"] == "asset_fit.shortlist_not_routed"

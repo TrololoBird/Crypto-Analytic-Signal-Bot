@@ -65,9 +65,7 @@ class TelemetryManager:
             if (values := self._frame_indicator_snapshot(frame))
         }
 
-    def decision_to_reject_row(
-        self, *, symbol: str, decision: StrategyDecision
-    ) -> dict[str, Any]:
+    def decision_to_reject_row(self, *, symbol: str, decision: StrategyDecision) -> dict[str, Any]:
         row: dict[str, Any] = {
             "ts": datetime.now(UTC).isoformat(),
             "symbol": symbol,
@@ -102,9 +100,7 @@ class TelemetryManager:
         if count >= limit:
             return
         self._bot._diagnostic_trace_counts[symbol] = count + 1
-        self._bot.telemetry.append_symbol_jsonl(
-            "analysis", symbol, "strategy_traces.jsonl", row
-        )
+        self._bot.telemetry.append_symbol_jsonl("analysis", symbol, "strategy_traces.jsonl", row)
 
     def append_strategy_decision(
         self,
@@ -122,6 +118,7 @@ class TelemetryManager:
             "stage": decision.stage,
             "reason": decision.reason_code,
             "reason_code": decision.reason_code,
+            "reason_family": decision.reason_code.split(".", 1)[0],
             "missing_fields": list(decision.missing_fields),
             "invalid_fields": list(decision.invalid_fields),
         }
@@ -132,6 +129,13 @@ class TelemetryManager:
             row["timeframe"] = signal.timeframe
             row["risk_reward"] = round(float(signal.risk_reward or 0.0), 6)
             row["stop_distance_pct"] = round(float(signal.stop_distance_pct), 6)
+            row["entry_low"] = signal.entry_low
+            row["entry_high"] = signal.entry_high
+            row["entry_mid"] = signal.entry_mid
+            row["stop"] = signal.stop
+            row["take_profit_1"] = signal.take_profit_1
+            row["take_profit_2"] = signal.take_profit_2
+            row["tracking_ref"] = signal.tracking_ref
             for field_name in (
                 "spread_bps",
                 "atr_pct",
@@ -143,6 +147,14 @@ class TelemetryManager:
                 if value is not None:
                     row[field_name] = value
         if decision.details:
+            for field_name in (
+                "routed_strategy_count",
+                "status",
+                "risk_profile",
+            ):
+                value = decision.details.get(field_name)
+                if value is not None:
+                    row[f"detail_{field_name}"] = value
             row["details"] = decision.details
         if decision.error is not None:
             row["error"] = decision.error
@@ -192,9 +204,7 @@ class TelemetryManager:
                 "enrich_errors_by_stage": dict(
                     getattr(self._bot, "_shortlist_enrich_error_counts", {})
                 ),
-                "enrich_errors_total": int(
-                    getattr(self._bot, "_shortlist_enrich_error_total", 0)
-                ),
+                "enrich_errors_total": int(getattr(self._bot, "_shortlist_enrich_error_total", 0)),
                 "enrich_errors_last_cycle": dict(
                     getattr(self._bot, "_shortlist_enrich_last_cycle_errors", {})
                 ),
@@ -264,9 +274,7 @@ class TelemetryManager:
             "rejected_count": len(rejected),
             "shortlist_source": self._bot._shortlist_source,
             "setup_counts": dict(Counter(s.setup_id for s in candidates)),
-            "selected_setup_counts": dict(
-                Counter(s.setup_id for s in (delivered or []))
-            ),
+            "selected_setup_counts": dict(Counter(s.setup_id for s in (delivered or []))),
             "delivery_status_counts": delivery_status_counts,
             "tracking_events": [e.event_type for e in tracking_events],
             "dry_run": False,
@@ -276,9 +284,7 @@ class TelemetryManager:
         if result.funnel:
             cycle_row["funnel"] = result.funnel
             if result.funnel.get("prepare_error_stage") is not None:
-                cycle_row["prepare_error_stage"] = result.funnel.get(
-                    "prepare_error_stage"
-                )
+                cycle_row["prepare_error_stage"] = result.funnel.get("prepare_error_stage")
             if result.funnel.get("prepare_error_exception_type") is not None:
                 cycle_row["prepare_error_exception_type"] = result.funnel.get(
                     "prepare_error_exception_type"
@@ -360,9 +366,7 @@ class TelemetryManager:
         if result.funnel:
             symbol_row["funnel"] = result.funnel
             if result.funnel.get("prepare_error_stage") is not None:
-                symbol_row["prepare_error_stage"] = result.funnel.get(
-                    "prepare_error_stage"
-                )
+                symbol_row["prepare_error_stage"] = result.funnel.get("prepare_error_stage")
             if result.funnel.get("prepare_error_exception_type") is not None:
                 symbol_row["prepare_error_exception_type"] = result.funnel.get(
                     "prepare_error_exception_type"

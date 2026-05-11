@@ -17,6 +17,25 @@ SUPPORTED_USDM_CONTRACT_TYPES = {"PERPETUAL", "TRADIFI_PERPETUAL"}
 _ASCII_CONTRACT_RE = re.compile(r"^[A-Z0-9]{4,24}$")
 _ASCII_ASSET_RE = re.compile(r"^[A-Z0-9]{2,16}$")
 _RESERVED_PER_STRATEGY = 2
+_PRICE_ACTION_COVERAGE_SETUP_IDS: tuple[str, ...] = (
+    "structure_break_retest",
+    "squeeze_setup",
+    "bb_squeeze",
+    "atr_expansion",
+    "bos_choch",
+    "order_block",
+    "breaker_block",
+    "price_velocity",
+    "volume_anomaly",
+    "wick_trap_reversal",
+    "hidden_divergence",
+    "rsi_divergence_bottom",
+    "turtle_soup",
+    "liquidity_sweep",
+    "stop_hunt_detection",
+    "wyckoff_spring",
+    "volume_climax_reversal",
+)
 
 
 def _bucket_for_price_change(price_change_pct: float) -> str:
@@ -33,10 +52,7 @@ def _scaled_bucket_targets(total_slots: int) -> dict[str, int]:
     if total_slots <= 0:
         return {key: 0 for key in base}
     base_total = sum(base.values())
-    scaled = {
-        key: int(round(total_slots * weight / base_total))
-        for key, weight in base.items()
-    }
+    scaled = {key: int(round(total_slots * weight / base_total)) for key, weight in base.items()}
     assigned = sum(scaled.values())
     if assigned < total_slots:
         for key in ("trend", "breakout", "reversal"):
@@ -133,12 +149,7 @@ def _oi_participation_score(row: dict[str, Any]) -> float:
             change_score = 0.5
 
     notional_score = 0.55
-    if (
-        oi_current is not None
-        and oi_current > 0.0
-        and quote_volume > 0.0
-        and last_price > 0.0
-    ):
+    if oi_current is not None and oi_current > 0.0 and quote_volume > 0.0 and last_price > 0.0:
         oi_notional_ratio = (oi_current * last_price) / quote_volume
         notional_score = _clamp(oi_notional_ratio / 1.6)
     return round(change_score * 0.65 + notional_score * 0.35, 6)
@@ -279,6 +290,7 @@ def _strategy_fits_for_row(
                 "depth_imbalance",
             )
         )
+        fits.extend(_PRICE_ACTION_COVERAGE_SETUP_IDS)
 
     if symbol in set(settings.universe.pinned_symbols):
         fits.extend(_ALL_SETUP_IDS)
@@ -345,9 +357,7 @@ def _spread_freshness_score(row: dict[str, Any], settings: BotSettings) -> float
     for age in (ticker_age, book_age, mark_age):
         if age is not None:
             freshness_values.append(_clamp(1.0 - (age / stale_s)))
-    freshness_score = (
-        sum(freshness_values) / len(freshness_values) if freshness_values else 0.55
-    )
+    freshness_score = sum(freshness_values) / len(freshness_values) if freshness_values else 0.55
     return round(spread_score * 0.55 + freshness_score * 0.45, 6)
 
 
@@ -359,17 +369,11 @@ def _composite_score(
     eligible_count: int,
     min_onboard_ms: int,
 ) -> tuple[float, tuple[str, ...]]:
-    shortlist_bucket = _bucket_for_price_change(
-        float(row.get("price_change_percent") or 0.0)
-    )
+    shortlist_bucket = _bucket_for_price_change(float(row.get("price_change_percent") or 0.0))
     liquidity_curve = 1.0 - ((liquidity_rank - 1) / max(eligible_count - 1, 1))
-    volume_floor = max(
-        float(getattr(settings.universe, "min_quote_volume_usd", 0.0)), 1.0
-    )
+    volume_floor = max(float(getattr(settings.universe, "min_quote_volume_usd", 0.0)), 1.0)
     volume = float(row.get("quote_volume") or 0.0)
-    liquidity_depth = _clamp(
-        (math.log10(max(volume, 1.0)) - math.log10(volume_floor)) / 2.0 + 0.5
-    )
+    liquidity_depth = _clamp((math.log10(max(volume, 1.0)) - math.log10(volume_floor)) / 2.0 + 0.5)
     liquidity_score = round(liquidity_curve * 0.7 + liquidity_depth * 0.3, 6)
 
     onboard_date_ms = int(row.get("onboard_date_ms") or 0)
@@ -391,8 +395,7 @@ def _composite_score(
     tradability_score = 1.0
     if (
         row.get("status") != "TRADING"
-        or str(row.get("contract_type") or "").upper()
-        not in SUPPORTED_USDM_CONTRACT_TYPES
+        or str(row.get("contract_type") or "").upper() not in SUPPORTED_USDM_CONTRACT_TYPES
     ):
         tradability_score = 0.0
     elif float(row.get("last_price") or 0.0) <= 0.0:
@@ -440,9 +443,7 @@ def build_shortlist(
 ) -> tuple[list[UniverseSymbol], dict[str, Any]]:
     meta_map = {meta.symbol: meta for meta in symbol_meta}
     pinned = {symbol for symbol in settings.universe.pinned_symbols}
-    min_onboard = datetime.now(UTC) - timedelta(
-        days=settings.universe.min_listing_age_days
-    )
+    min_onboard = datetime.now(UTC) - timedelta(days=settings.universe.min_listing_age_days)
     min_onboard_ms = int(min_onboard.timestamp() * 1000)
     eligible_rows: list[dict[str, Any]] = []
 
@@ -486,18 +487,14 @@ def build_shortlist(
                 "spread_bps": _safe_float(ticker_row.get("spread_bps")),
                 "ticker_age_seconds": _safe_float(ticker_row.get("ticker_age_seconds")),
                 "book_age_seconds": _safe_float(ticker_row.get("book_age_seconds")),
-                "mark_price_age_seconds": _safe_float(
-                    ticker_row.get("mark_price_age_seconds")
-                ),
+                "mark_price_age_seconds": _safe_float(ticker_row.get("mark_price_age_seconds")),
                 "oi_change_pct": _safe_float(ticker_row.get("oi_change_pct")),
                 "oi_current": _safe_float(ticker_row.get("oi_current")),
                 "funding_rate": _safe_float(ticker_row.get("funding_rate")),
                 "basis_pct": _safe_float(ticker_row.get("basis_pct")),
                 "top_account_ls_ratio": _safe_float(ticker_row.get("top_account_ls_ratio")),
                 "top_position_ls_ratio": _safe_float(ticker_row.get("top_position_ls_ratio")),
-                "global_account_ls_ratio": _safe_float(
-                    ticker_row.get("global_account_ls_ratio")
-                ),
+                "global_account_ls_ratio": _safe_float(ticker_row.get("global_account_ls_ratio")),
                 "top_vs_global_ls_gap": _safe_float(ticker_row.get("top_vs_global_ls_gap")),
             }
         )
@@ -583,9 +580,7 @@ def build_shortlist(
         shortlist.append(s_row)
         seen.add(s_row.symbol)
 
-    targets = _scaled_bucket_targets(
-        max(settings.universe.shortlist_limit - len(shortlist), 0)
-    )
+    targets = _scaled_bucket_targets(max(settings.universe.shortlist_limit - len(shortlist), 0))
     summary: dict[str, Any] = {
         "mode": seed_source,
         "eligible": len(eligible),
@@ -687,9 +682,7 @@ def rerank_shortlist(
     Does not add/remove symbols, only updates their metrics and resorts based
     on real-time activity (volume and volatility).
     """
-    ticker_map = {
-        str(t.get("symbol", "")).upper(): t for t in latest_tickers if t.get("symbol")
-    }
+    ticker_map = {str(t.get("symbol", "")).upper(): t for t in latest_tickers if t.get("symbol")}
     updated: list[UniverseSymbol] = []
 
     for item in current_shortlist:
@@ -697,9 +690,7 @@ def rerank_shortlist(
         if ticker:
             # Update dynamic metrics
             new_volume = float(ticker.get("quote_volume") or item.quote_volume)
-            new_change = float(
-                ticker.get("price_change_percent") or item.price_change_pct
-            )
+            new_change = float(ticker.get("price_change_percent") or item.price_change_pct)
             new_price = float(ticker.get("last_price") or item.last_price)
 
             # Re-calculate score using the fast path

@@ -90,9 +90,7 @@ def _fmt_audit_metric(name: str, value: float | None, suffix: str = "") -> str |
     return f"{name}={numeric:.2f}{suffix}"
 
 
-def _format_signal_audit_text(
-    label: str, signal: Signal, *, final: bool = False
-) -> str:
+def _format_signal_audit_text(label: str, signal: Signal, *, final: bool = False) -> str:
     normalized_label = str(label or "").strip().upper()
     parts = [
         f"[{normalized_label}]",
@@ -220,9 +218,7 @@ def _trailing_stop_instructions(stop_distance_pct: float) -> str:
     """Trailing stop hint based on stop distance."""
     trigger1 = round(stop_distance_pct * 2, 1)
     trigger2 = round(stop_distance_pct * 3, 1)
-    return (
-        f"📌 Трейлинг: +{trigger1}% → SL в безубыток | +{trigger2}% → фиксировать 30%"
-    )
+    return f"📌 Трейлинг: +{trigger1}% → SL в безубыток | +{trigger2}% → фиксировать 30%"
 
 
 def _compute_tp3(entry_mid: float, take_profit_2: float, direction: str) -> float:
@@ -270,19 +266,23 @@ def _render_signal_card(
 
     lines += [
         f"<b>{html.escape(symbol)} {_direction_label(direction)}</b> <code>#{tracking_ref}</code>",
-        f"{_confidence_label(score)} | <code>{html.escape(timeframe)} {_humanize_token(setup_id)}</code>",
-        f"RR <code>{risk_reward:.2f}</code> | Risk <code>{stop_distance_pct:.2f}%</code>",
-        "",
-        f"<b>Entry</b> <code>{_fmt_price(entry_low)} – {_fmt_price(entry_high)}</code>",
         (
-            f"<b>SL</b> <code>{_fmt_price(stop)}</code> | "
-            f"<b>TP</b> <code>{_fmt_price(take_profit_1)}</code>"
+            f"<b>Setup</b> <code>{html.escape(timeframe)} "
+            f"{_humanize_token(setup_id)}</code> | "
+            f"<b>Score</b> <code>{score * 100:.0f}%</code> "
+            f"{_confidence_label(score)}"
+        ),
+        f"<b>Risk</b> RR <code>{risk_reward:.2f}</code> | Stop distance <code>{stop_distance_pct:.2f}%</code>",
+        "",
+        f"<b>Entry zone</b> <code>{_fmt_price(entry_low)} – {_fmt_price(entry_high)}</code>",
+        f"<b>Invalidation</b> <code>{_fmt_price(stop)}</code>",
+        (
+            f"<b>Targets</b> <code>{_fmt_price(take_profit_1)}</code>"
             if single_target_mode
             else (
-                f"<b>SL</b> <code>{_fmt_price(stop)}</code> | "
-                f"<b>TP1</b> <code>{_fmt_price(take_profit_1)}</code> | "
-                f"<b>TP2</b> <code>{_fmt_price(take_profit_2)}</code> | "
-                f"<b>TP3</b> <code>{_fmt_price(tp3)}</code>"
+                f"<b>Targets</b> TP1 <code>{_fmt_price(take_profit_1)}</code> | "
+                f"TP2 <code>{_fmt_price(take_profit_2)}</code> | "
+                f"TP3 <code>{_fmt_price(tp3)}</code>"
             )
         ),
         _trailing_stop_instructions(stop_distance_pct),
@@ -303,9 +303,7 @@ def _render_signal_card(
     return "\n".join(lines)
 
 
-def _market_context_line(
-    oi_change_pct: float | None, funding_rate: float | None
-) -> str | None:
+def _market_context_line(oi_change_pct: float | None, funding_rate: float | None) -> str | None:
     parts = []
     if oi_change_pct is not None:
         sign = "+" if oi_change_pct >= 0 else ""
@@ -319,9 +317,7 @@ def _market_context_line(
 def format_signal_text(
     signal: Signal, *, pending_expiry_minutes: int, btc_bias: str | None = None
 ) -> str:
-    wait_until = signal.created_at.astimezone(UTC) + timedelta(
-        minutes=pending_expiry_minutes
-    )
+    wait_until = signal.created_at.astimezone(UTC) + timedelta(minutes=pending_expiry_minutes)
     return _render_signal_card(
         symbol=signal.symbol,
         direction=signal.direction,
@@ -458,9 +454,7 @@ def format_analytics_companion(
         "funding_reversal": "фандинг не нормализуется за 2 свечи",
         "session_killzone": "выход за границы сессионного диапазона",
     }.get(signal.setup_id, "пробой стопа")
-    lines.append(
-        f"• Аннулирование: {setup_invalidation} (стоп {stop_pct:.1f}% от входа)"
-    )
+    lines.append(f"• Аннулирование: {setup_invalidation} (стоп {stop_pct:.1f}% от входа)")
 
     return "\n".join(lines)
 
@@ -472,9 +466,7 @@ def format_tracked_signal_text(tracked: SignalTrackingEvent | object) -> str:
     risk = abs(entry_mid - stop)
     reward = abs(getattr(state, "take_profit_2") - entry_mid)
     risk_reward = (reward / risk) if risk > 0 else 0.0
-    stop_distance_pct = (
-        abs(entry_mid - stop) / entry_mid * 100.0 if entry_mid > 0 else 0.0
-    )
+    stop_distance_pct = abs(entry_mid - stop) / entry_mid * 100.0 if entry_mid > 0 else 0.0
     return _render_signal_card(
         symbol=getattr(state, "symbol"),
         direction=getattr(state, "direction"),
@@ -508,13 +500,9 @@ def format_tracking_event_text(event: SignalTrackingEvent) -> str:
         "ambiguous_exit": "Analytical Exit (Ambiguous)",
         "superseded": "Tracking Superseded",
     }
-    if event.event_type == "stop_loss" and getattr(
-        tracked, "moved_to_break_even_at", None
-    ):
+    if event.event_type == "stop_loss" and getattr(tracked, "moved_to_break_even_at", None):
         try:
-            break_even = float(
-                getattr(tracked, "activation_price", None) or tracked.entry_mid
-            )
+            break_even = float(getattr(tracked, "activation_price", None) or tracked.entry_mid)
             stop_px = float(event.event_price or tracked.stop)
             if break_even > 0 and abs(stop_px - break_even) <= (break_even * 1e-6):
                 event_titles["stop_loss"] = "Stop (Break-even)"
@@ -571,13 +559,9 @@ class SignalDelivery:
         final: bool = False,
     ) -> DeliveryResult:
         normalized_label = str(label or "").strip().upper()
-        text = html.escape(
-            _format_signal_audit_text(normalized_label, signal, final=final)
-        )
+        text = html.escape(_format_signal_audit_text(normalized_label, signal, final=final))
         if normalized_label in _AUDIT_BATCH_LABELS and not final:
-            return await self._queue_signal_audit(
-                text, label=normalized_label, signal=signal
-            )
+            return await self._queue_signal_audit(text, label=normalized_label, signal=signal)
 
         await self.flush_signal_audits()
         result = await self.broadcaster.send_html(text)
@@ -712,9 +696,7 @@ class SignalDelivery:
             if dry_run:
                 LOG.info("dry-run signal\n%s", text)
                 delivered.append(
-                    DeliveredSignal(
-                        signal=signal, status="sent", message_id=None, reason="dry_run"
-                    )
+                    DeliveredSignal(signal=signal, status="sent", message_id=None, reason="dry_run")
                 )
                 continue
             result = await self.broadcaster.send_html(text)
@@ -749,9 +731,7 @@ class SignalDelivery:
     ) -> None:
         """Send a short analytics narrative as a follow-up message after a signal."""
         try:
-            text = format_analytics_companion(
-                signal, btc_bias=btc_bias, eth_bias=eth_bias
-            )
+            text = format_analytics_companion(signal, btc_bias=btc_bias, eth_bias=eth_bias)
             await self.broadcaster.send_html(text)
         except Exception as exc:
             LOG.debug("analytics companion send failed: %s", exc)
@@ -802,9 +782,7 @@ class SignalDelivery:
                 if final_event.tracked.signal_message_id
                 else None
             )
-            result = await self.broadcaster.send_html(
-                text, reply_to_message_id=reply_to_message_id
-            )
+            result = await self.broadcaster.send_html(text, reply_to_message_id=reply_to_message_id)
             if result.status == "sent":
                 LOG.info("telegram tracking update sent\n%s", text)
             else:

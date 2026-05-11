@@ -19,9 +19,7 @@ def test_strategy_decision_signal_telemetry_includes_signal_quality_fields() -> 
     telemetry = _CaptureTelemetry()
     bot = SimpleNamespace(
         telemetry=telemetry,
-        settings=SimpleNamespace(
-            runtime=SimpleNamespace(diagnostic_trace_limit_per_symbol=0)
-        ),
+        settings=SimpleNamespace(runtime=SimpleNamespace(diagnostic_trace_limit_per_symbol=0)),
         _diagnostic_trace_counts={},
     )
     manager = TelemetryManager(bot)
@@ -58,6 +56,12 @@ def test_strategy_decision_signal_telemetry_includes_signal_quality_fields() -> 
     assert row["timeframe"] == "15m"
     assert row["score"] == 0.6018
     assert row["risk_reward"] == 1.5
+    assert row["reason_family"] == "pattern"
+    assert row["entry_low"] == 100.0
+    assert row["entry_high"] == 100.0
+    assert row["stop"] == 102.0
+    assert row["take_profit_1"] == 97.0
+    assert row["take_profit_2"] == 95.0
     assert row["stop_distance_pct"] == 2.0
     assert row["spread_bps"] == 0.04
     assert row["atr_pct"] == 0.34

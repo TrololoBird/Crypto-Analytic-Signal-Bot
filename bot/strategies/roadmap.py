@@ -92,6 +92,17 @@ def _series_mean_tail(frame: pl.DataFrame, column: str, window: int) -> float:
     return sum(values) / len(values) if values else 0.0
 
 
+def _series_max_tail(frame: pl.DataFrame, column: str, window: int) -> float:
+    if frame.is_empty() or column not in frame.columns:
+        return 0.0
+    values = [
+        _as_float(value)
+        for value in frame[column].tail(max(1, int(window))).to_list()
+        if value is not None
+    ]
+    return max(values) if values else 0.0
+
+
 def _build_atr_signal(
     *,
     prepared: PreparedSymbol,
@@ -160,14 +171,10 @@ class RoadmapSetup(BaseSetup):
         "min_rr": 1.5,
     }
 
-    def get_optimizable_params(
-        self, settings: BotSettings | None = None
-    ) -> dict[str, float]:
+    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
         return _configured_params(settings, self.setup_id, self.DEFAULTS)
 
-    def _params(
-        self, prepared: PreparedSymbol, settings: BotSettings
-    ) -> dict[str, float]:
+    def _params(self, prepared: PreparedSymbol, settings: BotSettings) -> dict[str, float]:
         return {
             **self.get_optimizable_params(settings),
             **get_dynamic_params(prepared, self.setup_id),
@@ -203,15 +210,13 @@ class WhaleWallsSetup(RoadmapSetup):
             params["min_microprice_bias"]
         ):
             direction = "long"
-        elif depth_value <= -float(
-            params["min_depth_imbalance"]
-        ) and micro_value <= -float(params["min_microprice_bias"]):
+        elif depth_value <= -float(params["min_depth_imbalance"]) and micro_value <= -float(
+            params["min_microprice_bias"]
+        ):
             direction = "short"
         else:
             reason = (
-                "wall_proxy_conflict"
-                if depth_value * micro_value < 0.0
-                else "wall_proxy_too_weak"
+                "wall_proxy_conflict" if depth_value * micro_value < 0.0 else "wall_proxy_too_weak"
             )
             _reject(
                 prepared,
@@ -335,18 +340,12 @@ class DepthImbalanceSetup(RoadmapSetup):
         depth = float(prepared.depth_imbalance)
         close_position = _last(prepared.work_15m, "close_position", 0.5)
         threshold = float(params["min_depth_imbalance"])
-        if depth >= threshold and close_position >= float(
-            params["min_close_position_long"]
-        ):
+        if depth >= threshold and close_position >= float(params["min_close_position_long"]):
             direction = "long"
-        elif depth <= -threshold and close_position <= float(
-            params["max_close_position_short"]
-        ):
+        elif depth <= -threshold and close_position <= float(params["max_close_position_short"]):
             direction = "short"
         else:
-            _reject(
-                prepared, self.setup_id, "depth_not_actionable", depth_imbalance=depth
-            )
+            _reject(prepared, self.setup_id, "depth_not_actionable", depth_imbalance=depth)
             return None
         return _build_atr_signal(
             prepared=prepared,
@@ -403,9 +402,7 @@ class AbsorptionSetup(RoadmapSetup):
         ):
             direction = "short"
         else:
-            _reject(
-                prepared, self.setup_id, "absorption_not_confirmed", flow_delta=flow
-            )
+            _reject(prepared, self.setup_id, "absorption_not_confirmed", flow_delta=flow)
             return None
         return _build_atr_signal(
             prepared=prepared,
@@ -433,9 +430,7 @@ class AggressionShiftSetup(RoadmapSetup):
         params = self._params(prepared, settings)
         if prepared.aggression_shift is not None:
             shift = float(prepared.aggression_shift)
-        elif (
-            prepared.work_15m.height >= 6 and "delta_ratio" in prepared.work_15m.columns
-        ):
+        elif prepared.work_15m.height >= 6 and "delta_ratio" in prepared.work_15m.columns:
             shift = _last(prepared.work_15m, "delta_ratio", 0.5) - _series_mean_tail(
                 prepared.work_15m.head(prepared.work_15m.height - 1),
                 "delta_ratio",
@@ -486,13 +481,9 @@ class LiquidationHeatmapSetup(RoadmapSetup):
         score = float(prepared.liquidation_score)
         close_position = _last(prepared.work_15m, "close_position", 0.5)
         threshold = float(params["min_liquidation_score"])
-        if score >= threshold and close_position >= float(
-            params["min_close_position_long"]
-        ):
+        if score >= threshold and close_position >= float(params["min_close_position_long"]):
             direction = "long"
-        elif score <= -threshold and close_position <= float(
-            params["max_close_position_short"]
-        ):
+        elif score <= -threshold and close_position <= float(params["max_close_position_short"]):
             direction = "short"
         else:
             _reject(
@@ -752,27 +743,34 @@ class BBSqueezeSetup(RoadmapSetup):
         "max_bb_width": 5.0,
         "min_volume_ratio": 1.05,
         "min_roc10_abs_pct": 0.15,
+        "squeeze_release_lookback": 4.0,
     }
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         params = self._params(prepared, settings)
         work = prepared.work_15m
-        missing = _missing_columns(
-            work, ("bb_width", "squeeze_on", "squeeze_off", "roc10")
-        )
+        missing = _missing_columns(work, ("bb_width", "squeeze_on", "squeeze_off", "roc10"))
         if missing:
             _reject(prepared, self.setup_id, "missing_columns", missing_fields=missing)
             return None
         bb_width = _last(work, "bb_width")
         squeeze_recent = _series_mean_tail(work, "squeeze_on", 8)
-        squeeze_off = _last(work, "squeeze_off")
+        release_lookback = int(params["squeeze_release_lookback"])
+        squeeze_release_recent = _series_max_tail(work, "squeeze_off", release_lookback)
         roc10 = _last(work, "roc10")
         vol_ratio = _last(work, "volume_ratio20", 1.0)
         if bb_width > float(params["max_bb_width"]) or squeeze_recent <= 0.0:
             _reject(prepared, self.setup_id, "bb_squeeze_not_active", bb_width=bb_width)
             return None
-        if squeeze_off <= 0.0 or vol_ratio < float(params["min_volume_ratio"]):
-            _reject(prepared, self.setup_id, "squeeze_breakout_unconfirmed")
+        if squeeze_release_recent <= 0.0 or vol_ratio < float(params["min_volume_ratio"]):
+            _reject(
+                prepared,
+                self.setup_id,
+                "squeeze_breakout_unconfirmed",
+                squeeze_release_recent=squeeze_release_recent,
+                volume_ratio=vol_ratio,
+                release_lookback=release_lookback,
+            )
             return None
         if abs(roc10) < float(params["min_roc10_abs_pct"]):
             _reject(prepared, self.setup_id, "momentum_too_low", roc10=roc10)
@@ -783,7 +781,11 @@ class BBSqueezeSetup(RoadmapSetup):
             setup_id=self.setup_id,
             direction=direction,
             params=params,
-            reasons=[f"bb_squeeze_{direction}", f"bb_width={bb_width:.2f}"],
+            reasons=[
+                f"bb_squeeze_{direction}",
+                f"bb_width={bb_width:.2f}",
+                f"release_recent={squeeze_release_recent:.0f}",
+            ],
             family=self.family,
             structure_clarity=min(abs(roc10), 1.0),
         )
@@ -847,11 +849,7 @@ class LSRatioExtremeSetup(RoadmapSetup):
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         params = self._params(prepared, settings)
-        ratio = (
-            prepared.top_account_ls_ratio
-            or prepared.ls_ratio
-            or prepared.global_ls_ratio
-        )
+        ratio = prepared.top_account_ls_ratio or prepared.ls_ratio or prepared.global_ls_ratio
         if ratio is None:
             _reject(prepared, self.setup_id, "ls_ratio_missing")
             return None
@@ -892,9 +890,9 @@ class OIDivergenceSetup(RoadmapSetup):
             return None
         oi_change = float(prepared.oi_change_pct)
         price_change = _price_change_pct(prepared.work_15m, 8)
-        if abs(oi_change) < float(params["min_abs_oi_change_pct"]) or abs(
-            price_change
-        ) < float(params["min_price_change_pct"]):
+        if abs(oi_change) < float(params["min_abs_oi_change_pct"]) or abs(price_change) < float(
+            params["min_price_change_pct"]
+        ):
             _reject(
                 prepared,
                 self.setup_id,
@@ -951,23 +949,13 @@ class BTCCorrelationSetup(RoadmapSetup):
         if vol_ratio < float(params["min_volume_ratio"]):
             _reject(prepared, self.setup_id, "volume_too_low", volume_ratio=vol_ratio)
             return None
-        roc10 = _last(
-            prepared.work_15m, "roc10", _price_change_pct(prepared.work_15m, 10)
-        )
+        roc10 = _last(prepared.work_15m, "roc10", _price_change_pct(prepared.work_15m, 10))
         if abs(roc10) < float(params["min_roc10_abs_pct"]):
             _reject(prepared, self.setup_id, "momentum_too_low", roc10=roc10)
             return None
-        if (
-            btc_bias in {"uptrend", "bull"}
-            and prepared.bias_1h != "downtrend"
-            and roc10 > 0.0
-        ):
+        if btc_bias in {"uptrend", "bull"} and prepared.bias_1h != "downtrend" and roc10 > 0.0:
             direction = "long"
-        elif (
-            btc_bias in {"downtrend", "bear"}
-            and prepared.bias_1h != "uptrend"
-            and roc10 < 0.0
-        ):
+        elif btc_bias in {"downtrend", "bear"} and prepared.bias_1h != "uptrend" and roc10 < 0.0:
             direction = "short"
         else:
             _reject(
@@ -1025,8 +1013,7 @@ class AltcoinSeasonIndexSetup(RoadmapSetup):
         ):
             direction = "long"
         elif (
-            alt_index <= float(params["btc_dominance_threshold"])
-            and prepared.bias_1h != "uptrend"
+            alt_index <= float(params["btc_dominance_threshold"]) and prepared.bias_1h != "uptrend"
         ):
             direction = "short"
         else:

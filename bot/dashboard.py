@@ -6,6 +6,7 @@ import json
 import logging
 import webbrowser
 import asyncio
+from collections import Counter
 from datetime import datetime, timezone
 import time
 from pathlib import Path
@@ -151,6 +152,20 @@ class BotDashboard:
             self._analytics_cache[days] = (now, merged)
             return merged
 
+        @self.app.get("/api/analytics/strategy-decisions")
+        async def strategy_decisions(
+            limit_files: int = 8,
+            max_rows: int = 200_000,
+        ) -> dict[str, Any]:
+            try:
+                return self._get_strategy_decision_summary(
+                    limit_files=limit_files,
+                    max_rows=max_rows,
+                )
+            except Exception as exc:
+                LOG.error("dashboard api strategy decisions error: %s", exc)
+                return {"error": "strategy_decisions_unavailable", "detail": str(exc)}
+
         @self.app.get("/api/strategies")
         async def strategies() -> list[dict[str, Any]]:
             """Return cached list of strategies with their enabled status."""
@@ -188,9 +203,7 @@ class BotDashboard:
                         "enabled": setup_id in enabled_setups,
                         "status": str(getattr(cls, "status", "beta")),
                         "risk_profile": str(
-                            getattr(
-                                cls, "risk_profile", getattr(cls, "family", "generic")
-                            )
+                            getattr(cls, "risk_profile", getattr(cls, "family", "generic"))
                         ),
                         "family": str(getattr(cls, "family", "generic")),
                     }
@@ -266,9 +279,7 @@ class BotDashboard:
         # Quick count without full fetch
         open_signals_count = 0
         try:
-            stats = await asyncio.wait_for(
-                bot._modern_repo.get_tracking_stats(), timeout=1.0
-            )
+            stats = await asyncio.wait_for(bot._modern_repo.get_tracking_stats(), timeout=1.0)
             open_signals_count = stats.get("active", 0)
         except Exception:
             pass
@@ -294,9 +305,7 @@ class BotDashboard:
 
         try:
             # Use timeout to prevent blocking dashboard
-            signals = await asyncio.wait_for(
-                repo.get_active_signals(), timeout=2.0
-            )
+            signals = await asyncio.wait_for(repo.get_active_signals(), timeout=2.0)
             return [
                 {
                     "symbol": sig.get("symbol"),
@@ -371,6 +380,123 @@ class BotDashboard:
 
         return signals
 
+    def _latest_analysis_files(
+        self,
+        telemetry_dir: Path,
+        filename: str,
+        *,
+        limit: int,
+    ) -> list[Path]:
+        runs_dir = telemetry_dir / "runs"
+        if not runs_dir.exists():
+            return []
+        stem = filename.removesuffix(".jsonl")
+        return sorted(
+            runs_dir.glob(f"*/analysis/{stem}*.jsonl"),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )[: max(1, int(limit))]
+
+    def _get_strategy_decision_summary(
+        self,
+        *,
+        limit_files: int = 8,
+        max_rows: int = 200_000,
+    ) -> dict[str, Any]:
+        bot = self.bot
+        if bot is None or not hasattr(bot, "settings"):
+            return {
+                "files": [],
+                "total_rows": 0,
+                "status_counts": {},
+                "reason_family_counts": {},
+                "setups": {},
+                "setup_reports": [],
+            }
+
+        files = self._latest_analysis_files(
+            bot.settings.telemetry_dir,
+            "strategy_decisions.jsonl",
+            limit=max(1, min(int(limit_files), 24)),
+        )
+        max_rows = max(1, min(int(max_rows), 1_000_000))
+        status_counts: Counter[str] = Counter()
+        reason_family_counts: Counter[str] = Counter()
+        setup_counters: dict[str, dict[str, Counter[str]]] = {}
+        total_rows = 0
+
+        for path in files:
+            if total_rows >= max_rows:
+                break
+            try:
+                with path.open("r", encoding="utf-8") as handle:
+                    for line in handle:
+                        if total_rows >= max_rows:
+                            break
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            row = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        setup_id = str(row.get("setup_id") or "unknown")
+                        status = str(row.get("status") or "unknown")
+                        reason = str(row.get("reason_code") or row.get("reason") or "unknown")
+                        reason_family = str(row.get("reason_family") or reason.split(".", 1)[0])
+                        counters = setup_counters.setdefault(
+                            setup_id,
+                            {
+                                "status": Counter(),
+                                "reason": Counter(),
+                                "reason_family": Counter(),
+                            },
+                        )
+                        counters["status"][status] += 1
+                        counters["reason"][reason] += 1
+                        counters["reason_family"][reason_family] += 1
+                        status_counts[status] += 1
+                        reason_family_counts[reason_family] += 1
+                        total_rows += 1
+            except OSError as exc:
+                LOG.debug("failed to read strategy decision telemetry %s: %s", path, exc)
+
+        setups: dict[str, dict[str, Any]] = {}
+        for setup_id, counters in setup_counters.items():
+            total = sum(counters["status"].values())
+            signals = counters["status"].get("signal", 0)
+            top_reasons = [
+                {"reason": reason, "count": count}
+                for reason, count in counters["reason"].most_common(5)
+            ]
+            setups[setup_id] = {
+                "setup_id": setup_id,
+                "total": total,
+                "signals": signals,
+                "signal_rate": round(signals / total, 6) if total else 0.0,
+                "status_counts": dict(counters["status"]),
+                "reason_family_counts": dict(counters["reason_family"]),
+                "top_reasons": top_reasons,
+            }
+
+        setup_reports = sorted(
+            setups.values(),
+            key=lambda row: (
+                -int(row.get("total") or 0),
+                float(row.get("signal_rate") or 0.0),
+                str(row.get("setup_id") or ""),
+            ),
+        )
+        return {
+            "files": [str(path) for path in files],
+            "file_count": len(files),
+            "total_rows": total_rows,
+            "status_counts": dict(status_counts),
+            "reason_family_counts": dict(reason_family_counts),
+            "setups": setups,
+            "setup_reports": setup_reports,
+        }
+
     def _get_market_regime(self) -> dict[str, Any]:
         bot = self.bot
         if bot is None:
@@ -389,9 +515,7 @@ class BotDashboard:
         # Get signal count with timeout
         open_signals_count = 0
         try:
-            stats = await asyncio.wait_for(
-                bot._modern_repo.get_tracking_stats(), timeout=1.0
-            )
+            stats = await asyncio.wait_for(bot._modern_repo.get_tracking_stats(), timeout=1.0)
             open_signals_count = stats.get("active", 0)
         except Exception:
             pass
@@ -433,9 +557,7 @@ class BotDashboard:
         )
         return candidates[0] if candidates else None
 
-    def start_server(
-        self, *, auto_open: bool = True, delay_seconds: float = 1.5
-    ) -> None:
+    def start_server(self, *, auto_open: bool = True, delay_seconds: float = 1.5) -> None:
         if not self._enabled or not self.app:
             LOG.debug("dashboard server disabled (fastapi not installed)")
             return
@@ -451,9 +573,7 @@ class BotDashboard:
                 LOG.warning("dashboard server failed to import uvicorn: %s", exc)
                 return
             try:
-                uvicorn.run(
-                    self.app, host=self.host, port=self.port, log_level="warning"
-                )
+                uvicorn.run(self.app, host=self.host, port=self.port, log_level="warning")
             except Exception as exc:
                 LOG.warning("dashboard server crashed: %s", exc)
 
@@ -930,12 +1050,35 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         <div style="text-align: center; color: var(--text-secondary);">Loading chart...</div>
                     </div>
                 </div>
+                <div class="card">
+                    <h2>Decision Funnel</h2>
+                    <div class="metric-row">
+                        <span class="metric-label">Rows</span>
+                        <span id="decision-rows" class="metric-value">-</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">Signal Rate</span>
+                        <span id="decision-signal-rate" class="metric-value">-</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">Top Blocker</span>
+                        <span id="decision-top-blocker" class="metric-value">-</span>
+                    </div>
+                </div>
             </div>
             <div class="card">
                 <h2>Strategy Performance</h2>
                 <div id="strategy-chart" style="min-height: 150px;">
                     <div class="empty-state">
                         <p>Strategy performance data will appear here</p>
+                    </div>
+                </div>
+            </div>
+            <div class="card">
+                <h2>Strategy Decision Diagnostics</h2>
+                <div id="decision-diagnostics">
+                    <div class="empty-state">
+                        <p>Decision diagnostics will appear here</p>
                     </div>
                 </div>
             </div>
@@ -1253,12 +1396,54 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 // Render signal distribution chart
                 renderSignalChart(data.by_setup || {});
                 renderStrategyPerformance(data.setup_reports || []);
+                fetchStrategyDecisions();
 
             } catch (err) {
                 console.error('Analytics error:', err);
                 const errorMsg = `<div style="text-align: center; color: var(--accent-red); width: 100%;">Failed to load analytics: ${err.message}</div>`;
                 if (signalChart) signalChart.innerHTML = errorMsg;
                 if (strategyChart) strategyChart.innerHTML = `<div class="empty-state"><p style="color: var(--accent-red)">Error: ${err.message}</p></div>`;
+            }
+        }
+
+        async function fetchStrategyDecisions() {
+            const container = document.getElementById('decision-diagnostics');
+            try {
+                const res = await fetch('/api/analytics/strategy-decisions?limit_files=8&max_rows=200000');
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const data = await res.json();
+                if (data.error) throw new Error(data.error);
+
+                const total = data.total_rows || 0;
+                const signals = (data.status_counts && data.status_counts.signal) || 0;
+                const signalRate = total ? (signals / total * 100).toFixed(2) + '%' : '0.00%';
+                const blockers = Object.entries(data.reason_family_counts || {})
+                    .sort((a, b) => b[1] - a[1]);
+
+                document.getElementById('decision-rows').textContent = total;
+                document.getElementById('decision-signal-rate').textContent = signalRate;
+                document.getElementById('decision-top-blocker').textContent = blockers.length ? blockers[0][0] : '-';
+
+                const rows = (data.setup_reports || []).slice(0, 18);
+                if (!rows.length) {
+                    container.innerHTML = '<div class="empty-state"><p>No strategy decision telemetry</p></div>';
+                    return;
+                }
+                container.innerHTML = rows.map(row => {
+                    const topReason = row.top_reasons && row.top_reasons.length ? row.top_reasons[0].reason : '-';
+                    const rate = ((row.signal_rate || 0) * 100).toFixed(2) + '%';
+                    return `
+                        <div class="metric-row">
+                            <span class="metric-label">${row.setup_id}<br><small style="color: var(--text-secondary)">${topReason}</small></span>
+                            <span class="metric-value">${row.signals || 0}/${row.total || 0} ${rate}</span>
+                        </div>
+                    `;
+                }).join('');
+            } catch (err) {
+                console.error('Strategy decision diagnostics error:', err);
+                if (container) {
+                    container.innerHTML = `<div class="empty-state"><p style="color: var(--accent-red)">Failed to load diagnostics</p></div>`;
+                }
             }
         }
         

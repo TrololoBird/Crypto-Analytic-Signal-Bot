@@ -79,9 +79,7 @@ class SignalEngine:
         symbol = prepared.symbol if prepared else "unknown"
         strategies = self._registry.get_enabled()
         routing_skips: list[SignalResult] = []
-        strategy_fits = set(
-            getattr(getattr(prepared, "universe", None), "strategy_fits", ()) or ()
-        )
+        strategy_fits = set(getattr(getattr(prepared, "universe", None), "strategy_fits", ()) or ())
         if strategy_fits:
             routed: list[Any] = []
             emit_routing_skips = bool(
@@ -95,9 +93,7 @@ class SignalEngine:
                 if strategy.strategy_id in strategy_fits:
                     routed.append(strategy)
                 elif emit_routing_skips:
-                    decision = self._build_routing_skip_decision(
-                        strategy, prepared, strategy_fits
-                    )
+                    decision = self._build_routing_skip_decision(strategy, prepared, strategy_fits)
                     routing_skips.append(
                         SignalResult(
                             setup_id=strategy.strategy_id,
@@ -136,9 +132,7 @@ class SignalEngine:
             can_calculate_count,
             len(strategies),
         )
-        await self._ensure_executor_warmed(
-            min(len(strategies), self._strategy_concurrency)
-        )
+        await self._ensure_executor_warmed(min(len(strategies), self._strategy_concurrency))
 
         pending = [
             asyncio.create_task(
@@ -255,9 +249,7 @@ class SignalEngine:
                 # Run calculation with timeout
                 loop = asyncio.get_running_loop()
                 result = await asyncio.wait_for(
-                    loop.run_in_executor(
-                        _STRATEGY_EXECUTOR, strategy.calculate, prepared
-                    ),
+                    loop.run_in_executor(_STRATEGY_EXECUTOR, strategy.calculate, prepared),
                     timeout=self._timeout,
                 )
 
@@ -287,9 +279,7 @@ class SignalEngine:
 
             except asyncio.TimeoutError:
                 elapsed_ms = (time.perf_counter() - start_time) * 1000
-                LOG.error(
-                    "Strategy %s timed out after %.2fs", strategy_id, self._timeout
-                )
+                LOG.error("Strategy %s timed out after %.2fs", strategy_id, self._timeout)
                 self._registry.record_performance(strategy_id, elapsed_ms, error=True)
                 decision = StrategyDecision.error_result(
                     setup_id=strategy_id,
@@ -350,9 +340,7 @@ class SignalEngine:
                     },
                 )
 
-    def _build_skip_decision(
-        self, strategy: Any, prepared: PreparedSymbol
-    ) -> StrategyDecision:
+    def _build_skip_decision(self, strategy: Any, prepared: PreparedSymbol) -> StrategyDecision:
         strategy_id = strategy.strategy_id
         metadata = getattr(strategy, "metadata", None)
         min_history_bars = getattr(metadata, "min_history_bars", 0)
@@ -383,10 +371,7 @@ class SignalEngine:
         elif getattr(metadata, "requires_oi", False) and prepared.oi_current is None:
             missing_fields.append("oi_current")
             reason_code = "data.oi_current_missing"
-        elif (
-            getattr(metadata, "requires_funding", False)
-            and prepared.funding_rate is None
-        ):
+        elif getattr(metadata, "requires_funding", False) and prepared.funding_rate is None:
             missing_fields.append("funding_rate")
             reason_code = "data.funding_rate_missing"
 
@@ -410,6 +395,7 @@ class SignalEngine:
             details={
                 "symbol": prepared.symbol,
                 "routed_strategy_count": len(strategy_fits),
+                "routed_strategies": sorted(strategy_fits),
                 "status": getattr(metadata, "status", "unknown"),
                 "risk_profile": getattr(metadata, "risk_profile", "unknown"),
             },
@@ -447,9 +433,7 @@ class SignalEngine:
         Returns:
             Best Signal or None if no valid signals
         """
-        valid_signals = [
-            r.signal for r in results if r.is_valid and r.signal is not None
-        ]
+        valid_signals = [r.signal for r in results if r.is_valid and r.signal is not None]
 
         if not valid_signals:
             return None

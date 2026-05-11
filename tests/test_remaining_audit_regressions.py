@@ -12,7 +12,7 @@ from bot.public_intelligence import PublicIntelligenceService
 from bot.setup_base import SetupParams
 from bot.setups import _compute_dynamic_score
 from bot.setups.smc import SMCZone, fvg, latest_fvg_zone, liquidity_pools
-from bot.strategies.roadmap import OIDivergenceSetup
+from bot.strategies.roadmap import BBSqueezeSetup, OIDivergenceSetup
 from bot.strategies.liquidity_sweep import LiquiditySweepSetup
 from bot.strategies.order_block import OrderBlockSetup
 from bot.strategies.wick_trap_reversal import WickTrapReversalSetup
@@ -189,6 +189,40 @@ def test_liquidity_sweep_accepts_previous_bar_sweep_with_current_confirmation(
     assert signal.entry_mid == pytest.approx(100.2)
 
 
+def test_bb_squeeze_accepts_recent_release_with_current_momentum() -> None:
+    settings = BotSettings(
+        tg_token="0" * 30,
+        target_chat_id="0",
+        filters={
+            "setups": {
+                "bb_squeeze": {
+                    "squeeze_release_lookback": 4.0,
+                    "min_volume_ratio": 1.0,
+                    "min_roc10_abs_pct": 0.10,
+                }
+            }
+        },
+    )
+    frame = _feature_frame([100.0 + idx * 0.1 for idx in range(30)])
+    frame = frame.with_columns(
+        [
+            pl.Series("squeeze_on", [0.0] * 22 + [1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0]),
+            pl.Series("squeeze_off", [0.0] * 26 + [1.0, 0.0, 0.0, 0.0]),
+            pl.Series("roc10", [0.25] * 30),
+            pl.Series("volume_ratio20", [1.2] * 30),
+            pl.Series("bb_width", [3.0] * 30),
+        ]
+    )
+
+    signal = BBSqueezeSetup(SetupParams(), settings).detect(
+        _prepared(frame, settings=settings, price=103.0),
+        settings,
+    )
+
+    assert signal is not None
+    assert signal.direction == "long"
+
+
 def test_order_block_applies_single_context_mismatch_penalty(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -250,9 +284,7 @@ def test_wick_trap_reversal_scans_latest_15m_bar(
         atr=1.0,
     )
     frame_1h = frame_1h.with_columns(
-        pl.Series(
-            "time", [base + timedelta(hours=idx) for idx in range(frame_1h.height)]
-        )
+        pl.Series("time", [base + timedelta(hours=idx) for idx in range(frame_1h.height)])
     )
     frame_15m = _feature_frame(
         [96.0] * 7 + [95.4],
@@ -265,10 +297,7 @@ def test_wick_trap_reversal_scans_latest_15m_bar(
     frame_15m = frame_15m.with_columns(
         pl.Series(
             "time",
-            [
-                base + timedelta(hours=5, minutes=15 * idx)
-                for idx in range(frame_15m.height)
-            ],
+            [base + timedelta(hours=5, minutes=15 * idx) for idx in range(frame_15m.height)],
         )
     ).with_columns(pl.Series("volume_ratio20", [1.6] * frame_15m.height))
 
