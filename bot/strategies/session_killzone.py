@@ -9,9 +9,8 @@ Requires directional momentum with volume confirmation during the killzone windo
 from __future__ import annotations
 
 import logging
-from typing import Any, cast
-import logging
 import math
+from typing import Any, cast
 from datetime import datetime, timezone
 
 from ..domain.config import BotSettings
