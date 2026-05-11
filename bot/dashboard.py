@@ -722,17 +722,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         .score-medium { background: rgba(210,153,34,0.15); color: var(--accent-yellow); }
         .score-low { background: rgba(248,81,73,0.15); color: var(--accent-red); }
         .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
             text-align: center;
             padding: var(--space-8);
             color: var(--text-secondary);
             margin-top: var(--space-2);
-            writing-mode: vertical-rl;
-            text-orientation: mixed;
-            transform: rotate(180deg);
-            height: 70px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
         }
         .chart-container {
             height: 220px;
@@ -1177,9 +1174,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     const score = fmt.score(s.score);
                     const when = s.ts || s.created_at || '';
                     const timeStr = when ? ` <small style="opacity: 0.5">(${fmt.timeAgo(when)})</small>` : '';
+                    const symbolHtml = s.symbol ? `<span class="signal-symbol" role="button" tabindex="0" onclick="copyToClipboard('${s.symbol}')" onkeydown="handleCopyKey(event, '${s.symbol}')" title="Click to copy">${s.symbol}</span>` : '-';
                     return `
                         <div class="metric-row">
-                            <span class="metric-label">${s.symbol || '-'} ${s.setup_id || ''} ${s.direction || ''}${timeStr}</span>
+                            <span class="metric-label">${symbolHtml} ${s.setup_id || ''} ${s.direction || ''}${timeStr}</span>
                             <span class="metric-value ${score.class}" title="${when}">${score.text}</span>
                         </div>
                     `;
