@@ -63,6 +63,21 @@ class SignalRecord:
             data["created_at"] = datetime.fromisoformat(data["created_at"])
         return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
 
+    def validate(self) -> None:
+        """Validate signal record fields."""
+        if not self.signal_id:
+            raise ValueError("signal_id cannot be empty")
+        if not self.symbol:
+            raise ValueError("symbol cannot be empty")
+        if self.entry_price <= 0:
+            raise ValueError(f"invalid entry_price: {self.entry_price}")
+        if self.stop_loss <= 0:
+            raise ValueError(f"invalid stop_loss: {self.stop_loss}")
+        if self.take_profit_1 <= 0:
+            raise ValueError(f"invalid take_profit_1: {self.take_profit_1}")
+        if self.take_profit_2 <= 0:
+            raise ValueError(f"invalid take_profit_2: {self.take_profit_2}")
+
 
 @dataclass
 class OutcomeRecord:
@@ -122,6 +137,15 @@ class OutcomeRecord:
         if "closed_at" in data and isinstance(data["closed_at"], str):
             data["closed_at"] = datetime.fromisoformat(data["closed_at"])
         return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+
+    def validate(self) -> None:
+        """Validate outcome record fields."""
+        if not self.outcome_id:
+            raise ValueError("outcome_id cannot be empty")
+        if not self.signal_id:
+            raise ValueError("signal_id cannot be empty")
+        if not self.symbol:
+            raise ValueError("symbol cannot be empty")
 
 
 class MemoryRepository(MemoryRepositoryExtension):
@@ -374,97 +398,107 @@ class MemoryRepository(MemoryRepositoryExtension):
         if not self._conn:
             raise RuntimeError("Repository not initialized")
 
-        await self._conn.execute(
-            """
-            INSERT INTO signals (
-                signal_id, symbol, strategy_id, direction, entry_price,
-                stop_loss, take_profit_1, take_profit_2, score, created_at,
-                timeframe, atr_pct, spread_bps, rsi_1h, adx_1h, volume_ratio,
-                funding_rate, oi_change_pct, features, metadata
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-            (
-                record.signal_id,
-                record.symbol,
-                record.strategy_id,
-                record.direction,
-                record.entry_price,
-                record.stop_loss,
-                record.take_profit_1,
-                record.take_profit_2,
-                record.score,
-                record.created_at.isoformat(),
-                record.timeframe,
-                record.atr_pct,
-                record.spread_bps,
-                record.rsi_1h,
-                record.adx_1h,
-                record.volume_ratio,
-                record.funding_rate,
-                record.oi_change_pct,
-                json.dumps(record.features) if record.features else None,
-                json.dumps(record.metadata) if record.metadata else None,
-            ),
-        )
-        await self._conn.commit()
+        record.validate()
+        try:
+            await self._conn.execute(
+                """
+                INSERT INTO signals (
+                    signal_id, symbol, strategy_id, direction, entry_price,
+                    stop_loss, take_profit_1, take_profit_2, score, created_at,
+                    timeframe, atr_pct, spread_bps, rsi_1h, adx_1h, volume_ratio,
+                    funding_rate, oi_change_pct, features, metadata
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+                (
+                    record.signal_id,
+                    record.symbol,
+                    record.strategy_id,
+                    record.direction,
+                    record.entry_price,
+                    record.stop_loss,
+                    record.take_profit_1,
+                    record.take_profit_2,
+                    record.score,
+                    record.created_at.isoformat(),
+                    record.timeframe,
+                    record.atr_pct,
+                    record.spread_bps,
+                    record.rsi_1h,
+                    record.adx_1h,
+                    record.volume_ratio,
+                    record.funding_rate,
+                    record.oi_change_pct,
+                    json.dumps(record.features) if record.features else None,
+                    json.dumps(record.metadata) if record.metadata else None,
+                ),
+            )
+            await self._conn.commit()
+        except Exception as exc:
+            LOG.error("failed to save signal %s: %s", record.signal_id, exc)
+            raise
 
     async def save_outcome(self, record: OutcomeRecord) -> None:
         """Save outcome record."""
         if not self._conn:
             raise RuntimeError("Repository not initialized")
 
-        await self._conn.execute(
-            """
-            INSERT INTO outcomes (
-                outcome_id, signal_id, symbol, price_1h, price_4h, price_24h,
-                pnl_1h, pnl_4h, pnl_24h, max_profit_pct, max_loss_pct, mae, mfe,
-                hit_tp1, hit_tp2, hit_sl, result, updated_at, closed_at,
-                time_to_tp1_min, time_to_tp2_min, time_to_sl_min
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(outcome_id) DO UPDATE SET
-                price_1h = excluded.price_1h,
-                price_4h = excluded.price_4h,
-                price_24h = excluded.price_24h,
-                pnl_1h = excluded.pnl_1h,
-                pnl_4h = excluded.pnl_4h,
-                pnl_24h = excluded.pnl_24h,
-                max_profit_pct = excluded.max_profit_pct,
-                max_loss_pct = excluded.max_loss_pct,
-                mae = excluded.mae,
-                mfe = excluded.mfe,
-                hit_tp1 = excluded.hit_tp1,
-                hit_tp2 = excluded.hit_tp2,
-                hit_sl = excluded.hit_sl,
-                result = excluded.result,
-                updated_at = excluded.updated_at,
-                closed_at = excluded.closed_at
-        """,
-            (
-                record.outcome_id,
-                record.signal_id,
-                record.symbol,
-                record.price_1h,
-                record.price_4h,
-                record.price_24h,
-                record.pnl_1h,
-                record.pnl_4h,
-                record.pnl_24h,
-                record.max_profit_pct,
-                record.max_loss_pct,
-                record.mae,
-                record.mfe,
-                int(record.hit_tp1),
-                int(record.hit_tp2),
-                int(record.hit_sl),
-                record.result,
-                record.updated_at.isoformat(),
-                record.closed_at.isoformat() if record.closed_at else None,
-                record.time_to_tp1_min,
-                record.time_to_tp2_min,
-                record.time_to_sl_min,
-            ),
-        )
-        await self._conn.commit()
+        record.validate()
+        try:
+            await self._conn.execute(
+                """
+                INSERT INTO outcomes (
+                    outcome_id, signal_id, symbol, price_1h, price_4h, price_24h,
+                    pnl_1h, pnl_4h, pnl_24h, max_profit_pct, max_loss_pct, mae, mfe,
+                    hit_tp1, hit_tp2, hit_sl, result, updated_at, closed_at,
+                    time_to_tp1_min, time_to_tp2_min, time_to_sl_min
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(outcome_id) DO UPDATE SET
+                    price_1h = excluded.price_1h,
+                    price_4h = excluded.price_4h,
+                    price_24h = excluded.price_24h,
+                    pnl_1h = excluded.pnl_1h,
+                    pnl_4h = excluded.pnl_4h,
+                    pnl_24h = excluded.pnl_24h,
+                    max_profit_pct = excluded.max_profit_pct,
+                    max_loss_pct = excluded.max_loss_pct,
+                    mae = excluded.mae,
+                    mfe = excluded.mfe,
+                    hit_tp1 = excluded.hit_tp1,
+                    hit_tp2 = excluded.hit_tp2,
+                    hit_sl = excluded.hit_sl,
+                    result = excluded.result,
+                    updated_at = excluded.updated_at,
+                    closed_at = excluded.closed_at
+            """,
+                (
+                    record.outcome_id,
+                    record.signal_id,
+                    record.symbol,
+                    record.price_1h,
+                    record.price_4h,
+                    record.price_24h,
+                    record.pnl_1h,
+                    record.pnl_4h,
+                    record.pnl_24h,
+                    record.max_profit_pct,
+                    record.max_loss_pct,
+                    record.mae,
+                    record.mfe,
+                    int(record.hit_tp1),
+                    int(record.hit_tp2),
+                    int(record.hit_sl),
+                    record.result,
+                    record.updated_at.isoformat(),
+                    record.closed_at.isoformat() if record.closed_at else None,
+                    record.time_to_tp1_min,
+                    record.time_to_tp2_min,
+                    record.time_to_sl_min,
+                ),
+            )
+            await self._conn.commit()
+        except Exception as exc:
+            LOG.error("failed to save outcome %s: %s", record.outcome_id, exc)
+            raise
 
     async def get_signal(self, signal_id: str) -> SignalRecord | None:
         """Get signal by ID."""
@@ -585,24 +619,28 @@ class MemoryRepository(MemoryRepositoryExtension):
 
         version_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
-        await self._conn.execute(
-            """
-            INSERT INTO config_versions (version_id, config_json, created_at, is_active)
-            VALUES (?, ?, ?, 1)
-        """,
-            (version_id, config_json, datetime.now(timezone.utc).isoformat()),
-        )
+        try:
+            await self._conn.execute(
+                """
+                INSERT INTO config_versions (version_id, config_json, created_at, is_active)
+                VALUES (?, ?, ?, 1)
+            """,
+                (version_id, config_json, datetime.now(timezone.utc).isoformat()),
+            )
 
-        # Deactivate previous versions
-        await self._conn.execute(
-            """
-            UPDATE config_versions SET is_active = 0
-            WHERE version_id != ?
-        """,
-            (version_id,),
-        )
+            # Deactivate previous versions
+            await self._conn.execute(
+                """
+                UPDATE config_versions SET is_active = 0
+                WHERE version_id != ?
+            """,
+                (version_id,),
+            )
 
-        await self._conn.commit()
+            await self._conn.commit()
+        except Exception as exc:
+            LOG.error("failed to save config version: %s", exc)
+            raise
         return version_id
 
     async def get_active_config(self) -> str | None:
@@ -937,6 +975,12 @@ class MemoryRepository(MemoryRepositoryExtension):
         if not self._conn:
             raise RuntimeError("Repository not initialized")
 
+        # Basic validation
+        required = {"tracking_id", "tracking_ref", "signal_key", "symbol", "setup_id", "direction"}
+        missing = required - set(signal_data.keys())
+        if missing:
+            raise ValueError(f"missing required fields in signal_data: {missing}")
+
         # Build columns and values
         columns = [
             "tracking_id",
@@ -994,15 +1038,19 @@ class MemoryRepository(MemoryRepositoryExtension):
             [f"{col} = excluded.{col}" for col in columns if col != "tracking_id"]
         )
 
-        await self._conn.execute(
-            f"""
-            INSERT INTO active_signals ({", ".join(columns)})
-            VALUES ({placeholders})
-            ON CONFLICT(tracking_id) DO UPDATE SET {updates}
-        """,
-            values,
-        )
-        await self._conn.commit()
+        try:
+            await self._conn.execute(
+                f"""
+                INSERT INTO active_signals ({", ".join(columns)})
+                VALUES ({placeholders})
+                ON CONFLICT(tracking_id) DO UPDATE SET {updates}
+            """,
+                values,
+            )
+            await self._conn.commit()
+        except Exception as exc:
+            LOG.error("failed to save active signal %s: %s", signal_data.get("tracking_id"), exc)
+            raise
 
     async def get_active_signals(
         self,
@@ -1059,18 +1107,22 @@ class MemoryRepository(MemoryRepositoryExtension):
 
         closed_at = closed_at or datetime.now(timezone.utc)
 
-        await self._conn.execute(
-            """
-            UPDATE active_signals
-            SET status = 'closed',
-                close_reason = ?,
-                close_price = ?,
-                closed_at = ?
-            WHERE tracking_id = ?
-        """,
-            (close_reason, close_price, closed_at.isoformat(), tracking_id),
-        )
-        await self._conn.commit()
+        try:
+            await self._conn.execute(
+                """
+                UPDATE active_signals
+                SET status = 'closed',
+                    close_reason = ?,
+                    close_price = ?,
+                    closed_at = ?
+                WHERE tracking_id = ?
+            """,
+                (close_reason, close_price, closed_at.isoformat(), tracking_id),
+            )
+            await self._conn.commit()
+        except Exception as exc:
+            LOG.error("failed to close active signal %s: %s", tracking_id, exc)
+            raise
 
     async def expire_open_signals_older_than(
         self, *, max_age_minutes: int, now: datetime | None = None
@@ -1111,21 +1163,25 @@ class MemoryRepository(MemoryRepositoryExtension):
         if not self._conn:
             raise RuntimeError("Repository not initialized")
 
-        if status == "active" and activated_at:
-            await self._conn.execute(
-                """
-                UPDATE active_signals
-                SET status = ?, activation_price = ?, activated_at = ?
-                WHERE tracking_id = ?
-            """,
-                (status, activation_price, activated_at.isoformat(), tracking_id),
-            )
-        else:
-            await self._conn.execute(
-                "UPDATE active_signals SET status = ? WHERE tracking_id = ?",
-                (status, tracking_id),
-            )
-        await self._conn.commit()
+        try:
+            if status == "active" and activated_at:
+                await self._conn.execute(
+                    """
+                    UPDATE active_signals
+                    SET status = ?, activation_price = ?, activated_at = ?
+                    WHERE tracking_id = ?
+                """,
+                    (status, activation_price, activated_at.isoformat(), tracking_id),
+                )
+            else:
+                await self._conn.execute(
+                    "UPDATE active_signals SET status = ? WHERE tracking_id = ?",
+                    (status, tracking_id),
+                )
+            await self._conn.commit()
+        except Exception as exc:
+            LOG.error("failed to update signal status for %s: %s", tracking_id, exc)
+            raise
 
     async def get_tracking_stats(self) -> dict[str, int]:
         """Return tracking lifecycle counters."""
@@ -1188,11 +1244,15 @@ class MemoryRepository(MemoryRepositoryExtension):
             return
 
         params.append(1)
-        await self._conn.execute(
-            f"UPDATE tracking_stats SET {', '.join(updates)} WHERE id = ?",
-            params,
-        )
-        await self._conn.commit()
+        try:
+            await self._conn.execute(
+                f"UPDATE tracking_stats SET {', '.join(updates)} WHERE id = ?",
+                params,
+            )
+            await self._conn.commit()
+        except Exception as exc:
+            LOG.error("failed to increment tracking stats: %s", exc)
+            raise
 
     async def save_signal_outcome(self, outcome_data: dict[str, Any]) -> None:
         """Persist a completed tracked-signal outcome."""
@@ -1206,6 +1266,13 @@ class MemoryRepository(MemoryRepositoryExtension):
             raise RuntimeError("Repository not initialized")
         if not outcomes_data:
             return
+
+        # Basic validation
+        required = {"tracking_id", "tracking_ref", "symbol", "setup_id", "direction", "timeframe", "created_at"}
+        for i, item in enumerate(outcomes_data):
+            missing = required - set(item.keys())
+            if missing:
+                raise ValueError(f"missing required fields in outcomes_data at index {i}: {missing}")
 
         query = """
             INSERT INTO signal_outcomes (
@@ -1273,8 +1340,12 @@ class MemoryRepository(MemoryRepositoryExtension):
                     item.get("setup_quality", "neutral"),
                 )
             )
-        await self._conn.executemany(query, rows)
-        await self._conn.commit()
+        try:
+            await self._conn.executemany(query, rows)
+            await self._conn.commit()
+        except Exception as exc:
+            LOG.error("failed to save signal outcomes batch: %s", exc)
+            raise
 
     async def get_setup_stats(
         self,

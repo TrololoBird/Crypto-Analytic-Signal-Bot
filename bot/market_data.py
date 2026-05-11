@@ -158,6 +158,53 @@ _FORBIDDEN_PUBLIC_PATH_MARKERS = (
     "apikey=",
 )
 
+_VALID_INTERVALS = frozenset(
+    [
+        "1m",
+        "3m",
+        "5m",
+        "15m",
+        "30m",
+        "1h",
+        "2h",
+        "4h",
+        "6h",
+        "8h",
+        "12h",
+        "1d",
+        "3d",
+        "1w",
+        "1M",
+    ]
+)
+
+
+def validate_symbol(symbol: str) -> None:
+    """Validate Binance symbol format (e.g., BTCUSDT)."""
+    if not symbol or not isinstance(symbol, str):
+        raise ValueError(f"invalid symbol type or empty: {symbol!r}")
+    if not symbol.isalnum():
+        raise ValueError(f"symbol must be alphanumeric: {symbol!r}")
+    if symbol != symbol.upper():
+        raise ValueError(f"symbol must be uppercase: {symbol!r}")
+
+
+def validate_interval(interval: str) -> None:
+    """Validate Binance kline interval."""
+    if interval not in _VALID_INTERVALS:
+        raise ValueError(f"unsupported binance interval: {interval!r}")
+
+
+def validate_limit(limit: int, min_val: int = 1, max_val: int = 1500) -> None:
+    """Validate request limit range."""
+    if not isinstance(limit, int):
+        try:
+            limit = int(limit)
+        except (ValueError, TypeError):
+            raise ValueError(f"limit must be an integer: {limit!r}")
+    if limit < min_val or limit > max_val:
+        raise ValueError(f"limit out of range [{min_val}, {max_val}]: {limit}")
+
 
 def validate_runtime_public_rest_url(url: str) -> None:
     """Validate that a runtime REST URL stays inside registered public USD-M data."""
@@ -1109,6 +1156,9 @@ class BinanceFuturesMarketData:
     async def fetch_klines(
         self, symbol: str, interval: str, *, limit: int
     ) -> pl.DataFrame:
+        validate_symbol(symbol)
+        validate_interval(interval)
+        validate_limit(limit)
         rows = await self._call_public_http_json(
             "kline_candlestick_data",
             params={"symbol": symbol, "interval": interval, "limit": limit},
@@ -1121,6 +1171,9 @@ class BinanceFuturesMarketData:
         self, symbol: str, interval: str, *, limit: int
     ) -> pl.DataFrame:
         """Fetch klines with a TTL cache to prevent REST stampedes."""
+        validate_symbol(symbol)
+        validate_interval(interval)
+        validate_limit(limit)
         key = (symbol, interval, int(limit))
         ttl = int(_CACHE_TTL.get(f"klines_{interval}", 60))
         now = time.monotonic()
@@ -1188,6 +1241,7 @@ class BinanceFuturesMarketData:
     async def _fetch_book_ticker_rest(
         self, symbol: str
     ) -> tuple[float | None, float | None]:
+        validate_symbol(symbol)
         max_attempts = 3
         for attempt in range(1, max_attempts + 1):
             try:
@@ -1232,6 +1286,8 @@ class BinanceFuturesMarketData:
     async def _fetch_agg_trade_snapshot_rest(
         self, symbol: str, *, limit: int = 100
     ) -> AggTradeSnapshot:
+        validate_symbol(symbol)
+        validate_limit(limit, max_val=1000)
         payload = await self._call_public_http_json(
             "compressed_aggregate_trades_list",
             params={"symbol": symbol, "limit": limit},
@@ -1294,6 +1350,7 @@ class BinanceFuturesMarketData:
         page_limit: int,
         page_size: int,
     ) -> tuple[list[AggTrade], bool]:
+        validate_symbol(symbol)
         rows: list[AggTrade] = []
         pages = 0
         complete = True
@@ -1364,6 +1421,7 @@ class BinanceFuturesMarketData:
         return sorted_rows, complete
 
     async def fetch_funding_rate(self, symbol: str) -> float | None:
+        validate_symbol(symbol)
         now = time.monotonic()
         cached = self._funding_rate_cache.get(symbol)
         if cached is not None and now - cached[0] < 300:
@@ -1454,6 +1512,7 @@ class BinanceFuturesMarketData:
         return rows
 
     async def fetch_open_interest(self, symbol: str) -> float | None:
+        validate_symbol(symbol)
         now = time.monotonic()
         # Use extended TTL (10 min) for non-critical OI data
         cached = self._open_interest_cache.get(symbol)
@@ -1503,6 +1562,7 @@ class BinanceFuturesMarketData:
     async def fetch_open_interest_change(
         self, symbol: str, *, period: str = "1h"
     ) -> float | None:
+        validate_symbol(symbol)
         cache_key = (symbol, period)
         now = time.monotonic()
         cached = self._open_interest_change_cache.get(cache_key)
@@ -1566,6 +1626,7 @@ class BinanceFuturesMarketData:
     async def fetch_long_short_ratio(
         self, symbol: str, *, period: str = "1h"
     ) -> float | None:
+        validate_symbol(symbol)
         cache_key = (symbol, period)
         now = time.monotonic()
         cached = self._long_short_ratio_cache.get(cache_key)
@@ -1671,6 +1732,7 @@ class BinanceFuturesMarketData:
     async def fetch_top_position_ls_ratio(
         self, symbol: str, *, period: str = "1h"
     ) -> float | None:
+        validate_symbol(symbol)
         cache_key = (symbol, period)
         now = time.monotonic()
         cached = self._top_position_ls_ratio_cache.get(cache_key)
@@ -1729,6 +1791,7 @@ class BinanceFuturesMarketData:
     async def fetch_taker_ratio(
         self, symbol: str, *, period: str = "1h"
     ) -> float | None:
+        validate_symbol(symbol)
         """Fetch taker buy/sell volume ratio from /futures/data/takerlongshortRatio.
 
         Returns ratio > 1.0 means takers are net buyers (bullish aggression).
@@ -1778,6 +1841,7 @@ class BinanceFuturesMarketData:
     async def fetch_global_ls_ratio(
         self, symbol: str, *, period: str = "1h"
     ) -> float | None:
+        validate_symbol(symbol)
         """Fetch global long/short account ratio from /futures/data/globalLongShortAccountRatio.
 
         Unlike topLongShortAccountRatio (top traders only), this covers all accounts.
@@ -1851,6 +1915,8 @@ class BinanceFuturesMarketData:
     async def fetch_funding_rate_history(
         self, symbol: str, *, limit: int = 10
     ) -> list[dict]:
+        validate_symbol(symbol)
+        validate_limit(limit, max_val=100)
         """Fetch last `limit` funding rate records from /fapi/v1/fundingRate.
 
         Returns list of {fundingTime: int ms, fundingRate: float, markPrice: float},
@@ -1938,6 +2004,7 @@ class BinanceFuturesMarketData:
     async def fetch_basis(
         self, symbol: str, *, period: str = "1h", limit: int = 3
     ) -> float | None:
+        validate_symbol(symbol)
         """Fetch most recent basis (futures - index price as %) from /futures/data/basis.
 
         Returns basis as a percentage (positive = contango, negative = backwardation).

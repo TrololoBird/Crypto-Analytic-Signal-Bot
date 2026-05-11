@@ -227,7 +227,10 @@ class Signal:
         if self.risk_reward is None:
             risk = abs(self.entry_mid - self.stop)
             reward = abs(self.take_profit_1 - self.entry_mid)
-            computed = (reward / risk) if risk > 0 else 0.0
+            try:
+                computed = (reward / risk) if risk > 0 else 0.0
+            except ZeroDivisionError:
+                computed = 0.0
             object.__setattr__(self, "risk_reward", computed)
 
     @property
@@ -248,9 +251,12 @@ class Signal:
 
     @property
     def stop_distance_pct(self) -> float:
-        if self.entry_mid <= 0:
+        try:
+            if self.entry_mid <= 0:
+                return 0.0
+            return abs(self.entry_mid - self.stop) / self.entry_mid * 100.0
+        except ZeroDivisionError:
             return 0.0
-        return abs(self.entry_mid - self.stop) / self.entry_mid * 100.0
 
     @property
     def signal_key(self) -> str:
