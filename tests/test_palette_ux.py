@@ -2,7 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 from types import SimpleNamespace
 from bot.dashboard import BotDashboard
-from bot.config import BotSettings
+from bot.domain.config import BotSettings
 import threading
 from unittest.mock import MagicMock, AsyncMock
 

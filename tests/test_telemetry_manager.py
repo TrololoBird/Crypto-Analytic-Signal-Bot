@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 from bot.application.telemetry_manager import TelemetryManager
 from bot.core.engine import StrategyDecision
-from bot.models import Signal
+from bot.domain.schemas import Signal
 
 
 class _CaptureTelemetry:

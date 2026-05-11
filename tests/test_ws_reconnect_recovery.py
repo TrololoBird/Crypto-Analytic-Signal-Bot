@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from bot.config import WSConfig
+from bot.domain.config import WSConfig
 from bot.websocket import subscriptions as ws_subscriptions
 from bot.ws_manager import FuturesWSManager, MessageBuffer
 

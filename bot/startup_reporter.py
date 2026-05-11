@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from .config import BotSettings, load_settings
+from .domain.config import BotSettings, load_settings
 from .core.memory import MemoryRepository
 from .journal import build_config_suggestions
 from .messaging import TelegramBroadcaster

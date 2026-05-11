@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from bot.config import BotSettings
+from bot.domain.config import BotSettings
 from bot.market_regime import MarketRegimeAnalyzer
 from bot.regime.composite_regime import CompositeRegimeAnalyzer
 

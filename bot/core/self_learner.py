@@ -27,7 +27,7 @@ except ImportError:
 
 if TYPE_CHECKING:
     from .engine import StrategyRegistry
-    from ..config import BotSettings
+    from ..domain.config import BotSettings
 
 LOG = logging.getLogger("bot.core.self_learner")
 

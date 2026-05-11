@@ -13,7 +13,7 @@ from bot.features import (
     _swing_points,
 )
 from bot.market_regime import MarketRegimeAnalyzer
-from bot.models import Signal
+from bot.domain.schemas import Signal
 from bot.strategies import STRATEGY_CLASSES
 from bot.analytics import StrategyAnalytics
 from types import SimpleNamespace

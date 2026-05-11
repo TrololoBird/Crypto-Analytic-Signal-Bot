@@ -8,7 +8,7 @@ from typing import Any, Literal, cast
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from .secrets import load_secrets
+from ..secrets import load_secrets
 
 
 class RuntimeConfig(BaseModel):

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from bot.config import BotSettings, load_settings
+from bot.domain.config import BotSettings, load_settings
 from bot.strategies import STRATEGY_CLASSES
 from bot.strategy_asset_fit import (
     ASSET_FIT_PROFILES,

@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
 from bot.market_data import BinanceFuturesMarketData
-from bot.models import UniverseSymbol
+from bot.domain.schemas import UniverseSymbol
 
 if TYPE_CHECKING:
     from bot.application.bot import SignalBot

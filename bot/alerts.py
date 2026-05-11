@@ -6,9 +6,9 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
-from .config import AlertConfig, BotSettings
+from .domain.config import AlertConfig, BotSettings
 from .messaging import DeliveryResult, MessageBroadcaster
-from .models import PreparedSymbol, Signal
+from .domain.schemas import PreparedSymbol, Signal
 from .telemetry import TelemetryStore
 
 LOG = logging.getLogger("bot.alerts")

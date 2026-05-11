@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from ..market_data import BinanceFuturesMarketData
-from ..models import UniverseSymbol
+from ..domain.schemas import UniverseSymbol
 from ..universe import build_shortlist, rerank_shortlist
 
 UTC = timezone.utc

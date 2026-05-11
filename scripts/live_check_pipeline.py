@@ -19,10 +19,10 @@ from common import (
 bootstrap_repo_path()
 
 from bot.application.bot import SignalBot
-from bot.config import load_settings
+from bot.domain.config import load_settings
 from bot.market_data import BinanceFuturesMarketData, MarketDataUnavailable
 from bot.messaging import DeliveryResult
-from bot.models import SymbolFrames, UniverseSymbol
+from bot.domain.schemas import SymbolFrames, UniverseSymbol
 from bot.telemetry import TelemetryStore
 
 

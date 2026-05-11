@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from bot.config import BotSettings
+from bot.domain.config import BotSettings
 from bot.ml.filter import MLFilter
 from bot.ml.guardrails import evaluate_live_model_guardrail
 from bot.ml.signal_classifier import SignalClassifier

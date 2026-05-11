@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from bot.config import BotSettings, load_settings
+from bot.domain.config import BotSettings, load_settings
 
 
 def test_runtime_strategy_executor_settings_are_loaded(

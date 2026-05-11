@@ -4,7 +4,7 @@ import sqlite3
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
-from bot.config import BotSettings
+from bot.domain.config import BotSettings
 from bot.core.self_learner import SelfLearner
 from bot.learning import RegimeAwareParams, WalkForwardOptimizer
 from bot.learning.outcome_store import OutcomeStore
