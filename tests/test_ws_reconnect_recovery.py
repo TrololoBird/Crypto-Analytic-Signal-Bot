@@ -183,6 +183,34 @@ async def test_recovery_backfill_triggers_after_short_disconnect_when_cache_miss
 
 
 @pytest.mark.asyncio
+async def test_backfill_scheduler_deduplicates_symbol_while_in_flight() -> None:
+    manager = FuturesWSManager(rest_client=SimpleNamespace(), config=WSConfig())
+    release = asyncio.Event()
+    calls: list[tuple[str, ...]] = []
+
+    async def _backfill(symbols: list[str]) -> None:
+        calls.append(tuple(symbols))
+        await release.wait()
+
+    manager._backfill = _backfill  # type: ignore[method-assign]
+
+    first = manager._schedule_backfill(["BTCUSDT"], name="test:first")
+    second = manager._schedule_backfill(["BTCUSDT"], name="test:second")
+    await asyncio.sleep(0)
+
+    assert first is not None
+    assert second is None
+    assert calls == [("BTCUSDT",)]
+
+    release.set()
+    await first
+
+    third = manager._schedule_backfill(["BTCUSDT"], name="test:third")
+    assert third is not None
+    await third
+
+
+@pytest.mark.asyncio
 async def test_reconnect_callback_fires_only_after_first_connect() -> None:
     reconnect_cb = AsyncMock()
     manager = SimpleNamespace(

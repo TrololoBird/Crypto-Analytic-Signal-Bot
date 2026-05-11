@@ -67,6 +67,19 @@ def _primary_freshness_window(
     return "15m", timedelta(minutes=settings.filters.freshness_15m_minutes)
 
 
+def _frame_for_timeframe(
+    prepared: PreparedSymbol,
+    timeframe: str,
+) -> pl.DataFrame | None:
+    if timeframe == "5m":
+        return prepared.work_5m
+    if timeframe == "1h":
+        return prepared.work_1h
+    if timeframe == "4h":
+        return prepared.work_4h
+    return prepared.work_15m
+
+
 def _frame_is_fresh(frame: pl.DataFrame, max_age: timedelta) -> bool:
     if frame.is_empty() or "close_time" not in frame.columns:
         return False
@@ -149,7 +162,8 @@ def apply_global_filters(
     primary_timeframe, primary_freshness = _primary_freshness_window(prepared, settings)
     if deep_analysis_asset:
         passed.append("deep_analysis_policy")
-    if not _frame_is_fresh(prepared.work_15m, primary_freshness):
+    primary_frame = _frame_for_timeframe(prepared, primary_timeframe)
+    if primary_frame is None or not _frame_is_fresh(primary_frame, primary_freshness):
         return _reject(f"stale_{primary_timeframe}", base)
     passed.append(
         "fresh_15m"

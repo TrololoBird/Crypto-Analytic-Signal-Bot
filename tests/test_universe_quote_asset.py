@@ -144,3 +144,40 @@ def test_build_shortlist_prefers_fresh_tight_symbol_with_same_liquidity() -> Non
     assert shortlist[1].shortlist_score is not None
     assert shortlist[0].shortlist_score > shortlist[1].shortlist_score
     assert shortlist[0].seed_source == "ws_light"
+
+
+def test_build_shortlist_fills_bucket_targets_before_strategy_reserve(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    setup_ids = tuple(f"setup_{idx}" for idx in range(10))
+    settings = _settings(quote_asset="USDT")
+    settings.universe.dynamic_limit = 12
+    settings.universe.shortlist_limit = 6
+
+    def _all_strategy_fits(*_args, **_kwargs) -> tuple[str, ...]:
+        return setup_ids
+
+    monkeypatch.setattr("bot.universe._ALL_SETUP_IDS", setup_ids)
+    monkeypatch.setattr("bot.universe._strategy_fits_for_row", _all_strategy_fits)
+
+    metas = [
+        _meta(f"COIN{idx}USDT", f"COIN{idx}", "USDT")
+        for idx in range(settings.universe.dynamic_limit)
+    ]
+    tickers = [
+        {
+            "symbol": meta.symbol,
+            "quote_volume": 50_000_000.0 - (idx * 1_000_000.0),
+            "last_price": 100.0,
+            "price_change_percent": (0.5, 4.0, 9.0)[idx % 3],
+        }
+        for idx, meta in enumerate(metas)
+    ]
+
+    shortlist, summary = build_shortlist(metas, tickers, settings)
+
+    assert len(shortlist) == settings.universe.shortlist_limit
+    assert summary["trend"] > 0
+    assert summary["breakout"] > 0
+    assert summary["reversal"] > 0
+    assert summary["strategy_seed"] < settings.universe.shortlist_limit

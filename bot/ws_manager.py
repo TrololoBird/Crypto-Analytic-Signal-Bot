@@ -314,6 +314,7 @@ class FuturesWSManager:
         self._message_buffer = MessageBuffer(maxsize=10000)
         self._buffer_processor_task: asyncio.Task[None] | None = None
         self._backfill_tasks: set[asyncio.Task[None]] = set()
+        self._backfill_symbols_inflight: set[str] = set()
         self._stale_event_drop_count: int = 0
 
         # P3: Per-stream latency monitoring
@@ -396,6 +397,34 @@ class FuturesWSManager:
 
         task.add_done_callback(_done)
 
+    def _schedule_backfill(
+        self,
+        symbols: list[str],
+        *,
+        name: str,
+    ) -> asyncio.Task[None] | None:
+        scheduled_symbols = [
+            symbol
+            for symbol in self._normalize_symbol_list(symbols)
+            if symbol not in self._backfill_symbols_inflight
+        ]
+        if not scheduled_symbols:
+            return None
+
+        self._backfill_symbols_inflight.update(scheduled_symbols)
+
+        async def _run_backfill() -> None:
+            try:
+                await self._backfill(scheduled_symbols)
+            finally:
+                self._backfill_symbols_inflight.difference_update(scheduled_symbols)
+
+        task = asyncio.create_task(_run_backfill(), name=name)
+        self._backfill_tasks.add(task)
+        task.add_done_callback(self._backfill_tasks.discard)
+        self._attach_task_logging(task, label=name)
+        return task
+
     async def start(self, symbols: list[str]) -> None:
         """Start the WebSocket manager with the given symbols.
 
@@ -430,11 +459,7 @@ class FuturesWSManager:
         )
 
         if self._symbols:
-            task = asyncio.create_task(
-                self._backfill(self._symbols), name="ws_backfill_initial"
-            )
-            self._backfill_tasks.add(task)
-            task.add_done_callback(self._backfill_tasks.discard)
+            self._schedule_backfill(self._symbols, name="ws_backfill_initial")
 
     async def stop(self) -> None:
         """Stop the WebSocket manager and close all connections."""
@@ -702,21 +727,17 @@ class FuturesWSManager:
                 list(self._active_endpoint_classes()),
             )
             if new_symbols:
-                task = asyncio.create_task(
-                    self._backfill(new_symbols),
+                self._schedule_backfill(
+                    new_symbols,
                     name=f"ws_backfill_subscribe:{len(new_symbols)}",
                 )
-                self._backfill_tasks.add(task)
-                task.add_done_callback(self._backfill_tasks.discard)
             return
 
         if new_symbols:
-            task = asyncio.create_task(
-                self._backfill(new_symbols),
+            self._schedule_backfill(
+                new_symbols,
                 name=f"ws_backfill_subscribe:{len(new_symbols)}",
             )
-            self._backfill_tasks.add(task)
-            task.add_done_callback(self._backfill_tasks.discard)
 
     def _base_streams_for_symbols(self, symbols: list[str]) -> list[str]:
         return ws_subscriptions.base_streams_for_symbols(self, symbols)
@@ -1584,8 +1605,8 @@ class FuturesWSManager:
                         row["time"],
                         missed,
                     )
-                    asyncio.create_task(
-                        self._backfill([symbol]),
+                    self._schedule_backfill(
+                        [symbol],
                         name=f"gap_backfill:{symbol}:{interval}",
                     )
             deq.append(row)

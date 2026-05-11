@@ -43,6 +43,13 @@ def test_funding_history_uses_public_request_limiter() -> None:
     assert client._estimate_weight("funding_rate_history") == 1
 
 
+def test_taker_ratio_endpoint_uses_documented_camel_case_path() -> None:
+    client = BinanceFuturesMarketData()
+    spec = client._endpoint_spec("taker_long_short_ratio")
+
+    assert spec.path == "/futures/data/takerLongShortRatio"
+
+
 def test_public_context_cache_accessors_do_not_make_rest_calls() -> None:
     client = BinanceFuturesMarketData()
     now = time.monotonic()
@@ -104,7 +111,7 @@ async def test_http_session_uses_connector_limit_matching_rest_semaphore() -> No
     session = await client._get_http_session()
     try:
         assert session.connector is not None
-        assert session.connector.limit == 5
+        assert session.connector.limit == 50
     finally:
         await client.close()
 

@@ -251,10 +251,20 @@ def min_required_bars(
 
 
 def has_minimum_bars(frames: SymbolFrames, *, minimums: dict[str, int]) -> bool:
-    return (
-        frames.df_15m.height >= minimums["15m"]
-        and frames.df_1h.height >= minimums["1h"]
-    )
+    frame_by_timeframe = {
+        "5m": frames.df_5m,
+        "15m": frames.df_15m,
+        "1h": frames.df_1h,
+        "4h": frames.df_4h,
+    }
+    for timeframe, frame in frame_by_timeframe.items():
+        required = int(minimums.get(timeframe, 0) or 0)
+        if required <= 0:
+            continue
+        available = 0 if frame is None else frame.height
+        if available < required:
+            return False
+    return True
 
 
 # ---------------------------------------------------------------------------

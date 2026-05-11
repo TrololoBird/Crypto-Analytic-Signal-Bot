@@ -8,9 +8,11 @@ from bot.features import (
     _FrameCache,
     _bollinger_bands,
     _cached_prepare_frame,
+    has_minimum_bars,
     _prepare_frame,
     _vwap,
 )
+from bot.domain.schemas import SymbolFrames
 
 
 def _ohlcv(rows: int = 260, *, end_time: datetime | None = None) -> pl.DataFrame:
@@ -118,3 +120,20 @@ def test_cached_prepare_frame_distinguishes_same_close_time_with_different_histo
 
     assert short_prepared.height != long_prepared.height
     assert long_prepared.height == _prepare_frame(long_frame).height
+
+
+def test_has_minimum_bars_rejects_short_context_frames() -> None:
+    frames = SymbolFrames(
+        symbol="BTCUSDT",
+        df_1h=_ohlcv(210),
+        df_15m=_ohlcv(210),
+        bid_price=100.0,
+        ask_price=100.1,
+        df_5m=_ohlcv(95),
+        df_4h=_ohlcv(209),
+    )
+
+    assert not has_minimum_bars(
+        frames,
+        minimums={"15m": 210, "1h": 210, "5m": 96, "4h": 210},
+    )

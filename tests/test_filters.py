@@ -49,6 +49,7 @@ def _prepared(
     minutes_ago_15m: int = 5,
     minutes_ago_1h: int = 30,
     minutes_ago_4h: int = 120,
+    primary_timeframe: str = "15m",
 ) -> PreparedSymbol:
     universe = UniverseSymbol(
         symbol="BTCUSDT",
@@ -71,6 +72,7 @@ def _prepared(
         spread_bps=5.0,
         mark_price=100.0,
         ticker_price=100.0,
+        primary_timeframe=primary_timeframe,
     )
 
 
@@ -109,6 +111,23 @@ def test_apply_global_filters_rejects_stale_15m() -> None:
 
     assert accepted is False
     assert reason == "stale_15m"
+
+
+def test_apply_global_filters_checks_freshness_on_primary_timeframe() -> None:
+    accepted, _updated, reason, _scoring, details = apply_global_filters(
+        _signal(),
+        _prepared(
+            minutes_ago_15m=60 * 24,
+            minutes_ago_1h=30,
+            primary_timeframe="1h",
+        ),
+        _settings(),
+        _ConfluenceStub(),
+    )
+
+    assert accepted is True
+    assert reason is None
+    assert details is None
 
 
 def test_apply_global_filters_rejects_stale_4h() -> None:

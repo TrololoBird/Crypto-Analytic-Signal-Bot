@@ -603,22 +603,6 @@ def build_shortlist(
         ),
     }
 
-    for setup_id in _ALL_SETUP_IDS:
-        if len(shortlist) >= settings.universe.shortlist_limit:
-            break
-        candidates = [
-            candidate
-            for candidate in dynamic_pool
-            if candidate.symbol not in seen and setup_id in candidate.strategy_fits
-        ]
-        candidates.sort(key=lambda item: item.quote_volume, reverse=True)
-        for cand_row in candidates[:_RESERVED_PER_STRATEGY]:
-            shortlist.append(cand_row)
-            seen.add(cand_row.symbol)
-            summary["strategy_seed"] = cast(int, summary["strategy_seed"]) + 1
-            if len(shortlist) >= settings.universe.shortlist_limit:
-                break
-
     for b_name in ("trend", "breakout", "reversal"):
         for b_row in bucket_pool[b_name]:
             if (
@@ -633,6 +617,30 @@ def build_shortlist(
             shortlist.append(b_row)
             seen.add(b_row.symbol)
             summary[b_name] = cast(int, summary[b_name]) + 1
+
+    for setup_id in _ALL_SETUP_IDS:
+        if len(shortlist) >= settings.universe.shortlist_limit:
+            break
+        candidates = [
+            candidate
+            for candidate in dynamic_pool
+            if candidate.symbol not in seen and setup_id in candidate.strategy_fits
+        ]
+        candidates.sort(
+            key=lambda item: (
+                item.shortlist_score or 0.0,
+                _bucket_priority(item)[0],
+                item.quote_volume,
+                item.symbol,
+            ),
+            reverse=True,
+        )
+        for cand_row in candidates[:_RESERVED_PER_STRATEGY]:
+            shortlist.append(cand_row)
+            seen.add(cand_row.symbol)
+            summary["strategy_seed"] = cast(int, summary["strategy_seed"]) + 1
+            if len(shortlist) >= settings.universe.shortlist_limit:
+                break
 
     for dy_row in dynamic_pool:
         if len(shortlist) >= settings.universe.shortlist_limit:

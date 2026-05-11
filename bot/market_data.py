@@ -43,6 +43,7 @@ _REST_GLOBAL_SEMAPHORE = asyncio.Semaphore(5)
 _FUTURES_DATA_IP_LIMIT_WINDOW_S = 300.0
 _FUTURES_DATA_IP_LIMIT_OFFICIAL_MAX = 1000
 _FUTURES_DATA_IP_LIMIT_DEFAULT = 300
+_HTTP_CONNECTOR_LIMIT = 50
 
 # Cache TTL settings for graceful degradation (seconds)
 _CACHE_TTL = {
@@ -137,7 +138,7 @@ _PUBLIC_ENDPOINT_REGISTRY: dict[str, _PublicEndpointSpec] = {
         "/futures/data/globalLongShortAccountRatio", ip_limited=True
     ),
     "taker_long_short_ratio": _PublicEndpointSpec(
-        "/futures/data/takerlongshortRatio", ip_limited=True
+        "/futures/data/takerLongShortRatio", ip_limited=True
     ),
     "basis": _PublicEndpointSpec("/futures/data/basis", ip_limited=True),
 }
@@ -975,7 +976,7 @@ class BinanceFuturesMarketData:
         session = self._http_session
         if session is None or session.closed:
             timeout = aiohttp.ClientTimeout(total=self._rest_timeout)
-            connector = aiohttp.TCPConnector(limit=5)
+            connector = aiohttp.TCPConnector(limit=_HTTP_CONNECTOR_LIMIT)
             self._http_session = aiohttp.ClientSession(
                 timeout=timeout,
                 connector=connector,
