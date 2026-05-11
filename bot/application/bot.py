@@ -24,18 +24,21 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
 
-from ..domain.config import BotSettings
-from ..core.events import BookTickerEvent, KlineCloseEvent, ReconnectEvent
-from ..core.engine import StrategyDecision, StrategyRegistry
-from ..feature_flags import FeatureFlags
-from ..market_data import BinanceFuturesMarketData
-from ..domain.schemas import (
+from ..domain import (
+    BotSettings,
+    BookTickerEvent,
+    KlineCloseEvent,
+    ReconnectEvent,
     PreparedSymbol,
     Signal,
     SymbolFrames,
     UniverseSymbol,
     PipelineResult,
+    StrategyDecision,
 )
+from ..core.engine import StrategyRegistry
+from ..feature_flags import FeatureFlags
+from ..market_data import BinanceFuturesMarketData
 from ..monitor_bot import HealthMonitor
 from ..setup_base import SetupParams
 from ..strategies import STRATEGY_CLASSES

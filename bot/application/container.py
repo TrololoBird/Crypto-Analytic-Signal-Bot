@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from ..alerts import AlertCoordinator
-from ..domain.config import BotSettings
+from ..domain import BotSettings
 from ..core.engine import SignalEngine, StrategyRegistry
 from ..core.event_bus import EventBus
 from ..core.memory import MemoryRepository
