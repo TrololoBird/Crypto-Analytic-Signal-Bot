@@ -94,12 +94,8 @@ class BotDashboard:
 
         @self.app.get("/api/signals/recent")
         async def recent_signals(limit: int = 20) -> list[dict[str, Any]]:
-            try:
-                limit = max(1, min(int(limit), 100))
-                return self._get_recent_signals(limit)
-            except Exception as exc:
-                LOG.error("dashboard api recent signals error: %s", exc)
-                return []
+            limit = max(1, min(int(limit), 100))
+            return self._get_recent_signals(limit)
 
         @self.app.get("/api/market/regime")
         async def market_regime() -> dict[str, Any]:
@@ -584,8 +580,7 @@ class BotDashboard:
                 <h2>Recent Activity</h2>
                 <div id="recent-activity">
                     <div class="empty-state">
-                        <div class="empty-state-icon">Activity</div>
-                        <p>No recent activity</p>
+                        <p>Loading recent activity...</p>
                     </div>
                 </div>
             </div>
@@ -595,8 +590,7 @@ class BotDashboard:
         <div id="tab-panel-signals" class="tab-content" role="tabpanel" aria-labelledby="tab-btn-signals" aria-hidden="true">
             <div id="active-signals-list">
                 <div class="empty-state">
-                    <div class="empty-state-icon">Radio</div>
-                    <p>No active signals</p>
+                    <p>Loading active signals...</p>
                 </div>
             </div>
         </div>
@@ -656,27 +650,51 @@ class BotDashboard:
     </div>
     
     <script>
-        // Tab switching
-        document.querySelectorAll('.nav-tab').forEach(tab => {
-            tab.addEventListener('click', () => {
-                const tabs = document.querySelectorAll('.nav-tab');
-                const panels = document.querySelectorAll('.tab-content');
+        // Tab switching logic
+        function switchTab(tabId) {
+            const tabs = document.querySelectorAll('.nav-tab');
+            const panels = document.querySelectorAll('.tab-content');
+            const selectedTab = document.querySelector(`[data-tab="${tabId}"]`);
 
-                tabs.forEach(t => {
-                    t.classList.remove('active');
-                    t.setAttribute('aria-selected', 'false');
-                });
-                panels.forEach(p => {
-                    p.classList.remove('active');
-                    p.setAttribute('aria-hidden', 'true');
-                });
+            if (!selectedTab) return;
 
-                tab.classList.add('active');
-                tab.setAttribute('aria-selected', 'true');
-                const activePanel = document.getElementById('tab-panel-' + tab.dataset.tab);
-                activePanel.classList.add('active');
-                activePanel.setAttribute('aria-hidden', 'false');
+            tabs.forEach(t => {
+                t.classList.remove('active');
+                t.setAttribute('aria-selected', 'false');
             });
+            panels.forEach(p => {
+                p.classList.remove('active');
+                p.setAttribute('aria-hidden', 'true');
+            });
+
+            selectedTab.classList.add('active');
+            selectedTab.setAttribute('aria-selected', 'true');
+            const activePanel = document.getElementById('tab-panel-' + tabId);
+            activePanel.classList.add('active');
+            activePanel.setAttribute('aria-hidden', 'false');
+
+            // Persist tab in URL
+            window.location.hash = tabId;
+
+            // Trigger immediate refresh for the relevant data
+            if (tabId === 'overview') { fetchStatus(); fetchRecentActivity(); }
+            if (tabId === 'signals') fetchSignals();
+            if (tabId === 'analytics') fetchAnalytics();
+            if (tabId === 'settings') fetchStrategies();
+        }
+
+        document.querySelectorAll('.nav-tab').forEach(tab => {
+            tab.addEventListener('click', () => switchTab(tab.dataset.tab));
+        });
+
+        // Handle initial load and back/forward navigation
+        window.addEventListener('load', () => {
+            const hash = window.location.hash.replace('#', '') || 'overview';
+            switchTab(hash);
+        });
+        window.addEventListener('hashchange', () => {
+            const hash = window.location.hash.replace('#', '');
+            if (hash) switchTab(hash);
         });
         
         // Keyboard shortcuts
@@ -714,6 +732,14 @@ class BotDashboard:
                 if (v >= 0.75) return { text: (v * 100).toFixed(0) + '%', class: 'score-high' };
                 if (v >= 0.60) return { text: (v * 100).toFixed(0) + '%', class: 'score-medium' };
                 return { text: (v * 100).toFixed(0) + '%', class: 'score-low' };
+            },
+            timeAgo: (v) => {
+                if (!v) return '-';
+                const seconds = Math.floor((new Date() - new Date(v)) / 1000);
+                if (seconds < 60) return seconds + 's';
+                if (seconds < 3600) return Math.floor(seconds / 60) + 'm';
+                if (seconds < 86400) return Math.floor(seconds / 3600) + 'h';
+                return Math.floor(seconds / 86400) + 'd';
             }
         };
 
@@ -730,6 +756,7 @@ class BotDashboard:
         async function fetchStatus() {
             try {
                 const res = await fetch('/api/status');
+                if (!res.ok) throw new Error('Status fetch failed');
                 const data = await res.json();
                 
                 // Update status badge
@@ -754,15 +781,19 @@ class BotDashboard:
                 document.getElementById('last-update').textContent = 'Last update: ' + new Date().toLocaleTimeString();
             } catch (err) {
                 console.error('Failed to fetch status:', err);
+                const badge = document.getElementById('status-badge');
+                badge.textContent = 'Error';
+                badge.className = 'status-badge offline';
             }
         }
         
         // Fetch active signals
         async function fetchSignals() {
+            const container = document.getElementById('active-signals-list');
             try {
                 const res = await fetch('/api/signals/active');
+                if (!res.ok) throw new Error('Signals fetch failed');
                 const data = await res.json();
-                const container = document.getElementById('active-signals-list');
                 
                 if (data.length === 0) {
                     container.innerHTML = `
@@ -804,15 +835,17 @@ class BotDashboard:
                 }).join('');
             } catch (err) {
                 console.error('Failed to fetch signals:', err);
+                container.innerHTML = `<div class="empty-state"><p style="color: var(--accent-red)">Failed to load signals</p></div>`;
             }
         }
 
         // Fetch recent activity
         async function fetchRecentActivity() {
+            const container = document.getElementById('recent-activity');
             try {
                 const res = await fetch('/api/signals/recent?limit=10');
+                if (!res.ok) throw new Error('Activity fetch failed');
                 const data = await res.json();
-                const container = document.getElementById('recent-activity');
 
                 if (!Array.isArray(data) || data.length === 0) {
                     container.innerHTML = `
@@ -826,15 +859,17 @@ class BotDashboard:
                 container.innerHTML = data.map(s => {
                     const score = fmt.score(s.score);
                     const when = s.ts || s.created_at || '';
+                    const timeStr = when ? ` <small style="opacity: 0.5">(${fmt.timeAgo(when)})</small>` : '';
                     return `
                         <div class="metric-row">
-                            <span class="metric-label">${s.symbol || '-'} ${s.setup_id || ''} ${s.direction || ''}</span>
+                            <span class="metric-label">${s.symbol || '-'} ${s.setup_id || ''} ${s.direction || ''}${timeStr}</span>
                             <span class="metric-value ${score.class}" title="${when}">${score.text}</span>
                         </div>
                     `;
                 }).join('');
             } catch (err) {
                 console.error('Failed to fetch recent activity:', err);
+                container.innerHTML = `<div class="empty-state"><p style="color: var(--accent-red)">Failed to load activity</p></div>`;
             }
         }
         
@@ -1066,7 +1101,13 @@ class BotDashboard:
         try:
             with candidates_file.open("r", encoding="utf-8") as handle:
                 lines = handle.readlines()
-            for line in reversed(lines[-limit:]):
+
+            # Ensure we don't use negative or zero slice in a way that returns all lines
+            if limit <= 0:
+                return []
+
+            target_lines = lines[-limit:]
+            for line in reversed(target_lines):
                 if line.strip():
                     signals.append(json.loads(line))
         except Exception as exc:
