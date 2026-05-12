@@ -57,18 +57,40 @@ def wilder_mean(
     """Wilder running average seeded with a simple mean over the first window."""
     size = len(series)
     period = max(1, int(period))
-    values = [finite_float(value) for value in series.to_list()]
-    output: list[float | None] = [None] * size
     seed_end = int(seed_offset) + period
     if size < seed_end:
-        return pl.Series(name, output, dtype=pl.Float64)
+        return pl.Series(name, [None] * size, dtype=pl.Float64)
 
-    average = sum(values[seed_offset:seed_end]) / period
-    output[seed_end - 1] = average
-    for idx in range(seed_end, size):
-        average = ((average * (period - 1)) + values[idx]) / period
-        output[idx] = average
-    return pl.Series(name, output, dtype=pl.Float64)
+    # Vectorized Wilder: use ewm_mean with alpha=1/period, seeded with SMA
+    # Replace non-finite values to ensure stability, matching finite_float behavior
+    clean_series = (
+        series.replace([float("inf"), float("-inf")], None)
+        .fill_nan(0.0)
+        .fill_null(0.0)
+        .cast(pl.Float64)
+    )
+
+    # Compute seeding SMA
+    sma = clean_series.slice(seed_offset, period).mean()
+    if sma is None:
+        sma = 0.0
+
+    # Construct input for EWM: seed value followed by subsequent raw values
+    subsequent = clean_series.slice(seed_end, size - seed_end)
+    ewm_input = pl.concat([pl.Series([sma], dtype=pl.Float64), subsequent])
+
+    # Wilder smoothing is exactly ewm(alpha=1/period, adjust=False)
+    ewm_output = ewm_input.ewm_mean(alpha=1.0 / period, adjust=False)
+
+    # Align with original series length by prepending nulls
+    result = pl.concat(
+        [
+            pl.Series([None] * (seed_end - 1), dtype=pl.Float64),
+            ewm_output,
+        ]
+    )
+
+    return result.rename(name)
 
 
 def true_range(df: pl.DataFrame, *, name: str = "true_range") -> pl.Series:
