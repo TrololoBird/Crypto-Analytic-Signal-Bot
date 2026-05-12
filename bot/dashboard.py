@@ -278,11 +278,31 @@ class BotDashboard:
 
         # Quick count without full fetch
         open_signals_count = 0
+        market_context: dict[str, Any] = {}
         try:
             stats = await asyncio.wait_for(bot._modern_repo.get_tracking_stats(), timeout=1.0)
             open_signals_count = stats.get("active", 0)
         except Exception:
             pass
+        try:
+            get_market_context = getattr(bot._modern_repo, "get_market_context", None)
+            if callable(get_market_context):
+                market_context = await asyncio.wait_for(get_market_context(), timeout=1.0)
+        except Exception:
+            market_context = {}
+
+        last_cycle = getattr(bot, "last_cycle_summary", {}) or {}
+        delivery_counts = last_cycle.get("delivery_status_counts", {})
+        if not isinstance(delivery_counts, dict):
+            delivery_counts = {}
+        selected_count = int(
+            last_cycle.get("selected_signals", last_cycle.get("selected", 0)) or 0
+        )
+        delivered_count = int(
+            last_cycle.get("delivered_signals", last_cycle.get("delivered", 0)) or 0
+        )
+        notifiers = getattr(getattr(bot, "settings", None), "notifiers", None)
+        notifier_provider = str(getattr(notifiers, "provider", "unknown"))
 
         return {
             "running": not bot._shutdown.is_set() if hasattr(bot, "_shutdown") else False,
@@ -291,6 +311,11 @@ class BotDashboard:
             "ws_latency_ms": ws_lag,
             "market_regime": getattr(regime, "regime", "unknown") if regime else "unknown",
             "market_strength": getattr(regime, "strength", 0.0) if regime else 0.0,
+            "btc_bias": market_context.get("btc_bias", "neutral"),
+            "delivery_provider": notifier_provider,
+            "last_cycle_selected": selected_count,
+            "last_cycle_delivered": delivered_count,
+            "last_cycle_delivery_status_counts": delivery_counts,
             "timestamp": datetime.now(UTC).isoformat(),
         }
 
@@ -339,15 +364,40 @@ class BotDashboard:
             return []
 
         telemetry_dir = bot.settings.telemetry_dir
-        signals: list[dict[str, Any]] = []
+        selected_file = self._latest_analysis_file(telemetry_dir, "selected.jsonl")
+        selected_rows = self._read_recent_jsonl(selected_file, limit=limit * 4)
+        if selected_rows:
+            out: list[dict[str, Any]] = []
+            for row in selected_rows[:limit]:
+                enriched = dict(row)
+                enriched["source"] = "selected"
+                enriched["delivery_status"] = "sent"
+                out.append(enriched)
+            return out
+
+        delivery_file = self._latest_analysis_file(telemetry_dir, "delivery.jsonl")
+        delivery_rows = self._read_recent_jsonl(delivery_file, limit=limit * 4)
+        if delivery_rows:
+            out = []
+            for row in delivery_rows[:limit]:
+                enriched = dict(row)
+                enriched["source"] = "delivery"
+                enriched["delivery_status"] = enriched.get("delivery_status") or enriched.get(
+                    "status", "unknown"
+                )
+                out.append(enriched)
+            return out
 
         candidates_file = self._latest_analysis_file(telemetry_dir, "candidates.jsonl")
-        if candidates_file is None:
-            return signals
+        candidates = self._read_recent_jsonl(candidates_file, limit=limit * 80)
+        return self._aggregate_recent_candidates(candidates, limit=limit)
 
+    def _read_recent_jsonl(self, path: Path | None, *, limit: int) -> list[dict[str, Any]]:
+        if path is None or limit <= 0:
+            return []
+        rows: list[dict[str, Any]] = []
         try:
-            # Efficiently read only the last N lines of the file
-            with candidates_file.open("rb") as handle:
+            with path.open("rb") as handle:
                 try:
                     handle.seek(0, 2)
                     size = handle.tell()
@@ -364,21 +414,92 @@ class BotDashboard:
 
                     lines = data.decode("utf-8", errors="ignore").splitlines()
                     for line in reversed(lines):
-                        if line.strip():
-                            signals.append(json.loads(line))
-                            if len(signals) >= limit:
-                                break
+                        if not line.strip():
+                            continue
+                        try:
+                            rows.append(json.loads(line))
+                        except json.JSONDecodeError:
+                            continue
+                        if len(rows) >= limit:
+                            break
                 except (IOError, ValueError):
-                    # Fallback to simple read if seeking fails
                     handle.seek(0)
                     lines = handle.read().decode("utf-8", errors="ignore").splitlines()
                     for line in reversed(lines[-limit:]):
-                        if line.strip():
-                            signals.append(json.loads(line))
+                        if not line.strip():
+                            continue
+                        try:
+                            rows.append(json.loads(line))
+                        except json.JSONDecodeError:
+                            continue
         except Exception as exc:
-            LOG.debug("failed to read recent candidates: %s", exc)
+            LOG.debug("failed to read telemetry file %s: %s", path, exc)
+        return rows
 
-        return signals
+    def _aggregate_recent_candidates(
+        self, rows: list[dict[str, Any]], *, limit: int
+    ) -> list[dict[str, Any]]:
+        if not rows:
+            return []
+
+        groups: dict[tuple[str, str, str, float, str], dict[str, Any]] = {}
+        ordered_keys: list[tuple[str, str, str, float, str]] = []
+        for row in rows:
+            symbol = str(row.get("symbol") or "").strip().upper()
+            direction = str(row.get("direction") or "").strip().lower()
+            timeframe = str(row.get("timeframe") or "").strip().lower()
+            ts_value = str(row.get("ts") or row.get("created_at") or "")
+            ts_bucket = ts_value[:16] if len(ts_value) >= 16 else ts_value
+            price_raw = row.get("entry_reference_price")
+            if price_raw is None:
+                price_raw = row.get("entry_mid")
+            try:
+                price = round(float(price_raw), 3)
+            except (TypeError, ValueError):
+                price = 0.0
+            key = (symbol, direction, timeframe, price, ts_bucket)
+
+            grouped = groups.get(key)
+            if grouped is None:
+                base = dict(row)
+                base["confluence_setups"] = [str(row.get("setup_id") or "")]
+                base["source"] = "candidate_aggregate"
+                base["delivery_status"] = "candidate"
+                groups[key] = base
+                ordered_keys.append(key)
+                continue
+
+            setup_id = str(row.get("setup_id") or "")
+            setups = grouped.setdefault("confluence_setups", [])
+            if setup_id and setup_id not in setups:
+                setups.append(setup_id)
+            try:
+                row_score = float(row.get("score") or 0.0)
+                current_score = float(grouped.get("score") or 0.0)
+            except (TypeError, ValueError):
+                row_score = 0.0
+                current_score = 0.0
+            if row_score > current_score:
+                for field_name in (
+                    "setup_id",
+                    "score",
+                    "reasons",
+                    "tracking_id",
+                    "tracking_ref",
+                ):
+                    if field_name in row:
+                        grouped[field_name] = row[field_name]
+
+        out: list[dict[str, Any]] = []
+        for key in ordered_keys:
+            row = groups[key]
+            setups = [item for item in row.get("confluence_setups", []) if item]
+            row["confluence_setups"] = setups
+            row["confluence_count"] = len(setups)
+            out.append(row)
+            if len(out) >= limit:
+                break
+        return out
 
     def _latest_analysis_files(
         self,
@@ -990,6 +1111,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                         <span class="metric-label">Market Regime</span>
                         <span id="market" class="metric-value">-</span>
                     </div>
+                    <div class="metric-row">
+                        <span class="metric-label">Delivery Provider</span>
+                        <span id="delivery-provider" class="metric-value">-</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="metric-label">Last Cycle Delivery</span>
+                        <span id="last-cycle-delivery" class="metric-value">-</span>
+                    </div>
                 </div>
                 <div class="card">
                     <h2>Market Context</h2>
@@ -1157,7 +1286,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             }
             if (e.key >= '1' && e.key <= '4') {
                 const tabs = ['overview', 'signals', 'analytics', 'settings'];
-                document.querySelector(`[data-tab="${tabs[e.key - 1]}"]`).click();
+                const tabButton = document.querySelector(`[data-tab="${tabs[e.key - 1]}"]`);
+                if (tabButton) tabButton.click();
             }
             if (e.key === 'r' || e.key === 'R') {
                 fetchStatus();
@@ -1169,6 +1299,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         // Toast notifications
         function showToast(title, body) {
             const container = document.getElementById('toast-container');
+            if (!container) return;
             const toast = document.createElement('div');
             toast.className = 'toast';
             toast.innerHTML = `<div class="toast-title">${title}</div><div class="toast-body">${body}</div>`;
@@ -1177,14 +1308,25 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         }
         
         // Formatters
+        const finiteNumber = (v) => {
+            const n = Number(v);
+            return Number.isFinite(n) ? n : null;
+        };
         const fmt = {
-            price: (v) => v ? v.toFixed(4) : '-',
-            pct: (v) => v ? (v * 100).toFixed(1) + '%' : '-',
+            price: (v) => {
+                const n = finiteNumber(v);
+                return n === null ? '-' : n.toFixed(4);
+            },
+            pct: (v) => {
+                const n = finiteNumber(v);
+                return n === null ? '-' : (n * 100).toFixed(1) + '%';
+            },
             score: (v) => {
-                if (!v) return { text: '-', class: '' };
-                if (v >= 0.75) return { text: (v * 100).toFixed(0) + '%', class: 'score-high' };
-                if (v >= 0.60) return { text: (v * 100).toFixed(0) + '%', class: 'score-medium' };
-                return { text: (v * 100).toFixed(0) + '%', class: 'score-low' };
+                const n = finiteNumber(v);
+                if (n === null) return { text: '-', class: '' };
+                if (n >= 0.75) return { text: (n * 100).toFixed(0) + '%', class: 'score-high' };
+                if (n >= 0.60) return { text: (n * 100).toFixed(0) + '%', class: 'score-medium' };
+                return { text: (n * 100).toFixed(0) + '%', class: 'score-low' };
             },
             timeAgo: (v) => {
                 if (!v) return "-";
@@ -1221,29 +1363,52 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 
                 // Update status badge
                 const badge = document.getElementById('status-badge');
-                badge.textContent = data.running ? 'Online' : 'Offline';
-                badge.className = 'status-badge ' + (data.running ? 'online' : 'offline');
+                if (badge) {
+                    badge.textContent = data.running ? 'Online' : 'Offline';
+                    badge.className = 'status-badge ' + (data.running ? 'online' : 'offline');
+                }
                 
                 // Update metrics
-                document.getElementById('shortlist').textContent = data.shortlist_size;
-                document.getElementById('signals').textContent = data.open_signals;
-                document.getElementById('ws-latency').textContent = data.ws_latency_ms + ' ms';
+                const shortlistEl = document.getElementById('shortlist');
+                if (shortlistEl) shortlistEl.textContent = data.shortlist_size ?? '-';
+                const signalsEl = document.getElementById('signals');
+                if (signalsEl) signalsEl.textContent = data.open_signals ?? '-';
+                const wsLatencyEl = document.getElementById('ws-latency');
+                if (wsLatencyEl) wsLatencyEl.textContent = (data.ws_latency_ms ?? '-') + ' ms';
                 
                 const regimeEl = document.getElementById('market');
-                regimeEl.textContent = data.market_regime;
-                regimeEl.className = 'metric-value ' + (
-                    data.market_regime === 'bull' ? 'green' : 
-                    data.market_regime === 'bear' ? 'red' : 'yellow'
-                );
+                if (regimeEl) {
+                    regimeEl.textContent = data.market_regime || '-';
+                    regimeEl.className = 'metric-value ' + (
+                        data.market_regime === 'bull' ? 'green' :
+                        data.market_regime === 'bear' ? 'red' : 'yellow'
+                    );
+                }
                 
-                document.getElementById('market-strength').textContent = fmt.pct(data.market_strength);
+                const btcBiasEl = document.getElementById('btc-bias');
+                if (btcBiasEl) document.getElementById('btc-bias').textContent = data.btc_bias || '-';
+                const marketStrengthEl = document.getElementById('market-strength');
+                if (marketStrengthEl) marketStrengthEl.textContent = fmt.pct(data.market_strength);
+                const deliveryProviderEl = document.getElementById('delivery-provider');
+                if (deliveryProviderEl) deliveryProviderEl.textContent = data.delivery_provider || '-';
+                const lastCycleDeliveryEl = document.getElementById('last-cycle-delivery');
+                if (lastCycleDeliveryEl) {
+                    const selected = Number(data.last_cycle_selected || 0);
+                    const delivered = Number(data.last_cycle_delivered || 0);
+                    const statuses = data.last_cycle_delivery_status_counts || {};
+                    const tail = Object.keys(statuses).length ? ` | ${JSON.stringify(statuses)}` : '';
+                    lastCycleDeliveryEl.textContent = `${delivered}/${selected}${tail}`;
+                }
                 
-                document.getElementById('last-update').textContent = 'Last update: ' + new Date().toLocaleTimeString();
+                const lastUpdateEl = document.getElementById('last-update');
+                if (lastUpdateEl) lastUpdateEl.textContent = 'Last update: ' + new Date().toLocaleTimeString();
             } catch (err) {
                 console.error('Failed to fetch status:', err);
                 const badge = document.getElementById('status-badge');
-                badge.textContent = 'Error';
-                badge.className = 'status-badge offline';
+                if (badge) {
+                    badge.textContent = 'Error';
+                    badge.className = 'status-badge offline';
+                }
             }
         }
         
@@ -1320,9 +1485,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     const score = fmt.score(s.score);
                     const when = s.ts || s.created_at || '';
                     const timeStr = when ? ` <small style="opacity: 0.5">(${fmt.timeAgo(when)})</small>` : '';
+                    const confluence = Number(s.confluence_count || 0);
+                    const conflText = confluence > 1 ? ` x${confluence}` : '';
+                    const source = s.source || 'candidate';
+                    const status = s.delivery_status || source;
                     return `
                         <div class="metric-row">
-                            <span class="metric-label">${s.symbol || '-'} ${s.setup_id || ''} ${s.direction || ''}${timeStr}</span>
+                            <span class="metric-label">${s.symbol || '-'} ${s.setup_id || ''} ${s.direction || ''}${conflText}${timeStr}<br><small style="color: var(--text-secondary)">${status}</small></span>
                             <span class="metric-value ${score.class}" title="${when}">${score.text}</span>
                         </div>
                     `;
@@ -1518,7 +1687,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         let tick = 0;
         setInterval(() => {
             tick++;
-            const activeTab = document.querySelector(".nav-tab.active").dataset.tab;
+            const activeButton = document.querySelector(".nav-tab.active");
+            const activeTab = activeButton ? activeButton.dataset.tab : "overview";
 
             // Frequent updates (every 5s)
             fetchStatus();

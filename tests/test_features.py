@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+import threading
+import time
 
 import polars as pl
 
@@ -120,6 +122,34 @@ def test_cached_prepare_frame_distinguishes_same_close_time_with_different_histo
 
     assert short_prepared.height != long_prepared.height
     assert long_prepared.height == _prepare_frame(long_frame).height
+
+
+def test_frame_cache_get_does_not_block_when_lock_is_contended() -> None:
+    cache = _FrameCache(max_size=4)
+    key = ("BTCUSDT", "15m", 1, 1, 1, (100.0,), None)
+    frame = pl.DataFrame({"close": [100.0]})
+    cache.put(key, frame)
+    acquired = threading.Event()
+    release = threading.Event()
+
+    def hold_lock() -> None:
+        cache._lock.acquire()
+        try:
+            acquired.set()
+            release.wait(timeout=1.0)
+        finally:
+            cache._lock.release()
+
+    thread = threading.Thread(target=hold_lock)
+    thread.start()
+    assert acquired.wait(timeout=1.0)
+    started = time.monotonic()
+    try:
+        assert cache.get(key) is None
+        assert time.monotonic() - started < 0.1
+    finally:
+        release.set()
+        thread.join(timeout=1.0)
 
 
 def test_has_minimum_bars_rejects_short_context_frames() -> None:

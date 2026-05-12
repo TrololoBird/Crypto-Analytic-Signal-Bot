@@ -5,7 +5,10 @@ import argparse
 import asyncio
 from typing import Sequence
 
-from common import bootstrap_repo_path, configure_script_logging
+try:
+    from scripts.common import bootstrap_repo_path, configure_script_logging
+except ModuleNotFoundError:  # pragma: no cover - direct script execution
+    from common import bootstrap_repo_path, configure_script_logging
 
 bootstrap_repo_path()
 

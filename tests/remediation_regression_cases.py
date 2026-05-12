@@ -269,7 +269,7 @@ def make_runtime_settings(
             stop_loss_pause_hours=0,
             runtime_mode="signal_only",
         ),
-        filters=SimpleNamespace(cooldown_minutes=30),
+        filters=SimpleNamespace(cooldown_minutes=30, symbol_cooldown_minutes=120),
     )
 
 
@@ -1955,7 +1955,7 @@ async def test_parallel_strategy_rejections_keep_distinct_reason_codes() -> None
 
 
 @pytest.mark.asyncio
-async def test_engine_emits_strategy_routing_skips_for_shortlist_fit_exclusions() -> (
+async def test_engine_runs_all_enabled_strategies_for_shortlist_assets() -> (
     None
 ):
     class RoutedSetup(BaseSetup):
@@ -1971,18 +1971,21 @@ async def test_engine_emits_strategy_routing_skips_for_shortlist_fit_exclusions(
     class UnroutedSetup(BaseSetup):
         setup_id = "unrouted_setup"
         min_history_bars = 1
+        executed = False
 
         def get_optimizable_params(self, settings=None) -> dict[str, float]:
             return {}
 
         def detect(self, prepared: PreparedSymbol, settings):
-            raise AssertionError("unrouted setup should not execute")
+            self.executed = True
+            return None
 
     registry = StrategyRegistry()
     settings = make_runtime_settings()
     settings.runtime.emit_strategy_routing_skips = True
     registry.register(RoutedSetup(SetupParams(enabled=True), settings), enabled=True)
-    registry.register(UnroutedSetup(SetupParams(enabled=True), settings), enabled=True)
+    unrouted = UnroutedSetup(SetupParams(enabled=True), settings)
+    registry.register(unrouted, enabled=True)
     engine = SignalEngine(registry, settings)
     prepared = make_prepared()
     prepared.universe = UniverseSymbol(
@@ -2006,9 +2009,9 @@ async def test_engine_emits_strategy_routing_skips_for_shortlist_fit_exclusions(
         if result.decision is not None
     }
 
-    assert decisions["unrouted_setup"].is_skip
-    assert decisions["unrouted_setup"].reason_code == "asset_fit.shortlist_not_routed"
+    assert decisions["unrouted_setup"].reason_code == "pattern.no_raw_hit"
     assert decisions["routed_setup"].reason_code == "pattern.no_raw_hit"
+    assert unrouted.executed is True
 
 
 @pytest.mark.asyncio

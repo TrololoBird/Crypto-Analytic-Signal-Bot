@@ -6,7 +6,20 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-from common import bootstrap_repo_path, configure_script_logging, load_symbols_from_run, resolve_symbols
+try:
+    from scripts.common import (
+        bootstrap_repo_path,
+        configure_script_logging,
+        load_symbols_from_run,
+        resolve_symbols,
+    )
+except ModuleNotFoundError:  # pragma: no cover - direct script execution
+    from common import (
+        bootstrap_repo_path,
+        configure_script_logging,
+        load_symbols_from_run,
+        resolve_symbols,
+    )
 
 bootstrap_repo_path()
 

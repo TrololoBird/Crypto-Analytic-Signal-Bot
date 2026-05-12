@@ -12,7 +12,7 @@ from bot.public_intelligence import PublicIntelligenceService
 from bot.setup_base import SetupParams
 from bot.setups import _compute_dynamic_score
 from bot.setups.smc import SMCZone, fvg, latest_fvg_zone, liquidity_pools
-from bot.strategies.roadmap import BBSqueezeSetup, OIDivergenceSetup
+from bot.strategies.roadmap import BBSqueezeSetup, LSRatioExtremeSetup, OIDivergenceSetup
 from bot.strategies.liquidity_sweep import LiquiditySweepSetup
 from bot.strategies.order_block import OrderBlockSetup
 from bot.strategies.wick_trap_reversal import WickTrapReversalSetup
@@ -353,6 +353,37 @@ def test_oi_divergence_fades_price_move_when_oi_contracts() -> None:
     assert signal is not None
     assert signal.direction == "short"
     assert "price_up_oi_contracting" in signal.reasons
+
+
+def test_oi_divergence_rejects_non_finite_oi_change() -> None:
+    settings = BotSettings(tg_token="0" * 30, target_chat_id="0")
+    frame = _feature_frame(
+        [100.0, 100.2, 100.4, 100.6, 101.0, 101.3, 101.7, 102.0, 102.4],
+        price=102.4,
+        atr=1.0,
+    )
+    prepared = _prepared(frame, settings=settings, price=102.4)
+    prepared.oi_change_pct = math.nan
+
+    signal = OIDivergenceSetup(SetupParams(), settings).detect(prepared, settings)
+
+    assert signal is None
+
+
+def test_ls_ratio_extreme_treats_zero_ratio_as_valid_extreme() -> None:
+    settings = BotSettings(tg_token="0" * 30, target_chat_id="0")
+    frame = _feature_frame(
+        [100.0, 100.2, 100.4, 100.6, 101.0, 101.3, 101.7, 102.0, 102.4],
+        price=102.4,
+        atr=1.0,
+    )
+    prepared = _prepared(frame, settings=settings, price=102.4)
+    prepared.top_account_ls_ratio = 0.0
+
+    signal = LSRatioExtremeSetup(SetupParams(), settings).detect(prepared, settings)
+
+    assert signal is not None
+    assert signal.direction == "long"
 
 
 def test_smc_unmitigated_fvg_and_unswept_liquidity_use_null_indices() -> None:

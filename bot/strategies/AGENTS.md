@@ -8,7 +8,7 @@ Work in `bot/strategies/` for individual setup detectors.
 
 - The target strategy file
 - `bot/setup_base.py`
-- `bot/models.py`
+- `bot/domain/schemas.py`
 - `bot/setups.py`
 - `bot/setups/utils.py`
 - Matching keys in `config.toml` and `config.toml.example`
@@ -19,7 +19,7 @@ Work in `bot/strategies/` for individual setup detectors.
 - Keep a stable `setup_id`
 - Implement `detect(prepared, settings) -> Signal | None`
 - Implement `get_optimizable_params(settings | None) -> dict[str, float]`
-- Return `bot.models.Signal`, not ad hoc dicts or tuples
+- Return `bot.domain.schemas.Signal`, not ad hoc dicts or tuples
 
 ## Local Rules
 
@@ -29,7 +29,7 @@ Work in `bot/strategies/` for individual setup detectors.
 - Keep dataframe logic Polars-native.
 - Put tunable thresholds in config; hardcode only true invariants.
 - If you add or rename a strategy, update `bot/strategies/__init__.py`, config files, and any registry/caller references in the same change.
-- Keep signal fields consistent with `bot/models.py` semantics: `direction`, `entry_low`, `entry_high`, `stop`, `take_profit_1`, `take_profit_2`.
+- Keep signal fields consistent with `bot/domain/schemas.py` semantics: `direction`, `entry_low`, `entry_high`, `stop`, `take_profit_1`, `take_profit_2`.
 
 ## Token Discipline
 

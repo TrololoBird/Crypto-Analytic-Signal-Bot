@@ -239,6 +239,13 @@ def apply_global_filters(
         if adx_policy == _ADX_POLICY_HARD_GATE:
             adx_policy = _ADX_POLICY_PENALTY
             adx_penalty_factor = max(adx_penalty_factor, 0.90)
+            LOGGER.info(
+                "deep-analysis ADX hard gate downgraded to score penalty | symbol=%s setup=%s primary_timeframe=%s min_adx_1h=%.2f",
+                signal.symbol,
+                signal.setup_id,
+                primary_timeframe,
+                min_adx_1h,
+            )
     adx_penalty_applied = False
     if adx_1h > 0.0 and adx_1h < min_adx_1h:
         if adx_policy == _ADX_POLICY_HARD_GATE:

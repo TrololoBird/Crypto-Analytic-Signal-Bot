@@ -26,16 +26,18 @@ py -3.13 -m venv .venv
 # 2) Install dependencies
 pip install -r requirements.txt
 
-# 3) Use dedicated signal-only preset
-Copy-Item config.signal_only.toml.example config.toml
+# 3) Create local config and Telegram secret files
+Copy-Item config.toml.example config.toml
+Copy-Item env.example .env
 
-# 4) Put Telegram credentials into .env (from env.example), then run
+# 4) Put TG_TOKEN and TARGET_CHAT_ID into .env, then run
 python .\main.py
 ```
 
 Notes:
-- This preset keeps runtime in public-data signal mode (`runtime_mode = "signal_only"`, `source_policy = "binance_only"`).
+- `config.toml.example` keeps runtime in public-data signal mode (`runtime_mode = "signal_only"`, `source_policy = "binance_only"`).
 - Dashboard auto-open is disabled by default (`auto_open_dashboard = false`) to keep runtime headless-friendly.
+- When `TG_TOKEN` and `TARGET_CHAT_ID` are present, Telegram delivery is enabled even if `[bot.notifiers].provider` is left as `none`. Set `BOT_NOTIFIER_PROVIDER=none` only for local/log-only operator checks.
 
 ## Dashboard
 

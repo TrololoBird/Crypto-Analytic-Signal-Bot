@@ -28,6 +28,24 @@ def _as_float(value: object, default: float = 0.0) -> float:
     return default
 
 
+def _finite_or_none(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    return numeric if math.isfinite(numeric) else None
+
+
+def _first_finite(*values: object) -> float | None:
+    for value in values:
+        numeric = _finite_or_none(value)
+        if numeric is not None:
+            return numeric
+    return None
+
+
 def _last(frame: pl.DataFrame, column: str, default: float = 0.0) -> float:
     if frame.is_empty() or column not in frame.columns:
         return default
@@ -69,12 +87,15 @@ def _price_change_pct(frame: pl.DataFrame, bars: int = 8) -> float:
 
 
 def _flow_delta(prepared: PreparedSymbol) -> float | None:
-    if prepared.agg_trade_delta_30s is not None:
-        return float(prepared.agg_trade_delta_30s)
-    if prepared.aggression_shift is not None:
-        return float(prepared.aggression_shift)
-    if prepared.taker_ratio is not None:
-        return float(prepared.taker_ratio) - 1.0
+    direct_delta = _first_finite(
+        prepared.agg_trade_delta_30s,
+        prepared.aggression_shift,
+    )
+    if direct_delta is not None:
+        return direct_delta
+    taker_ratio = _finite_or_none(prepared.taker_ratio)
+    if taker_ratio is not None:
+        return taker_ratio - 1.0
     work = prepared.work_15m
     if work.is_empty() or "delta_ratio" not in work.columns:
         return None
@@ -195,12 +216,12 @@ class WhaleWallsSetup(RoadmapSetup):
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         params = self._params(prepared, settings)
-        depth = prepared.depth_imbalance
-        micro = prepared.microprice_bias
+        depth = _finite_or_none(prepared.depth_imbalance)
+        micro = _finite_or_none(prepared.microprice_bias)
         if depth is None and micro is None:
             _reject(prepared, self.setup_id, "orderbook_context_missing")
             return None
-        spread = prepared.spread_bps
+        spread = _finite_or_none(prepared.spread_bps)
         if spread is not None and spread > float(params["max_spread_bps"]):
             _reject(prepared, self.setup_id, "spread_too_wide", spread_bps=spread)
             return None
@@ -258,7 +279,7 @@ class SpreadStrategySetup(RoadmapSetup):
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         params = self._params(prepared, settings)
-        spread = prepared.spread_bps
+        spread = _finite_or_none(prepared.spread_bps)
         if spread is None:
             _reject(prepared, self.setup_id, "spread_missing")
             return None
@@ -275,13 +296,13 @@ class SpreadStrategySetup(RoadmapSetup):
             _reject(prepared, self.setup_id, "momentum_too_low", roc10=roc10)
             return None
         direction = "long" if roc10 > 0.0 else "short"
-        depth = prepared.depth_imbalance
-        micro = prepared.microprice_bias
+        depth = _finite_or_none(prepared.depth_imbalance)
+        micro = _finite_or_none(prepared.microprice_bias)
         if depth is None and micro is None:
             _reject(prepared, self.setup_id, "orderbook_context_missing")
             return None
-        depth_value = _as_float(depth, 0.0) if depth is not None else 0.0
-        micro_value = _as_float(micro, 0.0) if micro is not None else 0.0
+        depth_value = depth if depth is not None else 0.0
+        micro_value = micro if micro is not None else 0.0
         close_position = _last(work, "close_position", 0.5)
         if direction == "long":
             orderbook_ok = depth_value >= float(
@@ -334,10 +355,10 @@ class DepthImbalanceSetup(RoadmapSetup):
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         params = self._params(prepared, settings)
-        if prepared.depth_imbalance is None:
+        depth = _finite_or_none(prepared.depth_imbalance)
+        if depth is None:
             _reject(prepared, self.setup_id, "depth_imbalance_missing")
             return None
-        depth = float(prepared.depth_imbalance)
         close_position = _last(prepared.work_15m, "close_position", 0.5)
         threshold = float(params["min_depth_imbalance"])
         if depth >= threshold and close_position >= float(params["min_close_position_long"]):
@@ -428,8 +449,9 @@ class AggressionShiftSetup(RoadmapSetup):
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         params = self._params(prepared, settings)
-        if prepared.aggression_shift is not None:
-            shift = float(prepared.aggression_shift)
+        explicit_shift = _finite_or_none(prepared.aggression_shift)
+        if explicit_shift is not None:
+            shift = explicit_shift
         elif prepared.work_15m.height >= 6 and "delta_ratio" in prepared.work_15m.columns:
             shift = _last(prepared.work_15m, "delta_ratio", 0.5) - _series_mean_tail(
                 prepared.work_15m.head(prepared.work_15m.height - 1),
@@ -475,10 +497,10 @@ class LiquidationHeatmapSetup(RoadmapSetup):
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         params = self._params(prepared, settings)
-        if prepared.liquidation_score is None:
+        score = _finite_or_none(prepared.liquidation_score)
+        if score is None:
             _reject(prepared, self.setup_id, "liquidation_score_missing")
             return None
-        score = float(prepared.liquidation_score)
         close_position = _last(prepared.work_15m, "close_position", 0.5)
         threshold = float(params["min_liquidation_score"])
         if score >= threshold and close_position >= float(params["min_close_position_long"]):
@@ -849,11 +871,15 @@ class LSRatioExtremeSetup(RoadmapSetup):
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         params = self._params(prepared, settings)
-        ratio = prepared.top_account_ls_ratio or prepared.ls_ratio or prepared.global_ls_ratio
+        ratio = _first_finite(
+            prepared.top_account_ls_ratio,
+            prepared.ls_ratio,
+            prepared.global_ls_ratio,
+        )
         if ratio is None:
             _reject(prepared, self.setup_id, "ls_ratio_missing")
             return None
-        ls_ratio = float(ratio)
+        ls_ratio = ratio
         if ls_ratio >= float(params["long_crowd_threshold"]):
             direction = "short"
         elif ls_ratio <= float(params["short_crowd_threshold"]):
@@ -885,10 +911,10 @@ class OIDivergenceSetup(RoadmapSetup):
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         params = self._params(prepared, settings)
-        if prepared.oi_change_pct is None:
+        oi_change = _finite_or_none(prepared.oi_change_pct)
+        if oi_change is None:
             _reject(prepared, self.setup_id, "oi_change_missing")
             return None
-        oi_change = float(prepared.oi_change_pct)
         price_change = _price_change_pct(prepared.work_15m, 8)
         if abs(oi_change) < float(params["min_abs_oi_change_pct"]) or abs(price_change) < float(
             params["min_price_change_pct"]
@@ -998,11 +1024,11 @@ class AltcoinSeasonIndexSetup(RoadmapSetup):
         if base == "BTC":
             _reject(prepared, self.setup_id, "not_altcoin")
             return None
-        index = getattr(prepared, "altcoin_season_index", None)
+        index = _finite_or_none(getattr(prepared, "altcoin_season_index", None))
         if index is None:
             _reject(prepared, self.setup_id, "altcoin_season_index_missing")
             return None
-        alt_index = float(index)
+        alt_index = index
         vol_ratio = _last(prepared.work_15m, "volume_ratio20", 1.0)
         if vol_ratio < float(params["min_volume_ratio"]):
             _reject(prepared, self.setup_id, "volume_too_low", volume_ratio=vol_ratio)

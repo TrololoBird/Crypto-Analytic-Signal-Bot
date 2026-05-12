@@ -73,12 +73,199 @@ def test_dashboard_initialization_without_settings() -> None:
     assert dashboard is not None
 
 
+def test_dashboard_status_exposes_btc_bias(tmp_path) -> None:
+    class MockRepo:
+        async def get_tracking_stats(self) -> dict[str, int]:
+            return {"active": 2}
+
+        async def get_market_context(self) -> dict[str, str]:
+            return {"btc_bias": "bearish"}
+
+    settings = BotSettings(
+        tg_token="TOKEN_FOR_TESTING",
+        target_chat_id="12345",
+        data_dir=tmp_path,
+    )
+    bot_mock = SimpleNamespace(
+        settings=settings,
+        _modern_repo=MockRepo(),
+        _ws_manager=None,
+        _shutdown=SimpleNamespace(is_set=lambda: False),
+        _shortlist=[],
+        market_regime=SimpleNamespace(_last_result=None),
+    )
+    dashboard = BotDashboard(bot_mock)
+    if not dashboard.app:
+        pytest.skip("FastAPI not installed")
+
+    payload = TestClient(dashboard.app).get("/api/status").json()
+
+    assert payload["open_signals"] == 2
+    assert payload["btc_bias"] == "bearish"
+
+
+def test_dashboard_html_hardens_formatters_hotkeys_and_refresh_loop() -> None:
+    html = BotDashboard(SimpleNamespace())._get_html_dashboard()
+
+    assert "Number.isFinite" in html
+    assert "if (tabButton) tabButton.click();" in html
+    assert "const activeButton = document.querySelector(\".nav-tab.active\")" in html
+    assert "document.getElementById('btc-bias').textContent = data.btc_bias || '-'" in html
+    assert "id=\"delivery-provider\"" in html
+    assert "id=\"last-cycle-delivery\"" in html
+
+
+def test_dashboard_recent_signals_prefers_selected_file(tmp_path) -> None:
+    settings = BotSettings(
+        tg_token="TOKEN_FOR_TESTING",
+        target_chat_id="12345",
+        data_dir=tmp_path,
+    )
+    analysis_dir = tmp_path / "telemetry" / "runs" / "run_1" / "analysis"
+    analysis_dir.mkdir(parents=True)
+    (analysis_dir / "candidates.jsonl").write_text(
+        json.dumps(
+            {
+                "ts": "2026-05-12T00:01:00+00:00",
+                "symbol": "BTCUSDT",
+                "setup_id": "spread_strategy",
+                "direction": "short",
+                "score": 0.57,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (analysis_dir / "selected.jsonl").write_text(
+        json.dumps(
+            {
+                "ts": "2026-05-12T00:02:00+00:00",
+                "symbol": "ETHUSDT",
+                "setup_id": "multi_tf_trend",
+                "direction": "long",
+                "score": 0.62,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    dashboard = BotDashboard(SimpleNamespace(settings=settings))
+
+    rows = dashboard._get_recent_signals(limit=5)
+
+    assert len(rows) == 1
+    assert rows[0]["symbol"] == "ETHUSDT"
+    assert rows[0]["source"] == "selected"
+    assert rows[0]["delivery_status"] == "sent"
+
+
+def test_dashboard_recent_signals_uses_delivery_attempts_before_candidates(
+    tmp_path,
+) -> None:
+    settings = BotSettings(
+        tg_token="TOKEN_FOR_TESTING",
+        target_chat_id="12345",
+        data_dir=tmp_path,
+    )
+    analysis_dir = tmp_path / "telemetry" / "runs" / "run_1" / "analysis"
+    analysis_dir.mkdir(parents=True)
+    (analysis_dir / "candidates.jsonl").write_text(
+        json.dumps(
+            {
+                "ts": "2026-05-12T00:01:00+00:00",
+                "symbol": "BTCUSDT",
+                "setup_id": "spread_strategy",
+                "direction": "short",
+                "score": 0.57,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (analysis_dir / "delivery.jsonl").write_text(
+        json.dumps(
+            {
+                "ts": "2026-05-12T00:02:00+00:00",
+                "symbol": "BTCUSDT",
+                "setup_id": "spread_strategy",
+                "direction": "short",
+                "score": 0.57,
+                "delivery_status": "logged",
+                "delivery_reason": "notifier_disabled",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    dashboard = BotDashboard(SimpleNamespace(settings=settings))
+
+    rows = dashboard._get_recent_signals(limit=5)
+
+    assert len(rows) == 1
+    assert rows[0]["source"] == "delivery"
+    assert rows[0]["delivery_status"] == "logged"
+    assert rows[0]["delivery_reason"] == "notifier_disabled"
+
+
+def test_dashboard_recent_signals_aggregates_candidates(tmp_path) -> None:
+    settings = BotSettings(
+        tg_token="TOKEN_FOR_TESTING",
+        target_chat_id="12345",
+        data_dir=tmp_path,
+    )
+    analysis_dir = tmp_path / "telemetry" / "runs" / "run_1" / "analysis"
+    analysis_dir.mkdir(parents=True)
+    rows = [
+        {
+            "ts": "2026-05-12T00:05:45+00:00",
+            "symbol": "BTCUSDT",
+            "setup_id": "spread_strategy",
+            "direction": "short",
+            "timeframe": "15m",
+            "entry_reference_price": 100.12345,
+            "score": 0.58,
+        },
+        {
+            "ts": "2026-05-12T00:05:46+00:00",
+            "symbol": "BTCUSDT",
+            "setup_id": "depth_imbalance",
+            "direction": "short",
+            "timeframe": "15m",
+            "entry_reference_price": 100.12341,
+            "score": 0.57,
+        },
+        {
+            "ts": "2026-05-12T00:05:47+00:00",
+            "symbol": "ETHUSDT",
+            "setup_id": "price_velocity",
+            "direction": "long",
+            "timeframe": "15m",
+            "entry_reference_price": 200.0,
+            "score": 0.60,
+        },
+    ]
+    with (analysis_dir / "candidates.jsonl").open("w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row) + "\n")
+    dashboard = BotDashboard(SimpleNamespace(settings=settings))
+
+    recent = dashboard._get_recent_signals(limit=5)
+
+    btc = next(item for item in recent if item["symbol"] == "BTCUSDT")
+    assert btc["confluence_count"] == 2
+    assert set(btc["confluence_setups"]) == {"spread_strategy", "depth_imbalance"}
+    assert btc["delivery_status"] == "candidate"
+
+
 @pytest.mark.asyncio
 async def test_dashboard_api_endpoints_coverage() -> None:
     # Mock bot with enough attributes to satisfy the API handlers
     class MockRepo:
         async def get_active_signals(self, **kwargs: object) -> list[object]:
             return []
+
+        async def get_market_context(self) -> dict[str, str]:
+            return {"btc_bias": "neutral"}
 
     class MockWS:
         def get_stats(self) -> dict[str, int]:

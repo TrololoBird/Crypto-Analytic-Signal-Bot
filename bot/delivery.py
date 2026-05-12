@@ -77,7 +77,45 @@ def _direction_label(direction: str) -> str:
 
 
 def _humanize_token(value: str) -> str:
-    return html.escape(str(value or "").replace("_", " ").strip())
+    raw = str(value or "").strip()
+    if raw.startswith("confluence_") and raw.endswith("_setups"):
+        count = raw.removeprefix("confluence_").removesuffix("_setups")
+        if count.isdigit():
+            return f"confluence {count} setups"
+    if raw.startswith("confluence_setups="):
+        payload = raw.split("=", 1)[1].strip()
+        if payload:
+            return "setups: " + html.escape(payload.replace(",", ", "))
+    return html.escape(raw.replace("_", " "))
+
+
+def _is_confluence_reason(value: str) -> bool:
+    raw = str(value or "").strip()
+    return (raw.startswith("confluence_") and raw.endswith("_setups")) or raw.startswith(
+        "confluence_setups="
+    )
+
+
+def _confluence_summary(reasons: tuple[str, ...] | list[str]) -> str | None:
+    setup_count = 0
+    setups: list[str] = []
+    for reason in reasons:
+        raw = str(reason or "").strip()
+        if raw.startswith("confluence_") and raw.endswith("_setups"):
+            count = raw.removeprefix("confluence_").removesuffix("_setups")
+            if count.isdigit():
+                setup_count = max(setup_count, int(count))
+        elif raw.startswith("confluence_setups="):
+            payload = raw.split("=", 1)[1]
+            setups = [item.strip() for item in payload.split(",") if item.strip()]
+    if not setup_count and len(setups) > 1:
+        setup_count = len(setups)
+    if setup_count <= 1:
+        return None
+    summary = f"{setup_count} setups"
+    if setups:
+        summary = f"{summary}: {', '.join(setups)}"
+    return html.escape(summary)
 
 
 def _fmt_audit_metric(name: str, value: float | None, suffix: str = "") -> str | None:
@@ -115,7 +153,11 @@ def _format_signal_audit_text(label: str, signal: Signal, *, final: bool = False
 
 
 def _trigger_text(reasons: tuple[str, ...] | list[str]) -> str:
-    parts = [_humanize_token(reason) for reason in reasons if str(reason).strip()]
+    parts = [
+        _humanize_token(reason)
+        for reason in reasons
+        if str(reason).strip() and not _is_confluence_reason(str(reason))
+    ]
     return " -> ".join(parts) if parts else "n/a"
 
 
@@ -290,6 +332,9 @@ def _render_signal_card(
     ctx = _market_context_line(oi_change_pct, funding_rate)
     if ctx:
         lines.append(f"<b>Market</b> <code>{html.escape(ctx)}</code>")
+    confluence = _confluence_summary(reasons)
+    if confluence:
+        lines.append(f"<b>Confluence</b> <code>{confluence}</code>")
     trigger_text = _trigger_text(reasons)
     if trigger_text != "n/a":
         lines.append(f"<b>Trigger</b> {html.escape(trigger_text)}")
@@ -704,9 +749,16 @@ class SignalDelivery:
                 LOG.info("telegram signal sent\n%s", text)
             elif result.status == "logged":
                 LOG.info("local signal logged\n%s", text)
+                LOG.warning(
+                    "signal delivery status is not sent | status=%s reason=%s symbol=%s setup=%s",
+                    result.status,
+                    result.reason,
+                    signal.symbol,
+                    signal.setup_id,
+                )
             else:
-                LOG.debug(
-                    "signal not delivered | status=%s reason=%s symbol=%s setup=%s",
+                LOG.warning(
+                    "signal delivery status is not sent | status=%s reason=%s symbol=%s setup=%s",
                     result.status,
                     result.reason,
                     signal.symbol,

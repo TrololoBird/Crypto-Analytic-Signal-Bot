@@ -695,22 +695,28 @@ class BinanceFuturesMarketData:
             None if response_age_s is None else max(0.0, float(response_age_s))
         )
 
-    async def _call_rest(self, operation: str, func: Any, /, **kwargs: Any) -> Any:
-        # Circuit breaker check
+    async def _prepare_public_rest_call(
+        self,
+        operation: str,
+        *,
+        params: dict[str, Any] | None,
+        symbol: str | None,
+    ) -> tuple[_PublicEndpointSpec, str, float]:
+        spec = self._endpoint_spec(operation)
+        url = self._endpoint_url(operation)
         if self._is_circuit_open(operation):
             raise MarketDataUnavailable(
                 operation=operation,
                 detail=f"circuit breaker open for {self._circuit_open_duration_seconds}s",
-                symbol=kwargs.get("symbol"),
+                symbol=symbol,
             )
 
-        # Security Hardening: Validate URL and params before any network activity
-        validate_runtime_public_rest_url(self._endpoint_url(operation))
-        _validate_rest_params(kwargs)
+        validate_runtime_public_rest_url(url)
+        _validate_rest_params(params)
 
-        # /futures/data/* request-based limiter (independent of weight)
-        if operation in _FUTURES_DATA_REQUEST_LIMITED_OPS:
-            await self._futures_data_limiter.acquire(label=operation)
+        limiter_wait_s = 0.0
+        if spec.ip_limited:
+            limiter_wait_s = await self._futures_data_limiter.acquire(label=operation)
 
         pause_remaining = self._rate_limit_pause_until - time.monotonic()
         if pause_remaining > 0:
@@ -721,13 +727,11 @@ class BinanceFuturesMarketData:
             )
             await asyncio.sleep(pause_remaining)
 
-        # Pre-flight weight guard: if adding this request would breach the soft
-        # limit, sleep out the remainder of the current 60-second window first.
         now = time.monotonic()
         if now - self._weight_window_start >= 60.0:
             self._weight_window_weight = 0
             self._weight_window_start = now
-        estimated = self._estimate_weight(operation, kwargs)
+        estimated = self._estimate_weight(operation, params)
         if self._weight_window_weight + estimated >= _REST_WEIGHT_SOFT_LIMIT:
             wait_secs = max(0.0, 60.0 - (now - self._weight_window_start)) + 1.0
             LOG.warning(
@@ -740,6 +744,16 @@ class BinanceFuturesMarketData:
             await asyncio.sleep(wait_secs)
             self._weight_window_weight = 0
             self._weight_window_start = time.monotonic()
+
+        return spec, url, limiter_wait_s
+
+    async def _call_rest(self, operation: str, func: Any, /, **kwargs: Any) -> Any:
+        symbol = kwargs.get("symbol")
+        await self._prepare_public_rest_call(
+            operation,
+            params=kwargs,
+            symbol=str(symbol) if symbol is not None else None,
+        )
 
         try:
             async with _REST_GLOBAL_SEMAPHORE:
@@ -822,49 +836,11 @@ class BinanceFuturesMarketData:
         Used for foundational endpoints where third-party SDK behavior is less predictable
         under cancellation / shutdown (stability-first path).
         """
-        spec = self._endpoint_spec(operation)
-        url = self._endpoint_url(operation)
-        if self._is_circuit_open(operation):
-            raise MarketDataUnavailable(
-                operation=operation,
-                detail=f"circuit breaker open for {self._circuit_open_duration_seconds}s",
-                symbol=symbol,
-            )
-
-        # Security Hardening: Validate URL and params before any network activity
-        validate_runtime_public_rest_url(url)
-        _validate_rest_params(params)
-
-        limiter_wait_s = 0.0
-        if spec.ip_limited:
-            limiter_wait_s = await self._futures_data_limiter.acquire(label=operation)
-
-        pause_remaining = self._rate_limit_pause_until - time.monotonic()
-        if pause_remaining > 0:
-            LOG.debug(
-                "rate-limit backoff | sleeping=%.1fs operation=%s",
-                pause_remaining,
-                operation,
-            )
-            await asyncio.sleep(pause_remaining)
-
-        now = time.monotonic()
-        if now - self._weight_window_start >= 60.0:
-            self._weight_window_weight = 0
-            self._weight_window_start = now
-        estimated = self._estimate_weight(operation, params)
-        if self._weight_window_weight + estimated >= _REST_WEIGHT_SOFT_LIMIT:
-            wait_secs = max(0.0, 60.0 - (now - self._weight_window_start)) + 1.0
-            LOG.warning(
-                "pre-flight weight guard | estimated_1m=%d threshold=%d sleeping=%.1fs operation=%s",
-                self._weight_window_weight + estimated,
-                _REST_WEIGHT_SOFT_LIMIT,
-                wait_secs,
-                operation,
-            )
-            await asyncio.sleep(wait_secs)
-            self._weight_window_weight = 0
-            self._weight_window_start = time.monotonic()
+        spec, url, limiter_wait_s = await self._prepare_public_rest_call(
+            operation,
+            params=params,
+            symbol=symbol,
+        )
 
         class _ResponseStub:
             __slots__ = ("headers",)

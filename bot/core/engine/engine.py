@@ -15,7 +15,6 @@ from .base import SignalResult
 from ...domain.strategies import StrategyDecision
 from ...domain.schemas import PreparedSymbol, Signal
 from ...domain.config import BotSettings
-from ...runtime_policy import is_deep_analysis_symbol
 from ...strategy_asset_fit import asset_fit_reject_reason, market_context_from_prepared
 from ..runtime_errors import classify_runtime_error
 
@@ -79,8 +78,17 @@ class SignalEngine:
         symbol = prepared.symbol if prepared else "unknown"
         strategies = self._registry.get_enabled()
         routing_skips: list[SignalResult] = []
-        strategy_fits = set(getattr(getattr(prepared, "universe", None), "strategy_fits", ()) or ())
-        if strategy_fits:
+        universe = getattr(prepared, "universe", None)
+        strategy_fits = set(getattr(universe, "strategy_fits", ()) or ())
+        shortlist_score = getattr(universe, "shortlist_score", None)
+        is_shortlist_asset = shortlist_score is not None
+        if is_shortlist_asset:
+            LOG.debug(
+                "%s: shortlist routing expanded to all enabled strategies | strategy_fits=%d",
+                symbol,
+                len(strategy_fits),
+            )
+        elif strategy_fits:
             routed: list[Any] = []
             emit_routing_skips = bool(
                 getattr(
@@ -108,12 +116,6 @@ class SignalEngine:
                         )
                     )
             strategies = routed
-        elif getattr(
-            getattr(prepared, "universe", None), "shortlist_score", None
-        ) is not None and not is_deep_analysis_symbol(prepared, self._settings):
-            LOG.info("%s: calculate_all skipped | no strategy_fits", symbol)
-            return []
-
         LOG.info("%s: calculate_all called | strategies=%d", symbol, len(strategies))
 
         if not strategies:

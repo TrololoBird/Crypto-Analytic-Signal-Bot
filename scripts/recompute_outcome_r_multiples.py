@@ -8,7 +8,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from common import bootstrap_repo_path
+try:
+    from scripts.common import bootstrap_repo_path
+except ModuleNotFoundError:  # pragma: no cover - direct script execution
+    from common import bootstrap_repo_path
 
 
 ROOT = bootstrap_repo_path()

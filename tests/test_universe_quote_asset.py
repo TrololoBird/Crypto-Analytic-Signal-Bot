@@ -4,8 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from bot.domain.schemas import UniverseSymbol
 from bot.domain.schemas import SymbolMeta
-from bot.universe import build_shortlist
+from bot.universe import build_shortlist, rerank_shortlist
 
 
 def _settings(*, quote_asset: str, pinned_symbols: tuple[str, ...] = ()) -> SimpleNamespace:
@@ -203,3 +204,54 @@ def test_strategy_fits_cover_price_action_setups_on_top_liquid_symbols() -> None
         "stop_hunt_detection",
         "wyckoff_spring",
     }.issubset(fits)
+
+
+def test_rerank_shortlist_recomputes_score_bucket_and_strategy_fits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _settings(quote_asset="USDT")
+    original = UniverseSymbol(
+        symbol="AAAUSDT",
+        base_asset="AAA",
+        quote_asset="USDT",
+        contract_type="PERPETUAL",
+        status="TRADING",
+        onboard_date_ms=0,
+        quote_volume=10_000_000.0,
+        price_change_pct=0.5,
+        last_price=10.0,
+        shortlist_bucket="trend",
+        shortlist_score=0.2,
+        strategy_fits=("before_fit",),
+        liquidity_rank=1,
+    )
+
+    def fake_strategy_fits(row, *, settings, liquidity_rank):
+        assert row["price_change_percent"] == 8.0
+        assert liquidity_rank == 1
+        return ("after_fit",)
+
+    monkeypatch.setattr("bot.universe._strategy_fits_for_row", fake_strategy_fits)
+
+    [updated] = rerank_shortlist(
+        [original],
+        [
+            {
+                "symbol": "AAAUSDT",
+                "quote_volume": 50_000_000.0,
+                "price_change_percent": 8.0,
+                "last_price": 12.0,
+                "spread_bps": 2.0,
+                "ticker_age_seconds": 1.0,
+                "book_age_seconds": 1.0,
+                "mark_price_age_seconds": 1.0,
+            }
+        ],
+        settings,
+    )
+
+    assert updated.price_change_pct == 8.0
+    assert updated.shortlist_bucket == "reversal"
+    assert updated.shortlist_score is not None
+    assert updated.shortlist_score != original.shortlist_score
+    assert updated.strategy_fits == ("after_fit",)

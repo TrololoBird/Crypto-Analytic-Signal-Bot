@@ -252,6 +252,17 @@ class TelemetryManager:
             if isinstance(result.funnel, dict)
             else {}
         )
+        selected_count = delivered_count
+        if isinstance(result.funnel, dict):
+            try:
+                selected_count = int(result.funnel.get("selected", delivered_count) or 0)
+            except (TypeError, ValueError):
+                selected_count = delivered_count
+        delivery_attempt_count = sum(
+            int(value or 0)
+            for value in delivery_status_counts.values()
+            if isinstance(value, (int, float))
+        )
         delivery_sent_count = int(delivery_status_counts.get("sent", delivered_count))
         cycle_row: dict[str, Any] = {
             "ts": datetime.now(UTC).isoformat(),
@@ -267,10 +278,13 @@ class TelemetryManager:
             "shortlist_size": shortlist_size,
             "detector_runs": result.raw_setups,
             "post_filter_candidates": len(candidates),
-            "selected_signals": delivered_count,
+            "selected_signals": selected_count,
+            "delivered_signals": delivered_count,
             "raw_setups": result.raw_setups,
             "candidate_count": len(candidates),
-            "selected_count": delivered_count,
+            "selected_count": selected_count,
+            "delivered_count": delivered_count,
+            "delivery_attempt_count": delivery_attempt_count,
             "rejected_count": len(rejected),
             "shortlist_source": self._bot._shortlist_source,
             "setup_counts": dict(Counter(s.setup_id for s in candidates)),
@@ -303,6 +317,7 @@ class TelemetryManager:
             cycle_row.update(rest_snapshot if isinstance(rest_snapshot, dict) else {})
 
         self._bot.telemetry.append_jsonl("cycles.jsonl", cycle_row)
+        self._bot.last_cycle_summary = dict(cycle_row)
         symbol_row: dict[str, Any] = {
             "ts": datetime.now(UTC).isoformat(),
             "symbol": symbol,
@@ -311,10 +326,13 @@ class TelemetryManager:
             "error": result.error,
             "detector_runs": result.raw_setups,
             "post_filter_candidates": len(candidates),
-            "selected_signals": delivered_count,
+            "selected_signals": selected_count,
+            "delivered_signals": delivered_count,
             "raw_setups": result.raw_setups,
             "candidates": len(candidates),
+            "selected": selected_count,
             "delivered": delivered_count,
+            "delivery_attempt_count": delivery_attempt_count,
             "rejected": len(rejected),
             "shortlist_source": self._bot._shortlist_source,
             "delivery_status_counts": delivery_status_counts,

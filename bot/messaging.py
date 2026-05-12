@@ -144,7 +144,7 @@ class DisabledBroadcaster:
     """No-op broadcaster for runtime modes with external delivery disabled."""
 
     async def preflight_check(self) -> None:
-        return None
+        raise RuntimeError("notifier provider is disabled; signal delivery is local/log only")
 
     async def send_html(
         self, text: str, *, reply_to_message_id: int | None = None

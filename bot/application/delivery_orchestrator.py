@@ -30,16 +30,49 @@ class DeliveryOrchestrator:
     def _apply_same_direction_confluence(signals: list[Signal]) -> Signal:
         ranked = sorted(signals, key=DeliveryOrchestrator._rank_key, reverse=True)
         best = ranked[0]
-        setup_count = len({signal.setup_id for signal in ranked})
+        setup_ids = sorted({signal.setup_id for signal in ranked})
+        setup_count = len(setup_ids)
         if setup_count <= 1:
             return best
         boost = min(0.05, 0.015 * float(setup_count - 1))
         reason = f"confluence_{setup_count}_setups"
-        reasons = best.reasons if reason in best.reasons else (*best.reasons, reason)
+        setup_reason = f"confluence_setups={','.join(setup_ids)}"
+        reasons = list(best.reasons)
+        if reason not in reasons:
+            reasons.append(reason)
+        if setup_reason not in reasons:
+            reasons.append(setup_reason)
         return replace(
             best,
             score=round(min(1.0, float(best.score) + boost), 4),
-            reasons=reasons,
+            reasons=tuple(reasons),
+        )
+
+    @staticmethod
+    def _symbol_direction_cooldown_key(signal: Signal) -> str:
+        return f"symbol_direction:{signal.symbol}:{signal.direction}"
+
+    def _record_delivery_attempt(
+        self,
+        signal: Signal,
+        *,
+        status: str,
+        reason: str | None,
+        message_id: int | None,
+    ) -> None:
+        telemetry = getattr(self._bot, "telemetry", None)
+        append_jsonl = getattr(telemetry, "append_jsonl", None)
+        if not callable(append_jsonl):
+            return
+        append_jsonl(
+            "delivery.jsonl",
+            {
+                "ts": datetime.now(UTC).isoformat(),
+                **signal.to_log_row(),
+                "delivery_status": status,
+                "delivery_reason": reason,
+                "message_id": message_id,
+            },
         )
 
     def select_and_rank(
@@ -129,6 +162,7 @@ class DeliveryOrchestrator:
 
         ready_to_send: list[Signal] = []
         rejected_rows: list[dict[str, Any]] = []
+        queued_symbol_direction: set[str] = set()
 
         for signal in signals:
             is_blacklisted = await self._bot._modern_repo.is_symbol_blacklisted(
@@ -179,6 +213,9 @@ class DeliveryOrchestrator:
                     if closed:
                         await self.deliver_tracking(closed)
                     ready_to_send.append(signal)
+                    queued_symbol_direction.add(
+                        self._symbol_direction_cooldown_key(signal)
+                    )
                 else:
                     rejected_rows.append(
                         {
@@ -192,6 +229,38 @@ class DeliveryOrchestrator:
                     )
                 continue
 
+            symbol_direction_key = self._symbol_direction_cooldown_key(signal)
+            if symbol_direction_key in queued_symbol_direction:
+                rejected_rows.append(
+                    {
+                        "ts": datetime.now(UTC).isoformat(),
+                        "symbol": signal.symbol,
+                        "setup_id": signal.setup_id,
+                        "direction": signal.direction,
+                        "stage": "cooldown",
+                        "reason": "symbol_direction_cooldown_active",
+                        "cooldown_minutes": self._bot.settings.filters.symbol_cooldown_minutes,
+                    }
+                )
+                continue
+            is_symbol_direction_cooldown = await self._bot._modern_repo.is_cooldown_active(
+                symbol_direction_key,
+                self._bot.settings.filters.symbol_cooldown_minutes,
+            )
+            if is_symbol_direction_cooldown:
+                rejected_rows.append(
+                    {
+                        "ts": datetime.now(UTC).isoformat(),
+                        "symbol": signal.symbol,
+                        "setup_id": signal.setup_id,
+                        "direction": signal.direction,
+                        "stage": "cooldown",
+                        "reason": "symbol_direction_cooldown_active",
+                        "cooldown_minutes": self._bot.settings.filters.symbol_cooldown_minutes,
+                    }
+                )
+                continue
+
             cooldown_key = f"{signal.setup_id}:{signal.symbol}"
             is_cooldown_active = await self._bot._modern_repo.is_cooldown_active(
                 cooldown_key,
@@ -199,12 +268,14 @@ class DeliveryOrchestrator:
             )
             if not is_cooldown_active:
                 ready_to_send.append(signal)
+                queued_symbol_direction.add(symbol_direction_key)
                 continue
 
             closed = await self.close_superseded_signal(signal)
             if closed:
                 await self.deliver_tracking(closed)
                 ready_to_send.append(signal)
+                queued_symbol_direction.add(symbol_direction_key)
             else:
                 rejected_rows.append(
                     {
@@ -237,7 +308,32 @@ class DeliveryOrchestrator:
 
             for item in results:
                 delivery_status_counts[item.status] += 1
+                self._record_delivery_attempt(
+                    item.signal,
+                    status=item.status,
+                    reason=item.reason,
+                    message_id=item.message_id,
+                )
                 if item.status != "sent":
+                    rejected_rows.append(
+                        {
+                            "ts": datetime.now(UTC).isoformat(),
+                            "symbol": item.signal.symbol,
+                            "setup_id": item.signal.setup_id,
+                            "direction": item.signal.direction,
+                            "stage": "delivery",
+                            "reason": f"delivery_{item.status}",
+                            "delivery_reason": item.reason,
+                        }
+                    )
+                    LOG.warning(
+                        "delivery result not sent | status=%s reason=%s symbol=%s setup=%s tracking_id=%s",
+                        item.status,
+                        item.reason,
+                        item.signal.symbol,
+                        item.signal.setup_id,
+                        item.signal.tracking_id,
+                    )
                     continue
                 delivered.append(item.signal)
                 prepared = (
@@ -260,6 +356,14 @@ class DeliveryOrchestrator:
                     item.signal.symbol,
                     "signal",
                 )
+                if self._bot.settings.filters.symbol_cooldown_minutes > 0:
+                    await self._bot._modern_repo.set_cooldown(
+                        self._symbol_direction_cooldown_key(item.signal),
+                        datetime.now(UTC),
+                        item.signal.setup_id,
+                        item.signal.symbol,
+                        "symbol_direction",
+                    )
                 await self._bot._wait_noncritical(
                     label=f"arm {item.signal.symbol}/{item.signal.setup_id}",
                     timeout=self._bot._noncritical_timeout_seconds,

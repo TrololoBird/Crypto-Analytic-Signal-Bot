@@ -102,3 +102,71 @@ def test_ws_subscribe_delay_respects_binance_control_message_limit() -> None:
             target_chat_id="123",
             ws={"subscribe_chunk_delay_ms": 50},
         )
+
+
+def test_load_settings_prefers_legacy_double_dot_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "config..toml").write_text(
+        """
+[bot]
+[bot.runtime]
+strategy_concurrency = 9
+""".strip(),
+        encoding="utf-8",
+    )
+    (tmp_path / "config.toml.example").write_text(
+        """
+[bot]
+[bot.runtime]
+strategy_concurrency = 3
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TG_TOKEN", "")
+    monkeypatch.setenv("TARGET_CHAT_ID", "")
+
+    settings = load_settings(tmp_path / "config.toml")
+
+    assert settings.runtime.strategy_concurrency == 9
+    assert settings.config_path.name == "config..toml"
+
+
+def test_load_settings_enables_telegram_when_example_fallback_has_secrets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "config.toml.example").write_text(
+        """
+[bot]
+[bot.notifiers]
+provider = "none"
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TG_TOKEN", "123456789:abcdefghijklmnopqrstuvwxyzABCDE")
+    monkeypatch.setenv("TARGET_CHAT_ID", "123456")
+
+    settings = load_settings(tmp_path / "config.toml")
+
+    assert settings.config_path.name == "config.toml.example"
+    assert settings.notifiers.provider == "telegram"
+
+
+def test_load_settings_enables_telegram_when_explicit_none_has_secrets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        """
+[bot]
+[bot.notifiers]
+provider = "none"
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TG_TOKEN", "123456789:abcdefghijklmnopqrstuvwxyzABCDE")
+    monkeypatch.setenv("TARGET_CHAT_ID", "123456")
+
+    settings = load_settings(config_file)
+
+    assert settings.notifiers.provider == "telegram"

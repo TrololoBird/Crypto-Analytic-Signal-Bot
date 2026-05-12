@@ -15,6 +15,10 @@ event_bus_warn_depth = 384
 event_bus_drop_log_interval = 25
 telemetry_subdir = "telemetry"
 log_level = "INFO"
+logs_retention_days = 14
+logs_max_files = 120
+telemetry_retention_days = 14
+telemetry_max_runs = 120
 shortlist_refresh_interval_seconds = 7200
 emergency_fallback_seconds = 1800
 strict_data_quality = true
@@ -253,6 +257,9 @@ intra_candle_min_move_bps = 0.0
 use_ml_in_live = false
 
 [bot.notifiers]
+# "none" keeps local/log-only delivery until TG_TOKEN and TARGET_CHAT_ID are set.
+# With both Telegram secrets present, load_settings() auto-promotes this to "telegram".
+# Set BOT_NOTIFIER_PROVIDER=none to force local/log-only mode for checks.
 provider = "none"
 
 [bot.notifiers.slack]

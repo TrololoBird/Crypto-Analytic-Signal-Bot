@@ -19,7 +19,7 @@ import sqlite3
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import re
 import shutil
@@ -55,10 +55,15 @@ def _run_doctor_check(settings: BotSettings) -> None:
     """Run lightweight doctor diagnostics and log the result."""
     try:
         report = {
+            "config_path": str(settings.config_path),
             "pid_lock": str(settings.pid_file),
             "logs_dir": str(settings.logs_dir),
             "telemetry_dir": str(settings.telemetry_dir),
             "db_path": str(settings.db_path),
+            "notifier": {
+                "provider": settings.notifiers.provider,
+                "telegram_enabled": settings.notifiers.provider == "telegram",
+            },
             "config_filters": {
                 "min_atr_pct": settings.filters.min_atr_pct,
                 "min_score": settings.filters.min_score,
@@ -108,6 +113,88 @@ def _bootstrap_env_if_missing() -> None:
         encoding="utf-8",
     )
     print("[INFO] .env not found - created with empty TG_TOKEN and TARGET_CHAT_ID")
+
+
+def _cleanup_runtime_artifacts(settings: BotSettings) -> None:
+    logger = logging.getLogger("bot.cli")
+    now = datetime.now(timezone.utc)
+
+    def _safe_mtime(path: Path) -> datetime:
+        try:
+            return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+        except OSError:
+            return now
+
+    def _prune_files(
+        directory: Path,
+        *,
+        pattern: str,
+        keep: int,
+        retention_days: int,
+    ) -> int:
+        if not directory.exists():
+            return 0
+        entries = sorted(
+            (path for path in directory.glob(pattern) if path.is_file()),
+            key=_safe_mtime,
+            reverse=True,
+        )
+        removed = 0
+        retention_delta = timedelta(days=max(1, int(retention_days)))
+        for idx, path in enumerate(entries):
+            age = now - _safe_mtime(path)
+            if idx < keep and age <= retention_delta:
+                continue
+            try:
+                path.unlink()
+                removed += 1
+            except OSError:
+                continue
+        return removed
+
+    def _prune_run_dirs(
+        runs_dir: Path,
+        *,
+        keep: int,
+        retention_days: int,
+    ) -> int:
+        if not runs_dir.exists():
+            return 0
+        entries = sorted(
+            (path for path in runs_dir.iterdir() if path.is_dir()),
+            key=_safe_mtime,
+            reverse=True,
+        )
+        removed = 0
+        retention_delta = timedelta(days=max(1, int(retention_days)))
+        for idx, path in enumerate(entries):
+            age = now - _safe_mtime(path)
+            if idx < keep and age <= retention_delta:
+                continue
+            try:
+                shutil.rmtree(path, ignore_errors=False)
+                removed += 1
+            except OSError:
+                continue
+        return removed
+
+    logs_removed = _prune_files(
+        settings.logs_dir,
+        pattern="bot_*.log",
+        keep=max(10, int(settings.runtime.logs_max_files)),
+        retention_days=max(1, int(settings.runtime.logs_retention_days)),
+    )
+    runs_removed = _prune_run_dirs(
+        settings.telemetry_dir / "runs",
+        keep=max(10, int(settings.runtime.telemetry_max_runs)),
+        retention_days=max(1, int(settings.runtime.telemetry_retention_days)),
+    )
+    if logs_removed or runs_removed:
+        logger.info(
+            "runtime artifact cleanup | logs_removed=%d telemetry_runs_removed=%d",
+            logs_removed,
+            runs_removed,
+        )
 
 
 def _rotate_session_log(log_path: Path, *, stamp: str) -> None:
@@ -308,7 +395,15 @@ def _setup_signal_handlers(bot: SignalBot) -> None:
 async def _main() -> None:
     _bootstrap_env_if_missing()
     settings = load_settings("config.toml")
+    if settings.config_path.name != "config.toml":
+        sys.stderr.write(
+            f"[WARN] config.toml not found; using {settings.config_path}\n"
+        )
     use_telegram = settings.notifiers.provider == "telegram"
+    if not use_telegram:
+        sys.stderr.write(
+            "[WARN] notifier provider is not telegram; signal delivery runs in local/log mode\n"
+        )
     settings.validate_for_runtime(require_telegram=use_telegram)
 
     try:
@@ -322,6 +417,7 @@ async def _main() -> None:
 
     debug_mode = os.getenv("DEBUG_BOT", "0") in ("1", "true", "yes")
     configure_logging(settings, debug_mode=debug_mode)
+    _cleanup_runtime_artifacts(settings)
 
     # Capture all warnings as log entries
     logging.captureWarnings(True)
@@ -380,8 +476,8 @@ async def _main() -> None:
             run_daily_summary_loop(
                 Path(".").resolve(),
                 stop_event=bot._shutdown,  # internal runtime stop event
-                config_path="config.toml",
-                send_telegram=True,
+                config_path=str(settings.config_path),
+                send_telegram=use_telegram,
             ),
             name="daily_summary",
         )

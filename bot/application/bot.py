@@ -428,6 +428,7 @@ class SignalBot:
     async def start(self) -> None:
         """Initial storage checks and WS bootstrap."""
         self._preflight_storage_check()
+        await self._preflight_delivery_check()
 
         # Initialize modern repository (SQLite)
         try:
@@ -815,6 +816,13 @@ class SignalBot:
         self.settings.logs_dir.mkdir(parents=True, exist_ok=True)
         self.settings.telemetry_dir.mkdir(parents=True, exist_ok=True)
         self.settings.db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    async def _preflight_delivery_check(self) -> None:
+        try:
+            await self.delivery.preflight_check()
+            LOG.info("delivery preflight completed")
+        except Exception as exc:
+            LOG.warning("delivery preflight failed (non-fatal): %s", exc)
 
     async def _wait_noncritical(
         self, *, label: str, timeout: float, operation: Any

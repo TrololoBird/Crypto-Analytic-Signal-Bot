@@ -109,12 +109,15 @@ _FRAME_CACHE_TAIL_COLUMNS = (
 
 
 class _FrameCache:
-    """Thread-safe LRU cache for prepared frames.
+    """Best-effort LRU cache for prepared frames.
 
     Keys include symbol, interval, row count, first/last close time, and the
     latest OHLCV-like values. `_prepare_frame` depends on the whole history
     window, and live partial kline updates keep the same close time while the
     current candle values change.
+
+    Cache access never waits for a contended lock. Missing a cache hit is
+    cheaper than blocking the async analysis loop behind another frame update.
     """
 
     __slots__ = ("_store", "_max_size", "_lock")
@@ -122,22 +125,30 @@ class _FrameCache:
     def __init__(self, max_size: int = 500) -> None:
         self._store: OrderedDict[_FrameCacheKey, pl.DataFrame] = OrderedDict()
         self._max_size = max_size
-        self._lock = threading.RLock()
+        self._lock = threading.Lock()
 
     def get(self, key: _FrameCacheKey) -> pl.DataFrame | None:
-        with self._lock:
+        if not self._lock.acquire(blocking=False):
+            return None
+        try:
             if key not in self._store:
                 return None
             self._store.move_to_end(key)
             return self._store[key]
+        finally:
+            self._lock.release()
 
     def put(self, key: _FrameCacheKey, value: pl.DataFrame) -> None:
-        with self._lock:
+        if not self._lock.acquire(blocking=False):
+            return
+        try:
             if key in self._store:
                 self._store.move_to_end(key)
             self._store[key] = value
             while len(self._store) > self._max_size:
                 self._store.popitem(last=False)
+        finally:
+            self._lock.release()
 
 
 # Module-level singleton kept for backward compatibility.

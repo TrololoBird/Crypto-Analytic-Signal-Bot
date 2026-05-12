@@ -1,7 +1,7 @@
 """Live Runtime Monitor for SignalBot
 
 Tracks bot performance in real-time during live trading session.
-Usage: python -m scripts.live_runtime_monitor --duration 3600
+Usage: python -m scripts.live_runtime_monitor --duration 3600 --poll-interval 5
 """
 
 from __future__ import annotations
@@ -30,6 +30,7 @@ class RuntimeMonitor:
 
     def __init__(self, log_dir: Path = Path("data/bot/logs")):
         self.log_dir = log_dir
+        self._offsets: dict[Path, int] = {}
         self.start_time = datetime.now()
         self.stats = {
             "cycles": 0,
@@ -62,17 +63,24 @@ class RuntimeMonitor:
 
     async def _collect_snapshot(self):
         """Collect current bot state."""
-        # Check for latest log files
         log_files = list(self.log_dir.glob("*.log"))
         if not log_files:
             return
 
-        # Get most recent log
         latest_log = max(log_files, key=lambda p: p.stat().st_mtime)
 
         try:
-            # Read last lines
-            lines = latest_log.read_text(encoding="utf-8").splitlines()[-100:]
+            size = latest_log.stat().st_size
+            offset = self._offsets.get(latest_log, 0)
+            if size < offset:
+                offset = 0
+            with latest_log.open("r", encoding="utf-8", errors="ignore") as handle:
+                handle.seek(offset)
+                chunk = handle.read()
+                self._offsets[latest_log] = handle.tell()
+            if not chunk:
+                return
+            lines = chunk.splitlines()
             self._parse_log_lines(lines)
         except Exception as exc:
             LOG.warning("Failed to read log", error=str(exc))
@@ -150,10 +158,10 @@ class RuntimeMonitor:
         }
 
         # Save report
-        report_path = (
-            Path("scripts/audit_data/runtime_report_")
-            / f"{self.start_time.strftime('%Y%m%d_%H%M%S')}.json"
+        report_path = Path("scripts/audit_data") / (
+            f"runtime_report_{self.start_time.strftime('%Y%m%d_%H%M%S')}.json"
         )
+        report["report_path"] = str(report_path)
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(
             json.dumps(report, indent=2, default=str), encoding="utf-8"
@@ -174,24 +182,24 @@ class RuntimeMonitor:
         perf = report["performance"]
 
         print(
-            f"\n⏱ Duration: {report['monitoring_session']['duration_seconds']:.0f} seconds"
+            f"\nDuration: {report['monitoring_session']['duration_seconds']:.0f} seconds"
         )
-        print(f"🔄 Total Cycles: {stats['total_cycles']}")
-        print(f"📊 Symbols Processed: {stats['unique_symbols_processed']}")
-        print(f"🔍 Detector Runs: {stats['detector_runs_total']}")
-        print(f"✅ Candidates Found: {stats['candidates_total']}")
-        print(f"📤 Signals Delivered: {stats['delivered_total']}")
-        print(f"❌ Rejected: {stats['rejected_total']}")
-        print(f"⚠️ Errors: {stats['errors_count']}")
+        print(f"Total Cycles: {stats['total_cycles']}")
+        print(f"Symbols Processed: {stats['unique_symbols_processed']}")
+        print(f"Detector Runs: {stats['detector_runs_total']}")
+        print(f"Candidates Found: {stats['candidates_total']}")
+        print(f"Signals Delivered: {stats['delivered_total']}")
+        print(f"Rejected: {stats['rejected_total']}")
+        print(f"Errors: {stats['errors_count']}")
 
-        print("\n📈 Performance:")
+        print("\nPerformance:")
         print(f"  Cycles/minute: {perf['cycles_per_minute']:.1f}")
         print(f"  Candidates/cycle: {perf['candidates_per_cycle']:.2f}")
         print(f"  Delivery rate: {perf['delivery_rate'] * 100:.1f}%")
 
         signals = report["signals"]["last_signals"]
         if signals:
-            print("\n🔔 Last Signals:")
+            print("\nLast Signals:")
             for sig in signals[-5:]:
                 print(
                     f"  {sig['time'][-8:]} | {sig['symbol']}: {sig['delivered']} delivered"
@@ -199,11 +207,11 @@ class RuntimeMonitor:
 
         errors = report["errors_sample"]
         if errors:
-            print(f"\n⚠️ Sample Errors ({len(errors)} shown):")
+            print(f"\nSample Errors ({len(errors)} shown):")
             for err in errors[:3]:
                 print(f"  {err['line'][:80]}...")
 
-        print(f"\n📄 Full report saved to: {report.get('report_path', 'N/A')}")
+        print(f"\nFull report saved to: {report.get('report_path', 'N/A')}")
         print("=" * 70 + "\n")
 
 
@@ -213,14 +221,25 @@ def main():
         "--duration", type=float, default=300, help="Monitoring duration in seconds"
     )
     parser.add_argument(
-        "--poll", type=float, default=5.0, help="Polling interval in seconds"
+        "--poll-interval",
+        "--poll",
+        dest="poll_interval",
+        type=float,
+        default=5.0,
+        help="Polling interval in seconds",
+    )
+    parser.add_argument(
+        "--log-dir",
+        type=Path,
+        default=Path("data/bot/logs"),
+        help="Directory containing bot_*.log runtime logs",
     )
     args = parser.parse_args()
 
-    monitor = RuntimeMonitor()
+    monitor = RuntimeMonitor(log_dir=args.log_dir)
 
     try:
-        asyncio.run(monitor.monitor(args.duration, args.poll))
+        asyncio.run(monitor.monitor(args.duration, args.poll_interval))
     except KeyboardInterrupt:
         LOG.info("Monitoring interrupted by user")
         asyncio.run(monitor._generate_report())

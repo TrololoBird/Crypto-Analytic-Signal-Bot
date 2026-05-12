@@ -5,13 +5,13 @@
 The bot includes a built-in web dashboard for real-time monitoring.
 
 - **URL**: http://localhost:8080 (default)
-- **Auto-open**: Enabled by default (`auto_open_dashboard = true` in config)
+- **Auto-open**: Disabled by default (`auto_open_dashboard = false` in config)
 - **Port**: Configurable via `dashboard_port` in `[bot.runtime]` section
 
 ### Dashboard Features
 
 - **Overview Tab**: Bot status, shortlist size, open signals, WS latency, market regime
-- **Signals Tab**: Active signals with entry/stop/TP levels, scores, and risk/reward ratios
+- **Signals Tab**: Active and recent delivery attempts with entry/stop/TP levels, scores, confluence, delivery status, and risk/reward ratios
 - **Analytics Tab**: Performance metrics (total signals, win rate, avg R/R)
 - **Settings Tab**: Strategy configuration and enabled status
 
@@ -36,7 +36,9 @@ The bot includes a built-in web dashboard for real-time monitoring.
 - `make lint` — lint and type checks.
 - `make test` — run tests.
 - `make run` — start bot runtime.
-- `make dry-run` — run without sending live deliveries.
+- `make validate-config` — validate config, strategy exports, and local feature invariants.
+- `make live-smoke` — run `SignalBot` against live market data with a fake broadcaster; Telegram sends are suppressed.
+- `make monitor-runtime` — summarize live logs from `data/bot/logs`.
 - Targeted remediation suites (`test_regression_suite_*` naming):
   - `pytest -q tests/test_regression_suite_runtime_boundary.py`
   - `pytest -q tests/test_regression_suite_setups_contracts.py`
@@ -59,9 +61,17 @@ The bot includes a built-in web dashboard for real-time monitoring.
 
 1. Validate config values in `config.toml`.
 2. Run `make check`.
-3. Start with `make dry-run`.
-4. Inspect telemetry logs (`telemetry/`) and repository state.
-5. Enable live mode only after dry-run sanity checks.
+3. Run `make validate-config`.
+4. Start with `make live-smoke`.
+5. Inspect telemetry logs (`data/bot/telemetry/`) and repository state.
+6. Start live runtime with `make run` only after the smoke check is clean.
+
+## Telegram Delivery
+
+- Runtime sends Telegram only when `settings.notifiers.provider == "telegram"`.
+- `load_settings()` promotes provider `none` to `telegram` when both `TG_TOKEN` and `TARGET_CHAT_ID` are present in `.env` or environment variables.
+- Set `BOT_NOTIFIER_PROVIDER=none` to force local/log-only delivery for operator checks.
+- If provider is disabled, startup preflight now reports a warning instead of a successful delivery preflight.
 
 ## Runtime health signals
 
@@ -71,6 +81,7 @@ The bot includes a built-in web dashboard for real-time monitoring.
 - data quality and strategy decision JSONL traces
 - emergency fallback checks (`fallback_checks.jsonl`)
 - cycle/symbol telemetry emitted via `TelemetryManager`
+- `delivery.jsonl` records every selected delivery attempt with `sent`, `logged`, `failed`, or provider-specific status; `cycles.jsonl` separates selected attempts from actually delivered Telegram sends
 - shortlist telemetry distinguishes `rest_full`, `ws_light`, `cached`, and `pinned_fallback` sources and includes top composite-score reasons
 - shortlist telemetry also records `source_before`/`source_after`, `fallback_reason`, and cached metadata (`cached_shortlist_age_s`, `cached_shortlist_size`) for each refresh decision
 

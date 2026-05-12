@@ -1,4 +1,4 @@
-.PHONY: check lint test test-smoke test-regression dry-run run
+.PHONY: check lint test test-smoke test-regression validate-config live-smoke monitor-runtime run status stop
 
 check:
 	@echo "=== Compile check ==="
@@ -21,8 +21,20 @@ test-smoke:
 test-regression:
 	@pytest tests/ -v --cov=bot --cov-report=xml --cov-fail-under=49
 
-dry-run:
-	@python main.py --mode dry-run --config config.toml
+validate-config:
+	@python scripts/validate_config.py --config config.toml
 
 run:
-	@python main.py --config config.toml
+	@python main.py run
+
+status:
+	@python main.py status
+
+stop:
+	@python main.py stop
+
+live-smoke:
+	@python scripts/live_smoke_bot.py --warmup-seconds 30
+
+monitor-runtime:
+	@python -m scripts.live_runtime_monitor --duration 300 --poll-interval 5 --log-dir data/bot/logs

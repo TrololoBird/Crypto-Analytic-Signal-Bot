@@ -683,26 +683,112 @@ def rerank_shortlist(
     on real-time activity (volume and volatility).
     """
     ticker_map = {str(t.get("symbol", "")).upper(): t for t in latest_tickers if t.get("symbol")}
-    updated: list[UniverseSymbol] = []
+    updated_rows: list[tuple[UniverseSymbol, dict[str, Any]]] = []
 
     for item in current_shortlist:
         ticker = ticker_map.get(item.symbol)
+        row = {
+            "symbol": item.symbol,
+            "base_asset": item.base_asset,
+            "quote_asset": item.quote_asset,
+            "contract_type": item.contract_type,
+            "status": item.status,
+            "onboard_date_ms": item.onboard_date_ms,
+            "quote_volume": item.quote_volume,
+            "price_change_pct": item.price_change_pct,
+            "price_change_percent": item.price_change_pct,
+            "last_price": item.last_price,
+        }
         if ticker:
             # Update dynamic metrics
             new_volume = float(ticker.get("quote_volume") or item.quote_volume)
             new_change = float(ticker.get("price_change_percent") or item.price_change_pct)
             new_price = float(ticker.get("last_price") or item.last_price)
-
-            # Re-calculate score using the fast path
-            # (In a real scenario, we might want to re-run _composite_score,
-            # but for a 'fast' rerank we just update the core metrics)
-            item = replace(
-                item,
-                quote_volume=new_volume,
-                price_change_pct=new_change,
-                last_price=new_price,
+            row.update(
+                {
+                    "quote_volume": new_volume,
+                    "price_change_pct": new_change,
+                    "price_change_percent": new_change,
+                    "last_price": new_price,
+                    "spread_bps": _safe_float(ticker.get("spread_bps")),
+                    "ticker_age_seconds": _safe_float(ticker.get("ticker_age_seconds")),
+                    "book_age_seconds": _safe_float(ticker.get("book_age_seconds")),
+                    "mark_price_age_seconds": _safe_float(
+                        ticker.get("mark_price_age_seconds")
+                    ),
+                    "oi_change_pct": _safe_float(ticker.get("oi_change_pct")),
+                    "oi_current": _safe_float(ticker.get("oi_current")),
+                    "funding_rate": _safe_float(ticker.get("funding_rate")),
+                    "basis_pct": _safe_float(ticker.get("basis_pct")),
+                    "top_account_ls_ratio": _safe_float(
+                        ticker.get("top_account_ls_ratio")
+                    ),
+                    "top_position_ls_ratio": _safe_float(
+                        ticker.get("top_position_ls_ratio")
+                    ),
+                    "global_account_ls_ratio": _safe_float(
+                        ticker.get("global_account_ls_ratio")
+                    ),
+                    "top_vs_global_ls_gap": _safe_float(
+                        ticker.get("top_vs_global_ls_gap")
+                    ),
+                }
             )
-        updated.append(item)
+
+        updated_rows.append((item, row))
+
+    ranked_rows = sorted(
+        updated_rows,
+        key=lambda pair: float(pair[1].get("quote_volume") or 0.0),
+        reverse=True,
+    )
+    rank_by_symbol: dict[str, int] = {}
+    previous_volume: float | None = None
+    liquidity_rank = 0
+    for index, (item, row) in enumerate(ranked_rows, start=1):
+        volume = float(row.get("quote_volume") or 0.0)
+        if previous_volume is None or not math.isclose(
+            volume, previous_volume, rel_tol=0.0, abs_tol=1e-9
+        ):
+            liquidity_rank = index
+            previous_volume = volume
+        rank_by_symbol[item.symbol] = liquidity_rank
+
+    min_onboard_ms = int(
+        (datetime.now(UTC) - timedelta(days=settings.universe.min_listing_age_days)).timestamp()
+        * 1000
+    )
+    updated: list[UniverseSymbol] = []
+    for item, row in updated_rows:
+        liquidity_rank = rank_by_symbol.get(item.symbol) or item.liquidity_rank or 1
+        shortlist_score, reasons = _composite_score(
+            row=row,
+            settings=settings,
+            liquidity_rank=liquidity_rank,
+            eligible_count=max(len(updated_rows), 1),
+            min_onboard_ms=min_onboard_ms,
+        )
+        updated.append(
+            replace(
+                item,
+                quote_volume=float(row.get("quote_volume") or item.quote_volume),
+                price_change_pct=float(
+                    row.get("price_change_percent") or item.price_change_pct
+                ),
+                last_price=float(row.get("last_price") or item.last_price),
+                shortlist_bucket=_bucket_for_price_change(
+                    float(row.get("price_change_percent") or item.price_change_pct)
+                ),
+                shortlist_score=shortlist_score,
+                shortlist_reasons=reasons,
+                liquidity_rank=liquidity_rank,
+                strategy_fits=_strategy_fits_for_row(
+                    row,
+                    settings=settings,
+                    liquidity_rank=liquidity_rank,
+                ),
+            )
+        )
 
     # Re-sort using the standard priority
     pinned = set(settings.universe.pinned_symbols)

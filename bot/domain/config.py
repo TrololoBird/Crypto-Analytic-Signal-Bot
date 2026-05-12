@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import os
 import tomllib as _toml_lib
 from collections.abc import Mapping
 from pathlib import Path
@@ -36,6 +37,10 @@ class RuntimeConfig(BaseModel):
     circuit_breaker_cooldown_seconds: int = Field(default=60, ge=0, le=3600)
     telemetry_subdir: str = "telemetry"
     log_level: str = "INFO"
+    logs_retention_days: int = Field(default=14, ge=1, le=3650)
+    logs_max_files: int = Field(default=120, ge=10, le=5000)
+    telemetry_retention_days: int = Field(default=14, ge=1, le=3650)
+    telemetry_max_runs: int = Field(default=120, ge=10, le=5000)
     shortlist_refresh_interval_seconds: int = Field(default=7200, ge=300, le=86400)
     emergency_fallback_seconds: int = Field(default=1800, ge=300, le=7200)
     strict_data_quality: bool = True
@@ -725,14 +730,23 @@ class BotSettings(BaseModel):
 
 def _load_toml(path: Path) -> dict[str, Any]:
     if not path.exists():
-        if path.name == "config.toml":
-            example_path = path.with_name("config.toml.example")
-            if example_path.exists():
-                return _load_toml(example_path)
         return {}
     with path.open("rb") as handle:
         parsed = _toml_lib.load(handle)
     return parsed if isinstance(parsed, dict) else {}
+
+
+def _resolve_config_source(config_file: Path) -> Path:
+    if config_file.exists():
+        return config_file
+    if config_file.name == "config.toml":
+        legacy_alias = config_file.with_name("config..toml")
+        if legacy_alias.exists():
+            return legacy_alias
+        example_path = config_file.with_name("config.toml.example")
+        if example_path.exists():
+            return example_path
+    return config_file
 
 
 def _flatten_legacy_strategy_config(config: Mapping[str, Any]) -> dict[str, float]:
@@ -786,13 +800,24 @@ def _convert_toml_dict(d: dict[Any, Any]) -> dict[str, Any]:
 
 def load_settings(config_path: str | Path = "config.toml") -> BotSettings:
     config_file = Path(config_path)
-    parsed = _load_toml(config_file)
+    resolved_config = _resolve_config_source(config_file)
+    parsed = _load_toml(resolved_config)
     bot_raw = parsed.get("bot") if isinstance(parsed.get("bot"), dict) else {}
     payload = _convert_toml_dict(cast(dict[Any, Any], bot_raw))
     secrets = load_secrets()
     payload["tg_token"] = secrets.tg_token
     payload["target_chat_id"] = secrets.target_chat_id
-    payload["config_path"] = config_file
+    payload["config_path"] = resolved_config
+    notifiers_payload = payload.setdefault("notifiers", {})
+    if isinstance(notifiers_payload, dict):
+        provider_override = str(os.getenv("BOT_NOTIFIER_PROVIDER", "") or "").strip().lower()
+        provider = str(
+            notifiers_payload.get("provider", "telegram") or "telegram"
+        ).strip().lower()
+        if provider_override:
+            notifiers_payload["provider"] = provider_override
+        elif provider == "none" and secrets.tg_token and secrets.target_chat_id:
+            notifiers_payload["provider"] = "telegram"
     payload.setdefault("data_dir", Path("data") / "bot")
     filters_payload = payload.setdefault("filters", {})
     if not isinstance(filters_payload, dict):
