@@ -452,7 +452,7 @@ class BotDashboard:
             if price_raw is None:
                 price_raw = row.get("entry_mid")
             try:
-                price = round(float(price_raw), 3)
+                price = round(float(price_raw or 0.0), 3)
             except (TypeError, ValueError):
                 price = 0.0
             key = (symbol, direction, timeframe, price, ts_bucket)
