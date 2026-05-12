@@ -801,6 +801,27 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             background: currentColor;
             animation: pulse 2s infinite;
         }
+        .refresh-btn {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            border-radius: 50%;
+            width: 28px;
+            height: 28px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-left: var(--space-2);
+        }
+        .refresh-btn:hover {
+            color: var(--text-primary);
+            border-color: var(--accent-blue);
+            background: var(--bg-secondary);
+        }
+        .refresh-btn:active { transform: scale(0.9); }
+        .refresh-btn svg { width: 14px; height: 14px; }
         @keyframes pulse {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.5; }
@@ -963,17 +984,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         .score-medium { background: rgba(210,153,34,0.15); color: var(--accent-yellow); }
         .score-low { background: rgba(248,81,73,0.15); color: var(--accent-red); }
         .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
             text-align: center;
             padding: var(--space-8);
             color: var(--text-secondary);
-            margin-top: var(--space-2);
-            writing-mode: vertical-rl;
-            text-orientation: mixed;
-            transform: rotate(180deg);
-            height: 70px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
+            min-height: 120px;
         }
         .chart-container {
             height: 220px;
@@ -1080,6 +1098,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         <h1>
             <span>Signal Bot</span>
             <span id="status-badge" class="status-badge offline" aria-live="polite">Offline</span>
+            <button class="refresh-btn" onclick="manualRefresh()" aria-label="Refresh data" title="Refresh data (R)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+            </button>
         </h1>
         <nav class="nav-tabs" role="tablist" aria-label="Dashboard sections">
             <button class="nav-tab active" role="tab" id="tab-btn-overview" aria-selected="true" aria-controls="tab-panel-overview" data-tab="overview" onclick="switchTab('overview')">Overview</button>
@@ -1281,6 +1302,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
             if (e.key === '?') {
                 showToast('Keyboard Shortcuts', '1-4: Switch tabs | R: Refresh | ?: Help');
             }
@@ -1290,9 +1312,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 if (tabButton) tabButton.click();
             }
             if (e.key === 'r' || e.key === 'R') {
-                fetchStatus();
-                fetchSignals();
-                showToast('Refreshed', 'Data updated manually');
+                manualRefresh();
             }
         });
         
@@ -1676,6 +1696,30 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             container.innerHTML = rows;
         }
         
+        async function manualRefresh() {
+            const btn = document.querySelector('.refresh-btn');
+            if (btn) btn.style.transform = 'rotate(360deg)';
+
+            showToast('Refreshing', 'Fetching latest data...');
+
+            await Promise.all([
+                fetchStatus(),
+                fetchSignals(),
+                fetchRecentActivity(),
+                fetchStrategies(),
+                fetchAnalytics()
+            ]);
+
+            if (btn) {
+                setTimeout(() => {
+                    btn.style.transition = 'none';
+                    btn.style.transform = 'rotate(0deg)';
+                    setTimeout(() => { btn.style.transition = 'all 0.2s'; }, 50);
+                }, 500);
+            }
+            showToast('Refreshed', 'All data updated');
+        }
+
         // Initial fetch
         fetchStatus();
         fetchSignals();
