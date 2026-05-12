@@ -452,7 +452,7 @@ class BotDashboard:
             if price_raw is None:
                 price_raw = row.get("entry_mid")
             try:
-                price = round(float(price_raw), 3)
+                price = round(float(price_raw or 0.0), 3)
             except (TypeError, ValueError):
                 price = 0.0
             key = (symbol, direction, timeframe, price, ts_bucket)
@@ -964,11 +964,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             text-align: center;
             padding: var(--space-8);
             color: var(--text-secondary);
-            margin-top: var(--space-2);
-            writing-mode: vertical-rl;
-            text-orientation: mixed;
-            transform: rotate(180deg);
-            height: 70px;
+
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+
+
+            min-height: 120px;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
@@ -1003,11 +1003,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         .chart-label {
             font-size: 10px;
             color: var(--text-secondary);
-            margin-top: var(--space-2);
-            writing-mode: vertical-rl;
-            text-orientation: mixed;
-            transform: rotate(180deg);
-            height: 70px;
+
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+
+
+            min-height: 120px;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
