@@ -27,15 +27,10 @@ class IntraCandleScanner:
             "market_ticker_freshness_seconds",
             None,
         )
-        if (
-            freshness_cfg is not None
-            and event.event_ts_ms is not None
-            and event.event_ts_ms > 0
-        ):
+        if freshness_cfg is not None and event.event_ts_ms is not None and event.event_ts_ms > 0:
             event_age_seconds = max(
                 0.0,
-                (datetime.now(UTC).timestamp() * 1000.0 - float(event.event_ts_ms))
-                / 1000.0,
+                (datetime.now(UTC).timestamp() * 1000.0 - float(event.event_ts_ms)) / 1000.0,
             )
             max_event_age_seconds = float(freshness_cfg)
             if event_age_seconds > max_event_age_seconds:
@@ -101,9 +96,7 @@ class IntraCandleScanner:
                     and event.ask >= event.bid
                 ):
                     mid = (event.bid + event.ask) / 2.0
-                    spread_bps = (
-                        ((event.ask - event.bid) / mid) * 10000.0 if mid > 0.0 else None
-                    )
+                    spread_bps = ((event.ask - event.bid) / mid) * 10000.0 if mid > 0.0 else None
                     ws_override = {
                         "bid_price": event.bid,
                         "ask_price": event.ask,

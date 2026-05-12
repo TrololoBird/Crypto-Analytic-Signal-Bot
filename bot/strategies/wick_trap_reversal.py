@@ -29,9 +29,7 @@ class WickTrapReversalSetup(BaseSetup):
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)
 
-    def get_optimizable_params(
-        self, settings: BotSettings | None = None
-    ) -> dict[str, float]:
+    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
         """Tunable parameters for self-learner optimization."""
         defaults = {
             "base_score": 0.55,
@@ -82,9 +80,7 @@ class WickTrapReversalSetup(BaseSetup):
         wick_through_atr_mult = float(
             dynamic_params.get(
                 "wick_through_atr_mult",
-                dynamic_params.get(
-                    "wick_atr_threshold", defaults["wick_through_atr_mult"]
-                ),
+                dynamic_params.get("wick_atr_threshold", defaults["wick_through_atr_mult"]),
             )
         )
         closed_back_threshold = max(
@@ -120,9 +116,7 @@ class WickTrapReversalSetup(BaseSetup):
 
         if sl_mask.any():
             # Get positions where sl_mask is True (swing low indices)
-            sl_positions = [
-                idx for idx, is_swing in enumerate(sl_mask.to_list()) if is_swing
-            ]
+            sl_positions = [idx for idx, is_swing in enumerate(sl_mask.to_list()) if is_swing]
             for sl_pos in reversed(sl_positions):
                 bars_ago = work_1h.height - 1 - sl_pos
                 if 3 <= bars_ago <= 20:
@@ -131,12 +125,8 @@ class WickTrapReversalSetup(BaseSetup):
                     for k in _recent_15m_positions_after(swing_time):
                         bar_low = float(work_15m.item(k, "low"))
                         bar_close = float(work_15m.item(k, "close"))
-                        wick_through = (
-                            bar_low < candidate_level - atr * wick_through_atr_mult
-                        )
-                        closed_back = (
-                            bar_close > candidate_level + closed_back_threshold
-                        )
+                        wick_through = bar_low < candidate_level - atr * wick_through_atr_mult
+                        closed_back = bar_close > candidate_level + closed_back_threshold
                         if wick_through and closed_back:
                             direction = "long"
                             wick_bar_idx = k
@@ -147,9 +137,7 @@ class WickTrapReversalSetup(BaseSetup):
 
         if direction is None and sh_mask.any():
             # Get positions where sh_mask is True (swing high indices)
-            sh_positions = [
-                idx for idx, is_swing in enumerate(sh_mask.to_list()) if is_swing
-            ]
+            sh_positions = [idx for idx, is_swing in enumerate(sh_mask.to_list()) if is_swing]
             for sh_pos in reversed(sh_positions):
                 bars_ago = work_1h.height - 1 - sh_pos
                 if 3 <= bars_ago <= 20:
@@ -158,12 +146,8 @@ class WickTrapReversalSetup(BaseSetup):
                     for k in _recent_15m_positions_after(swing_time):
                         bar_high = float(work_15m.item(k, "high"))
                         bar_close = float(work_15m.item(k, "close"))
-                        wick_through = (
-                            bar_high > candidate_level + atr * wick_through_atr_mult
-                        )
-                        closed_back = (
-                            bar_close < candidate_level - closed_back_threshold
-                        )
+                        wick_through = bar_high > candidate_level + atr * wick_through_atr_mult
+                        closed_back = bar_close < candidate_level - closed_back_threshold
                         if wick_through and closed_back:
                             direction = "short"
                             wick_bar_idx = k
@@ -178,9 +162,7 @@ class WickTrapReversalSetup(BaseSetup):
 
         confirmation_lag = work_15m.height - 1 - wick_bar_idx
         max_confirmation_bars = int(
-            dynamic_params.get(
-                "max_confirmation_bars", defaults["max_confirmation_bars"]
-            )
+            dynamic_params.get("max_confirmation_bars", defaults["max_confirmation_bars"])
         )
         if confirmation_lag > max_confirmation_bars:
             _reject(
@@ -291,9 +273,7 @@ class WickTrapReversalSetup(BaseSetup):
 
         price_anchor = trig_close
 
-        sl_buffer_atr = float(
-            dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"])
-        )
+        sl_buffer_atr = float(dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]))
 
         # --- Compute structural SL/TP ---
         if direction == "long":
@@ -325,9 +305,7 @@ class WickTrapReversalSetup(BaseSetup):
         fallback_note = None
         if tp1 is None or abs(tp1 - price_anchor) < min_required:
             tp1 = (
-                price_anchor + min_required
-                if direction == "long"
-                else price_anchor - min_required
+                price_anchor + min_required if direction == "long" else price_anchor - min_required
             )
             fallback_note = f"tp1_rr_fallback_{min_rr:.2f}"
         if tp2 is None:

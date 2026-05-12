@@ -54,9 +54,7 @@ class OutcomeStore:
                 return pl.DataFrame()
             columns = self._table_columns(conn, table)
             ts_col = (
-                "created_at"
-                if "created_at" in columns
-                else ("ts" if "ts" in columns else None)
+                "created_at" if "created_at" in columns else ("ts" if "ts" in columns else None)
             )
             if ts_col is None:
                 return pl.DataFrame()
@@ -82,9 +80,7 @@ class OutcomeStore:
     @staticmethod
     def _detect_outcomes_table(conn: sqlite3.Connection) -> str | None:
         candidates = ("setup_outcomes", "signal_outcomes")
-        rows = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        ).fetchall()
+        rows = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         names = {str(name) for (name,) in rows}
         for candidate in candidates:
             if candidate in names:

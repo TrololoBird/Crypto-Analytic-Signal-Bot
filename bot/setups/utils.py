@@ -55,17 +55,11 @@ def normalize_target_pair(
 
     if direction == "long":
         ordered_tp1, ordered_tp2 = sorted((target_a, target_b))
-        if (
-            ordered_tp1 <= price_anchor + tolerance
-            or ordered_tp2 <= price_anchor + tolerance
-        ):
+        if ordered_tp1 <= price_anchor + tolerance or ordered_tp2 <= price_anchor + tolerance:
             return None
     elif direction == "short":
         ordered_tp1, ordered_tp2 = sorted((target_a, target_b), reverse=True)
-        if (
-            ordered_tp1 >= price_anchor - tolerance
-            or ordered_tp2 >= price_anchor - tolerance
-        ):
+        if ordered_tp1 >= price_anchor - tolerance or ordered_tp2 >= price_anchor - tolerance:
             return None
     else:
         return None
@@ -74,9 +68,7 @@ def normalize_target_pair(
         math.isclose(target_a, ordered_tp1, abs_tol=tolerance, rel_tol=0.0)
         and math.isclose(target_b, ordered_tp2, abs_tol=tolerance, rel_tol=0.0)
     )
-    single_target_mode = math.isclose(
-        ordered_tp1, ordered_tp2, abs_tol=tolerance, rel_tol=0.0
-    )
+    single_target_mode = math.isclose(ordered_tp1, ordered_tp2, abs_tol=tolerance, rel_tol=0.0)
     if single_target_mode:
         ordered_tp1 = ordered_tp2
 
@@ -243,11 +235,7 @@ def build_structural_targets(
 
         # TP2: measured move = prior range projected from breakout point
         tp2 = None
-        if (
-            breakout_bar_idx is not None
-            and breakout_bar_idx > 0
-            and broken_level is not None
-        ):
+        if breakout_bar_idx is not None and breakout_bar_idx > 0 and broken_level is not None:
             high_before = _safe_float(work_1h["high"].slice(0, breakout_bar_idx).max())
             low_before = _safe_float(work_1h["low"].slice(0, breakout_bar_idx).min())
             range_before = float(high_before - low_before)
@@ -274,11 +262,7 @@ def build_structural_targets(
 
         # TP2: measured move downward from breakout point
         tp2 = None
-        if (
-            breakout_bar_idx is not None
-            and breakout_bar_idx > 0
-            and broken_level is not None
-        ):
+        if breakout_bar_idx is not None and breakout_bar_idx > 0 and broken_level is not None:
             high_before = _safe_float(work_1h["high"].slice(0, breakout_bar_idx).max())
             low_before = _safe_float(work_1h["low"].slice(0, breakout_bar_idx).min())
             range_before = float(high_before - low_before)
@@ -374,9 +358,7 @@ def _relax_deep_asset_thresholds(
     cap = 0.75 if primary_timeframe in {"1h", "4h"} else 0.85
     for key in ("min_volume_ratio", "volume_threshold"):
         raw_value = adjusted.get(key)
-        if not isinstance(raw_value, int | float) or not math.isfinite(
-            float(raw_value)
-        ):
+        if not isinstance(raw_value, int | float) or not math.isfinite(float(raw_value)):
             continue
         value = float(raw_value)
         if value <= floor:

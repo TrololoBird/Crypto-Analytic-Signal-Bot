@@ -62,9 +62,7 @@ class ShortlistService:
         if current_task is not None and not current_task.done():
             return
         try:
-            task = asyncio.create_task(
-                preload(), name="preload_frames:shortlist_refresh"
-            )
+            task = asyncio.create_task(preload(), name="preload_frames:shortlist_refresh")
         except RuntimeError:
             return
         bot._context_preload_task = task
@@ -82,9 +80,7 @@ class ShortlistService:
             return None
         return ((ask - bid) / mid) * 10_000.0
 
-    def _enrich_shortlist_rows(
-        self, rows: list[dict[str, Any]]
-    ) -> list[dict[str, Any]]:
+    def _enrich_shortlist_rows(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         bot = self._bot
         enriched: list[dict[str, Any]] = []
         ws = getattr(bot, "_ws_manager", None)
@@ -124,9 +120,7 @@ class ShortlistService:
                         mark_price = float(mark.get("mark_price") or 0.0)
                         index_price = float(mark.get("index_price") or 0.0)
                         if mark_price > 0.0 and index_price > 0.0:
-                            row["basis_pct"] = (
-                                (mark_price - index_price) / index_price
-                            ) * 100.0
+                            row["basis_pct"] = ((mark_price - index_price) / index_price) * 100.0
                 except Exception as exc:
                     LOG.debug(
                         "shortlist mark price unavailable | symbol=%s error=%s",
@@ -162,9 +156,9 @@ class ShortlistService:
                 if global_ratio is not None:
                     row["global_account_ls_ratio"] = float(global_ratio)
                 if "top_account_ls_ratio" in row and "global_account_ls_ratio" in row:
-                    row["top_vs_global_ls_gap"] = float(
-                        row["top_account_ls_ratio"]
-                    ) - float(row["global_account_ls_ratio"])
+                    row["top_vs_global_ls_gap"] = float(row["top_account_ls_ratio"]) - float(
+                        row["global_account_ls_ratio"]
+                    )
                 basis_pct = client.get_cached_basis(symbol, period="1h")
                 if basis_pct is not None:
                     row["basis_pct"] = float(basis_pct)
@@ -233,9 +227,7 @@ class ShortlistService:
             exchange_cache = getattr(bot.client, "_exchange_info_cache", None)
             if exchange_cache is not None:
                 _cached_at, rows = exchange_cache
-                cache_map = {
-                    str(getattr(row, "symbol", "")).strip().upper(): row for row in rows
-                }
+                cache_map = {str(getattr(row, "symbol", "")).strip().upper(): row for row in rows}
                 bot._symbol_meta_by_symbol.update(cache_map)
                 meta = bot._symbol_meta_by_symbol.get(sym)
         if meta is not None:
@@ -295,8 +287,7 @@ class ShortlistService:
             timeout=timeout_s,
         )
         bot._symbol_meta_by_symbol = {
-            str(getattr(row, "symbol", "")).strip().upper(): row
-            for row in symbol_meta_list
+            str(getattr(row, "symbol", "")).strip().upper(): row for row in symbol_meta_list
         }
         shortlist, summary = build_shortlist(
             symbol_meta_list,
@@ -313,11 +304,7 @@ class ShortlistService:
     ) -> tuple[list[UniverseSymbol], dict[str, Any]]:
         bot = self._bot
         ws = getattr(bot, "_ws_manager", None)
-        if (
-            ws is None
-            or not bot._symbol_meta_by_symbol
-            or not ws.is_ticker_cache_warm()
-        ):
+        if ws is None or not bot._symbol_meta_by_symbol or not ws.is_ticker_cache_warm():
             return [], {
                 "mode": "ws_light",
                 "eligible": 0,
@@ -351,9 +338,7 @@ class ShortlistService:
             )
         )
         last_full = getattr(bot, "_last_shortlist_full_refresh_at", None)
-        full_refresh_due = (
-            last_full is None or (now - last_full).total_seconds() >= full_interval
-        )
+        full_refresh_due = last_full is None or (now - last_full).total_seconds() >= full_interval
         ws = getattr(bot, "_ws_manager", None)
         try:
             ws_cache_warm = bool(ws is not None and ws.is_ticker_cache_warm())
@@ -363,9 +348,7 @@ class ShortlistService:
         cached_shortlist = list(getattr(bot, "_last_live_shortlist", []) or [])
         cached_at = getattr(bot, "_last_live_shortlist_at", None)
         cached_shortlist_age_s = (
-            max(0.0, (now - cached_at).total_seconds())
-            if isinstance(cached_at, datetime)
-            else None
+            max(0.0, (now - cached_at).total_seconds()) if isinstance(cached_at, datetime) else None
         )
         fallback_reason: str | None = None
 

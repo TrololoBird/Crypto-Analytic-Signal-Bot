@@ -295,9 +295,7 @@ class BotDashboard:
         delivery_counts = last_cycle.get("delivery_status_counts", {})
         if not isinstance(delivery_counts, dict):
             delivery_counts = {}
-        selected_count = int(
-            last_cycle.get("selected_signals", last_cycle.get("selected", 0)) or 0
-        )
+        selected_count = int(last_cycle.get("selected_signals", last_cycle.get("selected", 0)) or 0)
         delivered_count = int(
             last_cycle.get("delivered_signals", last_cycle.get("delivered", 0)) or 0
         )

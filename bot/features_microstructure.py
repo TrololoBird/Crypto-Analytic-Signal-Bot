@@ -32,19 +32,13 @@ def add_microstructure_features(df: pl.DataFrame) -> pl.DataFrame:
     else:
         result = result.with_columns([pl.lit(0.0).alias("tob_imbalance")])
 
-    if {"bid_price", "ask_price", "bid_qty", "ask_qty", "close"}.issubset(
-        result.columns
-    ):
+    if {"bid_price", "ask_price", "bid_qty", "ask_qty", "close"}.issubset(result.columns):
         microprice = (
-            (pl.col("ask_price") * pl.col("bid_qty"))
-            + (pl.col("bid_price") * pl.col("ask_qty"))
+            (pl.col("ask_price") * pl.col("bid_qty")) + (pl.col("bid_price") * pl.col("ask_qty"))
         ) / (pl.col("bid_qty") + pl.col("ask_qty")).clip(lower_bound=1e-9)
         result = result.with_columns(
             [
-                (
-                    ((microprice - pl.col("close")) / pl.col("close")).fill_nan(0.0)
-                    * 100.0
-                )
+                (((microprice - pl.col("close")) / pl.col("close")).fill_nan(0.0) * 100.0)
                 .clip(-2.0, 2.0)
                 .alias("microprice_deviation_pct"),
             ]

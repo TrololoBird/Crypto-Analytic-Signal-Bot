@@ -115,9 +115,7 @@ def analyze_strategy_decisions(run_dir: Path) -> dict:
         return {"error": str(exc)}
 
     stats["zero_hit_setups"] = sorted(
-        setup
-        for setup in stats["by_setup"]
-        if stats["signal_hits_by_setup"].get(setup, 0) == 0
+        setup for setup in stats["by_setup"] if stats["signal_hits_by_setup"].get(setup, 0) == 0
     )
     return stats
 
@@ -149,14 +147,10 @@ def analyze_data_quality(run_dir: Path) -> dict:
                 setup = str(row.get("setup_id") or "unknown")
                 stats["by_setup"][setup] += 1
                 missing_fields = (
-                    row.get("missing_fields")
-                    if isinstance(row.get("missing_fields"), list)
-                    else []
+                    row.get("missing_fields") if isinstance(row.get("missing_fields"), list) else []
                 )
                 invalid_fields = (
-                    row.get("invalid_fields")
-                    if isinstance(row.get("invalid_fields"), list)
-                    else []
+                    row.get("invalid_fields") if isinstance(row.get("invalid_fields"), list) else []
                 )
                 if missing_fields or invalid_fields:
                     stats["strict_none_violations"] += 1
@@ -348,12 +342,8 @@ def print_audit_report(
     else:
         print(f"Symbols Processed: {funnel_stats.get('symbols_processed', 0)}")
         print(f"Symbols with Raw Hits: {funnel_stats.get('symbols_with_raw_hits', 0)}")
-        print(
-            f"Total Raw Hits (detectors found): {funnel_stats.get('total_raw_hits', 0)}"
-        )
-        print(
-            f"Total Candidates (after filters): {funnel_stats.get('total_candidates', 0)}"
-        )
+        print(f"Total Raw Hits (detectors found): {funnel_stats.get('total_raw_hits', 0)}")
+        print(f"Total Candidates (after filters): {funnel_stats.get('total_candidates', 0)}")
         print(f"Total Delivered: {funnel_stats.get('total_delivered', 0)}")
 
         if funnel_stats.get("total_raw_hits", 0) > 0:
@@ -365,9 +355,7 @@ def print_audit_report(
             print(f"\nConversion: {conversion:.2f}% (raw hits to candidates)")
 
         print("\n--- Rejection Reasons (when raw hits exist) ---")
-        for reason, count in funnel_stats.get(
-            "rejection_reasons", Counter()
-        ).most_common():
+        for reason, count in funnel_stats.get("rejection_reasons", Counter()).most_common():
             print(f"  {reason}: {count}")
 
     # Cycle Summary
@@ -412,18 +400,14 @@ def print_audit_report(
             print(f"  {stage}: {count}")
 
         print("\n--- By Reason (why rejected?) ---")
-        for reason, count in rejection_stats.get("by_reason", Counter()).most_common(
-            10
-        ):
+        for reason, count in rejection_stats.get("by_reason", Counter()).most_common(10):
             print(f"  {reason}: {count}")
             # Show samples
             samples = rejection_stats.get("detailed", {}).get(reason, [])
             for s in samples[:2]:
                 details = f"{s['symbol']} | {s['setup']} | stage={s['stage']}"
                 if "adx_1h" in s:
-                    details += (
-                        f" | adx={s['adx_1h']:.1f}" if s["adx_1h"] else " | adx=N/A"
-                    )
+                    details += f" | adx={s['adx_1h']:.1f}" if s["adx_1h"] else " | adx=N/A"
                 if "rr" in s:
                     details += f" | rr={s['rr']:.2f}" if s["rr"] else " | rr=N/A"
                 if "details" in s:
@@ -466,20 +450,14 @@ def print_audit_report(
         print(f"ERROR: {data_quality_stats['error']}")
     else:
         print(f"Rows: {data_quality_stats.get('rows', 0)}")
-        print(
-            f"Strict-None Violations: {data_quality_stats.get('strict_none_violations', 0)}"
-        )
+        print(f"Strict-None Violations: {data_quality_stats.get('strict_none_violations', 0)}")
 
         print("\n--- Missing Fields ---")
-        for field, count in data_quality_stats.get(
-            "missing_fields", Counter()
-        ).most_common(10):
+        for field, count in data_quality_stats.get("missing_fields", Counter()).most_common(10):
             print(f"  {field}: {count}")
 
         print("\n--- Invalid Fields ---")
-        for field, count in data_quality_stats.get(
-            "invalid_fields", Counter()
-        ).most_common(10):
+        for field, count in data_quality_stats.get("invalid_fields", Counter()).most_common(10):
             print(f"  {field}: {count}")
 
     # Database Summary
@@ -520,9 +498,7 @@ def print_audit_report(
             )
             print("  -> Check strategy thresholds in config.toml [bot.filters.setups]")
         else:
-            print(
-                f"[OK] Rejection distribution looks healthy ({no_raw_hit_pct:.1f}% no_raw_hit)"
-            )
+            print(f"[OK] Rejection distribution looks healthy ({no_raw_hit_pct:.1f}% no_raw_hit)")
     else:
         print("[WARNING] No rejection data available")
 
@@ -530,17 +506,13 @@ def print_audit_report(
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Audit persisted bot runtime telemetry"
-    )
+    parser = argparse.ArgumentParser(description="Audit persisted bot runtime telemetry")
     parser.add_argument(
         "--run",
         default=None,
         help="explicit telemetry run id under data/bot/telemetry/runs",
     )
-    parser.add_argument(
-        "--watch", action="store_true", help="rerun audit every 30 seconds"
-    )
+    parser.add_argument("--watch", action="store_true", help="rerun audit every 30 seconds")
     args = parser.parse_args()
 
     print_header("BOT RUNTIME AUDIT - Starting")
@@ -599,9 +571,7 @@ def main():
         try:
             while True:
                 time.sleep(30)
-                print(
-                    f"\n--- Update at {datetime.now(timezone.utc).strftime('%H:%M:%S')} ---"
-                )
+                print(f"\n--- Update at {datetime.now(timezone.utc).strftime('%H:%M:%S')} ---")
                 run_dir = get_latest_run_dir(args.run) or run_dir
                 rejection_stats = analyze_rejection_funnel(run_dir)
                 cycle_stats = analyze_cycles(run_dir)

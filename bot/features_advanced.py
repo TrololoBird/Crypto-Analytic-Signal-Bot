@@ -24,9 +24,7 @@ def supertrend(
 ) -> tuple[pl.Series, pl.Series]:
     """Contract: input requires HLC; output (`supertrend`,`supertrend_dir`), dir ∈ {-1,1}."""
     close = df["close"]
-    atr = atr_from_true_range(
-        true_range(df), period=period, df=df, name="supertrend_atr"
-    )
+    atr = atr_from_true_range(true_range(df), period=period, df=df, name="supertrend_atr")
     hl2 = (df["high"] + df["low"]) / 2.0
     basic_upper = hl2 + multiplier * atr
     basic_lower = hl2 - multiplier * atr
@@ -59,10 +57,7 @@ def supertrend(
         st.append(next_st)
     return pl.Series("supertrend", st, dtype=pl.Float64), pl.Series(
         "supertrend_dir",
-        [
-            1.0 if float(c) >= float(s) else -1.0
-            for c, s in zip(close_vals, st, strict=False)
-        ],
+        [1.0 if float(c) >= float(s) else -1.0 for c, s in zip(close_vals, st, strict=False)],
         dtype=pl.Float64,
     )
 
@@ -119,9 +114,7 @@ def _parabolic_sar(
         prev_psar = psar
         psar = prev_psar + af * (ep - prev_psar)
         if is_long:
-            psar = min(
-                psar, low_vals[i - 1], low_vals[i - 2] if i > 1 else low_vals[i - 1]
-            )
+            psar = min(psar, low_vals[i - 1], low_vals[i - 2] if i > 1 else low_vals[i - 1])
             if low_vals[i] < psar:
                 is_long = False
                 rev[i] = -1.0
@@ -135,9 +128,7 @@ def _parabolic_sar(
                 af = min(af + step, max_step)
             long_psar[i] = psar
         else:
-            psar = max(
-                psar, high_vals[i - 1], high_vals[i - 2] if i > 1 else high_vals[i - 1]
-            )
+            psar = max(psar, high_vals[i - 1], high_vals[i - 2] if i > 1 else high_vals[i - 1])
             if high_vals[i] > psar:
                 is_long = True
                 rev[i] = 1.0
@@ -157,9 +148,7 @@ def _parabolic_sar(
     )
 
 
-def _aroon(
-    df: pl.DataFrame, period: int = 14
-) -> tuple[pl.Series, pl.Series, pl.Series]:
+def _aroon(df: pl.DataFrame, period: int = 14) -> tuple[pl.Series, pl.Series, pl.Series]:
     """Aroon indicator - vectorized via rolling_map."""
     high = df["high"]
     low = df["low"]
@@ -183,9 +172,7 @@ def _aroon(
     )
 
 
-def _fisher_transform(
-    df: pl.DataFrame, period: int = 10
-) -> tuple[pl.Series, pl.Series]:
+def _fisher_transform(df: pl.DataFrame, period: int = 10) -> tuple[pl.Series, pl.Series]:
     high = [float(v or 0.0) for v in df["high"]]
     low = [float(v or 0.0) for v in df["low"]]
     close = [float(v or 0.0) for v in df["close"]]
@@ -200,9 +187,7 @@ def _fisher_transform(
         prev_v = values[i - 1] if i > 0 else 0.0
         v = max(min(0.33 * raw + 0.67 * prev_v, 0.999), -0.999)
         values[i] = v
-        fisher[i] = 0.5 * np.log((1.0 + v) / (1.0 - v)) + 0.5 * (
-            fisher[i - 1] if i > 0 else 0.0
-        )
+        fisher[i] = 0.5 * np.log((1.0 + v) / (1.0 - v)) + 0.5 * (fisher[i - 1] if i > 0 else 0.0)
     fs = pl.Series("fisher", fisher, dtype=pl.Float64)
     return fs, fs.ewm_mean(span=5, adjust=False).rename("fisher_signal")
 
@@ -212,16 +197,8 @@ def _squeeze_momentum(
 ) -> tuple[pl.Series, pl.Series, pl.Series, pl.Series]:
     bb_upper, bb_mid, bb_lower = _bollinger_bands(df["close"], period=period, nbdev=2.0)
     kc_upper, _, kc_lower = _keltner_channels(df, period=period, multiplier=1.5)
-    on = (
-        ((bb_lower > kc_lower) & (bb_upper < kc_upper))
-        .cast(pl.Float64)
-        .rename("squeeze_on")
-    )
-    off = (
-        ((bb_lower < kc_lower) & (bb_upper > kc_upper))
-        .cast(pl.Float64)
-        .rename("squeeze_off")
-    )
+    on = ((bb_lower > kc_lower) & (bb_upper < kc_upper)).cast(pl.Float64).rename("squeeze_on")
+    off = ((bb_lower < kc_lower) & (bb_upper > kc_upper)).cast(pl.Float64).rename("squeeze_off")
     no = pl.Series(
         "squeeze_no",
         [
@@ -232,17 +209,14 @@ def _squeeze_momentum(
     )
     basis = (
         (
-            (
-                df["high"].rolling_max(window_size=period)
-                + df["low"].rolling_min(window_size=period)
-            )
+            (df["high"].rolling_max(window_size=period) + df["low"].rolling_min(window_size=period))
             / 2.0
         )
         + bb_mid
     ) / 2.0
-    hist = clean_non_finite(
-        (df["close"] - basis).ewm_mean(span=5, adjust=False), fill=0.0
-    ).rename("squeeze_hist")
+    hist = clean_non_finite((df["close"] - basis).ewm_mean(span=5, adjust=False), fill=0.0).rename(
+        "squeeze_hist"
+    )
     return hist, on, off, no
 
 
@@ -252,9 +226,7 @@ def _chandelier_exit(
     atr = (
         atr_fn(df, period)
         if atr_fn
-        else atr_from_true_range(
-            true_range(df), period=period, df=df, name=f"atr{period}"
-        )
+        else atr_from_true_range(true_range(df), period=period, df=df, name=f"atr{period}")
     )
     long_exit = (df["high"].rolling_max(window_size=period) - atr * atr_mult).rename(
         "chandelier_long"
@@ -288,12 +260,7 @@ def _volume_profile(df: pl.DataFrame, bins: int = 12) -> pl.Expr:
     volumes = df["volume"].cast(pl.Float64, strict=False)
 
     # Filter valid prices and volumes
-    valid_mask = (
-        prices.is_not_null()
-        & prices.is_finite()
-        & volumes.is_not_null()
-        & (volumes > 0.0)
-    )
+    valid_mask = prices.is_not_null() & prices.is_finite() & volumes.is_not_null() & (volumes > 0.0)
     v_prices = prices.filter(valid_mask)
     v_volumes = volumes.filter(valid_mask)
 
@@ -313,16 +280,11 @@ def _volume_profile(df: pl.DataFrame, bins: int = 12) -> pl.Expr:
 
         # Vectorized bucketing
         buckets = (
-            ((v_prices - price_min) / bucket_size)
-            .floor()
-            .cast(pl.Int32)
-            .clip(0, bucket_count - 1)
+            ((v_prices - price_min) / bucket_size).floor().cast(pl.Int32).clip(0, bucket_count - 1)
         )
 
         vol_by_bucket = (
-            pl.DataFrame({"b": buckets, "v": v_volumes})
-            .group_by("b")
-            .agg(pl.col("v").sum())
+            pl.DataFrame({"b": buckets, "v": v_volumes}).group_by("b").agg(pl.col("v").sum())
         )
 
         if vol_by_bucket.is_empty():
@@ -345,24 +307,16 @@ def add_advanced_indicators(
     """Contract: input requires core OHLCV+`close`; output adds advanced + oscillator columns used by strategies."""
     result = df
     st, st_dir = supertrend(df)
-    result = result.with_columns(
-        [st.alias("supertrend"), st_dir.alias("supertrend_dir")]
-    )
+    result = result.with_columns([st.alias("supertrend"), st_dir.alias("supertrend_dir")])
     try:
         if has_talib:
-            obv = materialize_series(
-                plta.OBV(pl.col("close"), pl.col("volume")), df=df, name="obv"
-            )
+            obv = materialize_series(plta.OBV(pl.col("close"), pl.col("volume")), df=df, name="obv")
         else:
             close_diff = df["close"].diff()
             direction = pl.Series(
                 "obv_direction",
                 [
-                    1.0
-                    if float(delta or 0.0) > 0.0
-                    else -1.0
-                    if float(delta or 0.0) < 0.0
-                    else 0.0
+                    1.0 if float(delta or 0.0) > 0.0 else -1.0 if float(delta or 0.0) < 0.0 else 0.0
                     for delta in close_diff
                 ],
                 dtype=pl.Float64,
@@ -389,12 +343,8 @@ def add_advanced_indicators(
     upper, middle, lower = _bollinger_bands(df["close"], period=20, nbdev=2.0)
     result = result.with_columns(
         [
-            clean_non_finite((df["close"] - lower) / (upper - lower), fill=0.5).alias(
-                "bb_pct_b"
-            ),
-            clean_non_finite((upper - lower) / middle * 100.0, fill=0.0).alias(
-                "bb_width"
-            ),
+            clean_non_finite((df["close"] - lower) / (upper - lower), fill=0.5).alias("bb_pct_b"),
+            clean_non_finite((upper - lower) / middle * 100.0, fill=0.0).alias("bb_width"),
         ]
     )
     kc_upper, _, kc_lower = _keltner_channels(df, period=20, multiplier=2.0)

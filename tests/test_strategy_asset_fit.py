@@ -95,8 +95,6 @@ def test_asset_override_excludes_strategy_from_symbol() -> None:
     }
 
     assert (
-        asset_fit_reject_reason(
-            "funding_reversal", "XAUUSDT", context, settings=settings
-        )
+        asset_fit_reject_reason("funding_reversal", "XAUUSDT", context, settings=settings)
         == "asset_fit.config_excluded"
     )

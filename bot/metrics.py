@@ -175,9 +175,7 @@ class BotMetricsCollector:
         )
 
         # Bot state
-        self.shortlist_size: Any = PromGauge(
-            "bot_shortlist_size", "Number of symbols in shortlist"
-        )
+        self.shortlist_size: Any = PromGauge("bot_shortlist_size", "Number of symbols in shortlist")
         self.open_signals: Any = PromGauge(
             "bot_open_signals", "Number of currently tracked signals"
         )
@@ -266,9 +264,7 @@ class BotMetricsCollector:
         """Record a signal outcome (tp1, tp2, sl, expired)."""
         if not self._enabled:
             return
-        self.signal_outcomes.labels(
-            setup_id=setup_id, direction=direction, outcome=outcome
-        ).inc()
+        self.signal_outcomes.labels(setup_id=setup_id, direction=direction, outcome=outcome).inc()
 
     def record_ws_latency(self, latency_ms: float) -> None:
         """Record WebSocket latency."""

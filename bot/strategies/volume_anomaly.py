@@ -28,9 +28,7 @@ class VolumeAnomalySetup(BaseSetup):
     confirmation_profile = "breakout_acceptance"
     required_context = ("futures_flow",)
 
-    def get_optimizable_params(
-        self, settings: BotSettings | None = None
-    ) -> dict[str, float]:
+    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
         defaults = {
             "base_score": 0.52,
             "min_volume_ratio": 2.0,
@@ -107,9 +105,7 @@ class VolumeAnomalySetup(BaseSetup):
             return None
 
         direction: str | None = None
-        if close > open_ and close_position >= float(
-            effective_params["min_close_position_long"]
-        ):
+        if close > open_ and close_position >= float(effective_params["min_close_position_long"]):
             direction = "long"
         elif close < open_ and close_position <= float(
             effective_params["max_close_position_short"]

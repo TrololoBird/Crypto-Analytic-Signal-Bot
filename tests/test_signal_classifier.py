@@ -61,9 +61,7 @@ def test_signal_classifier_unknown_type_falls_back(tmp_path) -> None:
 def test_signal_classifier_runtime_guardrail_blocks_live_baseline(tmp_path) -> None:
     classifier = SignalClassifier(model_dir=tmp_path, model_type="centroid")
     classifier.model = classifier._build_model()
-    decision = classifier.runtime_guardrail_decision(
-        is_live=True, stage="unit_runtime_guardrail"
-    )
+    decision = classifier.runtime_guardrail_decision(is_live=True, stage="unit_runtime_guardrail")
     assert decision.model_kind == "centroid_baseline"
     assert decision.disable_reason == "live_baseline_blocked"
 

@@ -22,9 +22,7 @@ class EmaBounceSetup(BaseSetup):
     confirmation_profile = "trend_follow"
     required_context = ("futures_flow",)
 
-    def get_optimizable_params(
-        self, settings: BotSettings | None = None
-    ) -> dict[str, float]:
+    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
         """Tunable parameters for self-learner optimization.
 
         If settings provided, reads from config [bot.filters.setups].
@@ -74,9 +72,7 @@ class EmaBounceSetup(BaseSetup):
         bounce_threshold_pct = dynamic_params.get("bounce_threshold_pct", 0.005)
         min_adx = dynamic_params.get(
             "min_adx",
-            dynamic_params.get(
-                "min_adx_1h", defaults.get("min_adx", defaults["min_adx_1h"])
-            ),
+            dynamic_params.get("min_adx_1h", defaults.get("min_adx", defaults["min_adx_1h"])),
         )
         sl_buffer_atr = float(
             dynamic_params.get("sl_buffer_atr", defaults.get("sl_buffer_atr", 1.5))
@@ -141,12 +137,11 @@ class EmaBounceSetup(BaseSetup):
         if bias_1h == "uptrend":
             touch_ema = (
                 abs(prev_close - ema20) / ema20 <= float(ema_touch_tolerance_pct)
-                or abs(prev_close - ema50) / ema50
-                <= float(ema_touch_tolerance_pct) * 2.0
+                or abs(prev_close - ema50) / ema50 <= float(ema_touch_tolerance_pct) * 2.0
             )
-            bounce = close > prev_close * (
-                1.0 + float(bounce_threshold_pct)
-            ) and close >= ema20 * (1.0 - float(ema_touch_tolerance_pct))
+            bounce = close > prev_close * (1.0 + float(bounce_threshold_pct)) and close >= ema20 * (
+                1.0 - float(ema_touch_tolerance_pct)
+            )
             if touch_ema and bounce:
                 signal_direction = "long"
                 reasons = [
@@ -158,12 +153,11 @@ class EmaBounceSetup(BaseSetup):
         elif bias_1h == "downtrend":
             touch_ema = (
                 abs(prev_close - ema20) / ema20 <= float(ema_touch_tolerance_pct)
-                or abs(prev_close - ema50) / ema50
-                <= float(ema_touch_tolerance_pct) * 2.0
+                or abs(prev_close - ema50) / ema50 <= float(ema_touch_tolerance_pct) * 2.0
             )
-            bounce = close < prev_close * (
-                1.0 - float(bounce_threshold_pct)
-            ) and close <= ema20 * (1.0 + float(ema_touch_tolerance_pct))
+            bounce = close < prev_close * (1.0 - float(bounce_threshold_pct)) and close <= ema20 * (
+                1.0 + float(ema_touch_tolerance_pct)
+            )
             if touch_ema and bounce:
                 signal_direction = "short"
                 reasons = [
@@ -227,9 +221,7 @@ class EmaBounceSetup(BaseSetup):
 
         # Apply graded penalty for RR issues (not reject)
         if not is_valid_rr and tp1 is not None:
-            score *= dynamic_params.get(
-                "tp_too_close_penalty", defaults["tp_too_close_penalty"]
-            )
+            score *= dynamic_params.get("tp_too_close_penalty", defaults["tp_too_close_penalty"])
             reasons.append("tp_too_close_penalty")
 
         if tp1 is None:

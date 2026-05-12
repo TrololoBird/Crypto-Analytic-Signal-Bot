@@ -86,13 +86,10 @@ class DeliveryOrchestrator:
 
         same_direction: dict[tuple[str, str], list[Signal]] = {}
         for signal in flat_candidates:
-            same_direction.setdefault((signal.symbol, signal.direction), []).append(
-                signal
-            )
+            same_direction.setdefault((signal.symbol, signal.direction), []).append(signal)
 
         best_by_direction = [
-            self._apply_same_direction_confluence(signals)
-            for signals in same_direction.values()
+            self._apply_same_direction_confluence(signals) for signals in same_direction.values()
         ]
         best_by_symbol: dict[str, Signal] = {}
         for signal in sorted(best_by_direction, key=self._rank_key, reverse=True):
@@ -108,13 +105,9 @@ class DeliveryOrchestrator:
         )
         return selected
 
-    async def close_superseded_signal(
-        self, new_signal: Signal
-    ) -> list[SignalTrackingEvent] | None:
+    async def close_superseded_signal(self, new_signal: Signal) -> list[SignalTrackingEvent] | None:
         try:
-            return await self._bot.tracker.supersede_open_signal(
-                new_signal, dry_run=False
-            )
+            return await self._bot.tracker.supersede_open_signal(new_signal, dry_run=False)
         except Exception as exc:
             LOG.debug("supersede failed for %s: %s", new_signal.symbol, exc)
             return None
@@ -146,9 +139,7 @@ class DeliveryOrchestrator:
         await self._bot._wait_noncritical(
             label="tracking delivery",
             timeout=self._bot._delivery_timeout_seconds,
-            operation=self._bot.delivery.deliver_tracking_updates(
-                events, dry_run=False
-            ),
+            operation=self._bot.delivery.deliver_tracking_updates(events, dry_run=False),
         )
 
     async def select_and_deliver(
@@ -171,9 +162,7 @@ class DeliveryOrchestrator:
                 pause_hours=self._bot.settings.intelligence.stop_loss_pause_hours,
             )
             if is_blacklisted:
-                sl_streak = await self._bot._modern_repo.get_consecutive_sl(
-                    signal.symbol
-                )
+                sl_streak = await self._bot._modern_repo.get_consecutive_sl(signal.symbol)
                 rejected_rows.append(
                     {
                         "ts": datetime.now(UTC).isoformat(),
@@ -187,15 +176,12 @@ class DeliveryOrchestrator:
                 )
                 continue
 
-            active_signals = await self._bot._modern_repo.get_active_signals(
-                symbol=signal.symbol
-            )
+            active_signals = await self._bot._modern_repo.get_active_signals(symbol=signal.symbol)
             existing = next(
                 (
                     r
                     for r in active_signals
-                    if r.get("symbol") == signal.symbol
-                    and r.get("status") in ("pending", "active")
+                    if r.get("symbol") == signal.symbol and r.get("status") in ("pending", "active")
                 ),
                 None,
             )
@@ -205,17 +191,12 @@ class DeliveryOrchestrator:
                     if isinstance(existing, dict)
                     else getattr(existing, "score", None)
                 )
-                if (
-                    score_raw is not None
-                    and signal.score >= float(score_raw or 0.0) + 0.10
-                ):
+                if score_raw is not None and signal.score >= float(score_raw or 0.0) + 0.10:
                     closed = await self.close_superseded_signal(signal)
                     if closed:
                         await self.deliver_tracking(closed)
                     ready_to_send.append(signal)
-                    queued_symbol_direction.add(
-                        self._symbol_direction_cooldown_key(signal)
-                    )
+                    queued_symbol_direction.add(self._symbol_direction_cooldown_key(signal))
                 else:
                     rejected_rows.append(
                         {
@@ -299,9 +280,7 @@ class DeliveryOrchestrator:
             ok, results = await self._bot._wait_noncritical(
                 label=f"deliver {signal.symbol}/{signal.setup_id}",
                 timeout=self._bot._delivery_timeout_seconds,
-                operation=self._bot.delivery.deliver(
-                    [signal], dry_run=False, btc_bias=btc_bias
-                ),
+                operation=self._bot.delivery.deliver([signal], dry_run=False, btc_bias=btc_bias),
             )
             if not ok or not results:
                 continue
@@ -381,9 +360,7 @@ class DeliveryOrchestrator:
                 )
 
         try:
-            await self._bot.alerts.on_confirmed_signals(
-                delivered, observed_at=datetime.now(UTC)
-            )
+            await self._bot.alerts.on_confirmed_signals(delivered, observed_at=datetime.now(UTC))
         except Exception as exc:
             LOG.debug("alerts.on_confirmed_signals failed: %s", exc)
         if delivered:

@@ -119,9 +119,7 @@ class HealthChecker:
 
     async def _check_performance(self) -> ComponentHealth:
         """Check overall performance health."""
-        metrics = await self._calc.calculate_metrics(
-            since=_utcnow_naive() - timedelta(days=7)
-        )
+        metrics = await self._calc.calculate_metrics(since=_utcnow_naive() - timedelta(days=7))
 
         # Check minimum thresholds
         if metrics.total_signals < 5:

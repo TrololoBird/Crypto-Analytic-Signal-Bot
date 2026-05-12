@@ -104,9 +104,7 @@ class SessionKillzoneSetup(BaseSetup):
     confirmation_profile = "breakout_acceptance"
     required_context = ("futures_flow",)
 
-    def get_optimizable_params(
-        self, settings: BotSettings | None = None
-    ) -> dict[str, float]:
+    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
         """Tunable parameters for self-learner optimization."""
         defaults = {
             "base_score": 0.55,
@@ -156,9 +154,7 @@ class SessionKillzoneSetup(BaseSetup):
             dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]),
             defaults["sl_buffer_atr"],
         )
-        min_rr = _as_float(
-            dynamic_params.get("min_rr", defaults["min_rr"]), defaults["min_rr"]
-        )
+        min_rr = _as_float(dynamic_params.get("min_rr", defaults["min_rr"]), defaults["min_rr"])
         min_adx_1h = _as_float(
             dynamic_params.get("min_adx_1h", defaults["min_adx_1h"]),
             defaults["min_adx_1h"],
@@ -172,9 +168,7 @@ class SessionKillzoneSetup(BaseSetup):
             return None
         last_bar_time = w.item(-1, "time")
         now_utc = (
-            last_bar_time
-            if isinstance(last_bar_time, datetime)
-            else datetime.now(timezone.utc)
+            last_bar_time if isinstance(last_bar_time, datetime) else datetime.now(timezone.utc)
         )
         session_name = _active_killzone_name(now_utc.hour, cast(dict[str, object], dynamic_params))
         if session_name is None:
@@ -254,9 +248,7 @@ class SessionKillzoneSetup(BaseSetup):
             stop = session_low - atr * sl_buffer_atr
             risk = price - stop
             if risk <= 0:
-                _reject(
-                    prepared, setup_id, "risk_non_positive_long", stop=stop, price=price
-                )
+                _reject(prepared, setup_id, "risk_non_positive_long", stop=stop, price=price)
                 return None
             # TP1: prior session's major level (previous 1h swing high or session high)
             tp1 = None

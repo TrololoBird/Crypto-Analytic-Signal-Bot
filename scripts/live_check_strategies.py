@@ -117,13 +117,23 @@ async def _run(symbols: list[str], concurrency: int) -> None:
                     symbol,
                 )
                 if prepared is None:
-                    failures.append({"symbol": symbol, "stage": "prepare", "error": "prepare_symbol returned None"})
+                    failures.append(
+                        {
+                            "symbol": symbol,
+                            "stage": "prepare",
+                            "error": "prepare_symbol returned None",
+                        }
+                    )
                     return
                 prepared_ok += 1
                 results = await engine.calculate_all(prepared)
                 detector_runs += len(results)
                 for result in results:
-                    setup_id = str(result.setup_id or result.metadata.get("setup_id") or getattr(result.signal, "setup_id", "unknown"))
+                    setup_id = str(
+                        result.setup_id
+                        or result.metadata.get("setup_id")
+                        or getattr(result.signal, "setup_id", "unknown")
+                    )
                     decision = result.decision
                     if decision is not None and decision.is_reject:
                         reject_reasons.update([decision.reason_code])
@@ -160,7 +170,9 @@ def main() -> None:
     fallback_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
     symbols = resolve_symbols(
         args_symbols=args.symbols,
-        symbols_from_run=load_symbols_from_run(args.symbols_from_run, Path("data") / "bot" / "telemetry"),
+        symbols_from_run=load_symbols_from_run(
+            args.symbols_from_run, Path("data") / "bot" / "telemetry"
+        ),
         fallback_symbols=fallback_symbols,
     )
     if symbols == fallback_symbols:
@@ -170,7 +182,12 @@ def main() -> None:
     try:
         asyncio.run(_run(symbols, args.concurrency))
     except MarketDataUnavailable as exc:
-        LOG.error("live_strategies_unavailable", operation=exc.operation, detail=exc.detail, symbol=exc.symbol)
+        LOG.error(
+            "live_strategies_unavailable",
+            operation=exc.operation,
+            detail=exc.detail,
+            symbol=exc.symbol,
+        )
         raise SystemExit(2) from exc
 
 

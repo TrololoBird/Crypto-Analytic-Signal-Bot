@@ -44,9 +44,7 @@ class CentroidRegimeDetector:
             self._centroid = matrix.mean(axis=0)
             if GaussianMixture is not None and matrix.shape[0] >= self.n_regimes * 5:
                 try:
-                    gmm_model = GaussianMixture(
-                        n_components=self.n_regimes, random_state=42
-                    )
+                    gmm_model = GaussianMixture(n_components=self.n_regimes, random_state=42)
                     gmm_model.fit(matrix)
                     self._gmm = gmm_model
                     self._component_labels = self._label_components(gmm_model.means_)
@@ -105,9 +103,7 @@ class CentroidRegimeDetector:
         if self._var is None:
             return regime
         try:
-            forecast = self._var.forecast(self._var.endog[-self._var.k_ar :], steps=1)[
-                0
-            ]
+            forecast = self._var.forecast(self._var.endog[-self._var.k_ar :], steps=1)[0]
             next_ret = float(forecast[0])
             if regime == "neutral" and next_ret > 0:
                 return "calm_up"

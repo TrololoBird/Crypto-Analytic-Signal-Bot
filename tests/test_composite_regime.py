@@ -12,9 +12,7 @@ import polars as pl
 
 def test_composite_regime_uses_hmm_and_gmm_votes(monkeypatch) -> None:
     analyzer = CompositeRegimeAnalyzer()
-    monkeypatch.setattr(
-        analyzer.gmm, "current_regime", lambda _features: ("calm_down", 0.8)
-    )
+    monkeypatch.setattr(analyzer.gmm, "current_regime", lambda _features: ("calm_down", 0.8))
     monkeypatch.setattr(
         analyzer.hmm,
         "predict",
@@ -34,9 +32,7 @@ def test_composite_regime_uses_hmm_and_gmm_votes(monkeypatch) -> None:
 
 def test_composite_regime_confidence_blends_models(monkeypatch) -> None:
     analyzer = CompositeRegimeAnalyzer()
-    monkeypatch.setattr(
-        analyzer.gmm, "current_regime", lambda _features: ("contagion", 0.7)
-    )
+    monkeypatch.setattr(analyzer.gmm, "current_regime", lambda _features: ("contagion", 0.7))
     monkeypatch.setattr(
         analyzer.hmm,
         "predict",
@@ -100,9 +96,7 @@ def test_composite_regime_uses_history_frame_when_available(monkeypatch) -> None
     analyzer = CompositeRegimeAnalyzer()
     captured = {}
 
-    monkeypatch.setattr(
-        analyzer.centroid, "current_regime", lambda _features: ("neutral", 0.4)
-    )
+    monkeypatch.setattr(analyzer.centroid, "current_regime", lambda _features: ("neutral", 0.4))
 
     def _fake_predict(df):
         captured["height"] = df.height

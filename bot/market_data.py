@@ -122,9 +122,7 @@ _PUBLIC_ENDPOINT_REGISTRY: dict[str, _PublicEndpointSpec] = {
     "compressed_aggregate_trades_list": _PublicEndpointSpec("/fapi/v1/aggTrades"),
     "premium_index": _PublicEndpointSpec("/fapi/v1/premiumIndex"),
     "open_interest": _PublicEndpointSpec("/fapi/v1/openInterest"),
-    "funding_rate_history": _PublicEndpointSpec(
-        "/fapi/v1/fundingRate", ip_limited=True
-    ),
+    "funding_rate_history": _PublicEndpointSpec("/fapi/v1/fundingRate", ip_limited=True),
     "open_interest_statistics": _PublicEndpointSpec(
         "/futures/data/openInterestHist", ip_limited=True
     ),
@@ -214,18 +212,12 @@ def validate_runtime_public_rest_url(url: str) -> None:
     path = parsed.path.lower()
     query = parsed.query.lower()
     if parsed.scheme.lower() != "https" or host != "fapi.binance.com":
-        raise ValueError(
-            f"runtime REST URL must target Binance USD-M Futures public host: {url}"
-        )
+        raise ValueError(f"runtime REST URL must target Binance USD-M Futures public host: {url}")
     combined = f"{path}?{query}" if query else path
     if any(marker in combined for marker in _FORBIDDEN_PUBLIC_PATH_MARKERS):
-        raise ValueError(
-            f"runtime REST URL contains private/auth endpoint paths: {url}"
-        )
+        raise ValueError(f"runtime REST URL contains private/auth endpoint paths: {url}")
     if path not in _ALLOWED_PUBLIC_REST_PATHS:
-        raise ValueError(
-            f"runtime REST URL must use registered public USD-M endpoint paths: {url}"
-        )
+        raise ValueError(f"runtime REST URL must use registered public USD-M endpoint paths: {url}")
 
 
 def _validate_rest_params(params: Mapping[str, Any] | None) -> None:
@@ -273,9 +265,7 @@ class _SlidingWindowRateLimiter:
 
 
 class MarketDataUnavailable(RuntimeError):
-    def __init__(
-        self, *, operation: str, detail: str, symbol: str | None = None
-    ) -> None:
+    def __init__(self, *, operation: str, detail: str, symbol: str | None = None) -> None:
         self.operation = operation
         self.detail = detail
         self.symbol = symbol
@@ -357,9 +347,7 @@ def _klines_to_frame(rows: Any) -> pl.DataFrame:
     ).with_columns(
         [
             pl.from_epoch(pl.col("time"), time_unit="ms").dt.replace_time_zone("UTC"),
-            pl.from_epoch(pl.col("close_time"), time_unit="ms").dt.replace_time_zone(
-                "UTC"
-            ),
+            pl.from_epoch(pl.col("close_time"), time_unit="ms").dt.replace_time_zone("UTC"),
             pl.col("open").cast(pl.Float64),
             pl.col("high").cast(pl.Float64),
             pl.col("low").cast(pl.Float64),
@@ -374,10 +362,7 @@ def _klines_to_frame(rows: Any) -> pl.DataFrame:
 
 
 def _unwrap_model(value: Any) -> Any:
-    if (
-        hasattr(value, "actual_instance")
-        and getattr(value, "actual_instance") is not None
-    ):
+    if hasattr(value, "actual_instance") and getattr(value, "actual_instance") is not None:
         return value.actual_instance
     return value
 
@@ -427,25 +412,17 @@ class BinanceFuturesMarketData:
         self.client: Any = None
         self._exchange_info_cache: tuple[float, list[SymbolMeta]] | None = None
         self._ticker_24h_cache: tuple[float, list[dict[str, float | str]]] | None = None
-        self._premium_index_all_cache: (
-            tuple[float, dict[str, dict[str, float]]] | None
-        ) = None
+        self._premium_index_all_cache: tuple[float, dict[str, dict[str, float]]] | None = None
         self._funding_rate_cache: dict[str, tuple[float, float]] = {}
         self._open_interest_cache: dict[str, tuple[float, float]] = {}
-        self._open_interest_change_cache: dict[
-            tuple[str, str], tuple[float, float]
-        ] = {}
+        self._open_interest_change_cache: dict[tuple[str, str], tuple[float, float]] = {}
         self._long_short_ratio_cache: dict[tuple[str, str], tuple[float, float]] = {}
         self._taker_ratio_cache: dict[tuple[str, str], tuple[float, float]] = {}
         self._global_ls_ratio_cache: dict[tuple[str, str], tuple[float, float]] = {}
-        self._top_position_ls_ratio_cache: dict[
-            tuple[str, str], tuple[float, float]
-        ] = {}
+        self._top_position_ls_ratio_cache: dict[tuple[str, str], tuple[float, float]] = {}
         self._funding_history_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
         self._basis_cache: dict[tuple[str, str], tuple[float, float | None]] = {}
-        self._basis_stats_cache: dict[
-            tuple[str, str], tuple[float, dict[str, float | None]]
-        ] = {}
+        self._basis_stats_cache: dict[tuple[str, str], tuple[float, dict[str, float | None]]] = {}
         self._basis_ws_history: dict[tuple[str, str], deque[tuple[float, float]]] = {}
         self._ws: FuturesWSManager | None = ws_manager
         self._last_rest_weight_1m: int | None = None
@@ -508,9 +485,7 @@ class BinanceFuturesMarketData:
         return retry_after
 
     @staticmethod
-    def _calculate_backoff(
-        attempt: int, *, base_delay: float = 1.0, cap: float = 60.0
-    ) -> float:
+    def _calculate_backoff(attempt: int, *, base_delay: float = 1.0, cap: float = 60.0) -> float:
         delay = base_delay * (2 ** max(attempt, 0))
         jitter = random.uniform(0.5, 1.5)
         return float(min(delay * jitter, cap))
@@ -562,9 +537,7 @@ class BinanceFuturesMarketData:
         if operation in self._circuit_failures:
             del self._circuit_failures[operation]
 
-    def _is_cache_valid(
-        self, cache_entry: tuple[float, Any] | None, ttl_seconds: int
-    ) -> bool:
+    def _is_cache_valid(self, cache_entry: tuple[float, Any] | None, ttl_seconds: int) -> bool:
         """Check if cache entry is still valid based on TTL."""
         if cache_entry is None:
             return False
@@ -580,9 +553,7 @@ class BinanceFuturesMarketData:
             return entry[1] if entry else None
         return None
 
-    def _estimate_weight(
-        self, operation: str, params: Mapping[str, Any] | None = None
-    ) -> int:
+    def _estimate_weight(self, operation: str, params: Mapping[str, Any] | None = None) -> int:
         """Return estimated request weight for client-side budget tracking."""
         if operation.startswith("kline_candlestick_data"):
             try:
@@ -598,9 +569,7 @@ class BinanceFuturesMarketData:
             return 10
         return _ENDPOINT_WEIGHTS.get(operation, 1)
 
-    def _track_weight(
-        self, operation: str, params: Mapping[str, Any] | None = None
-    ) -> None:
+    def _track_weight(self, operation: str, params: Mapping[str, Any] | None = None) -> None:
         """Accumulate client-side weight estimate; warn when approaching hard limit."""
         now = time.monotonic()
         if now - self._weight_window_start >= 60.0:
@@ -619,9 +588,7 @@ class BinanceFuturesMarketData:
                 self._weight_window_weight,
             )
 
-    def _capture_response_metadata(
-        self, response: Any, *, operation: str | None = None
-    ) -> None:
+    def _capture_response_metadata(self, response: Any, *, operation: str | None = None) -> None:
         headers = getattr(response, "headers", None)
         if not isinstance(headers, Mapping):
             return
@@ -668,9 +635,7 @@ class BinanceFuturesMarketData:
         try:
             return _PUBLIC_ENDPOINT_REGISTRY[operation]
         except KeyError as exc:
-            raise ValueError(
-                f"unsupported public endpoint operation={operation}"
-            ) from exc
+            raise ValueError(f"unsupported public endpoint operation={operation}") from exc
 
     def _endpoint_url(self, operation: str) -> str:
         spec = self._endpoint_spec(operation)
@@ -771,9 +736,7 @@ class BinanceFuturesMarketData:
         except (asyncio.TimeoutError, TimeoutError) as exc:
             symbol = kwargs.get("symbol")
             self._record_circuit_failure(operation)
-            log_timeout = (
-                LOG.info if operation == "symbol_order_book_ticker" else LOG.warning
-            )
+            log_timeout = LOG.info if operation == "symbol_order_book_ticker" else LOG.warning
             log_timeout(
                 "rest timeout | operation=%s symbol=%s timeout=%.1fs",
                 operation,
@@ -787,9 +750,7 @@ class BinanceFuturesMarketData:
             ) from exc
         except BinanceNetworkError as exc:
             symbol = kwargs.get("symbol")
-            status_code = getattr(exc, "status_code", None) or getattr(
-                exc, "status", None
-            )
+            status_code = getattr(exc, "status_code", None) or getattr(exc, "status", None)
             headers = getattr(exc, "headers", None)
             if status_code == 418:
                 # IP banned — enforce 30-minute minimum pause regardless of Retry-After header
@@ -889,9 +850,7 @@ class BinanceFuturesMarketData:
                         )
                     if status < 200 or status >= 300:
                         text = await response.text()
-                        detail = (
-                            text[:240].replace("\n", " ") if text else f"http={status}"
-                        )
+                        detail = text[:240].replace("\n", " ") if text else f"http={status}"
                         self._rate_limit_error_streak = 0
                         self._record_circuit_failure(operation)
                         raise MarketDataUnavailable(
@@ -926,9 +885,7 @@ class BinanceFuturesMarketData:
             raise
         except (asyncio.TimeoutError, TimeoutError) as exc:
             self._record_circuit_failure(operation)
-            log_timeout = (
-                LOG.info if operation == "symbol_order_book_ticker" else LOG.warning
-            )
+            log_timeout = LOG.info if operation == "symbol_order_book_ticker" else LOG.warning
             log_timeout(
                 "rest timeout | operation=%s symbol=%s timeout=%.1fs",
                 operation,
@@ -969,16 +926,24 @@ class BinanceFuturesMarketData:
         now = time.monotonic()
         open_circuits = sum(1 for v in self._circuit_open_until.values() if now < v)
         return {
-            "rest_weight_1m": float(self._last_rest_weight_1m) if self._last_rest_weight_1m is not None else 0.0,
-            "rest_response_time_ms": float(self._last_rest_response_time_ms) if self._last_rest_response_time_ms is not None else 0.0,
+            "rest_weight_1m": float(self._last_rest_weight_1m)
+            if self._last_rest_weight_1m is not None
+            else 0.0,
+            "rest_response_time_ms": float(self._last_rest_response_time_ms)
+            if self._last_rest_response_time_ms is not None
+            else 0.0,
             "circuit_breakers_open": int(open_circuits),
             "circuit_failure_counts": int(sum(self._circuit_failures.values())),
             "endpoint_name": str(self._last_endpoint_name or ""),
             "source": str(self._last_endpoint_source or ""),
             "cache_hit": float(int(bool(self._last_endpoint_cache_hit))),
             "fallback_used": float(int(bool(self._last_endpoint_fallback_used))),
-            "limiter_wait_ms": float(self._last_endpoint_limiter_wait_ms) if self._last_endpoint_limiter_wait_ms is not None else 0.0,
-            "response_age_s": float(self._last_endpoint_response_age_s) if self._last_endpoint_response_age_s is not None else 0.0,
+            "limiter_wait_ms": float(self._last_endpoint_limiter_wait_ms)
+            if self._last_endpoint_limiter_wait_ms is not None
+            else 0.0,
+            "response_age_s": float(self._last_endpoint_response_age_s)
+            if self._last_endpoint_response_age_s is not None
+            else 0.0,
             "futures_data_limit_per_5m": int(self._futures_data_limit_per_5m),
         }
 
@@ -1080,12 +1045,9 @@ class BinanceFuturesMarketData:
                 new_rows.append(
                     {
                         "symbol": str(item.get("symbol", "")),
-                        "last_price": float(
-                            item.get("lastPrice", 0) or item.get("last_price", 0)
-                        ),
+                        "last_price": float(item.get("lastPrice", 0) or item.get("last_price", 0)),
                         "price_change_percent": float(
-                            item.get("priceChangePercent", 0)
-                            or item.get("price_change_percent", 0)
+                            item.get("priceChangePercent", 0) or item.get("price_change_percent", 0)
                         ),
                         "quote_volume": float(
                             item.get("quoteVolume", 0) or item.get("quote_volume", 0)
@@ -1097,16 +1059,14 @@ class BinanceFuturesMarketData:
                     {
                         "symbol": str(getattr(item, "symbol", "")),
                         "last_price": float(
-                            getattr(item, "last_price", 0)
-                            or getattr(item, "lastPrice", 0)
+                            getattr(item, "last_price", 0) or getattr(item, "lastPrice", 0)
                         ),
                         "price_change_percent": float(
                             getattr(item, "price_change_percent", 0)
                             or getattr(item, "priceChangePercent", 0)
                         ),
                         "quote_volume": float(
-                            getattr(item, "quote_volume", 0)
-                            or getattr(item, "quoteVolume", 0)
+                            getattr(item, "quote_volume", 0) or getattr(item, "quoteVolume", 0)
                         ),
                     }
                 )
@@ -1132,9 +1092,7 @@ class BinanceFuturesMarketData:
             df_4h=frame_4h,
         )
 
-    async def fetch_klines(
-        self, symbol: str, interval: str, *, limit: int
-    ) -> pl.DataFrame:
+    async def fetch_klines(self, symbol: str, interval: str, *, limit: int) -> pl.DataFrame:
         validate_symbol(symbol)
         validate_interval(interval)
         validate_limit(limit)
@@ -1146,9 +1104,7 @@ class BinanceFuturesMarketData:
         frame = _drop_incomplete_ohlcv_tail(_klines_to_frame(rows), interval)
         return frame
 
-    async def fetch_klines_cached(
-        self, symbol: str, interval: str, *, limit: int
-    ) -> pl.DataFrame:
+    async def fetch_klines_cached(self, symbol: str, interval: str, *, limit: int) -> pl.DataFrame:
         """Fetch klines with a TTL cache to prevent REST stampedes."""
         validate_symbol(symbol)
         validate_interval(interval)
@@ -1209,17 +1165,13 @@ class BinanceFuturesMarketData:
             return None
         cached_at, frame = cached
         ttl = float(
-            max_age_s
-            if max_age_s is not None
-            else _CACHE_TTL.get(f"klines_{interval}", 60)
+            max_age_s if max_age_s is not None else _CACHE_TTL.get(f"klines_{interval}", 60)
         )
         if time.monotonic() - cached_at > ttl:
             return None
         return frame
 
-    async def _fetch_book_ticker_rest(
-        self, symbol: str
-    ) -> tuple[float | None, float | None]:
+    async def _fetch_book_ticker_rest(self, symbol: str) -> tuple[float | None, float | None]:
         validate_symbol(symbol)
         max_attempts = 3
         for attempt in range(1, max_attempts + 1):
@@ -1241,9 +1193,7 @@ class BinanceFuturesMarketData:
             except MarketDataUnavailable as exc:
                 detail = (exc.detail or "").lower()
                 if attempt < max_attempts and "timeout" in detail:
-                    backoff = min(2.0, 0.5 * (2 ** (attempt - 1))) * random.uniform(
-                        0.9, 1.1
-                    )
+                    backoff = min(2.0, 0.5 * (2 ** (attempt - 1))) * random.uniform(0.9, 1.1)
                     LOG.info(
                         "book ticker retry | symbol=%s attempt=%d/%d backoff=%.2fs detail=%s",
                         symbol,
@@ -1311,9 +1261,7 @@ class BinanceFuturesMarketData:
                 return cached
         return await self._fetch_book_ticker_rest(symbol)
 
-    async def fetch_agg_trade_snapshot(
-        self, symbol: str, *, limit: int = 100
-    ) -> AggTradeSnapshot:
+    async def fetch_agg_trade_snapshot(self, symbol: str, *, limit: int = 100) -> AggTradeSnapshot:
         if self._ws is not None:
             snapshot = self._ws.get_agg_trade_snapshot(symbol)
             if snapshot is not None:
@@ -1388,14 +1336,8 @@ class BinanceFuturesMarketData:
         deduped: dict[int, AggTrade] = {}
         for item in rows:
             deduped[item.trade_id] = item
-        sorted_rows = sorted(
-            deduped.values(), key=lambda item: (item.trade_time_ms, item.trade_id)
-        )
-        if (
-            sorted_rows
-            and sorted_rows[-1].trade_time_ms < end_time_ms
-            and pages >= page_limit
-        ):
+        sorted_rows = sorted(deduped.values(), key=lambda item: (item.trade_time_ms, item.trade_id))
+        if sorted_rows and sorted_rows[-1].trade_time_ms < end_time_ms and pages >= page_limit:
             complete = False
         return sorted_rows, complete
 
@@ -1512,11 +1454,7 @@ class BinanceFuturesMarketData:
                 params={"symbol": symbol},
                 symbol=symbol,
             )
-            row = (
-                payload.model_dump()
-                if hasattr(payload, "model_dump")
-                else dict(payload)
-            )
+            row = payload.model_dump() if hasattr(payload, "model_dump") else dict(payload)
             value_raw = row.get("open_interest") or row.get("openInterest")
             value = float(value_raw) if value_raw is not None else None
             if value is not None:
@@ -1532,15 +1470,11 @@ class BinanceFuturesMarketData:
                     fallback_used=True,
                     response_age_s=now - cached[0],
                 )
-                LOG.debug(
-                    "OI graceful degradation | symbol=%s using stale cache", symbol
-                )
+                LOG.debug("OI graceful degradation | symbol=%s using stale cache", symbol)
                 return cached[1]
             return None
 
-    async def fetch_open_interest_change(
-        self, symbol: str, *, period: str = "1h"
-    ) -> float | None:
+    async def fetch_open_interest_change(self, symbol: str, *, period: str = "1h") -> float | None:
         validate_symbol(symbol)
         cache_key = (symbol, period)
         now = time.monotonic()
@@ -1565,18 +1499,13 @@ class BinanceFuturesMarketData:
             if not payload:
                 return None
             rows = [
-                item.model_dump() if hasattr(item, "model_dump") else dict(item)
-                for item in payload
+                item.model_dump() if hasattr(item, "model_dump") else dict(item) for item in payload
             ]
             rows.sort(key=lambda row: int(row.get("timestamp") or 0))
             if len(rows) < 2:
                 return None
-            prev_raw = rows[-2].get("sumOpenInterest") or rows[-2].get(
-                "sum_open_interest"
-            )
-            curr_raw = rows[-1].get("sumOpenInterest") or rows[-1].get(
-                "sum_open_interest"
-            )
+            prev_raw = rows[-2].get("sumOpenInterest") or rows[-2].get("sum_open_interest")
+            curr_raw = rows[-1].get("sumOpenInterest") or rows[-1].get("sum_open_interest")
             prev = float(prev_raw) if prev_raw is not None else 0.0
             curr = float(curr_raw) if curr_raw is not None else 0.0
             if prev <= 0.0:
@@ -1602,9 +1531,7 @@ class BinanceFuturesMarketData:
                 return cached[1]
             return None
 
-    async def fetch_long_short_ratio(
-        self, symbol: str, *, period: str = "1h"
-    ) -> float | None:
+    async def fetch_long_short_ratio(self, symbol: str, *, period: str = "1h") -> float | None:
         validate_symbol(symbol)
         cache_key = (symbol, period)
         now = time.monotonic()
@@ -1683,9 +1610,7 @@ class BinanceFuturesMarketData:
             return None
         return value
 
-    def get_cached_funding_rate(
-        self, symbol: str, max_age_s: float = 1800.0
-    ) -> float | None:
+    def get_cached_funding_rate(self, symbol: str, max_age_s: float = 1800.0) -> float | None:
         """Return cached current funding rate if fresh, else None (no REST call)."""
         cached = self._funding_rate_cache.get(symbol)
         if cached is None:
@@ -1708,9 +1633,7 @@ class BinanceFuturesMarketData:
         row = rows.get(symbol)
         return dict(row) if row is not None else None
 
-    async def fetch_top_position_ls_ratio(
-        self, symbol: str, *, period: str = "1h"
-    ) -> float | None:
+    async def fetch_top_position_ls_ratio(self, symbol: str, *, period: str = "1h") -> float | None:
         validate_symbol(symbol)
         cache_key = (symbol, period)
         now = time.monotonic()
@@ -1767,9 +1690,7 @@ class BinanceFuturesMarketData:
             return None
         return value
 
-    async def fetch_taker_ratio(
-        self, symbol: str, *, period: str = "1h"
-    ) -> float | None:
+    async def fetch_taker_ratio(self, symbol: str, *, period: str = "1h") -> float | None:
         validate_symbol(symbol)
         """Fetch taker buy/sell volume ratio from /futures/data/takerlongshortRatio.
 
@@ -1817,9 +1738,7 @@ class BinanceFuturesMarketData:
             self._taker_ratio_cache[cache_key] = (now, value)
         return value
 
-    async def fetch_global_ls_ratio(
-        self, symbol: str, *, period: str = "1h"
-    ) -> float | None:
+    async def fetch_global_ls_ratio(self, symbol: str, *, period: str = "1h") -> float | None:
         validate_symbol(symbol)
         """Fetch global long/short account ratio from /futures/data/globalLongShortAccountRatio.
 
@@ -1951,9 +1870,7 @@ class BinanceFuturesMarketData:
         self._funding_history_cache[symbol] = (now, rows)
         return rows
 
-    def get_cached_funding_trend(
-        self, symbol: str, max_age_s: float = 1800.0
-    ) -> str | None:
+    def get_cached_funding_trend(self, symbol: str, max_age_s: float = 1800.0) -> str | None:
         """Derive funding trend from cached history — no REST call.
 
         Returns "rising", "falling", "flat", or None if no data.
@@ -1980,9 +1897,7 @@ class BinanceFuturesMarketData:
             return "falling"
         return "flat"
 
-    async def fetch_basis(
-        self, symbol: str, *, period: str = "1h", limit: int = 3
-    ) -> float | None:
+    async def fetch_basis(self, symbol: str, *, period: str = "1h", limit: int = 3) -> float | None:
         validate_symbol(symbol)
         """Fetch most recent basis (futures - index price as %) from /futures/data/basis.
 
@@ -2049,9 +1964,7 @@ class BinanceFuturesMarketData:
         premium_zscore = None
         if len(basis_series) >= 3:
             mean = sum(basis_series) / len(basis_series)
-            variance = sum((value - mean) ** 2 for value in basis_series) / len(
-                basis_series
-            )
+            variance = sum((value - mean) ** 2 for value in basis_series) / len(basis_series)
             std = math.sqrt(variance)
             if std > 0.0:
                 premium_zscore = (basis_series[-1] - mean) / std
@@ -2146,9 +2059,7 @@ class BinanceFuturesMarketData:
         premium_zscore = None
         if len(basis_values) >= 3:
             mean = sum(basis_values) / len(basis_values)
-            variance = sum((value - mean) ** 2 for value in basis_values) / len(
-                basis_values
-            )
+            variance = sum((value - mean) ** 2 for value in basis_values) / len(basis_values)
             std = math.sqrt(variance)
             if std > 0.0:
                 premium_zscore = (basis_values[-1] - mean) / std

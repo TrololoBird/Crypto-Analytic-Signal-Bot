@@ -107,9 +107,7 @@ ASSET_FIT_PROFILES: dict[str, AssetFit] = {
     "ls_ratio_extreme": _fit(("perp",), requires_oi=True),
     "oi_divergence": _fit(("perp",), requires_oi=True),
     "btc_correlation": _fit(("all",), excludes=(), preferred_timeframes=("1h", "4h")),
-    "altcoin_season_index": _fit(
-        ("all",), excludes=(), preferred_timeframes=("1h", "4h")
-    ),
+    "altcoin_season_index": _fit(("all",), excludes=(), preferred_timeframes=("1h", "4h")),
 }
 
 
@@ -147,9 +145,7 @@ def market_asset_tags(
 
     rank_raw = market_context.get("liquidity_rank")
     rank = (
-        int(rank_raw)
-        if isinstance(rank_raw, int | float) and isfinite(float(rank_raw))
-        else None
+        int(rank_raw) if isinstance(rank_raw, int | float) and isfinite(float(rank_raw)) else None
     )
     shortlist_limit_raw = market_context.get("shortlist_limit")
     shortlist_limit = (
@@ -160,9 +156,7 @@ def market_asset_tags(
         else None
     )
     high_volume_rank_cutoff = (
-        max(1, int(math.ceil(shortlist_limit * 0.4)))
-        if shortlist_limit is not None
-        else 50
+        max(1, int(math.ceil(shortlist_limit * 0.4))) if shortlist_limit is not None else 50
     )
     if rank is not None and rank <= high_volume_rank_cutoff:
         tags.add("HIGH_VOLUME")
@@ -212,9 +206,7 @@ def asset_fit_reject_reason(
     settings: object | None = None,
 ) -> str | None:
     """Return a calibrated rejection reason when a strategy does not fit a symbol."""
-    normalized_symbol = (
-        str(symbol or market_context.get("symbol") or "").strip().upper()
-    )
+    normalized_symbol = str(symbol or market_context.get("symbol") or "").strip().upper()
     profile = asset_fit_for_strategy(strategy_id)
     context = dict(market_context)
     universe = getattr(settings, "universe", None) if settings is not None else None
@@ -224,11 +216,7 @@ def asset_fit_reject_reason(
 
     assets = getattr(settings, "assets", {}) if settings is not None else {}
     asset_config = assets.get(normalized_symbol) if isinstance(assets, dict) else None
-    excluded = (
-        getattr(asset_config, "excluded_strategies", ())
-        if asset_config is not None
-        else ()
-    )
+    excluded = getattr(asset_config, "excluded_strategies", ()) if asset_config is not None else ()
     if strategy_id in set(str(item) for item in excluded):
         return "asset_fit.config_excluded"
 
@@ -239,9 +227,7 @@ def asset_fit_reject_reason(
 
     rank_raw = market_context.get("liquidity_rank")
     rank = (
-        int(rank_raw)
-        if isinstance(rank_raw, int | float) and isfinite(float(rank_raw))
-        else None
+        int(rank_raw) if isinstance(rank_raw, int | float) and isfinite(float(rank_raw)) else None
     )
     if rank is not None and rank > int(profile.min_liquidity_rank):
         return "asset_fit.liquidity_rank_too_low"
@@ -266,18 +252,13 @@ def calculate_strategy_fit_score(
     settings: object | None = None,
 ) -> float:
     """Score symbol/strategy fit from routing, liquidity, freshness, and volatility."""
-    if (
-        asset_fit_reject_reason(strategy_id, symbol, market_context, settings=settings)
-        is not None
-    ):
+    if asset_fit_reject_reason(strategy_id, symbol, market_context, settings=settings) is not None:
         return 0.0
 
     profile = asset_fit_for_strategy(strategy_id)
     rank_raw = market_context.get("liquidity_rank")
     rank = (
-        float(rank_raw)
-        if isinstance(rank_raw, int | float)
-        else float(profile.min_liquidity_rank)
+        float(rank_raw) if isinstance(rank_raw, int | float) else float(profile.min_liquidity_rank)
     )
     liquidity_score = max(
         0.0, min(1.0, 1.0 - (rank - 1.0) / max(float(profile.min_liquidity_rank), 1.0))

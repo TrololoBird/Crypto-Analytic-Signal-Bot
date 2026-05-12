@@ -33,14 +33,10 @@ def load_strategy_config(strategy_name: str) -> dict[str, Any]:
     try:
         with open(config_path, "rb") as f:
             config = tomllib.load(f)
-        LOG.debug(
-            "Loaded config for %s: %s sections", strategy_name, list(config.keys())
-        )
+        LOG.debug("Loaded config for %s: %s sections", strategy_name, list(config.keys()))
         return config
     except Exception as exc:
-        LOG.warning(
-            "Failed to load config for %s: %s, using defaults", strategy_name, exc
-        )
+        LOG.warning("Failed to load config for %s: %s, using defaults", strategy_name, exc)
         return {}
 
 

@@ -32,9 +32,7 @@ class FVGSetup(BaseSetup):
     confirmation_profile = "trend_follow"
     required_context = ("futures_flow",)
 
-    def get_optimizable_params(
-        self, settings: BotSettings | None = None
-    ) -> dict[str, float]:
+    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
         """Tunable parameters for self-learner optimization."""
         defaults = {
             "base_score": 0.55,
@@ -54,9 +52,7 @@ class FVGSetup(BaseSetup):
             if filters:
                 setups_config = getattr(filters, "setups", {})
                 if isinstance(setups_config, dict):
-                    override = setups_config.get(self.setup_id) or setups_config.get(
-                        "fvg"
-                    )
+                    override = setups_config.get(self.setup_id) or setups_config.get("fvg")
                     if isinstance(override, dict):
                         return {**defaults, **override}
         return defaults
@@ -80,9 +76,7 @@ class FVGSetup(BaseSetup):
         dynamic_params = get_dynamic_params(prepared, setup_id)
         defaults = self.get_optimizable_params(settings)
 
-        min_fvg_size_atr = dynamic_params.get(
-            "min_fvg_size_atr", defaults["min_fvg_size_atr"]
-        )
+        min_fvg_size_atr = dynamic_params.get("min_fvg_size_atr", defaults["min_fvg_size_atr"])
         min_mitigation_pct = dynamic_params.get(
             "min_mitigation_pct", defaults["min_mitigation_pct"]
         )
@@ -106,12 +100,8 @@ class FVGSetup(BaseSetup):
         vol_ratio = float(w.item(-1, "volume_ratio20") or 1.0)
         rsi = float(w.item(-1, "rsi14") or 50.0)
 
-        min_gap_width_bps = dynamic_params.get(
-            "min_gap_width_bps", defaults["min_gap_width_bps"]
-        )
-        min_volume_ratio = dynamic_params.get(
-            "min_volume_ratio", defaults["min_volume_ratio"]
-        )
+        min_gap_width_bps = dynamic_params.get("min_gap_width_bps", defaults["min_gap_width_bps"])
+        min_volume_ratio = dynamic_params.get("min_volume_ratio", defaults["min_volume_ratio"])
         price_touch_buffer = max(atr * 0.1, price * 0.001)
         zone = latest_fvg_zone(
             w,
@@ -147,9 +137,7 @@ class FVGSetup(BaseSetup):
         if "volume_ratio20" in w.columns:
             try:
                 raw_vol_ratio = w.item(zone.created_index, "volume_ratio20")
-                impulse_vol_ratio = (
-                    float(raw_vol_ratio) if raw_vol_ratio is not None else 1.0
-                )
+                impulse_vol_ratio = float(raw_vol_ratio) if raw_vol_ratio is not None else 1.0
             except (IndexError, TypeError, ValueError):
                 impulse_vol_ratio = 1.0
         if impulse_vol_ratio < min_volume_ratio:
@@ -164,9 +152,7 @@ class FVGSetup(BaseSetup):
 
         # Use 1H context for 15M signals (not 4H - too lagging for <4h trades)
         bias_1h = getattr(prepared, "bias_1h", prepared.bias_4h)
-        regime_1h = getattr(
-            prepared, "regime_1h_confirmed", prepared.regime_4h_confirmed
-        )
+        regime_1h = getattr(prepared, "regime_1h_confirmed", prepared.regime_4h_confirmed)
 
         # Graded scoring instead of hard reject for bias mismatch
         base_score = dynamic_params.get("base_score", defaults["base_score"])
@@ -178,18 +164,12 @@ class FVGSetup(BaseSetup):
         )
 
         if direction == "long" and bias_1h == "downtrend":
-            score *= dynamic_params.get(
-                "bias_mismatch_penalty", defaults["bias_mismatch_penalty"]
-            )
+            score *= dynamic_params.get("bias_mismatch_penalty", defaults["bias_mismatch_penalty"])
         if direction == "short" and bias_1h == "uptrend":
-            score *= dynamic_params.get(
-                "bias_mismatch_penalty", defaults["bias_mismatch_penalty"]
-            )
+            score *= dynamic_params.get("bias_mismatch_penalty", defaults["bias_mismatch_penalty"])
 
         # RSI extremes filter with graded penalty
-        rsi_overbought = dynamic_params.get(
-            "rsi_overbought", defaults["rsi_overbought"]
-        )
+        rsi_overbought = dynamic_params.get("rsi_overbought", defaults["rsi_overbought"])
         rsi_oversold = dynamic_params.get("rsi_oversold", defaults["rsi_oversold"])
         if direction == "long" and rsi > rsi_overbought:
             score *= 0.85  # Light penalty for overbought
@@ -199,13 +179,9 @@ class FVGSetup(BaseSetup):
         # 1h structure alignment with graded penalty
         structure_1h = prepared.structure_1h
         if direction == "long" and structure_1h == "downtrend":
-            score *= dynamic_params.get(
-                "bias_mismatch_penalty", defaults["bias_mismatch_penalty"]
-            )
+            score *= dynamic_params.get("bias_mismatch_penalty", defaults["bias_mismatch_penalty"])
         if direction == "short" and structure_1h == "uptrend":
-            score *= dynamic_params.get(
-                "bias_mismatch_penalty", defaults["bias_mismatch_penalty"]
-            )
+            score *= dynamic_params.get("bias_mismatch_penalty", defaults["bias_mismatch_penalty"])
         if zone.state == "mitigated":
             score *= 0.95
 
@@ -238,9 +214,7 @@ class FVGSetup(BaseSetup):
         is_valid_rr, _ = validate_rr_or_penalty(price, stop, tp1, min_rr)
 
         if not is_valid_rr and tp1 is not None:
-            score *= dynamic_params.get(
-                "tp_too_close_penalty", defaults["tp_too_close_penalty"]
-            )
+            score *= dynamic_params.get("tp_too_close_penalty", defaults["tp_too_close_penalty"])
 
         if tp2 is None or abs(tp2 - price) <= abs(tp1 - price):
             tp2 = tp1  # Use TP1 as TP2 if no extended target found

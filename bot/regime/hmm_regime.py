@@ -117,9 +117,7 @@ class RuleBasedRegimeDetector:
             if col.size == 0:
                 col = np.zeros(df_4h.height, dtype=float)
             matrix_cols.append(col)
-        matrix = (
-            np.vstack(matrix_cols).T if matrix_cols else np.empty((0, 0), dtype=float)
-        )
+        matrix = np.vstack(matrix_cols).T if matrix_cols else np.empty((0, 0), dtype=float)
         matrix = np.nan_to_num(matrix, nan=0.0, posinf=0.0, neginf=0.0).astype(
             np.float64, copy=False
         )
@@ -135,9 +133,7 @@ class RuleBasedRegimeDetector:
             if subset.size == 0:
                 continue
             mean_ret = float(np.mean(subset[:, 0]))
-            mean_vol = (
-                float(np.mean(np.abs(subset[:, 1]))) if subset.shape[1] > 1 else 0.0
-            )
+            mean_vol = float(np.mean(np.abs(subset[:, 1]))) if subset.shape[1] > 1 else 0.0
             if mean_vol > 0.02:
                 mapping[int(state)] = "high_vol_choppy"
             elif mean_ret > 0:

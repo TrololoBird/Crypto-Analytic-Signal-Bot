@@ -91,9 +91,7 @@ def test_outcome_store_get_outcomes_returns_polars_frame(tmp_path) -> None:
     conn.close()
 
     store = OutcomeStore(db_path)
-    frame = store.get_outcomes(
-        "ema_bounce", now - timedelta(days=1), now + timedelta(minutes=1)
-    )
+    frame = store.get_outcomes("ema_bounce", now - timedelta(days=1), now + timedelta(minutes=1))
     assert frame.height == 1
     assert set(frame.columns) >= {"setup_id", "outcome", "score", "created_at"}
 
@@ -135,9 +133,7 @@ async def test_self_learner_uses_walk_forward_fallback_when_optuna_missing(
     assert results[0].setup_id == "ema_bounce"
     assert "base_score" in results[0].params
 
-    stored = RegimeAwareParams(
-        regime="composite", db_path=str(tmp_path / "learner.db")
-    ).get_params(
+    stored = RegimeAwareParams(regime="composite", db_path=str(tmp_path / "learner.db")).get_params(
         "ema_bounce",
         "composite",
     )

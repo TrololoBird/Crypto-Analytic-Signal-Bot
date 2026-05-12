@@ -171,9 +171,7 @@ class DailyReporter:
         *,
         limit: int = 5,
     ) -> list[dict[str, Any]]:
-        rows = await self._repo.get_signal_outcomes(
-            last_days=None, limit=max(limit * 4, limit)
-        )
+        rows = await self._repo.get_signal_outcomes(last_days=None, limit=max(limit * 4, limit))
         filtered: list[dict[str, Any]] = []
         for row in rows:
             closed_raw = row.get("closed_at") or row.get("created_at")
@@ -217,9 +215,7 @@ class DailyReporter:
         for strategy_id, metrics in strategy_metrics.items():
             # Low win rate alert
             if metrics.total_signals >= 10 and metrics.win_rate < 0.4:
-                alerts.append(
-                    f"{strategy_id}: Low win rate ({metrics.win_rate * 100:.1f}%)"
-                )
+                alerts.append(f"{strategy_id}: Low win rate ({metrics.win_rate * 100:.1f}%)")
 
             # Low profit factor alert
             if metrics.total_signals >= 10 and metrics.profit_factor < 1.0:

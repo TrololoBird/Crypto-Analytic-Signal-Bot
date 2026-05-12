@@ -157,15 +157,9 @@ class PreparedSymbol:
             self.global_account_ls_ratio = self.global_ls_ratio
         if self.global_ls_ratio is None and self.global_account_ls_ratio is not None:
             self.global_ls_ratio = self.global_account_ls_ratio
-        if (
-            self.top_position_ls_ratio is None
-            and self.top_trader_position_ratio is not None
-        ):
+        if self.top_position_ls_ratio is None and self.top_trader_position_ratio is not None:
             self.top_position_ls_ratio = self.top_trader_position_ratio
-        if (
-            self.top_trader_position_ratio is None
-            and self.top_position_ls_ratio is not None
-        ):
+        if self.top_trader_position_ratio is None and self.top_position_ls_ratio is not None:
             self.top_trader_position_ratio = self.top_position_ls_ratio
         if not isinstance(self.reject_log, tuple):
             self.reject_log = tuple(self.reject_log)
@@ -211,9 +205,7 @@ class Signal:
     single_target_mode: bool = False
     passed_filters: tuple[str, ...] = ()
     mark_price: float | None = None
-    volume_ratio: float | None = (
-        None  # current volume / 20-bar avg (for analytics companion)
-    )
+    volume_ratio: float | None = None  # current volume / 20-bar avg (for analytics companion)
     adx_1h: float | None = None
     risk_reward: float | None = None
     trend_direction: str | None = None
@@ -319,9 +311,7 @@ class Signal:
                 1.0,
             )
             tol = anchor * 1e-8
-        return math.isclose(
-            self.take_profit_1, self.take_profit_2, abs_tol=tol, rel_tol=0.0
-        )
+        return math.isclose(self.take_profit_1, self.take_profit_2, abs_tol=tol, rel_tol=0.0)
 
     def to_log_row(self) -> dict[str, Any]:
         return {

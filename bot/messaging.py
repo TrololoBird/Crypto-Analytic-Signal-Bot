@@ -23,6 +23,7 @@ try:
 
     try:
         from aiogram.exceptions import TelegramAPIError as _AiogramAPIError
+
         AiogramAPIError: Any = _AiogramAPIError
     except ImportError:
         from aiogram import exceptions as aiogram_exceptions
@@ -76,9 +77,7 @@ def _simple_retry(
                 except exceptions as exc:
                     last_exc = exc
                     if attempt < max_attempts - 1:
-                        wait_time = RETRY_DELAY_SECONDS * (
-                            2**attempt
-                        )  # Exponential backoff
+                        wait_time = RETRY_DELAY_SECONDS * (2**attempt)  # Exponential backoff
                         LOG.debug(
                             "retry %s/%s after %.1fs: %s",
                             attempt + 1,
@@ -173,9 +172,7 @@ class TelegramBroadcaster:
 
     def __init__(self, token: str, target_chat_id: str) -> None:
         if not _HAS_AIogram:
-            raise RuntimeError(
-                "aiogram not installed. Run: pip install aiogram>=3.27.0"
-            )
+            raise RuntimeError("aiogram not installed. Run: pip install aiogram>=3.27.0")
 
         self.token = token
         self.target_chat_id = target_chat_id
@@ -216,9 +213,7 @@ class TelegramBroadcaster:
                         "telegram circuit breaker open; buffering message (%s buffered)",
                         len(self._send_buffer),
                     )
-                    return DeliveryResult(
-                        status="buffered_circuit_open", reason="circuit_open"
-                    )
+                    return DeliveryResult(status="buffered_circuit_open", reason="circuit_open")
                 self._circuit_state = "half_open"
             self._prune_recent_hashes()
             message_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
@@ -234,9 +229,7 @@ class TelegramBroadcaster:
                     reply_to_message_id=reply_to_message_id,
                 )
             except Exception as exc:
-                return DeliveryResult(
-                    status="failed", reason=f"{exc.__class__.__name__}: {exc}"
-                )
+                return DeliveryResult(status="failed", reason=f"{exc.__class__.__name__}: {exc}")
             while self._send_buffer:
                 buffered = self._send_buffer.popleft()
                 buffered_hash = hashlib.sha256(buffered.encode("utf-8")).hexdigest()
@@ -301,19 +294,11 @@ class TelegramBroadcaster:
             except Exception as exc:
                 error_str = str(exc).lower()
                 # Try plain text fallback if HTML parsing failed
-                if (
-                    "parse" in error_str
-                    or "html" in error_str
-                    or "caption" in error_str
-                ):
-                    fallback_caption = (
-                        self._plain_text_fallback(caption, exc) or plain_caption
-                    )
+                if "parse" in error_str or "html" in error_str or "caption" in error_str:
+                    fallback_caption = self._plain_text_fallback(caption, exc) or plain_caption
                     try:
                         BufferedInputFile = _buffered_input_file_class()
-                        photo_file = BufferedInputFile(
-                            photo_bytes, filename="chart.png"
-                        )
+                        photo_file = BufferedInputFile(photo_bytes, filename="chart.png")
                         await self._respect_min_send_interval()
                         await self.bot.send_photo(
                             chat_id=self.target_chat_id,
@@ -323,9 +308,7 @@ class TelegramBroadcaster:
                         )
                         self._mark_send_timestamp()
                     except Exception as fallback_exc:
-                        LOG.error(
-                            "telegram photo send failed (fallback): %s", fallback_exc
-                        )
+                        LOG.error("telegram photo send failed (fallback): %s", fallback_exc)
                         raise
                 else:
                     LOG.error("telegram photo send failed: %s", exc)
@@ -358,9 +341,7 @@ class TelegramBroadcaster:
                 disable_web_page_preview=True,
             )
             self._record_send_success(message_hash)
-            LOG.info(
-                "telegram message sent", chars=len(text), preview=_message_preview(text)
-            )
+            LOG.info("telegram message sent", chars=len(text), preview=_message_preview(text))
             return result.message_id
         except Exception as exc:
             # Try plain text fallback if HTML parsing failed
@@ -377,9 +358,7 @@ class TelegramBroadcaster:
                             disable_web_page_preview=True,
                         )
                         self._record_send_success(message_hash)
-                        LOG.info(
-                            "telegram message sent (plain text)", chars=len(plain_text)
-                        )
+                        LOG.info("telegram message sent (plain text)", chars=len(plain_text))
                         return result.message_id
                     except Exception as fallback_exc:
                         self._record_send_failure(fallback_exc)
@@ -468,9 +447,7 @@ class TelegramBroadcaster:
             LOG.warning("telegram rate limited; pausing sends", seconds=retry_after)
 
         self._failure_count += 1
-        LOG.error(
-            "telegram send failed", attempt=f"{self._failure_count}/5", error=str(exc)
-        )
+        LOG.error("telegram send failed", attempt=f"{self._failure_count}/5", error=str(exc))
 
         if self._circuit_state == "half_open" or self._failure_count >= 5:
             self._circuit_state = "open"
@@ -537,19 +514,14 @@ class TelegramBroadcaster:
         if len(html_caption) <= TELEGRAM_CAPTION_LIMIT:
             # Generate plain fallback for safety
             plain_caption = (
-                TelegramBroadcaster._plain_text_fallback(html_caption, None)
-                or html_caption
+                TelegramBroadcaster._plain_text_fallback(html_caption, None) or html_caption
             )
             if len(plain_caption) > TELEGRAM_CAPTION_LIMIT:
-                plain_caption = (
-                    plain_caption[: TELEGRAM_CAPTION_LIMIT - 1].rstrip() + "…"
-                )
+                plain_caption = plain_caption[: TELEGRAM_CAPTION_LIMIT - 1].rstrip() + "…"
             return html_caption, plain_caption
 
         # For oversized captions, convert to plain text
-        plain_caption = (
-            TelegramBroadcaster._plain_text_fallback(html_caption, None) or html_caption
-        )
+        plain_caption = TelegramBroadcaster._plain_text_fallback(html_caption, None) or html_caption
         if len(plain_caption) > TELEGRAM_CAPTION_LIMIT:
             plain_caption = plain_caption[: TELEGRAM_CAPTION_LIMIT - 1].rstrip() + "…"
         return plain_caption, plain_caption
@@ -569,9 +541,7 @@ def _message_preview(text: str, *, limit: int = TELEGRAM_LOG_PREVIEW_LIMIT) -> s
 
 
 def _extract_retry_after_seconds(description: str) -> int | None:
-    match = re.search(
-        r"retry after\s+(\d+)", str(description or ""), flags=re.IGNORECASE
-    )
+    match = re.search(r"retry after\s+(\d+)", str(description or ""), flags=re.IGNORECASE)
     if not match:
         return None
     try:
@@ -633,23 +603,15 @@ class WebhookBroadcaster:
                         response.status,
                         body[:200],
                     )
-                    return DeliveryResult(
-                        status="failed", reason=f"http_{response.status}"
-                    )
+                    return DeliveryResult(status="failed", reason=f"http_{response.status}")
         except Exception as exc:
-            LOG.warning(
-                "webhook delivery failed | provider=%s error=%s", self.provider, exc
-            )
-            return DeliveryResult(
-                status="failed", reason=f"{exc.__class__.__name__}: {exc}"
-            )
+            LOG.warning("webhook delivery failed | provider=%s error=%s", self.provider, exc)
+            return DeliveryResult(status="failed", reason=f"{exc.__class__.__name__}: {exc}")
         return DeliveryResult(status="sent")
 
     async def edit_html(self, message_id: int, text: str) -> None:
         del message_id, text
-        LOG.debug(
-            "webhook broadcaster does not support edits | provider=%s", self.provider
-        )
+        LOG.debug("webhook broadcaster does not support edits | provider=%s", self.provider)
 
     async def send_photo(
         self,
@@ -682,8 +644,7 @@ class WebhookBroadcaster:
 
 def build_message_broadcaster(settings: Any) -> MessageBroadcaster:
     provider = str(
-        getattr(getattr(settings, "notifiers", None), "provider", "telegram")
-        or "telegram"
+        getattr(getattr(settings, "notifiers", None), "provider", "telegram") or "telegram"
     ).lower()
     if provider == "none":
         return DisabledBroadcaster()

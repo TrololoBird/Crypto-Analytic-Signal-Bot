@@ -62,9 +62,7 @@ class SelfLearner:
         self._outcomes = OutcomeStore(db_path)
         self._walk_forward = WalkForwardOptimizer()
 
-    async def run_nightly_study(
-        self, settings: BotSettings
-    ) -> list[OptimizationResult]:
+    async def run_nightly_study(self, settings: BotSettings) -> list[OptimizationResult]:
         """Run optimization study for all setups with sufficient outcome data.
 
         Returns list of OptimizationResult with optimized parameters.
@@ -85,9 +83,7 @@ class SelfLearner:
                 # Get outcomes from database for this setup
                 outcomes = await self._fetch_outcomes(setup_id)
                 if len(outcomes) < 30:  # Need minimum data
-                    LOG.info(
-                        f"Insufficient outcomes for {setup_id}: {len(outcomes)} trades"
-                    )
+                    LOG.info(f"Insufficient outcomes for {setup_id}: {len(outcomes)} trades")
                     continue
 
                 # Run Optuna study
@@ -126,12 +122,8 @@ class SelfLearner:
         regime_bounds = RegimeAwareParams(regime=regime, db_path=self.db_path)
 
         if not OPTUNA_AVAILABLE or optuna is None:
-            search_space = self._build_fallback_search_space(
-                default_params, regime_bounds
-            )
-            best_params = self._walk_forward.optimize(
-                outcomes, search_space=search_space
-            )
+            search_space = self._build_fallback_search_space(default_params, regime_bounds)
+            best_params = self._walk_forward.optimize(outcomes, search_space=search_space)
             if not best_params:
                 return None
             best_value = float(best_params.pop("_score", 0.0))
@@ -145,27 +137,17 @@ class SelfLearner:
             # Sample parameters from search space
             suggested_params = {}
             for param_name, default_value in default_params.items():
-                if (
-                    "score" in param_name
-                    or "threshold" in param_name
-                    or "penalty" in param_name
-                ):
+                if "score" in param_name or "threshold" in param_name or "penalty" in param_name:
                     # These are typically 0.0-1.0 or small ranges
                     low, high = regime_bounds.scale(param_name, float(default_value))
-                    suggested_params[param_name] = trial.suggest_float(
-                        param_name, low, high
-                    )
+                    suggested_params[param_name] = trial.suggest_float(param_name, low, high)
                 elif "min_rr" in param_name:
                     # Risk/reward ratio typically 1.0-3.0
                     low, high = regime_bounds.scale(param_name, float(default_value))
                     suggested_params[param_name] = trial.suggest_float(
                         param_name, max(0.8, low), min(4.0, high)
                     )
-                elif (
-                    "bars" in param_name
-                    or "age" in param_name
-                    or "lookback" in param_name
-                ):
+                elif "bars" in param_name or "age" in param_name or "lookback" in param_name:
                     # Integer parameters
                     low, high = int(default_value * 0.5), int(default_value * 2.0)
                     suggested_params[param_name] = trial.suggest_int(
@@ -174,9 +156,7 @@ class SelfLearner:
                 else:
                     # Generic float parameter
                     low, high = regime_bounds.scale(param_name, float(default_value))
-                    suggested_params[param_name] = trial.suggest_float(
-                        param_name, low, high
-                    )
+                    suggested_params[param_name] = trial.suggest_float(param_name, low, high)
 
             return SelfLearner._simulate_performance_static(
                 outcomes_local,
@@ -267,16 +247,10 @@ class SelfLearner:
         win_rate = wins / total if total > 0 else 0.0
 
         gross_profit = sum(
-            float(o.get("pnl", 0.0) or 0.0)
-            for o in outcomes
-            if o.get("outcome") == "win"
+            float(o.get("pnl", 0.0) or 0.0) for o in outcomes if o.get("outcome") == "win"
         )
         gross_loss = abs(
-            sum(
-                float(o.get("pnl", 0.0) or 0.0)
-                for o in outcomes
-                if o.get("outcome") == "loss"
-            )
+            sum(float(o.get("pnl", 0.0) or 0.0) for o in outcomes if o.get("outcome") == "loss")
         )
         profit_factor = gross_profit / gross_loss if gross_loss > 0 else float("inf")
 
@@ -345,9 +319,7 @@ class SelfLearner:
                 LOG.info("Starting nightly optimization study...")
                 results = await self.run_nightly_study(settings)
                 await self.update_setup_params(results, settings)
-                LOG.info(
-                    f"Nightly optimization complete: {len(results)} setups optimized"
-                )
+                LOG.info(f"Nightly optimization complete: {len(results)} setups optimized")
 
             except asyncio.CancelledError:
                 break

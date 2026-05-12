@@ -34,9 +34,7 @@ class OrderBlockSetup(BaseSetup):
     confirmation_profile = "trend_follow"
     required_context = ("futures_flow",)
 
-    def get_optimizable_params(
-        self, settings: BotSettings | None = None
-    ) -> dict[str, float]:
+    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
         """Tunable parameters for self-learner optimization."""
         defaults = {
             "base_score": 0.52,
@@ -117,17 +115,14 @@ class OrderBlockSetup(BaseSetup):
         ob_high = zone.top
         age = n_bars - 1 - zone.created_index
         if age > ob_max_age:
-            _reject(
-                prepared, setup_id, "order_block_too_old", age=age, max_age=ob_max_age
-            )
+            _reject(prepared, setup_id, "order_block_too_old", age=age, max_age=ob_max_age)
             return None
 
         impulse_start = zone.created_index + 1
         impulse_end = min(impulse_start + 3, n_bars)
         impulse_dir = 1 if direction == "long" else -1
         impulse_moves = [
-            (closes[k] - opens[k]) * impulse_dir
-            for k in range(impulse_start, impulse_end)
+            (closes[k] - opens[k]) * impulse_dir for k in range(impulse_start, impulse_end)
         ]
         if len(impulse_moves) < 2 or sum(1 for move in impulse_moves if move > 0) < 2:
             _reject(
@@ -158,9 +153,7 @@ class OrderBlockSetup(BaseSetup):
 
         sh_mask, sl_mask = _sp(w1h, n=3, include_unconfirmed_tail=True)
         stop_basis = ob_low if direction == "long" else ob_high
-        fallback_stop = (
-            ob_low - 0.5 * atr if direction == "long" else ob_high + 0.5 * atr
-        )
+        fallback_stop = ob_low - 0.5 * atr if direction == "long" else ob_high + 0.5 * atr
 
         stop_calc, tp1, tp2 = build_structural_targets(
             direction=direction,
@@ -191,19 +184,12 @@ class OrderBlockSetup(BaseSetup):
         )
 
         context_mismatch = (
-            direction == "long"
-            and (bias_1h == "downtrend" or structure_1h == "downtrend")
-        ) or (
-            direction == "short" and (bias_1h == "uptrend" or structure_1h == "uptrend")
-        )
+            direction == "long" and (bias_1h == "downtrend" or structure_1h == "downtrend")
+        ) or (direction == "short" and (bias_1h == "uptrend" or structure_1h == "uptrend"))
         if context_mismatch:
-            score *= dynamic_params.get(
-                "bias_mismatch_penalty", defaults["bias_mismatch_penalty"]
-            )
+            score *= dynamic_params.get("bias_mismatch_penalty", defaults["bias_mismatch_penalty"])
 
-        rsi_overbought = dynamic_params.get(
-            "rsi_overbought", defaults["rsi_overbought"]
-        )
+        rsi_overbought = dynamic_params.get("rsi_overbought", defaults["rsi_overbought"])
         rsi_oversold = dynamic_params.get("rsi_oversold", defaults["rsi_oversold"])
         if direction == "long" and rsi_check > rsi_overbought:
             score *= 0.85
@@ -213,9 +199,7 @@ class OrderBlockSetup(BaseSetup):
             score *= 0.95
 
         if not is_valid_rr and tp1 is not None:
-            score *= dynamic_params.get(
-                "tp_too_close_penalty", defaults["tp_too_close_penalty"]
-            )
+            score *= dynamic_params.get("tp_too_close_penalty", defaults["tp_too_close_penalty"])
 
         if tp1 is None:
             _reject(prepared, setup_id, "tp1_missing", direction=direction, price=price)

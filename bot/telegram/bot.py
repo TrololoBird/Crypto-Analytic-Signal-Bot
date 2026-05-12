@@ -93,13 +93,9 @@ class TelegramSignalBot:
         )
 
         keyboard = InlineKeyboardBuilder()
-        keyboard.add(
-            InlineKeyboardButton(text="📊 View Dashboard", url="http://localhost:8080")
-        )
+        keyboard.add(InlineKeyboardButton(text="📊 View Dashboard", url="http://localhost:8080"))
 
-        await message.answer(
-            signals_text, parse_mode="HTML", reply_markup=keyboard.as_markup()
-        )
+        await message.answer(signals_text, parse_mode="HTML", reply_markup=keyboard.as_markup())
 
     async def _cmd_market(self, message: types.Message) -> None:
         """Handle /market command."""

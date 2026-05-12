@@ -47,9 +47,7 @@ def find_latest_run_dir(
         if not analysis_dir.exists():
             continue
         fallback = fallback or run_dir
-        if any(
-            file_has_rows(analysis_dir / filename) for filename in interesting_files
-        ):
+        if any(file_has_rows(analysis_dir / filename) for filename in interesting_files):
             return run_dir
     return fallback
 
@@ -139,11 +137,7 @@ def aggregate_symbol_funnel(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
 
         if raw_hits > 0 and candidates == 0:
             for key, value in funnel.items():
-                if (
-                    key == "alignment_penalties"
-                    and isinstance(value, int)
-                    and value > 0
-                ):
+                if key == "alignment_penalties" and isinstance(value, int) and value > 0:
                     stats["rejection_reasons"]["alignment_penalties"] += value
                 elif "rejects" in str(key) and isinstance(value, int) and value > 0:
                     stats["rejection_reasons"][str(key)] += value
@@ -189,9 +183,7 @@ def aggregate_cycle_stats(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
         funnel = row.get("funnel") if isinstance(row.get("funnel"), dict) else {}
         if funnel:
             stats["total_detector_runs"] += int(funnel.get("detector_runs", 0) or 0)
-            stats["total_candidates"] += int(
-                funnel.get("post_filter_candidates", 0) or 0
-            )
+            stats["total_candidates"] += int(funnel.get("post_filter_candidates", 0) or 0)
             stats["total_delivered"] += int(funnel.get("delivered", 0) or 0)
 
     return stats
@@ -239,9 +231,7 @@ def parse_cycle_log_lines(lines: Iterable[str]) -> dict[str, Any]:
                                 {"symbol": symbol, "delivered": delivered}
                             )
                     if "rejected=" in part:
-                        parsed["rejected_total"] += int(
-                            part.split("rejected=")[1].split()[0]
-                        )
+                        parsed["rejected_total"] += int(part.split("rejected=")[1].split()[0])
                 parsed["cycles"] += 1
             except (IndexError, ValueError):
                 continue

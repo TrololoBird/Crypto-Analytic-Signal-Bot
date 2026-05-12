@@ -110,9 +110,7 @@ class TelemetryStore:
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(row, ensure_ascii=True, default=str) + "\n")
 
-    def write_rejection_summary(
-        self, cycle_id: str, rejections: dict[str, int]
-    ) -> None:
+    def write_rejection_summary(self, cycle_id: str, rejections: dict[str, int]) -> None:
         self.append_jsonl(
             "rejections.jsonl",
             {
@@ -122,9 +120,7 @@ class TelemetryStore:
             },
         )
 
-    def append_calibration_snapshot(
-        self, symbol: str, snapshot: dict[str, Any]
-    ) -> None:
+    def append_calibration_snapshot(self, symbol: str, snapshot: dict[str, Any]) -> None:
         row = {
             "ts": datetime.now(UTC).isoformat(),
             "symbol": symbol,
@@ -151,9 +147,7 @@ class TelemetryStore:
             return
         self._append_jsonl_path(self.root_dir / "calibration_snapshots.jsonl", row)
 
-    def persist_candles(
-        self, symbol: str, timeframe: str, df: pl.DataFrame, max_rows: int
-    ) -> None:
+    def persist_candles(self, symbol: str, timeframe: str, df: pl.DataFrame, max_rows: int) -> None:
         out_dir = self.market_dir / symbol_storage_dirname(symbol)
         out_dir.mkdir(parents=True, exist_ok=True)
         path = out_dir / f"{timeframe}.csv"
@@ -171,9 +165,7 @@ class TelemetryStore:
             frame.write_csv(path)
             return
 
-        tail_rows = min(
-            max_rows if max_rows > 0 else len(frame), max(len(frame) * 3, 256)
-        )
+        tail_rows = min(max_rows if max_rows > 0 else len(frame), max(len(frame) * 3, 256))
         existing_tail = self._read_csv_tail(path, tail_rows)
         if existing_tail is None or existing_tail.is_empty():
             combined = frame
@@ -183,9 +175,7 @@ class TelemetryStore:
         # Write only new rows that don't exist in the file
         if existing_tail is not None and not existing_tail.is_empty():
             known_times = set(existing_tail["time"].cast(pl.Utf8).to_list())
-            append_rows = combined.filter(
-                ~pl.col("time").cast(pl.Utf8).is_in(list(known_times))
-            )
+            append_rows = combined.filter(~pl.col("time").cast(pl.Utf8).is_in(list(known_times)))
         else:
             append_rows = combined
         if not append_rows.is_empty():

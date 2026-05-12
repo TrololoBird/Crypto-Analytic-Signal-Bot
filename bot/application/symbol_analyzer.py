@@ -40,9 +40,7 @@ _HISTORY_FETCH_BUFFER_BARS = 60
 
 def _history_fetch_limit(minimums: dict[str, int], interval: str) -> int:
     required = int(minimums.get(interval, 0))
-    baseline = (
-        _DEFAULT_HISTORY_FETCH_LIMIT if interval in {"5m", "15m", "1h", "4h"} else 240
-    )
+    baseline = _DEFAULT_HISTORY_FETCH_LIMIT if interval in {"5m", "15m", "1h", "4h"} else 240
     return max(baseline, required + _HISTORY_FETCH_BUFFER_BARS)
 
 
@@ -84,9 +82,7 @@ def _apply_setup_score_adjustment(
     if adjusted_score == signal.score:
         return signal, {"applied": False, "adjustment": adjustment}
 
-    reason = (
-        "setup_performance_bonus" if adjustment > 0 else "setup_performance_penalty"
-    )
+    reason = "setup_performance_bonus" if adjustment > 0 else "setup_performance_penalty"
     reasons = signal.reasons if reason in signal.reasons else (*signal.reasons, reason)
     return (
         replace(signal, score=adjusted_score, reasons=reasons),
@@ -184,9 +180,7 @@ class SymbolAnalyzer:
         except (TypeError, ValueError):
             return None
         return (
-            numeric
-            if numeric == numeric and numeric not in (float("inf"), float("-inf"))
-            else None
+            numeric if numeric == numeric and numeric not in (float("inf"), float("-inf")) else None
         )
 
     @staticmethod
@@ -247,8 +241,7 @@ class SymbolAnalyzer:
             )
         return {
             "available": any(
-                value is not None
-                for value in (top_account, top_position, global_ratio, gap)
+                value is not None for value in (top_account, top_position, global_ratio, gap)
             ),
             "exhaustion": exhaustion,
             "trend_support": trend_support,
@@ -259,9 +252,7 @@ class SymbolAnalyzer:
             "top_vs_global_ls_gap": gap,
         }
 
-    def directional_context(
-        self, signal: Signal, prepared: PreparedSymbol
-    ) -> dict[str, Any]:
+    def directional_context(self, signal: Signal, prepared: PreparedSymbol) -> dict[str, Any]:
         work_5m = prepared.work_5m
         close_5m = self._frame_float(work_5m, "close")
         ema20_5m = self._frame_float(work_5m, "ema20")
@@ -307,10 +298,7 @@ class SymbolAnalyzer:
                 or (microprice_bias is not None and microprice_bias >= 0.0)
             )
             premium_exhaustion = bool(
-                (
-                    prepared.premium_zscore_5m is not None
-                    and prepared.premium_zscore_5m <= -1.5
-                )
+                (prepared.premium_zscore_5m is not None and prepared.premium_zscore_5m <= -1.5)
                 or (
                     prepared.mark_index_spread_bps is not None
                     and prepared.mark_index_spread_bps <= -8.0
@@ -318,12 +306,10 @@ class SymbolAnalyzer:
             )
             crowd_exhaustion = bool(crowding["exhaustion"])
             aggressor_reversal = bool(
-                prepared.aggression_shift is not None
-                and prepared.aggression_shift >= 0.03
+                prepared.aggression_shift is not None and prepared.aggression_shift >= 0.03
             )
             regime_opposes = (
-                prepared.regime_1h_confirmed == "downtrend"
-                or prepared.bias_1h == "downtrend"
+                prepared.regime_1h_confirmed == "downtrend" or prepared.bias_1h == "downtrend"
             )
             flow_opposes = bool(flow_proxy is not None and flow_proxy <= -0.03)
         else:
@@ -349,10 +335,7 @@ class SymbolAnalyzer:
                 or (microprice_bias is not None and microprice_bias <= 0.0)
             )
             premium_exhaustion = bool(
-                (
-                    prepared.premium_zscore_5m is not None
-                    and prepared.premium_zscore_5m >= 1.5
-                )
+                (prepared.premium_zscore_5m is not None and prepared.premium_zscore_5m >= 1.5)
                 or (
                     prepared.mark_index_spread_bps is not None
                     and prepared.mark_index_spread_bps >= 8.0
@@ -360,19 +343,16 @@ class SymbolAnalyzer:
             )
             crowd_exhaustion = bool(crowding["exhaustion"])
             aggressor_reversal = bool(
-                prepared.aggression_shift is not None
-                and prepared.aggression_shift <= -0.03
+                prepared.aggression_shift is not None and prepared.aggression_shift <= -0.03
             )
             regime_opposes = (
-                prepared.regime_1h_confirmed == "uptrend"
-                or prepared.bias_1h == "uptrend"
+                prepared.regime_1h_confirmed == "uptrend" or prepared.bias_1h == "uptrend"
             )
             flow_opposes = bool(flow_proxy is not None and flow_proxy >= 0.03)
         exhaustion_hits = {
             "premium_extreme": premium_exhaustion,
             "liquidation_imbalance": bool(
-                prepared.liquidation_score is not None
-                and prepared.liquidation_score <= -0.35
+                prepared.liquidation_score is not None and prepared.liquidation_score <= -0.35
             ),
             "crowd_stretch": crowd_exhaustion,
             "aggressor_reversal": aggressor_reversal,
@@ -425,11 +405,7 @@ class SymbolAnalyzer:
             details["penalty_factor"] = 0.80
             details["penalty_reason"] = f"family_precheck_opposes_{signal.direction}"
             return True, None, details
-        if (
-            profile == "trend_follow"
-            and details["flow_opposes"]
-            and not details["trend_confirms"]
-        ):
+        if profile == "trend_follow" and details["flow_opposes"] and not details["trend_confirms"]:
             return False, f"flow_precheck_opposes_{signal.direction}", details
         return True, None, details
 
@@ -457,11 +433,7 @@ class SymbolAnalyzer:
             "family": family,
             "confirmation_profile": profile,
         }
-        if (
-            opposing_votes == 0
-            or family == "reversal"
-            or profile == "countertrend_exhaustion"
-        ):
+        if opposing_votes == 0 or family == "reversal" or profile == "countertrend_exhaustion":
             return signal, details
         if signal.score <= 0.0:
             details["skipped_reason"] = "non_positive_score"
@@ -521,9 +493,7 @@ class SymbolAnalyzer:
             "depth_focus": details["depth_confirms"],
         }
         if details["crowding"]["available"]:
-            details["confirmation_votes"]["crowding_support"] = details[
-                "crowd_trend_support"
-            ]
+            details["confirmation_votes"]["crowding_support"] = details["crowd_trend_support"]
         details["confirmation_count"] = sum(
             1 for value in details["confirmation_votes"].values() if value
         )
@@ -553,9 +523,7 @@ class SymbolAnalyzer:
             if deep_analysis_asset and (
                 primary_timeframe in {"1h", "4h"} or details["confirmation_count"] >= 1
             ):
-                details["relaxed_reject"] = (
-                    f"breakout_crowding_unconfirmed_{signal.direction}"
-                )
+                details["relaxed_reject"] = f"breakout_crowding_unconfirmed_{signal.direction}"
                 return True, None, details
             return False, f"breakout_crowding_unconfirmed_{signal.direction}", details
         if details["confirmation_count"] >= 2:
@@ -887,9 +855,7 @@ class SymbolAnalyzer:
                     funnel["strategy_rejects_by_setup"].get(setup_id, 0) + 1
                 )
                 rejected.append(
-                    self._bot._decision_to_reject_row(
-                        symbol=item.symbol, decision=decision
-                    )
+                    self._bot._decision_to_reject_row(symbol=item.symbol, decision=decision)
                 )
                 LOG.debug(
                     "%s: strategy produced no signal | setup=%s status=%s reason=%s",
@@ -943,9 +909,7 @@ class SymbolAnalyzer:
                 continue
             if precheck_details.get("soft_penalty_applied"):
                 penalty_factor = float(precheck_details.get("penalty_factor", 1.0))
-                reason = str(
-                    precheck_details.get("penalty_reason") or "family_precheck_penalty"
-                )
+                reason = str(precheck_details.get("penalty_reason") or "family_precheck_penalty")
                 signal = replace(
                     signal,
                     score=round(max(signal.score * penalty_factor, 0.0), 4),
@@ -954,9 +918,7 @@ class SymbolAnalyzer:
                     else (*signal.reasons, reason),
                 )
 
-            signal, alignment_details = self.apply_alignment_penalty(
-                signal, prepared, metadata
-            )
+            signal, alignment_details = self.apply_alignment_penalty(signal, prepared, metadata)
             if alignment_details.get("applied"):
                 funnel["alignment_penalties"] += 1
 
@@ -994,14 +956,10 @@ class SymbolAnalyzer:
 
             # Apply adaptive setup scoring using modern repo. A -0.05 penalty is
             # calibration input, not enough evidence to suppress every signal.
-            score_adj = await self._bot._modern_repo.get_setup_score_adjustment(
-                signal.setup_id
-            )
+            score_adj = await self._bot._modern_repo.get_setup_score_adjustment(signal.setup_id)
             signal, perf_details = _apply_setup_score_adjustment(signal, score_adj)
             if perf_details.get("applied"):
-                funnel["performance_adjustments"] = (
-                    funnel.get("performance_adjustments", 0) + 1
-                )
+                funnel["performance_adjustments"] = funnel.get("performance_adjustments", 0) + 1
                 self._bot._append_symbol_trace(
                     symbol=item.symbol,
                     row={
@@ -1096,29 +1054,21 @@ class SymbolAnalyzer:
 
         try:
             if isinstance(self._bot.client, BinanceFuturesMarketData):
-                df_4h = await self._bot.client.fetch_klines_cached(
-                    symbol, "4h", limit=limit_4h
-                )
+                df_4h = await self._bot.client.fetch_klines_cached(symbol, "4h", limit=limit_4h)
                 df_1h = (
                     ws_1h
                     if ws_1h is not None and ws_1h.height >= minimums["1h"]
-                    else await self._bot.client.fetch_klines_cached(
-                        symbol, "1h", limit=limit_1h
-                    )
+                    else await self._bot.client.fetch_klines_cached(symbol, "1h", limit=limit_1h)
                 )
                 df_15m = (
                     ws_15m
                     if ws_15m is not None and ws_15m.height >= minimums["15m"]
-                    else await self._bot.client.fetch_klines_cached(
-                        symbol, "15m", limit=limit_15m
-                    )
+                    else await self._bot.client.fetch_klines_cached(symbol, "15m", limit=limit_15m)
                 )
                 df_5m = (
                     ws_5m
                     if ws_5m is not None and ws_5m.height >= minimums["5m"]
-                    else await self._bot.client.fetch_klines_cached(
-                        symbol, "5m", limit=limit_5m
-                    )
+                    else await self._bot.client.fetch_klines_cached(symbol, "5m", limit=limit_5m)
                 )
 
                 bid, ask = ws_bid, ws_ask
@@ -1155,9 +1105,7 @@ class SymbolAnalyzer:
 
         batch_size = int(self._bot.settings.runtime.startup_batch_size)
         batch_delay = float(self._bot.settings.runtime.startup_batch_delay_seconds)
-        sem = asyncio.Semaphore(
-            int(self._bot.settings.runtime.max_concurrent_rest_requests)
-        )
+        sem = asyncio.Semaphore(int(self._bot.settings.runtime.max_concurrent_rest_requests))
 
         async def _preload_one(symbol: str) -> None:
             async with sem:
@@ -1214,10 +1162,7 @@ class SymbolAnalyzer:
                     if ticker_age is not None:
                         enrichments["ticker_price_age_seconds"] = ticker_age
                         context_ages.append(ticker_age)
-                        if (
-                            ticker_age
-                            > self._bot.settings.ws.market_ticker_freshness_seconds
-                        ):
+                        if ticker_age > self._bot.settings.ws.market_ticker_freshness_seconds:
                             freshness_flags.add("ticker_price_stale")
                 else:
                     freshness_flags.add("ticker_price_missing")
@@ -1249,9 +1194,7 @@ class SymbolAnalyzer:
                     if mark_price > 0:
                         enrichments["mark_price"] = mark_price
                     if "funding_rate" in mark:
-                        enrichments["funding_rate"] = float(
-                            mark.get("funding_rate") or 0.0
-                        )
+                        enrichments["funding_rate"] = float(mark.get("funding_rate") or 0.0)
                     index_price = float(mark.get("index_price") or 0.0)
                     if mark_price > 0 and index_price > 0:
                         basis_pct = (mark_price - index_price) / index_price * 100.0
@@ -1345,16 +1288,10 @@ class SymbolAnalyzer:
                 mark_price = float(premium.get("mark_price") or 0.0)
                 index_price = float(premium.get("index_price") or 0.0)
                 if "funding_rate" not in enrichments:
-                    enrichments["funding_rate"] = float(
-                        premium.get("funding_rate") or 0.0
-                    )
+                    enrichments["funding_rate"] = float(premium.get("funding_rate") or 0.0)
                 if "mark_price" not in enrichments and mark_price > 0.0:
                     enrichments["mark_price"] = mark_price
-                if (
-                    "basis_pct" not in enrichments
-                    and mark_price > 0.0
-                    and index_price > 0.0
-                ):
+                if "basis_pct" not in enrichments and mark_price > 0.0 and index_price > 0.0:
                     basis_pct = (mark_price - index_price) / index_price * 100.0
                     enrichments["basis_pct"] = basis_pct
                     enrichments.setdefault("mark_index_spread_bps", basis_pct * 100.0)

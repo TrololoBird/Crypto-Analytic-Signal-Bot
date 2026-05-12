@@ -40,9 +40,7 @@ def test_swing_points_with_unconfirmed_tail_marks_recent_bars() -> None:
     sh, sl = _swing_points(frame, n=2, include_unconfirmed_tail=True)
     assert sh.len() == frame.height
     assert sl.len() == frame.height
-    assert any(bool(v) for v in sh.tail(2).to_list()) or any(
-        bool(v) for v in sl.tail(2).to_list()
-    )
+    assert any(bool(v) for v in sh.tail(2).to_list()) or any(bool(v) for v in sl.tail(2).to_list())
 
 
 def test_adx_no_inf_no_nan() -> None:
@@ -114,8 +112,7 @@ def test_cached_prepare_frame_invalidates_when_current_candle_updates() -> None:
             "close": [100.0] * rows,
             "volume": [1000.0] * rows,
             "close_time": [
-                now + timedelta(minutes=15 * idx + 14, seconds=59)
-                for idx in range(rows)
+                now + timedelta(minutes=15 * idx + 14, seconds=59) for idx in range(rows)
             ],
             "quote_volume": [100_000.0] * rows,
             "num_trades": [100] * rows,
@@ -134,9 +131,7 @@ def test_cached_prepare_frame_invalidates_when_current_candle_updates() -> None:
             .alias("close"),
         ]
     )
-    second = _cached_prepare_frame(
-        updated, symbol="BTCUSDT", interval="15m", cache=cache
-    )
+    second = _cached_prepare_frame(updated, symbol="BTCUSDT", interval="15m", cache=cache)
 
     assert first.item(-1, "close") == pytest.approx(100.0)
     assert second.item(-1, "close") == pytest.approx(105.0)

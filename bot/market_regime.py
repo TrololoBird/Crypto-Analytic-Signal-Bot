@@ -35,7 +35,9 @@ class MarketRegimeResult:
     altcoin_season_index: float  # 0-100, higher = more alt activity
     volatility_regime: str = "stable"  # "expanding" | "contracting" | "stable"
     risk_on_off: str = "neutral"  # "risk_on" | "risk_off" | "neutral"
-    btc_phase: str = "sideways"  # "accumulation" | "markup" | "distribution" | "decline" | "sideways"
+    btc_phase: str = (
+        "sideways"  # "accumulation" | "markup" | "distribution" | "decline" | "sideways"
+    )
     confidence: float = 0.0  # 0.0 to 1.0
 
     @property
@@ -99,10 +101,7 @@ class MarketRegimeAnalyzer:
         import time
 
         now = time.monotonic()
-        if (
-            self._last_result is not None
-            and now - self._last_update_ts < self._cache_ttl_seconds
-        ):
+        if self._last_result is not None and now - self._last_update_ts < self._cache_ttl_seconds:
             return self._last_result
 
         intelligence = getattr(self.settings, "intelligence", None)
@@ -193,9 +192,7 @@ class MarketRegimeAnalyzer:
         bottom_10 = sorted_changes[-10:]
 
         top_gainer_pct = sum(c for _, c in top_10) / len(top_10) if top_10 else 0.0
-        top_loser_pct = (
-            sum(c for _, c in bottom_10) / len(bottom_10) if bottom_10 else 0.0
-        )
+        top_loser_pct = sum(c for _, c in bottom_10) / len(bottom_10) if bottom_10 else 0.0
 
         # Calculate altcoin season index
         # Higher when alts outperform BTC

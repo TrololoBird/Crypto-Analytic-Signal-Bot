@@ -82,7 +82,9 @@ async def _run(symbols: list[str], concurrency: int) -> None:
             nonlocal successes
             async with semaphore:
                 if symbol not in meta_map:
-                    failures.append({"symbol": symbol, "stage": "metadata", "error": "missing_symbol_meta"})
+                    failures.append(
+                        {"symbol": symbol, "stage": "metadata", "error": "missing_symbol_meta"}
+                    )
                     return
                 item = await _build_universe_symbol(symbol, meta_map, ticker_map)
                 df_4h = await client.fetch_klines_cached(symbol, "4h", limit=300)
@@ -161,7 +163,9 @@ def main() -> None:
     fallback_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
     symbols = resolve_symbols(
         args_symbols=args.symbols,
-        symbols_from_run=load_symbols_from_run(args.symbols_from_run, Path("data") / "bot" / "telemetry"),
+        symbols_from_run=load_symbols_from_run(
+            args.symbols_from_run, Path("data") / "bot" / "telemetry"
+        ),
         fallback_symbols=fallback_symbols,
     )
     if symbols == fallback_symbols:
@@ -171,7 +175,12 @@ def main() -> None:
     try:
         asyncio.run(_run(symbols, args.concurrency))
     except MarketDataUnavailable as exc:
-        LOG.error("live_indicators_unavailable", operation=exc.operation, detail=exc.detail, symbol=exc.symbol)
+        LOG.error(
+            "live_indicators_unavailable",
+            operation=exc.operation,
+            detail=exc.detail,
+            symbol=exc.symbol,
+        )
         raise SystemExit(2) from exc
 
 

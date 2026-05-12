@@ -133,9 +133,11 @@ class SignalBot:
         self.metrics = BotMetricsCollector(
             settings.runtime.metrics_port, host=settings.runtime.metrics_host
         )
-        disable_http_servers = os.getenv(
-            "BOT_DISABLE_HTTP_SERVERS", "0"
-        ).strip().lower() in ("1", "true", "yes")
+        disable_http_servers = os.getenv("BOT_DISABLE_HTTP_SERVERS", "0").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        )
         if disable_http_servers:
             LOG.info(
                 "http servers disabled via BOT_DISABLE_HTTP_SERVERS=1 (metrics/dashboard not started)"
@@ -160,18 +162,14 @@ class SignalBot:
         # Modern SignalEngine — core/ architecture (replaces legacy SignalPipeline)
         self._modern_registry = container.registry
         self._modern_engine = container.engine
-        LOG.info(
-            "SignalEngine initialized with %d strategies", len(self._modern_registry)
-        )
+        LOG.info("SignalEngine initialized with %d strategies", len(self._modern_registry))
 
         # Track fire-and-forget tasks for graceful shutdown
         self._background_tasks: set[asyncio.Task[Any]] = set()
 
         # Async state
         self._shutdown = asyncio.Event()
-        self._analysis_semaphore = asyncio.Semaphore(
-            settings.runtime.analysis_concurrency
-        )
+        self._analysis_semaphore = asyncio.Semaphore(settings.runtime.analysis_concurrency)
         self._last_kline_event_ts: float = 0.0
         self._shortlist: list[UniverseSymbol] = []
         self._last_live_shortlist: list[UniverseSymbol] = []
@@ -203,9 +201,7 @@ class SignalBot:
         self._health_monitor = HealthMonitor(
             interval_seconds=float(self.settings.runtime.heartbeat_seconds),
             check=self.health_check,
-            publish=lambda payload: self.telemetry.append_jsonl(
-                "health_runtime.jsonl", payload
-            ),
+            publish=lambda payload: self.telemetry.append_jsonl("health_runtime.jsonl", payload),
             alert=self._alert_critical,
             alert_after_failures=3,
         )
@@ -293,9 +289,7 @@ class SignalBot:
             self._oi_refresh_runner = runner
         return runner
 
-    def _decision_to_reject_row(
-        self, *, symbol: str, decision: StrategyDecision
-    ) -> dict[str, Any]:
+    def _decision_to_reject_row(self, *, symbol: str, decision: StrategyDecision) -> dict[str, Any]:
         return self._get_telemetry_manager().decision_to_reject_row(
             symbol=symbol, decision=decision
         )
@@ -394,9 +388,7 @@ class SignalBot:
         prepared: PreparedSymbol,
         metadata: Any | None,
     ) -> tuple[bool, str | None, dict[str, Any]]:
-        return self._get_symbol_analyzer().check_family_precheck(
-            signal, prepared, metadata
-        )
+        return self._get_symbol_analyzer().check_family_precheck(signal, prepared, metadata)
 
     def _apply_alignment_penalty(
         self,
@@ -404,9 +396,7 @@ class SignalBot:
         prepared: PreparedSymbol,
         metadata: Any | None,
     ) -> tuple[Signal, dict[str, Any]]:
-        return self._get_symbol_analyzer().apply_alignment_penalty(
-            signal, prepared, metadata
-        )
+        return self._get_symbol_analyzer().apply_alignment_penalty(signal, prepared, metadata)
 
     def _check_family_confirmation(
         self,
@@ -414,9 +404,7 @@ class SignalBot:
         prepared: PreparedSymbol,
         metadata: Any | None,
     ) -> tuple[bool, str | None, dict[str, Any]]:
-        return self._get_symbol_analyzer().check_family_confirmation(
-            signal, prepared, metadata
-        )
+        return self._get_symbol_analyzer().check_family_confirmation(signal, prepared, metadata)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -454,9 +442,7 @@ class SignalBot:
             LOG.warning("startup stale state cleanup failed (non-fatal): %s", exc)
 
         try:
-            startup_tracking_events = await self.tracker.review_open_signals(
-                dry_run=False
-            )
+            startup_tracking_events = await self.tracker.review_open_signals(dry_run=False)
             if startup_tracking_events:
                 LOG.info(
                     "startup tracking sweep closed open signals | events=%d",
@@ -482,9 +468,7 @@ class SignalBot:
         if self._ws_manager is not None:
             # Build full shortlist immediately instead of using only 4 pinned symbols
             try:
-                shortlist_timeout_s = max(
-                    30.0, float(self.settings.ws.rest_timeout_seconds) * 2.5
-                )
+                shortlist_timeout_s = max(30.0, float(self.settings.ws.rest_timeout_seconds) * 2.5)
                 shortlist = await asyncio.wait_for(
                     self._do_refresh_shortlist(),
                     timeout=shortlist_timeout_s,
@@ -530,24 +514,16 @@ class SignalBot:
         LOG.info("event bus started and ready")
 
         background_tasks: list[asyncio.Task[None]] = [
-            asyncio.create_task(
-                self._refresh_shortlist_periodic(), name="shortlist_refresh"
-            ),
+            asyncio.create_task(self._refresh_shortlist_periodic(), name="shortlist_refresh"),
             asyncio.create_task(self._heartbeat_periodic(), name="heartbeat"),
-            asyncio.create_task(
-                self._health_telemetry_periodic(), name="health_telemetry"
-            ),
+            asyncio.create_task(self._health_telemetry_periodic(), name="health_telemetry"),
             asyncio.create_task(
                 self._health_monitor.run(stop_event=self._shutdown),
                 name="health_monitor",
             ),
-            asyncio.create_task(
-                self._emergency_fallback_scan(), name="emergency_fallback"
-            ),
+            asyncio.create_task(self._emergency_fallback_scan(), name="emergency_fallback"),
             asyncio.create_task(self._oi_refresh_periodic(), name="oi_refresh"),
-            asyncio.create_task(
-                self._tracking_review_periodic(), name="tracking_review"
-            ),
+            asyncio.create_task(self._tracking_review_periodic(), name="tracking_review"),
             asyncio.create_task(self._market_regime_periodic(), name="market_regime"),
         ]
         if self.intelligence is not None and self.settings.intelligence.enabled:
@@ -569,9 +545,7 @@ class SignalBot:
             for t in background_tasks:
                 t.cancel()
             with contextlib.suppress(asyncio.CancelledError):
-                await asyncio.gather(
-                    bus_task, *background_tasks, return_exceptions=True
-                )
+                await asyncio.gather(bus_task, *background_tasks, return_exceptions=True)
             # close() is called by CLI finally block; don't duplicate here
 
     async def close(self) -> None:
@@ -651,9 +625,7 @@ class SignalBot:
         symbol: str,
         result: PipelineResult,
     ) -> tuple[list[Signal], list[dict[str, Any]], list[Signal]]:
-        return await self._get_kline_handler().select_and_deliver_for_symbol(
-            symbol, result
-        )
+        return await self._get_kline_handler().select_and_deliver_for_symbol(symbol, result)
 
     # ------------------------------------------------------------------
     # Emergency fallback — full scan when no kline events
@@ -707,9 +679,7 @@ class SignalBot:
     async def _apply_public_guardrails(self, snapshot: dict[str, Any]) -> None:
         await self._market_context_updater.apply_public_guardrails(snapshot)
 
-    async def _update_memory_market_context(
-        self, shortlist: list[UniverseSymbol]
-    ) -> None:
+    async def _update_memory_market_context(self, shortlist: list[UniverseSymbol]) -> None:
         await self._market_context_updater.update_memory_market_context(shortlist)
 
     def _compute_price_bias(self, symbol: str) -> str:
@@ -721,9 +691,7 @@ class SignalBot:
 
     async def _fetch_symbols_with_retry(self, max_retries: int = 1) -> list[Any]:
         """Fetch exchange symbols with timeout and retry logic."""
-        return await self._get_shortlist_service().fetch_symbols_with_retry(
-            max_retries=max_retries
-        )
+        return await self._get_shortlist_service().fetch_symbols_with_retry(max_retries=max_retries)
 
     def _extract_symbol_assets(self, symbol: str) -> tuple[str | None, str | None]:
         return self._get_shortlist_service().extract_symbol_assets(symbol)
@@ -763,8 +731,7 @@ class SignalBot:
                 self.client.fetch_exchange_symbols(), timeout=30.0
             )
             self._symbol_meta_by_symbol = {
-                str(getattr(row, "symbol", "")).strip().upper(): row
-                for row in symbol_meta_list
+                str(getattr(row, "symbol", "")).strip().upper(): row for row in symbol_meta_list
             }
             LOG.info("background fetch: got %d exchange symbols", len(symbol_meta_list))
             # Could update shortlist here if needed, but pinned symbols are sufficient

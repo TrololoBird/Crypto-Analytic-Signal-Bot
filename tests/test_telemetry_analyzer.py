@@ -16,9 +16,7 @@ def _write_jsonl(path, rows: list[dict[str, object]]) -> None:
 
 def test_telemetry_analyzer_counts_strategy_decision_status_signal(tmp_path) -> None:
     telemetry_dir = tmp_path / "telemetry"
-    strategy_file = (
-        telemetry_dir / "runs" / "run-1" / "analysis" / "strategy_decisions.jsonl"
-    )
+    strategy_file = telemetry_dir / "runs" / "run-1" / "analysis" / "strategy_decisions.jsonl"
     ts = datetime.now(timezone.utc).isoformat()
     _write_jsonl(
         strategy_file,
@@ -50,8 +48,7 @@ def test_telemetry_analyzer_counts_strategy_decision_status_signal(tmp_path) -> 
 
     issues = analyzer.detect_calibration_issues()
     assert not any(
-        issue.kind == "zero_signal_strategy" and issue.subject == "bos_choch"
-        for issue in issues
+        issue.kind == "zero_signal_strategy" and issue.subject == "bos_choch" for issue in issues
     )
     assert not any(
         issue.kind == "priority_asset_zero_signals" and issue.subject == "BTCUSDT"

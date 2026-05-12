@@ -33,9 +33,7 @@ class BacktestResult:
         return payload
 
     @classmethod
-    def from_frames(
-        cls, trades: pl.DataFrame, equity_curve: pl.DataFrame
-    ) -> "BacktestResult":
+    def from_frames(cls, trades: pl.DataFrame, equity_curve: pl.DataFrame) -> "BacktestResult":
         def _as_float(value: Any, default: float = 0.0) -> float:
             try:
                 return float(value)
@@ -53,9 +51,7 @@ class BacktestResult:
         max_dd = abs(_as_float(drawdown, 0.0))
 
         returns = (
-            trades["ret"]
-            if "ret" in trades.columns
-            else pl.Series("ret", [], dtype=pl.Float64)
+            trades["ret"] if "ret" in trades.columns else pl.Series("ret", [], dtype=pl.Float64)
         )
         ret_std = _as_float(returns.std(), 0.0)
         mean_ret = _as_float(returns.mean(), 0.0)
@@ -78,23 +74,17 @@ class BacktestResult:
             else 0.0
         )
         tp2_rate = (
-            _as_float(
-                (trades.get_column("status") == "tp2").cast(pl.Float64).mean(), 0.0
-            )
+            _as_float((trades.get_column("status") == "tp2").cast(pl.Float64).mean(), 0.0)
             if "status" in trades.columns
             else 0.0
         )
         sl_rate = (
-            _as_float(
-                (trades.get_column("status") == "sl").cast(pl.Float64).mean(), 0.0
-            )
+            _as_float((trades.get_column("status") == "sl").cast(pl.Float64).mean(), 0.0)
             if "status" in trades.columns
             else 0.0
         )
         expired_rate = (
-            _as_float(
-                (trades.get_column("status") == "expired").cast(pl.Float64).mean(), 0.0
-            )
+            _as_float((trades.get_column("status") == "expired").cast(pl.Float64).mean(), 0.0)
             if "status" in trades.columns
             else 0.0
         )
@@ -114,11 +104,7 @@ class BacktestResult:
                     current_losses = 0
 
         setup_breakdown: dict[str, dict[str, float | int]] | None = None
-        if (
-            "setup_id" in trades.columns
-            and "status" in trades.columns
-            and trades.height > 0
-        ):
+        if "setup_id" in trades.columns and "status" in trades.columns and trades.height > 0:
             setup_breakdown = {}
             for row in trades.select(["setup_id", "status"]).to_dicts():
                 setup_id = str(row["setup_id"])

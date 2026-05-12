@@ -46,10 +46,7 @@ class HealthMonitor:
                     self._failure_streak,
                     exc,
                 )
-                if (
-                    self._failure_streak >= self._alert_after_failures
-                    and self._alert is not None
-                ):
+                if self._failure_streak >= self._alert_after_failures and self._alert is not None:
                     await self._alert(
                         exc,
                         {

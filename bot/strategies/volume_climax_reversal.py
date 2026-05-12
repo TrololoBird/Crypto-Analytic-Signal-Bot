@@ -28,9 +28,7 @@ class VolumeClimaxReversalSetup(BaseSetup):
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)
 
-    def get_optimizable_params(
-        self, settings: BotSettings | None = None
-    ) -> dict[str, float]:
+    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
         defaults = {
             "base_score": 0.52,
             "min_volume_ratio": 1.8,
@@ -85,9 +83,7 @@ class VolumeClimaxReversalSetup(BaseSetup):
         prev_low = _as_float(work.item(-1, "prev_donchian_low20"))
         prev_high = _as_float(work.item(-1, "prev_donchian_high20"))
 
-        if min(open_, high, low, close, atr, prev_low, prev_high) <= 0.0 or math.isnan(
-            atr
-        ):
+        if min(open_, high, low, close, atr, prev_low, prev_high) <= 0.0 or math.isnan(atr):
             _reject(prepared, setup_id, "invalid_indicator_state", atr=atr)
             return None
 

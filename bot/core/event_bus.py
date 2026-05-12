@@ -173,9 +173,7 @@ class EventBus:
             queued = self._pending_events.get(token)
             if queued is not None and type(queued) is type(event):
                 self._drop_queued_token(index, queued)
-                LOG.debug(
-                    "event bus evicted oldest %s to admit newer event", event_name
-                )
+                LOG.debug("event bus evicted oldest %s to admit newer event", event_name)
                 return True
 
         for index, token in enumerate(self._queue):

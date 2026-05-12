@@ -32,9 +32,7 @@ class StructurePullbackSetup(BaseSetup):
     confirmation_profile = "trend_follow"
     required_context = ("futures_flow",)
 
-    def get_optimizable_params(
-        self, settings: BotSettings | None = None
-    ) -> dict[str, float]:
+    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
         """Tunable parameters for self-learner optimization."""
         defaults = {
             "base_score": 0.55,
@@ -63,9 +61,7 @@ class StructurePullbackSetup(BaseSetup):
 
         dynamic_params = get_dynamic_params(prepared, self.setup_id)
         defaults = self.get_optimizable_params(settings)
-        min_trend_score = dynamic_params.get(
-            "min_trend_score", defaults["min_trend_score"]
-        )
+        min_trend_score = dynamic_params.get("min_trend_score", defaults["min_trend_score"])
         pullback_lookback = int(
             dynamic_params.get("pullback_lookback", defaults["pullback_lookback"])
         )
@@ -225,9 +221,7 @@ class StructurePullbackSetup(BaseSetup):
         level = selected_level
         vol_ratio = _as_float(work_15m.item(-1, "volume_ratio20"), 1.0)
         if vol_ratio < 0.8:
-            _reject(
-                prepared, "structure_pullback", "volume_too_low", vol_ratio=vol_ratio
-            )
+            _reject(prepared, "structure_pullback", "volume_too_low", vol_ratio=vol_ratio)
             return None
 
         rsi = _as_float(work_15m.item(-1, "rsi14"), 50.0)
@@ -305,9 +299,7 @@ class StructurePullbackSetup(BaseSetup):
         if direction == "long":
             # SL: below pullback swing low (last 3-5 15m bars) + 0.15×ATR noise buffer
             last_10_lows = work_15m_tail["low"]
-            sl_candidates = (
-                last_10_lows.filter(_sl15) if _sl15 is not None else last_10_lows
-            )
+            sl_candidates = last_10_lows.filter(_sl15) if _sl15 is not None else last_10_lows
             fallback_low = work_15m.tail(5)["low"].min()
             pullback_low = (
                 _as_float(sl_candidates.min())
@@ -326,11 +318,7 @@ class StructurePullbackSetup(BaseSetup):
             )
 
             # TP2: next 4h swing high beyond TP1
-            if (
-                work_4h is not None
-                and not work_4h.is_empty()
-                and sh_4h_mask is not None
-            ):
+            if work_4h is not None and not work_4h.is_empty() and sh_4h_mask is not None:
                 tp2 = select_structural_target(
                     work_4h,
                     mask=sh_4h_mask,
@@ -343,9 +331,7 @@ class StructurePullbackSetup(BaseSetup):
         else:
             # SL: above pullback swing high + 0.4×ATR noise buffer
             last_10_highs = work_15m_tail["high"]
-            sh_candidates = (
-                last_10_highs.filter(_sh15) if _sh15 is not None else last_10_highs
-            )
+            sh_candidates = last_10_highs.filter(_sh15) if _sh15 is not None else last_10_highs
             fallback_high = work_15m.tail(5)["high"].max()
             pullback_high = (
                 _as_float(sh_candidates.max())
@@ -364,11 +350,7 @@ class StructurePullbackSetup(BaseSetup):
             )
 
             # TP2: next 4h swing low beyond TP1
-            if (
-                work_4h is not None
-                and not work_4h.is_empty()
-                and sl_4h_mask is not None
-            ):
+            if work_4h is not None and not work_4h.is_empty() and sl_4h_mask is not None:
                 tp2 = select_structural_target(
                     work_4h,
                     mask=sl_4h_mask,

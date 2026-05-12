@@ -10,22 +10,14 @@ def ichimoku_lines(
     df: pl.DataFrame,
 ) -> tuple[pl.Series, pl.Series, pl.Series, pl.Series]:
     tenkan = (
-        (df["high"].rolling_max(window_size=9) + df["low"].rolling_min(window_size=9))
-        / 2.0
+        (df["high"].rolling_max(window_size=9) + df["low"].rolling_min(window_size=9)) / 2.0
     ).rename("tenkan")
     kijun = (
-        (df["high"].rolling_max(window_size=26) + df["low"].rolling_min(window_size=26))
-        / 2.0
+        (df["high"].rolling_max(window_size=26) + df["low"].rolling_min(window_size=26)) / 2.0
     ).rename("kijun")
     senkou_a = (((tenkan + kijun) / 2.0).shift(26)).rename("senkou_a")
     senkou_b = (
-        (
-            (
-                df["high"].rolling_max(window_size=52)
-                + df["low"].rolling_min(window_size=52)
-            )
-            / 2.0
-        )
+        ((df["high"].rolling_max(window_size=52) + df["low"].rolling_min(window_size=52)) / 2.0)
         .shift(26)
         .rename("senkou_b")
     )
@@ -46,9 +38,7 @@ def weighted_moving_average(series: pl.Series, period: int, *, name: str) -> pl.
     return pl.Series(name, out).fill_nan(0.0)
 
 
-def hull_moving_average(
-    close: pl.Series, period: int = 21, *, name: str = "hma21"
-) -> pl.Series:
+def hull_moving_average(close: pl.Series, period: int = 21, *, name: str = "hma21") -> pl.Series:
     period = max(2, int(period))
     half = max(1, period // 2)
     sqrt_n = max(1, int(math.sqrt(period)))

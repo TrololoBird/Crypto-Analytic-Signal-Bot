@@ -135,23 +135,18 @@ class RuntimeMonitor:
                 "errors_count": len(self.stats["errors"]),
             },
             "performance": {
-                "cycles_per_minute": self.stats["cycles"]
-                / (runtime.total_seconds() / 60)
+                "cycles_per_minute": self.stats["cycles"] / (runtime.total_seconds() / 60)
                 if runtime.total_seconds() > 0
                 else 0,
-                "candidates_per_cycle": self.stats["candidates_total"]
-                / self.stats["cycles"]
+                "candidates_per_cycle": self.stats["candidates_total"] / self.stats["cycles"]
                 if self.stats["cycles"] > 0
                 else 0,
-                "delivery_rate": self.stats["delivered_total"]
-                / self.stats["candidates_total"]
+                "delivery_rate": self.stats["delivered_total"] / self.stats["candidates_total"]
                 if self.stats["candidates_total"] > 0
                 else 0,
             },
             "signals": {
-                "symbols_with_candidates": self.stats["symbols_with_candidates"][
-                    -20:
-                ],  # Last 20
+                "symbols_with_candidates": self.stats["symbols_with_candidates"][-20:],  # Last 20
                 "last_signals": self.stats["last_signals"][-10:],  # Last 10
             },
             "errors_sample": self.stats["errors"][:10],  # First 10 errors
@@ -163,9 +158,7 @@ class RuntimeMonitor:
         )
         report["report_path"] = str(report_path)
         report_path.parent.mkdir(parents=True, exist_ok=True)
-        report_path.write_text(
-            json.dumps(report, indent=2, default=str), encoding="utf-8"
-        )
+        report_path.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
 
         # Print summary
         self._print_summary(report)
@@ -181,9 +174,7 @@ class RuntimeMonitor:
         stats = report["statistics"]
         perf = report["performance"]
 
-        print(
-            f"\nDuration: {report['monitoring_session']['duration_seconds']:.0f} seconds"
-        )
+        print(f"\nDuration: {report['monitoring_session']['duration_seconds']:.0f} seconds")
         print(f"Total Cycles: {stats['total_cycles']}")
         print(f"Symbols Processed: {stats['unique_symbols_processed']}")
         print(f"Detector Runs: {stats['detector_runs_total']}")
@@ -201,9 +192,7 @@ class RuntimeMonitor:
         if signals:
             print("\nLast Signals:")
             for sig in signals[-5:]:
-                print(
-                    f"  {sig['time'][-8:]} | {sig['symbol']}: {sig['delivered']} delivered"
-                )
+                print(f"  {sig['time'][-8:]} | {sig['symbol']}: {sig['delivered']} delivered")
 
         errors = report["errors_sample"]
         if errors:

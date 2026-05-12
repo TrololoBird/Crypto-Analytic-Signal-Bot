@@ -304,9 +304,7 @@ def build_config_suggestions(telemetry_root: Path) -> list[str]:
     # --- Setup performance with regime context ---
     setup_regime_bins: dict[str, list[OutcomeItem]] = defaultdict(list)
     for sig, outcome in resolved:
-        setup_id = (
-            sig.get("setup_id") or sig.get("signal", {}).get("setup_id") or "unknown"
-        )
+        setup_id = sig.get("setup_id") or sig.get("signal", {}).get("setup_id") or "unknown"
         regime = sig.get("bias_4h") or sig.get("signal", {}).get("bias_4h") or "neutral"
         key = f"{setup_id} / {regime}"
         setup_regime_bins[key].append((sig, outcome))
@@ -318,20 +316,14 @@ def build_config_suggestions(telemetry_root: Path) -> list[str]:
             total = wins + losses
             wr_val = wins / total if total > 0 else None
             flag = " ← LOW" if wr_val is not None and wr_val < 0.35 else ""
-            setup_lines.append(
-                f"  {key:<35}  n={len(items):>3}  wr={_wr_str(wins, losses)}{flag}"
-            )
+            setup_lines.append(f"  {key:<35}  n={len(items):>3}  wr={_wr_str(wins, losses)}{flag}")
     if setup_lines:
-        suggestions.append(
-            "[SUGGEST] Setup performance by regime (low wr = consider disabling):"
-        )
+        suggestions.append("[SUGGEST] Setup performance by regime (low wr = consider disabling):")
         suggestions.extend(setup_lines)
         suggestions.append("")
 
     if len(suggestions) <= 2:
-        suggestions.append(
-            "[ADVISOR] Bins too small for suggestions — keep accumulating outcomes."
-        )
+        suggestions.append("[ADVISOR] Bins too small for suggestions — keep accumulating outcomes.")
 
     return suggestions
 

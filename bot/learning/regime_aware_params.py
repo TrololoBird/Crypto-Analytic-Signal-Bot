@@ -55,19 +55,13 @@ class RegimeAwareParams:
             parsed = json.loads(str(row[0]))
             if not isinstance(parsed, dict):
                 return {}
-            return {
-                str(k): float(v)
-                for k, v in parsed.items()
-                if isinstance(v, (int, float))
-            }
+            return {str(k): float(v) for k, v in parsed.items() if isinstance(v, (int, float))}
         finally:
             conn.close()
 
     def set_params(self, setup_id: str, regime: str, params: dict[str, float]) -> None:
         """Upsert optimized params for setup/regime into SQLite."""
-        clean = {
-            str(k): float(v) for k, v in params.items() if isinstance(v, (int, float))
-        }
+        clean = {str(k): float(v) for k, v in params.items() if isinstance(v, (int, float))}
         if not clean:
             return
         conn = sqlite3.connect(str(self.db_path))

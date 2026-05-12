@@ -29,9 +29,7 @@ class SuperTrendFollowSetup(BaseSetup):
     confirmation_profile = "trend_follow"
     required_context = ("futures_flow",)
 
-    def get_optimizable_params(
-        self, settings: BotSettings | None = None
-    ) -> dict[str, float]:
+    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
         defaults = {
             "base_score": 0.56,
             "min_adx_1h": 14.0,
@@ -66,9 +64,7 @@ class SuperTrendFollowSetup(BaseSetup):
         )
         required_1h = ("adx14", "supertrend_dir")
         missing = [column for column in required_15m if column not in work_15m.columns]
-        missing.extend(
-            column for column in required_1h if column not in work_1h.columns
-        )
+        missing.extend(column for column in required_1h if column not in work_1h.columns)
         if missing:
             _reject(prepared, setup_id, "missing_columns", missing_fields=missing)
             return None
@@ -105,20 +101,10 @@ class SuperTrendFollowSetup(BaseSetup):
         direction: str | None = None
         stop_basis: float = 0.0
 
-        if (
-            st_15m > 0
-            and st_1h > 0
-            and low <= ema20 + atr * pullback_atr
-            and close > ema20
-        ):
+        if st_15m > 0 and st_1h > 0 and low <= ema20 + atr * pullback_atr and close > ema20:
             direction = "long"
             stop_basis = min(low, ema20)
-        elif (
-            st_15m < 0
-            and st_1h < 0
-            and high >= ema20 - atr * pullback_atr
-            and close < ema20
-        ):
+        elif st_15m < 0 and st_1h < 0 and high >= ema20 - atr * pullback_atr and close < ema20:
             direction = "short"
             stop_basis = max(high, ema20)
 
@@ -151,9 +137,7 @@ class SuperTrendFollowSetup(BaseSetup):
             _reject(prepared, setup_id, "invalid_stop", stop=stop, close=close)
             return None
         if tp1 is None or abs(tp1 - close) < risk * min_rr:
-            tp1 = (
-                close + risk * min_rr if direction == "long" else close - risk * min_rr
-            )
+            tp1 = close + risk * min_rr if direction == "long" else close - risk * min_rr
         if tp2 is None:
             tp2 = tp1
 

@@ -72,9 +72,7 @@ async def test_logs_regime_transition_once(monkeypatch: pytest.MonkeyPatch) -> N
         _modern_repo=repo,
         telemetry=_Telemetry(),
         settings=SimpleNamespace(
-            intelligence=SimpleNamespace(
-                source_policy="binance_only", regime_detector="composite"
-            )
+            intelligence=SimpleNamespace(source_policy="binance_only", regime_detector="composite")
         ),
         intelligence=None,
     )
@@ -97,9 +95,7 @@ async def test_logs_regime_transition_once(monkeypatch: pytest.MonkeyPatch) -> N
     await updater.update_memory_market_context(shortlist)
     await updater.update_memory_market_context(shortlist)
 
-    transition_rows = [
-        r for name, r in bot.telemetry.rows if name == "regime_transitions.jsonl"
-    ]
+    transition_rows = [r for name, r in bot.telemetry.rows if name == "regime_transitions.jsonl"]
     assert len(transition_rows) == 1
     assert transition_rows[0]["new_regime"] == "bull"
     assert repo.calls

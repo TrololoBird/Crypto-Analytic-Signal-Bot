@@ -69,9 +69,7 @@ class OIRefreshRunner:
 
         batch_size = self._bot.settings.runtime.startup_batch_size
         batch_delay = self._bot.settings.runtime.startup_batch_delay_seconds
-        rest_concurrency = max(
-            1, int(self._bot.settings.runtime.max_concurrent_rest_requests)
-        )
+        rest_concurrency = max(1, int(self._bot.settings.runtime.max_concurrent_rest_requests))
         sem = asyncio.Semaphore(rest_concurrency)
 
         async def _fetch_one(symbol: str, limiter: asyncio.Semaphore) -> None:

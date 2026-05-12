@@ -115,9 +115,7 @@ def test_cycle_log_separates_selected_attempts_from_sent_delivery() -> None:
     )
 
     cycle_row = next(row for name, row in telemetry.rows if name == "cycles.jsonl")
-    symbol_row = next(
-        row for name, row in telemetry.rows if name == "symbol_analysis.jsonl"
-    )
+    symbol_row = next(row for name, row in telemetry.rows if name == "symbol_analysis.jsonl")
     assert cycle_row["selected_count"] == 1
     assert cycle_row["selected_signals"] == 1
     assert cycle_row["delivered_count"] == 0

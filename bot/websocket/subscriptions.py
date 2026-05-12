@@ -84,9 +84,7 @@ def recompute_intended_streams(manager: Any) -> None:
 
 def validate_endpoint_stream_limits(manager: Any) -> None:
     max_streams = int(
-        getattr(
-            manager, "_max_streams_per_connection", DEFAULT_MAX_STREAMS_PER_CONNECTION
-        )
+        getattr(manager, "_max_streams_per_connection", DEFAULT_MAX_STREAMS_PER_CONNECTION)
     )
     for endpoint, streams in manager._intended_streams_by_endpoint.items():
         if len(streams) > max_streams:
@@ -113,9 +111,7 @@ async def send_subscription_command(
         if manager._ws_conns.get(endpoint) is None:
             break
         chunk = streams[offset : offset + chunk_size]
-        message = json.dumps(
-            {"method": method, "params": chunk, "id": manager._subscribe_id}
-        )
+        message = json.dumps({"method": method, "params": chunk, "id": manager._subscribe_id})
         manager._subscribe_id += 1
         try:
             await ws_conn.send(message)
@@ -132,9 +128,7 @@ async def send_subscription_command(
             OSError,
             AttributeError,
         ) as exc:
-            LOG.debug(
-                "ws %s failed (non-fatal) | endpoint=%s error=%s", method, endpoint, exc
-            )
+            LOG.debug("ws %s failed (non-fatal) | endpoint=%s error=%s", method, endpoint, exc)
             break
         if offset + chunk_size < len(streams):
             await asyncio.sleep(delay_seconds)

@@ -54,9 +54,7 @@ def test_prepare_frame_parity_with_decomposed_pipeline() -> None:
     work = work.with_columns(
         [
             features_core.roc(work, 10).fill_nan(0.0).alias("roc10"),
-            features_core.realized_volatility(work, 20)
-            .fill_nan(0.0)
-            .alias("realized_vol_20"),
+            features_core.realized_volatility(work, 20).fill_nan(0.0).alias("realized_vol_20"),
             (
                 (
                     pl.col("vwap_deviation_pct")

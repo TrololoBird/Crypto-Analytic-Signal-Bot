@@ -110,14 +110,10 @@ class PublicIntelligenceService:
         }
 
     def _options_eapi_research_enabled(self) -> bool:
-        return bool(
-            getattr(self._settings.intelligence, "allow_runtime_options_eapi", False)
-        )
+        return bool(getattr(self._settings.intelligence, "allow_runtime_options_eapi", False))
 
     async def collect(self, shortlist_symbols: Iterable[str]) -> dict[str, Any]:
-        symbols = [
-            str(item).strip().upper() for item in shortlist_symbols if str(item).strip()
-        ]
+        symbols = [str(item).strip().upper() for item in shortlist_symbols if str(item).strip()]
         symbols = list(dict.fromkeys(symbols))
         pinned_symbols = set(self._settings.universe.pinned_symbols)
         benchmark_symbols = list(
@@ -136,9 +132,7 @@ class PublicIntelligenceService:
             else await self._build_macro_snapshot()
         )
         barrier = await self._build_barrier_snapshot(benchmark_symbols)
-        harmonic = await self._build_harmonic_snapshot(
-            benchmark_symbols[:2] or ["BTCUSDT"]
-        )
+        harmonic = await self._build_harmonic_snapshot(benchmark_symbols[:2] or ["BTCUSDT"])
         aggregates = self._build_aggregates(
             derivatives=derivatives,
             options=options,
@@ -262,9 +256,7 @@ class PublicIntelligenceService:
                 if ema20 is not None and ema50 is not None:
                     _against_short(ema20 - ema50, 0.0, f"{interval}_ema20_above_ema50")
                 if ema50 is not None and ema200 is not None:
-                    _against_short(
-                        ema50 - ema200, 0.0, f"{interval}_ema50_above_ema200"
-                    )
+                    _against_short(ema50 - ema200, 0.0, f"{interval}_ema50_above_ema200")
                 _against_short(rsi14, 55.0, f"{interval}_rsi_strong_against_short")
                 _against_short(macd_hist, 0.0, f"{interval}_macd_positive")
                 _against_short(supertrend_dir, 0.0, f"{interval}_supertrend_positive")
@@ -273,16 +265,13 @@ class PublicIntelligenceService:
             dict[str, Any],
             cast(dict[str, Any], derivatives.get("by_symbol") or {}).get(symbol) or {},
         )
-        benchmark_options = cast(
-            dict[str, Any], options.get("by_underlying") or {}
-        ).get("BTC", {})
+        benchmark_options = cast(dict[str, Any], options.get("by_underlying") or {}).get("BTC", {})
         put_call_ratio = _safe_float(benchmark_options.get("put_call_oi_ratio"))
         basis_pct = _safe_float(symbol_derivatives.get("basis_pct"))
         taker_ratio = _safe_float(symbol_derivatives.get("taker_ratio"))
         oi_change_pct = _safe_float(symbol_derivatives.get("oi_change_pct"))
         macro_risk_mode = str(
-            macro.get("risk_mode")
-            or ("disabled_binance_only" if not macro_enabled else "normal")
+            macro.get("risk_mode") or ("disabled_binance_only" if not macro_enabled else "normal")
         )
 
         if direction == "long":
@@ -317,8 +306,7 @@ class PublicIntelligenceService:
         confidence = round(votes / max(max_votes, 1), 4)
         return {
             "available": True,
-            "triggered": confidence
-            >= float(self._settings.intelligence.smart_exit_threshold),
+            "triggered": confidence >= float(self._settings.intelligence.smart_exit_threshold),
             "mode": self._settings.intelligence.smart_exit_mode,
             "symbol": symbol,
             "direction": direction,
@@ -357,17 +345,13 @@ class PublicIntelligenceService:
 
         for index in range(0, len(symbols), 10):
             batch = symbols[index : index + 10]
-            batch_results = await asyncio.gather(
-                *[_fetch_one(symbol) for symbol in batch]
-            )
+            batch_results = await asyncio.gather(*[_fetch_one(symbol) for symbol in batch])
             results.update(dict(zip(batch, batch_results, strict=False)))
             if index + 10 < len(symbols):
                 await asyncio.sleep(0.2)
         return results
 
-    async def _fetch_value_batch(
-        self, symbols: list[str], fetcher: Any
-    ) -> dict[str, Any]:
+    async def _fetch_value_batch(self, symbols: list[str], fetcher: Any) -> dict[str, Any]:
         results: dict[str, Any] = {}
 
         async def _fetch_one(symbol: str) -> Any:
@@ -378,17 +362,13 @@ class PublicIntelligenceService:
 
         for index in range(0, len(symbols), 10):
             batch = symbols[index : index + 10]
-            batch_results = await asyncio.gather(
-                *[_fetch_one(symbol) for symbol in batch]
-            )
+            batch_results = await asyncio.gather(*[_fetch_one(symbol) for symbol in batch])
             results.update(dict(zip(batch, batch_results, strict=False)))
             if index + 10 < len(symbols):
                 await asyncio.sleep(0.2)
         return results
 
-    async def _build_derivatives_snapshot(
-        self, shortlist_symbols: list[str]
-    ) -> dict[str, Any]:
+    async def _build_derivatives_snapshot(self, shortlist_symbols: list[str]) -> dict[str, Any]:
         by_symbol: dict[str, Any] = {}
         confirmed_facts: list[str] = []
         funding_rates = await self._fetch_value_batch(
@@ -456,11 +436,7 @@ class PublicIntelligenceService:
                 "flow_bias": flow_bias,
                 "funding_history_points": len(funding_history),
             }
-            if (
-                funding_rate is not None
-                or oi_current is not None
-                or taker_ratio is not None
-            ):
+            if funding_rate is not None or oi_current is not None or taker_ratio is not None:
                 confirmed_facts.append(f"{symbol}_public_futures_context_available")
 
         return {
@@ -480,9 +456,7 @@ class PublicIntelligenceService:
                 "reason": "runtime_boundary_disallows_binance_eapi",
                 "gamma_semantics": gamma_semantics,
             }
-        assumptions.append(
-            "options_eapi_disabled_by_default_under_runtime_usdm_public_boundary"
-        )
+        assumptions.append("options_eapi_disabled_by_default_under_runtime_usdm_public_boundary")
 
         return {
             "enabled": False,
@@ -510,11 +484,7 @@ class PublicIntelligenceService:
         if not meta_rows:
             return [], [], [], []
         expiries = sorted(
-            {
-                str(row["symbol"]).split("-")[1]
-                for row in meta_rows
-                if str(row.get("symbol"))
-            }
+            {str(row["symbol"]).split("-")[1] for row in meta_rows if str(row.get("symbol"))}
         )
         selected_expiries = expiries[
             : max(1, int(self._settings.intelligence.options_expiry_count))
@@ -572,9 +542,7 @@ class PublicIntelligenceService:
             "confirmed_facts": confirmed_facts,
         }
 
-    async def _build_barrier_snapshot(
-        self, benchmark_symbols: list[str]
-    ) -> dict[str, Any]:
+    async def _build_barrier_snapshot(self, benchmark_symbols: list[str]) -> dict[str, Any]:
         strongest_move_pct = 0.0
         strongest_symbol: str | None = None
         long_barrier_triggered = False
@@ -629,9 +597,7 @@ class PublicIntelligenceService:
             pivots: list[tuple[int, float, str]] = []
             for idx, row in enumerate(work.iter_rows(named=True)):
                 ts_raw = row.get("close_time")
-                ts_val = (
-                    int(ts_raw.timestamp()) if isinstance(ts_raw, datetime) else idx
-                )
+                ts_val = int(ts_raw.timestamp()) if isinstance(ts_raw, datetime) else idx
                 if bool(swing_high[idx]):
                     pivots.append((ts_val, float(row["high"]), "high"))
                 if bool(swing_low[idx]):
@@ -647,9 +613,7 @@ class PublicIntelligenceService:
             ratio_abcd = abs(cd) / abs(ab) if abs(ab) > 0 else None
             retracement_bc = abs(bc) / abs(ab) if abs(ab) > 0 else None
             deviation_pct = (
-                abs((ratio_abcd or 0.0) - 1.0) * 100.0
-                if ratio_abcd is not None
-                else None
+                abs((ratio_abcd or 0.0) - 1.0) * 100.0 if ratio_abcd is not None else None
             )
             by_symbol[symbol] = {
                 "available": True,
@@ -660,12 +624,8 @@ class PublicIntelligenceService:
                 and abs(ratio_abcd - 1.0) <= 0.25
                 else "none",
                 "ratio_ab_cd": round(ratio_abcd, 4) if ratio_abcd is not None else None,
-                "ratio_bc_ab": round(retracement_bc, 4)
-                if retracement_bc is not None
-                else None,
-                "deviation_pct": round(deviation_pct, 4)
-                if deviation_pct is not None
-                else None,
+                "ratio_bc_ab": round(retracement_bc, 4) if retracement_bc is not None else None,
+                "deviation_pct": round(deviation_pct, 4) if deviation_pct is not None else None,
             }
         return {
             "enabled": True,
@@ -730,9 +690,7 @@ class PublicIntelligenceService:
                 continue
             if frame is None or frame.is_empty():
                 continue
-            work = _cached_prepare_frame(
-                _to_polars(frame), symbol=symbol, interval=interval
-            )
+            work = _cached_prepare_frame(_to_polars(frame), symbol=symbol, interval=interval)
             if work.is_empty():
                 continue
             last = work.row(-1, named=True)
@@ -746,12 +704,9 @@ class PublicIntelligenceService:
         latest = self._latest_snapshot or {}
         derivatives_by_symbol = cast(
             dict[str, Any],
-            cast(dict[str, Any], latest.get("derivatives") or {}).get("by_symbol")
-            or {},
+            cast(dict[str, Any], latest.get("derivatives") or {}).get("by_symbol") or {},
         )
-        symbol_derivatives = cast(
-            dict[str, Any], derivatives_by_symbol.get(symbol) or {}
-        )
+        symbol_derivatives = cast(dict[str, Any], derivatives_by_symbol.get(symbol) or {})
         for key in (
             "funding_rate",
             "oi_current",
@@ -764,24 +719,15 @@ class PublicIntelligenceService:
             features[key] = _safe_float(symbol_derivatives.get(key))
 
         macro = cast(dict[str, Any], latest.get("macro") or {})
-        features["macro_risk_off"] = (
-            1.0 if str(macro.get("risk_mode") or "") == "risk_off" else 0.0
-        )
-        features["macro_risk_on"] = (
-            1.0 if str(macro.get("risk_mode") or "") == "risk_on" else 0.0
-        )
+        features["macro_risk_off"] = 1.0 if str(macro.get("risk_mode") or "") == "risk_off" else 0.0
+        features["macro_risk_on"] = 1.0 if str(macro.get("risk_mode") or "") == "risk_on" else 0.0
         options = cast(
             dict[str, Any],
-            cast(dict[str, Any], latest.get("options") or {}).get("by_underlying")
-            or {},
+            cast(dict[str, Any], latest.get("options") or {}).get("by_underlying") or {},
         )
         btc_options = cast(dict[str, Any], options.get("BTC") or {})
-        features["btc_put_call_oi_ratio"] = _safe_float(
-            btc_options.get("put_call_oi_ratio")
-        )
-        features["btc_gamma_balance_ratio"] = _safe_float(
-            btc_options.get("gamma_balance_ratio")
-        )
+        features["btc_put_call_oi_ratio"] = _safe_float(btc_options.get("put_call_oi_ratio"))
+        features["btc_gamma_balance_ratio"] = _safe_float(btc_options.get("gamma_balance_ratio"))
 
         return {
             "available": bool(features),
@@ -800,29 +746,23 @@ class PublicIntelligenceService:
         barrier: dict[str, Any],
         aggregates: dict[str, Any],
     ) -> dict[str, list[str]]:
-        confirmed_facts = list(
-            cast(list[str], derivatives.get("confirmed_facts") or [])
-        )
+        confirmed_facts = list(cast(list[str], derivatives.get("confirmed_facts") or []))
         confirmed_facts.extend(cast(list[str], options.get("confirmed_facts") or []))
         confirmed_facts.extend(cast(list[str], macro.get("confirmed_facts") or []))
         if bool(barrier.get("long_barrier_triggered")) or bool(
             barrier.get("short_barrier_triggered")
         ):
-            confirmed_facts.append(
-                "hard_barrier_threshold_breached_on_public_benchmark_data"
-            )
+            confirmed_facts.append("hard_barrier_threshold_breached_on_public_benchmark_data")
 
         inferences = list(cast(list[str], options.get("inferences") or []))
         macro_enabled = bool(macro.get("enabled", True))
         macro_risk_mode = str(
-            macro.get("risk_mode")
-            or ("disabled_binance_only" if not macro_enabled else "normal")
+            macro.get("risk_mode") or ("disabled_binance_only" if not macro_enabled else "normal")
         )
         if macro_enabled and macro_risk_mode != "normal":
             inferences.append(f"macro_risk_mode_{macro_risk_mode}")
         sentiment_label = str(
-            cast(dict[str, Any], aggregates.get("sentiment") or {}).get("label")
-            or "neutral"
+            cast(dict[str, Any], aggregates.get("sentiment") or {}).get("label") or "neutral"
         )
         inferences.append(f"aggregated_sentiment_{sentiment_label}")
 
@@ -833,12 +773,9 @@ class PublicIntelligenceService:
 
         uncertainty: list[str] = []
         if not any(
-            item.endswith("_public_options_mark_and_oi_available")
-            for item in confirmed_facts
+            item.endswith("_public_options_mark_and_oi_available") for item in confirmed_facts
         ):
-            uncertainty.append(
-                "public_options_surface_not_available_for_requested_underlyings"
-            )
+            uncertainty.append("public_options_surface_not_available_for_requested_underlyings")
         uncertainty.append(
             "startup_snapshot_cannot_prove_live_binance_runtime_end_to_end_"
             "without_real_runtime_evidence"
@@ -861,13 +798,9 @@ class PublicIntelligenceService:
         by_underlying = cast(dict[str, Any], options.get("by_underlying") or {})
         macro_mode = str(macro.get("risk_mode") or "normal")
 
-        taker_values = [
-            _safe_float(row.get("taker_ratio")) for row in by_symbol.values()
-        ]
+        taker_values = [_safe_float(row.get("taker_ratio")) for row in by_symbol.values()]
         basis_values = [_safe_float(row.get("basis_pct")) for row in by_symbol.values()]
-        oi_change_values = [
-            _safe_float(row.get("oi_change_pct")) for row in by_symbol.values()
-        ]
+        oi_change_values = [_safe_float(row.get("oi_change_pct")) for row in by_symbol.values()]
         put_call_values = [
             _safe_float(row.get("put_call_oi_ratio")) for row in by_underlying.values()
         ]
@@ -953,9 +886,7 @@ class PublicIntelligenceService:
             },
         }
 
-    async def _fetch_options_exchange_info(
-        self, underlying_asset: str
-    ) -> list[dict[str, Any]]:
+    async def _fetch_options_exchange_info(self, underlying_asset: str) -> list[dict[str, Any]]:
         if not self._options_eapi_research_enabled():
             return []
         asset = str(underlying_asset or "").strip().upper()
@@ -964,18 +895,10 @@ class PublicIntelligenceService:
         if cached is not None and now - cached[0] < _OPTIONS_EXCHANGE_INFO_TTL_S:
             return cached[1]
 
-        validate_runtime_public_rest_url(
-            "https://eapi.binance.com/eapi/v1/exchangeInfo"
-        )
-        payload = await self._fetch_json(
-            "https://eapi.binance.com/eapi/v1/exchangeInfo"
-        )
-        option_symbols_raw = (
-            payload.get("optionSymbols") if isinstance(payload, dict) else None
-        )
-        option_symbols = (
-            option_symbols_raw if isinstance(option_symbols_raw, list) else []
-        )
+        validate_runtime_public_rest_url("https://eapi.binance.com/eapi/v1/exchangeInfo")
+        payload = await self._fetch_json("https://eapi.binance.com/eapi/v1/exchangeInfo")
+        option_symbols_raw = payload.get("optionSymbols") if isinstance(payload, dict) else None
+        option_symbols = option_symbols_raw if isinstance(option_symbols_raw, list) else []
         rows = [
             item
             for item in option_symbols
@@ -993,9 +916,7 @@ class PublicIntelligenceService:
     ) -> list[dict[str, Any]]:
         if not self._options_eapi_research_enabled():
             return []
-        validate_runtime_public_rest_url(
-            "https://eapi.binance.com/eapi/v1/openInterest"
-        )
+        validate_runtime_public_rest_url("https://eapi.binance.com/eapi/v1/openInterest")
         payload = await self._fetch_json(
             "https://eapi.binance.com/eapi/v1/openInterest",
             params={
@@ -1076,9 +997,7 @@ class PublicIntelligenceService:
         indicators = cast(dict[str, Any], result.get("indicators") or {})
         quote_rows = indicators.get("quote") if isinstance(indicators, dict) else None
         close_values = (
-            quote_rows[0].get("close")
-            if quote_rows and isinstance(quote_rows[0], dict)
-            else []
+            quote_rows[0].get("close") if quote_rows and isinstance(quote_rows[0], dict) else []
         )
         closes = [_safe_float(item) for item in close_values or []]
         closes = [item for item in closes if item is not None]

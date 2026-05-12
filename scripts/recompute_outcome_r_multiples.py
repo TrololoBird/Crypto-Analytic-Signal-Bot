@@ -136,9 +136,7 @@ def recompute(db_path: Path, *, apply: bool) -> dict[str, Any]:
             )
             con.commit()
 
-        max_abs_r_delta = max(
-            (abs(row["old_r"] - row["new_r"]) for row in changed), default=0.0
-        )
+        max_abs_r_delta = max((abs(row["old_r"] - row["new_r"]) for row in changed), default=0.0)
         return {
             "db_path": str(db_path),
             "applied": apply,

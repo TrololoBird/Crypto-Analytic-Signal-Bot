@@ -271,13 +271,9 @@ class TelegramQueue:
 
             if len(timestamps) >= self.MESSAGES_PER_MINUTE:
                 # Wait until oldest expires
-                wait_time = (
-                    timestamps[0] + timedelta(seconds=60) - now
-                ).total_seconds()
+                wait_time = (timestamps[0] + timedelta(seconds=60) - now).total_seconds()
                 if wait_time > 0:
-                    LOG.debug(
-                        "Rate limit hit for chat %s, waiting %.1fs", chat_id, wait_time
-                    )
+                    LOG.debug("Rate limit hit for chat %s, waiting %.1fs", chat_id, wait_time)
                     await asyncio.sleep(wait_time)
 
         # Check global burst limit (1/sec)

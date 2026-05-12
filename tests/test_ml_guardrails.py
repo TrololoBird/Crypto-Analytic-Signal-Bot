@@ -22,9 +22,7 @@ def test_ml_filter_disables_live_when_only_centroid_baseline_available(
     settings.ml.use_ml_in_live = True
     settings.data_dir = tmp_path
 
-    monkeypatch.setattr(
-        "bot.ml.signal_classifier.SignalClassifier.load", lambda self: True
-    )
+    monkeypatch.setattr("bot.ml.signal_classifier.SignalClassifier.load", lambda self: True)
     monkeypatch.setattr(
         "bot.ml.signal_classifier.SignalClassifier.model_kind",
         lambda self: "centroid_baseline",
@@ -43,9 +41,7 @@ def test_ml_filter_disables_live_when_only_linear_baseline_available(
     settings.ml.use_ml_in_live = True
     settings.data_dir = tmp_path
 
-    monkeypatch.setattr(
-        "bot.ml.signal_classifier.SignalClassifier.load", lambda self: True
-    )
+    monkeypatch.setattr("bot.ml.signal_classifier.SignalClassifier.load", lambda self: True)
     monkeypatch.setattr(
         "bot.ml.signal_classifier.SignalClassifier.model_kind",
         lambda self: "linear_baseline",
@@ -74,9 +70,7 @@ def test_ml_filter_sets_disable_reason_for_blocked_live_baseline(
     settings.ml.use_ml_in_live = True
     settings.data_dir = tmp_path
 
-    monkeypatch.setattr(
-        "bot.ml.signal_classifier.SignalClassifier.load", lambda self: True
-    )
+    monkeypatch.setattr("bot.ml.signal_classifier.SignalClassifier.load", lambda self: True)
     monkeypatch.setattr(
         "bot.ml.signal_classifier.SignalClassifier.model_kind",
         lambda self: "centroid_baseline",

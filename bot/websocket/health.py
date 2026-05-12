@@ -86,9 +86,7 @@ async def monitor_connection_silence(manager: Any, ws: Any, endpoint: str) -> bo
     if last_message_ts == 0.0:
         return False
     connected_map = getattr(manager, "_connected_at_by_endpoint", {})
-    connected_at = (
-        connected_map.get(endpoint, 0.0) if isinstance(connected_map, dict) else 0.0
-    )
+    connected_at = connected_map.get(endpoint, 0.0) if isinstance(connected_map, dict) else 0.0
     grace_seconds = max(
         60.0,
         float(getattr(manager._cfg, "market_reconnect_grace_seconds", 60.0)),

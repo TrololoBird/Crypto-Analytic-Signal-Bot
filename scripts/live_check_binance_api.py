@@ -20,7 +20,9 @@ from bot.ws_manager import FuturesWSManager
 LOG = configure_script_logging("scripts.live_check_binance_api")
 
 
-async def _run(symbols: Sequence[str], warmup_seconds: float, reconnect_wait_seconds: float) -> None:
+async def _run(
+    symbols: Sequence[str], warmup_seconds: float, reconnect_wait_seconds: float
+) -> None:
     settings = load_settings()
     client = BinanceFuturesMarketData(
         rest_timeout_seconds=settings.ws.rest_timeout_seconds,
@@ -85,7 +87,12 @@ def main() -> None:
     try:
         asyncio.run(_run(args.symbols, args.warmup_seconds, args.reconnect_wait_seconds))
     except MarketDataUnavailable as exc:
-        LOG.error("live_binance_api_unavailable", operation=exc.operation, detail=exc.detail, symbol=exc.symbol)
+        LOG.error(
+            "live_binance_api_unavailable",
+            operation=exc.operation,
+            detail=exc.detail,
+            symbol=exc.symbol,
+        )
         raise SystemExit(2) from exc
 
 

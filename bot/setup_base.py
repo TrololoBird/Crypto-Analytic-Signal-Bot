@@ -84,9 +84,7 @@ class BaseSetup(AbstractStrategy):
             required_features=self.required_features,
             required_enrichment=self.required_enrichment,
             requires_oi=bool(self.requires_oi or self.asset_fit.requires_oi),
-            requires_funding=bool(
-                self.requires_funding or self.asset_fit.requires_funding
-            ),
+            requires_funding=bool(self.requires_funding or self.asset_fit.requires_funding),
             min_history_bars=self.min_history_bars,
             asset_fit=self.asset_fit.to_dict(),
             score_calibration=self.score_calibration,
@@ -103,9 +101,7 @@ class BaseSetup(AbstractStrategy):
         ...
 
     @abstractmethod
-    def get_optimizable_params(
-        self, settings: "BotSettings | None" = None
-    ) -> dict[str, float]:
+    def get_optimizable_params(self, settings: "BotSettings | None" = None) -> dict[str, float]:
         """Return tunable parameters for self-learner Optuna optimization."""
         ...
 

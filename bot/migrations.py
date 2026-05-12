@@ -55,7 +55,5 @@ async def migrate_db(conn: aiosqlite.Connection) -> int:
         )
         await conn.commit()
         applied += 1
-        LOG.info(
-            "db migration applied | version=%d description=%s", version, description
-        )
+        LOG.info("db migration applied | version=%d description=%s", version, description)
     return applied

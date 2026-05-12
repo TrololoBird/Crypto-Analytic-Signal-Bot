@@ -64,13 +64,9 @@ class SymbolScanner:
                 if signal:
                     signals.append(signal)
             except Exception as exc:
-                LOG.error(
-                    "Scan failed for %s: %s", getattr(symbol_data, "symbol", "?"), exc
-                )
+                LOG.error("Scan failed for %s: %s", getattr(symbol_data, "symbol", "?"), exc)
 
-        LOG.info(
-            "Scan complete: %d signals from %d symbols", len(signals), len(symbols)
-        )
+        LOG.info("Scan complete: %d signals from %d symbols", len(signals), len(symbols))
         return signals
 
     async def _scan_one(self, prepared: PreparedSymbol) -> Signal | None:
