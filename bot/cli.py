@@ -281,7 +281,7 @@ def _pid_is_alive(pid: int) -> bool:
         if handle:
             kernel32.CloseHandle(handle)
             return True
-        return ctypes.get_last_error() == 5
+        return int(cast(Any, ctypes).get_last_error()) == 5
     try:
         os.kill(pid, 0)
     except OSError:
