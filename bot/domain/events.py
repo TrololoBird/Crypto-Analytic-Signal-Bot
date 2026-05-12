@@ -49,9 +49,5 @@ class BookTickerEvent(msgspec.Struct, frozen=True):
 
 # Union type for dispatcher type routing
 AnyEvent = (
-    KlineCloseEvent
-    | ShortlistUpdatedEvent
-    | ReconnectEvent
-    | OIRefreshDueEvent
-    | BookTickerEvent
+    KlineCloseEvent | ShortlistUpdatedEvent | ReconnectEvent | OIRefreshDueEvent | BookTickerEvent
 )

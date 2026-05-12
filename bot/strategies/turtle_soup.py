@@ -35,9 +35,7 @@ class TurtleSoupSetup(BaseSetup):
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)
 
-    def get_optimizable_params(
-        self, settings: BotSettings | None = None
-    ) -> dict[str, float]:
+    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
         """Tunable parameters for self-learner optimization."""
         defaults = {
             "base_score": 0.52,
@@ -70,12 +68,8 @@ class TurtleSoupSetup(BaseSetup):
         dynamic_params = get_dynamic_params(prepared, setup_id)
         defaults = self.get_optimizable_params(settings)
         roll_bars = max(5, int(dynamic_params.get("roll_bars", defaults["roll_bars"])))
-        break_atr_mult = float(
-            dynamic_params.get("break_atr_mult", defaults["break_atr_mult"])
-        )
-        sl_buffer_atr = float(
-            dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"])
-        )
+        break_atr_mult = float(dynamic_params.get("break_atr_mult", defaults["break_atr_mult"]))
+        sl_buffer_atr = float(dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]))
         volume_threshold = float(
             dynamic_params.get("volume_threshold", defaults["volume_threshold"])
         )
@@ -114,9 +108,7 @@ class TurtleSoupSetup(BaseSetup):
             wick_extreme = bar_low
 
         # Short setup: price swept highs (bar.high > rolling_high + break_atr_mult*atr) but close back below
-        elif (
-            bar_high > rolling_high + break_atr_mult * atr and bar_close < rolling_high
-        ):
+        elif bar_high > rolling_high + break_atr_mult * atr and bar_close < rolling_high:
             direction = "short"
             wick_extreme = bar_high
 

@@ -181,9 +181,7 @@ class WinRateCalculator:
                 mean_ret = _as_float(returns.mean())
                 std_ret = _as_float(returns.std())
                 if std_ret > 0:
-                    metrics.sharpe_ratio = (
-                        mean_ret / std_ret * np.sqrt(365)
-                    )  # Annualized
+                    metrics.sharpe_ratio = mean_ret / std_ret * np.sqrt(365)  # Annualized
 
         return metrics
 

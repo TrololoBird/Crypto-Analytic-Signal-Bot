@@ -43,9 +43,7 @@ class CVDDivergenceSetup(BaseSetup):
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)
 
-    def get_optimizable_params(
-        self, settings: BotSettings | None = None
-    ) -> dict[str, float]:
+    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
         """Tunable parameters for self-learner optimization."""
         defaults = {
             "base_score": 0.50,
@@ -87,9 +85,7 @@ class CVDDivergenceSetup(BaseSetup):
         min_delta_threshold = float(
             dynamic_params.get("min_delta_threshold", defaults["min_delta_threshold"])
         )
-        sl_buffer_atr = float(
-            dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"])
-        )
+        sl_buffer_atr = float(dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]))
         min_rr = float(dynamic_params.get("min_rr", defaults["min_rr"]))
         base_score = float(dynamic_params.get("base_score", defaults["base_score"]))
 
@@ -223,9 +219,7 @@ class CVDDivergenceSetup(BaseSetup):
             w1h = prepared.work_1h
             tp2 = None
             if w1h.height > 5:
-                sh_mask, sl_mask = _swing_points(
-                    w1h, n=3, include_unconfirmed_tail=True
-                )
+                sh_mask, sl_mask = _swing_points(w1h, n=3, include_unconfirmed_tail=True)
                 sh_prices = w1h.filter(sh_mask)["high"]
                 tp2_cands = sh_prices.filter(sh_prices > price)
                 tp2 = float(tp2_cands[0]) if tp2_cands.len() > 0 else None

@@ -64,9 +64,7 @@ class TelemetryAnalyzer:
         self.max_lines_per_file = max(1, int(max_lines_per_file))
         self.records = self._load_records()
 
-    def analyze_strategy_performance(
-        self, strategy_id: str, hours: int = 24
-    ) -> dict[str, object]:
+    def analyze_strategy_performance(self, strategy_id: str, hours: int = 24) -> dict[str, object]:
         """Return signal/reject distribution for a single strategy."""
         cutoff = datetime.now(timezone.utc) - timedelta(hours=max(1, int(hours)))
         rows = [
@@ -75,7 +73,11 @@ class TelemetryAnalyzer:
             if self._strategy_id(row) == strategy_id and self._row_ts(row) >= cutoff
         ]
         signal_rows = [row for row in rows if self._is_signal(row)]
-        reject_reasons = Counter(str(row.get("reason") or row.get("reason_code") or "unknown") for row in rows if not self._is_signal(row))
+        reject_reasons = Counter(
+            str(row.get("reason") or row.get("reason_code") or "unknown")
+            for row in rows
+            if not self._is_signal(row)
+        )
         confidences = [
             float(row["signal_confidence"])
             for row in signal_rows
@@ -88,9 +90,18 @@ class TelemetryAnalyzer:
             "signal_rate_per_hour": round(len(signal_rows) / max(float(hours), 1.0), 6),
             "reject_breakdown": dict(reject_reasons.most_common()),
             "top_reject_reason": reject_reasons.most_common(1)[0][0] if reject_reasons else "",
-            "avg_confidence": round(sum(confidences) / len(confidences), 6) if confidences else None,
-            "symbol_distribution": dict(Counter(str(row.get("symbol") or "unknown") for row in signal_rows).most_common()),
-            "timeframe_distribution": dict(Counter(str(row.get("timeframe") or row.get("event_interval") or "unknown") for row in signal_rows).most_common()),
+            "avg_confidence": round(sum(confidences) / len(confidences), 6)
+            if confidences
+            else None,
+            "symbol_distribution": dict(
+                Counter(str(row.get("symbol") or "unknown") for row in signal_rows).most_common()
+            ),
+            "timeframe_distribution": dict(
+                Counter(
+                    str(row.get("timeframe") or row.get("event_interval") or "unknown")
+                    for row in signal_rows
+                ).most_common()
+            ),
         }
 
     def detect_calibration_issues(self) -> list[CalibrationIssue]:
@@ -134,9 +145,16 @@ class TelemetryAnalyzer:
                     )
                 )
 
-        long_missing = stop_anchor_rejects.get("external_swing_stop_missing_long", 0) + stop_anchor_rejects.get("swing_stop_missing_long", 0)
-        short_missing = stop_anchor_rejects.get("external_swing_stop_missing_short", 0) + stop_anchor_rejects.get("swing_stop_missing_short", 0)
-        if min(long_missing, short_missing) > 0 and max(long_missing, short_missing) / max(min(long_missing, short_missing), 1) > 10:
+        long_missing = stop_anchor_rejects.get(
+            "external_swing_stop_missing_long", 0
+        ) + stop_anchor_rejects.get("swing_stop_missing_long", 0)
+        short_missing = stop_anchor_rejects.get(
+            "external_swing_stop_missing_short", 0
+        ) + stop_anchor_rejects.get("swing_stop_missing_short", 0)
+        if (
+            min(long_missing, short_missing) > 0
+            and max(long_missing, short_missing) / max(min(long_missing, short_missing), 1) > 10
+        ):
             issues.append(
                 CalibrationIssue(
                     kind="bos_choch_stop_anchor_imbalance",
@@ -191,8 +209,13 @@ class TelemetryAnalyzer:
     def write_report(self, output: Path, *, hours: int = 24) -> Path:
         """Write a concise markdown report plus adjacent JSON payload."""
         output.parent.mkdir(parents=True, exist_ok=True)
-        strategy_ids = sorted({self._strategy_id(row) for row in self.records if self._strategy_id(row)})
-        performances = [self.analyze_strategy_performance(strategy_id, hours=hours) for strategy_id in strategy_ids]
+        strategy_ids = sorted(
+            {self._strategy_id(row) for row in self.records if self._strategy_id(row)}
+        )
+        performances = [
+            self.analyze_strategy_performance(strategy_id, hours=hours)
+            for strategy_id in strategy_ids
+        ]
         issues = self.detect_calibration_issues()
         recommendations = self.recommend_threshold_adjustments()
         lines = [
@@ -214,7 +237,9 @@ class TelemetryAnalyzer:
         lines.extend(["", "## Calibration Issues", ""])
         if issues:
             for issue in issues:
-                lines.append(f"- `{issue.severity}` `{issue.kind}` `{issue.subject}`: {issue.detail}")
+                lines.append(
+                    f"- `{issue.severity}` `{issue.kind}` `{issue.subject}`: {issue.detail}"
+                )
         else:
             lines.append("- None detected from loaded telemetry.")
         lines.extend(["", "## Threshold Review Targets", ""])
@@ -247,7 +272,9 @@ class TelemetryAnalyzer:
         runs_dir = self.telemetry_dir / "runs"
         if run_id:
             return runs_dir / run_id
-        candidates = [path for path in runs_dir.glob("*") if path.is_dir()] if runs_dir.exists() else []
+        candidates = (
+            [path for path in runs_dir.glob("*") if path.is_dir()] if runs_dir.exists() else []
+        )
         if not candidates:
             return runs_dir / "missing"
         return max(candidates, key=lambda path: path.stat().st_mtime)
@@ -313,7 +340,9 @@ class TelemetryAnalyzer:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Analyze runtime telemetry for calibration issues.")
+    parser = argparse.ArgumentParser(
+        description="Analyze runtime telemetry for calibration issues."
+    )
     parser.add_argument("--telemetry-dir", type=Path, default=DEFAULT_TELEMETRY_DIR)
     parser.add_argument("--run-id", default="")
     parser.add_argument("--hours", type=int, default=24)

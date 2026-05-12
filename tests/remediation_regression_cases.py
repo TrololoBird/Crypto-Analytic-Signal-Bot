@@ -62,9 +62,7 @@ class TelemetryStub:
     def append_jsonl(self, filename: str, row: dict) -> None:
         self.rows.append((filename, row))
 
-    def append_symbol_jsonl(
-        self, bucket: str, symbol: str, relative_name: str, row: dict
-    ) -> None:
+    def append_symbol_jsonl(self, bucket: str, symbol: str, relative_name: str, row: dict) -> None:
         self.symbol_rows.append((symbol, relative_name, row))
 
 
@@ -116,9 +114,7 @@ class DummyMemoryRepo:
     async def get_tracking_stats(self) -> dict[str, int]:
         return dict(self.tracking_stats)
 
-    async def record_setup_outcome(
-        self, setup_id: str, outcome: str, **_: object
-    ) -> float:
+    async def record_setup_outcome(self, setup_id: str, outcome: str, **_: object) -> float:
         self.setup_outcomes.append((setup_id, outcome))
         return 0.0
 
@@ -126,9 +122,7 @@ class DummyMemoryRepo:
         self.saved_outcomes.extend(outcomes_data)
 
 
-def make_universe_symbol(
-    symbol: str = "BTCUSDT", price: float = 100.0
-) -> UniverseSymbol:
+def make_universe_symbol(symbol: str = "BTCUSDT", price: float = 100.0) -> UniverseSymbol:
     return UniverseSymbol(
         symbol=symbol,
         base_asset="BTC",
@@ -314,12 +308,8 @@ def make_tracked_state(
         direction=direction,
         timeframe="15m",
         created_at=created.isoformat(),
-        pending_expires_at=(
-            pending_expires_at or (created + timedelta(minutes=10))
-        ).isoformat(),
-        active_expires_at=(
-            active_expires_at or (created + timedelta(minutes=60))
-        ).isoformat(),
+        pending_expires_at=(pending_expires_at or (created + timedelta(minutes=10))).isoformat(),
+        active_expires_at=(active_expires_at or (created + timedelta(minutes=60))).isoformat(),
         entry_low=99.5,
         entry_high=100.5,
         entry_mid=100.0,
@@ -422,19 +412,13 @@ def test_signal_entry_mid_remains_raw_when_mark_price_is_close() -> None:
 
 
 @pytest.mark.asyncio
-async def test_tracking_expiry_falls_back_to_time_only_when_market_data_unavailable() -> (
-    None
-):
+async def test_tracking_expiry_falls_back_to_time_only_when_market_data_unavailable() -> None:
     class MarketDataStub:
         async def fetch_agg_trades(self, *args, **kwargs):
-            raise MarketDataUnavailable(
-                operation="agg", detail="offline", symbol="BTCUSDT"
-            )
+            raise MarketDataUnavailable(operation="agg", detail="offline", symbol="BTCUSDT")
 
         async def fetch_klines(self, *args, **kwargs):
-            raise MarketDataUnavailable(
-                operation="klines", detail="offline", symbol="BTCUSDT"
-            )
+            raise MarketDataUnavailable(operation="klines", detail="offline", symbol="BTCUSDT")
 
     tracker, repo, _ = make_tracker(MarketDataStub())
     now = datetime.now(UTC)
@@ -516,9 +500,7 @@ async def test_select_and_deliver_uses_tracking_id_for_message_binding_and_featu
         set_signal_features_async=AsyncMock(side_effect=_set_signal_features_async),
         arm_signals_with_messages=AsyncMock(return_value=None),
     )
-    delivery_result = SimpleNamespace(
-        signal=signal, status="sent", message_id=777, reason=None
-    )
+    delivery_result = SimpleNamespace(signal=signal, status="sent", message_id=777, reason=None)
     bot = SignalBot.__new__(SignalBot)
     bot.settings = make_runtime_settings()
     bot._modern_repo = SimpleNamespace(
@@ -559,9 +541,7 @@ async def test_select_and_deliver_uses_tracking_id_for_message_binding_and_featu
 
 
 @pytest.mark.asyncio
-async def test_select_and_deliver_for_symbol_does_not_double_write_reject_telemetry() -> (
-    None
-):
+async def test_select_and_deliver_for_symbol_does_not_double_write_reject_telemetry() -> None:
     signal = make_signal(created_at=datetime(2026, 4, 23, 0, 1, tzinfo=UTC))
     bot = SignalBot.__new__(SignalBot)
     bot.settings = make_runtime_settings()
@@ -582,9 +562,7 @@ async def test_select_and_deliver_for_symbol_does_not_double_write_reject_teleme
         funnel={},
     )
 
-    candidates, rejected, delivered = await bot._select_and_deliver_for_symbol(
-        "BTCUSDT", result
-    )
+    candidates, rejected, delivered = await bot._select_and_deliver_for_symbol("BTCUSDT", result)
 
     assert candidates == [signal]
     assert delivered == []
@@ -678,9 +656,7 @@ def test_funding_reversal_runtime_params_gate_delta_and_stop() -> None:
 def test_cvd_divergence_respects_min_delta_threshold() -> None:
     settings = SimpleNamespace(
         filters=SimpleNamespace(
-            setups={
-                "cvd_divergence": {"min_delta_threshold": 0.2, "sl_buffer_atr": 0.5}
-            }
+            setups={"cvd_divergence": {"min_delta_threshold": 0.2, "sl_buffer_atr": 0.5}}
         )
     )
     prepared = make_prepared(price=105.0)
@@ -764,9 +740,7 @@ def test_hidden_divergence_respects_rsi_and_delta_thresholds(
         sh[10] = True
         sl[5] = True
         sl[15] = True
-        return pl.Series("sh", sh, dtype=pl.Boolean), pl.Series(
-            "sl", sl, dtype=pl.Boolean
-        )
+        return pl.Series("sh", sh, dtype=pl.Boolean), pl.Series("sl", sl, dtype=pl.Boolean)
 
     monkeypatch.setattr(hidden_divergence_module, "_swing_points", fake_swing_points)
     settings = SimpleNamespace(
@@ -886,9 +860,7 @@ def test_squeeze_setup_runtime_params_drive_breakout_and_stop(
         sh = [False] * size
         sl = [False] * size
         sl[10] = True
-        return pl.Series("sh", sh, dtype=pl.Boolean), pl.Series(
-            "sl", sl, dtype=pl.Boolean
-        )
+        return pl.Series("sh", sh, dtype=pl.Boolean), pl.Series("sl", sl, dtype=pl.Boolean)
 
     monkeypatch.setattr(features_module, "_swing_points", fake_swing_points)
     closes = [100.0 + (idx * 0.2) for idx in range(29)] + [97.0]
@@ -965,9 +937,7 @@ def test_shortlist_service_uses_book_ticker_age_contract() -> None:
         def get_book_ticker_age_seconds(self, symbol: str) -> float | None:
             return 0.25
 
-    service = ShortlistService(
-        SimpleNamespace(_ws_manager=WSStub(), client=SimpleNamespace())
-    )
+    service = ShortlistService(SimpleNamespace(_ws_manager=WSStub(), client=SimpleNamespace()))
     enriched = service._enrich_shortlist_rows([{"symbol": "BTCUSDT"}])
 
     assert enriched[0]["book_age_seconds"] == pytest.approx(0.25)
@@ -1001,9 +971,7 @@ def test_build_structural_targets_prefers_nearest_long_resistance() -> None:
     assert tp2 == pytest.approx(120.0)
 
 
-def test_build_structural_targets_short_uses_resistance_above_entry_for_stop_anchor() -> (
-    None
-):
+def test_build_structural_targets_short_uses_resistance_above_entry_for_stop_anchor() -> None:
     work_1h = pl.DataFrame(
         {
             "time": [
@@ -1072,9 +1040,7 @@ def test_crowd_position_respects_strategy_family() -> None:
         confirmation_profile="countertrend_exhaustion",
     )
 
-    continuation_score = _crowd_position(
-        prepared, continuation_signal, SimpleNamespace()
-    )
+    continuation_score = _crowd_position(prepared, continuation_signal, SimpleNamespace())
     reversal_score = _crowd_position(prepared, reversal_signal, SimpleNamespace())
 
     assert continuation_score > reversal_score
@@ -1168,9 +1134,7 @@ def test_symbol_analyzer_does_not_hide_unexpected_frame_errors(
         async def fetch_klines_cached(self, *args, **kwargs):
             raise RuntimeError("boom")
 
-    monkeypatch.setattr(
-        symbol_analyzer_module, "BinanceFuturesMarketData", _DummyBinance
-    )
+    monkeypatch.setattr(symbol_analyzer_module, "BinanceFuturesMarketData", _DummyBinance)
 
     bot = SimpleNamespace(
         client=_DummyBinance(),
@@ -1189,8 +1153,7 @@ def test_symbol_analyzer_does_not_hide_unexpected_frame_errors(
 
     asyncio.run(_run())
     assert any(
-        "unexpected frame fetch failure for BTCUSDT" in record.message
-        for record in caplog.records
+        "unexpected frame fetch failure for BTCUSDT" in record.message for record in caplog.records
     )
 
 
@@ -1198,9 +1161,7 @@ def test_symbol_analyzer_ws_enrichment_degradation_sets_telemetry_flags(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     ws_manager = SimpleNamespace(
-        get_ticker_snapshot=lambda _symbol: (_ for _ in ()).throw(
-            RuntimeError("ticker boom")
-        ),
+        get_ticker_snapshot=lambda _symbol: (_ for _ in ()).throw(RuntimeError("ticker boom")),
         get_ticker_age_seconds=lambda _symbol: None,
         get_mark_price_snapshot=lambda _symbol: {},
         get_mark_price_age_seconds=lambda _symbol: None,
@@ -1223,9 +1184,7 @@ def test_symbol_analyzer_ws_enrichment_degradation_sets_telemetry_flags(
     assert enrichments["degraded"] is True
     assert enrichments["degrade_reason"].startswith("ticker_snapshot:")
     assert enrichments["fallback_used"] == "skip_ticker_enrichment"
-    assert any(
-        "enrichment degraded | symbol=BTCUSDT" in rec.message for rec in caplog.records
-    )
+    assert any("enrichment degraded | symbol=BTCUSDT" in rec.message for rec in caplog.records)
 
 
 @pytest.mark.asyncio
@@ -1233,17 +1192,13 @@ async def test_oi_refresh_runner_logs_controlled_degradation_without_silent_fail
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     class _Client:
-        async def fetch_open_interest_change(
-            self, symbol: str, period: str = "1h"
-        ) -> None:
+        async def fetch_open_interest_change(self, symbol: str, period: str = "1h") -> None:
             raise RuntimeError("oi failed")
 
         async def fetch_long_short_ratio(self, symbol: str, period: str = "1h") -> None:
             return None
 
-        async def fetch_top_position_ls_ratio(
-            self, symbol: str, period: str = "1h"
-        ) -> None:
+        async def fetch_top_position_ls_ratio(self, symbol: str, period: str = "1h") -> None:
             return None
 
         async def fetch_global_ls_ratio(self, symbol: str, period: str = "1h") -> None:
@@ -1259,8 +1214,7 @@ async def test_oi_refresh_runner_logs_controlled_degradation_without_silent_fail
         await runner._safe_fetch("BTCUSDT")
 
     assert any(
-        "oi refresh degraded | symbol=BTCUSDT stage=oi_change_1h source=rest"
-        in rec.message
+        "oi refresh degraded | symbol=BTCUSDT stage=oi_change_1h source=rest" in rec.message
         for rec in caplog.records
     )
 
@@ -1269,14 +1223,10 @@ def test_normalize_shortlist_fallback_reason_contract() -> None:
     assert normalize_shortlist_fallback_reason(None) is None
     assert normalize_shortlist_fallback_reason("  ") is None
     assert normalize_shortlist_fallback_reason("WS_CACHE_COLD") == "ws_cache_cold"
-    assert (
-        normalize_shortlist_fallback_reason("using_cached")
-        == FALLBACK_REASON_USING_CACHED
-    )
+    assert normalize_shortlist_fallback_reason("using_cached") == FALLBACK_REASON_USING_CACHED
     assert normalize_shortlist_fallback_reason("cached") == FALLBACK_REASON_USING_CACHED
     assert (
-        normalize_shortlist_fallback_reason("refresh_failed")
-        == FALLBACK_REASON_REFRESH_EXCEPTION
+        normalize_shortlist_fallback_reason("refresh_failed") == FALLBACK_REASON_REFRESH_EXCEPTION
     )
     assert normalize_shortlist_fallback_reason("not_mapped") == "unknown"
 
@@ -1309,9 +1259,7 @@ async def test_shortlist_refresh_cached_telemetry_fields() -> None:
 
     await service.do_refresh_shortlist()
 
-    shortlist_rows = [
-        row for filename, row in bot.telemetry.rows if filename == "shortlist.jsonl"
-    ]
+    shortlist_rows = [row for filename, row in bot.telemetry.rows if filename == "shortlist.jsonl"]
     assert shortlist_rows
     row = shortlist_rows[-1]
     assert row["source_before"] == "ws_light"
@@ -1346,9 +1294,7 @@ async def test_shortlist_refresh_prefers_ws_light_between_full_rebalances() -> N
         _shortlist_source="",
         _last_live_shortlist=[],
         _symbol_meta_by_symbol={
-            "BTCUSDT": SimpleNamespace(
-                symbol="BTCUSDT", base_asset="BTC", quote_asset="USDT"
-            )
+            "BTCUSDT": SimpleNamespace(symbol="BTCUSDT", base_asset="BTC", quote_asset="USDT")
         },
         _last_shortlist_full_refresh_at=datetime.now(UTC),
         client=SimpleNamespace(_exchange_info_cache=None),
@@ -1438,9 +1384,7 @@ def test_build_signal_normalizes_swapped_targets() -> None:
 def test_build_signal_reads_adx14_and_preserves_zero_metrics() -> None:
     prepared = make_prepared(price=100.0)
     prepared.work_1h = prepared.work_1h.with_columns(pl.lit(0.0).alias("adx14"))
-    prepared.work_15m = prepared.work_15m.with_columns(
-        pl.lit(0.0).alias("volume_ratio20")
-    )
+    prepared.work_15m = prepared.work_15m.with_columns(pl.lit(0.0).alias("volume_ratio20"))
     prepared.work_5m = pl.DataFrame(
         {
             "time": [datetime.now(UTC)],
@@ -1576,13 +1520,9 @@ def test_ema_bounce_requires_actual_ema_touch() -> None:
         (30.0, False),
     ],
 )
-def test_ema_bounce_config_min_adx_changes_outcome(
-    min_adx: float, expect_signal: bool
-) -> None:
+def test_ema_bounce_config_min_adx_changes_outcome(min_adx: float, expect_signal: bool) -> None:
     setup = EmaBounceSetup()
-    settings = SimpleNamespace(
-        filters=SimpleNamespace(setups={"ema_bounce": {"min_adx": min_adx}})
-    )
+    settings = SimpleNamespace(filters=SimpleNamespace(setups={"ema_bounce": {"min_adx": min_adx}}))
     t0 = datetime.now(UTC) - timedelta(hours=2)
     prepared = make_prepared(price=101.0)
     prepared.bias_1h = "uptrend"
@@ -1826,9 +1766,7 @@ def test_ws_stream_endpoint_class_keeps_public_market_split() -> None:
     assert ws_subscriptions.stream_endpoint_class("btcusdt@markPrice@1s") == "market"
     assert ws_subscriptions.stream_endpoint_class("!ticker@arr") == "market"
 
-    with pytest.raises(
-        ValueError, match="private/auth websocket streams are not allowed"
-    ):
+    with pytest.raises(ValueError, match="private/auth websocket streams are not allowed"):
         ws_subscriptions.stream_endpoint_class("listenKey")
 
 
@@ -1870,9 +1808,7 @@ def test_family_confirmation_soft_gates_missing_fast_context_when_strict() -> No
     prepared.microprice_bias = None
     signal = make_signal()
 
-    ok, reason, details = bot._check_family_confirmation(
-        signal, prepared, metadata=None
-    )
+    ok, reason, details = bot._check_family_confirmation(signal, prepared, metadata=None)
 
     assert ok is True
     assert reason is None
@@ -1894,9 +1830,7 @@ async def test_engine_skip_result_keeps_setup_id_and_reason_code() -> None:
 
     registry = StrategyRegistry()
     settings = make_runtime_settings()
-    registry.register(
-        HistoryHungrySetup(SetupParams(enabled=True), settings), enabled=True
-    )
+    registry.register(HistoryHungrySetup(SetupParams(enabled=True), settings), enabled=True)
     engine = SignalEngine(registry, settings)
 
     results = await engine.calculate_all(make_prepared())
@@ -1955,9 +1889,7 @@ async def test_parallel_strategy_rejections_keep_distinct_reason_codes() -> None
 
 
 @pytest.mark.asyncio
-async def test_engine_runs_all_enabled_strategies_for_shortlist_assets() -> (
-    None
-):
+async def test_engine_runs_all_enabled_strategies_for_shortlist_assets() -> None:
     class RoutedSetup(BaseSetup):
         setup_id = "routed_setup"
         min_history_bars = 1
@@ -2004,9 +1936,7 @@ async def test_engine_runs_all_enabled_strategies_for_shortlist_assets() -> (
 
     results = await engine.calculate_all(prepared)
     decisions = {
-        result.setup_id: result.decision
-        for result in results
-        if result.decision is not None
+        result.setup_id: result.decision for result in results if result.decision is not None
     }
 
     assert decisions["unrouted_setup"].reason_code == "pattern.no_raw_hit"
@@ -2094,11 +2024,7 @@ def test_cli_stderr_prefilter_detects_logger_timestamp_prefix_for_any_year() -> 
 def test_regression_live_guardrail_blocks_baseline_but_offline_allows(tmp_path) -> None:
     classifier = SignalClassifier(model_dir=tmp_path / "models", model_type="centroid")
     classifier.model = classifier._build_model()
-    live = classifier.runtime_guardrail_decision(
-        is_live=True, stage="regression_live_path"
-    )
-    offline = classifier.runtime_guardrail_decision(
-        is_live=False, stage="regression_offline_path"
-    )
+    live = classifier.runtime_guardrail_decision(is_live=True, stage="regression_live_path")
+    offline = classifier.runtime_guardrail_decision(is_live=False, stage="regression_offline_path")
     assert live.disable_reason == "live_baseline_blocked"
     assert offline.disable_reason is None

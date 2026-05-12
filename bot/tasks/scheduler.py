@@ -61,8 +61,7 @@ class TaskScheduler:
 
     def set_alert_handler(
         self,
-        handler: Callable[[str, Exception, int], Coroutine[Any, Any, None] | None]
-        | None,
+        handler: Callable[[str, Exception, int], Coroutine[Any, Any, None] | None] | None,
     ) -> None:
         """Set optional repeated-failure alert handler."""
         self._alert_handler = handler
@@ -236,9 +235,7 @@ class TaskScheduler:
 
                 # Reset error count on success
                 if task.error_count > 0:
-                    LOG.info(
-                        "Task %s recovered after %d errors", task.name, task.error_count
-                    )
+                    LOG.info("Task %s recovered after %d errors", task.name, task.error_count)
                     task.error_count = 0
                 return
             except asyncio.CancelledError:
@@ -271,9 +268,7 @@ class TaskScheduler:
                     if asyncio.iscoroutine(maybe_coro):
                         await maybe_coro
                 if task.error_count >= task.max_errors:
-                    LOG.error(
-                        "Task %s disabled after %d errors", task.name, task.error_count
-                    )
+                    LOG.error("Task %s disabled after %d errors", task.name, task.error_count)
                     task.enabled = False
                 return
 

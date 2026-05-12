@@ -7,7 +7,11 @@ from typing import Any
 
 
 from ...domain.schemas import PreparedSymbol
-from ...domain.strategies import StrategyMetadata, SignalResult, StrategyDecision as StrategyDecision
+from ...domain.strategies import (
+    StrategyMetadata,
+    SignalResult,
+    StrategyDecision as StrategyDecision,
+)
 
 __all__ = ["AbstractStrategy", "SignalResult", "StrategyDecision", "StrategyMetadata"]
 

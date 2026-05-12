@@ -35,9 +35,7 @@ class FundingReversalSetup(BaseSetup):
     required_context = ("futures_flow",)
     requires_funding = True
 
-    def get_optimizable_params(
-        self, settings: BotSettings | None = None
-    ) -> dict[str, float]:
+    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
         """Tunable parameters for self-learner optimization."""
         defaults = {
             "base_score": 0.52,
@@ -88,9 +86,7 @@ class FundingReversalSetup(BaseSetup):
             dynamic_params.get("base_score", defaults["base_score"]),
             defaults["base_score"],
         )
-        min_rr = _as_float(
-            dynamic_params.get("min_rr", defaults["min_rr"]), defaults["min_rr"]
-        )
+        min_rr = _as_float(dynamic_params.get("min_rr", defaults["min_rr"]), defaults["min_rr"])
 
         if prepared.funding_rate is None:
             _reject(prepared, setup_id, "funding_rate_missing")
@@ -225,9 +221,7 @@ class FundingReversalSetup(BaseSetup):
             stop = bar_low - atr * sl_buffer_atr
             risk = price - stop
             if risk <= 0:
-                _reject(
-                    prepared, setup_id, "risk_non_positive_long", stop=stop, price=price
-                )
+                _reject(prepared, setup_id, "risk_non_positive_long", stop=stop, price=price)
                 return None
             # TP1: funding mean-reversion level (mark price before funding spike = recent high)
             recent_highs = w["high"].slice(-(trend_window + 1), trend_window)

@@ -162,9 +162,7 @@ class MemoryRepositoryExtension:
             if row:
                 intelligence_snapshot: dict[str, Any] = {}
                 raw_intelligence = (
-                    row["intelligence_json"]
-                    if "intelligence_json" in row.keys()
-                    else None
+                    row["intelligence_json"] if "intelligence_json" in row.keys() else None
                 )
                 if raw_intelligence:
                     try:
@@ -178,9 +176,7 @@ class MemoryRepositoryExtension:
                     if "altcoin_season_index" in row.keys()
                     and row["altcoin_season_index"] is not None
                     else 50.0,
-                    "btc_phase": row["btc_phase"]
-                    if "btc_phase" in row.keys()
-                    else "sideways",
+                    "btc_phase": row["btc_phase"] if "btc_phase" in row.keys() else "sideways",
                     "high_funding_symbols": json.loads(row["high_funding_symbols"]),
                     "low_funding_symbols": json.loads(row["low_funding_symbols"]),
                     "updated_at": row["updated_at"],
@@ -300,9 +296,7 @@ class MemoryRepositoryExtension:
                 return True
             if last_signal_ts.tzinfo is None:
                 last_signal_ts = last_signal_ts.replace(tzinfo=timezone.utc)
-            return (datetime.now(timezone.utc) - last_signal_ts) < timedelta(
-                hours=pause_hours
-            )
+            return (datetime.now(timezone.utc) - last_signal_ts) < timedelta(hours=pause_hours)
 
     async def get_consecutive_sl(self, symbol: str) -> int:
         """Get consecutive SL streak for symbol."""

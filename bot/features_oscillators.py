@@ -24,12 +24,8 @@ def stochastic(
     low = df["low"].rolling_min(window_size=period)
     high = df["high"].rolling_max(window_size=period)
     raw_k = clean_non_finite(((df["close"] - low) / (high - low)) * 100.0, fill=50.0)
-    k = clean_non_finite(raw_k.rolling_mean(window_size=smooth_k), fill=50.0).rename(
-        "stoch_k14"
-    )
-    d = clean_non_finite(k.rolling_mean(window_size=smooth_d), fill=50.0).rename(
-        "stoch_d14"
-    )
+    k = clean_non_finite(raw_k.rolling_mean(window_size=smooth_k), fill=50.0).rename("stoch_k14")
+    d = clean_non_finite(k.rolling_mean(window_size=smooth_d), fill=50.0).rename("stoch_d14")
     return k, d
 
 
@@ -49,9 +45,7 @@ def cci(
     typical = (df["high"] + df["low"] + df["close"]) / 3.0
     sma = typical.rolling_mean(window_size=period)
     mean_dev = (typical - sma).abs().rolling_mean(window_size=period)
-    return clean_non_finite((typical - sma) / (0.015 * mean_dev), fill=0.0).rename(
-        f"cci{period}"
-    )
+    return clean_non_finite((typical - sma) / (0.015 * mean_dev), fill=0.0).rename(f"cci{period}")
 
 
 def mfi(
@@ -103,31 +97,28 @@ def cmf(df: pl.DataFrame, period: int = 20) -> pl.Series:
     width = df["high"] - df["low"]
     # Handle zero-width bars by replacing 0 with 1 to avoid div by zero in expr,
     # but we will then multiply by 0 where width was 0 anyway.
-    mfm = pl.when(width > 0.0).then(
-        ((df["close"] - df["low"]) - (df["high"] - df["close"])) / width
-    ).otherwise(0.0)
+    mfm = (
+        pl.when(width > 0.0)
+        .then(((df["close"] - df["low"]) - (df["high"] - df["close"])) / width)
+        .otherwise(0.0)
+    )
 
     mfv = mfm * df["volume"]
 
     return materialize_series(
         (
-            mfv.rolling_sum(window_size=period)
-            / df["volume"].rolling_sum(window_size=period)
+            mfv.rolling_sum(window_size=period) / df["volume"].rolling_sum(window_size=period)
         ).fill_nan(0.0),
         df=df,
         name=f"cmf{period}",
     )
 
 
-def ultimate_oscillator(
-    df: pl.DataFrame, p1: int = 7, p2: int = 14, p3: int = 28
-) -> pl.Series:
+def ultimate_oscillator(df: pl.DataFrame, p1: int = 7, p2: int = 14, p3: int = 28) -> pl.Series:
     """Contract: input requires HLC; output `uo` series with neutral fill 50."""
     ensure_columns(df, ("high", "low", "close"), fn_name="ultimate_oscillator")
     prev_close = df["close"].shift(1)
-    min_low = materialize_series(
-        pl.min_horizontal(df["low"], prev_close), df=df, name="uo_min_low"
-    )
+    min_low = materialize_series(pl.min_horizontal(df["low"], prev_close), df=df, name="uo_min_low")
     max_high = materialize_series(
         pl.max_horizontal(df["high"], prev_close), df=df, name="uo_max_high"
     )
@@ -148,9 +139,7 @@ def add_oscillator_features(
     stoch_k, stoch_d = stochastic(df)
     rolling_high = df["high"].rolling_max(window_size=14)
     rolling_low = df["low"].rolling_min(window_size=14)
-    willr = (
-        ((rolling_high - df["close"]) / (rolling_high - rolling_low)) * -100.0
-    ).fill_nan(-50.0)
+    willr = (((rolling_high - df["close"]) / (rolling_high - rolling_low)) * -100.0).fill_nan(-50.0)
     return df.with_columns(
         [
             stoch_k.alias("stoch_k14"),

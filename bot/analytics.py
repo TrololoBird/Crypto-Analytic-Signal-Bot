@@ -29,12 +29,8 @@ class StrategyAnalytics:
             rows = by_setup.get(setup_id, [])
             trades = int(setup.get("total") or 0)
             win_rate = float(setup.get("win_rate") or 0.0)
-            gross_profit = sum(
-                max(float(r.get("pnl_r_multiple") or 0.0), 0.0) for r in rows
-            )
-            gross_loss = sum(
-                abs(min(float(r.get("pnl_r_multiple") or 0.0), 0.0)) for r in rows
-            )
+            gross_profit = sum(max(float(r.get("pnl_r_multiple") or 0.0), 0.0) for r in rows)
+            gross_loss = sum(abs(min(float(r.get("pnl_r_multiple") or 0.0), 0.0)) for r in rows)
             profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else None
 
             curve = 0.0
@@ -54,18 +50,14 @@ class StrategyAnalytics:
                     "win_rate": round(win_rate, 4),
                     "expectancy_r": round(expectancy, 4),
                     "avg_rr": round(expectancy, 4),
-                    "profit_factor": None
-                    if profit_factor is None
-                    else round(profit_factor, 4),
+                    "profit_factor": None if profit_factor is None else round(profit_factor, 4),
                     "max_drawdown_r": round(max_drawdown, 4),
                 }
             )
 
         setup_reports = sorted(setup_reports, key=lambda r: r["setup_id"])
         total_trades = sum(int(r["trades"]) for r in setup_reports)
-        weighted_wins = sum(
-            float(r["win_rate"]) * int(r["trades"]) for r in setup_reports
-        )
+        weighted_wins = sum(float(r["win_rate"]) * int(r["trades"]) for r in setup_reports)
         weighted_expectancy = sum(
             float(r["expectancy_r"]) * int(r["trades"]) for r in setup_reports
         )

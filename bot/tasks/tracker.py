@@ -72,9 +72,7 @@ class OutcomeUpdater:
         LOG.info("Updated %d/%d signal outcomes", updated, len(pending))
         return updated
 
-    async def _get_prices_for_symbols(
-        self, symbols: set[str]
-    ) -> dict[str, PriceSnapshot]:
+    async def _get_prices_for_symbols(self, symbols: set[str]) -> dict[str, PriceSnapshot]:
         """Get current prices for symbols.
 
         Integrate with your market data source.

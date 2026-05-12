@@ -128,12 +128,7 @@ def _sanitize_reason_slug(reason: str) -> str:
 def _infer_reason_category(slug: str) -> str:
     if slug.startswith("data_") or "missing" in slug or "nan" in slug:
         return "data"
-    if (
-        slug.startswith("runtime_")
-        or "exception" in slug
-        or "timeout" in slug
-        or "error" in slug
-    ):
+    if slug.startswith("runtime_") or "exception" in slug or "timeout" in slug or "error" in slug:
         return "runtime"
     if (
         "target" in slug
@@ -187,9 +182,7 @@ def _normalize_reason(reason: str, *, stage: str | None = None) -> tuple[str, st
     if "." in raw:
         prefix, _, suffix = raw.partition(".")
         if prefix in _ALLOWED_REASON_PREFIXES:
-            return stage or _category_stage(
-                prefix
-            ), f"{prefix}.{_sanitize_reason_slug(suffix)}"
+            return stage or _category_stage(prefix), f"{prefix}.{_sanitize_reason_slug(suffix)}"
     slug = _sanitize_reason_slug(raw)
     category = _infer_reason_category(slug)
     return stage or _category_stage(category), f"{category}.{slug}"
@@ -453,12 +446,8 @@ def _reject(
     snapshot, snapshot_missing, snapshot_invalid = _decision_snapshot(prepared)
     if snapshot:
         details = {**details, "snapshot": snapshot}
-    merged_missing = _merge_field_names(
-        missing_fields, detail_missing, snapshot_missing
-    )
-    merged_invalid = _merge_field_names(
-        invalid_fields, detail_invalid, snapshot_invalid
-    )
+    merged_missing = _merge_field_names(missing_fields, detail_missing, snapshot_missing)
+    merged_invalid = _merge_field_names(invalid_fields, detail_invalid, snapshot_invalid)
     decision = StrategyDecision.reject(
         setup_id=detector,
         stage=normalized_stage,
@@ -483,25 +472,17 @@ def _reject(
         LOG.debug("%s: %s rejected | reason=%s", prepared.symbol, detector, reason_code)
 
 
-def _last_swing_prices(
-    work: pl.DataFrame, n: int = 3
-) -> tuple[float | None, float | None]:
+def _last_swing_prices(work: pl.DataFrame, n: int = 3) -> tuple[float | None, float | None]:
     """Return (last_swing_high_price, last_swing_low_price) from work frame."""
     sh, sl = _swing_points(work, n=n, include_unconfirmed_tail=True)
     sh_prices = work.filter(sh)["high"] if sh is not None else None
     sl_prices = work.filter(sl)["low"] if sl is not None else None
-    last_high = (
-        float(sh_prices[-1]) if sh_prices is not None and sh_prices.len() > 0 else None
-    )
-    last_low = (
-        float(sl_prices[-1]) if sl_prices is not None and sl_prices.len() > 0 else None
-    )
+    last_high = float(sh_prices[-1]) if sh_prices is not None and sh_prices.len() > 0 else None
+    last_low = float(sl_prices[-1]) if sl_prices is not None and sl_prices.len() > 0 else None
     return last_high, last_low
 
 
-def _pullback_levels(
-    prepared: PreparedSymbol, direction: str
-) -> list[tuple[str, float]]:
+def _pullback_levels(prepared: PreparedSymbol, direction: str) -> list[tuple[str, float]]:
     levels: list[tuple[str, float]] = []
     if prepared.work_1h.is_empty():
         return levels

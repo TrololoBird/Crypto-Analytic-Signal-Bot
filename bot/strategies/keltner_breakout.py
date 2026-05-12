@@ -29,9 +29,7 @@ class KeltnerBreakoutSetup(BaseSetup):
     confirmation_profile = "breakout_acceptance"
     required_context = ("futures_flow",)
 
-    def get_optimizable_params(
-        self, settings: BotSettings | None = None
-    ) -> dict[str, float]:
+    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
         defaults = {
             "base_score": 0.54,
             "min_volume_ratio": 1.25,
@@ -128,9 +126,7 @@ class KeltnerBreakoutSetup(BaseSetup):
             _reject(prepared, setup_id, "invalid_stop", stop=stop, close=close)
             return None
         if tp1 is None or abs(tp1 - close) < risk * min_rr:
-            tp1 = (
-                close + risk * min_rr if direction == "long" else close - risk * min_rr
-            )
+            tp1 = close + risk * min_rr if direction == "long" else close - risk * min_rr
         if tp2 is None:
             tp2 = tp1
 

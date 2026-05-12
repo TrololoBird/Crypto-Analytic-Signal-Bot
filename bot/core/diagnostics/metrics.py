@@ -49,9 +49,7 @@ class Histogram:
 
     name: str
     description: str
-    buckets: list[float] = field(
-        default_factory=lambda: [0.1, 0.5, 1.0, 2.5, 5.0, 10.0]
-    )
+    buckets: list[float] = field(default_factory=lambda: [0.1, 0.5, 1.0, 2.5, 5.0, 10.0])
     counts: dict[float, int] = field(default_factory=dict)
     sum_val: float = 0.0
     count: int = 0
@@ -120,9 +118,7 @@ class BotMetrics:
             "Strategy calculation time (ms)",
             buckets=[10, 50, 100, 250, 500, 1000],
         )
-        self.strategy_errors = Counter(
-            "strategy_errors_total", "Strategy calculation errors"
-        )
+        self.strategy_errors = Counter("strategy_errors_total", "Strategy calculation errors")
 
         # WebSocket metrics
         self.ws_reconnects = Counter("ws_reconnects_total", "WebSocket reconnect count")
@@ -141,16 +137,12 @@ class BotMetrics:
         # System health
         self.memory_usage_mb = Gauge("memory_usage_mb", "Memory usage in MB")
         self.active_symbols = Gauge("active_symbols", "Number of active symbols")
-        self.enabled_strategies = Gauge(
-            "enabled_strategies", "Number of enabled strategies"
-        )
+        self.enabled_strategies = Gauge("enabled_strategies", "Number of enabled strategies")
 
         # Telegram metrics
         self.telegram_sent = Counter("telegram_sent_total", "Messages sent to Telegram")
         self.telegram_errors = Counter("telegram_errors_total", "Telegram send errors")
-        self.telegram_queue_size = Gauge(
-            "telegram_queue_size", "Current Telegram queue size"
-        )
+        self.telegram_queue_size = Gauge("telegram_queue_size", "Current Telegram queue size")
 
     def record_signal(self, strategy_id: str, score: float) -> None:
         """Record signal generation."""

@@ -117,9 +117,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not config_path.exists() and config_path.name != "config.toml":
             errors.append(f"Config file not found: {config_path}")
         settings = load_settings(config_path)
-        settings.validate_for_runtime(
-            require_telegram=settings.notifiers.provider == "telegram"
-        )
+        settings.validate_for_runtime(require_telegram=settings.notifiers.provider == "telegram")
     except Exception as exc:  # pragma: no cover - defensive CLI script
         errors.append(f"Config validation failed: {exc}")
 
@@ -151,14 +149,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         df = pl.DataFrame(
             {
                 "open": [close - 0.2 for close in closes],
-                "high": [
-                    close + 1.0 + (idx % 5) * 0.05
-                    for idx, close in enumerate(closes)
-                ],
-                "low": [
-                    close - 1.0 - (idx % 7) * 0.05
-                    for idx, close in enumerate(closes)
-                ],
+                "high": [close + 1.0 + (idx % 5) * 0.05 for idx, close in enumerate(closes)],
+                "low": [close - 1.0 - (idx % 7) * 0.05 for idx, close in enumerate(closes)],
                 "close": closes,
                 "volume": [1000.0 + ((idx % 17) * 20.0) for idx in range(120)],
             }

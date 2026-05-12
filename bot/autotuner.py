@@ -53,9 +53,7 @@ def _load_outcomes(data_path: Path) -> list[dict[str, Any]]:
         finally:
             loop.close()
     except Exception as exc:
-        LOG.warning(
-            "autotuner: failed to load SQLite outcomes from %s: %s", data_path, exc
-        )
+        LOG.warning("autotuner: failed to load SQLite outcomes from %s: %s", data_path, exc)
         return []
 
 
@@ -119,11 +117,7 @@ def _setup_win_rates(records: list[dict[str, Any]]) -> dict[str, float]:
         counts[sid] = counts.get(sid, 0) + 1
         if _is_win(rec):
             wins[sid] = wins.get(sid, 0) + 1
-    return {
-        sid: round(wins.get(sid, 0) / total, 4)
-        for sid, total in counts.items()
-        if total >= 10
-    }
+    return {sid: round(wins.get(sid, 0) / total, 4) for sid, total in counts.items() if total >= 10}
 
 
 def compute_optimal_thresholds(data_path: str | Path) -> dict[str, Any]:
@@ -153,9 +147,7 @@ def compute_optimal_thresholds(data_path: str | Path) -> dict[str, Any]:
     LOG.info("autotuner: processing %d outcome records", sample_count)
 
     # --- Threshold recommendations ---
-    min_score = _find_threshold(records, "score") or _find_threshold(
-        records, "base_score"
-    )
+    min_score = _find_threshold(records, "score") or _find_threshold(records, "base_score")
     min_rr = _find_threshold(records, "risk_reward")
 
     result: dict[str, Any] = {

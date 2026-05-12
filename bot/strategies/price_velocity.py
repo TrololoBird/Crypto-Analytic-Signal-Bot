@@ -28,9 +28,7 @@ class PriceVelocitySetup(BaseSetup):
     confirmation_profile = "breakout_acceptance"
     required_context = ("futures_flow",)
 
-    def get_optimizable_params(
-        self, settings: BotSettings | None = None
-    ) -> dict[str, float]:
+    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
         defaults = {
             "base_score": 0.53,
             "min_roc10_abs_pct": 0.75,

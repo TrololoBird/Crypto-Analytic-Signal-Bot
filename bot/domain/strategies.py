@@ -5,6 +5,7 @@ from typing import Any
 
 from .schemas import Signal
 
+
 @dataclass(frozen=True, slots=True)
 class StrategyMetadata:
     """Metadata for strategy registration."""
@@ -69,9 +70,7 @@ class StrategyDecision:
 
     @property
     def is_signal(self) -> bool:
-        return (
-            self.status == "signal" and self.signal is not None and self.error is None
-        )
+        return self.status == "signal" and self.signal is not None and self.error is None
 
     @property
     def is_reject(self) -> bool:
@@ -201,11 +200,7 @@ class SignalResult:
                     reason_code="pattern.no_raw_hit",
                     details=dict(self.metadata),
                 )
-        if (
-            self.error is None
-            and self.decision is not None
-            and self.decision.error is not None
-        ):
+        if self.error is None and self.decision is not None and self.decision.error is not None:
             self.error = self.decision.error
 
     @property

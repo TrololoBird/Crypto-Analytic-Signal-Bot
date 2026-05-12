@@ -111,9 +111,7 @@ class OutcomeTracker:
 
         return outcome
 
-    def _calculate_pnl(
-        self, signal: SignalRecord, current_price: float
-    ) -> float | None:
+    def _calculate_pnl(self, signal: SignalRecord, current_price: float) -> float | None:
         """Calculate PnL percentage from entry."""
         if signal.entry_price <= 0 or current_price <= 0:
             return None
@@ -137,27 +135,21 @@ class OutcomeTracker:
             if not outcome.hit_tp1 and price >= signal.take_profit_1:
                 outcome.hit_tp1 = True
                 if outcome.time_to_tp1_min is None:
-                    elapsed = (
-                        datetime.now(timezone.utc) - signal.created_at
-                    ).total_seconds() / 60
+                    elapsed = (datetime.now(timezone.utc) - signal.created_at).total_seconds() / 60
                     outcome.time_to_tp1_min = int(elapsed)
 
             # Check TP2 hit
             if not outcome.hit_tp2 and price >= signal.take_profit_2:
                 outcome.hit_tp2 = True
                 if outcome.time_to_tp2_min is None:
-                    elapsed = (
-                        datetime.now(timezone.utc) - signal.created_at
-                    ).total_seconds() / 60
+                    elapsed = (datetime.now(timezone.utc) - signal.created_at).total_seconds() / 60
                     outcome.time_to_tp2_min = int(elapsed)
 
             # Check SL hit
             if not outcome.hit_sl and price <= signal.stop_loss:
                 outcome.hit_sl = True
                 if outcome.time_to_sl_min is None:
-                    elapsed = (
-                        datetime.now(timezone.utc) - signal.created_at
-                    ).total_seconds() / 60
+                    elapsed = (datetime.now(timezone.utc) - signal.created_at).total_seconds() / 60
                     outcome.time_to_sl_min = int(elapsed)
 
         else:  # short
@@ -165,27 +157,21 @@ class OutcomeTracker:
             if not outcome.hit_tp1 and price <= signal.take_profit_1:
                 outcome.hit_tp1 = True
                 if outcome.time_to_tp1_min is None:
-                    elapsed = (
-                        datetime.now(timezone.utc) - signal.created_at
-                    ).total_seconds() / 60
+                    elapsed = (datetime.now(timezone.utc) - signal.created_at).total_seconds() / 60
                     outcome.time_to_tp1_min = int(elapsed)
 
             # Check TP2 hit
             if not outcome.hit_tp2 and price <= signal.take_profit_2:
                 outcome.hit_tp2 = True
                 if outcome.time_to_tp2_min is None:
-                    elapsed = (
-                        datetime.now(timezone.utc) - signal.created_at
-                    ).total_seconds() / 60
+                    elapsed = (datetime.now(timezone.utc) - signal.created_at).total_seconds() / 60
                     outcome.time_to_tp2_min = int(elapsed)
 
             # Check SL hit
             if not outcome.hit_sl and price >= signal.stop_loss:
                 outcome.hit_sl = True
                 if outcome.time_to_sl_min is None:
-                    elapsed = (
-                        datetime.now(timezone.utc) - signal.created_at
-                    ).total_seconds() / 60
+                    elapsed = (datetime.now(timezone.utc) - signal.created_at).total_seconds() / 60
                     outcome.time_to_sl_min = int(elapsed)
 
     def _classify_result(self, outcome: OutcomeRecord, signal: SignalRecord) -> str:
@@ -210,9 +196,7 @@ class OutcomeTracker:
         """Get signals without outcomes or with open outcomes."""
         return await self._repo.get_signals_without_outcome(limit=limit)
 
-    async def batch_update(
-        self, prices: dict[str, PriceSnapshot]
-    ) -> list[OutcomeRecord]:
+    async def batch_update(self, prices: dict[str, PriceSnapshot]) -> list[OutcomeRecord]:
         """Batch update outcomes for multiple signals.
 
         Args:

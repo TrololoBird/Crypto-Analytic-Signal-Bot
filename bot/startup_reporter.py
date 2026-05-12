@@ -147,9 +147,7 @@ def _analysis_run_has_data(run_dir: Path) -> bool:
     return False
 
 
-def _load_context(
-    repo_root: Path, event: str, report_ts: datetime
-) -> StartupReportContext:
+def _load_context(repo_root: Path, event: str, report_ts: datetime) -> StartupReportContext:
     bot_dir = repo_root / "data" / "bot"
     reports_dir = bot_dir / "session" / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
@@ -176,9 +174,7 @@ def _load_context(
             latest_run_dir = None
 
     analysis_dir = (
-        (latest_run_dir / "analysis")
-        if latest_run_dir
-        else (telemetry_root / "analysis")
+        (latest_run_dir / "analysis") if latest_run_dir else (telemetry_root / "analysis")
     )
 
     # Logs: runtime uses per-session `bot_*.log`. Prefer the newest file.
@@ -230,18 +226,16 @@ def _previous_session_start(bot_log: Path) -> datetime | None:
         if not match:
             continue
         try:
-            value = datetime.strptime(
-                match.group("ts"), "%Y-%m-%d %H:%M:%S UTC"
-            ).replace(tzinfo=UTC)
+            value = datetime.strptime(match.group("ts"), "%Y-%m-%d %H:%M:%S UTC").replace(
+                tzinfo=UTC
+            )
         except ValueError:
             continue
         latest = value
     return latest
 
 
-def _filter_rows_since(
-    rows: list[dict[str, Any]], since: datetime | None
-) -> list[dict[str, Any]]:
+def _filter_rows_since(rows: list[dict[str, Any]], since: datetime | None) -> list[dict[str, Any]]:
     if since is None:
         return rows
     filtered: list[dict[str, Any]] = []
@@ -261,9 +255,7 @@ def _load_sqlite_tracking_snapshot(
         try:
             last_days: int | None = None
             if since is not None:
-                delta_days = max(
-                    1, int((datetime.now(UTC) - since).total_seconds() / 86400) + 1
-                )
+                delta_days = max(1, int((datetime.now(UTC) - since).total_seconds() / 86400) + 1)
                 last_days = delta_days
             outcomes = await repo.get_signal_outcomes(last_days=last_days)
             if since is not None:
@@ -315,33 +307,17 @@ def _load_sqlite_tracking_snapshot(
 def _collect_snapshot(context: StartupReportContext) -> dict[str, Any]:
     session_start = _previous_session_start(context.bot_log)
     cycles = _filter_rows_since(_read_jsonl(context.cycles_file), session_start)
-    shortlist_rows = _filter_rows_since(
-        _read_jsonl(context.shortlist_file), session_start
-    )
-    selected_rows = _filter_rows_since(
-        _read_jsonl(context.selected_file), session_start
-    )
-    rejected_rows = _filter_rows_since(
-        _read_jsonl(context.rejected_file), session_start
-    )
-    symbol_rows = _filter_rows_since(
-        _read_jsonl(context.symbol_analysis_file), session_start
-    )
-    delivery_rows = _filter_rows_since(
-        _read_jsonl(context.delivery_file), session_start
-    )
-    decision_rows = _filter_rows_since(
-        _read_jsonl(context.strategy_decisions_file), session_start
-    )
-    data_quality_rows = _filter_rows_since(
-        _read_jsonl(context.data_quality_file), session_start
-    )
+    shortlist_rows = _filter_rows_since(_read_jsonl(context.shortlist_file), session_start)
+    selected_rows = _filter_rows_since(_read_jsonl(context.selected_file), session_start)
+    rejected_rows = _filter_rows_since(_read_jsonl(context.rejected_file), session_start)
+    symbol_rows = _filter_rows_since(_read_jsonl(context.symbol_analysis_file), session_start)
+    delivery_rows = _filter_rows_since(_read_jsonl(context.delivery_file), session_start)
+    decision_rows = _filter_rows_since(_read_jsonl(context.strategy_decisions_file), session_start)
+    data_quality_rows = _filter_rows_since(_read_jsonl(context.data_quality_file), session_start)
     telemetry_mismatch_rows = _filter_rows_since(
         _read_jsonl(context.telemetry_mismatch_file), session_start
     )
-    tracking_rows = _filter_rows_since(
-        _read_jsonl(context.tracking_events_file), session_start
-    )
+    tracking_rows = _filter_rows_since(_read_jsonl(context.tracking_events_file), session_start)
     health_rows = _filter_rows_since(_read_jsonl(context.health_file), session_start)
     sqlite_snapshot = _load_sqlite_tracking_snapshot(
         context.db_path, context.bot_dir, session_start
@@ -373,9 +349,7 @@ def _collect_snapshot(context: StartupReportContext) -> dict[str, Any]:
 
     for row in cycles:
         if isinstance(row.get("setup_counts"), dict):
-            cycle_setup_counts.update(
-                {str(k): int(v) for k, v in row["setup_counts"].items()}
-            )
+            cycle_setup_counts.update({str(k): int(v) for k, v in row["setup_counts"].items()})
         if isinstance(row.get("selected_setup_counts"), dict):
             selected_setup_counts.update(
                 {str(k): int(v) for k, v in row["selected_setup_counts"].items()}
@@ -401,14 +375,10 @@ def _collect_snapshot(context: StartupReportContext) -> dict[str, Any]:
         setup_id = str(row.get("setup_id") or "unknown")
         data_quality_setup_counts.update([setup_id])
         missing_field_counts.update(
-            str(field)
-            for field in row.get("missing_fields", [])
-            if isinstance(field, str)
+            str(field) for field in row.get("missing_fields", []) if isinstance(field, str)
         )
         invalid_field_counts.update(
-            str(field)
-            for field in row.get("invalid_fields", [])
-            if isinstance(field, str)
+            str(field) for field in row.get("invalid_fields", []) if isinstance(field, str)
         )
     for row in telemetry_mismatch_rows:
         telemetry_mismatch_counts.update([str(row.get("mismatch_type") or "unknown")])
@@ -425,8 +395,7 @@ def _collect_snapshot(context: StartupReportContext) -> dict[str, Any]:
         outcome_quality_counts.update([str(row.get("setup_quality") or "unknown")])
 
     detector_runs_total = sum(
-        int(row.get("detector_runs") or row.get("raw_setups") or 0)
-        for row in symbol_rows
+        int(row.get("detector_runs") or row.get("raw_setups") or 0) for row in symbol_rows
     )
     zero_detector_symbols = sum(
         1
@@ -435,8 +404,7 @@ def _collect_snapshot(context: StartupReportContext) -> dict[str, Any]:
         and int(row.get("detector_runs") or row.get("raw_setups") or 0) == 0
     )
     post_filter_candidates_total = sum(
-        int(row.get("post_filter_candidates") or row.get("candidates") or 0)
-        for row in symbol_rows
+        int(row.get("post_filter_candidates") or row.get("candidates") or 0) for row in symbol_rows
     )
     zero_hit_setups = sorted(
         setup_id
@@ -450,24 +418,16 @@ def _collect_snapshot(context: StartupReportContext) -> dict[str, Any]:
     latest_cycle_ts = _parse_dt(latest_cycle.get("ts"))
     cycle_age_minutes = None
     if latest_cycle_ts is not None:
-        cycle_age_minutes = round(
-            (context.report_ts - latest_cycle_ts).total_seconds() / 60.0, 1
-        )
+        cycle_age_minutes = round((context.report_ts - latest_cycle_ts).total_seconds() / 60.0, 1)
 
     tracked_open = sqlite_snapshot["tracked_open"]
-    open_by_status = Counter(
-        str(item.get("status") or "unknown") for item in tracked_open
-    )
-    open_by_setup = Counter(
-        str(item.get("setup_id") or "unknown") for item in tracked_open
-    )
+    open_by_status = Counter(str(item.get("status") or "unknown") for item in tracked_open)
+    open_by_setup = Counter(str(item.get("setup_id") or "unknown") for item in tracked_open)
     cooldown_entries = int(sqlite_snapshot["cooldown_entries"])
     market_context = sqlite_snapshot["market_context"]
     shortlist_payload = latest_shortlist if isinstance(latest_shortlist, dict) else {}
     shortlist_symbols: list[Any] = (
-        shortlist_payload["symbols"]
-        if isinstance(shortlist_payload.get("symbols"), list)
-        else []
+        shortlist_payload["symbols"] if isinstance(shortlist_payload.get("symbols"), list) else []
     )
     latest_health = health_rows[-1] if health_rows else {}
 
@@ -574,9 +534,7 @@ def _derive_suspicious_modules(snapshot: dict[str, Any]) -> list[dict[str, str]]
             }
         )
     elif snapshot["symbol_rows"]:
-        zero_ratio = snapshot["zero_detector_symbols"] / max(
-            len(snapshot["symbol_rows"]), 1
-        )
+        zero_ratio = snapshot["zero_detector_symbols"] / max(len(snapshot["symbol_rows"]), 1)
         if zero_ratio >= 0.8:
             modules.append(
                 {
@@ -602,9 +560,7 @@ def _derive_suspicious_modules(snapshot: dict[str, Any]) -> list[dict[str, str]]
                 "reason": "rest_weight_1m was high in the latest persisted cycle",
             }
         )
-    if snapshot["delivery_status_counts"] and set(
-        snapshot["delivery_status_counts"]
-    ) != {"sent"}:
+    if snapshot["delivery_status_counts"] and set(snapshot["delivery_status_counts"]) != {"sent"}:
         modules.append(
             {
                 "module": "bot.delivery",
@@ -644,9 +600,7 @@ def _derive_recommended_fixes(snapshot: dict[str, Any]) -> list[dict[str, str]]:
             }
         )
     elif snapshot["symbol_rows"]:
-        zero_ratio = snapshot["zero_detector_symbols"] / max(
-            len(snapshot["symbol_rows"]), 1
-        )
+        zero_ratio = snapshot["zero_detector_symbols"] / max(len(snapshot["symbol_rows"]), 1)
         if zero_ratio >= 0.8:
             fixes.append(
                 {
@@ -685,9 +639,7 @@ def _derive_recommended_fixes(snapshot: dict[str, Any]) -> list[dict[str, str]]:
                 "action": "Reduce bursty REST usage or add adaptive backoff when Binance used weight approaches the minute limit.",
             }
         )
-    if snapshot["delivery_status_counts"] and set(
-        snapshot["delivery_status_counts"]
-    ) != {"sent"}:
+    if snapshot["delivery_status_counts"] and set(snapshot["delivery_status_counts"]) != {"sent"}:
         fixes.append(
             {
                 "priority": "medium",
@@ -736,9 +688,7 @@ def _build_current_market_state(snapshot: dict[str, Any]) -> dict[str, Any]:
     market_context = _live_market_context(snapshot)
     intelligence_snapshot = _live_intelligence_snapshot(snapshot)
     policy = (
-        intelligence_snapshot.get("policy", {})
-        if isinstance(intelligence_snapshot, dict)
-        else {}
+        intelligence_snapshot.get("policy", {}) if isinstance(intelligence_snapshot, dict) else {}
     )
     high_funding = market_context.get("high_funding_symbols", [])
     low_funding = market_context.get("low_funding_symbols", [])
@@ -751,15 +701,9 @@ def _build_current_market_state(snapshot: dict[str, Any]) -> dict[str, Any]:
     if bool(market_context.get("market_regime_confirmed")):
         market_regime = str(market_context.get("market_regime") or "unknown")
     barrier = (
-        intelligence_snapshot.get("barrier")
-        if isinstance(intelligence_snapshot, dict)
-        else {}
+        intelligence_snapshot.get("barrier") if isinstance(intelligence_snapshot, dict) else {}
     )
-    macro = (
-        intelligence_snapshot.get("macro")
-        if isinstance(intelligence_snapshot, dict)
-        else {}
-    )
+    macro = intelligence_snapshot.get("macro") if isinstance(intelligence_snapshot, dict) else {}
     macro_risk_mode = (
         str(macro.get("risk_mode") or market_context.get("macro_risk_mode"))
         if isinstance(macro, dict)
@@ -767,9 +711,7 @@ def _build_current_market_state(snapshot: dict[str, Any]) -> dict[str, Any]:
     )
     if not macro_risk_mode:
         macro_risk_mode = (
-            "disabled_binance_only"
-            if policy.get("source_policy") == "binance_only"
-            else "unknown"
+            "disabled_binance_only" if policy.get("source_policy") == "binance_only" else "unknown"
         )
     return {
         "market_regime": market_regime,
@@ -782,9 +724,7 @@ def _build_current_market_state(snapshot: dict[str, Any]) -> dict[str, Any]:
         "gamma_semantics": policy.get("gamma_semantics", "unknown"),
         "macro_risk_mode": macro_risk_mode,
         "macro_status": (
-            str(macro.get("status") or "unknown")
-            if isinstance(macro, dict)
-            else "unknown"
+            str(macro.get("status") or "unknown") if isinstance(macro, dict) else "unknown"
         ),
         "context_updated_at": market_context.get("updated_at"),
         "high_funding_count": len(high_funding),
@@ -811,15 +751,9 @@ def _build_runtime_readiness(snapshot: dict[str, Any]) -> dict[str, Any]:
     latest_shortlist = snapshot.get("latest_shortlist", {})
     intelligence_snapshot = _live_intelligence_snapshot(snapshot)
     policy = (
-        intelligence_snapshot.get("policy", {})
-        if isinstance(intelligence_snapshot, dict)
-        else {}
+        intelligence_snapshot.get("policy", {}) if isinstance(intelligence_snapshot, dict) else {}
     )
-    macro = (
-        intelligence_snapshot.get("macro")
-        if isinstance(intelligence_snapshot, dict)
-        else {}
-    )
+    macro = intelligence_snapshot.get("macro") if isinstance(intelligence_snapshot, dict) else {}
     return {
         "shortlist_source": latest_shortlist.get("source", "unknown"),
         "shortlist_size": latest_shortlist.get(
@@ -857,9 +791,7 @@ def _build_runtime_readiness(snapshot: dict[str, Any]) -> dict[str, Any]:
             "gamma_semantics": policy.get("gamma_semantics"),
         },
         "macro_status": (
-            str(macro.get("status") or "unknown")
-            if isinstance(macro, dict)
-            else "unknown"
+            str(macro.get("status") or "unknown") if isinstance(macro, dict) else "unknown"
         ),
     }
 
@@ -879,9 +811,7 @@ def _build_structured_summary(
     ]
 
     if snapshot["session_start"] is None:
-        confirmed_facts.append(
-            "No previous BOT SESSION STARTED marker was found in bot.log."
-        )
+        confirmed_facts.append("No previous BOT SESSION STARTED marker was found in bot.log.")
     else:
         confirmed_facts.append(
             f"Previous session started at {snapshot['session_start'].astimezone(UTC).isoformat()}."
@@ -893,19 +823,13 @@ def _build_structured_summary(
     confirmed_facts.append(
         f"Total post-filter candidates: {snapshot['post_filter_candidates_total']}."
     )
-    confirmed_facts.append(
-        f"Selected signals logged: {len(snapshot['selected_rows'])}."
-    )
+    confirmed_facts.append(f"Selected signals logged: {len(snapshot['selected_rows'])}.")
     confirmed_facts.append(
         f"Structured strategy decisions logged: {len(snapshot['decision_rows'])}."
     )
-    confirmed_facts.append(
-        f"Data-quality violations logged: {len(snapshot['data_quality_rows'])}."
-    )
+    confirmed_facts.append(f"Data-quality violations logged: {len(snapshot['data_quality_rows'])}.")
     confirmed_facts.append(f"Closed outcomes available: {len(snapshot['outcomes'])}.")
-    confirmed_facts.append(
-        f"Open tracked signals at startup: {len(snapshot['tracked_open'])}."
-    )
+    confirmed_facts.append(f"Open tracked signals at startup: {len(snapshot['tracked_open'])}.")
     confirmed_facts.append(
         f"Cooldown entries persisted at startup: {snapshot['cooldown_entries']}."
     )
@@ -944,9 +868,7 @@ def _build_structured_summary(
             "Detector surface produced no detector runs in the previous session window."
         )
     elif snapshot["symbol_rows"]:
-        zero_ratio = snapshot["zero_detector_symbols"] / max(
-            len(snapshot["symbol_rows"]), 1
-        )
+        zero_ratio = snapshot["zero_detector_symbols"] / max(len(snapshot["symbol_rows"]), 1)
         if zero_ratio >= 0.8:
             inferred_focus.append(
                 "Most analyzed symbols ended with detector_runs=0; detector conditions may be too strict or market regime mismatch dominated."
@@ -971,12 +893,8 @@ def _build_structured_summary(
         inferred_focus.append(
             "Strict data-quality rows were persisted; missing/invalid inputs now appear as explicit evidence."
         )
-    if snapshot["delivery_status_counts"] and set(
-        snapshot["delivery_status_counts"]
-    ) != {"sent"}:
-        inferred_focus.append(
-            "Delivery path had non-sent statuses in the previous session window."
-        )
+    if snapshot["delivery_status_counts"] and set(snapshot["delivery_status_counts"]) != {"sent"}:
+        inferred_focus.append("Delivery path had non-sent statuses in the previous session window.")
     if snapshot["telemetry_mismatch_rows"]:
         inferred_focus.append(
             "Telemetry mismatch rows indicate file-level parity issues that should be resolved before tuning thresholds."
@@ -1003,15 +921,9 @@ def _build_structured_summary(
     current_runtime_readiness = _build_runtime_readiness(snapshot)
     if runtime_policy.get("config_loaded"):
         current_market_state.setdefault("runtime_mode", runtime_policy["runtime_mode"])
-        current_market_state.setdefault(
-            "source_policy", runtime_policy["source_policy"]
-        )
-        current_market_state.setdefault(
-            "smart_exit_mode", runtime_policy["smart_exit_mode"]
-        )
-        current_market_state.setdefault(
-            "gamma_semantics", runtime_policy["gamma_semantics"]
-        )
+        current_market_state.setdefault("source_policy", runtime_policy["source_policy"])
+        current_market_state.setdefault("smart_exit_mode", runtime_policy["smart_exit_mode"])
+        current_market_state.setdefault("gamma_semantics", runtime_policy["gamma_semantics"])
         if current_market_state.get("runtime_mode") == "unknown":
             current_market_state["runtime_mode"] = runtime_policy["runtime_mode"]
         if current_market_state.get("source_policy") == "unknown":
@@ -1063,31 +975,15 @@ def _build_structured_summary(
         "top_decision_stages": _top_counter(snapshot["decision_stage_counts"]),
         "percentages": {
             "cycle_setup_counts": _counter_percentages(snapshot["cycle_setup_counts"]),
-            "selected_setup_counts": _counter_percentages(
-                snapshot["selected_setup_counts"]
-            ),
-            "outcome_setup_counts": _counter_percentages(
-                snapshot["outcome_setup_counts"]
-            ),
-            "outcome_result_counts": _counter_percentages(
-                snapshot["outcome_result_counts"]
-            ),
-            "outcome_quality_counts": _counter_percentages(
-                snapshot["outcome_quality_counts"]
-            ),
-            "rejection_reasons": _counter_percentages(
-                snapshot["rejection_reason_counts"]
-            ),
-            "rejection_stages": _counter_percentages(
-                snapshot["rejection_stage_counts"]
-            ),
-            "decision_reasons": _counter_percentages(
-                snapshot["decision_reason_counts"]
-            ),
+            "selected_setup_counts": _counter_percentages(snapshot["selected_setup_counts"]),
+            "outcome_setup_counts": _counter_percentages(snapshot["outcome_setup_counts"]),
+            "outcome_result_counts": _counter_percentages(snapshot["outcome_result_counts"]),
+            "outcome_quality_counts": _counter_percentages(snapshot["outcome_quality_counts"]),
+            "rejection_reasons": _counter_percentages(snapshot["rejection_reason_counts"]),
+            "rejection_stages": _counter_percentages(snapshot["rejection_stage_counts"]),
+            "decision_reasons": _counter_percentages(snapshot["decision_reason_counts"]),
             "decision_stages": _counter_percentages(snapshot["decision_stage_counts"]),
-            "delivery_statuses": _counter_percentages(
-                snapshot["delivery_status_counts"]
-            ),
+            "delivery_statuses": _counter_percentages(snapshot["delivery_status_counts"]),
             "tracking_events": _counter_percentages(snapshot["tracking_event_counts"]),
         },
         "setup_counts": {
@@ -1175,23 +1071,15 @@ def _render_markdown(
     )
     lines.append(f"- Cycle count: `{summary['metrics']['cycle_count']}`")
     lines.append(f"- Cycle age minutes: `{summary['metrics']['cycle_age_minutes']}`")
-    lines.append(
-        f"- Detector runs total: `{summary['metrics']['detector_runs_total']}`"
-    )
+    lines.append(f"- Detector runs total: `{summary['metrics']['detector_runs_total']}`")
     lines.append(
         f"- Post-filter candidates total: `{summary['metrics']['post_filter_candidates_total']}`"
     )
     lines.append(f"- Selected total: `{summary['metrics']['selected_total']}`")
     lines.append(f"- Rejected total: `{summary['metrics']['rejected_total']}`")
-    lines.append(
-        f"- Strategy decision rows: `{summary['metrics']['decision_rows_total']}`"
-    )
-    lines.append(
-        f"- Data-quality rows: `{summary['metrics']['data_quality_rows_total']}`"
-    )
-    lines.append(
-        f"- Telemetry mismatches: `{summary['metrics']['telemetry_mismatch_total']}`"
-    )
+    lines.append(f"- Strategy decision rows: `{summary['metrics']['decision_rows_total']}`")
+    lines.append(f"- Data-quality rows: `{summary['metrics']['data_quality_rows_total']}`")
+    lines.append(f"- Telemetry mismatches: `{summary['metrics']['telemetry_mismatch_total']}`")
     lines.append(f"- Outcomes total: `{summary['metrics']['outcomes_total']}`")
     lines.append(f"- Open tracked total: `{summary['metrics']['open_tracked_total']}`")
     lines.append(f"- Cooldown entries: `{summary['metrics']['cooldown_entries']}`")
@@ -1302,9 +1190,7 @@ def _render_markdown(
     lines.append("")
     lines.append("## Shortlist Preview")
     shortlist_preview = (
-        ", ".join(summary["shortlist_preview"])
-        if summary["shortlist_preview"]
-        else "n/a"
+        ", ".join(summary["shortlist_preview"]) if summary["shortlist_preview"] else "n/a"
     )
     lines.append(f"- {shortlist_preview}")
     lines.append("")
@@ -1329,9 +1215,7 @@ def _build_telegram_message(summary: dict[str, Any]) -> str:
     ws_health = readiness["ws_health"]
     frame_readiness = readiness["required_frame_readiness"]
     confirmed = html.escape(
-        summary["confirmed_facts"][0]
-        if summary["confirmed_facts"]
-        else "No confirmed facts."
+        summary["confirmed_facts"][0] if summary["confirmed_facts"] else "No confirmed facts."
     )
     focus = html.escape(
         summary["inferred_focus_areas"][0]
@@ -1405,13 +1289,9 @@ def generate_startup_report(
         telemetry_root = context.bot_dir / "telemetry"
         suggestions = build_config_suggestions(telemetry_root)
         # Only include lines that contain real suggestions (skip "Not enough data" messages).
-        real_suggestions = [
-            s for s in suggestions if "[SUGGEST]" in s or "[ADVISOR]" in s
-        ]
+        real_suggestions = [s for s in suggestions if "[SUGGEST]" in s or "[ADVISOR]" in s]
         if real_suggestions and not any("Not enough" in s for s in suggestions[:2]):
-            advisor_text = "\n\n<b>CONFIG ADVISOR</b>\n" + html.escape(
-                "\n".join(real_suggestions)
-            )
+            advisor_text = "\n\n<b>CONFIG ADVISOR</b>\n" + html.escape("\n".join(real_suggestions))
             telegram_message = telegram_message + advisor_text
     except Exception:
         pass
@@ -1421,9 +1301,7 @@ def generate_startup_report(
     json_path = context.reports_dir / f"startup_report_{stamp}.json"
     report_path.write_text(markdown, encoding="utf-8")
     context.latest_report_path.write_text(markdown, encoding="utf-8")
-    json_path.write_text(
-        json.dumps(summary, ensure_ascii=True, indent=2), encoding="utf-8"
-    )
+    json_path.write_text(json.dumps(summary, ensure_ascii=True, indent=2), encoding="utf-8")
     context.latest_report_path.with_suffix(".json").write_text(
         json.dumps(summary, ensure_ascii=True, indent=2),
         encoding="utf-8",

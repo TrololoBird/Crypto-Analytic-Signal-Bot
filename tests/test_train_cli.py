@@ -203,9 +203,7 @@ def test_aggregate_metrics_weighted_by_test_rows() -> None:
     assert report["f1"] > 0.9
 
 
-def test_train_cli_reports_multiple_gate_failures(
-    tmp_path, monkeypatch, capsys
-) -> None:
+def test_train_cli_reports_multiple_gate_failures(tmp_path, monkeypatch, capsys) -> None:
     base = datetime(2025, 1, 1, tzinfo=UTC)
     data = pl.DataFrame(
         {

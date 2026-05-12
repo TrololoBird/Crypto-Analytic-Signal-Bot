@@ -14,9 +14,7 @@ UTC = timezone.utc
 
 
 class _DummyConfluenceEngine:
-    def score(
-        self, signal: Signal, prepared: PreparedSymbol
-    ) -> None:  # pragma: no cover
+    def score(self, signal: Signal, prepared: PreparedSymbol) -> None:  # pragma: no cover
         raise AssertionError("Scoring should be disabled in these tests")
 
 
@@ -60,9 +58,7 @@ def _build_prepared(adx_1h: float) -> PreparedSymbol:
     )
 
 
-def _base_signal(
-    setup_id: str, strategy_family: str, confirmation_profile: str
-) -> Signal:
+def _base_signal(setup_id: str, strategy_family: str, confirmation_profile: str) -> Signal:
     return Signal(
         symbol="BTCUSDT",
         setup_id=setup_id,

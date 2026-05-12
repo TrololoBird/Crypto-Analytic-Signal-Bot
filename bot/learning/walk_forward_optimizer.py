@@ -12,9 +12,7 @@ class WalkForwardOptimizer:
     def __init__(self, min_fold_size: int = 20) -> None:
         self.min_fold_size = max(10, int(min_fold_size))
 
-    def evaluate(
-        self, outcomes: list[dict[str, Any]], params: dict[str, float]
-    ) -> float:
+    def evaluate(self, outcomes: list[dict[str, Any]], params: dict[str, float]) -> float:
         if len(outcomes) < self.min_fold_size:
             return -1.0
 
@@ -29,9 +27,7 @@ class WalkForwardOptimizer:
             return -1.0
         return sum(scores) / len(scores)
 
-    def _score_fold(
-        self, outcomes: list[dict[str, Any]], params: dict[str, float]
-    ) -> float:
+    def _score_fold(self, outcomes: list[dict[str, Any]], params: dict[str, float]) -> float:
         filtered = []
         min_score = params.get("base_score", 0.5) * 0.9
         for outcome in outcomes:

@@ -37,12 +37,8 @@ class _CentroidModel:
         cols = len(rows[0])
         pos = [row for row, label in zip(rows, y, strict=False) if label == 1]
         neg = [row for row, label in zip(rows, y, strict=False) if label == 0]
-        self.mean_pos = [
-            sum(row[i] for row in pos) / max(len(pos), 1) for i in range(cols)
-        ]
-        self.mean_neg = [
-            sum(row[i] for row in neg) / max(len(neg), 1) for i in range(cols)
-        ]
+        self.mean_pos = [sum(row[i] for row in pos) / max(len(pos), 1) for i in range(cols)]
+        self.mean_neg = [sum(row[i] for row in neg) / max(len(neg), 1) for i in range(cols)]
         raw = [abs(self.mean_pos[i] - self.mean_neg[i]) for i in range(cols)]
         denom = sum(raw) or 1.0
         self.feature_importances_ = [v / denom for v in raw]
@@ -92,9 +88,7 @@ class _LinearFallbackModel:
             return [[0.5, 0.5] for _ in x]
         result: list[list[float]] = []
         for row in x:
-            score = (
-                sum(w * v for w, v in zip(self.weights, row, strict=False)) + self.bias
-            )
+            score = sum(w * v for w, v in zip(self.weights, row, strict=False)) + self.bias
             # numerically stable sigmoid
             if score >= 0:
                 exp_term = math.exp(-score)
@@ -210,14 +204,7 @@ class SignalClassifier:
             return 0.5
         if pd is not None and hasattr(self.model, "feature_names_in_"):
             model_input: Any = pd.DataFrame(
-                [
-                    {
-                        name: value
-                        for name, value in zip(
-                            self._feature_names, vector, strict=False
-                        )
-                    }
-                ]
+                [{name: value for name, value in zip(self._feature_names, vector, strict=False)}]
             )
         else:
             model_input = [vector]

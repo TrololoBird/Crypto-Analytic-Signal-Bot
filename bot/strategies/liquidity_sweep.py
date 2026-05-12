@@ -40,9 +40,7 @@ class LiquiditySweepSetup(BaseSetup):
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)
 
-    def get_optimizable_params(
-        self, settings: BotSettings | None = None
-    ) -> dict[str, float]:
+    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
         """Tunable parameters for self-learner optimization."""
         defaults = {
             "base_score": 0.50,
@@ -75,15 +73,11 @@ class LiquiditySweepSetup(BaseSetup):
         min_level_hits = max(
             2, int(dynamic_params.get("min_level_hits", defaults["min_level_hits"]))
         )
-        sweep_atr_mult = float(
-            dynamic_params.get("sweep_atr_mult", defaults["sweep_atr_mult"])
-        )
+        sweep_atr_mult = float(dynamic_params.get("sweep_atr_mult", defaults["sweep_atr_mult"]))
         reclaim_threshold = float(
             dynamic_params.get("reclaim_threshold", defaults["reclaim_threshold"])
         )
-        sl_buffer_atr = float(
-            dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"])
-        )
+        sl_buffer_atr = float(dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]))
         min_rr = float(dynamic_params.get("min_rr", defaults["min_rr"]))
         base_score = float(dynamic_params.get("base_score", defaults["base_score"]))
 
@@ -211,13 +205,10 @@ class LiquiditySweepSetup(BaseSetup):
             _, sl_mask = _sp(w, n=3, include_unconfirmed_tail=True)
             sl_prices = w.filter(sl_mask)["low"]
             tp2_candidates = sl_prices.filter(sl_prices < price)
-            structural_tp1 = (
-                _as_float(tp2_candidates[-1]) if tp2_candidates.len() > 0 else None
-            )
+            structural_tp1 = _as_float(tp2_candidates[-1]) if tp2_candidates.len() > 0 else None
             tp1 = (
                 structural_tp1
-                if structural_tp1 is not None
-                and abs(structural_tp1 - price) >= risk * min_rr
+                if structural_tp1 is not None and abs(structural_tp1 - price) >= risk * min_rr
                 else rr_tp1
             )
             if tp1 >= price or abs(tp1 - price) < risk * min_rr:
@@ -270,9 +261,7 @@ class LiquiditySweepSetup(BaseSetup):
             or sweep_bar_c <= eq_low_level
             or confirmation_close <= eq_low_level
         ):
-            _reject(
-                prepared, setup_id, "long_reclaim_not_confirmed", level=eq_low_level
-            )
+            _reject(prepared, setup_id, "long_reclaim_not_confirmed", level=eq_low_level)
             return None
         if abs(price - confirmation_close) > reclaim_threshold * atr:
             _reject(
@@ -287,9 +276,7 @@ class LiquiditySweepSetup(BaseSetup):
         stop = sweep_bar_l - sl_buffer_atr * atr
         risk = price - stop
         if risk <= 0:
-            _reject(
-                prepared, setup_id, "risk_non_positive_long", stop=stop, price=price
-            )
+            _reject(prepared, setup_id, "risk_non_positive_long", stop=stop, price=price)
             return None
 
         rr_tp1 = price + risk * min_rr
@@ -298,13 +285,10 @@ class LiquiditySweepSetup(BaseSetup):
         sh_mask, _ = _sp(w, n=3, include_unconfirmed_tail=True)
         sh_prices = w.filter(sh_mask)["high"]
         tp2_candidates = sh_prices.filter(sh_prices > price)
-        structural_tp1 = (
-            _as_float(tp2_candidates[-1]) if tp2_candidates.len() > 0 else None
-        )
+        structural_tp1 = _as_float(tp2_candidates[-1]) if tp2_candidates.len() > 0 else None
         tp1 = (
             structural_tp1
-            if structural_tp1 is not None
-            and abs(structural_tp1 - price) >= risk * min_rr
+            if structural_tp1 is not None and abs(structural_tp1 - price) >= risk * min_rr
             else rr_tp1
         )
         if tp1 <= price or abs(tp1 - price) < risk * min_rr:
@@ -331,10 +315,7 @@ class LiquiditySweepSetup(BaseSetup):
         )
         reasons = [
             f"Liquidity sweep long: eq_low={eq_low_level:.4f} state={zone.state}",
-            (
-                f"wick={sweep_bar_l:.4f} close={sweep_bar_c:.4f} "
-                f"confirm={confirmation_close:.4f}"
-            ),
+            (f"wick={sweep_bar_l:.4f} close={sweep_bar_c:.4f} confirm={confirmation_close:.4f}"),
         ]
         return _build_signal(
             prepared=prepared,

@@ -37,13 +37,9 @@ def get_stats(manager: Any) -> dict[str, Any]:
             stream_latencies[stream] = round(sum(latencies) / len(latencies), 2)
     if stream_latencies:
         stats["avg_latency_per_stream"] = stream_latencies
-        all_latencies = [
-            sum(v) / len(v) for v in manager._stream_latency_ms.values() if v
-        ]
+        all_latencies = [sum(v) / len(v) for v in manager._stream_latency_ms.values() if v]
         if all_latencies:
-            stats["avg_latency_overall_ms"] = round(
-                sum(all_latencies) / len(all_latencies), 2
-            )
+            stats["avg_latency_overall_ms"] = round(sum(all_latencies) / len(all_latencies), 2)
     return stats
 
 
@@ -153,9 +149,7 @@ def should_throttle_mark_price_update(manager: Any, symbol: str) -> bool:
     last_update = manager._mark_price_update_times.get(symbol, 0.0)
     elapsed_ms = (now - last_update) * 1000
     if elapsed_ms < 50.0:
-        last_logged = getattr(manager, "_last_markprice_throttle_log", {}).get(
-            symbol, 0.0
-        )
+        last_logged = getattr(manager, "_last_markprice_throttle_log", {}).get(symbol, 0.0)
         if now - last_logged >= 30.0:
             if not hasattr(manager, "_last_markprice_throttle_log"):
                 manager._last_markprice_throttle_log = {}
@@ -223,7 +217,9 @@ def handle_mark_price(manager: Any, symbol: str, data: JsonDict) -> None:
     try:
         funding_str = data.get("r")
         # Ensure funding_str is not None for float() or check specifically
-        funding_rate = float(funding_str) if funding_str is not None and funding_str not in ("", "0") else 0.0
+        funding_rate = (
+            float(funding_str) if funding_str is not None and funding_str not in ("", "0") else 0.0
+        )
         manager._mark_price_cache[symbol] = {
             "symbol": symbol,
             "mark_price": float(data.get("p") or 0.0),

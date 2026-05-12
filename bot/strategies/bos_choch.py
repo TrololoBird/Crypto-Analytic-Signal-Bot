@@ -188,9 +188,7 @@ class BOSCHOCHSetup(BaseSetup):
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)
 
-    def get_optimizable_params(
-        self, settings: BotSettings | None = None
-    ) -> dict[str, float]:
+    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
         """Tunable parameters for self-learner optimization."""
         defaults = {
             "base_score": 0.55,
@@ -229,9 +227,7 @@ class BOSCHOCHSetup(BaseSetup):
             )
             return None
 
-    def _detect(
-        self, prepared: PreparedSymbol, _settings: BotSettings
-    ) -> Signal | None:
+    def _detect(self, prepared: PreparedSymbol, _settings: BotSettings) -> Signal | None:
         setup_id = self.setup_id
         dynamic_params = get_dynamic_params(prepared, setup_id)
         defaults = self.get_optimizable_params(_settings)
@@ -239,32 +235,18 @@ class BOSCHOCHSetup(BaseSetup):
         configured_swing_lookback = int(
             dynamic_params.get("swing_lookback", defaults["swing_lookback"])
         )
-        bos_lookback = int(
-            dynamic_params.get("bos_lookback", configured_swing_lookback)
-        )
-        choch_lookback = int(
-            dynamic_params.get("choch_lookback", configured_swing_lookback)
-        )
-        swing_lookback = max(
-            2, max(bos_lookback, choch_lookback, configured_swing_lookback)
-        )
+        bos_lookback = int(dynamic_params.get("bos_lookback", configured_swing_lookback))
+        choch_lookback = int(dynamic_params.get("choch_lookback", configured_swing_lookback))
+        swing_lookback = max(2, max(bos_lookback, choch_lookback, configured_swing_lookback))
         external_swing_lookback = max(
             swing_lookback + 1,
-            int(
-                dynamic_params.get(
-                    "external_swing_lookback", defaults["external_swing_lookback"]
-                )
-            ),
+            int(dynamic_params.get("external_swing_lookback", defaults["external_swing_lookback"])),
         )
-        sl_buffer_atr = float(
-            dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"])
-        )
+        sl_buffer_atr = float(dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]))
         min_rr = float(dynamic_params.get("min_rr", defaults["min_rr"]))
         base_score = float(dynamic_params.get("base_score", defaults["base_score"]))
         breakout_threshold_atr = float(
-            dynamic_params.get(
-                "breakout_threshold_atr", defaults["breakout_threshold_atr"]
-            )
+            dynamic_params.get("breakout_threshold_atr", defaults["breakout_threshold_atr"])
         )
         max_break_age_bars = int(
             dynamic_params.get("max_break_age_bars", defaults["max_break_age_bars"])
@@ -368,9 +350,7 @@ class BOSCHOCHSetup(BaseSetup):
         break_level = float(structure_zone.level or 0.0)
         break_close = float(scan.item(broken_index, "close") or 0.0)
         break_distance = (
-            break_close - break_level
-            if direction == "long"
-            else break_level - break_close
+            break_close - break_level if direction == "long" else break_level - break_close
         )
         min_break_distance = atr * breakout_threshold_atr
         if break_distance < min_break_distance:
@@ -520,9 +500,7 @@ class BOSCHOCHSetup(BaseSetup):
 
         fallback_note = None
         if tp1 is None or abs(tp1 - price) < risk * min_rr:
-            tp1 = (
-                price + risk * min_rr if direction == "long" else price - risk * min_rr
-            )
+            tp1 = price + risk * min_rr if direction == "long" else price - risk * min_rr
             fallback_note = f"tp1_rr_fallback_{min_rr:.2f}"
         if tp2 is None:
             tp2 = tp1  # Use TP1 as TP2 if no extended target found

@@ -109,10 +109,10 @@ def test_dashboard_html_hardens_formatters_hotkeys_and_refresh_loop() -> None:
 
     assert "Number.isFinite" in html
     assert "if (tabButton) tabButton.click();" in html
-    assert "const activeButton = document.querySelector(\".nav-tab.active\")" in html
+    assert 'const activeButton = document.querySelector(".nav-tab.active")' in html
     assert "document.getElementById('btc-bias').textContent = data.btc_bias || '-'" in html
-    assert "id=\"delivery-provider\"" in html
-    assert "id=\"last-cycle-delivery\"" in html
+    assert 'id="delivery-provider"' in html
+    assert 'id="last-cycle-delivery"' in html
 
 
 def test_dashboard_recent_signals_prefers_selected_file(tmp_path) -> None:

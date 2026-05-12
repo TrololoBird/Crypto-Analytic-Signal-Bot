@@ -156,9 +156,7 @@ def _oi_momentum(prepared: PreparedSymbol, signal: Signal) -> float:
     else:
         if signal.direction == "long":
             if basis <= -0.05:
-                basis_score = (
-                    0.85  # backwardation = capitulation, good for long reversal
-                )
+                basis_score = 0.85  # backwardation = capitulation, good for long reversal
             elif basis <= 0.05:
                 basis_score = 0.5
             elif basis <= 0.15:
@@ -173,9 +171,7 @@ def _oi_momentum(prepared: PreparedSymbol, signal: Signal) -> float:
             elif basis >= -0.03:
                 basis_score = 0.5
             else:
-                basis_score = (
-                    0.35  # backwardation = capitulation already done, risky short
-                )
+                basis_score = 0.35  # backwardation = capitulation already done, risky short
 
     return round((oi_score * 0.55 + cvd_score * 0.35 + basis_score * 0.10), 4)
 
@@ -197,9 +193,7 @@ def _risk_reward_quality(signal: Signal, settings: BotSettings) -> float:
     return max(0.0, min((rr - min_rr) / (max_rr - min_rr), 1.0))
 
 
-def _funding_contrarian(
-    prepared: PreparedSymbol, signal: Signal, settings: BotSettings
-) -> float:
+def _funding_contrarian(prepared: PreparedSymbol, signal: Signal, settings: BotSettings) -> float:
     """Contrarian funding score.
 
     Extreme funding against direction → crowding opportunity (higher score).
@@ -319,9 +313,7 @@ def _gap_score(gap: float | None, direction: str, *, contrarian: bool) -> float:
     return 0.5
 
 
-def _crowd_position(
-    prepared: PreparedSymbol, signal: Signal, settings: BotSettings
-) -> float:
+def _crowd_position(prepared: PreparedSymbol, signal: Signal, settings: BotSettings) -> float:
     contrarian_mode = (
         signal.strategy_family == "reversal"
         or signal.confirmation_profile == "countertrend_exhaustion"

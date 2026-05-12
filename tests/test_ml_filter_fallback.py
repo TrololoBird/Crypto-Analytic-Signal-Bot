@@ -67,14 +67,9 @@ def test_ml_filter_uses_signal_classifier_fallback(tmp_path) -> None:
     # train lightweight classifier artifact (fallback path)
     rows = 120
     features = pl.DataFrame(
-        {
-            name: [0.2 + (i / rows) for i in range(rows)]
-            for name in SignalClassifier.FEATURES
-        }
+        {name: [0.2 + (i / rows) for i in range(rows)] for name in SignalClassifier.FEATURES}
     )
-    labels = pl.Series(
-        "label", [0 if i < (rows // 2) else 1 for i in range(rows)], dtype=pl.Int8
-    )
+    labels = pl.Series("label", [0 if i < (rows // 2) else 1 for i in range(rows)], dtype=pl.Int8)
     SignalClassifier(model_dir=model_dir, model_type="rf").train(features, labels)
 
     ml_filter = MLFilter(settings)
@@ -90,8 +85,6 @@ def test_ml_filter_uses_signal_classifier_fallback(tmp_path) -> None:
 def test_signal_classifier_baseline_allowed_when_not_live(tmp_path) -> None:
     clf = SignalClassifier(model_dir=tmp_path, model_type="centroid")
     clf.model = clf._build_model()
-    decision = clf.runtime_guardrail_decision(
-        is_live=False, stage="integration_offline"
-    )
+    decision = clf.runtime_guardrail_decision(is_live=False, stage="integration_offline")
     assert decision.should_disable is False
     assert decision.disable_reason is None

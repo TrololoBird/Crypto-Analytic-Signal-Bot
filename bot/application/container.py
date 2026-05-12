@@ -75,9 +75,7 @@ def build_application_container(
         )
 
     tg = broadcaster or build_message_broadcaster(settings)
-    delivery = SignalDelivery(
-        tg, pending_expiry_minutes=settings.tracking.pending_expiry_minutes
-    )
+    delivery = SignalDelivery(tg, pending_expiry_minutes=settings.tracking.pending_expiry_minutes)
     telemetry_store = telemetry or TelemetryStore(settings.telemetry_dir)
     alerts = AlertCoordinator(
         settings=settings,

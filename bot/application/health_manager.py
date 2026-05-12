@@ -17,14 +17,10 @@ class HealthManager:
         self._bot = bot
 
     async def health_check(self) -> dict[str, Any]:
-        ws_connected = bool(
-            getattr(self._bot._ws_manager, "is_connected", lambda: False)()
-        )
+        ws_connected = bool(getattr(self._bot._ws_manager, "is_connected", lambda: False)())
         pending_outcomes = len(getattr(self._bot.tracker, "_pending_outcomes", []))
         try:
-            active_rows = await self._bot._modern_repo.get_active_signals(
-                include_closed=False
-            )
+            active_rows = await self._bot._modern_repo.get_active_signals(include_closed=False)
             active_signals = len(
                 [r for r in active_rows if r.get("status") in ("pending", "active")]
             )
@@ -79,15 +75,11 @@ class HealthManager:
             )
 
             if self._bot.metrics._enabled:
-                self._bot.metrics.update_bot_state(
-                    sl_size, open_signals, len(blacklisted)
-                )
+                self._bot.metrics.update_bot_state(sl_size, open_signals, len(blacklisted))
                 self._bot.metrics.record_ws_latency(ws_lag)
                 self._bot.metrics.record_ws_message_age(ws_age)
                 if self._bot._ws_manager is not None:
-                    self._bot.metrics.update_ws_streams(
-                        len(self._bot._ws_manager._symbols)
-                    )
+                    self._bot.metrics.update_ws_streams(len(self._bot._ws_manager._symbols))
                 if self._bot.market_regime._last_result is not None:
                     r = self._bot.market_regime._last_result
                     self._bot.metrics.update_market_regime(

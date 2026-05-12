@@ -369,9 +369,7 @@ class MemoryRepository(MemoryRepositoryExtension):
         await self._conn.commit()
         LOG.info("Memory repository initialized at %s", self._db_path)
 
-    async def _ensure_table_columns(
-        self, table_name: str, columns: dict[str, str]
-    ) -> None:
+    async def _ensure_table_columns(self, table_name: str, columns: dict[str, str]) -> None:
         """Add missing columns for existing databases."""
         if not self._conn:
             raise RuntimeError("Repository not initialized")
@@ -662,13 +660,17 @@ class MemoryRepository(MemoryRepositoryExtension):
             try:
                 data["features"] = json.loads(data["features"])
             except json.JSONDecodeError as exc:
-                LOG.warning("failed to decode features for signal %s: %s", data.get("signal_id"), exc)
+                LOG.warning(
+                    "failed to decode features for signal %s: %s", data.get("signal_id"), exc
+                )
                 data["features"] = {}
         if data.get("metadata"):
             try:
                 data["metadata"] = json.loads(data["metadata"])
             except json.JSONDecodeError as exc:
-                LOG.warning("failed to decode metadata for signal %s: %s", data.get("signal_id"), exc)
+                LOG.warning(
+                    "failed to decode metadata for signal %s: %s", data.get("signal_id"), exc
+                )
                 data["metadata"] = {}
         return SignalRecord.from_dict(data)
 
@@ -900,9 +902,7 @@ class MemoryRepository(MemoryRepositoryExtension):
         win_reasons = {"tp1_hit", "tp2_hit"}
         adjustment = 0.0
         if len(window) >= min_outcomes:
-            wins = sum(
-                1 for item in window if self._setup_outcome_is_win(item, win_reasons)
-            )
+            wins = sum(1 for item in window if self._setup_outcome_is_win(item, win_reasons))
             win_rate = wins / len(window)
             r_values = [
                 r_value
@@ -1034,9 +1034,7 @@ class MemoryRepository(MemoryRepositoryExtension):
             values.append(val)
 
         placeholders = ", ".join(["?"] * len(columns))
-        updates = ", ".join(
-            [f"{col} = excluded.{col}" for col in columns if col != "tracking_id"]
-        )
+        updates = ", ".join([f"{col} = excluded.{col}" for col in columns if col != "tracking_id"])
 
         try:
             await self._conn.execute(
@@ -1086,7 +1084,11 @@ class MemoryRepository(MemoryRepositoryExtension):
                         try:
                             data["reasons"] = json.loads(data["reasons"])
                         except json.JSONDecodeError as exc:
-                            LOG.warning("failed to decode reasons for signal %s: %s", data.get("tracking_id"), exc)
+                            LOG.warning(
+                                "failed to decode reasons for signal %s: %s",
+                                data.get("tracking_id"),
+                                exc,
+                            )
                             data["reasons"] = []
                     result.append(data)
                 return result
@@ -1258,9 +1260,7 @@ class MemoryRepository(MemoryRepositoryExtension):
         """Persist a completed tracked-signal outcome."""
         await self.save_signal_outcomes_batch([outcome_data])
 
-    async def save_signal_outcomes_batch(
-        self, outcomes_data: list[dict[str, Any]]
-    ) -> None:
+    async def save_signal_outcomes_batch(self, outcomes_data: list[dict[str, Any]]) -> None:
         """Persist completed tracked-signal outcomes in batch."""
         if not self._conn:
             raise RuntimeError("Repository not initialized")
@@ -1268,11 +1268,21 @@ class MemoryRepository(MemoryRepositoryExtension):
             return
 
         # Basic validation
-        required = {"tracking_id", "tracking_ref", "symbol", "setup_id", "direction", "timeframe", "created_at"}
+        required = {
+            "tracking_id",
+            "tracking_ref",
+            "symbol",
+            "setup_id",
+            "direction",
+            "timeframe",
+            "created_at",
+        }
         for i, item in enumerate(outcomes_data):
             missing = required - set(item.keys())
             if missing:
-                raise ValueError(f"missing required fields in outcomes_data at index {i}: {missing}")
+                raise ValueError(
+                    f"missing required fields in outcomes_data at index {i}: {missing}"
+                )
 
         query = """
             INSERT INTO signal_outcomes (
@@ -1449,9 +1459,7 @@ class MemoryRepository(MemoryRepositoryExtension):
                 item["features"] = {}
             item["was_profitable"] = bool(item.get("was_profitable", 0))
             llm_was_correct = item.get("llm_was_correct")
-            item["llm_was_correct"] = (
-                None if llm_was_correct is None else bool(llm_was_correct)
-            )
+            item["llm_was_correct"] = None if llm_was_correct is None else bool(llm_was_correct)
             result_rows.append(item)
         return result_rows
 
@@ -1459,9 +1467,7 @@ class MemoryRepository(MemoryRepositoryExtension):
         """Return number of persisted cooldown entries."""
         if not self._conn:
             raise RuntimeError("Repository not initialized")
-        async with self._conn.execute(
-            "SELECT COUNT(*) AS count FROM cooldowns"
-        ) as cursor:
+        async with self._conn.execute("SELECT COUNT(*) AS count FROM cooldowns") as cursor:
             row = await cursor.fetchone()
         return int(row["count"]) if row else 0
 

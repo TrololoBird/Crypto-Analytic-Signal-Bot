@@ -28,9 +28,7 @@ __all__ = [
 ]
 
 
-def ema(
-    df: pl.DataFrame, period: int, *, plta: Any = None, has_talib: bool = False
-) -> pl.Series:
+def ema(df: pl.DataFrame, period: int, *, plta: Any = None, has_talib: bool = False) -> pl.Series:
     """Contract: input requires `close`; output Float64 series named `ema{period}`."""
     ensure_columns(df, ("close",), fn_name="ema")
     if has_talib:
@@ -139,22 +137,14 @@ def adx(
         name="plus_dm",
     )
     minus_dm = materialize_series(
-        pl.when((down_move > up_move) & (down_move > 0.0))
-        .then(down_move)
-        .otherwise(0.0),
+        pl.when((down_move > up_move) & (down_move > 0.0)).then(down_move).otherwise(0.0),
         df=df,
         name="minus_dm",
     )
     atr_series = atr(df, period, plta=plta, has_talib=has_talib)
     atr_safe = clean_non_finite(atr_series, fill=1e-9).replace(0.0, 1e-9)
-    plus_di = (
-        100.0 * wilder_mean(plus_dm, period=period, name="plus_dm_smoothed") / atr_safe
-    )
-    minus_di = (
-        100.0
-        * wilder_mean(minus_dm, period=period, name="minus_dm_smoothed")
-        / atr_safe
-    )
+    plus_di = 100.0 * wilder_mean(plus_dm, period=period, name="plus_dm_smoothed") / atr_safe
+    minus_di = 100.0 * wilder_mean(minus_dm, period=period, name="minus_dm_smoothed") / atr_safe
     di_sum = (plus_di + minus_di).replace(0.0, None)
     dx = clean_non_finite(100.0 * (plus_di - minus_di).abs() / di_sum, fill=0.0)
     return materialize_series(
@@ -181,11 +171,7 @@ def vwap(df: pl.DataFrame) -> pl.Series:
     typical = (df["high"] + df["low"] + df["close"]) / 3.0
     pv = typical * df["volume"]
     time_column = next(
-        (
-            column
-            for column in ("close_time", "time", "open_time")
-            if column in df.columns
-        ),
+        (column for column in ("close_time", "time", "open_time") if column in df.columns),
         None,
     )
     if time_column is not None:
@@ -216,11 +202,7 @@ def roc(
             name=f"roc{period}",
         )
     prev_close = df["close"].shift(period)
-    return (
-        (((df["close"] / prev_close) - 1.0) * 100.0)
-        .fill_nan(0.0)
-        .rename(f"roc{period}")
-    )
+    return (((df["close"] / prev_close) - 1.0) * 100.0).fill_nan(0.0).rename(f"roc{period}")
 
 
 def safe_close_position(df: pl.DataFrame, window: int = 20) -> pl.Series:
@@ -240,8 +222,9 @@ def realized_volatility(df: pl.DataFrame, period: int = 20) -> pl.Series:
     ensure_columns(df, ("close",), fn_name="realized_volatility")
     log_returns = df["close"].log() - df["close"].shift(1).log()
     return materialize_series(
-        (log_returns.rolling_std(window_size=period) * float(np.sqrt(period)) * 100.0)
-        .fill_nan(0.0),
+        (log_returns.rolling_std(window_size=period) * float(np.sqrt(period)) * 100.0).fill_nan(
+            0.0
+        ),
         df=df,
         name=f"realized_vol_{period}",
     )
@@ -298,8 +281,7 @@ def add_core_features(
     price_dev_sq = (work["close"] - work["vwap"]) ** 2
     vwap_std = (
         (
-            price_dev_sq.cum_sum()
-            / pl.Series("n", range(1, work.height + 1), dtype=pl.Float64)
+            price_dev_sq.cum_sum() / pl.Series("n", range(1, work.height + 1), dtype=pl.Float64)
         ).sqrt()
         if work.height
         else price_dev_sq
@@ -331,9 +313,7 @@ def add_core_features(
         work = work.with_columns([pl.lit(0.5).alias("delta_ratio")])
     work = work.with_columns(
         [
-            ((pl.col("atr14") / pl.col("close")) * 100.0)
-            .clip(lower_bound=0.001)
-            .alias("atr_pct"),
+            ((pl.col("atr14") / pl.col("close")) * 100.0).clip(lower_bound=0.001).alias("atr_pct"),
         ]
     )
     work = work.with_columns(

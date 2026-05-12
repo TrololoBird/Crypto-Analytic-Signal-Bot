@@ -713,25 +713,15 @@ def rerank_shortlist(
                     "spread_bps": _safe_float(ticker.get("spread_bps")),
                     "ticker_age_seconds": _safe_float(ticker.get("ticker_age_seconds")),
                     "book_age_seconds": _safe_float(ticker.get("book_age_seconds")),
-                    "mark_price_age_seconds": _safe_float(
-                        ticker.get("mark_price_age_seconds")
-                    ),
+                    "mark_price_age_seconds": _safe_float(ticker.get("mark_price_age_seconds")),
                     "oi_change_pct": _safe_float(ticker.get("oi_change_pct")),
                     "oi_current": _safe_float(ticker.get("oi_current")),
                     "funding_rate": _safe_float(ticker.get("funding_rate")),
                     "basis_pct": _safe_float(ticker.get("basis_pct")),
-                    "top_account_ls_ratio": _safe_float(
-                        ticker.get("top_account_ls_ratio")
-                    ),
-                    "top_position_ls_ratio": _safe_float(
-                        ticker.get("top_position_ls_ratio")
-                    ),
-                    "global_account_ls_ratio": _safe_float(
-                        ticker.get("global_account_ls_ratio")
-                    ),
-                    "top_vs_global_ls_gap": _safe_float(
-                        ticker.get("top_vs_global_ls_gap")
-                    ),
+                    "top_account_ls_ratio": _safe_float(ticker.get("top_account_ls_ratio")),
+                    "top_position_ls_ratio": _safe_float(ticker.get("top_position_ls_ratio")),
+                    "global_account_ls_ratio": _safe_float(ticker.get("global_account_ls_ratio")),
+                    "top_vs_global_ls_gap": _safe_float(ticker.get("top_vs_global_ls_gap")),
                 }
             )
 
@@ -772,9 +762,7 @@ def rerank_shortlist(
             replace(
                 item,
                 quote_volume=float(row.get("quote_volume") or item.quote_volume),
-                price_change_pct=float(
-                    row.get("price_change_percent") or item.price_change_pct
-                ),
+                price_change_pct=float(row.get("price_change_percent") or item.price_change_pct),
                 last_price=float(row.get("last_price") or item.last_price),
                 shortlist_bucket=_bucket_for_price_change(
                     float(row.get("price_change_percent") or item.price_change_pct)

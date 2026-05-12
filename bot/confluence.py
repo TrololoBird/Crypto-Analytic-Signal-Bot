@@ -93,9 +93,7 @@ class ConfluenceEngine:
         result = engine.score(signal, prepared)
     """
 
-    def __init__(
-        self, settings: BotSettings, ml_filter: "MLFilter | None" = None
-    ) -> None:
+    def __init__(self, settings: BotSettings, ml_filter: "MLFilter | None" = None) -> None:
         self.settings = settings
         self._ml_filter = ml_filter
         self._volatility_gate = VolatilityGate()
@@ -157,9 +155,7 @@ class ConfluenceEngine:
         elif self._ml_filter is None:
             ml_skip_reason = "ml_filter_absent"
         elif not self._ml_filter.enabled:
-            ml_skip_reason = (
-                getattr(self._ml_filter, "disable_reason", None) or "ml_disabled"
-            )
+            ml_skip_reason = getattr(self._ml_filter, "disable_reason", None) or "ml_disabled"
 
         return ConfluenceResult(
             setup_prior=signal.score,
@@ -177,9 +173,7 @@ class ConfluenceEngine:
         prepared: PreparedSymbol,
         cfg: Any,
     ) -> list[ComponentScore]:
-        funding_weight = max(
-            0.0, min(cfg.weight_crowd_position * 0.5, cfg.weight_crowd_position)
-        )
+        funding_weight = max(0.0, min(cfg.weight_crowd_position * 0.5, cfg.weight_crowd_position))
         crowd_weight = max(0.0, cfg.weight_crowd_position - funding_weight)
         specs = [
             (
@@ -213,8 +207,7 @@ class ConfluenceEngine:
         weight_total = sum(max(0.0, float(weight)) for _, weight, _ in specs)
         if weight_total > 0.0:
             specs = [
-                (name, max(0.0, float(weight)) / weight_total, raw)
-                for name, weight, raw in specs
+                (name, max(0.0, float(weight)) / weight_total, raw) for name, weight, raw in specs
             ]
         return [
             ComponentScore(

@@ -56,19 +56,11 @@ class ParquetCache:
             if "close_time" in df.columns:
                 # Convert close_time (ms) to timestamp
                 df = df.with_columns(
-                    [
-                        (pl.col("close_time") / 1000)
-                        .cast(pl.Datetime)
-                        .alias(timestamp_col)
-                    ]
+                    [(pl.col("close_time") / 1000).cast(pl.Datetime).alias(timestamp_col)]
                 )
             elif "open_time" in df.columns:
                 df = df.with_columns(
-                    [
-                        (pl.col("open_time") / 1000)
-                        .cast(pl.Datetime)
-                        .alias(timestamp_col)
-                    ]
+                    [(pl.col("open_time") / 1000).cast(pl.Datetime).alias(timestamp_col)]
                 )
 
         # Group by date and write to separate chunks
@@ -85,9 +77,7 @@ class ParquetCache:
             if chunk_path.exists():
                 # Read existing and merge
                 existing = pl.read_parquet(chunk_path)
-                merged = pl.concat([existing, day_df]).unique(
-                    subset=[timestamp_col], keep="last"
-                )
+                merged = pl.concat([existing, day_df]).unique(subset=[timestamp_col], keep="last")
                 merged = merged.sort(timestamp_col)
             else:
                 merged = day_df.sort(timestamp_col)
@@ -133,9 +123,7 @@ class ParquetCache:
 
         return combined
 
-    def read_recent(
-        self, symbol: str, timeframe: str, lookback: timedelta
-    ) -> pl.DataFrame:
+    def read_recent(self, symbol: str, timeframe: str, lookback: timedelta) -> pl.DataFrame:
         """Read recent data for symbol/timeframe."""
         since = _utcnow_naive() - lookback
         return self.read(symbol, timeframe, since=since)
@@ -199,9 +187,7 @@ class TimeSeriesCache:
         """Create cache key."""
         return f"{symbol}:{timeframe}"
 
-    def get(
-        self, symbol: str, timeframe: str, lookback_bars: int | None = None
-    ) -> pl.DataFrame:
+    def get(self, symbol: str, timeframe: str, lookback_bars: int | None = None) -> pl.DataFrame:
         """Get data from cache (memory first, then disk)."""
         key = self._make_key(symbol, timeframe)
         bars = lookback_bars or self._memory_bars
@@ -256,9 +242,7 @@ class TimeSeriesCache:
     def invalidate(self, symbol: str | None = None) -> None:
         """Invalidate cache entries."""
         if symbol:
-            keys_to_remove = [
-                k for k in self._memory.keys() if k.startswith(f"{symbol}:")
-            ]
+            keys_to_remove = [k for k in self._memory.keys() if k.startswith(f"{symbol}:")]
             for key in keys_to_remove:
                 del self._memory[key]
                 del self._access_times[key]

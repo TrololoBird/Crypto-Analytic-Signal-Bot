@@ -32,9 +32,7 @@ class CompositeRegimeAnalyzer:
         returns = float(btc.get("basis_pct") or 0.0)
         vol = abs(float(btc.get("premium_slope_5m") or 0.0))
         funding = (
-            float(next(iter((funding_rates or {"x": 0.0}).values())))
-            if funding_rates
-            else 0.0
+            float(next(iter((funding_rates or {"x": 0.0}).values()))) if funding_rates else 0.0
         )
 
         centroid_regime, centroid_conf = self.centroid.current_regime(
@@ -63,9 +61,7 @@ class CompositeRegimeAnalyzer:
 
         regime = max(weighted_scores.items(), key=lambda item: item[1])[0]
         strength = max(0.45, min(0.9, weighted_scores[regime]))
-        confidence = min(
-            0.95, (centroid_conf * 0.5) + (rule_based_pred.confidence * 0.5)
-        )
+        confidence = min(0.95, (centroid_conf * 0.5) + (rule_based_pred.confidence * 0.5))
         return RegimeResult(regime=regime, strength=strength, confidence=confidence)
 
     @property

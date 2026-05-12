@@ -235,7 +235,9 @@ async def _run(
     )
     run_id = f"live_pipeline_check_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}"
     telemetry = TelemetryStore(settings.telemetry_dir, run_id=run_id)
-    bot = SignalBot(settings, market_data=client, broadcaster=FakeBroadcaster(), telemetry=telemetry)
+    bot = SignalBot(
+        settings, market_data=client, broadcaster=FakeBroadcaster(), telemetry=telemetry
+    )
     try:
         await bot._modern_repo.initialize()
         exchange_symbols = await client.fetch_exchange_symbols()

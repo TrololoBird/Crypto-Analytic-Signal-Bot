@@ -87,9 +87,7 @@ def test_backtester_supports_momentum_breakout(tmp_path) -> None:
     )
     assert result.equity_curve.height > 0
     assert "setup_id" in result.trades.columns or result.trades.is_empty()
-    assert (
-        result.setup_breakdown is None or "momentum_breakout" in result.setup_breakdown
-    )
+    assert result.setup_breakdown is None or "momentum_breakout" in result.setup_breakdown
 
 
 def test_backtester_uses_signal_columns_when_present(tmp_path) -> None:

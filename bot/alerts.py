@@ -131,9 +131,7 @@ class AlertCoordinator:
             self._active_by_symbol.clear()
             self._last_armed_key_by_symbol.clear()
 
-    async def refresh_candidates(
-        self, prepared: PreparedSymbol, *, observed_at: datetime
-    ) -> None:
+    async def refresh_candidates(self, prepared: PreparedSymbol, *, observed_at: datetime) -> None:
         if not self._cfg.enabled:
             return
         if self._closed:
@@ -200,16 +198,12 @@ class AlertCoordinator:
                         else chosen.invalidate_above,
                         "context": dict(ctx),
                         "bias_4h": ctx.get("bias_4h", "unknown"),
-                        "regime_4h_confirmed": ctx.get(
-                            "regime_4h_confirmed", "unknown"
-                        ),
+                        "regime_4h_confirmed": ctx.get("regime_4h_confirmed", "unknown"),
                         "market_regime": ctx.get("market_regime", "unknown"),
                     },
                 )
 
-    async def on_confirmed_signals(
-        self, signals: list[Signal], *, observed_at: datetime
-    ) -> None:
+    async def on_confirmed_signals(self, signals: list[Signal], *, observed_at: datetime) -> None:
         if not self._cfg.enabled:
             return
         async with self._lock:
@@ -303,9 +297,7 @@ class AlertCoordinator:
                                 "watch_key": state.candidate.key,
                                 "ref_id": state.candidate.ref_id,
                                 "ref": state.candidate.ref_id,
-                                "age_s": (
-                                    observed_at - state.watch_sent_at
-                                ).total_seconds(),
+                                "age_s": (observed_at - state.watch_sent_at).total_seconds(),
                             },
                         )
                         return
@@ -337,21 +329,15 @@ class AlertCoordinator:
             return
         raw_action_price = action.get("price")
         current_price = (
-            float(raw_action_price)
-            if isinstance(raw_action_price, (int, float))
-            else price
+            float(raw_action_price) if isinstance(raw_action_price, (int, float)) else price
         )
         if action_type == "watch":
             ref_id = cand.ref_id
-            latency_ms = int(
-                max(0.0, (observed_at - cand.created_at).total_seconds() * 1000.0)
-            )
+            latency_ms = int(max(0.0, (observed_at - cand.created_at).total_seconds() * 1000.0))
             text = self._format_watch(
                 cand, current_price=current_price, now=observed_at, ref_id=ref_id
             )
-            message_id = await self._send(
-                text, dry_run=dry_run, reply_to_message_id=None
-            )
+            message_id = await self._send(text, dry_run=dry_run, reply_to_message_id=None)
             async with self._lock:
                 st = self._active_by_symbol.get(symbol)
                 if st and st.status == "watch_sending" and st.candidate.key == cand.key:
@@ -387,9 +373,7 @@ class AlertCoordinator:
             ref_id = cand.ref_id
             reply_to = action.get("reply_to_message_id")
             reply_to_message_id = int(reply_to) if isinstance(reply_to, int) else None
-            latency_ms = int(
-                max(0.0, (observed_at - cand.created_at).total_seconds() * 1000.0)
-            )
+            latency_ms = int(max(0.0, (observed_at - cand.created_at).total_seconds() * 1000.0))
             text = self._format_entry_zone(
                 cand, current_price=current_price, now=observed_at, ref_id=ref_id
             )
@@ -425,9 +409,7 @@ class AlertCoordinator:
             reply_to = action.get("reply_to_message_id")
             reply_to_message_id = int(reply_to) if isinstance(reply_to, int) else None
             ref_id = str(action.get("ref_id") or "")
-            latency_ms = int(
-                max(0.0, (observed_at - cand.created_at).total_seconds() * 1000.0)
-            )
+            latency_ms = int(max(0.0, (observed_at - cand.created_at).total_seconds() * 1000.0))
             text = self._format_invalidated(
                 cand,
                 current_price=current_price,
@@ -609,9 +591,7 @@ class AlertCoordinator:
         }
         if not prepared.work_15m.is_empty():
             context["rsi_15m"] = float(prepared.work_15m.item(-1, "rsi14") or 0.0)
-            context["volume_ratio_15m"] = float(
-                prepared.work_15m.item(-1, "volume_ratio20") or 0.0
-            )
+            context["volume_ratio_15m"] = float(prepared.work_15m.item(-1, "volume_ratio20") or 0.0)
         candidates: list[WatchCandidate] = []
         for name, level in levels:
             if level <= 0:

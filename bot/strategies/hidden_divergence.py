@@ -30,9 +30,7 @@ class HiddenDivergenceSetup(BaseSetup):
     confirmation_profile = "trend_follow"
     required_context = ("futures_flow",)
 
-    def get_optimizable_params(
-        self, settings: BotSettings | None = None
-    ) -> dict[str, float]:
+    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
         """Tunable parameters for self-learner optimization."""
         defaults = {
             "base_score": 0.50,
@@ -73,21 +71,15 @@ class HiddenDivergenceSetup(BaseSetup):
         defaults = self.get_optimizable_params(settings)
 
         rsi_divergence_lookback = int(
-            dynamic_params.get(
-                "rsi_divergence_lookback", defaults["rsi_divergence_lookback"]
-            )
+            dynamic_params.get("rsi_divergence_lookback", defaults["rsi_divergence_lookback"])
         )
         rsi_divergence_threshold = float(
-            dynamic_params.get(
-                "rsi_divergence_threshold", defaults["rsi_divergence_threshold"]
-            )
+            dynamic_params.get("rsi_divergence_threshold", defaults["rsi_divergence_threshold"])
         )
         min_delta_threshold = float(
             dynamic_params.get("min_delta_threshold", defaults["min_delta_threshold"])
         )
-        sl_buffer_atr = float(
-            dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"])
-        )
+        sl_buffer_atr = float(dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]))
 
         w1h = prepared.work_1h
         if w1h.height < 20:
@@ -147,9 +139,7 @@ class HiddenDivergenceSetup(BaseSetup):
                 swing_ref = float(sl_v[-1])
                 # Compute last impulse wave size for Fib extensions
                 if sh_prices.len() >= 1:
-                    impulse_size = abs(
-                        float(sh_prices.to_numpy()[-1]) - float(sl_v[-1])
-                    )
+                    impulse_size = abs(float(sh_prices.to_numpy()[-1]) - float(sl_v[-1]))
 
         # Hidden Bearish: price LH (sh[-1] < sh[-2]) + RSI HH (rsi_sh[-1] > rsi_sh[-2])
         if direction is None and (
@@ -165,9 +155,7 @@ class HiddenDivergenceSetup(BaseSetup):
                 direction = "short"
                 swing_ref = float(sh_v[-1])
                 if sl_prices.len() >= 1:
-                    impulse_size = abs(
-                        float(sh_v[-1]) - float(sl_prices.to_numpy()[-1])
-                    )
+                    impulse_size = abs(float(sh_v[-1]) - float(sl_prices.to_numpy()[-1]))
 
         if direction is None or swing_ref is None:
             _reject(prepared, setup_id, "no_hidden_divergence_detected")

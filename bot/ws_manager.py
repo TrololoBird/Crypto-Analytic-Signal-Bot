@@ -53,9 +53,7 @@ _PROACTIVE_RECONNECT_AFTER_SECONDS = 23 * 3600 + 50 * 60
 _HEALTH_CHECK_INTERVAL_SECONDS = 30.0
 
 # Binance WebSocket limits (from official docs)
-_MAX_STREAMS_PER_CONNECTION = (
-    300  # Conservative limit (docs say 1024, but 10 msg/sec limit)
-)
+_MAX_STREAMS_PER_CONNECTION = 300  # Conservative limit (docs say 1024, but 10 msg/sec limit)
 _MAX_INCOMING_MSG_PER_SECOND = 8  # Below Binance's 10 msg/sec limit with safety margin
 _MAX_SUBSCRIBE_MSG_PER_SECOND = 4  # JSON control messages limit is 5 msg/sec
 
@@ -238,9 +236,9 @@ class FuturesWSManager:
         self._ticker_cache_ts: float = 0.0  # monotonic time of last ticker update
         self._mark_price_cache: dict[str, JsonDict] = {}
         # Force order buffer: (timestamp_ms, symbol, side, qty, price)
-        self._force_order_buffer: collections.deque[
-            tuple[int, str, str, float, float]
-        ] = collections.deque(maxlen=500)
+        self._force_order_buffer: collections.deque[tuple[int, str, str, float, float]] = (
+            collections.deque(maxlen=500)
+        )
 
         self._stream_task: asyncio.Task[None] | None = None
         self._stream_tasks: dict[str, asyncio.Task[None] | None] = {
@@ -252,9 +250,7 @@ class FuturesWSManager:
             endpoint: asyncio.Event() for endpoint in _WS_ENDPOINTS
         }
         self._ws_conn: Any | None = None
-        self._ws_conns: dict[str, Any | None] = {
-            endpoint: None for endpoint in _WS_ENDPOINTS
-        }
+        self._ws_conns: dict[str, Any | None] = {endpoint: None for endpoint in _WS_ENDPOINTS}
         self._subscribe_id = 1
         self._intended_streams: set[str] = set()
         self._intended_streams_by_endpoint: dict[str, set[str]] = {
@@ -270,29 +266,21 @@ class FuturesWSManager:
         self._last_reconnect_reason_by_endpoint: dict[str, str] = {
             endpoint: "not_started" for endpoint in _WS_ENDPOINTS
         }
-        self._connected_urls: dict[str, str | None] = {
-            endpoint: None for endpoint in _WS_ENDPOINTS
-        }
+        self._connected_urls: dict[str, str | None] = {endpoint: None for endpoint in _WS_ENDPOINTS}
         self._connected_at_by_endpoint: dict[str, float] = {
             endpoint: 0.0 for endpoint in _WS_ENDPOINTS
         }
         self._subscription_errors: dict[str, Any | None] = {
             endpoint: None for endpoint in _WS_ENDPOINTS
         }
-        self._subscription_ack_count: dict[str, int] = {
-            endpoint: 0 for endpoint in _WS_ENDPOINTS
-        }
+        self._subscription_ack_count: dict[str, int] = {endpoint: 0 for endpoint in _WS_ENDPOINTS}
         self._backfill_cooldowns: dict[str, float] = {}
         self._last_latency_warning_by_symbol: dict[str, float] = {}
         self._last_stale_warning_by_stream: dict[str, float] = {}
         self._last_short_disconnect_s: float | None = None
         # Debounce and throttling state for global streams
-        self._ticker_update_times: dict[
-            str, float
-        ] = {}  # symbol -> last update monotonic
-        self._mark_price_update_times: dict[
-            str, float
-        ] = {}  # symbol -> last update monotonic
+        self._ticker_update_times: dict[str, float] = {}  # symbol -> last update monotonic
+        self._mark_price_update_times: dict[str, float] = {}  # symbol -> last update monotonic
         self._book_update_times: dict[str, float] = {}
         self._min_ticker_update_interval_ms: float = 100.0  # throttle duplicate updates
         self._shortlist_rebuild_lock = asyncio.Lock()
@@ -305,9 +293,7 @@ class FuturesWSManager:
         self._kline_close_cbs: dict[
             str, list[KlineCloseCallback]
         ] = {}  # interval -> [async cb(symbol, interval, close_ts_ms)]
-        self._agg_trade_cbs: list[
-            AggTradeCallback
-        ] = []  # [async cb(symbol, price, ts)]
+        self._agg_trade_cbs: list[AggTradeCallback] = []  # [async cb(symbol, price, ts)]
         self._reconnect_cb: ReconnectCallback | None = None  # fired on reconnect
 
         # Message buffering with background draining.
@@ -322,13 +308,9 @@ class FuturesWSManager:
             str, collections.deque[float]
         ] = {}  # stream -> deque of last 10 latencies
         self._slow_streams: set[str] = set()  # streams with avg latency > 5000ms
-        self._stream_last_message_ts: dict[
-            str, float
-        ] = {}  # last message timestamp per stream
+        self._stream_last_message_ts: dict[str, float] = {}  # last message timestamp per stream
         self._connect_count: int = 0  # incremented each successful connection
-        self._connect_counts: dict[str, int] = {
-            endpoint: 0 for endpoint in _WS_ENDPOINTS
-        }
+        self._connect_counts: dict[str, int] = {endpoint: 0 for endpoint in _WS_ENDPOINTS}
 
         # EventBus integration (optional — set via set_event_bus())
         self._event_bus: EventBus | None = None
@@ -445,9 +427,7 @@ class FuturesWSManager:
             self._stream_tasks[endpoint] = asyncio.create_task(
                 self._run_stream(endpoint), name=f"ws_manager_stream:{endpoint}"
             )
-        self._stream_task = self._stream_tasks.get(
-            _WS_MARKET
-        ) or self._stream_tasks.get(_WS_PUBLIC)
+        self._stream_task = self._stream_tasks.get(_WS_MARKET) or self._stream_tasks.get(_WS_PUBLIC)
         # P1: Start message buffer processor
         self._buffer_processor_task = asyncio.create_task(
             self._process_buffered_messages(), name="ws_buffer_processor"
@@ -474,9 +454,7 @@ class FuturesWSManager:
             self._connected_urls[endpoint] = None
             self._connected_at_by_endpoint[endpoint] = 0.0
         tasks_to_cancel = [
-            task
-            for task in self._stream_tasks.values()
-            if task is not None and not task.done()
+            task for task in self._stream_tasks.values() if task is not None and not task.done()
         ]
         for task in tasks_to_cancel:
             task.cancel()
@@ -537,9 +515,7 @@ class FuturesWSManager:
 
     def _refresh_connected_event(self) -> None:
         active = self._active_endpoint_classes()
-        if active and all(
-            self._connected_endpoints[endpoint].is_set() for endpoint in active
-        ):
+        if active and all(self._connected_endpoints[endpoint].is_set() for endpoint in active):
             self._connected.set()
             return
         if not active:
@@ -558,9 +534,7 @@ class FuturesWSManager:
         warm = sum(1 for s in self._symbols if self.is_warm(s))
         total = len(self._symbols)
         now = time.monotonic()
-        ticker_age = (
-            round(now - self._ticker_cache_ts, 1) if self._ticker_cache_ts > 0 else None
-        )
+        ticker_age = round(now - self._ticker_cache_ts, 1) if self._ticker_cache_ts > 0 else None
         fresh_tickers = sum(
             1
             for sym, ts in self._ticker_update_times.items()
@@ -574,21 +548,14 @@ class FuturesWSManager:
         fresh_book_tickers = sum(
             1
             for sym, ts in self._book_update_times.items()
-            if sym in self._symbols
-            and now - ts <= self._cfg.market_ticker_freshness_seconds
+            if sym in self._symbols and now - ts <= self._cfg.market_ticker_freshness_seconds
         )
-        fresh_klines_15m = sum(
-            1 for sym in self._symbols if self._is_interval_fresh(sym, "15m")
-        )
+        fresh_klines_15m = sum(1 for sym in self._symbols if self._is_interval_fresh(sym, "15m"))
         connected_urls = {
-            endpoint: url
-            for endpoint, url in self._connected_urls.items()
-            if url is not None
+            endpoint: url for endpoint, url in self._connected_urls.items() if url is not None
         }
         connected_endpoints = [
-            endpoint
-            for endpoint in _WS_ENDPOINTS
-            if self._connected_endpoints[endpoint].is_set()
+            endpoint for endpoint in _WS_ENDPOINTS if self._connected_endpoints[endpoint].is_set()
         ]
         return {
             "active_stream_count": len(self._intended_streams),
@@ -599,12 +566,8 @@ class FuturesWSManager:
             "last_event_lag_ms": self._last_event_lag_ms,
             "avg_latency_ms": self._get_current_latency_ms(),
             "last_message_age_seconds": self._last_message_age_seconds(),
-            "public_last_message_age_seconds": self._last_message_age_seconds(
-                _WS_PUBLIC
-            ),
-            "market_last_message_age_seconds": self._last_message_age_seconds(
-                _WS_MARKET
-            ),
+            "public_last_message_age_seconds": self._last_message_age_seconds(_WS_PUBLIC),
+            "market_last_message_age_seconds": self._last_message_age_seconds(_WS_MARKET),
             "ticker_cache_age_seconds": ticker_age,
             "buffer_message_count": self._message_buffer.get_stats()["size"],
             "stale_event_drop_count": self._stale_event_drop_count,
@@ -625,9 +588,7 @@ class FuturesWSManager:
             "public_subscription_error": self._subscription_errors[_WS_PUBLIC],
             "market_subscription_error": self._subscription_errors[_WS_MARKET],
             # Shortlist rebuild state
-            "last_shortlist_rebuild_age_s": round(
-                now - self._last_shortlist_rebuild_ts, 1
-            )
+            "last_shortlist_rebuild_age_s": round(now - self._last_shortlist_rebuild_ts, 1)
             if self._last_shortlist_rebuild_ts > 0
             else None,
         }
@@ -652,9 +613,7 @@ class FuturesWSManager:
             if last_message_ts == 0.0:
                 return None
             return round(now - last_message_ts, 1)
-        ages = [
-            now - ts for ts in self._last_message_ts_by_endpoint.values() if ts > 0.0
-        ]
+        ages = [now - ts for ts in self._last_message_ts_by_endpoint.values() if ts > 0.0]
         if ages:
             return round(min(ages), 1)
         if self._last_message_ts == 0.0:
@@ -699,13 +658,9 @@ class FuturesWSManager:
                 removed_streams = list(
                     previous_by_endpoint[endpoint] - current_by_endpoint[endpoint]
                 )
-                added_streams = list(
-                    current_by_endpoint[endpoint] - previous_by_endpoint[endpoint]
-                )
+                added_streams = list(current_by_endpoint[endpoint] - previous_by_endpoint[endpoint])
                 if removed_streams:
-                    await self._send_subscription_command(
-                        endpoint, "UNSUBSCRIBE", removed_streams
-                    )
+                    await self._send_subscription_command(endpoint, "UNSUBSCRIBE", removed_streams)
                 if added_streams:
                     stream_task = self._stream_tasks[endpoint]
                     if stream_task is None or stream_task.done():
@@ -716,9 +671,7 @@ class FuturesWSManager:
                         if endpoint == _WS_MARKET:
                             self._stream_task = self._stream_tasks[endpoint]
                     else:
-                        await self._send_subscription_command(
-                            endpoint, "SUBSCRIBE", added_streams
-                        )
+                        await self._send_subscription_command(endpoint, "SUBSCRIBE", added_streams)
             LOG.info(
                 "ws_manager subscription update | added=%d removed=%d total=%d endpoints=%s",
                 len(new_symbols),
@@ -760,20 +713,14 @@ class FuturesWSManager:
             requested = set(tracked_symbols)
             removed = [s for s in self._tracked_symbols if s not in requested]
             self._tracked_symbols = tracked_symbols
-            previous_market_streams = set(
-                self._intended_streams_by_endpoint[_WS_MARKET]
-            )
+            previous_market_streams = set(self._intended_streams_by_endpoint[_WS_MARKET])
             self._recompute_intended_streams()
             current_market_streams = set(self._intended_streams_by_endpoint[_WS_MARKET])
 
         if not self._cfg.subscribe_agg_trade:
             return
         market_task = self._stream_tasks[_WS_MARKET]
-        if (
-            self._running
-            and (market_task is None or market_task.done())
-            and current_market_streams
-        ):
+        if self._running and (market_task is None or market_task.done()) and current_market_streams:
             self._stream_tasks[_WS_MARKET] = asyncio.create_task(
                 self._run_stream(_WS_MARKET),
                 name="ws_manager_stream:market",
@@ -807,9 +754,7 @@ class FuturesWSManager:
     async def _send_subscription_command(
         self, endpoint: str, method: str, streams: list[str]
     ) -> None:
-        await ws_subscriptions.send_subscription_command(
-            self, endpoint, method, streams
-        )
+        await ws_subscriptions.send_subscription_command(self, endpoint, method, streams)
 
     def _global_streams(self) -> list[str]:
         """Return the list of market-wide streams to subscribe if enabled."""
@@ -857,9 +802,7 @@ class FuturesWSManager:
                 if close_age > max_age:
                     stream_key = f"{symbol}:{interval}"
                     now = time.monotonic()
-                    last_logged = self._last_stale_warning_by_stream.get(
-                        stream_key, 0.0
-                    )
+                    last_logged = self._last_stale_warning_by_stream.get(stream_key, 0.0)
                     if now - last_logged >= _HEALTH_CHECK_INTERVAL_SECONDS:
                         self._last_stale_warning_by_stream[stream_key] = now
                     stale.append(stream_key)
@@ -889,9 +832,7 @@ class FuturesWSManager:
         if not stale_symbols:
             return False
         self._last_short_disconnect_s = (
-            round(elapsed, 1)
-            if elapsed < _SHORT_DISCONNECT_BACKFILL_GRACE_SECONDS
-            else None
+            round(elapsed, 1) if elapsed < _SHORT_DISCONNECT_BACKFILL_GRACE_SECONDS else None
         )
         if elapsed >= _SHORT_DISCONNECT_BACKFILL_GRACE_SECONDS:
             return True
@@ -903,9 +844,7 @@ class FuturesWSManager:
     ) -> None:
         if not stale_symbols:
             return
-        if not self._should_backfill_after_disconnect(
-            elapsed=elapsed, stale_symbols=stale_symbols
-        ):
+        if not self._should_backfill_after_disconnect(elapsed=elapsed, stale_symbols=stale_symbols):
             LOG.info(
                 "reconnect backfill skipped | short_disconnect=%.1fs stale_symbols=%d",
                 elapsed,
@@ -976,9 +915,7 @@ class FuturesWSManager:
             df_4h=interval_dfs.get("4h", pl.DataFrame()),
         )
 
-    async def get_book_ticker(
-        self, symbol: str
-    ) -> tuple[float | None, float | None] | None:
+    async def get_book_ticker(self, symbol: str) -> tuple[float | None, float | None] | None:
         """Get current best bid/ask prices for a symbol.
 
         Acquires _data_lock to prevent races with book ticker writers.
@@ -1234,9 +1171,7 @@ class FuturesWSManager:
             for interval in self._cfg.kline_intervals
         ]
         if self._cfg.subscribe_book_ticker:
-            tasks.extend(
-                self._backfill_book_ticker(symbol) for symbol in filtered_symbols
-            )
+            tasks.extend(self._backfill_book_ticker(symbol) for symbol in filtered_symbols)
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -1268,9 +1203,7 @@ class FuturesWSManager:
                 self._backfill_cooldowns[symbol] = (
                     time.monotonic() + self._cfg.backfill_failure_cooldown_seconds
                 )
-            LOG.debug(
-                "backfill failed | symbol=%s interval=%s: %s", symbol, interval, exc
-            )
+            LOG.debug("backfill failed | symbol=%s interval=%s: %s", symbol, interval, exc)
 
     async def _backfill_book_ticker(self, symbol: str) -> None:
         try:
@@ -1350,9 +1283,7 @@ class FuturesWSManager:
                         limit_val = limit.get("limit")
                         count = limit.get("count")
                         if limit_type and count is not None and limit_val is not None:
-                            usage_pct = (
-                                (count / limit_val) * 100 if limit_val > 0 else 0
-                            )
+                            usage_pct = (count / limit_val) * 100 if limit_val > 0 else 0
                             if usage_pct > 80:
                                 LOG.warning(
                                     "ws rate limit high usage | endpoint=%s type=%s interval=%s count=%d limit=%d usage=%.1f%%",
@@ -1401,9 +1332,7 @@ class FuturesWSManager:
         event_time = data.get("E")
         if event_time is not None:
             try:
-                self._last_event_lag_ms = max(
-                    0.0, (time.time() * 1000) - float(event_time)
-                )
+                self._last_event_lag_ms = max(0.0, (time.time() * 1000) - float(event_time))
                 if (
                     symbol
                     and event_type in _LATENCY_WARNING_EVENTS
@@ -1563,9 +1492,7 @@ class FuturesWSManager:
             return False
         if event_ms <= 0:
             return False
-        max_age_seconds = float(
-            getattr(self._cfg, "market_ticker_freshness_seconds", 30.0)
-        )
+        max_age_seconds = float(getattr(self._cfg, "market_ticker_freshness_seconds", 30.0))
         age_ms = (time.time() * 1000.0) - event_ms
         return age_ms > (max_age_seconds * 1000.0)
 
@@ -1617,9 +1544,7 @@ class FuturesWSManager:
         if cbs:
             for _cb in cbs:
                 task = asyncio.create_task(_cb(symbol, interval, close_ts_ms))
-                self._attach_task_logging(
-                    task, label=f"kline_close:{symbol}:{interval}"
-                )
+                self._attach_task_logging(task, label=f"kline_close:{symbol}:{interval}")
 
         # Publish to EventBus (primary path when SignalBot uses EventBus)
         if self._event_bus is not None:
@@ -1628,9 +1553,7 @@ class FuturesWSManager:
             self._event_bus.publish_nowait(
                 KlineCloseEvent(symbol=symbol, interval=interval, close_ts=close_ts_ms)
             )
-            LOG.info(
-                "kline published to EventBus | symbol=%s interval=%s", symbol, interval
-            )
+            LOG.info("kline published to EventBus | symbol=%s interval=%s", symbol, interval)
         else:
             LOG.warning("kline NOT published - EventBus is None | symbol=%s", symbol)
 

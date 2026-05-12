@@ -26,9 +26,7 @@ class FallbackRunner:
                 stale_stream_count = int(snapshot.get("stale_kline_stream_count") or 0)
                 fresh_15m = int(snapshot.get("fresh_klines_15m") or 0)
                 tracked_symbols = int(
-                    snapshot.get("total_symbols")
-                    or snapshot.get("tracked_symbols")
-                    or 0
+                    snapshot.get("total_symbols") or snapshot.get("tracked_symbols") or 0
                 )
             except Exception:
                 pass
@@ -56,9 +54,7 @@ class FallbackRunner:
             if self._bot._shutdown.is_set():
                 break
             try:
-                tracking_events = await self._bot.tracker.review_open_signals(
-                    dry_run=False
-                )
+                tracking_events = await self._bot.tracker.review_open_signals(dry_run=False)
                 if tracking_events:
                     await self._bot._deliver_tracking(tracking_events)
             except Exception as exc:
@@ -71,14 +67,11 @@ class FallbackRunner:
             if self._bot._shutdown.is_set():
                 break
 
-            time_since_event = (
-                asyncio.get_running_loop().time() - self._bot._last_kline_event_ts
-            )
+            time_since_event = asyncio.get_running_loop().time() - self._bot._last_kline_event_ts
             snapshot = self._fallback_health_snapshot()
             healthy_15m_flow = (
                 snapshot["tracked_symbols"] > 0
-                and snapshot["fresh_klines_15m"]
-                >= max(1, int(snapshot["tracked_symbols"] * 0.7))
+                and snapshot["fresh_klines_15m"] >= max(1, int(snapshot["tracked_symbols"] * 0.7))
                 and snapshot["stale_kline_stream_count"] == 0
             )
             ws_still_fresh = snapshot["ws_message_age_seconds"] is not None and float(

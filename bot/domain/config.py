@@ -50,9 +50,7 @@ class RuntimeConfig(BaseModel):
     startup_batch_size: int = Field(default=3, ge=1, le=10)
     startup_batch_delay_seconds: float = Field(default=2.0, ge=0.5, le=10.0)
     max_concurrent_rest_requests: int = Field(default=5, ge=1, le=20)
-    emergency_context_warmup_timeout_seconds: float = Field(
-        default=15.0, ge=1.0, le=120.0
-    )
+    emergency_context_warmup_timeout_seconds: float = Field(default=15.0, ge=1.0, le=120.0)
     emergency_context_warmup_symbol_limit: int = Field(default=12, ge=1, le=100)
     emergency_context_fetch_timeout_seconds: float = Field(default=3.0, ge=0.5, le=30.0)
     futures_data_request_limit_per_5m: int = Field(default=300, ge=30, le=1000)
@@ -67,9 +65,7 @@ class RuntimeConfig(BaseModel):
 class UniverseConfig(BaseModel):
     quote_asset: str = "USDT"
     dynamic_limit: int = Field(default=60, ge=10, le=200)
-    shortlist_limit: int = Field(
-        default=45, ge=5, le=100
-    )  # Reduced from 60 to prevent WS overload
+    shortlist_limit: int = Field(default=45, ge=5, le=100)  # Reduced from 60 to prevent WS overload
     min_quote_volume_usd: float = Field(default=10_000_000.0, ge=0.0)
     min_listing_age_days: int = Field(default=14, ge=0, le=3650)
     light_refresh_interval_seconds: int = Field(default=75, ge=15, le=900)
@@ -89,12 +85,8 @@ class UniverseConfig(BaseModel):
 
     @field_validator("pinned_symbols")
     @classmethod
-    def _normalize_pins(
-        cls, value: tuple[str, ...] | list[str] | None
-    ) -> tuple[str, ...]:
-        return tuple(
-            str(item).strip().upper() for item in (value or ()) if str(item).strip()
-        )
+    def _normalize_pins(cls, value: tuple[str, ...] | list[str] | None) -> tuple[str, ...]:
+        return tuple(str(item).strip().upper() for item in (value or ()) if str(item).strip())
 
 
 class AssetConfig(BaseModel):
@@ -157,8 +149,7 @@ class FilterConfig(BaseModel):
                     raise ValueError(f"filters.setups.{setup_id}.{key} must be finite")
                 if key in {"sl_buffer_atr", "sl_atr_mult"} and coerced < 0.05:
                     raise ValueError(
-                        f"filters.setups.{setup_id}.{key} must be >= 0.05 "
-                        "(ATR fraction scale)"
+                        f"filters.setups.{setup_id}.{key} must be >= 0.05 (ATR fraction scale)"
                     )
                 if key == "min_rr" and coerced < 0.5:
                     raise ValueError(f"filters.setups.{setup_id}.{key} must be >= 0.5")
@@ -303,9 +294,7 @@ class ScoringConfig(BaseModel):
         }
         total_weight = sum(weights.values())
         if total_weight <= 0.0:
-            raise ValueError(
-                "ScoringConfig: model component weights must have positive total"
-            )
+            raise ValueError("ScoringConfig: model component weights must have positive total")
         if abs(total_weight - 1.0) > 1e-6:
             for key, value in weights.items():
                 object.__setattr__(self, key, value / total_weight)
@@ -390,12 +379,8 @@ class SpotCompanionConfig(BaseModel):
 
     @field_validator("lead_symbols")
     @classmethod
-    def _normalize_lead_symbols(
-        cls, value: tuple[str, ...] | list[str] | None
-    ) -> tuple[str, ...]:
-        return tuple(
-            str(item).strip().upper() for item in (value or ()) if str(item).strip()
-        )
+    def _normalize_lead_symbols(cls, value: tuple[str, ...] | list[str] | None) -> tuple[str, ...]:
+        return tuple(str(item).strip().upper() for item in (value or ()) if str(item).strip())
 
 
 class IntelligenceConfig(BaseModel):
@@ -427,24 +412,18 @@ class IntelligenceConfig(BaseModel):
     def _normalize_benchmark_symbols(
         cls, value: tuple[str, ...] | list[str] | None
     ) -> tuple[str, ...]:
-        return tuple(
-            str(item).strip().upper() for item in (value or ()) if str(item).strip()
-        )
+        return tuple(str(item).strip().upper() for item in (value or ()) if str(item).strip())
 
     @field_validator("option_underlyings")
     @classmethod
     def _normalize_option_underlyings(
         cls, value: tuple[str, ...] | list[str] | None
     ) -> tuple[str, ...]:
-        return tuple(
-            str(item).strip().upper() for item in (value or ()) if str(item).strip()
-        )
+        return tuple(str(item).strip().upper() for item in (value or ()) if str(item).strip())
 
     @field_validator("macro_symbols")
     @classmethod
-    def _normalize_macro_symbols(
-        cls, value: tuple[str, ...] | list[str] | None
-    ) -> tuple[str, ...]:
+    def _normalize_macro_symbols(cls, value: tuple[str, ...] | list[str] | None) -> tuple[str, ...]:
         return tuple(str(item).strip() for item in (value or ()) if str(item).strip())
 
 
@@ -466,9 +445,7 @@ class WSConfig(BaseModel):
     subscription_scope: str = "shortlist"
     subscribe_book_ticker: bool = True
     subscribe_agg_trade: bool = True
-    subscribe_chunk_size: int = Field(
-        default=10, ge=5, le=200
-    )  # Reduced for Binance limits
+    subscribe_chunk_size: int = Field(default=10, ge=5, le=200)  # Reduced for Binance limits
     subscribe_chunk_delay_ms: int = Field(
         default=500, ge=100, le=2000
     )  # Binance allows 10 incoming control messages/sec per connection.
@@ -507,23 +484,17 @@ class WSConfig(BaseModel):
     def _normalize_subscription_scope(cls, value: str) -> str:
         raw = str(value or "shortlist").strip().lower()
         if raw not in {"tracked_only", "shortlist"}:
-            raise ValueError(
-                "ws.subscription_scope must be one of: tracked_only, shortlist"
-            )
+            raise ValueError("ws.subscription_scope must be one of: tracked_only, shortlist")
         return raw
 
     @field_validator("kline_intervals")
     @classmethod
-    def _normalize_intervals(
-        cls, value: tuple[str, ...] | list[str] | None
-    ) -> tuple[str, ...]:
+    def _normalize_intervals(cls, value: tuple[str, ...] | list[str] | None) -> tuple[str, ...]:
         return tuple(str(v).strip() for v in (value or ()) if str(v).strip())
 
     @model_validator(mode="after")
     def _resolve_endpoint_urls(self) -> "WSConfig":
-        normalized_root = (
-            str(self.base_url or "wss://fstream.binance.com").strip().rstrip("/")
-        )
+        normalized_root = str(self.base_url or "wss://fstream.binance.com").strip().rstrip("/")
         for suffix in ("/public", "/market"):
             if normalized_root.endswith(suffix):
                 normalized_root = normalized_root[: -len(suffix)]
@@ -612,9 +583,7 @@ class BotSettings(BaseModel):
         # Telegram tokens format: 123456789:ABCdefGHIjklMNOpqrsTUVwxyZ
         # Allow alphanumerics, underscore, hyphen, and colon
         if token:
-            allowed_chars = set(
-                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_:-"
-            )
+            allowed_chars = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_:-")
             if not all(c in allowed_chars for c in token):
                 raise ValueError("tg_token contains invalid characters")
         return token
@@ -638,8 +607,7 @@ class BotSettings(BaseModel):
         pending = self.tracking.pending_expiry_minutes
         if cooldown > pending:
             raise ValueError(
-                f"cooldown_minutes ({cooldown}) must be <= "
-                f"pending_expiry_minutes ({pending})"
+                f"cooldown_minutes ({cooldown}) must be <= pending_expiry_minutes ({pending})"
             )
         return self
 
@@ -666,16 +634,13 @@ class BotSettings(BaseModel):
         intervals = cast(list[str], self.ws.kline_intervals)
         for interval in intervals:
             if interval not in valid_intervals:
-                raise ValueError(
-                    f"Invalid kline interval: {interval}. Valid: {valid_intervals}"
-                )
+                raise ValueError(f"Invalid kline interval: {interval}. Valid: {valid_intervals}")
         return self
 
     @model_validator(mode="after")
     def _normalize_asset_overrides(self) -> "BotSettings":
         self.assets = {
-            str(symbol).strip().upper(): config
-            for symbol, config in self.assets.items()
+            str(symbol).strip().upper(): config for symbol, config in self.assets.items()
         }
         return self
 
@@ -701,20 +666,12 @@ class BotSettings(BaseModel):
         for label, url in ws_urls.items():
             lowered = str(url or "").strip().lower()
             if any(token in lowered for token in forbidden_tokens):
-                raise ValueError(
-                    f"{label} must point to Binance public market streams only: {url}"
-                )
-        if (
-            str(self.ws.public_base_url).rstrip("/").lower().endswith("/public")
-            is False
-        ):
+                raise ValueError(f"{label} must point to Binance public market streams only: {url}")
+        if str(self.ws.public_base_url).rstrip("/").lower().endswith("/public") is False:
             raise ValueError(
                 f"ws.public_base_url must use Binance /public routed endpoint: {self.ws.public_base_url}"
             )
-        if (
-            str(self.ws.market_base_url).rstrip("/").lower().endswith("/market")
-            is False
-        ):
+        if str(self.ws.market_base_url).rstrip("/").lower().endswith("/market") is False:
             raise ValueError(
                 f"ws.market_base_url must use Binance /market routed endpoint: {self.ws.market_base_url}"
             )
@@ -790,9 +747,7 @@ def _convert_toml_dict(d: dict[Any, Any]) -> dict[str, Any]:
         if isinstance(v, dict):
             result[key] = _convert_toml_dict(v)
         elif isinstance(v, list):
-            result[key] = [
-                _convert_toml_dict(i) if isinstance(i, dict) else i for i in v
-            ]
+            result[key] = [_convert_toml_dict(i) if isinstance(i, dict) else i for i in v]
         else:
             result[key] = v
     return result
@@ -811,9 +766,7 @@ def load_settings(config_path: str | Path = "config.toml") -> BotSettings:
     notifiers_payload = payload.setdefault("notifiers", {})
     if isinstance(notifiers_payload, dict):
         provider_override = str(os.getenv("BOT_NOTIFIER_PROVIDER", "") or "").strip().lower()
-        provider = str(
-            notifiers_payload.get("provider", "telegram") or "telegram"
-        ).strip().lower()
+        provider = str(notifiers_payload.get("provider", "telegram") or "telegram").strip().lower()
         if provider_override:
             notifiers_payload["provider"] = provider_override
         elif provider == "none" and secrets.tg_token and secrets.target_chat_id:

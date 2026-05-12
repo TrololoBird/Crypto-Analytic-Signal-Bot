@@ -34,9 +34,7 @@ def _signal(
     )
 
 
-def test_select_and_rank_deduplicates_symbol_and_boosts_same_direction_confluence() -> (
-    None
-):
+def test_select_and_rank_deduplicates_symbol_and_boosts_same_direction_confluence() -> None:
     orchestrator = DeliveryOrchestrator(SimpleNamespace())
 
     selected = orchestrator.select_and_rank(
@@ -45,9 +43,7 @@ def test_select_and_rank_deduplicates_symbol_and_boosts_same_direction_confluenc
                 _signal(symbol="BTCUSDT", setup_id="fvg_setup", score=0.60),
                 _signal(symbol="BTCUSDT", setup_id="bos_choch", score=0.62),
             ],
-            "ETHUSDT": [
-                _signal(symbol="ETHUSDT", setup_id="spread_strategy", score=0.61)
-            ],
+            "ETHUSDT": [_signal(symbol="ETHUSDT", setup_id="spread_strategy", score=0.61)],
         },
         max_signals=10,
     )
@@ -142,7 +138,9 @@ async def test_select_and_deliver_applies_symbol_direction_cooldown() -> None:
             return None
 
     class TrackerStub:
-        async def set_signal_features_async(self, tracking_id: str, features: dict[str, object]) -> None:
+        async def set_signal_features_async(
+            self, tracking_id: str, features: dict[str, object]
+        ) -> None:
             return None
 
         async def arm_signals_with_messages(
@@ -155,10 +153,14 @@ async def test_select_and_deliver_applies_symbol_direction_cooldown() -> None:
             return None
 
     class AlertsStub:
-        async def on_confirmed_signals(self, delivered: list[Signal], observed_at: datetime) -> None:
+        async def on_confirmed_signals(
+            self, delivered: list[Signal], observed_at: datetime
+        ) -> None:
             return None
 
-    async def _wait_noncritical(*, label: str, timeout: float, operation: object) -> tuple[bool, object]:
+    async def _wait_noncritical(
+        *, label: str, timeout: float, operation: object
+    ) -> tuple[bool, object]:
         return True, await operation  # type: ignore[misc]
 
     bot = SimpleNamespace(

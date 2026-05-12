@@ -146,11 +146,7 @@ class AlertManager:
         """Create alert from metric degradation."""
         change = abs(old_value - new_value)
 
-        severity = (
-            AlertSeverity.CRITICAL
-            if change > threshold * 1.5
-            else AlertSeverity.WARNING
-        )
+        severity = AlertSeverity.CRITICAL if change > threshold * 1.5 else AlertSeverity.WARNING
 
         direction = "dropped" if new_value < old_value else "increased"
 

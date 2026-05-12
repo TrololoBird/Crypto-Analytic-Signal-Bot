@@ -25,11 +25,7 @@ def pytest_pyfunc_call(pyfuncitem: pytest.Function) -> bool | None:
         return None
 
     sig = inspect.signature(test_func)
-    kwargs = {
-        name: value
-        for name, value in pyfuncitem.funcargs.items()
-        if name in sig.parameters
-    }
+    kwargs = {name: value for name, value in pyfuncitem.funcargs.items() if name in sig.parameters}
 
     loop = asyncio.new_event_loop()
     try:

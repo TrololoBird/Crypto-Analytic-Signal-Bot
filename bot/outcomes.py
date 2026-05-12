@@ -47,9 +47,7 @@ def _normalized_bool(value: Any) -> bool | None:
 def build_prepared_feature_snapshot(prepared: Any) -> dict[str, Any]:
     """Build a normalized feature snapshot from PreparedSymbol-like data."""
     if prepared is None:
-        return normalize_public_feature_payload(
-            {name: None for name in PUBLIC_FEATURE_FIELDS}
-        )
+        return normalize_public_feature_payload({name: None for name in PUBLIC_FEATURE_FIELDS})
 
     features: dict[str, Any] = {}
 
@@ -83,18 +81,10 @@ def build_prepared_feature_snapshot(prepared: Any) -> dict[str, Any]:
     features["volume_ratio_15m"] = _frame_value(work_15m, "volume_ratio20")
     features["macd_histogram_15m"] = _frame_value(work_15m, "macd_hist")
 
-    features["ema20_above_ema50_15m"] = _normalized_bool(
-        _ema_stack(work_15m, "ema20", "ema50")
-    )
-    features["ema50_above_ema200_15m"] = _normalized_bool(
-        _ema_stack(work_15m, "ema50", "ema200")
-    )
-    features["ema20_above_ema50_1h"] = _normalized_bool(
-        _ema_stack(work_1h, "ema20", "ema50")
-    )
-    features["ema50_above_ema200_1h"] = _normalized_bool(
-        _ema_stack(work_1h, "ema50", "ema200")
-    )
+    features["ema20_above_ema50_15m"] = _normalized_bool(_ema_stack(work_15m, "ema20", "ema50"))
+    features["ema50_above_ema200_15m"] = _normalized_bool(_ema_stack(work_15m, "ema50", "ema200"))
+    features["ema20_above_ema50_1h"] = _normalized_bool(_ema_stack(work_1h, "ema20", "ema50"))
+    features["ema50_above_ema200_1h"] = _normalized_bool(_ema_stack(work_1h, "ema50", "ema200"))
 
     features["supertrend_dir_1h"] = _frame_value(work_1h, "supertrend_dir")
     features["supertrend_dir_15m"] = _frame_value(work_15m, "supertrend_dir")
@@ -102,51 +92,33 @@ def build_prepared_feature_snapshot(prepared: Any) -> dict[str, Any]:
     features["bb_pct_b_15m"] = _frame_value(work_15m, "bb_pct_b")
     features["bb_width_15m"] = _frame_value(work_15m, "bb_width")
 
-    features["funding_rate"] = _normalized_float(
-        getattr(prepared, "funding_rate", None)
-    )
+    features["funding_rate"] = _normalized_float(getattr(prepared, "funding_rate", None))
     features["oi_current"] = _normalized_float(getattr(prepared, "oi_current", None))
-    features["oi_change_pct"] = _normalized_float(
-        getattr(prepared, "oi_change_pct", None)
-    )
+    features["oi_change_pct"] = _normalized_float(getattr(prepared, "oi_change_pct", None))
     features["oi_slope_5m"] = _normalized_float(getattr(prepared, "oi_slope_5m", None))
     features["ls_ratio"] = _normalized_float(getattr(prepared, "ls_ratio", None))
-    features["global_ls_ratio"] = _normalized_float(
-        getattr(prepared, "global_ls_ratio", None)
-    )
+    features["global_ls_ratio"] = _normalized_float(getattr(prepared, "global_ls_ratio", None))
     features["top_trader_position_ratio"] = _normalized_float(
         getattr(prepared, "top_trader_position_ratio", None)
     )
     features["top_vs_global_ls_gap"] = _normalized_float(
         getattr(prepared, "top_vs_global_ls_gap", None)
     )
-    features["liquidation_score"] = _normalized_float(
-        getattr(prepared, "liquidation_score", None)
-    )
+    features["liquidation_score"] = _normalized_float(getattr(prepared, "liquidation_score", None))
     features["mark_index_spread_bps"] = _normalized_float(
         getattr(prepared, "mark_index_spread_bps", None)
     )
-    features["premium_zscore_5m"] = _normalized_float(
-        getattr(prepared, "premium_zscore_5m", None)
-    )
-    features["premium_slope_5m"] = _normalized_float(
-        getattr(prepared, "premium_slope_5m", None)
-    )
+    features["premium_zscore_5m"] = _normalized_float(getattr(prepared, "premium_zscore_5m", None))
+    features["premium_slope_5m"] = _normalized_float(getattr(prepared, "premium_slope_5m", None))
     features["context_snapshot_age_seconds"] = _normalized_float(
         getattr(prepared, "context_snapshot_age_seconds", None)
     )
-    features["depth_imbalance"] = _normalized_float(
-        getattr(prepared, "depth_imbalance", None)
-    )
-    features["microprice_bias"] = _normalized_float(
-        getattr(prepared, "microprice_bias", None)
-    )
+    features["depth_imbalance"] = _normalized_float(getattr(prepared, "depth_imbalance", None))
+    features["microprice_bias"] = _normalized_float(getattr(prepared, "microprice_bias", None))
     features["agg_trade_delta_30s"] = _normalized_float(
         getattr(prepared, "agg_trade_delta_30s", None)
     )
-    features["aggression_shift"] = _normalized_float(
-        getattr(prepared, "aggression_shift", None)
-    )
+    features["aggression_shift"] = _normalized_float(getattr(prepared, "aggression_shift", None))
     features["spot_lead_return_1m"] = _normalized_float(
         getattr(prepared, "spot_lead_return_1m", None)
     )
@@ -165,9 +137,7 @@ def build_prepared_feature_snapshot(prepared: Any) -> dict[str, Any]:
     features["data_source_mix"] = (
         getattr(prepared, "data_source_mix", "futures_only") or "futures_only"
     )
-    features["market_regime"] = (
-        getattr(prepared, "market_regime", "neutral") or "neutral"
-    )
+    features["market_regime"] = getattr(prepared, "market_regime", "neutral") or "neutral"
 
     return normalize_public_feature_payload(features)
 
@@ -404,24 +374,14 @@ def extract_features_from_signal(
         adx_1h=prepared_data.get("adx_1h") if prepared_data else None,
         adx_4h=prepared_data.get("adx_4h") if prepared_data else None,
         atr_pct_15m=prepared_data.get("atr_pct_15m") if prepared_data else None,
-        volume_ratio_15m=prepared_data.get("volume_ratio_15m")
-        if prepared_data
-        else None,
-        macd_histogram_15m=prepared_data.get("macd_histogram_15m")
-        if prepared_data
-        else None,
-        ema20_above_ema50_15m=prepared_data.get("ema20_above_ema50_15m")
-        if prepared_data
-        else None,
+        volume_ratio_15m=prepared_data.get("volume_ratio_15m") if prepared_data else None,
+        macd_histogram_15m=prepared_data.get("macd_histogram_15m") if prepared_data else None,
+        ema20_above_ema50_15m=prepared_data.get("ema20_above_ema50_15m") if prepared_data else None,
         ema50_above_ema200_15m=prepared_data.get("ema50_above_ema200_15m")
         if prepared_data
         else None,
-        ema20_above_ema50_1h=prepared_data.get("ema20_above_ema50_1h")
-        if prepared_data
-        else None,
-        ema50_above_ema200_1h=prepared_data.get("ema50_above_ema200_1h")
-        if prepared_data
-        else None,
+        ema20_above_ema50_1h=prepared_data.get("ema20_above_ema50_1h") if prepared_data else None,
+        ema50_above_ema200_1h=prepared_data.get("ema50_above_ema200_1h") if prepared_data else None,
         spread_bps=signal.spread_bps,
         quote_volume=signal.quote_volume,
         delta_ratio=signal.orderflow_delta_ratio,
@@ -433,15 +393,9 @@ def extract_features_from_signal(
         direction=signal.direction,
         timeframe=signal.timeframe,
         # Advanced indicators
-        supertrend_dir_1h=prepared_data.get("supertrend_dir_1h")
-        if prepared_data
-        else None,
-        supertrend_dir_15m=prepared_data.get("supertrend_dir_15m")
-        if prepared_data
-        else None,
-        obv_above_ema_15m=prepared_data.get("obv_above_ema_15m")
-        if prepared_data
-        else None,
+        supertrend_dir_1h=prepared_data.get("supertrend_dir_1h") if prepared_data else None,
+        supertrend_dir_15m=prepared_data.get("supertrend_dir_15m") if prepared_data else None,
+        obv_above_ema_15m=prepared_data.get("obv_above_ema_15m") if prepared_data else None,
         bb_pct_b_15m=prepared_data.get("bb_pct_b_15m") if prepared_data else None,
         bb_width_15m=prepared_data.get("bb_width_15m") if prepared_data else None,
         # WS market context
@@ -454,35 +408,19 @@ def extract_features_from_signal(
         top_trader_position_ratio=prepared_data.get("top_trader_position_ratio")
         if prepared_data
         else None,
-        top_vs_global_ls_gap=prepared_data.get("top_vs_global_ls_gap")
-        if prepared_data
-        else None,
-        liquidation_score=prepared_data.get("liquidation_score")
-        if prepared_data
-        else None,
-        mark_index_spread_bps=prepared_data.get("mark_index_spread_bps")
-        if prepared_data
-        else None,
-        premium_zscore_5m=prepared_data.get("premium_zscore_5m")
-        if prepared_data
-        else None,
-        premium_slope_5m=prepared_data.get("premium_slope_5m")
-        if prepared_data
-        else None,
+        top_vs_global_ls_gap=prepared_data.get("top_vs_global_ls_gap") if prepared_data else None,
+        liquidation_score=prepared_data.get("liquidation_score") if prepared_data else None,
+        mark_index_spread_bps=prepared_data.get("mark_index_spread_bps") if prepared_data else None,
+        premium_zscore_5m=prepared_data.get("premium_zscore_5m") if prepared_data else None,
+        premium_slope_5m=prepared_data.get("premium_slope_5m") if prepared_data else None,
         context_snapshot_age_seconds=prepared_data.get("context_snapshot_age_seconds")
         if prepared_data
         else None,
         depth_imbalance=prepared_data.get("depth_imbalance") if prepared_data else None,
         microprice_bias=prepared_data.get("microprice_bias") if prepared_data else None,
-        agg_trade_delta_30s=prepared_data.get("agg_trade_delta_30s")
-        if prepared_data
-        else None,
-        aggression_shift=prepared_data.get("aggression_shift")
-        if prepared_data
-        else None,
-        spot_lead_return_1m=prepared_data.get("spot_lead_return_1m")
-        if prepared_data
-        else None,
+        agg_trade_delta_30s=prepared_data.get("agg_trade_delta_30s") if prepared_data else None,
+        aggression_shift=prepared_data.get("aggression_shift") if prepared_data else None,
+        spot_lead_return_1m=prepared_data.get("spot_lead_return_1m") if prepared_data else None,
         spot_futures_spread_bps=prepared_data.get("spot_futures_spread_bps")
         if prepared_data
         else None,
@@ -498,9 +436,7 @@ def extract_features_from_signal(
         data_source_mix=prepared_data.get("data_source_mix", "futures_only")
         if prepared_data
         else "futures_only",
-        market_regime=prepared_data.get("market_regime", "neutral")
-        if prepared_data
-        else "neutral",
+        market_regime=prepared_data.get("market_regime", "neutral") if prepared_data else "neutral",
     )
 
 
@@ -511,9 +447,7 @@ def create_outcome_from_tracked(
     max_loss_pct: float = 0.0,
 ) -> SignalOutcome:
     """Создает Outcome из завершенного tracked сигнала."""
-    outcome_result = getattr(tracked, "close_reason", None) or getattr(
-        tracked, "result", ""
-    )
+    outcome_result = getattr(tracked, "close_reason", None) or getattr(tracked, "result", "")
 
     # Определяем entry price
     entry_price = tracked.activation_price or tracked.entry_mid
@@ -530,9 +464,7 @@ def create_outcome_from_tracked(
 
         # R must use the original planned stop. Runtime tracking may move
         # tracked.stop to break-even after TP1, which would distort analytics.
-        risk_stop = (
-            tracked.initial_stop if tracked.initial_stop is not None else tracked.stop
-        )
+        risk_stop = tracked.initial_stop if tracked.initial_stop is not None else tracked.stop
         risk = abs(entry_price - risk_stop)
         if risk > 0:
             pnl_r_multiple = pnl_pct / (risk / entry_price * 100.0) if risk > 0 else 0.0
@@ -552,9 +484,7 @@ def create_outcome_from_tracked(
     # Определение качества сетапа
     was_profitable = pnl_pct > 0
     setup_quality = (
-        "good"
-        if pnl_r_multiple >= 1.0
-        else ("bad" if pnl_r_multiple <= -1.0 else "neutral")
+        "good" if pnl_r_multiple >= 1.0 else ("bad" if pnl_r_multiple <= -1.0 else "neutral")
     )
 
     # LLM корректность

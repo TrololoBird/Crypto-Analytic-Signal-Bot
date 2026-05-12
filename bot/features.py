@@ -94,7 +94,9 @@ _ADVANCED_FALLBACKS_LOGGED: set[str] = set()
 
 _MAX_CACHE_ENTRIES = 500
 _FrameCacheValue = float | None
-_FrameCacheKey = tuple[str, str, int, int, int, tuple[_FrameCacheValue, ...], tuple[object, ...] | None]
+_FrameCacheKey = tuple[
+    str, str, int, int, int, tuple[_FrameCacheValue, ...], tuple[object, ...] | None
+]
 _FRAME_CACHE_TAIL_COLUMNS = (
     "open",
     "high",
@@ -157,11 +159,7 @@ _FRAME_CACHE = _FrameCache(max_size=_MAX_CACHE_ENTRIES)
 
 def _clean_non_finite(series: pl.Series, *, fill: float) -> pl.Series:
     """Replace NaN/inf/null values with a stable fill value."""
-    return (
-        series.replace([float("inf"), float("-inf")], None)
-        .fill_nan(fill)
-        .fill_null(fill)
-    )
+    return series.replace([float("inf"), float("-inf")], None).fill_nan(fill).fill_null(fill)
 
 
 def _timestamp_ns(value: object) -> int:
@@ -192,14 +190,10 @@ def _tail_value_signature(row: dict[str, object]) -> tuple[_FrameCacheValue, ...
 
 def _log_indicator_fallback(indicator: str, exc: Exception) -> None:
     if indicator in _ADVANCED_FALLBACKS_LOGGED:
-        LOG.debug(
-            "advanced indicator fallback reused", indicator=indicator, error=str(exc)
-        )
+        LOG.debug("advanced indicator fallback reused", indicator=indicator, error=str(exc))
         return
     _ADVANCED_FALLBACKS_LOGGED.add(indicator)
-    LOG.warning(
-        "advanced indicator fallback activated", indicator=indicator, error=str(exc)
-    )
+    LOG.warning("advanced indicator fallback activated", indicator=indicator, error=str(exc))
 
 
 def _materialize_series(
@@ -215,9 +209,7 @@ def _materialize_series(
     return pl.Series(name, [value] * df.height, dtype=pl.Float64)
 
 
-def _numeric_item(
-    df: pl.DataFrame, row: int, column: str, default: float = 0.0
-) -> float:
+def _numeric_item(df: pl.DataFrame, row: int, column: str, default: float = 0.0) -> float:
     try:
         value = df.item(row, column)
     except (IndexError, ValueError):
@@ -405,23 +397,15 @@ def _adx(df: pl.DataFrame, period: int = 14) -> pl.Series:
         name="plus_dm",
     )
     minus_dm = _materialize_series(
-        pl.when((down_move > up_move) & (down_move > 0.0))
-        .then(down_move)
-        .otherwise(0.0),
+        pl.when((down_move > up_move) & (down_move > 0.0)).then(down_move).otherwise(0.0),
         df=df,
         name="minus_dm",
     )
 
     atr = _atr(df, period)
     atr_safe = _clean_non_finite(atr, fill=1e-9).replace(0.0, 1e-9)
-    plus_di = (
-        100.0 * wilder_mean(plus_dm, period=period, name="plus_dm_smoothed") / atr_safe
-    )
-    minus_di = (
-        100.0
-        * wilder_mean(minus_dm, period=period, name="minus_dm_smoothed")
-        / atr_safe
-    )
+    plus_di = 100.0 * wilder_mean(plus_dm, period=period, name="plus_dm_smoothed") / atr_safe
+    minus_di = 100.0 * wilder_mean(minus_dm, period=period, name="minus_dm_smoothed") / atr_safe
 
     di_sum = (plus_di + minus_di).replace(0.0, None)
     dx = _clean_non_finite(100.0 * (plus_di - minus_di).abs() / di_sum, fill=0.0)
@@ -449,11 +433,7 @@ def _vwap(df: pl.DataFrame) -> pl.Series:
     pv = typical_price * df["volume"]
 
     time_column = next(
-        (
-            column
-            for column in ("close_time", "time", "open_time")
-            if column in df.columns
-        ),
+        (column for column in ("close_time", "time", "open_time") if column in df.columns),
         None,
     )
     if time_column is not None:
@@ -486,11 +466,7 @@ def _roc(df: pl.DataFrame, period: int = 10) -> pl.Series:
         except Exception as exc:
             _log_indicator_fallback("roc_polars_ta", exc)
     prev_close = df["close"].shift(period)
-    return (
-        (((df["close"] / prev_close) - 1.0) * 100.0)
-        .fill_nan(0.0)
-        .rename(f"roc{period}")
-    )
+    return (((df["close"] / prev_close) - 1.0) * 100.0).fill_nan(0.0).rename(f"roc{period}")
 
 
 def _stochastic(
@@ -503,12 +479,8 @@ def _stochastic(
     rolling_high = df["high"].rolling_max(window_size=period)
     width = rolling_high - rolling_low
     raw_k = _clean_non_finite(((df["close"] - rolling_low) / width) * 100.0, fill=50.0)
-    k = _clean_non_finite(raw_k.rolling_mean(window_size=smooth_k), fill=50.0).rename(
-        "stoch_k14"
-    )
-    d = _clean_non_finite(k.rolling_mean(window_size=smooth_d), fill=50.0).rename(
-        "stoch_d14"
-    )
+    k = _clean_non_finite(raw_k.rolling_mean(window_size=smooth_k), fill=50.0).rename("stoch_k14")
+    d = _clean_non_finite(k.rolling_mean(window_size=smooth_d), fill=50.0).rename("stoch_d14")
     return k, d
 
 
@@ -516,9 +488,9 @@ def _cci(df: pl.DataFrame, period: int = 20) -> pl.Series:
     typical_price = (df["high"] + df["low"] + df["close"]) / 3.0
     sma = typical_price.rolling_mean(window_size=period)
     mean_dev = (typical_price - sma).abs().rolling_mean(window_size=period)
-    return _clean_non_finite(
-        (typical_price - sma) / (0.015 * mean_dev), fill=0.0
-    ).rename(f"cci{period}")
+    return _clean_non_finite((typical_price - sma) / (0.015 * mean_dev), fill=0.0).rename(
+        f"cci{period}"
+    )
 
 
 def _mfi(df: pl.DataFrame, period: int = 14) -> pl.Series:
@@ -547,9 +519,11 @@ def _mfi(df: pl.DataFrame, period: int = 14) -> pl.Series:
 
 def _cmf(df: pl.DataFrame, period: int = 20) -> pl.Series:
     width = df["high"] - df["low"]
-    mfm = pl.when(width > 0.0).then(
-        ((df["close"] - df["low"]) - (df["high"] - df["close"])) / width
-    ).otherwise(0.0)
+    mfm = (
+        pl.when(width > 0.0)
+        .then(((df["close"] - df["low"]) - (df["high"] - df["close"])) / width)
+        .otherwise(0.0)
+    )
 
     money_flow_volume = mfm * df["volume"]
     volume_sum = df["volume"].rolling_sum(window_size=period)
@@ -561,9 +535,7 @@ def _cmf(df: pl.DataFrame, period: int = 20) -> pl.Series:
     )
 
 
-def _ultimate_oscillator(
-    df: pl.DataFrame, p1: int = 7, p2: int = 14, p3: int = 28
-) -> pl.Series:
+def _ultimate_oscillator(df: pl.DataFrame, p1: int = 7, p2: int = 14, p3: int = 28) -> pl.Series:
     prev_close = df["close"].shift(1)
     min_low = _materialize_series(
         pl.min_horizontal(df["low"], prev_close), df=df, name="uo_min_low"
@@ -583,8 +555,9 @@ def _ultimate_oscillator(
 def _realized_volatility(df: pl.DataFrame, period: int = 20) -> pl.Series:
     log_returns = df["close"].log() - df["close"].shift(1).log()
     return _materialize_series(
-        (log_returns.rolling_std(window_size=period) * float(np.sqrt(period)) * 100.0)
-        .fill_nan(0.0),
+        (log_returns.rolling_std(window_size=period) * float(np.sqrt(period)) * 100.0).fill_nan(
+            0.0
+        ),
         df=df,
         name=f"realized_vol_{period}",
     )
@@ -610,13 +583,9 @@ def _add_session_features(work: pl.DataFrame, period: int = 20) -> pl.DataFrame:
     work = work.with_columns(
         [
             hour.is_between(0, 8, closed="left").cast(pl.Float64).alias("session_asia"),
-            hour.is_between(7, 16, closed="left")
-            .cast(pl.Float64)
-            .alias("session_london"),
+            hour.is_between(7, 16, closed="left").cast(pl.Float64).alias("session_london"),
             hour.is_between(13, 22, closed="left").cast(pl.Float64).alias("session_ny"),
-            hour.is_between(13, 16, closed="left")
-            .cast(pl.Float64)
-            .alias("session_overlap"),
+            hour.is_between(13, 16, closed="left").cast(pl.Float64).alias("session_overlap"),
         ]
     )
     scale = float(np.sqrt(period) * 100.0)
@@ -852,9 +821,7 @@ def _parabolic_sar(
         prev_psar = psar
         psar = prev_psar + af * (ep - prev_psar)
         if is_long:
-            psar = min(
-                psar, low_vals[i - 1], low_vals[i - 2] if i > 1 else low_vals[i - 1]
-            )
+            psar = min(psar, low_vals[i - 1], low_vals[i - 2] if i > 1 else low_vals[i - 1])
             if low_vals[i] < psar:
                 is_long = False
                 reversals[i] = -1.0
@@ -868,9 +835,7 @@ def _parabolic_sar(
                 af = min(af + step, max_step)
             long_psar[i] = psar
         else:
-            psar = max(
-                psar, high_vals[i - 1], high_vals[i - 2] if i > 1 else high_vals[i - 1]
-            )
+            psar = max(psar, high_vals[i - 1], high_vals[i - 2] if i > 1 else high_vals[i - 1])
             if high_vals[i] > psar:
                 is_long = True
                 reversals[i] = 1.0
@@ -891,9 +856,7 @@ def _parabolic_sar(
     )
 
 
-def _aroon(
-    df: pl.DataFrame, period: int = 14
-) -> tuple[pl.Series, pl.Series, pl.Series]:
+def _aroon(df: pl.DataFrame, period: int = 14) -> tuple[pl.Series, pl.Series, pl.Series]:
     """Aroon indicator - vectorized via rolling_map."""
     high = df["high"]
     low = df["low"]
@@ -917,9 +880,7 @@ def _aroon(
     )
 
 
-def _fisher_transform(
-    df: pl.DataFrame, period: int = 10
-) -> tuple[pl.Series, pl.Series]:
+def _fisher_transform(df: pl.DataFrame, period: int = 10) -> tuple[pl.Series, pl.Series]:
     high = [float(v or 0.0) for v in df["high"]]
     low = [float(v or 0.0) for v in df["low"]]
     close = [float(v or 0.0) for v in df["close"]]
@@ -950,14 +911,10 @@ def _squeeze_momentum(
     bb_upper, bb_mid, bb_lower = _bollinger_bands(df["close"], period=period, nbdev=2.0)
     kc_upper, _, kc_lower = _keltner_channels(df, period=period, multiplier=1.5)
     squeeze_on = (
-        ((bb_lower > kc_lower) & (bb_upper < kc_upper))
-        .cast(pl.Float64)
-        .rename("squeeze_on")
+        ((bb_lower > kc_lower) & (bb_upper < kc_upper)).cast(pl.Float64).rename("squeeze_on")
     )
     squeeze_off = (
-        ((bb_lower < kc_lower) & (bb_upper > kc_upper))
-        .cast(pl.Float64)
-        .rename("squeeze_off")
+        ((bb_lower < kc_lower) & (bb_upper > kc_upper)).cast(pl.Float64).rename("squeeze_off")
     )
     squeeze_no_values = [
         max(0.0, min(1.0, 1.0 - max(float(on or 0.0), float(off or 0.0))))
@@ -965,16 +922,13 @@ def _squeeze_momentum(
     ]
     squeeze_no = pl.Series("squeeze_no", squeeze_no_values, dtype=pl.Float64)
     basis = (
-        (
-            df["high"].rolling_max(window_size=period)
-            + df["low"].rolling_min(window_size=period)
-        )
+        (df["high"].rolling_max(window_size=period) + df["low"].rolling_min(window_size=period))
         / 2.0
         + bb_mid
     ) / 2.0
-    hist = _clean_non_finite(
-        (df["close"] - basis).ewm_mean(span=5, adjust=False), fill=0.0
-    ).rename("squeeze_hist")
+    hist = _clean_non_finite((df["close"] - basis).ewm_mean(span=5, adjust=False), fill=0.0).rename(
+        "squeeze_hist"
+    )
     return hist, squeeze_on, squeeze_off, squeeze_no
 
 
@@ -1068,9 +1022,7 @@ def _add_advanced_indicators(df: pl.DataFrame) -> pl.DataFrame:
 
     # --- Keltner Channels - pure Polars implementation -----------------------
     kc_upper, kc_middle, kc_lower = _keltner_channels(df, period=20, multiplier=2.0)
-    close_safe = _clean_non_finite(df["close"].abs(), fill=1e-10).clip(
-        lower_bound=1e-10
-    )
+    close_safe = _clean_non_finite(df["close"].abs(), fill=1e-10).clip(lower_bound=1e-10)
     kc_width = (kc_upper - kc_lower) / close_safe
     result = result.with_columns(
         [
@@ -1124,9 +1076,7 @@ def _add_advanced_indicators(df: pl.DataFrame) -> pl.DataFrame:
     # --- CCI, Williams %R, MFI, CMF, Ultimate Oscillator --------------------
     rolling_high = df["high"].rolling_max(window_size=14)
     rolling_low = df["low"].rolling_min(window_size=14)
-    willr = (
-        ((rolling_high - df["close"]) / (rolling_high - rolling_low)) * -100.0
-    ).fill_nan(-50.0)
+    willr = (((rolling_high - df["close"]) / (rolling_high - rolling_low)) * -100.0).fill_nan(-50.0)
     result = result.with_columns(
         [
             _cci(df, 20).fill_nan(0.0).alias("cci20"),
@@ -1210,12 +1160,7 @@ def _volume_profile(df: pl.DataFrame, bins: int = 12) -> pl.Expr:
     volumes = df["volume"].cast(pl.Float64, strict=False)
 
     # Filter valid prices and volumes
-    valid_mask = (
-        prices.is_not_null()
-        & prices.is_finite()
-        & volumes.is_not_null()
-        & (volumes > 0.0)
-    )
+    valid_mask = prices.is_not_null() & prices.is_finite() & volumes.is_not_null() & (volumes > 0.0)
     v_prices = prices.filter(valid_mask)
     v_volumes = volumes.filter(valid_mask)
 
@@ -1233,16 +1178,11 @@ def _volume_profile(df: pl.DataFrame, bins: int = 12) -> pl.Expr:
 
         # Vectorized bucketing
         buckets = (
-            ((v_prices - price_min) / bucket_size)
-            .floor()
-            .cast(pl.Int32)
-            .clip(0, bucket_count - 1)
+            ((v_prices - price_min) / bucket_size).floor().cast(pl.Int32).clip(0, bucket_count - 1)
         )
 
         vol_by_bucket = (
-            pl.DataFrame({"b": buckets, "v": v_volumes})
-            .group_by("b")
-            .agg(pl.col("v").sum())
+            pl.DataFrame({"b": buckets, "v": v_volumes}).group_by("b").agg(pl.col("v").sum())
         )
 
         if vol_by_bucket.is_empty():
@@ -1364,9 +1304,7 @@ def _prepare_frame(df: pl.DataFrame) -> pl.DataFrame:
     # ATR %
     work = work.with_columns(
         [
-            ((pl.col("atr14") / pl.col("close")) * 100.0)
-            .clip(lower_bound=0.001)
-            .alias("atr_pct"),
+            ((pl.col("atr14") / pl.col("close")) * 100.0).clip(lower_bound=0.001).alias("atr_pct"),
         ]
     )
 
@@ -1399,9 +1337,7 @@ def _prepare_frame(df: pl.DataFrame) -> pl.DataFrame:
 
     # Drop rows with insufficient data
     # Filter where ema200 or donchian_low20 is null
-    work = work.filter(
-        pl.col("ema200").is_not_null() & pl.col("donchian_low20").is_not_null()
-    )
+    work = work.filter(pl.col("ema200").is_not_null() & pl.col("donchian_low20").is_not_null())
 
     return work
 
@@ -1461,9 +1397,7 @@ def _market_regime(
     adx_4h = _numeric_item(work_4h, -1, "adx14")
     bias_4h = _bias_4h(work_4h)
     regime_1h = _regime_1h_confirmed(work_1h if work_1h is not None else pl.DataFrame())
-    atr_pct_15m = _numeric_item(
-        work_15m if work_15m is not None else pl.DataFrame(), -1, "atr_pct"
-    )
+    atr_pct_15m = _numeric_item(work_15m if work_15m is not None else pl.DataFrame(), -1, "atr_pct")
 
     if (
         adx_4h >= threshold_trending
@@ -1501,20 +1435,14 @@ def _swing_points(
 
     # Current bar is strict max/min compared to n bars before and n bars after
     left_max = high.rolling_max(window_size=n, min_samples=1).shift(1)
-    right_max = (
-        high.reverse().rolling_max(window_size=n, min_samples=1).reverse().shift(-1)
-    )
+    right_max = high.reverse().rolling_max(window_size=n, min_samples=1).reverse().shift(-1)
     swing_high = (high > left_max.fill_null(-float("inf"))) & (
         high > right_max.fill_null(-float("inf"))
     )
 
     left_min = low.rolling_min(window_size=n, min_samples=1).shift(1)
-    right_min = (
-        low.reverse().rolling_min(window_size=n, min_samples=1).reverse().shift(-1)
-    )
-    swing_low = (low < left_min.fill_null(float("inf"))) & (
-        low < right_min.fill_null(float("inf"))
-    )
+    right_min = low.reverse().rolling_min(window_size=n, min_samples=1).reverse().shift(-1)
+    swing_low = (low < left_min.fill_null(float("inf"))) & (low < right_min.fill_null(float("inf")))
 
     if not include_unconfirmed_tail:
         # Require full context (both sides)
@@ -1603,9 +1531,7 @@ def _regime_1h_confirmed(work_1h: pl.DataFrame, min_bars: int = 3) -> str:
     return "ranging"
 
 
-def _volume_poc(
-    work: pl.DataFrame, lookback: int = 96, buckets: int = 20
-) -> float | None:
+def _volume_poc(work: pl.DataFrame, lookback: int = 96, buckets: int = 20) -> float | None:
     """Simplified Volume Point of Control (vectorized)."""
     if len(work) < 10:
         return None
@@ -1623,17 +1549,10 @@ def _volume_poc(
     # This is slightly more complex to vectorize than simple close-based POC.
     # For a simplified vectorized version, we'll use the bar midpoint for bucketing.
     midpoints = (tail["high"] + tail["low"]) / 2.0
-    v_buckets = (
-        ((midpoints - price_min) / bucket_size)
-        .floor()
-        .cast(pl.Int32)
-        .clip(0, buckets - 1)
-    )
+    v_buckets = ((midpoints - price_min) / bucket_size).floor().cast(pl.Int32).clip(0, buckets - 1)
 
     vol_by_bucket = (
-        pl.DataFrame({"b": v_buckets, "v": tail["volume"]})
-        .group_by("b")
-        .agg(pl.col("v").sum())
+        pl.DataFrame({"b": v_buckets, "v": tail["volume"]}).group_by("b").agg(pl.col("v").sum())
     )
 
     if vol_by_bucket.is_empty():
@@ -1657,11 +1576,7 @@ def _cached_prepare_frame(
     ws_manager: Any | None = None,
 ) -> pl.DataFrame:
     """_prepare_frame with LRU cache keyed on (symbol, interval, close_time)."""
-    if (
-        frame.is_empty()
-        or "close_time" not in frame.columns
-        or "close" not in frame.columns
-    ):
+    if frame.is_empty() or "close_time" not in frame.columns or "close" not in frame.columns:
         return _enrich_with_ws_data(
             _prepare_frame(frame),
             symbol,
@@ -1857,14 +1772,10 @@ def prepare_symbol(
     )
     work_5m = None
     if frames.df_5m is not None and not frames.df_5m.is_empty():
-        work_5m = _cached_prepare_frame(
-            _to_polars(frames.df_5m), symbol=sym, interval="5m"
-        )
+        work_5m = _cached_prepare_frame(_to_polars(frames.df_5m), symbol=sym, interval="5m")
     work_4h = None
     if frames.df_4h is not None and not frames.df_4h.is_empty():
-        work_4h = _cached_prepare_frame(
-            _to_polars(frames.df_4h), symbol=sym, interval="4h"
-        )
+        work_4h = _cached_prepare_frame(_to_polars(frames.df_4h), symbol=sym, interval="4h")
 
     work_len_1h = len(work_1h) if work_1h is not None else 0
     work_len_15m = len(work_15m) if work_15m is not None else 0

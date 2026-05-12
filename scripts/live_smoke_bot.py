@@ -23,7 +23,9 @@ class FakeBroadcaster:
     async def preflight_check(self) -> None:
         return None
 
-    async def send_html(self, text: str, *, reply_to_message_id: int | None = None) -> DeliveryResult:
+    async def send_html(
+        self, text: str, *, reply_to_message_id: int | None = None
+    ) -> DeliveryResult:
         return DeliveryResult(status="suppressed", message_id=None, reason="live_smoke_bot")
 
     async def edit_html(self, message_id: int, text: str) -> None:
@@ -89,9 +91,13 @@ async def _run(
         )
         if before is not None and before.get("status") in {"pending", "active"}:
             if after is not None and after.get("status") in {"pending", "active"}:
-                raise RuntimeError(f"startup sweep did not close expired tracked signal: before={before} after={after}")
+                raise RuntimeError(
+                    f"startup sweep did not close expired tracked signal: before={before} after={after}"
+                )
         if bot._prepare_error_count != 0:
-            raise RuntimeError(f"prepare errors observed during live smoke: {bot._prepare_error_count}")
+            raise RuntimeError(
+                f"prepare errors observed during live smoke: {bot._prepare_error_count}"
+            )
         if int(ws_snapshot.get("fresh_tickers") or 0) <= 0:
             raise RuntimeError(f"fresh_tickers missing in live smoke snapshot: {ws_snapshot}")
         if int(ws_snapshot.get("fresh_mark_prices") or 0) <= 0:
@@ -122,7 +128,9 @@ async def _run(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="End-to-end live smoke test without Telegram sends")
+    parser = argparse.ArgumentParser(
+        description="End-to-end live smoke test without Telegram sends"
+    )
     parser.add_argument(
         "--tracking-id",
         default="XRPUSDT|structure_pullback|long|20260421T131017986805Z",

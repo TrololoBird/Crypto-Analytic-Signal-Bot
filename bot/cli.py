@@ -30,9 +30,7 @@ from .logging_config import configure_structlog
 from .startup_reporter import generate_and_send_startup_report, run_daily_summary_loop
 from .telemetry import TelemetryStore
 
-_LOGGER_STDERR_PREFIX_RE = re.compile(
-    r"^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?:,\d{3})?\s+\|"
-)
+_LOGGER_STDERR_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?:,\d{3})?\s+\|")
 
 
 def _get_or_create_event_loop() -> asyncio.AbstractEventLoop:
@@ -97,9 +95,7 @@ def _run_doctor_check(settings: BotSettings) -> None:
                 )
             },
         }
-        logging.getLogger("bot.cli").info(
-            "DOCTOR OK | %s", json.dumps(report, default=str)
-        )
+        logging.getLogger("bot.cli").info("DOCTOR OK | %s", json.dumps(report, default=str))
     except Exception as exc:
         logging.getLogger("bot.cli").warning("DOCTOR DEGRADED: %s", exc)
 
@@ -208,16 +204,12 @@ def _rotate_session_log(log_path: Path, *, stamp: str) -> None:
     target = log_path.with_name(f"{log_path.stem}_{stamp}{log_path.suffix}")
     counter = 1
     while target.exists():
-        target = log_path.with_name(
-            f"{log_path.stem}_{stamp}.{counter}{log_path.suffix}"
-        )
+        target = log_path.with_name(f"{log_path.stem}_{stamp}.{counter}{log_path.suffix}")
         counter += 1
     try:
         shutil.move(str(log_path), str(target))
     except OSError as exc:
-        sys.stderr.write(
-            f"[WARN] failed to rotate previous session log {log_path}: {exc}\n"
-        )
+        sys.stderr.write(f"[WARN] failed to rotate previous session log {log_path}: {exc}\n")
 
 
 def configure_logging(settings: BotSettings, *, debug_mode: bool = False) -> None:
@@ -234,11 +226,7 @@ def configure_logging(settings: BotSettings, *, debug_mode: bool = False) -> Non
         sys.stderr.write(f"[WARN] file logging disabled for {log_path}: {exc}\n")
 
     # Use DEBUG level for full traces
-    log_level = (
-        logging.DEBUG
-        if debug_mode
-        else getattr(logging, settings.log_level, logging.INFO)
-    )
+    log_level = logging.DEBUG if debug_mode else getattr(logging, settings.log_level, logging.INFO)
 
     logging.basicConfig(
         level=log_level,
@@ -255,9 +243,7 @@ def configure_logging(settings: BotSettings, *, debug_mode: bool = False) -> Non
     # Reduce noise from external libraries but keep warnings
     logging.getLogger("websockets").setLevel(logging.INFO)
     logging.getLogger("hpack").setLevel(logging.WARNING)
-    logging.getLogger("asyncio").setLevel(
-        logging.WARNING
-    )  # Only real warnings, not debug spam
+    logging.getLogger("asyncio").setLevel(logging.WARNING)  # Only real warnings, not debug spam
 
     # Log file location
     start_time = session_dt.strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -318,14 +304,8 @@ async def _acquire_pid_lock(pid_file: Path) -> None:
             return
         except FileExistsError:
             existing_pid = await asyncio.to_thread(_read_pid_value, pid_file)
-            if (
-                existing_pid
-                and existing_pid != os.getpid()
-                and _pid_is_alive(existing_pid)
-            ):
-                raise SystemExit(
-                    f"another bot process is already running with pid {existing_pid}"
-                )
+            if existing_pid and existing_pid != os.getpid() and _pid_is_alive(existing_pid):
+                raise SystemExit(f"another bot process is already running with pid {existing_pid}")
             # Race hardening for empty/initializing PID file:
             # never unlink immediately; first give other process enough time
             # to finish writing its PID.
@@ -344,9 +324,7 @@ async def _acquire_pid_lock(pid_file: Path) -> None:
             except FileNotFoundError:
                 continue
             except OSError as exc:
-                raise SystemExit(
-                    f"failed to remove stale pid lock {pid_file}: {exc}"
-                ) from exc
+                raise SystemExit(f"failed to remove stale pid lock {pid_file}: {exc}") from exc
             # After successful unlink, retry the lock acquisition
             continue
 
@@ -368,9 +346,7 @@ def _setup_signal_handlers(bot: SignalBot) -> None:
         try:
             bot.request_shutdown()
         except Exception as exc:
-            logging.getLogger("bot.cli").warning(
-                "failed to request shutdown: %s", repr(exc)
-            )
+            logging.getLogger("bot.cli").warning("failed to request shutdown: %s", repr(exc))
 
     for sig in (signal.SIGTERM, signal.SIGINT):
         try:
@@ -387,18 +363,14 @@ def _setup_signal_handlers(bot: SignalBot) -> None:
                     "signal.signal unavailable for %s (%s)", sig, repr(exc2)
                 )
         except Exception as exc:
-            logging.getLogger("bot.cli").warning(
-                "signal handler setup failed: %s", repr(exc)
-            )
+            logging.getLogger("bot.cli").warning("signal handler setup failed: %s", repr(exc))
 
 
 async def _main() -> None:
     _bootstrap_env_if_missing()
     settings = load_settings("config.toml")
     if settings.config_path.name != "config.toml":
-        sys.stderr.write(
-            f"[WARN] config.toml not found; using {settings.config_path}\n"
-        )
+        sys.stderr.write(f"[WARN] config.toml not found; using {settings.config_path}\n")
     use_telegram = settings.notifiers.provider == "telegram"
     if not use_telegram:
         sys.stderr.write(
@@ -452,9 +424,7 @@ async def _main() -> None:
     sys.stderr = _StderrToLog("stderr", _orig_stderr)
 
     # Hook to log unhandled exceptions
-    def _log_exception(
-        loop: asyncio.AbstractEventLoop, context: dict[str, Any]
-    ) -> None:
+    def _log_exception(loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
         msg = context.get("exception", context["message"])
         logging.getLogger("asyncio").exception(
             "Unhandled exception: %s",
@@ -500,9 +470,7 @@ def run() -> None:
     sub.add_parser("run", help="Run live bot runtime (default)")
     sub.add_parser("status", help="Show runtime/db status")
     sub.add_parser("stop", help="Stop running bot by pid-file")
-    backtest = sub.add_parser(
-        "backtest", help="Compute outcome stats from SQLite history"
-    )
+    backtest = sub.add_parser("backtest", help="Compute outcome stats from SQLite history")
     backtest.add_argument("--days", type=int, default=30)
     backtest.add_argument("--setup", type=str, default="")
     replay = sub.add_parser("replay", help="Show latest replay telemetry rows")
@@ -510,9 +478,7 @@ def run() -> None:
     db = sub.add_parser("db", help="DB maintenance")
     db_sub = db.add_subparsers(dest="db_command")
     db_sub.add_parser("migrate", help="Apply forward migrations")
-    db_clean = db_sub.add_parser(
-        "clean", help="Cleanup old outcomes by retention window"
-    )
+    db_clean = db_sub.add_parser("clean", help="Cleanup old outcomes by retention window")
     db_clean.add_argument("--days", type=int, default=30)
     args = parser.parse_args()
 
@@ -526,9 +492,7 @@ def run() -> None:
         _run_stop_command()
         return
     if args.command == "backtest":
-        _run_backtest_command(
-            days=max(1, int(args.days)), setup_id=str(args.setup or "").strip()
-        )
+        _run_backtest_command(days=max(1, int(args.days)), setup_id=str(args.setup or "").strip())
         return
     if args.command == "replay":
         _run_replay_command(tail=max(1, int(args.tail)))
@@ -673,9 +637,7 @@ def _run_replay_command(*, tail: int) -> None:
     if not replay_dir.exists():
         raise SystemExit(f"replay dir not found: {replay_dir}")
     rows: list[str] = []
-    for path in sorted(
-        replay_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True
-    ):
+    for path in sorted(replay_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True):
         data = path.read_text(encoding="utf-8", errors="ignore").splitlines()
         for line in reversed([ln for ln in data if ln.strip()]):
             rows.append(line)

@@ -16,15 +16,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Walk-forward ML training")
     parser.add_argument("--start", required=True)
     parser.add_argument("--end", required=True)
-    parser.add_argument(
-        "--input", required=True, help="Path to parquet/csv training dataset"
-    )
+    parser.add_argument("--input", required=True, help="Path to parquet/csv training dataset")
     parser.add_argument("--window-days", type=int, default=90)
     parser.add_argument("--step-days", type=int, default=30)
     parser.add_argument("--model-dir", default="data/bot/ml/models")
-    parser.add_argument(
-        "--report", default="", help="Optional path to write JSON report"
-    )
+    parser.add_argument("--report", default="", help="Optional path to write JSON report")
     parser.add_argument(
         "--min-windows",
         type=int,
@@ -103,9 +99,7 @@ def main() -> None:
     if args.report:
         report_path = Path(args.report)
         report_path.parent.mkdir(parents=True, exist_ok=True)
-        report_path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        report_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(payload, ensure_ascii=False))
     if gate_failures:
         print("; ".join(gate_failures), file=sys.stderr)
@@ -165,9 +159,7 @@ def _evaluate_gate_failures(
     for metric, threshold in thresholds.items():
         value = float(summary.get(metric, 0.0))
         if value < threshold:
-            failures.append(
-                f"aggregate {metric} {value:.4f} is below min-{metric} {threshold:.4f}"
-            )
+            failures.append(f"aggregate {metric} {value:.4f} is below min-{metric} {threshold:.4f}")
 
     return failures
 

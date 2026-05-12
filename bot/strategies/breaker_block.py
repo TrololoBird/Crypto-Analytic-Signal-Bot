@@ -29,9 +29,7 @@ class BreakerBlockSetup(BaseSetup):
     confirmation_profile = "breakout_acceptance"
     required_context = ("futures_flow",)
 
-    def get_optimizable_params(
-        self, settings: BotSettings | None = None
-    ) -> dict[str, float]:
+    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
         """Tunable parameters for self-learner optimization."""
         defaults = {
             "base_score": 0.52,
@@ -73,9 +71,7 @@ class BreakerBlockSetup(BaseSetup):
         mitigation_threshold = float(
             dynamic_params.get("mitigation_threshold", defaults["mitigation_threshold"])
         )
-        sl_buffer_atr = float(
-            dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"])
-        )
+        sl_buffer_atr = float(dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]))
         min_rr = float(dynamic_params.get("min_rr", defaults["min_rr"]))
         base_score = float(dynamic_params.get("base_score", defaults["base_score"]))
 
@@ -117,9 +113,7 @@ class BreakerBlockSetup(BaseSetup):
             stop = bb_low - sl_buffer_atr * atr
             risk = price - stop
             if risk <= 0:
-                _reject(
-                    prepared, setup_id, "risk_non_positive_long", stop=stop, price=price
-                )
+                _reject(prepared, setup_id, "risk_non_positive_long", stop=stop, price=price)
                 return None
             # TP1: next 1h swing high (liquidity target / imbalance fill)
             sh_mask, _ = _sp(w1h, n=3, include_unconfirmed_tail=True)
@@ -163,9 +157,7 @@ class BreakerBlockSetup(BaseSetup):
 
         fallback_note = None
         if tp1 is None or abs(tp1 - price) < risk * min_rr:
-            tp1 = (
-                price + risk * min_rr if direction == "long" else price - risk * min_rr
-            )
+            tp1 = price + risk * min_rr if direction == "long" else price - risk * min_rr
             fallback_note = f"tp1_rr_fallback_{min_rr:.2f}"
         if tp2 is None:
             tp2 = tp1  # Use TP1 as TP2 if no extended target found

@@ -53,9 +53,7 @@ def _bb_kc_squeeze_active(
                 else bb_squeeze_threshold
             )
         if width_q25 > 0:
-            compression_cap = (
-                min(compression_cap, width_q25) if compression_cap > 0 else width_q25
-            )
+            compression_cap = min(compression_cap, width_q25) if compression_cap > 0 else width_q25
         was_compressed = compression_cap > 0 and bb_width <= compression_cap
     else:
         compression_cap = min_bb_compression_width
@@ -84,9 +82,7 @@ class SqueezeSetup(BaseSetup):
     confirmation_profile = "breakout_acceptance"
     required_context = ("futures_flow",)
 
-    def get_optimizable_params(
-        self, settings: BotSettings | None = None
-    ) -> dict[str, float]:
+    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
         """Tunable parameters for self-learner optimization."""
         defaults = {
             "base_score": 0.55,
@@ -114,15 +110,11 @@ class SqueezeSetup(BaseSetup):
         dynamic_params = get_dynamic_params(prepared, self.setup_id)
         defaults = self.get_optimizable_params(settings)
         bb_squeeze_threshold = _as_float(
-            dynamic_params.get(
-                "bb_squeeze_threshold", defaults["bb_squeeze_threshold"]
-            ),
+            dynamic_params.get("bb_squeeze_threshold", defaults["bb_squeeze_threshold"]),
             defaults["bb_squeeze_threshold"],
         )
         min_bb_compression_width = _as_float(
-            dynamic_params.get(
-                "min_bb_compression_width", defaults["min_bb_compression_width"]
-            ),
+            dynamic_params.get("min_bb_compression_width", defaults["min_bb_compression_width"]),
             defaults["min_bb_compression_width"],
         )
         bb_pct_b_threshold = _as_float(
@@ -137,17 +129,13 @@ class SqueezeSetup(BaseSetup):
             dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]),
             defaults["sl_buffer_atr"],
         )
-        min_rr = _as_float(
-            dynamic_params.get("min_rr", defaults["min_rr"]), defaults["min_rr"]
-        )
+        min_rr = _as_float(dynamic_params.get("min_rr", defaults["min_rr"]), defaults["min_rr"])
         base_score = _as_float(
             dynamic_params.get("base_score", defaults["base_score"]),
             defaults["base_score"],
         )
         funding_extreme_threshold = _as_float(
-            dynamic_params.get(
-                "funding_extreme_threshold", defaults["funding_extreme_threshold"]
-            ),
+            dynamic_params.get("funding_extreme_threshold", defaults["funding_extreme_threshold"]),
             defaults["funding_extreme_threshold"],
         )
         liquidation_extreme_threshold = _as_float(
@@ -207,9 +195,7 @@ class SqueezeSetup(BaseSetup):
 
         oi_chg = prepared.oi_change_pct
         if oi_chg is not None and oi_chg < -8.0:
-            _reject(
-                prepared, "squeeze_setup", "oi_falling_too_fast", oi_change_pct=oi_chg
-            )
+            _reject(prepared, "squeeze_setup", "oi_falling_too_fast", oi_change_pct=oi_chg)
             return None
 
         atr = _as_float(work_15m.item(-1, "atr14"))

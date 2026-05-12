@@ -51,9 +51,7 @@ class _ExplodingSetup(BaseSetup):
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         raise RuntimeError("boom")
 
-    def get_optimizable_params(
-        self, settings: BotSettings | None = None
-    ) -> dict[str, float]:
+    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
         return {}
 
 
