@@ -311,7 +311,9 @@ class BOSCHOCHSetup(BaseSetup):
         sl_prices = scan.filter(sl_mask)["low"]
 
         # Need at least 3 of each to determine prior trend + break
-        min_swings = int(dynamic_params.get("min_swings", defaults["min_swings"]))
+        min_swings = max(
+            3, int(dynamic_params.get("min_swings", defaults["min_swings"]))
+        )
         if sh_prices.len() < min_swings or sl_prices.len() < min_swings:
             _reject(
                 prepared,
@@ -335,7 +337,16 @@ class BOSCHOCHSetup(BaseSetup):
             _reject(prepared, setup_id, "no_choch_detected")
             return None
         direction = structure_zone.direction
-        broken_index = int(structure_zone.broken_index or (scan.height - 1))
+        if structure_zone.level is None or structure_zone.broken_index is None:
+            _reject(
+                prepared,
+                setup_id,
+                "invalid_choch_zone",
+                level=structure_zone.level,
+                broken_index=structure_zone.broken_index,
+            )
+            return None
+        broken_index = int(structure_zone.broken_index)
         broken_index = max(0, min(broken_index, scan.height - 1))
         break_age = scan.height - 1 - broken_index
         if break_age > max_break_age_bars:
@@ -347,8 +358,12 @@ class BOSCHOCHSetup(BaseSetup):
                 max_break_age_bars=max_break_age_bars,
             )
             return None
-        break_level = float(structure_zone.level or 0.0)
-        break_close = float(scan.item(broken_index, "close") or 0.0)
+        break_level = float(structure_zone.level)
+        raw_break_close = scan.item(broken_index, "close")
+        if raw_break_close is None:
+            _reject(prepared, setup_id, "break_close_missing", broken_index=broken_index)
+            return None
+        break_close = float(raw_break_close)
         break_distance = (
             break_close - break_level if direction == "long" else break_level - break_close
         )
@@ -391,7 +406,7 @@ class BOSCHOCHSetup(BaseSetup):
         internal_markers = internal_swings["HighLow"].to_list()
         internal_levels = internal_swings["Level"].to_list()
         external_search_end = min(
-            int(structure_zone.broken_index or (scan.height - 1)),
+            int(structure_zone.broken_index),
             len(external_markers) - 1,
             len(external_levels) - 1,
             len(internal_markers) - 1,

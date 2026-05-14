@@ -106,6 +106,7 @@ class FVGSetup(BaseSetup):
         zone = latest_fvg_zone(
             w,
             join_consecutive=True,
+            allowed_states=("fresh",),
             current_price=price,
             touch_buffer=price_touch_buffer,
         )
@@ -118,6 +119,30 @@ class FVGSetup(BaseSetup):
         fvg_high = zone.top
         fvg_width = zone.width
         fvg_mid = zone.midpoint
+        try:
+            zone_values_valid = all(
+                math.isfinite(float(value)) and float(value) > 0.0
+                for value in (fvg_low, fvg_high, fvg_width, fvg_mid)
+            )
+        except (TypeError, ValueError):
+            zone_values_valid = False
+        if (
+            direction not in {"long", "short"}
+            or zone.created_index is None
+            or not (0 <= int(zone.created_index) < w.height)
+            or not zone_values_valid
+        ):
+            _reject(
+                prepared,
+                setup_id,
+                "invalid_fvg_zone",
+                direction=direction,
+                top=fvg_high,
+                bottom=fvg_low,
+                width=fvg_width,
+                created_index=zone.created_index,
+            )
+            return None
         mitigation_pct = abs(price - fvg_mid) / fvg_width if fvg_width > 0 else 0.0
         if (
             fvg_width / price < (min_gap_width_bps / 10000)
@@ -181,10 +206,9 @@ class FVGSetup(BaseSetup):
         if direction == "long" and structure_1h == "downtrend":
             score *= dynamic_params.get("bias_mismatch_penalty", defaults["bias_mismatch_penalty"])
         if direction == "short" and structure_1h == "uptrend":
-            score *= dynamic_params.get("bias_mismatch_penalty", defaults["bias_mismatch_penalty"])
-        if zone.state == "mitigated":
-            score *= 0.95
-
+            score *= dynamic_params.get(
+                "bias_mismatch_penalty", defaults["bias_mismatch_penalty"]
+            )
         # --- Compute structural SL/TP ---
         if direction == "long":
             # SL: beyond opposite side of FVG + 0.5×ATR (was 0.1)

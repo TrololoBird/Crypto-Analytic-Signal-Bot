@@ -1300,6 +1300,10 @@ class SymbolAnalyzer:
                 if funding_rate is not None:
                     enrichments["funding_rate"] = funding_rate
 
+            oi_current = self._bot.client.get_cached_open_interest(symbol)
+            if oi_current is not None:
+                enrichments["oi_current"] = oi_current
+
             oi_chg = self._bot.client.get_cached_oi_change(symbol)
             if oi_chg is not None:
                 enrichments["oi_change_pct"] = oi_chg

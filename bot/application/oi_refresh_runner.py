@@ -34,8 +34,8 @@ class OIRefreshRunner:
 
             await self.refresh_once(shortlist, max_age_seconds=0.0)
 
-            # Increased interval from 15min to 30min to reduce API load
-            # 45 symbols × 3 requests = 135 requests every 30min instead of every 15min
+            # Increased interval from 15min to 30min to reduce API load.
+            # 45 symbols x 6 public requests = 270 requests every 30min.
             try:
                 await asyncio.wait_for(self._bot._shutdown.wait(), timeout=1800)
             except asyncio.TimeoutError:
@@ -165,6 +165,11 @@ class OIRefreshRunner:
         fetchers: list[tuple[str, str, Any]] = [
             (
                 "rest",
+                "oi_current",
+                lambda: client.fetch_open_interest(symbol),
+            ),
+            (
+                "rest",
                 "oi_change_1h",
                 lambda: client.fetch_open_interest_change(symbol, period="1h"),
             ),
@@ -177,6 +182,11 @@ class OIRefreshRunner:
                 "rest",
                 "top_position_ls_ratio_1h",
                 lambda: client.fetch_top_position_ls_ratio(symbol, period="1h"),
+            ),
+            (
+                "rest",
+                "taker_ratio_1h",
+                lambda: client.fetch_taker_ratio(symbol, period="1h"),
             ),
             (
                 "rest",
@@ -202,7 +212,7 @@ class OIRefreshRunner:
                 degraded = True
                 degrade_reason = str(exc)
                 fallback_used = "skip_stage"
-                LOG.info(
+                LOG.warning(
                     "oi refresh degraded | symbol=%s stage=%s source=%s degraded=%s degrade_reason=%s fallback_used=%s exception_type=%s",
                     symbol,
                     stage,

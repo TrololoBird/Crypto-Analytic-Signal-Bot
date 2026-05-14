@@ -27,8 +27,50 @@ def _as_float(value: object, default: float = 0.0) -> float:
     if isinstance(value, bool):
         return float(value)
     if isinstance(value, (int, float)):
-        return float(value)
+        numeric = float(value)
+        return numeric if math.isfinite(numeric) else default
     return default
+
+
+def _finite_or_none(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    return numeric if math.isfinite(numeric) else None
+
+
+def _orderflow_conflicts(
+    prepared: PreparedSymbol,
+    direction: str,
+    *,
+    max_adverse_depth: float,
+    max_adverse_micro: float,
+) -> tuple[bool, dict[str, float]]:
+    depth = _finite_or_none(prepared.depth_imbalance)
+    micro = _finite_or_none(prepared.microprice_bias)
+    details: dict[str, float] = {}
+    if depth is not None:
+        details["depth_imbalance"] = depth
+    if micro is not None:
+        details["microprice_bias"] = micro
+    if direction == "long":
+        return (
+            bool(
+                (depth is not None and depth <= -max_adverse_depth)
+                or (micro is not None and micro <= -max_adverse_micro)
+            ),
+            details,
+        )
+    return (
+        bool(
+            (depth is not None and depth >= max_adverse_depth)
+            or (micro is not None and micro >= max_adverse_micro)
+        ),
+        details,
+    )
 
 
 _DEFAULT_KILLZONE_WINDOWS: tuple[tuple[str, int, int], ...] = (
@@ -113,6 +155,13 @@ class SessionKillzoneSetup(BaseSetup):
             "sl_buffer_atr": 0.75,
             "bias_mismatch_penalty": 0.75,
             "min_rr": 1.5,
+            "breakout_lookback_bars": 20,
+            "breakout_atr_mult": 0.05,
+            "min_close_position_long": 0.58,
+            "max_close_position_short": 0.42,
+            "max_adverse_depth_imbalance": 0.10,
+            "max_adverse_microprice_bias": 0.10,
+            "strict_1h_structure": 1.0,
             "asia_start_hour_utc": 0,
             "asia_end_hour_utc": 3,
             "london_start_hour_utc": 7,
@@ -159,6 +208,22 @@ class SessionKillzoneSetup(BaseSetup):
             dynamic_params.get("min_adx_1h", defaults["min_adx_1h"]),
             defaults["min_adx_1h"],
         )
+        breakout_lookback = max(
+            5,
+            int(
+                _as_float(
+                    dynamic_params.get(
+                        "breakout_lookback_bars",
+                        defaults["breakout_lookback_bars"],
+                    ),
+                    defaults["breakout_lookback_bars"],
+                )
+            ),
+        )
+        breakout_atr_mult = _as_float(
+            dynamic_params.get("breakout_atr_mult", defaults["breakout_atr_mult"]),
+            defaults["breakout_atr_mult"],
+        )
         w = prepared.work_15m
         if w.height < 20:
             _reject(prepared, setup_id, "insufficient_15m_bars", bars=w.height)
@@ -167,9 +232,14 @@ class SessionKillzoneSetup(BaseSetup):
             _reject(prepared, setup_id, "time_missing")
             return None
         last_bar_time = w.item(-1, "time")
-        now_utc = (
-            last_bar_time if isinstance(last_bar_time, datetime) else datetime.now(timezone.utc)
-        )
+        if isinstance(last_bar_time, datetime):
+            now_utc = (
+                last_bar_time.replace(tzinfo=timezone.utc)
+                if last_bar_time.tzinfo is None
+                else last_bar_time.astimezone(timezone.utc)
+            )
+        else:
+            now_utc = datetime.now(timezone.utc)
         session_name = _active_killzone_name(now_utc.hour, cast(dict[str, object], dynamic_params))
         if session_name is None:
             _reject(prepared, setup_id, "outside_killzone", hour=now_utc.hour)
@@ -233,6 +303,123 @@ class SessionKillzoneSetup(BaseSetup):
         else:
             _reject(prepared, setup_id, "directional_momentum_missing")
             return None
+
+        close_position = _as_float(w.item(-1, "close_position"), 0.5)
+        bar_high = _as_float(w.item(-1, "high"))
+        bar_low = _as_float(w.item(-1, "low"))
+        bar_close = _as_float(w.item(-1, "close"))
+        range_len = min(breakout_lookback, w.height - 1)
+        prior_range = w.slice(w.height - range_len - 1, range_len)
+        prior_high = _as_float(prior_range["high"].max())
+        prior_low = _as_float(prior_range["low"].min())
+        breakout_buffer = max(0.0, atr * breakout_atr_mult)
+        if direction == "long":
+            breakout_ok = (
+                bar_close > prior_high + breakout_buffer
+                or (
+                    bar_high > prior_high + breakout_buffer
+                    and bar_close > prior_high
+                    and close_position
+                    >= _as_float(
+                        dynamic_params.get(
+                            "min_close_position_long",
+                            defaults["min_close_position_long"],
+                        ),
+                        defaults["min_close_position_long"],
+                    )
+                )
+            )
+        else:
+            breakout_ok = (
+                bar_close < prior_low - breakout_buffer
+                or (
+                    bar_low < prior_low - breakout_buffer
+                    and bar_close < prior_low
+                    and close_position
+                    <= _as_float(
+                        dynamic_params.get(
+                            "max_close_position_short",
+                            defaults["max_close_position_short"],
+                        ),
+                        defaults["max_close_position_short"],
+                    )
+                )
+            )
+        if not breakout_ok:
+            _reject(
+                prepared,
+                setup_id,
+                "session_breakout_missing",
+                direction=direction,
+                prior_high=prior_high,
+                prior_low=prior_low,
+                close=bar_close,
+                close_position=close_position,
+            )
+            return None
+
+        orderflow_conflict, orderflow_details = _orderflow_conflicts(
+            prepared,
+            direction,
+            max_adverse_depth=_as_float(
+                dynamic_params.get(
+                    "max_adverse_depth_imbalance",
+                    defaults["max_adverse_depth_imbalance"],
+                ),
+                defaults["max_adverse_depth_imbalance"],
+            ),
+            max_adverse_micro=_as_float(
+                dynamic_params.get(
+                    "max_adverse_microprice_bias",
+                    defaults["max_adverse_microprice_bias"],
+                ),
+                defaults["max_adverse_microprice_bias"],
+            ),
+        )
+        if orderflow_conflict:
+            _reject(
+                prepared,
+                setup_id,
+                "orderflow_against_killzone",
+                direction=direction,
+                **orderflow_details,
+            )
+            return None
+
+        if (
+            _as_float(
+                dynamic_params.get(
+                    "strict_1h_structure",
+                    defaults["strict_1h_structure"],
+                ),
+                defaults["strict_1h_structure"],
+            )
+            > 0.0
+        ):
+            structure_1h = str(getattr(prepared, "structure_1h", "") or "")
+            regime_1h = str(getattr(prepared, "regime_1h_confirmed", "") or "")
+            if direction == "long" and (
+                structure_1h == "downtrend" or regime_1h == "downtrend"
+            ):
+                _reject(
+                    prepared,
+                    setup_id,
+                    "structure_against_killzone",
+                    structure_1h=structure_1h,
+                    regime_1h_confirmed=regime_1h,
+                )
+                return None
+            if direction == "short" and (
+                structure_1h == "uptrend" or regime_1h == "uptrend"
+            ):
+                _reject(
+                    prepared,
+                    setup_id,
+                    "structure_against_killzone",
+                    structure_1h=structure_1h,
+                    regime_1h_confirmed=regime_1h,
+                )
+                return None
 
         # --- Structural SL: beyond session high/low (killzone boundary) + configured ATR buffer ---
         scan20 = w.tail(20)

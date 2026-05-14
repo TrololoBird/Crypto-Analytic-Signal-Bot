@@ -30,6 +30,10 @@ def _executor_noop() -> None:
     return None
 
 
+def _has_oi_context(prepared: PreparedSymbol) -> bool:
+    return prepared.oi_current is not None or prepared.oi_change_pct is not None
+
+
 class SignalEngine:
     """Engine for calculating signals from multiple strategies.
 
@@ -370,9 +374,9 @@ class SignalEngine:
             reason_code = "data.work_1h_insufficient_history"
             details["available_1h_bars"] = int(prepared.work_1h.height)
             details["required_1h_bars"] = int(min_history_bars)
-        elif getattr(metadata, "requires_oi", False) and prepared.oi_current is None:
-            missing_fields.append("oi_current")
-            reason_code = "data.oi_current_missing"
+        elif getattr(metadata, "requires_oi", False) and not _has_oi_context(prepared):
+            missing_fields.extend(("oi_current", "oi_change_pct"))
+            reason_code = "data.oi_context_missing"
         elif getattr(metadata, "requires_funding", False) and prepared.funding_rate is None:
             missing_fields.append("funding_rate")
             reason_code = "data.funding_rate_missing"

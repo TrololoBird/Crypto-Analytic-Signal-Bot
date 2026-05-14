@@ -18,8 +18,43 @@ def _as_float(value: object, default: float = 0.0) -> float:
     if isinstance(value, bool):
         return float(value)
     if isinstance(value, (int, float)):
-        return float(value)
+        numeric = float(value)
+        return numeric if math.isfinite(numeric) else default
     return default
+
+
+def _finite_or_none(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    return numeric if math.isfinite(numeric) else None
+
+
+def _orderflow_against_direction(
+    prepared: PreparedSymbol,
+    direction: str,
+    *,
+    max_adverse_depth: float,
+    max_adverse_micro: float,
+) -> tuple[bool, dict[str, float]]:
+    depth = _finite_or_none(prepared.depth_imbalance)
+    micro = _finite_or_none(prepared.microprice_bias)
+    details: dict[str, float] = {}
+    if depth is not None:
+        details["depth_imbalance"] = depth
+    if micro is not None:
+        details["microprice_bias"] = micro
+
+    if direction == "long":
+        adverse_depth = depth is not None and depth <= -max_adverse_depth
+        adverse_micro = micro is not None and micro <= -max_adverse_micro
+    else:
+        adverse_depth = depth is not None and depth >= max_adverse_depth
+        adverse_micro = micro is not None and micro >= max_adverse_micro
+    return bool(adverse_depth or adverse_micro), details
 
 
 class PriceVelocitySetup(BaseSetup):
@@ -38,6 +73,10 @@ class PriceVelocitySetup(BaseSetup):
             "min_rsi_short": 18.0,
             "sl_buffer_atr": 0.55,
             "min_rr": 1.5,
+            "min_adx_1h": 16.0,
+            "max_adverse_depth_imbalance": 0.12,
+            "max_adverse_microprice_bias": 0.12,
+            "strict_1h_structure": 1.0,
         }
         if settings is not None:
             setups = getattr(getattr(settings, "filters", None), "setups", {})
@@ -110,6 +149,67 @@ class PriceVelocitySetup(BaseSetup):
         if direction is None:
             _reject(prepared, setup_id, "direction_not_confirmed", rsi=rsi)
             return None
+
+        adx_1h = (
+            _as_float(prepared.work_1h.item(-1, "adx14"), 0.0)
+            if not prepared.work_1h.is_empty() and "adx14" in prepared.work_1h.columns
+            else 0.0
+        )
+        min_adx_1h = float(effective_params.get("min_adx_1h", 0.0))
+        if adx_1h < min_adx_1h:
+            _reject(
+                prepared,
+                setup_id,
+                "adx_too_low",
+                adx_1h=adx_1h,
+                min_adx_1h=min_adx_1h,
+            )
+            return None
+
+        orderflow_conflict, orderflow_details = _orderflow_against_direction(
+            prepared,
+            direction,
+            max_adverse_depth=float(
+                effective_params.get("max_adverse_depth_imbalance", 0.12)
+            ),
+            max_adverse_micro=float(
+                effective_params.get("max_adverse_microprice_bias", 0.12)
+            ),
+        )
+        if orderflow_conflict:
+            _reject(
+                prepared,
+                setup_id,
+                "orderflow_against_velocity",
+                **orderflow_details,
+            )
+            return None
+
+        if float(effective_params.get("strict_1h_structure", 1.0)) > 0.0:
+            structure_1h = str(getattr(prepared, "structure_1h", "") or "")
+            regime_1h = str(getattr(prepared, "regime_1h_confirmed", "") or "")
+            if direction == "long" and (
+                structure_1h == "downtrend" or regime_1h == "downtrend"
+            ):
+                _reject(
+                    prepared,
+                    setup_id,
+                    "structure_against_velocity",
+                    structure_1h=structure_1h,
+                    regime_1h_confirmed=regime_1h,
+                )
+                return None
+            if direction == "short" and (
+                structure_1h == "uptrend" or regime_1h == "uptrend"
+            ):
+                _reject(
+                    prepared,
+                    setup_id,
+                    "structure_against_velocity",
+                    structure_1h=structure_1h,
+                    regime_1h_confirmed=regime_1h,
+                )
+                return None
 
         bias_1h = getattr(prepared, "bias_1h", prepared.bias_4h)
         sl_buffer = float(effective_params["sl_buffer_atr"])

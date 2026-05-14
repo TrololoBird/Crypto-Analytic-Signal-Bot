@@ -16,6 +16,10 @@ from ...domain.strategies import (
 __all__ = ["AbstractStrategy", "SignalResult", "StrategyDecision", "StrategyMetadata"]
 
 
+def _has_oi_context(prepared: PreparedSymbol) -> bool:
+    return prepared.oi_current is not None or prepared.oi_change_pct is not None
+
+
 class AbstractStrategy(ABC):
     """Abstract base class for all trading strategies.
 
@@ -58,7 +62,7 @@ class AbstractStrategy(ABC):
         if prepared.work_1h.height < self.metadata.min_history_bars:
             return False
 
-        if self.metadata.requires_oi and prepared.oi_current is None:
+        if self.metadata.requires_oi and not _has_oi_context(prepared):
             return False
 
         if self.metadata.requires_funding and prepared.funding_rate is None:

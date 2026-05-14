@@ -25,6 +25,57 @@ def _as_float(value: object, default: float = 0.0) -> float:
     return default
 
 
+def _detect_15m_range_retest(
+    work_15m,
+    *,
+    min_vol_breakout: float,
+    breakout_threshold: float,
+    retest_atr_mult: float,
+) -> tuple[str, float, str] | None:
+    required = {
+        "high",
+        "low",
+        "close",
+        "atr14",
+        "volume_ratio20",
+        "close_position",
+        "prev_donchian_low20",
+        "prev_donchian_high20",
+    }
+    if work_15m.height < 3 or not required.issubset(set(work_15m.columns)):
+        return None
+    high = _as_float(work_15m.item(-1, "high"))
+    low = _as_float(work_15m.item(-1, "low"))
+    close = _as_float(work_15m.item(-1, "close"))
+    atr = _as_float(work_15m.item(-1, "atr14"))
+    vol_ratio = _as_float(work_15m.item(-1, "volume_ratio20"), 1.0)
+    close_position = _as_float(work_15m.item(-1, "close_position"), 0.5)
+    prev_low = _as_float(work_15m.item(-1, "prev_donchian_low20"))
+    prev_high = _as_float(work_15m.item(-1, "prev_donchian_high20"))
+    if min(high, low, close, atr, prev_low, prev_high) <= 0.0:
+        return None
+    if vol_ratio < min_vol_breakout:
+        return None
+
+    threshold = max(0.0, float(breakout_threshold))
+    retest_distance = max(0.05, float(retest_atr_mult)) * atr
+    long_accepted = (
+        close > prev_high * (1.0 + threshold)
+        and low <= prev_high + retest_distance
+        and close_position >= 0.58
+    )
+    short_accepted = (
+        close < prev_low * (1.0 - threshold)
+        and high >= prev_low - retest_distance
+        and close_position <= 0.42
+    )
+    if long_accepted:
+        return "long", prev_high, "15m_range_retest_long"
+    if short_accepted:
+        return "short", prev_low, "15m_range_retest_short"
+    return None
+
+
 class StructureBreakRetestSetup(BaseSetup):
     setup_id = "structure_break_retest"
     family = "breakout"
@@ -44,6 +95,7 @@ class StructureBreakRetestSetup(BaseSetup):
             "bias_mismatch_penalty": 0.75,
             "tp_too_close_penalty": 0.75,
             "min_rr": 1.5,
+            "enable_15m_range_fallback": 1.0,
         }
         if settings is not None:
             filters = getattr(settings, "filters", None)
@@ -99,6 +151,8 @@ class StructureBreakRetestSetup(BaseSetup):
         direction: str | None = None
         broken_level: float | None = None
         breakout_bar_idx: int | None = None
+        used_15m_fallback = False
+        fallback_reason: str | None = None
 
         min_vol_breakout = dynamic_params.get("min_vol_breakout", defaults["min_vol_breakout"])
         breakout_threshold = dynamic_params.get(
@@ -154,10 +208,30 @@ class StructureBreakRetestSetup(BaseSetup):
                         direction = "short"
 
         if direction is None or broken_level is None:
-            _reject(prepared, setup_id, "no_breakout_detected", regime=regime_1h)
-            return None
+            if float(
+                dynamic_params.get(
+                    "enable_15m_range_fallback",
+                    defaults["enable_15m_range_fallback"],
+                )
+            ) > 0.0:
+                fallback = _detect_15m_range_retest(
+                    work_15m,
+                    min_vol_breakout=float(min_vol_breakout),
+                    breakout_threshold=float(breakout_threshold),
+                    retest_atr_mult=retest_atr_mult,
+                )
+                if fallback is not None:
+                    direction, broken_level, fallback_reason = fallback
+                    breakout_bar_idx = work_1h.height - 1
+                    used_15m_fallback = True
+            if direction is None or broken_level is None:
+                _reject(prepared, setup_id, "no_breakout_detected", regime=regime_1h)
+                return None
         broken_level_value = broken_level
-        if breakout_bar_idx is None or breakout_bar_idx < work_1h.height - 4:
+        if (
+            not used_15m_fallback
+            and (breakout_bar_idx is None or breakout_bar_idx < work_1h.height - 4)
+        ):
             _reject(
                 prepared,
                 setup_id,
@@ -166,7 +240,10 @@ class StructureBreakRetestSetup(BaseSetup):
             )
             return None
 
-        vol_ratio = _as_float(work_1h.item(-1, "volume_ratio20"), 1.0)
+        vol_ratio = _as_float(
+            work_15m.item(-1, "volume_ratio20") if used_15m_fallback else work_1h.item(-1, "volume_ratio20"),
+            1.0,
+        )
 
         reasons = [
             f"1h broken level={broken_level_value:.4f}",
@@ -175,6 +252,8 @@ class StructureBreakRetestSetup(BaseSetup):
             f"breakout_bar_idx={breakout_bar_idx}",
             f"retest confirmed vol_ratio={vol_ratio:.2f}",
         ]
+        if fallback_reason is not None:
+            reasons.append(fallback_reason)
 
         price_anchor = trig_close
 
@@ -196,9 +275,26 @@ class StructureBreakRetestSetup(BaseSetup):
             stop = min(stop, broken_level_value - sl_buffer_atr * atr)
         else:
             stop = max(stop, broken_level_value + sl_buffer_atr * atr)
+        risk = abs(price_anchor - stop)
+        if risk <= 0.0:
+            _reject(prepared, setup_id, "invalid_stop", stop=stop)
+            return None
+
+        min_rr = dynamic_params.get("min_rr", defaults["min_rr"])
+        if tp1 is None:
+            tp1 = (
+                price_anchor + risk * float(min_rr)
+                if direction == "long"
+                else price_anchor - risk * float(min_rr)
+            )
+        if tp2 is None or abs(tp2 - price_anchor) <= abs(tp1 - price_anchor):
+            tp2 = (
+                price_anchor + risk * max(2.0, float(min_rr) + 0.35)
+                if direction == "long"
+                else price_anchor - risk * max(2.0, float(min_rr) + 0.35)
+            )
 
         # Graded RR validation (penalty instead of reject)
-        min_rr = dynamic_params.get("min_rr", defaults["min_rr"])
         is_valid_rr, _ = validate_rr_or_penalty(price_anchor, stop, tp1, min_rr)
 
         base_score = dynamic_params.get("base_score", defaults["base_score"])

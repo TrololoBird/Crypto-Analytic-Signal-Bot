@@ -5,14 +5,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from ..domain.config import BotSettings
 from ..features import _swing_points
 from ..domain.schemas import PreparedSymbol, Signal
 from ..setup_base import BaseSetup
 from ..setups import _build_signal, _compute_dynamic_score, _last_swing_prices, _reject
-from ..setups.utils import get_dynamic_params
+from ..setups.utils import get_dynamic_params, normalize_trade_levels
 
 
 def _as_float(value: object, default: float = 0.0) -> float:
@@ -103,12 +103,17 @@ class WickTrapReversalSetup(BaseSetup):
         def _recent_15m_positions_after(event_time: object) -> list[int]:
             positions: list[int] = []
             start_idx = max(0, work_15m.height - 12)
+            event_dt = event_time if isinstance(event_time, datetime) else None
+            if event_dt is not None and event_dt.tzinfo is None:
+                event_dt = event_dt.replace(tzinfo=UTC)
             for idx in range(start_idx, work_15m.height):
                 bar_time = work_15m.item(idx, "time")
+                if isinstance(bar_time, datetime) and bar_time.tzinfo is None:
+                    bar_time = bar_time.replace(tzinfo=UTC)
                 if (
-                    isinstance(event_time, datetime)
+                    event_dt is not None
                     and isinstance(bar_time, datetime)
-                    and bar_time <= event_time
+                    and bar_time <= event_dt
                 ):
                     continue
                 positions.append(idx)
@@ -312,6 +317,26 @@ class WickTrapReversalSetup(BaseSetup):
             tp2 = tp1  # Use TP1 as TP2 if no extended target found
         if fallback_note:
             reasons.append(fallback_note)
+        normalized_levels = normalize_trade_levels(
+            direction=direction,
+            price_anchor=price_anchor,
+            stop=stop,
+            tp1=tp1,
+            tp2=tp2,
+        )
+        if normalized_levels is None:
+            _reject(
+                prepared,
+                "wick_trap_reversal",
+                "invalid_trade_levels",
+                direction=direction,
+                stop=stop,
+                tp1=tp1,
+                tp2=tp2,
+                price_anchor=price_anchor,
+            )
+            return None
+        stop, tp1, tp2, _, _ = normalized_levels
 
         score = _compute_dynamic_score(
             direction=direction,

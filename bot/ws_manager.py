@@ -128,17 +128,54 @@ class MessageBuffer:
         self._processed_count = 0
         self._last_compaction_log_count = 0
 
+    @staticmethod
+    def _message_priority(msg: JsonDict) -> int:
+        data = msg.get("data")
+        if isinstance(data, dict):
+            event_type = data.get("e")
+            if event_type == "kline":
+                kline = data.get("k")
+                if isinstance(kline, dict) and kline.get("x"):
+                    return 100
+            if event_type == "forceOrder":
+                return 90
+            if event_type == "aggTrade":
+                return 40
+        return 10
+
     def _drop_oldest_batch(self) -> int:
-        """Drop 50% of the oldest messages to quickly clear high-throughput bursts."""
+        """Drop lower-value queued messages first when clearing backpressure."""
         maxsize = max(1, self._buffer.maxsize)
         target = max(1, maxsize // 2)
-        dropped = 0
+        batch: list[JsonDict] = []
         for _ in range(target):
             try:
-                self._buffer.get_nowait()
+                batch.append(self._buffer.get_nowait())
             except asyncio.QueueEmpty:
                 break
-            dropped += 1
+
+        if not batch:
+            return 0
+
+        # Keep closed klines and liquidation events ahead of ticker noise. If the
+        # sampled batch is all high priority, drop the oldest one to guarantee room.
+        drop_candidates = sorted(
+            enumerate(batch), key=lambda item: (self._message_priority(item[1]), item[0])
+        )
+        drop_indexes = {drop_candidates[0][0]}
+        low_priority_indexes = [
+            idx for idx, msg in enumerate(batch) if self._message_priority(msg) < 50
+        ]
+        if low_priority_indexes:
+            drop_indexes = set(low_priority_indexes)
+
+        dropped = 0
+        for idx, msg in enumerate(batch):
+            if idx in drop_indexes:
+                dropped += 1
+                continue
+            with contextlib.suppress(asyncio.QueueFull):
+                self._buffer.put_nowait(msg)
         return dropped
 
     async def put(self, msg: JsonDict) -> bool:
@@ -302,6 +339,7 @@ class FuturesWSManager:
         self._backfill_tasks: set[asyncio.Task[None]] = set()
         self._backfill_symbols_inflight: set[str] = set()
         self._stale_event_drop_count: int = 0
+        self._epoch_monotonic_offset_ms = (time.time() - time.monotonic()) * 1000.0
 
         # P3: Per-stream latency monitoring
         self._stream_latency_ms: dict[
@@ -575,7 +613,6 @@ class FuturesWSManager:
             "fresh_mark_prices": fresh_mark_prices,
             "fresh_book_tickers": fresh_book_tickers,
             "fresh_klines_15m": fresh_klines_15m,
-            "connect_count": self._connect_count,
             "public_connect_count": self._connect_counts[_WS_PUBLIC],
             "market_connect_count": self._connect_counts[_WS_MARKET],
             "mark_price_fresh_symbols": fresh_mark_prices,
@@ -1332,7 +1369,9 @@ class FuturesWSManager:
         event_time = data.get("E")
         if event_time is not None:
             try:
-                self._last_event_lag_ms = max(0.0, (time.time() * 1000) - float(event_time))
+                self._last_event_lag_ms = max(
+                    0.0, self._now_epoch_ms() - float(event_time)
+                )
                 if (
                     symbol
                     and event_type in _LATENCY_WARNING_EVENTS
@@ -1428,10 +1467,8 @@ class FuturesWSManager:
                         await self._dispatch_event(item)
                 elif sym and sym in symbol_set:
                     await self._dispatch_event(item)
-                # Yield to event loop every 10 dispatched items so other tasks
-                # can run and WebSocket messages continue to be received.
                 count += 1
-                if count % 10 == 0:
+                if count % 250 == 0:
                     await asyncio.sleep(0)
 
             # Record latency for batch
@@ -1492,9 +1529,14 @@ class FuturesWSManager:
             return False
         if event_ms <= 0:
             return False
-        max_age_seconds = float(getattr(self._cfg, "market_ticker_freshness_seconds", 30.0))
-        age_ms = (time.time() * 1000.0) - event_ms
+        max_age_seconds = float(
+            getattr(self._cfg, "market_ticker_freshness_seconds", 30.0)
+        )
+        age_ms = self._now_epoch_ms() - event_ms
         return age_ms > (max_age_seconds * 1000.0)
+
+    def _now_epoch_ms(self) -> float:
+        return time.monotonic() * 1000.0 + self._epoch_monotonic_offset_ms
 
     async def _handle_kline(self, symbol: str, data: JsonDict) -> None:
         """Handle closed kline (candle) events.  Acquires _data_lock to prevent
@@ -1505,7 +1547,7 @@ class FuturesWSManager:
         if not k.get("x"):
             return
         interval = str(k.get("i", ""))
-        LOG.info("kline closed | symbol=%s interval=%s", symbol, interval)
+        LOG.debug("kline closed | symbol=%s interval=%s", symbol, interval)
         if interval not in self._cfg.kline_intervals:
             return
         row = _ws_kline_to_row(k)
@@ -1553,7 +1595,9 @@ class FuturesWSManager:
             self._event_bus.publish_nowait(
                 KlineCloseEvent(symbol=symbol, interval=interval, close_ts=close_ts_ms)
             )
-            LOG.info("kline published to EventBus | symbol=%s interval=%s", symbol, interval)
+            LOG.debug(
+                "kline published to EventBus | symbol=%s interval=%s", symbol, interval
+            )
         else:
             LOG.warning("kline NOT published - EventBus is None | symbol=%s", symbol)
 

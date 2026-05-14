@@ -1192,13 +1192,21 @@ async def test_oi_refresh_runner_logs_controlled_degradation_without_silent_fail
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     class _Client:
-        async def fetch_open_interest_change(self, symbol: str, period: str = "1h") -> None:
+        async def fetch_open_interest(self, symbol: str) -> None:
+            return None
+
+        async def fetch_open_interest_change(
+            self, symbol: str, period: str = "1h"
+        ) -> None:
             raise RuntimeError("oi failed")
 
         async def fetch_long_short_ratio(self, symbol: str, period: str = "1h") -> None:
             return None
 
         async def fetch_top_position_ls_ratio(self, symbol: str, period: str = "1h") -> None:
+            return None
+
+        async def fetch_taker_ratio(self, symbol: str, period: str = "1h") -> None:
             return None
 
         async def fetch_global_ls_ratio(self, symbol: str, period: str = "1h") -> None:
@@ -1841,6 +1849,36 @@ async def test_engine_skip_result_keeps_setup_id_and_reason_code() -> None:
     assert result.decision is not None
     assert result.decision.is_skip
     assert result.decision.reason_code == "data.work_1h_insufficient_history"
+
+
+@pytest.mark.asyncio
+async def test_oi_required_strategy_runs_with_cached_oi_change_context() -> None:
+    class OIContextSetup(BaseSetup):
+        setup_id = "oi_context_setup"
+        requires_oi = True
+        min_history_bars = 1
+
+        def get_optimizable_params(self, settings=None) -> dict[str, float]:
+            return {}
+
+        def detect(self, prepared: PreparedSymbol, settings):
+            return None
+
+    registry = StrategyRegistry()
+    settings = make_runtime_settings()
+    registry.register(OIContextSetup(SetupParams(enabled=True), settings), enabled=True)
+    engine = SignalEngine(registry, settings)
+    prepared = make_prepared()
+    prepared.oi_current = None
+    prepared.oi_change_pct = 1.4
+
+    results = await engine.calculate_all(prepared)
+
+    assert len(results) == 1
+    result = results[0]
+    assert result.decision is not None
+    assert not result.decision.is_skip
+    assert result.decision.reason_code == "pattern.no_raw_hit"
 
 
 @pytest.mark.asyncio

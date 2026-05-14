@@ -86,7 +86,7 @@ ASSET_FIT_PROFILES: dict[str, AssetFit] = {
     "session_killzone": _fit(("all",)),
     "breaker_block": _fit(("all",)),
     "turtle_soup": _fit(("all",)),
-    "vwap_trend": _fit(("majors", "high_volume"), min_liquidity_rank=20),
+    "vwap_trend": _fit(("majors", "high_volume"), min_liquidity_rank=50),
     "supertrend_follow": _fit(("all",)),
     "price_velocity": _fit(("volatile", "high_volume"), min_liquidity_rank=50),
     "volume_anomaly": _fit(("all",)),

@@ -1598,6 +1598,18 @@ class BinanceFuturesMarketData:
             return None
         return value
 
+    def get_cached_open_interest(
+        self, symbol: str, max_age_s: float = 1800.0
+    ) -> float | None:
+        """Return cached current open interest if fresh, else None (no REST call)."""
+        cached = self._open_interest_cache.get(symbol)
+        if cached is None:
+            return None
+        cached_at, value = cached
+        if time.monotonic() - cached_at > max_age_s:
+            return None
+        return value
+
     def get_cached_ls_ratio(
         self, symbol: str, period: str = "1h", max_age_s: float = 1800.0
     ) -> float | None:

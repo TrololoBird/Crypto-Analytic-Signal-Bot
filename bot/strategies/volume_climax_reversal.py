@@ -32,7 +32,9 @@ class VolumeClimaxReversalSetup(BaseSetup):
         defaults = {
             "base_score": 0.52,
             "min_volume_ratio": 1.8,
+            "adaptive_min_volume_ratio": 1.30,
             "min_wick_atr": 0.45,
+            "strong_wick_multiplier": 1.35,
             "max_rsi_long": 42.0,
             "min_rsi_short": 58.0,
             "sl_buffer_atr": 0.45,
@@ -87,14 +89,18 @@ class VolumeClimaxReversalSetup(BaseSetup):
             _reject(prepared, setup_id, "invalid_indicator_state", atr=atr)
             return None
 
-        if vol_ratio < float(effective_params["min_volume_ratio"]):
-            _reject(prepared, setup_id, "volume_climax_missing", volume_ratio=vol_ratio)
-            return None
-
         lower_wick_atr = (min(open_, close) - low) / atr
         upper_wick_atr = (high - max(open_, close)) / atr
         min_wick_atr = float(effective_params["min_wick_atr"])
+        configured_min_volume = float(effective_params["min_volume_ratio"])
+        adaptive_min_volume = float(
+            effective_params.get("adaptive_min_volume_ratio", 1.30)
+        )
+        strong_wick_multiplier = float(
+            effective_params.get("strong_wick_multiplier", 1.35)
+        )
         direction: str | None = None
+        clarity = 0.0
         if (
             low < prev_low
             and close > prev_low
@@ -102,6 +108,7 @@ class VolumeClimaxReversalSetup(BaseSetup):
             and close_position >= 0.55
         ):
             direction = "long"
+            clarity = min(lower_wick_atr / 2.0, 1.0)
         elif (
             high > prev_high
             and close < prev_high
@@ -109,6 +116,7 @@ class VolumeClimaxReversalSetup(BaseSetup):
             and close_position <= 0.45
         ):
             direction = "short"
+            clarity = min(upper_wick_atr / 2.0, 1.0)
 
         if direction is None:
             _reject(
@@ -121,6 +129,22 @@ class VolumeClimaxReversalSetup(BaseSetup):
             )
             return None
 
+        signal_wick_atr = lower_wick_atr if direction == "long" else upper_wick_atr
+        strong_wick = signal_wick_atr >= (min_wick_atr * strong_wick_multiplier)
+        required_volume = configured_min_volume
+        if strong_wick:
+            required_volume = min(configured_min_volume, adaptive_min_volume)
+        if vol_ratio < required_volume:
+            _reject(
+                prepared,
+                setup_id,
+                "volume_climax_missing",
+                volume_ratio=vol_ratio,
+                required_volume_ratio=required_volume,
+                adaptive_volume=strong_wick,
+            )
+            return None
+
         bias_1h = getattr(prepared, "bias_1h", prepared.bias_4h)
         sl_buffer = float(effective_params["sl_buffer_atr"])
         min_rr = float(effective_params["min_rr"])
@@ -129,13 +153,11 @@ class VolumeClimaxReversalSetup(BaseSetup):
             risk = close - stop
             tp1 = close + risk * min_rr
             tp2 = close + risk * max(2.0, min_rr + 0.35)
-            clarity = min(lower_wick_atr / 2.0, 1.0)
         else:
             stop = high + atr * sl_buffer
             risk = stop - close
             tp1 = close - risk * min_rr
             tp2 = close - risk * max(2.0, min_rr + 0.35)
-            clarity = min(upper_wick_atr / 2.0, 1.0)
         if risk <= 0.0:
             _reject(prepared, setup_id, "invalid_stop", stop=stop, close=close)
             return None

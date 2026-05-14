@@ -25,8 +25,56 @@ def _as_float(value: object, default: float = 0.0) -> float:
     if isinstance(value, bool):
         return float(value)
     if isinstance(value, (int, float)):
-        return float(value)
+        numeric = float(value)
+        return numeric if math.isfinite(numeric) else default
     return default
+
+
+def _finite_or_none(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    return numeric if math.isfinite(numeric) else None
+
+
+def _orderflow_recovered(
+    prepared: PreparedSymbol,
+    direction: str,
+    *,
+    delta_ratio: float | None,
+    min_delta_long: float,
+    max_delta_short: float,
+    max_adverse_depth: float,
+    max_adverse_micro: float,
+) -> tuple[bool, dict[str, float]]:
+    depth = _finite_or_none(prepared.depth_imbalance)
+    micro = _finite_or_none(prepared.microprice_bias)
+    details: dict[str, float] = {}
+    if delta_ratio is not None:
+        details["delta_ratio"] = delta_ratio
+    if depth is not None:
+        details["depth_imbalance"] = depth
+    if micro is not None:
+        details["microprice_bias"] = micro
+
+    if direction == "long":
+        if delta_ratio is not None and delta_ratio < min_delta_long:
+            return False, details
+        if depth is not None and depth <= -max_adverse_depth:
+            return False, details
+        if micro is not None and micro <= -max_adverse_micro:
+            return False, details
+    else:
+        if delta_ratio is not None and delta_ratio > max_delta_short:
+            return False, details
+        if depth is not None and depth >= max_adverse_depth:
+            return False, details
+        if micro is not None and micro >= max_adverse_micro:
+            return False, details
+    return True, details
 
 
 class TurtleSoupSetup(BaseSetup):
@@ -45,6 +93,10 @@ class TurtleSoupSetup(BaseSetup):
             "volume_threshold": 1.0,
             "bias_mismatch_penalty": 0.75,
             "min_rr": 1.5,
+            "min_recovery_delta_long": 0.49,
+            "max_recovery_delta_short": 0.51,
+            "max_adverse_depth_imbalance": 0.05,
+            "max_adverse_microprice_bias": 0.05,
         }
         if settings is not None:
             filters = getattr(settings, "filters", None)
@@ -75,6 +127,28 @@ class TurtleSoupSetup(BaseSetup):
         )
         min_rr = float(dynamic_params.get("min_rr", defaults["min_rr"]))
         base_score = float(dynamic_params.get("base_score", defaults["base_score"]))
+        min_recovery_delta_long = float(
+            dynamic_params.get(
+                "min_recovery_delta_long", defaults["min_recovery_delta_long"]
+            )
+        )
+        max_recovery_delta_short = float(
+            dynamic_params.get(
+                "max_recovery_delta_short", defaults["max_recovery_delta_short"]
+            )
+        )
+        max_adverse_depth = float(
+            dynamic_params.get(
+                "max_adverse_depth_imbalance",
+                defaults["max_adverse_depth_imbalance"],
+            )
+        )
+        max_adverse_micro = float(
+            dynamic_params.get(
+                "max_adverse_microprice_bias",
+                defaults["max_adverse_microprice_bias"],
+            )
+        )
 
         w1h = prepared.work_1h
         if w1h.height < roll_bars + 3:
@@ -143,6 +217,30 @@ class TurtleSoupSetup(BaseSetup):
                 setup_id,
                 "15m_confirmation_missing_short",
                 vol_ratio_15m=vol_ratio_15m,
+            )
+            return None
+
+        delta_ratio = (
+            _as_float(w15m.item(-1, "delta_ratio"), 0.5)
+            if "delta_ratio" in w15m.columns
+            else None
+        )
+        recovered, flow_details = _orderflow_recovered(
+            prepared,
+            direction,
+            delta_ratio=delta_ratio,
+            min_delta_long=min_recovery_delta_long,
+            max_delta_short=max_recovery_delta_short,
+            max_adverse_depth=max_adverse_depth,
+            max_adverse_micro=max_adverse_micro,
+        )
+        if not recovered:
+            _reject(
+                prepared,
+                setup_id,
+                "orderflow_recovery_missing",
+                direction=direction,
+                **flow_details,
             )
             return None
 

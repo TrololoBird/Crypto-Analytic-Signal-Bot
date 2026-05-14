@@ -41,6 +41,7 @@ class HiddenDivergenceSetup(BaseSetup):
             "rsi_divergence_lookback": 3.0,
             "rsi_divergence_threshold": 5.0,
             "min_delta_threshold": 0.0,
+            "min_volume_ratio": 0.55,
             "sl_buffer_atr": 0.5,
         }
         if settings is not None:
@@ -79,7 +80,12 @@ class HiddenDivergenceSetup(BaseSetup):
         min_delta_threshold = float(
             dynamic_params.get("min_delta_threshold", defaults["min_delta_threshold"])
         )
-        sl_buffer_atr = float(dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]))
+        min_volume_ratio = float(
+            dynamic_params.get("min_volume_ratio", defaults["min_volume_ratio"])
+        )
+        sl_buffer_atr = float(
+            dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"])
+        )
 
         w1h = prepared.work_1h
         if w1h.height < 20:
@@ -101,8 +107,14 @@ class HiddenDivergenceSetup(BaseSetup):
             _reject(prepared, setup_id, "insufficient_15m_bars", bars=w15m.height)
             return None
         vol_ratio_15m = float(w15m.item(-1, "volume_ratio20") or 1.0)
-        if vol_ratio_15m < 1.1:
-            _reject(prepared, setup_id, "volume_too_low", vol_ratio_15m=vol_ratio_15m)
+        if vol_ratio_15m < min_volume_ratio:
+            _reject(
+                prepared,
+                setup_id,
+                "volume_too_low",
+                vol_ratio_15m=vol_ratio_15m,
+                min_volume_ratio=min_volume_ratio,
+            )
             return None
 
         # 1H context for 15M signals (not 4H - too lagging for <4h trades)

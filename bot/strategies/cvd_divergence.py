@@ -51,7 +51,7 @@ class CVDDivergenceSetup(BaseSetup):
             "delta_lookback": 3,
             "bias_mismatch_penalty": 0.75,
             "min_rr": 1.5,
-            "min_delta_threshold": 0.12,
+            "min_delta_threshold": 0.06,
             "sl_buffer_atr": 0.5,
         }
         if settings is not None:

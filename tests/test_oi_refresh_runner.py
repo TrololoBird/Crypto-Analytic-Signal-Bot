@@ -22,6 +22,11 @@ async def test_refresh_once_can_bound_symbols_and_skip_funding_history(
 
     monkeypatch.setattr(
         client,
+        "fetch_open_interest",
+        lambda symbol, **kwargs: _record("oi_current", symbol, **kwargs),
+    )
+    monkeypatch.setattr(
+        client,
         "fetch_open_interest_change",
         lambda symbol, **kwargs: _record("oi_change", symbol, **kwargs),
     )
@@ -34,6 +39,11 @@ async def test_refresh_once_can_bound_symbols_and_skip_funding_history(
         client,
         "fetch_top_position_ls_ratio",
         lambda symbol, **kwargs: _record("top_position_ls", symbol, **kwargs),
+    )
+    monkeypatch.setattr(
+        client,
+        "fetch_taker_ratio",
+        lambda symbol, **kwargs: _record("taker_ratio", symbol, **kwargs),
     )
     monkeypatch.setattr(
         client,
@@ -68,9 +78,11 @@ async def test_refresh_once_can_bound_symbols_and_skip_funding_history(
     assert processed == 2
     assert {symbol for _, symbol in calls} == {"SYM0USDT", "SYM1USDT"}
     assert {stage for stage, _ in calls} == {
+        "oi_current",
         "oi_change",
         "top_account_ls",
         "top_position_ls",
+        "taker_ratio",
         "global_ls",
     }
     funding.assert_not_awaited()

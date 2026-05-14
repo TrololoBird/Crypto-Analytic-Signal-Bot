@@ -553,21 +553,35 @@ class SignalBot:
         self._running = False
         self._shutdown.set()
 
-        # Cancel and await all background tasks
-        if self._background_tasks:
-            for task in list(self._background_tasks):
+        # Cancel and await fire-and-forget tasks. Drain the set until stable so
+        # tasks spawned by cancellation callbacks cannot survive shutdown.
+        while self._background_tasks:
+            tasks = list(self._background_tasks)
+            for task in tasks:
                 task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
-                await asyncio.gather(*self._background_tasks, return_exceptions=True)
-            self._background_tasks.clear()
+                await asyncio.gather(*tasks, return_exceptions=True)
+            self._background_tasks.difference_update(tasks)
 
         try:
-            await self.tracker._persist_tracking_state()
+            persist = getattr(self.tracker, "persist_tracking_state", None)
+            if callable(persist):
+                result = persist()
+                if inspect.isawaitable(result):
+                    await result
         except Exception as exc:
             LOG.debug("tracker persist failed (non-fatal): %s", exc)
 
         if self._ws_manager is not None:
             await self._ws_manager.stop()
+        try:
+            delivery_close = getattr(self.delivery, "close", None)
+            if callable(delivery_close):
+                result = delivery_close()
+                if inspect.isawaitable(result):
+                    await result
+        except Exception as exc:
+            LOG.debug("delivery close failed (non-fatal): %s", exc)
         # Modern repository auto-closes with connection
         try:
             await self.alerts.close()

@@ -80,11 +80,14 @@ class EmaBounceSetup(BaseSetup):
 
         work_1h = prepared.work_1h
         context_timeframe = "1h"
-        if work_1h.height < 3 and prepared.work_15m.height >= 3:
-            work_1h = prepared.work_15m
-            context_timeframe = "15m"
         if work_1h.height < 3:
-            _reject(prepared, setup_id, "insufficient_context_bars")
+            _reject(
+                prepared,
+                setup_id,
+                "insufficient_1h_context_bars",
+                bars=work_1h.height,
+                required=3,
+            )
             return None
         required_columns = {
             "atr14",

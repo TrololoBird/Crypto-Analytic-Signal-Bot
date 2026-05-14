@@ -47,7 +47,9 @@ Thumbs.db
 
 # Local config / secrets
 .env
+config.toml
 config.local.toml
+ourtg.json
 
 # Project data artifacts
 data/

@@ -217,6 +217,10 @@ class SignalTracker:
         retention_days = int(getattr(self.settings.tracking, "outcome_retention_days", 90) or 90)
         await self._cleanup_old_outcomes(retention_days)
 
+    async def persist_tracking_state(self) -> None:
+        """Flush pending tracking writes before shutdown."""
+        await self._persist_tracking_state()
+
     async def _cleanup_old_outcomes(self, retention_days: int = 90) -> None:
         if retention_days <= 0:
             return

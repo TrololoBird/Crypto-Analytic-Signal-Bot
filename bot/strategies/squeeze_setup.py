@@ -76,6 +76,70 @@ def _bb_kc_squeeze_active(
     return False, ""
 
 
+def _bb_kc_squeeze_release(
+    work_15m: pl.DataFrame,
+    *,
+    bb_squeeze_threshold: float,
+    min_bb_compression_width: float,
+    bb_pct_b_threshold: float,
+    release_lookback: int,
+    min_width_expansion: float,
+    min_roc10_abs_pct: float,
+) -> tuple[bool, str, str]:
+    if work_15m.height < max(30, release_lookback + 2):
+        return False, "", ""
+    required = {"bb_width", "bb_pct_b", "kc_upper", "kc_lower", "close", "roc10"}
+    if not required.issubset(set(work_15m.columns)):
+        return False, "", ""
+
+    current_width = _as_float(work_15m.item(-1, "bb_width"))
+    bb_pct_b = _as_float(work_15m.item(-1, "bb_pct_b"), 0.5)
+    close = _as_float(work_15m.item(-1, "close"))
+    kc_upper = _as_float(work_15m.item(-1, "kc_upper"))
+    kc_lower = _as_float(work_15m.item(-1, "kc_lower"))
+    roc10 = _as_float(work_15m.item(-1, "roc10"))
+    if min(current_width, close, kc_upper, kc_lower) <= 0.0:
+        return False, "", ""
+
+    previous_widths = work_15m["bb_width"].slice(
+        max(0, work_15m.height - release_lookback - 1),
+        release_lookback,
+    )
+    compressed_width = _as_float(previous_widths.min())
+    width_q25 = _as_float(previous_widths.quantile(0.25), min_bb_compression_width)
+    compression_cap = max(min_bb_compression_width, 0.0)
+    if bb_squeeze_threshold > 0:
+        compression_cap = (
+            min(compression_cap, bb_squeeze_threshold)
+            if compression_cap > 0
+            else bb_squeeze_threshold
+        )
+    if width_q25 > 0:
+        compression_cap = (
+            min(compression_cap, width_q25) if compression_cap > 0 else width_q25
+        )
+    if compressed_width <= 0.0 or compressed_width > compression_cap:
+        return False, "", ""
+    if current_width < compressed_width * max(1.0, min_width_expansion):
+        return False, "", ""
+
+    breakout_up = (
+        close > kc_upper
+        and bb_pct_b >= bb_pct_b_threshold
+        and roc10 >= min_roc10_abs_pct
+    )
+    breakout_down = (
+        close < kc_lower
+        and bb_pct_b <= (1.0 - bb_pct_b_threshold)
+        and roc10 <= -min_roc10_abs_pct
+    )
+    if breakout_up:
+        return True, "long", "bb_kc_recent_compression_release_long"
+    if breakout_down:
+        return True, "short", "bb_kc_recent_compression_release_short"
+    return False, "", ""
+
+
 class SqueezeSetup(BaseSetup):
     setup_id = "squeeze_setup"
     family = "breakout"
@@ -95,6 +159,10 @@ class SqueezeSetup(BaseSetup):
             "min_rr": 1.5,
             "funding_extreme_threshold": 0.00015,
             "liquidation_extreme_threshold": 0.20,
+            "release_lookback": 12,
+            "min_release_width_expansion": 1.50,
+            "min_release_roc10_abs_pct": 0.35,
+            "no_crowd_confirmation_penalty": 0.92,
         }
         if settings is not None:
             filters = getattr(settings, "filters", None)
@@ -145,6 +213,31 @@ class SqueezeSetup(BaseSetup):
             ),
             defaults["liquidation_extreme_threshold"],
         )
+        release_lookback = max(
+            3,
+            int(dynamic_params.get("release_lookback", defaults["release_lookback"])),
+        )
+        min_release_width_expansion = _as_float(
+            dynamic_params.get(
+                "min_release_width_expansion",
+                defaults["min_release_width_expansion"],
+            ),
+            defaults["min_release_width_expansion"],
+        )
+        min_release_roc10_abs_pct = _as_float(
+            dynamic_params.get(
+                "min_release_roc10_abs_pct",
+                defaults["min_release_roc10_abs_pct"],
+            ),
+            defaults["min_release_roc10_abs_pct"],
+        )
+        no_crowd_confirmation_penalty = _as_float(
+            dynamic_params.get(
+                "no_crowd_confirmation_penalty",
+                defaults["no_crowd_confirmation_penalty"],
+            ),
+            defaults["no_crowd_confirmation_penalty"],
+        )
 
         if work_15m.height < 30:
             _reject(prepared, "squeeze_setup", "insufficient_bars")
@@ -156,6 +249,17 @@ class SqueezeSetup(BaseSetup):
             min_bb_compression_width=min_bb_compression_width,
             bb_pct_b_threshold=bb_pct_b_threshold,
         )
+        release_reason = ""
+        if not is_squeeze:
+            is_squeeze, squeeze_dir, release_reason = _bb_kc_squeeze_release(
+                work_15m,
+                bb_squeeze_threshold=bb_squeeze_threshold,
+                min_bb_compression_width=min_bb_compression_width,
+                bb_pct_b_threshold=bb_pct_b_threshold,
+                release_lookback=release_lookback,
+                min_width_expansion=min_release_width_expansion,
+                min_roc10_abs_pct=min_release_roc10_abs_pct,
+            )
         if not is_squeeze:
             _reject(prepared, "squeeze_setup", "no_bb_kc_squeeze")
             return None
@@ -180,16 +284,6 @@ class SqueezeSetup(BaseSetup):
             elif liq_score < 0 and squeeze_dir == "long":
                 crowd_aligned = True
                 crowd_reason = f"liq_score={liq_score:.3f} (short liq pressure)"
-
-        if not crowd_aligned:
-            _reject(
-                prepared,
-                "squeeze_setup",
-                "no_crowd_confirmation",
-                funding=funding,
-                liquidation_score=liq_score,
-            )
-            return None
 
         direction = squeeze_dir
 
@@ -217,12 +311,17 @@ class SqueezeSetup(BaseSetup):
             return None
 
         reasons = [
-            crowd_reason,
             f"bb_kc_squeeze breakout={direction} bb_pct_b>{bb_pct_b_threshold:.2f}",
             f"vol_ratio={vol_ratio:.2f} min={volume_threshold:.2f}",
             f"bb_width<={min_bb_compression_width:.4f} sl_buffer_atr={sl_buffer_atr:.2f}",
             f"rsi={rsi:.1f}",
         ]
+        if release_reason:
+            reasons.append(release_reason)
+        if crowd_aligned:
+            reasons.append(crowd_reason)
+        else:
+            reasons.append("crowd_context_neutral")
 
         price_anchor = _as_float(work_15m.item(-1, "close"))
 
@@ -281,6 +380,8 @@ class SqueezeSetup(BaseSetup):
             rsi=rsi,
             structure_clarity=0.5,
         )
+        if not crowd_aligned:
+            score *= no_crowd_confirmation_penalty
 
         return _build_signal(
             prepared=prepared,

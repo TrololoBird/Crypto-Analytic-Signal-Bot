@@ -75,24 +75,8 @@ def _run_doctor_check(settings: BotSettings) -> None:
                 "subscribe_book_ticker": settings.ws.subscribe_book_ticker,
             },
             "setups_enabled": {
-                k: getattr(settings.setups, k)
-                for k in (
-                    "structure_pullback",
-                    "structure_break_retest",
-                    "wick_trap_reversal",
-                    "squeeze_setup",
-                    "ema_bounce",
-                    "order_block",
-                    "breaker_block",
-                    "fvg_setup",
-                    "bos_choch",
-                    "liquidity_sweep",
-                    "turtle_soup",
-                    "cvd_divergence",
-                    "hidden_divergence",
-                    "funding_reversal",
-                    "session_killzone",
-                )
+                setup_id: getattr(settings.setups, setup_id, False)
+                for setup_id in settings.setups.enabled_setup_ids()
             },
         }
         logging.getLogger("bot.cli").info("DOCTOR OK | %s", json.dumps(report, default=str))

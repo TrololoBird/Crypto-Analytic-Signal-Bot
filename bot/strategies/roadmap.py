@@ -596,13 +596,17 @@ class MultiTFTrendSetup(RoadmapSetup):
     DEFAULTS = {
         **RoadmapSetup.DEFAULTS,
         "min_adx_1h": 18.0,
-        "min_volume_ratio": 0.90,
+        "min_volume_ratio": 1.10,
+        "pullback_rsi_long_max": 50.0,
+        "pullback_rsi_short_min": 50.0,
+        "max_adverse_depth_imbalance": 1.00,
     }
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         params = self._params(prepared, settings)
         adx_1h = _last(prepared.work_1h, "adx14")
         vol_ratio = _last(prepared.work_15m, "volume_ratio20", 1.0)
+        rsi_15m = _last(prepared.work_15m, "rsi14", 50.0)
         if adx_1h < float(params["min_adx_1h"]):
             _reject(prepared, self.setup_id, "adx_too_low", adx_1h=adx_1h)
             return None
@@ -622,12 +626,54 @@ class MultiTFTrendSetup(RoadmapSetup):
         else:
             _reject(prepared, self.setup_id, "multi_tf_not_aligned")
             return None
+        if direction == "long" and rsi_15m > float(params["pullback_rsi_long_max"]):
+            _reject(
+                prepared,
+                self.setup_id,
+                "pullback_quality_missing",
+                direction=direction,
+                rsi_15m=rsi_15m,
+                max_rsi=float(params["pullback_rsi_long_max"]),
+            )
+            return None
+        if direction == "short" and rsi_15m < float(params["pullback_rsi_short_min"]):
+            _reject(
+                prepared,
+                self.setup_id,
+                "pullback_quality_missing",
+                direction=direction,
+                rsi_15m=rsi_15m,
+                min_rsi=float(params["pullback_rsi_short_min"]),
+            )
+            return None
+        depth = _finite_or_none(prepared.depth_imbalance)
+        max_adverse_depth = float(params.get("max_adverse_depth_imbalance", 1.00))
+        if direction == "long" and depth is not None and depth <= -max_adverse_depth:
+            _reject(
+                prepared,
+                self.setup_id,
+                "orderflow_against_trend_pullback",
+                depth_imbalance=depth,
+            )
+            return None
+        if direction == "short" and depth is not None and depth >= max_adverse_depth:
+            _reject(
+                prepared,
+                self.setup_id,
+                "orderflow_against_trend_pullback",
+                depth_imbalance=depth,
+            )
+            return None
         return _build_atr_signal(
             prepared=prepared,
             setup_id=self.setup_id,
             direction=direction,
             params=params,
-            reasons=[f"multi_tf_trend_{direction}", f"adx_1h={adx_1h:.1f}"],
+            reasons=[
+                f"multi_tf_pullback_{direction}",
+                f"adx_1h={adx_1h:.1f}",
+                f"rsi15={rsi_15m:.1f}",
+            ],
             family=self.family,
             structure_clarity=0.85,
         )
@@ -1021,6 +1067,9 @@ class AltcoinSeasonIndexSetup(RoadmapSetup):
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         params = self._params(prepared, settings)
         base = str(prepared.universe.base_asset or "").upper()
+        if not base:
+            _reject(prepared, self.setup_id, "base_asset_missing")
+            return None
         if base == "BTC":
             _reject(prepared, self.setup_id, "not_altcoin")
             return None

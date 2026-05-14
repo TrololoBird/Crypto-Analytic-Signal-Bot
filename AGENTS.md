@@ -15,7 +15,7 @@ code, tests, configs, logs, and official external docs before relying on them.
 - Core infra lives in `bot/core/`
 - Strategies live in `bot/strategies/` and are exported via `bot/strategies/__init__.py`
 - Shared setup helpers live in `bot/setups.py` and `bot/setups/`
-- Config lives in `config.toml` and `config.toml.example`, parsed by `bot/config.py`
+- Config lives in `config.toml` and `config.toml.example`, parsed by `bot/domain/config.py`
 - Persistence lives in `bot/core/memory/repository.py`
 - Regression tests are spread across `tests/test_*.py`; use targeted `rg` or
   `pytest --collect-only` instead of assuming one canonical regression file.
@@ -44,9 +44,13 @@ code, tests, configs, logs, and official external docs before relying on them.
 
 ## Routing
 
-- `bot/*.py`: shared package-level modules such as config, models, features, market data, tracking, delivery
-- `bot/application/`: runtime orchestration and event wiring
+- `bot/*.py`: shared package-level modules such as features, market data, tracking, delivery, telemetry, confluence, dashboard, metrics, market regime, and compatibility shims
+- `bot/application/`: runtime orchestration and event wiring, including `ShortlistService`, `CycleRunner`, `HealthManager`, `TelemetryManager`, `DeliveryOrchestrator`, `FallbackRunner`, `KlineHandler`, and `OIRefreshRunner`
 - `bot/core/`: event bus, engine, memory, diagnostics, analyzer, self-learner
+- `bot/domain/`: Pydantic config, event, strategy, schema, and public feature contracts
+- `bot/ml/`: canonical ML filter, guardrails, classifier, and training pipeline
+- `bot/learning/`: walk-forward optimizer, regime-aware params, and outcome store helpers
+- `bot/regime/`: HMM/GMM/composite regime detectors
 - `bot/strategies/`: individual setup detectors
 - `bot/setups/`: shared strategy helpers
 - `bot/tasks/`: background jobs and schedulers

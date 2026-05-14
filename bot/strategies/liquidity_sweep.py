@@ -158,6 +158,15 @@ class LiquiditySweepSetup(BaseSetup):
             return None
 
         sweep_index = int(zone.sweep_index)
+        if not (0 <= sweep_index < n):
+            _reject(
+                prepared,
+                setup_id,
+                "liquidity_sweep_index_out_of_bounds",
+                sweep_index=sweep_index,
+                bars=n,
+            )
+            return None
         sweep_bar_h = float(highs[sweep_index])
         sweep_bar_l = float(lows[sweep_index])
         sweep_bar_c = float(closes[sweep_index])
@@ -165,6 +174,9 @@ class LiquiditySweepSetup(BaseSetup):
 
         if zone.direction == "short":
             eq_high_level = zone.level or zone.midpoint
+            if eq_high_level is None or not math.isfinite(float(eq_high_level)):
+                _reject(prepared, setup_id, "liquidity_level_missing", direction="short")
+                return None
             if (
                 sweep_bar_h <= eq_high_level
                 or sweep_bar_c >= eq_high_level
@@ -256,6 +268,9 @@ class LiquiditySweepSetup(BaseSetup):
             )
 
         eq_low_level = zone.level or zone.midpoint
+        if eq_low_level is None or not math.isfinite(float(eq_low_level)):
+            _reject(prepared, setup_id, "liquidity_level_missing", direction="long")
+            return None
         if (
             sweep_bar_l >= eq_low_level
             or sweep_bar_c <= eq_low_level

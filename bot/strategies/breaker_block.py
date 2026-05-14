@@ -23,6 +23,21 @@ LOG = logging.getLogger("bot.strategies.breaker_block")
 _SCAN_BARS = 40
 
 
+def _as_float(value: object, default: float = 0.0) -> float:
+    if isinstance(value, bool):
+        return float(value)
+    if isinstance(value, (int, float)):
+        numeric = float(value)
+        return numeric if math.isfinite(numeric) else default
+    return default
+
+
+def _last(frame: object, column: str, default: float = 0.0) -> float:
+    if not hasattr(frame, "is_empty") or frame.is_empty() or column not in frame.columns:
+        return default
+    return _as_float(frame.item(-1, column), default)
+
+
 class BreakerBlockSetup(BaseSetup):
     setup_id = "breaker_block"
     family = "breakout"
@@ -37,6 +52,9 @@ class BreakerBlockSetup(BaseSetup):
             "mitigation_threshold": 0.20,
             "sl_buffer_atr": 0.20,
             "min_atr": 0.0001,
+            "min_volume_ratio": 0.90,
+            "min_acceptance_close_position_long": 0.50,
+            "max_acceptance_close_position_short": 0.50,
             "bias_mismatch_penalty": 0.75,
             "min_rr": 1.5,
         }
@@ -74,6 +92,9 @@ class BreakerBlockSetup(BaseSetup):
         sl_buffer_atr = float(dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]))
         min_rr = float(dynamic_params.get("min_rr", defaults["min_rr"]))
         base_score = float(dynamic_params.get("base_score", defaults["base_score"]))
+        min_volume_ratio = float(
+            dynamic_params.get("min_volume_ratio", defaults["min_volume_ratio"])
+        )
 
         w1h = prepared.work_1h
         if w1h.height < 15:
@@ -104,6 +125,47 @@ class BreakerBlockSetup(BaseSetup):
         direction = zone.direction
         bb_low = zone.bottom
         bb_high = zone.top
+
+        vol_ratio_15m = _last(prepared.work_15m, "volume_ratio20", 1.0)
+        if vol_ratio_15m < min_volume_ratio:
+            _reject(
+                prepared,
+                setup_id,
+                "volume_too_low",
+                volume_ratio=vol_ratio_15m,
+                min_volume_ratio=min_volume_ratio,
+            )
+            return None
+
+        close_position = _last(prepared.work_15m, "close_position", 0.5)
+        if direction == "long" and close_position < float(
+            dynamic_params.get(
+                "min_acceptance_close_position_long",
+                defaults["min_acceptance_close_position_long"],
+            )
+        ):
+            _reject(
+                prepared,
+                setup_id,
+                "retest_acceptance_missing",
+                direction=direction,
+                close_position=close_position,
+            )
+            return None
+        if direction == "short" and close_position > float(
+            dynamic_params.get(
+                "max_acceptance_close_position_short",
+                defaults["max_acceptance_close_position_short"],
+            )
+        ):
+            _reject(
+                prepared,
+                setup_id,
+                "retest_acceptance_missing",
+                direction=direction,
+                close_position=close_position,
+            )
+            return None
 
         # --- Compute structural SL/TP ---
         from ..features import _swing_points as _sp

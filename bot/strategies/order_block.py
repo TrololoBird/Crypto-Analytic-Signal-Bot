@@ -113,6 +113,29 @@ class OrderBlockSetup(BaseSetup):
         direction = zone.direction
         ob_low = zone.bottom
         ob_high = zone.top
+        try:
+            zone_values_valid = all(
+                math.isfinite(float(value)) and float(value) > 0.0
+                for value in (ob_low, ob_high)
+            )
+        except (TypeError, ValueError):
+            zone_values_valid = False
+        if (
+            direction not in {"long", "short"}
+            or zone.created_index is None
+            or not (0 <= int(zone.created_index) < n_bars)
+            or not zone_values_valid
+        ):
+            _reject(
+                prepared,
+                setup_id,
+                "invalid_order_block_zone",
+                direction=direction,
+                top=ob_high,
+                bottom=ob_low,
+                created_index=zone.created_index,
+            )
+            return None
         age = n_bars - 1 - zone.created_index
         if age > ob_max_age:
             _reject(prepared, setup_id, "order_block_too_old", age=age, max_age=ob_max_age)
