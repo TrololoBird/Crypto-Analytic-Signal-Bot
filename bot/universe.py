@@ -103,6 +103,21 @@ def _safe_float(value: Any, default: float | None = None) -> float | None:
     return numeric
 
 
+def _oi_change_percent(value: Any) -> float | None:
+    """Normalize cached OI change to percentage points for shortlist routing.
+
+    The REST cache stores 1h OI change as a fraction (`0.03` == 3%), while
+    older telemetry/config thresholds used percentage points (`3.0` == 3%).
+    Accept both forms at the universe boundary so strategy routing is stable.
+    """
+    numeric = _safe_float(value)
+    if numeric is None:
+        return None
+    if abs(numeric) <= 1.0:
+        return numeric * 100.0
+    return numeric
+
+
 def _crowding_score(row: dict[str, Any]) -> float:
     ratios = []
     for key in (
@@ -128,7 +143,7 @@ def _crowding_score(row: dict[str, Any]) -> float:
 
 
 def _oi_participation_score(row: dict[str, Any]) -> float:
-    oi_change = _safe_float(row.get("oi_change_pct"))
+    oi_change = _oi_change_percent(row.get("oi_change_pct"))
     oi_current = _safe_float(row.get("oi_current"))
     quote_volume = float(row.get("quote_volume") or 0.0)
     last_price = float(row.get("last_price") or 0.0)
@@ -196,7 +211,7 @@ def _strategy_fits_for_row(
     fits: list[str] = []
     funding_rate = _safe_float(row.get("funding_rate"))
     basis_pct = _safe_float(row.get("basis_pct"))
-    oi_change_pct = _safe_float(row.get("oi_change_pct"))
+    oi_change_pct = _oi_change_percent(row.get("oi_change_pct"))
     quote_volume = float(row.get("quote_volume") or 0.0)
     price_change_pct = abs(float(row.get("price_change_percent") or 0.0))
     spread_bps = _safe_float(row.get("spread_bps"))

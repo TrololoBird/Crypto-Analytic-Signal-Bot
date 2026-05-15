@@ -40,6 +40,9 @@ class BotDashboard:
         self.app: FastAPI | None = None
         self._strategies_cache: list[dict[str, Any]] | None = None
         self._analytics_cache: dict[int, tuple[float, dict[str, Any]]] = {}
+        self._decision_cache: dict[
+            tuple[int, int], tuple[float, tuple[tuple[str, float], ...], dict[str, Any]]
+        ] = {}
 
         if not self._enabled:
             LOG.warning("fastapi not installed, dashboard disabled")
@@ -154,11 +157,12 @@ class BotDashboard:
 
         @self.app.get("/api/analytics/strategy-decisions")
         async def strategy_decisions(
-            limit_files: int = 8,
-            max_rows: int = 200_000,
+            limit_files: int = 1,
+            max_rows: int = 1_000,
         ) -> dict[str, Any]:
             try:
-                return self._get_strategy_decision_summary(
+                return await asyncio.to_thread(
+                    self._get_strategy_decision_summary,
                     limit_files=limit_files,
                     max_rows=max_rows,
                 )
@@ -181,6 +185,7 @@ class BotDashboard:
         """Pre-load and cache strategies at startup."""
         try:
             from .strategies import STRATEGY_CLASSES
+            from .domain.strategies import RISK_PROFILE_BY_ID, STRATEGY_STATUS_BY_ID
 
             settings = getattr(self.bot, "settings", None)
             setups = getattr(settings, "setups", None)
@@ -201,9 +206,9 @@ class BotDashboard:
                         "id": setup_id,
                         "name": cls.__name__,
                         "enabled": setup_id in enabled_setups,
-                        "status": str(getattr(cls, "status", "beta")),
-                        "risk_profile": str(
-                            getattr(cls, "risk_profile", getattr(cls, "family", "generic"))
+                        "status": STRATEGY_STATUS_BY_ID.get(setup_id, "beta"),
+                        "risk_profile": RISK_PROFILE_BY_ID.get(
+                            setup_id, str(getattr(cls, "family", "generic"))
                         ),
                         "family": str(getattr(cls, "family", "generic")),
                     }
@@ -212,6 +217,19 @@ class BotDashboard:
         except Exception as exc:
             LOG.warning("failed to cache strategies: %s", exc)
             self._strategies_cache = []
+
+    @staticmethod
+    def _runtime_strategy_status(row: dict[str, Any], catalog_status: str) -> str:
+        trades = int(row.get("trades") or row.get("count") or 0)
+        expectancy = float(row.get("expectancy_r") or row.get("avg_rr") or 0.0)
+        win_rate = float(row.get("win_rate") or 0.0)
+        if trades <= 0:
+            return "unverified"
+        if trades >= 5 and expectancy < 0.0:
+            return "needs_rework"
+        if trades >= 5 and expectancy > 0.0 and win_rate >= 45.0:
+            return "validated"
+        return f"observing:{catalog_status}"
 
     def _merge_strategy_catalog(self, report: dict[str, Any]) -> dict[str, Any]:
         """Attach every registered strategy to analytics, including zero-outcome rows."""
@@ -242,7 +260,9 @@ class BotDashboard:
 
             row = by_setup[setup_id]
             row["enabled"] = is_enabled
-            row["status"] = item.get("status", "beta")
+            catalog_status = str(item.get("status", "beta") or "beta")
+            row["catalog_status"] = catalog_status
+            row["status"] = self._runtime_strategy_status(row, catalog_status)
             row["risk_profile"] = item.get("risk_profile", "generic")
             row["family"] = item.get("family", "generic")
 
@@ -519,8 +539,8 @@ class BotDashboard:
     def _get_strategy_decision_summary(
         self,
         *,
-        limit_files: int = 8,
-        max_rows: int = 200_000,
+        limit_files: int = 1,
+        max_rows: int = 1_000,
     ) -> dict[str, Any]:
         bot = self.bot
         if bot is None or not hasattr(bot, "settings"):
@@ -533,12 +553,22 @@ class BotDashboard:
                 "setup_reports": [],
             }
 
+        limit_files = max(1, min(int(limit_files), 24))
+        max_rows = max(1, min(int(max_rows), 1_000_000))
         files = self._latest_analysis_files(
             bot.settings.telemetry_dir,
             "strategy_decisions.jsonl",
-            limit=max(1, min(int(limit_files), 24)),
+            limit=limit_files,
         )
-        max_rows = max(1, min(int(max_rows), 1_000_000))
+        fingerprint: tuple[tuple[str, float], ...] = tuple(
+            (str(path), path.stat().st_mtime) for path in files if path.exists()
+        )
+        cache_key = (limit_files, max_rows)
+        now = time.monotonic()
+        cached = self._decision_cache.get(cache_key)
+        if cached and (now - cached[0]) < 15.0 and cached[1] == fingerprint:
+            return cached[2]
+
         status_counts: Counter[str] = Counter()
         reason_family_counts: Counter[str] = Counter()
         setup_counters: dict[str, dict[str, Counter[str]]] = {}
@@ -548,35 +578,26 @@ class BotDashboard:
             if total_rows >= max_rows:
                 break
             try:
-                with path.open("r", encoding="utf-8") as handle:
-                    for line in handle:
-                        if total_rows >= max_rows:
-                            break
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            row = json.loads(line)
-                        except json.JSONDecodeError:
-                            continue
-                        setup_id = str(row.get("setup_id") or "unknown")
-                        status = str(row.get("status") or "unknown")
-                        reason = str(row.get("reason_code") or row.get("reason") or "unknown")
-                        reason_family = str(row.get("reason_family") or reason.split(".", 1)[0])
-                        counters = setup_counters.setdefault(
-                            setup_id,
-                            {
-                                "status": Counter(),
-                                "reason": Counter(),
-                                "reason_family": Counter(),
-                            },
-                        )
-                        counters["status"][status] += 1
-                        counters["reason"][reason] += 1
-                        counters["reason_family"][reason_family] += 1
-                        status_counts[status] += 1
-                        reason_family_counts[reason_family] += 1
-                        total_rows += 1
+                rows = self._read_recent_jsonl(path, limit=max_rows - total_rows)
+                for row in rows:
+                    setup_id = str(row.get("setup_id") or "unknown")
+                    status = str(row.get("status") or "unknown")
+                    reason = str(row.get("reason_code") or row.get("reason") or "unknown")
+                    reason_family = str(row.get("reason_family") or reason.split(".", 1)[0])
+                    counters = setup_counters.setdefault(
+                        setup_id,
+                        {
+                            "status": Counter(),
+                            "reason": Counter(),
+                            "reason_family": Counter(),
+                        },
+                    )
+                    counters["status"][status] += 1
+                    counters["reason"][reason] += 1
+                    counters["reason_family"][reason_family] += 1
+                    status_counts[status] += 1
+                    reason_family_counts[reason_family] += 1
+                    total_rows += 1
             except OSError as exc:
                 LOG.debug("failed to read strategy decision telemetry %s: %s", path, exc)
 
@@ -606,15 +627,20 @@ class BotDashboard:
                 str(row.get("setup_id") or ""),
             ),
         )
-        return {
+        summary = {
             "files": [str(path) for path in files],
             "file_count": len(files),
             "total_rows": total_rows,
+            "max_rows": max_rows,
+            "limit_files": limit_files,
+            "generated_at": datetime.now(UTC).isoformat(),
             "status_counts": dict(status_counts),
             "reason_family_counts": dict(reason_family_counts),
             "setups": setups,
             "setup_reports": setup_reports,
         }
+        self._decision_cache[cache_key] = (now, fingerprint, summary)
+        return summary
 
     def _get_market_regime(self) -> dict[str, Any]:
         bot = self.bot
@@ -1576,7 +1602,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         async function fetchStrategyDecisions() {
             const container = document.getElementById('decision-diagnostics');
             try {
-                const res = await fetch('/api/analytics/strategy-decisions?limit_files=8&max_rows=200000');
+                const res = await fetch('/api/analytics/strategy-decisions?limit_files=1&max_rows=1000');
                 if (!res.ok) throw new Error('HTTP ' + res.status);
                 const data = await res.json();
                 if (data.error) throw new Error(data.error);

@@ -94,7 +94,7 @@ class StructureBreakRetestSetup(BaseSetup):
             "breakout_threshold": 0.002,
             "bias_mismatch_penalty": 0.75,
             "tp_too_close_penalty": 0.75,
-            "min_rr": 1.5,
+            "min_rr": 1.9,
             "enable_15m_range_fallback": 1.0,
         }
         if settings is not None:
@@ -281,12 +281,13 @@ class StructureBreakRetestSetup(BaseSetup):
             return None
 
         min_rr = dynamic_params.get("min_rr", defaults["min_rr"])
-        if tp1 is None:
+        if tp1 is None or abs(tp1 - price_anchor) < risk * float(min_rr):
             tp1 = (
                 price_anchor + risk * float(min_rr)
                 if direction == "long"
                 else price_anchor - risk * float(min_rr)
             )
+            reasons.append(f"tp1_rr_fallback_{float(min_rr):.2f}")
         if tp2 is None or abs(tp2 - price_anchor) <= abs(tp1 - price_anchor):
             tp2 = (
                 price_anchor + risk * max(2.0, float(min_rr) + 0.35)

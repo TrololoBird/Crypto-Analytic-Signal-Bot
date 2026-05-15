@@ -263,6 +263,33 @@ def apply_global_filters(
     # is transitional but 1h clearly shows direction.
     passed.append("regime_ok")
 
+    dominant_1h = str(
+        getattr(prepared, "regime_1h_confirmed", None)
+        or getattr(prepared, "bias_1h", None)
+        or "neutral"
+    ).lower()
+    if signal.direction == "long" and dominant_1h == "downtrend":
+        return _reject(
+            "trend_conflict_1h",
+            base,
+            details={
+                "signal_direction": signal.direction,
+                "dominant_1h": dominant_1h,
+                "setup_id": signal.setup_id,
+            },
+        )
+    if signal.direction == "short" and dominant_1h == "uptrend":
+        return _reject(
+            "trend_conflict_1h",
+            base,
+            details={
+                "signal_direction": signal.direction,
+                "dominant_1h": dominant_1h,
+                "setup_id": signal.setup_id,
+            },
+        )
+    passed.append("trend_context_ok")
+
     # Compute delta_ratio from 15m candles (CVD proxy)
     delta_ratio: float | None = None
     if not prepared.work_15m.is_empty() and "delta_ratio" in prepared.work_15m.columns:
@@ -283,11 +310,6 @@ def apply_global_filters(
 
     # --- 5. Stop distance ---
     min_stop_distance_pct = float(settings.tracking.min_stop_distance_pct)
-    if deep_analysis_asset:
-        min_stop_distance_pct = min(
-            min_stop_distance_pct,
-            0.20 if primary_timeframe in {"1h", "4h"} else 0.25,
-        )
     if updated.stop_distance_pct < min_stop_distance_pct:
         return _reject(
             "stop_too_tight",
@@ -308,9 +330,10 @@ def apply_global_filters(
     risk = abs(updated.entry_mid - updated.stop)
     reward_tp1 = abs(updated.take_profit_1 - updated.entry_mid)
     rr_tp1 = (reward_tp1 / risk) if risk > 0 else 0.0
-    effective_min_rr = float(setup_overrides.get("min_rr", settings.filters.min_risk_reward))
-    if deep_analysis_asset:
-        effective_min_rr = min(effective_min_rr, 1.5)
+    effective_min_rr = max(
+        settings.filters.min_risk_reward,
+        float(setup_overrides.get("min_rr", settings.filters.min_risk_reward)),
+    )
     rr_epsilon = 1e-9
     if rr_tp1 + rr_epsilon < effective_min_rr:
         return _reject(

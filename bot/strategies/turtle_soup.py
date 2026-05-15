@@ -92,7 +92,7 @@ class TurtleSoupSetup(BaseSetup):
             "sl_buffer_atr": 0.5,
             "volume_threshold": 1.0,
             "bias_mismatch_penalty": 0.75,
-            "min_rr": 1.5,
+            "min_rr": 1.9,
             "min_recovery_delta_long": 0.49,
             "max_recovery_delta_short": 0.51,
             "max_adverse_depth_imbalance": 0.05,
@@ -109,8 +109,14 @@ class TurtleSoupSetup(BaseSetup):
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         try:
             return self._detect(prepared, settings)
-        except Exception:
-            _reject(prepared, self.setup_id, "unexpected_exception")
+        except Exception as exc:
+            _reject(
+                prepared,
+                self.setup_id,
+                "runtime.unexpected_exception",
+                stage="runtime",
+                exception_type=type(exc).__name__,
+            )
             LOG.exception("%s turtle_soup: unexpected error", prepared.symbol)
             return None
 

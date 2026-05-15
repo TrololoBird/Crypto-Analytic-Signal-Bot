@@ -136,7 +136,7 @@ _PUBLIC_ENDPOINT_REGISTRY: dict[str, _PublicEndpointSpec] = {
         "/futures/data/globalLongShortAccountRatio", ip_limited=True
     ),
     "taker_long_short_ratio": _PublicEndpointSpec(
-        "/futures/data/takerLongShortRatio", ip_limited=True
+        "/futures/data/takerlongshortRatio", ip_limited=True
     ),
     "basis": _PublicEndpointSpec("/futures/data/basis", ip_limited=True),
 }
@@ -1079,17 +1079,18 @@ class BinanceFuturesMarketData:
             self.fetch_klines_cached(symbol, "1h", limit=_DEFAULT_KLINE_FETCH_LIMIT),
             self.fetch_klines_cached(symbol, "15m", limit=_DEFAULT_KLINE_FETCH_LIMIT),
             self.fetch_klines_cached(symbol, "5m", limit=_DEFAULT_KLINE_FETCH_LIMIT),
-            self._fetch_book_ticker_rest(symbol),
+            self._fetch_book_ticker_rest_detail(symbol),
         )
-        bid, ask = book_ticker
         return SymbolFrames(
             symbol=symbol,
             df_1h=frame_1h,
             df_15m=frame_15m,
-            bid_price=bid,
-            ask_price=ask,
+            bid_price=book_ticker.get("bid_price"),
+            ask_price=book_ticker.get("ask_price"),
             df_5m=frame_5m,
             df_4h=frame_4h,
+            bid_qty=book_ticker.get("bid_qty"),
+            ask_qty=book_ticker.get("ask_qty"),
         )
 
     async def fetch_klines(self, symbol: str, interval: str, *, limit: int) -> pl.DataFrame:
@@ -1171,7 +1172,7 @@ class BinanceFuturesMarketData:
             return None
         return frame
 
-    async def _fetch_book_ticker_rest(self, symbol: str) -> tuple[float | None, float | None]:
+    async def _fetch_book_ticker_rest_detail(self, symbol: str) -> dict[str, float | None]:
         validate_symbol(symbol)
         max_attempts = 3
         for attempt in range(1, max_attempts + 1):
@@ -1184,12 +1185,23 @@ class BinanceFuturesMarketData:
                 if isinstance(payload, Mapping):
                     bid_raw = payload.get("bidPrice") or payload.get("bid_price")
                     ask_raw = payload.get("askPrice") or payload.get("ask_price")
+                    bid_qty_raw = payload.get("bidQty") or payload.get("bid_qty")
+                    ask_qty_raw = payload.get("askQty") or payload.get("ask_qty")
                 else:
                     bid_raw = getattr(payload, "bid_price", None)
                     ask_raw = getattr(payload, "ask_price", None)
+                    bid_qty_raw = getattr(payload, "bid_qty", None)
+                    ask_qty_raw = getattr(payload, "ask_qty", None)
                 bid = float(bid_raw) if bid_raw is not None else None
                 ask = float(ask_raw) if ask_raw is not None else None
-                return bid, ask
+                bid_qty = float(bid_qty_raw) if bid_qty_raw is not None else None
+                ask_qty = float(ask_qty_raw) if ask_qty_raw is not None else None
+                return {
+                    "bid_price": bid,
+                    "ask_price": ask,
+                    "bid_qty": bid_qty,
+                    "ask_qty": ask_qty,
+                }
             except MarketDataUnavailable as exc:
                 detail = (exc.detail or "").lower()
                 if attempt < max_attempts and "timeout" in detail:
@@ -1209,8 +1221,22 @@ class BinanceFuturesMarketData:
                     symbol,
                     detail,
                 )
-                return None, None
-        return None, None
+                return {
+                    "bid_price": None,
+                    "ask_price": None,
+                    "bid_qty": None,
+                    "ask_qty": None,
+                }
+        return {
+            "bid_price": None,
+            "ask_price": None,
+            "bid_qty": None,
+            "ask_qty": None,
+        }
+
+    async def _fetch_book_ticker_rest(self, symbol: str) -> tuple[float | None, float | None]:
+        detail = await self._fetch_book_ticker_rest_detail(symbol)
+        return detail.get("bid_price"), detail.get("ask_price")
 
     async def _fetch_agg_trade_snapshot_rest(
         self, symbol: str, *, limit: int = 100

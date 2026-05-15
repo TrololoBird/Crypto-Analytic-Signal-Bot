@@ -247,4 +247,5 @@ def test_dashboard_strategy_catalog_keeps_zero_outcome_strategies_visible() -> N
     assert merged["registered_strategies"] == 2
     assert merged["enabled_strategies"] == 2
     assert merged["by_setup"]["price_velocity"]["trades"] == 0
-    assert merged["by_setup"]["price_velocity"]["status"] == "beta"
+    assert merged["by_setup"]["price_velocity"]["catalog_status"] == "beta"
+    assert merged["by_setup"]["price_velocity"]["status"] == "unverified"

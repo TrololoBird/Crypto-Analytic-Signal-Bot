@@ -50,7 +50,7 @@ class CVDDivergenceSetup(BaseSetup):
             "divergence_lookback": 5,
             "delta_lookback": 3,
             "bias_mismatch_penalty": 0.75,
-            "min_rr": 1.5,
+            "min_rr": 1.9,
             "min_delta_threshold": 0.06,
             "sl_buffer_atr": 0.5,
         }
@@ -260,8 +260,12 @@ class CVDDivergenceSetup(BaseSetup):
                 price=price,
             )
             return None  # Reject this CVD divergence setup
-        if tp2 is None:
-            tp2 = tp1  # Use TP1 as TP2 if no extended target found
+        if tp2 is None or abs(tp2 - price) <= abs(tp1 - price):
+            tp2 = (
+                price + risk * max(2.0, min_rr + 0.35)
+                if direction == "long"
+                else price - risk * max(2.0, min_rr + 0.35)
+            )
 
         vol_ratio = float(w.item(-1, "volume_ratio20") or 1.0)
         rsi = float(w.item(-1, "rsi14") or 50.0)

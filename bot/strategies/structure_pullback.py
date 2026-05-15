@@ -38,7 +38,7 @@ class StructurePullbackSetup(BaseSetup):
             "base_score": 0.55,
             "bias_mismatch_penalty": 0.75,
             "tp_too_close_penalty": 0.75,
-            "min_rr": 1.5,
+            "min_rr": 1.9,
             "min_trend_score": 0.40,
             "ema_proximity_pct": 0.990,
             "ema_deep_pullback_pct": 0.965,
@@ -67,6 +67,22 @@ class StructurePullbackSetup(BaseSetup):
         )
         sl_buffer_atr = dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"])
         min_rr = dynamic_params.get("min_rr", defaults["min_rr"])
+        ema_proximity_cfg = float(
+            dynamic_params.get("ema_proximity_pct", defaults["ema_proximity_pct"])
+        )
+        ema_deep_pullback_cfg = float(
+            dynamic_params.get("ema_deep_pullback_pct", defaults["ema_deep_pullback_pct"])
+        )
+        ema_proximity_tol = (
+            max(0.0, 1.0 - ema_proximity_cfg)
+            if ema_proximity_cfg > 0.5
+            else max(0.0, ema_proximity_cfg)
+        )
+        ema_deep_pullback_tol = (
+            max(ema_proximity_tol, 1.0 - ema_deep_pullback_cfg)
+            if ema_deep_pullback_cfg > 0.5
+            else max(ema_proximity_tol, ema_deep_pullback_cfg)
+        )
 
         if work_1h.height < 5 or work_15m.height < 5:
             _reject(prepared, "structure_pullback", "insufficient_bars")
@@ -115,10 +131,10 @@ class StructurePullbackSetup(BaseSetup):
         if close_1h > ema20_1h:
             long_score += 0.20
             long_reasons.append("price_above_ema20")
-        elif ema20_proximity <= 0.005:
+        elif ema20_proximity <= ema_proximity_tol:
             long_score += 0.15
             long_reasons.append("price_near_ema20")
-        elif ema20_proximity <= 0.02:
+        elif ema20_proximity <= ema_deep_pullback_tol:
             long_score += 0.05
             long_reasons.append("deep_pullback_near_ema20")
 
@@ -139,10 +155,10 @@ class StructurePullbackSetup(BaseSetup):
         if close_1h < ema20_1h:
             short_score += 0.20
             short_reasons.append("price_below_ema20")
-        elif ema20_proximity <= 0.005:
+        elif ema20_proximity <= ema_proximity_tol:
             short_score += 0.15
             short_reasons.append("price_near_ema20")
-        elif ema20_proximity <= 0.02:
+        elif ema20_proximity <= ema_deep_pullback_tol:
             short_score += 0.05
             short_reasons.append("deep_pullback_near_ema20")
 
@@ -234,7 +250,7 @@ class StructurePullbackSetup(BaseSetup):
                 rsi=rsi,
             )
             return None
-        if direction == "short" and not (55.0 <= rsi <= 75.0):
+        if direction == "short" and not (20.0 <= rsi <= 75.0):
             _reject(
                 prepared,
                 "structure_pullback",
@@ -374,12 +390,16 @@ class StructurePullbackSetup(BaseSetup):
             else:
                 tp1 = price_anchor - min_required
             reasons.append("tp1_rr_fallback")
-        if tp2 is None:
-            tp2 = tp1  # Use TP1 as TP2 if no extended target found
+        if tp2 is None or abs(tp2 - price_anchor) <= abs(tp1 - price_anchor):
+            tp2 = (
+                price_anchor + risk * max(2.0, min_rr_cfg + 0.35)
+                if direction == "long"
+                else price_anchor - risk * max(2.0, min_rr_cfg + 0.35)
+            )
 
         score = _compute_dynamic_score(
             direction=direction,
-            base_score=0.60,
+            base_score=float(dynamic_params.get("base_score", defaults["base_score"])),
             vol_ratio=vol_ratio,
             rsi=rsi,
             structure_clarity=0.6,

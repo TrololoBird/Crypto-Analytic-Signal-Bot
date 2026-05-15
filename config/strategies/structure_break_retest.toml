@@ -16,7 +16,7 @@ retest_atr_tol = 0.5
 
 [risk_management]
 sl_buffer_atr = 1.5
-min_rr = 1.5
+min_rr = 1.9
 
 [scoring]
 base_score = 0.54

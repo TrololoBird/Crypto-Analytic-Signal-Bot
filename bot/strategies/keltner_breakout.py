@@ -35,7 +35,7 @@ class KeltnerBreakoutSetup(BaseSetup):
             "min_volume_ratio": 1.25,
             "min_adx_1h": 14.0,
             "sl_buffer_atr": 0.6,
-            "min_rr": 1.5,
+            "min_rr": 1.9,
         }
         if settings is not None:
             setups = getattr(getattr(settings, "filters", None), "setups", {})
@@ -108,7 +108,7 @@ class KeltnerBreakoutSetup(BaseSetup):
             return None
 
         sh_mask, sl_mask = _swing_points(work_1h, n=3, include_unconfirmed_tail=True)
-        min_rr = float(params["min_rr"])
+        min_rr = float(effective_params["min_rr"])
         stop, tp1, tp2 = build_structural_targets(
             direction=direction,
             price_anchor=close,
@@ -117,7 +117,7 @@ class KeltnerBreakoutSetup(BaseSetup):
             work_1h=work_1h,
             work_4h=prepared.work_4h,
             min_rr=min_rr,
-            sl_buffer_atr=float(params["sl_buffer_atr"]),
+            sl_buffer_atr=float(effective_params["sl_buffer_atr"]),
             sh_mask=sh_mask,
             sl_mask=sl_mask,
         )
@@ -127,8 +127,12 @@ class KeltnerBreakoutSetup(BaseSetup):
             return None
         if tp1 is None or abs(tp1 - close) < risk * min_rr:
             tp1 = close + risk * min_rr if direction == "long" else close - risk * min_rr
-        if tp2 is None:
-            tp2 = tp1
+        if tp2 is None or abs(tp2 - close) <= abs(tp1 - close):
+            tp2 = (
+                close + risk * max(2.0, min_rr + 0.35)
+                if direction == "long"
+                else close - risk * max(2.0, min_rr + 0.35)
+            )
 
         base_score = float(effective_params["base_score"])
         score = _compute_dynamic_score(

@@ -37,6 +37,16 @@ Family and confirmation profile metadata are attached per strategy and used by s
 
 - Keep strategy params in `[bot.filters.setups]` config scope.
 - Keep setup enable flags in `[bot.setups]`.
+- All registered setup flags must remain enabled unless a strategy is removed
+  from `STRATEGY_CLASSES`; broken strategies are fixed through detector logic,
+  explicit reject reasons, or config calibration rather than hidden disablement.
+- `bot.filters.min_risk_reward` is the global RR floor. Per-setup `min_rr`
+  values may raise the floor but must not lower it.
+- A signal that opposes confirmed 1h trend context is rejected by the global
+  `trend_conflict_1h` filter.
+- Telegram `why now` companion messages are optional and controlled by
+  `bot.notifiers.send_analytics_companion`; the main signal card remains the
+  canonical delivery format.
 - Add regression coverage when changing decision contracts or metadata.
 - When changing structural target logic, preserve the short-side rule that stop anchors come from resistance above entry, not from the nearest arbitrary structure.
 - Runtime params must affect detection or target construction, not just defaults:
@@ -65,3 +75,9 @@ for concepts that would need richer historical orderbook or liquidation-cluster
 data for full parity. Examples: `whale_walls` uses depth/microprice imbalance
 as a wall proxy, and `liquidation_heatmap` uses recent liquidation sentiment
 rather than a true exchange-wide liquidation heatmap.
+
+## 2026-05-14 Live Audit
+
+See `docs/strategy_live_audit_2026-05-14.md` for the live audit against the
+running process, telemetry, outcome database, Telegram delivery format, Binance
+public-data docs, and the current 37-strategy matrix.

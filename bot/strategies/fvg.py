@@ -19,6 +19,7 @@ from ..domain.schemas import PreparedSymbol, Signal
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.smc import latest_fvg_zone
 from ..setups.utils import (
+    select_structural_target,
     validate_rr_or_penalty,
     get_dynamic_params,
 )
@@ -41,7 +42,7 @@ class FVGSetup(BaseSetup):
             "bias_mismatch_penalty": 0.75,
             "rsi_overbought": 70.0,
             "rsi_oversold": 30.0,
-            "min_rr": 1.5,
+            "min_rr": 1.9,
             "tp_too_close_penalty": 0.8,
             "min_fvg_size_atr": 0.25,
             "min_mitigation_pct": 0.20,
@@ -209,32 +210,72 @@ class FVGSetup(BaseSetup):
             score *= dynamic_params.get(
                 "bias_mismatch_penalty", defaults["bias_mismatch_penalty"]
             )
-        # --- Compute structural SL/TP ---
+        # --- Compute continuation SL/TP.
+        # A mitigated FVG is the entry zone; its midpoint/opposite boundary is
+        # not a meaningful profit target. Target the next structure level, then
+        # fall back to a deterministic RR projection.
+        from ..features import _swing_points as _sp
+
+        sh_mask = sl_mask = None
+        if prepared.work_1h.height >= 8:
+            sh_mask, sl_mask = _sp(prepared.work_1h, n=3, include_unconfirmed_tail=True)
+        min_rr = float(dynamic_params.get("min_rr", defaults["min_rr"]))
         if direction == "long":
-            # SL: beyond opposite side of FVG + 0.5×ATR (was 0.1)
             stop = fvg_low - atr * float(sl_buffer_atr)
-            # TP1: FVG midpoint (50% fill)
-            tp1 = fvg_mid if fvg_mid > price else fvg_high
-            # TP2: full FVG fill (opposite boundary)
-            tp2 = fvg_high
-            if tp1 <= price:
-                tp1 = price + max(fvg_width, atr * 0.5)
-            if tp2 <= tp1:
-                tp2 = tp1 + max(fvg_width * 0.5, atr * 0.5)
+            risk = price - stop
+            if risk <= 0.0:
+                _reject(prepared, setup_id, "invalid_stop", stop=stop, price=price)
+                return None
+            tp1 = select_structural_target(
+                prepared.work_1h,
+                mask=sh_mask,
+                column="high",
+                price_anchor=price,
+                direction="long",
+            )
+            tp2 = select_structural_target(
+                prepared.work_4h,
+                mask=None,
+                column="high",
+                price_anchor=price,
+                direction="long",
+            )
+            if tp1 is None or abs(tp1 - price) < risk * min_rr:
+                tp1 = price + risk * min_rr
+                reasons_note = "tp1_rr_fallback"
+            else:
+                reasons_note = "tp1_structural"
+            if tp2 is None or tp2 <= tp1:
+                tp2 = price + risk * max(2.0, min_rr + 0.35)
         else:
-            # SL: beyond opposite side of FVG + 0.5×ATR (was 0.1)
             stop = fvg_high + atr * float(sl_buffer_atr)
-            # TP1: FVG midpoint (50% fill)
-            tp1 = fvg_mid if fvg_mid < price else fvg_low
-            # TP2: full FVG fill
-            tp2 = fvg_low
-            if tp1 >= price:
-                tp1 = price - max(fvg_width, atr * 0.5)
-            if tp2 >= tp1:
-                tp2 = tp1 - max(fvg_width * 0.5, atr * 0.5)
+            risk = stop - price
+            if risk <= 0.0:
+                _reject(prepared, setup_id, "invalid_stop", stop=stop, price=price)
+                return None
+            tp1 = select_structural_target(
+                prepared.work_1h,
+                mask=sl_mask,
+                column="low",
+                price_anchor=price,
+                direction="short",
+            )
+            tp2 = select_structural_target(
+                prepared.work_4h,
+                mask=None,
+                column="low",
+                price_anchor=price,
+                direction="short",
+            )
+            if tp1 is None or abs(tp1 - price) < risk * min_rr:
+                tp1 = price - risk * min_rr
+                reasons_note = "tp1_rr_fallback"
+            else:
+                reasons_note = "tp1_structural"
+            if tp2 is None or tp2 >= tp1:
+                tp2 = price - risk * max(2.0, min_rr + 0.35)
 
         # Graded RR validation instead of hard reject
-        min_rr = dynamic_params.get("min_rr", defaults["min_rr"])
         is_valid_rr, _ = validate_rr_or_penalty(price, stop, tp1, min_rr)
 
         if not is_valid_rr and tp1 is not None:
@@ -247,6 +288,7 @@ class FVGSetup(BaseSetup):
             f"FVG {direction}: gap [{fvg_low:.4f}-{fvg_high:.4f}] state={zone.state}",
             f"price={price:.4f} inside gap | 1h_bias={bias_1h} 1h_struct={structure_1h} 1h_regime={regime_1h}",
             f"vol_ratio={vol_ratio:.2f} impulse_vol={impulse_vol_ratio:.2f} rsi={rsi:.1f}",
+            reasons_note,
         ]
 
         return _build_signal(

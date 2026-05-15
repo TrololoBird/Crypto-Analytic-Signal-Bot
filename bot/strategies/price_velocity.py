@@ -72,7 +72,7 @@ class PriceVelocitySetup(BaseSetup):
             "max_rsi_long": 82.0,
             "min_rsi_short": 18.0,
             "sl_buffer_atr": 0.55,
-            "min_rr": 1.5,
+            "min_rr": 1.9,
             "min_adx_1h": 16.0,
             "max_adverse_depth_imbalance": 0.12,
             "max_adverse_microprice_bias": 0.12,

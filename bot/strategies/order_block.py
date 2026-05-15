@@ -42,7 +42,7 @@ class OrderBlockSetup(BaseSetup):
             "ob_max_age": 30.0,
             "bias_mismatch_penalty": 0.75,
             "tp_too_close_penalty": 0.75,
-            "min_rr": 1.5,
+            "min_rr": 1.9,
             "sl_buffer_atr": 0.5,
             "rsi_overbought": 76.0,
             "rsi_oversold": 24.0,
@@ -193,6 +193,7 @@ class OrderBlockSetup(BaseSetup):
         stop = stop_calc if stop_calc != stop_basis else fallback_stop
 
         min_rr = dynamic_params.get("min_rr", defaults["min_rr"])
+        risk = abs(price - stop)
         is_valid_rr, _ = validate_rr_or_penalty(price, stop, tp1, min_rr)
 
         vol_ratio = float(w1h.item(-1, "volume_ratio20") or 1.0)
@@ -224,16 +225,26 @@ class OrderBlockSetup(BaseSetup):
         if not is_valid_rr and tp1 is not None:
             score *= dynamic_params.get("tp_too_close_penalty", defaults["tp_too_close_penalty"])
 
-        if tp1 is None:
-            _reject(prepared, setup_id, "tp1_missing", direction=direction, price=price)
+        if risk <= 0.0:
+            _reject(prepared, setup_id, "invalid_stop", stop=stop, price=price)
             return None
-        if tp2 is None:
-            tp2 = tp1
+        if tp1 is None or abs(tp1 - price) < risk * float(min_rr):
+            tp1 = price + risk * float(min_rr) if direction == "long" else price - risk * float(min_rr)
+            reasons_note = f"tp1_rr_fallback_{float(min_rr):.2f}"
+        else:
+            reasons_note = "tp1_structural"
+        if tp2 is None or abs(tp2 - price) <= abs(tp1 - price):
+            tp2 = (
+                price + risk * max(2.0, float(min_rr) + 0.35)
+                if direction == "long"
+                else price - risk * max(2.0, float(min_rr) + 0.35)
+            )
 
         reasons = [
             f"OB {direction}: zone [{ob_low:.4f}-{ob_high:.4f}] state={zone.state}",
             f"age={age}bars price={price:.4f} | 1h_bias={bias_1h} 1h_struct={structure_1h}",
             f"rsi={rsi_check:.1f}",
+            reasons_note,
         ]
 
         return _build_signal(

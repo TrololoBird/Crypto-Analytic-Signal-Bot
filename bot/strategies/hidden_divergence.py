@@ -37,7 +37,7 @@ class HiddenDivergenceSetup(BaseSetup):
             "min_swings": 2.0,
             "bias_mismatch_penalty": 0.75,
             "tp_too_close_penalty": 0.75,
-            "min_rr": 1.5,
+            "min_rr": 1.9,
             "rsi_divergence_lookback": 3.0,
             "rsi_divergence_threshold": 5.0,
             "min_delta_threshold": 0.0,
@@ -257,8 +257,8 @@ class HiddenDivergenceSetup(BaseSetup):
                 tp1 = None
                 tp2 = None
 
-        # Validate: TP1 must be at least 1.5× risk distance, else reject
-        if tp1 is None or abs(tp1 - price) < risk * 1.5:
+        min_rr = float(dynamic_params.get("min_rr", defaults["min_rr"]))
+        if tp1 is None or abs(tp1 - price) < risk * min_rr:
             _reject(
                 prepared,
                 setup_id,
@@ -266,6 +266,7 @@ class HiddenDivergenceSetup(BaseSetup):
                 tp1=tp1,
                 risk=risk,
                 price=price,
+                min_rr=min_rr,
             )
             return None  # Reject this hidden divergence setup
         if tp2 is None or abs(tp2 - price) <= abs(tp1 - price):
@@ -275,7 +276,7 @@ class HiddenDivergenceSetup(BaseSetup):
         vol_ratio = float(w1h.item(-1, "volume_ratio20") or 1.0)
         score = _compute_dynamic_score(
             direction=direction,
-            base_score=0.48,
+            base_score=float(dynamic_params.get("base_score", defaults["base_score"])),
             vol_ratio=vol_ratio,
             rsi=rsi,
         )

@@ -2,7 +2,7 @@
 
 [strategy]
 enabled = true
-name = "fvg"
+name = "fvg_setup"
 
 [detection]
 # FVG parameters
@@ -13,12 +13,12 @@ max_fvg_age_bars = 5
 min_imbalance_ratio = 0.3
 
 [risk_management]
-sl_buffer_atr = 1.5
-min_rr = 1.5
+sl_buffer_atr = 0.8
+min_rr = 1.9
 
 [scoring]
-base_score = 0.54
+base_score = 0.60
 
 [filters]
-min_volume_ratio = 0.8
+min_volume_ratio = 1.10
 require_fill_confirmation = true

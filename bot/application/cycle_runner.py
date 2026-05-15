@@ -40,6 +40,30 @@ class CycleRunner:
         ws_enrichments = dict(bot._ws_cache_enrichments(symbol))
         if ws_enrichments_override:
             ws_enrichments.update(ws_enrichments_override)
+        required_derivatives_context = (
+            "oi_change_pct",
+            "ls_ratio",
+            "top_position_ls_ratio",
+            "global_ls_ratio",
+            "taker_ratio",
+            "funding_rate",
+        )
+        if any(key not in ws_enrichments for key in required_derivatives_context):
+            try:
+                warmed = await bot._get_oi_refresh_runner().refresh_symbol_if_missing(
+                    symbol,
+                    max_age_seconds=900.0,
+                    include_funding_history=False,
+                    timeout_seconds=bot.settings.runtime.emergency_context_fetch_timeout_seconds,
+                )
+                if warmed:
+                    ws_enrichments.update(bot._ws_cache_enrichments(symbol))
+            except Exception as exc:
+                LOG.info(
+                    "symbol derivatives context warmup skipped | symbol=%s error=%s",
+                    symbol,
+                    exc,
+                )
 
         async with bot._analysis_semaphore:
             result = await bot._run_modern_analysis(

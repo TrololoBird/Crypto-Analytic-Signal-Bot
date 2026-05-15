@@ -352,12 +352,13 @@ class DeliveryOrchestrator:
                         message_ids={item.signal.tracking_id: item.message_id},
                     ),
                 )
-                asyncio.create_task(
-                    self._bot.delivery.send_analytics_companion(
-                        item.signal, btc_bias=btc_bias, eth_bias=eth_bias
-                    ),
-                    name=f"analytics:{item.signal.symbol}",
-                )
+                if bool(getattr(self._bot.settings.notifiers, "send_analytics_companion", False)):
+                    asyncio.create_task(
+                        self._bot.delivery.send_analytics_companion(
+                            item.signal, btc_bias=btc_bias, eth_bias=eth_bias
+                        ),
+                        name=f"analytics:{item.signal.symbol}",
+                    )
 
         try:
             await self._bot.alerts.on_confirmed_signals(delivered, observed_at=datetime.now(UTC))

@@ -145,6 +145,69 @@ class OIRefreshRunner:
         await self._bot._update_memory_market_context(shortlist)
         return processed
 
+    async def refresh_symbol_if_missing(
+        self,
+        symbol: str,
+        *,
+        max_age_seconds: float = 900.0,
+        include_funding_history: bool = False,
+        timeout_seconds: float | None = None,
+    ) -> bool:
+        """Warm derivatives context for one symbol when the cache is incomplete."""
+        if not symbol or not isinstance(self._bot.client, BinanceFuturesMarketData):
+            return False
+        client = self._bot.client
+        has_oi_change = client.get_cached_oi_change(symbol, max_age_s=max_age_seconds) is not None
+        has_ls = client.get_cached_ls_ratio(symbol, max_age_s=max_age_seconds) is not None
+        has_top_position_ls = (
+            client.get_cached_top_position_ls_ratio(symbol, max_age_s=max_age_seconds)
+            is not None
+        )
+        has_global_ls = (
+            client.get_cached_global_ls_ratio(symbol, max_age_s=max_age_seconds) is not None
+        )
+        has_taker = client.get_cached_taker_ratio(symbol, max_age_s=max_age_seconds) is not None
+        has_funding = client.get_cached_funding_rate(symbol, max_age_s=max_age_seconds) is not None
+        if (
+            has_oi_change
+            and has_ls
+            and has_top_position_ls
+            and has_global_ls
+            and has_taker
+            and has_funding
+        ):
+            return False
+        try:
+            if timeout_seconds is not None and timeout_seconds > 0:
+                await asyncio.wait_for(
+                    self._safe_fetch(
+                        symbol,
+                        include_funding_history=include_funding_history,
+                    ),
+                    timeout=timeout_seconds,
+                )
+            else:
+                await self._safe_fetch(
+                    symbol,
+                    include_funding_history=include_funding_history,
+                )
+            return True
+        except (asyncio.TimeoutError, TimeoutError) as exc:
+            LOG.info(
+                "single-symbol oi refresh timed out | symbol=%s degraded_reason=%s",
+                symbol,
+                str(exc),
+            )
+            return False
+        except _DEGRADATION_ERRORS as exc:
+            LOG.info(
+                "single-symbol oi refresh degraded | symbol=%s degraded_reason=%s exception_type=%s",
+                symbol,
+                str(exc),
+                type(exc).__name__,
+            )
+            return False
+
     async def _safe_fetch(
         self,
         symbol: str,
@@ -192,6 +255,11 @@ class OIRefreshRunner:
                 "rest",
                 "global_ls_ratio_1h",
                 lambda: client.fetch_global_ls_ratio(symbol, period="1h"),
+            ),
+            (
+                "rest",
+                "funding_rate",
+                lambda: client.fetch_funding_rate(symbol),
             ),
         ]
         if include_funding_history:

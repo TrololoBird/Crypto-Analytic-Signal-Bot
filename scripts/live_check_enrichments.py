@@ -307,16 +307,19 @@ async def _run(
             df_4h = await client.fetch_klines_cached(symbol, "4h", limit=300)
             df_1h = await client.fetch_klines_cached(symbol, "1h", limit=300)
             df_15m = await client.fetch_klines_cached(symbol, "15m", limit=300)
-            bid_price, ask_price = await client.fetch_book_ticker(symbol)
+            df_5m = await client.fetch_klines_cached(symbol, "5m", limit=300)
+            book_context = await client._fetch_book_ticker_rest_detail(symbol)
 
             frames = SymbolFrames(
                 symbol=symbol,
                 df_1h=df_1h,
                 df_15m=df_15m,
-                bid_price=bid_price,
-                ask_price=ask_price,
-                df_5m=None,  # Not needed for this check
+                bid_price=book_context.get("bid_price"),
+                ask_price=book_context.get("ask_price"),
+                df_5m=df_5m,
                 df_4h=df_4h,
+                bid_qty=book_context.get("bid_qty"),
+                ask_qty=book_context.get("ask_qty"),
             )
 
             # Create prepared symbol
@@ -402,10 +405,12 @@ async def _run(
 
         # Check if all critical fields are now populated
         all_populated = total_null == 0
-        if all_populated:
+        if all_results and all_populated:
             LOG.info("SUCCESS: All critical fields are populated!")
         else:
             LOG.error("FAILURE: %d fields still NULL", total_null)
+            if not all_results:
+                raise RuntimeError("no symbols were prepared; enrichment check is invalid")
 
     finally:
         await ws_manager.stop()

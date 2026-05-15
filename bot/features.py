@@ -39,6 +39,7 @@ from .features_structure import (
     ichimoku_lines as _ichimoku_lines_external,
     weighted_moving_average as _weighted_moving_average_external,
 )
+from .websocket.enrichment import depth_imbalance_from_book, microprice_bias_from_book
 
 # Optional polars_ta import. TA-Lib itself is deliberately not imported:
 # Windows/Python 3.13 deployments are brittle with that native dependency,
@@ -1663,13 +1664,18 @@ def _enrich_with_ws_data(
     work: pl.DataFrame,
     symbol: str,
     ws_manager: Any | None,
+    fallback_book: tuple[float | None, float | None, float | None, float | None] | None = None,
 ) -> pl.DataFrame:
     """Merge current WebSocket bookTicker and aggTrade context into work_15m."""
-    if ws_manager is None or work.is_empty():
+    if work.is_empty() or (ws_manager is None and fallback_book is None):
         return work
 
-    book = getattr(ws_manager, "_book", {}).get(symbol, (None, None))
-    qty = getattr(ws_manager, "_book_qty", {}).get(symbol, (None, None))
+    book = getattr(ws_manager, "_book", {}).get(symbol, (None, None)) if ws_manager else None
+    qty = getattr(ws_manager, "_book_qty", {}).get(symbol, (None, None)) if ws_manager else None
+    if (not isinstance(book, tuple) or book == (None, None)) and fallback_book is not None:
+        book = fallback_book[:2]
+    if (not isinstance(qty, tuple) or qty == (None, None)) and fallback_book is not None:
+        qty = fallback_book[2:4]
     bid_price, ask_price = book if isinstance(book, tuple) else (None, None)
     bid_qty, ask_qty = qty if isinstance(qty, tuple) else (None, None)
     work = work.with_columns(
@@ -1682,7 +1688,7 @@ def _enrich_with_ws_data(
     )
 
     snapshot = None
-    getter = getattr(ws_manager, "get_agg_trade_snapshot", None)
+    getter = getattr(ws_manager, "get_agg_trade_snapshot", None) if ws_manager else None
     if callable(getter):
         try:
             snapshot = getter(symbol)
@@ -1770,6 +1776,14 @@ def prepare_symbol(
         interval="15m",
         ws_manager=ws_manager,
     )
+    fallback_book = (frames.bid_price, frames.ask_price, frames.bid_qty, frames.ask_qty)
+    if ws_manager is None and (frames.bid_qty is not None or frames.ask_qty is not None):
+        work_15m = _enrich_with_ws_data(
+            work_15m,
+            sym,
+            None,
+            fallback_book=fallback_book,
+        )
     work_5m = None
     if frames.df_5m is not None and not frames.df_5m.is_empty():
         work_5m = _cached_prepare_frame(_to_polars(frames.df_5m), symbol=sym, interval="5m")
@@ -1835,6 +1849,18 @@ def prepare_symbol(
         midpoint = (frames.bid_price + frames.ask_price) / 2.0
         if midpoint > 0:
             spread_bps = ((frames.ask_price - frames.bid_price) / midpoint) * 10_000.0
+    book_depth_imbalance = depth_imbalance_from_book(
+        bid_qty=frames.bid_qty,
+        ask_qty=frames.ask_qty,
+        delta_ratio=None,
+    )
+    book_microprice_bias = microprice_bias_from_book(
+        bid=frames.bid_price,
+        ask=frames.ask_price,
+        bid_qty=frames.bid_qty,
+        ask_qty=frames.ask_qty,
+        delta_ratio=None,
+    )
 
     work_4h_frame = work_4h if work_4h is not None else pl.DataFrame()
     regime = _market_regime(work_4h_frame, work_1h=work_1h, work_15m=work_15m)
@@ -1856,6 +1882,8 @@ def prepare_symbol(
         regime_1h_confirmed=_regime_1h_confirmed(work_1h),  # 1H context for 15M signals
         poc_1h=_volume_poc(work_1h, lookback=48),
         poc_15m=_volume_poc(primary_work, lookback=96),
+        depth_imbalance=book_depth_imbalance,
+        microprice_bias=book_microprice_bias,
         primary_timeframe=primary_timeframe,
         context_timeframes=context_timeframes,
         settings=settings,

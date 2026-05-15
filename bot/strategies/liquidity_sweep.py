@@ -51,7 +51,7 @@ class LiquiditySweepSetup(BaseSetup):
             "reclaim_threshold": 0.30,
             "sl_buffer_atr": 0.50,
             "bias_mismatch_penalty": 0.75,
-            "min_rr": 1.5,
+            "min_rr": 1.9,
         }
         if settings is not None:
             filters = getattr(settings, "filters", None)
@@ -189,13 +189,14 @@ class LiquiditySweepSetup(BaseSetup):
                     level=eq_high_level,
                 )
                 return None
-            if abs(price - confirmation_close) > sweep_atr_mult * atr:
+            if abs(price - confirmation_close) > reclaim_threshold * atr:
                 _reject(
                     prepared,
                     setup_id,
                     "short_reclaim_too_far",
                     price=price,
                     close=confirmation_close,
+                    reclaim_threshold=reclaim_threshold,
                 )
                 return None
 

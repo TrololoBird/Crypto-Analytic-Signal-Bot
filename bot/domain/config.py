@@ -48,12 +48,12 @@ class RuntimeConfig(BaseModel):
     diagnostic_trace_limit_per_symbol: int = Field(default=20, ge=0, le=500)
     # Startup throttling to prevent REST API flood
     startup_batch_size: int = Field(default=3, ge=1, le=10)
-    startup_batch_delay_seconds: float = Field(default=2.0, ge=0.5, le=10.0)
-    max_concurrent_rest_requests: int = Field(default=5, ge=1, le=20)
-    emergency_context_warmup_timeout_seconds: float = Field(default=15.0, ge=1.0, le=120.0)
+    startup_batch_delay_seconds: float = Field(default=3.0, ge=0.5, le=10.0)
+    max_concurrent_rest_requests: int = Field(default=3, ge=1, le=20)
+    emergency_context_warmup_timeout_seconds: float = Field(default=45.0, ge=1.0, le=120.0)
     emergency_context_warmup_symbol_limit: int = Field(default=12, ge=1, le=100)
-    emergency_context_fetch_timeout_seconds: float = Field(default=3.0, ge=0.5, le=30.0)
-    futures_data_request_limit_per_5m: int = Field(default=300, ge=30, le=1000)
+    emergency_context_fetch_timeout_seconds: float = Field(default=8.0, ge=0.5, le=30.0)
+    futures_data_request_limit_per_5m: int = Field(default=240, ge=30, le=1000)
     heartbeat_seconds: float = Field(default=60.0, ge=5.0, le=3600.0)
 
     @field_validator("log_level")
@@ -362,6 +362,7 @@ class NotifierWebhookConfig(BaseModel):
 
 class NotifierConfig(BaseModel):
     provider: Literal["none", "telegram", "slack", "discord", "webhook"] = "telegram"
+    send_analytics_companion: bool = False
     slack: NotifierWebhookConfig = Field(default_factory=NotifierWebhookConfig)
     discord: NotifierWebhookConfig = Field(default_factory=NotifierWebhookConfig)
     webhook: NotifierWebhookConfig = Field(default_factory=NotifierWebhookConfig)
@@ -727,6 +728,9 @@ def _flatten_legacy_strategy_config(config: Mapping[str, Any]) -> dict[str, floa
 def _load_legacy_strategy_overrides(config_root: Path) -> dict[str, dict[str, float]]:
     """Load config/strategies/*.toml once and map to filters.setups format."""
     overrides: dict[str, dict[str, float]] = {}
+    setup_aliases = {
+        "fvg": "fvg_setup",
+    }
     legacy_dir = config_root / "config" / "strategies"
     if not legacy_dir.exists():
         return overrides
@@ -734,7 +738,7 @@ def _load_legacy_strategy_overrides(config_root: Path) -> dict[str, dict[str, fl
         parsed = _load_toml(file_path)
         if not parsed:
             continue
-        setup_id = file_path.stem
+        setup_id = setup_aliases.get(file_path.stem, file_path.stem)
         overrides[setup_id] = _flatten_legacy_strategy_config(parsed)
     return overrides
 

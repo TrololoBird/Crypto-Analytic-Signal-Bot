@@ -150,13 +150,13 @@ class SqueezeSetup(BaseSetup):
         """Tunable parameters for self-learner optimization."""
         defaults = {
             "base_score": 0.55,
-            "bb_squeeze_threshold": 0.05,
-            "min_bb_compression_width": 0.02,
+            "bb_squeeze_threshold": 4.5,
+            "min_bb_compression_width": 4.5,
             "bb_pct_b_threshold": 0.80,
             "volume_threshold": 1.2,
             "sl_buffer_atr": 0.4,
             "bias_mismatch_penalty": 0.75,
-            "min_rr": 1.5,
+            "min_rr": 1.9,
             "funding_extreme_threshold": 0.00015,
             "liquidation_extreme_threshold": 0.20,
             "release_lookback": 12,
@@ -278,17 +278,18 @@ class SqueezeSetup(BaseSetup):
                 crowd_reason = f"funding={funding:.4f} (shorts crowded)"
 
         if liq_score is not None and abs(liq_score) >= liquidation_extreme_threshold:
-            if liq_score > 0 and squeeze_dir == "short":
+            if liq_score > 0 and squeeze_dir == "long":
                 crowd_aligned = True
-                crowd_reason = f"liq_score={liq_score:.3f} (long liq pressure)"
-            elif liq_score < 0 and squeeze_dir == "long":
+                crowd_reason = f"liq_score={liq_score:.3f} (short liquidations bullish)"
+            elif liq_score < 0 and squeeze_dir == "short":
                 crowd_aligned = True
-                crowd_reason = f"liq_score={liq_score:.3f} (short liq pressure)"
+                crowd_reason = f"liq_score={liq_score:.3f} (long liquidations bearish)"
 
         direction = squeeze_dir
 
         oi_chg = prepared.oi_change_pct
-        if oi_chg is not None and oi_chg < -8.0:
+        oi_drop_limit = -8.0 if oi_chg is not None and abs(oi_chg) > 1.0 else -0.08
+        if oi_chg is not None and oi_chg < oi_drop_limit:
             _reject(prepared, "squeeze_setup", "oi_falling_too_fast", oi_change_pct=oi_chg)
             return None
 
@@ -370,8 +371,12 @@ class SqueezeSetup(BaseSetup):
                 else price_anchor - risk * min_rr
             )
             reasons.append(f"tp1_rr_fallback_{min_rr:.2f}")
-        if tp2 is None:
-            tp2 = tp1  # Use TP1 as TP2 if no extended target found
+        if tp2 is None or abs(tp2 - price_anchor) <= abs(tp1 - price_anchor):
+            tp2 = (
+                price_anchor + risk * max(2.0, min_rr + 0.35)
+                if direction == "long"
+                else price_anchor - risk * max(2.0, min_rr + 0.35)
+            )
 
         score = _compute_dynamic_score(
             direction=direction,

@@ -22,7 +22,7 @@ min_15m_bars = 3
 sl_buffer_atr = 1.5
 
 # Minimum risk/reward ratio
-min_rr = 1.5
+min_rr = 1.9
 
 # Maximum entry distance from wick
 max_entry_atr_mult = 0.3
@@ -38,6 +38,6 @@ bias_mismatch_penalty = 0.75
 volume_threshold = 0.8
 volume_compare_bars = 20
 
-[execution]
-# Single target mode for quick reversals
+[signal_plan]
+# Single target mode for quick reversal alerts
 single_target_mode = false

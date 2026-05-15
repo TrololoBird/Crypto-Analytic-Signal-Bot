@@ -36,7 +36,7 @@ class WickTrapReversalSetup(BaseSetup):
             "bias_mismatch_penalty": 0.75,
             "tp_too_close_penalty": 0.75,
             "sl_buffer_atr": 0.8,
-            "min_rr": 1.5,
+            "min_rr": 1.9,
             "wick_atr_threshold": 0.3,
             "wick_through_atr_mult": 0.3,
             "closed_back_atr_mult": 0.10,
@@ -313,8 +313,12 @@ class WickTrapReversalSetup(BaseSetup):
                 price_anchor + min_required if direction == "long" else price_anchor - min_required
             )
             fallback_note = f"tp1_rr_fallback_{min_rr:.2f}"
-        if tp2 is None:
-            tp2 = tp1  # Use TP1 as TP2 if no extended target found
+        if tp2 is None or abs(tp2 - price_anchor) <= abs(tp1 - price_anchor):
+            tp2 = (
+                price_anchor + risk * max(2.0, min_rr + 0.35)
+                if direction == "long"
+                else price_anchor - risk * max(2.0, min_rr + 0.35)
+            )
         if fallback_note:
             reasons.append(fallback_note)
         normalized_levels = normalize_trade_levels(

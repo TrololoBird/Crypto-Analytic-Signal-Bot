@@ -15,7 +15,7 @@ internal_structure = false
 
 [risk_management]
 sl_buffer_atr = 1.5
-min_rr = 1.5
+min_rr = 1.9
 
 [scoring]
 base_score = 0.53

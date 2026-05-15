@@ -1072,8 +1072,17 @@ class SymbolAnalyzer:
                 )
 
                 bid, ask = ws_bid, ws_ask
+                bid_qty = ask_qty = None
+                if self._bot._ws_manager is not None:
+                    qty = getattr(self._bot._ws_manager, "_book_qty", {}).get(symbol)
+                    if isinstance(qty, tuple):
+                        bid_qty, ask_qty = qty[:2]
                 if bid is None or ask is None:
-                    bid, ask = await self._bot.client.fetch_book_ticker(symbol)
+                    book_context = await self._bot.client._fetch_book_ticker_rest_detail(symbol)
+                    bid = book_context.get("bid_price")
+                    ask = book_context.get("ask_price")
+                    bid_qty = book_context.get("bid_qty")
+                    ask_qty = book_context.get("ask_qty")
 
                 return SymbolFrames(
                     symbol=symbol,
@@ -1083,6 +1092,8 @@ class SymbolAnalyzer:
                     ask_price=ask,
                     df_5m=df_5m,
                     df_4h=df_4h,
+                    bid_qty=bid_qty,
+                    ask_qty=ask_qty,
                 )
 
             return await cast(Any, self._bot.client.fetch_symbol_frames(symbol))
@@ -1442,27 +1453,3 @@ class SymbolAnalyzer:
         if next_last_price == item.last_price:
             return item
         return replace(item, last_price=next_last_price)
-
-    async def ws_enrich(self, result: PipelineResult) -> None:
-        if result.prepared is None:
-            return
-        p = result.prepared
-        try:
-            p.oi_current = await self._bot.client.fetch_open_interest(p.universe.symbol)
-            p.oi_change_pct = await self._bot.client.fetch_open_interest_change(
-                p.universe.symbol,
-                period="1h",
-            )
-            p.oi_slope_5m = await self._bot.client.fetch_open_interest_change(
-                p.universe.symbol,
-                period="5m",
-            )
-        except _DEGRADATION_ERRORS as exc:
-            self._log_degradation(
-                level=logging.WARNING,
-                symbol=p.universe.symbol,
-                stage="oi_enrich_live",
-                source="rest",
-                reason=str(exc),
-                fallback_used="cached_oi_context_only",
-            )

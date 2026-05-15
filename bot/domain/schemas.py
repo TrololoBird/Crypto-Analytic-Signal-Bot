@@ -53,6 +53,8 @@ class SymbolFrames:
     ask_price: float | None
     df_5m: pl.DataFrame | None = None
     df_4h: pl.DataFrame | None = None
+    bid_qty: float | None = None
+    ask_qty: float | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -154,7 +154,7 @@ class SessionKillzoneSetup(BaseSetup):
             "min_adx_1h": 14.0,
             "sl_buffer_atr": 0.75,
             "bias_mismatch_penalty": 0.75,
-            "min_rr": 1.5,
+            "min_rr": 1.9,
             "breakout_lookback_bars": 20,
             "breakout_atr_mult": 0.05,
             "min_close_position_long": 0.58,
@@ -182,8 +182,14 @@ class SessionKillzoneSetup(BaseSetup):
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         try:
             return self._detect(prepared, settings)
-        except Exception:
-            _reject(prepared, self.setup_id, "unexpected_exception")
+        except Exception as exc:
+            _reject(
+                prepared,
+                self.setup_id,
+                "runtime.unexpected_exception",
+                stage="runtime",
+                exception_type=type(exc).__name__,
+            )
             LOG.exception("%s session_killzone: unexpected error", prepared.symbol)
             return None
 
@@ -479,8 +485,12 @@ class SessionKillzoneSetup(BaseSetup):
             fallback_note = f"tp1_rr_fallback_{min_rr:.2f}"
         else:
             fallback_note = None
-        if tp2 is None:
-            tp2 = tp1  # Use TP1 as TP2 if no extended target found
+        if tp2 is None or abs(tp2 - price) <= abs(tp1 - price):
+            tp2 = (
+                price + risk * max(2.0, min_rr + 0.35)
+                if direction == "long"
+                else price - risk * max(2.0, min_rr + 0.35)
+            )
 
         rsi = float(w.item(-1, "rsi14") or 50.0)
         vol_ratio = float(w.item(-1, "volume_ratio20") or 1.0)

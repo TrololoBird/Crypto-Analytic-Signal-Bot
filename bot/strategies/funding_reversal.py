@@ -44,7 +44,7 @@ class FundingReversalSetup(BaseSetup):
             "min_delta_threshold": 0.02,
             "sl_buffer_atr": 0.6,
             "bias_mismatch_penalty": 0.75,
-            "min_rr": 1.5,
+            "min_rr": 1.9,
         }
         if settings is not None:
             filters = getattr(settings, "filters", None)
@@ -57,8 +57,14 @@ class FundingReversalSetup(BaseSetup):
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         try:
             return self._detect(prepared, settings)
-        except Exception:
-            _reject(prepared, self.setup_id, "unexpected_exception")
+        except Exception as exc:
+            _reject(
+                prepared,
+                self.setup_id,
+                "runtime.unexpected_exception",
+                stage="runtime",
+                exception_type=type(exc).__name__,
+            )
             LOG.exception("%s funding_reversal: unexpected error", prepared.symbol)
             return None
 
@@ -241,8 +247,12 @@ class FundingReversalSetup(BaseSetup):
         if tp1 is None or abs(tp1 - price) < risk * min_rr:
             _reject(prepared, setup_id, "tp1_too_close_or_missing", tp1=tp1, risk=risk)
             return None  # Reject this funding reversal setup
-        if tp2 is None:
-            tp2 = tp1  # Use TP1 as TP2 if no extended target found
+        if tp2 is None or abs(tp2 - price) <= abs(tp1 - price):
+            tp2 = (
+                price + risk * max(2.0, min_rr + 0.35)
+                if direction == "long"
+                else price - risk * max(2.0, min_rr + 0.35)
+            )
 
         rsi = _as_float(w.item(-1, "rsi14"), 50.0)
         score = _compute_dynamic_score(

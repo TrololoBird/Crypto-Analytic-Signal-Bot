@@ -34,7 +34,7 @@ class EmaBounceSetup(BaseSetup):
             "vol_ratio_threshold": 1.0,
             "bias_mismatch_penalty": 0.75,
             "tp_too_close_penalty": 0.75,
-            "min_rr": 1.5,
+            "min_rr": 1.9,
             "sl_buffer_atr": 0.5,
             "ema_touch_tolerance_pct": 0.005,
             "ema_touch_tolerance": 0.005,
@@ -79,25 +79,35 @@ class EmaBounceSetup(BaseSetup):
         )
 
         work_1h = prepared.work_1h
-        context_timeframe = "1h"
-        if work_1h.height < 3:
+        work_15m = prepared.work_15m
+        context_timeframe = "15m+1h"
+        if work_1h.height < 3 or work_15m.height < 5:
             _reject(
                 prepared,
                 setup_id,
-                "insufficient_1h_context_bars",
-                bars=work_1h.height,
-                required=3,
+                "insufficient_context_bars",
+                bars_1h=work_1h.height,
+                bars_15m=work_15m.height,
+                required_1h=3,
+                required_15m=5,
             )
             return None
-        required_columns = {
+        required_1h = {"ema20", "ema50", "close", "adx14"}
+        required_15m = {
+            "open",
+            "high",
+            "low",
+            "close",
             "atr14",
             "ema20",
             "ema50",
-            "close",
             "volume_ratio20",
-            "adx14",
+            "rsi14",
+            "close_position",
         }
-        missing_columns = sorted(required_columns.difference(work_1h.columns))
+        missing_columns = sorted(
+            required_1h.difference(work_1h.columns) | required_15m.difference(work_15m.columns)
+        )
         if missing_columns:
             _reject(
                 prepared,
@@ -108,73 +118,92 @@ class EmaBounceSetup(BaseSetup):
             )
             return None
 
-        atr = float(work_1h.item(-1, "atr14") or 0.0)
-        ema20 = float(work_1h.item(-1, "ema20") or 0.0)
-        ema50 = float(work_1h.item(-1, "ema50") or 0.0)
-        close = float(work_1h.item(-1, "close"))
-        prev_close = float(work_1h.item(-2, "close"))
+        atr = float(work_15m.item(-1, "atr14") or 0.0)
+        ema20_1h = float(work_1h.item(-1, "ema20") or 0.0)
+        ema50_1h = float(work_1h.item(-1, "ema50") or 0.0)
+        close_1h = float(work_1h.item(-1, "close"))
+        ema20 = float(work_15m.item(-1, "ema20") or 0.0)
+        ema50 = float(work_15m.item(-1, "ema50") or 0.0)
+        open_ = float(work_15m.item(-1, "open") or 0.0)
+        high = float(work_15m.item(-1, "high") or 0.0)
+        low = float(work_15m.item(-1, "low") or 0.0)
+        close = float(work_15m.item(-1, "close"))
+        prev_close = float(work_15m.item(-2, "close"))
+        close_position = float(work_15m.item(-1, "close_position") or 0.5)
 
-        if atr <= 0.0 or ema20 <= 0.0 or ema50 <= 0.0:
+        if min(atr, ema20_1h, ema50_1h, ema20, ema50, open_, high, low, close) <= 0.0:
             _reject(
                 prepared,
                 setup_id,
                 "invalid_indicator_state",
                 atr=atr,
-                ema20=ema20,
-                ema50=ema50,
+                ema20_1h=ema20_1h,
+                ema50_1h=ema50_1h,
+                ema20_15m=ema20,
+                ema50_15m=ema50,
             )
             return None
 
         reasons: list[str] = []
 
-        # 1H context for 15M signals (not 4H - too lagging for <4h trades)
         bias_1h = getattr(prepared, "bias_1h", prepared.bias_4h)
-        if context_timeframe == "15m":
-            if close > ema50 and ema20 > ema50:
+        if bias_1h not in {"uptrend", "downtrend"}:
+            if close_1h > ema50_1h and ema20_1h > ema50_1h:
                 bias_1h = "uptrend"
-            elif close < ema50 and ema20 < ema50:
+            elif close_1h < ema50_1h and ema20_1h < ema50_1h:
                 bias_1h = "downtrend"
 
-        # Direction detection with graded scoring instead of reject
         signal_direction: str | None = None
+        recent = work_15m.tail(5)
         if bias_1h == "uptrend":
+            recent_low = float(recent["low"].min())
             touch_ema = (
-                abs(prev_close - ema20) / ema20 <= float(ema_touch_tolerance_pct)
-                or abs(prev_close - ema50) / ema50 <= float(ema_touch_tolerance_pct) * 2.0
+                recent_low <= ema20 * (1.0 + float(ema_touch_tolerance_pct))
+                or recent_low <= ema50 * (1.0 + float(ema_touch_tolerance_pct) * 2.0)
             )
-            bounce = close > prev_close * (1.0 + float(bounce_threshold_pct)) and close >= ema20 * (
-                1.0 - float(ema_touch_tolerance_pct)
+            bounce = (
+                close > open_
+                and close >= prev_close * (1.0 + float(bounce_threshold_pct))
+                and close >= ema20 * (1.0 - float(ema_touch_tolerance_pct))
+                and close_position >= 0.55
             )
             if touch_ema and bounce:
                 signal_direction = "long"
                 reasons = [
                     "ema_bounce_long",
                     f"context_tf={context_timeframe}",
-                    f"ema20_1h={ema20:.4f}",
-                    f"ema50_1h={ema50:.4f}",
+                    f"ema20_1h={ema20_1h:.4f}",
+                    f"ema50_1h={ema50_1h:.4f}",
+                    f"ema20_15m={ema20:.4f}",
                 ]
         elif bias_1h == "downtrend":
+            recent_high = float(recent["high"].max())
             touch_ema = (
-                abs(prev_close - ema20) / ema20 <= float(ema_touch_tolerance_pct)
-                or abs(prev_close - ema50) / ema50 <= float(ema_touch_tolerance_pct) * 2.0
+                recent_high >= ema20 * (1.0 - float(ema_touch_tolerance_pct))
+                or recent_high >= ema50 * (1.0 - float(ema_touch_tolerance_pct) * 2.0)
             )
-            bounce = close < prev_close * (1.0 - float(bounce_threshold_pct)) and close <= ema20 * (
-                1.0 + float(ema_touch_tolerance_pct)
+            bounce = (
+                close < open_
+                and close <= prev_close * (1.0 - float(bounce_threshold_pct))
+                and close <= ema20 * (1.0 + float(ema_touch_tolerance_pct))
+                and close_position <= 0.45
             )
             if touch_ema and bounce:
                 signal_direction = "short"
                 reasons = [
                     "ema_bounce_short",
                     f"context_tf={context_timeframe}",
-                    f"ema20_1h={ema20:.4f}",
-                    f"ema50_1h={ema50:.4f}",
+                    f"ema20_1h={ema20_1h:.4f}",
+                    f"ema50_1h={ema50_1h:.4f}",
+                    f"ema20_15m={ema20:.4f}",
                 ]
 
         if signal_direction is None:
             _reject(prepared, setup_id, "no_bounce_pattern", bias_1h=bias_1h)
             return None
 
-        vol_ratio = float(work_1h.item(-1, "volume_ratio20") or 1.0)
+        vol_ratio = float(work_15m.item(-1, "volume_ratio20") or 1.0)
+        rsi = float(work_15m.item(-1, "rsi14") or 50.0)
         adx_1h = float(work_1h.item(-1, "adx14") or 0.0)
         if adx_1h > 0.0 and adx_1h < float(min_adx):
             _reject(prepared, setup_id, "adx_too_low", adx_1h=adx_1h, min_adx=min_adx)
@@ -219,6 +248,7 @@ class EmaBounceSetup(BaseSetup):
             direction=signal_direction,
             base_score=base_score,
             vol_ratio=vol_ratio,
+            rsi=rsi,
             structure_clarity=0.3,
         )
 
@@ -245,9 +275,13 @@ class EmaBounceSetup(BaseSetup):
                 tp1 = price_anchor - risk * rr_multiplier
             reasons.append("tp1_atr_fallback")
 
-        # Fallback TP2
-        if tp2 is None:
-            tp2 = tp1
+        if tp2 is None or abs(tp2 - price_anchor) <= abs(tp1 - price_anchor):
+            risk = abs(price_anchor - stop)
+            tp2 = (
+                price_anchor + risk * max(2.0, float(min_rr) + 0.35)
+                if signal_direction == "long"
+                else price_anchor - risk * max(2.0, float(min_rr) + 0.35)
+            )
 
         return _build_signal(
             prepared=prepared,

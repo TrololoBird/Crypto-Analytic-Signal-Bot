@@ -673,9 +673,6 @@ class SignalBot:
     def _refresh_universe_symbol_from_ws(self, item: UniverseSymbol) -> UniverseSymbol:
         return self._symbol_analyzer.refresh_universe_symbol_from_ws(item)
 
-    async def _ws_enrich(self, result: PipelineResult) -> None:
-        await self._symbol_analyzer.ws_enrich(result)
-
     # ------------------------------------------------------------------
     # Background OI + L/S refresh
     # ------------------------------------------------------------------

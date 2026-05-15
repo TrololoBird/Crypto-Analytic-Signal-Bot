@@ -47,7 +47,7 @@ def test_taker_ratio_endpoint_uses_documented_camel_case_path() -> None:
     client = BinanceFuturesMarketData()
     spec = client._endpoint_spec("taker_long_short_ratio")
 
-    assert spec.path == "/futures/data/takerLongShortRatio"
+    assert spec.path == "/futures/data/takerlongshortRatio"
 
 
 def test_public_context_cache_accessors_do_not_make_rest_calls() -> None:

@@ -69,10 +69,69 @@ async def _build_prepared(
         df_5m=await client.fetch_klines_cached(symbol, "5m", limit=300),
         df_4h=await client.fetch_klines_cached(symbol, "4h", limit=300),
     )
-    return prepare_symbol(item, frames, minimums=minimums, settings=settings)
+    try:
+        book_context = await client._fetch_book_ticker_rest_detail(symbol)
+        frames.bid_price = book_context.get("bid_price")
+        frames.ask_price = book_context.get("ask_price")
+        frames.bid_qty = book_context.get("bid_qty")
+        frames.ask_qty = book_context.get("ask_qty")
+    except Exception:
+        pass
+    for fetch in (
+        lambda: client.fetch_open_interest(symbol),
+        lambda: client.fetch_open_interest_change(symbol, period="1h"),
+        lambda: client.fetch_long_short_ratio(symbol, period="1h"),
+        lambda: client.fetch_top_position_ls_ratio(symbol, period="1h"),
+        lambda: client.fetch_global_ls_ratio(symbol, period="1h"),
+        lambda: client.fetch_taker_ratio(symbol, period="1h"),
+        lambda: client.fetch_funding_rate(symbol),
+    ):
+        try:
+            await fetch()
+        except Exception:
+            continue
+    prepared = prepare_symbol(item, frames, minimums=minimums, settings=settings)
+    if prepared is None:
+        return None
+    prepared.oi_current = client.get_cached_open_interest(symbol)
+    prepared.oi_change_pct = client.get_cached_oi_change(symbol)
+    prepared.ls_ratio = client.get_cached_ls_ratio(symbol)
+    prepared.top_account_ls_ratio = prepared.ls_ratio
+    prepared.top_position_ls_ratio = client.get_cached_top_position_ls_ratio(symbol)
+    prepared.global_ls_ratio = client.get_cached_global_ls_ratio(symbol)
+    prepared.taker_ratio = client.get_cached_taker_ratio(symbol)
+    prepared.funding_rate = client.get_cached_funding_rate(symbol)
+    prepared.funding_trend = client.get_cached_funding_trend(symbol)
+    return prepared
 
 
-async def _run(symbols: list[str], concurrency: int) -> None:
+def _top_volume_symbols(
+    *,
+    ticker_rows: list[dict[str, Any]],
+    meta_map: dict[str, Any],
+    limit: int,
+) -> list[str]:
+    rows: list[tuple[str, float]] = []
+    for row in ticker_rows:
+        if not isinstance(row, dict):
+            continue
+        symbol = str(row.get("symbol") or "").upper()
+        meta = meta_map.get(symbol)
+        if meta is None or getattr(meta, "status", "") != "TRADING":
+            continue
+        if getattr(meta, "quote_asset", "") != "USDT":
+            continue
+        try:
+            quote_volume = float(row.get("quote_volume") or 0.0)
+        except (TypeError, ValueError):
+            quote_volume = 0.0
+        if quote_volume > 0.0:
+            rows.append((symbol, quote_volume))
+    rows.sort(key=lambda item: item[1], reverse=True)
+    return [symbol for symbol, _volume in rows[: max(1, int(limit or 30))]]
+
+
+async def _run(symbols: list[str], concurrency: int, limit: int) -> None:
     settings = load_settings()
     minimums = min_required_bars(
         min_bars_15m=settings.filters.min_bars_15m,
@@ -96,9 +155,17 @@ async def _run(symbols: list[str], concurrency: int) -> None:
             for row in ticker_rows
             if isinstance(row, dict)
         }
+        if not symbols:
+            symbols = _top_volume_symbols(
+                ticker_rows=ticker_rows,
+                meta_map=meta_map,
+                limit=limit,
+            )
+            LOG.info("symbols_top_volume_used", symbols=symbols)
 
         hits_by_setup: Counter[str] = Counter()
         errors_by_setup: Counter[str] = Counter()
+        rejects_by_setup: Counter[str] = Counter()
         reject_reasons: Counter[str] = Counter()
         detector_runs = 0
         prepared_ok = 0
@@ -136,6 +203,7 @@ async def _run(symbols: list[str], concurrency: int) -> None:
                     )
                     decision = result.decision
                     if decision is not None and decision.is_reject:
+                        rejects_by_setup.update([setup_id])
                         reject_reasons.update([decision.reason_code])
                     if result.error:
                         errors_by_setup.update([setup_id])
@@ -150,8 +218,11 @@ async def _run(symbols: list[str], concurrency: int) -> None:
             detector_runs=detector_runs,
             strategy_hits=hits_by_setup.most_common(),
             strategy_errors=errors_by_setup.most_common(),
+            strategy_rejects=rejects_by_setup.most_common(20),
             strategy_reject_reasons=reject_reasons.most_common(15),
         )
+        if prepared_ok <= 0:
+            raise RuntimeError("no symbols prepared from live Binance data")
         if failures:
             LOG.warning("strategy_prepare_failures", failures=failures[:20])
         if errors_by_setup:
@@ -175,12 +246,14 @@ def main() -> None:
         ),
         fallback_symbols=fallback_symbols,
     )
-    if symbols == fallback_symbols:
+    explicit_symbols = bool(args.symbols)
+    if symbols == fallback_symbols and not explicit_symbols and args.limit > len(fallback_symbols):
         LOG.info("symbols_fallback_used", symbols=symbols)
-    if args.limit > 0:
+        symbols = []
+    elif args.limit > 0:
         symbols = symbols[: args.limit]
     try:
-        asyncio.run(_run(symbols, args.concurrency))
+        asyncio.run(_run(symbols, args.concurrency, args.limit))
     except MarketDataUnavailable as exc:
         LOG.error(
             "live_strategies_unavailable",

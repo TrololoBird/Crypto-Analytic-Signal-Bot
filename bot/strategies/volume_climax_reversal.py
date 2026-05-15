@@ -38,7 +38,7 @@ class VolumeClimaxReversalSetup(BaseSetup):
             "max_rsi_long": 42.0,
             "min_rsi_short": 58.0,
             "sl_buffer_atr": 0.45,
-            "min_rr": 1.5,
+            "min_rr": 1.9,
         }
         if settings is not None:
             setups = getattr(getattr(settings, "filters", None), "setups", {})

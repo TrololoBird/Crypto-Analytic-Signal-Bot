@@ -56,7 +56,7 @@ class BreakerBlockSetup(BaseSetup):
             "min_acceptance_close_position_long": 0.50,
             "max_acceptance_close_position_short": 0.50,
             "bias_mismatch_penalty": 0.75,
-            "min_rr": 1.5,
+            "min_rr": 1.9,
         }
         if settings is not None:
             filters = getattr(settings, "filters", None)
@@ -221,8 +221,12 @@ class BreakerBlockSetup(BaseSetup):
         if tp1 is None or abs(tp1 - price) < risk * min_rr:
             tp1 = price + risk * min_rr if direction == "long" else price - risk * min_rr
             fallback_note = f"tp1_rr_fallback_{min_rr:.2f}"
-        if tp2 is None:
-            tp2 = tp1  # Use TP1 as TP2 if no extended target found
+        if tp2 is None or abs(tp2 - price) <= abs(tp1 - price):
+            tp2 = (
+                price + risk * max(2.0, min_rr + 0.35)
+                if direction == "long"
+                else price - risk * max(2.0, min_rr + 0.35)
+            )
 
         vol_ratio = float(w1h.item(-1, "volume_ratio20") or 1.0)
         rsi = float(w1h.item(-1, "rsi14") or 50.0)

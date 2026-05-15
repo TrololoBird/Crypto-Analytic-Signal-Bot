@@ -942,6 +942,7 @@ class FuturesWSManager:
                 interval_dfs[interval] = pl.DataFrame(list(deq))
 
             bid, ask = self._book.get(symbol, (None, None))
+            bid_qty, ask_qty = self._book_qty.get(symbol, (None, None))
         return SymbolFrames(
             symbol=symbol,
             df_1h=interval_dfs.get("1h", pl.DataFrame()),
@@ -950,6 +951,8 @@ class FuturesWSManager:
             ask_price=ask,
             df_5m=interval_dfs.get("5m", pl.DataFrame()),
             df_4h=interval_dfs.get("4h", pl.DataFrame()),
+            bid_qty=bid_qty,
+            ask_qty=ask_qty,
         )
 
     async def get_book_ticker(self, symbol: str) -> tuple[float | None, float | None] | None:
