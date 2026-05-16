@@ -28,6 +28,20 @@ def public_streams_for_symbols(manager: Any, symbols: list[str]) -> list[str]:
     return [f"{symbol.lower()}@bookTicker" for symbol in symbols]
 
 
+def tracked_depth_streams(manager: Any, symbols: list[str]) -> list[str]:
+    if not getattr(manager._cfg, "subscribe_depth", False):
+        return []
+    limit = int(getattr(manager._cfg, "depth_symbol_limit", 0) or 0)
+    if limit <= 0:
+        return []
+    levels = int(getattr(manager._cfg, "depth_levels", 20) or 20)
+    if levels not in {5, 10, 20}:
+        levels = 20
+    speed = str(getattr(manager._cfg, "depth_speed", "500ms") or "500ms").lower()
+    suffix = "" if speed == "250ms" else f"@{speed}"
+    return [f"{symbol.lower()}@depth{levels}{suffix}" for symbol in symbols[:limit]]
+
+
 def stream_endpoint_class(stream: str) -> str:
     normalized = str(stream or "").strip().lower()
     if any(
@@ -72,6 +86,8 @@ def global_streams(manager: Any) -> list[str]:
 
 def recompute_intended_streams(manager: Any) -> None:
     public_streams = set(public_streams_for_symbols(manager, manager._symbols))
+    depth_symbols = manager._tracked_symbols or manager._symbols
+    public_streams.update(tracked_depth_streams(manager, depth_symbols))
     market_streams = set(base_streams_for_symbols(manager, manager._symbols))
     market_streams.update(tracked_agg_trade_streams(manager, manager._tracked_symbols))
     if manager._symbols:

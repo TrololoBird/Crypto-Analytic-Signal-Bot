@@ -1267,6 +1267,31 @@ class SymbolAnalyzer:
                 microprice_bias = self._bot._ws_manager.get_microprice_bias(symbol)
                 if microprice_bias is not None:
                     enrichments["microprice_bias"] = float(microprice_bias)
+                depth_age_getter = getattr(
+                    self._bot._ws_manager, "get_depth_book_age_seconds", None
+                )
+                if callable(depth_age_getter):
+                    depth_age = depth_age_getter(symbol)
+                    max_age = self._bot.settings.ws.market_ticker_freshness_seconds
+                    if depth_age is not None and depth_age > max_age:
+                        freshness_flags.add("depth_book_stale")
+                trade_snapshot_getter = getattr(
+                    self._bot._ws_manager, "get_agg_trade_snapshot", None
+                )
+                if callable(trade_snapshot_getter):
+                    short_flow = trade_snapshot_getter(symbol, window_seconds=30)
+                    long_flow = trade_snapshot_getter(symbol, window_seconds=300)
+                    if short_flow is not None and short_flow.delta_ratio is not None:
+                        enrichments["agg_trade_delta_30s"] = float(short_flow.delta_ratio)
+                    if (
+                        short_flow is not None
+                        and long_flow is not None
+                        and short_flow.delta_ratio is not None
+                        and long_flow.delta_ratio is not None
+                    ):
+                        enrichments["aggression_shift"] = float(
+                            short_flow.delta_ratio - long_flow.delta_ratio
+                        )
                 liquidation = self._bot._ws_manager.get_liquidation_sentiment(
                     symbol=symbol, window_seconds=900
                 )

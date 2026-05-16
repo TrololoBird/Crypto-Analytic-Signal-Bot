@@ -191,6 +191,25 @@ def _collect_ws_enrichments(
         micro_bias = ws_manager.get_microprice_bias(symbol)
         if micro_bias is not None:
             enrichments["microprice_bias"] = micro_bias
+        depth_age_getter = getattr(ws_manager, "get_depth_book_age_seconds", None)
+        if callable(depth_age_getter):
+            depth_age = depth_age_getter(symbol)
+            if depth_age is not None:
+                enrichments["depth_book_age_seconds"] = depth_age
+                context_ages.append(depth_age)
+        short_flow = ws_manager.get_agg_trade_snapshot(symbol, window_seconds=30)
+        long_flow = ws_manager.get_agg_trade_snapshot(symbol, window_seconds=300)
+        if short_flow is not None and short_flow.delta_ratio is not None:
+            enrichments["agg_trade_delta_30s"] = float(short_flow.delta_ratio)
+        if (
+            short_flow is not None
+            and long_flow is not None
+            and short_flow.delta_ratio is not None
+            and long_flow.delta_ratio is not None
+        ):
+            enrichments["aggression_shift"] = float(
+                short_flow.delta_ratio - long_flow.delta_ratio
+            )
 
     if context_ages:
         enrichments["context_snapshot_age_seconds"] = max(context_ages)
@@ -220,6 +239,7 @@ async def _run(
     try:
         # Start WebSocket to get live data
         await ws_manager.start(list(symbols))
+        await ws_manager.set_tracked_symbols(list(symbols))
         connected = await ws_manager.wait_until_connected(timeout=30.0)
         if not connected:
             raise RuntimeError("ws_manager failed to connect within 30 seconds")

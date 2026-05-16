@@ -1703,12 +1703,22 @@ def _enrich_with_ws_data(
             signed_flow = _as_optional_float(getattr(snapshot, "delta_ratio", None))
             if signed_flow is None:
                 signed_flow = (buy_share - 0.5) * 2.0
+            row_index = "__ws_row_nr"
+            base_delta_expr = (
+                pl.col("delta_ratio") if "delta_ratio" in work.columns else pl.lit(0.5)
+            )
+            work = work.with_row_index(row_index)
             work = work.with_columns(
                 [
-                    pl.lit(buy_share).cast(pl.Float64).alias("delta_ratio"),
+                    pl.when(pl.col(row_index) == (work.height - 1))
+                    .then(pl.lit(buy_share))
+                    .otherwise(base_delta_expr)
+                    .cast(pl.Float64)
+                    .alias("delta_ratio"),
+                    pl.lit(buy_share).cast(pl.Float64).alias("live_delta_ratio"),
                     pl.lit(signed_flow).cast(pl.Float64).alias("signed_order_flow"),
                 ]
-            )
+            ).drop(row_index)
 
     work = add_microstructure_features(work)
     return work.with_columns(

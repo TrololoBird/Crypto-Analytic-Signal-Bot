@@ -82,6 +82,7 @@ _SHORT_DISCONNECT_BACKFILL_GRACE_SECONDS = 30.0
 _LATENCY_WARNING_EVENTS = {"kline", "bookTicker", "aggTrade"}
 _STALE_DROP_EVENTS = {
     "bookTicker",
+    "depthUpdate",
     "aggTrade",
     "24hrTicker",
     "miniTicker",
@@ -265,6 +266,10 @@ class FuturesWSManager:
         self._klines: dict[str, dict[str, collections.deque[JsonDict]]] = {}
         self._book: dict[str, tuple[float | None, float | None]] = {}
         self._book_qty: dict[str, tuple[float | None, float | None]] = {}
+        self._depth_book: dict[str, dict[str, tuple[tuple[float, float], ...]]] = {}
+        self._depth_update_times: dict[str, float] = {}
+        self._depth_wall_state: dict[str, dict[tuple[str, float], dict[str, float]]] = {}
+        self._depth_wall_pressure: dict[str, float] = {}
         self._agg_trades: dict[str, collections.deque[AggTrade]] = {}
         self._max_streams_per_connection = _MAX_STREAMS_PER_CONNECTION
 
@@ -588,6 +593,11 @@ class FuturesWSManager:
             for sym, ts in self._book_update_times.items()
             if sym in self._symbols and now - ts <= self._cfg.market_ticker_freshness_seconds
         )
+        fresh_depth_books = sum(
+            1
+            for sym, ts in self._depth_update_times.items()
+            if sym in self._symbols and now - ts <= self._cfg.market_ticker_freshness_seconds
+        )
         fresh_klines_15m = sum(1 for sym in self._symbols if self._is_interval_fresh(sym, "15m"))
         connected_urls = {
             endpoint: url for endpoint, url in self._connected_urls.items() if url is not None
@@ -612,6 +622,7 @@ class FuturesWSManager:
             "fresh_tickers": fresh_tickers,
             "fresh_mark_prices": fresh_mark_prices,
             "fresh_book_tickers": fresh_book_tickers,
+            "fresh_depth_books": fresh_depth_books,
             "fresh_klines_15m": fresh_klines_15m,
             "public_connect_count": self._connect_counts[_WS_PUBLIC],
             "market_connect_count": self._connect_counts[_WS_MARKET],
@@ -685,6 +696,10 @@ class FuturesWSManager:
                     self._klines.pop(symbol, None)
                     self._book.pop(symbol, None)
                     self._agg_trades.pop(symbol, None)
+                    self._depth_book.pop(symbol, None)
+                    self._depth_update_times.pop(symbol, None)
+                    self._depth_wall_state.pop(symbol, None)
+                    self._depth_wall_pressure.pop(symbol, None)
                     self._book_update_times.pop(symbol, None)
 
         if not new_symbols and not removed_symbols:
@@ -750,11 +765,39 @@ class FuturesWSManager:
             requested = set(tracked_symbols)
             removed = [s for s in self._tracked_symbols if s not in requested]
             self._tracked_symbols = tracked_symbols
+            previous_public_streams = set(self._intended_streams_by_endpoint[_WS_PUBLIC])
             previous_market_streams = set(self._intended_streams_by_endpoint[_WS_MARKET])
             self._recompute_intended_streams()
+            current_public_streams = set(self._intended_streams_by_endpoint[_WS_PUBLIC])
             current_market_streams = set(self._intended_streams_by_endpoint[_WS_MARKET])
 
+        if getattr(self._cfg, "subscribe_depth", False):
+            public_task = self._stream_tasks[_WS_PUBLIC]
+            if self._running and (public_task is None or public_task.done()) and current_public_streams:
+                self._stream_tasks[_WS_PUBLIC] = asyncio.create_task(
+                    self._run_stream(_WS_PUBLIC),
+                    name="ws_manager_stream:public",
+                )
+            elif self._ws_conns[_WS_PUBLIC] is not None and self._running:
+                await self._send_subscription_command(
+                    _WS_PUBLIC,
+                    "UNSUBSCRIBE",
+                    list(previous_public_streams - current_public_streams),
+                )
+                await self._send_subscription_command(
+                    _WS_PUBLIC,
+                    "SUBSCRIBE",
+                    list(current_public_streams - previous_public_streams),
+                )
+
         if not self._cfg.subscribe_agg_trade:
+            if removed:
+                async with self._data_lock:
+                    for symbol in removed:
+                        self._depth_book.pop(symbol, None)
+                        self._depth_update_times.pop(symbol, None)
+                        self._depth_wall_state.pop(symbol, None)
+                        self._depth_wall_pressure.pop(symbol, None)
             return
         market_task = self._stream_tasks[_WS_MARKET]
         if self._running and (market_task is None or market_task.done()) and current_market_streams:
@@ -778,6 +821,10 @@ class FuturesWSManager:
             async with self._data_lock:
                 for symbol in removed:
                     self._agg_trades.pop(symbol, None)
+                    self._depth_book.pop(symbol, None)
+                    self._depth_update_times.pop(symbol, None)
+                    self._depth_wall_state.pop(symbol, None)
+                    self._depth_wall_pressure.pop(symbol, None)
 
         if tracked_symbols:
             LOG.info(
@@ -969,7 +1016,9 @@ class FuturesWSManager:
         async with self._data_lock:
             return self._book.get(symbol)
 
-    def get_agg_trade_snapshot(self, symbol: str) -> AggTradeSnapshot | None:
+    def get_agg_trade_snapshot(
+        self, symbol: str, *, window_seconds: int | None = None
+    ) -> AggTradeSnapshot | None:
         """Get aggregated trade statistics for a symbol over the configured window.
 
         Args:
@@ -981,7 +1030,8 @@ class FuturesWSManager:
         buf = self._agg_trades.get(symbol)
         if not buf:
             return None
-        cutoff_ms = int(time.time() * 1000) - self._cfg.agg_trade_window_seconds * 1000
+        window = int(window_seconds or self._cfg.agg_trade_window_seconds)
+        cutoff_ms = int(time.time() * 1000) - window * 1000
         buy_qty = sell_qty = 0.0
         count = 0
         for trade in buf:
@@ -1003,6 +1053,22 @@ class FuturesWSManager:
             sell_qty=sell_qty,
             delta_ratio=delta_ratio,
         )
+
+    def get_depth_book_snapshot(
+        self, symbol: str
+    ) -> dict[str, tuple[tuple[float, float], ...]] | None:
+        """Return the latest partial L2 book for a symbol, if available."""
+        return self._depth_book.get(symbol)
+
+    def get_depth_book_age_seconds(self, symbol: str) -> float | None:
+        updated_at = self._depth_update_times.get(symbol)
+        if updated_at is None or updated_at <= 0.0:
+            return None
+        return round(time.monotonic() - updated_at, 3)
+
+    def get_depth_wall_pressure(self, symbol: str) -> float | None:
+        """Return signed persistent wall pressure from partial depth, if available."""
+        return self._depth_wall_pressure.get(symbol)
 
     # ------------------------------------------------------------------ #
     # Global market stream accessors                                       #
@@ -1085,12 +1151,7 @@ class FuturesWSManager:
         return round(time.monotonic() - updated_at, 3)
 
     def get_depth_imbalance(self, symbol: str) -> float | None:
-        """Return a directional order-flow imbalance proxy in [-1, 1].
-
-        Primary source is aggTrade ``delta_ratio`` already normalized to [-1, 1]:
-        positive values imply net buyer pressure, negative imply seller pressure.
-        Falls back to None when no directional proxy is available.
-        """
+        """Return L2 depth imbalance in [-1, 1], falling back to L1/flow proxy."""
         return ws_cache.get_depth_imbalance(self, symbol)
 
     def get_microprice_bias(self, symbol: str) -> float | None:
@@ -1099,8 +1160,8 @@ class FuturesWSManager:
         Returns a signed bias proxy in [-1, 1], where positive means buy pressure
         and negative means sell pressure.
 
-        We do not maintain full L2 sizes, so we approximate microprice pressure
-        from recent aggTrade delta ratio when available.
+        Uses best bid/ask quantities from bookTicker or partial depth; falls
+        back to recent aggTrade delta when the book is unavailable.
         """
         return ws_cache.get_microprice_bias(self, symbol)
 
@@ -1398,6 +1459,9 @@ class FuturesWSManager:
         elif event_type == "bookTicker":
             if symbol:
                 await self._handle_book_ticker(symbol, data)
+        elif event_type == "depthUpdate":
+            if symbol:
+                await self._handle_depth_update(symbol, data)
         elif event_type == "aggTrade":
             if symbol:
                 await self._handle_agg_trade(symbol, data)
@@ -1607,6 +1671,10 @@ class FuturesWSManager:
     async def _handle_book_ticker(self, symbol: str, data: JsonDict) -> None:
         """Handle bookTicker events.  Acquires _data_lock to prevent races."""
         await ws_cache.handle_book_ticker(self, symbol, data)
+
+    async def _handle_depth_update(self, symbol: str, data: JsonDict) -> None:
+        """Handle partial depth events for active orderflow symbols."""
+        await ws_cache.handle_depth_update(self, symbol, data)
 
     async def _handle_agg_trade(self, symbol: str, data: JsonDict) -> None:
         """Handle aggTrade events.  Acquires _data_lock to prevent races."""

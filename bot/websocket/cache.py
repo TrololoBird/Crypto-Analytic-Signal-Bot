@@ -16,6 +16,108 @@ LOG = logging.getLogger("bot.ws_manager")
 JsonDict = dict[str, Any]
 
 
+def _parse_depth_levels(
+    raw_levels: Any, *, reverse: bool
+) -> tuple[tuple[float, float], ...]:
+    parsed: list[tuple[float, float]] = []
+    if not isinstance(raw_levels, list):
+        return ()
+    for raw in raw_levels:
+        if not isinstance(raw, (list, tuple)) or len(raw) < 2:
+            continue
+        try:
+            price = float(raw[0])
+            qty = float(raw[1])
+        except (TypeError, ValueError):
+            continue
+        if price <= 0.0 or qty <= 0.0:
+            continue
+        parsed.append((price, qty))
+    parsed.sort(key=lambda item: item[0], reverse=reverse)
+    return tuple(parsed)
+
+
+def _l2_depth_imbalance(manager: Any, symbol: str) -> float | None:
+    book = manager._depth_book.get(symbol)
+    if not book:
+        return None
+    bids = book.get("bids") or ()
+    asks = book.get("asks") or ()
+    if not bids or not asks:
+        return None
+    best_bid = bids[0][0]
+    best_ask = asks[0][0]
+    mid = (best_bid + best_ask) / 2.0
+    if mid <= 0.0:
+        return None
+    band_bps = float(getattr(manager._cfg, "depth_band_bps", 8.0) or 8.0)
+    band = mid * band_bps / 10_000.0
+
+    bid_notional = sum(price * qty for price, qty in bids if (mid - price) <= band)
+    ask_notional = sum(price * qty for price, qty in asks if (price - mid) <= band)
+    if bid_notional <= 0.0 and ask_notional <= 0.0:
+        bid_notional = sum(price * qty for price, qty in bids)
+        ask_notional = sum(price * qty for price, qty in asks)
+    total = bid_notional + ask_notional
+    if total <= 0.0:
+        return None
+    imbalance = (bid_notional - ask_notional) / total
+    wall_pressure = manager._depth_wall_pressure.get(symbol)
+    if wall_pressure is not None:
+        imbalance = (imbalance * 0.65) + (float(wall_pressure) * 0.35)
+    return round(max(-1.0, min(1.0, imbalance)), 4)
+
+
+def _update_depth_wall_pressure(
+    manager: Any,
+    symbol: str,
+    bids: tuple[tuple[float, float], ...],
+    asks: tuple[tuple[float, float], ...],
+    now: float,
+) -> None:
+    min_notional = float(getattr(manager._cfg, "depth_wall_min_notional", 250_000.0) or 0.0)
+    if min_notional <= 0.0:
+        manager._depth_wall_pressure.pop(symbol, None)
+        return
+    persistence = float(getattr(manager._cfg, "depth_wall_persistence_seconds", 10.0) or 0.0)
+    stale_after = max(5.0, persistence * 2.0)
+    state = manager._depth_wall_state.setdefault(symbol, {})
+    seen: set[tuple[str, float]] = set()
+    bid_wall = ask_wall = 0.0
+
+    for side, levels in (("bid", bids), ("ask", asks)):
+        for price, qty in levels:
+            notional = price * qty
+            if notional < min_notional:
+                continue
+            key = (side, round(price, 8))
+            seen.add(key)
+            item = state.get(key)
+            if item is None:
+                item = {"first_seen": now, "last_seen": now, "max_notional": notional}
+                state[key] = item
+            else:
+                item["last_seen"] = now
+                item["max_notional"] = max(float(item.get("max_notional", 0.0)), notional)
+            if now - float(item.get("first_seen", now)) >= persistence:
+                if side == "bid":
+                    bid_wall += notional
+                else:
+                    ask_wall += notional
+
+    for key, item in list(state.items()):
+        if key not in seen and now - float(item.get("last_seen", 0.0)) > stale_after:
+            state.pop(key, None)
+
+    total = bid_wall + ask_wall
+    if total > 0.0:
+        manager._depth_wall_pressure[symbol] = round(
+            max(-1.0, min(1.0, (bid_wall - ask_wall) / total)), 4
+        )
+    else:
+        manager._depth_wall_pressure.pop(symbol, None)
+
+
 def is_ticker_cache_warm(manager: Any) -> bool:
     if not manager._ticker_cache:
         return False
@@ -62,6 +164,9 @@ def get_global_ticker_data(manager: Any) -> list[JsonDict]:
 
 
 def get_depth_imbalance(manager: Any, symbol: str) -> float | None:
+    l2_imbalance = _l2_depth_imbalance(manager, symbol)
+    if l2_imbalance is not None:
+        return l2_imbalance
     bid_qty, ask_qty = manager._book_qty.get(symbol, (None, None))
     snapshot = manager.get_agg_trade_snapshot(symbol)
     return depth_imbalance_from_book(
@@ -268,6 +373,24 @@ async def handle_book_ticker(manager: Any, symbol: str, data: JsonDict) -> None:
         manager._event_bus.publish_nowait(
             BookTickerEvent(symbol=symbol, bid=bid, ask=ask, event_ts_ms=event_ts_ms)
         )
+
+
+async def handle_depth_update(manager: Any, symbol: str, data: JsonDict) -> None:
+    if manager._symbols and symbol not in manager._symbols:
+        return
+    bids = _parse_depth_levels(data.get("b"), reverse=True)
+    asks = _parse_depth_levels(data.get("a"), reverse=False)
+    if not bids or not asks:
+        return
+
+    now = time.monotonic()
+    async with manager._data_lock:
+        manager._depth_book[symbol] = {"bids": bids, "asks": asks}
+        manager._depth_update_times[symbol] = now
+        manager._book[symbol] = (bids[0][0], asks[0][0])
+        manager._book_qty[symbol] = (bids[0][1], asks[0][1])
+        manager._book_update_times[symbol] = now
+        _update_depth_wall_pressure(manager, symbol, bids, asks, now)
 
 
 async def handle_agg_trade(manager: Any, symbol: str, data: JsonDict) -> None:

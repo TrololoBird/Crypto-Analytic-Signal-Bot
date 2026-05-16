@@ -234,7 +234,17 @@ book_ticker_publish_interval_seconds = 5.0
 book_ticker_publish_min_move_bps = 1.0
 # NOTE: aggTrade is subscribed only for tracked/active symbols.
 # It is never attached to the full shortlist.
-subscribe_agg_trade = false
+subscribe_agg_trade = true
+# L2 partial depth is used only for active/tracked shortlist symbols, not the
+# whole market. This turns whale_walls/depth_imbalance from L1 proxies into
+# real top-20 book measurements while keeping request pressure bounded.
+subscribe_depth = true
+depth_levels = 20
+depth_speed = "500ms"
+depth_symbol_limit = 20
+depth_band_bps = 8.0
+depth_wall_min_notional = 250000.0
+depth_wall_persistence_seconds = 10.0
 subscribe_chunk_size = 10
 subscribe_chunk_delay_ms = 500
 health_check_silence_seconds = 60.0
