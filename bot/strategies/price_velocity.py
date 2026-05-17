@@ -169,12 +169,8 @@ class PriceVelocitySetup(BaseSetup):
         orderflow_conflict, orderflow_details = _orderflow_against_direction(
             prepared,
             direction,
-            max_adverse_depth=float(
-                effective_params.get("max_adverse_depth_imbalance", 0.12)
-            ),
-            max_adverse_micro=float(
-                effective_params.get("max_adverse_microprice_bias", 0.12)
-            ),
+            max_adverse_depth=float(effective_params.get("max_adverse_depth_imbalance", 0.12)),
+            max_adverse_micro=float(effective_params.get("max_adverse_microprice_bias", 0.12)),
         )
         if orderflow_conflict:
             _reject(
@@ -188,9 +184,7 @@ class PriceVelocitySetup(BaseSetup):
         if float(effective_params.get("strict_1h_structure", 1.0)) > 0.0:
             structure_1h = str(getattr(prepared, "structure_1h", "") or "")
             regime_1h = str(getattr(prepared, "regime_1h_confirmed", "") or "")
-            if direction == "long" and (
-                structure_1h == "downtrend" or regime_1h == "downtrend"
-            ):
+            if direction == "long" and (structure_1h == "downtrend" or regime_1h == "downtrend"):
                 _reject(
                     prepared,
                     setup_id,
@@ -199,9 +193,7 @@ class PriceVelocitySetup(BaseSetup):
                     regime_1h_confirmed=regime_1h,
                 )
                 return None
-            if direction == "short" and (
-                structure_1h == "uptrend" or regime_1h == "uptrend"
-            ):
+            if direction == "short" and (structure_1h == "uptrend" or regime_1h == "uptrend"):
                 _reject(
                     prepared,
                     setup_id,

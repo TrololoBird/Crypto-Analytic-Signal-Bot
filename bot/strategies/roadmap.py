@@ -21,7 +21,6 @@ from .common import (
     finite_or_none as _finite_or_none,
     first_finite as _first_finite,
     last as _last,
-    previous as _prev,
 )
 
 

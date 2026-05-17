@@ -134,14 +134,10 @@ class TurtleSoupSetup(BaseSetup):
         min_rr = float(dynamic_params.get("min_rr", defaults["min_rr"]))
         base_score = float(dynamic_params.get("base_score", defaults["base_score"]))
         min_recovery_delta_long = float(
-            dynamic_params.get(
-                "min_recovery_delta_long", defaults["min_recovery_delta_long"]
-            )
+            dynamic_params.get("min_recovery_delta_long", defaults["min_recovery_delta_long"])
         )
         max_recovery_delta_short = float(
-            dynamic_params.get(
-                "max_recovery_delta_short", defaults["max_recovery_delta_short"]
-            )
+            dynamic_params.get("max_recovery_delta_short", defaults["max_recovery_delta_short"])
         )
         max_adverse_depth = float(
             dynamic_params.get(
@@ -227,9 +223,7 @@ class TurtleSoupSetup(BaseSetup):
             return None
 
         delta_ratio = (
-            _as_float(w15m.item(-1, "delta_ratio"), 0.5)
-            if "delta_ratio" in w15m.columns
-            else None
+            _as_float(w15m.item(-1, "delta_ratio"), 0.5) if "delta_ratio" in w15m.columns else None
         )
         recovered, flow_details = _orderflow_recovered(
             prepared,

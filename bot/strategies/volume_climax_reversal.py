@@ -93,12 +93,8 @@ class VolumeClimaxReversalSetup(BaseSetup):
         upper_wick_atr = (high - max(open_, close)) / atr
         min_wick_atr = float(effective_params["min_wick_atr"])
         configured_min_volume = float(effective_params["min_volume_ratio"])
-        adaptive_min_volume = float(
-            effective_params.get("adaptive_min_volume_ratio", 1.30)
-        )
-        strong_wick_multiplier = float(
-            effective_params.get("strong_wick_multiplier", 1.35)
-        )
+        adaptive_min_volume = float(effective_params.get("adaptive_min_volume_ratio", 1.30))
+        strong_wick_multiplier = float(effective_params.get("strong_wick_multiplier", 1.35))
         direction: str | None = None
         clarity = 0.0
         if (

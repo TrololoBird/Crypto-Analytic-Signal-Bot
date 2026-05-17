@@ -773,7 +773,11 @@ class FuturesWSManager:
 
         if getattr(self._cfg, "subscribe_depth", False):
             public_task = self._stream_tasks[_WS_PUBLIC]
-            if self._running and (public_task is None or public_task.done()) and current_public_streams:
+            if (
+                self._running
+                and (public_task is None or public_task.done())
+                and current_public_streams
+            ):
                 self._stream_tasks[_WS_PUBLIC] = asyncio.create_task(
                     self._run_stream(_WS_PUBLIC),
                     name="ws_manager_stream:public",
@@ -1433,9 +1437,7 @@ class FuturesWSManager:
         event_time = data.get("E")
         if event_time is not None:
             try:
-                self._last_event_lag_ms = max(
-                    0.0, self._now_epoch_ms() - float(event_time)
-                )
+                self._last_event_lag_ms = max(0.0, self._now_epoch_ms() - float(event_time))
                 if (
                     symbol
                     and event_type in _LATENCY_WARNING_EVENTS
@@ -1596,9 +1598,7 @@ class FuturesWSManager:
             return False
         if event_ms <= 0:
             return False
-        max_age_seconds = float(
-            getattr(self._cfg, "market_ticker_freshness_seconds", 30.0)
-        )
+        max_age_seconds = float(getattr(self._cfg, "market_ticker_freshness_seconds", 30.0))
         age_ms = self._now_epoch_ms() - event_ms
         return age_ms > (max_age_seconds * 1000.0)
 
@@ -1662,9 +1662,7 @@ class FuturesWSManager:
             self._event_bus.publish_nowait(
                 KlineCloseEvent(symbol=symbol, interval=interval, close_ts=close_ts_ms)
             )
-            LOG.debug(
-                "kline published to EventBus | symbol=%s interval=%s", symbol, interval
-            )
+            LOG.debug("kline published to EventBus | symbol=%s interval=%s", symbol, interval)
         else:
             LOG.warning("kline NOT published - EventBus is None | symbol=%s", symbol)
 

@@ -320,35 +320,29 @@ class SessionKillzoneSetup(BaseSetup):
         prior_low = _as_float(prior_range["low"].min())
         breakout_buffer = max(0.0, atr * breakout_atr_mult)
         if direction == "long":
-            breakout_ok = (
-                bar_close > prior_high + breakout_buffer
-                or (
-                    bar_high > prior_high + breakout_buffer
-                    and bar_close > prior_high
-                    and close_position
-                    >= _as_float(
-                        dynamic_params.get(
-                            "min_close_position_long",
-                            defaults["min_close_position_long"],
-                        ),
+            breakout_ok = bar_close > prior_high + breakout_buffer or (
+                bar_high > prior_high + breakout_buffer
+                and bar_close > prior_high
+                and close_position
+                >= _as_float(
+                    dynamic_params.get(
+                        "min_close_position_long",
                         defaults["min_close_position_long"],
-                    )
+                    ),
+                    defaults["min_close_position_long"],
                 )
             )
         else:
-            breakout_ok = (
-                bar_close < prior_low - breakout_buffer
-                or (
-                    bar_low < prior_low - breakout_buffer
-                    and bar_close < prior_low
-                    and close_position
-                    <= _as_float(
-                        dynamic_params.get(
-                            "max_close_position_short",
-                            defaults["max_close_position_short"],
-                        ),
+            breakout_ok = bar_close < prior_low - breakout_buffer or (
+                bar_low < prior_low - breakout_buffer
+                and bar_close < prior_low
+                and close_position
+                <= _as_float(
+                    dynamic_params.get(
+                        "max_close_position_short",
                         defaults["max_close_position_short"],
-                    )
+                    ),
+                    defaults["max_close_position_short"],
                 )
             )
         if not breakout_ok:
@@ -404,9 +398,7 @@ class SessionKillzoneSetup(BaseSetup):
         ):
             structure_1h = str(getattr(prepared, "structure_1h", "") or "")
             regime_1h = str(getattr(prepared, "regime_1h_confirmed", "") or "")
-            if direction == "long" and (
-                structure_1h == "downtrend" or regime_1h == "downtrend"
-            ):
+            if direction == "long" and (structure_1h == "downtrend" or regime_1h == "downtrend"):
                 _reject(
                     prepared,
                     setup_id,
@@ -415,9 +407,7 @@ class SessionKillzoneSetup(BaseSetup):
                     regime_1h_confirmed=regime_1h,
                 )
                 return None
-            if direction == "short" and (
-                structure_1h == "uptrend" or regime_1h == "uptrend"
-            ):
+            if direction == "short" and (structure_1h == "uptrend" or regime_1h == "uptrend"):
                 _reject(
                     prepared,
                     setup_id,

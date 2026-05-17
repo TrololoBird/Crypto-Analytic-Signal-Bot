@@ -207,9 +207,7 @@ class FVGSetup(BaseSetup):
         if direction == "long" and structure_1h == "downtrend":
             score *= dynamic_params.get("bias_mismatch_penalty", defaults["bias_mismatch_penalty"])
         if direction == "short" and structure_1h == "uptrend":
-            score *= dynamic_params.get(
-                "bias_mismatch_penalty", defaults["bias_mismatch_penalty"]
-            )
+            score *= dynamic_params.get("bias_mismatch_penalty", defaults["bias_mismatch_penalty"])
         # --- Compute continuation SL/TP.
         # A mitigated FVG is the entry zone; its midpoint/opposite boundary is
         # not a meaningful profit target. Target the next structure level, then

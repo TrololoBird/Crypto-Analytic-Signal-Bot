@@ -115,23 +115,15 @@ def _bb_kc_squeeze_release(
             else bb_squeeze_threshold
         )
     if width_q25 > 0:
-        compression_cap = (
-            min(compression_cap, width_q25) if compression_cap > 0 else width_q25
-        )
+        compression_cap = min(compression_cap, width_q25) if compression_cap > 0 else width_q25
     if compressed_width <= 0.0 or compressed_width > compression_cap:
         return False, "", ""
     if current_width < compressed_width * max(1.0, min_width_expansion):
         return False, "", ""
 
-    breakout_up = (
-        close > kc_upper
-        and bb_pct_b >= bb_pct_b_threshold
-        and roc10 >= min_roc10_abs_pct
-    )
+    breakout_up = close > kc_upper and bb_pct_b >= bb_pct_b_threshold and roc10 >= min_roc10_abs_pct
     breakout_down = (
-        close < kc_lower
-        and bb_pct_b <= (1.0 - bb_pct_b_threshold)
-        and roc10 <= -min_roc10_abs_pct
+        close < kc_lower and bb_pct_b <= (1.0 - bb_pct_b_threshold) and roc10 <= -min_roc10_abs_pct
     )
     if breakout_up:
         return True, "long", "bb_kc_recent_compression_release_long"

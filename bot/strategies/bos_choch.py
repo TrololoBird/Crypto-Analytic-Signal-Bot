@@ -311,9 +311,7 @@ class BOSCHOCHSetup(BaseSetup):
         sl_prices = scan.filter(sl_mask)["low"]
 
         # Need at least 3 of each to determine prior trend + break
-        min_swings = max(
-            3, int(dynamic_params.get("min_swings", defaults["min_swings"]))
-        )
+        min_swings = max(3, int(dynamic_params.get("min_swings", defaults["min_swings"])))
         if sh_prices.len() < min_swings or sl_prices.len() < min_swings:
             _reject(
                 prepared,

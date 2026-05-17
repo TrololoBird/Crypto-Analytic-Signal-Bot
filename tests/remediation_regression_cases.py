@@ -1197,9 +1197,7 @@ async def test_oi_refresh_runner_logs_controlled_degradation_without_silent_fail
         async def fetch_open_interest(self, symbol: str) -> None:
             return None
 
-        async def fetch_open_interest_change(
-            self, symbol: str, period: str = "1h"
-        ) -> None:
+        async def fetch_open_interest_change(self, symbol: str, period: str = "1h") -> None:
             raise RuntimeError("oi failed")
 
         async def fetch_long_short_ratio(self, symbol: str, period: str = "1h") -> None:

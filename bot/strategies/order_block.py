@@ -115,8 +115,7 @@ class OrderBlockSetup(BaseSetup):
         ob_high = zone.top
         try:
             zone_values_valid = all(
-                math.isfinite(float(value)) and float(value) > 0.0
-                for value in (ob_low, ob_high)
+                math.isfinite(float(value)) and float(value) > 0.0 for value in (ob_low, ob_high)
             )
         except (TypeError, ValueError):
             zone_values_valid = False
@@ -229,7 +228,11 @@ class OrderBlockSetup(BaseSetup):
             _reject(prepared, setup_id, "invalid_stop", stop=stop, price=price)
             return None
         if tp1 is None or abs(tp1 - price) < risk * float(min_rr):
-            tp1 = price + risk * float(min_rr) if direction == "long" else price - risk * float(min_rr)
+            tp1 = (
+                price + risk * float(min_rr)
+                if direction == "long"
+                else price - risk * float(min_rr)
+            )
             reasons_note = f"tp1_rr_fallback_{float(min_rr):.2f}"
         else:
             reasons_note = "tp1_structural"

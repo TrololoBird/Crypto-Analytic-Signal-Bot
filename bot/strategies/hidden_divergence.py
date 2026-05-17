@@ -83,9 +83,7 @@ class HiddenDivergenceSetup(BaseSetup):
         min_volume_ratio = float(
             dynamic_params.get("min_volume_ratio", defaults["min_volume_ratio"])
         )
-        sl_buffer_atr = float(
-            dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"])
-        )
+        sl_buffer_atr = float(dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]))
 
         w1h = prepared.work_1h
         if w1h.height < 20:

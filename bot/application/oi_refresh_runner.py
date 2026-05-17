@@ -161,8 +161,7 @@ class OIRefreshRunner:
         has_oi_change = client.get_cached_oi_change(symbol, max_age_s=max_age_seconds) is not None
         has_ls = client.get_cached_ls_ratio(symbol, max_age_s=max_age_seconds) is not None
         has_top_position_ls = (
-            client.get_cached_top_position_ls_ratio(symbol, max_age_s=max_age_seconds)
-            is not None
+            client.get_cached_top_position_ls_ratio(symbol, max_age_s=max_age_seconds) is not None
         )
         has_global_ls = (
             client.get_cached_global_ls_ratio(symbol, max_age_s=max_age_seconds) is not None

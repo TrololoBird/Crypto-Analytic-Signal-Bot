@@ -1103,9 +1103,7 @@ class SymbolAnalyzer:
                             symbol,
                             exc.detail,
                         )
-                        book_context = await self._bot.client._fetch_book_ticker_rest_detail(
-                            symbol
-                        )
+                        book_context = await self._bot.client._fetch_book_ticker_rest_detail(symbol)
                     bid = bid if bid is not None else book_context.get("bid_price")
                     ask = ask if ask is not None else book_context.get("ask_price")
                     bid_qty = book_context.get("bid_qty")

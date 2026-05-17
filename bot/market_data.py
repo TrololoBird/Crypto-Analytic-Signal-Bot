@@ -1294,9 +1294,7 @@ class BinanceFuturesMarketData:
         self._order_book_depth_cache[key] = (time.monotonic(), snapshot)
         return dict(snapshot)
 
-    async def _fetch_order_book_context_rest_detail(
-        self, symbol: str
-    ) -> dict[str, float | None]:
+    async def _fetch_order_book_context_rest_detail(self, symbol: str) -> dict[str, float | None]:
         try:
             return await self.fetch_order_book_depth_snapshot(
                 symbol,
@@ -1762,9 +1760,7 @@ class BinanceFuturesMarketData:
             return None
         return value
 
-    def get_cached_open_interest(
-        self, symbol: str, max_age_s: float = 1800.0
-    ) -> float | None:
+    def get_cached_open_interest(self, symbol: str, max_age_s: float = 1800.0) -> float | None:
         """Return cached current open interest if fresh, else None (no REST call)."""
         cached = self._open_interest_cache.get(symbol)
         if cached is None:

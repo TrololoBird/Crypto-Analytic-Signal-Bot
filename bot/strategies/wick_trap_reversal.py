@@ -110,11 +110,7 @@ class WickTrapReversalSetup(BaseSetup):
                 bar_time = work_15m.item(idx, "time")
                 if isinstance(bar_time, datetime) and bar_time.tzinfo is None:
                     bar_time = bar_time.replace(tzinfo=UTC)
-                if (
-                    event_dt is not None
-                    and isinstance(bar_time, datetime)
-                    and bar_time <= event_dt
-                ):
+                if event_dt is not None and isinstance(bar_time, datetime) and bar_time <= event_dt:
                     continue
                 positions.append(idx)
             return positions

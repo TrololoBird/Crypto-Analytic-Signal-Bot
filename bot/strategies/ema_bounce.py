@@ -157,10 +157,9 @@ class EmaBounceSetup(BaseSetup):
         recent = work_15m.tail(5)
         if bias_1h == "uptrend":
             recent_low = float(recent["low"].min())
-            touch_ema = (
-                recent_low <= ema20 * (1.0 + float(ema_touch_tolerance_pct))
-                or recent_low <= ema50 * (1.0 + float(ema_touch_tolerance_pct) * 2.0)
-            )
+            touch_ema = recent_low <= ema20 * (
+                1.0 + float(ema_touch_tolerance_pct)
+            ) or recent_low <= ema50 * (1.0 + float(ema_touch_tolerance_pct) * 2.0)
             bounce = (
                 close > open_
                 and close >= prev_close * (1.0 + float(bounce_threshold_pct))
@@ -178,10 +177,9 @@ class EmaBounceSetup(BaseSetup):
                 ]
         elif bias_1h == "downtrend":
             recent_high = float(recent["high"].max())
-            touch_ema = (
-                recent_high >= ema20 * (1.0 - float(ema_touch_tolerance_pct))
-                or recent_high >= ema50 * (1.0 - float(ema_touch_tolerance_pct) * 2.0)
-            )
+            touch_ema = recent_high >= ema20 * (
+                1.0 - float(ema_touch_tolerance_pct)
+            ) or recent_high >= ema50 * (1.0 - float(ema_touch_tolerance_pct) * 2.0)
             bounce = (
                 close < open_
                 and close <= prev_close * (1.0 - float(bounce_threshold_pct))

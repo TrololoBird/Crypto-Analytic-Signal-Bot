@@ -16,9 +16,7 @@ LOG = logging.getLogger("bot.ws_manager")
 JsonDict = dict[str, Any]
 
 
-def _parse_depth_levels(
-    raw_levels: Any, *, reverse: bool
-) -> tuple[tuple[float, float], ...]:
+def _parse_depth_levels(raw_levels: Any, *, reverse: bool) -> tuple[tuple[float, float], ...]:
     parsed: list[tuple[float, float]] = []
     if not isinstance(raw_levels, list):
         return ()

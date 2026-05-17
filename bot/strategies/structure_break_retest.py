@@ -208,12 +208,15 @@ class StructureBreakRetestSetup(BaseSetup):
                         direction = "short"
 
         if direction is None or broken_level is None:
-            if float(
-                dynamic_params.get(
-                    "enable_15m_range_fallback",
-                    defaults["enable_15m_range_fallback"],
+            if (
+                float(
+                    dynamic_params.get(
+                        "enable_15m_range_fallback",
+                        defaults["enable_15m_range_fallback"],
+                    )
                 )
-            ) > 0.0:
+                > 0.0
+            ):
                 fallback = _detect_15m_range_retest(
                     work_15m,
                     min_vol_breakout=float(min_vol_breakout),
@@ -228,9 +231,8 @@ class StructureBreakRetestSetup(BaseSetup):
                 _reject(prepared, setup_id, "no_breakout_detected", regime=regime_1h)
                 return None
         broken_level_value = broken_level
-        if (
-            not used_15m_fallback
-            and (breakout_bar_idx is None or breakout_bar_idx < work_1h.height - 4)
+        if not used_15m_fallback and (
+            breakout_bar_idx is None or breakout_bar_idx < work_1h.height - 4
         ):
             _reject(
                 prepared,
@@ -241,7 +243,9 @@ class StructureBreakRetestSetup(BaseSetup):
             return None
 
         vol_ratio = _as_float(
-            work_15m.item(-1, "volume_ratio20") if used_15m_fallback else work_1h.item(-1, "volume_ratio20"),
+            work_15m.item(-1, "volume_ratio20")
+            if used_15m_fallback
+            else work_1h.item(-1, "volume_ratio20"),
             1.0,
         )
 
