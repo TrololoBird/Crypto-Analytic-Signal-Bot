@@ -1,6 +1,6 @@
 """Live check script to verify critical enrichment fields are populated.
 
-This script verifies that the following fields (previously always NULL) are now
+This script verifies that the following fields (previously often missing) are now
 correctly populated with live data:
 - mark_index_spread_bps
 - premium_zscore_5m
@@ -72,7 +72,7 @@ def _check_field(prepared: Any, field: str) -> dict[str, Any]:
         "field": field,
         "value": value,
         "is_populated": value is not None,
-        "type": type(value).__name__ if value is not None else "None",
+        "type": type(value).__name__ if value is not None else "missing",
     }
 
 
@@ -174,8 +174,13 @@ def _collect_ws_enrichments(
     # Try both 5m and 1h periods for basis stats
     for period in ["5m", "1h"]:
         basis_stats = client.get_cached_basis_stats(symbol, period=period)
-        LOG.debug("basis_stats_check | symbol=%s period=%s stats=%s", symbol, period, basis_stats)
         if basis_stats is not None:
+            LOG.debug(
+                "basis_stats_check | symbol=%s period=%s populated_fields=%s",
+                symbol,
+                period,
+                sorted(key for key, value in basis_stats.items() if value is not None),
+            )
             if enrichments.get("mark_index_spread_bps") is None:
                 enrichments["mark_index_spread_bps"] = basis_stats.get("mark_index_spread_bps")
             if enrichments.get("premium_slope_5m") is None:
@@ -328,7 +333,7 @@ async def _run(
             df_1h = await client.fetch_klines_cached(symbol, "1h", limit=300)
             df_15m = await client.fetch_klines_cached(symbol, "15m", limit=300)
             df_5m = await client.fetch_klines_cached(symbol, "5m", limit=300)
-            book_context = await client._fetch_book_ticker_rest_detail(symbol)
+            book_context = await client.fetch_order_book_depth_snapshot(symbol, limit=20)
 
             frames = SymbolFrames(
                 symbol=symbol,
@@ -375,7 +380,7 @@ async def _run(
                     symbol,
                     field,
                     result["is_populated"],
-                    result["value"],
+                    result["value"] if result["value"] is not None else "missing",
                 )
 
             all_results.append(
@@ -383,7 +388,7 @@ async def _run(
                     "symbol": symbol,
                     "total_fields": len(critical_fields),
                     "populated_count": populated_count,
-                    "null_count": len(critical_fields) - populated_count,
+                    "missing_count": len(critical_fields) - populated_count,
                     "fields": field_results,
                     "enrichments_available": len(ws_enrichments),
                 }
@@ -396,13 +401,13 @@ async def _run(
 
         total_fields_all = sum(r["total_fields"] for r in all_results)
         total_populated = sum(r["populated_count"] for r in all_results)
-        total_null = sum(r["null_count"] for r in all_results)
+        total_missing = sum(r["missing_count"] for r in all_results)
 
         LOG.info(
-            "overall | total_fields=%d populated=%d null=%d rate=%.1f%%",
+            "overall | total_fields=%d populated=%d missing=%d rate=%.1f%%",
             total_fields_all,
             total_populated,
-            total_null,
+            total_missing,
             100.0 * total_populated / total_fields_all if total_fields_all > 0 else 0,
         )
 
@@ -418,17 +423,16 @@ async def _run(
                 result["enrichments_available"],
             )
 
-            # List null fields
-            null_fields = [f["field"] for f in result["fields"] if not f["is_populated"]]
-            if null_fields:
-                LOG.warning("  null_fields | symbol=%s: %s", symbol, ", ".join(null_fields))
+            missing_fields = [f["field"] for f in result["fields"] if not f["is_populated"]]
+            if missing_fields:
+                LOG.warning("  missing_fields | symbol=%s: %s", symbol, ", ".join(missing_fields))
 
         # Check if all critical fields are now populated
-        all_populated = total_null == 0
+        all_populated = total_missing == 0
         if all_results and all_populated:
             LOG.info("SUCCESS: All critical fields are populated!")
         else:
-            LOG.error("FAILURE: %d fields still NULL", total_null)
+            LOG.error("FAILURE: %d fields still missing", total_missing)
             if not all_results:
                 raise RuntimeError("no symbols were prepared; enrichment check is invalid")
 

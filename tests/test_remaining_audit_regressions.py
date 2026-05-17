@@ -376,6 +376,8 @@ def test_ls_ratio_extreme_treats_zero_ratio_as_valid_extreme() -> None:
         [100.0, 100.2, 100.4, 100.6, 101.0, 101.3, 101.7, 102.0, 102.4],
         price=102.4,
         atr=1.0,
+    ).with_columns(
+        pl.lit(0.72).alias("close_position")
     )
     prepared = _prepared(frame, settings=settings, price=102.4)
     prepared.top_account_ls_ratio = 0.0

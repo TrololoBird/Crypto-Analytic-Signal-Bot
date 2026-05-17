@@ -5,7 +5,11 @@ import time
 
 import pytest
 
-from bot.market_data import BinanceFuturesMarketData, _SlidingWindowRateLimiter
+from bot.market_data import (
+    BinanceFuturesMarketData,
+    _SlidingWindowRateLimiter,
+    validate_runtime_public_rest_url,
+)
 
 
 def test_futures_data_limiter_is_configurable_and_clamped() -> None:
@@ -32,6 +36,19 @@ def test_kline_weight_estimate_uses_limit_tiers() -> None:
     assert client._estimate_weight("kline_candlestick_data", {"limit": 300}) == 2
     assert client._estimate_weight("kline_candlestick_data", {"limit": 1000}) == 5
     assert client._estimate_weight("kline_candlestick_data", {"limit": 1500}) == 10
+
+
+def test_order_book_depth_endpoint_uses_documented_public_path_and_weight_tiers() -> None:
+    client = BinanceFuturesMarketData()
+    spec = client._endpoint_spec("order_book_depth")
+
+    assert spec.path == "/fapi/v1/depth"
+    validate_runtime_public_rest_url(client._endpoint_url("order_book_depth"))
+    assert client._estimate_weight("order_book_depth", {"limit": 5}) == 2
+    assert client._estimate_weight("order_book_depth", {"limit": 20}) == 2
+    assert client._estimate_weight("order_book_depth", {"limit": 100}) == 5
+    assert client._estimate_weight("order_book_depth", {"limit": 500}) == 10
+    assert client._estimate_weight("order_book_depth", {"limit": 1000}) == 20
 
 
 def test_funding_history_uses_public_request_limiter() -> None:
@@ -142,3 +159,38 @@ async def test_fetch_agg_trades_caps_future_end_time(
     assert rows == []
     assert complete is True
     assert captured_params[0]["endTime"] <= int(time.time() * 1000)
+
+
+@pytest.mark.asyncio
+async def test_fetch_order_book_depth_snapshot_sums_valid_levels(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = BinanceFuturesMarketData()
+    captured: dict[str, object] = {}
+
+    async def fake_call(operation: str, *, params: dict, symbol: str | None = None):
+        captured["operation"] = operation
+        captured["params"] = dict(params)
+        captured["symbol"] = symbol
+        return {
+            "lastUpdateId": 123,
+            "bids": [["100.0", "2.0"], ["99.5", "3.0"], ["bad", "9.0"], ["98.0", "0"]],
+            "asks": [["100.5", "1.5"], ["101.0", "2.5"], ["101.5", "-1.0"]],
+        }
+
+    monkeypatch.setattr(client, "_call_public_http_json", fake_call)
+
+    snapshot = await client.fetch_order_book_depth_snapshot("BTCUSDT", limit=20)
+
+    assert captured == {
+        "operation": "order_book_depth",
+        "params": {"symbol": "BTCUSDT", "limit": 20},
+        "symbol": "BTCUSDT",
+    }
+    assert snapshot == {
+        "bid_price": 100.0,
+        "ask_price": 100.5,
+        "bid_qty": 5.0,
+        "ask_qty": 4.0,
+        "last_update_id": 123.0,
+    }

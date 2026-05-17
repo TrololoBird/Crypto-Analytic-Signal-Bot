@@ -219,6 +219,7 @@ def make_feature_frame(
             "kc_upper": kc_uppers,
             "kc_lower": kc_lowers,
             "delta_ratio": delta_ratios,
+            "close_position": [0.68] * count,
         }
     )
 
@@ -620,6 +621,7 @@ def test_funding_reversal_runtime_params_gate_delta_and_stop() -> None:
                     "min_delta_threshold": 0.15,
                     "sl_buffer_atr": 1.0,
                     "funding_trend_bars": 2.0,
+                    "min_rr": 1.5,
                 }
             }
         )
@@ -1485,11 +1487,18 @@ def test_ema_bounce_emits_1h_timeframe() -> None:
             "adx14": [21.0, 22.0, 24.0],
         }
     )
+    prepared.work_15m = make_feature_frame(
+        [99.0, 99.4, 99.8, 100.2, 101.0],
+        opens=[98.8, 99.2, 99.6, 100.0, 100.3],
+        highs=[99.4, 99.8, 100.2, 100.8, 101.4],
+        lows=[98.5, 99.0, 99.2, 99.8, 100.1],
+        atr=1.4,
+    )
 
     signal = setup.detect(prepared, settings)
 
     assert signal is not None
-    assert signal.timeframe == "1h"
+    assert signal.timeframe == "15m+1h"
 
 
 def test_ema_bounce_requires_actual_ema_touch() -> None:
@@ -1551,6 +1560,13 @@ def test_ema_bounce_config_min_adx_changes_outcome(min_adx: float, expect_signal
             "ema50": [99.0, 99.3, 99.7],
             "adx14": [21.0, 22.0, 24.0],
         }
+    )
+    prepared.work_15m = make_feature_frame(
+        [99.0, 99.4, 99.8, 100.2, 101.0],
+        opens=[98.8, 99.2, 99.6, 100.0, 100.3],
+        highs=[99.4, 99.8, 100.2, 100.8, 101.4],
+        lows=[98.5, 99.0, 99.2, 99.8, 100.1],
+        atr=1.4,
     )
     signal = setup.detect(prepared, settings)
 

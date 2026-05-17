@@ -175,8 +175,8 @@ def _select_stop_level_with_fallback(
         details["fallback_used"] = "internal_swing_stop"
         return internal_level, "internal_swing", details
 
-    details["stop_source"] = "none"
-    details["fallback_used"] = "none"
+    details["stop_source"] = "not_available"
+    details["fallback_used"] = "not_used"
     return None, None, details
 
 

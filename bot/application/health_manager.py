@@ -71,7 +71,7 @@ class HealthManager:
                 ws_age,
                 regime_info,
                 market_ctx.get("btc_bias", "neutral"),
-                blacklisted if blacklisted else "none",
+                blacklisted if blacklisted else "not_blacklisted",
             )
 
             if self._bot.metrics._enabled:

@@ -12,6 +12,10 @@ from typing import Any
 import websockets
 
 LOG = logging.getLogger("bot.ws_manager")
+_WS_PING_INTERVAL_SECONDS = 20.0
+_WS_PING_TIMEOUT_SECONDS = 60.0
+_WS_CLOSE_TIMEOUT_SECONDS = 10.0
+_WS_CONNECT_TIMEOUT_SECONDS = 30.0
 
 
 def build_stream_url(manager: Any, endpoint: str) -> str:
@@ -115,11 +119,11 @@ async def run_stream_session(
     ws = await asyncio.wait_for(
         websockets.connect(
             url,
-            ping_interval=20.0,
-            ping_timeout=20.0,
-            close_timeout=10.0,
+            ping_interval=_WS_PING_INTERVAL_SECONDS,
+            ping_timeout=_WS_PING_TIMEOUT_SECONDS,
+            close_timeout=_WS_CLOSE_TIMEOUT_SECONDS,
         ),
-        timeout=10.0,
+        timeout=_WS_CONNECT_TIMEOUT_SECONDS,
     )
     LOG.info("ws connection established | endpoint=%s url=%s", endpoint, url)
     backoff_reset = False

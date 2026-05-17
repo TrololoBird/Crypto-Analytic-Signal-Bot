@@ -32,7 +32,7 @@ def compute_disconnect_delay(
 
     close_detail = ""
     if isinstance(exc, ws_exceptions.ConnectionClosed):
-        close_code = exc.rcvd.code if exc.rcvd else "none"
+        close_code = exc.rcvd.code if exc.rcvd else "not_received"
         close_reason = repr(exc.rcvd.reason) if exc.rcvd else ""
         close_detail = f" code={close_code} reason={close_reason}"
 
@@ -55,7 +55,7 @@ def compute_disconnect_delay(
     level = logging.WARNING if manager._short_lived_streak >= 3 else logging.INFO
     LOG.log(
         level,
-        "ws disconnected | endpoint=%s url=%s error=%s%s uptime=%.1fs retry_in=%.1fs streak=%d",
+        "ws disconnected | endpoint=%s url=%s close_detail=%s%s uptime=%.1fs retry_in=%.1fs streak=%d",
         endpoint,
         url,
         exc,

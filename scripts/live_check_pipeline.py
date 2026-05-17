@@ -157,9 +157,9 @@ async def _fetch_frames(
     *,
     timeout: float,
 ) -> SymbolFrames:
-    bid_price, ask_price = await _wait_for(
-        "book_ticker",
-        lambda: client.fetch_book_ticker(symbol),
+    book_context = await _wait_for(
+        "order_book_depth",
+        lambda: client.fetch_order_book_depth_snapshot(symbol, limit=20),
         timeout=timeout,
     )
     df_1h, df_15m, df_5m, df_4h = await asyncio.gather(
@@ -188,10 +188,12 @@ async def _fetch_frames(
         symbol=symbol,
         df_1h=df_1h,
         df_15m=df_15m,
-        bid_price=bid_price,
-        ask_price=ask_price,
+        bid_price=book_context.get("bid_price"),
+        ask_price=book_context.get("ask_price"),
         df_5m=df_5m,
         df_4h=df_4h,
+        bid_qty=book_context.get("bid_qty"),
+        ask_qty=book_context.get("ask_qty"),
     )
 
 

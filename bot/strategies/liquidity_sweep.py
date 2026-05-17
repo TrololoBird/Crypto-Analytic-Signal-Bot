@@ -224,7 +224,7 @@ class LiquiditySweepSetup(BaseSetup):
                 if structural_tp1 is not None and abs(structural_tp1 - price) >= risk * min_rr
                 else rr_tp1
             )
-            if tp1 >= price or abs(tp1 - price) < risk * min_rr:
+            if tp1 >= price or abs(tp1 - price) + 1e-9 < risk * min_rr:
                 _reject(
                     prepared,
                     setup_id,
@@ -307,7 +307,7 @@ class LiquiditySweepSetup(BaseSetup):
             if structural_tp1 is not None and abs(structural_tp1 - price) >= risk * min_rr
             else rr_tp1
         )
-        if tp1 <= price or abs(tp1 - price) < risk * min_rr:
+        if tp1 <= price or abs(tp1 - price) + 1e-9 < risk * min_rr:
             _reject(
                 prepared,
                 setup_id,

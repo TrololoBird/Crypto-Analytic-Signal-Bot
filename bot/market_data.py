@@ -62,6 +62,7 @@ _CACHE_TTL = {
     "funding_history": 1800,  # 30 minutes
     "basis": 600,
     "book_ticker": 5,  # 5 seconds - use WS primarily
+    "order_book_depth": 5,  # 5 seconds - REST fallback when WS L2 is cold/stale
 }
 
 _PERIOD_WINDOW_SECONDS: dict[str, int] = {
@@ -78,6 +79,7 @@ _ENDPOINT_WEIGHTS: dict[str, int] = {
     "exchange_information": 1,
     "ticker24hr_price_change_statistics": 40,
     "symbol_order_book_ticker": 2,
+    "order_book_depth": 2,
     "compressed_aggregate_trades_list": 20,
     "open_interest": 1,
     # /futures/data/openInterestHist has request weight=0; it is constrained by an IP request limit instead.
@@ -104,6 +106,14 @@ _FUTURES_DATA_REQUEST_LIMITED_OPS: set[str] = {
     "funding_rate_history",
 }
 _DEFAULT_KLINE_FETCH_LIMIT = 300
+_DEFAULT_ORDER_BOOK_DEPTH_LIMIT = 20
+_VALID_ORDER_BOOK_DEPTH_LIMITS = frozenset({5, 10, 20, 50, 100, 500, 1000})
+_FALLBACK_TIMEOUT_DEBUG_OPERATIONS = frozenset(
+    {
+        "symbol_order_book_ticker",
+        "order_book_depth",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,6 +129,7 @@ _PUBLIC_ENDPOINT_REGISTRY: dict[str, _PublicEndpointSpec] = {
     "ticker24hr_price_change_statistics": _PublicEndpointSpec("/fapi/v1/ticker/24hr"),
     "kline_candlestick_data": _PublicEndpointSpec("/fapi/v1/klines"),
     "symbol_order_book_ticker": _PublicEndpointSpec("/fapi/v1/ticker/bookTicker"),
+    "order_book_depth": _PublicEndpointSpec("/fapi/v1/depth"),
     "compressed_aggregate_trades_list": _PublicEndpointSpec("/fapi/v1/aggTrades"),
     "premium_index": _PublicEndpointSpec("/fapi/v1/premiumIndex"),
     "open_interest": _PublicEndpointSpec("/fapi/v1/openInterest"),
@@ -203,6 +214,18 @@ def validate_limit(limit: int, min_val: int = 1, max_val: int = 1500) -> None:
             raise ValueError(f"limit must be an integer: {limit!r}")
     if limit < min_val or limit > max_val:
         raise ValueError(f"limit out of range [{min_val}, {max_val}]: {limit}")
+
+
+def validate_order_book_depth_limit(limit: int) -> int:
+    """Validate Binance USD-M order-book depth snapshot limit."""
+    try:
+        normalized = int(limit)
+    except (ValueError, TypeError) as exc:
+        raise ValueError(f"order book depth limit must be an integer: {limit!r}") from exc
+    if normalized not in _VALID_ORDER_BOOK_DEPTH_LIMITS:
+        allowed = ", ".join(str(value) for value in sorted(_VALID_ORDER_BOOK_DEPTH_LIMITS))
+        raise ValueError(f"order book depth limit must be one of [{allowed}]: {normalized}")
+    return normalized
 
 
 def validate_runtime_public_rest_url(url: str) -> None:
@@ -378,6 +401,25 @@ def _coerce_rest_row(item: Any) -> Mapping[str, Any]:
     raise TypeError(f"Unsupported REST row payload type: {type(item)!r}")
 
 
+def _parse_depth_levels(raw_levels: Any, *, reverse: bool) -> tuple[tuple[float, float], ...]:
+    parsed: list[tuple[float, float]] = []
+    if not isinstance(raw_levels, list):
+        return ()
+    for raw in raw_levels:
+        if not isinstance(raw, (list, tuple)) or len(raw) < 2:
+            continue
+        try:
+            price = float(raw[0])
+            qty = float(raw[1])
+        except (TypeError, ValueError):
+            continue
+        if price <= 0.0 or qty <= 0.0 or not math.isfinite(price) or not math.isfinite(qty):
+            continue
+        parsed.append((price, qty))
+    parsed.sort(key=lambda item: item[0], reverse=reverse)
+    return tuple(parsed)
+
+
 def _validate_public_endpoint_registry() -> None:
     for endpoint_name, spec in _PUBLIC_ENDPOINT_REGISTRY.items():
         path = spec.path.strip()
@@ -424,6 +466,9 @@ class BinanceFuturesMarketData:
         self._basis_cache: dict[tuple[str, str], tuple[float, float | None]] = {}
         self._basis_stats_cache: dict[tuple[str, str], tuple[float, dict[str, float | None]]] = {}
         self._basis_ws_history: dict[tuple[str, str], deque[tuple[float, float]]] = {}
+        self._order_book_depth_cache: dict[
+            tuple[str, int], tuple[float, dict[str, float | None]]
+        ] = {}
         self._ws: FuturesWSManager | None = ws_manager
         self._last_rest_weight_1m: int | None = None
         self._last_rest_response_time_ms: float | None = None
@@ -567,6 +612,20 @@ class BinanceFuturesMarketData:
             if limit <= 1000:
                 return 5
             return 10
+        if operation == "order_book_depth":
+            try:
+                limit = validate_order_book_depth_limit(
+                    int((params or {}).get("limit") or _DEFAULT_ORDER_BOOK_DEPTH_LIMIT)
+                )
+            except (TypeError, ValueError):
+                limit = _DEFAULT_ORDER_BOOK_DEPTH_LIMIT
+            if limit <= 50:
+                return 2
+            if limit == 100:
+                return 5
+            if limit == 500:
+                return 10
+            return 20
         return _ENDPOINT_WEIGHTS.get(operation, 1)
 
     def _track_weight(self, operation: str, params: Mapping[str, Any] | None = None) -> None:
@@ -736,7 +795,9 @@ class BinanceFuturesMarketData:
         except (asyncio.TimeoutError, TimeoutError) as exc:
             symbol = kwargs.get("symbol")
             self._record_circuit_failure(operation)
-            log_timeout = LOG.info if operation == "symbol_order_book_ticker" else LOG.warning
+            log_timeout = (
+                LOG.debug if operation in _FALLBACK_TIMEOUT_DEBUG_OPERATIONS else LOG.warning
+            )
             log_timeout(
                 "rest timeout | operation=%s symbol=%s timeout=%.1fs",
                 operation,
@@ -885,7 +946,9 @@ class BinanceFuturesMarketData:
             raise
         except (asyncio.TimeoutError, TimeoutError) as exc:
             self._record_circuit_failure(operation)
-            log_timeout = LOG.info if operation == "symbol_order_book_ticker" else LOG.warning
+            log_timeout = (
+                LOG.debug if operation in _FALLBACK_TIMEOUT_DEBUG_OPERATIONS else LOG.warning
+            )
             log_timeout(
                 "rest timeout | operation=%s symbol=%s timeout=%.1fs",
                 operation,
@@ -909,7 +972,10 @@ class BinanceFuturesMarketData:
         session = self._http_session
         if session is None or session.closed:
             timeout = aiohttp.ClientTimeout(total=self._rest_timeout)
-            connector = aiohttp.TCPConnector(limit=_HTTP_CONNECTOR_LIMIT)
+            connector = aiohttp.TCPConnector(
+                limit=_HTTP_CONNECTOR_LIMIT,
+                resolver=aiohttp.ThreadedResolver(),
+            )
             self._http_session = aiohttp.ClientSession(
                 timeout=timeout,
                 connector=connector,
@@ -1074,23 +1140,23 @@ class BinanceFuturesMarketData:
         return new_rows
 
     async def _fetch_symbol_frames_rest(self, symbol: str) -> SymbolFrames:
-        frame_4h, frame_1h, frame_15m, frame_5m, book_ticker = await asyncio.gather(
+        frame_4h, frame_1h, frame_15m, frame_5m, book_context = await asyncio.gather(
             self.fetch_klines_cached(symbol, "4h", limit=_DEFAULT_KLINE_FETCH_LIMIT),
             self.fetch_klines_cached(symbol, "1h", limit=_DEFAULT_KLINE_FETCH_LIMIT),
             self.fetch_klines_cached(symbol, "15m", limit=_DEFAULT_KLINE_FETCH_LIMIT),
             self.fetch_klines_cached(symbol, "5m", limit=_DEFAULT_KLINE_FETCH_LIMIT),
-            self._fetch_book_ticker_rest_detail(symbol),
+            self._fetch_order_book_context_rest_detail(symbol),
         )
         return SymbolFrames(
             symbol=symbol,
             df_1h=frame_1h,
             df_15m=frame_15m,
-            bid_price=book_ticker.get("bid_price"),
-            ask_price=book_ticker.get("ask_price"),
+            bid_price=book_context.get("bid_price"),
+            ask_price=book_context.get("ask_price"),
             df_5m=frame_5m,
             df_4h=frame_4h,
-            bid_qty=book_ticker.get("bid_qty"),
-            ask_qty=book_ticker.get("ask_qty"),
+            bid_qty=book_context.get("bid_qty"),
+            ask_qty=book_context.get("ask_qty"),
         )
 
     async def fetch_klines(self, symbol: str, interval: str, *, limit: int) -> pl.DataFrame:
@@ -1172,6 +1238,78 @@ class BinanceFuturesMarketData:
             return None
         return frame
 
+    async def fetch_order_book_depth_snapshot(
+        self, symbol: str, *, limit: int = _DEFAULT_ORDER_BOOK_DEPTH_LIMIT
+    ) -> dict[str, float | None]:
+        """Fetch a public USD-M L2 order-book snapshot and aggregate returned depth levels."""
+        validate_symbol(symbol)
+        limit = validate_order_book_depth_limit(limit)
+        key = (symbol, limit)
+        now = time.monotonic()
+        cached = self._order_book_depth_cache.get(key)
+        ttl = int(_CACHE_TTL["order_book_depth"])
+        if cached is not None and (now - cached[0]) < ttl:
+            self._record_endpoint_snapshot(
+                "order_book_depth",
+                source="rest",
+                cache_hit=True,
+                fallback_used=False,
+                response_age_s=now - cached[0],
+            )
+            return dict(cached[1])
+
+        payload = await self._call_public_http_json(
+            "order_book_depth",
+            params={"symbol": symbol, "limit": limit},
+            symbol=symbol,
+        )
+        if not isinstance(payload, Mapping):
+            raise MarketDataUnavailable(
+                operation="order_book_depth",
+                detail=f"unexpected payload type: {type(payload).__name__}",
+                symbol=symbol,
+            )
+
+        bids = _parse_depth_levels(payload.get("bids"), reverse=True)
+        asks = _parse_depth_levels(payload.get("asks"), reverse=False)
+        if not bids or not asks:
+            raise MarketDataUnavailable(
+                operation="order_book_depth",
+                detail="empty order book levels",
+                symbol=symbol,
+            )
+
+        last_update_raw = payload.get("lastUpdateId") or payload.get("last_update_id")
+        try:
+            last_update_id = float(last_update_raw) if last_update_raw is not None else None
+        except (TypeError, ValueError):
+            last_update_id = None
+        snapshot: dict[str, float | None] = {
+            "bid_price": bids[0][0],
+            "ask_price": asks[0][0],
+            "bid_qty": sum(qty for _price, qty in bids),
+            "ask_qty": sum(qty for _price, qty in asks),
+            "last_update_id": last_update_id,
+        }
+        self._order_book_depth_cache[key] = (time.monotonic(), snapshot)
+        return dict(snapshot)
+
+    async def _fetch_order_book_context_rest_detail(
+        self, symbol: str
+    ) -> dict[str, float | None]:
+        try:
+            return await self.fetch_order_book_depth_snapshot(
+                symbol,
+                limit=_DEFAULT_ORDER_BOOK_DEPTH_LIMIT,
+            )
+        except MarketDataUnavailable as exc:
+            LOG.info(
+                "order book depth unavailable, falling back to book ticker | symbol=%s detail=%s",
+                symbol,
+                exc.detail,
+            )
+            return await self._fetch_book_ticker_rest_detail(symbol)
+
     async def _fetch_book_ticker_rest_detail(self, symbol: str) -> dict[str, float | None]:
         validate_symbol(symbol)
         max_attempts = 3
@@ -1217,7 +1355,7 @@ class BinanceFuturesMarketData:
                     await asyncio.sleep(backoff)
                     continue
                 LOG.info(
-                    "book ticker unavailable, returning None prices | symbol=%s detail=%s",
+                    "book ticker unavailable, returning empty prices | symbol=%s detail=%s",
                     symbol,
                     detail,
                 )

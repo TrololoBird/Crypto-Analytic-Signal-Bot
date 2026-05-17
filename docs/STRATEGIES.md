@@ -40,8 +40,8 @@ Family and confirmation profile metadata are attached per strategy and used by s
 - All registered setup flags must remain enabled unless a strategy is removed
   from `STRATEGY_CLASSES`; broken strategies are fixed through detector logic,
   explicit reject reasons, or config calibration rather than hidden disablement.
-- `bot.filters.min_risk_reward` is the global RR floor. Per-setup `min_rr`
-  values may raise the floor but must not lower it.
+- `bot.filters.min_risk_reward` is the default RR floor. Per-setup `min_rr`
+  values explicitly override it for that detector.
 - A signal that opposes confirmed 1h trend context is rejected by the global
   `trend_conflict_1h` filter.
 - Telegram `why now` companion messages are optional and controlled by
@@ -73,7 +73,8 @@ Added detectors:
 Implementation caveat: several detectors are conservative public-data proxies
 for concepts that would need richer historical orderbook or liquidation-cluster
 data for full parity. Examples: `whale_walls` uses depth/microprice imbalance
-as a wall proxy, and `liquidation_heatmap` uses recent liquidation sentiment
+from public WS partial-depth when fresh and public REST `/fapi/v1/depth` as the
+cold/stale fallback, and `liquidation_heatmap` uses recent liquidation sentiment
 rather than a true exchange-wide liquidation heatmap.
 
 ## 2026-05-14 Live Audit

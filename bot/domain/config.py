@@ -50,10 +50,10 @@ class RuntimeConfig(BaseModel):
     startup_batch_size: int = Field(default=3, ge=1, le=10)
     startup_batch_delay_seconds: float = Field(default=3.0, ge=0.5, le=10.0)
     max_concurrent_rest_requests: int = Field(default=3, ge=1, le=20)
-    emergency_context_warmup_timeout_seconds: float = Field(default=45.0, ge=1.0, le=120.0)
-    emergency_context_warmup_symbol_limit: int = Field(default=12, ge=1, le=100)
-    emergency_context_fetch_timeout_seconds: float = Field(default=8.0, ge=0.5, le=30.0)
-    futures_data_request_limit_per_5m: int = Field(default=240, ge=30, le=1000)
+    emergency_context_warmup_timeout_seconds: float = Field(default=120.0, ge=1.0, le=120.0)
+    emergency_context_warmup_symbol_limit: int = Field(default=45, ge=1, le=100)
+    emergency_context_fetch_timeout_seconds: float = Field(default=20.0, ge=0.5, le=30.0)
+    futures_data_request_limit_per_5m: int = Field(default=900, ge=30, le=1000)
     heartbeat_seconds: float = Field(default=60.0, ge=5.0, le=3600.0)
 
     @field_validator("log_level")
@@ -464,7 +464,7 @@ class WSConfig(BaseModel):
     warmup_timeout_seconds: float = Field(default=60.0, ge=5.0, le=300.0)
     reconnect_max_delay_seconds: float = Field(default=300.0, ge=1.0, le=3600.0)
     max_agg_trade_buffer: int = Field(default=10000, ge=100, le=100000)
-    rest_timeout_seconds: float = Field(default=10.0, ge=1.0, le=120.0)
+    rest_timeout_seconds: float = Field(default=20.0, ge=1.0, le=120.0)
     backfill_failure_cooldown_seconds: int = Field(default=900, ge=0, le=86400)
     # Global market streams (no per-symbol subscription needed)
     subscribe_market_streams: bool = True

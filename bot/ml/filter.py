@@ -418,7 +418,7 @@ class MLFilter:
             "ML guardrail | stage=%s model_kind=%s disable_reason=%s is_live=%s count=%d",
             decision.stage,
             decision.model_kind,
-            decision.disable_reason or "none",
+            decision.disable_reason or "not_disabled",
             decision.is_live,
             count,
         )

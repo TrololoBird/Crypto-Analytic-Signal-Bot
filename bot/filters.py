@@ -330,10 +330,7 @@ def apply_global_filters(
     risk = abs(updated.entry_mid - updated.stop)
     reward_tp1 = abs(updated.take_profit_1 - updated.entry_mid)
     rr_tp1 = (reward_tp1 / risk) if risk > 0 else 0.0
-    effective_min_rr = max(
-        settings.filters.min_risk_reward,
-        float(setup_overrides.get("min_rr", settings.filters.min_risk_reward)),
-    )
+    effective_min_rr = float(setup_overrides.get("min_rr", settings.filters.min_risk_reward))
     rr_epsilon = 1e-9
     if rr_tp1 + rr_epsilon < effective_min_rr:
         return _reject(

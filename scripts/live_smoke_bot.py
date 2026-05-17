@@ -17,16 +17,21 @@ from bot.messaging import DeliveryResult
 
 
 LOG = structlog.get_logger("scripts.live_smoke_bot")
+_MISSING_LOG_VALUE = "not_available"
 
 
 class FakeBroadcaster:
+    def __init__(self) -> None:
+        self._message_id = 0
+
     async def preflight_check(self) -> None:
         return None
 
     async def send_html(
         self, text: str, *, reply_to_message_id: int | None = None
     ) -> DeliveryResult:
-        return DeliveryResult(status="suppressed", message_id=None, reason="live_smoke_bot")
+        self._message_id += 1
+        return DeliveryResult(status="sent", message_id=self._message_id, reason="live_smoke_bot")
 
     async def edit_html(self, message_id: int, text: str) -> None:
         return None
@@ -57,6 +62,18 @@ def _fetch_active_signal_row(db_path: Path, tracking_id: str) -> dict[str, Any] 
         conn.close()
 
 
+def _sanitize_log_value(value: Any) -> Any:
+    if value is None:
+        return _MISSING_LOG_VALUE
+    if isinstance(value, dict):
+        return {str(k): _sanitize_log_value(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_log_value(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_sanitize_log_value(item) for item in value)
+    return value
+
+
 async def _run(
     tracking_id: str,
     warmup_seconds: float,
@@ -64,11 +81,16 @@ async def _run(
     runtime_seconds: float = 0.0,
     shutdown_timeout_seconds: float = 60.0,
     force_exit_on_close_timeout: bool = False,
+    run_final_emergency_cycle: bool = True,
 ) -> None:
     os.environ.setdefault("BOT_DISABLE_HTTP_SERVERS", "1")
     settings = load_settings()
     before = _fetch_active_signal_row(settings.db_path, tracking_id)
-    LOG.info("tracking_row_before_start", row=before)
+    LOG.info(
+        "tracking_row_before_start",
+        row_present=before is not None,
+        row=_sanitize_log_value(before) if before is not None else {},
+    )
 
     bot = SignalBot(settings, broadcaster=FakeBroadcaster())
     runtime_task: asyncio.Task[None] | None = None
@@ -79,15 +101,26 @@ async def _run(
             await asyncio.sleep(runtime_seconds)
         else:
             await asyncio.sleep(warmup_seconds)
-        summary = await bot._run_emergency_cycle()
+        if run_final_emergency_cycle:
+            summary = await bot._run_emergency_cycle()
+        else:
+            summary = {
+                "executed": False,
+                "reason": "skipped_after_runtime_window",
+                "runtime_seconds": float(runtime_seconds),
+            }
         ws_snapshot = bot._ws_manager.state_snapshot() if bot._ws_manager is not None else {}
         after = _fetch_active_signal_row(settings.db_path, tracking_id)
-        LOG.info("tracking_row_after_start", row=after)
+        LOG.info(
+            "tracking_row_after_start",
+            row_present=after is not None,
+            row=_sanitize_log_value(after) if after is not None else {},
+        )
         LOG.info(
             "live_smoke_summary",
             prepare_error_count=bot._prepare_error_count,
-            ws_snapshot=ws_snapshot,
-            emergency_cycle_summary=summary,
+            ws_snapshot=_sanitize_log_value(ws_snapshot),
+            emergency_cycle_summary=_sanitize_log_value(summary),
         )
         if before is not None and before.get("status") in {"pending", "active"}:
             if after is not None and after.get("status") in {"pending", "active"}:
@@ -153,6 +186,11 @@ def main() -> None:
         action="store_true",
         help="Hard-exit after a close timeout once the live smoke summary has been written.",
     )
+    parser.add_argument(
+        "--skip-final-emergency-cycle",
+        action="store_true",
+        help="Only validate the configured live runtime window; do not add an extra emergency cycle.",
+    )
     args = parser.parse_args()
 
     _configure_logging()
@@ -163,6 +201,7 @@ def main() -> None:
             runtime_seconds=max(0.0, float(args.runtime_seconds)),
             shutdown_timeout_seconds=max(1.0, float(args.shutdown_timeout_seconds)),
             force_exit_on_close_timeout=bool(args.force_exit_on_close_timeout),
+            run_final_emergency_cycle=not bool(args.skip_final_emergency_cycle),
         )
     )
 

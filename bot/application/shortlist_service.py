@@ -13,6 +13,7 @@ from ..universe import build_shortlist, rerank_shortlist
 
 UTC = timezone.utc
 LOG = logging.getLogger("bot.application.shortlist_service")
+_LOG_MISSING_VALUE = "not_available"
 
 FALLBACK_REASON_WS_CACHE_COLD = "ws_cache_cold"
 FALLBACK_REASON_FULL_REFRESH_DUE = "full_refresh_due"
@@ -43,6 +44,10 @@ def normalize_shortlist_fallback_reason(value: object) -> str | None:
         "pinned_fallback": FALLBACK_REASON_USING_PINNED,
     }
     return aliases.get(raw, FALLBACK_REASON_UNKNOWN)
+
+
+def _log_value(value: object) -> object:
+    return _LOG_MISSING_VALUE if value is None else value
 
 
 class ShortlistService:
@@ -442,10 +447,10 @@ class ShortlistService:
             source,
             summary.get("mode", source),
             len(shortlist),
-            summary.get("eligible"),
-            summary.get("dynamic_pool"),
-            summary.get("pinned"),
-            summary.get("avg_score"),
+            _log_value(summary.get("eligible")),
+            _log_value(summary.get("dynamic_pool")),
+            _log_value(summary.get("pinned")),
+            _log_value(summary.get("avg_score")),
         )
         self._schedule_context_preload()
         return shortlist

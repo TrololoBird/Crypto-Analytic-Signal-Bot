@@ -2,7 +2,7 @@
 
 _Date:_ 2026-04-28 (UTC)
 
-_Rechecked:_ 2026-05-03 (UTC)
+_Rechecked:_ 2026-05-17 (UTC)
 
 Current official Binance USD-M WS docs describe routed market-stream endpoints:
 
@@ -29,7 +29,7 @@ with subscription acknowledgements and fresh ticker/mark/book/kline data.
   - `bot/ws_manager.py`
   - `bot/websocket/subscriptions.py`
   - `bot/websocket/connection.py`
-  - `bot/config.py`
+  - `bot/domain/config.py`
   - `bot/public_intelligence.py`
 
 ## Base URLs
@@ -37,7 +37,7 @@ with subscription acknowledgements and fresh ticker/mark/book/kline data.
 | Protocol | Base URL | Source |
 |---|---|---|
 | REST (USDⓈ-M Futures) | `https://fapi.binance.com` | `bot/market_data.py::_FAPI_BASE_URL` |
-| WS (Futures streams root) | `wss://fstream.binance.com` (normalized) | `bot/config.py::WSConfig` + `bot/websocket/connection.py::build_stream_url` |
+| WS (Futures streams root) | `wss://fstream.binance.com` (normalized) | `bot/domain/config.py::WSConfig` + `bot/websocket/connection.py::build_stream_url` |
 
 > Effective WS connect URL is `<base>/stream`.
 
@@ -49,6 +49,7 @@ with subscription acknowledgements and fresh ticker/mark/book/kline data.
 | `GET /fapi/v1/ticker/24hr` | 24h ticker stats | Public | No |
 | `GET /fapi/v1/klines` | OHLCV candles | Public | No |
 | `GET /fapi/v1/ticker/bookTicker` | Best bid/ask | Public | No |
+| `GET /fapi/v1/depth` | L2 order-book snapshot for REST depth fallback | Public | No |
 | `GET /fapi/v1/aggTrades` | Aggregate trades | Public | No |
 | `GET /fapi/v1/premiumIndex` | Mark/index + funding snapshot (`lastFundingRate`) | Public | No |
 | `GET /fapi/v1/openInterest` | Current open interest | Public | No |
@@ -74,6 +75,9 @@ with subscription acknowledgements and fresh ticker/mark/book/kline data.
 ## Explicit guardrails found in code
 
 - REST registry validator allows only public prefixes: `/fapi/v1/`, `/futures/data/`.
+- `GET /fapi/v1/depth` uses the official depth-limit weight tiers
+  (`5/10/20/50 -> 2`, `100 -> 5`, `500 -> 10`, `1000 -> 20`) and validates the
+  documented limit set before runtime calls.
 - Runtime REST host validator allows only `https://fapi.binance.com`; non-USDⓈ-M hosts like `eapi.binance.com` are rejected.
 - Runtime options snapshot path in `bot/public_intelligence.py::_build_options_snapshot(...)` is hard-disabled for eAPI and returns unavailable metadata under the USDⓈ-M runtime boundary.
 - REST registry validator forbids private/auth markers: `/private`, `listenkey`, `/ws-api`, `/sapi`, `/papi`, `signature=`, `timestamp=`.

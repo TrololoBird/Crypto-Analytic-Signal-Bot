@@ -607,7 +607,10 @@ class BotDashboard:
             signals = counters["status"].get("signal", 0)
             top_reasons = [
                 {"reason": reason, "count": count}
-                for reason, count in counters["reason"].most_common(5)
+                for reason, count in sorted(
+                    counters["reason"].items(),
+                    key=lambda item: (-item[1], item[0]),
+                )[:5]
             ]
             setups[setup_id] = {
                 "setup_id": setup_id,

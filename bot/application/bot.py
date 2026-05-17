@@ -116,7 +116,7 @@ class SignalBot:
             "ML runtime status | stage=%s model_kind=%s disable_reason=%s is_live=%s count=%d",
             "orchestrator_init",
             ml_status.get("model_kind") or "unknown",
-            ml_status.get("disable_reason") or "none",
+            ml_status.get("disable_reason") or "not_disabled",
             bool(settings.ml.enabled and settings.ml.use_ml_in_live),
             1,
         )
@@ -463,7 +463,7 @@ class SignalBot:
             self.settings.universe.shortlist_limit,
             mem_summary.get("symbol_count", 0),
             market_ctx.get("btc_bias", "neutral"),
-            mem_summary.get("blacklisted_symbols") or "none",
+            mem_summary.get("blacklisted_symbols") or "not_blacklisted",
         )
         if self._ws_manager is not None:
             # Build full shortlist immediately instead of using only 4 pinned symbols

@@ -25,6 +25,7 @@ class OIRefreshRunner:
     def __init__(self, bot: Any) -> None:
         self._bot = bot
         self._last_refresh_monotonic: float = 0.0
+        self._single_symbol_limiter: asyncio.Semaphore | None = None
 
     async def run(self) -> None:
         await asyncio.sleep(30)  # stagger after shortlist populates
@@ -177,7 +178,24 @@ class OIRefreshRunner:
             and has_funding
         ):
             return False
+        limiter = self._get_single_symbol_limiter()
+        if limiter.locked():
+            LOG.debug(
+                "symbol derivatives context warmup skipped | symbol=%s reason=single_symbol_limiter_saturated",
+                symbol,
+            )
+            return False
+        acquired_limiter = False
         try:
+            try:
+                await asyncio.wait_for(limiter.acquire(), timeout=0.05)
+                acquired_limiter = True
+            except (asyncio.TimeoutError, TimeoutError):
+                LOG.debug(
+                    "symbol derivatives context warmup skipped | symbol=%s reason=single_symbol_limiter_busy",
+                    symbol,
+                )
+                return False
             if timeout_seconds is not None and timeout_seconds > 0:
                 await asyncio.wait_for(
                     self._safe_fetch(
@@ -193,20 +211,33 @@ class OIRefreshRunner:
                 )
             return True
         except (asyncio.TimeoutError, TimeoutError) as exc:
-            LOG.info(
-                "single-symbol oi refresh timed out | symbol=%s degraded_reason=%s",
+            LOG.debug(
+                "symbol derivatives context warmup skipped | symbol=%s reason=context_fetch_timeout exception_type=%s",
                 symbol,
-                str(exc),
+                type(exc).__name__,
             )
             return False
         except _DEGRADATION_ERRORS as exc:
             LOG.info(
-                "single-symbol oi refresh degraded | symbol=%s degraded_reason=%s exception_type=%s",
+                "symbol derivatives context warmup skipped | symbol=%s reason=context_fetch_error detail=%s exception_type=%s",
                 symbol,
                 str(exc),
                 type(exc).__name__,
             )
             return False
+        finally:
+            if acquired_limiter:
+                limiter.release()
+
+    def _get_single_symbol_limiter(self) -> asyncio.Semaphore:
+        limiter = self._single_symbol_limiter
+        if limiter is not None:
+            return limiter
+        runtime = getattr(getattr(self._bot, "settings", None), "runtime", None)
+        configured = int(getattr(runtime, "max_concurrent_rest_requests", 1) or 1)
+        capacity = max(1, min(2, configured))
+        self._single_symbol_limiter = asyncio.Semaphore(capacity)
+        return self._single_symbol_limiter
 
     async def _safe_fetch(
         self,
@@ -273,7 +304,7 @@ class OIRefreshRunner:
         for source, stage, fetch in fetchers:
             degraded = False
             degrade_reason: str | None = None
-            fallback_used = "none"
+            fallback_used = "not_used"
             try:
                 await fetch()
             except _DEGRADATION_ERRORS as exc:

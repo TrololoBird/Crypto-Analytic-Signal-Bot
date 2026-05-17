@@ -352,7 +352,8 @@ class DeliveryOrchestrator:
                         message_ids={item.signal.tracking_id: item.message_id},
                     ),
                 )
-                if bool(getattr(self._bot.settings.notifiers, "send_analytics_companion", False)):
+                notifier_settings = getattr(self._bot.settings, "notifiers", None)
+                if bool(getattr(notifier_settings, "send_analytics_companion", False)):
                     asyncio.create_task(
                         self._bot.delivery.send_analytics_companion(
                             item.signal, btc_bias=btc_bias, eth_bias=eth_bias

@@ -395,10 +395,13 @@ class PublicIntelligenceService:
             shortlist_symbols,
             lambda symbol: self._client.fetch_taker_ratio(symbol, period="1h"),
         )
-        basis_values = await self._fetch_value_batch(
-            shortlist_symbols,
-            lambda symbol: self._client.fetch_basis(symbol, period="1h"),
-        )
+        # /futures/data/basis is public but tightly IP-rate-limited. Runtime
+        # intelligence uses cached basis from mark/index streams or explicit
+        # operator checks instead of bursting this endpoint across the shortlist.
+        basis_values = {
+            symbol: self._client.get_cached_basis(symbol, period="1h")
+            for symbol in shortlist_symbols
+        }
         funding_histories = await self._fetch_value_batch(
             shortlist_symbols,
             lambda symbol: self._client.fetch_funding_rate_history(symbol, limit=4),

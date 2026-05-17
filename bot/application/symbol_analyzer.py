@@ -1077,10 +1077,37 @@ class SymbolAnalyzer:
                     qty = getattr(self._bot._ws_manager, "_book_qty", {}).get(symbol)
                     if isinstance(qty, tuple):
                         bid_qty, ask_qty = qty[:2]
-                if bid is None or ask is None:
-                    book_context = await self._bot.client._fetch_book_ticker_rest_detail(symbol)
-                    bid = book_context.get("bid_price")
-                    ask = book_context.get("ask_price")
+                depth_context_needed = (
+                    bid is None or ask is None or bid_qty is None or ask_qty is None
+                )
+                if self._bot._ws_manager is not None:
+                    depth_age_getter = getattr(
+                        self._bot._ws_manager,
+                        "get_depth_book_age_seconds",
+                        None,
+                    )
+                    if callable(depth_age_getter):
+                        depth_age = depth_age_getter(symbol)
+                        max_age = self._bot.settings.ws.market_ticker_freshness_seconds
+                        if depth_age is None or depth_age > max_age:
+                            depth_context_needed = True
+                if depth_context_needed:
+                    try:
+                        book_context = await self._bot.client.fetch_order_book_depth_snapshot(
+                            symbol,
+                            limit=20,
+                        )
+                    except MarketDataUnavailable as exc:
+                        LOG.info(
+                            "order book depth fallback unavailable | symbol=%s detail=%s",
+                            symbol,
+                            exc.detail,
+                        )
+                        book_context = await self._bot.client._fetch_book_ticker_rest_detail(
+                            symbol
+                        )
+                    bid = bid if bid is not None else book_context.get("bid_price")
+                    ask = ask if ask is not None else book_context.get("ask_price")
                     bid_qty = book_context.get("bid_qty")
                     ask_qty = book_context.get("ask_qty")
 
@@ -1344,49 +1371,13 @@ class SymbolAnalyzer:
             if oi_chg is not None:
                 enrichments["oi_change_pct"] = oi_chg
             else:
-                degradation_events.append(
-                    self._degrade_event(
-                        symbol=symbol,
-                        stage="oi_cache",
-                        source="rest_cache",
-                        reason="oi_change_missing",
-                        fallback_used="skip_oi_context",
-                        exception_type="stale_cache",
-                    )
-                )
-                self._log_degradation(
-                    level=logging.INFO,
-                    symbol=symbol,
-                    stage="oi_cache",
-                    source="rest_cache",
-                    reason="oi_change_missing",
-                    fallback_used="skip_oi_context",
-                    exception_type="stale_cache",
-                )
+                freshness_flags.add("oi_change_missing")
             ls = self._bot.client.get_cached_ls_ratio(symbol)
             if ls is not None:
                 enrichments["ls_ratio"] = ls
                 enrichments["top_account_ls_ratio"] = ls
             else:
-                degradation_events.append(
-                    self._degrade_event(
-                        symbol=symbol,
-                        stage="ls_cache",
-                        source="rest_cache",
-                        reason="ls_ratio_missing",
-                        fallback_used="skip_ls_context",
-                        exception_type="stale_cache",
-                    )
-                )
-                self._log_degradation(
-                    level=logging.INFO,
-                    symbol=symbol,
-                    stage="ls_cache",
-                    source="rest_cache",
-                    reason="ls_ratio_missing",
-                    fallback_used="skip_ls_context",
-                    exception_type="stale_cache",
-                )
+                freshness_flags.add("ls_ratio_missing")
             top_position_ls = self._bot.client.get_cached_top_position_ls_ratio(symbol)
             if top_position_ls is not None:
                 enrichments["top_position_ls_ratio"] = top_position_ls
@@ -1402,25 +1393,7 @@ class SymbolAnalyzer:
             if funding_trend is not None:
                 enrichments["funding_trend"] = funding_trend
             else:
-                degradation_events.append(
-                    self._degrade_event(
-                        symbol=symbol,
-                        stage="funding_cache",
-                        source="rest_cache",
-                        reason="funding_trend_missing",
-                        fallback_used="skip_funding_context",
-                        exception_type="stale_cache",
-                    )
-                )
-                self._log_degradation(
-                    level=logging.INFO,
-                    symbol=symbol,
-                    stage="funding_cache",
-                    source="rest_cache",
-                    reason="funding_trend_missing",
-                    fallback_used="skip_funding_context",
-                    exception_type="stale_cache",
-                )
+                freshness_flags.add("funding_trend_missing")
             cached_basis_pct = self._bot.client.get_cached_basis(symbol, period="1h")
             if cached_basis_pct is not None:
                 enrichments["basis_pct"] = cached_basis_pct
