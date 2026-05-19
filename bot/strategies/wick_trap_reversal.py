@@ -40,8 +40,8 @@ class WickTrapReversalSetup(BaseSetup):
             "wick_atr_threshold": 0.3,
             "wick_through_atr_mult": 0.3,
             "closed_back_atr_mult": 0.10,
-            "min_volume_ratio": 1.50,
-            "max_confirmation_bars": 1,
+            "min_volume_ratio": 1.20,
+            "max_confirmation_bars": 4,
         }
         if settings is not None:
             filters = getattr(settings, "filters", None)
@@ -203,23 +203,10 @@ class WickTrapReversalSetup(BaseSetup):
             else:
                 close_strength_ok = ((trig_high - trig_close) / candle_range) > 0.7
 
-        if st_15m is not None:
-            if direction == "long" and st_15m < 0:
-                _reject(
-                    prepared,
-                    "wick_trap_reversal",
-                    "supertrend_opposes_15m",
-                    st_dir_15m=st_15m,
-                )
-                return None
-            if direction == "short" and st_15m > 0:
-                _reject(
-                    prepared,
-                    "wick_trap_reversal",
-                    "supertrend_opposes_15m",
-                    st_dir_15m=st_15m,
-                )
-                return None
+        supertrend_opposes = bool(
+            st_15m is not None
+            and ((direction == "long" and st_15m < 0) or (direction == "short" and st_15m > 0))
+        )
 
         if direction == "long":
             if trig_close <= level:
@@ -275,6 +262,8 @@ class WickTrapReversalSetup(BaseSetup):
             f"close_strength_ok={close_strength_ok}",
             f"rsi={rsi:.1f}",
         ]
+        if supertrend_opposes:
+            reasons.append(f"supertrend_opposes_penalty={st_15m:.0f}")
 
         price_anchor = trig_close
 
@@ -349,6 +338,8 @@ class WickTrapReversalSetup(BaseSetup):
             rsi=rsi,
             structure_clarity=0.5,
         )
+        if supertrend_opposes:
+            score *= float(dynamic_params.get("supertrend_opposes_penalty", 0.88))
 
         return _build_signal(
             prepared=prepared,

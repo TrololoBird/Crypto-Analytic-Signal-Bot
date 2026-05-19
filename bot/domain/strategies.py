@@ -219,6 +219,7 @@ STRATEGY_STATUS_BY_ID = {
     "liquidity_sweep": "beta",
     "bos_choch": "beta",
     "hidden_divergence": "beta",
+    "indicator_divergence": "beta",
     "funding_reversal": "experimental",
     "cvd_divergence": "beta",
     "session_killzone": "experimental",
@@ -235,7 +236,7 @@ STRATEGY_STATUS_BY_ID = {
     "depth_imbalance": "experimental",
     "absorption": "experimental",
     "aggression_shift": "experimental",
-    "liquidation_heatmap": "production",
+    "liquidation_heatmap": "beta",
     "stop_hunt_detection": "beta",
     "multi_tf_trend": "production",
     "rsi_divergence_bottom": "experimental",
@@ -259,4 +260,5 @@ RISK_PROFILE_BY_ID = {
     "oi_divergence": "sentiment",
     "btc_correlation": "multi_asset",
     "altcoin_season_index": "multi_asset",
+    "indicator_divergence": "reversal",
 }

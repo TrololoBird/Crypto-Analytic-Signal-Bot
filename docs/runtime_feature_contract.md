@@ -42,6 +42,11 @@ Current denylist checks include:
 - `bot.telegram_bot`
 - module names containing: `scaffold`, `experimental`, `prototype`
 
+This denylist is about module/package names on the runtime import path. It is
+not about `StrategyMetadata.status`. A strategy exported from
+`STRATEGY_CLASSES` remains a runtime strategy even when its status metadata is
+`experimental`.
+
 Guard checks live in `bot/runtime_contract.py` (`assert_runtime_call_path_is_clean`, `assert_runtime_import_contract`). Tests fail fast if blocked names appear on the runtime call path.
 
 ## 4) Extension policy (how to evolve safely)

@@ -34,13 +34,19 @@ _DEGRADATION_ERRORS = (
     AttributeError,
     KeyError,
 )
-_DEFAULT_HISTORY_FETCH_LIMIT = 300
+_DEFAULT_HISTORY_FETCH_LIMIT = 500
 _HISTORY_FETCH_BUFFER_BARS = 60
+_HISTORY_FETCH_BASELINE_BY_INTERVAL = {
+    "5m": 300,
+    "15m": 500,
+    "1h": 500,
+    "4h": 500,
+}
 
 
 def _history_fetch_limit(minimums: dict[str, int], interval: str) -> int:
     required = int(minimums.get(interval, 0))
-    baseline = _DEFAULT_HISTORY_FETCH_LIMIT if interval in {"5m", "15m", "1h", "4h"} else 240
+    baseline = _HISTORY_FETCH_BASELINE_BY_INTERVAL.get(interval, 240)
     return max(baseline, required + _HISTORY_FETCH_BUFFER_BARS)
 
 
@@ -622,7 +628,7 @@ class SymbolAnalyzer:
                     "missing_required_frames": missing_required,
                 }
             )
-            LOG.warning(
+            LOG.info(
                 "%s: insufficient required history for analysis | 15m=%d/%d 1h=%d/%d optional_5m=%d/%d optional_4h=%d/%d",
                 item.symbol,
                 rows_15m,
@@ -679,7 +685,7 @@ class SymbolAnalyzer:
             funnel["prepare_error_stage"] = "prepare_symbol"
             funnel["prepare_error_exception_type"] = type(exc).__name__
             funnel["prepare_error_class"] = error_payload["error_class"]
-            LOG.warning("%s: failed to build prepared symbol: %s", item.symbol, exc)
+            LOG.exception("%s: failed to build prepared symbol", item.symbol)
             _attach_rejection_rollups(funnel, rejected)
             return PipelineResult(
                 symbol=item.symbol,
@@ -723,7 +729,7 @@ class SymbolAnalyzer:
                 )
             except Exception as exc:
                 self._log_degradation(
-                    level=logging.WARNING,
+                    level=logging.INFO,
                     symbol=item.symbol,
                     stage="ws_enrichment_apply",
                     source="ws_cache",
@@ -756,7 +762,7 @@ class SymbolAnalyzer:
                 )
             except Exception as exc:
                 self._log_degradation(
-                    level=logging.WARNING,
+                    level=logging.INFO,
                     symbol=item.symbol,
                     stage="market_context",
                     source="memory",
@@ -767,7 +773,7 @@ class SymbolAnalyzer:
 
         # Run modern engine (replaces pipeline analysis)
         if prepared is None:
-            LOG.warning("%s: prepared symbol is None", item.symbol)
+            LOG.info("%s: prepared symbol is None", item.symbol)
             _attach_rejection_rollups(funnel, rejected)
             return PipelineResult(
                 symbol=item.symbol,
@@ -802,10 +808,9 @@ class SymbolAnalyzer:
         except Exception as exc:
             error_class = classify_runtime_error(exc)
             funnel["engine_error_class"] = error_class
-            LOG.warning(
-                "%s: modern engine calculation failed: %s | error_class=%s",
+            LOG.exception(
+                "%s: modern engine calculation failed | error_class=%s",
                 item.symbol,
-                exc,
                 error_class,
             )
             _attach_rejection_rollups(funnel, rejected)
@@ -1125,7 +1130,7 @@ class SymbolAnalyzer:
 
             return await cast(Any, self._bot.client.fetch_symbol_frames(symbol))
         except MarketDataUnavailable as exc:
-            LOG.warning("frame fetch failed for %s: %s", symbol, exc)
+            LOG.info("frame fetch failed for %s: %s", symbol, exc)
             return None
         except Exception:
             LOG.exception("unexpected frame fetch failure for %s", symbol)
@@ -1167,7 +1172,7 @@ class SymbolAnalyzer:
                     TypeError,
                 ) as exc:
                     self._log_degradation(
-                        level=logging.WARNING,
+                        level=logging.INFO,
                         symbol=symbol,
                         stage="shortlist_preload",
                         source="rest",
@@ -1216,7 +1221,7 @@ class SymbolAnalyzer:
                     )
                 )
                 self._log_degradation(
-                    level=logging.WARNING,
+                    level=logging.INFO,
                     symbol=symbol,
                     stage="ticker_snapshot",
                     source="ws",
@@ -1279,7 +1284,7 @@ class SymbolAnalyzer:
                     )
                 )
                 self._log_degradation(
-                    level=logging.WARNING,
+                    level=logging.INFO,
                     symbol=symbol,
                     stage="mark_snapshot",
                     source="ws",
@@ -1336,7 +1341,7 @@ class SymbolAnalyzer:
                     )
                 )
                 self._log_degradation(
-                    level=logging.WARNING,
+                    level=logging.INFO,
                     symbol=symbol,
                     stage="microstructure_snapshot",
                     source="ws",

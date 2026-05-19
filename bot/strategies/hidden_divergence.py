@@ -20,8 +20,57 @@ from ..domain.schemas import PreparedSymbol, Signal
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..features import _swing_points
 from ..setups.utils import get_dynamic_params
+from .common import as_float
 
 LOG = logging.getLogger("bot.strategies.hidden_divergence")
+
+
+def _finite_series_values(values: object) -> list[float]:
+    try:
+        raw_values = values.to_list()
+    except AttributeError:
+        raw_values = list(values or [])
+    out: list[float] = []
+    for value in raw_values:
+        numeric = as_float(value, default=math.nan)
+        if math.isfinite(numeric):
+            out.append(numeric)
+    return out
+
+
+def _find_recent_hidden_divergence_pair(
+    prices: object,
+    oscillators: object,
+    *,
+    direction: str,
+    min_oscillator_separation: float,
+    max_pair_gap: int,
+) -> tuple[float, float] | None:
+    price_values = _finite_series_values(prices)
+    oscillator_values = _finite_series_values(oscillators)
+    count = min(len(price_values), len(oscillator_values))
+    if count < 2:
+        return None
+    price_values = price_values[-count:]
+    oscillator_values = oscillator_values[-count:]
+    pair_gap = max(1, int(max_pair_gap))
+
+    for current_idx in range(count - 1, 0, -1):
+        first_idx = max(0, current_idx - pair_gap)
+        for previous_idx in range(current_idx - 1, first_idx - 1, -1):
+            previous_price = price_values[previous_idx]
+            current_price = price_values[current_idx]
+            previous_oscillator = oscillator_values[previous_idx]
+            current_oscillator = oscillator_values[current_idx]
+            if direction == "long":
+                oscillator_gap = previous_oscillator - current_oscillator
+                if current_price > previous_price and oscillator_gap >= min_oscillator_separation:
+                    return current_price, oscillator_gap
+            else:
+                oscillator_gap = current_oscillator - previous_oscillator
+                if current_price < previous_price and oscillator_gap >= min_oscillator_separation:
+                    return current_price, oscillator_gap
+    return None
 
 
 class HiddenDivergenceSetup(BaseSetup):
@@ -39,7 +88,8 @@ class HiddenDivergenceSetup(BaseSetup):
             "tp_too_close_penalty": 0.75,
             "min_rr": 1.9,
             "rsi_divergence_lookback": 3.0,
-            "rsi_divergence_threshold": 5.0,
+            "rsi_divergence_threshold": 2.0,
+            "max_swing_pair_gap": 6.0,
             "min_delta_threshold": 0.0,
             "min_volume_ratio": 0.55,
             "sl_buffer_atr": 0.5,
@@ -77,6 +127,9 @@ class HiddenDivergenceSetup(BaseSetup):
         rsi_divergence_threshold = float(
             dynamic_params.get("rsi_divergence_threshold", defaults["rsi_divergence_threshold"])
         )
+        max_swing_pair_gap = int(
+            dynamic_params.get("max_swing_pair_gap", defaults["max_swing_pair_gap"])
+        )
         min_delta_threshold = float(
             dynamic_params.get("min_delta_threshold", defaults["min_delta_threshold"])
         )
@@ -107,15 +160,9 @@ class HiddenDivergenceSetup(BaseSetup):
             _reject(prepared, setup_id, "insufficient_15m_bars", bars=w15m.height)
             return None
         vol_ratio_15m = float(w15m.item(-1, "volume_ratio20") or 1.0)
+        volume_penalty = False
         if vol_ratio_15m < min_volume_ratio:
-            _reject(
-                prepared,
-                setup_id,
-                "volume_too_low",
-                vol_ratio_15m=vol_ratio_15m,
-                min_volume_ratio=min_volume_ratio,
-            )
-            return None
+            volume_penalty = True
 
         # 1H context for 15M signals (not 4H - too lagging for <4h trades)
         bias_1h = getattr(prepared, "bias_1h", prepared.bias_4h)
@@ -143,15 +190,19 @@ class HiddenDivergenceSetup(BaseSetup):
             and sl_rsi is not None
             and sl_rsi.len() >= 2
         ):
-            sl_v = sl_prices.to_numpy()
-            sl_r = sl_rsi.to_numpy()
-            rsi_separation = float(sl_r[-2] - sl_r[-1])
-            if sl_v[-1] > sl_v[-2] and rsi_separation >= rsi_divergence_threshold:
+            match = _find_recent_hidden_divergence_pair(
+                sl_prices,
+                sl_rsi,
+                direction="long",
+                min_oscillator_separation=rsi_divergence_threshold,
+                max_pair_gap=max_swing_pair_gap,
+            )
+            if match is not None:
                 direction = "long"
-                swing_ref = float(sl_v[-1])
+                swing_ref, rsi_separation = match
                 # Compute last impulse wave size for Fib extensions
                 if sh_prices.len() >= 1:
-                    impulse_size = abs(float(sh_prices.to_numpy()[-1]) - float(sl_v[-1]))
+                    impulse_size = abs(float(sh_prices.to_numpy()[-1]) - float(swing_ref))
 
         # Hidden Bearish: price LH (sh[-1] < sh[-2]) + RSI HH (rsi_sh[-1] > rsi_sh[-2])
         if direction is None and (
@@ -160,14 +211,18 @@ class HiddenDivergenceSetup(BaseSetup):
             and sh_rsi is not None
             and sh_rsi.len() >= 2
         ):
-            sh_v = sh_prices.to_numpy()
-            sh_r = sh_rsi.to_numpy()
-            rsi_separation = float(sh_r[-1] - sh_r[-2])
-            if sh_v[-1] < sh_v[-2] and rsi_separation >= rsi_divergence_threshold:
+            match = _find_recent_hidden_divergence_pair(
+                sh_prices,
+                sh_rsi,
+                direction="short",
+                min_oscillator_separation=rsi_divergence_threshold,
+                max_pair_gap=max_swing_pair_gap,
+            )
+            if match is not None:
                 direction = "short"
-                swing_ref = float(sh_v[-1])
+                swing_ref, rsi_separation = match
                 if sl_prices.len() >= 1:
-                    impulse_size = abs(float(sh_v[-1]) - float(sl_prices.to_numpy()[-1]))
+                    impulse_size = abs(float(swing_ref) - float(sl_prices.to_numpy()[-1]))
 
         if direction is None or swing_ref is None:
             _reject(prepared, setup_id, "no_hidden_divergence_detected")
@@ -188,32 +243,19 @@ class HiddenDivergenceSetup(BaseSetup):
             if delta_series.len() > 0:
                 latest_delta_ratio = float(delta_series[-1])
                 delta_shift = latest_delta_ratio - 0.5
+        delta_penalty = False
         if (
             direction == "long"
             and latest_delta_ratio is not None
             and delta_shift < min_delta_threshold
         ):
-            _reject(
-                prepared,
-                setup_id,
-                "delta_confirmation_missing_long",
-                delta_ratio=latest_delta_ratio,
-                min_delta_threshold=min_delta_threshold,
-            )
-            return None
+            delta_penalty = True
         if (
             direction == "short"
             and latest_delta_ratio is not None
             and delta_shift > -min_delta_threshold
         ):
-            _reject(
-                prepared,
-                setup_id,
-                "delta_confirmation_missing_short",
-                delta_ratio=latest_delta_ratio,
-                min_delta_threshold=min_delta_threshold,
-            )
-            return None
+            delta_penalty = True
 
         # --- Compute structural SL/TP ---
         if direction == "long":
@@ -259,18 +301,16 @@ class HiddenDivergenceSetup(BaseSetup):
 
         min_rr = float(dynamic_params.get("min_rr", defaults["min_rr"]))
         if tp1 is None or abs(tp1 - price) < risk * min_rr:
-            _reject(
-                prepared,
-                setup_id,
-                "tp1_too_close_or_missing",
-                tp1=tp1,
-                risk=risk,
-                price=price,
-                min_rr=min_rr,
-            )
-            return None  # Reject this hidden divergence setup
+            tp1 = price + risk * min_rr if direction == "long" else price - risk * min_rr
+            reasons_note = f"tp1_rr_fallback_{min_rr:.2f}"
+        else:
+            reasons_note = "tp1_fib_extension"
         if tp2 is None or abs(tp2 - price) <= abs(tp1 - price):
-            tp2 = tp1  # Use TP1 as TP2 if no extended target found
+            tp2 = (
+                price + risk * max(2.0, min_rr + 0.35)
+                if direction == "long"
+                else price - risk * max(2.0, min_rr + 0.35)
+            )
 
         rsi = float(w1h.item(-1, "rsi14") or 50.0)
         vol_ratio = float(w1h.item(-1, "volume_ratio20") or 1.0)
@@ -280,11 +320,20 @@ class HiddenDivergenceSetup(BaseSetup):
             vol_ratio=vol_ratio,
             rsi=rsi,
         )
+        if delta_penalty:
+            score *= float(dynamic_params.get("delta_mismatch_penalty", 0.88))
+        if volume_penalty:
+            score *= float(dynamic_params.get("volume_penalty", 0.90))
 
         reasons = [
             f"Hidden div {direction}: swing_ref={swing_ref:.4f} rsi_sep={rsi_separation:.2f}",
             f"vol_ratio_15m={vol_ratio_15m:.2f} delta_shift={delta_shift:.3f} 1h={bias_1h}",
+            reasons_note,
         ]
+        if volume_penalty:
+            reasons.append("volume_penalty")
+        if delta_penalty:
+            reasons.append("delta_mismatch_penalty")
 
         return _build_signal(
             prepared=prepared,

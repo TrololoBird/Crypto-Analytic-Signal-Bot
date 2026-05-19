@@ -7,7 +7,7 @@
 
 В репозитории одновременно живут:
 
-- runtime-часть бота (`main.py`, `bot/application/`, `bot/core/`, `bot/strategies/`, `bot/tasks/`);
+- runtime-часть бота (`main.py`, `bot/application/`, `bot/core/`, `bot/strategies/`, `bot/telegram/`);
 - operator/manual-утилиты в `scripts/`.
 
 При росте числа скриптов возрастает риск:
@@ -22,7 +22,7 @@
 
 Runtime-логика (продуктовый код, исполняемый в штатном запуске бота) размещается только в:
 
-- `bot/` (включая `bot/application/`, `bot/core/`, `bot/strategies/`, `bot/tasks/`, `bot/telegram/`);
+- `bot/` (включая `bot/application/`, `bot/core/`, `bot/strategies/`, `bot/telegram/`);
 - `main.py` как точка входа.
 
 Запрещено переносить core-логику в `scripts/`.

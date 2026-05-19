@@ -40,6 +40,17 @@ _ADX_POLICY_BY_FAMILY: dict[str, str] = {
     "continuation": _ADX_POLICY_HARD_GATE,
 }
 
+_TREND_CONFLICT_SOFT_FAMILIES = {
+    "reversal",
+    "orderflow",
+    "liquidity",
+    "sentiment",
+}
+_TREND_CONFLICT_SOFT_PROFILES = {
+    "countertrend_exhaustion",
+    "divergence_reversal",
+}
+
 
 def _resolve_adx_policy(signal: Signal) -> str:
     setup_policy = _ADX_POLICY_BY_SETUP.get(signal.setup_id)
@@ -51,6 +62,66 @@ def _resolve_adx_policy(signal: Signal) -> str:
     if signal.confirmation_profile == "trend_follow":
         return _ADX_POLICY_HARD_GATE
     return _ADX_POLICY_PENALTY
+
+
+def _uses_soft_trend_conflict(signal: Signal) -> bool:
+    """Countertrend strategies should be penalized, not globally suppressed."""
+    return (
+        signal.strategy_family in _TREND_CONFLICT_SOFT_FAMILIES
+        or signal.confirmation_profile in _TREND_CONFLICT_SOFT_PROFILES
+    )
+
+
+def _expand_signal_to_min_stop(
+    signal: Signal,
+    *,
+    min_stop_distance_pct: float,
+    min_rr: float,
+) -> tuple[Signal, bool]:
+    """Widen micro-stops to the runtime minimum and preserve TP1 RR.
+
+    Detectors often anchor stops to tight local structure. That is useful for
+    pattern recognition, but the live signal contract has a global minimum stop
+    distance to avoid immediate noise stops. Normalize the signal here instead
+    of rejecting a valid setup after it has already passed strategy logic.
+    """
+    entry = float(signal.entry_mid)
+    if entry <= 0.0 or min_stop_distance_pct <= 0.0:
+        return signal, False
+    if signal.stop_distance_pct >= min_stop_distance_pct:
+        return signal, False
+
+    min_risk = entry * (min_stop_distance_pct / 100.0)
+    rr_floor = max(1.0, float(min_rr))
+    tp2_rr = max(rr_floor * 1.5, rr_floor + 0.5)
+    reasons = tuple(
+        [
+            *signal.reasons,
+            f"min_stop_normalized={min_stop_distance_pct:.2f}% rr_floor={rr_floor:.2f}",
+        ]
+    )
+
+    if signal.direction == "long":
+        stop = entry - min_risk
+        tp1 = max(float(signal.take_profit_1), entry + min_risk * rr_floor)
+        tp2 = max(float(signal.take_profit_2), tp1, entry + min_risk * tp2_rr)
+    else:
+        stop = entry + min_risk
+        tp1 = min(float(signal.take_profit_1), entry - min_risk * rr_floor)
+        tp2 = min(float(signal.take_profit_2), tp1, entry - min_risk * tp2_rr)
+
+    risk_reward = abs(tp1 - entry) / min_risk if min_risk > 0.0 else signal.risk_reward
+    return (
+        replace(
+            signal,
+            stop=stop,
+            take_profit_1=tp1,
+            take_profit_2=tp2,
+            risk_reward=risk_reward,
+            reasons=reasons,
+        ),
+        True,
+    )
 
 
 def _primary_freshness_window(
@@ -269,26 +340,30 @@ def apply_global_filters(
         or "neutral"
     ).lower()
     if signal.direction == "long" and dominant_1h == "downtrend":
-        return _reject(
-            "trend_conflict_1h",
-            base,
-            details={
-                "signal_direction": signal.direction,
-                "dominant_1h": dominant_1h,
-                "setup_id": signal.setup_id,
-            },
-        )
-    if signal.direction == "short" and dominant_1h == "uptrend":
-        return _reject(
-            "trend_conflict_1h",
-            base,
-            details={
-                "signal_direction": signal.direction,
-                "dominant_1h": dominant_1h,
-                "setup_id": signal.setup_id,
-            },
-        )
-    passed.append("trend_context_ok")
+        trend_conflict = True
+    elif signal.direction == "short" and dominant_1h == "uptrend":
+        trend_conflict = True
+    else:
+        trend_conflict = False
+
+    trend_conflict_penalty_applied = False
+    trend_conflict_penalty_factor = float(
+        setup_overrides.get("trend_conflict_penalty_factor", 0.88)
+    )
+    if trend_conflict:
+        trend_details = {
+            "signal_direction": signal.direction,
+            "dominant_1h": dominant_1h,
+            "setup_id": signal.setup_id,
+            "strategy_family": signal.strategy_family,
+            "confirmation_profile": signal.confirmation_profile,
+        }
+        if not _uses_soft_trend_conflict(signal):
+            return _reject("trend_conflict_1h", base, details=trend_details)
+        trend_conflict_penalty_applied = True
+        passed.append("trend_conflict_1h_penalized")
+    else:
+        passed.append("trend_context_ok")
 
     # Compute delta_ratio from 15m candles (CVD proxy)
     delta_ratio: float | None = None
@@ -310,7 +385,16 @@ def apply_global_filters(
 
     # --- 5. Stop distance ---
     min_stop_distance_pct = float(settings.tracking.min_stop_distance_pct)
-    if updated.stop_distance_pct < min_stop_distance_pct:
+    effective_min_rr = float(setup_overrides.get("min_rr", settings.filters.min_risk_reward))
+    updated, stop_expanded = _expand_signal_to_min_stop(
+        updated,
+        min_stop_distance_pct=min_stop_distance_pct,
+        min_rr=effective_min_rr,
+    )
+    if stop_expanded:
+        passed.append("stop_expanded_to_min")
+    stop_epsilon = 1e-6
+    if updated.stop_distance_pct + stop_epsilon < min_stop_distance_pct:
         return _reject(
             "stop_too_tight",
             updated,
@@ -330,7 +414,6 @@ def apply_global_filters(
     risk = abs(updated.entry_mid - updated.stop)
     reward_tp1 = abs(updated.take_profit_1 - updated.entry_mid)
     rr_tp1 = (reward_tp1 / risk) if risk > 0 else 0.0
-    effective_min_rr = float(setup_overrides.get("min_rr", settings.filters.min_risk_reward))
     rr_epsilon = 1e-9
     if rr_tp1 + rr_epsilon < effective_min_rr:
         return _reject(
@@ -380,6 +463,27 @@ def apply_global_filters(
         updated = replace(
             updated,
             passed_filters=tuple([*updated.passed_filters, "adx_penalty_applied"]),
+        )
+
+    if trend_conflict_penalty_applied:
+        pre_penalty_score = updated.score
+        adjusted_score = pre_penalty_score * trend_conflict_penalty_factor
+        updated = replace(updated, score=adjusted_score)
+        penalty_delta = round(adjusted_score - pre_penalty_score, 6)
+        if scoring_result is not None:
+            scoring_result = replace(
+                scoring_result,
+                final_score=adjusted_score,
+                adjustments={
+                    **scoring_result.adjustments,
+                    "trend_conflict_1h_penalty": penalty_delta,
+                },
+            )
+        updated = replace(
+            updated,
+            passed_filters=tuple(
+                [*updated.passed_filters, "trend_conflict_1h_penalty_applied"]
+            ),
         )
 
     # --- 9. Minimum score gate (final gate after ALL adjustments) ---

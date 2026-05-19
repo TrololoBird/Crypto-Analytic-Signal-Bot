@@ -105,7 +105,7 @@ _FUTURES_DATA_REQUEST_LIMITED_OPS: set[str] = {
     # 500 requests / 5 minutes / IP cap. The default limiter value is lower.
     "funding_rate_history",
 }
-_DEFAULT_KLINE_FETCH_LIMIT = 300
+_DEFAULT_KLINE_FETCH_LIMIT = 500
 _DEFAULT_ORDER_BOOK_DEPTH_LIMIT = 20
 _VALID_ORDER_BOOK_DEPTH_LIMITS = frozenset({5, 10, 20, 50, 100, 500, 1000})
 _FALLBACK_TIMEOUT_DEBUG_OPERATIONS = frozenset(
@@ -275,7 +275,7 @@ class _SlidingWindowRateLimiter:
                     self._times.append(now)
                     return waited_s
                 sleep_s = max(0.0, (self._times[0] + self._window_seconds) - now) + 0.05
-                LOG.warning(
+                LOG.info(
                     "futures-data request budget exhausted | sleeping=%.2fs label=%s used=%d limit=%d window=%.0fs",
                     sleep_s,
                     label,
@@ -556,7 +556,7 @@ class BinanceFuturesMarketData:
                 time.monotonic() + self._circuit_open_duration_seconds
             )
             self._circuit_failures[operation] = 0
-            LOG.warning(
+            LOG.error(
                 "circuit breaker half-open probe failed | operation=%s duration=%.0fs",
                 operation,
                 self._circuit_open_duration_seconds,
@@ -567,7 +567,7 @@ class BinanceFuturesMarketData:
         if failures >= self._circuit_failure_threshold:
             open_until = time.monotonic() + self._circuit_open_duration_seconds
             self._circuit_open_until[operation] = open_until
-            LOG.warning(
+            LOG.error(
                 "circuit breaker opened | operation=%s failures=%d duration=%.0fs",
                 operation,
                 failures,
@@ -636,7 +636,7 @@ class BinanceFuturesMarketData:
             self._weight_window_start = now
         self._weight_window_weight += self._estimate_weight(operation, params)
         if self._weight_window_weight >= _REST_WEIGHT_HARD_LIMIT:
-            LOG.warning(
+            LOG.error(
                 "client-side weight budget at hard limit | estimated_1m=%d operation=%s",
                 self._weight_window_weight,
                 operation,
@@ -669,7 +669,7 @@ class BinanceFuturesMarketData:
             self._last_rest_response_time_ms = None
         retry_after = self._capture_retry_after(headers)
         if retry_after:
-            LOG.warning("binance rest requested backoff | retry_after=%ss", retry_after)
+            LOG.info("binance rest requested backoff | retry_after=%ss", retry_after)
         if self._last_rest_weight_1m is not None:
             if self._last_rest_weight_1m >= _REST_WEIGHT_CRITICAL_LIMIT:
                 LOG.error(
@@ -678,7 +678,7 @@ class BinanceFuturesMarketData:
                 )
                 self._set_rate_limit_pause(15.0)
             elif self._last_rest_weight_1m >= _REST_WEIGHT_HARD_LIMIT:
-                LOG.warning(
+                LOG.error(
                     "binance rest weight hard limit | used_weight_1m=%s - applying 5s backoff",
                     self._last_rest_weight_1m,
                 )
@@ -758,7 +758,7 @@ class BinanceFuturesMarketData:
         estimated = self._estimate_weight(operation, params)
         if self._weight_window_weight + estimated >= _REST_WEIGHT_SOFT_LIMIT:
             wait_secs = max(0.0, 60.0 - (now - self._weight_window_start)) + 1.0
-            LOG.warning(
+            LOG.info(
                 "pre-flight weight guard | estimated_1m=%d threshold=%d sleeping=%.1fs operation=%s",
                 self._weight_window_weight + estimated,
                 _REST_WEIGHT_SOFT_LIMIT,
@@ -796,7 +796,7 @@ class BinanceFuturesMarketData:
             symbol = kwargs.get("symbol")
             self._record_circuit_failure(operation)
             log_timeout = (
-                LOG.debug if operation in _FALLBACK_TIMEOUT_DEBUG_OPERATIONS else LOG.warning
+                LOG.debug if operation in _FALLBACK_TIMEOUT_DEBUG_OPERATIONS else LOG.error
             )
             log_timeout(
                 "rest timeout | operation=%s symbol=%s timeout=%.1fs",
@@ -830,7 +830,7 @@ class BinanceFuturesMarketData:
                 # Enforce aggressive 30-minute backoff for 429 to stay well clear of IP bans
                 effective_pause = max(1800.0, float(retry_after_header or 0))
                 self._set_rate_limit_pause(effective_pause)
-                LOG.warning(
+                LOG.error(
                     "binance rate limited (429) | retry_after_header=%s effective_pause=%.0fs streak=%d operation=%s",
                     retry_after_header,
                     effective_pause,
@@ -896,7 +896,7 @@ class BinanceFuturesMarketData:
                         # Enforce aggressive 30-minute backoff for 429
                         effective_pause = max(1800.0, float(retry_after_header or 0))
                         self._set_rate_limit_pause(effective_pause)
-                        LOG.warning(
+                        LOG.error(
                             "binance rate limited (429) | retry_after_header=%s effective_pause=%.0fs streak=%d operation=%s",
                             retry_after_header,
                             effective_pause,
@@ -947,7 +947,7 @@ class BinanceFuturesMarketData:
         except (asyncio.TimeoutError, TimeoutError) as exc:
             self._record_circuit_failure(operation)
             log_timeout = (
-                LOG.debug if operation in _FALLBACK_TIMEOUT_DEBUG_OPERATIONS else LOG.warning
+                LOG.debug if operation in _FALLBACK_TIMEOUT_DEBUG_OPERATIONS else LOG.error
             )
             log_timeout(
                 "rest timeout | operation=%s symbol=%s timeout=%.1fs",
@@ -1096,7 +1096,7 @@ class BinanceFuturesMarketData:
                     fallback_used=True,
                     response_age_s=stale_age,
                 )
-                LOG.warning(
+                LOG.info(
                     "fetch_ticker_24h failed, using stale cache | age=%.0fs | error=%s",
                     stale_age,
                     exc.detail,

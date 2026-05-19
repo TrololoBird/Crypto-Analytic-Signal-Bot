@@ -68,7 +68,7 @@ class SelfLearner:
         Returns list of OptimizationResult with optimized parameters.
         """
         if not OPTUNA_AVAILABLE:
-            LOG.warning("Optuna not available, using walk-forward grid-search fallback")
+            LOG.info("Optuna not available, using walk-forward grid-search fallback")
 
         results: list[OptimizationResult] = []
 

@@ -1214,27 +1214,24 @@ def _build_telegram_message(summary: dict[str, Any]) -> str:
     runtime_policy = summary.get("runtime_policy", {})
     ws_health = readiness["ws_health"]
     frame_readiness = readiness["required_frame_readiness"]
-    confirmed = html.escape(
-        summary["confirmed_facts"][0] if summary["confirmed_facts"] else "No confirmed facts."
-    )
-    focus = html.escape(
-        summary["inferred_focus_areas"][0]
-        if summary["inferred_focus_areas"]
-        else "No dominant focus area."
-    )
-    fix = html.escape(
-        summary["recommended_fixes"][0]["action"]
-        if summary["recommended_fixes"]
-        else "No specific action."
-    )
     return "\n".join(
         [
-            "<b>Startup Report</b>",
-            f"Type: <code>{html.escape(str(summary['report_kind']))}</code>",
-            f"Cycles: <code>{summary['metrics']['cycle_count']}</code> | Detector runs: <code>{summary['metrics']['detector_runs_total']}</code> | Selected: <code>{summary['metrics']['selected_total']}</code>",
-            f"Outcomes: <code>{summary['metrics']['outcomes_total']}</code> | Open tracked: <code>{summary['metrics']['open_tracked_total']}</code>",
-            f"Latest cycle: <code>{html.escape(str(latest_cycle.get('ts') or ''))}</code>",
-            f"Market: regime=<code>{html.escape(str(market_state.get('market_regime') or 'unknown'))}</code> btc=<code>{html.escape(str(market_state.get('btc_bias') or 'neutral'))}</code> eth=<code>{html.escape(str(market_state.get('eth_bias') or 'neutral'))}</code>",
+            "<b>Market State</b> <code>startup</code>",
+            (
+                f"Regime: <code>{html.escape(str(market_state.get('market_regime') or 'unknown'))}</code> | "
+                f"BTC <code>{html.escape(str(market_state.get('btc_bias') or 'neutral'))}</code> | "
+                f"ETH <code>{html.escape(str(market_state.get('eth_bias') or 'neutral'))}</code>"
+            ),
+            (
+                f"Alt index: <code>{html.escape(str(market_state.get('altcoin_season_index') or 'n/a'))}</code> | "
+                f"BTC phase <code>{html.escape(str(market_state.get('btc_phase') or 'unknown'))}</code> | "
+                f"macro <code>{html.escape(str(market_state.get('macro_risk_mode') or 'unknown'))}</code>"
+            ),
+            (
+                f"Tracked: open <code>{summary['metrics']['open_tracked_total']}</code> | "
+                f"outcomes <code>{summary['metrics']['outcomes_total']}</code>"
+            ),
+            f"Latest cycle: <code>{html.escape(str(latest_cycle.get('ts') or 'n/a'))}</code>",
             (
                 f"Policy: runtime=<code>{html.escape(str(runtime_policy.get('runtime_mode') or 'unknown'))}</code> "
                 f"source=<code>{html.escape(str(runtime_policy.get('source_policy') or 'unknown'))}</code> "
@@ -1243,10 +1240,7 @@ def _build_telegram_message(summary: dict[str, Any]) -> str:
             ),
             f"Shortlist: source=<code>{html.escape(str(readiness.get('shortlist_source') or 'unknown'))}</code> size=<code>{html.escape(str(readiness.get('shortlist_size') or 'n/a'))}</code>",
             f"WS: streams=<code>{html.escape(str(ws_health.get('active_stream_count') or 'n/a'))}</code> reconnect=<code>{html.escape(str(ws_health.get('reconnect_reason') or 'n/a'))}</code>",
-            f"Frames: 15m=<code>{frame_readiness.get('15m_ready_symbols', 0)}</code> 1h=<code>{frame_readiness.get('1h_ready_symbols', 0)}</code> 5m=<code>{frame_readiness.get('5m_ready_symbols', 0)}</code>",
-            f"Fact: {confirmed}",
-            f"Focus: {focus}",
-            f"Fix: {fix}",
+            f"Frames ready: 15m=<code>{frame_readiness.get('15m_ready_symbols', 0)}</code> 1h=<code>{frame_readiness.get('1h_ready_symbols', 0)}</code> 4h=<code>{frame_readiness.get('4h_ready_symbols', 0)}</code>",
         ]
     )
 

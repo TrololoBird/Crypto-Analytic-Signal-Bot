@@ -660,7 +660,7 @@ class MemoryRepository(MemoryRepositoryExtension):
             try:
                 data["features"] = json.loads(data["features"])
             except json.JSONDecodeError as exc:
-                LOG.warning(
+                LOG.error(
                     "failed to decode features for signal %s: %s", data.get("signal_id"), exc
                 )
                 data["features"] = {}
@@ -668,7 +668,7 @@ class MemoryRepository(MemoryRepositoryExtension):
             try:
                 data["metadata"] = json.loads(data["metadata"])
             except json.JSONDecodeError as exc:
-                LOG.warning(
+                LOG.error(
                     "failed to decode metadata for signal %s: %s", data.get("signal_id"), exc
                 )
                 data["metadata"] = {}
@@ -809,6 +809,19 @@ class MemoryRepository(MemoryRepositoryExtension):
             FROM signal_outcomes
             WHERE setup_id = ?
               AND COALESCE(closed_at, created_at) >= ?
+              AND result NOT IN ('expired_pending', 'unactivated_close', 'superseded')
+              AND (
+                  activated_at IS NOT NULL
+                  OR result IN (
+                      'tp1_hit',
+                      'tp2_hit',
+                      'stop_loss',
+                      'breakeven_stop',
+                      'trailing_stop',
+                      'smart_exit',
+                      'ambiguous_exit'
+                  )
+              )
             """,
             (setup_id, since.isoformat()),
         ) as cursor:
@@ -870,7 +883,7 @@ class MemoryRepository(MemoryRepositoryExtension):
                 try:
                     window = json.loads(row["outcome_window"])
                 except json.JSONDecodeError as exc:
-                    LOG.warning("failed to decode outcome window for setup %s: %s", setup_id, exc)
+                    LOG.error("failed to decode outcome window for setup %s: %s", setup_id, exc)
                     window = []
 
         # Add new outcome. New entries include R data; older string-only
@@ -1084,7 +1097,7 @@ class MemoryRepository(MemoryRepositoryExtension):
                         try:
                             data["reasons"] = json.loads(data["reasons"])
                         except json.JSONDecodeError as exc:
-                            LOG.warning(
+                            LOG.error(
                                 "failed to decode reasons for signal %s: %s",
                                 data.get("tracking_id"),
                                 exc,
@@ -1362,6 +1375,7 @@ class MemoryRepository(MemoryRepositoryExtension):
         setup_id: str | None = None,
         *,
         last_days: int | None = 90,
+        since: datetime | str | None = None,
     ) -> list[dict[str, Any]]:
         """Aggregate tracked-signal outcome performance by setup."""
         if not self._conn:
@@ -1370,11 +1384,78 @@ class MemoryRepository(MemoryRepositoryExtension):
         query = """
             SELECT
                 setup_id,
-                SUM(CASE WHEN was_profitable = 1 THEN 1 ELSE 0 END) AS wins,
+                SUM(
+                    CASE
+                        WHEN was_profitable = 1
+                             AND result NOT IN (
+                                 'expired_pending',
+                                 'unactivated_close',
+                                 'superseded'
+                             )
+                        THEN 1 ELSE 0
+                    END
+                ) AS wins,
                 SUM(CASE WHEN result = 'stop_loss' THEN 1 ELSE 0 END) AS losses,
-                COUNT(*) AS total,
-                AVG(pnl_r_multiple) AS avg_r_multiple,
-                AVG(pnl_pct) AS avg_pnl_pct
+                SUM(
+                    CASE
+                        WHEN result IN (
+                            'expired_pending',
+                            'unactivated_close',
+                            'superseded'
+                        ) THEN 0
+                        WHEN activated_at IS NOT NULL THEN 1
+                        WHEN result IN (
+                            'tp1_hit',
+                            'tp2_hit',
+                            'stop_loss',
+                            'breakeven_stop',
+                            'trailing_stop',
+                            'smart_exit',
+                            'ambiguous_exit'
+                        ) THEN 1
+                        ELSE 0
+                    END
+                ) AS total,
+                AVG(
+                    CASE
+                        WHEN result IN (
+                            'expired_pending',
+                            'unactivated_close',
+                            'superseded'
+                        ) THEN NULL
+                        WHEN activated_at IS NOT NULL THEN pnl_r_multiple
+                        WHEN result IN (
+                            'tp1_hit',
+                            'tp2_hit',
+                            'stop_loss',
+                            'breakeven_stop',
+                            'trailing_stop',
+                            'smart_exit',
+                            'ambiguous_exit'
+                        ) THEN pnl_r_multiple
+                        ELSE NULL
+                    END
+                ) AS avg_r_multiple,
+                AVG(
+                    CASE
+                        WHEN result IN (
+                            'expired_pending',
+                            'unactivated_close',
+                            'superseded'
+                        ) THEN NULL
+                        WHEN activated_at IS NOT NULL THEN pnl_pct
+                        WHEN result IN (
+                            'tp1_hit',
+                            'tp2_hit',
+                            'stop_loss',
+                            'breakeven_stop',
+                            'trailing_stop',
+                            'smart_exit',
+                            'ambiguous_exit'
+                        ) THEN pnl_pct
+                        ELSE NULL
+                    END
+                ) AS avg_pnl_pct
             FROM signal_outcomes
             WHERE 1 = 1
         """
@@ -1382,7 +1463,11 @@ class MemoryRepository(MemoryRepositoryExtension):
         if setup_id:
             query += " AND setup_id = ?"
             params.append(setup_id)
-        if last_days is not None:
+        if since is not None:
+            since_iso = since.isoformat() if isinstance(since, datetime) else str(since)
+            query += " AND COALESCE(closed_at, created_at) >= ?"
+            params.append(since_iso)
+        elif last_days is not None:
             since = datetime.now(timezone.utc) - timedelta(days=last_days)
             query += " AND COALESCE(closed_at, created_at) >= ?"
             params.append(since.isoformat())
@@ -1416,6 +1501,7 @@ class MemoryRepository(MemoryRepositoryExtension):
         symbol: str | None = None,
         result: str | None = None,
         last_days: int | None = 30,
+        since: datetime | str | None = None,
         limit: int | None = None,
     ) -> list[dict[str, Any]]:
         """Return persisted tracked-signal outcomes."""
@@ -1433,7 +1519,11 @@ class MemoryRepository(MemoryRepositoryExtension):
         if result:
             query += " AND result = ?"
             params.append(result)
-        if last_days is not None:
+        if since is not None:
+            since_iso = since.isoformat() if isinstance(since, datetime) else str(since)
+            query += " AND COALESCE(closed_at, created_at) >= ?"
+            params.append(since_iso)
+        elif last_days is not None:
             since = datetime.now(timezone.utc) - timedelta(days=last_days)
             query += " AND COALESCE(closed_at, created_at) >= ?"
             params.append(since.isoformat())

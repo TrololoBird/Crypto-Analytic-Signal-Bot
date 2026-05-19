@@ -423,7 +423,7 @@ class SignalBot:
             await self._modern_repo.initialize()
             LOG.info("modern repository initialized | SQLite ready")
         except Exception as exc:
-            LOG.warning("modern repository init failed (non-fatal): %s", exc)
+            raise RuntimeError("modern repository init failed; runtime cannot track signals") from exc
 
         try:
             expired_count = await self._modern_repo.expire_open_signals_older_than(
@@ -438,8 +438,8 @@ class SignalBot:
                     expired_count,
                     purged_cooldowns,
                 )
-        except Exception as exc:
-            LOG.warning("startup stale state cleanup failed (non-fatal): %s", exc)
+        except Exception:
+            LOG.exception("startup stale state cleanup failed")
 
         try:
             startup_tracking_events = await self.tracker.review_open_signals(dry_run=False)
@@ -449,8 +449,15 @@ class SignalBot:
                     len(startup_tracking_events),
                 )
                 await self._deliver_tracking(startup_tracking_events)
-        except Exception as exc:
-            LOG.warning("startup tracking sweep failed (non-fatal): %s", exc)
+        except Exception:
+            LOG.exception("startup tracking sweep failed")
+
+        try:
+            reconciled_outcomes = await self.tracker.reconcile_closed_outcomes()
+            if reconciled_outcomes:
+                LOG.info("startup reconciled closed signal outcomes | count=%d", reconciled_outcomes)
+        except Exception:
+            LOG.exception("startup outcome reconciliation failed")
 
         # Get modern repository summary
         mem_summary = await self._modern_repo.summary()
@@ -480,20 +487,20 @@ class SignalBot:
                     shortlist_timeout_s,
                 )
             except asyncio.TimeoutError:
-                LOG.warning(
+                LOG.info(
                     "shortlist build timed out; using pinned | timeout=%.1fs pinned=%d",
                     shortlist_timeout_s,
                     len(self.settings.universe.pinned_symbols),
                 )
                 symbols = list(self.settings.universe.pinned_symbols)
-            except Exception as exc:
-                LOG.warning("shortlist build failed, using pinned | error=%s", exc)
+            except Exception:
+                LOG.exception("shortlist build failed, using pinned fallback")
                 symbols = list(self.settings.universe.pinned_symbols)
 
             try:
                 await self._ws_manager.start(symbols)
-            except Exception as exc:
-                LOG.info("ws_manager start failed (non-fatal, will use REST): %s", exc)
+            except Exception:
+                LOG.exception("ws_manager start failed; continuing with REST fallback")
 
         # Preload historical frames in the background so `prepare_symbol` can
         # meet its required 15m/1h history and optional 5m/4h context. This is deliberately
@@ -800,7 +807,7 @@ class SignalBot:
             await self.delivery.preflight_check()
             LOG.info("delivery preflight completed")
         except Exception as exc:
-            LOG.warning("delivery preflight failed (non-fatal): %s", exc)
+            LOG.info("delivery preflight unavailable; continuing in signal-only mode: %s", exc)
 
     async def _wait_noncritical(
         self, *, label: str, timeout: float, operation: Any
@@ -808,10 +815,10 @@ class SignalBot:
         try:
             result = await asyncio.wait_for(operation, timeout=timeout)
         except asyncio.TimeoutError:
-            LOG.warning("%s timed out after %.1fs; skipping", label, timeout)
+            LOG.info("%s timed out after %.1fs; skipping noncritical startup task", label, timeout)
             return False, None
         except Exception as exc:
-            LOG.warning("%s failed (skipped): %s", label, exc)
+            LOG.exception("%s failed; skipped noncritical startup task", label)
             await self._alert_critical(exc, {"label": label, "timeout": timeout})
             return False, None
         return True, result

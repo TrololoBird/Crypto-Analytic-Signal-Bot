@@ -56,7 +56,7 @@ class OutcomeTracker:
         # Get signal
         signal = await self._repo.get_signal(signal_id)
         if signal is None:
-            LOG.warning("Signal not found: %s", signal_id)
+            LOG.error("Signal not found: %s", signal_id)
             return None
 
         # Get or create outcome

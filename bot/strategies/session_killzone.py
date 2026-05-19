@@ -150,7 +150,7 @@ class SessionKillzoneSetup(BaseSetup):
         """Tunable parameters for self-learner optimization."""
         defaults = {
             "base_score": 0.55,
-            "min_volume_ratio": 1.2,
+            "min_volume_ratio": 1.0,
             "min_adx_1h": 14.0,
             "sl_buffer_atr": 0.75,
             "bias_mismatch_penalty": 0.75,
@@ -161,14 +161,16 @@ class SessionKillzoneSetup(BaseSetup):
             "max_close_position_short": 0.42,
             "max_adverse_depth_imbalance": 0.10,
             "max_adverse_microprice_bias": 0.10,
-            "strict_1h_structure": 1.0,
-            "asia_start_hour_utc": 0,
+            "strict_1h_structure": 0.0,
+            "orderflow_conflict_penalty": 0.88,
+            "structure_conflict_penalty": 0.82,
+            "asia_start_hour_utc": 22,
             "asia_end_hour_utc": 3,
-            "london_start_hour_utc": 7,
+            "london_start_hour_utc": 6,
             "london_end_hour_utc": 10,
-            "ny_start_hour_utc": 13,
+            "ny_start_hour_utc": 12,
             "ny_end_hour_utc": 16,
-            "overlap_start_hour_utc": 13,
+            "overlap_start_hour_utc": 12,
             "overlap_end_hour_utc": 16,
         }
         if settings is not None:
@@ -197,28 +199,29 @@ class SessionKillzoneSetup(BaseSetup):
         setup_id = self.setup_id
         dynamic_params = get_dynamic_params(prepared, setup_id)
         defaults = self.get_optimizable_params(settings)
+        effective_params = {**defaults, **dynamic_params}
         base_score = _as_float(
-            dynamic_params.get("base_score", defaults["base_score"]),
+            effective_params.get("base_score", defaults["base_score"]),
             defaults["base_score"],
         )
         min_volume_ratio = _as_float(
-            dynamic_params.get("min_volume_ratio", defaults["min_volume_ratio"]),
+            effective_params.get("min_volume_ratio", defaults["min_volume_ratio"]),
             defaults["min_volume_ratio"],
         )
         sl_buffer_atr = _as_float(
-            dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]),
+            effective_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]),
             defaults["sl_buffer_atr"],
         )
-        min_rr = _as_float(dynamic_params.get("min_rr", defaults["min_rr"]), defaults["min_rr"])
+        min_rr = _as_float(effective_params.get("min_rr", defaults["min_rr"]), defaults["min_rr"])
         min_adx_1h = _as_float(
-            dynamic_params.get("min_adx_1h", defaults["min_adx_1h"]),
+            effective_params.get("min_adx_1h", defaults["min_adx_1h"]),
             defaults["min_adx_1h"],
         )
         breakout_lookback = max(
             5,
             int(
                 _as_float(
-                    dynamic_params.get(
+                    effective_params.get(
                         "breakout_lookback_bars",
                         defaults["breakout_lookback_bars"],
                     ),
@@ -227,7 +230,7 @@ class SessionKillzoneSetup(BaseSetup):
             ),
         )
         breakout_atr_mult = _as_float(
-            dynamic_params.get("breakout_atr_mult", defaults["breakout_atr_mult"]),
+            effective_params.get("breakout_atr_mult", defaults["breakout_atr_mult"]),
             defaults["breakout_atr_mult"],
         )
         w = prepared.work_15m
@@ -246,7 +249,7 @@ class SessionKillzoneSetup(BaseSetup):
             )
         else:
             now_utc = datetime.now(timezone.utc)
-        session_name = _active_killzone_name(now_utc.hour, cast(dict[str, object], dynamic_params))
+        session_name = _active_killzone_name(now_utc.hour, cast(dict[str, object], effective_params))
         if session_name is None:
             _reject(prepared, setup_id, "outside_killzone", hour=now_utc.hour)
             return None
@@ -310,6 +313,7 @@ class SessionKillzoneSetup(BaseSetup):
             _reject(prepared, setup_id, "directional_momentum_missing")
             return None
 
+        penalty_reasons: list[str] = []
         close_position = _as_float(w.item(-1, "close_position"), 0.5)
         bar_high = _as_float(w.item(-1, "high"))
         bar_low = _as_float(w.item(-1, "low"))
@@ -352,30 +356,40 @@ class SessionKillzoneSetup(BaseSetup):
                 )
             )
         if not breakout_ok:
-            _reject(
-                prepared,
-                setup_id,
-                "session_breakout_missing",
-                direction=direction,
-                prior_high=prior_high,
-                prior_low=prior_low,
-                close=bar_close,
-                close_position=close_position,
+            soft_accept = (
+                avg_vol_ratio >= min_volume_ratio * 1.15
+                and (
+                    (direction == "long" and close_position >= 0.55)
+                    or (direction == "short" and close_position <= 0.45)
+                )
             )
-            return None
+            if soft_accept:
+                penalty_reasons.append("session_momentum_no_range_break_penalty")
+            else:
+                _reject(
+                    prepared,
+                    setup_id,
+                    "session_breakout_missing",
+                    direction=direction,
+                    prior_high=prior_high,
+                    prior_low=prior_low,
+                    close=bar_close,
+                    close_position=close_position,
+                )
+                return None
 
         orderflow_conflict, orderflow_details = _orderflow_conflicts(
             prepared,
             direction,
             max_adverse_depth=_as_float(
-                dynamic_params.get(
+                effective_params.get(
                     "max_adverse_depth_imbalance",
                     defaults["max_adverse_depth_imbalance"],
                 ),
                 defaults["max_adverse_depth_imbalance"],
             ),
             max_adverse_micro=_as_float(
-                dynamic_params.get(
+                effective_params.get(
                     "max_adverse_microprice_bias",
                     defaults["max_adverse_microprice_bias"],
                 ),
@@ -383,19 +397,13 @@ class SessionKillzoneSetup(BaseSetup):
             ),
         )
         if orderflow_conflict:
-            _reject(
-                prepared,
-                setup_id,
-                "orderflow_against_killzone",
-                direction=direction,
-                **orderflow_details,
-            )
-            return None
+            penalty_reasons.append("orderflow_conflict_penalty")
 
+        structure_conflict = False
         if (
             _as_float(
-                dynamic_params.get(
-                    "strict_1h_structure",
+                    effective_params.get(
+                        "strict_1h_structure",
                     defaults["strict_1h_structure"],
                 ),
                 defaults["strict_1h_structure"],
@@ -407,25 +415,13 @@ class SessionKillzoneSetup(BaseSetup):
             if direction == "long" and (
                 structure_1h == "downtrend" or regime_1h == "downtrend"
             ):
-                _reject(
-                    prepared,
-                    setup_id,
-                    "structure_against_killzone",
-                    structure_1h=structure_1h,
-                    regime_1h_confirmed=regime_1h,
-                )
-                return None
+                structure_conflict = True
             if direction == "short" and (
                 structure_1h == "uptrend" or regime_1h == "uptrend"
             ):
-                _reject(
-                    prepared,
-                    setup_id,
-                    "structure_against_killzone",
-                    structure_1h=structure_1h,
-                    regime_1h_confirmed=regime_1h,
-                )
-                return None
+                structure_conflict = True
+        if structure_conflict:
+            penalty_reasons.append("structure_conflict_penalty")
 
         # --- Structural SL: beyond session high/low (killzone boundary) + configured ATR buffer ---
         scan20 = w.tail(20)
@@ -506,8 +502,31 @@ class SessionKillzoneSetup(BaseSetup):
             f"adx1h={adx_1h:.1f} avg_vol={avg_vol_ratio:.2f}",
             f"sl_buffer_atr={sl_buffer_atr:.2f}",
         ]
+        reasons.extend(penalty_reasons)
         if fallback_note:
             reasons.append(fallback_note)
+        if orderflow_details:
+            reasons.append(
+                " ".join(f"{key}={value:.3f}" for key, value in orderflow_details.items())
+            )
+        if orderflow_conflict:
+            score *= _as_float(
+                    effective_params.get(
+                    "orderflow_conflict_penalty",
+                    defaults["orderflow_conflict_penalty"],
+                ),
+                defaults["orderflow_conflict_penalty"],
+            )
+        if structure_conflict:
+            score *= _as_float(
+                effective_params.get(
+                    "structure_conflict_penalty",
+                    defaults["structure_conflict_penalty"],
+                ),
+                defaults["structure_conflict_penalty"],
+            )
+        if "session_momentum_no_range_break_penalty" in penalty_reasons:
+            score *= 0.90
 
         return _build_signal(
             prepared=prepared,

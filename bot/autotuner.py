@@ -52,8 +52,8 @@ def _load_outcomes(data_path: Path) -> list[dict[str, Any]]:
             return loop.run_until_complete(_read())
         finally:
             loop.close()
-    except Exception as exc:
-        LOG.warning("autotuner: failed to load SQLite outcomes from %s: %s", data_path, exc)
+    except Exception:
+        LOG.exception("autotuner: failed to load SQLite outcomes from %s", data_path)
         return []
 
 
@@ -182,7 +182,7 @@ def compute_optimal_thresholds(data_path: str | Path) -> dict[str, Any]:
             lines.append(f"{sid} = {wr}")
         toml_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         LOG.info("autotuner: wrote recommendations to %s", toml_path)
-    except OSError as exc:
-        LOG.warning("autotuner: could not write recommended.toml: %s", exc)
+    except OSError:
+        LOG.exception("autotuner: could not write recommended.toml")
 
     return result

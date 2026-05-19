@@ -1,6 +1,7 @@
 # Strategy/Setup Audit — 2026-04-28
 
-Scope: `bot/strategies/`, `bot/setups.py`, `bot/setups/`, `bot/models.py`, `config.toml`, `config.toml.example`.
+Scope: `bot/strategies/`, historical `bot/setups.py`, active `bot/setups/`,
+`bot/models.py`, `config.toml`, `config.toml.example`.
 
 Historical note: sections below the 2026-05-03 recheck preserve the original
 2026-04-28 audit context. Where they conflict with the recheck, the recheck is
@@ -12,6 +13,7 @@ Confirmed current state:
 
 - Active import target for `bot.setups` is `bot/setups/__init__.py`, not the
   legacy same-name file `bot/setups.py`.
+- 2026-05-18 update: the legacy sibling `bot/setups.py` has been removed.
 - Active `_build_signal(...)` already uses `normalize_trade_levels(...)`,
   finite checks, target normalization, `target_integrity_status`, and
   single-target metadata.
@@ -33,17 +35,12 @@ Confirmed current state:
 - `bot.features` now emits `session_overlap` and `session_overlap_vol_20`, and
   keeps runtime indicator generation on the deterministic pure-Polars path even
   when `polars_ta` is installed.
-- Regression checks passed after the fix:
-  `tests/test_strategies.py`,
-  `tests/test_regression_suite_setups_contracts.py`,
-  `tests/test_regression_suite_contracts.py`, and
-  `tests/test_regression_suite_tracking_delivery.py`.
+- Historical regression checks were recorded in this audit, but generated tests
+  are no longer treated as proof of strategy correctness or live edge.
 
 Residual risks:
 
-- The duplicate legacy file `bot/setups.py` remains in the tree and is stale
-  relative to the active package implementation. It should be removed or made an
-  explicit compatibility shim in a separate cleanup pass.
+- The duplicate legacy file `bot/setups.py` has been removed.
 - Full SMC parity against an external reference is still not proven; current
   tests cover schema, length, selected invalidation behavior, and signal-level
   contracts rather than every ICT edge case.

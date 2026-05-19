@@ -107,7 +107,7 @@ class BotMetricsCollector:
         self._enabled = HAS_PROMETHEUS
 
         if not self._enabled:
-            LOG.warning("prometheus_client not installed, metrics disabled")
+            LOG.info("prometheus_client not installed, metrics disabled")
             return
 
         # Info

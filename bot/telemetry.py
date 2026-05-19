@@ -49,6 +49,7 @@ class TelemetryStore:
     ) -> None:
         self.root_dir = base_dir
         self.run_id = run_id
+        self.started_at = datetime.now(UTC)
         self.rotation_max_mb = max(1, int(rotation_max_mb))
         self.base_dir = base_dir / "runs" / run_id if run_id else base_dir
         self.analysis_dir = self.base_dir / "analysis"
@@ -65,7 +66,15 @@ class TelemetryStore:
             metadata_path = self.base_dir / "run_metadata.json"
             if not metadata_path.exists():
                 metadata_path.write_text(
-                    json.dumps({"run_id": run_id}, indent=2, ensure_ascii=True),
+                    json.dumps(
+                        {
+                            "run_id": run_id,
+                            "started_at": self.started_at.isoformat(),
+                            "schema_version": 2,
+                        },
+                        indent=2,
+                        ensure_ascii=True,
+                    ),
                     encoding="utf-8",
                 )
 

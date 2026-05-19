@@ -68,7 +68,7 @@ class PriceVelocitySetup(BaseSetup):
             "base_score": 0.53,
             "min_roc10_abs_pct": 0.75,
             "min_body_atr": 0.55,
-            "min_volume_ratio": 1.35,
+            "min_volume_ratio": 1.0,
             "max_rsi_long": 82.0,
             "min_rsi_short": 18.0,
             "sl_buffer_atr": 0.55,
@@ -76,7 +76,7 @@ class PriceVelocitySetup(BaseSetup):
             "min_adx_1h": 16.0,
             "max_adverse_depth_imbalance": 0.12,
             "max_adverse_microprice_bias": 0.12,
-            "strict_1h_structure": 1.0,
+            "strict_1h_structure": 0.0,
         }
         if settings is not None:
             setups = getattr(getattr(settings, "filters", None), "setups", {})
@@ -136,9 +136,7 @@ class PriceVelocitySetup(BaseSetup):
                 body_atr=body_atr,
             )
             return None
-        if vol_ratio < float(effective_params["min_volume_ratio"]):
-            _reject(prepared, setup_id, "volume_too_low", volume_ratio=vol_ratio)
-            return None
+        volume_penalty = vol_ratio < float(effective_params["min_volume_ratio"])
 
         direction: str | None = None
         if roc10 > 0.0 and close > open_ and close_position >= 0.65:
@@ -147,8 +145,13 @@ class PriceVelocitySetup(BaseSetup):
             direction = "short"
 
         if direction is None:
-            _reject(prepared, setup_id, "direction_not_confirmed", rsi=rsi)
-            return None
+            if roc10 > 0.0 and close_position >= 0.55:
+                direction = "long"
+            elif roc10 < 0.0 and close_position <= 0.45:
+                direction = "short"
+            else:
+                _reject(prepared, setup_id, "direction_not_confirmed", rsi=rsi)
+                return None
 
         adx_1h = (
             _as_float(prepared.work_1h.item(-1, "adx14"), 0.0)
@@ -156,15 +159,7 @@ class PriceVelocitySetup(BaseSetup):
             else 0.0
         )
         min_adx_1h = float(effective_params.get("min_adx_1h", 0.0))
-        if adx_1h < min_adx_1h:
-            _reject(
-                prepared,
-                setup_id,
-                "adx_too_low",
-                adx_1h=adx_1h,
-                min_adx_1h=min_adx_1h,
-            )
-            return None
+        adx_penalty = adx_1h < min_adx_1h
 
         orderflow_conflict, orderflow_details = _orderflow_against_direction(
             prepared,
@@ -176,40 +171,20 @@ class PriceVelocitySetup(BaseSetup):
                 effective_params.get("max_adverse_microprice_bias", 0.12)
             ),
         )
-        if orderflow_conflict:
-            _reject(
-                prepared,
-                setup_id,
-                "orderflow_against_velocity",
-                **orderflow_details,
-            )
-            return None
+        orderflow_penalty = bool(orderflow_conflict)
 
-        if float(effective_params.get("strict_1h_structure", 1.0)) > 0.0:
+        structure_conflict = False
+        if float(effective_params.get("strict_1h_structure", 0.0)) > 0.0:
             structure_1h = str(getattr(prepared, "structure_1h", "") or "")
             regime_1h = str(getattr(prepared, "regime_1h_confirmed", "") or "")
             if direction == "long" and (
                 structure_1h == "downtrend" or regime_1h == "downtrend"
             ):
-                _reject(
-                    prepared,
-                    setup_id,
-                    "structure_against_velocity",
-                    structure_1h=structure_1h,
-                    regime_1h_confirmed=regime_1h,
-                )
-                return None
+                structure_conflict = True
             if direction == "short" and (
                 structure_1h == "uptrend" or regime_1h == "uptrend"
             ):
-                _reject(
-                    prepared,
-                    setup_id,
-                    "structure_against_velocity",
-                    structure_1h=structure_1h,
-                    regime_1h_confirmed=regime_1h,
-                )
-                return None
+                structure_conflict = True
 
         bias_1h = getattr(prepared, "bias_1h", prepared.bias_4h)
         sl_buffer = float(effective_params["sl_buffer_atr"])
@@ -242,6 +217,14 @@ class PriceVelocitySetup(BaseSetup):
             score *= effective_params.get("bias_mismatch_penalty", 0.75)
         elif direction == "short" and bias_1h == "uptrend":
             score *= effective_params.get("bias_mismatch_penalty", 0.75)
+        if structure_conflict:
+            score *= effective_params.get("structure_conflict_penalty", 0.82)
+        if volume_penalty:
+            score *= effective_params.get("volume_penalty", 0.90)
+        if adx_penalty:
+            score *= effective_params.get("adx_penalty", 0.90)
+        if orderflow_penalty:
+            score *= effective_params.get("orderflow_penalty", 0.86)
 
         # RSI extremes graded penalty
         if direction == "long" and rsi > float(effective_params["max_rsi_long"]):
@@ -255,6 +238,16 @@ class PriceVelocitySetup(BaseSetup):
             f"body_atr={body_atr:.2f}",
             f"vol_ratio={vol_ratio:.2f}",
         ]
+        if structure_conflict:
+            reasons.append("structure_conflict_penalty")
+        if volume_penalty:
+            reasons.append(f"volume_penalty={vol_ratio:.2f}")
+        if adx_penalty:
+            reasons.append(f"adx_penalty={adx_1h:.1f}")
+        if orderflow_penalty:
+            reasons.append("orderflow_penalty")
+            for key, value in orderflow_details.items():
+                reasons.append(f"{key}={value:.3f}")
         return _build_signal(
             prepared=prepared,
             setup_id=setup_id,

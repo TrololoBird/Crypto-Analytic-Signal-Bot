@@ -31,7 +31,7 @@ async def evaluate_endpoint_health(manager: Any, ws: Any, endpoint: str) -> bool
                     int(snapshot.get("fresh_tickers") or 0) == 0
                     or int(snapshot.get("fresh_mark_prices") or 0) == 0
                 ):
-                    LOG.warning(
+                    LOG.error(
                         "ws market recovery failed | endpoint=%s age=%.1fs fresh_tickers=%s fresh_mark_prices=%s - forcing reconnect",
                         endpoint,
                         recovery_age,
@@ -45,7 +45,7 @@ async def evaluate_endpoint_health(manager: Any, ws: Any, endpoint: str) -> bool
         if stale_streams:
             preview = stale_streams[:3]
             stale_symbols = list({s.split(":")[0] for s in stale_streams})
-            LOG.warning(
+            LOG.info(
                 "ws stale kline data | endpoint=%s streams=%d sample=%s - backfilling (not reconnecting)",
                 endpoint,
                 len(stale_streams),
@@ -64,7 +64,7 @@ async def evaluate_endpoint_health(manager: Any, ws: Any, endpoint: str) -> bool
         if manager._symbols and manager._cfg.subscribe_book_ticker and fresh_books == 0:
             connected_at = manager._connected_at_by_endpoint.get(endpoint, 0.0)
             if connected_at > 0.0 and time.monotonic() - connected_at >= grace_seconds:
-                LOG.warning(
+                LOG.error(
                     "ws public recovery failed | endpoint=%s fresh_book_tickers=0 - forcing reconnect",
                     endpoint,
                 )

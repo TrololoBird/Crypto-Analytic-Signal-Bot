@@ -127,6 +127,8 @@ class DeliveryOrchestrator:
             outcome = outcome_map.get(event.event_type)
             if outcome:
                 tracked = event.tracked
+                if event.event_type == "stop_loss" and tracked.tp1_hit_at is not None:
+                    outcome = "breakeven_stop"
                 regime = getattr(tracked, "regime_4h_confirmed", None) or "neutral"
                 await self._bot._modern_repo.record_symbol_outcome(
                     tracked.symbol,
@@ -305,7 +307,7 @@ class DeliveryOrchestrator:
                             "delivery_reason": item.reason,
                         }
                     )
-                    LOG.warning(
+                    LOG.info(
                         "delivery result not sent | status=%s reason=%s symbol=%s setup=%s tracking_id=%s",
                         item.status,
                         item.reason,

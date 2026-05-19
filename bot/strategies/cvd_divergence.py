@@ -161,6 +161,7 @@ class CVDDivergenceSetup(BaseSetup):
             return None
 
         direction = None
+        bias_penalty = False
 
         # Use 1H context for 15M signals (not 4H - too lagging for <4h trades)
         bias_1h = getattr(prepared, "bias_1h", prepared.bias_4h)
@@ -170,28 +171,14 @@ class CVDDivergenceSetup(BaseSetup):
             # Don't short in 1H uptrend unless delta very extreme
             bias_override_threshold = max(0.2, min_delta_threshold)
             if bias_1h == "uptrend" and delta_shift > -bias_override_threshold:
-                _reject(
-                    prepared,
-                    self.setup_id,
-                    "context_bias_blocks_short",
-                    bias_1h=bias_1h,
-                    delta_shift=delta_shift,
-                )
-                return None
+                bias_penalty = True
             direction = "short"
 
         # Bullish divergence: price LL, delta rising
         elif price_ll and delta_mean_b > delta_mean_a:
             bias_override_threshold = max(0.2, min_delta_threshold)
             if bias_1h == "downtrend" and delta_shift < bias_override_threshold:
-                _reject(
-                    prepared,
-                    self.setup_id,
-                    "context_bias_blocks_long",
-                    bias_1h=bias_1h,
-                    delta_shift=delta_shift,
-                )
-                return None
+                bias_penalty = True
             direction = "long"
 
         if direction is None:
@@ -250,16 +237,10 @@ class CVDDivergenceSetup(BaseSetup):
 
         # Validate: TP1 must clear the configured R threshold.
         if tp1 is None or abs(tp1 - price) < risk * min_rr:
-            _reject(
-                prepared,
-                self.setup_id,
-                "tp1_too_close_or_missing",
-                tp1=tp1,
-                risk=risk,
-                min_rr=min_rr,
-                price=price,
-            )
-            return None  # Reject this CVD divergence setup
+            tp1 = price + risk * min_rr if direction == "long" else price - risk * min_rr
+            target_note = f"tp1_rr_fallback_{min_rr:.2f}"
+        else:
+            target_note = "tp1_prior_segment"
         if tp2 is None or abs(tp2 - price) <= abs(tp1 - price):
             tp2 = (
                 price + risk * max(2.0, min_rr + 0.35)
@@ -275,12 +256,17 @@ class CVDDivergenceSetup(BaseSetup):
             vol_ratio=vol_ratio,
             rsi=rsi,
         )
+        if bias_penalty:
+            score *= float(dynamic_params.get("bias_mismatch_penalty", defaults["bias_mismatch_penalty"]))
 
         reasons = [
             f"CVD divergence {direction}",
             f"delta_a={delta_mean_a:.3f} delta_b={delta_mean_b:.3f} shift={delta_shift:.3f}",
             f"bias_1h={bias_1h}",
+            target_note,
         ]
+        if bias_penalty:
+            reasons.append("bias_mismatch_penalty")
 
         return _build_signal(
             prepared=prepared,

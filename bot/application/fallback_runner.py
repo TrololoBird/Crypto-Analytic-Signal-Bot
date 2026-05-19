@@ -29,13 +29,14 @@ class FallbackRunner:
                     snapshot.get("total_symbols") or snapshot.get("tracked_symbols") or 0
                 )
             except Exception:
-                pass
+                LOG.debug("fallback health ws snapshot failed", exc_info=True)
         bus_depth = 0
         bus_stats = getattr(self._bot._bus, "stats", None)
         if callable(bus_stats):
             try:
                 bus_depth = int((bus_stats() or {}).get("current_depth") or 0)
             except Exception:
+                LOG.debug("fallback health bus stats failed", exc_info=True)
                 bus_depth = 0
         analysis_permits = int(getattr(self._bot._analysis_semaphore, "_value", 0))
         return {
@@ -117,5 +118,5 @@ class FallbackRunner:
             )
             try:
                 await self._bot._run_emergency_cycle()
-            except Exception as exc:
-                LOG.warning("emergency fallback failed: %s", exc, exc_info=True)
+            except Exception:
+                LOG.exception("emergency fallback failed")

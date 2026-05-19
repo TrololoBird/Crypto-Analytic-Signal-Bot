@@ -129,11 +129,8 @@ class CycleRunner:
                         runtime.emergency_context_warmup_timeout_seconds,
                         runtime.emergency_context_warmup_symbol_limit,
                     )
-            except Exception as exc:
-                LOG.warning(
-                    "emergency cycle context warmup failed (non-fatal): %s",
-                    exc,
-                )
+            except Exception:
+                LOG.exception("emergency cycle context warmup failed")
 
         async def _analyze_one(item: UniverseSymbol) -> PipelineResult | None:
             async with bot._analysis_semaphore:

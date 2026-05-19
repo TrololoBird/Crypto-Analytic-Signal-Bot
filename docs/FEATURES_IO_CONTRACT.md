@@ -25,7 +25,12 @@ Session fields currently emitted by the runtime feature path:
 - `session_asia`, `session_london`, `session_ny`, `session_overlap`
 - `session_asia_vol_20`, `session_london_vol_20`, `session_ny_vol_20`, `session_overlap_vol_20`
 
-The runtime indicator path is deterministic pure Polars on Windows/Python 3.13. `polars_ta` can be installed, but `_USE_POLARS_TA_BACKEND` remains disabled unless a future audit intentionally enables and revalidates it.
+The runtime indicator path is Polars-native and now prefers installed
+`polars_ta` expressions for compatible core indicators. Project-specific
+normalization still applies after materialization; for example, `polars_ta.RSI`
+is normalized from `0..1` to the bot contract of `0..100`. Pure-Polars formulas
+remain deterministic fallbacks when the installed backend is unavailable or a
+specific expression fails.
 
 ## Backward compatibility
 

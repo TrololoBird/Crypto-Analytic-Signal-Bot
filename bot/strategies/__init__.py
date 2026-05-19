@@ -7,6 +7,7 @@ from .ema_bounce import EmaBounceSetup
 from .funding_reversal import FundingReversalSetup
 from .fvg import FVGSetup
 from .hidden_divergence import HiddenDivergenceSetup
+from .indicator_divergence import IndicatorDivergenceSetup
 from .keltner_breakout import KeltnerBreakoutSetup
 from .liquidity_sweep import LiquiditySweepSetup
 from .order_block import OrderBlockSetup
@@ -51,6 +52,7 @@ STRATEGY_CLASSES = (
     LiquiditySweepSetup,
     BOSCHOCHSetup,
     HiddenDivergenceSetup,
+    IndicatorDivergenceSetup,
     FundingReversalSetup,
     CVDDivergenceSetup,
     SessionKillzoneSetup,
@@ -95,6 +97,7 @@ __all__ = [
     "FundingReversalSetup",
     "FVGSetup",
     "HiddenDivergenceSetup",
+    "IndicatorDivergenceSetup",
     "KeltnerBreakoutSetup",
     "LiquiditySweepSetup",
     "LiquidationHeatmapSetup",

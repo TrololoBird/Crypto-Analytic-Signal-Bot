@@ -494,13 +494,13 @@ def print_audit_report(
         )
         if no_raw_hit_pct > 90:
             print(
-                f"[WARNING] {no_raw_hit_pct:.1f}% rejections are 'no_raw_hit' - detectors not finding patterns"
+                f"[ISSUE] {no_raw_hit_pct:.1f}% rejections are 'no_raw_hit' - detectors not finding patterns"
             )
             print("  -> Check strategy thresholds in config.toml [bot.filters.setups]")
         else:
             print(f"[OK] Rejection distribution looks healthy ({no_raw_hit_pct:.1f}% no_raw_hit)")
     else:
-        print("[WARNING] No rejection data available")
+        print("[ISSUE] No rejection data available")
 
     print(f"\n{'=' * 80}\n")
 
@@ -520,7 +520,7 @@ def main():
     # Check bot status
     process = check_bot_process()
     if not process.get("running"):
-        print(f"[WARNING] Bot not running: {process.get('error')}")
+        print(f"[ISSUE] Bot not running: {process.get('error')}")
         print("Audit will analyze existing data...\n")
     else:
         print(f"[OK] Bot running with PID {process['pid']}")

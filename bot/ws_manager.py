@@ -357,6 +357,7 @@ class FuturesWSManager:
 
         # EventBus integration (optional — set via set_event_bus())
         self._event_bus: EventBus | None = None
+        self._event_bus_missing_logged = False
 
     @staticmethod
     def _normalize_symbol_list(items: list[Any]) -> list[str]:
@@ -1259,7 +1260,7 @@ class FuturesWSManager:
         for symbol in symbols:
             cooldown_until = self._backfill_cooldowns.get(symbol)
             if cooldown_until is not None and now < cooldown_until:
-                LOG.warning(
+                LOG.info(
                     "backfill cooldown active | symbol=%s remaining=%.1fs",
                     symbol,
                     cooldown_until - now,
@@ -1367,7 +1368,7 @@ class FuturesWSManager:
     def _handle_ws_response(self, msg: JsonDict, endpoint: str) -> None:
         if msg.get("error"):
             self._subscription_errors[endpoint] = msg["error"]
-            LOG.warning(
+            LOG.error(
                 "ws subscription error from Binance | endpoint=%s error=%s",
                 endpoint,
                 msg["error"],
@@ -1385,8 +1386,8 @@ class FuturesWSManager:
                         count = limit.get("count")
                         if limit_type and count is not None and limit_val is not None:
                             usage_pct = (count / limit_val) * 100 if limit_val > 0 else 0
-                            if usage_pct > 80:
-                                LOG.warning(
+                            if usage_pct > 95:
+                                LOG.error(
                                     "ws rate limit high usage | endpoint=%s type=%s interval=%s count=%d limit=%d usage=%.1f%%",
                                     endpoint,
                                     limit_type,
@@ -1395,8 +1396,18 @@ class FuturesWSManager:
                                     limit_val,
                                     usage_pct,
                                 )
-            except (TypeError, ValueError, KeyError):
-                pass
+                            elif usage_pct > 80:
+                                LOG.info(
+                                    "ws rate limit elevated usage | endpoint=%s type=%s interval=%s count=%d limit=%d usage=%.1f%%",
+                                    endpoint,
+                                    limit_type,
+                                    interval,
+                                    count,
+                                    limit_val,
+                                    usage_pct,
+                                )
+            except (TypeError, ValueError, KeyError) as exc:
+                LOG.debug("failed to parse ws rate limit payload from %s: %s", endpoint, exc)
         if "result" not in msg:
             return
         result = msg["result"]
@@ -1560,7 +1571,7 @@ class FuturesWSManager:
                 )
                 if avg_latency > 5000 and stream not in self._slow_streams:
                     self._slow_streams.add(stream)
-                    LOG.warning(
+                    LOG.error(
                         "slow stream detected | stream=%s avg_latency_ms=%.1f",
                         stream,
                         avg_latency,
@@ -1666,7 +1677,9 @@ class FuturesWSManager:
                 "kline published to EventBus | symbol=%s interval=%s", symbol, interval
             )
         else:
-            LOG.warning("kline NOT published - EventBus is None | symbol=%s", symbol)
+            if not self._event_bus_missing_logged:
+                LOG.info("kline EventBus publish skipped because EventBus is not attached")
+                self._event_bus_missing_logged = True
 
     async def _handle_book_ticker(self, symbol: str, data: JsonDict) -> None:
         """Handle bookTicker events.  Acquires _data_lock to prevent races."""

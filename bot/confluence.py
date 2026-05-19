@@ -149,8 +149,8 @@ class ConfluenceEngine:
                         regime,
                         ml_skip_reason,
                     )
-            except Exception as exc:
-                LOG.warning("ML prediction failed for %s: %s", signal.symbol, exc)
+            except Exception:
+                LOG.exception("ML prediction failed for %s", signal.symbol)
                 ml_skip_reason = "ml_exception"
         elif self._ml_filter is None:
             ml_skip_reason = "ml_filter_absent"

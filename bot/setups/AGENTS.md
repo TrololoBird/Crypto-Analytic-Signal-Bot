@@ -6,15 +6,18 @@ Work in `bot/setups/`.
 
 ## Role
 
-These files hold shared utilities used across multiple strategies. A small change here can affect many setups at once.
+These files hold shared utilities used across multiple strategies. A small
+change here can affect many setups at once.
 
-`bot/setups.py` is a sibling shared-helper module and follows the package-level rules in `bot/AGENTS.md`.
+`bot/setups/__init__.py` is the active shared-helper module imported as
+`bot.setups`. Do not recreate the removed sibling `bot/setups.py` legacy file.
 
 ## Read Before Editing
 
 - The touched helper
 - At least one current strategy caller
-- `bot/models.py` if signal shape or prepared-symbol expectations are involved
+- `bot/domain/schemas.py` if signal shape or prepared-symbol expectations are involved
+- `bot/setup_base.py` if strategy-engine adapter behavior is involved
 
 ## Local Rules
 
@@ -31,4 +34,5 @@ These files hold shared utilities used across multiple strategies. A small chang
 ## Verification
 
 - After changing a shared helper, verify at least the direct callers you touched or affected.
-- Prefer targeted regressions when a helper change fixes a specific bug.
+- Prefer compile/import checks, local strategy diagnostics, and telemetry
+  reason review. Generated tests are supplemental only.

@@ -155,8 +155,8 @@ async def resubscribe_all(manager: Any, endpoint: str, ws: Any) -> None:
     if not streams:
         return
     if len(streams) > 200:
-        LOG.warning(
-            "ws high stream count warning | endpoint=%s streams=%d symbols=%d - "
+        LOG.info(
+            "ws high stream count | endpoint=%s streams=%d symbols=%d - "
             "consider reducing shortlist_limit in config",
             endpoint,
             len(streams),

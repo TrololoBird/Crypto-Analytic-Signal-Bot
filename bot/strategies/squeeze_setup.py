@@ -88,6 +88,19 @@ def _bb_kc_squeeze_release(
 ) -> tuple[bool, str, str]:
     if work_15m.height < max(30, release_lookback + 2):
         return False, "", ""
+    if {"squeeze_on", "squeeze_off"}.issubset(set(work_15m.columns)):
+        lookback = max(2, min(release_lookback, work_15m.height - 1))
+        prior = work_15m.slice(work_15m.height - lookback - 1, lookback)
+        was_squeezed = bool(prior["squeeze_on"].fill_null(0).max())
+        released_now = _as_float(work_15m.item(-1, "squeeze_off")) > 0.0
+        if was_squeezed and released_now:
+            hist = _as_float(work_15m.item(-1, "squeeze_hist")) if "squeeze_hist" in work_15m.columns else 0.0
+            roc10 = _as_float(work_15m.item(-1, "roc10")) if "roc10" in work_15m.columns else 0.0
+            direction = "long" if (hist > 0.0 or roc10 > 0.0) else "short"
+            if hist == 0.0 and roc10 == 0.0:
+                return False, "", ""
+            return True, direction, "polars_squeeze_release"
+
     required = {"bb_width", "bb_pct_b", "kc_upper", "kc_lower", "close", "roc10"}
     if not required.issubset(set(work_15m.columns)):
         return False, "", ""
@@ -301,15 +314,21 @@ class SqueezeSetup(BaseSetup):
         rsi = _as_float(work_15m.item(-1, "rsi14"), 50.0)
 
         if vol_ratio < volume_threshold:
-            _reject(prepared, "squeeze_setup", "volume_too_low", vol_ratio=vol_ratio)
-            return None
+            strong_release = (
+                release_reason == "polars_squeeze_release"
+                and "squeeze_hist" in work_15m.columns
+                and abs(_as_float(work_15m.item(-1, "squeeze_hist"))) >= atr * 0.15
+            )
+            if not strong_release:
+                _reject(prepared, "squeeze_setup", "volume_too_low", vol_ratio=vol_ratio)
+                return None
 
         if direction == "short" and rsi > 70.0:
-            _reject(prepared, "squeeze_setup", "rsi_too_high", rsi=rsi)
-            return None
-        if direction == "long" and rsi < 30.0:
-            _reject(prepared, "squeeze_setup", "rsi_too_low", rsi=rsi)
-            return None
+            reasons_rsi_penalty = "rsi_short_overbought_penalty"
+        elif direction == "long" and rsi < 30.0:
+            reasons_rsi_penalty = "rsi_long_oversold_penalty"
+        else:
+            reasons_rsi_penalty = None
 
         reasons = [
             f"bb_kc_squeeze breakout={direction} bb_pct_b>{bb_pct_b_threshold:.2f}",
@@ -323,6 +342,8 @@ class SqueezeSetup(BaseSetup):
             reasons.append(crowd_reason)
         else:
             reasons.append("crowd_context_neutral")
+        if reasons_rsi_penalty:
+            reasons.append(reasons_rsi_penalty)
 
         price_anchor = _as_float(work_15m.item(-1, "close"))
 
@@ -387,6 +408,8 @@ class SqueezeSetup(BaseSetup):
         )
         if not crowd_aligned:
             score *= no_crowd_confirmation_penalty
+        if reasons_rsi_penalty:
+            score *= 0.90
 
         return _build_signal(
             prepared=prepared,

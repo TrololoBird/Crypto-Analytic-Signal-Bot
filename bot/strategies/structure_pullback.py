@@ -93,20 +93,20 @@ class StructurePullbackSetup(BaseSetup):
         regime_4h = prepared.regime_4h_confirmed
         bias_1h = prepared.bias_1h
         structure = prepared.structure_1h
+        penalty_multiplier = 1.0
+        penalty_reasons: list[str] = []
 
         if (
             regime_1h in {"uptrend", "downtrend"}
             and structure in {"uptrend", "downtrend"}
             and structure != regime_1h
         ):
-            _reject(
-                prepared,
-                "structure_pullback",
-                "structure_contradicts_regime",
-                regime=regime_1h,
-                structure=structure,
+            penalty_multiplier *= float(
+                dynamic_params.get("structure_regime_conflict_penalty", 0.84)
             )
-            return None
+            penalty_reasons.append(
+                f"structure_regime_conflict={structure}/{regime_1h}"
+            )
         ema20_1h = _as_float(work_1h.item(-1, "ema20"))
         close_1h = _as_float(work_1h.item(-1, "close"))
         if ema20_1h <= 0.0:
@@ -268,21 +268,11 @@ class StructurePullbackSetup(BaseSetup):
                 bb_pct_b = None
         if bb_pct_b is not None:
             if direction == "long" and bb_pct_b > 0.90:
-                _reject(
-                    prepared,
-                    "structure_pullback",
-                    "bb_extreme_long",
-                    bb_pct_b=round(bb_pct_b, 4),
-                )
-                return None
+                penalty_multiplier *= float(dynamic_params.get("bb_extreme_penalty", 0.88))
+                penalty_reasons.append(f"bb_extreme_long={bb_pct_b:.3f}")
             if direction == "short" and bb_pct_b < 0.10:
-                _reject(
-                    prepared,
-                    "structure_pullback",
-                    "bb_extreme_short",
-                    bb_pct_b=round(bb_pct_b, 4),
-                )
-                return None
+                penalty_multiplier *= float(dynamic_params.get("bb_extreme_penalty", 0.88))
+                penalty_reasons.append(f"bb_extreme_short={bb_pct_b:.3f}")
 
         reasons = [
             f"1h regime_confirmed={regime_1h}",
@@ -291,6 +281,7 @@ class StructurePullbackSetup(BaseSetup):
             f"pullback to {selected_level_name}={level:.4f}",
             f"vol_ratio={vol_ratio:.2f}",
             f"rsi={rsi:.1f}",
+            *penalty_reasons,
         ]
         if (
             regime_1h in {"uptrend", "downtrend"}
@@ -404,6 +395,7 @@ class StructurePullbackSetup(BaseSetup):
             rsi=rsi,
             structure_clarity=0.6,
         )
+        score *= penalty_multiplier
 
         return _build_signal(
             prepared=prepared,

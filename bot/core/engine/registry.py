@@ -40,7 +40,7 @@ class StrategyRegistry:
 
         with self._lock:
             if strategy_id in self._strategies:
-                LOG.warning("Strategy %s already registered, replacing", strategy_id)
+                LOG.info("Strategy %s already registered, replacing", strategy_id)
 
             self._strategies[strategy_id] = strategy
 
@@ -71,9 +71,9 @@ class StrategyRegistry:
     def get_enabled(self) -> list[AbstractStrategy]:
         """Get list of enabled strategies."""
         with self._lock:
-            enabled_ids = tuple(self._enabled)
+            enabled_ids = set(self._enabled)
             strategies = dict(self._strategies)
-        return [strategies[sid] for sid in enabled_ids if sid in strategies]
+        return [strategy for sid, strategy in strategies.items() if sid in enabled_ids]
 
     def list_all(self) -> list[StrategyMetadata]:
         """List metadata for all registered strategies."""
@@ -83,9 +83,9 @@ class StrategyRegistry:
     def list_enabled(self) -> list[StrategyMetadata]:
         """List metadata for enabled strategies."""
         with self._lock:
-            enabled_ids = tuple(self._enabled)
+            enabled_ids = set(self._enabled)
             strategies = dict(self._strategies)
-        return [strategies[sid].metadata for sid in enabled_ids if sid in strategies]
+        return [strategy.metadata for sid, strategy in strategies.items() if sid in enabled_ids]
 
     def enable(self, strategy_id: str) -> bool:
         """Enable a strategy."""

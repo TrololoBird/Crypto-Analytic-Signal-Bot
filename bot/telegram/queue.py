@@ -142,7 +142,7 @@ class TelegramQueue:
         if total_size >= self._max_size:
             # Try to drop oldest low-priority
             if not self._drop_oldest_low_priority():
-                LOG.warning("Queue full, message dropped: %s...", text[:50])
+                LOG.error("Queue full, message dropped: %s...", text[:50])
                 self._stats["dropped"] += 1
                 return None
 
@@ -218,7 +218,7 @@ class TelegramQueue:
 
                     if msg.retry_count <= msg.max_retries:
                         # Requeue with delay
-                        LOG.warning(
+                        LOG.info(
                             "Send failed, retrying %d/%d: %s",
                             msg.retry_count,
                             msg.max_retries,

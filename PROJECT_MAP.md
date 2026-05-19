@@ -6,9 +6,23 @@ This map is based on the current repository state, targeted source reads, local
 import checks, telemetry JSONL parsing, and official dependency/API references.
 It distinguishes implemented/reachable behavior from unverified trading validity.
 
+## 2026-05-18 Correction
+
+- Generated tests are no longer treated as proof of strategy correctness,
+  profitability, or live readiness. Use current code, config, telemetry,
+  read-only live diagnostics, official Binance docs, and inspected GitHub
+  references first.
+- `bot/setups.py` was a stale sibling module shadowed by the active
+  `bot/setups/` package. The active import target for `bot.setups` is
+  `bot/setups/__init__.py`; the legacy file has been removed.
+- `bot/tasks/` was unused scaffold code. Runtime background work is owned by
+  `bot/application/`, `bot/tracking.py`, and startup/reporting modules.
+- Strategy metadata status is descriptive only. Strategies marked
+  `experimental` remain runtime obligations when exported and enabled.
+
 ## Reflection
 
-Tentative answer: the project has 37 strategy classes, an SMC helper layer, a
+Tentative answer: the project has 38 strategy classes, an SMC helper layer, a
 public Binance USD-M market-data boundary, and an event-driven Telegram signal
 pipeline.
 
@@ -18,7 +32,7 @@ against source, counted the exported strategies at runtime, checked config keys,
 read strategy tests, parsed telemetry for the BOS/CHoCH anomaly, and checked the
 Binance WS and package metadata externally.
 
-Revised conclusion: the 37 strategies are implemented and reachable by the
+Revised conclusion: the 38 strategies are implemented and reachable by the
 runtime registry. Their profitability and live-market correctness are not proven
 by this audit.
 
@@ -115,11 +129,11 @@ Residual uncertainty:
 
 Confirmed facts:
 
-- `bot/strategies/__init__.py` exports 37 concrete strategy classes.
-- Runtime import check returned 37 classes after the roadmap expansion.
-- All 37 have `[bot.setups]` enable flags in `config.toml` and
+- `bot/strategies/__init__.py` exports 38 concrete strategy classes.
+- Runtime import check returned 38 classes after the roadmap expansion.
+- All 38 have `[bot.setups]` enable flags in `config.toml` and
   `config.toml.example`.
-- All 37 have `[bot.filters.setups]` parameter blocks in `config.toml` and
+- All 38 have `[bot.filters.setups]` parameter blocks in `config.toml` and
   `config.toml.example`.
 - Each strategy implements `detect()` and `get_optimizable_params()`.
 - `tests/test_strategies.py` parametrizes all exported strategies and checks the
@@ -137,33 +151,34 @@ Confirmed facts:
 | 8 | `liquidity_sweep` | reversal / countertrend_exhaustion | Implemented, registered, config-backed | Uses `latest_liquidity_sweep()` |
 | 9 | `bos_choch` | breakout / breakout_acceptance | Implemented, registered, config-backed | Uses `latest_structure_break()` and external swing stop anchors |
 | 10 | `hidden_divergence` | continuation / trend_follow | Implemented, registered, config-backed | Hidden divergence, context bias, delta confirmation |
-| 11 | `funding_reversal` | reversal / countertrend_exhaustion | Implemented, registered, config-backed | Only strategy with `requires_funding=True` |
-| 12 | `cvd_divergence` | reversal / countertrend_exhaustion | Implemented, registered, config-backed | CVD/delta divergence checks |
-| 13 | `session_killzone` | breakout / breakout_acceptance | Implemented, registered, config-backed | Hardcoded killzone windows plus momentum/volume checks |
-| 14 | `breaker_block` | breakout / breakout_acceptance | Implemented, registered, config-backed | Uses `latest_breaker_block()` |
-| 15 | `turtle_soup` | reversal / countertrend_exhaustion | Implemented, registered, config-backed | False-breakout detection and 15m confirmation |
-| 16 | `vwap_trend` | continuation / trend_follow | Implemented, registered, config-backed | VWAP reclaim continuation with 1h bias, ADX, volume, structural targets |
-| 17 | `supertrend_follow` | continuation / trend_follow | Implemented, registered, config-backed | SuperTrend 15m+1h alignment plus EMA pullback and structural targets |
-| 18 | `price_velocity` | breakout / breakout_acceptance | Implemented, registered, config-backed | ROC/body velocity breakout with volume and RSI guard |
-| 19 | `volume_anomaly` | breakout / breakout_acceptance | Implemented, registered, config-backed | Volume spike impulse candle with close-position guard |
-| 20 | `volume_climax_reversal` | reversal / countertrend_exhaustion | Implemented, registered, config-backed | Donchian sweep/reclaim, wick ATR, volume climax, RSI exhaustion |
-| 21 | `keltner_breakout` | breakout / breakout_acceptance | Implemented, registered, config-backed | Keltner channel breakout with ADX, volume, 1h bias, structural targets |
-| 22 | `whale_walls` | orderbook / breakout_acceptance | Implemented, registered, config-backed | Depth imbalance + microprice wall proxy; public bookTicker/depth context only |
-| 23 | `spread_strategy` | orderbook / breakout_acceptance | Implemented, registered, config-backed | Tight spread + volume + momentum breakout |
-| 24 | `depth_imbalance` | orderbook / breakout_acceptance | Implemented, registered, config-backed | Signed depth imbalance + close-position confirmation |
-| 25 | `absorption` | orderflow / countertrend_exhaustion | Implemented, registered, config-backed | Aggressive flow delta opposed by wick/close rejection |
-| 26 | `aggression_shift` | orderflow / breakout_acceptance | Implemented, registered, config-backed | WS aggression shift or delta-ratio shift |
-| 27 | `liquidation_heatmap` | liquidity / countertrend_exhaustion | Implemented, registered, config-backed | Recent liquidation sentiment proxy + candle confirmation |
-| 28 | `stop_hunt_detection` | liquidity / countertrend_exhaustion | Implemented, registered, config-backed | Donchian sweep/reclaim with volume and close-position checks |
-| 29 | `multi_tf_trend` | continuation / trend_follow | Implemented, registered, config-backed | 1h/4h bias and confirmed-regime alignment |
-| 30 | `rsi_divergence_bottom` | reversal / countertrend_exhaustion | Implemented, registered, config-backed | RSI divergence bottom/top detection over two rolling windows |
-| 31 | `wyckoff_spring` | reversal / countertrend_exhaustion | Implemented, registered, config-backed | Spring/upthrust sweep reclaim with volume confirmation |
-| 32 | `bb_squeeze` | volatility / breakout_acceptance | Implemented, registered, config-backed | Bollinger squeeze release with momentum/volume confirmation |
-| 33 | `atr_expansion` | volatility / breakout_acceptance | Implemented, registered, config-backed | ATR expansion ratio + impulse body confirmation |
-| 34 | `ls_ratio_extreme` | sentiment / countertrend_exhaustion | Implemented, registered, config-backed | Long/short crowding extreme contrarian detector |
-| 35 | `oi_divergence` | sentiment / countertrend_exhaustion | Implemented, registered, config-backed | OI change vs price movement divergence |
-| 36 | `btc_correlation` | multi_asset / trend_follow | Implemented, registered, config-backed | BTC market-context bias alignment for non-BTC symbols |
-| 37 | `altcoin_season_index` | multi_asset / trend_follow | Implemented, registered, config-backed | Altcoin-season context gate with symbol trend bias |
+| 11 | `indicator_divergence` | reversal / countertrend_exhaustion | Implemented, registered, config-backed | Regular price divergence/convergence against RSI, MACD histogram, OBV, and delta |
+| 12 | `funding_reversal` | reversal / countertrend_exhaustion | Implemented, registered, config-backed | Only strategy with `requires_funding=True` |
+| 13 | `cvd_divergence` | reversal / countertrend_exhaustion | Implemented, registered, config-backed | CVD/delta divergence checks |
+| 14 | `session_killzone` | breakout / breakout_acceptance | Implemented, registered, config-backed | Hardcoded killzone windows plus momentum/volume checks |
+| 15 | `breaker_block` | breakout / breakout_acceptance | Implemented, registered, config-backed | Uses `latest_breaker_block()` |
+| 16 | `turtle_soup` | reversal / countertrend_exhaustion | Implemented, registered, config-backed | False-breakout detection and 15m confirmation |
+| 17 | `vwap_trend` | continuation / trend_follow | Implemented, registered, config-backed | VWAP reclaim continuation with 1h bias, ADX, volume, structural targets |
+| 18 | `supertrend_follow` | continuation / trend_follow | Implemented, registered, config-backed | SuperTrend 15m+1h alignment plus EMA pullback and structural targets |
+| 19 | `price_velocity` | breakout / breakout_acceptance | Implemented, registered, config-backed | ROC/body velocity breakout with volume and RSI guard |
+| 20 | `volume_anomaly` | breakout / breakout_acceptance | Implemented, registered, config-backed | Volume spike impulse candle with close-position guard |
+| 21 | `volume_climax_reversal` | reversal / countertrend_exhaustion | Implemented, registered, config-backed | Donchian sweep/reclaim, wick ATR, volume climax, RSI exhaustion |
+| 22 | `keltner_breakout` | breakout / breakout_acceptance | Implemented, registered, config-backed | Keltner channel breakout with ADX, volume, 1h bias, structural targets |
+| 23 | `whale_walls` | orderbook / breakout_acceptance | Implemented, registered, config-backed | Depth imbalance + microprice wall proxy; public bookTicker/depth context only |
+| 24 | `spread_strategy` | orderbook / breakout_acceptance | Implemented, registered, config-backed | Tight spread + volume + momentum breakout |
+| 25 | `depth_imbalance` | orderbook / breakout_acceptance | Implemented, registered, config-backed | Signed depth imbalance + close-position confirmation |
+| 26 | `absorption` | orderflow / countertrend_exhaustion | Implemented, registered, config-backed | Aggressive flow delta opposed by wick/close rejection |
+| 27 | `aggression_shift` | orderflow / breakout_acceptance | Implemented, registered, config-backed | WS aggression shift or delta-ratio shift |
+| 28 | `liquidation_heatmap` | liquidity / countertrend_exhaustion | Implemented, registered, config-backed | Recent liquidation sentiment proxy + candle confirmation |
+| 29 | `stop_hunt_detection` | liquidity / countertrend_exhaustion | Implemented, registered, config-backed | Donchian sweep/reclaim with volume and close-position checks |
+| 30 | `multi_tf_trend` | continuation / trend_follow | Implemented, registered, config-backed | 1h/4h bias and confirmed-regime alignment |
+| 31 | `rsi_divergence_bottom` | reversal / countertrend_exhaustion | Implemented, registered, config-backed | RSI divergence bottom/top detection over two rolling windows |
+| 32 | `wyckoff_spring` | reversal / countertrend_exhaustion | Implemented, registered, config-backed | Spring/upthrust sweep reclaim with volume confirmation |
+| 33 | `bb_squeeze` | volatility / breakout_acceptance | Implemented, registered, config-backed | Bollinger squeeze release with momentum/volume confirmation |
+| 34 | `atr_expansion` | volatility / breakout_acceptance | Implemented, registered, config-backed | ATR expansion ratio + impulse body confirmation |
+| 35 | `ls_ratio_extreme` | sentiment / countertrend_exhaustion | Implemented, registered, config-backed | Long/short crowding extreme contrarian detector |
+| 36 | `oi_divergence` | sentiment / countertrend_exhaustion | Implemented, registered, config-backed | OI change vs price movement divergence |
+| 37 | `btc_correlation` | multi_asset / trend_follow | Implemented, registered, config-backed | BTC market-context bias alignment for non-BTC symbols |
+| 38 | `altcoin_season_index` | multi_asset / trend_follow | Implemented, registered, config-backed | Altcoin-season context gate with symbol trend bias |
 
 Inference:
 
@@ -171,6 +186,13 @@ Inference:
   importable, registered, config-backed, and covered by contract tests.
 - Trading validity, edge, and live robustness remain unverified without live
   replay/backtest evidence per strategy.
+- Runtime filter validity was tightened on 2026-05-19: 1h trend conflict is a
+  hard gate for continuation/breakout/trend-following strategies, but
+  countertrend exhaustion families are score-penalized and still evaluated by
+  confluence.
+- Outcome analytics now exclude unactivated monitoring outcomes
+  (`expired_pending`, `unactivated_close`, `superseded`) from trade expectancy
+  and adaptive setup scoring.
 
 ## SMC Implementation
 
@@ -385,20 +407,19 @@ Codebase scan:
 - Python files scanned/enumerated: 210 after the phase-5.3 strategy expansion and
   current ignored paths.
 - Groups: `bot/` 140, `tests/` 55, `scripts/` 15, root scripts 4.
-- Routing files found: root plus 8 nested `AGENTS.md` files
-  (`bot/`, `bot/application/`, `bot/setups/`, `bot/strategies/`, `bot/tasks/`,
-  `bot/telegram/`, `scripts/`, `tests/`).
+- Historical routing files found at the time included `bot/tasks/`; as of
+  2026-05-18 that package has been removed as unused scaffold.
 - Source/config/data inventory command covered 278 files:
   `rg --files bot scripts tests docs data config.toml config.toml.example requirements.txt CODEX.md PROJECT_MAP.md AGENTS.md README.md`.
 - Active import target for `bot.setups` is confirmed as
-  `bot/setups/__init__.py`; the sibling `bot/setups.py` remains a legacy/stale
-  file in the tree and is not the import target.
+  `bot/setups/__init__.py`; the sibling `bot/setups.py` legacy file has been
+  removed.
 
 Skill/phase matrix:
 
 | Phase / skill | Status | Evidence |
 |---|---|---|
-| `code_audit` | executed | Python/Markdown corpus enumerated; runtime import path checked; strategy registry count 37 after the roadmap expansion. |
+| `code_audit` | executed | Python/Markdown corpus enumerated; runtime import path checked; strategy registry count 38 after the divergence expansion. |
 | `api_verify` | executed | Official Binance WS docs checked; live WS smoke connected to `/public/stream` and `/market/stream`. |
 | `strategy_analyze` | executed | Original 15 strategies plus 6 phase-5.3 strategies imported/config-aligned; synthetic strategy tests pass. |
 | `config_audit` | executed | `python scripts/validate_config.py` passed after config changes. |
@@ -492,12 +513,14 @@ Prompt file checks:
   verification addendum. It is intentionally no longer byte-identical to
   `codex_agent_prompt_v4.md`.
 
-Project audit checks:
+Project audit checks from the earlier roadmap pass. These are retained as
+history; current source of truth is the 38-strategy inventory above and the
+2026-05-19 live-surface verification in `docs/STRATEGIES.md`:
 
 - `from bot.strategies import STRATEGY_CLASSES; len(STRATEGY_CLASSES)` -> 37
-  after the roadmap expansion.
+  after the earlier roadmap expansion.
 - Strategy metadata print confirmed family/profile/context/min bars.
-- TOML parse confirmed all 37 strategy ids exist in `[bot.setups]` and
+- TOML parse confirmed all 37 then-current strategy ids exist in `[bot.setups]` and
   `[bot.filters.setups]` for both `config.toml` and `config.toml.example`.
 - `rg` scan confirmed no direct strategy use of `ichi_*`.
 - `rg` scan confirmed session feature and session-killzone duplication; code
@@ -545,8 +568,8 @@ Fresh project scan:
   returned 287 tracked/audited paths in the requested surface.
 - Confirmed mismatch with the prompt: there is no `bot/filters/` directory in
   the current repository; filter logic is in `bot/filters.py`.
-- Runtime import check now reports 37 strategy classes after the roadmap
-  expansion, not the 15 listed in the original prompt.
+- Runtime import check then reported 37 strategy classes after the roadmap
+  expansion; the current registry contains 38 after `indicator_divergence`.
 
 Fresh Binance verification:
 
@@ -574,7 +597,7 @@ Fresh runtime/live checks:
 
 - `python scripts\validate_config.py` -> passed.
 - `python -c "from bot.config import load_settings; from bot.strategies import STRATEGY_CLASSES; ..."`
-  -> 37 strategies, no missing filter params, no disabled setup flags.
+  -> then-current 37 strategies, no missing filter params, no disabled setup flags.
 - `python -m ruff check` on touched Python files -> passed.
 - `python -m pytest -q tests\test_strategies.py tests\test_config_runtime.py tests\test_sanity.py::test_strategy_registry_contains_extended_setups tests\test_backtest_engine.py::test_backtester_supports_lifecycle_metrics_for_all_live_setups`
   -> 53 passed.

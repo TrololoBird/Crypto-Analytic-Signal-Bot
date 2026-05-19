@@ -34,6 +34,21 @@ def _has_oi_context(prepared: PreparedSymbol) -> bool:
     return prepared.oi_current is not None or prepared.oi_change_pct is not None
 
 
+def _missing_required_features(prepared: PreparedSymbol, features: list[str]) -> tuple[str, ...]:
+    if not features:
+        return ()
+    columns: set[str] = set()
+    for frame_name in ("work_15m", "work_1h", "work_4h"):
+        frame = getattr(prepared, frame_name, None)
+        if frame is not None:
+            columns.update(frame.columns)
+    return tuple(feature for feature in features if feature not in columns)
+
+
+def _missing_required_enrichment(prepared: PreparedSymbol, fields: list[str]) -> tuple[str, ...]:
+    return tuple(field for field in fields if getattr(prepared, field, None) is None)
+
+
 class SignalEngine:
     """Engine for calculating signals from multiple strategies.
 
@@ -66,6 +81,10 @@ class SignalEngine:
         if configured_concurrency is None:
             configured_concurrency = getattr(runtime, "analysis_concurrency", 10)
         self._strategy_concurrency = max(1, int(configured_concurrency))
+        self._max_queue_wait_seconds = max(
+            0.0,
+            float(getattr(runtime, "max_strategy_queue_wait_seconds", 45.0)),
+        )
         self._semaphore = asyncio.Semaphore(self._strategy_concurrency)
         self._executor_warmed = False
         self._executor_warm_lock = asyncio.Lock()
@@ -123,7 +142,7 @@ class SignalEngine:
         LOG.info("%s: calculate_all called | strategies=%d", symbol, len(strategies))
 
         if not strategies:
-            LOG.warning("%s: No enabled strategies to calculate", symbol)
+            LOG.error("%s: No enabled strategies to calculate", symbol)
             return routing_skips
 
         # Check which strategies can calculate
@@ -211,7 +230,7 @@ class SignalEngine:
         """
         strategy = self._registry.get(strategy_id)
         if strategy is None:
-            LOG.warning("Strategy %s not found", strategy_id)
+            LOG.error("Strategy %s not found", strategy_id)
             return None
 
         if not self._registry.is_enabled(strategy_id):
@@ -233,6 +252,30 @@ class SignalEngine:
         async with self._semaphore:
             start_time = time.perf_counter()
             queue_wait_ms = (start_time - queued_at) * 1000.0
+            if (
+                self._max_queue_wait_seconds > 0.0
+                and queue_wait_ms > self._max_queue_wait_seconds * 1000.0
+            ):
+                decision = StrategyDecision.skip(
+                    setup_id=strategy_id,
+                    reason_code="runtime.strategy_queue_stale",
+                    details={
+                        "symbol": symbol,
+                        "queue_wait_ms": queue_wait_ms,
+                        "max_queue_wait_seconds": self._max_queue_wait_seconds,
+                    },
+                )
+                return SignalResult(
+                    setup_id=strategy_id,
+                    signal=None,
+                    decision=decision,
+                    calculation_time_ms=0.0,
+                    metadata={
+                        "setup_id": strategy_id,
+                        "queue_wait_ms": queue_wait_ms,
+                        "compute_ms": 0.0,
+                    },
+                )
 
             try:
                 # Check if strategy can calculate
@@ -351,8 +394,14 @@ class SignalEngine:
         metadata = getattr(strategy, "metadata", None)
         min_history_bars = getattr(metadata, "min_history_bars", 0)
         required_context = list(getattr(metadata, "required_context", ()) or ())
+        required_features = list(getattr(metadata, "required_features", ()) or ())
+        required_enrichment = list(getattr(metadata, "required_enrichment", ()) or ())
         missing_fields: list[str] = []
-        details: dict[str, Any] = {"required_context": required_context}
+        details: dict[str, Any] = {
+            "required_context": required_context,
+            "required_features": required_features,
+            "required_enrichment": required_enrichment,
+        }
         reason_code = "data.insufficient_input"
 
         asset_fit_reason = asset_fit_reject_reason(
@@ -380,6 +429,14 @@ class SignalEngine:
         elif getattr(metadata, "requires_funding", False) and prepared.funding_rate is None:
             missing_fields.append("funding_rate")
             reason_code = "data.funding_rate_missing"
+        elif missing_feature_fields := _missing_required_features(prepared, required_features):
+            missing_fields.extend(missing_feature_fields)
+            reason_code = "data.required_features_missing"
+        elif missing_enrichment_fields := _missing_required_enrichment(
+            prepared, required_enrichment
+        ):
+            missing_fields.extend(missing_enrichment_fields)
+            reason_code = "data.required_enrichment_missing"
 
         return StrategyDecision.skip(
             setup_id=strategy_id,

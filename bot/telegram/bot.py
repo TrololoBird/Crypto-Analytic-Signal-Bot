@@ -172,7 +172,7 @@ class TelegramSignalBot:
 async def setup_telegram_bot(settings: BotSettings) -> TelegramSignalBot | None:
     """Factory function to create and start Telegram bot."""
     if not (settings.tg_token and settings.tg_token.strip()):
-        LOG.warning("No TG_TOKEN provided, Telegram bot disabled")
+        LOG.info("No TG_TOKEN provided, Telegram bot disabled")
         return None
 
     bot = TelegramSignalBot(settings)

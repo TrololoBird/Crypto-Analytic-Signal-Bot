@@ -39,9 +39,12 @@ class FundingReversalSetup(BaseSetup):
         """Tunable parameters for self-learner optimization."""
         defaults = {
             "base_score": 0.52,
-            "funding_threshold": 0.0005,
+            "funding_threshold": 0.00015,
             "funding_trend_bars": 3.0,
             "min_delta_threshold": 0.02,
+            "confirmation_lookback_bars": 4,
+            "min_confirmation_score": 1.0,
+            "min_volume_ratio": 0.85,
             "sl_buffer_atr": 0.6,
             "bias_mismatch_penalty": 0.75,
             "min_rr": 1.9,
@@ -93,6 +96,23 @@ class FundingReversalSetup(BaseSetup):
             defaults["base_score"],
         )
         min_rr = _as_float(dynamic_params.get("min_rr", defaults["min_rr"]), defaults["min_rr"])
+        confirmation_lookback = max(
+            2,
+            int(
+                dynamic_params.get(
+                    "confirmation_lookback_bars",
+                    defaults["confirmation_lookback_bars"],
+                )
+            ),
+        )
+        min_confirmation_score = _as_float(
+            dynamic_params.get("min_confirmation_score", defaults["min_confirmation_score"]),
+            defaults["min_confirmation_score"],
+        )
+        min_volume_ratio = _as_float(
+            dynamic_params.get("min_volume_ratio", defaults["min_volume_ratio"]),
+            defaults["min_volume_ratio"],
+        )
 
         if prepared.funding_rate is None:
             _reject(prepared, setup_id, "funding_rate_missing")
@@ -102,32 +122,7 @@ class FundingReversalSetup(BaseSetup):
             _reject(prepared, setup_id, "funding_not_extreme", funding_rate=fr)
             return None
 
-        # Require funding trend to avoid one-bar spikes that immediately mean-revert.
-        # "rising" confirms longs are building (→ short reversal) or funding is
-        # falling (accumulation squeeze → long reversal).  "flat" = not trending →
-        # spike anomaly, skip.  None = no history yet → allow through.
         funding_trend = prepared.funding_trend
-        if funding_trend == "flat":
-            _reject(prepared, setup_id, "funding_trend_flat")
-            return None
-        if fr > funding_threshold and funding_trend == "falling":
-            # Funding already unwinding on its own — not a setup
-            _reject(
-                prepared,
-                setup_id,
-                "funding_already_unwinding_short",
-                funding_trend=funding_trend,
-            )
-            return None
-        if fr < -funding_threshold and funding_trend == "rising":
-            # Negative funding already recovering — not a setup
-            _reject(
-                prepared,
-                setup_id,
-                "funding_already_unwinding_long",
-                funding_trend=funding_trend,
-            )
-            return None
 
         w = prepared.work_15m
         if w.height < 5:
@@ -145,9 +140,6 @@ class FundingReversalSetup(BaseSetup):
             return None
 
         vol_ratio = _as_float(w.item(-1, "volume_ratio20"), 1.0)
-        if vol_ratio < 1.2:
-            _reject(prepared, setup_id, "volume_too_low", vol_ratio=vol_ratio)
-            return None
 
         latest_delta_ratio: float | None = None
         delta_shift = 0.0
@@ -157,82 +149,79 @@ class FundingReversalSetup(BaseSetup):
                 latest_delta_ratio = _as_float(delta_series[-1], 0.5)
                 delta_shift = latest_delta_ratio - 0.5
 
-        bar_open = _as_float(w.item(-1, "open"))
-        bar_close = _as_float(w.item(-1, "close"))
-        bar_high = _as_float(w.item(-1, "high"))
-        bar_low = _as_float(w.item(-1, "low"))
-        body = abs(bar_close - bar_open)
+        recent = w.tail(min(confirmation_lookback, w.height))
         trend_window = max(6, funding_trend_bars * 3)
+        rsi = _as_float(w.item(-1, "rsi14"), 50.0)
+        bb_pct_b = _as_float(w.item(-1, "bb_pct_b"), 0.5) if "bb_pct_b" in w.columns else 0.5
+        close_position = (
+            _as_float(w.item(-1, "close_position"), 0.5)
+            if "close_position" in w.columns
+            else 0.5
+        )
 
-        if fr > funding_threshold:
-            # Extreme longs → look for short reversal
-            # Confirm: close < open, upper wick > body * 1.5
+        direction = "short" if fr > funding_threshold else "long"
+        confirmation_score = 0.0
+        confirmation_reasons: list[str] = []
+        for idx in range(recent.height):
+            bar_open = _as_float(recent.item(idx, "open"))
+            bar_close = _as_float(recent.item(idx, "close"))
+            bar_high = _as_float(recent.item(idx, "high"))
+            bar_low = _as_float(recent.item(idx, "low"))
+            body = abs(bar_close - bar_open)
             upper_wick = bar_high - max(bar_open, bar_close)
-            if not (bar_close < bar_open and body > 0 and upper_wick >= body * 1.5):
-                _reject(prepared, setup_id, "reversal_candle_missing_short")
-                return None
-            if latest_delta_ratio is not None and delta_shift > -min_delta_threshold:
-                _reject(
-                    prepared,
-                    setup_id,
-                    "delta_confirmation_missing_short",
-                    delta_ratio=latest_delta_ratio,
-                    min_delta_threshold=min_delta_threshold,
-                )
-                return None
-            direction = "short"
-            # SL: beyond the extreme funding candle's wick tip + configured ATR buffer
-            stop = bar_high + atr * sl_buffer_atr
+            lower_wick = min(bar_open, bar_close) - bar_low
+            if direction == "short" and (
+                bar_close < bar_open
+                or (body > 0.0 and upper_wick >= body * 1.2)
+                or upper_wick >= atr * 0.35
+            ):
+                confirmation_score += 0.75
+                confirmation_reasons.append("bearish_recent_reversal_bar")
+                break
+            if direction == "long" and (
+                bar_close > bar_open
+                or (body > 0.0 and lower_wick >= body * 1.2)
+                or lower_wick >= atr * 0.35
+            ):
+                confirmation_score += 0.75
+                confirmation_reasons.append("bullish_recent_reversal_bar")
+                break
+
+        if direction == "short":
+            if rsi >= 58.0:
+                confirmation_score += 0.35
+                confirmation_reasons.append(f"rsi={rsi:.1f}")
+            if bb_pct_b >= 0.80 or close_position >= 0.65:
+                confirmation_score += 0.35
+                confirmation_reasons.append("price_extended_up")
+            if latest_delta_ratio is not None and delta_shift <= -min_delta_threshold:
+                confirmation_score += 0.35
+                confirmation_reasons.append(f"delta_shift={delta_shift:.3f}")
+            stop = _as_float(recent["high"].max()) + atr * sl_buffer_atr
             risk = stop - price
-            if risk <= 0:
-                _reject(
-                    prepared,
-                    setup_id,
-                    "risk_non_positive_short",
-                    stop=stop,
-                    price=price,
-                )
-                return None
-            # TP1: funding mean-reversion level (mark price before funding spike = recent low)
-            recent_lows = w["low"].slice(-(trend_window + 1), trend_window)
-            tp1 = _as_float(recent_lows.min()) if recent_lows.len() > 0 else None
-            # TP2: prior structural level (1h swing low)
+            tp1 = _as_float(w["low"].slice(-(trend_window + 1), trend_window).min())
             from ..features import _swing_points as _sp
 
             w1h = prepared.work_1h
             tp2 = None
             if w1h.height > 5:
-                sh_mask, sl_mask = _sp(w1h, n=3, include_unconfirmed_tail=True)
+                _, sl_mask = _sp(w1h, n=3, include_unconfirmed_tail=True)
                 sl_prices = w1h.filter(sl_mask)["low"]
                 tp2_cands = sl_prices.filter(sl_prices < price)
                 tp2 = _as_float(tp2_cands[-1]) if tp2_cands.len() > 0 else None
         else:
-            # Extreme shorts → look for long reversal
-            # Confirm: close > open, lower wick > body * 1.5
-            lower_wick = min(bar_open, bar_close) - bar_low
-            if not (bar_close > bar_open and body > 0 and lower_wick >= body * 1.5):
-                _reject(prepared, setup_id, "reversal_candle_missing_long")
-                return None
-            if latest_delta_ratio is not None and delta_shift < min_delta_threshold:
-                _reject(
-                    prepared,
-                    setup_id,
-                    "delta_confirmation_missing_long",
-                    delta_ratio=latest_delta_ratio,
-                    min_delta_threshold=min_delta_threshold,
-                )
-                return None
-            direction = "long"
-            # SL: beyond the extreme funding candle's wick tip + configured ATR buffer
-            stop = bar_low - atr * sl_buffer_atr
+            if rsi <= 42.0:
+                confirmation_score += 0.35
+                confirmation_reasons.append(f"rsi={rsi:.1f}")
+            if bb_pct_b <= 0.20 or close_position <= 0.35:
+                confirmation_score += 0.35
+                confirmation_reasons.append("price_extended_down")
+            if latest_delta_ratio is not None and delta_shift >= min_delta_threshold:
+                confirmation_score += 0.35
+                confirmation_reasons.append(f"delta_shift={delta_shift:.3f}")
+            stop = _as_float(recent["low"].min()) - atr * sl_buffer_atr
             risk = price - stop
-            if risk <= 0:
-                _reject(prepared, setup_id, "risk_non_positive_long", stop=stop, price=price)
-                return None
-            # TP1: funding mean-reversion level (mark price before funding spike = recent high)
-            recent_highs = w["high"].slice(-(trend_window + 1), trend_window)
-            tp1 = _as_float(recent_highs.max()) if recent_highs.len() > 0 else None
-            # TP2: prior structural level (1h swing high)
+            tp1 = _as_float(w["high"].slice(-(trend_window + 1), trend_window).max())
             from ..features import _swing_points as _sp
 
             w1h = prepared.work_1h
@@ -243,10 +232,42 @@ class FundingReversalSetup(BaseSetup):
                 tp2_cands = sh_prices.filter(sh_prices > price)
                 tp2 = _as_float(tp2_cands[0]) if tp2_cands.len() > 0 else None
 
-        # Validate: TP1 must satisfy configured risk/reward floor, else reject
+        if vol_ratio >= min_volume_ratio:
+            confirmation_score += 0.25
+            confirmation_reasons.append(f"vol_ratio={vol_ratio:.2f}")
+        if funding_trend == "flat":
+            confirmation_score *= 0.95
+            confirmation_reasons.append("funding_trend_flat_penalty")
+        elif direction == "short" and funding_trend == "falling":
+            confirmation_score *= 0.90
+            confirmation_reasons.append("funding_unwinding_penalty")
+        elif direction == "long" and funding_trend == "rising":
+            confirmation_score *= 0.90
+            confirmation_reasons.append("funding_unwinding_penalty")
+
+        if confirmation_score < min_confirmation_score:
+            _reject(
+                prepared,
+                setup_id,
+                "funding_reversal_confirmation_missing",
+                direction=direction,
+                confirmation_score=round(confirmation_score, 3),
+                min_confirmation_score=min_confirmation_score,
+                rsi=rsi,
+                bb_pct_b=bb_pct_b,
+                close_position=close_position,
+                delta_shift=delta_shift,
+                vol_ratio=vol_ratio,
+            )
+            return None
+        if risk <= 0:
+            _reject(prepared, setup_id, f"risk_non_positive_{direction}", stop=stop, price=price)
+            return None
+
+        fallback_note = None
         if tp1 is None or abs(tp1 - price) < risk * min_rr:
-            _reject(prepared, setup_id, "tp1_too_close_or_missing", tp1=tp1, risk=risk)
-            return None  # Reject this funding reversal setup
+            tp1 = price + risk * min_rr if direction == "long" else price - risk * min_rr
+            fallback_note = f"tp1_rr_fallback_{min_rr:.2f}"
         if tp2 is None or abs(tp2 - price) <= abs(tp1 - price):
             tp2 = (
                 price + risk * max(2.0, min_rr + 0.35)
@@ -254,19 +275,22 @@ class FundingReversalSetup(BaseSetup):
                 else price - risk * max(2.0, min_rr + 0.35)
             )
 
-        rsi = _as_float(w.item(-1, "rsi14"), 50.0)
         score = _compute_dynamic_score(
             direction=direction,
             base_score=base_score,
             vol_ratio=vol_ratio,
             rsi=rsi,
         )
+        score *= min(1.20, max(0.80, 0.85 + confirmation_score * 0.10))
 
         reasons = [
             f"Funding reversal {direction}: fr={fr:.5f} trend={funding_trend or 'unknown'}",
-            f"vol_ratio={vol_ratio:.2f} delta_shift={delta_shift:.3f} trend_window={trend_window}",
-            f"sl_buffer_atr={sl_buffer_atr:.2f} min_rr={min_rr:.2f} reversal_candle=yes",
+            f"confirmation_score={confirmation_score:.2f} trend_window={trend_window}",
+            f"sl_buffer_atr={sl_buffer_atr:.2f} min_rr={min_rr:.2f}",
+            *confirmation_reasons,
         ]
+        if fallback_note:
+            reasons.append(fallback_note)
 
         return _build_signal(
             prepared=prepared,

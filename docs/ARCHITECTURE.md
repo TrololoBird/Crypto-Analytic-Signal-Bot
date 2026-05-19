@@ -58,7 +58,10 @@
 - Public feature payload schema is fixed by `bot/domain/contracts.py` (`PUBLIC_FEATURE_FIELDS`, schema `v1`).
 - `bot/outcomes.py::build_prepared_feature_snapshot(...)` must emit **exactly** this field set in stable order.
 - Missing fields and unexpected additions are treated as contract violations and rejected by validator.
-- Runtime call-path modules (`bot/application/bot.py`, `bot/application/symbol_analyzer.py`, `bot/core/engine/engine.py`, `bot/strategies/__init__.py`) must not import experimental/scaffold modules.
+- Runtime call-path modules (`bot/application/bot.py`, `bot/application/symbol_analyzer.py`, `bot/core/engine/engine.py`, `bot/strategies/__init__.py`) must not import scaffold/prototype modules that are not intended for live signal generation. Strategy metadata status strings such as `experimental` are descriptive and do not by themselves make an exported strategy non-runtime.
+- `PreparedSymbol` requires viable `15m` and `1h` frames. `5m` and `4h` frames
+  are optional context and must degrade to neutral/missing context instead of
+  preventing every strategy from running for a symbol.
 
 ## Signal-context contract
 

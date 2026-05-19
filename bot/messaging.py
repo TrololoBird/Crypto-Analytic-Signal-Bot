@@ -109,7 +109,7 @@ def _telegram_retry() -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Await
                 stop=stop_after_attempt(3),
                 wait=wait_exponential(multiplier=1, min=2, max=10),
                 retry=retry_if_exception_type((Exception,)),
-                before_sleep=before_sleep_log(RETRY_LOG, logging.WARNING),
+                before_sleep=before_sleep_log(RETRY_LOG, logging.INFO),
                 reraise=True,
             ),
         )
@@ -444,7 +444,7 @@ class TelegramBroadcaster:
 
         if retry_after:
             self._rate_limit_until = datetime.now(UTC) + timedelta(seconds=retry_after)
-            LOG.warning("telegram rate limited; pausing sends", seconds=retry_after)
+            LOG.info("telegram rate limited; pausing sends", seconds=retry_after)
 
         self._failure_count += 1
         LOG.error("telegram send failed", attempt=f"{self._failure_count}/5", error=str(exc))
@@ -597,7 +597,7 @@ class WebhookBroadcaster:
             ) as response:
                 if response.status >= 400:
                     body = await response.text()
-                    LOG.warning(
+                    LOG.error(
                         "webhook delivery failed | provider=%s status=%s body=%s",
                         self.provider,
                         response.status,
@@ -605,7 +605,7 @@ class WebhookBroadcaster:
                     )
                     return DeliveryResult(status="failed", reason=f"http_{response.status}")
         except Exception as exc:
-            LOG.warning("webhook delivery failed | provider=%s error=%s", self.provider, exc)
+            LOG.exception("webhook delivery failed | provider=%s", self.provider)
             return DeliveryResult(status="failed", reason=f"{exc.__class__.__name__}: {exc}")
         return DeliveryResult(status="sent")
 

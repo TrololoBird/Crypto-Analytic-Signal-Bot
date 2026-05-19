@@ -1,7 +1,7 @@
 """Break of Structure / Change of Character (BOS/CHoCH) setup detector.
 
-Uses _swing_points to classify swing structure on work_15m.
-Focuses on CHoCH signals (structure reversal) as entry triggers.
+Uses SMC swing structure on work_15m. BOS is handled as continuation/
+acceptance, CHoCH as reversal; both are valid events for this setup_id.
 
 # WINDSURF_REVIEW: unified + vectorized + 1H context + graded
 """
@@ -198,7 +198,9 @@ class BOSCHOCHSetup(BaseSetup):
             "choch_lookback": 6,  # Backward-compatible alias.
             "sl_buffer_atr": 0.2,
             "breakout_threshold_atr": 0.4,
-            "max_break_age_bars": 3,
+            "max_break_age_bars": 6,
+            "max_retest_age_bars": 16,
+            "retest_atr_mult": 1.25,
             "min_volume_ratio": 1.05,
             "bias_mismatch_penalty": 0.75,
             "min_rr": 1.9,
@@ -251,6 +253,12 @@ class BOSCHOCHSetup(BaseSetup):
         max_break_age_bars = int(
             dynamic_params.get("max_break_age_bars", defaults["max_break_age_bars"])
         )
+        max_retest_age_bars = int(
+            dynamic_params.get("max_retest_age_bars", defaults["max_retest_age_bars"])
+        )
+        retest_atr_mult = float(
+            dynamic_params.get("retest_atr_mult", defaults["retest_atr_mult"])
+        )
         min_volume_ratio = float(
             dynamic_params.get("min_volume_ratio", defaults["min_volume_ratio"])
         )
@@ -289,10 +297,10 @@ class BOSCHOCHSetup(BaseSetup):
             )
             if (
                 unconfirmed_zone is not None
-                and unconfirmed_zone.kind == "choch"
+                and unconfirmed_zone.kind in {"bos", "choch"}
                 and int(unconfirmed_zone.broken_index or 0) >= w.height - 1
             ):
-                _reject(prepared, setup_id, "choch_on_unconfirmed_bar")
+                _reject(prepared, setup_id, "structure_break_on_unconfirmed_bar")
                 return None
 
         scan = w if last_bar_is_closed else w.head(w.height - 1)
@@ -333,15 +341,19 @@ class BOSCHOCHSetup(BaseSetup):
             swing_length=swing_lookback,
             prefer_kind="choch",
         )
-        if structure_zone is None or structure_zone.kind != "choch":
-            _reject(prepared, setup_id, "no_choch_detected")
+        if structure_zone is None:
+            _reject(prepared, setup_id, "no_bos_choch_detected")
             return None
+        if structure_zone.kind not in {"bos", "choch"}:
+            _reject(prepared, setup_id, "invalid_structure_break_kind", kind=structure_zone.kind)
+            return None
+        break_kind = str(structure_zone.kind)
         direction = structure_zone.direction
         if structure_zone.level is None or structure_zone.broken_index is None:
             _reject(
                 prepared,
                 setup_id,
-                "invalid_choch_zone",
+                "invalid_bos_choch_zone",
                 level=structure_zone.level,
                 broken_index=structure_zone.broken_index,
             )
@@ -349,16 +361,22 @@ class BOSCHOCHSetup(BaseSetup):
         broken_index = int(structure_zone.broken_index)
         broken_index = max(0, min(broken_index, scan.height - 1))
         break_age = scan.height - 1 - broken_index
-        if break_age > max_break_age_bars:
+        break_level = float(structure_zone.level)
+        retest_active = break_age <= max_retest_age_bars and abs(price - break_level) <= (
+            atr * retest_atr_mult
+        )
+        if break_age > max_break_age_bars and not retest_active:
             _reject(
                 prepared,
                 setup_id,
-                "choch_break_too_old",
+                "structure_break_too_old",
                 break_age=break_age,
                 max_break_age_bars=max_break_age_bars,
+                max_retest_age_bars=max_retest_age_bars,
+                distance_atr=abs(price - break_level) / atr,
+                kind=break_kind,
             )
             return None
-        break_level = float(structure_zone.level)
         raw_break_close = scan.item(broken_index, "close")
         if raw_break_close is None:
             _reject(prepared, setup_id, "break_close_missing", broken_index=broken_index)
@@ -372,10 +390,11 @@ class BOSCHOCHSetup(BaseSetup):
             _reject(
                 prepared,
                 setup_id,
-                "choch_break_too_weak",
+                "structure_break_too_weak",
                 break_distance=break_distance,
                 min_break_distance=min_break_distance,
                 breakout_threshold_atr=breakout_threshold_atr,
+                kind=break_kind,
             )
             return None
         vol_ratio = float(scan.item(broken_index, "volume_ratio20") or 1.0)
@@ -383,9 +402,10 @@ class BOSCHOCHSetup(BaseSetup):
             _reject(
                 prepared,
                 setup_id,
-                "choch_volume_too_low",
+                "structure_break_volume_too_low",
                 vol_ratio=vol_ratio,
                 min_volume_ratio=min_volume_ratio,
+                kind=break_kind,
             )
             return None
         stop_price = None
@@ -531,11 +551,14 @@ class BOSCHOCHSetup(BaseSetup):
             vol_ratio=vol_ratio,
             rsi=rsi,
         )
+        if break_kind == "bos":
+            score *= float(dynamic_params.get("bos_score_multiplier", 0.94))
 
         reasons = [
-            f"CHoCH {direction}: structure reversal level={structure_zone.level:.4f}",
+            f"{break_kind.upper()} {direction}: structure level={structure_zone.level:.4f}",
             f"break_close={break_close:.4f} break_age={break_age}",
             f"break_distance_atr={break_distance / atr:.2f}",
+            f"retest_active={retest_active}",
             f"vol_ratio={vol_ratio:.2f}",
             f"{stop_source}_sl={pivot_level:.4f}",
             f"sh[-3]={sh_vals[-3]:.4f} sh[-2]={sh_vals[-2]:.4f} sh[-1]={sh_vals[-1]:.4f}",

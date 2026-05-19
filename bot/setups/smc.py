@@ -354,8 +354,8 @@ def order_blocks(
 
         crossed[last_top_index] = True
         default_index = max(close_index - 1, 0)
-        ob_bottom = high[default_index]
-        ob_top = low[default_index]
+        ob_top = high[default_index]
+        ob_bottom = low[default_index]
         ob_index = default_index
 
         if close_index - last_top_index > 1:
@@ -495,9 +495,11 @@ def liquidity_pools(
     atr_window = true_range[-min(14, length) :] if length else true_range
     atr = float(np.nanmean(atr_window)) if atr_window.size else 0.0
     median_price = float(np.nanmedian(close)) if length else 0.0
-    pip_range = atr * float(range_percent) * 2.0
+    # ``range_percent`` is a price-distance tolerance, e.g. 0.0015 means
+    # equal highs/lows within 0.15% of the instrument price.
+    pip_range = abs(median_price) * float(range_percent)
     if pip_range <= 0.0:
-        pip_range = abs(median_price) * float(range_percent)
+        pip_range = atr * float(range_percent) * 2.0
     sweep_buffer = max(pip_range * 0.10, abs(median_price) * 1e-5)
 
     shl_hl = swing_high_low.copy()
@@ -792,8 +794,10 @@ def latest_order_block(
         raw_direction = zones.item(idx, "OB")
         if _is_missing(raw_direction):
             continue
-        top = float(zones.item(idx, "Top"))
-        bottom = float(zones.item(idx, "Bottom"))
+        raw_top = float(zones.item(idx, "Top"))
+        raw_bottom = float(zones.item(idx, "Bottom"))
+        top = max(raw_top, raw_bottom)
+        bottom = min(raw_top, raw_bottom)
         direction = "long" if float(raw_direction) > 0 else "short"
         mitigation_index, invalidation_index = _order_block_touch_indices(
             frame,
@@ -805,8 +809,8 @@ def latest_order_block(
         state = _zone_state(mitigation_index, invalidation_index)
         if state not in allowed_states:
             continue
-        low = min(top, bottom)
-        high = max(top, bottom)
+        low = bottom
+        high = top
         if current_price is not None:
             if not ((low - touch_buffer) <= current_price <= (high + touch_buffer)):
                 continue
@@ -927,8 +931,10 @@ def latest_breaker_block(
         raw_direction = zones.item(idx, "OB")
         if _is_missing(raw_direction):
             continue
-        top = float(zones.item(idx, "Top"))
-        bottom = float(zones.item(idx, "Bottom"))
+        raw_top = float(zones.item(idx, "Top"))
+        raw_bottom = float(zones.item(idx, "Bottom"))
+        top = max(raw_top, raw_bottom)
+        bottom = min(raw_top, raw_bottom)
         direction = "long" if float(raw_direction) > 0 else "short"
         mitigation_index, invalidation_index = _order_block_touch_indices(
             frame,
@@ -939,8 +945,8 @@ def latest_breaker_block(
         )
         if invalidation_index is None:
             continue
-        low = min(top, bottom)
-        high = max(top, bottom)
+        low = bottom
+        high = top
         if current_price is not None:
             if not ((low - retest_buffer) <= current_price <= (high + retest_buffer)):
                 continue

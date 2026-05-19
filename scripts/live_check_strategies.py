@@ -42,6 +42,7 @@ async def _build_prepared(
     minimums: dict[str, int],
     meta_map: dict[str, Any],
     ticker_map: dict[str, dict[str, Any]],
+    market_context: dict[str, Any],
     symbol: str,
 ):
     meta = meta_map.get(symbol)
@@ -62,12 +63,12 @@ async def _build_prepared(
     )
     frames = SymbolFrames(
         symbol=symbol,
-        df_1h=await client.fetch_klines_cached(symbol, "1h", limit=300),
-        df_15m=await client.fetch_klines_cached(symbol, "15m", limit=300),
+        df_1h=await client.fetch_klines_cached(symbol, "1h", limit=500),
+        df_15m=await client.fetch_klines_cached(symbol, "15m", limit=500),
         bid_price=None,
         ask_price=None,
         df_5m=await client.fetch_klines_cached(symbol, "5m", limit=300),
-        df_4h=await client.fetch_klines_cached(symbol, "4h", limit=300),
+        df_4h=await client.fetch_klines_cached(symbol, "4h", limit=500),
     )
     try:
         book_context = await client._fetch_book_ticker_rest_detail(symbol)
@@ -93,6 +94,17 @@ async def _build_prepared(
     prepared = prepare_symbol(item, frames, minimums=minimums, settings=settings)
     if prepared is None:
         return None
+    try:
+        premium_rows = await client.fetch_premium_index_all()
+        premium = premium_rows.get(symbol, {})
+    except Exception:
+        premium = {}
+    mark_price = premium.get("mark_price")
+    basis_pct = premium.get("basis_pct")
+    if isinstance(mark_price, int | float) and float(mark_price) > 0.0:
+        prepared.mark_price = float(mark_price)
+    if isinstance(basis_pct, int | float):
+        prepared.basis_pct = float(basis_pct)
     prepared.oi_current = client.get_cached_open_interest(symbol)
     prepared.oi_change_pct = client.get_cached_oi_change(symbol)
     prepared.ls_ratio = client.get_cached_ls_ratio(symbol)
@@ -102,6 +114,9 @@ async def _build_prepared(
     prepared.taker_ratio = client.get_cached_taker_ratio(symbol)
     prepared.funding_rate = client.get_cached_funding_rate(symbol)
     prepared.funding_trend = client.get_cached_funding_trend(symbol)
+    for key in ("btc_bias", "eth_bias", "altcoin_season_index", "btc_phase"):
+        if key in market_context:
+            setattr(prepared, key, market_context[key])
     return prepared
 
 
@@ -131,6 +146,53 @@ def _top_volume_symbols(
     return [symbol for symbol, _volume in rows[: max(1, int(limit or 30))]]
 
 
+def _market_context_from_tickers(ticker_map: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    def change_pct(symbol: str) -> float:
+        row = ticker_map.get(symbol, {})
+        try:
+            return float(row.get("price_change_percent") or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def bias(symbol: str) -> str:
+        change = change_pct(symbol)
+        if change > 2.0:
+            return "uptrend"
+        if change < -2.0:
+            return "downtrend"
+        return "neutral"
+
+    btc_change = change_pct("BTCUSDT")
+    alt_changes = [
+        change_pct(symbol)
+        for symbol in ticker_map
+        if symbol.endswith("USDT") and symbol not in {"BTCUSDT", "ETHUSDT"}
+    ]
+    if alt_changes:
+        avg_alt_change = sum(alt_changes) / len(alt_changes)
+        alt_index = max(0.0, min(100.0, 50.0 + (avg_alt_change - btc_change) * 5.0))
+    else:
+        alt_index = 50.0
+    eth_change = change_pct("ETHUSDT")
+    dominance_24h = btc_change - eth_change
+    if btc_change > 1.5 and dominance_24h >= 0:
+        btc_phase = "markup"
+    elif btc_change < -1.5 and dominance_24h >= 0:
+        btc_phase = "decline"
+    elif dominance_24h < 0 and btc_change <= 0.5:
+        btc_phase = "accumulation"
+    elif dominance_24h < 0 and btc_change > 0.5:
+        btc_phase = "distribution"
+    else:
+        btc_phase = "sideways"
+    return {
+        "btc_bias": bias("BTCUSDT"),
+        "eth_bias": bias("ETHUSDT"),
+        "altcoin_season_index": alt_index,
+        "btc_phase": btc_phase,
+    }
+
+
 async def _run(symbols: list[str], concurrency: int, limit: int) -> None:
     settings = load_settings()
     minimums = min_required_bars(
@@ -155,6 +217,7 @@ async def _run(symbols: list[str], concurrency: int, limit: int) -> None:
             for row in ticker_rows
             if isinstance(row, dict)
         }
+        market_context = _market_context_from_tickers(ticker_map)
         if not symbols:
             symbols = _top_volume_symbols(
                 ticker_rows=ticker_rows,
@@ -166,7 +229,9 @@ async def _run(symbols: list[str], concurrency: int, limit: int) -> None:
         hits_by_setup: Counter[str] = Counter()
         errors_by_setup: Counter[str] = Counter()
         rejects_by_setup: Counter[str] = Counter()
+        skips_by_setup: Counter[str] = Counter()
         reject_reasons: Counter[str] = Counter()
+        skip_reasons: Counter[str] = Counter()
         detector_runs = 0
         prepared_ok = 0
         failures: list[dict[str, Any]] = []
@@ -181,6 +246,7 @@ async def _run(symbols: list[str], concurrency: int, limit: int) -> None:
                     minimums,
                     meta_map,
                     ticker_map,
+                    market_context,
                     symbol,
                 )
                 if prepared is None:
@@ -205,6 +271,9 @@ async def _run(symbols: list[str], concurrency: int, limit: int) -> None:
                     if decision is not None and decision.is_reject:
                         rejects_by_setup.update([setup_id])
                         reject_reasons.update([decision.reason_code])
+                    if decision is not None and decision.is_skip:
+                        skips_by_setup.update([setup_id])
+                        skip_reasons.update([decision.reason_code])
                     if result.error:
                         errors_by_setup.update([setup_id])
                     elif result.signal is not None:
@@ -220,11 +289,13 @@ async def _run(symbols: list[str], concurrency: int, limit: int) -> None:
             strategy_errors=errors_by_setup.most_common(),
             strategy_rejects=rejects_by_setup.most_common(20),
             strategy_reject_reasons=reject_reasons.most_common(15),
+            strategy_skips=skips_by_setup.most_common(20),
+            strategy_skip_reasons=skip_reasons.most_common(15),
         )
         if prepared_ok <= 0:
             raise RuntimeError("no symbols prepared from live Binance data")
         if failures:
-            LOG.warning("strategy_prepare_failures", failures=failures[:20])
+            LOG.info("strategy_prepare_failures", failures=failures[:20])
         if errors_by_setup:
             raise RuntimeError(f"strategy errors detected: {errors_by_setup.most_common()}")
     finally:
@@ -234,7 +305,7 @@ async def _run(symbols: list[str], concurrency: int, limit: int) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Live strategy detector-surface review")
     parser.add_argument("--symbols", nargs="*", default=[])
-    parser.add_argument("--symbols-from-run", default="20260421_215817_70948")
+    parser.add_argument("--symbols-from-run", default="")
     parser.add_argument("--limit", type=int, default=12)
     parser.add_argument("--concurrency", type=int, default=2)
     args = parser.parse_args()

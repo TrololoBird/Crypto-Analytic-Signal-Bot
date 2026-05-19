@@ -80,6 +80,7 @@ async def _run(
     *,
     runtime_seconds: float = 0.0,
     shutdown_timeout_seconds: float = 60.0,
+    final_emergency_timeout_seconds: float = 180.0,
     force_exit_on_close_timeout: bool = False,
     run_final_emergency_cycle: bool = True,
 ) -> None:
@@ -102,7 +103,21 @@ async def _run(
         else:
             await asyncio.sleep(warmup_seconds)
         if run_final_emergency_cycle:
-            summary = await bot._run_emergency_cycle()
+            try:
+                summary = await asyncio.wait_for(
+                    bot._run_emergency_cycle(),
+                    timeout=final_emergency_timeout_seconds,
+                )
+            except TimeoutError:
+                summary = {
+                    "executed": False,
+                    "reason": "final_emergency_cycle_timeout",
+                    "timeout_seconds": float(final_emergency_timeout_seconds),
+                }
+                LOG.info(
+                    "final_emergency_cycle_timeout",
+                    timeout_seconds=float(final_emergency_timeout_seconds),
+                )
         else:
             summary = {
                 "executed": False,
@@ -141,7 +156,7 @@ async def _run(
             try:
                 await asyncio.wait_for(runtime_task, timeout=shutdown_timeout_seconds)
             except TimeoutError:
-                LOG.warning(
+                LOG.error(
                     "runtime task did not stop within timeout; cancelling",
                     timeout_seconds=shutdown_timeout_seconds,
                 )
@@ -151,7 +166,7 @@ async def _run(
         try:
             await asyncio.wait_for(bot.close(), timeout=shutdown_timeout_seconds)
         except TimeoutError:
-            LOG.warning(
+            LOG.error(
                 "bot close timed out after live smoke summary",
                 timeout_seconds=shutdown_timeout_seconds,
             )
@@ -182,6 +197,12 @@ def main() -> None:
         help="Maximum seconds to wait for runtime shutdown and resource close.",
     )
     parser.add_argument(
+        "--final-emergency-timeout-seconds",
+        type=float,
+        default=180.0,
+        help="Maximum seconds to wait for the optional final emergency cycle.",
+    )
+    parser.add_argument(
         "--force-exit-on-close-timeout",
         action="store_true",
         help="Hard-exit after a close timeout once the live smoke summary has been written.",
@@ -200,6 +221,9 @@ def main() -> None:
             args.warmup_seconds,
             runtime_seconds=max(0.0, float(args.runtime_seconds)),
             shutdown_timeout_seconds=max(1.0, float(args.shutdown_timeout_seconds)),
+            final_emergency_timeout_seconds=max(
+                1.0, float(args.final_emergency_timeout_seconds)
+            ),
             force_exit_on_close_timeout=bool(args.force_exit_on_close_timeout),
             run_final_emergency_cycle=not bool(args.skip_final_emergency_cycle),
         )

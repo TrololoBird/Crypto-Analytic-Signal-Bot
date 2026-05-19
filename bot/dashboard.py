@@ -6,8 +6,8 @@ import json
 import logging
 import webbrowser
 import asyncio
-from collections import Counter
-from datetime import datetime, timezone
+from collections import Counter, deque
+from datetime import datetime, timedelta, timezone
 import time
 from pathlib import Path
 from typing import Any, TYPE_CHECKING, cast
@@ -39,13 +39,15 @@ class BotDashboard:
         self._enabled = HAS_FASTAPI
         self.app: FastAPI | None = None
         self._strategies_cache: list[dict[str, Any]] | None = None
-        self._analytics_cache: dict[int, tuple[float, dict[str, Any]]] = {}
+        self._analytics_cache: dict[
+            tuple[str, int, str | None], tuple[float, dict[str, Any]]
+        ] = {}
         self._decision_cache: dict[
             tuple[int, int], tuple[float, tuple[tuple[str, float], ...], dict[str, Any]]
         ] = {}
 
         if not self._enabled:
-            LOG.warning("fastapi not installed, dashboard disabled")
+            LOG.info("fastapi not installed, dashboard disabled")
             return
 
         app = _FastAPI(title="Signal Bot Dashboard", version="2.0.0")
@@ -133,7 +135,7 @@ class BotDashboard:
                 return {"status": "error", "detail": str(exc)}
 
         @self.app.get("/api/analytics/report")
-        async def analytics_report(days: int = 30) -> dict[str, Any]:
+        async def analytics_report(days: int = 30, scope: str = "current_run") -> dict[str, Any]:
             try:
                 from .analytics import StrategyAnalytics
             except ImportError as exc:
@@ -141,18 +143,33 @@ class BotDashboard:
                 return {"error": "analytics_unavailable"}
 
             days = max(1, min(int(days), 365))
+            normalized_scope = str(scope or "current_run").strip().lower()
+            if normalized_scope not in {"current_run", "rolling", "all"}:
+                normalized_scope = "current_run"
+            since = self._analytics_since(normalized_scope, days=days)
+            since_key = since.isoformat() if since is not None else None
 
             # TTL Cache for analytics report (60s)
             now = time.monotonic()
-            cached = self._analytics_cache.get(days)
+            cache_key = (normalized_scope, days, since_key)
+            cached = self._analytics_cache.get(cache_key)
             if cached and (now - cached[0]) < 60.0:
                 return cached[1]
 
             reporter = StrategyAnalytics(repo=self.bot._modern_repo)
-            report = await reporter.generate_report(days=days)
-            merged = self._merge_strategy_catalog(report)
+            report = await reporter.generate_report(
+                days=days,
+                since=since,
+                scope=normalized_scope,
+            )
+            decision_summary = await asyncio.to_thread(
+                self._get_strategy_decision_summary,
+                limit_files=1,
+                max_rows=50_000,
+            )
+            merged = self._merge_strategy_catalog(report, decision_summary=decision_summary)
 
-            self._analytics_cache[days] = (now, merged)
+            self._analytics_cache[cache_key] = (now, merged)
             return merged
 
         @self.app.get("/api/analytics/strategy-decisions")
@@ -214,27 +231,49 @@ class BotDashboard:
                     }
                 )
             LOG.info("dashboard cached %d strategies", len(self._strategies_cache))
-        except Exception as exc:
-            LOG.warning("failed to cache strategies: %s", exc)
+        except Exception:
+            LOG.exception("failed to cache strategies")
             self._strategies_cache = []
 
     @staticmethod
     def _runtime_strategy_status(row: dict[str, Any], catalog_status: str) -> str:
         trades = int(row.get("trades") or row.get("count") or 0)
+        pending = int(row.get("pending_signals") or 0)
+        active = int(row.get("active_signals") or 0)
+        signals_seen = int(row.get("signals_seen") or 0)
+        missing_outcomes = int(row.get("closed_missing_outcomes") or 0)
+        detector_runs = int(row.get("detector_runs") or 0)
+        detector_hits = int(row.get("detector_hits") or 0)
         expectancy = float(row.get("expectancy_r") or row.get("avg_rr") or 0.0)
         win_rate = float(row.get("win_rate") or 0.0)
         if trades <= 0:
+            if pending or active:
+                return "observing:open"
+            if missing_outcomes:
+                return "observing:outcome_repair_needed"
+            if detector_hits:
+                return "observing:detector_active"
+            if detector_runs:
+                return "observing:market_condition"
+            if signals_seen:
+                return f"observing:{catalog_status}"
             return "unverified"
         if trades >= 5 and expectancy < 0.0:
             return "needs_rework"
-        if trades >= 5 and expectancy > 0.0 and win_rate >= 45.0:
+        if trades >= 5 and expectancy > 0.0 and win_rate >= 0.45:
             return "validated"
         return f"observing:{catalog_status}"
 
-    def _merge_strategy_catalog(self, report: dict[str, Any]) -> dict[str, Any]:
+    def _merge_strategy_catalog(
+        self,
+        report: dict[str, Any],
+        *,
+        decision_summary: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Attach every registered strategy to analytics, including zero-outcome rows."""
         catalog = self._strategies_cache or []
         by_setup = report.get("by_setup") or {}
+        decision_setups = (decision_summary or {}).get("setups") or {}
 
         enabled_count = 0
         for item in catalog:
@@ -254,11 +293,25 @@ class BotDashboard:
                     "win_rate": 0.0,
                     "expectancy_r": 0.0,
                     "avg_rr": 0.0,
+                    "outcomes": 0,
+                    "signals_seen": 0,
+                    "pending_signals": 0,
+                    "active_signals": 0,
+                    "closed_signals": 0,
+                    "closed_missing_outcomes": 0,
                     "profit_factor": None,
                     "max_drawdown_r": 0.0,
                 }
 
             row = by_setup[setup_id]
+            decision_row = decision_setups.get(setup_id) or {}
+            row["detector_runs"] = int(decision_row.get("total") or 0)
+            row["detector_hits"] = int(decision_row.get("signals") or 0)
+            row["detector_signal_rate"] = float(decision_row.get("signal_rate") or 0.0)
+            blockers = decision_row.get("top_blockers") or []
+            row["top_detector_blocker"] = (
+                blockers[0].get("reason") if blockers and isinstance(blockers[0], dict) else None
+            )
             row["enabled"] = is_enabled
             catalog_status = str(item.get("status", "beta") or "beta")
             row["catalog_status"] = catalog_status
@@ -279,10 +332,61 @@ class BotDashboard:
         report["setup_reports"] = setup_reports
         report["registered_strategies"] = len(catalog)
         report["enabled_strategies"] = enabled_count
+        report["decision_summary"] = decision_summary or {}
         return report
 
     def _get_html_dashboard(self) -> str:
         return DASHBOARD_HTML
+
+    def _current_run_id(self) -> str | None:
+        telemetry = getattr(self.bot, "telemetry", None)
+        run_id = getattr(telemetry, "run_id", None)
+        return str(run_id) if run_id else None
+
+    def _current_run_started_at(self) -> datetime | None:
+        telemetry = getattr(self.bot, "telemetry", None)
+        started_at = getattr(telemetry, "started_at", None)
+        parsed = self._parse_datetime(started_at)
+        if parsed is not None:
+            return parsed
+
+        run_id = self._current_run_id()
+        settings = getattr(self.bot, "settings", None)
+        telemetry_dir = getattr(settings, "telemetry_dir", None)
+        if run_id and telemetry_dir:
+            metadata_path = Path(telemetry_dir) / "runs" / run_id / "run_metadata.json"
+            try:
+                payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+                parsed = self._parse_datetime(payload.get("started_at"))
+                if parsed is not None:
+                    return parsed
+            except (OSError, json.JSONDecodeError):
+                pass
+            try:
+                stamp = "_".join(run_id.split("_")[:2])
+                return datetime.strptime(stamp, "%Y%m%d_%H%M%S").replace(tzinfo=UTC)
+            except (ValueError, TypeError):
+                return None
+        return None
+
+    def _analytics_since(self, scope: str, *, days: int) -> datetime | None:
+        if scope == "current_run":
+            return self._current_run_started_at()
+        if scope == "all":
+            return None
+        return datetime.now(UTC) - timedelta(days=max(1, int(days)))
+
+    @staticmethod
+    def _parse_datetime(value: Any) -> datetime | None:
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value if value.tzinfo else value.replace(tzinfo=UTC)
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            return None
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
     async def _get_status(self) -> dict[str, Any]:
         bot = self.bot
@@ -415,41 +519,15 @@ class BotDashboard:
             return []
         rows: list[dict[str, Any]] = []
         try:
-            with path.open("rb") as handle:
+            with path.open("r", encoding="utf-8", errors="ignore") as handle:
+                tail = deque(handle, maxlen=limit)
+            for line in reversed(tail):
+                if not line.strip():
+                    continue
                 try:
-                    handle.seek(0, 2)
-                    size = handle.tell()
-                    block_size = 4096
-                    data = b""
-                    lines_found = 0
-                    pos = size
-                    while pos > 0 and lines_found <= limit:
-                        pos = max(0, pos - block_size)
-                        handle.seek(pos)
-                        chunk = handle.read(min(block_size, size - pos))
-                        data = chunk + data
-                        lines_found = data.count(b"\n")
-
-                    lines = data.decode("utf-8", errors="ignore").splitlines()
-                    for line in reversed(lines):
-                        if not line.strip():
-                            continue
-                        try:
-                            rows.append(json.loads(line))
-                        except json.JSONDecodeError:
-                            continue
-                        if len(rows) >= limit:
-                            break
-                except (IOError, ValueError):
-                    handle.seek(0)
-                    lines = handle.read().decode("utf-8", errors="ignore").splitlines()
-                    for line in reversed(lines[-limit:]):
-                        if not line.strip():
-                            continue
-                        try:
-                            rows.append(json.loads(line))
-                        except json.JSONDecodeError:
-                            continue
+                    rows.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
         except Exception as exc:
             LOG.debug("failed to read telemetry file %s: %s", path, exc)
         return rows
@@ -530,11 +608,18 @@ class BotDashboard:
         if not runs_dir.exists():
             return []
         stem = filename.removesuffix(".jsonl")
-        return sorted(
+        current_run_id = self._current_run_id()
+        current_file = (
+            runs_dir / current_run_id / "analysis" / filename if current_run_id else None
+        )
+        files = sorted(
             runs_dir.glob(f"*/analysis/{stem}*.jsonl"),
             key=lambda path: path.stat().st_mtime,
             reverse=True,
-        )[: max(1, int(limit))]
+        )
+        if current_file is not None and current_file.exists():
+            files = [current_file, *[path for path in files if path != current_file]]
+        return files[: max(1, int(limit))]
 
     def _get_strategy_decision_summary(
         self,
@@ -549,12 +634,13 @@ class BotDashboard:
                 "total_rows": 0,
                 "status_counts": {},
                 "reason_family_counts": {},
+                "blocker_counts": {},
                 "setups": {},
                 "setup_reports": [],
             }
 
         limit_files = max(1, min(int(limit_files), 24))
-        max_rows = max(1, min(int(max_rows), 1_000_000))
+        max_rows = max(1, min(int(max_rows), 100_000))
         files = self._latest_analysis_files(
             bot.settings.telemetry_dir,
             "strategy_decisions.jsonl",
@@ -571,6 +657,7 @@ class BotDashboard:
 
         status_counts: Counter[str] = Counter()
         reason_family_counts: Counter[str] = Counter()
+        blocker_counts: Counter[str] = Counter()
         setup_counters: dict[str, dict[str, Counter[str]]] = {}
         total_rows = 0
 
@@ -589,12 +676,16 @@ class BotDashboard:
                         {
                             "status": Counter(),
                             "reason": Counter(),
+                            "blocker": Counter(),
                             "reason_family": Counter(),
                         },
                     )
                     counters["status"][status] += 1
                     counters["reason"][reason] += 1
                     counters["reason_family"][reason_family] += 1
+                    if status != "signal":
+                        counters["blocker"][reason] += 1
+                        blocker_counts[reason] += 1
                     status_counts[status] += 1
                     reason_family_counts[reason_family] += 1
                     total_rows += 1
@@ -612,6 +703,13 @@ class BotDashboard:
                     key=lambda item: (-item[1], item[0]),
                 )[:5]
             ]
+            top_blockers = [
+                {"reason": reason, "count": count}
+                for reason, count in sorted(
+                    counters["blocker"].items(),
+                    key=lambda item: (-item[1], item[0]),
+                )[:5]
+            ]
             setups[setup_id] = {
                 "setup_id": setup_id,
                 "total": total,
@@ -620,6 +718,7 @@ class BotDashboard:
                 "status_counts": dict(counters["status"]),
                 "reason_family_counts": dict(counters["reason_family"]),
                 "top_reasons": top_reasons,
+                "top_blockers": top_blockers,
             }
 
         setup_reports = sorted(
@@ -636,9 +735,11 @@ class BotDashboard:
             "total_rows": total_rows,
             "max_rows": max_rows,
             "limit_files": limit_files,
+            "run_id": self._current_run_id(),
             "generated_at": datetime.now(UTC).isoformat(),
             "status_counts": dict(status_counts),
             "reason_family_counts": dict(reason_family_counts),
+            "blocker_counts": dict(blocker_counts),
             "setups": setups,
             "setup_reports": setup_reports,
         }
@@ -718,12 +819,12 @@ class BotDashboard:
             try:
                 import uvicorn
             except Exception as exc:
-                LOG.warning("dashboard server failed to import uvicorn: %s", exc)
+                LOG.error("dashboard server failed to import uvicorn: %s", exc)
                 return
             try:
                 uvicorn.run(self.app, host=self.host, port=self.port, log_level="warning")
-            except Exception as exc:
-                LOG.warning("dashboard server crashed: %s", exc)
+            except Exception:
+                LOG.exception("dashboard server crashed")
 
         thread = Thread(target=run_server, daemon=True)
         thread.start()
@@ -1573,7 +1674,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             try {
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 8000);
-                const res = await fetch('/api/analytics/report?days=30', { signal: controller.signal });
+                const res = await fetch('/api/analytics/report?scope=current_run&days=30', { signal: controller.signal });
                 clearTimeout(timeoutId);
                 
                 if (!res.ok) {
@@ -1605,7 +1706,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         async function fetchStrategyDecisions() {
             const container = document.getElementById('decision-diagnostics');
             try {
-                const res = await fetch('/api/analytics/strategy-decisions?limit_files=1&max_rows=1000');
+                const res = await fetch('/api/analytics/strategy-decisions?limit_files=1&max_rows=50000');
                 if (!res.ok) throw new Error('HTTP ' + res.status);
                 const data = await res.json();
                 if (data.error) throw new Error(data.error);
@@ -1613,7 +1714,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                 const total = data.total_rows || 0;
                 const signals = (data.status_counts && data.status_counts.signal) || 0;
                 const signalRate = total ? (signals / total * 100).toFixed(2) + '%' : '0.00%';
-                const blockers = Object.entries(data.reason_family_counts || {})
+                const blockers = Object.entries(data.blocker_counts || {})
                     .sort((a, b) => b[1] - a[1]);
 
                 document.getElementById('decision-rows').textContent = total;
@@ -1626,7 +1727,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     return;
                 }
                 container.innerHTML = rows.map(row => {
-                    const topReason = row.top_reasons && row.top_reasons.length ? row.top_reasons[0].reason : '-';
+                    const topReason = row.top_blockers && row.top_blockers.length ? row.top_blockers[0].reason : 'raw_hit';
                     const rate = ((row.signal_rate || 0) * 100).toFixed(2) + '%';
                     return `
                         <div class="metric-row">
@@ -1652,19 +1753,19 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             }
             
             const setups = Object.entries(bySetup)
-                .sort((a, b) => (b[1].count || 0) - (a[1].count || 0))
+                .sort((a, b) => (b[1].signals_seen || b[1].count || 0) - (a[1].signals_seen || a[1].count || 0))
                 .slice(0, 10);  // Top 10 setups
             
-            const maxCount = Math.max(...setups.map(s => s[1].count || 0), 1);
+            const maxCount = Math.max(...setups.map(s => s[1].signals_seen || s[1].count || 0), 1);
             
             container.innerHTML = setups.map(([name, data]) => {
-                const count = data.count || 0;
+                const count = data.signals_seen || data.count || 0;
                 const height = (count / maxCount * 140) || 0;
                 const winRate = data.win_rate ? (data.win_rate * 100).toFixed(0) : '0';
                 const label = name.replace('Setup', '').replace('Strategy', '');
                 return `
                     <div class="chart-bar-wrapper">
-                        <div class="chart-bar" style="height: ${height}px" title="${name}: ${count} signals, ${winRate}% win">
+                        <div class="chart-bar" style="height: ${height}px" title="${name}: ${count} current-run signals, ${winRate}% win on closed trades">
                         </div>
                         <div class="chart-label">${label}</div>
                     </div>
@@ -1692,10 +1793,14 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                     const valueClass = row.expectancy_r > 0 ? 'green' : (row.expectancy_r < 0 ? 'red' : 'yellow');
                     const status = row.status || 'beta';
                     const suffix = row.enabled === false ? ' off' : status;
+                    const detectorHits = Number(row.detector_hits || 0);
+                    const detectorRuns = Number(row.detector_runs || 0);
+                    const detectorText = detectorRuns ? ` · detector ${detectorHits}/${detectorRuns}` : '';
+                    const blockerText = row.top_detector_blocker ? ` · ${row.top_detector_blocker}` : '';
                     return `
                         <div class="metric-row">
-                            <span class="metric-label">${row.setup_id}</span>
-                            <span class="metric-value ${valueClass}">${row.trades || 0} / ${winRate} / ${rr}R / ${suffix}</span>
+                            <span class="metric-label">${row.setup_id}<br><small style="color: var(--text-secondary)">${suffix}${detectorText}${blockerText}</small></span>
+                            <span class="metric-value ${valueClass}">${row.trades || 0} / ${winRate} / ${rr}R</span>
                         </div>
                     `;
                 }).join('');

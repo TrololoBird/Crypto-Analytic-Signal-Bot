@@ -12,7 +12,9 @@ The bot includes a built-in web dashboard for real-time monitoring.
 
 - **Overview Tab**: Bot status, shortlist size, open signals, WS latency, market regime
 - **Signals Tab**: Active and recent delivery attempts with entry/stop/TP levels, scores, confluence, delivery status, and risk/reward ratios
-- **Analytics Tab**: Performance metrics (total signals, win rate, avg R/R)
+- **Analytics Tab**: Current-run signal count, closed-trade win rate/avg R,
+  detector activity, and top blocker reasons. It intentionally separates
+  detector hits from closed trade outcomes.
 - **Settings Tab**: Strategy configuration and enabled status
 
 ### Keyboard Shortcuts
@@ -28,41 +30,30 @@ The bot includes a built-in web dashboard for real-time monitoring.
 - `GET /api/health` — Health check with WS connection status
 - `GET /api/strategies` — Strategy list with enabled status
 - `GET /api/metrics` — Detailed metrics
-- `GET /api/analytics/report?days=30` — Performance analytics
+- `GET /api/analytics/report?scope=current_run&days=30` — default dashboard
+  analytics for the currently running telemetry run.
+- `GET /api/analytics/report?scope=rolling&days=30` — rolling historical
+  outcome analytics when explicitly needed.
+- `GET /api/analytics/strategy-decisions?limit_files=1&max_rows=50000` —
+  recent detector decision telemetry for the current run.
 
 ## Local commands
 
-- `make check` — full local checks.
-- `make lint` — lint and type checks.
-- `make test` — run tests.
+- `python -m compileall bot` — verify Python modules compile.
+- `python scripts/validate_config.py` — validate config, strategy exports, and local feature invariants when the script is available and current.
 - `make run` — start bot runtime.
-- `make validate-config` — validate config, strategy exports, and local feature invariants.
 - `make live-smoke` — run `SignalBot` against live market data with a fake broadcaster; Telegram sends are suppressed.
 - `make monitor-runtime` — summarize live logs from `data/bot/logs`.
-- Targeted remediation suites (`test_regression_suite_*` naming):
-  - `pytest -q tests/test_regression_suite_runtime_boundary.py`
-  - `pytest -q tests/test_regression_suite_setups_contracts.py`
-  - `pytest -q tests/test_regression_suite_ml_and_features.py`
-  - `pytest -q tests/test_regression_suite_remediation_intra_candle.py`
-  - `pytest -q tests/test_regression_suite_remediation_indicators.py`
-  - `pytest -q tests/test_regression_suite_tracking_delivery.py`
-  - `pytest -q tests/test_regression_suite_strategies.py`
-  - `pytest -q tests/test_regression_suite_contracts.py`
-  - `pytest -q tests/test_regression_suite_engine.py`
-- Fast triage by suite markers:
-  - `pytest -q -m regression_remediation`
-  - `pytest -q -m regression_remediation_runtime`
-  - `pytest -q -m regression_remediation_indicators`
-  - `pytest -q tests/test_regression_suite_runtime_boundary.py -x`
-  - `pytest -q tests/test_regression_suite_setups_contracts.py -x`
-  - `pytest -q tests/test_regression_suite_ml_and_features.py -x`
+- Generated tests are supplemental diagnostics only. Do not use them as proof
+  that a strategy works or has trading edge.
 
 ## Recommended routine
 
 1. Validate config values in `config.toml`.
-2. Run `make check`.
-3. Run `make validate-config`.
-4. Start with `make live-smoke`.
+2. Run `python -m compileall bot`.
+3. Validate strategy/config alignment with a local diagnostic or
+   `scripts/validate_config.py`.
+4. Start with `make live-smoke` or a read-only live strategy diagnostic.
 5. Inspect telemetry logs (`data/bot/telemetry/`) and repository state.
 6. Start live runtime with `make run` only after the smoke check is clean.
 
@@ -71,7 +62,40 @@ The bot includes a built-in web dashboard for real-time monitoring.
 - Runtime sends Telegram only when `settings.notifiers.provider == "telegram"`.
 - `load_settings()` promotes provider `none` to `telegram` when both `TG_TOKEN` and `TARGET_CHAT_ID` are present in `.env` or environment variables.
 - Set `BOT_NOTIFIER_PROVIDER=none` to force local/log-only delivery for operator checks.
-- If provider is disabled, startup preflight now reports a warning instead of a successful delivery preflight.
+- If provider is disabled, startup preflight reports a degraded local-delivery
+  status instead of a successful Telegram delivery preflight.
+- Startup Telegram is a compact market-state message, not a full engineering
+  report. Full startup markdown/JSON remains in `data/bot/reports/`.
+- Signal Telegram messages are limit plans: `LIMIT LONG/SHORT`, setup,
+  entry range, `SL`, `TP1`, `TP2`, RR/risk, TTL, and TradingView link. Do not
+  add broad narrative to the main signal card.
+- Tracking Telegram messages are lifecycle updates: `ENTRY FILLED`, `TP1 HIT`,
+  `TP2 HIT`, `STOP LOSS`, `BREAKEVEN STOP`, `EXPIRED`, or explicit analytical
+  exit. They should include price and the original plan, without extra prose.
+
+## Historical Kline Context
+
+- Runtime fetches public Binance USD-M klines through the cached REST path
+  (`/fapi/v1/klines`) and prepares Polars frames.
+- Base fetch depth is 500 bars for 15m/1h/4h context and 300 bars for 5m fast
+  context. Binance allows `limit` up to 1500 on the public kline endpoint; 500
+  stays within the lower weight tier while giving roughly 20 days of 1h context
+  and 83 days of 4h context.
+- `15m` and `1h` are required for symbol preparation. `5m` and `4h` are
+  contextual; missing optional context should lower confidence or add a
+  precise reason, not abort the entire symbol analysis.
+
+## Telemetry Scope
+
+- Each bot process writes a distinct telemetry run under
+  `data/bot/telemetry/runs/<run_id>`.
+- Do not judge fresh code by old runs. If code was changed while a bot was
+  already running, restart the bot and use the new run id.
+- Dashboard current-run analytics should be used for detector health. Rolling
+  outcome analytics is useful for longer-term profitability, but it can include
+  signals generated by older strategy logic.
+- Large JSONL files must be tailed with bounded/linear readers. Avoid loading
+  entire telemetry history in dashboard refresh paths.
 
 ## Runtime health signals
 
@@ -117,15 +141,19 @@ The bot includes a built-in web dashboard for real-time monitoring.
 
 1. Verify exchange connectivity and WS status.
 2. Confirm fresh klines/market context.
-3. Inspect reject reasons in telemetry.
+3. Inspect strategy skip/reject reasons in telemetry before changing code.
    - For ML guardrails, filter `ML guardrail` / `ML runtime status` events and verify: `model_kind`, `disable_reason`, `stage`, `is_live`.
 4. Validate cooldown/blacklist status in repository.
-5. Restart only after root cause is identified.
+5. If the code changed during a live run, restart before judging the new
+   behavior. Old telemetry remains diagnostic only.
 
 ## Audit and documentation drift handling
 
 - Treat local docs, `AGENTS.md`, and generated audit reports as hypotheses
-  until verified against current code, tests, configs, logs, or official docs.
+  until verified against current code, configs, logs, telemetry, live scripts,
+  or official docs.
+- Treat generated tests as supplemental diagnostics, not proof of strategy
+  correctness or profitability.
 - For each audit item, record whether it is `confirmed`, `already-fixed/false`,
   `ambiguous`, or `deferred with reason`.
 - Do not downgrade dependencies solely from stale audit text. Check the current
@@ -136,6 +164,6 @@ The bot includes a built-in web dashboard for real-time monitoring.
 
 ## PR doc-change gate
 
-- CI now enforces a docs-parity check for pull requests that touch critical runtime paths: `main.py`, `bot/application`, `bot/core`, `bot/tasks`, `bot/telegram`, `bot/websocket`, `bot/features*`, `bot/ml*`, `bot/market_data.py`, `bot/ws_manager.py`, `bot/config.py`.
+- CI now enforces a docs-parity check for pull requests that touch critical runtime paths: `main.py`, `bot/application`, `bot/core`, `bot/telegram`, `bot/websocket`, `bot/features*`, `bot/ml*`, `bot/market_data.py`, `bot/ws_manager.py`, `bot/config.py`.
 - If any of those paths change, at least one file under `docs/` must also change in the same PR.
 - The same expectation is reflected in the pull-request checklist template.

@@ -38,8 +38,9 @@ class OrderBlockSetup(BaseSetup):
         """Tunable parameters for self-learner optimization."""
         defaults = {
             "base_score": 0.52,
-            "min_ob_impulse_atr": 1.5,
-            "ob_max_age": 30.0,
+            "min_ob_impulse_atr": 0.9,
+            "ob_max_age": 72.0,
+            "touch_buffer_atr": 0.25,
             "bias_mismatch_penalty": 0.75,
             "tp_too_close_penalty": 0.75,
             "min_rr": 1.9,
@@ -100,11 +101,13 @@ class OrderBlockSetup(BaseSetup):
             "min_ob_impulse_atr", defaults["min_ob_impulse_atr"]
         )
         ob_max_age = dynamic_params.get("ob_max_age", defaults["ob_max_age"])
+        touch_buffer_atr = float(dynamic_params.get("touch_buffer_atr", defaults["touch_buffer_atr"]))
         zone = latest_order_block(
             w1h,
             swing_length=3,
             include_unconfirmed_tail=True,
             current_price=price,
+            touch_buffer=touch_buffer_atr * atr,
         )
         if zone is None:
             _reject(prepared, setup_id, "no_order_block_detected")

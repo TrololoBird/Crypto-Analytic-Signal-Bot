@@ -115,7 +115,7 @@ class TelegramSender:
             return False
 
         if self._circuit_open:
-            LOG.warning("Circuit breaker open, message dropped")
+            LOG.error("Circuit breaker open, message dropped")
             if self._metrics:
                 self._metrics.record_telegram_sent(error=True)
             return False
@@ -205,7 +205,7 @@ class TelegramSender:
             except TelegramRetryAfter as exc:
                 # Rate limited by Telegram
                 wait_time = max(1, int(getattr(exc, "retry_after", 1)))
-                LOG.warning("Telegram rate limit, waiting %ds", wait_time)
+                LOG.info("Telegram rate limit, waiting %ds", wait_time)
                 await asyncio.sleep(wait_time)
                 last_error = exc
 

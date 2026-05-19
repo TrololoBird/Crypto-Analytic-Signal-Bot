@@ -187,7 +187,7 @@ class SignalFeatures:
     direction: str = ""
     timeframe: str = ""
 
-    # Advanced indicators from pandas-ta (None if pandas-ta not installed)
+    # Advanced indicators from prepared Polars/polars_ta feature layers.
     supertrend_dir_1h: float | None = None
     supertrend_dir_15m: float | None = None
     obv_above_ema_15m: float | None = None
@@ -447,13 +447,21 @@ def create_outcome_from_tracked(
     max_loss_pct: float = 0.0,
 ) -> SignalOutcome:
     """Создает Outcome из завершенного tracked сигнала."""
-    outcome_result = getattr(tracked, "close_reason", None) or getattr(tracked, "result", "")
+    raw_result = getattr(tracked, "close_reason", None) or getattr(tracked, "result", "")
 
-    # Определяем entry price
-    entry_price = tracked.activation_price or tracked.entry_mid
-    exit_price = tracked.close_price
+    # Время до событий
+    created_at = parse_state_dt(tracked.created_at) or datetime.now(UTC)
+    activated_at = parse_state_dt(tracked.activated_at)
+    closed_at = parse_state_dt(tracked.closed_at)
 
-    # Рассчитываем PnL
+    # Signals that never touched entry are delivery/monitoring outcomes, not
+    # executed trades. Do not turn stale price drift or pre-entry invalidation
+    # into fake wins/losses in expectancy statistics.
+    is_unactivated_close = activated_at is None and raw_result != "superseded"
+    is_pending_expiry = raw_result == "expired" and activated_at is None
+    entry_price = None if is_unactivated_close else (tracked.activation_price or tracked.entry_mid)
+    exit_price = None if is_unactivated_close else tracked.close_price
+
     pnl_pct = 0.0
     pnl_r_multiple = 0.0
     if entry_price and exit_price:
@@ -469,10 +477,16 @@ def create_outcome_from_tracked(
         if risk > 0:
             pnl_r_multiple = pnl_pct / (risk / entry_price * 100.0) if risk > 0 else 0.0
 
-    # Время до событий
-    created_at = parse_state_dt(tracked.created_at) or datetime.now(UTC)
-    activated_at = parse_state_dt(tracked.activated_at)
-    closed_at = parse_state_dt(tracked.closed_at)
+    outcome_result = str(raw_result or "")
+    if is_pending_expiry:
+        outcome_result = "expired_pending"
+    elif is_unactivated_close:
+        outcome_result = "unactivated_close"
+    elif outcome_result == "stop_loss" and tracked.tp1_hit_at is not None:
+        if pnl_r_multiple > 0.05:
+            outcome_result = "trailing_stop"
+        elif pnl_r_multiple >= -0.10:
+            outcome_result = "breakeven_stop"
 
     time_to_entry_min = 0
     time_to_exit_min = 0
@@ -482,7 +496,7 @@ def create_outcome_from_tracked(
         time_to_exit_min = int((closed_at - created_at).total_seconds() / 60)
 
     # Определение качества сетапа
-    was_profitable = pnl_pct > 0
+    was_profitable = (pnl_pct > 0) if not is_unactivated_close else False
     setup_quality = (
         "good" if pnl_r_multiple >= 1.0 else ("bad" if pnl_r_multiple <= -1.0 else "neutral")
     )

@@ -48,13 +48,13 @@ class BreakerBlockSetup(BaseSetup):
         """Tunable parameters for self-learner optimization."""
         defaults = {
             "base_score": 0.52,
-            "scan_bars": 40,
-            "mitigation_threshold": 0.20,
+            "scan_bars": 72,
+            "mitigation_threshold": 0.30,
             "sl_buffer_atr": 0.20,
             "min_atr": 0.0001,
-            "min_volume_ratio": 0.90,
-            "min_acceptance_close_position_long": 0.50,
-            "max_acceptance_close_position_short": 0.50,
+            "min_volume_ratio": 0.75,
+            "min_acceptance_close_position_long": 0.45,
+            "max_acceptance_close_position_short": 0.55,
             "bias_mismatch_penalty": 0.75,
             "min_rr": 1.9,
         }

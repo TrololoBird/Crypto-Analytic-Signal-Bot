@@ -58,7 +58,7 @@ async def _safe_call(label: str, operation: Any, *, timeout: float) -> tuple[str
         await asyncio.wait_for(operation(), timeout=timeout)
         return label, True
     except Exception as exc:
-        LOG.warning("context_prefetch_failed", label=label, error=str(exc))
+        LOG.error("context_prefetch_failed", label=label, error=str(exc))
         return label, False
 
 
@@ -165,12 +165,12 @@ async def _fetch_frames(
     df_1h, df_15m, df_5m, df_4h = await asyncio.gather(
         _wait_for(
             "klines_1h",
-            lambda: client.fetch_klines_cached(symbol, "1h", limit=300),
+            lambda: client.fetch_klines_cached(symbol, "1h", limit=500),
             timeout=timeout,
         ),
         _wait_for(
             "klines_15m",
-            lambda: client.fetch_klines_cached(symbol, "15m", limit=300),
+            lambda: client.fetch_klines_cached(symbol, "15m", limit=500),
             timeout=timeout,
         ),
         _wait_for(
@@ -180,7 +180,7 @@ async def _fetch_frames(
         ),
         _wait_for(
             "klines_4h",
-            lambda: client.fetch_klines_cached(symbol, "4h", limit=300),
+            lambda: client.fetch_klines_cached(symbol, "4h", limit=500),
             timeout=timeout,
         ),
     )
@@ -375,7 +375,7 @@ async def _run(
                 ],
             )
         if failures:
-            LOG.warning("pipeline_failures", failures=failures[:20])
+            LOG.error("pipeline_failures", failures=failures[:20])
         if detector_runs <= 0 or prepared_ok <= 0:
             raise RuntimeError("pipeline check did not execute any prepared detector runs")
     finally:

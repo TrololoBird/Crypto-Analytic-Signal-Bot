@@ -34,8 +34,8 @@ class OutcomeStore:
                 rows = await cursor.fetchall()
                 columns = [desc[0] for desc in cursor.description or []]
                 return [dict(zip(columns, row)) for row in rows]
-        except Exception as exc:
-            LOG.warning("failed to fetch outcomes for %s: %s", setup_id, exc)
+        except Exception:
+            LOG.exception("failed to fetch outcomes for %s", setup_id)
             return []
 
     def get_outcomes(
@@ -71,8 +71,8 @@ class OutcomeStore:
             if not rows or not names:
                 return pl.DataFrame()
             return pl.from_dicts([dict(zip(names, row)) for row in rows])
-        except Exception as exc:
-            LOG.warning("failed to get outcomes: %s", exc)
+        except Exception:
+            LOG.exception("failed to get outcomes")
             return pl.DataFrame()
         finally:
             conn.close()

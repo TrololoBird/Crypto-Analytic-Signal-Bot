@@ -261,7 +261,7 @@ class WinRateCalculator:
         if baseline.win_rate > 0:
             winrate_drop = baseline.win_rate - current.win_rate
             if winrate_drop > winrate_threshold:
-                LOG.warning(
+                LOG.error(
                     "Win rate degradation detected: %.2f%% -> %.2f%%",
                     baseline.win_rate * 100,
                     current.win_rate * 100,
@@ -272,7 +272,7 @@ class WinRateCalculator:
         if baseline.profit_factor > 0:
             pf_drop = baseline.profit_factor - current.profit_factor
             if pf_drop > pf_threshold:
-                LOG.warning(
+                LOG.error(
                     "Profit factor degradation: %.2f -> %.2f",
                     baseline.profit_factor,
                     current.profit_factor,

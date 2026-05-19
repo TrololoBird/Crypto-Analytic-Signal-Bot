@@ -91,7 +91,7 @@ class MLFilter:
                         )
                     self._emit_guardrail_telemetry(decision)
                     if decision.should_disable:
-                        LOG.warning(
+                        LOG.error(
                             "ML filter fallback resolved to blocked model kind; "
                             "live ML scoring is disabled for safety"
                         )
@@ -108,7 +108,7 @@ class MLFilter:
                         classifier.model_path,
                     )
                     return
-                LOG.warning("No trained model found in %s, ML filter disabled", self.model_dir)
+                LOG.info("No trained model found in %s, ML filter disabled", self.model_dir)
                 self.enabled = False
                 return
 
@@ -141,7 +141,7 @@ class MLFilter:
             )
             self._emit_guardrail_telemetry(decision)
             if decision.should_disable:
-                LOG.warning("ML filter primary model blocked by live guardrail; disabling ML")
+                LOG.error("ML filter primary model blocked by live guardrail; disabling ML")
                 self.enabled = False
                 self._disable_reason = decision.disable_reason
                 return
@@ -156,7 +156,7 @@ class MLFilter:
                 if hasattr(self._model, "feature_names_in_"):
                     self._feature_columns = list(cast(Any, self._model).feature_names_in_)
                 else:
-                    LOG.warning("Could not determine feature columns, ML may not work correctly")
+                    LOG.error("Could not determine feature columns, ML may not work correctly")
                     self._feature_columns = None
 
             LOG.info(
@@ -329,7 +329,7 @@ class MLFilter:
             if self._feature_columns:
                 missing = [col for col in self._feature_columns if col not in features]
                 if missing:
-                    LOG.warning(
+                    LOG.info(
                         "ML inference skipped for %s %s: %d missing feature(s): %s",
                         signal.symbol,
                         signal.setup_id,

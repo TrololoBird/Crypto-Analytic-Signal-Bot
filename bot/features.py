@@ -1,8 +1,9 @@
-"""Technical analysis feature preparation (pure-Polars runtime path).
+"""Technical analysis feature preparation (Polars-native runtime path).
 
-Indicators stay Polars-native. `polars_ta` may be installed for research or
-optional experiments, but the runtime path defaults to deterministic pure-Polars
-series math to avoid TA-Lib/native-backend drift on Windows/Python 3.13.
+Indicators stay Polars-native and prefer the installed `polars_ta` expression
+backend where its semantics match the runtime contract. Pure-Polars formulas are
+kept as deterministic fallbacks and for indicators that need project-specific
+normalization.
 
 Key indicators (actually used by strategies):
   - Core: ema20/50/200, rsi14, adx14, atr14, macd_*, donchian_*, vwap
@@ -18,7 +19,7 @@ from importlib import util as importlib_util
 from collections import OrderedDict
 from datetime import date, datetime, timezone
 import threading
-from typing import Any, cast
+from typing import Any, Iterable, cast
 
 import numpy as np
 import polars as pl
@@ -55,7 +56,7 @@ if _plta_module is not None:
 else:
     plta = cast(Any, None)
     _HAS_POLARS_TA = False
-_USE_POLARS_TA_BACKEND = False
+_USE_POLARS_TA_BACKEND = _HAS_POLARS_TA
 
 # Compatibility name for the decomposed feature modules/tests. This tracks the
 # native TA-Lib path, which the project deliberately disables on Windows/Python
@@ -194,7 +195,7 @@ def _log_indicator_fallback(indicator: str, exc: Exception) -> None:
         LOG.debug("advanced indicator fallback reused", indicator=indicator, error=str(exc))
         return
     _ADVANCED_FALLBACKS_LOGGED.add(indicator)
-    LOG.warning("advanced indicator fallback activated", indicator=indicator, error=str(exc))
+    LOG.info("advanced indicator fallback activated", indicator=indicator, error=str(exc))
 
 
 def _materialize_series(
@@ -208,6 +209,21 @@ def _materialize_series(
     if isinstance(value, pl.Expr):
         return df.select(value.alias(name)).to_series()
     return pl.Series(name, [value] * df.height, dtype=pl.Float64)
+
+
+def _normalize_rsi_scale(series: pl.Series, *, name: str) -> pl.Series:
+    """Normalize RSI to the project contract: 0..100."""
+    numeric = series.cast(pl.Float64, strict=False)
+    max_value = numeric.max()
+    min_value = numeric.min()
+    try:
+        max_float = float(max_value) if max_value is not None else 100.0
+        min_float = float(min_value) if min_value is not None else 0.0
+    except (TypeError, ValueError):
+        return numeric.rename(name)
+    if max_float <= 1.5 and min_float >= -0.01:
+        return (numeric * 100.0).rename(name)
+    return numeric.rename(name)
 
 
 def _numeric_item(df: pl.DataFrame, row: int, column: str, default: float = 0.0) -> float:
@@ -254,7 +270,13 @@ def min_required_bars(
     }
 
 
-def has_minimum_bars(frames: SymbolFrames, *, minimums: dict[str, int]) -> bool:
+def has_minimum_bars(
+    frames: SymbolFrames,
+    *,
+    minimums: dict[str, int],
+    required_timeframes: Iterable[str] | None = None,
+) -> bool:
+    required = set(required_timeframes) if required_timeframes is not None else set(minimums)
     frame_by_timeframe = {
         "5m": frames.df_5m,
         "15m": frames.df_15m,
@@ -262,11 +284,13 @@ def has_minimum_bars(frames: SymbolFrames, *, minimums: dict[str, int]) -> bool:
         "4h": frames.df_4h,
     }
     for timeframe, frame in frame_by_timeframe.items():
-        required = int(minimums.get(timeframe, 0) or 0)
-        if required <= 0:
+        if timeframe not in required:
+            continue
+        required_bars = int(minimums.get(timeframe, 0) or 0)
+        if required_bars <= 0:
             continue
         available = 0 if frame is None else frame.height
-        if available < required:
+        if available < required_bars:
             return False
     return True
 
@@ -296,11 +320,12 @@ def _rsi(df: pl.DataFrame, period: int = 14) -> pl.Series:
     """Wilder's RSI."""
     if _USE_POLARS_TA_BACKEND and _HAS_POLARS_TA and hasattr(plta, "RSI"):
         try:
-            return _materialize_series(
+            rsi_series = _materialize_series(
                 plta.RSI(pl.col("close"), timeperiod=int(period)),
                 df=df,
                 name=f"rsi{period}",
             )
+            return _normalize_rsi_scale(rsi_series, name=f"rsi{period}")
         except Exception as exc:
             _log_indicator_fallback("rsi_polars_ta", exc)
 
@@ -428,6 +453,53 @@ def _vwap_session_key(value: object) -> date | None:
     return None
 
 
+def _is_temporal_dtype(dtype: pl.DataType | None) -> bool:
+    return bool(dtype is not None and getattr(dtype, "is_temporal", lambda: False)())
+
+
+def _infer_epoch_time_unit(values: pl.Series) -> str | None:
+    values = values.drop_nulls()
+    if values.is_empty():
+        return None
+    try:
+        max_abs = float(values.abs().max())
+    except (TypeError, ValueError):
+        return None
+    if max_abs >= 1_000_000_000_000_000_000:
+        return "ns"
+    if max_abs >= 1_000_000_000_000_000:
+        return "us"
+    if max_abs >= 100_000_000_000:
+        return "ms"
+    return "s"
+
+
+def _coerce_temporal_columns(df: pl.DataFrame) -> pl.DataFrame:
+    conversions: list[pl.Expr] = []
+    for column in ("time", "open_time", "close_time"):
+        dtype = df.schema.get(column)
+        if dtype is None or _is_temporal_dtype(dtype):
+            continue
+        if (
+            getattr(dtype, "is_integer", lambda: False)()
+            or getattr(dtype, "is_float", lambda: False)()
+        ):
+            unit = _infer_epoch_time_unit(df[column])
+            if unit is not None:
+                conversions.append(
+                    pl.from_epoch(pl.col(column).cast(pl.Int64), time_unit=unit)
+                    .dt.replace_time_zone("UTC")
+                    .alias(column)
+                )
+        elif dtype == pl.String:
+            conversions.append(
+                pl.col(column).str.to_datetime(strict=False, time_zone="UTC").alias(column)
+            )
+    if not conversions:
+        return df
+    return df.with_columns(conversions)
+
+
 def _vwap(df: pl.DataFrame) -> pl.Series:
     """Volume Weighted Average Price, reset per UTC session when timestamps exist."""
     typical_price = (df["high"] + df["low"] + df["close"]) / 3.0
@@ -437,7 +509,7 @@ def _vwap(df: pl.DataFrame) -> pl.Series:
         (column for column in ("close_time", "time", "open_time") if column in df.columns),
         None,
     )
-    if time_column is not None:
+    if time_column is not None and _is_temporal_dtype(df.schema.get(time_column)):
         # Create a session key (date) for reset
         session_key = df[time_column].dt.date().alias("_vwap_session")
         temp_df = df.with_columns([pv.alias("_pv"), session_key])
@@ -565,7 +637,7 @@ def _realized_volatility(df: pl.DataFrame, period: int = 20) -> pl.Series:
 
 
 def _add_session_features(work: pl.DataFrame, period: int = 20) -> pl.DataFrame:
-    if "close_time" not in work.columns:
+    if "close_time" not in work.columns or not _is_temporal_dtype(work.schema.get("close_time")):
         return work.with_columns(
             [
                 pl.lit(0.0).alias("session_asia"),
@@ -1206,6 +1278,8 @@ def _prepare_frame(df: pl.DataFrame) -> pl.DataFrame:
     Returns a new DataFrame with NaN-seeded rows dropped.
     All backward-compatible column names are preserved.
     """
+    df = _coerce_temporal_columns(df)
+
     # Core indicators
     work = df.with_columns(
         [
@@ -1763,8 +1837,13 @@ def prepare_symbol(
     len_15m = frames.df_15m.height
     len_5m = frames.df_5m.height if frames.df_5m is not None else 0
 
-    if not has_minimum_bars(frames, minimums=minimums):
-        _log.warning(
+    required_timeframes = ("15m", "1h")
+    if not has_minimum_bars(
+        frames,
+        minimums=minimums,
+        required_timeframes=required_timeframes,
+    ):
+        _log.info(
             "%s: insufficient frame data | 1h=%d/%d 15m=%d/%d 5m=%d/%d optional_4h=%d/%d",
             sym,
             len_1h,
@@ -1807,7 +1886,7 @@ def prepare_symbol(
     work_len_4h = len(work_4h) if work_4h is not None else 0
 
     if min(work_len_1h, work_len_15m) < 30:
-        _log.warning(
+        _log.info(
             "%s: insufficient processed data | work_1h=%d work_15m=%d optional_5m=%d optional_4h=%d need=30",
             sym,
             work_len_1h,
@@ -1829,7 +1908,7 @@ def prepare_symbol(
         primary_work = work_5m
     elif configured_primary != "15m":
         primary_timeframe = "15m"
-        _log.warning(
+        _log.info(
             "%s: primary timeframe fallback | requested=%s fallback=15m work_5m=%d work_4h=%d",
             sym,
             configured_primary,

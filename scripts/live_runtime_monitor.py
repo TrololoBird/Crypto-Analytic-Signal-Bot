@@ -83,7 +83,7 @@ class RuntimeMonitor:
             lines = chunk.splitlines()
             self._parse_log_lines(lines)
         except Exception as exc:
-            LOG.warning("Failed to read log", error=str(exc))
+            LOG.error("Failed to read log", error=str(exc))
 
     def _parse_log_lines(self, lines: list[str]):
         """Parse log lines for statistics."""

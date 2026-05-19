@@ -271,7 +271,7 @@ async def _run(
                 # Fetch global LS ratio
                 await client.fetch_global_ls_ratio(symbol)
             except Exception as exc:
-                LOG.warning("prefetch_error | symbol=%s error=%s", symbol, exc)
+                LOG.error("prefetch_error | symbol=%s error=%s", symbol, exc)
 
         LOG.info("rest_prefetch_complete")
 
@@ -425,7 +425,7 @@ async def _run(
 
             missing_fields = [f["field"] for f in result["fields"] if not f["is_populated"]]
             if missing_fields:
-                LOG.warning("  missing_fields | symbol=%s: %s", symbol, ", ".join(missing_fields))
+                LOG.error("  missing_fields | symbol=%s: %s", symbol, ", ".join(missing_fields))
 
         # Check if all critical fields are now populated
         all_populated = total_missing == 0

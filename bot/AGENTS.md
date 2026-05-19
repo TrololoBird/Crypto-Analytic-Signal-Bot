@@ -11,16 +11,26 @@ Work in top-level modules directly under `bot/`.
 - `features.py`: Polars feature preparation and derived market context
 - `market_data.py`, `ws_manager.py`: external market I/O and stream handling
 - `tracking.py`, `delivery.py`, `messaging.py`: signal lifecycle and notification plumbing
-- `setups.py`: shared strategy helpers with broad blast radius
+- `setup_base.py`: BaseSetup adapter between strategy classes and engine
+- `setups/`: shared strategy helpers with broad blast radius
 
 ## Local Rules
 
 - Treat top-level `bot/*.py` modules as shared boundaries. Trace callers and consumers before changing public shapes.
-- Model or config changes require checking strategies, application flow, and tests in the same pass.
+- Model or config changes require checking strategies, application flow, runtime
+  config loading, and telemetry impact in the same pass.
 - Keep market I/O async and time-sensitive paths lightweight.
-- Preserve the logging style already used in the touched module.
-- Do not duplicate logic that already belongs in `bot/core/`, `bot/application/`, or `bot/setups.py`.
-- Changes to `bot/setups.py` or `bot/domain/schemas.py` usually affect multiple strategies; verify representative callers.
+- Preserve the runtime logging contract: expected throttling/fallback is
+  `info`/`debug`; actionable failures are `error`/`exception`/`critical`.
+  Do not add generic warning-level console noise.
+- Do not duplicate logic that already belongs in `bot/core/`, `bot/application/`, or `bot/setups/`.
+- Changes to `bot/setups/`, `bot/setup_base.py`, or `bot/domain/schemas.py` usually affect multiple strategies; verify representative callers.
+- Strategy status labels are descriptive. Do not turn off strategies because of
+  `experimental`/`beta` metadata; repair data contracts and detector logic.
+- In global filters, keep 1h trend conflict as a hard gate for continuation and
+  breakout logic, but only score-penalize countertrend exhaustion setups.
+- Generated tests are not proof of trading behavior. Prefer compile/import
+  checks, config validation, telemetry replay, and live read-only diagnostics.
 
 ## Token Discipline
 
@@ -29,4 +39,5 @@ Work in top-level modules directly under `bot/`.
 
 ## Verification
 
-- Prefer targeted regressions or import/call-site review proportional to the blast radius.
+- Prefer import/call-site review, `python -m compileall`, config validation, and
+  read-only live/telemetry diagnostics proportional to the blast radius.

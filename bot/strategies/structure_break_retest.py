@@ -31,6 +31,7 @@ def _detect_15m_range_retest(
     min_vol_breakout: float,
     breakout_threshold: float,
     retest_atr_mult: float,
+    fallback_lookback_bars: int,
 ) -> tuple[str, float, str] | None:
     required = {
         "high",
@@ -44,35 +45,38 @@ def _detect_15m_range_retest(
     }
     if work_15m.height < 3 or not required.issubset(set(work_15m.columns)):
         return None
-    high = _as_float(work_15m.item(-1, "high"))
-    low = _as_float(work_15m.item(-1, "low"))
     close = _as_float(work_15m.item(-1, "close"))
     atr = _as_float(work_15m.item(-1, "atr14"))
-    vol_ratio = _as_float(work_15m.item(-1, "volume_ratio20"), 1.0)
-    close_position = _as_float(work_15m.item(-1, "close_position"), 0.5)
-    prev_low = _as_float(work_15m.item(-1, "prev_donchian_low20"))
-    prev_high = _as_float(work_15m.item(-1, "prev_donchian_high20"))
-    if min(high, low, close, atr, prev_low, prev_high) <= 0.0:
-        return None
-    if vol_ratio < min_vol_breakout:
+    if min(close, atr) <= 0.0:
         return None
 
     threshold = max(0.0, float(breakout_threshold))
     retest_distance = max(0.05, float(retest_atr_mult)) * atr
-    long_accepted = (
-        close > prev_high * (1.0 + threshold)
-        and low <= prev_high + retest_distance
-        and close_position >= 0.58
-    )
-    short_accepted = (
-        close < prev_low * (1.0 - threshold)
-        and high >= prev_low - retest_distance
-        and close_position <= 0.42
-    )
-    if long_accepted:
-        return "long", prev_high, "15m_range_retest_long"
-    if short_accepted:
-        return "short", prev_low, "15m_range_retest_short"
+    recent = work_15m.tail(min(max(1, int(fallback_lookback_bars)), work_15m.height))
+    for local_idx in range(recent.height - 1, -1, -1):
+        high = _as_float(recent.item(local_idx, "high"))
+        low = _as_float(recent.item(local_idx, "low"))
+        bar_close = _as_float(recent.item(local_idx, "close"))
+        vol_ratio = _as_float(recent.item(local_idx, "volume_ratio20"), 1.0)
+        close_position = _as_float(recent.item(local_idx, "close_position"), 0.5)
+        prev_low = _as_float(recent.item(local_idx, "prev_donchian_low20"))
+        prev_high = _as_float(recent.item(local_idx, "prev_donchian_high20"))
+        if min(high, low, bar_close, prev_low, prev_high) <= 0.0:
+            continue
+        if vol_ratio < min_vol_breakout:
+            continue
+        if (
+            max(bar_close, close) > prev_high * (1.0 + threshold)
+            and low <= prev_high + retest_distance
+            and close_position >= 0.54
+        ):
+            return "long", prev_high, f"15m_range_retest_long_lag={recent.height - 1 - local_idx}"
+        if (
+            min(bar_close, close) < prev_low * (1.0 - threshold)
+            and high >= prev_low - retest_distance
+            and close_position <= 0.46
+        ):
+            return "short", prev_low, f"15m_range_retest_short_lag={recent.height - 1 - local_idx}"
     return None
 
 
@@ -90,6 +94,7 @@ class StructureBreakRetestSetup(BaseSetup):
             "min_vol_breakout": 1.3,
             "retest_atr_tol": 0.5,
             "retest_atr_mult": 0.5,  # Backward-compatible alias.
+            "fallback_lookback_bars": 12,
             "sl_buffer_atr": 0.5,
             "breakout_threshold": 0.002,
             "bias_mismatch_penalty": 0.75,
@@ -219,6 +224,12 @@ class StructureBreakRetestSetup(BaseSetup):
                     min_vol_breakout=float(min_vol_breakout),
                     breakout_threshold=float(breakout_threshold),
                     retest_atr_mult=retest_atr_mult,
+                    fallback_lookback_bars=int(
+                        dynamic_params.get(
+                            "fallback_lookback_bars",
+                            defaults["fallback_lookback_bars"],
+                        )
+                    ),
                 )
                 if fallback is not None:
                     direction, broken_level, fallback_reason = fallback

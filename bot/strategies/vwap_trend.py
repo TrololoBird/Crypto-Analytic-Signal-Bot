@@ -35,6 +35,10 @@ class VWAPTrendSetup(BaseSetup):
             "min_adx_1h": 15.0,
             "min_volume_ratio": 1.05,
             "vwap_reclaim_tolerance_pct": 0.0008,
+            "reclaim_lookback_bars": 6,
+            "max_vwap_distance_atr": 1.35,
+            "volume_penalty": 0.90,
+            "adx_penalty": 0.90,
             "min_rr": 1.9,
             "sl_buffer_atr": 0.7,
         }
@@ -91,22 +95,12 @@ class VWAPTrendSetup(BaseSetup):
             )
             return None
 
-        if adx_1h > 0.0 and adx_1h < float(effective_params["min_adx_1h"]):
-            _reject(prepared, setup_id, "adx_too_low", adx_1h=adx_1h)
-            return None
-
-        if vol_ratio < float(effective_params["min_volume_ratio"]):
-            _reject(
-                prepared,
-                setup_id,
-                "volume_too_low",
-                volume_ratio=vol_ratio,
-            )
-            return None
-
         tolerance = float(effective_params["vwap_reclaim_tolerance_pct"])
+        max_distance_atr = float(effective_params.get("max_vwap_distance_atr", 1.35))
         bias_1h = getattr(prepared, "bias_1h", prepared.bias_4h)
         direction: str | None = None
+        reclaim_lag = 0
+        structure_clarity = 0.45
         if (
             prev_close <= prev_vwap * (1.0 + tolerance)
             and close > vwap * (1.0 + tolerance)
@@ -119,6 +113,58 @@ class VWAPTrendSetup(BaseSetup):
             and close < ema20
         ):
             direction = "short"
+
+        if direction is None:
+            lookback = max(2, int(effective_params.get("reclaim_lookback_bars", 6)))
+            recent = work_15m.tail(min(lookback, work_15m.height))
+            for local_idx in range(recent.height - 1, -1, -1):
+                bar_close = _as_float(recent.item(local_idx, "close"))
+                bar_vwap = _as_float(recent.item(local_idx, "vwap"))
+                bar_ema20 = _as_float(recent.item(local_idx, "ema20"))
+                bar_low = (
+                    _as_float(recent.item(local_idx, "low"))
+                    if "low" in recent.columns
+                    else bar_close
+                )
+                bar_high = (
+                    _as_float(recent.item(local_idx, "high"))
+                    if "high" in recent.columns
+                    else bar_close
+                )
+                if min(bar_close, bar_vwap, bar_ema20) <= 0.0:
+                    continue
+                reclaim_lag = recent.height - 1 - local_idx
+                distance_ok = abs(close - vwap) <= atr * max_distance_atr
+                if (
+                    close > vwap * (1.0 + tolerance)
+                    and close > ema20
+                    and distance_ok
+                    and (
+                        bar_low <= bar_vwap * (1.0 + tolerance)
+                        or bar_close <= bar_vwap * (1.0 + tolerance)
+                    )
+                ):
+                    direction = "long"
+                    structure_clarity = max(
+                        0.50,
+                        1.0 - abs(close - vwap) / max(atr * max_distance_atr, atr),
+                    )
+                    break
+                if (
+                    close < vwap * (1.0 - tolerance)
+                    and close < ema20
+                    and distance_ok
+                    and (
+                        bar_high >= bar_vwap * (1.0 - tolerance)
+                        or bar_close >= bar_vwap * (1.0 - tolerance)
+                    )
+                ):
+                    direction = "short"
+                    structure_clarity = max(
+                        0.50,
+                        1.0 - abs(close - vwap) / max(atr * max_distance_atr, atr),
+                    )
+                    break
 
         if direction is None:
             _reject(prepared, setup_id, "no_vwap_reclaim", close=close, vwap=vwap)
@@ -158,8 +204,13 @@ class VWAPTrendSetup(BaseSetup):
             base_score=base_score,
             vol_ratio=vol_ratio,
             rsi=rsi,
-            structure_clarity=0.45,
+            structure_clarity=structure_clarity,
         )
+
+        if adx_1h > 0.0 and adx_1h < float(effective_params["min_adx_1h"]):
+            score *= float(effective_params.get("adx_penalty", 0.90))
+        if vol_ratio < float(effective_params["min_volume_ratio"]):
+            score *= float(effective_params.get("volume_penalty", 0.90))
 
         # Graded bias alignment
         if direction == "long" and bias_1h == "downtrend":
@@ -173,6 +224,7 @@ class VWAPTrendSetup(BaseSetup):
             f"vwap={vwap:.4f}",
             f"vol_ratio={vol_ratio:.2f}",
             f"adx_1h={adx_1h:.1f}",
+            f"reclaim_lag={reclaim_lag}",
         ]
         return _build_signal(
             prepared=prepared,

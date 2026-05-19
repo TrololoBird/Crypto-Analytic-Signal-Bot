@@ -97,24 +97,26 @@ class OIRefreshRunner:
                         )
                 except (asyncio.TimeoutError, TimeoutError) as exc:
                     LOG.info(
-                        "oi refresh symbol degraded | symbol=%s degraded_reason=%s exception_type=%s fallback_used=skip_symbol",
+                        "oi refresh symbol skipped | symbol=%s reason=context_fetch_timeout detail=%s exception_type=%s",
                         symbol,
                         str(exc),
                         type(exc).__name__,
                     )
                 except _DEGRADATION_ERRORS as exc:
                     LOG.info(
-                        "oi refresh symbol degraded | symbol=%s degraded_reason=%s exception_type=%s fallback_used=skip_symbol",
+                        "oi refresh symbol skipped | symbol=%s reason=context_fetch_error detail=%s exception_type=%s",
                         symbol,
                         str(exc),
                         type(exc).__name__,
                     )
 
         processed = 0
+        budget_reached = False
         for i in range(0, len(shortlist), batch_size):
             if deadline is not None and time.monotonic() >= deadline:
-                LOG.warning(
-                    "oi/ls cache refresh time budget exhausted | attempted=%d total=%d budget_s=%.1f",
+                budget_reached = True
+                LOG.info(
+                    "oi/ls cache refresh partial | attempted=%d total=%d budget_s=%.1f reason=time_budget",
                     processed,
                     len(shortlist),
                     float(time_budget_seconds or 0.0),
@@ -137,11 +139,13 @@ class OIRefreshRunner:
 
         self._last_refresh_monotonic = time.monotonic()
         LOG.info(
-            "oi/ls cache refreshed | symbols=%d batches=%d rest_concurrency=%d funding_history=%s",
+            "oi/ls cache refreshed | symbols=%d total=%d batches=%d rest_concurrency=%d funding_history=%s partial=%s",
             processed,
+            len(shortlist),
             (len(shortlist) + batch_size - 1) // batch_size,
             rest_concurrency,
             include_funding_history,
+            budget_reached,
         )
         await self._bot._update_memory_market_context(shortlist)
         return processed
@@ -302,22 +306,14 @@ class OIRefreshRunner:
                 )
             )
         for source, stage, fetch in fetchers:
-            degraded = False
-            degrade_reason: str | None = None
-            fallback_used = "not_used"
             try:
                 await fetch()
             except _DEGRADATION_ERRORS as exc:
-                degraded = True
-                degrade_reason = str(exc)
-                fallback_used = "skip_stage"
-                LOG.warning(
-                    "oi refresh degraded | symbol=%s stage=%s source=%s degraded=%s degrade_reason=%s fallback_used=%s exception_type=%s",
+                LOG.info(
+                    "oi refresh optional stage skipped | symbol=%s stage=%s source=%s reason=context_fetch_error detail=%s exception_type=%s",
                     symbol,
                     stage,
                     source,
-                    degraded,
-                    degrade_reason,
-                    fallback_used,
+                    str(exc),
                     type(exc).__name__,
                 )

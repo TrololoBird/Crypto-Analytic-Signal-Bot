@@ -35,8 +35,8 @@ def load_strategy_config(strategy_name: str) -> dict[str, Any]:
             config = tomllib.load(f)
         LOG.debug("Loaded config for %s: %s sections", strategy_name, list(config.keys()))
         return config
-    except Exception as exc:
-        LOG.warning("Failed to load config for %s: %s, using defaults", strategy_name, exc)
+    except Exception:
+        LOG.exception("Failed to load config for %s, using defaults", strategy_name)
         return {}
 
 
@@ -76,6 +76,6 @@ def load_global_strategy_config() -> dict[str, Any]:
     try:
         with open(config_path, "rb") as f:
             return tomllib.load(f)
-    except Exception as exc:
-        LOG.warning("Failed to load global strategy config: %s", exc)
+    except Exception:
+        LOG.exception("Failed to load global strategy config")
         return {}

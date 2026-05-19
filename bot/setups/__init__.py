@@ -256,22 +256,23 @@ def _decision_snapshot(
     snapshot: dict[str, Any] = {}
     missing_fields: list[str] = []
     invalid_fields: list[str] = []
-    field_specs: list[tuple[str, Callable[[], _SnapshotMetric]]] = [
-        ("atr14", lambda: _frame_metric(prepared.work_15m, "atr14")),
-        ("rsi14", lambda: _frame_metric(prepared.work_15m, "rsi14")),
-        ("volume_ratio20", lambda: _frame_metric(prepared.work_15m, "volume_ratio20")),
-        ("adx14", lambda: _frame_metric(prepared.work_1h, "adx14")),
-        ("spread_bps", lambda: _attr_metric(prepared, "spread_bps")),
-        ("funding_rate", lambda: _attr_metric(prepared, "funding_rate")),
-        ("oi_change_pct", lambda: _attr_metric(prepared, "oi_change_pct")),
-        ("ls_ratio", lambda: _attr_metric(prepared, "ls_ratio")),
-        ("mark_price", lambda: _attr_metric(prepared, "mark_price")),
+    field_specs: list[tuple[str, Callable[[], _SnapshotMetric], bool]] = [
+        ("atr14", lambda: _frame_metric(prepared.work_15m, "atr14"), True),
+        ("rsi14", lambda: _frame_metric(prepared.work_15m, "rsi14"), True),
+        ("volume_ratio20", lambda: _frame_metric(prepared.work_15m, "volume_ratio20"), True),
+        ("adx14", lambda: _frame_metric(prepared.work_1h, "adx14"), True),
+        ("spread_bps", lambda: _attr_metric(prepared, "spread_bps"), True),
+        ("funding_rate", lambda: _attr_metric(prepared, "funding_rate"), False),
+        ("oi_change_pct", lambda: _attr_metric(prepared, "oi_change_pct"), False),
+        ("ls_ratio", lambda: _attr_metric(prepared, "ls_ratio"), False),
+        ("mark_price", lambda: _attr_metric(prepared, "mark_price"), False),
     ]
-    for key, getter in field_specs:
+    for key, getter, required in field_specs:
         value, missing, invalid = getter()
         if value is not None:
             snapshot[key] = value
-        missing_fields.extend(missing)
+        if required:
+            missing_fields.extend(missing)
         invalid_fields.extend(invalid)
     for attr_name in (
         "bias_4h",

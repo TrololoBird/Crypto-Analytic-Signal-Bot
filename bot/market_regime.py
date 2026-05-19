@@ -107,6 +107,9 @@ class MarketRegimeAnalyzer:
         intelligence = getattr(self.settings, "intelligence", None)
         detector = getattr(intelligence, "regime_detector", "legacy")
         if detector in {"hmm", "gmm_var", "composite"}:
+            context = self._calculate_regime(
+                ticker_data, funding_rates, open_interest, benchmark_context
+            )
             composite = self._composite.analyze(
                 ticker_data,
                 funding_rates,
@@ -115,14 +118,17 @@ class MarketRegimeAnalyzer:
             mapped = MarketRegimeResult(
                 regime=composite.regime,
                 strength=composite.strength,
-                btc_bias="neutral",
-                eth_bias="neutral",
-                dominance_24h=0.0,
-                funding_sentiment="neutral",
-                oi_momentum="stable",
-                top_gainer_pct=0.0,
-                top_loser_pct=0.0,
-                altcoin_season_index=50.0,
+                btc_bias=context.btc_bias,
+                eth_bias=context.eth_bias,
+                dominance_24h=context.dominance_24h,
+                funding_sentiment=context.funding_sentiment,
+                oi_momentum=context.oi_momentum,
+                top_gainer_pct=context.top_gainer_pct,
+                top_loser_pct=context.top_loser_pct,
+                altcoin_season_index=context.altcoin_season_index,
+                volatility_regime=context.volatility_regime,
+                risk_on_off=context.risk_on_off,
+                btc_phase=context.btc_phase,
                 confidence=composite.confidence,
             )
             self._last_result = mapped

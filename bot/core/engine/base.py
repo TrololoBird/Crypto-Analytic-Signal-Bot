@@ -20,6 +20,25 @@ def _has_oi_context(prepared: PreparedSymbol) -> bool:
     return prepared.oi_current is not None or prepared.oi_change_pct is not None
 
 
+def _missing_required_features(prepared: PreparedSymbol, features: tuple[str, ...]) -> tuple[str, ...]:
+    if not features:
+        return ()
+    columns: set[str] = set()
+    for frame_name in ("work_15m", "work_1h", "work_4h"):
+        frame = getattr(prepared, frame_name, None)
+        if frame is not None:
+            columns.update(frame.columns)
+    return tuple(feature for feature in features if feature not in columns)
+
+
+def _missing_required_enrichment(
+    prepared: PreparedSymbol, enrichment_fields: tuple[str, ...]
+) -> tuple[str, ...]:
+    return tuple(
+        field for field in enrichment_fields if getattr(prepared, field, None) is None
+    )
+
+
 class AbstractStrategy(ABC):
     """Abstract base class for all trading strategies.
 
@@ -56,16 +75,24 @@ class AbstractStrategy(ABC):
 
         Override for custom validation (OI data, funding, etc.)
         """
+        metadata = self.metadata
+
         if prepared.work_1h is None or prepared.work_1h.is_empty():
             return False
 
-        if prepared.work_1h.height < self.metadata.min_history_bars:
+        if prepared.work_1h.height < metadata.min_history_bars:
             return False
 
-        if self.metadata.requires_oi and not _has_oi_context(prepared):
+        if metadata.requires_oi and not _has_oi_context(prepared):
             return False
 
-        if self.metadata.requires_funding and prepared.funding_rate is None:
+        if metadata.requires_funding and prepared.funding_rate is None:
+            return False
+
+        if _missing_required_features(prepared, tuple(metadata.required_features or ())):
+            return False
+
+        if _missing_required_enrichment(prepared, tuple(metadata.required_enrichment or ())):
             return False
 
         return True

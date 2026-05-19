@@ -30,9 +30,11 @@ def configure_script_logging(name: str) -> structlog.BoundLogger:
 
 
 def load_symbols_from_run(run_id: str, telemetry_root: Path) -> list[str]:
+    if not str(run_id or "").strip():
+        return []
     target = telemetry_root / "runs" / run_id / "analysis" / "symbol_analysis.jsonl"
     if not target.exists():
-        _COMMON_LOG.warning("symbols_from_run_missing", run_id=run_id, path=str(target))
+        _COMMON_LOG.info("symbols_from_run_missing", run_id=run_id, path=str(target))
         return []
 
     symbols: list[str] = []

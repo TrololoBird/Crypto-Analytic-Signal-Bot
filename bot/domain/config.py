@@ -16,6 +16,7 @@ class RuntimeConfig(BaseModel):
     analysis_concurrency: int = Field(default=6, ge=1, le=20)
     strategy_concurrency: int = Field(default=4, ge=1, le=20)
     strategy_timeout_seconds: float = Field(default=12.0, ge=0.5, le=120.0)
+    max_strategy_queue_wait_seconds: float = Field(default=45.0, ge=0.0, le=300.0)
     max_signals_per_cycle: int = Field(default=3, ge=1, le=10)
     event_bus_max_size: int = Field(default=512, ge=16, le=50_000)
     event_bus_warn_depth: int = Field(default=384, ge=8, le=50_000)
@@ -183,6 +184,7 @@ _ALL_SETUP_IDS: tuple[str, ...] = (
     "liquidity_sweep",
     "bos_choch",
     "hidden_divergence",
+    "indicator_divergence",
     "funding_reversal",
     "cvd_divergence",
     "session_killzone",
@@ -222,12 +224,13 @@ class SetupConfig(BaseModel):
     wick_trap_reversal: bool = True
     squeeze_setup: bool = True
     ema_bounce: bool = True
-    # New 10 setups (disabled by default until registered in SetupRegistry)
+    # Registered setups. Status metadata is descriptive only; enabled flags control runtime.
     fvg_setup: bool = True
     order_block: bool = True
     liquidity_sweep: bool = True
     bos_choch: bool = True
     hidden_divergence: bool = True
+    indicator_divergence: bool = True
     funding_reversal: bool = True
     cvd_divergence: bool = True
     session_killzone: bool = True
@@ -460,7 +463,7 @@ class WSConfig(BaseModel):
     health_check_silence_seconds: float = Field(default=60.0, ge=10.0, le=300.0)
     market_reconnect_grace_seconds: float = Field(default=90.0, ge=60.0, le=120.0)
     agg_trade_window_seconds: int = Field(default=300, ge=10, le=3600)
-    kline_cache_size: int = Field(default=300, ge=50, le=1000)
+    kline_cache_size: int = Field(default=500, ge=50, le=1000)
     warmup_timeout_seconds: float = Field(default=60.0, ge=5.0, le=300.0)
     reconnect_max_delay_seconds: float = Field(default=300.0, ge=1.0, le=3600.0)
     max_agg_trade_buffer: int = Field(default=10000, ge=100, le=100000)

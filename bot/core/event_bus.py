@@ -78,8 +78,8 @@ class EventBus:
             return
 
         if queue_depth >= self._warn_depth:
-            LOG.warning(
-                "event bus backlog warning | depth=%d high_water=%d max_size=%d",
+            LOG.error(
+                "event bus backlog near capacity | depth=%d high_water=%d max_size=%d",
                 queue_depth,
                 self._high_water_mark,
                 self._max_size,
@@ -204,7 +204,7 @@ class EventBus:
     def _log_drop(self, event: AnyEvent, *, reason: str) -> None:
         if self._dropped_count % self._drop_log_interval != 0:
             return
-        LOG.warning(
+        LOG.error(
             "event bus dropping events | dropped=%d reason=%s last_type=%s stats=%s",
             self._dropped_count,
             reason,

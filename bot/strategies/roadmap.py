@@ -104,6 +104,17 @@ def _series_max_tail(frame: pl.DataFrame, column: str, window: int) -> float:
     return max(values) if values else 0.0
 
 
+def _series_min_tail(frame: pl.DataFrame, column: str, window: int) -> float:
+    if frame.is_empty() or column not in frame.columns:
+        return 0.0
+    values = [
+        _as_float(value)
+        for value in frame[column].tail(max(1, int(window))).to_list()
+        if value is not None
+    ]
+    return min(values) if values else 0.0
+
+
 def _build_atr_signal(
     *,
     prepared: PreparedSymbol,
@@ -191,9 +202,9 @@ class WhaleWallsSetup(RoadmapSetup):
         **RoadmapSetup.DEFAULTS,
         "min_depth_imbalance": 0.45,
         "min_microprice_bias": 0.20,
-        "min_volume_ratio": 1.15,
-        "min_close_position_long": 0.60,
-        "max_close_position_short": 0.40,
+        "min_volume_ratio": 0.90,
+        "min_close_position_long": 0.55,
+        "max_close_position_short": 0.45,
         "max_spread_bps": 8.0,
         "min_roc10_abs_pct": 0.05,
         "min_rr": 1.9,
@@ -220,25 +231,31 @@ class WhaleWallsSetup(RoadmapSetup):
         micro_value = float(micro)
         work = prepared.work_15m
         vol_ratio = _last(work, "volume_ratio20", 1.0)
-        if vol_ratio < float(params["min_volume_ratio"]):
-            _reject(prepared, self.setup_id, "volume_too_low", volume_ratio=vol_ratio)
-            return None
+        volume_penalty = vol_ratio < float(params["min_volume_ratio"])
         close_position = _last(work, "close_position", 0.5)
         roc10 = _last(work, "roc10", _price_change_pct(work, 10))
         if abs(roc10) < float(params["min_roc10_abs_pct"]):
             _reject(prepared, self.setup_id, "price_acceptance_missing", roc10=roc10)
             return None
-        if (
-            depth_value >= float(params["min_depth_imbalance"])
-            and micro_value >= float(params["min_microprice_bias"])
-            and close_position >= float(params["min_close_position_long"])
-        ):
+        long_votes = sum(
+            (
+                depth_value >= float(params["min_depth_imbalance"]),
+                micro_value >= float(params["min_microprice_bias"]),
+                close_position >= float(params["min_close_position_long"]),
+                roc10 >= 0.0,
+            )
+        )
+        short_votes = sum(
+            (
+                depth_value <= -float(params["min_depth_imbalance"]),
+                micro_value <= -float(params["min_microprice_bias"]),
+                close_position <= float(params["max_close_position_short"]),
+                roc10 <= 0.0,
+            )
+        )
+        if long_votes >= 3 and long_votes > short_votes:
             direction = "long"
-        elif (
-            depth_value <= -float(params["min_depth_imbalance"])
-            and micro_value <= -float(params["min_microprice_bias"])
-            and close_position <= float(params["max_close_position_short"])
-        ):
+        elif short_votes >= 3 and short_votes > long_votes:
             direction = "short"
         else:
             reason = (
@@ -253,17 +270,12 @@ class WhaleWallsSetup(RoadmapSetup):
                 close_position=close_position,
             )
             return None
-        if _confirmed_context_conflict(prepared, direction):
-            _reject(
-                prepared,
-                self.setup_id,
-                "context_conflicts_orderbook_wall",
-                direction=direction,
-                bias_1h=getattr(prepared, "bias_1h", None),
-                structure_1h=getattr(prepared, "structure_1h", None),
-                regime_1h_confirmed=getattr(prepared, "regime_1h_confirmed", None),
-            )
-            return None
+        context_penalty = _confirmed_context_conflict(prepared, direction)
+        clarity = min(abs(depth_value), 1.0)
+        if volume_penalty:
+            clarity *= 0.90
+        if context_penalty:
+            clarity *= 0.82
         return _build_atr_signal(
             prepared=prepared,
             setup_id=self.setup_id,
@@ -276,9 +288,10 @@ class WhaleWallsSetup(RoadmapSetup):
                 f"close_position={close_position:.2f}",
                 f"volume_ratio={vol_ratio:.2f}",
                 f"roc10={roc10:.2f}",
+                f"votes={long_votes if direction == 'long' else short_votes}",
             ],
             family=self.family,
-            structure_clarity=min(abs(depth_value), 1.0),
+            structure_clarity=clarity,
         )
 
 
@@ -290,12 +303,12 @@ class SpreadStrategySetup(RoadmapSetup):
     DEFAULTS = {
         **RoadmapSetup.DEFAULTS,
         "max_spread_bps": 8.0,
-        "min_volume_ratio": 1.60,
-        "min_roc10_abs_pct": 0.65,
-        "min_depth_imbalance": 0.18,
-        "min_microprice_bias": 0.10,
-        "min_close_position_long": 0.60,
-        "max_close_position_short": 0.40,
+        "min_volume_ratio": 0.90,
+        "min_roc10_abs_pct": 0.15,
+        "min_depth_imbalance": 0.10,
+        "min_microprice_bias": 0.05,
+        "min_close_position_long": 0.55,
+        "max_close_position_short": 0.45,
         "min_rr": 1.9,
     }
 
@@ -311,9 +324,7 @@ class SpreadStrategySetup(RoadmapSetup):
         work = prepared.work_15m
         vol_ratio = _last(work, "volume_ratio20", 1.0)
         roc10 = _last(work, "roc10", _price_change_pct(work, 10))
-        if vol_ratio < float(params["min_volume_ratio"]):
-            _reject(prepared, self.setup_id, "volume_too_low", volume_ratio=vol_ratio)
-            return None
+        volume_penalty = vol_ratio < float(params["min_volume_ratio"])
         if abs(roc10) < float(params["min_roc10_abs_pct"]):
             _reject(prepared, self.setup_id, "momentum_too_low", roc10=roc10)
             return None
@@ -342,7 +353,7 @@ class SpreadStrategySetup(RoadmapSetup):
                 params["min_depth_imbalance"]
             ) and micro_value <= -float(params["min_microprice_bias"])
             close_ok = close_position <= float(params["max_close_position_short"])
-        if not orderbook_ok or not close_ok:
+        if not orderbook_ok and not close_ok:
             _reject(
                 prepared,
                 self.setup_id,
@@ -352,17 +363,14 @@ class SpreadStrategySetup(RoadmapSetup):
                 close_position=close_position,
             )
             return None
-        if _confirmed_context_conflict(prepared, direction):
-            _reject(
-                prepared,
-                self.setup_id,
-                "context_conflicts_spread_breakout",
-                direction=direction,
-                bias_1h=getattr(prepared, "bias_1h", None),
-                structure_1h=getattr(prepared, "structure_1h", None),
-                regime_1h_confirmed=getattr(prepared, "regime_1h_confirmed", None),
-            )
-            return None
+        context_penalty = _confirmed_context_conflict(prepared, direction)
+        clarity = min(abs(roc10) / 1.5, 1.0)
+        if not orderbook_ok or not close_ok:
+            clarity *= 0.82
+        if volume_penalty:
+            clarity *= 0.90
+        if context_penalty:
+            clarity *= 0.82
         return _build_atr_signal(
             prepared=prepared,
             setup_id=self.setup_id,
@@ -374,9 +382,10 @@ class SpreadStrategySetup(RoadmapSetup):
                 f"roc10={roc10:.2f}",
                 f"depth={depth_value:.3f}",
                 f"micro={micro_value:.5f}",
+                f"close_position={close_position:.2f}",
             ],
             family=self.family,
-            structure_clarity=min(abs(roc10) / 1.5, 1.0),
+            structure_clarity=clarity,
         )
 
 
@@ -387,12 +396,12 @@ class DepthImbalanceSetup(RoadmapSetup):
     required_context = ("futures_flow",)
     DEFAULTS = {
         **RoadmapSetup.DEFAULTS,
-        "min_depth_imbalance": 0.35,
-        "min_microprice_bias": 0.12,
-        "min_close_position_long": 0.55,
-        "max_close_position_short": 0.45,
-        "min_volume_ratio": 0.90,
-        "min_roc10_abs_pct": 0.05,
+        "min_depth_imbalance": 0.20,
+        "min_microprice_bias": 0.05,
+        "min_close_position_long": 0.52,
+        "max_close_position_short": 0.48,
+        "min_volume_ratio": 0.80,
+        "min_roc10_abs_pct": 0.00,
         "min_rr": 1.9,
     }
 
@@ -410,24 +419,30 @@ class DepthImbalanceSetup(RoadmapSetup):
         threshold = float(params["min_depth_imbalance"])
         micro_threshold = float(params["min_microprice_bias"])
         vol_ratio = _last(prepared.work_15m, "volume_ratio20", 1.0)
-        if vol_ratio < float(params["min_volume_ratio"]):
-            _reject(prepared, self.setup_id, "volume_too_low", volume_ratio=vol_ratio)
-            return None
+        volume_penalty = vol_ratio < float(params["min_volume_ratio"])
         roc10 = _last(prepared.work_15m, "roc10", _price_change_pct(prepared.work_15m, 10))
         if abs(roc10) < float(params["min_roc10_abs_pct"]):
             _reject(prepared, self.setup_id, "price_acceptance_missing", roc10=roc10)
             return None
-        if (
-            depth >= threshold
-            and micro >= micro_threshold
-            and close_position >= float(params["min_close_position_long"])
-        ):
+        long_votes = sum(
+            (
+                depth >= threshold,
+                micro >= micro_threshold,
+                close_position >= float(params["min_close_position_long"]),
+                roc10 >= 0.0,
+            )
+        )
+        short_votes = sum(
+            (
+                depth <= -threshold,
+                micro <= -micro_threshold,
+                close_position <= float(params["max_close_position_short"]),
+                roc10 <= 0.0,
+            )
+        )
+        if long_votes >= 2 and long_votes > short_votes:
             direction = "long"
-        elif (
-            depth <= -threshold
-            and micro <= -micro_threshold
-            and close_position <= float(params["max_close_position_short"])
-        ):
+        elif short_votes >= 2 and short_votes > long_votes:
             direction = "short"
         else:
             _reject(
@@ -439,17 +454,12 @@ class DepthImbalanceSetup(RoadmapSetup):
                 close_position=close_position,
             )
             return None
-        if _confirmed_context_conflict(prepared, direction):
-            _reject(
-                prepared,
-                self.setup_id,
-                "context_conflicts_depth_imbalance",
-                direction=direction,
-                bias_1h=getattr(prepared, "bias_1h", None),
-                structure_1h=getattr(prepared, "structure_1h", None),
-                regime_1h_confirmed=getattr(prepared, "regime_1h_confirmed", None),
-            )
-            return None
+        context_penalty = _confirmed_context_conflict(prepared, direction)
+        clarity = min(abs(depth), 1.0)
+        if volume_penalty:
+            clarity *= 0.90
+        if context_penalty:
+            clarity *= 0.82
         return _build_atr_signal(
             prepared=prepared,
             setup_id=self.setup_id,
@@ -461,9 +471,10 @@ class DepthImbalanceSetup(RoadmapSetup):
                 f"micro={micro:.3f}",
                 f"volume_ratio={vol_ratio:.2f}",
                 f"roc10={roc10:.2f}",
+                f"votes={long_votes if direction == 'long' else short_votes}",
             ],
             family=self.family,
-            structure_clarity=min(abs(depth), 1.0),
+            structure_clarity=clarity,
         )
 
 
@@ -474,10 +485,11 @@ class AbsorptionSetup(RoadmapSetup):
     required_context = ("futures_flow",)
     DEFAULTS = {
         **RoadmapSetup.DEFAULTS,
-        "min_abs_flow_delta": 0.12,
-        "min_close_position_long": 0.62,
-        "max_close_position_short": 0.38,
-        "min_wick_atr": 0.25,
+        "min_abs_flow_delta": 0.05,
+        "min_close_position_long": 0.55,
+        "max_close_position_short": 0.45,
+        "min_wick_atr": 0.12,
+        "min_volume_ratio": 0.90,
     }
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
@@ -498,6 +510,8 @@ class AbsorptionSetup(RoadmapSetup):
             return None
         lower_wick_atr = (min(open_, close) - low) / atr
         upper_wick_atr = (high - max(open_, close)) / atr
+        vol_ratio = _last(work, "volume_ratio20", 1.0)
+        volume_penalty = vol_ratio < float(params["min_volume_ratio"])
         if (
             flow <= -float(params["min_abs_flow_delta"])
             and close_position >= float(params["min_close_position_long"])
@@ -513,14 +527,22 @@ class AbsorptionSetup(RoadmapSetup):
         else:
             _reject(prepared, self.setup_id, "absorption_not_confirmed", flow_delta=flow)
             return None
+        clarity = min(abs(flow) * 2.0, 1.0)
+        if volume_penalty:
+            clarity *= 0.90
         return _build_atr_signal(
             prepared=prepared,
             setup_id=self.setup_id,
             direction=direction,
             params=params,
-            reasons=[f"absorption_{direction}", f"flow_delta={flow:.3f}"],
+            reasons=[
+                f"absorption_{direction}",
+                f"flow_delta={flow:.3f}",
+                f"close_position={close_position:.2f}",
+                f"volume_ratio={vol_ratio:.2f}",
+            ],
             family=self.family,
-            structure_clarity=min(abs(flow) * 2.0, 1.0),
+            structure_clarity=clarity,
         )
 
 
@@ -531,8 +553,8 @@ class AggressionShiftSetup(RoadmapSetup):
     required_context = ("futures_flow",)
     DEFAULTS = {
         **RoadmapSetup.DEFAULTS,
-        "min_shift": 0.10,
-        "min_volume_ratio": 1.05,
+        "min_shift": 0.05,
+        "min_volume_ratio": 0.90,
     }
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
@@ -541,7 +563,8 @@ class AggressionShiftSetup(RoadmapSetup):
         if explicit_shift is not None:
             shift = explicit_shift
         elif prepared.work_15m.height >= 6 and "delta_ratio" in prepared.work_15m.columns:
-            shift = _last(prepared.work_15m, "delta_ratio", 0.5) - _series_mean_tail(
+            current_delta = _last(prepared.work_15m, "delta_ratio", 0.5)
+            shift = current_delta - _series_mean_tail(
                 prepared.work_15m.head(prepared.work_15m.height - 1),
                 "delta_ratio",
                 5,
@@ -550,9 +573,10 @@ class AggressionShiftSetup(RoadmapSetup):
             _reject(prepared, self.setup_id, "aggression_shift_missing")
             return None
         vol_ratio = _last(prepared.work_15m, "volume_ratio20", 1.0)
-        if vol_ratio < float(params["min_volume_ratio"]):
-            _reject(prepared, self.setup_id, "volume_too_low", volume_ratio=vol_ratio)
-            return None
+        volume_penalty = vol_ratio < float(params["min_volume_ratio"])
+        if abs(shift) < float(params["min_shift"]) and "delta_ratio" in prepared.work_15m.columns:
+            current_delta = _last(prepared.work_15m, "delta_ratio", 0.5)
+            shift = current_delta - 0.5
         if shift >= float(params["min_shift"]):
             direction = "long"
         elif shift <= -float(params["min_shift"]):
@@ -567,7 +591,8 @@ class AggressionShiftSetup(RoadmapSetup):
             params=params,
             reasons=[f"aggression_shift_{direction}", f"shift={shift:.3f}"],
             family=self.family,
-            structure_clarity=min(abs(shift) * 3.0, 1.0),
+            structure_clarity=min(abs(shift) * 3.0, 1.0)
+            * (0.90 if volume_penalty else 1.0),
         )
 
 
@@ -579,7 +604,9 @@ class LiquidationHeatmapSetup(RoadmapSetup):
     DEFAULTS = {
         **RoadmapSetup.DEFAULTS,
         "min_liquidation_score": 0.30,
-        "min_proxy_score": 0.30,
+        "min_proxy_volume_ratio": 1.20,
+        "min_proxy_wick_atr": 0.25,
+        "proxy_lookback_bars": 12,
         "min_close_position_long": 0.55,
         "max_close_position_short": 0.45,
         "min_volume_ratio": 0.90,
@@ -590,42 +617,75 @@ class LiquidationHeatmapSetup(RoadmapSetup):
         score = _finite_or_none(prepared.liquidation_score)
         close_position = _last(prepared.work_15m, "close_position", 0.5)
         vol_ratio = _last(prepared.work_15m, "volume_ratio20", 1.0)
-        if vol_ratio < float(params["min_volume_ratio"]):
-            _reject(prepared, self.setup_id, "volume_too_low", volume_ratio=vol_ratio)
-            return None
-        source = "force_order"
+        volume_penalty = vol_ratio < float(params["min_volume_ratio"])
         if score is None:
-            ls_ratio = _first_finite(
-                prepared.global_ls_ratio,
-                prepared.top_account_ls_ratio,
-                prepared.ls_ratio,
-            )
-            taker_ratio = _finite_or_none(prepared.taker_ratio)
-            oi_change = _finite_or_none(prepared.oi_change_pct)
-            price_change = _price_change_pct(prepared.work_15m, bars=4)
-            depth = _finite_or_none(prepared.depth_imbalance)
+            work = prepared.work_15m
+            atr = _last(work, "atr14")
+            close = _last(work, "close")
+            if min(atr, close) <= 0.0:
+                _reject(prepared, self.setup_id, "liquidation_score_missing")
+                return None
+            proxy_threshold = float(params["min_proxy_volume_ratio"])
+            wick_threshold = float(params["min_proxy_wick_atr"])
+            proxy_lookback = max(1, int(params.get("proxy_lookback_bars", 12)))
+            recent = work.tail(min(proxy_lookback, work.height))
+            best_proxy_score = 0.0
+            best_lower_wick = 0.0
+            best_upper_wick = 0.0
+            for local_idx in range(recent.height - 1, -1, -1):
+                open_ = _as_float(recent.item(local_idx, "open"))
+                high = _as_float(recent.item(local_idx, "high"))
+                low = _as_float(recent.item(local_idx, "low"))
+                bar_close = _as_float(recent.item(local_idx, "close"))
+                bar_volume = _as_float(recent.item(local_idx, "volume_ratio20"), 1.0)
+                close_position_bar = _as_float(recent.item(local_idx, "close_position"), 0.5)
+                if min(open_, high, low, bar_close) <= 0.0 or bar_volume < proxy_threshold:
+                    continue
+                lower_wick_atr = (min(open_, bar_close) - low) / atr
+                upper_wick_atr = (high - max(open_, bar_close)) / atr
+                long_proxy = (
+                    lower_wick_atr >= wick_threshold
+                    and close_position_bar >= float(params["min_close_position_long"])
+                )
+                short_proxy = (
+                    upper_wick_atr >= wick_threshold
+                    and close_position_bar <= float(params["max_close_position_short"])
+                )
+                if long_proxy:
+                    candidate = min(
+                        1.0,
+                        0.25 + lower_wick_atr * 0.35 + (bar_volume - 1.0) * 0.12,
+                    )
+                    if abs(candidate) > abs(best_proxy_score):
+                        best_proxy_score = candidate
+                        best_lower_wick = lower_wick_atr
+                        best_upper_wick = upper_wick_atr
+                if short_proxy:
+                    candidate = -min(
+                        1.0,
+                        0.25 + upper_wick_atr * 0.35 + (bar_volume - 1.0) * 0.12,
+                    )
+                    if abs(candidate) > abs(best_proxy_score):
+                        best_proxy_score = candidate
+                        best_lower_wick = lower_wick_atr
+                        best_upper_wick = upper_wick_atr
+            if best_proxy_score != 0.0:
+                score = best_proxy_score
+                source = "volume_wick_proxy"
+            else:
+                _reject(
+                    prepared,
+                    self.setup_id,
+                    "liquidation_score_missing",
+                    volume_ratio=vol_ratio,
+                    lower_wick_atr=best_lower_wick,
+                    upper_wick_atr=best_upper_wick,
+                )
+                return None
+        else:
+            source = "force_order"
 
-            proxy = 0.0
-            if taker_ratio is not None and taker_ratio > 0.0:
-                proxy += max(-0.35, min(0.35, (taker_ratio - 1.0) * 0.7))
-            if ls_ratio is not None and ls_ratio > 0.0:
-                if ls_ratio <= 0.85:
-                    proxy += min((0.85 - ls_ratio) / 0.35, 1.0) * 0.30
-                elif ls_ratio >= 1.35:
-                    proxy -= min((ls_ratio - 1.35) / 0.85, 1.0) * 0.30
-            if oi_change is not None:
-                proxy += max(-0.20, min(0.20, oi_change * 12.0))
-            proxy += max(-0.20, min(0.20, price_change / 1.5))
-            if depth is not None:
-                proxy += max(-0.15, min(0.15, depth * 0.25))
-            score = proxy
-            source = "oi_ls_taker_proxy"
-
-        threshold = (
-            float(params["min_liquidation_score"])
-            if source == "force_order"
-            else float(params["min_proxy_score"])
-        )
+        threshold = float(params["min_liquidation_score"])
         if score >= threshold and close_position >= float(params["min_close_position_long"]):
             direction = "long"
         elif score <= -threshold and close_position <= float(params["max_close_position_short"]):
@@ -638,17 +698,14 @@ class LiquidationHeatmapSetup(RoadmapSetup):
                 liquidation_score=score,
             )
             return None
-        if _confirmed_context_conflict(prepared, direction):
-            _reject(
-                prepared,
-                self.setup_id,
-                "context_conflicts_liquidation_signal",
-                direction=direction,
-                bias_1h=getattr(prepared, "bias_1h", None),
-                structure_1h=getattr(prepared, "structure_1h", None),
-                regime_1h_confirmed=getattr(prepared, "regime_1h_confirmed", None),
-            )
-            return None
+        context_penalty = _confirmed_context_conflict(prepared, direction)
+        clarity = min(abs(score), 1.0)
+        if source != "force_order":
+            clarity *= 0.75
+        if volume_penalty:
+            clarity *= 0.90
+        if context_penalty:
+            clarity *= 0.82
         return _build_atr_signal(
             prepared=prepared,
             setup_id=self.setup_id,
@@ -661,7 +718,7 @@ class LiquidationHeatmapSetup(RoadmapSetup):
                 f"volume_ratio={vol_ratio:.2f}",
             ],
             family=self.family,
-            structure_clarity=min(abs(score), 1.0),
+            structure_clarity=clarity,
         )
 
 
@@ -672,10 +729,13 @@ class StopHuntDetectionSetup(RoadmapSetup):
     required_context = ("futures_flow",)
     DEFAULTS = {
         **RoadmapSetup.DEFAULTS,
-        "sweep_tolerance_pct": 0.0015,
-        "min_volume_ratio": 1.20,
-        "min_close_position_long": 0.58,
-        "max_close_position_short": 0.42,
+        "sweep_tolerance_pct": 0.0010,
+        "min_volume_ratio": 0.80,
+        "min_close_position_long": 0.45,
+        "max_close_position_short": 0.55,
+        "signal_lookback_bars": 12,
+        "near_level_atr": 0.35,
+        "min_wick_atr": 0.35,
     }
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
@@ -688,40 +748,88 @@ class StopHuntDetectionSetup(RoadmapSetup):
         if missing:
             _reject(prepared, self.setup_id, "missing_columns", missing_fields=missing)
             return None
-        high = _last(work, "high")
-        low = _last(work, "low")
         close = _last(work, "close")
-        prev_low = _last(work, "prev_donchian_low20")
-        prev_high = _last(work, "prev_donchian_high20")
-        vol_ratio = _last(work, "volume_ratio20", 1.0)
-        close_position = _last(work, "close_position", 0.5)
         tolerance = float(params["sweep_tolerance_pct"])
-        if vol_ratio < float(params["min_volume_ratio"]):
-            _reject(prepared, self.setup_id, "volume_too_low", volume_ratio=vol_ratio)
-            return None
-        if (
-            low < prev_low * (1.0 - tolerance)
-            and close > prev_low
-            and close_position >= float(params["min_close_position_long"])
-        ):
-            direction = "long"
-            level = prev_low
-        elif (
-            high > prev_high * (1.0 + tolerance)
-            and close < prev_high
-            and close_position <= float(params["max_close_position_short"])
-        ):
-            direction = "short"
-            level = prev_high
-        else:
-            _reject(prepared, self.setup_id, "stop_hunt_not_detected")
-            return None
+        recent = work.tail(min(int(params.get("signal_lookback_bars", 3)), work.height))
+        direction = None
+        level = 0.0
+        signal_lag = 0
+        vol_ratio = _last(work, "volume_ratio20", 1.0)
+        for local_idx in range(recent.height - 1, -1, -1):
+            high = _as_float(recent.item(local_idx, "high"))
+            low = _as_float(recent.item(local_idx, "low"))
+            bar_close = _as_float(recent.item(local_idx, "close"))
+            prev_low = _as_float(recent.item(local_idx, "prev_donchian_low20"))
+            prev_high = _as_float(recent.item(local_idx, "prev_donchian_high20"))
+            close_position = _as_float(recent.item(local_idx, "close_position"), 0.5)
+            bar_vol_ratio = _as_float(recent.item(local_idx, "volume_ratio20"), 1.0)
+            volume_ok = bar_vol_ratio >= float(params["min_volume_ratio"])
+            if (
+                low < prev_low * (1.0 - tolerance)
+                and max(bar_close, close) > prev_low
+                and close_position >= float(params["min_close_position_long"])
+                and volume_ok
+            ):
+                direction = "long"
+                level = prev_low
+            elif (
+                high > prev_high * (1.0 + tolerance)
+                and min(bar_close, close) < prev_high
+                and close_position <= float(params["max_close_position_short"])
+                and volume_ok
+            ):
+                direction = "short"
+                level = prev_high
+            if direction is not None:
+                signal_lag = recent.height - 1 - local_idx
+                vol_ratio = max(vol_ratio, bar_vol_ratio)
+                break
+        if direction is None:
+            atr = _last(work, "atr14")
+            if atr > 0.0 and recent.height > 0:
+                near_level_atr = float(params.get("near_level_atr", 0.35))
+                min_wick_atr = float(params.get("min_wick_atr", 0.35))
+                for local_idx in range(recent.height - 1, -1, -1):
+                    open_ = _as_float(recent.item(local_idx, "open"))
+                    high = _as_float(recent.item(local_idx, "high"))
+                    low = _as_float(recent.item(local_idx, "low"))
+                    bar_close = _as_float(recent.item(local_idx, "close"))
+                    prev_low = _as_float(recent.item(local_idx, "prev_donchian_low20"))
+                    prev_high = _as_float(recent.item(local_idx, "prev_donchian_high20"))
+                    lower_wick_atr = (min(open_, bar_close) - low) / atr
+                    upper_wick_atr = (high - max(open_, bar_close)) / atr
+                    if (
+                        low <= prev_low + atr * near_level_atr
+                        and lower_wick_atr >= min_wick_atr
+                        and close >= bar_close * 0.996
+                    ):
+                        direction = "long"
+                        level = prev_low
+                        signal_lag = recent.height - 1 - local_idx
+                        break
+                    if (
+                        high >= prev_high - atr * near_level_atr
+                        and upper_wick_atr >= min_wick_atr
+                        and close <= bar_close * 1.004
+                    ):
+                        direction = "short"
+                        level = prev_high
+                        signal_lag = recent.height - 1 - local_idx
+                        break
+            if direction is None:
+                _reject(prepared, self.setup_id, "stop_hunt_not_detected")
+                return None
         return _build_atr_signal(
             prepared=prepared,
             setup_id=self.setup_id,
             direction=direction,
             params=params,
-            reasons=[f"stop_hunt_{direction}", f"swept_level={level:.4f}"],
+            reasons=[
+                f"stop_hunt_{direction}",
+                f"swept_level={level:.4f}",
+                f"signal_lag={signal_lag}",
+                f"vol_ratio={vol_ratio:.2f}",
+            ],
             family=self.family,
             structure_clarity=0.7,
         )
@@ -734,11 +842,12 @@ class MultiTFTrendSetup(RoadmapSetup):
     required_context = ("futures_flow",)
     DEFAULTS = {
         **RoadmapSetup.DEFAULTS,
-        "min_adx_1h": 18.0,
-        "min_volume_ratio": 1.10,
-        "pullback_rsi_long_max": 50.0,
-        "pullback_rsi_short_min": 50.0,
+        "min_adx_1h": 15.0,
+        "min_volume_ratio": 0.90,
+        "pullback_rsi_long_max": 58.0,
+        "pullback_rsi_short_min": 42.0,
         "max_adverse_depth_imbalance": 1.00,
+        "min_trend_votes": 2,
     }
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
@@ -752,18 +861,28 @@ class MultiTFTrendSetup(RoadmapSetup):
         if vol_ratio < float(params["min_volume_ratio"]):
             _reject(prepared, self.setup_id, "volume_too_low", volume_ratio=vol_ratio)
             return None
-        bullish = {
+        context_values = [
             prepared.bias_4h,
             prepared.bias_1h,
             prepared.regime_4h_confirmed,
             prepared.regime_1h_confirmed,
-        }
-        if bullish <= {"uptrend"}:
+        ]
+        up_votes = sum(1 for value in context_values if value == "uptrend")
+        down_votes = sum(1 for value in context_values if value == "downtrend")
+        min_votes = int(params.get("min_trend_votes", 3))
+        if up_votes >= min_votes and up_votes > down_votes:
             direction = "long"
-        elif bullish <= {"downtrend"}:
+        elif down_votes >= min_votes and down_votes > up_votes:
             direction = "short"
         else:
-            _reject(prepared, self.setup_id, "multi_tf_not_aligned")
+            _reject(
+                prepared,
+                self.setup_id,
+                "multi_tf_not_aligned",
+                up_votes=up_votes,
+                down_votes=down_votes,
+                min_votes=min_votes,
+            )
             return None
         if direction == "long" and rsi_15m > float(params["pullback_rsi_long_max"]):
             _reject(
@@ -812,6 +931,7 @@ class MultiTFTrendSetup(RoadmapSetup):
                 f"multi_tf_pullback_{direction}",
                 f"adx_1h={adx_1h:.1f}",
                 f"rsi15={rsi_15m:.1f}",
+                f"votes_up={up_votes} votes_down={down_votes}",
             ],
             family=self.family,
             structure_clarity=0.85,
@@ -888,9 +1008,13 @@ class WyckoffSpringSetup(RoadmapSetup):
     DEFAULTS = {
         **RoadmapSetup.DEFAULTS,
         "sweep_tolerance_pct": 0.0010,
-        "min_volume_ratio": 1.35,
-        "min_close_position_long": 0.62,
-        "max_close_position_short": 0.38,
+        "min_volume_ratio": 1.05,
+        "min_close_position_long": 0.55,
+        "max_close_position_short": 0.45,
+        "signal_lookback_bars": 12,
+        "near_range_atr": 0.40,
+        "min_wick_atr": 0.25,
+        "volume_penalty": 0.90,
     }
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
@@ -903,40 +1027,98 @@ class WyckoffSpringSetup(RoadmapSetup):
         if missing:
             _reject(prepared, self.setup_id, "missing_columns", missing_fields=missing)
             return None
-        vol_ratio = _last(work, "volume_ratio20", 1.0)
-        if vol_ratio < float(params["min_volume_ratio"]):
-            _reject(prepared, self.setup_id, "volume_too_low", volume_ratio=vol_ratio)
-            return None
-        high = _last(work, "high")
-        low = _last(work, "low")
         close = _last(work, "close")
-        prev_low = _last(work, "prev_donchian_low20")
-        prev_high = _last(work, "prev_donchian_high20")
-        close_position = _last(work, "close_position", 0.5)
         tolerance = float(params["sweep_tolerance_pct"])
-        if (
-            low < prev_low * (1.0 - tolerance)
-            and close > prev_low
-            and close_position >= float(params["min_close_position_long"])
-        ):
-            direction = "long"
-        elif (
-            high > prev_high * (1.0 + tolerance)
-            and close < prev_high
-            and close_position <= float(params["max_close_position_short"])
-        ):
-            direction = "short"
-        else:
-            _reject(prepared, self.setup_id, "wyckoff_spring_upthrust_missing")
-            return None
+        lookback = max(1, int(params.get("signal_lookback_bars", 12)))
+        recent = work.tail(min(lookback, work.height))
+        direction = None
+        signal_lag = 0
+        level = 0.0
+        vol_ratio = _last(work, "volume_ratio20", 1.0)
+        volume_penalty = vol_ratio < float(params["min_volume_ratio"])
+        for local_idx in range(recent.height - 1, -1, -1):
+            high = _as_float(recent.item(local_idx, "high"))
+            low = _as_float(recent.item(local_idx, "low"))
+            bar_close = _as_float(recent.item(local_idx, "close"))
+            prev_low = _as_float(recent.item(local_idx, "prev_donchian_low20"))
+            prev_high = _as_float(recent.item(local_idx, "prev_donchian_high20"))
+            close_position = _as_float(recent.item(local_idx, "close_position"), 0.5)
+            bar_vol_ratio = _as_float(recent.item(local_idx, "volume_ratio20"), 1.0)
+            vol_ratio = max(vol_ratio, bar_vol_ratio)
+            if (
+                low < prev_low * (1.0 - tolerance)
+                and max(bar_close, close) > prev_low
+                and close_position >= float(params["min_close_position_long"])
+            ):
+                direction = "long"
+                signal_lag = recent.height - 1 - local_idx
+                level = prev_low
+                break
+            if (
+                high > prev_high * (1.0 + tolerance)
+                and min(bar_close, close) < prev_high
+                and close_position <= float(params["max_close_position_short"])
+            ):
+                direction = "short"
+                signal_lag = recent.height - 1 - local_idx
+                level = prev_high
+                break
+        if direction is None:
+            atr = _last(work, "atr14")
+            near_range_atr = float(params.get("near_range_atr", 0.40))
+            min_wick_atr = float(params.get("min_wick_atr", 0.25))
+            if atr > 0.0 and recent.height > 0:
+                range_low = _as_float(recent["low"].min())
+                range_high = _as_float(recent["high"].max())
+                for local_idx in range(recent.height - 1, -1, -1):
+                    high = _as_float(recent.item(local_idx, "high"))
+                    low = _as_float(recent.item(local_idx, "low"))
+                    bar_close = _as_float(recent.item(local_idx, "close"))
+                    open_ = (
+                        _as_float(recent.item(local_idx, "open"))
+                        if "open" in recent.columns
+                        else bar_close
+                    )
+                    close_position = _as_float(recent.item(local_idx, "close_position"), 0.5)
+                    lower_wick_atr = (min(open_, bar_close) - low) / atr
+                    upper_wick_atr = (high - max(open_, bar_close)) / atr
+                    if (
+                        low <= range_low + atr * near_range_atr
+                        and lower_wick_atr >= min_wick_atr
+                        and max(bar_close, close) >= range_low + atr * 0.15
+                        and close_position >= float(params["min_close_position_long"])
+                    ):
+                        direction = "long"
+                        signal_lag = recent.height - 1 - local_idx
+                        level = range_low
+                        break
+                    if (
+                        high >= range_high - atr * near_range_atr
+                        and upper_wick_atr >= min_wick_atr
+                        and min(bar_close, close) <= range_high - atr * 0.15
+                        and close_position <= float(params["max_close_position_short"])
+                    ):
+                        direction = "short"
+                        signal_lag = recent.height - 1 - local_idx
+                        level = range_high
+                        break
+            if direction is None:
+                _reject(prepared, self.setup_id, "wyckoff_spring_upthrust_missing")
+                return None
+        clarity = 0.75 * (float(params.get("volume_penalty", 0.90)) if volume_penalty else 1.0)
         return _build_atr_signal(
             prepared=prepared,
             setup_id=self.setup_id,
             direction=direction,
             params=params,
-            reasons=[f"wyckoff_{direction}", f"vol_ratio={vol_ratio:.2f}"],
+            reasons=[
+                f"wyckoff_{direction}",
+                f"vol_ratio={vol_ratio:.2f}",
+                f"signal_lag={signal_lag}",
+                f"level={level:.4f}",
+            ],
             family=self.family,
-            structure_clarity=0.75,
+            structure_clarity=clarity,
         )
 
 
@@ -948,9 +1130,10 @@ class BBSqueezeSetup(RoadmapSetup):
     DEFAULTS = {
         **RoadmapSetup.DEFAULTS,
         "max_bb_width": 5.0,
-        "min_volume_ratio": 1.05,
-        "min_roc10_abs_pct": 0.15,
-        "squeeze_release_lookback": 4.0,
+        "min_volume_ratio": 0.90,
+        "min_roc10_abs_pct": 0.10,
+        "squeeze_release_lookback": 8.0,
+        "squeeze_memory_bars": 20.0,
     }
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
@@ -961,15 +1144,20 @@ class BBSqueezeSetup(RoadmapSetup):
             _reject(prepared, self.setup_id, "missing_columns", missing_fields=missing)
             return None
         bb_width = _last(work, "bb_width")
-        squeeze_recent = _series_mean_tail(work, "squeeze_on", 8)
         release_lookback = int(params["squeeze_release_lookback"])
+        memory_bars = int(params.get("squeeze_memory_bars", 20))
+        prior = work.head(max(0, work.height - 1))
+        squeeze_recent = _series_max_tail(prior, "squeeze_on", memory_bars)
         squeeze_release_recent = _series_max_tail(work, "squeeze_off", release_lookback)
         roc10 = _last(work, "roc10")
         vol_ratio = _last(work, "volume_ratio20", 1.0)
-        if bb_width > float(params["max_bb_width"]) or squeeze_recent <= 0.0:
+        if squeeze_recent <= 0.0 and bb_width > float(params["max_bb_width"]):
             _reject(prepared, self.setup_id, "bb_squeeze_not_active", bb_width=bb_width)
             return None
-        if squeeze_release_recent <= 0.0 or vol_ratio < float(params["min_volume_ratio"]):
+        volume_penalty = vol_ratio < float(params["min_volume_ratio"])
+        if squeeze_release_recent <= 0.0 and bb_width <= float(params["max_bb_width"]):
+            squeeze_release_recent = 1.0
+        if squeeze_release_recent <= 0.0:
             _reject(
                 prepared,
                 self.setup_id,
@@ -983,6 +1171,7 @@ class BBSqueezeSetup(RoadmapSetup):
             _reject(prepared, self.setup_id, "momentum_too_low", roc10=roc10)
             return None
         direction = "long" if roc10 > 0.0 else "short"
+        clarity = min(abs(roc10), 1.0) * (0.90 if volume_penalty else 1.0)
         return _build_atr_signal(
             prepared=prepared,
             setup_id=self.setup_id,
@@ -994,7 +1183,7 @@ class BBSqueezeSetup(RoadmapSetup):
                 f"release_recent={squeeze_release_recent:.0f}",
             ],
             family=self.family,
-            structure_clarity=min(abs(roc10), 1.0),
+            structure_clarity=clarity,
         )
 
 
@@ -1006,8 +1195,9 @@ class ATRExpansionSetup(RoadmapSetup):
     DEFAULTS = {
         **RoadmapSetup.DEFAULTS,
         "atr_mean_window": 20,
-        "min_atr_expansion_ratio": 1.25,
-        "min_body_atr": 0.45,
+        "min_atr_expansion_ratio": 1.08,
+        "min_body_atr": 0.25,
+        "signal_lookback_bars": 6,
     }
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
@@ -1017,25 +1207,49 @@ class ATRExpansionSetup(RoadmapSetup):
         if missing:
             _reject(prepared, self.setup_id, "missing_columns", missing_fields=missing)
             return None
+        lookback = max(1, int(params.get("signal_lookback_bars", 6)))
+        recent = work.tail(min(lookback, work.height))
         atr = _last(work, "atr14")
         mean_atr = _series_mean_tail(work, "atr14", int(params["atr_mean_window"]))
         if atr <= 0.0 or mean_atr <= 0.0:
             _reject(prepared, self.setup_id, "atr_invalid", atr=atr, mean_atr=mean_atr)
             return None
-        ratio = atr / mean_atr
-        body_atr = abs(_last(work, "close") - _last(work, "open")) / atr
+        best_idx = recent.height - 1
+        ratio = 0.0
+        body_atr = 0.0
+        for local_idx in range(recent.height):
+            bar_atr = _as_float(recent.item(local_idx, "atr14"))
+            if bar_atr <= 0.0:
+                continue
+            candidate_ratio = bar_atr / mean_atr
+            candidate_body = abs(
+                _as_float(recent.item(local_idx, "close"))
+                - _as_float(recent.item(local_idx, "open"))
+            ) / bar_atr
+            if candidate_ratio + candidate_body > ratio + body_atr:
+                ratio = candidate_ratio
+                body_atr = candidate_body
+                best_idx = local_idx
         if ratio < float(params["min_atr_expansion_ratio"]) or body_atr < float(
             params["min_body_atr"]
         ):
             _reject(prepared, self.setup_id, "atr_expansion_too_low", atr_ratio=ratio)
             return None
-        direction = "long" if _last(work, "close") >= _last(work, "open") else "short"
+        signal_open = _as_float(recent.item(best_idx, "open"))
+        signal_close = _as_float(recent.item(best_idx, "close"))
+        direction = "long" if signal_close >= signal_open else "short"
+        signal_lag = recent.height - 1 - best_idx
         return _build_atr_signal(
             prepared=prepared,
             setup_id=self.setup_id,
             direction=direction,
             params=params,
-            reasons=[f"atr_expansion_{direction}", f"atr_ratio={ratio:.2f}"],
+            reasons=[
+                f"atr_expansion_{direction}",
+                f"atr_ratio={ratio:.2f}",
+                f"body_atr={body_atr:.2f}",
+                f"signal_lag={signal_lag}",
+            ],
             family=self.family,
             structure_clarity=min((ratio - 1.0) / 1.0, 1.0),
         )
@@ -1048,11 +1262,11 @@ class LSRatioExtremeSetup(RoadmapSetup):
     required_context = ("futures_flow",)
     DEFAULTS = {
         **RoadmapSetup.DEFAULTS,
-        "long_crowd_threshold": 2.0,
-        "short_crowd_threshold": 0.55,
-        "min_close_position_long": 0.65,
-        "max_close_position_short": 0.35,
-        "min_volume_ratio": 1.15,
+        "long_crowd_threshold": 1.75,
+        "short_crowd_threshold": 0.65,
+        "min_close_position_long": 0.58,
+        "max_close_position_short": 0.42,
+        "min_volume_ratio": 0.90,
         "max_adverse_depth_imbalance": 0.10,
         "max_adverse_microprice_bias": 0.10,
         "sl_buffer_atr": 0.85,
@@ -1081,14 +1295,9 @@ class LSRatioExtremeSetup(RoadmapSetup):
         close_position = _last(work, "close_position", 0.5)
         volume_ratio = _last(work, "volume_ratio20", 1.0)
         if volume_ratio < float(params["min_volume_ratio"]):
-            _reject(
-                prepared,
-                self.setup_id,
-                "ls_ratio_volume_confirmation_missing",
-                ls_ratio=ls_ratio,
-                volume_ratio=volume_ratio,
-            )
-            return None
+            volume_penalty = True
+        else:
+            volume_penalty = False
         if direction == "long":
             close_ok = close_position >= float(params["min_close_position_long"])
         else:
@@ -1115,41 +1324,39 @@ class LSRatioExtremeSetup(RoadmapSetup):
             adverse_depth = depth is not None and depth > max_depth
             adverse_micro = micro is not None and micro > max_micro
         if adverse_depth or adverse_micro:
-            _reject(
-                prepared,
-                self.setup_id,
-                "ls_ratio_orderbook_against_signal",
-                ls_ratio=ls_ratio,
-                depth_imbalance=depth,
-                microprice_bias=micro,
-                direction=direction,
-            )
-            return None
+            orderbook_penalty = True
+        else:
+            orderbook_penalty = False
+        context_penalty = False
         if _confirmed_context_conflict(prepared, direction):
-            _reject(
-                prepared,
-                self.setup_id,
-                "context_conflicts_crowd_reversal",
-                ls_ratio=ls_ratio,
-                direction=direction,
-                bias_1h=getattr(prepared, "bias_1h", None),
-                structure_1h=getattr(prepared, "structure_1h", None),
-                regime_1h_confirmed=getattr(prepared, "regime_1h_confirmed", None),
-            )
-            return None
+            context_penalty = True
+        reasons = [
+            f"ls_ratio_extreme_{direction}",
+            f"ls_ratio={ls_ratio:.2f}",
+            f"close_position={close_position:.2f}",
+            f"volume_ratio={volume_ratio:.2f}",
+        ]
+        if volume_penalty:
+            reasons.append("volume_confirmation_penalty")
+        if orderbook_penalty:
+            reasons.append("orderbook_against_penalty")
+        if context_penalty:
+            reasons.append("context_conflict_penalty")
+        score_multiplier = 1.0
+        if volume_penalty:
+            score_multiplier *= 0.90
+        if orderbook_penalty:
+            score_multiplier *= 0.86
+        if context_penalty:
+            score_multiplier *= 0.82
         return _build_atr_signal(
             prepared=prepared,
             setup_id=self.setup_id,
             direction=direction,
             params=params,
-            reasons=[
-                f"ls_ratio_extreme_{direction}",
-                f"ls_ratio={ls_ratio:.2f}",
-                f"close_position={close_position:.2f}",
-                f"volume_ratio={volume_ratio:.2f}",
-            ],
+            reasons=reasons,
             family=self.family,
-            structure_clarity=min(abs(ls_ratio - 1.0), 1.0),
+            structure_clarity=min(abs(ls_ratio - 1.0), 1.0) * score_multiplier,
         )
 
 
@@ -1214,7 +1421,7 @@ class BTCCorrelationSetup(RoadmapSetup):
     DEFAULTS = {
         **RoadmapSetup.DEFAULTS,
         "min_roc10_abs_pct": 0.15,
-        "min_volume_ratio": 0.90,
+        "min_volume_ratio": 0.70,
     }
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
@@ -1223,13 +1430,19 @@ class BTCCorrelationSetup(RoadmapSetup):
             _reject(prepared, self.setup_id, "benchmark_symbol")
             return None
         btc_bias = getattr(prepared, "btc_bias", None)
-        if btc_bias not in {"uptrend", "downtrend", "bull", "bear"}:
+        if btc_bias is None or str(btc_bias).strip() == "":
             _reject(prepared, self.setup_id, "btc_context_missing")
             return None
+        btc_phase = str(getattr(prepared, "btc_phase", "") or "").lower()
+        if btc_bias not in {"uptrend", "downtrend", "bull", "bear"}:
+            if btc_phase in {"markup", "accumulation"}:
+                btc_bias = "bull"
+            elif btc_phase in {"decline", "distribution"}:
+                btc_bias = "bear"
+            else:
+                btc_bias = "neutral"
         vol_ratio = _last(prepared.work_15m, "volume_ratio20", 1.0)
-        if vol_ratio < float(params["min_volume_ratio"]):
-            _reject(prepared, self.setup_id, "volume_too_low", volume_ratio=vol_ratio)
-            return None
+        volume_penalty = vol_ratio < float(params["min_volume_ratio"])
         roc10 = _last(prepared.work_15m, "roc10", _price_change_pct(prepared.work_15m, 10))
         if abs(roc10) < float(params["min_roc10_abs_pct"]):
             _reject(prepared, self.setup_id, "momentum_too_low", roc10=roc10)
@@ -1237,6 +1450,10 @@ class BTCCorrelationSetup(RoadmapSetup):
         if btc_bias in {"uptrend", "bull"} and prepared.bias_1h != "downtrend" and roc10 > 0.0:
             direction = "long"
         elif btc_bias in {"downtrend", "bear"} and prepared.bias_1h != "uptrend" and roc10 < 0.0:
+            direction = "short"
+        elif btc_bias == "neutral" and prepared.bias_1h == "uptrend" and roc10 > 0.0:
+            direction = "long"
+        elif btc_bias == "neutral" and prepared.bias_1h == "downtrend" and roc10 < 0.0:
             direction = "short"
         else:
             _reject(
@@ -1246,18 +1463,22 @@ class BTCCorrelationSetup(RoadmapSetup):
                 btc_bias=btc_bias,
             )
             return None
+        reasons = [
+            f"btc_correlation_{direction}",
+            f"btc_bias={btc_bias}",
+            f"btc_phase={btc_phase or '-'}",
+            f"roc10={roc10:.2f}",
+        ]
+        if volume_penalty:
+            reasons.append(f"volume_penalty={vol_ratio:.2f}")
         return _build_atr_signal(
             prepared=prepared,
             setup_id=self.setup_id,
             direction=direction,
             params=params,
-            reasons=[
-                f"btc_correlation_{direction}",
-                f"btc_bias={btc_bias}",
-                f"roc10={roc10:.2f}",
-            ],
+            reasons=reasons,
             family=self.family,
-            structure_clarity=0.75,
+            structure_clarity=0.65 if volume_penalty else 0.75,
         )
 
 
@@ -1268,9 +1489,10 @@ class AltcoinSeasonIndexSetup(RoadmapSetup):
     required_context = ("futures_flow",)
     DEFAULTS = {
         **RoadmapSetup.DEFAULTS,
-        "altseason_long_threshold": 60.0,
-        "btc_dominance_threshold": 40.0,
-        "min_volume_ratio": 0.90,
+        "altseason_long_threshold": 55.0,
+        "btc_dominance_threshold": 45.0,
+        "min_volume_ratio": 0.80,
+        "min_roc10_abs_pct": 0.10,
     }
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
@@ -1279,7 +1501,7 @@ class AltcoinSeasonIndexSetup(RoadmapSetup):
         if not base:
             _reject(prepared, self.setup_id, "base_asset_missing")
             return None
-        if base == "BTC":
+        if base in {"BTC", "XAU", "XAG"}:
             _reject(prepared, self.setup_id, "not_altcoin")
             return None
         index = _finite_or_none(getattr(prepared, "altcoin_season_index", None))
@@ -1288,9 +1510,8 @@ class AltcoinSeasonIndexSetup(RoadmapSetup):
             return None
         alt_index = index
         vol_ratio = _last(prepared.work_15m, "volume_ratio20", 1.0)
-        if vol_ratio < float(params["min_volume_ratio"]):
-            _reject(prepared, self.setup_id, "volume_too_low", volume_ratio=vol_ratio)
-            return None
+        volume_penalty = vol_ratio < float(params["min_volume_ratio"])
+        roc10 = _last(prepared.work_15m, "roc10", _price_change_pct(prepared.work_15m, 10))
         if (
             alt_index >= float(params["altseason_long_threshold"])
             and prepared.bias_1h != "downtrend"
@@ -1300,6 +1521,11 @@ class AltcoinSeasonIndexSetup(RoadmapSetup):
             alt_index <= float(params["btc_dominance_threshold"]) and prepared.bias_1h != "uptrend"
         ):
             direction = "short"
+        elif abs(roc10) >= float(params["min_roc10_abs_pct"]) and prepared.bias_1h in {
+            "uptrend",
+            "downtrend",
+        }:
+            direction = "long" if prepared.bias_1h == "uptrend" else "short"
         else:
             _reject(
                 prepared,
@@ -1313,7 +1539,12 @@ class AltcoinSeasonIndexSetup(RoadmapSetup):
             setup_id=self.setup_id,
             direction=direction,
             params=params,
-            reasons=[f"altcoin_season_{direction}", f"alt_index={alt_index:.1f}"],
+            reasons=[
+                f"altcoin_season_{direction}",
+                f"alt_index={alt_index:.1f}",
+                f"roc10={roc10:.2f}",
+            ],
             family=self.family,
-            structure_clarity=abs(alt_index - 50.0) / 50.0,
+            structure_clarity=max(abs(alt_index - 50.0) / 50.0, min(abs(roc10), 1.0))
+            * (0.90 if volume_penalty else 1.0),
         )

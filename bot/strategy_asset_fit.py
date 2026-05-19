@@ -76,9 +76,9 @@ ASSET_FIT_PROFILES: dict[str, AssetFit] = {
     "liquidity_sweep": _fit(("all",), min_liquidity_rank=50),
     "bos_choch": _fit(("all",)),
     "hidden_divergence": _fit(("all",)),
+    "indicator_divergence": _fit(("all",)),
     "funding_reversal": _fit(
         ("perp", "majors"),
-        excludes=("XAUUSDT", "XAGUSDT"),
         requires_funding=True,
     ),
     "cvd_divergence": _fit(("perp",), min_liquidity_rank=80),

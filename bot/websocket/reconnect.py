@@ -52,13 +52,14 @@ def compute_disconnect_delay(
 
     manager._last_reconnect_reason = f"{endpoint}:{exc}"
     manager._last_reconnect_reason_by_endpoint[endpoint] = str(exc)
-    level = logging.WARNING if manager._short_lived_streak >= 3 else logging.INFO
+    level = logging.INFO
+    log_reason = "keepalive_ping_timeout" if keepalive_timeout else str(exc)
     LOG.log(
         level,
-        "ws disconnected | endpoint=%s url=%s close_detail=%s%s uptime=%.1fs retry_in=%.1fs streak=%d",
+        "ws disconnected | endpoint=%s url=%s reason=%s close_detail=%s uptime=%.1fs retry_in=%.1fs streak=%d",
         endpoint,
         url,
-        exc,
+        log_reason,
         close_detail,
         elapsed,
         next_delay,

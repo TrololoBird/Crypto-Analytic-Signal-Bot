@@ -23,6 +23,11 @@ Work in `bot/application/`, currently centered on `bot.py`.
 - If a handler changes because an event changed, update the producer/consumer chain in the same change.
 - If persistence flows change, verify repository method contracts instead of assuming payload shapes.
 - Preserve the current stdlib `logging` style in this module unless the task explicitly refactors logging.
+- Strategy runtime coverage belongs here: if a detector needs public enrichment,
+  verify that `SymbolAnalyzer`, `FuturesWSManager`, `MarketContextUpdater`, or
+  OI/funding runners actually populate the `PreparedSymbol` field.
+- Do not solve a strategy no-signal issue by changing enabled flags. Surface
+  missing data as structured skip/reject telemetry and repair the producer path.
 
 ## Token Discipline
 
@@ -31,5 +36,7 @@ Work in `bot/application/`, currently centered on `bot.py`.
 
 ## Verification
 
-- Prefer targeted regression tests for touched runtime behavior.
-- If no test covers the path, verify the specific event flow and cleanup path you changed.
+- Prefer event-flow tracing, compile/import checks, telemetry replay, and
+  read-only live diagnostics for touched runtime behavior.
+- Generated tests are not proof of live behavior; use them only as supplemental
+  safety checks when explicitly useful.

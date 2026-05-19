@@ -80,8 +80,8 @@ def _run_doctor_check(settings: BotSettings) -> None:
             },
         }
         logging.getLogger("bot.cli").info("DOCTOR OK | %s", json.dumps(report, default=str))
-    except Exception as exc:
-        logging.getLogger("bot.cli").warning("DOCTOR DEGRADED: %s", exc)
+    except Exception:
+        logging.getLogger("bot.cli").exception("DOCTOR DEGRADED")
 
 
 def _bootstrap_env_if_missing() -> None:
@@ -193,7 +193,7 @@ def _rotate_session_log(log_path: Path, *, stamp: str) -> None:
     try:
         shutil.move(str(log_path), str(target))
     except OSError as exc:
-        sys.stderr.write(f"[WARN] failed to rotate previous session log {log_path}: {exc}\n")
+        sys.stderr.write(f"[ERROR] failed to rotate previous session log {log_path}: {exc}\n")
 
 
 def configure_logging(settings: BotSettings, *, debug_mode: bool = False) -> None:
@@ -207,7 +207,7 @@ def configure_logging(settings: BotSettings, *, debug_mode: bool = False) -> Non
         log_path.parent.mkdir(parents=True, exist_ok=True)
         handlers.append(logging.FileHandler(log_path, encoding="utf-8", mode="w"))
     except OSError as exc:
-        sys.stderr.write(f"[WARN] file logging disabled for {log_path}: {exc}\n")
+        sys.stderr.write(f"[ERROR] file logging disabled for {log_path}: {exc}\n")
 
     # Use DEBUG level for full traces
     log_level = logging.DEBUG if debug_mode else getattr(logging, settings.log_level, logging.INFO)
@@ -320,7 +320,7 @@ def _release_pid_lock(pid_file: Path) -> None:
             if current == str(os.getpid()):
                 pid_file.unlink()
     except OSError:
-        logging.getLogger("bot.cli").warning("failed to release pid lock %s", pid_file)
+        logging.getLogger("bot.cli").exception("failed to release pid lock %s", pid_file)
 
 
 def _setup_signal_handlers(bot: SignalBot) -> None:
@@ -329,8 +329,8 @@ def _setup_signal_handlers(bot: SignalBot) -> None:
     def _request_shutdown() -> None:
         try:
             bot.request_shutdown()
-        except Exception as exc:
-            logging.getLogger("bot.cli").warning("failed to request shutdown: %s", repr(exc))
+        except Exception:
+            logging.getLogger("bot.cli").exception("failed to request shutdown")
 
     for sig in (signal.SIGTERM, signal.SIGINT):
         try:
@@ -346,19 +346,19 @@ def _setup_signal_handlers(bot: SignalBot) -> None:
                 logging.getLogger("bot.cli").debug(
                     "signal.signal unavailable for %s (%s)", sig, repr(exc2)
                 )
-        except Exception as exc:
-            logging.getLogger("bot.cli").warning("signal handler setup failed: %s", repr(exc))
+        except Exception:
+            logging.getLogger("bot.cli").exception("signal handler setup failed")
 
 
 async def _main() -> None:
     _bootstrap_env_if_missing()
     settings = load_settings("config.toml")
     if settings.config_path.name != "config.toml":
-        sys.stderr.write(f"[WARN] config.toml not found; using {settings.config_path}\n")
+        sys.stderr.write(f"[INFO] config.toml not found; using {settings.config_path}\n")
     use_telegram = settings.notifiers.provider == "telegram"
     if not use_telegram:
         sys.stderr.write(
-            "[WARN] notifier provider is not telegram; signal delivery runs in local/log mode\n"
+            "[INFO] notifier provider is not telegram; signal delivery runs in local/log mode\n"
         )
     settings.validate_for_runtime(require_telegram=use_telegram)
 
@@ -369,7 +369,7 @@ async def _main() -> None:
             config_path="config.toml",
         )
     except Exception as exc:
-        sys.stderr.write(f"[WARN] startup report failed: {exc}\n")
+        sys.stderr.write(f"[ERROR] startup report failed: {exc}\n")
 
     debug_mode = os.getenv("DEBUG_BOT", "0") in ("1", "true", "yes")
     configure_logging(settings, debug_mode=debug_mode)
@@ -396,13 +396,13 @@ async def _main() -> None:
                 lines = self._buf.split("\n")
                 for line in lines[:-1]:
                     if line.strip() and not _is_preformatted_log_stderr(line):
-                        self.logger.warning("STDERR: %s", line)
+                        self.logger.error("STDERR: %s", line)
                 self._buf = lines[-1]
 
         def flush(self) -> None:
             self._orig.flush()
             if self._buf.strip():
-                self.logger.warning("STDERR: %s", self._buf)
+                self.logger.error("STDERR: %s", self._buf)
                 self._buf = ""
 
     sys.stderr = _StderrToLog("stderr", _orig_stderr)

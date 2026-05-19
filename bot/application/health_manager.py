@@ -25,6 +25,7 @@ class HealthManager:
                 [r for r in active_rows if r.get("status") in ("pending", "active")]
             )
         except Exception:
+            LOG.debug("health check active signal count failed", exc_info=True)
             active_signals = 0
         return {
             "status": "healthy" if self._bot._running else "degraded",

@@ -76,26 +76,6 @@ def _direction_label(direction: str) -> str:
     return "LONG" if direction == "long" else "SHORT"
 
 
-def _humanize_token(value: str) -> str:
-    raw = str(value or "").strip()
-    if raw.startswith("confluence_") and raw.endswith("_setups"):
-        count = raw.removeprefix("confluence_").removesuffix("_setups")
-        if count.isdigit():
-            return f"confluence {count} setups"
-    if raw.startswith("confluence_setups="):
-        payload = raw.split("=", 1)[1].strip()
-        if payload:
-            return "setups: " + html.escape(payload.replace(",", ", "))
-    return html.escape(raw.replace("_", " "))
-
-
-def _is_confluence_reason(value: str) -> bool:
-    raw = str(value or "").strip()
-    return (raw.startswith("confluence_") and raw.endswith("_setups")) or raw.startswith(
-        "confluence_setups="
-    )
-
-
 def _confluence_summary(reasons: tuple[str, ...] | list[str]) -> str | None:
     setup_count = 0
     setups: list[str] = []
@@ -150,15 +130,6 @@ def _format_signal_audit_text(label: str, signal: Signal, *, final: bool = False
         parts.append("FINAL")
     parts.append(signal.created_at.astimezone(UTC).strftime("%H:%M:%S"))
     return " ".join(parts)
-
-
-def _trigger_text(reasons: tuple[str, ...] | list[str]) -> str:
-    parts = [
-        _humanize_token(reason)
-        for reason in reasons
-        if str(reason).strip() and not _is_confluence_reason(str(reason))
-    ]
-    return " -> ".join(parts) if parts else "n/a"
 
 
 def _tradingview_interval(timeframe: str) -> str:
@@ -250,25 +221,10 @@ def _status_line_for_tracked(tracked: SignalTrackingEvent | object) -> str:
 
 def _confidence_label(score: float) -> str:
     if score > 0.75:
-        return "🔥 Сильный"
+        return "strong"
     if score >= 0.68:
-        return "💪 Средний"
-    return "💡 Умеренный"
-
-
-def _trailing_stop_instructions(stop_distance_pct: float) -> str:
-    """Trailing stop hint based on stop distance."""
-    trigger1 = round(stop_distance_pct * 2, 1)
-    trigger2 = round(stop_distance_pct * 3, 1)
-    return f"📌 Трейлинг: +{trigger1}% → SL в безубыток | +{trigger2}% → фиксировать 30%"
-
-
-def _compute_tp3(entry_mid: float, take_profit_2: float, direction: str) -> float:
-    """TP3 = entry + 2 × (TP2 - entry) for longs; mirror for shorts."""
-    dist = abs(take_profit_2 - entry_mid)
-    if direction == "long":
-        return entry_mid + 2.0 * dist
-    return entry_mid - 2.0 * dist
+        return "medium"
+    return "moderate"
 
 
 def _render_signal_card(
@@ -296,38 +252,31 @@ def _render_signal_card(
     entry_mid = (entry_low + entry_high) / 2.0
     scale = max(abs(entry_mid), abs(take_profit_1), abs(take_profit_2), 1.0)
     single_target_mode = abs(take_profit_2 - take_profit_1) <= (scale * 1e-6)
-    tp3 = _compute_tp3(entry_mid, take_profit_2, direction)
 
     lines: list[str] = []
 
-    # BTC warning header (when BTC trend conflicts with signal direction)
     if btc_bias == "downtrend" and direction == "long":
-        lines.append("⚠️ BTC В НИСХОДЯЩЕМ ТРЕНДЕ — повышенный риск")
+        lines.append("<b>BTC risk</b> <code>downtrend vs LONG</code>")
     elif btc_bias == "uptrend" and direction == "short":
-        lines.append("⚠️ BTC В ВОСХОДЯЩЕМ ТРЕНДЕ — повышенный риск")
+        lines.append("<b>BTC risk</b> <code>uptrend vs SHORT</code>")
 
     lines += [
-        f"<b>{html.escape(symbol)} {_direction_label(direction)}</b> <code>#{tracking_ref}</code>",
+        f"<b>LIMIT {_direction_label(direction)} {html.escape(symbol)}</b> <code>#{tracking_ref}</code>",
         (
-            f"<b>Setup</b> <code>{html.escape(timeframe)} "
-            f"{_humanize_token(setup_id)}</code> | "
-            f"<b>Score</b> <code>{score * 100:.0f}%</code> "
-            f"{_confidence_label(score)}"
+            f"<b>Setup</b> <code>{html.escape(setup_id)} {html.escape(timeframe)}</code> | "
+            f"<b>Score</b> <code>{score * 100:.0f}% {_confidence_label(score)}</code>"
         ),
-        f"<b>Risk</b> RR <code>{risk_reward:.2f}</code> | Stop distance <code>{stop_distance_pct:.2f}%</code>",
-        "",
-        f"<b>Entry zone</b> <code>{_fmt_price(entry_low)} – {_fmt_price(entry_high)}</code>",
-        f"<b>Invalidation</b> <code>{_fmt_price(stop)}</code>",
+        f"<b>Entry</b> <code>{_fmt_price(entry_low)} - {_fmt_price(entry_high)}</code>",
+        f"<b>SL</b> <code>{_fmt_price(stop)}</code>",
         (
-            f"<b>Targets</b> <code>{_fmt_price(take_profit_1)}</code>"
+            f"<b>TP</b> <code>{_fmt_price(take_profit_1)}</code>"
             if single_target_mode
             else (
-                f"<b>Targets</b> TP1 <code>{_fmt_price(take_profit_1)}</code> | "
-                f"TP2 <code>{_fmt_price(take_profit_2)}</code> | "
-                f"TP3 <code>{_fmt_price(tp3)}</code>"
+                f"<b>TP</b> TP1 <code>{_fmt_price(take_profit_1)}</code> | "
+                f"TP2 <code>{_fmt_price(take_profit_2)}</code>"
             )
         ),
-        _trailing_stop_instructions(stop_distance_pct),
+        f"<b>RR</b> <code>{risk_reward:.2f}</code> | <b>Risk</b> <code>{stop_distance_pct:.2f}%</code>",
     ]
     ctx = _market_context_line(oi_change_pct, funding_rate)
     if ctx:
@@ -335,14 +284,11 @@ def _render_signal_card(
     confluence = _confluence_summary(reasons)
     if confluence:
         lines.append(f"<b>Confluence</b> <code>{confluence}</code>")
-    trigger_text = _trigger_text(reasons)
-    if trigger_text != "n/a":
-        lines.append(f"<b>Trigger</b> {html.escape(trigger_text)}")
     lines.append(
         f'<b>Chart</b> <a href="{html.escape(tradingview_chart_url(symbol, timeframe), quote=True)}">TradingView</a>'
     )
     if expiry_dt:
-        lines.append(f"👁 Ожидать входа: до <code>{_fmt_dt(expiry_dt)}</code>")
+        lines.append(f"<b>Wait entry until</b> <code>{_fmt_dt(expiry_dt)}</code>")
     else:
         lines.append(f"<b>Status</b> {status_line}")
     return "\n".join(lines)
@@ -377,7 +323,7 @@ def format_signal_text(
         risk_reward=float(signal.risk_reward or 0.0),
         stop_distance_pct=signal.stop_distance_pct,
         reasons=signal.reasons,
-        status_line=f"👁 Ожидать входа: до <code>{_fmt_dt(wait_until)}</code>",
+        status_line=f"waiting entry until <code>{_fmt_dt(wait_until)}</code>",
         score=signal.score,
         oi_change_pct=signal.oi_change_pct,
         funding_rate=signal.funding_rate,
@@ -535,22 +481,22 @@ def format_tracking_event_text(event: SignalTrackingEvent) -> str:
     tracked = event.tracked
     single_target_mode = bool(getattr(tracked, "single_target_mode", False))
     event_titles = {
-        "activated": "Tracking Activated",
-        "tp1_hit": "TP Hit" if single_target_mode else "TP1 Hit",
-        "tp2_hit": "TP2 Hit",
-        "stop_loss": "Stop Loss",
-        "smart_exit": "Analytical Exit (Smart)",
-        "emergency_exit": "Analytical Exit (Hard Barrier)",
-        "expired": "Tracking Expired",
-        "ambiguous_exit": "Analytical Exit (Ambiguous)",
-        "superseded": "Tracking Superseded",
+        "activated": "ENTRY FILLED",
+        "tp1_hit": "TP HIT" if single_target_mode else "TP1 HIT",
+        "tp2_hit": "TP2 HIT",
+        "stop_loss": "STOP LOSS",
+        "smart_exit": "SMART EXIT",
+        "emergency_exit": "HARD EXIT",
+        "expired": "EXPIRED",
+        "ambiguous_exit": "AMBIGUOUS EXIT",
+        "superseded": "SUPERSEDED",
     }
     if event.event_type == "stop_loss" and getattr(tracked, "moved_to_break_even_at", None):
         try:
             break_even = float(getattr(tracked, "activation_price", None) or tracked.entry_mid)
             stop_px = float(event.event_price or tracked.stop)
             if break_even > 0 and abs(stop_px - break_even) <= (break_even * 1e-6):
-                event_titles["stop_loss"] = "Stop (Break-even)"
+                event_titles["stop_loss"] = "BREAKEVEN STOP"
         except (TypeError, ValueError) as exc:
             LOG.debug("stop-loss display adjustment skipped: %s", exc)
     lines = [
@@ -568,7 +514,6 @@ def format_tracking_event_text(event: SignalTrackingEvent) -> str:
             )
             + "</code>"
         ),
-        f'<b>Chart</b> <a href="{html.escape(tradingview_chart_url(tracked.symbol, tracked.timeframe), quote=True)}">TradingView</a>',
     ]
     if event.note:
         lines.append(f"<b>Note</b> <code>{html.escape(event.note)}</code>")
@@ -749,7 +694,7 @@ class SignalDelivery:
                 LOG.info("telegram signal sent\n%s", text)
             elif result.status == "logged":
                 LOG.info("local signal logged\n%s", text)
-                LOG.warning(
+                LOG.info(
                     "signal delivery status is not sent | status=%s reason=%s symbol=%s setup=%s",
                     result.status,
                     result.reason,
@@ -757,7 +702,7 @@ class SignalDelivery:
                     signal.setup_id,
                 )
             else:
-                LOG.warning(
+                LOG.error(
                     "signal delivery status is not sent | status=%s reason=%s symbol=%s setup=%s",
                     result.status,
                     result.reason,

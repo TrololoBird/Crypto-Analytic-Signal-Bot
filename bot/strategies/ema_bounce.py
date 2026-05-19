@@ -38,6 +38,7 @@ class EmaBounceSetup(BaseSetup):
             "sl_buffer_atr": 0.5,
             "ema_touch_tolerance_pct": 0.005,
             "ema_touch_tolerance": 0.005,
+            "bounce_threshold_atr": 0.12,
         }
 
         if settings is not None:
@@ -69,7 +70,12 @@ class EmaBounceSetup(BaseSetup):
                 ),
             )
         )
-        bounce_threshold_pct = dynamic_params.get("bounce_threshold_pct", 0.005)
+        bounce_threshold_atr = float(
+            dynamic_params.get(
+                "bounce_threshold_atr",
+                dynamic_params.get("bounce_threshold_pct", defaults["bounce_threshold_atr"]),
+            )
+        )
         min_adx = dynamic_params.get(
             "min_adx",
             dynamic_params.get("min_adx_1h", defaults.get("min_adx", defaults["min_adx_1h"])),
@@ -163,7 +169,10 @@ class EmaBounceSetup(BaseSetup):
             )
             bounce = (
                 close > open_
-                and close >= prev_close * (1.0 + float(bounce_threshold_pct))
+                and (
+                    close - prev_close >= atr * bounce_threshold_atr
+                    or close_position >= 0.60
+                )
                 and close >= ema20 * (1.0 - float(ema_touch_tolerance_pct))
                 and close_position >= 0.55
             )
@@ -184,7 +193,10 @@ class EmaBounceSetup(BaseSetup):
             )
             bounce = (
                 close < open_
-                and close <= prev_close * (1.0 - float(bounce_threshold_pct))
+                and (
+                    prev_close - close >= atr * bounce_threshold_atr
+                    or close_position <= 0.40
+                )
                 and close <= ema20 * (1.0 + float(ema_touch_tolerance_pct))
                 and close_position <= 0.45
             )

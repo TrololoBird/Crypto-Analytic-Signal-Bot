@@ -41,10 +41,9 @@ class HealthMonitor:
                 raise
             except Exception as exc:
                 self._failure_streak += 1
-                LOG.warning(
-                    "health monitor failure | streak=%d err=%s",
+                LOG.exception(
+                    "health monitor failure | streak=%d",
                     self._failure_streak,
-                    exc,
                 )
                 if self._failure_streak >= self._alert_after_failures and self._alert is not None:
                     await self._alert(

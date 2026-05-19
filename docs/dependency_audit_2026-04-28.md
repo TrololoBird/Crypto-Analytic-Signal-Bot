@@ -19,7 +19,11 @@ Last updated: 2026-05-03
 - Python target remains `>=3.13,<3.14`.
 - Native or platform-sensitive packages are present: `numpy`, `polars`, `aiohttp`, `orjson`, `msgspec`, `hmmlearn`, `scikit-learn`, `statsmodels`, `lightgbm`, `xgboost`, `pyarrow`, and `psutil`.
 - `websockets` is constrained to `>=16.0,<17.0`; Binance USD-M routed WebSocket endpoints and the local `websockets.connect(...)` call path were checked against current docs.
-- `polars_ta` is included without `TA-Lib`; runtime feature generation now keeps `_HAS_TALIB=False` and `_USE_POLARS_TA_BACKEND=False`, so installed `polars_ta` does not change core indicator warm-up semantics. The local no-TA-Lib smoke test confirmed `polars_ta.ta.SMA` and project EMA fallback work without importing native `talib`.
+- `polars_ta` is included without native `TA-Lib`; runtime feature generation
+  keeps `_HAS_TALIB=False` and `_USE_POLARS_TA_BACKEND=True` when `polars_ta`
+  is installed. Core indicators use `polars_ta` where compatible, with
+  project-contract normalization such as RSI `0..1` -> `0..100`, and fall back
+  to deterministic Polars formulas on backend failure.
 
 ## Residual Risk
 

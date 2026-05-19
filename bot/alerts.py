@@ -138,7 +138,7 @@ class AlertCoordinator:
             return
         # Guard against accidental dict passage (PreparedFeatureSnapshot mix-up).
         if isinstance(prepared, dict):
-            LOG.warning(
+            LOG.error(
                 "refresh_candidates received dict instead of PreparedSymbol, skipping | symbol=%s",
                 prepared.get("symbol", "unknown"),
             )

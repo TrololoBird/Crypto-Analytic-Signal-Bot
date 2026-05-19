@@ -202,7 +202,7 @@ class ShortlistService:
                     timeout=10.0,
                 )
             except asyncio.TimeoutError:
-                LOG.warning(
+                LOG.info(
                     "fetch_exchange_symbols attempt %d/%d timed out",
                     attempt + 1,
                     max_retries + 1,
@@ -211,12 +211,11 @@ class ShortlistService:
                     await asyncio.sleep(1.0)
                 else:
                     raise
-            except Exception as exc:
-                LOG.warning(
-                    "fetch_exchange_symbols attempt %d/%d failed: %s",
+            except Exception:
+                LOG.exception(
+                    "fetch_exchange_symbols attempt %d/%d failed",
                     attempt + 1,
                     max_retries + 1,
-                    exc,
                 )
                 if attempt < max_retries:
                     await asyncio.sleep(1.0)
@@ -255,7 +254,7 @@ class ShortlistService:
             symbol = str(raw_symbol).strip().upper()
             base_asset, quote_asset = self.extract_symbol_assets(symbol)
             if not base_asset or not quote_asset:
-                LOG.warning(
+                LOG.error(
                     "skipping pinned symbol due to unresolved base/quote assets | symbol=%s configured_quote_asset=%s",
                     symbol,
                     bot.settings.universe.quote_asset,
@@ -396,10 +395,10 @@ class ShortlistService:
                 shortlist = list(cached_shortlist)
                 source = "cached"
                 fallback_reason = FALLBACK_REASON_REFRESH_EXCEPTION
-                LOG.warning("shortlist refresh failed, using cached shortlist: %s", exc)
+                LOG.exception("shortlist refresh failed, using cached shortlist")
             else:
                 fallback_reason = FALLBACK_REASON_REFRESH_EXCEPTION
-                LOG.warning("shortlist refresh failed, using pinned fallback: %s", exc)
+                LOG.exception("shortlist refresh failed, using pinned fallback")
 
         async with bot._shortlist_lock:
             bot._shortlist = shortlist

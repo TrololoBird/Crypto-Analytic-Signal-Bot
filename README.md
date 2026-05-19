@@ -62,6 +62,7 @@ See [docs/OPERATIONS.md](docs/OPERATIONS.md) for detailed documentation.
 
 ## Documentation
 
+- [Agent Playbook](docs/AGENT_PLAYBOOK.md) — Current agent workflow, runtime map, and strategy repair rules
 - [Operations Guide](docs/OPERATIONS.md) — Running and monitoring the bot
 - [Architecture Overview](docs/ARCHITECTURE.md) — System design and components
 - [Strategy Reference](docs/STRATEGIES.md) — Available trading strategies
