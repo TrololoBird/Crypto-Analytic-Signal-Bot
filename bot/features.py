@@ -1805,11 +1805,11 @@ def _enrich_with_ws_data(
 
 
 def _to_polars(df: object) -> pl.DataFrame:
-    """Convert supported frame-like values to Polars."""
+    """Normalize supported frame-like values to Polars."""
     if isinstance(df, pl.DataFrame):
         return df
-    if hasattr(df, "__dataframe__"):
-        return pl.from_pandas(cast(Any, df))
+    if type(df).__module__.startswith("pandas"):
+        raise TypeError("prepare_symbol expects Polars frames; pandas inputs are unsupported")
     return pl.DataFrame(cast(Any, df))
 
 
@@ -1857,7 +1857,6 @@ def prepare_symbol(
         )
         return None
 
-    # Convert pandas DataFrames to Polars if needed
     work_1h = _cached_prepare_frame(_to_polars(frames.df_1h), symbol=sym, interval="1h")
     work_15m = _cached_prepare_frame(
         _to_polars(frames.df_15m),

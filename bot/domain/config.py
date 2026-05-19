@@ -335,18 +335,6 @@ class AlertConfig(BaseModel):
     watch_expiry_minutes: int = Field(default=60, ge=5, le=1440)
 
 
-class MLConfig(BaseModel):
-    """Machine learning configuration for signal enhancement."""
-
-    enabled: bool = False
-    use_ml_in_live: bool = False
-    ml_confidence_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
-    model_dir: str = "models"
-    model_type: str = "xgboost"  # xgboost, lightgbm, sklearn
-    auto_retrain: bool = False
-    retrain_interval_hours: int = Field(default=24, ge=1, le=168)
-
-
 class NotifierWebhookConfig(BaseModel):
     enabled: bool = False
     webhook_url: str | None = None
@@ -561,7 +549,6 @@ class BotSettings(BaseModel):
     ws: WSConfig = Field(default_factory=WSConfig)
     scoring: ScoringConfig = Field(default_factory=ScoringConfig)
     alerts: AlertConfig = Field(default_factory=AlertConfig)
-    ml: MLConfig = Field(default_factory=MLConfig)
     notifiers: NotifierConfig = Field(default_factory=NotifierConfig)
     spot_companion: SpotCompanionConfig = Field(default_factory=SpotCompanionConfig)
     intelligence: IntelligenceConfig = Field(default_factory=IntelligenceConfig)
@@ -586,10 +573,6 @@ class BotSettings(BaseModel):
     @property
     def pid_file(self) -> Path:
         return self.data_dir / "bot.pid"
-
-    @property
-    def ml_dir(self) -> Path:
-        return self.data_dir / "ml"
 
     @property
     def log_level(self) -> str:

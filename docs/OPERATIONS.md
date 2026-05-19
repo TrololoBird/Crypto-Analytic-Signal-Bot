@@ -125,24 +125,23 @@ The bot includes a built-in web dashboard for real-time monitoring.
 - Treat any `/private`, signed/auth route, `listenKey`, or user-data stream as a configuration/code regression.
 - After market-data changes, rerun endpoint grep plus the contract-focused suites (`tests/test_regression_suite_contracts.py`, `tests/test_regression_suite_tracking_delivery.py`) to confirm public-only guardrails still hold.
 
-## ML training quality gates
+## Signal scoring quality gates
 
-- Use `python -m bot.ml.train` with `--report` to persist machine-readable walk-forward output.
-- `summary` metrics are aggregated with `test_rows` weights, so larger validation windows have proportionally larger impact.
-- Use gates for CI/non-interactive validation:
-  - `--min-windows` (expected minimum number of evaluated windows),
-  - `--min-accuracy`, `--min-precision`, `--min-recall`, `--min-f1` (all bounded in `[0.0, 1.0]`).
-- CLI exits with code `2` when any enabled gate fails and includes failure reasons in `quality_gate.failures`.
-- Runtime ML integration should import `MLFilter` from `bot.ml` (canonical path). The top-level module `bot.ml_filter` is kept only as a backward-compatible shim.
-- Live-guardrail decision is centralized on runtime paths via `SignalClassifier.runtime_guardrail_decision(...)` (which delegates to `bot.ml.guardrails.evaluate_live_model_guardrail`), so baseline kinds are blocked only in live mode (`is_live && model_kind in {centroid_baseline, linear_baseline} => disable`) and remain allowed for offline/backtest scoring.
-- Guardrail telemetry is emitted as structured fields in logs: `stage`, `model_kind`, `disable_reason`, `is_live`, `count` (including orchestrator init status row). `MLFilter.get_status()` also exposes `last_guardrail_decision` with the same four keys for operational checks.
+- Runtime signal quality is produced by `ConfluenceEngine` using deterministic
+  scoring components only: setup prior, multi-timeframe alignment, volume,
+  structure, risk/reward, funding, crowd positioning, and OI momentum.
+- There is no live ML filter or training pipeline in the runtime contract.
+  Do not add pandas/sklearn model inference back into the signal path without a
+  separate design review and live validation plan.
+- Strategy failures must surface as structured `StrategyDecision` rows. A
+  detector that does not emit a signal must explain the exact data, feature,
+  filter, threshold, or market-condition reason.
 
 ## Incident checklist
 
 1. Verify exchange connectivity and WS status.
 2. Confirm fresh klines/market context.
 3. Inspect strategy skip/reject reasons in telemetry before changing code.
-   - For ML guardrails, filter `ML guardrail` / `ML runtime status` events and verify: `model_kind`, `disable_reason`, `stage`, `is_live`.
 4. Validate cooldown/blacklist status in repository.
 5. If the code changed during a live run, restart before judging the new
    behavior. Old telemetry remains diagnostic only.

@@ -85,7 +85,6 @@ class SignalEngine:
             0.0,
             float(getattr(runtime, "max_strategy_queue_wait_seconds", 45.0)),
         )
-        self._semaphore = asyncio.Semaphore(self._strategy_concurrency)
         self._executor_warmed = False
         self._executor_warm_lock = asyncio.Lock()
 
@@ -159,9 +158,10 @@ class SignalEngine:
         )
         await self._ensure_executor_warmed(min(len(strategies), self._strategy_concurrency))
 
+        per_symbol_semaphore = asyncio.Semaphore(self._strategy_concurrency)
         pending = [
             asyncio.create_task(
-                self._calculate_one(strategy, prepared),
+                self._calculate_one(strategy, prepared, semaphore=per_symbol_semaphore),
                 name=f"engine:{symbol}:{strategy.strategy_id}",
             )
             for strategy in strategies
@@ -237,19 +237,25 @@ class SignalEngine:
             LOG.debug("Strategy %s is disabled", strategy_id)
             return None
 
-        return await self._calculate_one(strategy, prepared)
+        return await self._calculate_one(
+            strategy,
+            prepared,
+            semaphore=asyncio.Semaphore(self._strategy_concurrency),
+        )
 
     async def _calculate_one(
         self,
         strategy: Any,  # AbstractStrategy
         prepared: PreparedSymbol,
+        *,
+        semaphore: asyncio.Semaphore,
     ) -> SignalResult:
         """Calculate signal from single strategy with timeout and error handling."""
         strategy_id = strategy.strategy_id
         symbol = prepared.symbol if prepared else "unknown"
         queued_at = time.perf_counter()
 
-        async with self._semaphore:
+        async with semaphore:
             start_time = time.perf_counter()
             queue_wait_ms = (start_time - queued_at) * 1000.0
             if (
@@ -539,4 +545,5 @@ class SignalEngine:
             "total_strategies": total_count,
             "timeout_seconds": self._timeout,
             "semaphore_limit": self._strategy_concurrency,
+            "strategy_concurrency_per_symbol": self._strategy_concurrency,
         }

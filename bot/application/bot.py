@@ -107,20 +107,7 @@ class SignalBot:
         # Note: All persistence now uses MemoryRepository (SQLite)
         # Legacy JSON stores (memory.json, state.json, tracking.json) removed in modern architecture
 
-        # ML Filter for live signal enhancement
-        from bot.ml import MLFilter
-
-        self.ml_filter = MLFilter(settings)
-        ml_status = self.ml_filter.get_status()
-        LOG.info(
-            "ML runtime status | stage=%s model_kind=%s disable_reason=%s is_live=%s count=%d",
-            "orchestrator_init",
-            ml_status.get("model_kind") or "unknown",
-            ml_status.get("disable_reason") or "not_disabled",
-            bool(settings.ml.enabled and settings.ml.use_ml_in_live),
-            1,
-        )
-        self.confluence = ConfluenceEngine(settings, ml_filter=self.ml_filter)
+        self.confluence = ConfluenceEngine(settings)
 
         # Market regime analyzer
         from bot.market_regime import MarketRegimeAnalyzer
@@ -154,7 +141,7 @@ class SignalBot:
         if not disable_http_servers:
             self.dashboard.start_server(auto_open=settings.runtime.auto_open_dashboard)
 
-        # Tracking & ML - uses Modern MemoryRepository
+        # Tracking uses Modern MemoryRepository.
         # Legacy stores removed - all data in SQLite
         self.tracker = container.tracker
         self.intelligence = container.intelligence

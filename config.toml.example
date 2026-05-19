@@ -4,8 +4,8 @@
 
 [bot.runtime]
 analysis_concurrency = 8
-# Strategy executor budget inside SignalEngine.
-# Keep lower than analysis_concurrency to avoid thread oversubscription/timeouts.
+# Per-symbol strategy executor budget inside SignalEngine. Global symbol
+# concurrency is controlled separately by analysis_concurrency.
 strategy_concurrency = 4
 # Per-strategy compute timeout (seconds) excluding queue wait.
 strategy_timeout_seconds = 12.0
@@ -268,9 +268,6 @@ force_order_window_seconds = 60
 intra_candle_throttle_seconds = 60.0
 # Optional noise gate for intra-candle scans. 0 disables gating.
 intra_candle_min_move_bps = 0.0
-
-[bot.ml]
-use_ml_in_live = false
 
 [bot.notifiers]
 # "none" keeps local/log-only delivery until TG_TOKEN and TARGET_CHAT_ID are set.

@@ -432,7 +432,7 @@ def apply_global_filters(
         )
     updated = replace(updated, passed_filters=tuple([*updated.passed_filters, "rr_ok"]))
 
-    # --- 7. Scoring + ML (ConfluenceEngine — unified path) ---
+    # --- 7. Scoring (ConfluenceEngine — unified path) ---
     scoring_result: ScoringResult | None = None
     if settings.scoring.enabled:
         confluence_result = confluence_engine.score(updated, prepared)
@@ -440,8 +440,6 @@ def apply_global_filters(
         scoring_result = confluence_result.to_scoring_result()
         passed = list(updated.passed_filters)
         passed.append("scoring_applied")
-        if confluence_result.ml_probability is not None:
-            passed.append("ml_applied")
         updated = replace(updated, passed_filters=tuple(passed))
 
     if adx_penalty_applied:

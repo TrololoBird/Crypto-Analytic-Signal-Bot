@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from .ml.volatility_gate import VolatilityGate
 from .domain.config import BotSettings
 from .domain.schemas import PreparedSymbol, Signal
 from .scoring import (
@@ -19,9 +18,6 @@ from .scoring import (
     _structure_clarity,
     _volume_quality,
 )
-
-if TYPE_CHECKING:
-    from .ml.filter import MLFilter
 
 LOG = logging.getLogger("bot.confluence")
 
@@ -43,10 +39,6 @@ class ConfluenceResult:
     setup_prior: float
     components: tuple[ComponentScore, ...]
     final_score: float
-    ml_probability: float | None = None
-    ml_confidence: float | None = None
-    ml_applied: bool = False
-    ml_skip_reason: str | None = None
 
     @property
     def weighted_model_score(self) -> float:
@@ -54,8 +46,6 @@ class ConfluenceResult:
 
     def to_scoring_result(self) -> ScoringResult:
         adjustments = {c.name: c.contribution for c in self.components}
-        if self.ml_applied and self.ml_probability is not None:
-            adjustments["ml_boost"] = self.ml_probability - 0.5
         return ScoringResult(
             base_score=self.setup_prior,
             adjustments=adjustments,
@@ -77,10 +67,6 @@ class ConfluenceResult:
             ],
             "weighted_model_score": self.weighted_model_score,
             "final_score": self.final_score,
-            "ml_probability": self.ml_probability,
-            "ml_confidence": self.ml_confidence,
-            "ml_applied": self.ml_applied,
-            "ml_skip_reason": self.ml_skip_reason,
         }
 
 
@@ -89,14 +75,12 @@ class ConfluenceEngine:
 
     Usage::
 
-        engine = ConfluenceEngine(settings, ml_filter=ml_filter)
+        engine = ConfluenceEngine(settings)
         result = engine.score(signal, prepared)
     """
 
-    def __init__(self, settings: BotSettings, ml_filter: "MLFilter | None" = None) -> None:
+    def __init__(self, settings: BotSettings) -> None:
         self.settings = settings
-        self._ml_filter = ml_filter
-        self._volatility_gate = VolatilityGate()
 
     def score(self, signal: Signal, prepared: PreparedSymbol) -> ConfluenceResult:
         cfg = self.settings.scoring
@@ -107,64 +91,10 @@ class ConfluenceEngine:
         blended = (signal.score * prior_w) + (model_score * (1.0 - prior_w))
         final = round(max(0.0, min(blended, 1.0)), 4)
 
-        # ML enhancement (if enabled and confident)
-        ml_probability: float | None = None
-        ml_confidence: float | None = None
-        ml_applied = False
-        ml_skip_reason: str | None = None
-
-        if self._ml_filter is not None and self._ml_filter.enabled:
-            try:
-                ml_result = self._ml_filter.predict(signal, prepared)
-                regime = str(getattr(prepared, "market_regime", "neutral") or "neutral")
-                gate_passed = self._volatility_gate.should_use_ml(regime, signal.score)
-                if ml_result.error is not None:
-                    ml_skip_reason = "ml_error"
-                elif not ml_result.is_confident:
-                    ml_skip_reason = "ml_low_confidence"
-                elif not gate_passed:
-                    ml_skip_reason = "volatility_gate_blocked"
-                else:
-                    ml_probability = ml_result.probability
-                    ml_confidence = ml_result.confidence
-                    delta = ml_probability - 0.5
-                    bounded_delta = max(-0.15, min(0.15, delta))
-                    final = round(max(0.0, min(final + bounded_delta, 1.0)), 4)
-                    ml_applied = True
-                    ml_skip_reason = None
-                    LOG.debug(
-                        "ML applied | symbol=%s setup=%s regime=%s ml_prob=%.3f confidence=%.3f final_score=%.3f",
-                        signal.symbol,
-                        signal.setup_id,
-                        regime,
-                        ml_probability,
-                        ml_confidence,
-                        final,
-                    )
-                if not ml_applied and ml_skip_reason is not None:
-                    LOG.debug(
-                        "ML skipped | symbol=%s setup=%s regime=%s reason=%s",
-                        signal.symbol,
-                        signal.setup_id,
-                        regime,
-                        ml_skip_reason,
-                    )
-            except Exception:
-                LOG.exception("ML prediction failed for %s", signal.symbol)
-                ml_skip_reason = "ml_exception"
-        elif self._ml_filter is None:
-            ml_skip_reason = "ml_filter_absent"
-        elif not self._ml_filter.enabled:
-            ml_skip_reason = getattr(self._ml_filter, "disable_reason", None) or "ml_disabled"
-
         return ConfluenceResult(
             setup_prior=signal.score,
             components=tuple(components),
             final_score=final,
-            ml_probability=ml_probability,
-            ml_confidence=ml_confidence,
-            ml_applied=ml_applied,
-            ml_skip_reason=ml_skip_reason,
         )
 
     def _compute_components(

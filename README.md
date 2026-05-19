@@ -66,7 +66,7 @@ See [docs/OPERATIONS.md](docs/OPERATIONS.md) for detailed documentation.
 - [Operations Guide](docs/OPERATIONS.md) — Running and monitoring the bot
 - [Architecture Overview](docs/ARCHITECTURE.md) — System design and components
 - [Strategy Reference](docs/STRATEGIES.md) — Available trading strategies
-- [Audit Report 2 Remediation Ledger](docs/remediation_report_2.md) — Verified status of `audit_report (2).md` items and follow-up tasks
+- [Architecture Audit 2026-05-19](docs/ARCHITECTURE_AUDIT_2026-05-19.md) — current runtime audit, dead-code removals, and verification notes
 
 ## License
 

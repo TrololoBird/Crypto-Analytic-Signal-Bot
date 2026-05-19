@@ -386,21 +386,21 @@ Markdown corpus review:
 - Markdown files scanned: 63.
 - Groups: root/hidden 12, `bot/` 6, `docs/` 16, `logs/` 10, `data/` 15,
   `scripts/` 2, `tests/` 1, `reports/` 1.
-- Key current documents read/checked: `AGENTS.md`, `.codex.md`,
-  `codex_agent_prompt_v4.md`, `CODEX.md`, `Crypto-Analytic-Signal-Bot-AUDIT-v2.md`,
-  `docs/REMEDIATION_PLAN.md`, `docs/v2_cycle_after_v1.md`,
-  `docs/strategy_audit_2026-04-28.md`, `docs/shortlist_audit_2026-04-28.md`,
-  `docs/FEATURES_IO_CONTRACT.md`, `docs/ws_runtime_audit.md`,
-  `reports/binance_endpoint_registry.md`, and latest startup/public-intelligence
-  reports under `data/bot/session/reports/`.
+- Key current documents read/checked: `AGENTS.md`, `CODEX.md`,
+  `docs/AGENT_PLAYBOOK.md`, `docs/ARCHITECTURE.md`,
+  `docs/FEATURES_IO_CONTRACT.md`, `docs/OPERATIONS.md`,
+  `docs/STRATEGIES.md`, `docs/CODEX_UNIVERSAL_PROMPT.md`,
+  `docs/ARCHITECTURE_AUDIT_2026-05-19.md`, `PROJECT_MAP.md`,
+  `config.toml`, `config.toml.example`, and runtime telemetry under
+  `data/bot/telemetry/runs/`.
 - Important stale-doc corrections:
   - `docs/strategy_audit_2026-04-28.md` still contained historical "critical"
     TP contradictions and `_build_signal` caveats; these were updated as
     historical/stale where current code disagrees.
   - `docs/FEATURES_IO_CONTRACT.md` did not list session overlap fields; it now
     does.
-  - `docs/dependency_audit_2026-04-28.md` now states that runtime feature
-    generation is pure Polars even with `polars_ta` installed.
+  - The stale remediation/dependency audit bundle from April 2026 has been
+    removed. The current audit source is `docs/ARCHITECTURE_AUDIT_2026-05-19.md`.
 
 Codebase scan:
 
@@ -464,8 +464,9 @@ Code changes from the recheck:
   and added `session_overlap` and `session_overlap_vol_20`.
 - `bot/features_core.py`: aligned decomposed core feature column ordering with
   legacy `_prepare_frame`.
-- `bot/ml/filter.py`: live-mode `SignalClassifier` fallback artifacts are
-  blocked by guardrail instead of silently loading through the fallback path.
+- Removed stale live signal-ML path. Runtime confluence is deterministic and no
+  longer imports model filters, dataframe-to-model conversions, or model
+  artifact guardrails.
 - `bot/scoring.py`: `_risk_reward_quality(...)` now tolerates narrow test
   settings objects without assuming a full `BotSettings.filters` tree.
 - `bot/strategies/session_killzone.py`: guarded empty/missing-time frames,
