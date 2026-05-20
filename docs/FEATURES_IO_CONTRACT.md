@@ -20,6 +20,31 @@ For full pipeline (`_prepare_frame`) input frame must include:
 
 `_prepare_frame` returns a Polars DataFrame with core + advanced + oscillator + microstructure + session columns and drops warm-up rows where long-window features are not available (`ema200`, `donchian_low20`).
 
+`prepare_symbol()` preserves timeframe names literally in `PreparedSymbol`:
+
+- `work_15m` is always the prepared 15m frame.
+- `work_1h` is always the prepared 1h frame.
+- `work_5m` and `work_4h` remain optional context frames.
+- `work_primary` points to the configured primary timeframe frame (`5m`, `15m`, `1h`, or `4h`) after fallback resolution.
+
+Asset-level `primary_timeframe` changes freshness/scoring policy and the
+explicit `work_primary` pointer. It must not alias a 1h or 4h frame into
+`work_15m`, because strategies, telemetry, outcomes, and diagnostics treat the
+field name as part of the runtime contract.
+
+Microstructure fields must carry provenance when they are promoted to
+`PreparedSymbol`:
+
+- `depth_imbalance_source` and `microprice_bias_source` distinguish `l2_depth`,
+  `l1_book`, `rest_book_l1`, and `agg_trade_proxy`.
+- `depth_book_age_seconds` is populated when a partial depth book is available.
+- `orderflow_source` identifies live `agg_trade` flow versus weaker REST/candle
+  proxies.
+- `liquidation_score_source="force_order"` is required before
+  `liquidation_heatmap` can treat `liquidation_score` as real liquidation
+  context. OHLCV wick/volume exhaustion is a separate proxy and must not be
+  emitted as a force-order heatmap signal.
+
 Session fields currently emitted by the runtime feature path:
 
 - `session_asia`, `session_london`, `session_ny`, `session_overlap`
@@ -38,10 +63,13 @@ Legacy wrappers in `bot.features` remain available and delegate to grouped modul
 
 Shared dataframe/helper primitives are centralized in `bot.features_shared` (for example: `materialize_series`, `clean_non_finite`, `true_range`, `atr_from_true_range`, and input validators), and group modules consume those helpers directly.
 
-## Regression parity
+## Verification
 
-Parity is validated with decomposition regression tests:
+The generated regression tests were removed. Feature contract changes should be
+validated with compile/import checks, config validation, and read-only live
+diagnostics such as:
 
-- `tests/test_features_decomposition_parity.py`
-- `tests/test_features_group_contracts.py`
-- `tests/test_features_group_modules.py`
+- `python -m compileall bot`
+- `python -m scripts.validate_config`
+- `python -m scripts.live_check_indicators --symbols BTCUSDT ETHUSDT`
+- `python -m scripts.live_check_pipeline --limit 4 --concurrency 1 --no-warm-context`

@@ -22,8 +22,8 @@ Those artifacts can drift. Treat them as clues, not proof.
 - Config lives in `config.toml` and `config.toml.example`, parsed by `bot/domain/config.py`
 - Persistence lives in `bot/core/memory/repository.py`
 - Manual/live checks live in `scripts/live_*.py`
-- Generated tests exist, but they are not evidence that a strategy works in
-  live market conditions.
+- Generated tests were removed from this workspace. They were not evidence that
+  a strategy works in live market conditions.
 - New long-running Codex sessions can start from
   `docs/CODEX_UNIVERSAL_PROMPT.md` after this file and
   `docs/AGENT_PLAYBOOK.md`.
@@ -35,8 +35,7 @@ Those artifacts can drift. Treat them as clues, not proof.
 - If code, docs, `AGENTS.md`, and audit reports disagree, the precedence is:
   current runtime code and config first, then runtime logs/telemetry/live scripts,
   then official docs or high-quality GitHub sources for external/time-sensitive
-  behavior, then local docs/instructions. Tests are supplemental diagnostics,
-  not proof of strategy correctness.
+  behavior, then local docs/instructions.
 - Mark audit items as `confirmed`, `already-fixed/false`, `ambiguous`, or
   `deferred with reason`; do not apply stale audit recommendations blindly.
 - When a task reveals doc or instruction drift, update the relevant docs in the
@@ -99,7 +98,9 @@ Those artifacts can drift. Treat them as clues, not proof.
 - `bot/setups/`: shared strategy helpers; do not recreate a sibling
   `bot/setups.py` module.
 - `bot/telegram/`: Telegram queue/sender infrastructure
-- `tests/`: regression coverage
+- There is intentionally no `tests/` contract in this workspace. Verification
+  should use compile/import checks, config validation, telemetry diagnostics,
+  and read-only live scripts.
 - `scripts/`: manual/live validation scripts
 
 ## Required Work Pattern
@@ -109,9 +110,8 @@ Those artifacts can drift. Treat them as clues, not proof.
 3. Verify any audit/doc claim against the current code or official external
    docs before changing behavior.
 4. Edit the smallest coherent set of files.
-5. Verify with the narrowest relevant non-test check first: grep, import path
-   review, compile/import check, config validation, telemetry replay, diagnostic
-   script, or live script when the task requires external validation. Generated
-   tests may be inspected only as supplemental context.
+5. Verify with the narrowest relevant check first: grep, import path review,
+   compile/import check, config validation, telemetry replay, diagnostic script,
+   or live script when the task requires external validation.
 6. In summaries, separate confirmed facts from assumptions, inferences,
    ambiguous claims, and unverified follow-up risks.

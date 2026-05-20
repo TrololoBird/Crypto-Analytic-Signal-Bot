@@ -220,7 +220,6 @@ class EmaBounceSetup(BaseSetup):
         if adx_1h > 0.0 and adx_1h < float(min_adx):
             _reject(prepared, setup_id, "adx_too_low", adx_1h=adx_1h, min_adx=min_adx)
             return None
-        price_anchor = close
 
         # --- Compute structural SL/TP via unified utility ---
         from ..features import _swing_points as _sp
@@ -230,8 +229,11 @@ class EmaBounceSetup(BaseSetup):
         # Determine bounce EMA for SL basis
         if signal_direction == "long":
             bounce_ema = min(ema20, ema50) if prev_close <= ema50 * 1.01 else ema20
+            price_anchor = min(bounce_ema, close)
         else:
             bounce_ema = max(ema20, ema50) if prev_close >= ema50 * 0.99 else ema20
+            price_anchor = max(bounce_ema, close)
+        reasons.append(f"limit_entry={price_anchor:.4f}")
 
         stop, tp1, tp2 = build_structural_targets(
             direction=signal_direction,
@@ -306,6 +308,6 @@ class EmaBounceSetup(BaseSetup):
             stop=stop,
             tp1=tp1,
             tp2=tp2,
-            price_anchor=close,
+            price_anchor=price_anchor,
             atr=atr,
         )

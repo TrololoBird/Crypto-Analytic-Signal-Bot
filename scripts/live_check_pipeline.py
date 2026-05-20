@@ -151,6 +151,32 @@ def _build_universe_symbol(
     )
 
 
+def _top_volume_symbols(
+    *,
+    ticker_rows: list[dict[str, Any]],
+    meta_map: dict[str, Any],
+    limit: int,
+) -> list[str]:
+    rows: list[tuple[str, float]] = []
+    for row in ticker_rows:
+        if not isinstance(row, dict):
+            continue
+        symbol = str(row.get("symbol") or "").upper()
+        meta = meta_map.get(symbol)
+        if meta is None or getattr(meta, "status", "") != "TRADING":
+            continue
+        if getattr(meta, "quote_asset", "") != "USDT":
+            continue
+        try:
+            quote_volume = float(row.get("quote_volume") or 0.0)
+        except (TypeError, ValueError):
+            quote_volume = 0.0
+        if quote_volume > 0.0:
+            rows.append((symbol, quote_volume))
+    rows.sort(key=lambda item: item[1], reverse=True)
+    return [symbol for symbol, _volume in rows[: max(1, int(limit or 30))]]
+
+
 async def _fetch_frames(
     client: BinanceFuturesMarketData,
     symbol: str,
@@ -228,6 +254,7 @@ async def _run(
     concurrency: int,
     warm_context: bool,
     include_basis: bool,
+    limit: int,
 ) -> None:
     os.environ.setdefault("BOT_DISABLE_HTTP_SERVERS", "1")
     settings = load_settings()
@@ -251,6 +278,14 @@ async def _run(
             for row in ticker_rows
             if isinstance(row, dict)
         }
+        symbols = list(symbols)
+        if not symbols:
+            symbols = _top_volume_symbols(
+                ticker_rows=ticker_rows,
+                meta_map=meta_map,
+                limit=limit,
+            )
+            LOG.info("symbols_top_volume_used", symbols=symbols)
 
         semaphore = asyncio.Semaphore(concurrency)
         all_candidates: dict[str, list[Any]] = {}
@@ -401,14 +436,22 @@ def main() -> None:
         help="Also warm /futures/data/basis. Disabled by default to avoid REST bursts.",
     )
     args = parser.parse_args()
+    fallback_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+    run_symbols = load_symbols_from_run(
+        args.symbols_from_run, Path("data") / "bot" / "telemetry"
+    )
     symbols = resolve_symbols(
         args_symbols=args.symbols,
-        symbols_from_run=load_symbols_from_run(
-            args.symbols_from_run, Path("data") / "bot" / "telemetry"
-        ),
-        fallback_symbols=["BTCUSDT", "ETHUSDT", "SOLUSDT"],
+        symbols_from_run=run_symbols,
+        fallback_symbols=fallback_symbols,
     )
-    if args.limit > 0:
+    explicit_symbols = bool(args.symbols)
+    if symbols == fallback_symbols and not explicit_symbols and not run_symbols:
+        if args.limit > len(fallback_symbols):
+            symbols = []
+        else:
+            LOG.info("symbols_fallback_used", symbols=symbols)
+    if args.limit > 0 and symbols:
         symbols = symbols[: args.limit]
     try:
         asyncio.run(
@@ -417,6 +460,7 @@ def main() -> None:
                 args.concurrency,
                 warm_context=not args.no_warm_context,
                 include_basis=args.include_basis,
+                limit=args.limit,
             )
         )
     except MarketDataUnavailable as exc:

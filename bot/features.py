@@ -1956,12 +1956,13 @@ def prepare_symbol(
     return PreparedSymbol(
         universe=universe_symbol,
         work_1h=work_1h,
-        work_15m=primary_work,
+        work_15m=work_15m,
         bid_price=frames.bid_price,
         ask_price=frames.ask_price,
         spread_bps=spread_bps,
         work_5m=work_5m,
         work_4h=work_4h,
+        work_primary=primary_work,
         bias_4h=_bias_4h(work_4h_frame),
         bias_1h=_bias_1h(work_1h),  # 1H context for 15M signals
         market_regime=regime,
@@ -1969,9 +1970,11 @@ def prepare_symbol(
         regime_4h_confirmed=_regime_4h_confirmed(work_4h_frame),
         regime_1h_confirmed=_regime_1h_confirmed(work_1h),  # 1H context for 15M signals
         poc_1h=_volume_poc(work_1h, lookback=48),
-        poc_15m=_volume_poc(primary_work, lookback=96),
+        poc_15m=_volume_poc(work_15m, lookback=96),
         depth_imbalance=book_depth_imbalance,
         microprice_bias=book_microprice_bias,
+        depth_imbalance_source="rest_book_l1" if book_depth_imbalance is not None else None,
+        microprice_bias_source="rest_book_l1" if book_microprice_bias is not None else None,
         primary_timeframe=primary_timeframe,
         context_timeframes=context_timeframes,
         settings=settings,

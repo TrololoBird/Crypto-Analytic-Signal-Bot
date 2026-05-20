@@ -104,6 +104,15 @@ class SignalTracker:
         self._pending_outcomes_flush_size = 10  # Flush when queue reaches this size
         self._last_outcome_cleanup_ts: float = 0.0
         self._features_persist_lock = asyncio.Lock()
+        self._symbol_review_locks: dict[str, asyncio.Lock] = {}
+
+    def _symbol_review_lock(self, symbol: str) -> asyncio.Lock:
+        key = str(symbol or "").upper()
+        lock = self._symbol_review_locks.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._symbol_review_locks[key] = lock
+        return lock
 
     async def _flush_pending_outcomes(self) -> None:
         """Flush pending outcomes to disk in batch."""
@@ -551,30 +560,14 @@ class SignalTracker:
             by_symbol.setdefault(tracked.symbol, []).append(tracked)
 
         events: list[SignalTrackingEvent] = []
-        for symbol, symbol_rows in by_symbol.items():
-            symbol_rows.sort(key=lambda item: item.created_at)
-            try:
-                symbol_events = await self._review_symbol(symbol, symbol_rows, now=now)
-            except Exception:
-                LOG.exception("tracking review failed for %s; using time fallback", symbol)
-                symbol_events = await self._apply_time_fallback_rows(
-                    symbol_rows,
+        for symbol in by_symbol:
+            events.extend(
+                await self._review_symbol_open_signals_locked(
+                    symbol,
                     now=now,
-                    precision_mode="time_fallback",
+                    fallback_precision_mode="time_fallback",
+                    persist_error_context="tracking state persist failed (continuing without persistence)",
                 )
-            events.extend(symbol_events)
-
-        # Persist first to avoid re-emitting the same events after restart, but
-        # never let a persistence failure suppress Telegram updates and telemetry.
-        if tracked_rows:
-            try:
-                await self._persist_tracking_state()
-            except (OSError, IOError):
-                LOG.exception("tracking state persist failed (continuing without persistence)")
-        for event in events:
-            self.telemetry.append_jsonl(
-                "tracking_events.jsonl",
-                event.to_log_row(stats=await self._stats_snapshot()),
             )
         return events
 
@@ -1373,44 +1366,47 @@ class SignalTracker:
         if dry_run or not self.settings.tracking.enabled:
             return None
 
-        # Find existing open signals for this symbol
-        existing_signals = [
-            r
-            for r in await self._active_signals(symbol=new_signal.symbol)
-            if r.activated_at is None
-        ]
+        async with self._symbol_review_lock(new_signal.symbol):
+            # Find existing open signals for this symbol after entering the
+            # per-symbol lifecycle lock so review/expiry cannot close the same
+            # pending row concurrently.
+            existing_signals = [
+                r
+                for r in await self._active_signals(symbol=new_signal.symbol)
+                if r.activated_at is None and r.setup_id == new_signal.setup_id
+            ]
 
-        if not existing_signals:
-            return None
+            if not existing_signals:
+                return None
 
-        events: list[SignalTrackingEvent] = []
-        now = datetime.now(UTC)
+            events: list[SignalTrackingEvent] = []
+            now = datetime.now(UTC)
 
-        for existing in existing_signals:
-            # Close the existing signal as superseded
-            event = await self._close_event(
-                existing,
-                event_type="superseded",
-                occurred_at=now,
-                price=None,
-                precision_mode="theoretical",
-                note=f"Superseded by {new_signal.setup_id} (score: {new_signal.score:.2f})",
-            )
-            events.append(event)
-
-        if events:
-            try:
-                await self._persist_tracking_state()
-            except (OSError, IOError):
-                LOG.exception("tracking state persist failed for supersede (continuing)")
-
-            for event in events:
-                self.telemetry.append_jsonl(
-                    "tracking_events.jsonl",
-                    event.to_log_row(stats=await self._stats_snapshot()),
+            for existing in existing_signals:
+                # Close the existing signal as superseded
+                event = await self._close_event(
+                    existing,
+                    event_type="superseded",
+                    occurred_at=now,
+                    price=None,
+                    precision_mode="theoretical",
+                    note=f"Superseded by {new_signal.setup_id} (score: {new_signal.score:.2f})",
                 )
+                events.append(event)
 
-        return events if events else None
+            if events:
+                try:
+                    await self._persist_tracking_state()
+                except (OSError, IOError):
+                    LOG.exception("tracking state persist failed for supersede (continuing)")
+
+                for event in events:
+                    self.telemetry.append_jsonl(
+                        "tracking_events.jsonl",
+                        event.to_log_row(stats=await self._stats_snapshot()),
+                    )
+
+            return events if events else None
 
     # ------------------------------------------------------------------
     # Event-driven additions (Фаза 1 рефакторинга)
@@ -1430,34 +1426,48 @@ class SignalTracker:
         """
         if dry_run or not self.settings.tracking.enabled:
             return []
-        tracked_rows = await self._active_signals(symbol=symbol)
-        if not tracked_rows:
-            return []
-        tracked_rows.sort(key=lambda item: item.created_at)
-        now = datetime.now(UTC)
-        try:
-            events = await self._review_symbol(symbol, tracked_rows, now=now)
-        except Exception:
-            LOG.exception("tracking review failed for %s; using time fallback", symbol)
-            events = await self._apply_time_fallback_rows(
-                tracked_rows,
-                now=now,
-                precision_mode="time_fallback",
-            )
-        if tracked_rows:
+        return await self._review_symbol_open_signals_locked(
+            symbol,
+            now=datetime.now(UTC),
+            fallback_precision_mode="time_fallback",
+            persist_error_context=(
+                f"tracking state persist failed for {symbol} "
+                "(continuing without persistence)"
+            ),
+        )
+
+    async def _review_symbol_open_signals_locked(
+        self,
+        symbol: str,
+        *,
+        now: datetime,
+        fallback_precision_mode: str,
+        persist_error_context: str,
+    ) -> list[SignalTrackingEvent]:
+        async with self._symbol_review_lock(symbol):
+            tracked_rows = await self._active_signals(symbol=symbol)
+            if not tracked_rows:
+                return []
+            tracked_rows.sort(key=lambda item: item.created_at)
+            try:
+                events = await self._review_symbol(symbol, tracked_rows, now=now)
+            except Exception:
+                LOG.exception("tracking review failed for %s; using time fallback", symbol)
+                events = await self._apply_time_fallback_rows(
+                    tracked_rows,
+                    now=now,
+                    precision_mode=fallback_precision_mode,
+                )
             try:
                 await self._persist_tracking_state()
             except (OSError, IOError):
-                LOG.exception(
-                    "tracking state persist failed for %s (continuing without persistence)",
-                    symbol,
+                LOG.exception(persist_error_context)
+            for event in events:
+                self.telemetry.append_jsonl(
+                    "tracking_events.jsonl",
+                    event.to_log_row(stats=await self._stats_snapshot()),
                 )
-        for event in events:
-            self.telemetry.append_jsonl(
-                "tracking_events.jsonl",
-                event.to_log_row(stats=await self._stats_snapshot()),
-            )
-        return events
+            return events
 
     async def on_agg_trade(
         self,
@@ -1474,38 +1484,39 @@ class SignalTracker:
         """
         if not self.settings.tracking.enabled:
             return []
-        active_rows = [
-            r for r in await self._active_signals(symbol=symbol) if r.activated_at is not None
-        ]
-        if not active_rows:
-            return []
+        async with self._symbol_review_lock(symbol):
+            active_rows = [
+                r for r in await self._active_signals(symbol=symbol) if r.activated_at is not None
+            ]
+            if not active_rows:
+                return []
 
-        events: list[SignalTrackingEvent] = []
-        for tracked in active_rows:
-            tick_events, closed = await self._apply_price_tick(
-                tracked,
-                price=price,
-                occurred_at=trade_dt,
-                precision_mode="trade_realtime",
-            )
-            events.extend(tick_events)
-            if closed:
-                break  # signal closed — stop processing for this symbol
+            events: list[SignalTrackingEvent] = []
+            for tracked in active_rows:
+                tick_events, closed = await self._apply_price_tick(
+                    tracked,
+                    price=price,
+                    occurred_at=trade_dt,
+                    precision_mode="trade_realtime",
+                )
+                events.extend(tick_events)
+                if closed:
+                    break  # signal closed — stop processing for this symbol
 
-        if events:
-            try:
-                await self._persist_tracking_state()
-            except (OSError, IOError):
-                LOG.exception(
-                    "tracking state persist failed for realtime trade %s (continuing without persistence)",
-                    symbol,
-                )
-            for event in events:
-                self.telemetry.append_jsonl(
-                    "tracking_events.jsonl",
-                    event.to_log_row(stats=await self._stats_snapshot()),
-                )
-        return events
+            if events:
+                try:
+                    await self._persist_tracking_state()
+                except (OSError, IOError):
+                    LOG.exception(
+                        "tracking state persist failed for realtime trade %s (continuing without persistence)",
+                        symbol,
+                    )
+                for event in events:
+                    self.telemetry.append_jsonl(
+                        "tracking_events.jsonl",
+                        event.to_log_row(stats=await self._stats_snapshot()),
+                    )
+            return events
 
 
 def _price_in_entry_zone(tracked: TrackedSignalState, price: float) -> bool:

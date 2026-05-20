@@ -176,6 +176,17 @@ def get_depth_imbalance(manager: Any, symbol: str) -> float | None:
     )
 
 
+def get_depth_imbalance_source(manager: Any, symbol: str) -> str | None:
+    if _l2_depth_imbalance(manager, symbol) is not None:
+        return "l2_depth"
+    bid_qty, ask_qty = manager._book_qty.get(symbol, (None, None))
+    if bid_qty is not None and ask_qty is not None and bid_qty >= 0 and ask_qty >= 0:
+        return "l1_book"
+    if manager.get_agg_trade_snapshot(symbol) is not None:
+        return "agg_trade_proxy"
+    return None
+
+
 def get_microprice_bias(manager: Any, symbol: str) -> float | None:
     bid, ask = manager.get_book_snapshot(symbol)
     if bid is None or ask is None or bid <= 0 or ask <= 0:
@@ -189,6 +200,20 @@ def get_microprice_bias(manager: Any, symbol: str) -> float | None:
         ask_qty=ask_qty,
         delta_ratio=None if snapshot is None else snapshot.delta_ratio,
     )
+
+
+def get_microprice_bias_source(manager: Any, symbol: str) -> str | None:
+    bid, ask = manager.get_book_snapshot(symbol)
+    if bid is None or ask is None or bid <= 0 or ask <= 0:
+        return None
+    if manager._depth_book.get(symbol):
+        return "l2_depth"
+    bid_qty, ask_qty = manager._book_qty.get(symbol, (None, None))
+    if bid_qty is not None and ask_qty is not None and bid_qty >= 0 and ask_qty >= 0:
+        return "l1_book"
+    if manager.get_agg_trade_snapshot(symbol) is not None:
+        return "agg_trade_proxy"
+    return None
 
 
 def get_funding_sentiment(manager: Any) -> float | None:
@@ -226,6 +251,25 @@ def get_liquidation_sentiment(
     if total == 0.0:
         return None
     return (short_liq - long_liq) / total
+
+
+def get_liquidation_age_seconds(
+    manager: Any,
+    symbol: str | None = None,
+    window_seconds: int = 60,
+) -> float | None:
+    cutoff_ms = int(time.time() * 1000) - window_seconds * 1000
+    latest_ts_ms: int | None = None
+    for ts_ms, sym, _side, qty, _price in manager._force_order_buffer:
+        if ts_ms < cutoff_ms or qty <= 0.0:
+            continue
+        if symbol is not None and sym != symbol:
+            continue
+        if latest_ts_ms is None or ts_ms > latest_ts_ms:
+            latest_ts_ms = ts_ms
+    if latest_ts_ms is None:
+        return None
+    return max(0.0, (int(time.time() * 1000) - latest_ts_ms) / 1000.0)
 
 
 def should_throttle_ticker_update(manager: Any, symbol: str) -> bool:
@@ -408,15 +452,26 @@ async def handle_agg_trade(manager: Any, symbol: str, data: JsonDict) -> None:
     except (KeyError, TypeError, ValueError):
         return
 
-    async with manager._data_lock:
-        if symbol not in manager._agg_trades:
-            manager._agg_trades[symbol] = collections.deque(
-                maxlen=manager._cfg.max_agg_trade_buffer
-            )
-        manager._agg_trades[symbol].append(trade)
+    pending = manager._pending_agg_trades.setdefault(symbol, [])
+    pending.append(trade)
+    now = time.monotonic()
+    last_flush = manager._last_agg_trade_flush_ts.get(symbol, 0.0)
+    flush_interval = float(manager._cfg.agg_trade_flush_interval_ms) / 1000.0
+    if now - last_flush < flush_interval and len(pending) < 500:
+        return
+
+    batch = pending[:]
+    pending.clear()
+    manager._last_agg_trade_flush_ts[symbol] = now
+
+    if symbol not in manager._agg_trades:
+        manager._agg_trades[symbol] = collections.deque(
+            maxlen=manager._cfg.max_agg_trade_buffer
+        )
+    manager._agg_trades[symbol].extend(batch)
 
     if manager._agg_trade_cbs:
-        trade_dt = datetime.fromtimestamp(trade.trade_time_ms / 1000.0, tz=timezone.utc)
+        trade_dt = datetime.fromtimestamp(batch[-1].trade_time_ms / 1000.0, tz=timezone.utc)
         for callback in manager._agg_trade_cbs:
-            task = asyncio.create_task(callback(symbol, trade.price, trade_dt))
+            task = asyncio.create_task(callback(symbol, batch[-1].price, trade_dt))
             manager._attach_task_logging(task, label=f"agg_trade:{symbol}")

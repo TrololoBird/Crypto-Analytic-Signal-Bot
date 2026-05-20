@@ -293,22 +293,23 @@ class TurtleSoupSetup(BaseSetup):
         from ..features import _swing_points as _sp
 
         range_before = max(rolling_high - rolling_low, atr)
+        entry_price = rolling_low if direction == "long" else rolling_high
 
         if direction == "long":
             # SL: beyond false breakout extreme + sl_buffer_atr×ATR
             stop = wick_extreme - sl_buffer_atr * atr
-            risk = confirm_close - stop
+            risk = entry_price - stop
             if risk <= 0:
                 _reject(
                     prepared,
                     setup_id,
                     "risk_non_positive_long",
                     stop=stop,
-                    close=confirm_close,
+                    close=entry_price,
                 )
                 return None
             # TP1/TP2 must be above entry for long to satisfy _build_signal contract.
-            tp1 = max(rolling_high, confirm_close + risk * min_rr)
+            tp1 = max(rolling_high, entry_price + risk * min_rr)
             sh_mask, _ = _sp(w1h, n=3, include_unconfirmed_tail=True)
             sh_prices = w1h.filter(sh_mask)["high"]
             tp2_candidates = sh_prices.filter(sh_prices > tp1)
@@ -316,61 +317,61 @@ class TurtleSoupSetup(BaseSetup):
             tp2 = (
                 _as_float(tp2_series[0])
                 if tp2_series.len() > 0
-                else max(tp1 + range_before, confirm_close + risk * (min_rr + 0.5))
+                else max(tp1 + range_before, entry_price + risk * (min_rr + 0.5))
             )
         else:
             # SL: beyond false breakout extreme + sl_buffer_atr×ATR
             stop = wick_extreme + sl_buffer_atr * atr
-            risk = stop - confirm_close
+            risk = stop - entry_price
             if risk <= 0:
                 _reject(
                     prepared,
                     setup_id,
                     "risk_non_positive_short",
                     stop=stop,
-                    close=confirm_close,
+                    close=entry_price,
                 )
                 return None
             # TP1/TP2 must be below entry for short to satisfy _build_signal contract.
-            tp1 = min(rolling_low, confirm_close - risk * min_rr)
+            tp1 = min(rolling_low, entry_price - risk * min_rr)
             _, sl_mask = _sp(w1h, n=3, include_unconfirmed_tail=True)
             sl_prices = w1h.filter(sl_mask)["low"]
             tp2_candidates = sl_prices.filter(sl_prices < tp1)
             tp2 = (
                 _as_float(tp2_candidates[-1])
                 if tp2_candidates.len() > 0
-                else min(tp1 - range_before, confirm_close - risk * (min_rr + 0.5))
+                else min(tp1 - range_before, entry_price - risk * (min_rr + 0.5))
             )
 
         # Validate: TP1 must be at least configured risk distance, else reject.
-        if tp1 is None or abs(tp1 - confirm_close) < risk * min_rr:
+        if tp1 is None or abs(tp1 - entry_price) < risk * min_rr:
             _reject(prepared, setup_id, "tp1_too_close_or_missing", tp1=tp1, risk=risk)
             return None  # Reject this turtle soup setup
         if tp2 is None:
             tp2 = tp1  # Use TP1 as TP2 if no extended target found
-        if direction == "long" and (tp1 <= confirm_close or tp2 <= confirm_close):
+        if direction == "long" and (tp1 <= entry_price or tp2 <= entry_price):
             _reject(
                 prepared,
                 setup_id,
                 "tp_direction_mismatch_long",
                 tp1=tp1,
                 tp2=tp2,
-                price_anchor=confirm_close,
+                price_anchor=entry_price,
             )
             return None
-        if direction == "short" and (tp1 >= confirm_close or tp2 >= confirm_close):
+        if direction == "short" and (tp1 >= entry_price or tp2 >= entry_price):
             _reject(
                 prepared,
                 setup_id,
                 "tp_direction_mismatch_short",
                 tp1=tp1,
                 tp2=tp2,
-                price_anchor=confirm_close,
+                price_anchor=entry_price,
             )
             return None
         normalized_levels = normalize_trade_levels(
             direction=direction,
-            price_anchor=confirm_close,
+            price_anchor=entry_price,
             stop=stop,
             tp1=tp1,
             tp2=tp2,
@@ -384,7 +385,7 @@ class TurtleSoupSetup(BaseSetup):
                 stop=stop,
                 tp1=tp1,
                 tp2=tp2,
-                price_anchor=confirm_close,
+                price_anchor=entry_price,
             )
             return None
         stop, tp1, tp2, _, _ = normalized_levels
@@ -407,7 +408,10 @@ class TurtleSoupSetup(BaseSetup):
 
         reasons = [
             f"Turtle soup {direction}: roll_high={rolling_high:.4f} roll_low={rolling_low:.4f}",
-            f"wick_extreme={wick_extreme:.4f} close={confirm_close:.4f} sweep_lag={sweep_lag}",
+            (
+                f"wick_extreme={wick_extreme:.4f} close={confirm_close:.4f} "
+                f"limit_entry={entry_price:.4f} sweep_lag={sweep_lag}"
+            ),
             f"15m vol_ratio={vol_ratio_15m:.2f}",
         ]
         if flow_details.get("orderflow_conflict"):
@@ -424,6 +428,6 @@ class TurtleSoupSetup(BaseSetup):
             stop=stop,
             tp1=tp1,
             tp2=tp2,
-            price_anchor=confirm_close,
+            price_anchor=entry_price,
             atr=atr,
         )

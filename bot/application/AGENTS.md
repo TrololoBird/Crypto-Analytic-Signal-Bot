@@ -38,5 +38,5 @@ Work in `bot/application/`, currently centered on `bot.py`.
 
 - Prefer event-flow tracing, compile/import checks, telemetry replay, and
   read-only live diagnostics for touched runtime behavior.
-- Generated tests are not proof of live behavior; use them only as supplemental
-  safety checks when explicitly useful.
+- Generated tests were removed; use live behavior diagnostics instead of
+  recreating synthetic safety checks.

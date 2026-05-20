@@ -390,7 +390,7 @@ class ShortlistService:
                 shortlist = list(cached_shortlist)
                 source = "cached"
                 fallback_reason = FALLBACK_REASON_USING_CACHED
-        except Exception as exc:
+        except Exception:
             if cached_shortlist:
                 shortlist = list(cached_shortlist)
                 source = "cached"

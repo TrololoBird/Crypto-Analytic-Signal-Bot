@@ -265,7 +265,8 @@ class WickTrapReversalSetup(BaseSetup):
         if supertrend_opposes:
             reasons.append(f"supertrend_opposes_penalty={st_15m:.0f}")
 
-        price_anchor = trig_close
+        price_anchor = float(level)
+        reasons.append(f"limit_entry={price_anchor:.4f}")
 
         sl_buffer_atr = float(dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]))
 
@@ -274,20 +275,16 @@ class WickTrapReversalSetup(BaseSetup):
             # SL: beyond wick extreme (absolute tip of sweep wick) + configured ATR buffer.
             wick_bar_low = float(work_15m.item(wick_bar_idx, "low"))
             stop = wick_bar_low - atr * sl_buffer_atr
-            # TP1: the swept level itself (price returns through what was pierced)
-            tp1 = float(level)
-            # TP2: next 1h swing beyond swept level
             last_sh, _ = _last_swing_prices(work_1h)
-            tp2 = last_sh if (last_sh and last_sh > price_anchor) else None
+            tp1 = last_sh if (last_sh and last_sh > price_anchor) else None
+            tp2 = None
         else:
             # SL: beyond wick extreme + configured ATR buffer.
             wick_bar_high = float(work_15m.item(wick_bar_idx, "high"))
             stop = wick_bar_high + atr * sl_buffer_atr
-            # TP1: the swept level
-            tp1 = float(level)
-            # TP2: next 1h swing beyond
             _, last_sl = _last_swing_prices(work_1h)
-            tp2 = last_sl if (last_sl and last_sl < price_anchor) else None
+            tp1 = last_sl if (last_sl and last_sl < price_anchor) else None
+            tp2 = None
 
         # Validate runtime RR with a deterministic fallback target when structure is too close.
         risk = abs(price_anchor - stop)

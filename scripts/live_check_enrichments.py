@@ -124,6 +124,12 @@ def _collect_ws_enrichments(
             liq = ws_manager.get_liquidation_sentiment(symbol, window_seconds=300)
             if liq is not None:
                 enrichments["liquidation_score"] = liq
+                enrichments["liquidation_score_source"] = "force_order"
+                liq_age_getter = getattr(ws_manager, "get_liquidation_age_seconds", None)
+                if callable(liq_age_getter):
+                    liq_age = liq_age_getter(symbol=symbol, window_seconds=300)
+                    if liq_age is not None:
+                        enrichments["liquidation_score_age_seconds"] = liq_age
         except Exception:
             pass
 
@@ -193,9 +199,19 @@ def _collect_ws_enrichments(
         depth_imb = ws_manager.get_depth_imbalance(symbol)
         if depth_imb is not None:
             enrichments["depth_imbalance"] = depth_imb
+            depth_source_getter = getattr(ws_manager, "get_depth_imbalance_source", None)
+            if callable(depth_source_getter):
+                depth_source = depth_source_getter(symbol)
+                if depth_source:
+                    enrichments["depth_imbalance_source"] = depth_source
         micro_bias = ws_manager.get_microprice_bias(symbol)
         if micro_bias is not None:
             enrichments["microprice_bias"] = micro_bias
+            micro_source_getter = getattr(ws_manager, "get_microprice_bias_source", None)
+            if callable(micro_source_getter):
+                micro_source = micro_source_getter(symbol)
+                if micro_source:
+                    enrichments["microprice_bias_source"] = micro_source
         depth_age_getter = getattr(ws_manager, "get_depth_book_age_seconds", None)
         if callable(depth_age_getter):
             depth_age = depth_age_getter(symbol)
@@ -206,6 +222,7 @@ def _collect_ws_enrichments(
         long_flow = ws_manager.get_agg_trade_snapshot(symbol, window_seconds=300)
         if short_flow is not None and short_flow.delta_ratio is not None:
             enrichments["agg_trade_delta_30s"] = float(short_flow.delta_ratio)
+            enrichments["orderflow_source"] = "agg_trade"
         if (
             short_flow is not None
             and long_flow is not None
@@ -215,6 +232,7 @@ def _collect_ws_enrichments(
             enrichments["aggression_shift"] = float(
                 short_flow.delta_ratio - long_flow.delta_ratio
             )
+            enrichments["orderflow_source"] = "agg_trade"
 
     if context_ages:
         enrichments["context_snapshot_age_seconds"] = max(context_ages)
@@ -302,7 +320,15 @@ async def _run(
         if include_premium_stats:
             critical_fields.extend(["premium_zscore_5m", "premium_slope_5m"])
         if require_depth:
-            critical_fields.extend(["depth_imbalance", "microprice_bias"])
+            critical_fields.extend(
+                [
+                    "depth_imbalance",
+                    "microprice_bias",
+                    "depth_imbalance_source",
+                    "microprice_bias_source",
+                    "depth_book_age_seconds",
+                ]
+            )
 
         all_results: list[dict[str, Any]] = []
 

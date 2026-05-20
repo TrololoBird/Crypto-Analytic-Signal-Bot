@@ -170,11 +170,12 @@ class VWAPTrendSetup(BaseSetup):
             _reject(prepared, setup_id, "no_vwap_reclaim", close=close, vwap=vwap)
             return None
 
+        entry_price = vwap
         sh_mask, sl_mask = _swing_points(work_1h, n=3, include_unconfirmed_tail=True)
         stop_basis = min(vwap, ema20) if direction == "long" else max(vwap, ema20)
         stop, tp1, tp2 = build_structural_targets(
             direction=direction,
-            price_anchor=close,
+            price_anchor=entry_price,
             stop_basis=stop_basis,
             atr=atr,
             work_1h=work_1h,
@@ -184,18 +185,22 @@ class VWAPTrendSetup(BaseSetup):
             sh_mask=sh_mask,
             sl_mask=sl_mask,
         )
-        risk = abs(close - stop)
+        risk = abs(entry_price - stop)
         if risk <= 0.0:
-            _reject(prepared, setup_id, "invalid_stop", stop=stop, close=close)
+            _reject(prepared, setup_id, "invalid_stop", stop=stop, close=entry_price)
             return None
         min_rr = float(effective_params["min_rr"])
-        if tp1 is None or abs(tp1 - close) < risk * min_rr:
-            tp1 = close + risk * min_rr if direction == "long" else close - risk * min_rr
-        if tp2 is None or abs(tp2 - close) <= abs(tp1 - close):
-            tp2 = (
-                close + risk * max(2.0, min_rr + 0.35)
+        if tp1 is None or abs(tp1 - entry_price) < risk * min_rr:
+            tp1 = (
+                entry_price + risk * min_rr
                 if direction == "long"
-                else close - risk * max(2.0, min_rr + 0.35)
+                else entry_price - risk * min_rr
+            )
+        if tp2 is None or abs(tp2 - entry_price) <= abs(tp1 - entry_price):
+            tp2 = (
+                entry_price + risk * max(2.0, min_rr + 0.35)
+                if direction == "long"
+                else entry_price - risk * max(2.0, min_rr + 0.35)
             )
 
         base_score = float(effective_params["base_score"])
@@ -222,6 +227,7 @@ class VWAPTrendSetup(BaseSetup):
             f"vwap_reclaim_{direction}",
             f"bias_1h={bias_1h}",
             f"vwap={vwap:.4f}",
+            f"limit_entry={entry_price:.4f}",
             f"vol_ratio={vol_ratio:.2f}",
             f"adx_1h={adx_1h:.1f}",
             f"reclaim_lag={reclaim_lag}",
@@ -237,6 +243,6 @@ class VWAPTrendSetup(BaseSetup):
             stop=stop,
             tp1=tp1,
             tp2=tp2,
-            price_anchor=close,
+            price_anchor=entry_price,
             atr=atr,
         )

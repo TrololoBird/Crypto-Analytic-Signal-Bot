@@ -44,8 +44,8 @@ The bot includes a built-in web dashboard for real-time monitoring.
 - `make run` — start bot runtime.
 - `make live-smoke` — run `SignalBot` against live market data with a fake broadcaster; Telegram sends are suppressed.
 - `make monitor-runtime` — summarize live logs from `data/bot/logs`.
-- Generated tests are supplemental diagnostics only. Do not use them as proof
-  that a strategy works or has trading edge.
+- Generated tests were removed. Use live diagnostics and telemetry rather than
+  synthetic regression suites as proof of runtime behavior.
 
 ## Recommended routine
 
@@ -108,6 +108,10 @@ The bot includes a built-in web dashboard for real-time monitoring.
 - `delivery.jsonl` records every selected delivery attempt with `sent`, `logged`, `failed`, or provider-specific status; `cycles.jsonl` separates selected attempts from actually delivered Telegram sends
 - shortlist telemetry distinguishes `rest_full`, `ws_light`, `cached`, and `pinned_fallback` sources and includes top composite-score reasons
 - shortlist telemetry also records `source_before`/`source_after`, `fallback_reason`, and cached metadata (`cached_shortlist_age_s`, `cached_shortlist_size`) for each refresh decision
+- WebSocket `aggTrade` is a hot-path enrichment stream. It is intentionally
+  restricted to tracked/active symbols and micro-batched before updating
+  in-memory deques; do not route every trade packet directly into strategy
+  analysis or Polars feature preparation.
 
 ### Shortlist fallback telemetry interpretation
 
@@ -123,7 +127,10 @@ The bot includes a built-in web dashboard for real-time monitoring.
 - Runtime path must not call Binance eAPI options endpoints; options intelligence in runtime is always reported as unavailable under the USDⓈ-M-only boundary.
 - If options eAPI analytics are required, run them only through an explicit research/offline path with the non-default flag enabled.
 - Treat any `/private`, signed/auth route, `listenKey`, or user-data stream as a configuration/code regression.
-- After market-data changes, rerun endpoint grep plus the contract-focused suites (`tests/test_regression_suite_contracts.py`, `tests/test_regression_suite_tracking_delivery.py`) to confirm public-only guardrails still hold.
+- After market-data changes, rerun endpoint grep plus read-only live diagnostics
+  such as `scripts/live_check_binance_api.py`,
+  `scripts/live_check_enrichments.py`, and `scripts/live_check_pipeline.py` to
+  confirm public-only guardrails still hold.
 
 ## Signal scoring quality gates
 
@@ -151,8 +158,8 @@ The bot includes a built-in web dashboard for real-time monitoring.
 - Treat local docs, `AGENTS.md`, and generated audit reports as hypotheses
   until verified against current code, configs, logs, telemetry, live scripts,
   or official docs.
-- Treat generated tests as supplemental diagnostics, not proof of strategy
-  correctness or profitability.
+- Generated tests were removed; do not recreate them as a substitute for live
+  market validation.
 - For each audit item, record whether it is `confirmed`, `already-fixed/false`,
   `ambiguous`, or `deferred with reason`.
 - Do not downgrade dependencies solely from stale audit text. Check the current
@@ -161,8 +168,10 @@ The bot includes a built-in web dashboard for real-time monitoring.
 - For Binance runtime behavior, verify against official Binance docs before
   changing stream limits, endpoint routing, or REST/WebSocket boundaries.
 
-## PR doc-change gate
+## Runtime change gate
 
-- CI now enforces a docs-parity check for pull requests that touch critical runtime paths: `main.py`, `bot/application`, `bot/core`, `bot/telegram`, `bot/websocket`, `bot/features*`, `bot/ml*`, `bot/market_data.py`, `bot/ws_manager.py`, `bot/config.py`.
-- If any of those paths change, at least one file under `docs/` must also change in the same PR.
-- The same expectation is reflected in the pull-request checklist template.
+- Critical runtime changes should include an adjacent docs update when the
+  operational contract changes.
+- There is no CI/test gate in this workspace; use compile/import checks,
+  config validation, telemetry review, and live smoke scripts before judging a
+  change.

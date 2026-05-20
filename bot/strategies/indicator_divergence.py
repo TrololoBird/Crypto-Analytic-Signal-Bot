@@ -188,16 +188,17 @@ class IndicatorDivergenceSetup(BaseSetup):
 
         sl_buffer = float(params["sl_buffer_atr"])
         min_rr = float(params["min_rr"])
+        entry_price = reference_level
         if direction == "long":
-            stop = min(reference_level, close) - atr * sl_buffer
-            risk = close - stop
-            tp1 = close + risk * min_rr
-            tp2 = close + risk * max(min_rr + 0.4, 2.2)
+            stop = entry_price - atr * sl_buffer
+            risk = entry_price - stop
+            tp1 = entry_price + risk * min_rr
+            tp2 = entry_price + risk * max(min_rr + 0.4, 2.2)
         else:
-            stop = max(reference_level, close) + atr * sl_buffer
-            risk = stop - close
-            tp1 = close - risk * min_rr
-            tp2 = close - risk * max(min_rr + 0.4, 2.2)
+            stop = entry_price + atr * sl_buffer
+            risk = stop - entry_price
+            tp1 = entry_price - risk * min_rr
+            tp2 = entry_price - risk * max(min_rr + 0.4, 2.2)
         if risk <= 0.0:
             _reject(prepared, setup_id, "invalid_stop", direction=direction, stop=stop)
             return None
@@ -214,6 +215,7 @@ class IndicatorDivergenceSetup(BaseSetup):
             f"votes={','.join(votes)}",
             f"rsi={rsi:.1f}",
             f"vol_ratio={vol_ratio:.2f}",
+            f"limit_entry={entry_price:.4f}",
         ]
         return _build_signal(
             prepared=prepared,
@@ -226,6 +228,6 @@ class IndicatorDivergenceSetup(BaseSetup):
             stop=stop,
             tp1=tp1,
             tp2=tp2,
-            price_anchor=close,
+            price_anchor=entry_price,
             atr=atr,
         )

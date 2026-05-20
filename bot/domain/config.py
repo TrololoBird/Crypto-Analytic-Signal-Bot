@@ -14,10 +14,10 @@ from ..secrets import load_secrets
 
 class RuntimeConfig(BaseModel):
     analysis_concurrency: int = Field(default=6, ge=1, le=20)
-    strategy_concurrency: int = Field(default=4, ge=1, le=20)
+    strategy_concurrency: int = Field(default=10, ge=1, le=20)
     strategy_timeout_seconds: float = Field(default=12.0, ge=0.5, le=120.0)
-    max_strategy_queue_wait_seconds: float = Field(default=45.0, ge=0.0, le=300.0)
-    max_signals_per_cycle: int = Field(default=3, ge=1, le=10)
+    max_strategy_queue_wait_seconds: float = Field(default=30.0, ge=0.0, le=300.0)
+    max_signals_per_cycle: int = Field(default=80, ge=1, le=80)
     event_bus_max_size: int = Field(default=512, ge=16, le=50_000)
     event_bus_warn_depth: int = Field(default=384, ge=8, le=50_000)
     event_bus_drop_log_interval: int = Field(default=25, ge=1, le=10_000)
@@ -455,6 +455,7 @@ class WSConfig(BaseModel):
     warmup_timeout_seconds: float = Field(default=60.0, ge=5.0, le=300.0)
     reconnect_max_delay_seconds: float = Field(default=300.0, ge=1.0, le=3600.0)
     max_agg_trade_buffer: int = Field(default=10000, ge=100, le=100000)
+    agg_trade_flush_interval_ms: int = Field(default=250, ge=50, le=5000)
     rest_timeout_seconds: float = Field(default=20.0, ge=1.0, le=120.0)
     backfill_failure_cooldown_seconds: int = Field(default=900, ge=0, le=86400)
     # Global market streams (no per-symbol subscription needed)

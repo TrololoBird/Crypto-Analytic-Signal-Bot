@@ -271,6 +271,8 @@ class FuturesWSManager:
         self._depth_wall_state: dict[str, dict[tuple[str, float], dict[str, float]]] = {}
         self._depth_wall_pressure: dict[str, float] = {}
         self._agg_trades: dict[str, collections.deque[AggTrade]] = {}
+        self._pending_agg_trades: dict[str, list[AggTrade]] = {}
+        self._last_agg_trade_flush_ts: dict[str, float] = {}
         self._max_streams_per_connection = _MAX_STREAMS_PER_CONNECTION
 
         # Global market stream caches (populated from !ticker@arr, !markPrice@arr, !forceOrder@arr)
@@ -1155,6 +1157,10 @@ class FuturesWSManager:
         """Return L2 depth imbalance in [-1, 1], falling back to L1/flow proxy."""
         return ws_cache.get_depth_imbalance(self, symbol)
 
+    def get_depth_imbalance_source(self, symbol: str) -> str | None:
+        """Return the data source backing the latest depth imbalance value."""
+        return ws_cache.get_depth_imbalance_source(self, symbol)
+
     def get_microprice_bias(self, symbol: str) -> float | None:
         """Calculate microprice bias from order book.
 
@@ -1165,6 +1171,10 @@ class FuturesWSManager:
         back to recent aggTrade delta when the book is unavailable.
         """
         return ws_cache.get_microprice_bias(self, symbol)
+
+    def get_microprice_bias_source(self, symbol: str) -> str | None:
+        """Return the data source backing the latest microprice bias value."""
+        return ws_cache.get_microprice_bias_source(self, symbol)
 
     def get_funding_sentiment(self) -> float | None:
         """Return the average funding rate across all tracked symbols.
@@ -1191,6 +1201,16 @@ class FuturesWSManager:
             window_seconds: Look-back window in seconds.
         """
         return ws_cache.get_liquidation_sentiment(
+            self, symbol=symbol, window_seconds=window_seconds
+        )
+
+    def get_liquidation_age_seconds(
+        self,
+        symbol: str | None = None,
+        window_seconds: int = 60,
+    ) -> float | None:
+        """Return age of the newest forceOrder event used for liquidation sentiment."""
+        return ws_cache.get_liquidation_age_seconds(
             self, symbol=symbol, window_seconds=window_seconds
         )
 

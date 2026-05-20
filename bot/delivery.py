@@ -803,6 +803,10 @@ class SignalDelivery:
     def _should_send_tracking_follow_up(self, event: SignalTrackingEvent) -> bool:
         if event.event_type == "activated":
             return False
+        if event.event_type == "superseded":
+            return False
+        if event.event_type == "expired" and not getattr(event.tracked, "activated_at", None):
+            return False
         occurred_at = event.occurred_at.astimezone(UTC)
         max_age = timedelta(minutes=self.tracking_reply_freshness_minutes)
         if datetime.now(UTC) - occurred_at > max_age:

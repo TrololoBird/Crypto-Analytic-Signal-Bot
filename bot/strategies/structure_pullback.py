@@ -290,7 +290,8 @@ class StructurePullbackSetup(BaseSetup):
         ):
             reasons.append(f"macro_4h_conflict={regime_4h}")
 
-        price_anchor = trig_close
+        price_anchor = level
+        reasons.append(f"limit_entry={price_anchor:.4f}")
 
         # --- Compute structural SL/TP ---
         from ..features import _swing_points as _sp

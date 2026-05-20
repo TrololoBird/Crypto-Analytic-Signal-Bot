@@ -215,6 +215,7 @@ class LiquiditySweepSetup(BaseSetup):
         if direction not in {"long", "short"} or level is None:
             _reject(prepared, setup_id, "invalid_liquidity_sweep_state")
             return None
+        entry_price = float(level)
         if not (0 <= sweep_index < n):
             _reject(
                 prepared,
@@ -247,7 +248,6 @@ class LiquiditySweepSetup(BaseSetup):
                 prepared.work_15m.item(-1, "close"),
                 confirmation_close,
             )
-        entry_price = price if price > 0 else confirmation_close
 
         if direction == "short":
             eq_high_level = level

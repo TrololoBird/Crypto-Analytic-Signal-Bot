@@ -120,9 +120,10 @@ class SuperTrendFollowSetup(BaseSetup):
 
         sh_mask, sl_mask = _swing_points(work_1h, n=3, include_unconfirmed_tail=True)
         min_rr = float(effective_params["min_rr"])
+        price_anchor = min(ema20, close) if direction == "long" else max(ema20, close)
         stop, tp1, tp2 = build_structural_targets(
             direction=direction,
-            price_anchor=close,
+            price_anchor=price_anchor,
             stop_basis=stop_basis,
             atr=atr,
             work_1h=work_1h,
@@ -132,17 +133,21 @@ class SuperTrendFollowSetup(BaseSetup):
             sh_mask=sh_mask,
             sl_mask=sl_mask,
         )
-        risk = abs(close - stop)
+        risk = abs(price_anchor - stop)
         if risk <= 0.0:
-            _reject(prepared, setup_id, "invalid_stop", stop=stop, close=close)
+            _reject(prepared, setup_id, "invalid_stop", stop=stop, close=price_anchor)
             return None
-        if tp1 is None or abs(tp1 - close) < risk * min_rr:
-            tp1 = close + risk * min_rr if direction == "long" else close - risk * min_rr
-        if tp2 is None or abs(tp2 - close) <= abs(tp1 - close):
-            tp2 = (
-                close + risk * max(2.0, min_rr + 0.35)
+        if tp1 is None or abs(tp1 - price_anchor) < risk * min_rr:
+            tp1 = (
+                price_anchor + risk * min_rr
                 if direction == "long"
-                else close - risk * max(2.0, min_rr + 0.35)
+                else price_anchor - risk * min_rr
+            )
+        if tp2 is None or abs(tp2 - price_anchor) <= abs(tp1 - price_anchor):
+            tp2 = (
+                price_anchor + risk * max(2.0, min_rr + 0.35)
+                if direction == "long"
+                else price_anchor - risk * max(2.0, min_rr + 0.35)
             )
 
         base_score = float(effective_params["base_score"])
@@ -166,6 +171,7 @@ class SuperTrendFollowSetup(BaseSetup):
             f"st_15m={st_15m:.0f}",
             f"st_1h={st_1h:.0f}",
             f"adx_1h={adx_1h:.1f}",
+            f"limit_entry={price_anchor:.4f}",
         ]
         return _build_signal(
             prepared=prepared,
@@ -178,6 +184,6 @@ class SuperTrendFollowSetup(BaseSetup):
             stop=stop,
             tp1=tp1,
             tp2=tp2,
-            price_anchor=close,
+            price_anchor=price_anchor,
             atr=atr,
         )

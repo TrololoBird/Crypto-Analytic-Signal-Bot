@@ -279,9 +279,10 @@ def apply_global_filters(
     passed.append("spread_ok")
 
     # --- 4. ATR ---
-    if prepared.work_15m.is_empty() or "atr_pct" not in prepared.work_15m.columns:
+    atr_frame = primary_frame if primary_frame is not None else prepared.work_15m
+    if atr_frame.is_empty() or "atr_pct" not in atr_frame.columns:
         return _reject("atr_unavailable", replace(base, atr_pct=0.0))
-    atr_pct_raw = prepared.work_15m.item(-1, "atr_pct")
+    atr_pct_raw = atr_frame.item(-1, "atr_pct")
     if atr_pct_raw is None or (isinstance(atr_pct_raw, float) and math.isnan(atr_pct_raw)):
         return _reject("atr_nan", replace(base, atr_pct=0.0))
     atr_pct = float(atr_pct_raw)

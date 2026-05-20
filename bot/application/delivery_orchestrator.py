@@ -30,27 +30,32 @@ class DeliveryOrchestrator:
     def _apply_same_direction_confluence(signals: list[Signal]) -> Signal:
         ranked = sorted(signals, key=DeliveryOrchestrator._rank_key, reverse=True)
         best = ranked[0]
+        return DeliveryOrchestrator._with_same_direction_confluence(best, ranked)
+
+    @staticmethod
+    def _with_same_direction_confluence(signal: Signal, peers: list[Signal]) -> Signal:
+        ranked = sorted(peers, key=DeliveryOrchestrator._rank_key, reverse=True)
         setup_ids = sorted({signal.setup_id for signal in ranked})
         setup_count = len(setup_ids)
         if setup_count <= 1:
-            return best
+            return signal
         boost = min(0.05, 0.015 * float(setup_count - 1))
         reason = f"confluence_{setup_count}_setups"
         setup_reason = f"confluence_setups={','.join(setup_ids)}"
-        reasons = list(best.reasons)
+        reasons = list(signal.reasons)
         if reason not in reasons:
             reasons.append(reason)
         if setup_reason not in reasons:
             reasons.append(setup_reason)
         return replace(
-            best,
-            score=round(min(1.0, float(best.score) + boost), 4),
+            signal,
+            score=round(min(1.0, float(signal.score) + boost), 4),
             reasons=tuple(reasons),
         )
 
     @staticmethod
     def _symbol_direction_cooldown_key(signal: Signal) -> str:
-        return f"symbol_direction:{signal.symbol}:{signal.direction}"
+        return f"strategy_symbol_direction:{signal.symbol}:{signal.direction}"
 
     def _record_delivery_attempt(
         self,
@@ -88,19 +93,48 @@ class DeliveryOrchestrator:
         for signal in flat_candidates:
             same_direction.setdefault((signal.symbol, signal.direction), []).append(signal)
 
-        best_by_direction = [
-            self._apply_same_direction_confluence(signals) for signals in same_direction.values()
-        ]
-        best_by_symbol: dict[str, Signal] = {}
-        for signal in sorted(best_by_direction, key=self._rank_key, reverse=True):
-            best_by_symbol.setdefault(signal.symbol, signal)
+        direction_representatives: list[Signal] = []
+        for peers in same_direction.values():
+            direction_representatives.append(self._apply_same_direction_confluence(peers))
 
-        ranked = sorted(best_by_symbol.values(), key=self._rank_key, reverse=True)
-        selected = ranked[:max_signals]
+        by_symbol: dict[str, Signal] = {}
+        for signal in sorted(direction_representatives, key=self._rank_key, reverse=True):
+            if signal.symbol not in by_symbol:
+                by_symbol[signal.symbol] = signal
+        enriched = list(by_symbol.values())
+
+        by_setup: dict[str, list[Signal]] = {}
+        for signal in sorted(enriched, key=self._rank_key, reverse=True):
+            by_setup.setdefault(signal.setup_id, []).append(signal)
+
+        selected: list[Signal] = []
+        selected_keys: set[str] = set()
+        independent_candidates: list[Signal] = []
+        for setup_signals in by_setup.values():
+            independent_candidates.extend(setup_signals[:2])
+        for signal in sorted(independent_candidates, key=self._rank_key, reverse=True):
+            if len(selected) >= max_signals:
+                break
+            key = signal.signal_key
+            if key in selected_keys:
+                continue
+            selected.append(signal)
+            selected_keys.add(key)
+
+        for signal in sorted(enriched, key=self._rank_key, reverse=True):
+            if len(selected) >= max_signals:
+                break
+            key = signal.signal_key
+            if key in selected_keys:
+                continue
+            selected.append(signal)
+            selected_keys.add(key)
+
         LOG.debug(
-            "select_and_rank | candidates=%d deduped_symbols=%d selected=%d",
+            "select_and_rank | candidates=%d symbol_plans=%d setups=%d selected=%d independent_by_setup=true",
             len(flat_candidates),
-            len(best_by_symbol),
+            len(enriched),
+            len(by_setup),
             len(selected),
         )
         return selected
@@ -156,8 +190,21 @@ class DeliveryOrchestrator:
         ready_to_send: list[Signal] = []
         rejected_rows: list[dict[str, Any]] = []
         queued_symbol_direction: set[str] = set()
+        queued_setup_ids: set[str] = set()
 
         for signal in signals:
+            if signal.setup_id in queued_setup_ids:
+                rejected_rows.append(
+                    {
+                        "ts": datetime.now(UTC).isoformat(),
+                        "symbol": signal.symbol,
+                        "setup_id": signal.setup_id,
+                        "direction": signal.direction,
+                        "stage": "selection",
+                        "reason": "setup_cycle_quota_filled",
+                    }
+                )
+                continue
             is_blacklisted = await self._bot._modern_repo.is_symbol_blacklisted(
                 signal.symbol,
                 max_sl_streak=self._bot.settings.intelligence.max_consecutive_stop_losses,
@@ -179,25 +226,41 @@ class DeliveryOrchestrator:
                 continue
 
             active_signals = await self._bot._modern_repo.get_active_signals(symbol=signal.symbol)
-            existing = next(
+            existing_same_setup = next(
                 (
                     r
                     for r in active_signals
-                    if r.get("symbol") == signal.symbol and r.get("status") in ("pending", "active")
+                    if r.get("symbol") == signal.symbol
+                    and r.get("setup_id") == signal.setup_id
+                    and r.get("status") in ("pending", "active")
                 ),
                 None,
             )
-            if existing is not None:
+            if existing_same_setup is not None:
                 score_raw = (
-                    existing.get("score")
-                    if isinstance(existing, dict)
-                    else getattr(existing, "score", None)
+                    existing_same_setup.get("score")
+                    if isinstance(existing_same_setup, dict)
+                    else getattr(existing_same_setup, "score", None)
                 )
-                if score_raw is not None and signal.score >= float(score_raw or 0.0) + 0.10:
+                existing_status = (
+                    existing_same_setup.get("status")
+                    if isinstance(existing_same_setup, dict)
+                    else getattr(existing_same_setup, "status", None)
+                )
+                existing_direction = (
+                    existing_same_setup.get("direction")
+                    if isinstance(existing_same_setup, dict)
+                    else getattr(existing_same_setup, "direction", None)
+                )
+                can_supersede_pending = str(existing_status) == "pending"
+                better_score = score_raw is not None and signal.score >= float(score_raw or 0.0) + 0.10
+                direction_flip = str(existing_direction or "") != signal.direction
+                if can_supersede_pending and (better_score or direction_flip):
                     closed = await self.close_superseded_signal(signal)
                     if closed:
                         await self.deliver_tracking(closed)
                     ready_to_send.append(signal)
+                    queued_setup_ids.add(signal.setup_id)
                     queued_symbol_direction.add(self._symbol_direction_cooldown_key(signal))
                 else:
                     rejected_rows.append(
@@ -207,7 +270,9 @@ class DeliveryOrchestrator:
                             "setup_id": signal.setup_id,
                             "direction": signal.direction,
                             "stage": "tracking",
-                            "reason": "symbol_has_open_signal",
+                            "reason": "setup_has_open_signal",
+                            "existing_direction": existing_direction,
+                            "existing_status": existing_status,
                         }
                     )
                 continue
@@ -223,6 +288,31 @@ class DeliveryOrchestrator:
                         "stage": "cooldown",
                         "reason": "symbol_direction_cooldown_active",
                         "cooldown_minutes": self._bot.settings.filters.symbol_cooldown_minutes,
+                    }
+                )
+                continue
+
+            existing_symbol = next(
+                (
+                    r
+                    for r in active_signals
+                    if r.get("symbol") == signal.symbol
+                    and r.get("status") in ("pending", "active")
+                ),
+                None,
+            )
+            if existing_symbol is not None:
+                rejected_rows.append(
+                    {
+                        "ts": datetime.now(UTC).isoformat(),
+                        "symbol": signal.symbol,
+                        "setup_id": signal.setup_id,
+                        "direction": signal.direction,
+                        "stage": "tracking",
+                        "reason": "symbol_has_open_signal",
+                        "existing_setup_id": existing_symbol.get("setup_id"),
+                        "existing_direction": existing_symbol.get("direction"),
+                        "existing_status": existing_symbol.get("status"),
                     }
                 )
                 continue
@@ -251,6 +341,7 @@ class DeliveryOrchestrator:
             )
             if not is_cooldown_active:
                 ready_to_send.append(signal)
+                queued_setup_ids.add(signal.setup_id)
                 queued_symbol_direction.add(symbol_direction_key)
                 continue
 
@@ -258,6 +349,7 @@ class DeliveryOrchestrator:
             if closed:
                 await self.deliver_tracking(closed)
                 ready_to_send.append(signal)
+                queued_setup_ids.add(signal.setup_id)
                 queued_symbol_direction.add(symbol_direction_key)
             else:
                 rejected_rows.append(

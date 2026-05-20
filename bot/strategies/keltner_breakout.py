@@ -36,6 +36,9 @@ class KeltnerBreakoutSetup(BaseSetup):
             "min_adx_1h": 14.0,
             "sl_buffer_atr": 0.6,
             "min_rr": 1.9,
+            "breakout_lookback_bars": 8,
+            "max_retest_distance_atr": 1.25,
+            "volume_penalty": 0.90,
         }
         if settings is not None:
             setups = getattr(getattr(settings, "filters", None), "setups", {})
@@ -84,9 +87,7 @@ class KeltnerBreakoutSetup(BaseSetup):
             _reject(prepared, setup_id, "invalid_indicator_state", atr=atr)
             return None
 
-        if vol_ratio < float(effective_params["min_volume_ratio"]):
-            _reject(prepared, setup_id, "volume_too_low", volume_ratio=vol_ratio)
-            return None
+        volume_penalty = vol_ratio < float(effective_params["min_volume_ratio"])
 
         if adx_1h > 0.0 and adx_1h < float(effective_params["min_adx_1h"]):
             _reject(prepared, setup_id, "adx_too_low", adx_1h=adx_1h)
@@ -95,13 +96,37 @@ class KeltnerBreakoutSetup(BaseSetup):
         bias_1h = getattr(prepared, "bias_1h", prepared.bias_4h)
         direction: str | None = None
         stop_basis: float = 0.0
-
-        if close > kc_upper:
-            direction = "long"
-            stop_basis = max(kc_lower, ema20)
-        elif close < kc_lower:
-            direction = "short"
-            stop_basis = min(kc_upper, ema20)
+        entry_price = 0.0
+        breakout_lag = 0
+        breakout_vol_ratio = vol_ratio
+        lookback = min(max(1, int(effective_params["breakout_lookback_bars"])), work_15m.height)
+        max_retest_distance = atr * float(effective_params["max_retest_distance_atr"])
+        for idx in range(work_15m.height - 1, work_15m.height - lookback - 1, -1):
+            bar_close = _as_float(work_15m.item(idx, "close"))
+            bar_upper = _as_float(work_15m.item(idx, "kc_upper"))
+            bar_lower = _as_float(work_15m.item(idx, "kc_lower"))
+            bar_ema = _as_float(work_15m.item(idx, "ema20"))
+            bar_vol = _as_float(work_15m.item(idx, "volume_ratio20"), 1.0)
+            if min(bar_close, bar_upper, bar_lower, bar_ema) <= 0.0:
+                continue
+            if bar_close > bar_upper:
+                distance = close - bar_upper
+                if distance >= -atr * 0.25 and abs(distance) <= max_retest_distance:
+                    direction = "long"
+                    entry_price = bar_upper
+                    stop_basis = max(bar_lower, bar_ema)
+                    breakout_lag = work_15m.height - 1 - idx
+                    breakout_vol_ratio = bar_vol
+                    break
+            if bar_close < bar_lower:
+                distance = bar_lower - close
+                if distance >= -atr * 0.25 and abs(distance) <= max_retest_distance:
+                    direction = "short"
+                    entry_price = bar_lower
+                    stop_basis = min(bar_upper, bar_ema)
+                    breakout_lag = work_15m.height - 1 - idx
+                    breakout_vol_ratio = bar_vol
+                    break
 
         if direction is None:
             _reject(prepared, setup_id, "no_keltner_breakout", close=close)
@@ -111,7 +136,7 @@ class KeltnerBreakoutSetup(BaseSetup):
         min_rr = float(effective_params["min_rr"])
         stop, tp1, tp2 = build_structural_targets(
             direction=direction,
-            price_anchor=close,
+            price_anchor=entry_price,
             stop_basis=stop_basis,
             atr=atr,
             work_1h=work_1h,
@@ -121,27 +146,37 @@ class KeltnerBreakoutSetup(BaseSetup):
             sh_mask=sh_mask,
             sl_mask=sl_mask,
         )
-        risk = abs(close - stop)
+        if direction == "long" and stop >= entry_price:
+            stop = entry_price - atr * float(effective_params["sl_buffer_atr"])
+        elif direction == "short" and stop <= entry_price:
+            stop = entry_price + atr * float(effective_params["sl_buffer_atr"])
+        risk = abs(entry_price - stop)
         if risk <= 0.0:
-            _reject(prepared, setup_id, "invalid_stop", stop=stop, close=close)
+            _reject(prepared, setup_id, "invalid_stop", stop=stop, close=entry_price)
             return None
-        if tp1 is None or abs(tp1 - close) < risk * min_rr:
-            tp1 = close + risk * min_rr if direction == "long" else close - risk * min_rr
-        if tp2 is None or abs(tp2 - close) <= abs(tp1 - close):
-            tp2 = (
-                close + risk * max(2.0, min_rr + 0.35)
+        if tp1 is None or abs(tp1 - entry_price) < risk * min_rr:
+            tp1 = (
+                entry_price + risk * min_rr
                 if direction == "long"
-                else close - risk * max(2.0, min_rr + 0.35)
+                else entry_price - risk * min_rr
+            )
+        if tp2 is None or abs(tp2 - entry_price) <= abs(tp1 - entry_price):
+            tp2 = (
+                entry_price + risk * max(2.0, min_rr + 0.35)
+                if direction == "long"
+                else entry_price - risk * max(2.0, min_rr + 0.35)
             )
 
         base_score = float(effective_params["base_score"])
         score = _compute_dynamic_score(
             direction=direction,
             base_score=base_score,
-            vol_ratio=vol_ratio,
+            vol_ratio=max(vol_ratio, breakout_vol_ratio),
             rsi=rsi,
             structure_clarity=0.6,
         )
+        if volume_penalty:
+            score *= float(effective_params["volume_penalty"])
 
         # Graded bias alignment
         if direction == "long" and bias_1h == "downtrend":
@@ -152,7 +187,9 @@ class KeltnerBreakoutSetup(BaseSetup):
         reasons = [
             f"keltner_breakout_{direction}",
             f"bias_1h={bias_1h}",
-            f"vol_ratio={vol_ratio:.2f}",
+            f"limit_entry={entry_price:.4f}",
+            f"breakout_lag={breakout_lag}",
+            f"vol_ratio={vol_ratio:.2f} breakout_vol={breakout_vol_ratio:.2f}",
             f"adx_1h={adx_1h:.1f}",
         ]
         return _build_signal(
@@ -166,6 +203,6 @@ class KeltnerBreakoutSetup(BaseSetup):
             stop=stop,
             tp1=tp1,
             tp2=tp2,
-            price_anchor=close,
+            price_anchor=entry_price,
             atr=atr,
         )

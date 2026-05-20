@@ -277,18 +277,25 @@ class VolumeClimaxReversalSetup(BaseSetup):
         bias_1h = getattr(prepared, "bias_1h", prepared.bias_4h)
         sl_buffer = float(effective_params["sl_buffer_atr"])
         min_rr = float(effective_params["min_rr"])
+        signal_mid = (signal_high + signal_low) / 2.0
+        if reclaim_level > 0.0:
+            price_anchor = reclaim_level
+        elif direction == "long":
+            price_anchor = min(signal_mid, close)
+        else:
+            price_anchor = max(signal_mid, close)
         if direction == "long":
             stop = signal_low - atr * sl_buffer
-            risk = close - stop
-            tp1 = close + risk * min_rr
-            tp2 = close + risk * max(2.0, min_rr + 0.35)
+            risk = price_anchor - stop
+            tp1 = price_anchor + risk * min_rr
+            tp2 = price_anchor + risk * max(2.0, min_rr + 0.35)
         else:
             stop = signal_high + atr * sl_buffer
-            risk = stop - close
-            tp1 = close - risk * min_rr
-            tp2 = close - risk * max(2.0, min_rr + 0.35)
+            risk = stop - price_anchor
+            tp1 = price_anchor - risk * min_rr
+            tp2 = price_anchor - risk * max(2.0, min_rr + 0.35)
         if risk <= 0.0:
-            _reject(prepared, setup_id, "invalid_stop", stop=stop, close=close)
+            _reject(prepared, setup_id, "invalid_stop", stop=stop, close=price_anchor)
             return None
 
         base_score = float(effective_params["base_score"])
@@ -319,6 +326,7 @@ class VolumeClimaxReversalSetup(BaseSetup):
             f"upper_wick_atr={upper_wick_atr:.2f}",
             f"signal_lag={work.height - 1 - signal_idx}",
             f"reclaim_level={reclaim_level:.4f}",
+            f"limit_entry={price_anchor:.4f}",
         ]
         return _build_signal(
             prepared=prepared,
@@ -331,6 +339,6 @@ class VolumeClimaxReversalSetup(BaseSetup):
             stop=stop,
             tp1=tp1,
             tp2=tp2,
-            price_anchor=close,
+            price_anchor=price_anchor,
             atr=atr,
         )

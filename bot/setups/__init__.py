@@ -375,10 +375,6 @@ def _build_signal(
     trend_score = getattr(prepared, "trend_score_1h", None)
 
     signal_timeframe = str(timeframe or "15m")
-    if signal_timeframe == "15m":
-        primary_timeframe = str(getattr(prepared, "primary_timeframe", "15m") or "15m")
-        if primary_timeframe in {"5m", "1h", "4h"}:
-            signal_timeframe = primary_timeframe
 
     return Signal(
         symbol=prepared.symbol,

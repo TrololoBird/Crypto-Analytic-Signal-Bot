@@ -181,23 +181,7 @@ class OrderBlockSetup(BaseSetup):
         stop_basis = ob_low if direction == "long" else ob_high
         fallback_stop = ob_low - 0.5 * atr if direction == "long" else ob_high + 0.5 * atr
 
-        stop_calc, tp1, tp2 = build_structural_targets(
-            direction=direction,
-            price_anchor=price,
-            stop_basis=stop_basis,
-            atr=atr,
-            work_1h=w1h,
-            min_rr=dynamic_params.get("min_rr", defaults["min_rr"]),
-            sl_buffer_atr=sl_buffer_atr,
-            sh_mask=sh_mask,
-            sl_mask=sl_mask,
-        )
-
-        stop = stop_calc if stop_calc != stop_basis else fallback_stop
-
         min_rr = dynamic_params.get("min_rr", defaults["min_rr"])
-        risk = abs(price - stop)
-        is_valid_rr, _ = validate_rr_or_penalty(price, stop, tp1, min_rr)
 
         vol_ratio = float(w1h.item(-1, "volume_ratio20") or 1.0)
         rsi = float(w1h.item(-1, "rsi14") or 50.0)
@@ -225,27 +209,49 @@ class OrderBlockSetup(BaseSetup):
         if zone.state == "mitigated":
             score *= 0.95
 
+        entry_price = ob_low if direction == "long" else ob_high
+        stop_calc, tp1, tp2 = build_structural_targets(
+            direction=direction,
+            price_anchor=entry_price,
+            stop_basis=stop_basis,
+            atr=atr,
+            work_1h=w1h,
+            min_rr=dynamic_params.get("min_rr", defaults["min_rr"]),
+            sl_buffer_atr=sl_buffer_atr,
+            sh_mask=sh_mask,
+            sl_mask=sl_mask,
+        )
+        stop = stop_calc if stop_calc != stop_basis else fallback_stop
+        risk = abs(entry_price - stop)
+        is_valid_rr, _ = validate_rr_or_penalty(entry_price, stop, tp1, min_rr)
         if not is_valid_rr and tp1 is not None:
             score *= dynamic_params.get("tp_too_close_penalty", defaults["tp_too_close_penalty"])
 
         if risk <= 0.0:
-            _reject(prepared, setup_id, "invalid_stop", stop=stop, price=price)
+            _reject(prepared, setup_id, "invalid_stop", stop=stop, price=entry_price)
             return None
-        if tp1 is None or abs(tp1 - price) < risk * float(min_rr):
-            tp1 = price + risk * float(min_rr) if direction == "long" else price - risk * float(min_rr)
+        if tp1 is None or abs(tp1 - entry_price) < risk * float(min_rr):
+            tp1 = (
+                entry_price + risk * float(min_rr)
+                if direction == "long"
+                else entry_price - risk * float(min_rr)
+            )
             reasons_note = f"tp1_rr_fallback_{float(min_rr):.2f}"
         else:
             reasons_note = "tp1_structural"
-        if tp2 is None or abs(tp2 - price) <= abs(tp1 - price):
+        if tp2 is None or abs(tp2 - entry_price) <= abs(tp1 - entry_price):
             tp2 = (
-                price + risk * max(2.0, float(min_rr) + 0.35)
+                entry_price + risk * max(2.0, float(min_rr) + 0.35)
                 if direction == "long"
-                else price - risk * max(2.0, float(min_rr) + 0.35)
+                else entry_price - risk * max(2.0, float(min_rr) + 0.35)
             )
 
         reasons = [
             f"OB {direction}: zone [{ob_low:.4f}-{ob_high:.4f}] state={zone.state}",
-            f"age={age}bars price={price:.4f} | 1h_bias={bias_1h} 1h_struct={structure_1h}",
+            (
+                f"age={age}bars price={price:.4f} limit_entry={entry_price:.4f} "
+                f"| 1h_bias={bias_1h} 1h_struct={structure_1h}"
+            ),
             f"rsi={rsi_check:.1f}",
             reasons_note,
         ]
@@ -261,6 +267,6 @@ class OrderBlockSetup(BaseSetup):
             stop=stop,
             tp1=tp1,
             tp2=tp2,
-            price_anchor=price,
+            price_anchor=entry_price,
             atr=atr,
         )

@@ -90,6 +90,7 @@ class PreparedSymbol:
     spread_bps: float | None
     work_5m: pl.DataFrame | None = None
     work_4h: pl.DataFrame | None = None
+    work_primary: pl.DataFrame | None = None
     bias_4h: str = "neutral"  # 4H macro context (market regime)
     bias_1h: str = "neutral"  # 1H trading context for 15M signals
     # Optional fields populated from WS global streams (mark price / liquidations)
@@ -117,8 +118,14 @@ class PreparedSymbol:
     oi_slope_5m: float | None = None
     depth_imbalance: float | None = None
     microprice_bias: float | None = None
+    depth_imbalance_source: str | None = None
+    microprice_bias_source: str | None = None
+    depth_book_age_seconds: float | None = None
     agg_trade_delta_30s: float | None = None
     aggression_shift: float | None = None
+    orderflow_source: str | None = None
+    liquidation_score_source: str | None = None
+    liquidation_score_age_seconds: float | None = None
     spot_lead_return_1m: float | None = None
     spot_futures_spread_bps: float | None = None
     btc_bias: str | None = None
@@ -165,6 +172,15 @@ class PreparedSymbol:
             self.top_trader_position_ratio = self.top_position_ls_ratio
         if not isinstance(self.reject_log, tuple):
             self.reject_log = tuple(self.reject_log)
+        if self.work_primary is None:
+            if self.primary_timeframe == "5m" and self.work_5m is not None:
+                self.work_primary = self.work_5m
+            elif self.primary_timeframe == "1h":
+                self.work_primary = self.work_1h
+            elif self.primary_timeframe == "4h" and self.work_4h is not None:
+                self.work_primary = self.work_4h
+            else:
+                self.work_primary = self.work_15m
 
     @property
     def symbol(self) -> str:

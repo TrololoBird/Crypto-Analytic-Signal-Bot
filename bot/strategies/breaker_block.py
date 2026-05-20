@@ -125,6 +125,10 @@ class BreakerBlockSetup(BaseSetup):
         direction = zone.direction
         bb_low = zone.bottom
         bb_high = zone.top
+        if direction == "long":
+            entry_price = bb_high if bb_high <= price else bb_low
+        else:
+            entry_price = bb_low if bb_low >= price else bb_high
 
         vol_ratio_15m = _last(prepared.work_15m, "volume_ratio20", 1.0)
         if vol_ratio_15m < min_volume_ratio:
@@ -173,14 +177,20 @@ class BreakerBlockSetup(BaseSetup):
         if direction == "long":
             # SL: beyond breaker block level + sl_buffer_atr×ATR.
             stop = bb_low - sl_buffer_atr * atr
-            risk = price - stop
+            risk = entry_price - stop
             if risk <= 0:
-                _reject(prepared, setup_id, "risk_non_positive_long", stop=stop, price=price)
+                _reject(
+                    prepared,
+                    setup_id,
+                    "risk_non_positive_long",
+                    stop=stop,
+                    price=entry_price,
+                )
                 return None
             # TP1: next 1h swing high (liquidity target / imbalance fill)
             sh_mask, _ = _sp(w1h, n=3, include_unconfirmed_tail=True)
             sh_prices = w1h.filter(sh_mask)["high"]
-            tp1_candidates = sh_prices.filter(sh_prices > price)
+            tp1_candidates = sh_prices.filter(sh_prices > entry_price)
             tp1 = float(tp1_candidates[0]) if tp1_candidates.len() > 0 else None
             # TP2: 4h structural resistance
             w4h = prepared.work_4h
@@ -188,25 +198,25 @@ class BreakerBlockSetup(BaseSetup):
             if w4h is not None and w4h.height > 5:
                 sh4_mask, _ = _sp(w4h, n=2)
                 sh4_prices = w4h.filter(sh4_mask)["high"]
-                tp2_cands = sh4_prices.filter(sh4_prices > price)
+                tp2_cands = sh4_prices.filter(sh4_prices > entry_price)
                 tp2 = float(tp2_cands[0]) if tp2_cands.len() > 0 else None
         else:
             # SL: beyond breaker block level + sl_buffer_atr×ATR.
             stop = bb_high + sl_buffer_atr * atr
-            risk = stop - price
+            risk = stop - entry_price
             if risk <= 0:
                 _reject(
                     prepared,
                     setup_id,
                     "risk_non_positive_short",
                     stop=stop,
-                    price=price,
+                    price=entry_price,
                 )
                 return None
             # TP1: next 1h swing low (liquidity target)
             _, sl_mask = _sp(w1h, n=3, include_unconfirmed_tail=True)
             sl_prices = w1h.filter(sl_mask)["low"]
-            tp1_candidates = sl_prices.filter(sl_prices < price)
+            tp1_candidates = sl_prices.filter(sl_prices < entry_price)
             tp1 = float(tp1_candidates[-1]) if tp1_candidates.len() > 0 else None
             # TP2: 4h structural support
             w4h = prepared.work_4h
@@ -214,18 +224,22 @@ class BreakerBlockSetup(BaseSetup):
             if w4h is not None and w4h.height > 5:
                 _, sl4_mask = _sp(w4h, n=2)
                 sl4_prices = w4h.filter(sl4_mask)["low"]
-                tp2_cands = sl4_prices.filter(sl4_prices < price)
+                tp2_cands = sl4_prices.filter(sl4_prices < entry_price)
                 tp2 = float(tp2_cands[-1]) if tp2_cands.len() > 0 else None
 
         fallback_note = None
-        if tp1 is None or abs(tp1 - price) < risk * min_rr:
-            tp1 = price + risk * min_rr if direction == "long" else price - risk * min_rr
-            fallback_note = f"tp1_rr_fallback_{min_rr:.2f}"
-        if tp2 is None or abs(tp2 - price) <= abs(tp1 - price):
-            tp2 = (
-                price + risk * max(2.0, min_rr + 0.35)
+        if tp1 is None or abs(tp1 - entry_price) < risk * min_rr:
+            tp1 = (
+                entry_price + risk * min_rr
                 if direction == "long"
-                else price - risk * max(2.0, min_rr + 0.35)
+                else entry_price - risk * min_rr
+            )
+            fallback_note = f"tp1_rr_fallback_{min_rr:.2f}"
+        if tp2 is None or abs(tp2 - entry_price) <= abs(tp1 - entry_price):
+            tp2 = (
+                entry_price + risk * max(2.0, min_rr + 0.35)
+                if direction == "long"
+                else entry_price - risk * max(2.0, min_rr + 0.35)
             )
 
         vol_ratio = float(w1h.item(-1, "volume_ratio20") or 1.0)
@@ -239,7 +253,10 @@ class BreakerBlockSetup(BaseSetup):
 
         reasons = [
             f"Breaker block {direction}: zone [{bb_low:.4f}-{bb_high:.4f}] state={zone.state}",
-            f"price={price:.4f} retesting broken OB from {zone.metadata.get('source_ob_direction')}",
+            (
+                f"price={price:.4f} limit_entry={entry_price:.4f} "
+                f"retesting broken OB from {zone.metadata.get('source_ob_direction')}"
+            ),
         ]
         if fallback_note:
             reasons.append(fallback_note)
@@ -255,6 +272,6 @@ class BreakerBlockSetup(BaseSetup):
             stop=stop,
             tp1=tp1,
             tp2=tp2,
-            price_anchor=price,
+            price_anchor=entry_price,
             atr=atr,
         )

@@ -1296,17 +1296,34 @@ class SymbolAnalyzer:
                 depth_imbalance = self._bot._ws_manager.get_depth_imbalance(symbol)
                 if depth_imbalance is not None:
                     enrichments["depth_imbalance"] = float(depth_imbalance)
+                    depth_source_getter = getattr(
+                        self._bot._ws_manager, "get_depth_imbalance_source", None
+                    )
+                    if callable(depth_source_getter):
+                        depth_source = depth_source_getter(symbol)
+                        if depth_source:
+                            enrichments["depth_imbalance_source"] = str(depth_source)
                 microprice_bias = self._bot._ws_manager.get_microprice_bias(symbol)
                 if microprice_bias is not None:
                     enrichments["microprice_bias"] = float(microprice_bias)
+                    micro_source_getter = getattr(
+                        self._bot._ws_manager, "get_microprice_bias_source", None
+                    )
+                    if callable(micro_source_getter):
+                        micro_source = micro_source_getter(symbol)
+                        if micro_source:
+                            enrichments["microprice_bias_source"] = str(micro_source)
                 depth_age_getter = getattr(
                     self._bot._ws_manager, "get_depth_book_age_seconds", None
                 )
                 if callable(depth_age_getter):
                     depth_age = depth_age_getter(symbol)
                     max_age = self._bot.settings.ws.market_ticker_freshness_seconds
-                    if depth_age is not None and depth_age > max_age:
-                        freshness_flags.add("depth_book_stale")
+                    if depth_age is not None:
+                        enrichments["depth_book_age_seconds"] = float(depth_age)
+                        context_ages.append(float(depth_age))
+                        if depth_age > max_age:
+                            freshness_flags.add("depth_book_stale")
                 trade_snapshot_getter = getattr(
                     self._bot._ws_manager, "get_agg_trade_snapshot", None
                 )
@@ -1315,6 +1332,7 @@ class SymbolAnalyzer:
                     long_flow = trade_snapshot_getter(symbol, window_seconds=300)
                     if short_flow is not None and short_flow.delta_ratio is not None:
                         enrichments["agg_trade_delta_30s"] = float(short_flow.delta_ratio)
+                        enrichments["orderflow_source"] = "agg_trade"
                     if (
                         short_flow is not None
                         and long_flow is not None
@@ -1324,11 +1342,21 @@ class SymbolAnalyzer:
                         enrichments["aggression_shift"] = float(
                             short_flow.delta_ratio - long_flow.delta_ratio
                         )
+                        enrichments["orderflow_source"] = "agg_trade"
                 liquidation = self._bot._ws_manager.get_liquidation_sentiment(
                     symbol=symbol, window_seconds=900
                 )
                 if liquidation is not None:
                     enrichments["liquidation_score"] = float(liquidation)
+                    enrichments["liquidation_score_source"] = "force_order"
+                    liq_age_getter = getattr(
+                        self._bot._ws_manager, "get_liquidation_age_seconds", None
+                    )
+                    if callable(liq_age_getter):
+                        liq_age = liq_age_getter(symbol=symbol, window_seconds=900)
+                        if liq_age is not None:
+                            enrichments["liquidation_score_age_seconds"] = float(liq_age)
+                            context_ages.append(float(liq_age))
             except _DEGRADATION_ERRORS as exc:
                 degradation_events.append(
                     self._degrade_event(

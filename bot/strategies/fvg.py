@@ -47,6 +47,7 @@ class FVGSetup(BaseSetup):
             "min_fvg_size_atr": 0.25,
             "min_mitigation_pct": 0.20,
             "sl_buffer_atr": 0.50,
+            "max_entry_distance_atr": 1.50,
         }
         if settings is not None:
             filters = getattr(settings, "filters", None)
@@ -103,13 +104,12 @@ class FVGSetup(BaseSetup):
 
         min_gap_width_bps = dynamic_params.get("min_gap_width_bps", defaults["min_gap_width_bps"])
         min_volume_ratio = dynamic_params.get("min_volume_ratio", defaults["min_volume_ratio"])
-        price_touch_buffer = max(atr * 0.1, price * 0.001)
         zone = latest_fvg_zone(
             w,
             join_consecutive=True,
-            allowed_states=("fresh",),
-            current_price=price,
-            touch_buffer=price_touch_buffer,
+            allowed_states=("fresh", "mitigated"),
+            current_price=None,
+            touch_buffer=0.0,
         )
         if zone is None:
             _reject(prepared, setup_id, "no_fvg_detected")
@@ -144,11 +144,39 @@ class FVGSetup(BaseSetup):
                 created_index=zone.created_index,
             )
             return None
-        mitigation_pct = abs(price - fvg_mid) / fvg_width if fvg_width > 0 else 0.0
+        price_inside_gap = fvg_low <= price <= fvg_high
+        if direction == "long":
+            if price < fvg_low:
+                _reject(prepared, setup_id, "fvg_already_lost", price=price, bottom=fvg_low)
+                return None
+            entry_distance = max(0.0, price - fvg_high)
+        else:
+            if price > fvg_high:
+                _reject(prepared, setup_id, "fvg_already_lost", price=price, top=fvg_high)
+                return None
+            entry_distance = max(0.0, fvg_low - price)
+        max_entry_distance = atr * float(
+            dynamic_params.get("max_entry_distance_atr", defaults["max_entry_distance_atr"])
+        )
+        if entry_distance > max_entry_distance:
+            _reject(
+                prepared,
+                setup_id,
+                "fvg_retest_too_far",
+                entry_distance_atr=entry_distance / atr if atr > 0 else None,
+                max_entry_distance_atr=dynamic_params.get(
+                    "max_entry_distance_atr", defaults["max_entry_distance_atr"]
+                ),
+            )
+            return None
+        mitigation_pct = abs(price - fvg_mid) / fvg_width if price_inside_gap and fvg_width > 0 else 0.0
         if (
             fvg_width / price < (min_gap_width_bps / 10000)
             or fvg_width < atr * float(min_fvg_size_atr)
-            or not (float(min_mitigation_pct) <= mitigation_pct <= 1.0)
+            or (
+                price_inside_gap
+                and not (float(min_mitigation_pct) <= mitigation_pct <= 1.0)
+            )
         ):
             _reject(
                 prepared,
@@ -156,6 +184,7 @@ class FVGSetup(BaseSetup):
                 "fvg_constraints_failed",
                 width=fvg_width,
                 mitigation_pct=mitigation_pct,
+                price_inside_gap=price_inside_gap,
             )
             return None
 
@@ -221,72 +250,84 @@ class FVGSetup(BaseSetup):
             sh_mask, sl_mask = _sp(prepared.work_1h, n=3, include_unconfirmed_tail=True)
         min_rr = float(dynamic_params.get("min_rr", defaults["min_rr"]))
         if direction == "long":
+            entry_price = fvg_mid if fvg_mid <= price else fvg_low
+            if entry_price > price:
+                entry_price = price
+        else:
+            entry_price = fvg_mid if fvg_mid >= price else fvg_high
+            if entry_price < price:
+                entry_price = price
+        if direction == "long":
             stop = fvg_low - atr * float(sl_buffer_atr)
-            risk = price - stop
+            risk = entry_price - stop
             if risk <= 0.0:
-                _reject(prepared, setup_id, "invalid_stop", stop=stop, price=price)
+                _reject(prepared, setup_id, "invalid_stop", stop=stop, price=entry_price)
                 return None
             tp1 = select_structural_target(
                 prepared.work_1h,
                 mask=sh_mask,
                 column="high",
-                price_anchor=price,
+                price_anchor=entry_price,
                 direction="long",
             )
             tp2 = select_structural_target(
                 prepared.work_4h,
                 mask=None,
                 column="high",
-                price_anchor=price,
+                price_anchor=entry_price,
                 direction="long",
             )
-            if tp1 is None or abs(tp1 - price) < risk * min_rr:
-                tp1 = price + risk * min_rr
+            if tp1 is None or abs(tp1 - entry_price) < risk * min_rr:
+                tp1 = entry_price + risk * min_rr
                 reasons_note = "tp1_rr_fallback"
             else:
                 reasons_note = "tp1_structural"
             if tp2 is None or tp2 <= tp1:
-                tp2 = price + risk * max(2.0, min_rr + 0.35)
+                tp2 = entry_price + risk * max(2.0, min_rr + 0.35)
         else:
             stop = fvg_high + atr * float(sl_buffer_atr)
-            risk = stop - price
+            risk = stop - entry_price
             if risk <= 0.0:
-                _reject(prepared, setup_id, "invalid_stop", stop=stop, price=price)
+                _reject(prepared, setup_id, "invalid_stop", stop=stop, price=entry_price)
                 return None
             tp1 = select_structural_target(
                 prepared.work_1h,
                 mask=sl_mask,
                 column="low",
-                price_anchor=price,
+                price_anchor=entry_price,
                 direction="short",
             )
             tp2 = select_structural_target(
                 prepared.work_4h,
                 mask=None,
                 column="low",
-                price_anchor=price,
+                price_anchor=entry_price,
                 direction="short",
             )
-            if tp1 is None or abs(tp1 - price) < risk * min_rr:
-                tp1 = price - risk * min_rr
+            if tp1 is None or abs(tp1 - entry_price) < risk * min_rr:
+                tp1 = entry_price - risk * min_rr
                 reasons_note = "tp1_rr_fallback"
             else:
                 reasons_note = "tp1_structural"
             if tp2 is None or tp2 >= tp1:
-                tp2 = price - risk * max(2.0, min_rr + 0.35)
+                tp2 = entry_price - risk * max(2.0, min_rr + 0.35)
 
         # Graded RR validation instead of hard reject
-        is_valid_rr, _ = validate_rr_or_penalty(price, stop, tp1, min_rr)
+        is_valid_rr, _ = validate_rr_or_penalty(entry_price, stop, tp1, min_rr)
 
         if not is_valid_rr and tp1 is not None:
             score *= dynamic_params.get("tp_too_close_penalty", defaults["tp_too_close_penalty"])
 
-        if tp2 is None or abs(tp2 - price) <= abs(tp1 - price):
+        if tp2 is None or abs(tp2 - entry_price) <= abs(tp1 - entry_price):
             tp2 = tp1  # Use TP1 as TP2 if no extended target found
 
         reasons = [
             f"FVG {direction}: gap [{fvg_low:.4f}-{fvg_high:.4f}] state={zone.state}",
-            f"price={price:.4f} inside gap | 1h_bias={bias_1h} 1h_struct={structure_1h} 1h_regime={regime_1h}",
+            (
+                f"price={price:.4f} limit_entry={entry_price:.4f} inside gap "
+                f"| entry_distance_atr={entry_distance / atr:.2f} "
+                f"| 1h_bias={bias_1h} 1h_struct={structure_1h} 1h_regime={regime_1h}"
+            ),
             f"vol_ratio={vol_ratio:.2f} impulse_vol={impulse_vol_ratio:.2f} rsi={rsi:.1f}",
             reasons_note,
         ]
@@ -302,6 +343,6 @@ class FVGSetup(BaseSetup):
             stop=stop,
             tp1=tp1,
             tp2=tp2,
-            price_anchor=price,
+            price_anchor=entry_price,
             atr=atr,
         )

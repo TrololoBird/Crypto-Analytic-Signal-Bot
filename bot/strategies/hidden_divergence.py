@@ -260,56 +260,62 @@ class HiddenDivergenceSetup(BaseSetup):
         # --- Compute structural SL/TP ---
         if direction == "long":
             # SL: beyond hidden divergence extreme (swing low) + 0.15×ATR
+            entry_price = swing_ref
             stop_price = swing_ref - atr * sl_buffer_atr
-            risk = price - stop_price
+            risk = entry_price - stop_price
             if risk <= 0:
                 _reject(
                     prepared,
                     setup_id,
                     "risk_non_positive_long",
                     stop=stop_price,
-                    price=price,
+                    price=entry_price,
                 )
                 return None
             # TP1/TP2: Fibonacci 1.272× and 1.618× extension of last impulse wave
             if impulse_size and impulse_size > 0:
-                tp1 = price + impulse_size * 1.272
-                tp2 = price + impulse_size * 1.618
+                tp1 = entry_price + impulse_size * 1.272
+                tp2 = entry_price + impulse_size * 1.618
             else:
                 tp1 = None
                 tp2 = None
         else:
             # SL: beyond hidden divergence extreme (swing high) + 0.15×ATR
+            entry_price = swing_ref
             stop_price = swing_ref + atr * sl_buffer_atr
-            risk = stop_price - price
+            risk = stop_price - entry_price
             if risk <= 0:
                 _reject(
                     prepared,
                     setup_id,
                     "risk_non_positive_short",
                     stop=stop_price,
-                    price=price,
+                    price=entry_price,
                 )
                 return None
             # TP1/TP2: Fibonacci extensions of last impulse wave
             if impulse_size and impulse_size > 0:
-                tp1 = price - impulse_size * 1.272
-                tp2 = price - impulse_size * 1.618
+                tp1 = entry_price - impulse_size * 1.272
+                tp2 = entry_price - impulse_size * 1.618
             else:
                 tp1 = None
                 tp2 = None
 
         min_rr = float(dynamic_params.get("min_rr", defaults["min_rr"]))
-        if tp1 is None or abs(tp1 - price) < risk * min_rr:
-            tp1 = price + risk * min_rr if direction == "long" else price - risk * min_rr
+        if tp1 is None or abs(tp1 - entry_price) < risk * min_rr:
+            tp1 = (
+                entry_price + risk * min_rr
+                if direction == "long"
+                else entry_price - risk * min_rr
+            )
             reasons_note = f"tp1_rr_fallback_{min_rr:.2f}"
         else:
             reasons_note = "tp1_fib_extension"
-        if tp2 is None or abs(tp2 - price) <= abs(tp1 - price):
+        if tp2 is None or abs(tp2 - entry_price) <= abs(tp1 - entry_price):
             tp2 = (
-                price + risk * max(2.0, min_rr + 0.35)
+                entry_price + risk * max(2.0, min_rr + 0.35)
                 if direction == "long"
-                else price - risk * max(2.0, min_rr + 0.35)
+                else entry_price - risk * max(2.0, min_rr + 0.35)
             )
 
         rsi = float(w1h.item(-1, "rsi14") or 50.0)
@@ -327,6 +333,7 @@ class HiddenDivergenceSetup(BaseSetup):
 
         reasons = [
             f"Hidden div {direction}: swing_ref={swing_ref:.4f} rsi_sep={rsi_separation:.2f}",
+            f"price={price:.4f} limit_entry={entry_price:.4f}",
             f"vol_ratio_15m={vol_ratio_15m:.2f} delta_shift={delta_shift:.3f} 1h={bias_1h}",
             reasons_note,
         ]
@@ -346,6 +353,6 @@ class HiddenDivergenceSetup(BaseSetup):
             stop=stop_price,
             tp1=tp1,
             tp2=tp2,
-            price_anchor=price,
+            price_anchor=entry_price,
             atr=atr,
         )

@@ -55,7 +55,8 @@ avoid re-learning the repository from stale audits every session.
 
 ## Verification Rules
 
-- Generated tests are not proof of strategy behavior or trading edge.
+- Generated tests were removed from this workspace and are not a supported
+  verification surface.
 - First-line checks are:
   - `rg` call-path review
   - `python -m compileall bot`

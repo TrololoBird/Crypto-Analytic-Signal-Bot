@@ -96,16 +96,16 @@ class PublicIntelligenceService:
     def _macro_disabled_snapshot(self) -> dict[str, Any]:
         source_policy = self._settings.intelligence.source_policy
         return {
-            "enabled": False,
-            "available": False,
-            "status": "disabled_by_source_policy",
+            "enabled": True,
+            "available": True,
+            "status": "binance_proxy",
             "reason": f"source_policy_{source_policy}",
-            "risk_mode": "disabled_binance_only",
+            "risk_mode": "neutral_binance_proxy",
             "risk_off_votes": 0,
             "risk_on_votes": 0,
             "by_symbol": {},
             "confirmed_facts": [
-                "external_macro_and_news_feeds_disabled_under_source_policy_binance_only"
+                "macro_context_uses_binance_futures_proxy_under_source_policy_binance_only"
             ],
         }
 
@@ -271,7 +271,7 @@ class PublicIntelligenceService:
         taker_ratio = _safe_float(symbol_derivatives.get("taker_ratio"))
         oi_change_pct = _safe_float(symbol_derivatives.get("oi_change_pct"))
         macro_risk_mode = str(
-            macro.get("risk_mode") or ("disabled_binance_only" if not macro_enabled else "normal")
+            macro.get("risk_mode") or ("neutral_binance_proxy" if not macro_enabled else "normal")
         )
 
         if direction == "long":
@@ -281,7 +281,7 @@ class PublicIntelligenceService:
             _against_short(put_call_ratio, 1.05, "put_call_ratio_risk_off")
             if macro_enabled:
                 max_votes += 1
-                if macro_risk_mode == "risk_off":
+                if "risk_off" in macro_risk_mode:
                     votes += 1
                     reasons.append("macro_risk_off")
             max_votes += 1
@@ -295,7 +295,7 @@ class PublicIntelligenceService:
             _against_long(put_call_ratio, 0.95, "put_call_ratio_risk_on")
             if macro_enabled:
                 max_votes += 1
-                if macro_risk_mode == "risk_on":
+                if "risk_on" in macro_risk_mode:
                     votes += 1
                     reasons.append("macro_risk_on")
             max_votes += 1
@@ -760,7 +760,7 @@ class PublicIntelligenceService:
         inferences = list(cast(list[str], options.get("inferences") or []))
         macro_enabled = bool(macro.get("enabled", True))
         macro_risk_mode = str(
-            macro.get("risk_mode") or ("disabled_binance_only" if not macro_enabled else "normal")
+            macro.get("risk_mode") or ("neutral_binance_proxy" if not macro_enabled else "normal")
         )
         if macro_enabled and macro_risk_mode != "normal":
             inferences.append(f"macro_risk_mode_{macro_risk_mode}")
@@ -861,9 +861,9 @@ class PublicIntelligenceService:
             sentiment_score += 1
         elif basis["basis_regime"] == "backwardation":
             sentiment_score -= 1
-        if macro_mode == "risk_on":
+        if "risk_on" in macro_mode:
             sentiment_score += 1
-        elif macro_mode in {"risk_off", "disabled_binance_only"}:
+        elif "risk_off" in macro_mode:
             sentiment_score -= 1
         pc_avg = _avg(put_call_values)
         if pc_avg is not None and pc_avg >= 1.2:

@@ -410,6 +410,7 @@ class BOSCHOCHSetup(BaseSetup):
             return None
         stop_price = None
         pivot_level = None
+        entry_price = break_level
 
         external_swings = swing_highs_lows(
             scan,
@@ -443,8 +444,8 @@ class BOSCHOCHSetup(BaseSetup):
                 internal_levels=internal_levels,
                 search_end=external_search_end,
                 marker=-1.0,
-                price=price,
-                break_level=break_level or price,
+                price=entry_price,
+                break_level=entry_price,
                 atr=atr,
                 above_price=False,
             )
@@ -463,25 +464,25 @@ class BOSCHOCHSetup(BaseSetup):
                 if stop_source in {"atr_stop", "previous_candle"}
                 else pivot_level - sl_buffer_atr * atr
             )
-            risk = price - stop_price
+            risk = entry_price - stop_price
             if risk <= 0:
                 _reject(
                     prepared,
                     setup_id,
                     "risk_non_positive_long",
                     stop=stop_price,
-                    price=price,
+                    price=entry_price,
                 )
                 return None
             # TP1: last swing high before the structural break
-            tp1 = float(sh_vals[-2]) if sh_vals[-2] > price else None
+            tp1 = float(sh_vals[-2]) if sh_vals[-2] > entry_price else None
             # TP2: 4h swing target
             w4h = prepared.work_4h
             tp2 = None
             if w4h is not None and w4h.height > 5:
                 sh4_mask, _ = _swing_points(w4h, n=2)
                 sh4_prices = w4h.filter(sh4_mask)["high"]
-                tp2_cands = sh4_prices.filter(sh4_prices > price)
+                tp2_cands = sh4_prices.filter(sh4_prices > entry_price)
                 tp2 = float(tp2_cands[0]) if tp2_cands.len() > 0 else None
         else:
             pivot_level, stop_source, stop_details = _select_stop_level_with_fallback(
@@ -492,8 +493,8 @@ class BOSCHOCHSetup(BaseSetup):
                 internal_levels=internal_levels,
                 search_end=external_search_end,
                 marker=1.0,
-                price=price,
-                break_level=break_level or price,
+                price=entry_price,
+                break_level=entry_price,
                 atr=atr,
                 above_price=True,
             )
@@ -512,37 +513,41 @@ class BOSCHOCHSetup(BaseSetup):
                 if stop_source in {"atr_stop", "previous_candle"}
                 else pivot_level + sl_buffer_atr * atr
             )
-            risk = stop_price - price
+            risk = stop_price - entry_price
             if risk <= 0:
                 _reject(
                     prepared,
                     setup_id,
                     "risk_non_positive_short",
                     stop=stop_price,
-                    price=price,
+                    price=entry_price,
                 )
                 return None
             # TP1: last swing low before the structural break
-            tp1 = float(sl_vals[-2]) if sl_vals[-2] < price else None
+            tp1 = float(sl_vals[-2]) if sl_vals[-2] < entry_price else None
             # TP2: 4h swing target
             w4h = prepared.work_4h
             tp2 = None
             if w4h is not None and w4h.height > 5:
                 _, sl4_mask = _swing_points(w4h, n=2)
                 sl4_prices = w4h.filter(sl4_mask)["low"]
-                tp2_cands = sl4_prices.filter(sl4_prices < price)
+                tp2_cands = sl4_prices.filter(sl4_prices < entry_price)
                 tp2 = float(tp2_cands[-1]) if tp2_cands.len() > 0 else None
 
         fallback_note = None
-        if tp1 is None or abs(tp1 - price) < risk * min_rr:
-            tp1 = price + risk * min_rr if direction == "long" else price - risk * min_rr
+        if tp1 is None or abs(tp1 - entry_price) < risk * min_rr:
+            tp1 = (
+                entry_price + risk * min_rr
+                if direction == "long"
+                else entry_price - risk * min_rr
+            )
             fallback_note = f"tp1_rr_fallback_{min_rr:.2f}"
         if direction == "long":
             if tp2 is None or tp2 <= tp1:
-                tp2 = price + risk * max(2.0, min_rr + 0.35)
+                tp2 = entry_price + risk * max(2.0, min_rr + 0.35)
         else:
             if tp2 is None or tp2 >= tp1:
-                tp2 = price - risk * max(2.0, min_rr + 0.35)
+                tp2 = entry_price - risk * max(2.0, min_rr + 0.35)
 
         rsi = float(w.item(-1, "rsi14") or 50.0)
         score = _compute_dynamic_score(
@@ -557,6 +562,7 @@ class BOSCHOCHSetup(BaseSetup):
         reasons = [
             f"{break_kind.upper()} {direction}: structure level={structure_zone.level:.4f}",
             f"break_close={break_close:.4f} break_age={break_age}",
+            f"price={price:.4f} limit_entry={entry_price:.4f}",
             f"break_distance_atr={break_distance / atr:.2f}",
             f"retest_active={retest_active}",
             f"vol_ratio={vol_ratio:.2f}",
@@ -578,6 +584,6 @@ class BOSCHOCHSetup(BaseSetup):
             stop=stop_price,
             tp1=tp1,
             tp2=tp2,
-            price_anchor=price,
+            price_anchor=entry_price,
             atr=atr,
         )

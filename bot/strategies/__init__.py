@@ -10,28 +10,24 @@ from .hidden_divergence import HiddenDivergenceSetup
 from .indicator_divergence import IndicatorDivergenceSetup
 from .keltner_breakout import KeltnerBreakoutSetup
 from .liquidity_sweep import LiquiditySweepSetup
+from .absorption import AbsorptionSetup
+from .aggression_shift import AggressionShiftSetup
+from .altcoin_season_index import AltcoinSeasonIndexSetup
+from .atr_expansion import ATRExpansionSetup
+from .bb_squeeze import BBSqueezeSetup
+from .btc_correlation import BTCCorrelationSetup
+from .depth_imbalance import DepthImbalanceSetup
+from .liquidation_heatmap import LiquidationHeatmapSetup
+from .ls_ratio_extreme import LSRatioExtremeSetup
+from .multi_tf_trend import MultiTFTrendSetup
+from .oi_divergence import OIDivergenceSetup
 from .order_block import OrderBlockSetup
 from .price_velocity import PriceVelocitySetup
-from .roadmap import (
-    AbsorptionSetup,
-    AggressionShiftSetup,
-    AltcoinSeasonIndexSetup,
-    ATRExpansionSetup,
-    BBSqueezeSetup,
-    BTCCorrelationSetup,
-    DepthImbalanceSetup,
-    LiquidationHeatmapSetup,
-    LSRatioExtremeSetup,
-    MultiTFTrendSetup,
-    OIDivergenceSetup,
-    RSIDivergenceBottomSetup,
-    SpreadStrategySetup,
-    StopHuntDetectionSetup,
-    WhaleWallsSetup,
-    WyckoffSpringSetup,
-)
+from .rsi_divergence_bottom import RSIDivergenceBottomSetup
 from .session_killzone import SessionKillzoneSetup
+from .spread_strategy import SpreadStrategySetup
 from .squeeze_setup import SqueezeSetup
+from .stop_hunt_detection import StopHuntDetectionSetup
 from .structure_break_retest import StructureBreakRetestSetup
 from .structure_pullback import StructurePullbackSetup
 from .supertrend_follow import SuperTrendFollowSetup
@@ -39,7 +35,9 @@ from .turtle_soup import TurtleSoupSetup
 from .volume_anomaly import VolumeAnomalySetup
 from .volume_climax_reversal import VolumeClimaxReversalSetup
 from .vwap_trend import VWAPTrendSetup
+from .whale_walls import WhaleWallsSetup
 from .wick_trap_reversal import WickTrapReversalSetup
+from .wyckoff_spring import WyckoffSpringSetup
 
 STRATEGY_CLASSES = (
     StructurePullbackSetup,

@@ -140,7 +140,7 @@ class VolumeAnomalySetup(BaseSetup):
         bias_1h = getattr(prepared, "bias_1h", prepared.bias_4h)
         sl_buffer = float(effective_params["sl_buffer_atr"])
         min_rr = float(effective_params["min_rr"])
-        price_anchor = close
+        price_anchor = (signal_high + signal_low) / 2.0
         if direction == "long":
             stop = min(signal_low, signal_open) - atr * sl_buffer
             risk = price_anchor - stop
@@ -184,6 +184,7 @@ class VolumeAnomalySetup(BaseSetup):
             f"close_position={signal_close_position:.2f}",
             f"signal_lag={work.height - 1 - signal_idx}",
             f"signal_close={signal_close:.4f}",
+            f"limit_entry={price_anchor:.4f}",
         ]
         return _build_signal(
             prepared=prepared,

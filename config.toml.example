@@ -6,12 +6,12 @@
 analysis_concurrency = 8
 # Per-symbol strategy executor budget inside SignalEngine. Global symbol
 # concurrency is controlled separately by analysis_concurrency.
-strategy_concurrency = 4
+strategy_concurrency = 10
 # Per-strategy compute timeout (seconds) excluding queue wait.
 strategy_timeout_seconds = 12.0
-# Drop stale strategy work before it turns obsolete event backlog into timeouts.
-max_strategy_queue_wait_seconds = 45.0
-max_signals_per_cycle = 10
+# Drop stale strategy work before obsolete bookTicker backlog becomes engine timeouts.
+max_strategy_queue_wait_seconds = 30.0
+max_signals_per_cycle = 80
 event_bus_max_size = 512
 event_bus_warn_depth = 384
 event_bus_drop_log_interval = 25
@@ -105,7 +105,7 @@ structure_pullback = { base_score = 0.55, bias_mismatch_penalty = 0.75, tp_too_c
 structure_break_retest = { base_score = 0.55, threshold_adx = 18.0, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.80, min_rr = 1.9, min_vol_breakout = 0.85, breakout_threshold = 0.0005, retest_atr_mult = 0.85, fallback_lookback_bars = 12, enable_15m_range_fallback = 1.0 }
 wick_trap_reversal = { base_score = 0.50, bias_mismatch_penalty = 0.75, sl_buffer_atr = 1.00, min_rr = 1.9, wick_through_atr_mult = 0.3, closed_back_atr_mult = 0.10, min_volume_ratio = 1.2, max_confirmation_bars = 4, supertrend_opposes_penalty = 0.88 }
 squeeze_setup = { base_score = 0.55, bias_mismatch_penalty = 0.75, sl_buffer_atr = 1.00, min_rr = 1.9, bb_squeeze_threshold = 4.5, min_bb_compression_width = 4.5, bb_pct_b_threshold = 0.80, volume_threshold = 1.2, funding_extreme_threshold = 0.00015, liquidation_extreme_threshold = 0.20, release_lookback = 12, min_release_width_expansion = 1.5, min_release_roc10_abs_pct = 0.35, no_crowd_confirmation_penalty = 0.92 }
-fvg_setup = { base_score = 0.60, threshold_gap = 0.001, sl_buffer_atr = 1.00, min_rr = 1.9, tp_too_close_penalty = 0.8 }
+fvg_setup = { base_score = 0.60, threshold_gap = 0.001, sl_buffer_atr = 1.00, min_rr = 1.9, tp_too_close_penalty = 0.8, max_entry_distance_atr = 1.50 }
 order_block = { base_score = 0.50, min_ob_impulse_atr = 0.9, ob_max_age = 72.0, touch_buffer_atr = 0.25, sl_buffer_atr = 0.85, min_rr = 1.9 }
 liquidity_sweep = { base_score = 0.50, threshold_tol = 0.0015, sl_buffer_atr = 0.90, min_rr = 1.9, max_sweep_age_bars = 4, max_entry_distance_atr = 1.25 }
 bos_choch = { base_score = 0.55, bias_mismatch_penalty = 0.75, sl_buffer_atr = 1.15, min_rr = 1.9, swing_lookback = 5, external_swing_lookback = 18, min_swings = 3, breakout_threshold_atr = 0.20, max_break_age_bars = 10, max_retest_age_bars = 36, retest_atr_mult = 1.50, min_volume_ratio = 0.80 }
@@ -121,7 +121,7 @@ supertrend_follow = { base_score = 0.56, min_adx_1h = 14.0, min_volume_ratio = 1
 price_velocity = { base_score = 0.53, min_roc10_abs_pct = 0.75, min_body_atr = 0.55, min_volume_ratio = 1.0, volume_penalty = 0.90, min_adx_1h = 16.0, max_rsi_long = 82.0, min_rsi_short = 18.0, max_adverse_depth_imbalance = 0.12, max_adverse_microprice_bias = 0.12, strict_1h_structure = 0.0, structure_conflict_penalty = 0.82, sl_buffer_atr = 0.85, min_rr = 1.9 }
 volume_anomaly = { base_score = 0.52, min_volume_ratio = 1.6, min_body_atr = 0.50, min_close_position_long = 0.65, max_close_position_short = 0.35, signal_lookback_bars = 3, max_rsi_long = 78.0, min_rsi_short = 22.0, sl_buffer_atr = 0.85, min_rr = 1.9 }
 volume_climax_reversal = { base_score = 0.52, min_volume_ratio = 1.8, adaptive_min_volume_ratio = 1.3, min_wick_atr = 0.45, strong_wick_multiplier = 1.35, signal_lookback_bars = 10, body_reversal_close_position_long = 0.62, body_reversal_close_position_short = 0.38, max_rsi_long = 42.0, min_rsi_short = 58.0, sl_buffer_atr = 0.80, min_rr = 1.9 }
-keltner_breakout = { base_score = 0.54, min_volume_ratio = 1.25, min_adx_1h = 14.0, sl_buffer_atr = 0.90, min_rr = 1.9 }
+keltner_breakout = { base_score = 0.54, min_volume_ratio = 1.25, min_adx_1h = 14.0, sl_buffer_atr = 0.90, min_rr = 1.9, breakout_lookback_bars = 8, max_retest_distance_atr = 1.25, volume_penalty = 0.90 }
 whale_walls = { base_score = 0.52, min_depth_imbalance = 0.45, min_microprice_bias = 0.20, min_volume_ratio = 0.90, min_close_position_long = 0.55, max_close_position_short = 0.45, max_spread_bps = 8.0, min_roc10_abs_pct = 0.05, sl_buffer_atr = 1.00, min_rr = 1.9 }
 spread_strategy = { base_score = 0.52, max_spread_bps = 6.0, min_volume_ratio = 0.90, min_roc10_abs_pct = 0.15, min_depth_imbalance = 0.10, min_microprice_bias = 0.05, min_close_position_long = 0.55, max_close_position_short = 0.45, sl_buffer_atr = 1.0, min_rr = 1.9 }
 depth_imbalance = { base_score = 0.52, min_depth_imbalance = 0.20, min_microprice_bias = 0.05, min_close_position_long = 0.52, max_close_position_short = 0.48, min_volume_ratio = 0.80, min_roc10_abs_pct = 0.00, sl_buffer_atr = 1.00, min_rr = 1.9 }
@@ -130,7 +130,7 @@ aggression_shift = { base_score = 0.52, min_shift = 0.05, min_volume_ratio = 0.9
 liquidation_heatmap = { base_score = 0.52, min_liquidation_score = 0.30, min_proxy_volume_ratio = 1.20, min_proxy_wick_atr = 0.25, proxy_lookback_bars = 12, min_close_position_long = 0.55, max_close_position_short = 0.45, min_volume_ratio = 0.90, sl_buffer_atr = 1.15, min_rr = 1.9 }
 stop_hunt_detection = { base_score = 0.52, sweep_tolerance_pct = 0.0010, min_volume_ratio = 0.80, min_close_position_long = 0.45, max_close_position_short = 0.55, signal_lookback_bars = 12, near_level_atr = 0.35, min_wick_atr = 0.35, sl_buffer_atr = 0.85, min_rr = 1.9 }
 multi_tf_trend = { base_score = 0.54, min_adx_1h = 15.0, min_volume_ratio = 0.90, pullback_rsi_long_max = 58.0, pullback_rsi_short_min = 42.0, max_adverse_depth_imbalance = 1.00, min_trend_votes = 2, sl_buffer_atr = 1.00, min_rr = 1.9 }
-rsi_divergence_bottom = { base_score = 0.52, divergence_window = 12, min_rsi_delta = 3.0, min_price_delta_pct = 0.10, sl_buffer_atr = 0.85, min_rr = 1.9 }
+rsi_divergence_bottom = { base_score = 0.52, divergence_window = 12, min_rsi_delta = 1.5, min_price_delta_pct = 0.05, sl_buffer_atr = 0.85, min_rr = 1.9 }
 wyckoff_spring = { base_score = 0.52, sweep_tolerance_pct = 0.0010, min_volume_ratio = 1.05, min_close_position_long = 0.55, max_close_position_short = 0.45, signal_lookback_bars = 12, near_range_atr = 0.40, min_wick_atr = 0.25, volume_penalty = 0.90, sl_buffer_atr = 0.85, min_rr = 1.9 }
 bb_squeeze = { base_score = 0.52, max_bb_width = 4.5, min_volume_ratio = 0.90, min_roc10_abs_pct = 0.10, squeeze_release_lookback = 8, squeeze_memory_bars = 20, sl_buffer_atr = 0.90, min_rr = 1.9 }
 atr_expansion = { base_score = 0.52, atr_mean_window = 20, min_atr_expansion_ratio = 1.08, min_body_atr = 0.25, signal_lookback_bars = 6, sl_buffer_atr = 0.85, min_rr = 1.9 }
@@ -260,6 +260,7 @@ kline_cache_size = 500
 warmup_timeout_seconds = 60.0
 reconnect_max_delay_seconds = 300.0
 max_agg_trade_buffer = 10000
+agg_trade_flush_interval_ms = 250
 rest_timeout_seconds = 20.0
 subscribe_market_streams = true
 market_ticker_freshness_seconds = 120.0
@@ -267,7 +268,7 @@ force_order_window_seconds = 60
 # Intra-candle analysis frequency (lower = more real-time, higher = less CPU load)
 intra_candle_throttle_seconds = 60.0
 # Optional noise gate for intra-candle scans. 0 disables gating.
-intra_candle_min_move_bps = 0.0
+intra_candle_min_move_bps = 15.0
 
 [bot.notifiers]
 # "none" keeps local/log-only delivery until TG_TOKEN and TARGET_CHAT_ID are set.

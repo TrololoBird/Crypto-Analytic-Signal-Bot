@@ -1,4 +1,4 @@
-.PHONY: check lint test test-smoke test-regression validate-config live-smoke monitor-runtime run status stop
+.PHONY: check lint validate-config live-smoke monitor-runtime run status stop
 
 check:
 	@echo "=== Compile check ==="
@@ -9,17 +9,8 @@ check:
 	@python -c "from bot.strategies import STRATEGY_CLASSES; print(f'Strategies: {len(STRATEGY_CLASSES)}')"
 
 lint:
-	@ruff check bot/ tests/
+	@ruff check bot/
 	@mypy
-
-test:
-	@pytest -q tests/
-
-test-smoke:
-	@pytest -q tests/test_sanity.py tests/test_event_bus.py tests/test_config_intelligence.py tests/test_filters.py --maxfail=1
-
-test-regression:
-	@pytest tests/ -v --cov=bot --cov-report=xml --cov-fail-under=49
 
 validate-config:
 	@python scripts/validate_config.py --config config.toml

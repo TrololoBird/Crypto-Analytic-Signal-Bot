@@ -197,8 +197,9 @@ class FundingReversalSetup(BaseSetup):
             if latest_delta_ratio is not None and delta_shift <= -min_delta_threshold:
                 confirmation_score += 0.35
                 confirmation_reasons.append(f"delta_shift={delta_shift:.3f}")
-            stop = _as_float(recent["high"].max()) + atr * sl_buffer_atr
-            risk = stop - price
+            entry_price = _as_float(recent["high"].max(), price)
+            stop = entry_price + atr * sl_buffer_atr
+            risk = stop - entry_price
             tp1 = _as_float(w["low"].slice(-(trend_window + 1), trend_window).min())
             from ..features import _swing_points as _sp
 
@@ -207,7 +208,7 @@ class FundingReversalSetup(BaseSetup):
             if w1h.height > 5:
                 _, sl_mask = _sp(w1h, n=3, include_unconfirmed_tail=True)
                 sl_prices = w1h.filter(sl_mask)["low"]
-                tp2_cands = sl_prices.filter(sl_prices < price)
+                tp2_cands = sl_prices.filter(sl_prices < entry_price)
                 tp2 = _as_float(tp2_cands[-1]) if tp2_cands.len() > 0 else None
         else:
             if rsi <= 42.0:
@@ -219,8 +220,9 @@ class FundingReversalSetup(BaseSetup):
             if latest_delta_ratio is not None and delta_shift >= min_delta_threshold:
                 confirmation_score += 0.35
                 confirmation_reasons.append(f"delta_shift={delta_shift:.3f}")
-            stop = _as_float(recent["low"].min()) - atr * sl_buffer_atr
-            risk = price - stop
+            entry_price = _as_float(recent["low"].min(), price)
+            stop = entry_price - atr * sl_buffer_atr
+            risk = entry_price - stop
             tp1 = _as_float(w["high"].slice(-(trend_window + 1), trend_window).max())
             from ..features import _swing_points as _sp
 
@@ -229,7 +231,7 @@ class FundingReversalSetup(BaseSetup):
             if w1h.height > 5:
                 sh_mask, _ = _sp(w1h, n=3, include_unconfirmed_tail=True)
                 sh_prices = w1h.filter(sh_mask)["high"]
-                tp2_cands = sh_prices.filter(sh_prices > price)
+                tp2_cands = sh_prices.filter(sh_prices > entry_price)
                 tp2 = _as_float(tp2_cands[0]) if tp2_cands.len() > 0 else None
 
         if vol_ratio >= min_volume_ratio:
@@ -261,18 +263,28 @@ class FundingReversalSetup(BaseSetup):
             )
             return None
         if risk <= 0:
-            _reject(prepared, setup_id, f"risk_non_positive_{direction}", stop=stop, price=price)
+            _reject(
+                prepared,
+                setup_id,
+                f"risk_non_positive_{direction}",
+                stop=stop,
+                price=entry_price,
+            )
             return None
 
         fallback_note = None
-        if tp1 is None or abs(tp1 - price) < risk * min_rr:
-            tp1 = price + risk * min_rr if direction == "long" else price - risk * min_rr
-            fallback_note = f"tp1_rr_fallback_{min_rr:.2f}"
-        if tp2 is None or abs(tp2 - price) <= abs(tp1 - price):
-            tp2 = (
-                price + risk * max(2.0, min_rr + 0.35)
+        if tp1 is None or abs(tp1 - entry_price) < risk * min_rr:
+            tp1 = (
+                entry_price + risk * min_rr
                 if direction == "long"
-                else price - risk * max(2.0, min_rr + 0.35)
+                else entry_price - risk * min_rr
+            )
+            fallback_note = f"tp1_rr_fallback_{min_rr:.2f}"
+        if tp2 is None or abs(tp2 - entry_price) <= abs(tp1 - entry_price):
+            tp2 = (
+                entry_price + risk * max(2.0, min_rr + 0.35)
+                if direction == "long"
+                else entry_price - risk * max(2.0, min_rr + 0.35)
             )
 
         score = _compute_dynamic_score(
@@ -286,6 +298,7 @@ class FundingReversalSetup(BaseSetup):
         reasons = [
             f"Funding reversal {direction}: fr={fr:.5f} trend={funding_trend or 'unknown'}",
             f"confirmation_score={confirmation_score:.2f} trend_window={trend_window}",
+            f"limit_entry={entry_price:.4f}",
             f"sl_buffer_atr={sl_buffer_atr:.2f} min_rr={min_rr:.2f}",
             *confirmation_reasons,
         ]
@@ -303,6 +316,6 @@ class FundingReversalSetup(BaseSetup):
             stop=stop,
             tp1=tp1,
             tp2=tp2,
-            price_anchor=price,
+            price_anchor=entry_price,
             atr=atr,
         )

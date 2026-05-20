@@ -189,15 +189,16 @@ class CVDDivergenceSetup(BaseSetup):
         if direction == "long":
             # SL: below the most recent price-action low in window_b + ATR buffer.
             div_extreme = float(min(low_window_b))
+            entry_price = div_extreme
             stop = div_extreme - atr * sl_buffer_atr
-            risk = price - stop
+            risk = entry_price - stop
             if risk <= 0:
                 _reject(
                     prepared,
                     self.setup_id,
                     "risk_non_positive_long",
                     stop=stop,
-                    price=price,
+                    price=entry_price,
                 )
                 return None
             # TP1: first leg retrace target from the prior divergence segment on close prices.
@@ -208,20 +209,21 @@ class CVDDivergenceSetup(BaseSetup):
             if w1h.height > 5:
                 sh_mask, sl_mask = _swing_points(w1h, n=3, include_unconfirmed_tail=True)
                 sh_prices = w1h.filter(sh_mask)["high"]
-                tp2_cands = sh_prices.filter(sh_prices > price)
+                tp2_cands = sh_prices.filter(sh_prices > entry_price)
                 tp2 = float(tp2_cands[0]) if tp2_cands.len() > 0 else None
         else:
             # SL: above the most recent price-action high in window_b + ATR buffer.
             div_extreme = float(max(high_window_b))
+            entry_price = div_extreme
             stop = div_extreme + atr * sl_buffer_atr
-            risk = stop - price
+            risk = stop - entry_price
             if risk <= 0:
                 _reject(
                     prepared,
                     self.setup_id,
                     "risk_non_positive_short",
                     stop=stop,
-                    price=price,
+                    price=entry_price,
                 )
                 return None
             # TP1: first leg retrace target from the prior divergence segment on close prices.
@@ -232,20 +234,24 @@ class CVDDivergenceSetup(BaseSetup):
             if w1h.height > 5:
                 _, sl_mask = _swing_points(w1h, n=3, include_unconfirmed_tail=True)
                 sl_prices = w1h.filter(sl_mask)["low"]
-                tp2_cands = sl_prices.filter(sl_prices < price)
+                tp2_cands = sl_prices.filter(sl_prices < entry_price)
                 tp2 = float(tp2_cands[-1]) if tp2_cands.len() > 0 else None
 
         # Validate: TP1 must clear the configured R threshold.
-        if tp1 is None or abs(tp1 - price) < risk * min_rr:
-            tp1 = price + risk * min_rr if direction == "long" else price - risk * min_rr
+        if tp1 is None or abs(tp1 - entry_price) < risk * min_rr:
+            tp1 = (
+                entry_price + risk * min_rr
+                if direction == "long"
+                else entry_price - risk * min_rr
+            )
             target_note = f"tp1_rr_fallback_{min_rr:.2f}"
         else:
             target_note = "tp1_prior_segment"
-        if tp2 is None or abs(tp2 - price) <= abs(tp1 - price):
+        if tp2 is None or abs(tp2 - entry_price) <= abs(tp1 - entry_price):
             tp2 = (
-                price + risk * max(2.0, min_rr + 0.35)
+                entry_price + risk * max(2.0, min_rr + 0.35)
                 if direction == "long"
-                else price - risk * max(2.0, min_rr + 0.35)
+                else entry_price - risk * max(2.0, min_rr + 0.35)
             )
 
         vol_ratio = float(w.item(-1, "volume_ratio20") or 1.0)
@@ -263,6 +269,7 @@ class CVDDivergenceSetup(BaseSetup):
             f"CVD divergence {direction}",
             f"delta_a={delta_mean_a:.3f} delta_b={delta_mean_b:.3f} shift={delta_shift:.3f}",
             f"bias_1h={bias_1h}",
+            f"limit_entry={entry_price:.4f}",
             target_note,
         ]
         if bias_penalty:
@@ -279,6 +286,6 @@ class CVDDivergenceSetup(BaseSetup):
             stop=stop,
             tp1=tp1,
             tp2=tp2,
-            price_anchor=price,
+            price_anchor=entry_price,
             atr=atr,
         )

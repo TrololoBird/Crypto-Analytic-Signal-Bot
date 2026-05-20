@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
+import math
 import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
@@ -247,14 +248,12 @@ class MarketContextUpdater:
                 if self._bot.intelligence is not None
                 else None
             )
-            macro_risk_mode = (
-                "disabled_binance_only"
-                if self._bot.settings.intelligence.source_policy == "binance_only"
-                else "unknown"
-            )
+            macro_risk_mode = self._macro_proxy_mode(regime_result)
             if intelligence_snapshot:
                 macro_snapshot = cast(dict[str, Any], intelligence_snapshot.get("macro") or {})
-                macro_risk_mode = str(macro_snapshot.get("risk_mode") or macro_risk_mode)
+                snapshot_mode = str(macro_snapshot.get("risk_mode") or "").strip()
+                if snapshot_mode and not snapshot_mode.startswith("disabled_"):
+                    macro_risk_mode = snapshot_mode
             await self._bot._modern_repo.update_market_context(
                 btc_bias,
                 eth_bias,
@@ -281,6 +280,8 @@ class MarketContextUpdater:
                 benchmark_context=benchmark_context,
                 macro_risk_mode=macro_risk_mode,
                 previous_regime=previous_regime,
+                ticker_rows=all_tickers,
+                shortlist=shortlist,
             )
 
         except Exception:
@@ -318,8 +319,424 @@ class MarketContextUpdater:
         try:
             numeric = float(value)
         except (TypeError, ValueError):
-            return "n/a"
+            return "+0.00%"
         return f"{numeric * 100:+.2f}%"
+
+    @staticmethod
+    def _safe_float(value: object, default: float = 0.0) -> float:
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return default
+        return numeric if math.isfinite(numeric) else default
+
+    @staticmethod
+    def _ticker_symbol(row: dict[str, Any]) -> str:
+        return str(row.get("symbol") or "").strip().upper()
+
+    @classmethod
+    def _ticker_change_pct(cls, row: dict[str, Any] | None) -> float:
+        return cls._safe_float((row or {}).get("price_change_percent"), 0.0)
+
+    @classmethod
+    def _ticker_quote_volume(cls, row: dict[str, Any] | None) -> float:
+        return max(0.0, cls._safe_float((row or {}).get("quote_volume"), 0.0))
+
+    @staticmethod
+    def _fmt_signed_pct_value(value: float, *, digits: int = 1) -> str:
+        return f"{value:+.{digits}f}%"
+
+    @staticmethod
+    def _fmt_unsigned_pct_value(value: float, *, digits: int = 1) -> str:
+        return f"{value:.{digits}f}%"
+
+    @staticmethod
+    def _macro_proxy_mode(regime: MarketRegimeResult) -> str:
+        if regime.risk_on_off == "risk_off" or regime.regime == "bear":
+            return "risk_off_binance_proxy"
+        if regime.risk_on_off == "risk_on" or regime.regime == "bull":
+            return "risk_on_binance_proxy"
+        return "neutral_binance_proxy"
+
+    @staticmethod
+    def _risk_label(mode: str) -> str:
+        normalized = str(mode or "").lower()
+        if "risk_off" in normalized:
+            return "risk-off"
+        if "risk_on" in normalized:
+            return "risk-on"
+        return "neutral"
+
+    @staticmethod
+    def _trend_bias_ru(change_pct: float, *, strong_threshold: float) -> tuple[str, str]:
+        if change_pct <= -strong_threshold:
+            return "нисходящий уклон", "импульс вниз"
+        if change_pct >= strong_threshold:
+            return "восходящий уклон", "импульс вверх"
+        if change_pct < 0:
+            return "легкий нисходящий уклон", "импульс слабый"
+        if change_pct > 0:
+            return "легкий восходящий уклон", "импульс слабый"
+        return "боковой режим", "импульс отсутствует"
+
+    @classmethod
+    def _fear_greed_proxy(
+        cls,
+        *,
+        breadth_share: float,
+        btc_24h_pct: float,
+        regime: MarketRegimeResult,
+        funding_sentiment: str,
+    ) -> tuple[int, str]:
+        score = 50.0
+        score += max(-30.0, min(30.0, btc_24h_pct * 5.0))
+        score += max(-25.0, min(25.0, (breadth_share - 0.50) * 80.0))
+        score += max(-15.0, min(15.0, (float(regime.altcoin_season_index) - 50.0) * 0.35))
+        if regime.regime == "bear":
+            score -= 12.0
+        elif regime.regime == "bull":
+            score += 12.0
+        if funding_sentiment == "long_heavy" and regime.regime in {"bear", "volatile"}:
+            score -= 8.0
+        elif funding_sentiment == "short_heavy" and regime.regime in {"bull", "volatile"}:
+            score += 5.0
+        value = int(max(0.0, min(100.0, round(score))))
+        if value <= 24:
+            label = "Extreme Fear"
+        elif value <= 44:
+            label = "Fear"
+        elif value <= 55:
+            label = "Neutral"
+        elif value <= 75:
+            label = "Greed"
+        else:
+            label = "Extreme Greed"
+        return value, label
+
+    def _liquid_ticker_rows(self, ticker_rows: list[dict[str, Any]], *, limit: int = 80) -> list[dict[str, Any]]:
+        min_volume = float(getattr(self._bot.settings.universe, "min_quote_volume_usd", 0.0) or 0.0)
+        rows = [
+            row
+            for row in ticker_rows
+            if self._ticker_symbol(row).endswith("USDT")
+            and self._ticker_quote_volume(row) >= min_volume
+        ]
+        rows.sort(key=self._ticker_quote_volume, reverse=True)
+        return rows[: max(1, int(limit))]
+
+    async def _fetch_close_values(self, symbol: str, interval: str, *, limit: int) -> list[float]:
+        try:
+            frame = await asyncio.wait_for(
+                self._bot.client.fetch_klines_cached(symbol, interval, limit=limit),
+                timeout=8.0,
+            )
+        except Exception as exc:
+            LOG.debug(
+                "market-state kline fetch failed | symbol=%s interval=%s error=%s",
+                symbol,
+                interval,
+                exc,
+            )
+            return []
+        if frame.is_empty() or "close" not in frame.columns:
+            return []
+        values = [self._safe_float(value) for value in frame["close"].to_list()]
+        return [value for value in values if value > 0.0]
+
+    async def _resolve_change_pct(
+        self,
+        symbol: str,
+        interval: str,
+        ticker_by_symbol: dict[str, dict[str, Any]],
+    ) -> tuple[float, str, list[float]]:
+        cached = self._cached_kline_change_pct(symbol, interval)
+        if cached is not None:
+            return cached * 100.0, "kline_cache", []
+        limit_by_interval = {"15m": 220, "1h": 220, "4h": 220}
+        closes = await self._fetch_close_values(
+            symbol,
+            interval,
+            limit=limit_by_interval.get(interval, 220),
+        )
+        if len(closes) >= 2:
+            return (closes[-1] / closes[-2] - 1.0) * 100.0, "rest_kline", closes
+        ticker_change = self._ticker_change_pct(ticker_by_symbol.get(symbol))
+        scale = {"15m": 1.0 / 96.0, "1h": 1.0 / 24.0, "4h": 1.0 / 6.0}.get(interval, 1.0)
+        return ticker_change * scale, "ticker_24h_proxy", []
+
+    @staticmethod
+    def _ema(values: list[float], span: int) -> float:
+        if not values:
+            return 0.0
+        alpha = 2.0 / (float(span) + 1.0)
+        ema = values[0]
+        for value in values[1:]:
+            ema = value * alpha + ema * (1.0 - alpha)
+        return ema
+
+    async def _timeframe_line(
+        self,
+        symbol: str,
+        interval: str,
+        ticker_by_symbol: dict[str, dict[str, Any]],
+    ) -> str:
+        threshold = {"15m": 0.12, "1h": 0.35, "4h": 0.90}.get(interval, 0.35)
+        change_pct, source, closes = await self._resolve_change_pct(
+            symbol,
+            interval,
+            ticker_by_symbol,
+        )
+        trend, impulse = self._trend_bias_ru(change_pct, strong_threshold=threshold)
+        trend_strength = "тренд выражен" if abs(change_pct) >= threshold else "тренд слабый"
+        parts = [f"{interval}: {trend}", impulse, trend_strength]
+        if interval == "15m":
+            if not closes:
+                closes = await self._fetch_close_values(symbol, interval, limit=220)
+            if len(closes) >= 50:
+                ema_span = min(200, len(closes))
+                ema_value = self._ema(closes[-ema_span:], ema_span)
+                price_state = "ниже EMA200" if closes[-1] < ema_value else "выше EMA200"
+                parts.append(price_state)
+        if source == "ticker_24h_proxy":
+            parts.append("источник 24h proxy")
+        return "; ".join(parts)
+
+    @staticmethod
+    def _returns(values: list[float]) -> list[float]:
+        returns: list[float] = []
+        for left, right in zip(values, values[1:], strict=False):
+            if left > 0.0 and right > 0.0:
+                returns.append((right / left) - 1.0)
+        return returns
+
+    @staticmethod
+    def _correlation(left: list[float], right: list[float]) -> float | None:
+        size = min(len(left), len(right))
+        if size < 8:
+            return None
+        x = left[-size:]
+        y = right[-size:]
+        mean_x = sum(x) / size
+        mean_y = sum(y) / size
+        cov = sum((a - mean_x) * (b - mean_y) for a, b in zip(x, y, strict=False))
+        var_x = sum((a - mean_x) ** 2 for a in x)
+        var_y = sum((b - mean_y) ** 2 for b in y)
+        if var_x <= 0.0 or var_y <= 0.0:
+            return None
+        value = cov / math.sqrt(var_x * var_y)
+        return max(-1.0, min(1.0, value))
+
+    @staticmethod
+    def _corr_strength(value: float) -> str:
+        abs_value = abs(value)
+        if abs_value >= 0.75:
+            return "high"
+        if abs_value >= 0.40:
+            return "weak"
+        return "flat"
+
+    async def _build_correlation_line(
+        self,
+        ticker_by_symbol: dict[str, dict[str, Any]],
+        liquid_rows: list[dict[str, Any]],
+    ) -> tuple[str, str]:
+        btc_closes = await self._fetch_close_values("BTCUSDT", "1h", limit=190)
+        btc_returns = self._returns(btc_closes)
+        pairs: list[tuple[str, float]] = []
+        narrative: list[str] = []
+
+        async def add_symbol(label: str, symbol: str) -> None:
+            if symbol not in ticker_by_symbol:
+                return
+            closes = await self._fetch_close_values(symbol, "1h", limit=190)
+            corr = self._correlation(btc_returns, self._returns(closes))
+            if corr is not None:
+                pairs.append((label, corr))
+
+        await add_symbol("ETH", "ETHUSDT")
+        await add_symbol("PAXG", "PAXGUSDT")
+        await add_symbol("XAU", "XAUUSDT")
+        await add_symbol("XAG", "XAGUSDT")
+
+        stable_bases = {"USDC", "BUSD", "FDUSD", "TUSD", "USDE", "DAI", "USDP", "PYUSD"}
+        alt_symbols = [
+            self._ticker_symbol(row)
+            for row in liquid_rows
+            if self._ticker_symbol(row) not in {"BTCUSDT", "ETHUSDT", "SOLUSDT"}
+            and self._ticker_symbol(row).removesuffix("USDT") not in stable_bases
+        ][:5]
+        alt_returns_grid: list[list[float]] = []
+        for symbol in alt_symbols:
+            closes = await self._fetch_close_values(symbol, "1h", limit=190)
+            returns = self._returns(closes)
+            if len(returns) >= 8:
+                alt_returns_grid.append(returns)
+        if alt_returns_grid:
+            size = min(len(row) for row in alt_returns_grid)
+            basket = [
+                sum(row[-size + idx] for row in alt_returns_grid) / len(alt_returns_grid)
+                for idx in range(size)
+            ]
+            corr = self._correlation(btc_returns, basket)
+            if corr is not None:
+                pairs.insert(1, ("ALTS", corr))
+
+        if not pairs:
+            btc_change = self._ticker_change_pct(ticker_by_symbol.get("BTCUSDT"))
+            eth_change = self._ticker_change_pct(ticker_by_symbol.get("ETHUSDT"))
+            proxy = 0.35 if btc_change * eth_change >= 0.0 else -0.35
+            pairs.append(("ETH", proxy))
+            narrative.append("corr: используется 24h co-direction proxy до прогрева 1h klines")
+
+        rendered = [
+            f"{label} {corr:+.2f} {self._corr_strength(corr)}"
+            for label, corr in pairs
+        ]
+        for label, corr in pairs:
+            if label == "ETH":
+                if corr >= 0.65:
+                    narrative.append("ETH движется синхронно с BTC")
+                elif corr <= -0.35:
+                    narrative.append("ETH расходится с BTC")
+            if label == "ALTS":
+                if abs(corr) <= 0.25:
+                    narrative.append("альт-бета распалась")
+                elif corr >= 0.60:
+                    narrative.append("альты синхронны с BTC")
+            if label in {"PAXG", "XAU", "XAG"} and corr >= 0.40:
+                narrative.append("металлы движутся вместе с BTC")
+        if not narrative:
+            narrative.append("корреляции умеренные; рынок без одного доминирующего драйвера")
+        return "corr 1h/7d proxy: " + " | ".join(rendered), " | ".join(dict.fromkeys(narrative))
+
+    @classmethod
+    def _format_leaders(cls, rows: list[dict[str, Any]], *, reverse: bool) -> str:
+        ranked = sorted(rows, key=cls._ticker_change_pct, reverse=reverse)[:5]
+        if not ranked:
+            return "нет liquid futures после фильтра объема"
+        return ", ".join(
+            f"{cls._ticker_symbol(row)} {cls._fmt_signed_pct_value(cls._ticker_change_pct(row))}"
+            for row in ranked
+        )
+
+    async def _build_market_state_text(
+        self,
+        *,
+        regime: MarketRegimeResult,
+        macro_risk_mode: str,
+        ticker_rows: list[dict[str, Any]],
+        stats: dict[str, Any],
+    ) -> str:
+        ticker_by_symbol = {self._ticker_symbol(row): row for row in ticker_rows}
+        liquid_rows = self._liquid_ticker_rows(ticker_rows)
+        positive_count = sum(1 for row in liquid_rows if self._ticker_change_pct(row) > 0.0)
+        liquid_count = len(liquid_rows)
+        breadth_share = positive_count / liquid_count if liquid_count else 0.0
+        btc_24h_pct = self._ticker_change_pct(ticker_by_symbol.get("BTCUSDT"))
+        eth_24h_pct = self._ticker_change_pct(ticker_by_symbol.get("ETHUSDT"))
+        sol_24h_pct = self._ticker_change_pct(ticker_by_symbol.get("SOLUSDT"))
+        risk_label = self._risk_label(macro_risk_mode or regime.risk_on_off)
+        fear_value, fear_label = self._fear_greed_proxy(
+            breadth_share=breadth_share,
+            btc_24h_pct=btc_24h_pct,
+            regime=regime,
+            funding_sentiment=regime.funding_sentiment,
+        )
+        if risk_label == "risk-off":
+            practical = "рынок больше поддерживает short или осторожный режим; long фильтровать строже"
+        elif risk_label == "risk-on":
+            practical = "рынок поддерживает continuation/breakout long; short требует сильного свипа"
+        else:
+            practical = "рынок смешанный; приоритет сетапам с подтвержденной ликвидностью и объемом"
+
+        total_quote_volume = sum(self._ticker_quote_volume(row) for row in liquid_rows) or 1.0
+        stable_bases = {"USDC", "BUSD", "FDUSD", "TUSD", "USDE", "DAI", "USDP", "PYUSD"}
+        btc_volume_share = (
+            self._ticker_quote_volume(ticker_by_symbol.get("BTCUSDT")) / total_quote_volume * 100.0
+        )
+        eth_volume_share = (
+            self._ticker_quote_volume(ticker_by_symbol.get("ETHUSDT")) / total_quote_volume * 100.0
+        )
+        sol_volume_share = (
+            self._ticker_quote_volume(ticker_by_symbol.get("SOLUSDT")) / total_quote_volume * 100.0
+        )
+        stable_volume_share = (
+            sum(
+                self._ticker_quote_volume(row)
+                for row in liquid_rows
+                if self._ticker_symbol(row).removesuffix("USDT") in stable_bases
+            )
+            / total_quote_volume
+            * 100.0
+        )
+        alt_volume_share = max(
+            0.0,
+            100.0 - btc_volume_share - eth_volume_share - sol_volume_share - stable_volume_share,
+        )
+
+        tf_4h, tf_1h, tf_15m = await asyncio.gather(
+            self._timeframe_line("BTCUSDT", "4h", ticker_by_symbol),
+            self._timeframe_line("BTCUSDT", "1h", ticker_by_symbol),
+            self._timeframe_line("BTCUSDT", "15m", ticker_by_symbol),
+        )
+        corr_line, corr_narrative = await self._build_correlation_line(
+            ticker_by_symbol,
+            liquid_rows,
+        )
+        paxg_change = self._ticker_change_pct(ticker_by_symbol.get("PAXGUSDT"))
+        if "PAXGUSDT" in ticker_by_symbol:
+            macro_line = f"PAXG {self._fmt_signed_pct_value(paxg_change)} | mode {risk_label}"
+        else:
+            macro_line = f"mode {risk_label} по Binance breadth/BTC/funding proxy"
+
+        tracked_line = (
+            f"Сопровождение: active {int(stats.get('active', 0) or 0)} | "
+            f"pending {int(stats.get('pending', 0) or 0)}"
+        )
+        lines = [
+            "🧭 <b>Контекст рынка</b>",
+            (
+                f"Итог: <code>{html.escape(risk_label)}</code>; "
+                f"fear/greed proxy <code>{fear_value} ({html.escape(fear_label)})</code>"
+            ),
+            f"Практически: {html.escape(practical)}.",
+            (
+                "Ширина рынка: "
+                f"<code>{positive_count}</code> из <code>{liquid_count}</code> "
+                f"ликвидных в плюсе "
+                f"(<code>{self._fmt_unsigned_pct_value(breadth_share * 100.0, digits=0)}</code>)"
+            ),
+            html.escape(tf_4h),
+            html.escape(tf_1h),
+            html.escape(tf_15m),
+            (
+                "Крипто-драйверы: "
+                f"BTC <code>{self._fmt_signed_pct_value(btc_24h_pct)}</code> | "
+                f"ETH <code>{self._fmt_signed_pct_value(eth_24h_pct)}</code> | "
+                f"SOL <code>{self._fmt_signed_pct_value(sol_24h_pct)}</code>"
+            ),
+            (
+                "Доминация фьючерсного объема: "
+                f"BTC <code>{self._fmt_unsigned_pct_value(btc_volume_share)}</code> | "
+                f"ETH <code>{self._fmt_unsigned_pct_value(eth_volume_share)}</code> | "
+                f"SOL <code>{self._fmt_unsigned_pct_value(sol_volume_share)}</code> | "
+                f"альты <code>{self._fmt_unsigned_pct_value(alt_volume_share)}</code> | "
+                f"стейбл-базы <code>{self._fmt_unsigned_pct_value(stable_volume_share)}</code>"
+            ),
+            f"Макро-прокси: <code>{html.escape(macro_line)}</code>",
+            html.escape(corr_line),
+            html.escape(corr_narrative),
+            (
+                "Лидеры 24ч (liquid futures): "
+                f"<code>{html.escape(self._format_leaders(liquid_rows, reverse=True))}</code>"
+            ),
+            (
+                "Аутсайдеры 24ч (liquid futures): "
+                f"<code>{html.escape(self._format_leaders(liquid_rows, reverse=False))}</code>"
+            ),
+            html.escape(tracked_line),
+        ]
+        return "\n".join(lines)
 
     async def _maybe_send_market_state_update(
         self,
@@ -328,6 +745,8 @@ class MarketContextUpdater:
         benchmark_context: dict[str, dict[str, Any]],
         macro_risk_mode: str,
         previous_regime: str | None,
+        ticker_rows: list[dict[str, Any]],
+        shortlist: list[UniverseSymbol],
     ) -> None:
         notifiers = getattr(self._bot.settings, "notifiers", None)
         if str(getattr(notifiers, "provider", "telegram")) != "telegram":
@@ -337,7 +756,6 @@ class MarketContextUpdater:
             return
 
         btc = benchmark_context.get("BTCUSDT", {})
-        eth = benchmark_context.get("ETHUSDT", {})
         btc_1h = btc.get("pct_1h")
         btc_4h = btc.get("pct_4h")
         btc_24h = btc.get("pct_24h")
@@ -370,6 +788,7 @@ class MarketContextUpdater:
                 str(round(btc_1h_abs * 100, 1)),
                 str(round(btc_4h_abs * 100, 1)),
                 str(round(btc_24h_abs * 100, 1)),
+                str(len(shortlist)),
             ]
         )
         now = time.monotonic()
@@ -384,49 +803,11 @@ class MarketContextUpdater:
         except Exception as exc:
             LOG.debug("market-state tracking stats unavailable: %s", exc)
 
-        btc_note = "neutral"
-        if regime.btc_bias in {"downtrend", "bear"} or (
-            isinstance(btc_1h, (int, float)) and btc_1h <= -0.006
-        ):
-            btc_note = "watch downside pressure"
-        elif regime.btc_bias in {"uptrend", "bull"} or (
-            isinstance(btc_1h, (int, float)) and btc_1h >= 0.006
-        ):
-            btc_note = "watch upside pressure"
-
-        text = "\n".join(
-            [
-                f"<b>Market State</b> <code>{html.escape(reason)}</code>",
-                (
-                    f"Regime: <code>{html.escape(regime.regime)}</code> | "
-                    f"strength <code>{float(regime.strength):.2f}</code> | "
-                    f"confidence <code>{float(regime.confidence):.2f}</code>"
-                ),
-                (
-                    f"BTC: <code>{html.escape(regime.btc_bias)}</code> | "
-                    f"1h <code>{self._fmt_pct(btc_1h)}</code> | "
-                    f"4h <code>{self._fmt_pct(btc_4h)}</code> | "
-                    f"24h <code>{self._fmt_pct(btc_24h)}</code>"
-                ),
-                (
-                    f"ETH: <code>{html.escape(regime.eth_bias)}</code> | "
-                    f"1h <code>{self._fmt_pct(eth.get('pct_1h'))}</code> | "
-                    f"24h <code>{self._fmt_pct(eth.get('pct_24h'))}</code>"
-                ),
-                (
-                    f"BTC note: <code>{html.escape(btc_note)}</code> | "
-                    f"phase <code>{html.escape(str(regime.btc_phase))}</code>"
-                ),
-                (
-                    f"Alt index: <code>{float(regime.altcoin_season_index):.0f}/100</code> | "
-                    f"risk <code>{html.escape(str(regime.risk_on_off))}</code> | "
-                    f"macro <code>{html.escape(str(macro_risk_mode))}</code>"
-                ),
-                (
-                    f"Tracked: active <code>{int(stats.get('active', 0) or 0)}</code> | "
-                    f"pending <code>{int(stats.get('pending', 0) or 0)}</code>"
-                ),
-            ]
+        text = await self._build_market_state_text(
+            regime=regime,
+            macro_risk_mode=macro_risk_mode,
+            ticker_rows=ticker_rows,
+            stats=stats,
         )
         try:
             await sender(text)

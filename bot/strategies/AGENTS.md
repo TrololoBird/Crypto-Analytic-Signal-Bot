@@ -32,8 +32,7 @@ Work in `bot/strategies/` for individual setup detectors.
 - `setup_id` must match the keys under `[bot.filters.setups]` and `[bot.setups]`.
 - All registered setup flags should remain enabled unless the strategy is
   intentionally removed from `STRATEGY_CLASSES`. Do not disable a strategy
-  because metadata says `experimental`, because current telemetry is negative,
-  or because generated tests are weak.
+  because metadata says `experimental` or because current telemetry is negative.
 - Prefer shared helpers over duplicating RR, SL/TP, scoring, or rejection logic.
 - Guard frame height and required columns before `item(-1)`, `item(-2)`, or similar indexed access.
 - Keep dataframe logic Polars-native. Use existing prepared Polars columns and
@@ -55,9 +54,8 @@ Work in `bot/strategies/` for individual setup detectors.
   official exchange/source documentation for the strategy/data concept. For
   Binance data fields, verify the actual public USD-M endpoint/stream and the
   producer path that fills `PreparedSymbol`.
-- Generated tests are not proof that a strategy works. Do not modify generated
-  tests to make a strategy look correct. Use compile/import checks, config
-  validation, live/replay strategy decisions, and source-level comparison.
+- Generated tests were removed. Use compile/import checks, config validation,
+  live/replay strategy decisions, and source-level comparison.
 - Do not replace a broken hard reject with an always-on signal. Convert noisy
   context conflicts (orderbook, funding trend, 1h lag, volume below ideal) into
   explicit score penalties when the underlying trading setup remains valid.
@@ -70,9 +68,8 @@ Work in `bot/strategies/` for individual setup detectors.
 ## Verification
 
 - Check config key alignment and strategy exports after every strategy change.
-- Use non-test proof first: compile/import checks, a local prepared-frame
-  diagnostic, telemetry decision counts, and read-only live scripts. Generated
-  tests are supplemental only and must not be treated as trading evidence.
+- Use non-test proof: compile/import checks, a local prepared-frame diagnostic,
+  telemetry decision counts, and read-only live scripts.
 - For "does not signal" bugs, report the dominant reason codes by setup before
   changing thresholds, then re-run a live/replay surface check and confirm there
   are no strategy errors or hidden skips.

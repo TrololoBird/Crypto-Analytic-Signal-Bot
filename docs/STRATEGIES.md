@@ -4,6 +4,10 @@
 
 Strategies are implemented in `bot/strategies/` and registered in the modern registry.  
 Each strategy produces a `StrategyDecision` that can be accepted, rejected, skipped, or errored.
+Roadmap-era detectors are no longer embedded in a monolithic `roadmap.py` file:
+each setup has its own module, shared helpers live in
+`bot/strategies/roadmap_base.py`, and `roadmap.py` remains only as a
+compatibility re-export for old imports.
 
 ## Pipeline
 

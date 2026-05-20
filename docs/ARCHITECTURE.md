@@ -44,6 +44,13 @@
 - WebSocket routing is split intentionally:
   - `/public` for `@bookTicker`
   - `/market` for `@kline_*`, `@aggTrade`, `!ticker@arr`, `@markPrice`, `!forceOrder@arr`
+- The hot WebSocket path is separated from analysis:
+  - raw messages enter a bounded `MessageBuffer`;
+  - stale low-value ticker/trade events are dropped under backpressure;
+  - kline-close events are published through bounded/coalescing `EventBus`;
+  - `aggTrade` updates are micro-batched before they enter per-symbol deques;
+  - Polars feature preparation is triggered from candle/event analysis paths,
+    not from every websocket packet.
 - Shortlist maintenance is two-speed:
   - `rest_full`: infrequent full rebalance from exchange metadata + `ticker/24hr`
   - `ws_light`: frequent rerank from cached public WS ticker context plus cached public derivatives metrics
@@ -59,9 +66,12 @@
 - `bot/outcomes.py::build_prepared_feature_snapshot(...)` must emit **exactly** this field set in stable order.
 - Missing fields and unexpected additions are treated as contract violations and rejected by validator.
 - Runtime call-path modules (`bot/application/bot.py`, `bot/application/symbol_analyzer.py`, `bot/core/engine/engine.py`, `bot/strategies/__init__.py`) must not import scaffold/prototype modules that are not intended for live signal generation. Strategy metadata status strings such as `experimental` are descriptive and do not by themselves make an exported strategy non-runtime.
-- `PreparedSymbol` requires viable `15m` and `1h` frames. `5m` and `4h` frames
-  are optional context and must degrade to neutral/missing context instead of
-  preventing every strategy from running for a symbol.
+- `PreparedSymbol` requires viable `15m` and `1h` frames. `work_15m` and
+  `work_1h` are literal timeframe contracts. Asset-level primary timeframe
+  overrides are exposed through `primary_timeframe` and `work_primary`; they
+  must not rename 1h/4h data into `work_15m`.
+- `5m` and `4h` frames are optional context and must degrade to neutral/missing
+  context instead of preventing every strategy from running for a symbol.
 
 ## Signal-context contract
 

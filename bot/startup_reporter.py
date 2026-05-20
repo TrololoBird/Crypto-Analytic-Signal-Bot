@@ -697,9 +697,9 @@ def _build_current_market_state(snapshot: dict[str, Any]) -> dict[str, Any]:
         funding_sentiment = "long_heavy"
     elif len(low_funding) > len(high_funding):
         funding_sentiment = "short_heavy"
-    market_regime = "unknown"
+    market_regime = "live_warmup"
     if bool(market_context.get("market_regime_confirmed")):
-        market_regime = str(market_context.get("market_regime") or "unknown")
+        market_regime = str(market_context.get("market_regime") or "live_warmup")
     barrier = (
         intelligence_snapshot.get("barrier") if isinstance(intelligence_snapshot, dict) else {}
     )
@@ -711,20 +711,24 @@ def _build_current_market_state(snapshot: dict[str, Any]) -> dict[str, Any]:
     )
     if not macro_risk_mode:
         macro_risk_mode = (
-            "disabled_binance_only" if policy.get("source_policy") == "binance_only" else "unknown"
+            "neutral_binance_proxy"
+            if policy.get("source_policy") == "binance_only"
+            else "public_context_warmup"
         )
     return {
         "market_regime": market_regime,
         "btc_bias": market_context.get("btc_bias", "neutral"),
         "eth_bias": market_context.get("eth_bias", "neutral"),
         "funding_sentiment": funding_sentiment,
-        "runtime_mode": policy.get("runtime_mode", "unknown"),
-        "source_policy": policy.get("source_policy", "unknown"),
-        "smart_exit_mode": policy.get("smart_exit_mode", "unknown"),
-        "gamma_semantics": policy.get("gamma_semantics", "unknown"),
+        "runtime_mode": policy.get("runtime_mode", "signal_only"),
+        "source_policy": policy.get("source_policy", "binance_only"),
+        "smart_exit_mode": policy.get("smart_exit_mode", "heuristic_v1"),
+        "gamma_semantics": policy.get("gamma_semantics", "proxy_only"),
         "macro_risk_mode": macro_risk_mode,
         "macro_status": (
-            str(macro.get("status") or "unknown") if isinstance(macro, dict) else "unknown"
+            str(macro.get("status") or "binance_proxy")
+            if isinstance(macro, dict)
+            else "binance_proxy"
         ),
         "context_updated_at": market_context.get("updated_at"),
         "high_funding_count": len(high_funding),
@@ -755,7 +759,7 @@ def _build_runtime_readiness(snapshot: dict[str, Any]) -> dict[str, Any]:
     )
     macro = intelligence_snapshot.get("macro") if isinstance(intelligence_snapshot, dict) else {}
     return {
-        "shortlist_source": latest_shortlist.get("source", "unknown"),
+        "shortlist_source": latest_shortlist.get("source", "rest_full_warmup"),
         "shortlist_size": latest_shortlist.get(
             "size",
             latest_cycle.get("shortlist_size")
@@ -791,7 +795,9 @@ def _build_runtime_readiness(snapshot: dict[str, Any]) -> dict[str, Any]:
             "gamma_semantics": policy.get("gamma_semantics"),
         },
         "macro_status": (
-            str(macro.get("status") or "unknown") if isinstance(macro, dict) else "unknown"
+            str(macro.get("status") or "binance_proxy")
+            if isinstance(macro, dict)
+            else "binance_proxy"
         ),
     }
 
@@ -805,7 +811,7 @@ def _build_structured_summary(
     inferred_focus: list[str] = []
     project_state_notes = [
         "Live Binance runtime is not verified end-to-end by startup artifacts alone.",
-        "Startup snapshot keeps market_regime=`unknown` unless persisted runtime context explicitly confirms it.",
+        "Startup snapshot marks market_regime=`live_warmup` until persisted runtime context explicitly confirms it.",
         "Startup snapshot keeps public_intelligence_ts=`null` when persisted intelligence predates the analyzed session.",
         "Smart Levels / Nearby is not a separate module yet; current runtime exposes 5m/1h hooks and an explicit funnel instead.",
     ]
@@ -856,7 +862,7 @@ def _build_structured_summary(
         )
         if runtime_policy["source_policy"] == "binance_only":
             project_state_notes.append(
-                "External macro/news inputs are intentionally disabled under source_policy=`binance_only`."
+                "Macro context uses Binance futures proxies under source_policy=`binance_only`."
             )
     if not _market_context_is_fresh(snapshot):
         confirmed_facts.append(
@@ -924,19 +930,22 @@ def _build_structured_summary(
         current_market_state.setdefault("source_policy", runtime_policy["source_policy"])
         current_market_state.setdefault("smart_exit_mode", runtime_policy["smart_exit_mode"])
         current_market_state.setdefault("gamma_semantics", runtime_policy["gamma_semantics"])
-        if current_market_state.get("runtime_mode") == "unknown":
+        if current_market_state.get("runtime_mode") in {"unknown", None}:
             current_market_state["runtime_mode"] = runtime_policy["runtime_mode"]
-        if current_market_state.get("source_policy") == "unknown":
+        if current_market_state.get("source_policy") in {"unknown", None}:
             current_market_state["source_policy"] = runtime_policy["source_policy"]
-        if current_market_state.get("smart_exit_mode") == "unknown":
+        if current_market_state.get("smart_exit_mode") in {"unknown", None}:
             current_market_state["smart_exit_mode"] = runtime_policy["smart_exit_mode"]
-        if current_market_state.get("gamma_semantics") == "unknown":
+        if current_market_state.get("gamma_semantics") in {"unknown", None}:
             current_market_state["gamma_semantics"] = runtime_policy["gamma_semantics"]
         if runtime_policy["source_policy"] == "binance_only":
-            if current_market_state.get("macro_status") == "unknown":
-                current_market_state["macro_status"] = "disabled_by_source_policy"
-            if current_market_state.get("macro_risk_mode") == "unknown":
-                current_market_state["macro_risk_mode"] = "disabled_binance_only"
+            if current_market_state.get("macro_status") in {"unknown", None}:
+                current_market_state["macro_status"] = "binance_proxy"
+            if current_market_state.get("macro_risk_mode") in {
+                "unknown",
+                None,
+            }:
+                current_market_state["macro_risk_mode"] = "neutral_binance_proxy"
             policy_block = current_runtime_readiness.get("intelligence_policy", {})
             if isinstance(policy_block, dict):
                 if policy_block.get("runtime_mode") is None:
@@ -947,8 +956,8 @@ def _build_structured_summary(
                     policy_block["smart_exit_mode"] = runtime_policy["smart_exit_mode"]
                 if policy_block.get("gamma_semantics") is None:
                     policy_block["gamma_semantics"] = runtime_policy["gamma_semantics"]
-            if current_runtime_readiness.get("macro_status") == "unknown":
-                current_runtime_readiness["macro_status"] = "disabled_by_source_policy"
+            if current_runtime_readiness.get("macro_status") in {"unknown", None}:
+                current_runtime_readiness["macro_status"] = "binance_proxy"
     return {
         "event": context.event,
         "generated_at_utc": context.report_ts.astimezone(UTC).isoformat(),
@@ -1214,32 +1223,64 @@ def _build_telegram_message(summary: dict[str, Any]) -> str:
     runtime_policy = summary.get("runtime_policy", {})
     ws_health = readiness["ws_health"]
     frame_readiness = readiness["required_frame_readiness"]
+
+    def clean(value: object, fallback: str) -> str:
+        raw = str(value or "").strip()
+        if not raw or raw.lower() in {"unknown", "n/a", "none"} or raw.startswith("disabled_"):
+            return fallback
+        return raw
+
+    regime = clean(market_state.get("market_regime"), "ожидает live-контекст")
+    btc_bias = clean(market_state.get("btc_bias"), "neutral")
+    eth_bias = clean(market_state.get("eth_bias"), "neutral")
+    macro_mode = clean(market_state.get("macro_risk_mode"), "binance_proxy_warmup")
+    alt_index = clean(market_state.get("altcoin_season_index"), "50.0")
+    btc_phase = clean(market_state.get("btc_phase"), "sideways")
+    latest_ts = clean(latest_cycle.get("ts"), "первый цикл ещё не записан")
+    risk_label = (
+        "risk-off"
+        if "risk_off" in macro_mode or regime == "bear"
+        else "risk-on"
+        if "risk_on" in macro_mode or regime == "bull"
+        else "neutral"
+    )
+    practical = (
+        "short/осторожный режим до подтверждения breadth"
+        if risk_label == "risk-off"
+        else "continuation long допускается только после прогрева фильтров"
+        if risk_label == "risk-on"
+        else "приоритет только сетапам с сильным confluence"
+    )
     return "\n".join(
         [
-            "<b>Market State</b> <code>startup</code>",
+            "🧭 <b>Контекст рынка</b> <code>startup</code>",
             (
-                f"Regime: <code>{html.escape(str(market_state.get('market_regime') or 'unknown'))}</code> | "
-                f"BTC <code>{html.escape(str(market_state.get('btc_bias') or 'neutral'))}</code> | "
-                f"ETH <code>{html.escape(str(market_state.get('eth_bias') or 'neutral'))}</code>"
+                f"Итог: <code>{html.escape(risk_label)}</code>; "
+                f"режим <code>{html.escape(regime)}</code>"
+            ),
+            f"Практически: {html.escape(practical)}.",
+            (
+                f"BTC <code>{html.escape(btc_bias)}</code> | "
+                f"ETH <code>{html.escape(eth_bias)}</code> | "
+                f"BTC phase <code>{html.escape(btc_phase)}</code>"
             ),
             (
-                f"Alt index: <code>{html.escape(str(market_state.get('altcoin_season_index') or 'n/a'))}</code> | "
-                f"BTC phase <code>{html.escape(str(market_state.get('btc_phase') or 'unknown'))}</code> | "
-                f"macro <code>{html.escape(str(market_state.get('macro_risk_mode') or 'unknown'))}</code>"
+                f"Alt index proxy: <code>{html.escape(alt_index)}/100</code> | "
+                f"macro <code>{html.escape(macro_mode)}</code>"
             ),
             (
                 f"Tracked: open <code>{summary['metrics']['open_tracked_total']}</code> | "
                 f"outcomes <code>{summary['metrics']['outcomes_total']}</code>"
             ),
-            f"Latest cycle: <code>{html.escape(str(latest_cycle.get('ts') or 'n/a'))}</code>",
+            f"Latest cycle: <code>{html.escape(latest_ts)}</code>",
             (
-                f"Policy: runtime=<code>{html.escape(str(runtime_policy.get('runtime_mode') or 'unknown'))}</code> "
-                f"source=<code>{html.escape(str(runtime_policy.get('source_policy') or 'unknown'))}</code> "
-                f"pause=<code>{html.escape(str(runtime_policy.get('max_consecutive_stop_losses') or 'n/a'))}"
-                f"/{html.escape(str(runtime_policy.get('stop_loss_pause_hours') or 'n/a'))}h</code>"
+                f"Policy: runtime=<code>{html.escape(clean(runtime_policy.get('runtime_mode'), 'signal_only'))}</code> "
+                f"source=<code>{html.escape(clean(runtime_policy.get('source_policy'), 'binance_only'))}</code> "
+                f"pause=<code>{html.escape(clean(runtime_policy.get('max_consecutive_stop_losses'), '3'))}"
+                f"/{html.escape(clean(runtime_policy.get('stop_loss_pause_hours'), '5'))}h</code>"
             ),
-            f"Shortlist: source=<code>{html.escape(str(readiness.get('shortlist_source') or 'unknown'))}</code> size=<code>{html.escape(str(readiness.get('shortlist_size') or 'n/a'))}</code>",
-            f"WS: streams=<code>{html.escape(str(ws_health.get('active_stream_count') or 'n/a'))}</code> reconnect=<code>{html.escape(str(ws_health.get('reconnect_reason') or 'n/a'))}</code>",
+            f"Shortlist: source=<code>{html.escape(clean(readiness.get('shortlist_source'), 'rest_full'))}</code> size=<code>{html.escape(clean(readiness.get('shortlist_size'), '0'))}</code>",
+            f"WS: streams=<code>{html.escape(clean(ws_health.get('active_stream_count'), '0'))}</code> reconnect=<code>{html.escape(clean(ws_health.get('reconnect_reason'), 'steady'))}</code>",
             f"Frames ready: 15m=<code>{frame_readiness.get('15m_ready_symbols', 0)}</code> 1h=<code>{frame_readiness.get('1h_ready_symbols', 0)}</code> 4h=<code>{frame_readiness.get('4h_ready_symbols', 0)}</code>",
         ]
     )

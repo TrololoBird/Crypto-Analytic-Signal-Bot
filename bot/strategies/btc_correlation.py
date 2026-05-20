@@ -1,0 +1,82 @@
+from __future__ import annotations
+
+from ..domain.config import BotSettings
+from ..domain.schemas import PreparedSymbol, Signal
+from .roadmap_base import (
+    RoadmapSetup,
+    _build_atr_signal,
+    _last,
+    _price_change_pct,
+    _reject,
+)
+
+class BTCCorrelationSetup(RoadmapSetup):
+    setup_id = "btc_correlation"
+    family = "multi_asset"
+    confirmation_profile = "trend_follow"
+    required_context = ("futures_flow",)
+    DEFAULTS = {
+        **RoadmapSetup.DEFAULTS,
+        "min_roc10_abs_pct": 0.15,
+        "min_volume_ratio": 0.70,
+    }
+
+    def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
+        params = self._params(prepared, settings)
+        if prepared.symbol == "BTCUSDT":
+            _reject(prepared, self.setup_id, "benchmark_symbol")
+            return None
+        btc_bias = getattr(prepared, "btc_bias", None)
+        if btc_bias is None or str(btc_bias).strip() == "":
+            _reject(prepared, self.setup_id, "btc_context_missing")
+            return None
+        btc_phase = str(getattr(prepared, "btc_phase", "") or "").lower()
+        if btc_bias not in {"uptrend", "downtrend", "bull", "bear"}:
+            if btc_phase in {"markup", "accumulation"}:
+                btc_bias = "bull"
+            elif btc_phase in {"decline", "distribution"}:
+                btc_bias = "bear"
+            else:
+                btc_bias = "neutral"
+        vol_ratio = _last(prepared.work_15m, "volume_ratio20", 1.0)
+        volume_penalty = vol_ratio < float(params["min_volume_ratio"])
+        roc10 = _last(prepared.work_15m, "roc10", _price_change_pct(prepared.work_15m, 10))
+        if abs(roc10) < float(params["min_roc10_abs_pct"]):
+            _reject(prepared, self.setup_id, "momentum_too_low", roc10=roc10)
+            return None
+        if btc_bias in {"uptrend", "bull"} and prepared.bias_1h != "downtrend" and roc10 > 0.0:
+            direction = "long"
+        elif btc_bias in {"downtrend", "bear"} and prepared.bias_1h != "uptrend" and roc10 < 0.0:
+            direction = "short"
+        elif btc_bias == "neutral" and prepared.bias_1h == "uptrend" and roc10 > 0.0:
+            direction = "long"
+        elif btc_bias == "neutral" and prepared.bias_1h == "downtrend" and roc10 < 0.0:
+            direction = "short"
+        else:
+            _reject(
+                prepared,
+                self.setup_id,
+                "btc_correlation_not_aligned",
+                btc_bias=btc_bias,
+            )
+            return None
+        reasons = [
+            f"btc_correlation_{direction}",
+            f"btc_bias={btc_bias}",
+            f"btc_phase={btc_phase or '-'}",
+            f"roc10={roc10:.2f}",
+        ]
+        if volume_penalty:
+            reasons.append(f"volume_penalty={vol_ratio:.2f}")
+        return _build_atr_signal(
+            prepared=prepared,
+            setup_id=self.setup_id,
+            direction=direction,
+            params=params,
+            reasons=reasons,
+            family=self.family,
+            structure_clarity=0.65 if volume_penalty else 0.75,
+        )
+
+
+__all__ = ["BTCCorrelationSetup"]

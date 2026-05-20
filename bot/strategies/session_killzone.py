@@ -427,6 +427,7 @@ class SessionKillzoneSetup(BaseSetup):
         scan20 = w.tail(20)
         session_high = _as_float(scan20["high"].max())
         session_low = _as_float(scan20["low"].min())
+        entry_price = prior_high if direction == "long" else prior_low
 
         # Look for prior session levels from 1h data
         from ..features import _swing_points as _sp
@@ -435,30 +436,36 @@ class SessionKillzoneSetup(BaseSetup):
 
         if direction == "long":
             stop = session_low - atr * sl_buffer_atr
-            risk = price - stop
+            risk = entry_price - stop
             if risk <= 0:
-                _reject(prepared, setup_id, "risk_non_positive_long", stop=stop, price=price)
+                _reject(
+                    prepared,
+                    setup_id,
+                    "risk_non_positive_long",
+                    stop=stop,
+                    price=entry_price,
+                )
                 return None
             # TP1: prior session's major level (previous 1h swing high or session high)
             tp1 = None
             if w1h.height > 5:
                 sh_mask, sl_mask = _sp(w1h, n=3, include_unconfirmed_tail=True)
                 sh_prices = w1h.filter(sh_mask)["high"]
-                tp1_cands = sh_prices.filter(sh_prices > price)
+                tp1_cands = sh_prices.filter(sh_prices > entry_price)
                 tp1 = float(tp1_cands[0]) if tp1_cands.len() > 0 else None
             # TP2: next killzone range midpoint (above)
             killzone_range = session_high - session_low
             tp2 = session_high + killzone_range * 0.5 if killzone_range > 0 else None
         else:
             stop = session_high + atr * sl_buffer_atr
-            risk = stop - price
+            risk = stop - entry_price
             if risk <= 0:
                 _reject(
                     prepared,
                     setup_id,
                     "risk_non_positive_short",
                     stop=stop,
-                    price=price,
+                    price=entry_price,
                 )
                 return None
             # TP1: prior session's major level (previous 1h swing low)
@@ -466,7 +473,7 @@ class SessionKillzoneSetup(BaseSetup):
             if w1h.height > 5:
                 _, sl_mask = _sp(w1h, n=3, include_unconfirmed_tail=True)
                 sl_prices = w1h.filter(sl_mask)["low"]
-                tp1_cands = sl_prices.filter(sl_prices < price)
+                tp1_cands = sl_prices.filter(sl_prices < entry_price)
                 tp1 = float(tp1_cands[-1]) if tp1_cands.len() > 0 else None
             # TP2: next killzone range midpoint (below)
             killzone_range = session_high - session_low
@@ -476,16 +483,20 @@ class SessionKillzoneSetup(BaseSetup):
         # If structural target is missing/too close, use deterministic RR fallback
         # instead of dropping an otherwise valid setup.
         min_required = risk * min_rr
-        if tp1 is None or abs(tp1 - price) < min_required:
-            tp1 = price + min_required if direction == "long" else price - min_required
+        if tp1 is None or abs(tp1 - entry_price) < min_required:
+            tp1 = (
+                entry_price + min_required
+                if direction == "long"
+                else entry_price - min_required
+            )
             fallback_note = f"tp1_rr_fallback_{min_rr:.2f}"
         else:
             fallback_note = None
-        if tp2 is None or abs(tp2 - price) <= abs(tp1 - price):
+        if tp2 is None or abs(tp2 - entry_price) <= abs(tp1 - entry_price):
             tp2 = (
-                price + risk * max(2.0, min_rr + 0.35)
+                entry_price + risk * max(2.0, min_rr + 0.35)
                 if direction == "long"
-                else price - risk * max(2.0, min_rr + 0.35)
+                else entry_price - risk * max(2.0, min_rr + 0.35)
             )
 
         rsi = float(w.item(-1, "rsi14") or 50.0)
@@ -500,6 +511,7 @@ class SessionKillzoneSetup(BaseSetup):
         reasons = [
             f"Session killzone {direction}: {session_name} {now_utc.strftime('%H:%M')}UTC",
             f"adx1h={adx_1h:.1f} avg_vol={avg_vol_ratio:.2f}",
+            f"limit_entry={entry_price:.4f}",
             f"sl_buffer_atr={sl_buffer_atr:.2f}",
         ]
         reasons.extend(penalty_reasons)
@@ -539,6 +551,6 @@ class SessionKillzoneSetup(BaseSetup):
             stop=stop,
             tp1=tp1,
             tp2=tp2,
-            price_anchor=price,
+            price_anchor=entry_price,
             atr=atr,
         )

@@ -266,7 +266,8 @@ class StructureBreakRetestSetup(BaseSetup):
         if fallback_reason is not None:
             reasons.append(fallback_reason)
 
-        price_anchor = trig_close
+        price_anchor = broken_level_value
+        reasons.append(f"limit_entry={price_anchor:.4f}")
 
         # --- Compute structural SL/TP via unified utility ---
         stop, tp1, tp2 = build_structural_targets(

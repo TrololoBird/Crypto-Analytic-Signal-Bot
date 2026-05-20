@@ -345,12 +345,16 @@ class SqueezeSetup(BaseSetup):
         if reasons_rsi_penalty:
             reasons.append(reasons_rsi_penalty)
 
-        price_anchor = _as_float(work_15m.item(-1, "close"))
-
         # --- Compute structural SL/TP ---
         pre_breakout = work_15m.slice(-11, 10)  # 10 bars before signal bar
         if pre_breakout.height < 3:
             pre_breakout = work_15m.slice(-6, 5)
+        price_anchor = (
+            _as_float(pre_breakout["high"].max())
+            if direction == "long"
+            else _as_float(pre_breakout["low"].min())
+        )
+        reasons.append(f"limit_entry={price_anchor:.4f}")
 
         if direction == "long":
             # SL: below pre-breakout swing low + configured ATR buffer
