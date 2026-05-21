@@ -16,6 +16,7 @@ from ..setups import (
     _reject,
 )
 from ..setups.utils import get_dynamic_params, select_structural_target
+from .spec_patterns import build_spec_signal, detect_structure_pullback
 
 
 def _as_float(value: object, default: float = 0.0) -> float:
@@ -61,6 +62,21 @@ class StructurePullbackSetup(BaseSetup):
 
         dynamic_params = get_dynamic_params(prepared, self.setup_id)
         defaults = self.get_optimizable_params(settings)
+
+        hit = detect_structure_pullback(work_15m, timeframe="15m")
+        if hit is not None:
+            return build_spec_signal(
+                prepared=prepared,
+                settings=settings,
+                setup_id=self.setup_id,
+                family=self.family,
+                hit=hit,
+                defaults=defaults,
+                params=dynamic_params,
+            )
+        _reject(prepared, "structure_pullback", "pattern.no_valid_pullback_level")
+        return None
+
         min_trend_score = dynamic_params.get("min_trend_score", defaults["min_trend_score"])
         pullback_lookback = int(
             dynamic_params.get("pullback_lookback", defaults["pullback_lookback"])

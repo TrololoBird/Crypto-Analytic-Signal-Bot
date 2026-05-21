@@ -18,6 +18,7 @@ from ..domain.schemas import PreparedSymbol, Signal
 from ..setup_base import BaseSetup
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.utils import get_dynamic_params
+from .spec_patterns import build_spec_signal, detect_cvd_divergence
 
 LOG = logging.getLogger("bot.strategies.cvd_divergence")
 
@@ -79,6 +80,21 @@ class CVDDivergenceSetup(BaseSetup):
     def _detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         dynamic_params = get_dynamic_params(prepared, self.setup_id)
         defaults = self.get_optimizable_params(settings)
+        effective_params = {**defaults, **dynamic_params}
+        hit = detect_cvd_divergence(prepared.work_15m, timeframe="15m")
+        if hit is None:
+            _reject(prepared, self.setup_id, "indicator.delta_shift_too_small")
+            return None
+        return build_spec_signal(
+            prepared=prepared,
+            settings=settings,
+            setup_id=self.setup_id,
+            family=self.family,
+            hit=hit,
+            defaults=defaults,
+            params=effective_params,
+        )
+
         divergence_lookback = int(
             dynamic_params.get("divergence_lookback", defaults["divergence_lookback"])
         )

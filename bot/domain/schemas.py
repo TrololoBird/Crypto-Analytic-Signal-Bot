@@ -36,6 +36,7 @@ class UniverseSymbol:
     quote_volume: float
     price_change_pct: float
     last_price: float
+    trade_count_24h: int | None = None
     shortlist_bucket: str = ""
     shortlist_score: float | None = None
     shortlist_reasons: tuple[str, ...] = ()
@@ -118,6 +119,7 @@ class PreparedSymbol:
     oi_slope_5m: float | None = None
     depth_imbalance: float | None = None
     microprice_bias: float | None = None
+    depth_wall_pressure: float | None = None
     depth_imbalance_source: str | None = None
     microprice_bias_source: str | None = None
     depth_book_age_seconds: float | None = None

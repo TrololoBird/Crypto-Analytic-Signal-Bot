@@ -19,8 +19,8 @@ class LSRatioExtremeSetup(RoadmapSetup):
     required_context = ("futures_flow",)
     DEFAULTS = {
         **RoadmapSetup.DEFAULTS,
-        "long_crowd_threshold": 1.75,
-        "short_crowd_threshold": 0.65,
+        "long_account_threshold": 0.65,
+        "short_account_threshold": 0.35,
         "min_close_position_long": 0.58,
         "max_close_position_short": 0.42,
         "min_volume_ratio": 0.90,
@@ -38,15 +38,22 @@ class LSRatioExtremeSetup(RoadmapSetup):
             prepared.global_ls_ratio,
         )
         if ratio is None:
-            _reject(prepared, self.setup_id, "ls_ratio_missing")
+            _reject(prepared, self.setup_id, "data.ls_ratio_missing")
             return None
         ls_ratio = ratio
-        if ls_ratio >= float(params["long_crowd_threshold"]):
+        long_account = ls_ratio / (1.0 + ls_ratio) if ls_ratio > 0.0 else 0.5
+        if long_account >= float(params["long_account_threshold"]):
             direction = "short"
-        elif ls_ratio <= float(params["short_crowd_threshold"]):
+        elif long_account <= float(params["short_account_threshold"]):
             direction = "long"
         else:
-            _reject(prepared, self.setup_id, "ls_ratio_not_extreme", ls_ratio=ls_ratio)
+            _reject(
+                prepared,
+                self.setup_id,
+                "indicator.ls_ratio_not_extreme",
+                ls_ratio=ls_ratio,
+                long_account=long_account,
+            )
             return None
         work = prepared.work_15m
         close_position = _last(work, "close_position", 0.5)
@@ -90,6 +97,7 @@ class LSRatioExtremeSetup(RoadmapSetup):
         reasons = [
             f"ls_ratio_extreme_{direction}",
             f"ls_ratio={ls_ratio:.2f}",
+            f"long_account={long_account:.2f}",
             f"close_position={close_position:.2f}",
             f"volume_ratio={volume_ratio:.2f}",
         ]
@@ -113,7 +121,7 @@ class LSRatioExtremeSetup(RoadmapSetup):
             params=params,
             reasons=reasons,
             family=self.family,
-            structure_clarity=min(abs(ls_ratio - 1.0), 1.0) * score_multiplier,
+            structure_clarity=min(abs(long_account - 0.5) * 3.0, 1.0) * score_multiplier,
         )
 
 

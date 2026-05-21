@@ -480,11 +480,16 @@ def build_shortlist(
         quote_volume = float(ticker_row.get("quote_volume") or 0.0)
         last_price = float(ticker_row.get("last_price") or 0.0)
         price_change_pct = float(ticker_row.get("price_change_percent") or 0.0)
+        trade_count = int(float(ticker_row.get("trade_count") or 0.0))
         if quote_volume <= 0.0 or last_price <= 0.0:
             continue
-        if quote_volume < settings.universe.min_quote_volume_usd:
-            continue
         if symbol not in pinned:
+            if quote_volume < settings.universe.min_quote_volume_usd:
+                continue
+            if abs(price_change_pct) < settings.universe.min_price_change_pct:
+                continue
+            if trade_count < settings.universe.min_trade_count_24h:
+                continue
             if meta.onboard_date_ms and meta.onboard_date_ms > min_onboard_ms:
                 continue
         eligible_rows.append(
@@ -497,6 +502,7 @@ def build_shortlist(
                 "onboard_date_ms": meta.onboard_date_ms,
                 "quote_volume": quote_volume,
                 "price_change_pct": price_change_pct,
+                "trade_count": trade_count,
                 "last_price": last_price,
                 "shortlist_bucket": _bucket_for_price_change(price_change_pct),
                 "spread_bps": _safe_float(ticker_row.get("spread_bps")),
@@ -543,6 +549,7 @@ def build_shortlist(
                 quote_volume=float(el_row["quote_volume"]),
                 price_change_pct=float(el_row["price_change_pct"]),
                 last_price=float(el_row["last_price"]),
+                trade_count_24h=int(el_row["trade_count"]),
                 shortlist_bucket=str(el_row["shortlist_bucket"]),
                 shortlist_score=shortlist_score,
                 shortlist_reasons=reasons,

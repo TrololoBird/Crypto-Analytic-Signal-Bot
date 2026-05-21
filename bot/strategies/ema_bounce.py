@@ -11,9 +11,10 @@ from ..setup_base import BaseSetup
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.utils import (
     build_structural_targets,
-    validate_rr_or_penalty,
     get_dynamic_params,
+    validate_rr_or_penalty,
 )
+from .spec_patterns import build_spec_signal, detect_ema_bounce
 
 
 class EmaBounceSetup(BaseSetup):
@@ -57,6 +58,20 @@ class EmaBounceSetup(BaseSetup):
         setup_id = self.setup_id
         dynamic_params = get_dynamic_params(prepared, setup_id)
         defaults = self.get_optimizable_params(settings)
+        effective_params = {**defaults, **dynamic_params}
+        hit = detect_ema_bounce(prepared.work_15m, timeframe="15m")
+        if hit is None:
+            _reject(prepared, setup_id, "pattern.no_bounce_pattern")
+            return None
+        return build_spec_signal(
+            prepared=prepared,
+            settings=settings,
+            setup_id=setup_id,
+            family=self.family,
+            hit=hit,
+            defaults=defaults,
+            params=effective_params,
+        )
 
         ema_touch_tolerance_pct = float(
             dynamic_params.get(

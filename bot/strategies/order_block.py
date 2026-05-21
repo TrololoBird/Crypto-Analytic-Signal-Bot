@@ -22,6 +22,7 @@ from ..setups.utils import (
     validate_rr_or_penalty,
     get_dynamic_params,
 )
+from .spec_patterns import build_spec_signal, detect_order_block
 
 LOG = logging.getLogger("bot.strategies.order_block")
 
@@ -74,6 +75,21 @@ class OrderBlockSetup(BaseSetup):
         setup_id = self.setup_id
         dynamic_params = get_dynamic_params(prepared, setup_id)
         defaults = self.get_optimizable_params(settings)
+
+        hit = detect_order_block(prepared.work_1h, timeframe="1h")
+        if hit is not None:
+            return build_spec_signal(
+                prepared=prepared,
+                settings=settings,
+                setup_id=setup_id,
+                family=self.family,
+                hit=hit,
+                defaults=defaults,
+                params=dynamic_params,
+            )
+        _reject(prepared, setup_id, "data.order_block_impulse_missing")
+        return None
+
         sl_buffer_atr = float(
             dynamic_params.get("sl_buffer_atr", defaults.get("sl_buffer_atr", 1.5))
         )

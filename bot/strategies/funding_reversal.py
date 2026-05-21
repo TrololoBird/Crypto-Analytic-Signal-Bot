@@ -39,7 +39,7 @@ class FundingReversalSetup(BaseSetup):
         """Tunable parameters for self-learner optimization."""
         defaults = {
             "base_score": 0.52,
-            "funding_threshold": 0.00015,
+            "funding_threshold": 0.0010,
             "funding_trend_bars": 3.0,
             "min_delta_threshold": 0.02,
             "confirmation_lookback_bars": 4,
@@ -115,11 +115,11 @@ class FundingReversalSetup(BaseSetup):
         )
 
         if prepared.funding_rate is None:
-            _reject(prepared, setup_id, "funding_rate_missing")
+            _reject(prepared, setup_id, "data.funding_rate_missing")
             return None
         fr = prepared.funding_rate
         if math.isnan(fr) or abs(fr) <= funding_threshold:
-            _reject(prepared, setup_id, "funding_not_extreme", funding_rate=fr)
+            _reject(prepared, setup_id, "indicator.funding_not_extreme", funding_rate=fr)
             return None
 
         funding_trend = prepared.funding_trend

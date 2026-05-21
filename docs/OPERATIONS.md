@@ -81,9 +81,11 @@ The bot includes a built-in web dashboard for real-time monitoring.
   context. Binance allows `limit` up to 1500 on the public kline endpoint; 500
   stays within the lower weight tier while giving roughly 20 days of 1h context
   and 83 days of 4h context.
-- `15m` and `1h` are required for symbol preparation. `5m` and `4h` are
-  contextual; missing optional context should lower confidence or add a
-  precise reason, not abort the entire symbol analysis.
+- Current `prepare_symbol()` runtime code requires warm `5m`, `15m`, `1h`, and
+  `4h` frames before symbol analysis. This is intentional warmup protection for
+  fast-trigger context, 15m setup logic, 1h confirmation, and 4h macro/regime
+  context. A short frame returns `None` and logs `insufficient frame data` with
+  the actual and required bar counts.
 
 ## Telemetry Scope
 

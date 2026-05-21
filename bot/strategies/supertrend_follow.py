@@ -58,6 +58,7 @@ class SuperTrendFollowSetup(BaseSetup):
             "high",
             "ema20",
             "atr14",
+            "supertrend",
             "supertrend_dir",
             "volume_ratio20",
             "rsi14",
@@ -78,13 +79,14 @@ class SuperTrendFollowSetup(BaseSetup):
         high = _as_float(work_15m.item(-1, "high"))
         ema20 = _as_float(work_15m.item(-1, "ema20"))
         atr = _as_float(work_15m.item(-1, "atr14"))
+        supertrend_line = _as_float(work_15m.item(-1, "supertrend"))
         vol_ratio = _as_float(work_15m.item(-1, "volume_ratio20"), 1.0)
         rsi = _as_float(work_15m.item(-1, "rsi14"), 50.0)
         st_15m = _as_float(work_15m.item(-1, "supertrend_dir"))
         st_1h = _as_float(work_1h.item(-1, "supertrend_dir"))
         adx_1h = _as_float(work_1h.item(-1, "adx14"))
 
-        if min(close, low, high, ema20, atr) <= 0.0 or math.isnan(atr):
+        if min(close, low, high, ema20, supertrend_line, atr) <= 0.0 or math.isnan(atr):
             _reject(prepared, setup_id, "invalid_indicator_state", atr=atr)
             return None
 
@@ -96,31 +98,35 @@ class SuperTrendFollowSetup(BaseSetup):
             _reject(prepared, setup_id, "volume_too_low", volume_ratio=vol_ratio)
             return None
 
-        pullback_atr = float(effective_params["ema_pullback_atr"])
+        pullback_atr = min(float(effective_params["ema_pullback_atr"]), 0.5)
         bias_1h = getattr(prepared, "bias_1h", prepared.bias_4h)
         direction: str | None = None
         stop_basis: float = 0.0
 
-        if st_15m > 0 and st_1h > 0 and low <= ema20 + atr * pullback_atr and close > ema20:
+        near_line = abs(close - supertrend_line) <= atr * pullback_atr
+        if st_15m > 0 and st_1h > 0 and near_line and close > supertrend_line:
             direction = "long"
-            stop_basis = min(low, ema20)
-        elif st_15m < 0 and st_1h < 0 and high >= ema20 - atr * pullback_atr and close < ema20:
+            stop_basis = min(low, supertrend_line)
+        elif st_15m < 0 and st_1h < 0 and near_line and close < supertrend_line:
             direction = "short"
-            stop_basis = max(high, ema20)
+            stop_basis = max(high, supertrend_line)
 
         if direction is None:
             _reject(
                 prepared,
                 setup_id,
-                "no_supertrend_pullback",
+                "indicator.no_supertrend_pullback",
                 st_15m=st_15m,
                 st_1h=st_1h,
+                distance_atr=abs(close - supertrend_line) / atr,
             )
             return None
 
         sh_mask, sl_mask = _swing_points(work_1h, n=3, include_unconfirmed_tail=True)
         min_rr = float(effective_params["min_rr"])
-        price_anchor = min(ema20, close) if direction == "long" else max(ema20, close)
+        price_anchor = (
+            min(supertrend_line, close) if direction == "long" else max(supertrend_line, close)
+        )
         stop, tp1, tp2 = build_structural_targets(
             direction=direction,
             price_anchor=price_anchor,
@@ -170,6 +176,7 @@ class SuperTrendFollowSetup(BaseSetup):
             f"bias_1h={bias_1h}",
             f"st_15m={st_15m:.0f}",
             f"st_1h={st_1h:.0f}",
+            f"supertrend_line={supertrend_line:.4f}",
             f"adx_1h={adx_1h:.1f}",
             f"limit_entry={price_anchor:.4f}",
         ]

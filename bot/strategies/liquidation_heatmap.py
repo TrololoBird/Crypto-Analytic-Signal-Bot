@@ -19,6 +19,7 @@ class LiquidationHeatmapSetup(RoadmapSetup):
     DEFAULTS = {
         **RoadmapSetup.DEFAULTS,
         "min_liquidation_score": 0.30,
+        "min_oi_drop_pct": 0.03,
         "min_proxy_volume_ratio": 1.20,
         "min_proxy_wick_atr": 0.25,
         "proxy_lookback_bars": 12,
@@ -31,15 +32,31 @@ class LiquidationHeatmapSetup(RoadmapSetup):
         params = self._params(prepared, settings)
         score = _finite_or_none(prepared.liquidation_score)
         source = str(getattr(prepared, "liquidation_score_source", None) or "missing")
+        oi_change = _finite_or_none(prepared.oi_change_pct)
         close_position = _last(prepared.work_15m, "close_position", 0.5)
         vol_ratio = _last(prepared.work_15m, "volume_ratio20", 1.0)
         volume_penalty = vol_ratio < float(params["min_volume_ratio"])
-        if score is None or source != "force_order":
+        if score is None and oi_change is not None and oi_change <= -float(params["min_oi_drop_pct"]):
+            price_change = _last(prepared.work_15m, "roc10", 0.0)
+            score = 1.0 if price_change >= 0.0 else -1.0
+            source = "oi_drop_proxy"
+        if score is None:
             _reject(
                 prepared,
                 self.setup_id,
-                "liquidation_score_missing",
+                "data.liquidation_score_missing",
                 liquidation_source=source,
+                oi_change_pct=oi_change,
+                volume_ratio=vol_ratio,
+            )
+            return None
+        if source not in {"force_order", "oi_drop_proxy"}:
+            _reject(
+                prepared,
+                self.setup_id,
+                "data.liquidation_score_missing",
+                liquidation_source=source,
+                oi_change_pct=oi_change,
                 volume_ratio=vol_ratio,
             )
             return None
@@ -53,14 +70,15 @@ class LiquidationHeatmapSetup(RoadmapSetup):
             _reject(
                 prepared,
                 self.setup_id,
-                "liquidation_cluster_not_actionable",
+                "data.liquidation_score_missing",
                 liquidation_score=score,
+                oi_change_pct=oi_change,
             )
             return None
         context_penalty = _confirmed_context_conflict(prepared, direction)
         clarity = min(abs(score), 1.0)
-        if source != "force_order":
-            clarity *= 0.75
+        if source == "oi_drop_proxy":
+            clarity *= 0.82
         if volume_penalty:
             clarity *= 0.90
         if context_penalty:

@@ -10,6 +10,7 @@ from .roadmap_base import (
     _missing_columns,
     _reject,
 )
+from .spec_patterns import build_spec_signal, detect_wyckoff_spring
 
 class WyckoffSpringSetup(RoadmapSetup):
     setup_id = "wyckoff_spring"
@@ -31,6 +32,20 @@ class WyckoffSpringSetup(RoadmapSetup):
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         params = self._params(prepared, settings)
         work = prepared.work_15m
+        hit = detect_wyckoff_spring(work, timeframe="15m")
+        if hit is None:
+            _reject(prepared, self.setup_id, "pattern.no_liquidity_sweep_detected")
+            return None
+        return build_spec_signal(
+            prepared=prepared,
+            settings=settings,
+            setup_id=self.setup_id,
+            family=self.family,
+            hit=hit,
+            defaults=self.DEFAULTS,
+            params=params,
+        )
+
         missing = _missing_columns(
             work,
             ("high", "low", "close", "prev_donchian_low20", "prev_donchian_high20"),

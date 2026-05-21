@@ -23,6 +23,7 @@ from ..setups.utils import (
     validate_rr_or_penalty,
     get_dynamic_params,
 )
+from .spec_patterns import build_spec_signal, detect_fvg
 
 LOG = logging.getLogger("bot.strategies.fvg")
 
@@ -85,6 +86,23 @@ class FVGSetup(BaseSetup):
         sl_buffer_atr = dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"])
 
         w = prepared.work_15m
+        hit = detect_fvg(
+            w,
+            timeframe="15m",
+            max_age=int(dynamic_params.get("max_fvg_age_bars", 20)),
+        )
+        if hit is None:
+            _reject(prepared, setup_id, "pattern.fvg_retest_too_far")
+            return None
+        return build_spec_signal(
+            prepared=prepared,
+            settings=settings,
+            setup_id=setup_id,
+            family=self.family,
+            hit=hit,
+            defaults=defaults,
+            params={**defaults, **dynamic_params, "sl_buffer_atr": sl_buffer_atr},
+        )
         if w.height < 5:
             _reject(prepared, setup_id, "insufficient_15m_bars", bars=w.height)
             return None

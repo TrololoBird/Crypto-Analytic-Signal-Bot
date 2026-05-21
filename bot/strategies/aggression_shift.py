@@ -10,6 +10,7 @@ from .roadmap_base import (
     _reject,
     _series_mean_tail,
 )
+from .spec_patterns import build_spec_signal, detect_aggression_shift
 
 class AggressionShiftSetup(RoadmapSetup):
     setup_id = "aggression_shift"
@@ -24,6 +25,20 @@ class AggressionShiftSetup(RoadmapSetup):
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         params = self._params(prepared, settings)
+        hit = detect_aggression_shift(prepared.work_15m, timeframe="15m")
+        if hit is None:
+            _reject(prepared, self.setup_id, "pattern.aggression_shift_too_small")
+            return None
+        return build_spec_signal(
+            prepared=prepared,
+            settings=settings,
+            setup_id=self.setup_id,
+            family=self.family,
+            hit=hit,
+            defaults=self.DEFAULTS,
+            params=params,
+        )
+
         explicit_shift = _finite_or_none(prepared.aggression_shift)
         if explicit_shift is not None:
             shift = explicit_shift

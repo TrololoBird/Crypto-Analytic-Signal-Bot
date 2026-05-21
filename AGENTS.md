@@ -115,3 +115,51 @@ Those artifacts can drift. Treat them as clues, not proof.
    or live script when the task requires external validation.
 6. In summaries, separate confirmed facts from assumptions, inferences,
    ambiguous claims, and unverified follow-up risks.
+
+## Changelog (agent-readable)
+
+### 2026-05-21 - Strategy spec diagnostics and docs alignment
+
+Reason for session: run a read-only diagnostic pass over the 38-strategy
+runtime surface, classify strategy/data-contract risks, and align drifted docs
+with the current code contract.
+
+Changes:
+- `docs/FEATURES_IO_CONTRACT.md`: clarified that current `prepare_symbol()`
+  requires warm `5m`, `15m`, `1h`, and `4h` frames before returning
+  `PreparedSymbol`.
+- `docs/OPERATIONS.md`: aligned historical-kline operating notes with the
+  same four-timeframe warmup contract.
+- `bot/public_intelligence.py` and `bot/domain/config.py`: removed the dead
+  Binance options eAPI endpoint literals/config toggle so the runtime codebase
+  contains no `eapi.binance.com` endpoint string.
+- `bot/market_data.py`: normalized private/auth REST parameter deny-list keys
+  to lowercase so `listenkey`/`apikey` checks match the lowercased request
+  parameters.
+- Existing working tree changes before this session already included the
+  shared `bot/strategies/spec_patterns.py` strategy-spec layer and public-data
+  boundary updates; this session verified them rather than rewriting them.
+
+Verified:
+- `python -m compileall bot` -> exit 0.
+- `python -m scripts.validate_config` -> `[OK] All checks passed`.
+- `python -m scripts.live_check_strategies --limit 35 --concurrency 4` ->
+  34 prepared symbols, 1292 detector runs, `strategy_errors=[]`, 28 strategies
+  with detector hits.
+- `BOT_NOTIFIER_PROVIDER=none python -m scripts.live_check_strategies
+  --limit 15 --concurrency 3` -> 15 prepared symbols, 570 detector runs,
+  `strategy_errors=[]`, 26 strategies with detector hits.
+- `python -m scripts.live_check_enrichments --symbols BTCUSDT ETHUSDT
+  --warmup 8 --require-depth` -> 22/22 critical enrichment fields populated;
+  `depth_imbalance_source=l2_depth`, `orderflow_source=agg_trade`.
+
+Known remaining limitations:
+- `scripts/live_check_strategies.py` is a REST-oriented detector-surface check
+  and does not warm WebSocket L2 depth or force-order streams. Orderbook and
+  liquidation strategy misses in that script must be compared with
+  `scripts.live_check_enrichments` or a running pipeline before being classified
+  as strategy bugs.
+- Zero-hit sets varied between the 35-symbol and later 15-symbol REST-surface
+  runs as market state changed. Treat repeated single-code rejects as triage
+  candidates, not as confirmed broken strategy logic without a WS/pipeline
+  comparison and per-gate evidence.

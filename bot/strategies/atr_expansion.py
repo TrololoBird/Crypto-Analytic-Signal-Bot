@@ -11,6 +11,7 @@ from .roadmap_base import (
     _reject,
     _series_mean_tail,
 )
+from .spec_patterns import build_spec_signal, detect_atr_expansion
 
 class ATRExpansionSetup(RoadmapSetup):
     setup_id = "atr_expansion"
@@ -27,6 +28,19 @@ class ATRExpansionSetup(RoadmapSetup):
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         params = self._params(prepared, settings)
+        hit = detect_atr_expansion(prepared.work_15m, timeframe="15m")
+        if hit is None:
+            _reject(prepared, self.setup_id, "indicator.atr_expansion_too_low")
+            return None
+        return build_spec_signal(
+            prepared=prepared,
+            settings=settings,
+            setup_id=self.setup_id,
+            family=self.family,
+            hit=hit,
+            defaults=self.DEFAULTS,
+            params=params,
+        )
         work = prepared.work_15m
         missing = _missing_columns(work, ("open", "close", "atr14"))
         if missing:

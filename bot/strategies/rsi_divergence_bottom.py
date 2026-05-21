@@ -9,6 +9,7 @@ from .roadmap_base import (
     _missing_columns,
     _reject,
 )
+from .spec_patterns import build_spec_signal, detect_regular_divergence
 
 class RSIDivergenceBottomSetup(RoadmapSetup):
     setup_id = "rsi_divergence_bottom"
@@ -25,6 +26,20 @@ class RSIDivergenceBottomSetup(RoadmapSetup):
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         params = self._params(prepared, settings)
         work = prepared.work_15m
+        hit = detect_regular_divergence(work, timeframe="15m", require_oversold=True)
+        if hit is None:
+            _reject(prepared, self.setup_id, "data.rsi_divergence_missing")
+            return None
+        return build_spec_signal(
+            prepared=prepared,
+            settings=settings,
+            setup_id=self.setup_id,
+            family=self.family,
+            hit=hit,
+            defaults=self.DEFAULTS,
+            params=params,
+        )
+
         missing = _missing_columns(work, ("high", "low", "close", "rsi14"))
         if missing:
             _reject(prepared, self.setup_id, "missing_columns", missing_fields=missing)

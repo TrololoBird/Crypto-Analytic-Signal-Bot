@@ -21,6 +21,7 @@ from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..features import _swing_points
 from ..setups.smc import latest_structure_break, swing_highs_lows
 from ..setups.utils import get_dynamic_params
+from .spec_patterns import build_spec_signal, detect_bos_choch
 
 LOG = logging.getLogger("bot.strategies.bos_choch")
 
@@ -233,6 +234,20 @@ class BOSCHOCHSetup(BaseSetup):
         setup_id = self.setup_id
         dynamic_params = get_dynamic_params(prepared, setup_id)
         defaults = self.get_optimizable_params(_settings)
+
+        hit = detect_bos_choch(prepared.work_15m, timeframe="15m", max_age=20)
+        if hit is not None:
+            return build_spec_signal(
+                prepared=prepared,
+                settings=_settings,
+                setup_id=setup_id,
+                family=self.family,
+                hit=hit,
+                defaults=defaults,
+                params=dynamic_params,
+            )
+        _reject(prepared, setup_id, "pattern.structure_break_too_old")
+        return None
 
         configured_swing_lookback = int(
             dynamic_params.get("swing_lookback", defaults["swing_lookback"])

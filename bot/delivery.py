@@ -42,11 +42,11 @@ class DeliveredSignal:
 
 def _fmt_price(value: float | None) -> str:
     if value is None:
-        return "n/a"
+        return "data_missing"
     try:
         numeric = float(value)
     except (TypeError, ValueError):
-        return "n/a"
+        return "data_invalid"
     if numeric >= 1_000.0:
         return f"{numeric:,.2f}"
     if numeric >= 1.0:
@@ -64,7 +64,7 @@ def _tz_label(value: datetime) -> str:
 
 def _fmt_dt(raw: str | datetime | None) -> str:
     if raw is None:
-        return "n/a"
+        return "time_missing"
     value = raw if isinstance(raw, datetime) else datetime.fromisoformat(str(raw))
     if value.tzinfo is None:
         value = value.replace(tzinfo=UTC)

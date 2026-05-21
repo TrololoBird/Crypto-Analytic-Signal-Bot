@@ -13,6 +13,7 @@ from ..domain.schemas import PreparedSymbol, Signal
 from ..setup_base import BaseSetup
 from ..setups import _build_signal, _compute_dynamic_score, _last_swing_prices, _reject
 from ..setups.utils import get_dynamic_params, normalize_trade_levels
+from .spec_patterns import build_spec_signal, detect_wick_trap
 
 
 def _as_float(value: object, default: float = 0.0) -> float:
@@ -77,6 +78,19 @@ class WickTrapReversalSetup(BaseSetup):
             return None
 
         defaults = self.get_optimizable_params(settings)
+        hit = detect_wick_trap(work_15m, timeframe="15m")
+        if hit is None:
+            _reject(prepared, setup_id, "pattern.no_wick_trap_detected")
+            return None
+        return build_spec_signal(
+            prepared=prepared,
+            settings=settings,
+            setup_id=setup_id,
+            family=self.family,
+            hit=hit,
+            defaults=defaults,
+            params={**defaults, **dynamic_params},
+        )
         wick_through_atr_mult = float(
             dynamic_params.get(
                 "wick_through_atr_mult",

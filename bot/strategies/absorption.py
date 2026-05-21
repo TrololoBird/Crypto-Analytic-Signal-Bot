@@ -9,6 +9,7 @@ from .roadmap_base import (
     _last,
     _reject,
 )
+from .spec_patterns import build_spec_signal, detect_absorption
 
 class AbsorptionSetup(RoadmapSetup):
     setup_id = "absorption"
@@ -26,6 +27,20 @@ class AbsorptionSetup(RoadmapSetup):
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         params = self._params(prepared, settings)
+        hit = detect_absorption(prepared.work_15m, timeframe="15m")
+        if hit is None:
+            _reject(prepared, self.setup_id, "pattern.absorption_not_confirmed")
+            return None
+        return build_spec_signal(
+            prepared=prepared,
+            settings=settings,
+            setup_id=self.setup_id,
+            family=self.family,
+            hit=hit,
+            defaults=self.DEFAULTS,
+            params=params,
+        )
+
         flow, flow_source = _flow_delta_with_source(prepared)
         if flow is None:
             _reject(prepared, self.setup_id, "orderflow_delta_missing")

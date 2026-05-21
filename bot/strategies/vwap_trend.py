@@ -13,6 +13,7 @@ from ..domain.schemas import PreparedSymbol, Signal
 from ..setup_base import BaseSetup
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.utils import build_structural_targets, get_dynamic_params
+from .spec_patterns import build_spec_signal, detect_vwap_reclaim
 
 
 def _as_float(value: object, default: float = 0.0) -> float:
@@ -52,6 +53,23 @@ class VWAPTrendSetup(BaseSetup):
         setup_id = self.setup_id
         work_15m = prepared.work_15m
         work_1h = prepared.work_1h
+        params = self.get_optimizable_params(settings)
+        dynamic_params = get_dynamic_params(prepared, setup_id)
+        effective_params = {**params, **dynamic_params}
+        hit = detect_vwap_reclaim(work_15m, timeframe="15m")
+        if hit is None:
+            _reject(prepared, setup_id, "pattern.no_vwap_reclaim")
+            return None
+        return build_spec_signal(
+            prepared=prepared,
+            settings=settings,
+            setup_id=setup_id,
+            family=self.family,
+            hit=hit,
+            defaults=params,
+            params=effective_params,
+        )
+
         if work_15m.height < 30 or work_1h.height < 30:
             _reject(prepared, setup_id, "insufficient_bars")
             return None
@@ -68,10 +86,6 @@ class VWAPTrendSetup(BaseSetup):
         if missing:
             _reject(prepared, setup_id, "missing_columns", missing_fields=missing)
             return None
-
-        params = self.get_optimizable_params(settings)
-        dynamic_params = get_dynamic_params(prepared, setup_id)
-        effective_params = {**params, **dynamic_params}
 
         close = _as_float(work_15m.item(-1, "close"))
         prev_close = _as_float(work_15m.item(-2, "close"))

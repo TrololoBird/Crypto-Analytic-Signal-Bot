@@ -17,6 +17,7 @@ from ..domain.schemas import PreparedSymbol, Signal
 from ..setup_base import BaseSetup
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.utils import get_dynamic_params, normalize_trade_levels
+from .spec_patterns import build_spec_signal, detect_turtle_soup
 
 LOG = logging.getLogger("bot.strategies.turtle_soup")
 
@@ -128,6 +129,19 @@ class TurtleSoupSetup(BaseSetup):
 
         dynamic_params = get_dynamic_params(prepared, setup_id)
         defaults = self.get_optimizable_params(settings)
+        hit = detect_turtle_soup(prepared.work_15m, timeframe="15m")
+        if hit is None:
+            _reject(prepared, setup_id, "pattern.no_false_breakout_detected")
+            return None
+        return build_spec_signal(
+            prepared=prepared,
+            settings=settings,
+            setup_id=setup_id,
+            family=self.family,
+            hit=hit,
+            defaults=defaults,
+            params={**defaults, **dynamic_params},
+        )
         roll_bars = max(5, int(dynamic_params.get("roll_bars", defaults["roll_bars"])))
         break_atr_mult = float(dynamic_params.get("break_atr_mult", defaults["break_atr_mult"]))
         sl_buffer_atr = float(dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]))

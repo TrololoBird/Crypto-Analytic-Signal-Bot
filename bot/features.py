@@ -1837,14 +1837,14 @@ def prepare_symbol(
     len_15m = frames.df_15m.height
     len_5m = frames.df_5m.height if frames.df_5m is not None else 0
 
-    required_timeframes = ("15m", "1h")
+    required_timeframes = ("5m", "15m", "1h", "4h")
     if not has_minimum_bars(
         frames,
         minimums=minimums,
         required_timeframes=required_timeframes,
     ):
         _log.info(
-            "%s: insufficient frame data | 1h=%d/%d 15m=%d/%d 5m=%d/%d optional_4h=%d/%d",
+            "%s: insufficient frame data | 1h=%d/%d 15m=%d/%d 5m=%d/%d 4h=%d/%d",
             sym,
             len_1h,
             minimums["1h"],

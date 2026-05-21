@@ -66,12 +66,15 @@
 - `bot/outcomes.py::build_prepared_feature_snapshot(...)` must emit **exactly** this field set in stable order.
 - Missing fields and unexpected additions are treated as contract violations and rejected by validator.
 - Runtime call-path modules (`bot/application/bot.py`, `bot/application/symbol_analyzer.py`, `bot/core/engine/engine.py`, `bot/strategies/__init__.py`) must not import scaffold/prototype modules that are not intended for live signal generation. Strategy metadata status strings such as `experimental` are descriptive and do not by themselves make an exported strategy non-runtime.
-- `PreparedSymbol` requires viable `15m` and `1h` frames. `work_15m` and
-  `work_1h` are literal timeframe contracts. Asset-level primary timeframe
+- `PreparedSymbol` requires viable `5m`, `15m`, `1h`, and `4h` frames. This is
+  a warmup guard for EMA200/HTF context and prevents strategies from treating
+  absent market context as neutral truth. `work_15m` and `work_1h` are literal
+  timeframe contracts. Asset-level primary timeframe
   overrides are exposed through `primary_timeframe` and `work_primary`; they
   must not rename 1h/4h data into `work_15m`.
-- `5m` and `4h` frames are optional context and must degrade to neutral/missing
-  context instead of preventing every strategy from running for a symbol.
+- Shortlist L1 is intentionally strict for runtime scanning: public USD-M
+  symbols must pass quote-volume, 24h movement, trade-count, and listing-age
+  gates unless explicitly pinned for benchmark context.
 
 ## Signal-context contract
 

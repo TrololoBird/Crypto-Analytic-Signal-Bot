@@ -17,6 +17,7 @@ from ..domain.schemas import PreparedSymbol, Signal
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.smc import latest_breaker_block
 from ..setups.utils import get_dynamic_params
+from .spec_patterns import build_spec_signal, detect_breaker_block
 
 LOG = logging.getLogger("bot.strategies.breaker_block")
 
@@ -84,6 +85,20 @@ class BreakerBlockSetup(BaseSetup):
         setup_id = self.setup_id
         dynamic_params = get_dynamic_params(prepared, setup_id)
         defaults = self.get_optimizable_params(settings)
+
+        hit = detect_breaker_block(prepared.work_1h, timeframe="1h")
+        if hit is not None:
+            return build_spec_signal(
+                prepared=prepared,
+                settings=settings,
+                setup_id=setup_id,
+                family=self.family,
+                hit=hit,
+                defaults=defaults,
+                params=dynamic_params,
+            )
+        _reject(prepared, setup_id, "pattern.no_breaker_block_detected")
+        return None
 
         scan_bars = max(15, int(dynamic_params.get("scan_bars", defaults["scan_bars"])))
         mitigation_threshold = float(

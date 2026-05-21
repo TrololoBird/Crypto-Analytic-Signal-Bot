@@ -19,6 +19,7 @@ from ..setup_base import BaseSetup
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.utils import get_dynamic_params
 from .common import as_float as _as_float
+from .spec_patterns import build_spec_signal, detect_regular_divergence
 
 
 def _tail_pair(values: list[float]) -> tuple[float, float] | None:
@@ -81,6 +82,21 @@ class IndicatorDivergenceSetup(BaseSetup):
             **get_dynamic_params(prepared, setup_id),
         }
         work = prepared.work_15m
+        defaults = self.get_optimizable_params(settings)
+        hit = detect_regular_divergence(work, timeframe="15m")
+        if hit is None:
+            _reject(prepared, setup_id, "data.regular_divergence_missing")
+            return None
+        return build_spec_signal(
+            prepared=prepared,
+            settings=settings,
+            setup_id=setup_id,
+            family=self.family,
+            hit=hit,
+            defaults=defaults,
+            params=params,
+        )
+
         if work.height < 80:
             _reject(prepared, setup_id, "insufficient_15m_bars", bars=work.height)
             return None

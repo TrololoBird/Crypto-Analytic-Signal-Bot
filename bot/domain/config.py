@@ -67,8 +67,10 @@ class UniverseConfig(BaseModel):
     quote_asset: str = "USDT"
     dynamic_limit: int = Field(default=60, ge=10, le=200)
     shortlist_limit: int = Field(default=45, ge=5, le=100)  # Reduced from 60 to prevent WS overload
-    min_quote_volume_usd: float = Field(default=10_000_000.0, ge=0.0)
-    min_listing_age_days: int = Field(default=14, ge=0, le=3650)
+    min_quote_volume_usd: float = Field(default=50_000_000.0, ge=0.0)
+    min_price_change_pct: float = Field(default=0.5, ge=0.0, le=100.0)
+    min_trade_count_24h: int = Field(default=10_000, ge=0, le=10_000_000_000)
+    min_listing_age_days: int = Field(default=90, ge=0, le=3650)
     light_refresh_interval_seconds: int = Field(default=75, ge=15, le=900)
     full_refresh_interval_seconds: int = Field(default=7200, ge=60, le=86_400)
     shortlist_spread_max_bps: float = Field(default=8.0, ge=0.5, le=100.0)
@@ -130,6 +132,7 @@ class FilterConfig(BaseModel):
     freshness_4h_hours: int = Field(default=10, ge=1, le=240)
     min_bars_15m: int = Field(default=210, ge=30, le=5000)
     min_bars_1h: int = Field(default=210, ge=30, le=5000)
+    min_bars_5m: int = Field(default=100, ge=30, le=5000)
     min_bars_4h: int = Field(default=210, ge=30, le=5000)
     # Mark price sanity guard: reject if mark and last diverge beyond this pct.
     max_mark_price_deviation_pct: float = Field(default=0.005, ge=0.0, le=0.10)
@@ -383,7 +386,6 @@ class IntelligenceConfig(BaseModel):
     source_policy: Literal["binance_only"] = "binance_only"
     smart_exit_mode: Literal["heuristic_v1"] = "heuristic_v1"
     gamma_semantics: Literal["proxy_only"] = "proxy_only"
-    allow_runtime_options_eapi: bool = False
     refresh_interval_seconds: int = Field(default=900, ge=60, le=86400)
     write_hourly_reports: bool = True
     options_expiry_count: int = Field(default=2, ge=1, le=8)

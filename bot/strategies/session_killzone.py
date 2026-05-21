@@ -164,14 +164,14 @@ class SessionKillzoneSetup(BaseSetup):
             "strict_1h_structure": 0.0,
             "orderflow_conflict_penalty": 0.88,
             "structure_conflict_penalty": 0.82,
-            "asia_start_hour_utc": 22,
-            "asia_end_hour_utc": 3,
-            "london_start_hour_utc": 6,
-            "london_end_hour_utc": 10,
+            "asia_start_hour_utc": 0,
+            "asia_end_hour_utc": 6,
+            "london_start_hour_utc": 7,
+            "london_end_hour_utc": 9,
             "ny_start_hour_utc": 12,
-            "ny_end_hour_utc": 16,
+            "ny_end_hour_utc": 14,
             "overlap_start_hour_utc": 12,
-            "overlap_end_hour_utc": 16,
+            "overlap_end_hour_utc": 14,
         }
         if settings is not None:
             filters = getattr(settings, "filters", None)
@@ -251,7 +251,7 @@ class SessionKillzoneSetup(BaseSetup):
             now_utc = datetime.now(timezone.utc)
         session_name = _active_killzone_name(now_utc.hour, cast(dict[str, object], effective_params))
         if session_name is None:
-            _reject(prepared, setup_id, "outside_killzone", hour=now_utc.hour)
+            _reject(prepared, setup_id, "context.outside_killzone", hour=now_utc.hour)
             return None
 
         atr = _as_float(w.item(-1, "atr14"))

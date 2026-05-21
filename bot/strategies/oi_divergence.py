@@ -18,14 +18,14 @@ class OIDivergenceSetup(RoadmapSetup):
     DEFAULTS = {
         **RoadmapSetup.DEFAULTS,
         "min_abs_oi_change_pct": 0.01,
-        "min_price_change_pct": 0.35,
+        "min_price_change_pct": 0.10,
     }
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         params = self._params(prepared, settings)
         oi_change = _finite_or_none(prepared.oi_change_pct)
         if oi_change is None:
-            _reject(prepared, self.setup_id, "data.oi_missing")
+            _reject(prepared, self.setup_id, "asset_fit.oi_missing")
             return None
         price_change = _price_change_pct(prepared.work_15m, 8)
         if abs(oi_change) < float(params["min_abs_oi_change_pct"]) or abs(price_change) < float(
@@ -34,7 +34,7 @@ class OIDivergenceSetup(RoadmapSetup):
             _reject(
                 prepared,
                 self.setup_id,
-                "oi_price_divergence_too_small",
+                "indicator.oi_price_divergence_too_small",
                 oi_change_pct=oi_change,
             )
             return None

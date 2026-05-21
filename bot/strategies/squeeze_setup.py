@@ -12,6 +12,7 @@ from ..domain.schemas import PreparedSymbol, Signal
 from ..setup_base import BaseSetup
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.utils import get_dynamic_params
+from .spec_patterns import build_spec_signal, detect_bb_squeeze_release
 
 
 def _as_float(value: object, default: float = 0.0) -> float:
@@ -190,6 +191,21 @@ class SqueezeSetup(BaseSetup):
 
         dynamic_params = get_dynamic_params(prepared, self.setup_id)
         defaults = self.get_optimizable_params(settings)
+        effective_params = {**defaults, **dynamic_params}
+        hit = detect_bb_squeeze_release(work_15m, timeframe="15m")
+        if hit is None:
+            _reject(prepared, self.setup_id, "indicator.no_bb_kc_squeeze")
+            return None
+        return build_spec_signal(
+            prepared=prepared,
+            settings=settings,
+            setup_id=self.setup_id,
+            family=self.family,
+            hit=hit,
+            defaults=defaults,
+            params=effective_params,
+        )
+
         bb_squeeze_threshold = _as_float(
             dynamic_params.get("bb_squeeze_threshold", defaults["bb_squeeze_threshold"]),
             defaults["bb_squeeze_threshold"],

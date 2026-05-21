@@ -124,6 +124,7 @@ class SymbolAnalyzer:
         return min_required_bars(
             min_bars_15m=self._bot.settings.filters.min_bars_15m,
             min_bars_1h=max(config_min_1h, strategies_min_1h),
+            min_bars_5m=self._bot.settings.filters.min_bars_5m,
             min_bars_4h=self._bot.settings.filters.min_bars_4h,
         )
 
@@ -401,6 +402,40 @@ class SymbolAnalyzer:
         profile = getattr(metadata, "confirmation_profile", signal.confirmation_profile)
         details["family"] = family
         details["confirmation_profile"] = profile
+        adx_1h = self._frame_float(prepared.work_1h, "adx14")
+        adx_15m = self._frame_float(prepared.work_15m, "adx14")
+        regime_adx = adx_1h if adx_1h is not None else adx_15m
+        details["adx_1h"] = adx_1h
+        details["adx_15m"] = adx_15m
+        trend_regime_setups = {
+            "bos_choch",
+            "structure_pullback",
+            "ema_bounce",
+            "supertrend_follow",
+            "keltner_breakout",
+            "multi_tf_trend",
+            "hidden_divergence",
+        }
+        range_regime_setups = {
+            "absorption",
+            "bb_squeeze",
+            "liquidity_sweep",
+            "squeeze_setup",
+            "stop_hunt_detection",
+            "turtle_soup",
+            "volume_climax_reversal",
+            "wick_trap_reversal",
+            "wyckoff_spring",
+        }
+        if regime_adx is not None:
+            if signal.setup_id in trend_regime_setups and regime_adx < 20.0:
+                details["regime_filter"] = "trend_required_adx_lt_20"
+                return False, "context.market_regime_mismatch", details
+            if signal.setup_id in range_regime_setups and regime_adx > 40.0:
+                details["soft_penalty_applied"] = True
+                details["penalty_factor"] = 0.88
+                details["penalty_reason"] = "context.range_setup_in_strong_trend"
+                return True, None, details
         strong_opposition = details["regime_opposes"] and details["flow_opposes"]
         if (
             family in {"continuation", "breakout"}
@@ -603,18 +638,27 @@ class SymbolAnalyzer:
             "5m": rows_5m >= minimums["5m"],
             "4h": rows_4h >= minimums["4h"],
         }
-        if rows_1h < minimums["1h"] or rows_15m < minimums["15m"]:
+        if (
+            rows_5m < minimums["5m"]
+            or rows_15m < minimums["15m"]
+            or rows_1h < minimums["1h"]
+            or rows_4h < minimums["4h"]
+        ):
             missing_required = []
+            if rows_5m < minimums["5m"]:
+                missing_required.append("5m")
             if rows_15m < minimums["15m"]:
                 missing_required.append("15m")
             if rows_1h < minimums["1h"]:
                 missing_required.append("1h")
+            if rows_4h < minimums["4h"]:
+                missing_required.append("4h")
             rejected.append(
                 {
                     "ts": datetime.now(UTC).isoformat(),
                     "symbol": item.symbol,
                     "setup_id": "data",
-                    "direction": "n/a",
+                    "direction": "none",
                     "stage": "data",
                     "reason": "insufficient_required_history",
                     "rows_1h": rows_1h,
@@ -629,14 +673,14 @@ class SymbolAnalyzer:
                 }
             )
             LOG.info(
-                "%s: insufficient required history for analysis | 15m=%d/%d 1h=%d/%d optional_5m=%d/%d optional_4h=%d/%d",
+                "%s: insufficient required history for analysis | 5m=%d/%d 15m=%d/%d 1h=%d/%d 4h=%d/%d",
                 item.symbol,
+                rows_5m,
+                minimums["5m"],
                 rows_15m,
                 minimums["15m"],
                 rows_1h,
                 minimums["1h"],
-                rows_5m,
-                minimums["5m"],
                 rows_4h,
                 minimums["4h"],
             )
@@ -1324,6 +1368,11 @@ class SymbolAnalyzer:
                         context_ages.append(float(depth_age))
                         if depth_age > max_age:
                             freshness_flags.add("depth_book_stale")
+                wall_getter = getattr(self._bot._ws_manager, "get_depth_wall_pressure", None)
+                if callable(wall_getter):
+                    wall_pressure = wall_getter(symbol)
+                    if wall_pressure is not None:
+                        enrichments["depth_wall_pressure"] = float(wall_pressure)
                 trade_snapshot_getter = getattr(
                     self._bot._ws_manager, "get_agg_trade_snapshot", None
                 )

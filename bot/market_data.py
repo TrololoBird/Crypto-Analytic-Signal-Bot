@@ -162,7 +162,7 @@ _FORBIDDEN_PUBLIC_PATH_MARKERS = (
     "/ws-api",
     "/sapi",
     "/papi",
-    "signature=",
+    "signature",
     "timestamp=",
     "api_key=",
     "apikey=",
@@ -247,7 +247,7 @@ def _validate_rest_params(params: Mapping[str, Any] | None) -> None:
     """Ensure no auth-related or private parameters are passed in REST calls."""
     if not params:
         return
-    forbidden = {"signature", "timestamp", "listenKey", "api_key", "apiKey"}
+    forbidden = {"signature", "timestamp", "listenkey", "api_key", "apikey"}
     for key in params:
         if str(key).lower() in forbidden:
             raise ValueError(f"forbidden security/private parameter detected: {key}")
@@ -287,6 +287,51 @@ class _SlidingWindowRateLimiter:
             waited_s += sleep_s
 
 
+class _WeightBudgetManager:
+    """Client-side request-weight queue for Binance public REST calls."""
+
+    def __init__(self, *, max_weight: int, window_seconds: float) -> None:
+        self._max_weight = max(1, int(max_weight))
+        self._window_seconds = float(window_seconds)
+        self._events: deque[tuple[float, int]] = deque()
+        self._lock = asyncio.Lock()
+
+    @property
+    def used_weight(self) -> int:
+        now = time.monotonic()
+        cutoff = now - self._window_seconds
+        return sum(weight for ts, weight in self._events if ts >= cutoff)
+
+    async def acquire(self, *, weight: int, label: str) -> float:
+        normalized_weight = max(0, int(weight))
+        if normalized_weight <= 0:
+            return 0.0
+        waited_s = 0.0
+        while True:
+            async with self._lock:
+                now = time.monotonic()
+                cutoff = now - self._window_seconds
+                while self._events and self._events[0][0] < cutoff:
+                    self._events.popleft()
+                used = sum(item_weight for _ts, item_weight in self._events)
+                if used + normalized_weight <= self._max_weight:
+                    self._events.append((now, normalized_weight))
+                    return waited_s
+                oldest_ts = self._events[0][0] if self._events else now
+                sleep_s = max(0.0, (oldest_ts + self._window_seconds) - now) + 0.05
+                LOG.info(
+                    "REST weight budget exhausted | sleeping=%.2fs label=%s used=%d requested=%d limit=%d window=%.0fs",
+                    sleep_s,
+                    label,
+                    used,
+                    normalized_weight,
+                    self._max_weight,
+                    self._window_seconds,
+                )
+            await asyncio.sleep(sleep_s)
+            waited_s += sleep_s
+
+
 class MarketDataUnavailable(RuntimeError):
     def __init__(self, *, operation: str, detail: str, symbol: str | None = None) -> None:
         self.operation = operation
@@ -317,6 +362,10 @@ def _timeframe_to_seconds(timeframe: str) -> int | None:
 def _ohlcv_frame_has_incomplete_tail(df: pl.DataFrame, timeframe: str) -> bool:
     if df.is_empty():
         return False
+    if "close_time" in df.columns:
+        last_close = df["close_time"].tail(1).item()
+        if isinstance(last_close, datetime):
+            return datetime.now(UTC) <= last_close
     timeframe_seconds = _timeframe_to_seconds(timeframe)
     if timeframe_seconds is None:
         return False
@@ -329,6 +378,11 @@ def _ohlcv_frame_has_incomplete_tail(df: pl.DataFrame, timeframe: str) -> bool:
 def _drop_incomplete_ohlcv_tail(df: pl.DataFrame, timeframe: str) -> pl.DataFrame:
     if df.is_empty():
         return df
+    if "close_time" in df.columns:
+        now = datetime.now(UTC)
+        closed = df.filter(pl.col("close_time") < pl.lit(now))
+        if closed.height != df.height:
+            return closed
     if _ohlcv_frame_has_incomplete_tail(df, timeframe):
         return df.head(df.height - 1)
     return df
@@ -380,6 +434,9 @@ def _klines_to_frame(rows: Any) -> pl.DataFrame:
             pl.col("num_trades").cast(pl.Int64),
             pl.col("taker_buy_base_volume").cast(pl.Float64),
             pl.col("taker_buy_quote_volume").cast(pl.Float64),
+            pl.from_epoch(pl.col("time"), time_unit="ms")
+            .dt.replace_time_zone("UTC")
+            .alias("open_time"),
         ]
     )
 
@@ -476,6 +533,10 @@ class BinanceFuturesMarketData:
         self._rate_limit_error_streak = 0
         self._weight_window_weight: int = 0
         self._weight_window_start: float = 0.0
+        self._weight_budget = _WeightBudgetManager(
+            max_weight=_REST_WEIGHT_SOFT_LIMIT,
+            window_seconds=60.0,
+        )
         # Request-based limiter for /futures/data/*
         self._futures_data_limiter = _SlidingWindowRateLimiter(
             max_requests=self._futures_data_limit_per_5m,
@@ -632,9 +693,8 @@ class BinanceFuturesMarketData:
         """Accumulate client-side weight estimate; warn when approaching hard limit."""
         now = time.monotonic()
         if now - self._weight_window_start >= 60.0:
-            self._weight_window_weight = 0
             self._weight_window_start = now
-        self._weight_window_weight += self._estimate_weight(operation, params)
+        self._weight_window_weight = self._weight_budget.used_weight
         if self._weight_window_weight >= _REST_WEIGHT_HARD_LIMIT:
             LOG.error(
                 "client-side weight budget at hard limit | estimated_1m=%d operation=%s",
@@ -751,23 +811,11 @@ class BinanceFuturesMarketData:
             )
             await asyncio.sleep(pause_remaining)
 
-        now = time.monotonic()
-        if now - self._weight_window_start >= 60.0:
-            self._weight_window_weight = 0
-            self._weight_window_start = now
         estimated = self._estimate_weight(operation, params)
-        if self._weight_window_weight + estimated >= _REST_WEIGHT_SOFT_LIMIT:
-            wait_secs = max(0.0, 60.0 - (now - self._weight_window_start)) + 1.0
-            LOG.info(
-                "pre-flight weight guard | estimated_1m=%d threshold=%d sleeping=%.1fs operation=%s",
-                self._weight_window_weight + estimated,
-                _REST_WEIGHT_SOFT_LIMIT,
-                wait_secs,
-                operation,
-            )
-            await asyncio.sleep(wait_secs)
-            self._weight_window_weight = 0
-            self._weight_window_start = time.monotonic()
+        weight_wait_s = await self._weight_budget.acquire(weight=estimated, label=operation)
+        if weight_wait_s > 0.0:
+            limiter_wait_s += weight_wait_s
+        self._weight_window_weight = self._weight_budget.used_weight
 
         return spec, url, limiter_wait_s
 
@@ -1118,6 +1166,7 @@ class BinanceFuturesMarketData:
                         "quote_volume": float(
                             item.get("quoteVolume", 0) or item.get("quote_volume", 0)
                         ),
+                        "trade_count": float(item.get("count", 0) or item.get("trade_count", 0)),
                     }
                 )
             else:
@@ -1133,6 +1182,9 @@ class BinanceFuturesMarketData:
                         ),
                         "quote_volume": float(
                             getattr(item, "quote_volume", 0) or getattr(item, "quoteVolume", 0)
+                        ),
+                        "trade_count": float(
+                            getattr(item, "count", 0) or getattr(item, "trade_count", 0)
                         ),
                     }
                 )

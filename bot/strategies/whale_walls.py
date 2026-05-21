@@ -21,7 +21,7 @@ class WhaleWallsSetup(RoadmapSetup):
     required_context = ("futures_flow",)
     DEFAULTS = {
         **RoadmapSetup.DEFAULTS,
-        "min_depth_imbalance": 0.45,
+        "min_depth_imbalance": 0.3334,
         "min_microprice_bias": 0.20,
         "min_volume_ratio": 0.90,
         "min_close_position_long": 0.55,
@@ -33,13 +33,17 @@ class WhaleWallsSetup(RoadmapSetup):
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         params = self._params(prepared, settings)
+        wall_pressure = _finite_or_none(getattr(prepared, "depth_wall_pressure", None))
+        if wall_pressure is None or abs(wall_pressure) <= 0.0:
+            _reject(prepared, self.setup_id, "pattern.wall_proxy_too_weak")
+            return None
         depth = _finite_or_none(prepared.depth_imbalance)
         micro = _finite_or_none(prepared.microprice_bias)
         if depth is None or micro is None:
             _reject(
                 prepared,
                 self.setup_id,
-                "orderbook_context_incomplete",
+                "pattern.wall_proxy_too_weak",
                 depth_imbalance=depth,
                 microprice_bias=micro,
             )
@@ -48,7 +52,7 @@ class WhaleWallsSetup(RoadmapSetup):
             _reject(
                 prepared,
                 self.setup_id,
-                "depth_l2_missing",
+                "pattern.wall_proxy_too_weak",
                 depth_source=_orderbook_source(prepared),
                 depth_imbalance=depth,
                 microprice_bias=micro,
@@ -56,7 +60,7 @@ class WhaleWallsSetup(RoadmapSetup):
             return None
         spread = _finite_or_none(prepared.spread_bps)
         if spread is not None and spread > float(params["max_spread_bps"]):
-            _reject(prepared, self.setup_id, "spread_too_wide", spread_bps=spread)
+            _reject(prepared, self.setup_id, "pattern.wall_proxy_too_weak", spread_bps=spread)
             return None
         depth_value = float(depth)
         micro_value = float(micro)
@@ -66,7 +70,7 @@ class WhaleWallsSetup(RoadmapSetup):
         close_position = _last(work, "close_position", 0.5)
         roc10 = _last(work, "roc10", _price_change_pct(work, 10))
         if abs(roc10) < float(params["min_roc10_abs_pct"]):
-            _reject(prepared, self.setup_id, "price_acceptance_missing", roc10=roc10)
+            _reject(prepared, self.setup_id, "pattern.wall_proxy_too_weak", roc10=roc10)
             return None
         long_votes = sum(
             (
@@ -84,20 +88,18 @@ class WhaleWallsSetup(RoadmapSetup):
                 roc10 <= 0.0,
             )
         )
-        if long_votes >= 3 and long_votes > short_votes:
+        if wall_pressure > 0.0 and long_votes >= 2 and long_votes >= short_votes:
             direction = "long"
-        elif short_votes >= 3 and short_votes > long_votes:
+        elif wall_pressure < 0.0 and short_votes >= 2 and short_votes >= long_votes:
             direction = "short"
         else:
-            reason = (
-                "wall_proxy_conflict" if depth_value * micro_value < 0.0 else "wall_proxy_too_weak"
-            )
             _reject(
                 prepared,
                 self.setup_id,
-                reason,
+                "pattern.wall_proxy_too_weak",
                 depth_imbalance=depth_value,
                 microprice_bias=micro_value,
+                wall_pressure=wall_pressure,
                 close_position=close_position,
             )
             return None
@@ -114,6 +116,7 @@ class WhaleWallsSetup(RoadmapSetup):
             params=params,
             reasons=[
                 f"orderbook_wall_proxy_{direction}",
+                f"wall_pressure={wall_pressure:.3f}",
                 f"depth_imbalance={depth_value:.3f}",
                 f"depth_source={_orderbook_source(prepared)}",
                 f"micro={micro_value:.3f}",

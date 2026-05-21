@@ -21,6 +21,7 @@ from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..features import _swing_points
 from ..setups.utils import get_dynamic_params
 from .common import as_float
+from .spec_patterns import build_spec_signal, detect_hidden_divergence
 
 LOG = logging.getLogger("bot.strategies.hidden_divergence")
 
@@ -120,6 +121,20 @@ class HiddenDivergenceSetup(BaseSetup):
         setup_id = self.setup_id
         dynamic_params = get_dynamic_params(prepared, setup_id)
         defaults = self.get_optimizable_params(settings)
+        effective_params = {**defaults, **dynamic_params}
+        hit = detect_hidden_divergence(prepared.work_15m, timeframe="15m")
+        if hit is None:
+            _reject(prepared, setup_id, "pattern.no_trend_context")
+            return None
+        return build_spec_signal(
+            prepared=prepared,
+            settings=settings,
+            setup_id=setup_id,
+            family=self.family,
+            hit=hit,
+            defaults=defaults,
+            params=effective_params,
+        )
 
         rsi_divergence_lookback = int(
             dynamic_params.get("rsi_divergence_lookback", defaults["rsi_divergence_lookback"])

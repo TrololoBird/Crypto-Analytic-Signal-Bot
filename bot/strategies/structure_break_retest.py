@@ -15,6 +15,7 @@ from ..setups.utils import (
     get_dynamic_params,
     validate_rr_or_penalty,
 )
+from .spec_patterns import build_spec_signal, detect_structure_break_retest
 
 
 def _as_float(value: object, default: float = 0.0) -> float:
@@ -114,6 +115,20 @@ class StructureBreakRetestSetup(BaseSetup):
         setup_id = self.setup_id
         dynamic_params = get_dynamic_params(prepared, setup_id)
         defaults = self.get_optimizable_params(settings)
+
+        hit = detect_structure_break_retest(prepared.work_15m, timeframe="15m")
+        if hit is not None:
+            return build_spec_signal(
+                prepared=prepared,
+                settings=settings,
+                setup_id=setup_id,
+                family=self.family,
+                hit=hit,
+                defaults=defaults,
+                params=dynamic_params,
+            )
+        _reject(prepared, setup_id, "pattern.no_breakout_detected")
+        return None
 
         swing_lookback = max(
             2, int(dynamic_params.get("swing_lookback", defaults["swing_lookback"]))

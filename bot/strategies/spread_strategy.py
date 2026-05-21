@@ -34,7 +34,7 @@ class SpreadStrategySetup(RoadmapSetup):
         params = self._params(prepared, settings)
         spread = _finite_or_none(prepared.spread_bps)
         if spread is None:
-            _reject(prepared, self.setup_id, "spread_missing")
+            _reject(prepared, self.setup_id, "data.spread_missing")
             return None
         if spread > float(params["max_spread_bps"]):
             _reject(prepared, self.setup_id, "spread_too_wide", spread_bps=spread)
@@ -43,8 +43,11 @@ class SpreadStrategySetup(RoadmapSetup):
         vol_ratio = _last(work, "volume_ratio20", 1.0)
         roc10 = _last(work, "roc10", _price_change_pct(work, 10))
         volume_penalty = vol_ratio < float(params["min_volume_ratio"])
+        if vol_ratio < 0.5:
+            _reject(prepared, self.setup_id, "context.momentum_too_low", volume_ratio=vol_ratio)
+            return None
         if abs(roc10) < float(params["min_roc10_abs_pct"]):
-            _reject(prepared, self.setup_id, "momentum_too_low", roc10=roc10)
+            _reject(prepared, self.setup_id, "context.momentum_too_low", roc10=roc10)
             return None
         direction = "long" if roc10 > 0.0 else "short"
         depth = _finite_or_none(prepared.depth_imbalance)

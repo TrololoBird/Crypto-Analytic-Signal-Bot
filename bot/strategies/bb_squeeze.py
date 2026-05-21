@@ -10,6 +10,7 @@ from .roadmap_base import (
     _reject,
     _series_max_tail,
 )
+from .spec_patterns import build_spec_signal, detect_bb_squeeze_release
 
 class BBSqueezeSetup(RoadmapSetup):
     setup_id = "bb_squeeze"
@@ -27,6 +28,19 @@ class BBSqueezeSetup(RoadmapSetup):
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         params = self._params(prepared, settings)
+        hit = detect_bb_squeeze_release(prepared.work_15m, timeframe="15m")
+        if hit is None:
+            _reject(prepared, self.setup_id, "indicator.no_bb_kc_squeeze")
+            return None
+        return build_spec_signal(
+            prepared=prepared,
+            settings=settings,
+            setup_id=self.setup_id,
+            family=self.family,
+            hit=hit,
+            defaults=self.DEFAULTS,
+            params=params,
+        )
         work = prepared.work_15m
         missing = _missing_columns(work, ("bb_width", "squeeze_on", "squeeze_off", "roc10"))
         if missing:

@@ -20,11 +20,16 @@ For full pipeline (`_prepare_frame`) input frame must include:
 
 `_prepare_frame` returns a Polars DataFrame with core + advanced + oscillator + microstructure + session columns and drops warm-up rows where long-window features are not available (`ema200`, `donchian_low20`).
 
-`prepare_symbol()` preserves timeframe names literally in `PreparedSymbol`:
+`prepare_symbol()` preserves timeframe names literally in `PreparedSymbol`.
+Current runtime code requires all configured warmup minimums for `5m`, `15m`,
+`1h`, and `4h` before it returns a `PreparedSymbol`; missing or short history
+returns `None` with an `insufficient frame data` log line. The field names then
+retain their literal timeframe meaning:
 
 - `work_15m` is always the prepared 15m frame.
 - `work_1h` is always the prepared 1h frame.
-- `work_5m` and `work_4h` remain optional context frames.
+- `work_5m` is the prepared 5m frame once the symbol passes warmup.
+- `work_4h` is the prepared 4h frame once the symbol passes warmup.
 - `work_primary` points to the configured primary timeframe frame (`5m`, `15m`, `1h`, or `4h`) after fallback resolution.
 
 Asset-level `primary_timeframe` changes freshness/scoring policy and the

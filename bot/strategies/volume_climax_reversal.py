@@ -12,6 +12,7 @@ from ..domain.schemas import PreparedSymbol, Signal
 from ..setup_base import BaseSetup
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.utils import get_dynamic_params
+from .spec_patterns import build_spec_signal, detect_volume_climax_reversal
 
 
 def _as_float(value: object, default: float = 0.0) -> float:
@@ -52,6 +53,23 @@ class VolumeClimaxReversalSetup(BaseSetup):
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         setup_id = self.setup_id
         work = prepared.work_15m
+        params = self.get_optimizable_params(settings)
+        dynamic_params = get_dynamic_params(prepared, setup_id)
+        effective_params = {**params, **dynamic_params}
+        hit = detect_volume_climax_reversal(work, timeframe="15m")
+        if hit is None:
+            _reject(prepared, setup_id, "pattern.no_volume_climax_reclaim")
+            return None
+        return build_spec_signal(
+            prepared=prepared,
+            settings=settings,
+            setup_id=setup_id,
+            family=self.family,
+            hit=hit,
+            defaults=params,
+            params=effective_params,
+        )
+
         if work.height < 30:
             _reject(prepared, setup_id, "insufficient_15m_bars")
             return None
@@ -72,10 +90,6 @@ class VolumeClimaxReversalSetup(BaseSetup):
         if missing:
             _reject(prepared, setup_id, "missing_columns", missing_fields=missing)
             return None
-
-        params = self.get_optimizable_params(settings)
-        dynamic_params = get_dynamic_params(prepared, setup_id)
-        effective_params = {**params, **dynamic_params}
 
         atr = _as_float(work.item(-1, "atr14"))
         close = _as_float(work.item(-1, "close"))

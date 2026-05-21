@@ -13,12 +13,11 @@ import structlog
 
 from .domain.config import BotSettings
 from .features import _cached_prepare_frame, _swing_points, _to_polars
-from .market_data import BinanceFuturesMarketData, validate_runtime_public_rest_url
+from .market_data import BinanceFuturesMarketData
 from .telemetry import TelemetryStore
 
 LOG = structlog.get_logger("bot.public_intelligence")
 UTC = timezone.utc
-_OPTIONS_EXCHANGE_INFO_TTL_S = 3600.0
 _MACRO_TTL_S = 900.0
 _PLACEHOLDER_COLUMNS: frozenset[str] = frozenset()
 
@@ -75,7 +74,6 @@ class PublicIntelligenceService:
         self._telemetry = telemetry
         self._reports_dir = settings.data_dir / "session" / "reports"
         self._reports_dir.mkdir(parents=True, exist_ok=True)
-        self._options_exchange_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
         self._macro_cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self._latest_snapshot: dict[str, Any] | None = None
         self._last_report_hour_key: str | None = None
@@ -108,9 +106,6 @@ class PublicIntelligenceService:
                 "macro_context_uses_binance_futures_proxy_under_source_policy_binance_only"
             ],
         }
-
-    def _options_eapi_research_enabled(self) -> bool:
-        return bool(getattr(self._settings.intelligence, "allow_runtime_options_eapi", False))
 
     async def collect(self, shortlist_symbols: Iterable[str]) -> dict[str, Any]:
         symbols = [str(item).strip().upper() for item in shortlist_symbols if str(item).strip()]
@@ -471,9 +466,7 @@ class PublicIntelligenceService:
 
     async def build_options_research_snapshot(self) -> dict[str, Any]:
         """Optional non-runtime helper for offline options analytics."""
-        if not self._options_eapi_research_enabled():
-            return {"enabled": False, "reason": "allow_runtime_options_eapi_false"}
-        return {"enabled": True, "note": "research utility path only"}
+        return {"enabled": False, "reason": "binance_options_surface_removed_from_runtime_code"}
 
     async def _fetch_options_runtime_inputs(
         self, asset: str
@@ -890,57 +883,16 @@ class PublicIntelligenceService:
         }
 
     async def _fetch_options_exchange_info(self, underlying_asset: str) -> list[dict[str, Any]]:
-        if not self._options_eapi_research_enabled():
-            return []
-        asset = str(underlying_asset or "").strip().upper()
-        now = time.monotonic()
-        cached = self._options_exchange_cache.get(asset)
-        if cached is not None and now - cached[0] < _OPTIONS_EXCHANGE_INFO_TTL_S:
-            return cached[1]
-
-        validate_runtime_public_rest_url("https://eapi.binance.com/eapi/v1/exchangeInfo")
-        payload = await self._fetch_json("https://eapi.binance.com/eapi/v1/exchangeInfo")
-        option_symbols_raw = payload.get("optionSymbols") if isinstance(payload, dict) else None
-        option_symbols = option_symbols_raw if isinstance(option_symbols_raw, list) else []
-        rows = [
-            item
-            for item in option_symbols
-            if isinstance(item, dict)
-            and str(item.get("status") or "").upper() == "TRADING"
-            and str(item.get("underlying") or "").upper() == f"{asset}USDT"
-        ]
-        self._options_exchange_cache[asset] = (now, rows)
-        return rows
+        return []
 
     async def _fetch_options_open_interest(
         self,
         underlying_asset: str,
         expiry_code: str,
     ) -> list[dict[str, Any]]:
-        if not self._options_eapi_research_enabled():
-            return []
-        validate_runtime_public_rest_url("https://eapi.binance.com/eapi/v1/openInterest")
-        payload = await self._fetch_json(
-            "https://eapi.binance.com/eapi/v1/openInterest",
-            params={
-                "underlyingAsset": str(underlying_asset or "").strip().upper(),
-                "expiration": str(expiry_code or "").strip(),
-            },
-        )
-        if isinstance(payload, list):
-            return [row for row in payload if isinstance(row, dict)]
         return []
 
     async def _fetch_options_mark_rows(self, underlying: str) -> list[dict[str, Any]]:
-        if not self._options_eapi_research_enabled():
-            return []
-        validate_runtime_public_rest_url("https://eapi.binance.com/eapi/v1/mark")
-        payload = await self._fetch_json(
-            "https://eapi.binance.com/eapi/v1/mark",
-            params={"underlying": str(underlying or "").strip().upper()},
-        )
-        if isinstance(payload, list):
-            return [row for row in payload if isinstance(row, dict)]
         return []
 
     async def _fetch_yahoo_chart_snapshot(self, symbol: str) -> dict[str, Any]:

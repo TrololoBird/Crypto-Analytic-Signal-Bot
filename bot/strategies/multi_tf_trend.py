@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import polars as pl
+
 from ..domain.config import BotSettings
 from ..domain.schemas import PreparedSymbol, Signal
 from .roadmap_base import (
@@ -27,6 +29,36 @@ class MultiTFTrendSetup(RoadmapSetup):
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         params = self._params(prepared, settings)
+        htf = prepared.work_4h if prepared.work_4h is not None and prepared.work_4h.height >= 55 else prepared.work_1h
+        ltf = prepared.work_15m
+        if htf.height < 55 or ltf.height < 10:
+            _reject(
+                prepared,
+                self.setup_id,
+                "insufficient_history",
+                htf_bars=htf.height,
+                ltf_bars=ltf.height,
+            )
+            return None
+        htf_ema = htf.select(pl.col("close").ewm_mean(span=50, adjust=False).alias("ema50"))[
+            "ema50"
+        ]
+        htf_slope = float(htf_ema[-1] - htf_ema[-5])
+        ltf_delta = _last(ltf, "close") - _last(ltf.head(ltf.height - 5), "close")
+        if htf_slope > 0.0 and ltf_delta >= 0.0:
+            spec_direction = "long"
+        elif htf_slope < 0.0 and ltf_delta <= 0.0:
+            spec_direction = "short"
+        else:
+            _reject(
+                prepared,
+                self.setup_id,
+                "pattern.multi_tf_not_aligned",
+                htf_slope=htf_slope,
+                ltf_delta=ltf_delta,
+            )
+            return None
+
         adx_1h = _last(prepared.work_1h, "adx14")
         vol_ratio = _last(prepared.work_15m, "volume_ratio20", 1.0)
         rsi_15m = _last(prepared.work_15m, "rsi14", 50.0)
@@ -57,6 +89,17 @@ class MultiTFTrendSetup(RoadmapSetup):
                 up_votes=up_votes,
                 down_votes=down_votes,
                 min_votes=min_votes,
+            )
+            return None
+        if direction != spec_direction:
+            _reject(
+                prepared,
+                self.setup_id,
+                "pattern.multi_tf_not_aligned",
+                htf_slope=htf_slope,
+                ltf_delta=ltf_delta,
+                context_direction=direction,
+                spec_direction=spec_direction,
             )
             return None
         if direction == "long" and rsi_15m > float(params["pullback_rsi_long_max"]):
@@ -105,6 +148,7 @@ class MultiTFTrendSetup(RoadmapSetup):
             reasons=[
                 f"multi_tf_pullback_{direction}",
                 f"adx_1h={adx_1h:.1f}",
+                f"htf_ema50_slope={htf_slope:.6f}",
                 f"rsi15={rsi_15m:.1f}",
                 f"votes_up={up_votes} votes_down={down_votes}",
             ],

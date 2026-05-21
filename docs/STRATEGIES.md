@@ -125,6 +125,32 @@ Use this sequence before changing a strategy:
 6. If the strategy concept itself is weak or mislabeled, rewrite it from a
    real public-data-compatible implementation and update this document.
 
+## 2026-05-21 Spec Contract Pass
+
+The runtime now has a shared Polars spec layer in
+`bot/strategies/spec_patterns.py` for the 38-strategy public-data contract.
+Strategy modules still own scoring/metadata, but the first detector path for
+the price-action, volume, volatility, orderflow, and divergence families uses
+the explicit spec thresholds and rejection codes from the current operator
+specification.
+
+- Rate limiting: public REST calls go through a client-side request-weight
+  budget before hitting Binance, while `/futures/data/*` remains separately
+  paced by request-count limits.
+- Warmup/data quality: `5m`, `15m`, `1h`, and `4h` frames are required before
+  strategy analysis; incomplete kline tails are dropped by `close_time`.
+- Shortlist L1: non-pinned symbols must pass `PERPETUAL`/USDT/trading metadata,
+  50M quote volume, 0.5 percent 24h movement, 10k 24h trades, and 90 days of
+  listing history.
+- Diagnostics: every spec miss is a structured `StrategyDecision` rejection;
+  hourly rejection rollups are written to `rejection_stats.jsonl`.
+- Regime handling: ADX-based trend/range prechecks are family-aware. Trend
+  continuation setups are hard-rejected in weak regimes; range/exhaustion
+  setups receive a score penalty in very strong trends.
+- Market state output must use public-data proxies or explicit diagnostic
+  wording. It must not render unknown placeholders such as `n/a`/`н/д` in the
+  market-state message.
+
 ## 2026-05-19 Strategy Logic Remediation
 
 Current remediation target: keep all 38 registered strategies active and repair
@@ -153,9 +179,9 @@ logic or broken data contracts.
   `squeeze_on/squeeze_off/squeeze_hist` columns; `price_velocity` and
   `volume_anomaly` use ATR/body/close-position confirmation with penalties for
   weak context instead of brittle last-candle-only gates.
-- Data-preparation contract: `15m` and `1h` frames are mandatory for runtime
-  preparation. `5m` and `4h` frames are contextual; a short optional frame must
-  downgrade context, not reject the whole symbol before strategies run.
+- Historical note: this pass previously treated `5m` and `4h` as contextual.
+  The current runtime contract above supersedes that: all four runtime
+  timeframes must be warmed before strategy analysis.
 - Outcome/tracking contract: pending signals that never activate are
   `expired_pending` or `unactivated_close` and are excluded from trade
   expectancy and adaptive setup scoring. A stop after TP1 is classified as

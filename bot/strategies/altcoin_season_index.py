@@ -28,14 +28,14 @@ class AltcoinSeasonIndexSetup(RoadmapSetup):
         params = self._params(prepared, settings)
         base = str(prepared.universe.base_asset or "").upper()
         if not base:
-            _reject(prepared, self.setup_id, "base_asset_missing")
+            _reject(prepared, self.setup_id, "data.base_asset_missing")
             return None
-        if base in {"BTC", "XAU", "XAG"}:
-            _reject(prepared, self.setup_id, "not_altcoin")
+        if base in {"BTC", "USDT", "USDC", "BUSD", "TUSD", "FDUSD", "DAI", "XAU", "XAG"}:
+            _reject(prepared, self.setup_id, "pattern.not_altcoin")
             return None
         index = _finite_or_none(getattr(prepared, "altcoin_season_index", None))
         if index is None:
-            _reject(prepared, self.setup_id, "altcoin_season_index_missing")
+            _reject(prepared, self.setup_id, "data.altcoin_season_index_missing")
             return None
         alt_index = index
         vol_ratio = _last(prepared.work_15m, "volume_ratio20", 1.0)

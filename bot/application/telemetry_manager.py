@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections import Counter
 from datetime import UTC, datetime
 from typing import Any
@@ -28,6 +29,8 @@ class TelemetryManager:
 
     def __init__(self, bot: Any) -> None:
         self._bot = bot
+        self._rejection_counts: Counter[str] = Counter()
+        self._last_rejection_summary_ts = 0.0
 
     @staticmethod
     def _frame_indicator_snapshot(frame: Any) -> dict[str, float]:
@@ -70,7 +73,7 @@ class TelemetryManager:
             "ts": datetime.now(UTC).isoformat(),
             "symbol": symbol,
             "setup_id": decision.setup_id,
-            "direction": getattr(decision.signal, "direction", "n/a"),
+            "direction": getattr(decision.signal, "direction", "none"),
             "stage": decision.stage,
             "reason": decision.reason_code,
             "reason_code": decision.reason_code,
@@ -159,10 +162,40 @@ class TelemetryManager:
         if decision.error is not None:
             row["error"] = decision.error
         self._bot.telemetry.append_jsonl("strategy_decisions.jsonl", row)
+        if decision.status in {"reject", "error"}:
+            key = f"{decision.setup_id}:{decision.reason_code}"
+            self._rejection_counts[key] += 1
+            self._maybe_emit_rejection_stats()
         if decision.missing_fields or decision.invalid_fields:
             self._bot.telemetry.append_jsonl("data_quality.jsonl", row)
         if decision.status in {"signal", "reject", "error"}:
             self.append_symbol_trace(symbol=symbol, row=row)
+
+    def _maybe_emit_rejection_stats(self) -> None:
+        now = time.monotonic()
+        if now - self._last_rejection_summary_ts < 3600.0:
+            return
+        self._last_rejection_summary_ts = now
+        rows = []
+        for key, count in self._rejection_counts.most_common(200):
+            setup_id, _, reason_code = key.partition(":")
+            rows.append(
+                {
+                    "setup_id": setup_id,
+                    "reason_code": reason_code,
+                    "count": int(count),
+                }
+            )
+        if not rows:
+            return
+        self._bot.telemetry.append_jsonl(
+            "rejection_stats.jsonl",
+            {
+                "ts": datetime.now(UTC).isoformat(),
+                "window": "process_lifetime",
+                "top": rows,
+            },
+        )
 
     def emit_shortlist_refresh(
         self,

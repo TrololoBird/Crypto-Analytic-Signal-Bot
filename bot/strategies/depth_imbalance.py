@@ -21,7 +21,7 @@ class DepthImbalanceSetup(RoadmapSetup):
     required_context = ("futures_flow",)
     DEFAULTS = {
         **RoadmapSetup.DEFAULTS,
-        "min_depth_imbalance": 0.20,
+        "min_depth_imbalance": 0.3334,
         "min_microprice_bias": 0.05,
         "min_close_position_long": 0.52,
         "max_close_position_short": 0.48,
@@ -34,7 +34,7 @@ class DepthImbalanceSetup(RoadmapSetup):
         params = self._params(prepared, settings)
         depth = _finite_or_none(prepared.depth_imbalance)
         if depth is None:
-            _reject(prepared, self.setup_id, "depth_imbalance_missing")
+            _reject(prepared, self.setup_id, "pattern.depth_not_actionable")
             return None
         micro = _finite_or_none(prepared.microprice_bias)
         if micro is None:
@@ -44,7 +44,7 @@ class DepthImbalanceSetup(RoadmapSetup):
             _reject(
                 prepared,
                 self.setup_id,
-                "depth_l2_missing",
+                "pattern.depth_not_actionable",
                 depth_source=_orderbook_source(prepared),
                 depth_imbalance=depth,
                 microprice_bias=micro,
@@ -57,7 +57,7 @@ class DepthImbalanceSetup(RoadmapSetup):
         volume_penalty = vol_ratio < float(params["min_volume_ratio"])
         roc10 = _last(prepared.work_15m, "roc10", _price_change_pct(prepared.work_15m, 10))
         if abs(roc10) < float(params["min_roc10_abs_pct"]):
-            _reject(prepared, self.setup_id, "price_acceptance_missing", roc10=roc10)
+            _reject(prepared, self.setup_id, "pattern.depth_not_actionable", roc10=roc10)
             return None
         long_votes = sum(
             (

@@ -24,11 +24,11 @@ class BTCCorrelationSetup(RoadmapSetup):
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         params = self._params(prepared, settings)
         if prepared.symbol == "BTCUSDT":
-            _reject(prepared, self.setup_id, "benchmark_symbol")
+            _reject(prepared, self.setup_id, "pattern.benchmark_symbol")
             return None
         btc_bias = getattr(prepared, "btc_bias", None)
         if btc_bias is None or str(btc_bias).strip() == "":
-            _reject(prepared, self.setup_id, "btc_context_missing")
+            _reject(prepared, self.setup_id, "data.btc_context_missing")
             return None
         btc_phase = str(getattr(prepared, "btc_phase", "") or "").lower()
         if btc_bias not in {"uptrend", "downtrend", "bull", "bear"}:
@@ -42,7 +42,7 @@ class BTCCorrelationSetup(RoadmapSetup):
         volume_penalty = vol_ratio < float(params["min_volume_ratio"])
         roc10 = _last(prepared.work_15m, "roc10", _price_change_pct(prepared.work_15m, 10))
         if abs(roc10) < float(params["min_roc10_abs_pct"]):
-            _reject(prepared, self.setup_id, "momentum_too_low", roc10=roc10)
+            _reject(prepared, self.setup_id, "context.momentum_too_low", roc10=roc10)
             return None
         if btc_bias in {"uptrend", "bull"} and prepared.bias_1h != "downtrend" and roc10 > 0.0:
             direction = "long"
@@ -56,7 +56,7 @@ class BTCCorrelationSetup(RoadmapSetup):
             _reject(
                 prepared,
                 self.setup_id,
-                "btc_correlation_not_aligned",
+                "pattern.btc_correlation_not_aligned",
                 btc_bias=btc_bias,
             )
             return None

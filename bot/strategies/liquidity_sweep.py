@@ -19,6 +19,7 @@ from ..setup_base import BaseSetup
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.smc import latest_liquidity_sweep
 from ..setups.utils import get_dynamic_params
+from .spec_patterns import build_spec_signal, detect_liquidity_sweep
 
 LOG = logging.getLogger("bot.strategies.liquidity_sweep")
 
@@ -87,6 +88,19 @@ class LiquiditySweepSetup(BaseSetup):
         )
         max_entry_distance_atr = float(
             dynamic_params.get("max_entry_distance_atr", defaults["max_entry_distance_atr"])
+        )
+        hit = detect_liquidity_sweep(prepared.work_15m, timeframe="15m")
+        if hit is None:
+            _reject(prepared, self.setup_id, "pattern.no_liquidity_sweep_detected")
+            return None
+        return build_spec_signal(
+            prepared=prepared,
+            settings=settings,
+            setup_id=self.setup_id,
+            family=self.family,
+            hit=hit,
+            defaults=defaults,
+            params={**defaults, **dynamic_params, "sl_buffer_atr": sl_buffer_atr},
         )
 
         try:
