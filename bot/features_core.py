@@ -50,11 +50,22 @@ def rsi(
     """Contract: input requires `close`; output RSI in [0,100] with neutral fill 50."""
     ensure_columns(df, ("close",), fn_name="rsi")
     if has_talib:
-        return materialize_series(
+        raw = materialize_series(
             cast(Any, plta).RSI(pl.col("close"), timeperiod=float(period)),
             df=df,
             name=f"rsi{period}",
         )
+        numeric = raw.cast(pl.Float64, strict=False)
+        max_value = numeric.max()
+        min_value = numeric.min()
+        try:
+            max_float = float(max_value) if max_value is not None else 100.0
+            min_float = float(min_value) if min_value is not None else 0.0
+        except (TypeError, ValueError):
+            return clean_non_finite(numeric, fill=50.0).clip(0.0, 100.0).rename(f"rsi{period}")
+        if max_float <= 1.5 and min_float >= -0.01:
+            numeric = numeric * 100.0
+        return clean_non_finite(numeric, fill=50.0).clip(0.0, 100.0).rename(f"rsi{period}")
     close = df["close"]
     delta = close.diff()
     gains = delta.clip(lower_bound=0.0)
@@ -279,13 +290,30 @@ def add_core_features(
         ]
     )
     price_dev_sq = (work["close"] - work["vwap"]) ** 2
-    vwap_std = (
-        (
-            price_dev_sq.cum_sum() / pl.Series("n", range(1, work.height + 1), dtype=pl.Float64)
-        ).sqrt()
-        if work.height
-        else price_dev_sq
+    time_column = next(
+        (column for column in ("close_time", "time", "open_time") if column in work.columns),
+        None,
     )
+    if time_column is not None and getattr(work.schema.get(time_column), "is_temporal", lambda: False)():
+        temp_vwap = work.with_columns(
+            [
+                price_dev_sq.alias("_vwap_dev_sq"),
+                pl.col(time_column).dt.date().alias("_vwap_session"),
+            ]
+        )
+        vwap_std = materialize_series(
+            (
+                pl.col("_vwap_dev_sq").cum_sum().over("_vwap_session")
+                / pl.col("_vwap_dev_sq").cum_count().over("_vwap_session")
+            ).sqrt(),
+            df=temp_vwap,
+            name="vwap_std",
+        )
+    elif work.height:
+        denom = pl.Series("n", range(1, work.height + 1), dtype=pl.Float64)
+        vwap_std = (price_dev_sq.cum_sum() / denom).sqrt()
+    else:
+        vwap_std = price_dev_sq
     work = work.with_columns(
         [
             vwap_std.alias("vwap_std"),

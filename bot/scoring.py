@@ -190,7 +190,12 @@ def _risk_reward_quality(signal: Signal, settings: BotSettings) -> float:
         setup_params = {}
     min_rr = float(setup_params.get("min_rr", min_risk_reward))
     max_rr = max(min_rr + 0.1, 4.0)
-    return max(0.0, min((rr - min_rr) / (max_rr - min_rr), 1.0))
+    if rr <= 0.0:
+        return 0.0
+    if rr < min_rr:
+        return max(0.05, min((rr / max(min_rr, 1e-9)) * 0.45, 0.45))
+    excess = (rr - min_rr) / max(max_rr - min_rr, 1e-9)
+    return max(0.55, min(0.55 + excess * 0.45, 1.0))
 
 
 def _funding_contrarian(prepared: PreparedSymbol, signal: Signal, settings: BotSettings) -> float:

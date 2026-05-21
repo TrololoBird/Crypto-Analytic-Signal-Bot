@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from ..domain.config import BotSettings
 
 from ..setup_base import BaseSetup
+from ..domain.strategies import StrategyDecision
 from ..domain.schemas import PreparedSymbol, Signal
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.utils import get_dynamic_params
@@ -140,6 +141,19 @@ def _in_killzone(hour: int, params: dict[str, object] | None = None) -> bool:
     return _active_killzone_name(hour, params) is not None
 
 
+def _latest_bar_time_utc(prepared: PreparedSymbol) -> datetime:
+    frame = prepared.work_15m
+    if frame.height > 0 and "time" in frame.columns:
+        last_bar_time = frame.item(-1, "time")
+        if isinstance(last_bar_time, datetime):
+            return (
+                last_bar_time.replace(tzinfo=timezone.utc)
+                if last_bar_time.tzinfo is None
+                else last_bar_time.astimezone(timezone.utc)
+            )
+    return datetime.now(timezone.utc)
+
+
 class SessionKillzoneSetup(BaseSetup):
     setup_id = "session_killzone"
     family = "breakout"
@@ -181,7 +195,25 @@ class SessionKillzoneSetup(BaseSetup):
                     return {**defaults, **setups_config.get(self.setup_id, {})}
         return defaults
 
-    def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
+    def active_session_name(
+        self,
+        prepared: PreparedSymbol,
+        settings: BotSettings | None = None,
+    ) -> str | None:
+        params = self.get_optimizable_params(settings)
+        dynamic_params = get_dynamic_params(prepared, self.setup_id)
+        effective_params = {**params, **dynamic_params}
+        now_utc = _latest_bar_time_utc(prepared)
+        return _active_killzone_name(now_utc.hour, cast(dict[str, object], effective_params))
+
+    def is_active_now(
+        self,
+        prepared: PreparedSymbol,
+        settings: BotSettings | None = None,
+    ) -> bool:
+        return self.active_session_name(prepared, settings) is not None
+
+    def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> StrategyDecision | Signal | None:
         try:
             return self._detect(prepared, settings)
         except Exception as exc:
@@ -240,19 +272,14 @@ class SessionKillzoneSetup(BaseSetup):
         if "time" not in w.columns:
             _reject(prepared, setup_id, "time_missing")
             return None
-        last_bar_time = w.item(-1, "time")
-        if isinstance(last_bar_time, datetime):
-            now_utc = (
-                last_bar_time.replace(tzinfo=timezone.utc)
-                if last_bar_time.tzinfo is None
-                else last_bar_time.astimezone(timezone.utc)
-            )
-        else:
-            now_utc = datetime.now(timezone.utc)
+        now_utc = _latest_bar_time_utc(prepared)
         session_name = _active_killzone_name(now_utc.hour, cast(dict[str, object], effective_params))
         if session_name is None:
-            _reject(prepared, setup_id, "context.outside_killzone", hour=now_utc.hour)
-            return None
+            return StrategyDecision.skip(
+                setup_id=setup_id,
+                reason_code="schedule.outside_killzone",
+                details={"hour": now_utc.hour},
+            )
 
         atr = _as_float(w.item(-1, "atr14"))
         if atr <= 0 or math.isnan(atr):

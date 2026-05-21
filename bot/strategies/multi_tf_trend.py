@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import polars as pl
-
 from ..domain.config import BotSettings
 from ..domain.schemas import PreparedSymbol, Signal
 from .roadmap_base import (
@@ -40,9 +38,10 @@ class MultiTFTrendSetup(RoadmapSetup):
                 ltf_bars=ltf.height,
             )
             return None
-        htf_ema = htf.select(pl.col("close").ewm_mean(span=50, adjust=False).alias("ema50"))[
-            "ema50"
-        ]
+        if "ema50" not in htf.columns:
+            _reject(prepared, self.setup_id, "required_feature_missing", missing_fields=("ema50",))
+            return None
+        htf_ema = htf["ema50"]
         htf_slope = float(htf_ema[-1] - htf_ema[-5])
         ltf_delta = _last(ltf, "close") - _last(ltf.head(ltf.height - 5), "close")
         if htf_slope > 0.0 and ltf_delta >= 0.0:

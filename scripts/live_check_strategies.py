@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from collections import Counter
+import statistics
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,7 @@ except ModuleNotFoundError:  # pragma: no cover - direct script execution
 bootstrap_repo_path()
 
 from bot.domain.config import load_settings
+from bot.confluence import ConfluenceEngine
 from bot.core.engine import SignalEngine, StrategyRegistry
 from bot.features import min_required_bars, prepare_symbol
 from bot.market_data import BinanceFuturesMarketData, MarketDataUnavailable
@@ -198,7 +200,56 @@ def _market_context_from_tickers(ticker_map: dict[str, dict[str, Any]]) -> dict[
     }
 
 
-async def _run(symbols: list[str], concurrency: int, limit: int) -> None:
+def _parse_strategy_filter(raw: list[str] | None) -> tuple[str, ...]:
+    if not raw:
+        return ()
+    values: list[str] = []
+    for item in raw:
+        values.extend(part.strip() for part in str(item).split(",") if part.strip())
+    return tuple(dict.fromkeys(values))
+
+
+def _score_summary(scores: list[float]) -> dict[str, Any]:
+    if not scores:
+        return {"n": 0}
+    buckets = {
+        "<0.4": sum(1 for score in scores if score < 0.4),
+        "0.4-0.55": sum(1 for score in scores if 0.4 <= score < 0.55),
+        "0.55-0.65": sum(1 for score in scores if 0.55 <= score < 0.65),
+        "0.65-0.75": sum(1 for score in scores if 0.65 <= score < 0.75),
+        ">=0.75": sum(1 for score in scores if score >= 0.75),
+    }
+    return {
+        "n": len(scores),
+        "min": round(min(scores), 4),
+        "mean": round(statistics.mean(scores), 4),
+        "max": round(max(scores), 4),
+        "stdev": round(statistics.stdev(scores), 4) if len(scores) > 1 else 0.0,
+        "high_confidence": buckets[">=0.75"],
+        "buckets": buckets,
+    }
+
+
+def _component_summary(values_by_name: dict[str, list[float]]) -> dict[str, dict[str, Any]]:
+    summary: dict[str, dict[str, Any]] = {}
+    for name, values in sorted(values_by_name.items()):
+        if not values:
+            continue
+        summary[name] = {
+            "min": round(min(values), 4),
+            "mean": round(statistics.mean(values), 4),
+            "max": round(max(values), 4),
+            "unique": len({round(value, 3) for value in values}),
+        }
+    return summary
+
+
+async def _run(
+    symbols: list[str],
+    concurrency: int,
+    limit: int,
+    strategy_filter: tuple[str, ...] = (),
+) -> None:
     settings = load_settings()
     minimums = min_required_bars(
         min_bars_15m=settings.filters.min_bars_15m,
@@ -206,9 +257,19 @@ async def _run(symbols: list[str], concurrency: int, limit: int) -> None:
         min_bars_4h=settings.filters.min_bars_4h,
     )
     registry = StrategyRegistry()
+    selected_ids = set(strategy_filter)
+    available_ids = {strategy_class.setup_id for strategy_class in STRATEGY_CLASSES}
+    unknown_ids = sorted(selected_ids - available_ids)
+    if unknown_ids:
+        raise ValueError(f"unknown strategies requested: {unknown_ids}")
     for strategy_class in STRATEGY_CLASSES:
+        if selected_ids and strategy_class.setup_id not in selected_ids:
+            continue
         registry.register(strategy_class(SetupParams(enabled=True), settings))
+    if selected_ids:
+        LOG.info("strategy_filter_applied", strategies=sorted(selected_ids))
     engine = SignalEngine(registry, settings)
+    confluence = ConfluenceEngine(settings)
     client = BinanceFuturesMarketData(
         rest_timeout_seconds=settings.ws.rest_timeout_seconds,
         futures_data_request_limit_per_5m=settings.runtime.futures_data_request_limit_per_5m,
@@ -237,6 +298,8 @@ async def _run(symbols: list[str], concurrency: int, limit: int) -> None:
         skips_by_setup: Counter[str] = Counter()
         reject_reasons: Counter[str] = Counter()
         skip_reasons: Counter[str] = Counter()
+        confluence_scores: list[float] = []
+        confluence_components: defaultdict[str, list[float]] = defaultdict(list)
         detector_runs = 0
         prepared_ok = 0
         failures: list[dict[str, Any]] = []
@@ -283,13 +346,23 @@ async def _run(symbols: list[str], concurrency: int, limit: int) -> None:
                         errors_by_setup.update([setup_id])
                     elif result.signal is not None:
                         hits_by_setup.update([result.signal.setup_id])
+                        confluence_result = confluence.score(result.signal, prepared)
+                        confluence_scores.append(confluence_result.final_score)
+                        for component in confluence_result.components:
+                            if component.available:
+                                confluence_components[component.name].append(component.raw)
 
         await asyncio.gather(*[asyncio.create_task(_analyze(symbol)) for symbol in symbols])
+        scoring_summary = _score_summary(confluence_scores)
+        component_summary = _component_summary(confluence_components)
         LOG.info(
             "strategy_surface_summary",
             symbols=len(symbols),
             prepared_ok=prepared_ok,
             detector_runs=detector_runs,
+            requested_strategies=sorted(selected_ids),
+            confluence_score=scoring_summary,
+            confluence_components=component_summary,
             strategy_hits=hits_by_setup.most_common(),
             strategy_errors=errors_by_setup.most_common(),
             strategy_rejects=rejects_by_setup.most_common(20),
@@ -313,6 +386,12 @@ def main() -> None:
     parser.add_argument("--symbols-from-run", default="")
     parser.add_argument("--limit", type=int, default=12)
     parser.add_argument("--concurrency", type=int, default=2)
+    parser.add_argument(
+        "--strategies",
+        nargs="*",
+        default=[],
+        help="Optional setup ids to run; accepts space- or comma-separated ids.",
+    )
     args = parser.parse_args()
     fallback_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
     symbols = resolve_symbols(
@@ -329,7 +408,14 @@ def main() -> None:
     elif args.limit > 0:
         symbols = symbols[: args.limit]
     try:
-        asyncio.run(_run(symbols, args.concurrency, args.limit))
+        asyncio.run(
+            _run(
+                symbols,
+                args.concurrency,
+                args.limit,
+                _parse_strategy_filter(args.strategies),
+            )
+        )
     except MarketDataUnavailable as exc:
         LOG.error(
             "live_strategies_unavailable",

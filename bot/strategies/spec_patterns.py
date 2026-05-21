@@ -44,8 +44,36 @@ def required_columns(frame: pl.DataFrame, columns: tuple[str, ...]) -> list[str]
     return [column for column in columns if column not in frame.columns]
 
 
+def _feature_or_expr(
+    frame: pl.DataFrame,
+    source_column: str,
+    fallback: pl.Expr,
+    alias: str,
+) -> pl.Expr:
+    if source_column in frame.columns:
+        return pl.col(source_column).cast(pl.Float64, strict=False).alias(alias)
+    return fallback.alias(alias)
+
+
+def _feature_pair_or_expr(
+    frame: pl.DataFrame,
+    upper_column: str,
+    lower_column: str,
+    upper_fallback: pl.Expr,
+    lower_fallback: pl.Expr,
+    upper_alias: str,
+    lower_alias: str,
+) -> tuple[pl.Expr, pl.Expr]:
+    if upper_column in frame.columns and lower_column in frame.columns:
+        return (
+            pl.col(upper_column).cast(pl.Float64, strict=False).alias(upper_alias),
+            pl.col(lower_column).cast(pl.Float64, strict=False).alias(lower_alias),
+        )
+    return upper_fallback.alias(upper_alias), lower_fallback.alias(lower_alias)
+
+
 def with_spec_columns(frame: pl.DataFrame) -> pl.DataFrame:
-    """Add strict spec columns without relying on project-specific ATR semantics."""
+    """Add strict spec columns while reusing prepared feature columns when present."""
     if frame.is_empty():
         return frame
     required = required_columns(frame, ("open", "high", "low", "close", "volume"))
@@ -62,14 +90,39 @@ def with_spec_columns(frame: pl.DataFrame) -> pl.DataFrame:
             ).alias("spec_tr")
         )
     additions: list[pl.Expr] = [
-        pl.col("spec_tr").rolling_mean(14).alias("spec_atr14"),
-        pl.col("spec_tr").rolling_mean(20).alias("spec_atr20"),
-        pl.col("volume").rolling_mean(20).alias("spec_volume_mean20"),
-        pl.col("close").ewm_mean(span=20, adjust=False).alias("spec_ema20"),
-        pl.col("close").ewm_mean(span=21, adjust=False).alias("spec_ema21"),
-        pl.col("close").ewm_mean(span=50, adjust=False).alias("spec_ema50"),
-        pl.col("close").ewm_mean(span=200, adjust=False).alias("spec_ema200"),
-        (pl.col("close").rolling_mean(20)).alias("spec_sma20"),
+        _feature_or_expr(work, "atr14", pl.col("spec_tr").rolling_mean(14), "spec_atr14"),
+        _feature_or_expr(work, "atr20", pl.col("spec_tr").rolling_mean(20), "spec_atr20"),
+        _feature_or_expr(
+            work,
+            "volume_mean20",
+            pl.col("volume").rolling_mean(20),
+            "spec_volume_mean20",
+        ),
+        _feature_or_expr(
+            work,
+            "ema20",
+            pl.col("close").ewm_mean(span=20, adjust=False),
+            "spec_ema20",
+        ),
+        _feature_or_expr(
+            work,
+            "ema21",
+            pl.col("close").ewm_mean(span=21, adjust=False),
+            "spec_ema21",
+        ),
+        _feature_or_expr(
+            work,
+            "ema50",
+            pl.col("close").ewm_mean(span=50, adjust=False),
+            "spec_ema50",
+        ),
+        _feature_or_expr(
+            work,
+            "ema200",
+            pl.col("close").ewm_mean(span=200, adjust=False),
+            "spec_ema200",
+        ),
+        _feature_or_expr(work, "sma20", pl.col("close").rolling_mean(20), "spec_sma20"),
         (pl.col("high").shift(1).rolling_max(20)).alias("spec_prev_high20"),
         (pl.col("low").shift(1).rolling_min(20)).alias("spec_prev_low20"),
         (pl.col("high").shift(1).rolling_max(30)).alias("spec_prev_high30"),
@@ -85,14 +138,41 @@ def with_spec_columns(frame: pl.DataFrame) -> pl.DataFrame:
     ]
     work = work.with_columns(additions)
     bb_std = pl.col("close").rolling_std(20)
+    kc15_upper, kc15_lower = _feature_pair_or_expr(
+        work,
+        "kc_upper_15",
+        "kc_lower_15",
+        pl.col("spec_ema20") + 1.5 * pl.col("spec_atr20"),
+        pl.col("spec_ema20") - 1.5 * pl.col("spec_atr20"),
+        "spec_kc15_upper",
+        "spec_kc15_lower",
+    )
+    kc20_upper, kc20_lower = _feature_pair_or_expr(
+        work,
+        "kc_upper",
+        "kc_lower",
+        pl.col("spec_ema20") + 2.0 * pl.col("spec_atr14"),
+        pl.col("spec_ema20") - 2.0 * pl.col("spec_atr14"),
+        "spec_kc20_upper",
+        "spec_kc20_lower",
+    )
+    bb_upper, bb_lower = _feature_pair_or_expr(
+        work,
+        "bb_upper",
+        "bb_lower",
+        pl.col("spec_sma20") + 2.0 * bb_std,
+        pl.col("spec_sma20") - 2.0 * bb_std,
+        "spec_bb_upper",
+        "spec_bb_lower",
+    )
     work = work.with_columns(
         [
-            (pl.col("spec_sma20") + 2.0 * bb_std).alias("spec_bb_upper"),
-            (pl.col("spec_sma20") - 2.0 * bb_std).alias("spec_bb_lower"),
-            (pl.col("spec_ema20") + 1.5 * pl.col("spec_atr20")).alias("spec_kc15_upper"),
-            (pl.col("spec_ema20") - 1.5 * pl.col("spec_atr20")).alias("spec_kc15_lower"),
-            (pl.col("spec_ema20") + 2.0 * pl.col("spec_atr14")).alias("spec_kc20_upper"),
-            (pl.col("spec_ema20") - 2.0 * pl.col("spec_atr14")).alias("spec_kc20_lower"),
+            bb_upper,
+            bb_lower,
+            kc15_upper,
+            kc15_lower,
+            kc20_upper,
+            kc20_lower,
             (
                 pl.col("spec_body")
                 / pl.when(pl.col("spec_range") > 0.0).then(pl.col("spec_range")).otherwise(1e-8)
@@ -139,6 +219,8 @@ def with_spec_columns(frame: pl.DataFrame) -> pl.DataFrame:
             .fill_null(50.0)
             .alias("rsi14")
         )
+    else:
+        work = work.with_columns(pl.col("rsi14").cast(pl.Float64, strict=False).alias("rsi14"))
     if "vwap" not in work.columns:
         time_column = next(
             (column for column in ("open_time", "time", "close_time") if column in work.columns),
@@ -991,39 +1073,110 @@ def detect_ema_bounce(frame: pl.DataFrame, *, timeframe: str = "15m") -> SpecHit
     return None
 
 
-def detect_keltner_breakout(frame: pl.DataFrame, *, timeframe: str = "15m") -> SpecHit | None:
+def detect_keltner_breakout(
+    frame: pl.DataFrame,
+    *,
+    timeframe: str = "15m",
+    lookback_bars: int = 3,
+    min_volume_ratio: float = 1.30,
+    kc_atr_mult: float = 1.80,
+    acceptance_band_pct: float = 0.01,
+    min_body_ratio: float = 0.45,
+) -> SpecHit | None:
     work = with_spec_columns(frame)
     if work.height < 25:
         return None
-    row = _latest_values(work)
-    atr = row.get("spec_atr14", 0.0)
-    volume_mean = row.get("spec_volume_mean20", 0.0)
-    if atr <= 0.0 or volume_mean <= 0.0 or row["volume"] <= volume_mean * 1.5:
+    channel_mult = max(1.0, min(float(kc_atr_mult), 3.0))
+    work = work.with_columns(
+        [
+            (pl.col("spec_ema20") + channel_mult * pl.col("spec_atr14")).alias(
+                "spec_kc_break_upper"
+            ),
+            (pl.col("spec_ema20") - channel_mult * pl.col("spec_atr14")).alias(
+                "spec_kc_break_lower"
+            ),
+        ]
+    )
+    current = _latest_values(work)
+    current_close = current.get("close", 0.0)
+    current_upper = current.get("spec_kc_break_upper", 0.0)
+    current_lower = current.get("spec_kc_break_lower", 0.0)
+    current_atr = current.get("spec_atr14", 0.0)
+    if min(current_close, current_upper, current_atr) <= 0.0 or current_lower <= 0.0:
         return None
-    if row["close"] > row.get("spec_kc20_upper", float("inf")):
-        return SpecHit(
-            strategy="keltner_breakout",
-            direction="long",
-            entry=row["close"],
-            stop_basis=row["low"],
-            atr=atr,
-            timeframe=timeframe,
-            reasons=(f"kc_upper_break={row['spec_kc20_upper']:.4f}",),
-            vol_ratio=row.get("volume_ratio20", row["volume"] / volume_mean),
-            rsi=row.get("rsi14", 50.0),
-        )
-    if row["close"] < row.get("spec_kc20_lower", 0.0):
-        return SpecHit(
-            strategy="keltner_breakout",
-            direction="short",
-            entry=row["close"],
-            stop_basis=row["high"],
-            atr=atr,
-            timeframe=timeframe,
-            reasons=(f"kc_lower_break={row['spec_kc20_lower']:.4f}",),
-            vol_ratio=row.get("volume_ratio20", row["volume"] / volume_mean),
-            rsi=row.get("rsi14", 50.0),
-        )
+    recent_count = max(1, min(int(lookback_bars), 5, work.height))
+    recent = work.tail(recent_count).to_dicts()
+    current_idx = int(current.get("_spec_idx", work.height - 1))
+    min_vol = max(0.0, float(min_volume_ratio))
+    body_floor = max(0.0, min(float(min_body_ratio), 1.0))
+    hold_band = max(0.0, min(float(acceptance_band_pct), 0.05))
+    current_holds_long = current_close >= current_upper * (1.0 - hold_band)
+    current_holds_short = current_close <= current_lower * (1.0 + hold_band)
+
+    for row in reversed(recent):
+        idx = int(row.get("_spec_idx", current_idx))
+        lag = current_idx - idx
+        if lag < 0 or lag >= recent_count:
+            continue
+        atr = as_float(row.get("spec_atr14"))
+        upper = as_float(row.get("spec_kc_break_upper"))
+        lower = as_float(row.get("spec_kc_break_lower"))
+        volume_mean = as_float(row.get("spec_volume_mean20"))
+        volume_ratio = as_float(row.get("volume_ratio20"), 0.0)
+        if volume_ratio <= 0.0 and volume_mean > 0.0:
+            volume_ratio = as_float(row.get("volume")) / volume_mean
+        if atr <= 0.0 or upper <= 0.0 or lower <= 0.0 or volume_ratio < min_vol:
+            continue
+        body_ratio = as_float(row.get("spec_body_ratio"))
+        open_price = as_float(row.get("open"))
+        close_price = as_float(row.get("close"))
+        directional_body = body_ratio >= body_floor
+        if (
+            current_holds_long
+            and close_price > upper
+            and close_price > open_price
+            and directional_body
+        ):
+            return SpecHit(
+                strategy="keltner_breakout",
+                direction="long",
+                entry=max(current_upper, upper),
+                stop_basis=as_float(row.get("low")),
+                atr=atr,
+                timeframe=timeframe,
+                reasons=(
+                    f"kc_upper_recent_break={upper:.4f}",
+                    f"breakout_lag={lag}",
+                    f"kc_mult={channel_mult:.2f}",
+                    f"acceptance={current_close / current_upper:.4f}",
+                ),
+                vol_ratio=volume_ratio,
+                rsi=current.get("rsi14", 50.0),
+                source_index=idx,
+            )
+        if (
+            current_holds_short
+            and close_price < lower
+            and close_price < open_price
+            and directional_body
+        ):
+            return SpecHit(
+                strategy="keltner_breakout",
+                direction="short",
+                entry=min(current_lower, lower),
+                stop_basis=as_float(row.get("high")),
+                atr=atr,
+                timeframe=timeframe,
+                reasons=(
+                    f"kc_lower_recent_break={lower:.4f}",
+                    f"breakout_lag={lag}",
+                    f"kc_mult={channel_mult:.2f}",
+                    f"acceptance={current_close / current_lower:.4f}",
+                ),
+                vol_ratio=volume_ratio,
+                rsi=current.get("rsi14", 50.0),
+                source_index=idx,
+            )
     return None
 
 

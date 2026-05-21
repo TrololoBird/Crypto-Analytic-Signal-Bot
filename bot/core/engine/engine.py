@@ -138,10 +138,24 @@ class SignalEngine:
                         )
                     )
             strategies = routed
+        scheduled: list[Any] = []
+        schedule_skips = 0
+        for strategy in strategies:
+            if self._strategy_is_active_for_symbol(strategy, prepared):
+                scheduled.append(strategy)
+            else:
+                schedule_skips += 1
+        if schedule_skips:
+            LOG.debug(
+                "%s: strategy schedule skipped without detector telemetry | skipped=%d",
+                symbol,
+                schedule_skips,
+            )
+        strategies = scheduled
         LOG.info("%s: calculate_all called | strategies=%d", symbol, len(strategies))
 
         if not strategies:
-            LOG.error("%s: No enabled strategies to calculate", symbol)
+            LOG.debug("%s: No enabled strategies to calculate after routing/schedule", symbol)
             return routing_skips
 
         # Check which strategies can calculate
@@ -450,6 +464,30 @@ class SignalEngine:
             details=details,
             missing_fields=tuple(sorted(set(missing_fields))),
         )
+
+    def _strategy_is_active_for_symbol(self, strategy: Any, prepared: PreparedSymbol) -> bool:
+        checker = getattr(strategy, "is_active_now", None)
+        if not callable(checker):
+            return True
+        try:
+            return bool(checker(prepared, self._settings))
+        except TypeError:
+            try:
+                return bool(checker(prepared))
+            except Exception:
+                LOG.exception(
+                    "%s: strategy schedule check failed | strategy=%s",
+                    prepared.symbol,
+                    getattr(strategy, "strategy_id", "unknown"),
+                )
+                return True
+        except Exception:
+            LOG.exception(
+                "%s: strategy schedule check failed | strategy=%s",
+                prepared.symbol,
+                getattr(strategy, "strategy_id", "unknown"),
+            )
+            return True
 
     def _build_routing_skip_decision(
         self,

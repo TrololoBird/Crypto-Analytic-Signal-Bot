@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+import math
 from typing import Any
 
 from .domain.config import BotSettings
@@ -30,6 +31,7 @@ class ComponentScore:
     raw: float
     weight: float
     contribution: float
+    available: bool = True
 
 
 @dataclass(frozen=True)
@@ -62,6 +64,7 @@ class ConfluenceResult:
                     "raw": c.raw,
                     "weight": c.weight,
                     "contribution": c.contribution,
+                    "available": c.available,
                 }
                 for c in self.components
             ],
@@ -88,8 +91,13 @@ class ConfluenceEngine:
         model_score = sum(c.contribution for c in components)
 
         prior_w = max(0.0, min(cfg.setup_prior_weight, 1.0))
-        blended = (signal.score * prior_w) + (model_score * (1.0 - prior_w))
-        final = round(max(0.0, min(blended, 1.0)), 4)
+        calibrated_prior = self._calibrate_setup_prior(signal.score)
+        calibrated_model = self._calibrate_component_model(model_score)
+        blended = (calibrated_prior * prior_w) + (calibrated_model * (1.0 - prior_w))
+        final = round(
+            self._apply_component_edge(blended, signal=signal, components=components),
+            4,
+        )
 
         return ConfluenceResult(
             setup_prior=signal.score,
@@ -105,46 +113,196 @@ class ConfluenceEngine:
     ) -> list[ComponentScore]:
         funding_weight = max(0.0, min(cfg.weight_crowd_position * 0.5, cfg.weight_crowd_position))
         crowd_weight = max(0.0, cfg.weight_crowd_position - funding_weight)
-        specs = [
-            (
-                "mtf_alignment",
-                cfg.weight_mtf_alignment,
-                _mtf_alignment(prepared, signal),
-            ),
-            ("volume_quality", cfg.weight_volume_quality, _volume_quality(prepared)),
-            (
-                "structure_clarity",
-                cfg.weight_structure_clarity,
-                _structure_clarity(prepared, signal),
-            ),
-            (
-                "risk_reward",
-                cfg.weight_risk_reward,
-                _risk_reward_quality(signal, self.settings),
-            ),
-            (
-                "funding_score",
-                funding_weight,
-                _funding_contrarian(prepared, signal, self.settings),
-            ),
-            (
-                "crowd_position",
-                crowd_weight,
-                _crowd_position(prepared, signal, self.settings),
-            ),
-            ("oi_momentum", cfg.weight_oi_momentum, _oi_momentum(prepared, signal)),
+        raw_specs = [
+            {
+                "name": "mtf_alignment",
+                "weight": cfg.weight_mtf_alignment,
+                "raw": _mtf_alignment(prepared, signal),
+                "available": True,
+            },
+            {
+                "name": "volume_quality",
+                "weight": cfg.weight_volume_quality,
+                "raw": _volume_quality(prepared),
+                "available": self._has_latest_feature(prepared, "work_15m", "volume_ratio20"),
+            },
+            {
+                "name": "structure_clarity",
+                "weight": cfg.weight_structure_clarity,
+                "raw": _structure_clarity(prepared, signal),
+                "available": self._has_structure_context(prepared),
+            },
+            {
+                "name": "risk_reward",
+                "weight": cfg.weight_risk_reward,
+                "raw": _risk_reward_quality(signal, self.settings),
+                "available": bool(signal.risk_reward and signal.risk_reward > 0.0),
+            },
+            {
+                "name": "funding_score",
+                "weight": funding_weight,
+                "raw": _funding_contrarian(prepared, signal, self.settings),
+                "available": self._has_finite_attr(prepared, "funding_rate"),
+            },
+            {
+                "name": "crowd_position",
+                "weight": crowd_weight,
+                "raw": _crowd_position(prepared, signal, self.settings),
+                "available": self._has_crowding_context(prepared),
+            },
+            {
+                "name": "oi_momentum",
+                "weight": cfg.weight_oi_momentum,
+                "raw": _oi_momentum(prepared, signal),
+                "available": self._has_oi_or_flow_context(prepared, signal),
+            },
         ]
-        weight_total = sum(max(0.0, float(weight)) for _, weight, _ in specs)
+        specs: list[dict[str, Any]] = []
+        for spec in raw_specs:
+            base_weight = max(0.0, float(spec["weight"]))
+            if not spec["available"]:
+                base_weight = 0.0
+            adjusted_weight = base_weight * self._component_family_multiplier(
+                str(spec["name"]),
+                signal,
+            )
+            specs.append({**spec, "weight": adjusted_weight})
+
+        weight_total = sum(max(0.0, float(spec["weight"])) for spec in specs)
         if weight_total > 0.0:
             specs = [
-                (name, max(0.0, float(weight)) / weight_total, raw) for name, weight, raw in specs
+                {**spec, "weight": max(0.0, float(spec["weight"])) / weight_total}
+                for spec in specs
             ]
         return [
             ComponentScore(
-                name=name,
-                raw=round(raw, 4),
-                weight=weight,
-                contribution=round(weight * raw, 4),
+                name=str(spec["name"]),
+                raw=round(max(0.0, min(float(spec["raw"]), 1.0)), 4),
+                weight=round(float(spec["weight"]), 4),
+                contribution=round(float(spec["weight"]) * float(spec["raw"]), 4),
+                available=bool(spec["available"]),
             )
-            for name, weight, raw in specs
+            for spec in specs
         ]
+
+    @staticmethod
+    def _calibrate_setup_prior(score: float) -> float:
+        numeric = max(0.0, min(float(score), 1.0))
+        return max(0.0, min(0.5 + (numeric - 0.5) * 1.15, 1.0))
+
+    @staticmethod
+    def _calibrate_component_model(score: float) -> float:
+        numeric = max(0.0, min(float(score), 1.0))
+        return max(0.0, min(0.5 + (numeric - 0.5) * 1.35, 1.0))
+
+    @staticmethod
+    def _apply_component_edge(
+        blended: float,
+        *,
+        signal: Signal,
+        components: list[ComponentScore],
+    ) -> float:
+        usable = [item for item in components if item.available and item.weight > 0.0]
+        if not usable:
+            return max(0.0, min(blended, 1.0))
+        strong = sum(1 for item in usable if item.raw >= 0.72)
+        weak = sum(1 for item in usable if item.raw <= 0.30)
+        directional_bonus = 0.0
+        if signal.strategy_family in {"breakout", "continuation"}:
+            directional_bonus += 0.015 * strong
+        elif signal.strategy_family in {"reversal", "sentiment", "orderflow", "liquidity"}:
+            directional_bonus += 0.012 * strong
+        edge = directional_bonus - (0.025 * weak)
+        if strong >= 3 and weak == 0:
+            edge += 0.035
+        if weak >= 3:
+            edge -= 0.040
+        return max(0.0, min(blended + edge + 0.025, 1.0))
+
+    @staticmethod
+    def _component_family_multiplier(name: str, signal: Signal) -> float:
+        family = str(signal.strategy_family or "")
+        profile = str(signal.confirmation_profile or "")
+        if family in {"breakout", "continuation"} or profile == "trend_follow":
+            return {
+                "mtf_alignment": 1.20,
+                "volume_quality": 1.15,
+                "structure_clarity": 0.90,
+                "risk_reward": 1.05,
+                "funding_score": 0.65,
+                "crowd_position": 0.90,
+                "oi_momentum": 1.10,
+            }.get(name, 1.0)
+        if family in {"reversal", "sentiment", "liquidity", "orderflow"}:
+            return {
+                "mtf_alignment": 0.75,
+                "volume_quality": 1.00,
+                "structure_clarity": 1.10,
+                "risk_reward": 1.00,
+                "funding_score": 1.25,
+                "crowd_position": 1.25,
+                "oi_momentum": 1.05,
+            }.get(name, 1.0)
+        return 1.0
+
+    @staticmethod
+    def _has_finite_attr(prepared: PreparedSymbol, name: str) -> bool:
+        value = getattr(prepared, name, None)
+        if value is None:
+            return False
+        try:
+            return math.isfinite(float(value))
+        except (TypeError, ValueError):
+            return False
+
+    @classmethod
+    def _has_latest_feature(cls, prepared: PreparedSymbol, frame_name: str, column: str) -> bool:
+        frame = getattr(prepared, frame_name, None)
+        if frame is None or frame.is_empty() or column not in frame.columns:
+            return False
+        try:
+            value = frame.item(-1, column)
+        except (IndexError, TypeError, ValueError):
+            return False
+        try:
+            return value is not None and math.isfinite(float(value))
+        except (TypeError, ValueError):
+            return False
+
+    @classmethod
+    def _has_structure_context(cls, prepared: PreparedSymbol) -> bool:
+        if cls._has_finite_attr(prepared, "poc_1h"):
+            return True
+        frame = getattr(prepared, "work_1h", None)
+        if frame is None or frame.is_empty():
+            return False
+        return all(column in frame.columns for column in ("high", "low", "ema20", "atr14"))
+
+    @classmethod
+    def _has_crowding_context(cls, prepared: PreparedSymbol) -> bool:
+        flags = getattr(prepared, "data_freshness_flags", ()) or ()
+        if "crowding_context_missing" in flags:
+            return False
+        return any(
+            cls._has_finite_attr(prepared, name)
+            for name in (
+                "ls_ratio",
+                "top_account_ls_ratio",
+                "top_position_ls_ratio",
+                "global_ls_ratio",
+                "global_account_ls_ratio",
+                "top_vs_global_ls_gap",
+                "taker_ratio",
+            )
+        )
+
+    @classmethod
+    def _has_oi_or_flow_context(cls, prepared: PreparedSymbol, signal: Signal) -> bool:
+        if cls._has_finite_attr(prepared, "oi_change_pct") or cls._has_finite_attr(
+            prepared,
+            "basis_pct",
+        ):
+            return True
+        if getattr(signal, "orderflow_delta_ratio", None) is not None:
+            return True
+        return cls._has_latest_feature(prepared, "work_15m", "delta_ratio")

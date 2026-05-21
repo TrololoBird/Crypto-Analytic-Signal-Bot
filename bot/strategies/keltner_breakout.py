@@ -33,11 +33,15 @@ class KeltnerBreakoutSetup(BaseSetup):
     def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
         defaults = {
             "base_score": 0.54,
-            "min_volume_ratio": 1.25,
+            "min_volume_ratio": 1.30,
             "min_adx_1h": 14.0,
             "sl_buffer_atr": 0.6,
             "min_rr": 1.9,
             "breakout_lookback_bars": 8,
+            "recent_breakout_bars": 3,
+            "kc_atr_mult": 1.80,
+            "acceptance_band_pct": 0.01,
+            "min_body_ratio": 0.45,
             "max_retest_distance_atr": 1.25,
             "volume_penalty": 0.90,
         }
@@ -52,19 +56,25 @@ class KeltnerBreakoutSetup(BaseSetup):
         params = self.get_optimizable_params(settings)
         dynamic_params = get_dynamic_params(prepared, setup_id)
         effective_params = {**params, **dynamic_params}
-        hit = detect_keltner_breakout(prepared.work_15m, timeframe="15m")
-        if hit is None:
-            _reject(prepared, setup_id, "pattern.no_keltner_breakout")
-            return None
-        return build_spec_signal(
-            prepared=prepared,
-            settings=settings,
-            setup_id=setup_id,
-            family=self.family,
-            hit=hit,
-            defaults=params,
-            params=effective_params,
+        hit = detect_keltner_breakout(
+            prepared.work_15m,
+            timeframe="15m",
+            lookback_bars=int(effective_params.get("recent_breakout_bars", 3)),
+            min_volume_ratio=float(effective_params.get("min_volume_ratio", 1.30)),
+            kc_atr_mult=float(effective_params.get("kc_atr_mult", 1.80)),
+            acceptance_band_pct=float(effective_params.get("acceptance_band_pct", 0.01)),
+            min_body_ratio=float(effective_params.get("min_body_ratio", 0.45)),
         )
+        if hit is not None:
+            return build_spec_signal(
+                prepared=prepared,
+                settings=settings,
+                setup_id=setup_id,
+                family=self.family,
+                hit=hit,
+                defaults=params,
+                params=effective_params,
+            )
         work_15m = prepared.work_15m
         work_1h = prepared.work_1h
         if work_15m.height < 30 or work_1h.height < 30:
@@ -92,19 +102,15 @@ class KeltnerBreakoutSetup(BaseSetup):
         effective_params = {**params, **dynamic_params}
 
         close = _as_float(work_15m.item(-1, "close"))
-        kc_upper = _as_float(work_15m.item(-1, "kc_upper"))
-        kc_lower = _as_float(work_15m.item(-1, "kc_lower"))
         ema20 = _as_float(work_15m.item(-1, "ema20"))
         atr = _as_float(work_15m.item(-1, "atr14"))
         vol_ratio = _as_float(work_15m.item(-1, "volume_ratio20"), 1.0)
         rsi = _as_float(work_15m.item(-1, "rsi14"), 50.0)
         adx_1h = _as_float(work_1h.item(-1, "adx14"))
 
-        if min(close, kc_upper, kc_lower, ema20, atr) <= 0.0 or math.isnan(atr):
+        if min(close, ema20, atr) <= 0.0 or math.isnan(atr):
             _reject(prepared, setup_id, "invalid_indicator_state", atr=atr)
             return None
-
-        volume_penalty = vol_ratio < float(effective_params["min_volume_ratio"])
 
         if adx_1h > 0.0 and adx_1h < float(effective_params["min_adx_1h"]):
             _reject(prepared, setup_id, "adx_too_low", adx_1h=adx_1h)
@@ -116,37 +122,65 @@ class KeltnerBreakoutSetup(BaseSetup):
         entry_price = 0.0
         breakout_lag = 0
         breakout_vol_ratio = vol_ratio
-        lookback = min(max(1, int(effective_params["breakout_lookback_bars"])), work_15m.height)
-        max_retest_distance = atr * float(effective_params["max_retest_distance_atr"])
+        kc_atr_mult = max(1.0, min(float(effective_params.get("kc_atr_mult", 1.80)), 3.0))
+        min_volume_ratio = float(effective_params.get("min_volume_ratio", 1.30))
+        min_body_ratio = max(0.0, min(float(effective_params.get("min_body_ratio", 0.45)), 1.0))
+        acceptance_band = max(
+            0.0,
+            min(float(effective_params.get("acceptance_band_pct", 0.01)), 0.05),
+        )
+        lookback = min(
+            max(1, int(effective_params.get("recent_breakout_bars", 3))),
+            work_15m.height,
+        )
+        current_upper = ema20 + kc_atr_mult * atr
+        current_lower = ema20 - kc_atr_mult * atr
+        current_holds_long = close >= current_upper * (1.0 - acceptance_band)
+        current_holds_short = close <= current_lower * (1.0 + acceptance_band)
         for idx in range(work_15m.height - 1, work_15m.height - lookback - 1, -1):
+            bar_open = _as_float(work_15m.item(idx, "open"))
+            bar_high = _as_float(work_15m.item(idx, "high"))
+            bar_low = _as_float(work_15m.item(idx, "low"))
             bar_close = _as_float(work_15m.item(idx, "close"))
-            bar_upper = _as_float(work_15m.item(idx, "kc_upper"))
-            bar_lower = _as_float(work_15m.item(idx, "kc_lower"))
             bar_ema = _as_float(work_15m.item(idx, "ema20"))
+            bar_atr = _as_float(work_15m.item(idx, "atr14"))
             bar_vol = _as_float(work_15m.item(idx, "volume_ratio20"), 1.0)
-            if min(bar_close, bar_upper, bar_lower, bar_ema) <= 0.0:
+            if min(bar_open, bar_high, bar_low, bar_close, bar_ema, bar_atr) <= 0.0:
                 continue
-            if bar_close > bar_upper:
-                distance = close - bar_upper
-                if distance >= -atr * 0.25 and abs(distance) <= max_retest_distance:
-                    direction = "long"
-                    entry_price = bar_upper
-                    stop_basis = max(bar_lower, bar_ema)
-                    breakout_lag = work_15m.height - 1 - idx
-                    breakout_vol_ratio = bar_vol
-                    break
-            if bar_close < bar_lower:
-                distance = bar_lower - close
-                if distance >= -atr * 0.25 and abs(distance) <= max_retest_distance:
-                    direction = "short"
-                    entry_price = bar_lower
-                    stop_basis = min(bar_upper, bar_ema)
-                    breakout_lag = work_15m.height - 1 - idx
-                    breakout_vol_ratio = bar_vol
-                    break
+            if bar_vol < min_volume_ratio:
+                continue
+            bar_range = max(bar_high - bar_low, 1e-9)
+            body_ratio = abs(bar_close - bar_open) / bar_range
+            if body_ratio < min_body_ratio:
+                continue
+            bar_upper = bar_ema + kc_atr_mult * bar_atr
+            bar_lower = bar_ema - kc_atr_mult * bar_atr
+            if current_holds_long and bar_close > bar_upper and bar_close > bar_open:
+                direction = "long"
+                entry_price = max(current_upper, bar_upper)
+                stop_basis = min(bar_low, bar_ema)
+                breakout_lag = work_15m.height - 1 - idx
+                breakout_vol_ratio = bar_vol
+                break
+            if current_holds_short and bar_close < bar_lower and bar_close < bar_open:
+                direction = "short"
+                entry_price = min(current_lower, bar_lower)
+                stop_basis = max(bar_high, bar_ema)
+                breakout_lag = work_15m.height - 1 - idx
+                breakout_vol_ratio = bar_vol
+                break
 
         if direction is None:
-            _reject(prepared, setup_id, "no_keltner_breakout", close=close)
+            _reject(
+                prepared,
+                setup_id,
+                "pattern.no_keltner_breakout",
+                close=close,
+                kc_upper=current_upper,
+                kc_lower=current_lower,
+                min_volume_ratio=min_volume_ratio,
+                lookback=lookback,
+            )
             return None
 
         sh_mask, sl_mask = _swing_points(work_1h, n=3, include_unconfirmed_tail=True)
@@ -192,8 +226,6 @@ class KeltnerBreakoutSetup(BaseSetup):
             rsi=rsi,
             structure_clarity=0.6,
         )
-        if volume_penalty:
-            score *= float(effective_params["volume_penalty"])
 
         # Graded bias alignment
         if direction == "long" and bias_1h == "downtrend":
@@ -207,6 +239,7 @@ class KeltnerBreakoutSetup(BaseSetup):
             f"limit_entry={entry_price:.4f}",
             f"breakout_lag={breakout_lag}",
             f"vol_ratio={vol_ratio:.2f} breakout_vol={breakout_vol_ratio:.2f}",
+            f"kc_mult={kc_atr_mult:.2f} acceptance_band={acceptance_band:.3f}",
             f"adx_1h={adx_1h:.1f}",
         ]
         return _build_signal(

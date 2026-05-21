@@ -23,42 +23,46 @@ def supertrend(
     df: pl.DataFrame, period: int = 10, multiplier: float = 3.0
 ) -> tuple[pl.Series, pl.Series]:
     """Contract: input requires HLC; output (`supertrend`,`supertrend_dir`), dir ∈ {-1,1}."""
-    close = df["close"]
     atr = atr_from_true_range(true_range(df), period=period, df=df, name="supertrend_atr")
-    hl2 = (df["high"] + df["low"]) / 2.0
-    basic_upper = hl2 + multiplier * atr
-    basic_lower = hl2 - multiplier * atr
-    close_vals = close.to_list()
-    upper_vals = basic_upper.to_list()
-    lower_vals = basic_lower.to_list()
-    size = len(close_vals)
+    close = df["close"].to_numpy().astype(float, copy=False)
+    high = df["high"].to_numpy().astype(float, copy=False)
+    low = df["low"].to_numpy().astype(float, copy=False)
+    atr_values = atr.to_numpy().astype(float, copy=False)
+    size = len(close)
     if size == 0:
         empty = pl.Series("supertrend", [], dtype=pl.Float64)
-        return empty, pl.Series("supertrend_dir", [], dtype=pl.Float64)
-    final_upper = [float(upper_vals[0])]
-    final_lower = [float(lower_vals[0])]
-    st = [float(upper_vals[0])]
+        return empty, pl.Series("supertrend_dir", [], dtype=pl.Int8)
+
+    hl2 = (high + low) / 2.0
+    atr_values = np.nan_to_num(atr_values, nan=0.0, posinf=0.0, neginf=0.0)
+    upper_band = hl2 + multiplier * atr_values
+    lower_band = hl2 - multiplier * atr_values
+    final_upper = upper_band.copy()
+    final_lower = lower_band.copy()
+    direction = np.ones(size, dtype=np.int8)
+
     for idx in range(1, size):
-        bu = float(upper_vals[idx])
-        bl = float(lower_vals[idx])
-        prev_close = float(close_vals[idx - 1])
-        prev_fu = final_upper[idx - 1]
-        prev_fl = final_lower[idx - 1]
-        fu = bu if (bu < prev_fu or prev_close > prev_fu) else prev_fu
-        fl = bl if (bl > prev_fl or prev_close < prev_fl) else prev_fl
-        final_upper.append(fu)
-        final_lower.append(fl)
-        prev_st = st[idx - 1]
-        curr_close = float(close_vals[idx])
-        if prev_st == prev_fu:
-            next_st = fu if curr_close <= fu else fl
+        if close[idx - 1] > final_upper[idx - 1]:
+            final_upper[idx] = min(upper_band[idx], final_upper[idx - 1])
         else:
-            next_st = fl if curr_close >= fl else fu
-        st.append(next_st)
-    return pl.Series("supertrend", st, dtype=pl.Float64), pl.Series(
-        "supertrend_dir",
-        [1.0 if float(c) >= float(s) else -1.0 for c, s in zip(close_vals, st, strict=False)],
-        dtype=pl.Float64,
+            final_upper[idx] = upper_band[idx]
+
+        if close[idx - 1] < final_lower[idx - 1]:
+            final_lower[idx] = max(lower_band[idx], final_lower[idx - 1])
+        else:
+            final_lower[idx] = lower_band[idx]
+
+        if direction[idx - 1] == -1 and close[idx] > final_upper[idx]:
+            direction[idx] = 1
+        elif direction[idx - 1] == 1 and close[idx] < final_lower[idx]:
+            direction[idx] = -1
+        else:
+            direction[idx] = direction[idx - 1]
+
+    line = np.where(direction == 1, final_lower, final_upper)
+    return (
+        pl.Series("supertrend", line, dtype=pl.Float64),
+        pl.Series("supertrend_dir", direction, dtype=pl.Int8),
     )
 
 

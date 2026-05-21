@@ -733,67 +733,59 @@ def _supertrend(
     df: pl.DataFrame, period: int = 10, multiplier: float = 3.0
 ) -> tuple[pl.Series, pl.Series]:
     """SuperTrend indicator using canonical iterative band state updates."""
-    high = df["high"]
-    low = df["low"]
-    close = df["close"]
+    high_series = df["high"]
+    low_series = df["low"]
+    close_series = df["close"]
 
-    # ATR for SuperTrend
-    prev_close = close.shift(1)
+    prev_close = close_series.shift(1)
     tr = pl.max_horizontal(
-        (high - low).abs(),
-        (high - prev_close).abs(),
-        (low - prev_close).abs(),
+        (high_series - low_series).abs(),
+        (high_series - prev_close).abs(),
+        (low_series - prev_close).abs(),
     )
     atr = _materialize_series(
         tr.ewm_mean(alpha=1.0 / period, adjust=False), df=df, name="supertrend_atr"
     )
 
-    hl2 = (high + low) / 2.0
-    basic_upper = hl2 + multiplier * atr
-    basic_lower = hl2 - multiplier * atr
-
-    close_vals = close.to_list()
-    upper_vals = basic_upper.to_list()
-    lower_vals = basic_lower.to_list()
-    size = len(close_vals)
+    close = close_series.to_numpy().astype(float, copy=False)
+    high = high_series.to_numpy().astype(float, copy=False)
+    low = low_series.to_numpy().astype(float, copy=False)
+    atr_values = atr.to_numpy().astype(float, copy=False)
+    size = len(close)
     if size == 0:
         empty = pl.Series("supertrend", [], dtype=pl.Float64)
-        return empty, pl.Series("supertrend_dir", [], dtype=pl.Float64)
+        return empty, pl.Series("supertrend_dir", [], dtype=pl.Int8)
 
-    final_upper: list[float] = [float(upper_vals[0])]
-    final_lower: list[float] = [float(lower_vals[0])]
-    supertrend: list[float] = [float(upper_vals[0])]
-
+    atr_values = np.nan_to_num(atr_values, nan=0.0, posinf=0.0, neginf=0.0)
+    hl2 = (high + low) / 2.0
+    upper_band = hl2 + multiplier * atr_values
+    lower_band = hl2 - multiplier * atr_values
+    final_upper = upper_band.copy()
+    final_lower = lower_band.copy()
+    direction = np.ones(size, dtype=np.int8)
     for idx in range(1, size):
-        bu = float(upper_vals[idx])
-        bl = float(lower_vals[idx])
-        prev_close_value = float(close_vals[idx - 1])
-        prev_fu = final_upper[idx - 1]
-        prev_fl = final_lower[idx - 1]
-
-        fu = bu if (bu < prev_fu or prev_close_value > prev_fu) else prev_fu
-        fl = bl if (bl > prev_fl or prev_close_value < prev_fl) else prev_fl
-        final_upper.append(fu)
-        final_lower.append(fl)
-
-        prev_st = supertrend[idx - 1]
-        curr_close = float(close_vals[idx])
-        if prev_st == prev_fu:
-            st = fu if curr_close <= fu else fl
+        if close[idx - 1] > final_upper[idx - 1]:
+            final_upper[idx] = min(upper_band[idx], final_upper[idx - 1])
         else:
-            st = fl if curr_close >= fl else fu
-        supertrend.append(st)
+            final_upper[idx] = upper_band[idx]
 
-    st_s = pl.Series("supertrend", supertrend, dtype=pl.Float64)
-    direction = pl.Series(
-        "supertrend_dir",
-        [
-            1.0 if float(c) >= float(s) else -1.0
-            for c, s in zip(close_vals, supertrend, strict=False)
-        ],
-        dtype=pl.Float64,
+        if close[idx - 1] < final_lower[idx - 1]:
+            final_lower[idx] = max(lower_band[idx], final_lower[idx - 1])
+        else:
+            final_lower[idx] = lower_band[idx]
+
+        if direction[idx - 1] == -1 and close[idx] > final_upper[idx]:
+            direction[idx] = 1
+        elif direction[idx - 1] == 1 and close[idx] < final_lower[idx]:
+            direction[idx] = -1
+        else:
+            direction[idx] = direction[idx - 1]
+
+    line = np.where(direction == 1, final_lower, final_upper)
+    return (
+        pl.Series("supertrend", line, dtype=pl.Float64),
+        pl.Series("supertrend_dir", direction, dtype=pl.Int8),
     )
-    return st_s, direction
 
 
 def _bollinger_bands(
@@ -1342,8 +1334,30 @@ def _prepare_frame(df: pl.DataFrame) -> pl.DataFrame:
     )
 
     price_dev_sq = (work["close"] - work["vwap"]) ** 2
-    # polars Series has no cum_mean(); compute cumulative mean via cum_sum / n
-    if work.height:
+    vwap_time_column = next(
+        (
+            column
+            for column in ("close_time", "time", "open_time")
+            if column in work.columns and _is_temporal_dtype(work.schema.get(column))
+        ),
+        None,
+    )
+    if vwap_time_column is not None:
+        temp_vwap = work.with_columns(
+            [
+                price_dev_sq.alias("_vwap_dev_sq"),
+                pl.col(vwap_time_column).dt.date().alias("_vwap_session"),
+            ]
+        )
+        vwap_std = _materialize_series(
+            (
+                pl.col("_vwap_dev_sq").cum_sum().over("_vwap_session")
+                / pl.col("_vwap_dev_sq").cum_count().over("_vwap_session")
+            ).sqrt(),
+            df=temp_vwap,
+            name="vwap_std",
+        )
+    elif work.height:
         denom = pl.Series("n", range(1, work.height + 1), dtype=pl.Float64)
         vwap_std = (price_dev_sq.cum_sum() / denom).sqrt()
     else:
