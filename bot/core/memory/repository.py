@@ -812,7 +812,7 @@ class MemoryRepository(MemoryRepositoryExtension):
         setup_id: str,
         *,
         last_days: int = 90,
-        min_outcomes: int = 6,
+        min_outcomes: int = 3,
     ) -> float:
         if not self._conn:
             raise RuntimeError("Repository not initialized")
@@ -827,7 +827,15 @@ class MemoryRepository(MemoryRepositoryExtension):
             FROM signal_outcomes
             WHERE setup_id = ?
               AND COALESCE(closed_at, created_at) >= ?
-              AND result NOT IN ('expired_pending', 'unactivated_close', 'superseded')
+              AND result NOT IN (
+                  'expired',
+                  'expired_active',
+                  'expired_pending',
+                  'risk_monitor_exit',
+                  'smart_exit',
+                  'unactivated_close',
+                  'superseded'
+              )
               AND (
                   activated_at IS NOT NULL
                   OR result IN (
@@ -836,7 +844,7 @@ class MemoryRepository(MemoryRepositoryExtension):
                       'stop_loss',
                       'breakeven_stop',
                       'trailing_stop',
-                      'smart_exit',
+                      'emergency_exit',
                       'ambiguous_exit'
                   )
               )
@@ -860,6 +868,8 @@ class MemoryRepository(MemoryRepositoryExtension):
         if not math.isfinite(avg_r):
             avg_r = 0.0
 
+        if total >= 3 and wins == 0 and avg_r <= -0.35:
+            return -0.22
         if avg_r <= -0.35 or (avg_r <= -0.15 and win_rate < 0.40):
             return -0.18
         if avg_r < 0.0 and win_rate < 0.35:
@@ -878,7 +888,7 @@ class MemoryRepository(MemoryRepositoryExtension):
         pnl_r_multiple: float | None = None,
         was_profitable: bool | None = None,
         window_size: int = 20,
-        min_outcomes: int = 8,
+        min_outcomes: int = 3,
         penalty: float = -0.05,
         bonus: float = 0.03,
         low_win_rate: float = 0.40,
@@ -930,7 +940,7 @@ class MemoryRepository(MemoryRepositoryExtension):
             window = window[-window_size:]
 
         # Calculate adjustment
-        win_reasons = {"tp1_hit", "tp2_hit"}
+        win_reasons = {"tp1_hit", "tp2_hit", "tp3_hit", "partial_tp"}
         adjustment = 0.0
         if len(window) >= min_outcomes:
             wins = sum(1 for item in window if self._setup_outcome_is_win(item, win_reasons))
@@ -941,7 +951,9 @@ class MemoryRepository(MemoryRepositoryExtension):
                 if (r_value := self._setup_outcome_r_multiple(item)) is not None
             ]
             avg_r = sum(r_values) / len(r_values) if r_values else 0.0
-            if avg_r <= -0.35 or (win_rate < low_win_rate and avg_r < 0.0):
+            if len(window) >= 3 and wins == 0 and avg_r <= -0.35:
+                adjustment = min(penalty * 4.0, -0.20)
+            elif avg_r <= -0.35 or (win_rate < low_win_rate and avg_r < 0.0):
                 adjustment = min(penalty * 3.0, -0.15)
             elif win_rate < low_win_rate:
                 adjustment = penalty
@@ -1424,6 +1436,10 @@ class MemoryRepository(MemoryRepositoryExtension):
                         WHEN was_profitable = 1
                              AND result NOT IN (
                                  'expired_pending',
+                                 'expired',
+                                 'expired_active',
+                                 'risk_monitor_exit',
+                                 'smart_exit',
                                  'unactivated_close',
                                  'superseded'
                              )
@@ -1435,6 +1451,10 @@ class MemoryRepository(MemoryRepositoryExtension):
                     CASE
                         WHEN result IN (
                             'expired_pending',
+                            'expired',
+                            'expired_active',
+                            'risk_monitor_exit',
+                            'smart_exit',
                             'unactivated_close',
                             'superseded'
                         ) THEN 0
@@ -1445,7 +1465,7 @@ class MemoryRepository(MemoryRepositoryExtension):
                             'stop_loss',
                             'breakeven_stop',
                             'trailing_stop',
-                            'smart_exit',
+                            'emergency_exit',
                             'ambiguous_exit'
                         ) THEN 1
                         ELSE 0
@@ -1455,6 +1475,10 @@ class MemoryRepository(MemoryRepositoryExtension):
                     CASE
                         WHEN result IN (
                             'expired_pending',
+                            'expired',
+                            'expired_active',
+                            'risk_monitor_exit',
+                            'smart_exit',
                             'unactivated_close',
                             'superseded'
                         ) THEN NULL
@@ -1465,7 +1489,7 @@ class MemoryRepository(MemoryRepositoryExtension):
                             'stop_loss',
                             'breakeven_stop',
                             'trailing_stop',
-                            'smart_exit',
+                            'emergency_exit',
                             'ambiguous_exit'
                         ) THEN pnl_r_multiple
                         ELSE NULL
@@ -1475,6 +1499,10 @@ class MemoryRepository(MemoryRepositoryExtension):
                     CASE
                         WHEN result IN (
                             'expired_pending',
+                            'expired',
+                            'expired_active',
+                            'risk_monitor_exit',
+                            'smart_exit',
                             'unactivated_close',
                             'superseded'
                         ) THEN NULL
@@ -1485,7 +1513,7 @@ class MemoryRepository(MemoryRepositoryExtension):
                             'stop_loss',
                             'breakeven_stop',
                             'trailing_stop',
-                            'smart_exit',
+                            'emergency_exit',
                             'ambiguous_exit'
                         ) THEN pnl_pct
                         ELSE NULL

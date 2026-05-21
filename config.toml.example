@@ -55,7 +55,7 @@ light_refresh_interval_seconds = 75
 full_refresh_interval_seconds = 7200
 shortlist_spread_max_bps = 8.0
 shortlist_book_stale_seconds = 90.0
-pinned_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+pinned_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XAUUSDT", "XAGUSDT"]
 
 [bot.assets.BTCUSDT]
 primary_timeframe = "15m"
@@ -64,6 +64,12 @@ excluded_strategies = []
 deep_analysis = true
 
 [bot.assets.ETHUSDT]
+primary_timeframe = "15m"
+context_timeframes = ["1h", "4h"]
+excluded_strategies = []
+deep_analysis = true
+
+[bot.assets.SOLUSDT]
 primary_timeframe = "15m"
 context_timeframes = ["1h", "4h"]
 excluded_strategies = []
@@ -311,11 +317,11 @@ options_expiry_count = 2
 barrier_symbol_count = 2
 hard_barrier_pct = 1.5
 hard_barrier_window_minutes = 15
-smart_exit_enabled = true
+smart_exit_enabled = false
 smart_exit_threshold = 0.62
 regime_detector = "composite"
 max_consecutive_stop_losses = 3
 stop_loss_pause_hours = 5
-benchmark_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+benchmark_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XAUUSDT", "XAGUSDT"]
 option_underlyings = ["BTC", "ETH"]
 macro_symbols = ["^VIX", "DX-Y.NYB", "^TNX", "^GSPC"]

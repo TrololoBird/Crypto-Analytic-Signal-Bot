@@ -788,12 +788,29 @@ class SymbolAnalyzer:
                 for key in (
                     "btc_bias",
                     "eth_bias",
+                    "sol_bias",
+                    "xau_bias",
+                    "xag_bias",
                     "altcoin_season_index",
                     "btc_phase",
+                    "macro_risk_mode",
+                    "benchmark_context",
                 ):
                     value = market_ctx.get(key)
                     if value is not None and hasattr(prepared, key):
                         setattr(prepared, key, value)
+                benchmark_context = market_ctx.get("benchmark_context")
+                if isinstance(benchmark_context, dict):
+                    for symbol, attr in (
+                        ("SOLUSDT", "sol_bias"),
+                        ("XAUUSDT", "xau_bias"),
+                        ("XAGUSDT", "xag_bias"),
+                    ):
+                        payload = benchmark_context.get(symbol)
+                        if isinstance(payload, dict):
+                            bias = payload.get("bias")
+                            if bias:
+                                setattr(prepared, attr, str(bias))
             except _DEGRADATION_ERRORS as exc:
                 self._log_degradation(
                     level=logging.INFO,

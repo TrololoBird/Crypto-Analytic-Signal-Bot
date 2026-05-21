@@ -18,7 +18,15 @@ class StrategyAnalytics:
     @staticmethod
     def _is_trade_outcome(row: dict[str, Any]) -> bool:
         result = str(row.get("result") or "")
-        if result in {"expired_pending", "unactivated_close", "superseded"}:
+        if result in {
+            "expired",
+            "expired_active",
+            "expired_pending",
+            "risk_monitor_exit",
+            "smart_exit",
+            "unactivated_close",
+            "superseded",
+        }:
             return False
         return bool(row.get("activated_at")) or result in {
             "tp1_hit",
@@ -26,8 +34,8 @@ class StrategyAnalytics:
             "stop_loss",
             "breakeven_stop",
             "trailing_stop",
-            "smart_exit",
             "ambiguous_exit",
+            "emergency_exit",
         }
 
     async def generate_report(

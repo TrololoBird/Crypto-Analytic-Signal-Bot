@@ -787,17 +787,6 @@ class SignalTracker:
                     )
             if tracked.activated_at is None:
                 continue
-            if trade.trade_time > active_expires_at:
-                events.append(
-                    await self._close_event(
-                        tracked,
-                        event_type="expired",
-                        occurred_at=active_expires_at,
-                        price=last_price,
-                        precision_mode="trade",
-                    )
-                )
-                return events
             tick_events, closed = await self._apply_price_tick(
                 tracked,
                 price=trade.price,
@@ -815,17 +804,6 @@ class SignalTracker:
                     tracked,
                     event_type="expired",
                     occurred_at=pending_expires_at,
-                    price=last_price,
-                    precision_mode="trade",
-                )
-            )
-            return events
-        if tracked.activated_at is not None and now > active_expires_at:
-            events.append(
-                await self._close_event(
-                    tracked,
-                    event_type="expired",
-                    occurred_at=active_expires_at,
                     price=last_price,
                     precision_mode="trade",
                 )
@@ -913,17 +891,6 @@ class SignalTracker:
                     )
             if tracked.activated_at is None:
                 continue
-            if bar_close_time > active_expires_at:
-                events.append(
-                    await self._close_event(
-                        tracked,
-                        event_type="expired",
-                        occurred_at=active_expires_at,
-                        price=last_price,
-                        precision_mode="candle",
-                    )
-                )
-                return events
             if (tp2_touched and stop_touched) or (
                 tracked.tp1_hit_at is None and tp1_touched and stop_touched
             ):
@@ -1019,17 +986,6 @@ class SignalTracker:
                 )
             )
             return events
-        if tracked.activated_at is not None and now > active_expires_at:
-            events.append(
-                await self._close_event(
-                    tracked,
-                    event_type="expired",
-                    occurred_at=active_expires_at,
-                    price=last_price,
-                    precision_mode="candle",
-                )
-            )
-            return events
         await self._mark_checked(
             tracked,
             checked_at=last_processed_at if last_processed_at is not None else now,
@@ -1046,7 +1002,6 @@ class SignalTracker:
         precision_mode: str,
     ) -> list[SignalTrackingEvent]:
         pending_expires_at = parse_state_dt(tracked.pending_expires_at) or now
-        active_expires_at = parse_state_dt(tracked.active_expires_at) or now
         last_price = (
             tracked.last_price
             or tracked.close_price
@@ -1065,18 +1020,6 @@ class SignalTracker:
                     note="time_fallback_pending_expiry",
                 )
             ]
-        if tracked.activated_at is not None and now > active_expires_at:
-            return [
-                await self._close_event(
-                    tracked,
-                    event_type="expired",
-                    occurred_at=active_expires_at,
-                    price=last_price,
-                    precision_mode=precision_mode,
-                    note="time_fallback_active_expiry",
-                )
-            ]
-
         await self._mark_checked(
             tracked,
             checked_at=now,
@@ -1285,14 +1228,13 @@ class SignalTracker:
                 "tp1_hit",
                 "tp2_hit",
                 "stop_loss",
-                "expired",
                 "ambiguous_exit",
-                "smart_exit",
+                "emergency_exit",
                 "superseded",
             }
             else "ambiguous_exit"
         )
-        if tracked.activated_at is not None:
+        if tracked.activated_at is not None and setup_outcome != "superseded":
             try:
                 pnl_r_multiple = self._tracked_r_multiple(tracked)
                 await self._record_setup_outcome(

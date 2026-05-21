@@ -73,6 +73,79 @@ def _uses_soft_trend_conflict(signal: Signal) -> bool:
     )
 
 
+def _benchmark_context_guard(
+    signal: Signal,
+    prepared: PreparedSymbol,
+) -> tuple[bool, str | None, dict[str, Any]]:
+    """Reject thin alt entries that fight dominant benchmark pressure.
+
+    BTC, ETH and SOL often drag the rest of the USD-M universe. XAU/XAG are
+    tracked as macro/risk proxies but are not enough by themselves to block a
+    crypto setup. Missing context stays non-blocking and is surfaced in details.
+    """
+    symbol = str(getattr(prepared, "symbol", "") or "").upper()
+    context = getattr(prepared, "benchmark_context", {}) or {}
+    if not isinstance(context, dict) or symbol in {"BTCUSDT", "ETHUSDT", "SOLUSDT"}:
+        return True, None, {"benchmark_context_available": bool(context)}
+
+    crypto_symbols = ("BTCUSDT", "ETHUSDT", "SOLUSDT")
+    votes: list[dict[str, Any]] = []
+    for benchmark in crypto_symbols:
+        payload = context.get(benchmark)
+        if not isinstance(payload, dict):
+            continue
+        bias = str(payload.get("bias") or "neutral").lower()
+        try:
+            pct_1h = float(payload.get("pct_1h") or 0.0)
+        except (TypeError, ValueError):
+            pct_1h = 0.0
+        try:
+            pct_4h = float(payload.get("pct_4h") or 0.0)
+        except (TypeError, ValueError):
+            pct_4h = 0.0
+        move_score = max(abs(pct_1h) / 0.006, abs(pct_4h) / 0.015)
+        if move_score < 1.0 and bias == "neutral":
+            continue
+        direction = "long" if pct_1h > 0.0 or pct_4h > 0.0 or bias == "uptrend" else "short"
+        if bias == "downtrend":
+            direction = "short"
+        elif bias == "uptrend":
+            direction = "long"
+        votes.append(
+            {
+                "symbol": benchmark,
+                "direction": direction,
+                "bias": bias,
+                "pct_1h": pct_1h,
+                "pct_4h": pct_4h,
+                "move_score": round(move_score, 3),
+            }
+        )
+
+    aligned = sum(1 for vote in votes if vote["direction"] == signal.direction)
+    opposed = sum(1 for vote in votes if vote["direction"] != signal.direction)
+    strong_opposed = [
+        vote
+        for vote in votes
+        if vote["direction"] != signal.direction and float(vote["move_score"]) >= 1.0
+    ]
+    details = {
+        "benchmark_context_available": bool(context),
+        "votes": votes,
+        "aligned": aligned,
+        "opposed": opposed,
+        "strong_opposed": strong_opposed,
+        "macro_risk_mode": getattr(prepared, "macro_risk_mode", None),
+    }
+    if len(strong_opposed) >= 2 and opposed > aligned:
+        return False, "benchmark_context_conflict", details
+
+    macro_risk_mode = str(getattr(prepared, "macro_risk_mode", "") or "").lower()
+    if signal.direction == "long" and macro_risk_mode in {"risk_off", "panic", "stress"}:
+        return False, "macro_risk_off_long", details
+    return True, None, details
+
+
 def _expand_signal_to_min_stop(
     signal: Signal,
     *,
@@ -393,6 +466,14 @@ def apply_global_filters(
         passed.append("trend_conflict_1h_penalized")
     else:
         passed.append("trend_context_ok")
+
+    benchmark_ok, benchmark_reason, benchmark_details = _benchmark_context_guard(signal, prepared)
+    if not benchmark_ok and not deep_analysis_asset:
+        return _reject(benchmark_reason or "benchmark_context_conflict", base, details=benchmark_details)
+    if benchmark_ok:
+        passed.append("benchmark_context_ok")
+    else:
+        passed.append("benchmark_context_deep_override")
 
     # Compute delta_ratio from 15m candles (CVD proxy)
     delta_ratio: float | None = None

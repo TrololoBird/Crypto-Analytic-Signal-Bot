@@ -16,7 +16,7 @@ from typing import Any
 UTC = timezone.utc
 
 DEFAULT_SCALE_WEIGHTS: tuple[float, float, float] = (0.5, 0.3, 0.2)
-DEFAULT_TARGET_RR: tuple[float, float, float] = (1.5, 3.0, 5.0)
+DEFAULT_TARGET_RR: tuple[float, float, float] = (1.9, 3.0, 5.0)
 
 _TIMEFRAME_MINUTES: dict[str, int] = {
     "1m": 1,

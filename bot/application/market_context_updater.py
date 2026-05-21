@@ -136,6 +136,8 @@ class MarketContextUpdater:
                 tracking_id = str(row.get("tracking_id") or "")
                 if not tracking_id or tracking_id in closed_tracking_ids:
                     continue
+                if not row.get("activated_at"):
+                    continue
                 symbol = str(row.get("symbol") or "")
                 direction = str(row.get("direction") or "")
                 smart_exit = await self._bot.intelligence.evaluate_smart_exit(symbol, direction)
@@ -174,21 +176,32 @@ class MarketContextUpdater:
                 elif fr <= -extreme_threshold:
                     low_funding.append(item.symbol)
 
-            btc_bias = "neutral"
-            eth_bias = "neutral"
+            configured_benchmarks = tuple(
+                dict.fromkeys(
+                    [
+                        *getattr(
+                            self._bot.settings.intelligence,
+                            "benchmark_symbols",
+                            ("BTCUSDT", "ETHUSDT", "SOLUSDT"),
+                        ),
+                        "BTCUSDT",
+                        "ETHUSDT",
+                        "SOLUSDT",
+                        "XAUUSDT",
+                        "XAGUSDT",
+                    ]
+                )
+            )
+            benchmark_biases: dict[str, str] = {symbol: "neutral" for symbol in configured_benchmarks}
             if self._bot._ws_manager is not None:
-                for sym, bias_attr in [
-                    ("BTCUSDT", "btc_bias"),
-                    ("ETHUSDT", "eth_bias"),
-                ]:
-                    bias = self.compute_price_bias(sym)
-                    if bias_attr == "btc_bias":
-                        btc_bias = bias
-                    else:
-                        eth_bias = bias
+                for sym in configured_benchmarks:
+                    benchmark_biases[sym] = self.compute_price_bias(sym)
+            btc_bias = benchmark_biases.get("BTCUSDT", "neutral")
+            eth_bias = benchmark_biases.get("ETHUSDT", "neutral")
 
             benchmark_context: dict[str, dict[str, Any]] = {}
-            for sym, bias in [("BTCUSDT", btc_bias), ("ETHUSDT", eth_bias)]:
+            for sym in configured_benchmarks:
+                bias = benchmark_biases.get(sym, "neutral")
                 payload: dict[str, Any] = {"bias": bias}
                 payload["pct_1h"] = self._cached_kline_change_pct(sym, "1h")
                 payload["pct_4h"] = self._cached_kline_change_pct(sym, "4h")
@@ -203,7 +216,7 @@ class MarketContextUpdater:
             ticker_data: list[dict[str, Any]] = []
             all_tickers = await self._bot.client.fetch_ticker_24h()
             ticker_dict = {t.get("symbol"): t for t in all_tickers if isinstance(t, dict)}
-            for sym in ("BTCUSDT", "ETHUSDT"):
+            for sym in configured_benchmarks:
                 ticker = ticker_dict.get(sym)
                 if ticker is None:
                     continue
@@ -266,6 +279,7 @@ class MarketContextUpdater:
                     getattr(regime_result, "altcoin_season_index", 50.0) or 50.0
                 ),
                 btc_phase=str(getattr(regime_result, "btc_phase", "sideways") or "sideways"),
+                benchmark_context=benchmark_context,
                 intelligence_snapshot=intelligence_snapshot,
             )
             LOG.info(

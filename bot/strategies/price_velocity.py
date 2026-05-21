@@ -137,6 +137,11 @@ class PriceVelocitySetup(BaseSetup):
         close = _as_float(work.item(-1, "close"))
         atr = _as_float(work.item(-1, "atr14"))
         roc10 = _as_float(work.item(-1, "roc10"))
+        ols_slope_atr20 = (
+            _as_float(work.item(-1, "close_ols_slope_atr20"))
+            if "close_ols_slope_atr20" in work.columns
+            else 0.0
+        )
         vol_ratio = _as_float(work.item(-1, "volume_ratio20"), 1.0)
         close_position = _as_float(work.item(-1, "close_position"), 0.5)
         rsi = _as_float(work.item(-1, "rsi14"), 50.0)
@@ -147,27 +152,34 @@ class PriceVelocitySetup(BaseSetup):
 
         min_roc = float(effective_params["min_roc10_abs_pct"])
         body_atr = abs(close - open_) / atr
-        if abs(roc10) < min_roc and body_atr < float(effective_params["min_body_atr"]):
+        regression_impulse = abs(ols_slope_atr20) * 2.5
+        if (
+            abs(roc10) < min_roc
+            and body_atr < float(effective_params["min_body_atr"])
+            and regression_impulse < min_roc * 0.75
+        ):
             _reject(
                 prepared,
                 setup_id,
                 "velocity_too_low",
                 roc10=roc10,
                 body_atr=body_atr,
+                close_ols_slope_atr20=ols_slope_atr20,
             )
             return None
         volume_penalty = vol_ratio < float(effective_params["min_volume_ratio"])
 
         direction: str | None = None
-        if roc10 > 0.0 and close > open_ and close_position >= 0.65:
+        directional_velocity = roc10 if abs(roc10) >= min_roc * 0.5 else ols_slope_atr20
+        if directional_velocity > 0.0 and close > open_ and close_position >= 0.65:
             direction = "long"
-        elif roc10 < 0.0 and close < open_ and close_position <= 0.35:
+        elif directional_velocity < 0.0 and close < open_ and close_position <= 0.35:
             direction = "short"
 
         if direction is None:
-            if roc10 > 0.0 and close_position >= 0.55:
+            if directional_velocity > 0.0 and close_position >= 0.55:
                 direction = "long"
-            elif roc10 < 0.0 and close_position <= 0.45:
+            elif directional_velocity < 0.0 and close_position <= 0.45:
                 direction = "short"
             else:
                 _reject(prepared, setup_id, "direction_not_confirmed", rsi=rsi)
@@ -257,6 +269,7 @@ class PriceVelocitySetup(BaseSetup):
         reasons = [
             f"price_velocity_{direction}",
             f"roc10={roc10:.2f}",
+            f"ols_slope_atr20={ols_slope_atr20:.3f}",
             f"body_atr={body_atr:.2f}",
             f"vol_ratio={vol_ratio:.2f}",
             f"limit_entry={price_anchor:.4f}",

@@ -38,6 +38,7 @@ class MemoryRepositoryExtension:
                 market_regime TEXT DEFAULT 'unknown',
                 market_regime_confirmed INTEGER DEFAULT 0,
                 macro_risk_mode TEXT DEFAULT 'normal',
+                benchmark_context_json TEXT DEFAULT '{}',
                 intelligence_json TEXT DEFAULT '{}'
             )
         """)
@@ -63,6 +64,10 @@ class MemoryRepositoryExtension:
             (
                 "macro_risk_mode",
                 "ALTER TABLE market_context ADD COLUMN macro_risk_mode TEXT DEFAULT 'normal'",
+            ),
+            (
+                "benchmark_context_json",
+                "ALTER TABLE market_context ADD COLUMN benchmark_context_json TEXT DEFAULT '{}'",
             ),
             (
                 "intelligence_json",
@@ -111,6 +116,7 @@ class MemoryRepositoryExtension:
         macro_risk_mode: str = "normal",
         altcoin_season_index: float | None = None,
         btc_phase: str | None = None,
+        benchmark_context: dict[str, Any] | None = None,
         intelligence_snapshot: dict[str, Any] | None = None,
     ) -> None:
         """Update market context in SQLite."""
@@ -132,9 +138,10 @@ class MemoryRepositoryExtension:
                 market_regime,
                 market_regime_confirmed,
                 macro_risk_mode,
+                benchmark_context_json,
                 intelligence_json
             )
-            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             (
                 btc_bias,
@@ -147,6 +154,7 @@ class MemoryRepositoryExtension:
                 market_regime,
                 1 if market_regime_confirmed else 0,
                 macro_risk_mode,
+                json.dumps(benchmark_context or {}, ensure_ascii=True),
                 json.dumps(intelligence_snapshot or {}, ensure_ascii=True),
             ),
         )
@@ -164,6 +172,19 @@ class MemoryRepositoryExtension:
                 raw_intelligence = (
                     row["intelligence_json"] if "intelligence_json" in row.keys() else None
                 )
+                benchmark_context: dict[str, Any] = {}
+                raw_benchmarks = (
+                    row["benchmark_context_json"]
+                    if "benchmark_context_json" in row.keys()
+                    else None
+                )
+                if raw_benchmarks:
+                    try:
+                        parsed_benchmarks = json.loads(raw_benchmarks)
+                    except json.JSONDecodeError:
+                        parsed_benchmarks = {}
+                    if isinstance(parsed_benchmarks, dict):
+                        benchmark_context = parsed_benchmarks
                 if raw_intelligence:
                     try:
                         intelligence_snapshot = json.loads(raw_intelligence)
@@ -172,6 +193,15 @@ class MemoryRepositoryExtension:
                 return {
                     "btc_bias": row["btc_bias"],
                     "eth_bias": row["eth_bias"],
+                    "sol_bias": str(
+                        (benchmark_context.get("SOLUSDT") or {}).get("bias") or "neutral"
+                    ),
+                    "xau_bias": str(
+                        (benchmark_context.get("XAUUSDT") or {}).get("bias") or "neutral"
+                    ),
+                    "xag_bias": str(
+                        (benchmark_context.get("XAGUSDT") or {}).get("bias") or "neutral"
+                    ),
                     "altcoin_season_index": float(row["altcoin_season_index"])
                     if "altcoin_season_index" in row.keys()
                     and row["altcoin_season_index"] is not None
@@ -189,11 +219,15 @@ class MemoryRepositoryExtension:
                     "macro_risk_mode": row["macro_risk_mode"]
                     if "macro_risk_mode" in row.keys()
                     else "normal",
+                    "benchmark_context": benchmark_context,
                     "intelligence_snapshot": intelligence_snapshot,
                 }
             return {
                 "btc_bias": "neutral",
                 "eth_bias": "neutral",
+                "sol_bias": "neutral",
+                "xau_bias": "neutral",
+                "xag_bias": "neutral",
                 "altcoin_season_index": 50.0,
                 "btc_phase": "sideways",
                 "high_funding_symbols": [],
@@ -201,6 +235,7 @@ class MemoryRepositoryExtension:
                 "market_regime": "unknown",
                 "market_regime_confirmed": False,
                 "macro_risk_mode": "normal",
+                "benchmark_context": {},
                 "intelligence_snapshot": {},
             }
 

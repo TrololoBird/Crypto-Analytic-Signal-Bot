@@ -282,14 +282,39 @@ class ShortlistService:
     async def build_live_shortlist(self) -> tuple[list[UniverseSymbol], dict[str, Any]]:
         bot = self._bot
         timeout_s = max(10.0, float(bot.settings.ws.rest_timeout_seconds) * 2.0)
-        symbol_meta_list, tickers_24h, premium_by_symbol = await asyncio.wait_for(
+        results = await asyncio.wait_for(
             asyncio.gather(
                 self.fetch_symbols_with_retry(max_retries=1),
                 bot.client.fetch_ticker_24h(),
                 bot.client.fetch_premium_index_all(),
+                return_exceptions=True,
             ),
             timeout=timeout_s,
         )
+        symbol_meta_result, tickers_result, premium_result = results
+        if isinstance(symbol_meta_result, Exception):
+            cached_meta = list(getattr(bot, "_symbol_meta_by_symbol", {}).values())
+            if not cached_meta:
+                raise symbol_meta_result
+            LOG.info(
+                "shortlist symbol metadata refresh failed; using cached metadata | count=%d error=%s",
+                len(cached_meta),
+                symbol_meta_result,
+            )
+            symbol_meta_list = cached_meta
+        else:
+            symbol_meta_list = list(symbol_meta_result)
+        if isinstance(tickers_result, Exception):
+            raise tickers_result
+        tickers_24h = list(tickers_result)
+        if isinstance(premium_result, Exception):
+            premium_by_symbol = {}
+            LOG.info(
+                "shortlist premium-index refresh failed; continuing without premium context | error=%s",
+                premium_result,
+            )
+        else:
+            premium_by_symbol = dict(premium_result)
         bot._symbol_meta_by_symbol = {
             str(getattr(row, "symbol", "")).strip().upper(): row for row in symbol_meta_list
         }

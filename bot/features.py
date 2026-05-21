@@ -58,6 +58,20 @@ else:
     _HAS_POLARS_TA = False
 _USE_POLARS_TA_BACKEND = _HAS_POLARS_TA
 
+try:
+    _polars_ols_module = importlib_util.find_spec("polars_ols")
+except (ImportError, ModuleNotFoundError):
+    _polars_ols_module = None
+
+if _polars_ols_module is not None:
+    _polars_ols = cast(Any, importlib.import_module("polars_ols"))
+    _polars_ols_ls = cast(Any, importlib.import_module("polars_ols.least_squares"))
+    _HAS_POLARS_OLS = True
+else:
+    _polars_ols = cast(Any, None)
+    _polars_ols_ls = cast(Any, None)
+    _HAS_POLARS_OLS = False
+
 # Compatibility name for the decomposed feature modules/tests. This tracks the
 # native TA-Lib path, which the project deliberately disables on Windows/Python
 # 3.13; optional `polars_ta` availability is tracked separately above.
@@ -1259,6 +1273,67 @@ def _volume_profile(df: pl.DataFrame, bins: int = 12) -> pl.Expr:
     return pl.lit(0.0 if poc is None else poc).cast(pl.Float64).alias("volume_profile")
 
 
+def _add_polars_ols_features(df: pl.DataFrame) -> pl.DataFrame:
+    """Add shared regression-slope features using polars_ols when available."""
+    if df.is_empty() or "close" not in df.columns:
+        return df
+    index_expr = pl.int_range(0, pl.len()).cast(pl.Float64)
+    if _HAS_POLARS_OLS:
+        try:
+            rolling_kwargs = _polars_ols_ls.RollingKwargs(
+                window_size=20,
+                min_periods=20,
+                use_woodbury=None,
+                alpha=None,
+                null_policy="drop",
+            )
+            slope_struct = _polars_ols.compute_rolling_least_squares(
+                pl.col("close"),
+                index_expr,
+                add_intercept=True,
+                mode="coefficients",
+                rolling_kwargs=rolling_kwargs,
+            )
+            work = df.with_columns(slope_struct.alias("_ols_close20"))
+            work = work.with_columns(
+                pl.col("_ols_close20").struct.field("literal").alias("close_ols_slope20")
+            )
+            return work.drop("_ols_close20").with_columns(
+                [
+                    (pl.col("close_ols_slope20") / pl.col("close") * 100.0)
+                    .fill_nan(0.0)
+                    .fill_null(0.0)
+                    .alias("close_ols_slope_pct20"),
+                    (
+                        pl.col("close_ols_slope20")
+                        / pl.when(pl.col("atr14") > 0.0).then(pl.col("atr14")).otherwise(None)
+                    )
+                    .fill_nan(0.0)
+                    .fill_null(0.0)
+                    .alias("close_ols_slope_atr20"),
+                ]
+            )
+        except Exception as exc:
+            _log_indicator_fallback("polars_ols_close_slope20", exc)
+
+    fallback_slope = (pl.col("close") - pl.col("close").shift(19)) / 19.0
+    return df.with_columns(fallback_slope.alias("close_ols_slope20")).with_columns(
+        [
+            (pl.col("close_ols_slope20") / pl.col("close") * 100.0)
+            .fill_nan(0.0)
+            .fill_null(0.0)
+            .alias("close_ols_slope_pct20"),
+            (
+                pl.col("close_ols_slope20")
+                / pl.when(pl.col("atr14") > 0.0).then(pl.col("atr14")).otherwise(None)
+            )
+            .fill_nan(0.0)
+            .fill_null(0.0)
+            .alias("close_ols_slope_atr20"),
+        ]
+    )
+
+
 # ---------------------------------------------------------------------------
 # Main frame preparation
 # ---------------------------------------------------------------------------
@@ -1407,6 +1482,7 @@ def _prepare_frame(df: pl.DataFrame) -> pl.DataFrame:
     # Advanced indicators
     work = _add_advanced_indicators(work)
     work = add_microstructure_features(work)
+    work = _add_polars_ols_features(work)
     work = work.with_columns(
         [
             _roc(work, 10).fill_nan(0.0).alias("roc10"),

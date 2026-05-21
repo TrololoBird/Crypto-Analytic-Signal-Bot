@@ -142,8 +142,13 @@ class PreparedSymbol:
     spot_futures_spread_bps: float | None = None
     btc_bias: str | None = None
     eth_bias: str | None = None
+    sol_bias: str | None = None
+    xau_bias: str | None = None
+    xag_bias: str | None = None
     altcoin_season_index: float | None = None
     btc_phase: str | None = None
+    macro_risk_mode: str | None = None
+    benchmark_context: dict[str, Any] = field(default_factory=dict)
     mark_price_age_seconds: float | None = None
     ticker_price_age_seconds: float | None = None
     book_ticker_age_seconds: float | None = None

@@ -43,42 +43,27 @@ class ATRExpansionSetup(RoadmapSetup):
         # FIX 2026-05-21: spec requires a large current-bar TR spike; if absent,
         # use the existing config-driven recent ATR expansion detector below.
         work = prepared.work_15m
-        missing = _missing_columns(work, ("open", "close", "atr14"))
+        missing = _missing_columns(work, ("open", "high", "low", "close", "atr14"))
         if missing:
             _reject(prepared, self.setup_id, "missing_columns", missing_fields=missing)
             return None
-        lookback = max(1, int(params.get("signal_lookback_bars", 6)))
-        recent = work.tail(min(lookback, work.height))
-        atr = _last(work, "atr14")
-        mean_atr = _series_mean_tail(work, "atr14", int(params["atr_mean_window"]))
-        if atr <= 0.0 or mean_atr <= 0.0:
-            _reject(prepared, self.setup_id, "atr_invalid", atr=atr, mean_atr=mean_atr)
+        candidate = self._find_expansion_candidate(work, params, timeframe="15m")
+        if candidate is None and not prepared.work_1h.is_empty():
+            candidate = self._find_expansion_candidate(prepared.work_1h, params, timeframe="1h")
+        if candidate is None:
+            _reject(
+                prepared,
+                self.setup_id,
+                "atr_expansion_too_low",
+                min_atr_expansion_ratio=float(params["min_atr_expansion_ratio"]),
+                min_body_atr=float(params["min_body_atr"]),
+            )
             return None
-        best_idx = recent.height - 1
-        ratio = 0.0
-        body_atr = 0.0
-        for local_idx in range(recent.height):
-            bar_atr = _as_float(recent.item(local_idx, "atr14"))
-            if bar_atr <= 0.0:
-                continue
-            candidate_ratio = bar_atr / mean_atr
-            candidate_body = abs(
-                _as_float(recent.item(local_idx, "close"))
-                - _as_float(recent.item(local_idx, "open"))
-            ) / bar_atr
-            if candidate_ratio + candidate_body > ratio + body_atr:
-                ratio = candidate_ratio
-                body_atr = candidate_body
-                best_idx = local_idx
-        if ratio < float(params["min_atr_expansion_ratio"]) or body_atr < float(
-            params["min_body_atr"]
-        ):
-            _reject(prepared, self.setup_id, "atr_expansion_too_low", atr_ratio=ratio)
-            return None
-        signal_open = _as_float(recent.item(best_idx, "open"))
-        signal_close = _as_float(recent.item(best_idx, "close"))
-        direction = "long" if signal_close >= signal_open else "short"
-        signal_lag = recent.height - 1 - best_idx
+        direction = str(candidate["direction"])
+        ratio = float(candidate["ratio"])
+        body_atr = float(candidate["body_atr"])
+        signal_lag = int(candidate["signal_lag"])
+        source_timeframe = str(candidate["timeframe"])
         return _build_atr_signal(
             prepared=prepared,
             setup_id=self.setup_id,
@@ -86,13 +71,87 @@ class ATRExpansionSetup(RoadmapSetup):
             params=params,
             reasons=[
                 f"atr_expansion_{direction}",
+                f"source_tf={source_timeframe}",
                 f"atr_ratio={ratio:.2f}",
                 f"body_atr={body_atr:.2f}",
                 f"signal_lag={signal_lag}",
             ],
             family=self.family,
+            timeframe=source_timeframe,
             structure_clarity=min((ratio - 1.0) / 1.0, 1.0),
         )
+
+    def _find_expansion_candidate(
+        self,
+        work,
+        params: dict[str, float],
+        *,
+        timeframe: str,
+    ) -> dict[str, float | int | str] | None:
+        missing = _missing_columns(work, ("open", "high", "low", "close", "atr14"))
+        if missing or work.height < 25:
+            return None
+        lookback = max(1, int(params.get("signal_lookback_bars", 6)))
+        recent = work.tail(min(lookback, work.height))
+        atr = _last(work, "atr14")
+        mean_atr = _series_mean_tail(work, "atr14", int(params["atr_mean_window"]))
+        if atr <= 0.0 or mean_atr <= 0.0:
+            return None
+
+        range_window = work.tail(max(int(params["atr_mean_window"]) + lookback + 1, 25))
+        true_ranges: list[float] = []
+        previous_close = 0.0
+        for idx in range(range_window.height):
+            high = _as_float(range_window.item(idx, "high"))
+            low = _as_float(range_window.item(idx, "low"))
+            close = _as_float(range_window.item(idx, "close"))
+            if high <= 0.0 or low <= 0.0:
+                continue
+            if previous_close > 0.0:
+                true_range = max(high - low, abs(high - previous_close), abs(low - previous_close))
+            else:
+                true_range = high - low
+            if true_range > 0.0:
+                true_ranges.append(true_range)
+            previous_close = close if close > 0.0 else previous_close
+        mean_tr = sum(true_ranges[-int(params["atr_mean_window"]) :]) / max(
+            1,
+            len(true_ranges[-int(params["atr_mean_window"]) :]),
+        )
+
+        best: dict[str, float | int | str] | None = None
+        for local_idx in range(recent.height):
+            open_ = _as_float(recent.item(local_idx, "open"))
+            high = _as_float(recent.item(local_idx, "high"))
+            low = _as_float(recent.item(local_idx, "low"))
+            close = _as_float(recent.item(local_idx, "close"))
+            bar_atr = _as_float(recent.item(local_idx, "atr14"))
+            if min(open_, high, low, close, bar_atr) <= 0.0:
+                continue
+            bar_range = high - low
+            atr_ratio = bar_atr / mean_atr if mean_atr > 0.0 else 0.0
+            tr_ratio = bar_range / mean_tr if mean_tr > 0.0 else 0.0
+            ratio = max(atr_ratio, tr_ratio)
+            body_atr = abs(close - open_) / max(bar_atr, bar_range, 1e-12)
+            close_position = (close - low) / max(high - low, 1e-12)
+            decisive_close = close_position >= 0.62 or close_position <= 0.38
+            if ratio < float(params["min_atr_expansion_ratio"]):
+                continue
+            if body_atr < float(params["min_body_atr"]) and not (
+                decisive_close and ratio >= float(params["min_atr_expansion_ratio"]) * 1.18
+            ):
+                continue
+            score = ratio + body_atr + (0.10 if decisive_close else 0.0)
+            if best is None or score > float(best["score"]):
+                best = {
+                    "score": score,
+                    "ratio": ratio,
+                    "body_atr": body_atr,
+                    "direction": "long" if close >= open_ else "short",
+                    "signal_lag": recent.height - 1 - local_idx,
+                    "timeframe": timeframe,
+                }
+        return best
 
 
 __all__ = ["ATRExpansionSetup"]
