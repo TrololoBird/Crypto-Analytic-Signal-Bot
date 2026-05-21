@@ -2125,6 +2125,46 @@ class BinanceFuturesMarketData:
             return "falling"
         return "flat"
 
+    def get_cached_funding_recent_extreme(
+        self,
+        symbol: str,
+        *,
+        max_age_hours: float = 48.0,
+        max_cache_age_s: float = 1800.0,
+    ) -> tuple[float, float] | None:
+        """Return the strongest cached funding rate from recent real funding history.
+
+        The funding reversal detector needs the most recent funding dislocation,
+        not only the current premium-index snapshot. Binance publishes funding
+        every 4/8h depending on contract, so a reversal can still be valid after
+        the current `lastFundingRate` has already normalized.
+        """
+        cached = self._funding_history_cache.get(symbol)
+        if cached is None:
+            return None
+        cached_at, rows = cached
+        if time.monotonic() - cached_at > max_cache_age_s:
+            return None
+        if not rows:
+            return None
+        now_ms = int(time.time() * 1000)
+        max_age_ms = max(0.0, float(max_age_hours)) * 3600.0 * 1000.0
+        candidates: list[tuple[float, float]] = []
+        for row in rows:
+            try:
+                rate = float(row.get("fundingRate") or 0.0)
+                funding_time = int(row.get("fundingTime") or 0)
+            except (TypeError, ValueError):
+                continue
+            if funding_time <= 0:
+                continue
+            age_ms = max(0, now_ms - funding_time)
+            if age_ms <= max_age_ms:
+                candidates.append((rate, age_ms / 3600000.0))
+        if not candidates:
+            return None
+        return max(candidates, key=lambda item: abs(item[0]))
+
     async def fetch_basis(self, symbol: str, *, period: str = "1h", limit: int = 3) -> float | None:
         validate_symbol(symbol)
         """Fetch most recent basis (futures - index price as %) from /futures/data/basis.

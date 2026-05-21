@@ -86,6 +86,7 @@ async def _build_prepared(
         lambda: client.fetch_global_ls_ratio(symbol, period="1h"),
         lambda: client.fetch_taker_ratio(symbol, period="1h"),
         lambda: client.fetch_funding_rate(symbol),
+        lambda: client.fetch_funding_rate_history(symbol),
     ):
         try:
             await fetch()
@@ -114,6 +115,10 @@ async def _build_prepared(
     prepared.taker_ratio = client.get_cached_taker_ratio(symbol)
     prepared.funding_rate = client.get_cached_funding_rate(symbol)
     prepared.funding_trend = client.get_cached_funding_trend(symbol)
+    funding_recent_extreme = client.get_cached_funding_recent_extreme(symbol)
+    if funding_recent_extreme is not None:
+        prepared.funding_recent_extreme_rate = funding_recent_extreme[0]
+        prepared.funding_recent_extreme_age_hours = funding_recent_extreme[1]
     for key in ("btc_bias", "eth_bias", "altcoin_season_index", "btc_phase"):
         if key in market_context:
             setattr(prepared, key, market_context[key])

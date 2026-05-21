@@ -48,13 +48,14 @@ class CycleRunner:
                 "global_ls_ratio",
                 "taker_ratio",
                 "funding_rate",
+                "funding_trend",
             )
             if any(key not in ws_enrichments for key in required_derivatives_context):
                 try:
                     warmed = await bot._get_oi_refresh_runner().refresh_symbol_if_missing(
                         symbol,
                         max_age_seconds=900.0,
-                        include_funding_history=False,
+                        include_funding_history=True,
                         timeout_seconds=bot.settings.runtime.emergency_context_fetch_timeout_seconds,
                     )
                     if warmed:
@@ -119,12 +120,12 @@ class CycleRunner:
                     max_age_seconds=300.0,
                     time_budget_seconds=runtime.emergency_context_warmup_timeout_seconds,
                     symbol_limit=runtime.emergency_context_warmup_symbol_limit,
-                    include_funding_history=False,
+                    include_funding_history=True,
                     per_symbol_timeout_seconds=runtime.emergency_context_fetch_timeout_seconds,
                 )
                 if warmed:
                     LOG.info(
-                        "emergency cycle context warmup | symbols=%d budget_s=%.1f symbol_limit=%d funding_history=false",
+                        "emergency cycle context warmup | symbols=%d budget_s=%.1f symbol_limit=%d funding_history=true",
                         warmed,
                         runtime.emergency_context_warmup_timeout_seconds,
                         runtime.emergency_context_warmup_symbol_limit,

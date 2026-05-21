@@ -151,6 +151,33 @@ specification.
   wording. It must not render unknown placeholders such as `n/a`/`н/д` in the
   market-state message.
 
+## 2026-05-21 Deep Audit Remediation
+
+This pass re-audited the three previously documented `market_condition`
+zero-hit strategies. Live evidence did not support that classification for
+`funding_reversal` or `supertrend_follow`.
+
+| Strategy | Classification | Concrete issue | Fix |
+|---|---|---|---|
+| funding_reversal | implementation_bug / missing runtime enrichment | detector used only current `lastFundingRate`; top-volume symbols had recent real funding extremes that were invisible after current funding normalized | warm public funding history, expose `funding_recent_extreme_rate` + age on `PreparedSymbol`, and score history-sourced signals with an explicit reason/penalty |
+| ls_ratio_extreme | already active | 50-symbol diagnostic showed 9 hits and live long-account extremes; the 25-symbol zero was sample/timing, not data loss | no code change |
+| supertrend_follow | implementation_bug / threshold gate | detector silently capped configured pullback from 0.65 ATR to 0.50 ATR, required close-only retests, and hard-rejected low-volume pullbacks before pattern checks | honor configured pullback range, accept wick retests that close back in trend direction, and turn weak volume into a score penalty |
+
+Current live evidence after the fix:
+
+- `python -m scripts.live_check_strategies --limit 25 --concurrency 3`
+  prepared 25 symbols, ran 950 detectors, reported `strategy_errors=[]`, and
+  produced detector hits for 36/38 strategies.
+- `funding_reversal` hit on real public funding history; example:
+  `FIDAUSDT current=-0.00010311 recent=-0.00253721 age_h=26.0`,
+  signal reason `source=history`.
+- `supertrend_follow` produced 4 hits in the 25-symbol full run and 5 hits in
+  the targeted 30-symbol diagnostic.
+- Remaining zero-hit strategies in that run were market-state constrained:
+  `session_killzone` rejected 25/25 with `context.outside_killzone` at UTC
+  hour 9.0, and `keltner_breakout` rejected 25/25 with
+  `pattern.no_keltner_breakout`.
+
 ## 2026-05-21 Zero-Hit Strategy Remediation
 
 Before this pass, the live detector surface had 15 zero-hit strategies on a
@@ -186,14 +213,18 @@ Verification on 2026-05-21:
   prepared 20 symbols, ran 760 detectors, reported `strategy_errors=[]`, and
   produced `detector_hits > 0` for 35/38 strategies.
 
-Documented market-condition zeroes in that run:
+Documented market-condition zeroes in that run, superseded by the later deep
+audit above:
 
 - `funding_reversal`: sampled funding rates were below the configured
-  `funding_threshold=0.001`, so `indicator.funding_not_extreme` is expected.
+  `funding_threshold=0.001`, but later audit found the detector was missing
+  recent funding-history context.
 - `ls_ratio_extreme`: current symbols either were not extreme enough or lacked
-  contrarian price-position confirmation.
+  contrarian price-position confirmation; later audit verified the strategy was
+  active on the 50-symbol sample without code changes.
 - `supertrend_follow`: current symbols lacked a valid SuperTrend pullback or
-  failed volume/ADX gates.
+  failed volume/ADX gates; later audit found close-only retest and volume-gate
+  logic defects.
 
 ## 2026-05-19 Strategy Logic Remediation
 

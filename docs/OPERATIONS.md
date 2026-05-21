@@ -133,6 +133,10 @@ The bot includes a built-in web dashboard for real-time monitoring.
   such as `scripts/live_check_binance_api.py`,
   `scripts/live_check_enrichments.py`, and `scripts/live_check_pipeline.py` to
   confirm public-only guardrails still hold.
+- `scripts.live_check_strategies` warms recent public funding history in
+  addition to the current funding snapshot. A `funding_reversal` miss should
+  therefore show both `funding_rate` and any recent extreme metadata before it
+  is classified as `market_condition`.
 
 ## Signal scoring quality gates
 

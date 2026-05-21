@@ -41,6 +41,8 @@ class FundingReversalSetup(BaseSetup):
             "base_score": 0.52,
             "funding_threshold": 0.0010,
             "funding_trend_bars": 3.0,
+            "funding_recent_extreme_lookback_hours": 48.0,
+            "historical_funding_score_penalty": 0.92,
             "min_delta_threshold": 0.02,
             "confirmation_lookback_bars": 4,
             "min_confirmation_score": 1.0,
@@ -83,6 +85,20 @@ class FundingReversalSetup(BaseSetup):
         funding_trend_bars = int(
             dynamic_params.get("funding_trend_bars", defaults["funding_trend_bars"])
         )
+        funding_recent_extreme_lookback_hours = _as_float(
+            dynamic_params.get(
+                "funding_recent_extreme_lookback_hours",
+                defaults["funding_recent_extreme_lookback_hours"],
+            ),
+            defaults["funding_recent_extreme_lookback_hours"],
+        )
+        historical_funding_score_penalty = _as_float(
+            dynamic_params.get(
+                "historical_funding_score_penalty",
+                defaults["historical_funding_score_penalty"],
+            ),
+            defaults["historical_funding_score_penalty"],
+        )
         min_delta_threshold = _as_float(
             dynamic_params.get("min_delta_threshold", defaults["min_delta_threshold"]),
             defaults["min_delta_threshold"],
@@ -118,9 +134,48 @@ class FundingReversalSetup(BaseSetup):
             _reject(prepared, setup_id, "data.funding_rate_missing")
             return None
         fr = prepared.funding_rate
+        recent_extreme_rate = getattr(prepared, "funding_recent_extreme_rate", None)
+        recent_extreme_age_hours = getattr(
+            prepared,
+            "funding_recent_extreme_age_hours",
+            None,
+        )
+        effective_fr = fr
+        funding_source = "current"
         if math.isnan(fr) or abs(fr) <= funding_threshold:
-            _reject(prepared, setup_id, "indicator.funding_not_extreme", funding_rate=fr)
-            return None
+            # FIX 2026-05-21: the detector looked only at the current
+            # `lastFundingRate`, so fresh reversal setups disappeared as soon as
+            # funding normalized. Use real public funding history when an
+            # extreme print is still inside the configured lookback.
+            try:
+                recent_rate = None if recent_extreme_rate is None else float(recent_extreme_rate)
+                recent_age = (
+                    None
+                    if recent_extreme_age_hours is None
+                    else float(recent_extreme_age_hours)
+                )
+            except (TypeError, ValueError):
+                recent_rate = None
+                recent_age = None
+            if (
+                recent_rate is not None
+                and recent_age is not None
+                and recent_age <= funding_recent_extreme_lookback_hours
+                and abs(recent_rate) > funding_threshold
+            ):
+                effective_fr = recent_rate
+                funding_source = "history"
+            else:
+                _reject(
+                    prepared,
+                    setup_id,
+                    "indicator.funding_not_extreme",
+                    funding_rate=fr,
+                    recent_extreme_rate=recent_extreme_rate,
+                    recent_extreme_age_hours=recent_extreme_age_hours,
+                    lookback_hours=funding_recent_extreme_lookback_hours,
+                )
+                return None
 
         funding_trend = prepared.funding_trend
 
@@ -159,7 +214,7 @@ class FundingReversalSetup(BaseSetup):
             else 0.5
         )
 
-        direction = "short" if fr > funding_threshold else "long"
+        direction = "short" if effective_fr > funding_threshold else "long"
         confirmation_score = 0.0
         confirmation_reasons: list[str] = []
         for idx in range(recent.height):
@@ -294,14 +349,22 @@ class FundingReversalSetup(BaseSetup):
             rsi=rsi,
         )
         score *= min(1.20, max(0.80, 0.85 + confirmation_score * 0.10))
+        if funding_source == "history":
+            score *= max(0.70, min(1.0, historical_funding_score_penalty))
 
         reasons = [
-            f"Funding reversal {direction}: fr={fr:.5f} trend={funding_trend or 'unknown'}",
+            (
+                f"Funding reversal {direction}: fr={effective_fr:.5f} "
+                f"source={funding_source} trend={funding_trend or 'unknown'}"
+            ),
+            f"current_funding={fr:.5f}",
             f"confirmation_score={confirmation_score:.2f} trend_window={trend_window}",
             f"limit_entry={entry_price:.4f}",
             f"sl_buffer_atr={sl_buffer_atr:.2f} min_rr={min_rr:.2f}",
             *confirmation_reasons,
         ]
+        if funding_source == "history":
+            reasons.append(f"funding_extreme_age_h={recent_extreme_age_hours:.1f}")
         if fallback_note:
             reasons.append(fallback_note)
 

@@ -1474,6 +1474,11 @@ class SymbolAnalyzer:
             funding_trend = self._bot.client.get_cached_funding_trend(symbol)
             if funding_trend is not None:
                 enrichments["funding_trend"] = funding_trend
+                recent_extreme = self._bot.client.get_cached_funding_recent_extreme(symbol)
+                if recent_extreme is not None:
+                    extreme_rate, extreme_age_hours = recent_extreme
+                    enrichments["funding_recent_extreme_rate"] = extreme_rate
+                    enrichments["funding_recent_extreme_age_hours"] = extreme_age_hours
             else:
                 freshness_flags.add("funding_trend_missing")
             cached_basis_pct = self._bot.client.get_cached_basis(symbol, period="1h")

@@ -118,6 +118,65 @@ Those artifacts can drift. Treat them as clues, not proof.
 
 ## Changelog (agent-readable)
 
+### 2026-05-21 - Deep audit funding and SuperTrend remediation
+
+Reason for session: verify the previous `market_condition` claims for
+`funding_reversal`, `ls_ratio_extreme`, and `supertrend_follow`, audit signal
+quality/runtime data flow, and remediate confirmed zero-hit defects without
+touching working strategies unnecessarily.
+
+Findings:
+- `funding_reversal` was not a pure market-condition miss: top-volume symbols
+  had recent real Binance funding extremes, but the detector only consumed the
+  current `lastFundingRate` snapshot after funding normalized.
+- `supertrend_follow` had two detector bugs: the configured 0.65 ATR pullback
+  was silently capped to 0.50 ATR, and only close-to-line retests were accepted
+  while wick retests were rejected; low volume was also a hard detector reject.
+- `ls_ratio_extreme` was already active on expanded live data: 9 hits on a
+  50-symbol diagnostic and 7 hits in the 25-symbol post-fix live check.
+- `session_killzone` and `keltner_breakout` were the only remaining zero-hit
+  strategies in the final 25-symbol run, with concrete market-state reasons:
+  `context.outside_killzone` at UTC hour 9.0 and `pattern.no_keltner_breakout`.
+- Signal quality audit found active outcome data with balanced direction
+  exposure and non-neutral scores; no live ML/pandas inference path was present.
+
+Changes:
+- `bot/market_data.py`, `bot/domain/schemas.py`,
+  `bot/application/symbol_analyzer.py`, `bot/application/cycle_runner.py`,
+  `bot/application/oi_refresh_runner.py`: warmed public funding history and
+  exposed `funding_recent_extreme_rate` plus age on `PreparedSymbol`.
+- `bot/strategies/funding_reversal.py`: uses recent real funding-history
+  extremes when current funding has normalized, with explicit `source=history`
+  reason and score penalty.
+- `bot/strategies/supertrend_follow.py`: accepts wick retests that close back
+  in trend direction, honors the configured pullback range, and converts weak
+  volume to a score penalty.
+- `scripts/live_check_strategies.py`: warms funding history so detector-surface
+  checks match the runtime contract.
+- `config.toml.example`: documents the new setup parameters.
+- `docs/FEATURES_IO_CONTRACT.md`, `docs/ARCHITECTURE.md`,
+  `docs/OPERATIONS.md`, `docs/STRATEGIES.md`: aligned data contract,
+  runtime warmup notes, and strategy remediation evidence.
+
+Verified:
+- `python -m compileall bot scripts/live_check_strategies.py` -> exit 0.
+- `python -m scripts.validate_config` -> `[OK] All checks passed`.
+- Targeted live diagnostic over 30 symbols -> `funding_reversal=1`,
+  `ls_ratio_extreme=7`, `multi_tf_trend=3`, `supertrend_follow=5`,
+  `session_killzone=0` with `context.outside_killzone`.
+- `BOT_NOTIFIER_PROVIDER=none python -m scripts.live_check_strategies
+  --limit 25 --concurrency 3` -> 25 prepared symbols, 950 detector runs,
+  `strategy_errors=[]`, 36/38 strategies with detector hits.
+
+Known remaining limitations:
+- `session_killzone`: zero in the final run because the check ran outside the
+  configured UTC killzones (`context.outside_killzone`, hour 9.0).
+- `keltner_breakout`: zero in the final run because no sampled symbol had a
+  valid Keltner breakout (`pattern.no_keltner_breakout`).
+- The REST-oriented live strategy check still does not validate full WS L2
+  depth or force-order freshness; compare with enrichment diagnostics when
+  triaging orderbook/liquidation behavior.
+
 ### 2026-05-21 - Strategy spec diagnostics and docs alignment
 
 Reason for session: run a read-only diagnostic pass over the 38-strategy
@@ -225,26 +284,26 @@ Known remaining limitations:
 | cvd_divergence | orderflow | 15m | LIVE | - | - |
 | depth_imbalance | orderbook | 15m | LIVE | source_gate: REST/L1 public source hard-rejected | labeled proxy |
 | ema_bounce | continuation | 15m | LIVE | - | - |
-| funding_reversal | reversal | 15m+funding | MARKET_CONDITION | funding not extreme | documented |
+| funding_reversal | reversal | 15m+funding | LIVE | implementation_bug: current-only funding snapshot hid recent public funding extremes | funding history contract |
 | fvg_setup | continuation | 15m | LIVE | implementation_bug: spec retest hid SMC zone fallback | fallthrough fixed |
 | hidden_divergence | continuation | 15m+1h | LIVE | implementation_bug: spec miss hid swing scan | fallthrough fixed |
 | indicator_divergence | reversal | 15m | LIVE | - | - |
-| keltner_breakout | volatility | 15m | LIVE | - | - |
+| keltner_breakout | volatility | 15m | MARKET_CONDITION | final run 25/25 `pattern.no_keltner_breakout` | documented |
 | liquidity_sweep | liquidity | 15m | LIVE | - | - |
 | liquidation_heatmap | liquidity | 15m | LIVE | implementation_bug: documented proxy params unused | volume_wick_proxy |
-| ls_ratio_extreme | sentiment | 15m+futures data | MARKET_CONDITION | no extreme/price confirmation | documented |
+| ls_ratio_extreme | sentiment | 15m+futures data | LIVE | sample/timing in baseline; active on expanded live data | no code change |
 | multi_tf_trend | continuation | 15m+1h+4h | LIVE | market state mixed in baseline | no code change |
 | oi_divergence | sentiment | 15m+OI | LIVE | - | - |
 | order_block | continuation | 15m | LIVE | - | - |
 | price_velocity | momentum | 15m | LIVE | - | - |
 | rsi_divergence_bottom | reversal | 15m | LIVE | implementation_bug: spec miss hid window detector | fallthrough fixed |
-| session_killzone | session | 15m | LIVE | - | - |
+| session_killzone | session | 15m | MARKET_CONDITION | final run UTC hour 9.0 outside configured killzones | documented |
 | spread_strategy | orderbook | 15m | LIVE | - | - |
 | squeeze_setup | breakout | 15m | LIVE | implementation_bug: spec miss hid squeeze fallback | fallthrough fixed |
 | stop_hunt_detection | liquidity | 15m | LIVE | implementation_bug: spec miss hid sweep fallback | fallthrough fixed |
 | structure_break_retest | breakout | 15m | LIVE | - | - |
 | structure_pullback | continuation | 15m+1h | LIVE | implementation_bug: spec fib window hid fallback | fallthrough fixed |
-| supertrend_follow | continuation | 15m+1h | MARKET_CONDITION | no current SuperTrend pullback/volume/ADX gate | documented |
+| supertrend_follow | continuation | 15m+1h | LIVE | implementation_bug: close-only retest plus volume hard gate | wick retest + volume penalty |
 | turtle_soup | liquidity | 15m | LIVE | - | - |
 | volume_anomaly | momentum | 15m | LIVE | implementation_bug: spec miss hid recent-bar fallback | fallthrough fixed |
 | volume_climax_reversal | reversal | 15m | LIVE | implementation_bug: spec miss hid reclaim fallback | fallthrough fixed |

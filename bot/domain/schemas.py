@@ -98,6 +98,8 @@ class PreparedSymbol:
     mark_price: float | None = None
     ticker_price: float | None = None
     funding_rate: float | None = None
+    funding_recent_extreme_rate: float | None = None
+    funding_recent_extreme_age_hours: float | None = None
     oi_current: float | None = None
     oi_change_pct: float | None = None
     ls_ratio: float | None = None

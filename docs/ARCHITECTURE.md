@@ -58,6 +58,10 @@
   - `ticker_age_seconds`
   - `mark_price_age_seconds`
   - `book_age_seconds` from bookTicker cache age
+- Derivatives-context warmup uses only public REST data: open interest,
+  long/short ratios, taker ratios, current funding, and recent funding history.
+  Funding history is promoted as explicit `PreparedSymbol`
+  `funding_recent_extreme_*` fields rather than hidden inside a strategy.
 
 
 ## Runtime feature contract (orchestrator -> analyzer -> strategies)

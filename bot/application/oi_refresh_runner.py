@@ -173,6 +173,9 @@ class OIRefreshRunner:
         )
         has_taker = client.get_cached_taker_ratio(symbol, max_age_s=max_age_seconds) is not None
         has_funding = client.get_cached_funding_rate(symbol, max_age_s=max_age_seconds) is not None
+        has_funding_history = (
+            client.get_cached_funding_trend(symbol, max_age_s=max_age_seconds) is not None
+        )
         if (
             has_oi_change
             and has_ls
@@ -180,6 +183,7 @@ class OIRefreshRunner:
             and has_global_ls
             and has_taker
             and has_funding
+            and (has_funding_history or not include_funding_history)
         ):
             return False
         limiter = self._get_single_symbol_limiter()

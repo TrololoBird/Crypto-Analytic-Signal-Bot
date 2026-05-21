@@ -34,6 +34,7 @@ class SuperTrendFollowSetup(BaseSetup):
             "base_score": 0.56,
             "min_adx_1h": 14.0,
             "min_volume_ratio": 1.0,
+            "volume_penalty": 0.92,
             "ema_pullback_atr": 0.65,
             "sl_buffer_atr": 0.65,
             "min_rr": 1.9,
@@ -94,20 +95,29 @@ class SuperTrendFollowSetup(BaseSetup):
             _reject(prepared, setup_id, "adx_too_low", adx_1h=adx_1h)
             return None
 
-        if vol_ratio < float(effective_params["min_volume_ratio"]):
-            _reject(prepared, setup_id, "volume_too_low", volume_ratio=vol_ratio)
-            return None
+        volume_penalty = vol_ratio < float(effective_params["min_volume_ratio"])
 
-        pullback_atr = min(float(effective_params["ema_pullback_atr"]), 0.5)
+        # FIX 2026-05-21: the detector silently capped the configured 0.65 ATR
+        # pullback to 0.50 and checked only close-to-line distance. SuperTrend
+        # retests are often wick touches that close back in trend direction, so
+        # the candle range must participate in the confirmation.
+        pullback_atr = max(0.20, min(float(effective_params["ema_pullback_atr"]), 1.25))
         bias_1h = getattr(prepared, "bias_1h", prepared.bias_4h)
         direction: str | None = None
         stop_basis: float = 0.0
 
-        near_line = abs(close - supertrend_line) <= atr * pullback_atr
-        if st_15m > 0 and st_1h > 0 and near_line and close > supertrend_line:
+        line_buffer = atr * pullback_atr
+        close_near_line = abs(close - supertrend_line) <= line_buffer
+        long_retest = (close_near_line or low <= supertrend_line + line_buffer) and (
+            close > supertrend_line
+        )
+        short_retest = (close_near_line or high >= supertrend_line - line_buffer) and (
+            close < supertrend_line
+        )
+        if st_15m > 0 and st_1h > 0 and long_retest:
             direction = "long"
             stop_basis = min(low, supertrend_line)
-        elif st_15m < 0 and st_1h < 0 and near_line and close < supertrend_line:
+        elif st_15m < 0 and st_1h < 0 and short_retest:
             direction = "short"
             stop_basis = max(high, supertrend_line)
 
@@ -119,6 +129,9 @@ class SuperTrendFollowSetup(BaseSetup):
                 st_15m=st_15m,
                 st_1h=st_1h,
                 distance_atr=abs(close - supertrend_line) / atr,
+                low_line_distance_atr=abs(low - supertrend_line) / atr,
+                high_line_distance_atr=abs(high - supertrend_line) / atr,
+                pullback_atr=pullback_atr,
             )
             return None
 
@@ -164,6 +177,8 @@ class SuperTrendFollowSetup(BaseSetup):
             rsi=rsi,
             structure_clarity=0.55,
         )
+        if volume_penalty:
+            score *= float(effective_params.get("volume_penalty", 0.92))
 
         # Graded bias alignment
         if direction == "long" and bias_1h == "downtrend":
@@ -178,8 +193,11 @@ class SuperTrendFollowSetup(BaseSetup):
             f"st_1h={st_1h:.0f}",
             f"supertrend_line={supertrend_line:.4f}",
             f"adx_1h={adx_1h:.1f}",
+            f"volume_ratio={vol_ratio:.2f}",
             f"limit_entry={price_anchor:.4f}",
         ]
+        if volume_penalty:
+            reasons.append("volume_confirmation_penalty")
         return _build_signal(
             prepared=prepared,
             setup_id=setup_id,

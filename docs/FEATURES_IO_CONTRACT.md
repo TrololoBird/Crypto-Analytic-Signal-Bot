@@ -40,6 +40,12 @@ field name as part of the runtime contract.
 Microstructure fields must carry provenance when they are promoted to
 `PreparedSymbol`:
 
+- `funding_rate` is the current public USD-M funding snapshot. When funding
+  history has been warmed from `/fapi/v1/fundingRate`,
+  `funding_recent_extreme_rate` and `funding_recent_extreme_age_hours` expose
+  the strongest real funding print inside the runtime lookback so
+  `funding_reversal` does not treat a normalized current snapshot as proof that
+  no recent funding dislocation existed.
 - `depth_imbalance_source` and `microprice_bias_source` distinguish `l2_depth`,
   `l1_book`, `rest_book_l1`, and `agg_trade_proxy`.
 - `depth_book_age_seconds` is populated when a partial depth book is available.
