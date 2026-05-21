@@ -142,9 +142,11 @@ class TelegramSender:
         tp2: float,
         score: float,
         strategy: str,
+        tp3: float | None = None,
     ) -> bool:
         """Send formatted signal alert."""
         emoji = "🟢" if direction == "long" else "🔴"
+        third_target = tp3 if tp3 is not None else tp2
 
         text = f"""
 <b>{emoji} {symbol} {direction.upper()}</b>
@@ -153,6 +155,8 @@ class TelegramSender:
 <b>SL:</b> {sl:.8g}
 <b>TP1:</b> {tp1:.8g}
 <b>TP2:</b> {tp2:.8g}
+<b>TP3:</b> {third_target:.8g}
+<b>Scale:</b> 50% / 30% / 20%
 
 <b>Score:</b> {score:.2f}
 <b>Strategy:</b> {strategy}

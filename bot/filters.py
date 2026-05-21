@@ -13,6 +13,7 @@ import polars as pl
 from .domain.config import BotSettings
 from .domain.schemas import PreparedSymbol, Signal
 from .runtime_policy import is_deep_analysis_symbol
+from .signal_contract import DEFAULT_TARGET_RR, build_trade_plan
 from .scoring import ScoringResult
 
 if TYPE_CHECKING:
@@ -105,19 +106,46 @@ def _expand_signal_to_min_stop(
         stop = entry - min_risk
         tp1 = max(float(signal.take_profit_1), entry + min_risk * rr_floor)
         tp2 = max(float(signal.take_profit_2), tp1, entry + min_risk * tp2_rr)
+        tp3 = max(float(signal.tp3), tp2, entry + min_risk * DEFAULT_TARGET_RR[2])
     else:
         stop = entry + min_risk
         tp1 = min(float(signal.take_profit_1), entry - min_risk * rr_floor)
         tp2 = min(float(signal.take_profit_2), tp1, entry - min_risk * tp2_rr)
+        tp3 = min(float(signal.tp3), tp2, entry - min_risk * DEFAULT_TARGET_RR[2])
 
     risk_reward = abs(tp1 - entry) / min_risk if min_risk > 0.0 else signal.risk_reward
+    plan = build_trade_plan(
+        direction=signal.direction,
+        setup_id=signal.setup_id,
+        strategy_family=signal.strategy_family,
+        timeframe=signal.timeframe,
+        price_anchor=entry,
+        atr=max(min_risk, entry * 0.0005),
+        stop_loss=stop,
+        tp1=tp1,
+        tp2=tp2,
+        tp3=tp3,
+        created_at=signal.created_at,
+        ttl_bars=signal.ttl_bars,
+        scale_weights=signal.scale_weights,
+    )
+    if plan is not None:
+        stop = plan.stop_loss
+        tp1 = plan.tp1
+        tp2 = plan.tp2
+        tp3 = plan.tp3
     return (
         replace(
             signal,
             stop=stop,
             take_profit_1=tp1,
             take_profit_2=tp2,
+            take_profit_3=tp3,
             risk_reward=risk_reward,
+            target_integrity_status=(
+                plan.integrity_status if plan is not None else signal.target_integrity_status
+            ),
+            entry_plan_status=plan.integrity_status if plan is not None else signal.entry_plan_status,
             reasons=reasons,
         ),
         True,

@@ -68,6 +68,9 @@ class SignalTrackingEvent:
             "stop": self.tracked.stop,
             "take_profit_1": self.tracked.take_profit_1,
             "take_profit_2": self.tracked.take_profit_2,
+            "take_profit_3": self.tracked.take_profit_3,
+            "valid_until": self.tracked.valid_until,
+            "scale_weights": self.tracked.scale_weights,
             "single_target_mode": self.tracked.single_target_mode,
             "target_integrity_status": self.tracked.target_integrity_status,
             "created_at": self.tracked.created_at,
@@ -206,6 +209,13 @@ class SignalTracker:
         row.setdefault("stop_price", row.get("stop"))
         row.setdefault("tp1_price", row.get("take_profit_1"))
         row.setdefault("tp2_price", row.get("take_profit_2"))
+        row.setdefault("take_profit_3", row.get("take_profit_2"))
+        row.setdefault("tp3_price", row.get("take_profit_3"))
+        row.setdefault("valid_until", row.get("pending_expires_at"))
+        row.setdefault("scale_weights", (0.5, 0.3, 0.2))
+        if isinstance(row.get("scale_weights"), list):
+            row["scale_weights"] = tuple(row["scale_weights"])
+        row.setdefault("ttl_bars", None)
         row.setdefault("single_target_mode", False)
         row.setdefault("target_integrity_status", "unchecked")
         row["single_target_mode"] = bool(row.get("single_target_mode"))
@@ -374,6 +384,11 @@ class SignalTracker:
             tp1_price=signal.take_profit_1,
             take_profit_2=signal.take_profit_2,
             tp2_price=signal.take_profit_2,
+            take_profit_3=signal.tp3,
+            tp3_price=signal.tp3,
+            valid_until=signal.valid_until_iso,
+            scale_weights=signal.scale_weights,
+            ttl_bars=signal.ttl_bars,
             single_target_mode=signal.single_target_mode,
             target_integrity_status=signal.target_integrity_status or "unchecked",
             score=signal.score,
@@ -539,6 +554,9 @@ class SignalTracker:
                     "stop": tracked.stop,
                     "take_profit_1": tracked.take_profit_1,
                     "take_profit_2": tracked.take_profit_2,
+                    "take_profit_3": tracked.take_profit_3,
+                    "valid_until": tracked.valid_until,
+                    "scale_weights": tracked.scale_weights,
                     "single_target_mode": tracked.single_target_mode,
                     "target_integrity_status": tracked.target_integrity_status,
                     "signal_message_id": tracked.signal_message_id,

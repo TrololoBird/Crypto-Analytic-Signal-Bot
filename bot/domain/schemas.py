@@ -8,6 +8,14 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
+from ..signal_contract import (
+    DEFAULT_SCALE_WEIGHTS,
+    DEFAULT_TARGET_RR,
+    default_ttl_bars,
+    normalize_scale_weights,
+    valid_until_from,
+)
+
 if TYPE_CHECKING:
     from .config import BotSettings
 
@@ -213,6 +221,11 @@ class Signal:
     stop: float
     take_profit_1: float
     take_profit_2: float
+    take_profit_3: float | None = None
+    valid_until: datetime | None = None
+    scale_weights: tuple[float, float, float] = DEFAULT_SCALE_WEIGHTS
+    ttl_bars: int | None = None
+    entry_plan_status: str = "valid"
     reasons: tuple[str, ...] = ()
     bias_4h: str = "neutral"
     quote_volume: float | None = None
@@ -238,6 +251,48 @@ class Signal:
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def __post_init__(self) -> None:
+        created_at = self.created_at
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=UTC)
+            object.__setattr__(self, "created_at", created_at)
+        else:
+            created_at = created_at.astimezone(UTC)
+            object.__setattr__(self, "created_at", created_at)
+        scale_weights = normalize_scale_weights(self.scale_weights)
+        object.__setattr__(self, "scale_weights", scale_weights)
+
+        if self.valid_until is None:
+            ttl_bars = (
+                int(self.ttl_bars)
+                if self.ttl_bars is not None
+                else default_ttl_bars(self.setup_id, self.strategy_family, self.timeframe)
+            )
+            object.__setattr__(
+                self,
+                "valid_until",
+                valid_until_from(
+                    created_at=created_at,
+                    setup_id=self.setup_id,
+                    strategy_family=self.strategy_family,
+                    timeframe=self.timeframe,
+                    ttl_bars=ttl_bars,
+                ),
+            )
+            object.__setattr__(self, "ttl_bars", max(1, min(ttl_bars, 96)))
+        elif self.valid_until.tzinfo is None:
+            object.__setattr__(self, "valid_until", self.valid_until.replace(tzinfo=UTC))
+        else:
+            object.__setattr__(self, "valid_until", self.valid_until.astimezone(UTC))
+
+        if self.take_profit_3 is None or not math.isfinite(float(self.take_profit_3)):
+            risk = abs(self.entry_mid - self.stop)
+            rr3 = DEFAULT_TARGET_RR[2]
+            if self.direction == "long":
+                tp3 = self.entry_mid + risk * rr3
+            else:
+                tp3 = self.entry_mid - risk * rr3
+            object.__setattr__(self, "take_profit_3", tp3)
+
         if self.risk_reward is None:
             risk = abs(self.entry_mid - self.stop)
             reward = abs(self.take_profit_1 - self.entry_mid)
@@ -307,8 +362,34 @@ class Signal:
         return self.take_profit_2
 
     @property
+    def tp3(self) -> float:
+        return float(self.take_profit_3 or 0.0)
+
+    @property
+    def stop_loss(self) -> float:
+        return self.stop
+
+    @property
+    def entry_zone(self) -> tuple[float, float]:
+        return (self.entry_low, self.entry_high)
+
+    @property
+    def valid_until_iso(self) -> str:
+        return self.valid_until.isoformat() if self.valid_until is not None else ""
+
+    @property
+    def scale_weight_pct(self) -> tuple[int, int, int]:
+        return tuple(int(round(weight * 100)) for weight in self.scale_weights)  # type: ignore[return-value]
+
+    @property
+    def time_to_expiry_minutes(self) -> float:
+        if self.valid_until is None:
+            return 0.0
+        return max(0.0, (self.valid_until - datetime.now(UTC)).total_seconds() / 60.0)
+
+    @property
     def target_count(self) -> int:
-        return 1 if self.single_target_mode else 2
+        return 1 if self.single_target_mode else 3
 
     @property
     def metadata(self) -> dict[str, Any]:
@@ -321,6 +402,10 @@ class Signal:
             "confirmation_profile": self.confirmation_profile,
             "target_integrity_status": self.target_integrity_status,
             "single_target_mode": self.single_target_mode,
+            "entry_plan_status": self.entry_plan_status,
+            "valid_until": self.valid_until_iso,
+            "ttl_bars": self.ttl_bars,
+            "scale_weights": self.scale_weights,
         }
 
     def same_target(self, tolerance: float | None = None) -> bool:
@@ -330,6 +415,7 @@ class Signal:
                 abs(self.entry_mid),
                 abs(self.take_profit_1),
                 abs(self.take_profit_2),
+                abs(self.tp3),
                 1.0,
             )
             tol = anchor * 1e-8
@@ -344,14 +430,23 @@ class Signal:
             "timeframe": self.timeframe,
             "entry_low": round(self.entry_low, 8),
             "entry_high": round(self.entry_high, 8),
+            "entry_zone": [round(self.entry_low, 8), round(self.entry_high, 8)],
             "entry_mid": round(self.entry_mid, 8),
             "entry_mid_raw": round(self.entry_mid_raw, 8),
             "entry_reference_price": round(self.entry_reference_price, 8),
             "stop": round(self.stop, 8),
+            "stop_loss": round(self.stop_loss, 8),
             "take_profit_1": round(self.take_profit_1, 8),
             "take_profit_2": round(self.take_profit_2, 8),
+            "take_profit_3": round(self.tp3, 8),
+            "tp1": round(self.tp1, 8),
+            "tp2": round(self.tp2, 8),
+            "tp3": round(self.tp3, 8),
             "risk_reward": round(float(self.risk_reward or 0.0), 4),
             "stop_distance_pct": round(self.stop_distance_pct, 4),
+            "valid_until": self.valid_until_iso,
+            "ttl_bars": self.ttl_bars,
+            "scale_weights": list(self.scale_weights),
             "bias_4h": self.bias_4h,
             "quote_volume": self.quote_volume,
             "spread_bps": self.spread_bps,

@@ -21,6 +21,8 @@ class LSRatioExtremeSetup(RoadmapSetup):
         **RoadmapSetup.DEFAULTS,
         "long_account_threshold": 0.65,
         "short_account_threshold": 0.35,
+        "soft_long_account_threshold": 0.58,
+        "soft_short_account_threshold": 0.42,
         "min_close_position_long": 0.58,
         "max_close_position_short": 0.42,
         "min_volume_ratio": 0.90,
@@ -42,10 +44,25 @@ class LSRatioExtremeSetup(RoadmapSetup):
             return None
         ls_ratio = ratio
         long_account = ls_ratio / (1.0 + ls_ratio) if ls_ratio > 0.0 else 0.5
+        long_threshold = min(
+            float(params["long_account_threshold"]),
+            max(0.5, float(params.get("soft_long_account_threshold", 0.58))),
+        )
+        short_threshold = max(
+            float(params["short_account_threshold"]),
+            min(0.5, float(params.get("soft_short_account_threshold", 0.42))),
+        )
+        soft_extreme = False
         if long_account >= float(params["long_account_threshold"]):
             direction = "short"
         elif long_account <= float(params["short_account_threshold"]):
             direction = "long"
+        elif long_account >= long_threshold:
+            direction = "short"
+            soft_extreme = True
+        elif long_account <= short_threshold:
+            direction = "long"
+            soft_extreme = True
         else:
             _reject(
                 prepared,
@@ -53,6 +70,8 @@ class LSRatioExtremeSetup(RoadmapSetup):
                 "indicator.ls_ratio_not_extreme",
                 ls_ratio=ls_ratio,
                 long_account=long_account,
+                long_threshold=long_threshold,
+                short_threshold=short_threshold,
             )
             return None
         work = prepared.work_15m
@@ -63,19 +82,24 @@ class LSRatioExtremeSetup(RoadmapSetup):
         else:
             volume_penalty = False
         if direction == "long":
-            close_ok = close_position >= float(params["min_close_position_long"])
-        else:
             close_ok = close_position <= float(params["max_close_position_short"])
+        else:
+            close_ok = close_position >= float(params["min_close_position_long"])
         if not close_ok:
-            _reject(
-                prepared,
-                self.setup_id,
-                "ls_ratio_price_confirmation_missing",
-                ls_ratio=ls_ratio,
-                close_position=close_position,
-                direction=direction,
-            )
-            return None
+            if soft_extreme:
+                price_confirmation_penalty = True
+            else:
+                _reject(
+                    prepared,
+                    self.setup_id,
+                    "ls_ratio_price_confirmation_missing",
+                    ls_ratio=ls_ratio,
+                    close_position=close_position,
+                    direction=direction,
+                )
+                return None
+        else:
+            price_confirmation_penalty = False
 
         depth = _finite_or_none(prepared.depth_imbalance)
         micro = _finite_or_none(prepared.microprice_bias)
@@ -101,6 +125,10 @@ class LSRatioExtremeSetup(RoadmapSetup):
             f"close_position={close_position:.2f}",
             f"volume_ratio={volume_ratio:.2f}",
         ]
+        if soft_extreme:
+            reasons.append("soft_crowd_extreme_penalty")
+        if price_confirmation_penalty:
+            reasons.append("price_confirmation_penalty")
         if volume_penalty:
             reasons.append("volume_confirmation_penalty")
         if orderbook_penalty:
@@ -108,6 +136,10 @@ class LSRatioExtremeSetup(RoadmapSetup):
         if context_penalty:
             reasons.append("context_conflict_penalty")
         score_multiplier = 1.0
+        if soft_extreme:
+            score_multiplier *= 0.86
+        if price_confirmation_penalty:
+            score_multiplier *= 0.84
         if volume_penalty:
             score_multiplier *= 0.90
         if orderbook_penalty:

@@ -239,19 +239,26 @@ def _render_signal_card(
     stop: float,
     take_profit_1: float,
     take_profit_2: float,
+    take_profit_3: float | None = None,
     risk_reward: float,
     stop_distance_pct: float,
     reasons: tuple[str, ...] | list[str],
     status_line: str,
     score: float = 0.0,
+    scale_weights: tuple[float, float, float] | list[float] | None = None,
     oi_change_pct: float | None = None,
     funding_rate: float | None = None,
     btc_bias: str | None = None,
     expiry_dt: datetime | None = None,
 ) -> str:
     entry_mid = (entry_low + entry_high) / 2.0
-    scale = max(abs(entry_mid), abs(take_profit_1), abs(take_profit_2), 1.0)
+    tp3 = float(take_profit_3 or take_profit_2)
+    scale = max(abs(entry_mid), abs(take_profit_1), abs(take_profit_2), abs(tp3), 1.0)
     single_target_mode = abs(take_profit_2 - take_profit_1) <= (scale * 1e-6)
+    weights = tuple(scale_weights or (0.5, 0.3, 0.2))
+    if len(weights) != 3:
+        weights = (0.5, 0.3, 0.2)
+    weight_labels = tuple(int(round(float(weight) * 100.0)) for weight in weights)
 
     lines: list[str] = []
 
@@ -273,8 +280,13 @@ def _render_signal_card(
             if single_target_mode
             else (
                 f"<b>TP</b> TP1 <code>{_fmt_price(take_profit_1)}</code> | "
-                f"TP2 <code>{_fmt_price(take_profit_2)}</code>"
+                f"TP2 <code>{_fmt_price(take_profit_2)}</code> | "
+                f"TP3 <code>{_fmt_price(tp3)}</code>"
             )
+        ),
+        (
+            f"<b>Scale</b> <code>{weight_labels[0]}% / {weight_labels[1]}% / "
+            f"{weight_labels[2]}%</code>"
         ),
         f"<b>RR</b> <code>{risk_reward:.2f}</code> | <b>Risk</b> <code>{stop_distance_pct:.2f}%</code>",
     ]
@@ -308,7 +320,10 @@ def _market_context_line(oi_change_pct: float | None, funding_rate: float | None
 def format_signal_text(
     signal: Signal, *, pending_expiry_minutes: int, btc_bias: str | None = None
 ) -> str:
-    wait_until = signal.created_at.astimezone(UTC) + timedelta(minutes=pending_expiry_minutes)
+    fallback_until = signal.created_at.astimezone(UTC) + timedelta(minutes=pending_expiry_minutes)
+    wait_until = signal.valid_until or fallback_until
+    if wait_until > fallback_until:
+        wait_until = fallback_until
     return _render_signal_card(
         symbol=signal.symbol,
         direction=signal.direction,
@@ -320,6 +335,8 @@ def format_signal_text(
         stop=signal.stop,
         take_profit_1=signal.take_profit_1,
         take_profit_2=signal.take_profit_2,
+        take_profit_3=signal.tp3,
+        scale_weights=signal.scale_weights,
         risk_reward=float(signal.risk_reward or 0.0),
         stop_distance_pct=signal.stop_distance_pct,
         reasons=signal.reasons,
@@ -455,7 +472,7 @@ def format_tracked_signal_text(tracked: SignalTrackingEvent | object) -> str:
     entry_mid = getattr(state, "entry_mid")
     stop = getattr(state, "stop")
     risk = abs(entry_mid - stop)
-    reward = abs(getattr(state, "take_profit_2") - entry_mid)
+    reward = abs(getattr(state, "take_profit_3", getattr(state, "take_profit_2")) - entry_mid)
     risk_reward = (reward / risk) if risk > 0 else 0.0
     stop_distance_pct = abs(entry_mid - stop) / entry_mid * 100.0 if entry_mid > 0 else 0.0
     return _render_signal_card(
@@ -469,6 +486,8 @@ def format_tracked_signal_text(tracked: SignalTrackingEvent | object) -> str:
         stop=stop,
         take_profit_1=getattr(state, "take_profit_1"),
         take_profit_2=getattr(state, "take_profit_2"),
+        take_profit_3=getattr(state, "take_profit_3", getattr(state, "take_profit_2")),
+        scale_weights=getattr(state, "scale_weights", (0.5, 0.3, 0.2)),
         risk_reward=risk_reward,
         stop_distance_pct=stop_distance_pct,
         reasons=getattr(state, "reasons", ()),
@@ -510,7 +529,11 @@ def format_tracking_event_text(event: SignalTrackingEvent) -> str:
             + (
                 f"SL {_fmt_price(tracked.stop)} | TP {_fmt_price(tracked.take_profit_1)}"
                 if single_target_mode
-                else f"SL {_fmt_price(tracked.stop)} | TP1 {_fmt_price(tracked.take_profit_1)} | TP2 {_fmt_price(tracked.take_profit_2)}"
+                else (
+                    f"SL {_fmt_price(tracked.stop)} | TP1 {_fmt_price(tracked.take_profit_1)} | "
+                    f"TP2 {_fmt_price(tracked.take_profit_2)} | "
+                    f"TP3 {_fmt_price(getattr(tracked, 'take_profit_3', tracked.take_profit_2))}"
+                )
             )
             + "</code>"
         ),

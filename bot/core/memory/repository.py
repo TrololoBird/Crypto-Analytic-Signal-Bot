@@ -32,6 +32,9 @@ class SignalRecord:
     take_profit_1: float
     take_profit_2: float
     score: float
+    take_profit_3: float | None = None
+    valid_until: datetime | None = None
+    scale_weights: tuple[float, float, float] = (0.5, 0.3, 0.2)
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Context at signal time
@@ -53,6 +56,8 @@ class SignalRecord:
         result = asdict(self)
         # Convert datetime to ISO string
         result["created_at"] = self.created_at.isoformat()
+        if self.valid_until is not None:
+            result["valid_until"] = self.valid_until.isoformat()
         return result
 
     @classmethod
@@ -61,6 +66,8 @@ class SignalRecord:
         # Parse ISO datetime
         if "created_at" in data and isinstance(data["created_at"], str):
             data["created_at"] = datetime.fromisoformat(data["created_at"])
+        if "valid_until" in data and isinstance(data["valid_until"], str):
+            data["valid_until"] = datetime.fromisoformat(data["valid_until"])
         return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
 
     def validate(self) -> None:
@@ -77,6 +84,8 @@ class SignalRecord:
             raise ValueError(f"invalid take_profit_1: {self.take_profit_1}")
         if self.take_profit_2 <= 0:
             raise ValueError(f"invalid take_profit_2: {self.take_profit_2}")
+        if self.take_profit_3 is not None and self.take_profit_3 <= 0:
+            raise ValueError(f"invalid take_profit_3: {self.take_profit_3}")
 
 
 @dataclass
@@ -272,6 +281,10 @@ class MemoryRepository(MemoryRepositoryExtension):
                 stop REAL,
                 take_profit_1 REAL,
                 take_profit_2 REAL,
+                take_profit_3 REAL,
+                valid_until TEXT,
+                scale_weights TEXT,
+                ttl_bars INTEGER,
                 single_target_mode INTEGER DEFAULT 0,
                 target_integrity_status TEXT DEFAULT 'unchecked',
                 score REAL,
@@ -358,6 +371,11 @@ class MemoryRepository(MemoryRepositoryExtension):
                 "stop_price": "REAL",
                 "tp1_price": "REAL",
                 "tp2_price": "REAL",
+                "take_profit_3": "REAL",
+                "tp3_price": "REAL",
+                "valid_until": "TEXT",
+                "scale_weights": "TEXT",
+                "ttl_bars": "INTEGER",
                 "last_checked_at": "TEXT",
                 "last_price": "REAL",
                 "single_target_mode": "INTEGER DEFAULT 0",
@@ -1013,6 +1031,10 @@ class MemoryRepository(MemoryRepositoryExtension):
             "stop",
             "take_profit_1",
             "take_profit_2",
+            "take_profit_3",
+            "valid_until",
+            "scale_weights",
+            "ttl_bars",
             "single_target_mode",
             "target_integrity_status",
             "score",
@@ -1032,6 +1054,7 @@ class MemoryRepository(MemoryRepositoryExtension):
             "stop_price",
             "tp1_price",
             "tp2_price",
+            "tp3_price",
             "last_checked_at",
             "last_price",
             "closed_at",
@@ -1043,6 +1066,8 @@ class MemoryRepository(MemoryRepositoryExtension):
         for col in columns:
             val = signal_data.get(col)
             if col == "reasons" and isinstance(val, (list, tuple)):
+                val = json.dumps(list(val))
+            if col == "scale_weights" and isinstance(val, (list, tuple)):
                 val = json.dumps(list(val))
             values.append(val)
 
@@ -1103,6 +1128,16 @@ class MemoryRepository(MemoryRepositoryExtension):
                                 exc,
                             )
                             data["reasons"] = []
+                    if data.get("scale_weights"):
+                        try:
+                            data["scale_weights"] = tuple(json.loads(data["scale_weights"]))
+                        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                            LOG.error(
+                                "failed to decode scale_weights for signal %s: %s",
+                                data.get("tracking_id"),
+                                exc,
+                            )
+                            data["scale_weights"] = (0.5, 0.3, 0.2)
                     result.append(data)
                 return result
         except Exception as exc:

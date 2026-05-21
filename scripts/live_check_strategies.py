@@ -32,6 +32,7 @@ from bot.core.engine import SignalEngine, StrategyRegistry
 from bot.features import min_required_bars, prepare_symbol
 from bot.market_data import BinanceFuturesMarketData, MarketDataUnavailable
 from bot.domain.schemas import SymbolFrames, UniverseSymbol
+from bot.signal_contract import signal_contract_row, validate_signal_contract
 from bot.setup_base import SetupParams
 from bot.strategies import STRATEGY_CLASSES
 
@@ -245,6 +246,71 @@ def _component_summary(values_by_name: dict[str, list[float]]) -> dict[str, dict
     return summary
 
 
+def _empty_contract_summary() -> dict[str, Any]:
+    return {
+        "checked": 0,
+        "ok": 0,
+        "failed": 0,
+        "failure_rate": 0.0,
+        "issues": [],
+        "issue_counts": {},
+        "fields": {
+            "entry_zone": 0,
+            "stop_loss": 0,
+            "tp1": 0,
+            "tp2": 0,
+            "tp3": 0,
+            "valid_until": 0,
+            "scale_weights": 0,
+        },
+    }
+
+
+def _contract_field_presence(signal: Any) -> dict[str, bool]:
+    valid_until = getattr(signal, "valid_until", None)
+    scale_weights = getattr(signal, "scale_weights", None)
+    return {
+        "entry_zone": getattr(signal, "entry_low", None) is not None
+        and getattr(signal, "entry_high", None) is not None,
+        "stop_loss": getattr(signal, "stop_loss", getattr(signal, "stop", None)) is not None,
+        "tp1": getattr(signal, "tp1", getattr(signal, "take_profit_1", None)) is not None,
+        "tp2": getattr(signal, "tp2", getattr(signal, "take_profit_2", None)) is not None,
+        "tp3": getattr(signal, "tp3", getattr(signal, "take_profit_3", None)) is not None,
+        "valid_until": valid_until is not None,
+        "scale_weights": bool(scale_weights) and len(tuple(scale_weights)) == 3,
+    }
+
+
+def _contract_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    if not rows:
+        return _empty_contract_summary()
+    issue_counter: Counter[str] = Counter()
+    field_counter: Counter[str] = Counter()
+    failed_rows: list[dict[str, Any]] = []
+    for row in rows:
+        for field, present in row.get("field_presence", {}).items():
+            if present:
+                field_counter.update([field])
+        issues = row.get("issues", [])
+        if issues:
+            failed_rows.append(row)
+            for issue in issues:
+                field = str(issue.get("field") or "unknown")
+                reason = str(issue.get("reason") or "unknown")
+                issue_counter.update([f"{field}:{reason}"])
+    checked = len(rows)
+    failed = len(failed_rows)
+    return {
+        "checked": checked,
+        "ok": checked - failed,
+        "failed": failed,
+        "failure_rate": round(failed / checked, 4) if checked else 0.0,
+        "issues": failed_rows[:20],
+        "issue_counts": _counter_map(issue_counter),
+        "fields": {field: int(field_counter.get(field, 0)) for field in _empty_contract_summary()["fields"]},
+    }
+
+
 def _strategy_ids() -> tuple[str, ...]:
     return tuple(strategy_class.setup_id for strategy_class in STRATEGY_CLASSES)
 
@@ -302,6 +368,7 @@ def _build_surface_summary(
     skip_reasons: Counter[str],
     scoring_summary: dict[str, Any],
     component_summary: dict[str, dict[str, Any]],
+    signal_contract_summary: dict[str, Any],
 ) -> dict[str, Any]:
     evaluated_ids = tuple(id_ for id_ in registered_ids if not selected_ids or id_ in selected_ids)
     hit_ids = tuple(sorted(set(hits_by_setup)))
@@ -320,6 +387,7 @@ def _build_surface_summary(
         "error_strategies": list(error_ids),
         "confluence_score": scoring_summary,
         "confluence_components": component_summary,
+        "signal_contract": signal_contract_summary,
         "strategy_hits": _counter_items(hits_by_setup),
         "strategy_errors": _counter_items(errors_by_setup),
         "strategy_rejects": _counter_items(rejects_by_setup),
@@ -387,6 +455,7 @@ def _validate_surface_requirements(
     max_prepare_failures: int | None,
     min_score_max: float | None,
     min_score_stdev: float | None,
+    require_signal_contract: bool,
 ) -> None:
     failures: list[str] = []
     if summary["prepared_ok"] < min_prepared:
@@ -425,6 +494,17 @@ def _validate_surface_requirements(
         if score_stdev < min_score_stdev:
             failures.append(
                 f"score stdev below requirement: {score_stdev:.4f} < {min_score_stdev:.4f}"
+            )
+    if require_signal_contract:
+        contract = summary.get("signal_contract", {})
+        checked = int(contract.get("checked", 0) or 0)
+        failed = int(contract.get("failed", 0) or 0)
+        if checked <= 0:
+            failures.append("signal contract requirement had no signals to inspect")
+        if failed:
+            failures.append(
+                f"signal contract failures detected: {failed}/{checked} "
+                f"{contract.get('issue_counts', {})}"
             )
     if failures:
         raise RuntimeError("; ".join(failures))
@@ -487,6 +567,7 @@ async def _run(
         skip_reasons: Counter[str] = Counter()
         confluence_scores: list[float] = []
         confluence_components: defaultdict[str, list[float]] = defaultdict(list)
+        signal_contract_rows: list[dict[str, Any]] = []
         detector_runs = 0
         prepared_ok = 0
         failures: list[dict[str, Any]] = []
@@ -533,6 +614,15 @@ async def _run(
                         errors_by_setup.update([setup_id])
                     elif result.signal is not None:
                         hits_by_setup.update([result.signal.setup_id])
+                        contract_issues = validate_signal_contract(result.signal)
+                        contract_row = signal_contract_row(result.signal)
+                        contract_row["symbol"] = prepared.symbol
+                        contract_row["field_presence"] = _contract_field_presence(result.signal)
+                        if contract_issues:
+                            contract_row["strategy_status"] = (
+                                decision.status if decision is not None else "unknown"
+                            )
+                        signal_contract_rows.append(contract_row)
                         confluence_result = confluence.score(result.signal, prepared)
                         confluence_scores.append(confluence_result.final_score)
                         for component in confluence_result.components:
@@ -542,6 +632,7 @@ async def _run(
         await asyncio.gather(*[asyncio.create_task(_analyze(symbol)) for symbol in symbols])
         scoring_summary = _score_summary(confluence_scores)
         component_summary = _component_summary(confluence_components)
+        contract_summary = _contract_summary(signal_contract_rows)
         summary = _build_surface_summary(
             symbols=symbols,
             selected_ids=selected_ids,
@@ -557,6 +648,7 @@ async def _run(
             skip_reasons=skip_reasons,
             scoring_summary=scoring_summary,
             component_summary=component_summary,
+            signal_contract_summary=contract_summary,
         )
         LOG.info(
             "strategy_surface_summary",
@@ -566,6 +658,7 @@ async def _run(
             requested_strategies=sorted(selected_ids),
             confluence_score=scoring_summary,
             confluence_components=component_summary,
+            signal_contract=contract_summary,
             strategy_hits=hits_by_setup.most_common(),
             strategy_errors=errors_by_setup.most_common(),
             strategy_rejects=rejects_by_setup.most_common(20),
@@ -652,6 +745,11 @@ def main() -> None:
         default=None,
         help="Fail when confluence score standard deviation is below this value.",
     )
+    parser.add_argument(
+        "--require-signal-contract",
+        action="store_true",
+        help="Fail when any emitted signal misses entry zone, SL, TP1/TP2/TP3, TTL or scale weights.",
+    )
     args = parser.parse_args()
     fallback_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
     symbols = resolve_symbols(
@@ -695,6 +793,7 @@ def main() -> None:
             max_prepare_failures=args.max_prepare_failures,
             min_score_max=args.min_score_max,
             min_score_stdev=args.min_score_stdev,
+            require_signal_contract=bool(args.require_signal_contract),
         )
         if args.summary_json:
             _write_summary_json(args.summary_json, summary)

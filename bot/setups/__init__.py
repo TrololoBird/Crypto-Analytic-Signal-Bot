@@ -15,6 +15,7 @@ import polars as pl
 from ..domain.strategies import StrategyDecision
 from ..features import _swing_points  # shared swing detection helper
 from ..domain.schemas import PreparedSymbol, Signal
+from ..signal_contract import build_trade_plan
 from .utils import (
     apply_graded_penalty,
     build_structural_targets,
@@ -334,8 +335,20 @@ def _build_signal(
             price_anchor=price_anchor,
         )
         return None
-    normalized_levels = normalize_trade_levels(direction, price_anchor, stop, tp1, tp2)
-    if normalized_levels is None:
+    signal_timeframe = str(timeframe or "15m")
+    trade_plan = build_trade_plan(
+        direction=direction,
+        setup_id=setup_id,
+        strategy_family=strategy_family,
+        timeframe=signal_timeframe,
+        price_anchor=price_anchor,
+        atr=atr,
+        stop_loss=stop,
+        tp1=tp1,
+        tp2=tp2,
+        entry_pad_atr_mult=entry_pad_atr_mult,
+    )
+    if trade_plan is None:
         _reject(
             prepared,
             setup_id,
@@ -347,17 +360,6 @@ def _build_signal(
             tp2=tp2,
         )
         return None
-    (
-        normalized_stop,
-        normalized_tp1,
-        normalized_tp2,
-        single_target_mode,
-        integrity_status,
-    ) = normalized_levels
-    entry_pad = max(atr * entry_pad_atr_mult, price_anchor * 0.0005)
-    entry_low = price_anchor - entry_pad
-    entry_high = price_anchor + entry_pad
-    entry_mid = (entry_low + entry_high) / 2
 
     volume_ratio = _finite_or_none(prepared.work_15m, "volume_ratio20")
     adx_1h = _finite_or_none(prepared.work_1h, "adx14")
@@ -367,14 +369,13 @@ def _build_signal(
     if ls_ratio is None:
         ls_ratio = getattr(prepared, "ls_ratio", None)
 
-    risk = abs(entry_mid - normalized_stop)
-    reward = abs(normalized_tp1 - entry_mid)
+    entry_mid = trade_plan.entry_mid
+    risk = abs(entry_mid - trade_plan.stop_loss)
+    reward = abs(trade_plan.tp1 - entry_mid)
     risk_reward = reward / risk if risk > 0 else None
 
     trend_direction = getattr(prepared, "bias_1h", None)
     trend_score = getattr(prepared, "trend_score_1h", None)
-
-    signal_timeframe = str(timeframe or "15m")
 
     return Signal(
         symbol=prepared.symbol,
@@ -382,11 +383,16 @@ def _build_signal(
         direction=direction,
         score=score,
         timeframe=signal_timeframe,
-        entry_low=min(entry_low, entry_high),
-        entry_high=max(entry_low, entry_high),
-        stop=normalized_stop,
-        take_profit_1=normalized_tp1,
-        take_profit_2=normalized_tp2,
+        entry_low=trade_plan.entry_low,
+        entry_high=trade_plan.entry_high,
+        stop=trade_plan.stop_loss,
+        take_profit_1=trade_plan.tp1,
+        take_profit_2=trade_plan.tp2,
+        take_profit_3=trade_plan.tp3,
+        valid_until=trade_plan.valid_until,
+        scale_weights=trade_plan.scale_weights,
+        ttl_bars=trade_plan.ttl_bars,
+        entry_plan_status=trade_plan.integrity_status,
         reasons=tuple(reasons),
         strategy_family=str(strategy_family or "continuation"),
         bias_4h=prepared.bias_4h,
@@ -397,8 +403,8 @@ def _build_signal(
         funding_rate=prepared.funding_rate,
         oi_change_pct=prepared.oi_change_pct,
         volume_ratio=volume_ratio,
-        target_integrity_status=integrity_status,
-        single_target_mode=single_target_mode,
+        target_integrity_status=trade_plan.integrity_status,
+        single_target_mode=trade_plan.single_target_mode,
         adx_1h=adx_1h,
         risk_reward=risk_reward,
         trend_direction=trend_direction,

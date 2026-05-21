@@ -40,9 +40,11 @@ class FundingReversalSetup(BaseSetup):
         defaults = {
             "base_score": 0.52,
             "funding_threshold": 0.0010,
+            "funding_soft_threshold": 0.00010,
             "funding_trend_bars": 3.0,
             "funding_recent_extreme_lookback_hours": 48.0,
             "historical_funding_score_penalty": 0.92,
+            "relative_funding_score_penalty": 0.82,
             "min_delta_threshold": 0.02,
             "confirmation_lookback_bars": 4,
             "min_confirmation_score": 1.0,
@@ -82,6 +84,11 @@ class FundingReversalSetup(BaseSetup):
             dynamic_params.get("funding_threshold", defaults["funding_threshold"]),
             defaults["funding_threshold"],
         )
+        funding_soft_threshold = _as_float(
+            dynamic_params.get("funding_soft_threshold", defaults["funding_soft_threshold"]),
+            defaults["funding_soft_threshold"],
+        )
+        effective_threshold = max(0.00002, min(funding_threshold, funding_soft_threshold))
         funding_trend_bars = int(
             dynamic_params.get("funding_trend_bars", defaults["funding_trend_bars"])
         )
@@ -98,6 +105,13 @@ class FundingReversalSetup(BaseSetup):
                 defaults["historical_funding_score_penalty"],
             ),
             defaults["historical_funding_score_penalty"],
+        )
+        relative_funding_score_penalty = _as_float(
+            dynamic_params.get(
+                "relative_funding_score_penalty",
+                defaults["relative_funding_score_penalty"],
+            ),
+            defaults["relative_funding_score_penalty"],
         )
         min_delta_threshold = _as_float(
             dynamic_params.get("min_delta_threshold", defaults["min_delta_threshold"]),
@@ -142,11 +156,8 @@ class FundingReversalSetup(BaseSetup):
         )
         effective_fr = fr
         funding_source = "current"
-        if math.isnan(fr) or abs(fr) <= funding_threshold:
-            # FIX 2026-05-21: the detector looked only at the current
-            # `lastFundingRate`, so fresh reversal setups disappeared as soon as
-            # funding normalized. Use real public funding history when an
-            # extreme print is still inside the configured lookback.
+        funding_score_penalty = 1.0
+        if math.isnan(fr) or abs(fr) <= effective_threshold:
             try:
                 recent_rate = None if recent_extreme_rate is None else float(recent_extreme_rate)
                 recent_age = (
@@ -161,21 +172,27 @@ class FundingReversalSetup(BaseSetup):
                 recent_rate is not None
                 and recent_age is not None
                 and recent_age <= funding_recent_extreme_lookback_hours
-                and abs(recent_rate) > funding_threshold
+                and abs(recent_rate) > effective_threshold
             ):
                 effective_fr = recent_rate
                 funding_source = "history"
+                funding_score_penalty = max(0.70, min(1.0, historical_funding_score_penalty))
             else:
                 _reject(
                     prepared,
                     setup_id,
                     "indicator.funding_not_extreme",
                     funding_rate=fr,
+                    funding_threshold=funding_threshold,
+                    effective_threshold=effective_threshold,
                     recent_extreme_rate=recent_extreme_rate,
                     recent_extreme_age_hours=recent_extreme_age_hours,
                     lookback_hours=funding_recent_extreme_lookback_hours,
                 )
                 return None
+        elif abs(fr) <= funding_threshold:
+            funding_source = "relative"
+            funding_score_penalty = max(0.60, min(1.0, relative_funding_score_penalty))
 
         funding_trend = prepared.funding_trend
 
@@ -214,7 +231,7 @@ class FundingReversalSetup(BaseSetup):
             else 0.5
         )
 
-        direction = "short" if effective_fr > funding_threshold else "long"
+        direction = "short" if effective_fr > effective_threshold else "long"
         confirmation_score = 0.0
         confirmation_reasons: list[str] = []
         for idx in range(recent.height):
@@ -349,13 +366,13 @@ class FundingReversalSetup(BaseSetup):
             rsi=rsi,
         )
         score *= min(1.20, max(0.80, 0.85 + confirmation_score * 0.10))
-        if funding_source == "history":
-            score *= max(0.70, min(1.0, historical_funding_score_penalty))
+        score *= funding_score_penalty
 
         reasons = [
             (
                 f"Funding reversal {direction}: fr={effective_fr:.5f} "
-                f"source={funding_source} trend={funding_trend or 'unknown'}"
+                f"source={funding_source} threshold={effective_threshold:.5f} "
+                f"trend={funding_trend or 'unknown'}"
             ),
             f"current_funding={fr:.5f}",
             f"confirmation_score={confirmation_score:.2f} trend_window={trend_window}",
