@@ -91,18 +91,19 @@ class FVGSetup(BaseSetup):
             timeframe="15m",
             max_age=int(dynamic_params.get("max_fvg_age_bars", 20)),
         )
-        if hit is None:
-            _reject(prepared, setup_id, "pattern.fvg_retest_too_far")
-            return None
-        return build_spec_signal(
-            prepared=prepared,
-            settings=settings,
-            setup_id=setup_id,
-            family=self.family,
-            hit=hit,
-            defaults=defaults,
-            params={**defaults, **dynamic_params, "sl_buffer_atr": sl_buffer_atr},
-        )
+        if hit is not None:
+            return build_spec_signal(
+                prepared=prepared,
+                settings=settings,
+                setup_id=setup_id,
+                family=self.family,
+                hit=hit,
+                defaults=defaults,
+                params={**defaults, **dynamic_params, "sl_buffer_atr": sl_buffer_atr},
+            )
+
+        # FIX 2026-05-21: spec FVG only accepts an immediate retest; fall through
+        # to the configured SMC zone scanner before rejecting as no setup.
         if w.height < 5:
             _reject(prepared, setup_id, "insufficient_15m_bars", bars=w.height)
             return None

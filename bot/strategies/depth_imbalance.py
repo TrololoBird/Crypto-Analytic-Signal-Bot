@@ -40,16 +40,23 @@ class DepthImbalanceSetup(RoadmapSetup):
         if micro is None:
             _reject(prepared, self.setup_id, "microprice_bias_missing")
             return None
+        depth_source = _orderbook_source(prepared)
+        source_penalty = 1.0
         if not _has_l2_depth(prepared):
-            _reject(
-                prepared,
-                self.setup_id,
-                "pattern.depth_not_actionable",
-                depth_source=_orderbook_source(prepared),
-                depth_imbalance=depth,
-                microprice_bias=micro,
-            )
-            return None
+            if depth_source not in {"l2_depth", "l1_book", "rest_book_l1"}:
+                _reject(
+                    prepared,
+                    self.setup_id,
+                    "pattern.depth_not_actionable",
+                    depth_source=depth_source,
+                    depth_imbalance=depth,
+                    microprice_bias=micro,
+                )
+                return None
+            # FIX 2026-05-21: REST/L1 public book context is weaker than fresh
+            # partial-depth, but it is an explicit source and should be scored
+            # as a proxy instead of hard-rejected as missing data.
+            source_penalty = 0.72
         close_position = _last(prepared.work_15m, "close_position", 0.5)
         threshold = float(params["min_depth_imbalance"])
         micro_threshold = float(params["min_microprice_bias"])
@@ -91,10 +98,12 @@ class DepthImbalanceSetup(RoadmapSetup):
             return None
         context_penalty = _confirmed_context_conflict(prepared, direction)
         clarity = min(abs(depth), 1.0)
+        clarity *= source_penalty
         if volume_penalty:
             clarity *= 0.90
         if context_penalty:
             clarity *= 0.82
+        source_note = "depth_source=proxy" if source_penalty < 1.0 else "depth_source=l2_depth"
         return _build_atr_signal(
             prepared=prepared,
             setup_id=self.setup_id,
@@ -103,7 +112,8 @@ class DepthImbalanceSetup(RoadmapSetup):
             reasons=[
                 f"depth_imbalance_{direction}",
                 f"depth={depth:.3f}",
-                f"depth_source={_orderbook_source(prepared)}",
+                f"depth_source={depth_source}",
+                source_note,
                 f"micro={micro:.3f}",
                 f"volume_ratio={vol_ratio:.2f}",
                 f"roc10={roc10:.2f}",

@@ -29,18 +29,19 @@ class ATRExpansionSetup(RoadmapSetup):
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         params = self._params(prepared, settings)
         hit = detect_atr_expansion(prepared.work_15m, timeframe="15m")
-        if hit is None:
-            _reject(prepared, self.setup_id, "indicator.atr_expansion_too_low")
-            return None
-        return build_spec_signal(
-            prepared=prepared,
-            settings=settings,
-            setup_id=self.setup_id,
-            family=self.family,
-            hit=hit,
-            defaults=self.DEFAULTS,
-            params=params,
-        )
+        if hit is not None:
+            return build_spec_signal(
+                prepared=prepared,
+                settings=settings,
+                setup_id=self.setup_id,
+                family=self.family,
+                hit=hit,
+                defaults=self.DEFAULTS,
+                params=params,
+            )
+
+        # FIX 2026-05-21: spec requires a large current-bar TR spike; if absent,
+        # use the existing config-driven recent ATR expansion detector below.
         work = prepared.work_15m
         missing = _missing_columns(work, ("open", "close", "atr14"))
         if missing:

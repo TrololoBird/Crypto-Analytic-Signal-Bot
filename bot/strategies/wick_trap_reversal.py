@@ -79,18 +79,19 @@ class WickTrapReversalSetup(BaseSetup):
 
         defaults = self.get_optimizable_params(settings)
         hit = detect_wick_trap(work_15m, timeframe="15m")
-        if hit is None:
-            _reject(prepared, setup_id, "pattern.no_wick_trap_detected")
-            return None
-        return build_spec_signal(
-            prepared=prepared,
-            settings=settings,
-            setup_id=setup_id,
-            family=self.family,
-            hit=hit,
-            defaults=defaults,
-            params={**defaults, **dynamic_params},
-        )
+        if hit is not None:
+            return build_spec_signal(
+                prepared=prepared,
+                settings=settings,
+                setup_id=setup_id,
+                family=self.family,
+                hit=hit,
+                defaults=defaults,
+                params={**defaults, **dynamic_params},
+            )
+
+        # FIX 2026-05-21: spec trap is narrow; fall through to the confirmed
+        # 1h swing sweep detector before declaring no wick trap.
         wick_through_atr_mult = float(
             dynamic_params.get(
                 "wick_through_atr_mult",

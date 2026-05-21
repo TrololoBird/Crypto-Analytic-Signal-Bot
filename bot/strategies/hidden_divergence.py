@@ -123,19 +123,19 @@ class HiddenDivergenceSetup(BaseSetup):
         defaults = self.get_optimizable_params(settings)
         effective_params = {**defaults, **dynamic_params}
         hit = detect_hidden_divergence(prepared.work_15m, timeframe="15m")
-        if hit is None:
-            _reject(prepared, setup_id, "pattern.no_trend_context")
-            return None
-        return build_spec_signal(
-            prepared=prepared,
-            settings=settings,
-            setup_id=setup_id,
-            family=self.family,
-            hit=hit,
-            defaults=defaults,
-            params=effective_params,
-        )
+        if hit is not None:
+            return build_spec_signal(
+                prepared=prepared,
+                settings=settings,
+                setup_id=setup_id,
+                family=self.family,
+                hit=hit,
+                defaults=defaults,
+                params=effective_params,
+            )
 
+        # FIX 2026-05-21: spec divergence only checks the latest 15m pivots; on
+        # a miss, keep the existing 1h confirmed-swing hidden divergence scan.
         rsi_divergence_lookback = int(
             dynamic_params.get("rsi_divergence_lookback", defaults["rsi_divergence_lookback"])
         )

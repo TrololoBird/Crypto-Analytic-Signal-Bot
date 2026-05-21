@@ -163,3 +163,92 @@ Known remaining limitations:
   runs as market state changed. Treat repeated single-code rejects as triage
   candidates, not as confirmed broken strategy logic without a WS/pipeline
   comparison and per-gate evidence.
+
+### 2026-05-21 - Zero-hit detector remediation
+
+Reason for session: the previous session reported 26/38 strategies with
+`detector_hits > 0`; the fresh baseline for this session found 15 zero-hit
+strategies on a 20-symbol sample. This session targeted only zero-hit detector
+participation and avoided infrastructure refactors.
+
+Changes:
+- `bot/strategies/absorption.py`, `aggression_shift.py`, `atr_expansion.py`,
+  `bb_squeeze.py`, `fvg.py`, `hidden_divergence.py`,
+  `rsi_divergence_bottom.py`, `squeeze_setup.py`,
+  `stop_hunt_detection.py`, `structure_pullback.py`,
+  `volume_anomaly.py`, `volume_climax_reversal.py`,
+  `wick_trap_reversal.py`, and `wyckoff_spring.py`: strict
+  `spec_patterns` misses now fall through to the already existing
+  config-driven fallback detector instead of returning an early reject.
+- `bot/strategies/depth_imbalance.py`: explicit public `l1_book` and
+  `rest_book_l1` sources are accepted as lower-scored orderbook proxies rather
+  than being hard-rejected as missing L2 depth.
+- `bot/strategies/whale_walls.py`: when persistent L2 wall pressure is absent,
+  explicit public depth imbalance can produce a lower-scored, labeled
+  `*_depth_proxy` signal.
+- `bot/strategies/liquidation_heatmap.py`: added a labeled
+  `source=volume_wick_proxy` fallback using existing public OHLCV proxy
+  parameters; `force_order` remains reserved for real force-order stream data.
+- `docs/STRATEGIES.md`: added the zero-hit remediation log and documented the
+  remaining market-condition zeroes.
+
+Verified:
+- `python -m compileall bot/strategies` -> exit 0.
+- `python -m scripts.validate_config` -> `[OK] All checks passed`.
+- `python -m scripts.live_check_strategies --limit 20 --concurrency 3` ->
+  20 prepared symbols, 760 detector runs, `strategy_errors=[]`, 35/38
+  strategies with `detector_hits > 0`.
+
+Known remaining limitations:
+- `funding_reversal`: `market_condition`; sampled funding rates were below the
+  configured `funding_threshold=0.001`, so `indicator.funding_not_extreme` is
+  expected until crowding appears.
+- `ls_ratio_extreme`: `market_condition`; current symbols were either not
+  extreme enough or lacked the required price-position confirmation for a
+  contrarian signal.
+- `supertrend_follow`: `market_condition`; current symbols lacked a valid
+  SuperTrend pullback, or failed volume/ADX gates, so no detector bug was
+  confirmed.
+
+## Strategy Status - 2026-05-21
+
+| Strategy | Family | TF | Status | Zero reason if applicable | Fix |
+|---|---|---|---|---|---|
+| absorption | orderflow | 15m | LIVE | implementation_bug: spec miss hid fallback | fallthrough fixed |
+| aggression_shift | orderflow | 15m | LIVE | implementation_bug: spec miss hid fallback | fallthrough fixed |
+| altcoin_season_index | multi_asset | 15m/market | LIVE | - | - |
+| atr_expansion | volatility | 15m | LIVE | implementation_bug: spec threshold hid fallback | fallthrough fixed |
+| bb_squeeze | volatility | 15m | LIVE | implementation_bug: last-bar spec hid memory window | fallthrough fixed |
+| bos_choch | breakout | 15m | LIVE | - | - |
+| breaker_block | liquidity | 15m | LIVE | - | - |
+| btc_correlation | multi_asset | 15m/market | LIVE | - | - |
+| cvd_divergence | orderflow | 15m | LIVE | - | - |
+| depth_imbalance | orderbook | 15m | LIVE | source_gate: REST/L1 public source hard-rejected | labeled proxy |
+| ema_bounce | continuation | 15m | LIVE | - | - |
+| funding_reversal | reversal | 15m+funding | MARKET_CONDITION | funding not extreme | documented |
+| fvg_setup | continuation | 15m | LIVE | implementation_bug: spec retest hid SMC zone fallback | fallthrough fixed |
+| hidden_divergence | continuation | 15m+1h | LIVE | implementation_bug: spec miss hid swing scan | fallthrough fixed |
+| indicator_divergence | reversal | 15m | LIVE | - | - |
+| keltner_breakout | volatility | 15m | LIVE | - | - |
+| liquidity_sweep | liquidity | 15m | LIVE | - | - |
+| liquidation_heatmap | liquidity | 15m | LIVE | implementation_bug: documented proxy params unused | volume_wick_proxy |
+| ls_ratio_extreme | sentiment | 15m+futures data | MARKET_CONDITION | no extreme/price confirmation | documented |
+| multi_tf_trend | continuation | 15m+1h+4h | LIVE | market state mixed in baseline | no code change |
+| oi_divergence | sentiment | 15m+OI | LIVE | - | - |
+| order_block | continuation | 15m | LIVE | - | - |
+| price_velocity | momentum | 15m | LIVE | - | - |
+| rsi_divergence_bottom | reversal | 15m | LIVE | implementation_bug: spec miss hid window detector | fallthrough fixed |
+| session_killzone | session | 15m | LIVE | - | - |
+| spread_strategy | orderbook | 15m | LIVE | - | - |
+| squeeze_setup | breakout | 15m | LIVE | implementation_bug: spec miss hid squeeze fallback | fallthrough fixed |
+| stop_hunt_detection | liquidity | 15m | LIVE | implementation_bug: spec miss hid sweep fallback | fallthrough fixed |
+| structure_break_retest | breakout | 15m | LIVE | - | - |
+| structure_pullback | continuation | 15m+1h | LIVE | implementation_bug: spec fib window hid fallback | fallthrough fixed |
+| supertrend_follow | continuation | 15m+1h | MARKET_CONDITION | no current SuperTrend pullback/volume/ADX gate | documented |
+| turtle_soup | liquidity | 15m | LIVE | - | - |
+| volume_anomaly | momentum | 15m | LIVE | implementation_bug: spec miss hid recent-bar fallback | fallthrough fixed |
+| volume_climax_reversal | reversal | 15m | LIVE | implementation_bug: spec miss hid reclaim fallback | fallthrough fixed |
+| vwap_trend | continuation | 15m | LIVE | - | - |
+| whale_walls | orderbook | 15m | LIVE | source_gate: missing persistent L2 wall pressure | labeled depth proxy |
+| wick_trap_reversal | reversal | 15m+1h | LIVE | implementation_bug: spec miss hid 1h swing trap fallback | fallthrough fixed |
+| wyckoff_spring | reversal | 15m | LIVE | implementation_bug: spec miss hid range sweep fallback | fallthrough fixed |

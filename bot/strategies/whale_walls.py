@@ -33,10 +33,6 @@ class WhaleWallsSetup(RoadmapSetup):
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         params = self._params(prepared, settings)
-        wall_pressure = _finite_or_none(getattr(prepared, "depth_wall_pressure", None))
-        if wall_pressure is None or abs(wall_pressure) <= 0.0:
-            _reject(prepared, self.setup_id, "pattern.wall_proxy_too_weak")
-            return None
         depth = _finite_or_none(prepared.depth_imbalance)
         micro = _finite_or_none(prepared.microprice_bias)
         if depth is None or micro is None:
@@ -48,22 +44,47 @@ class WhaleWallsSetup(RoadmapSetup):
                 microprice_bias=micro,
             )
             return None
-        if not _has_l2_depth(prepared):
+        depth_source = _orderbook_source(prepared)
+        if depth_source not in {"l2_depth", "l1_book", "rest_book_l1"}:
             _reject(
                 prepared,
                 self.setup_id,
                 "pattern.wall_proxy_too_weak",
-                depth_source=_orderbook_source(prepared),
+                depth_source=depth_source,
                 depth_imbalance=depth,
                 microprice_bias=micro,
             )
             return None
+        depth_value = float(depth)
+        micro_value = float(micro)
+        wall_pressure = _finite_or_none(getattr(prepared, "depth_wall_pressure", None))
+        wall_source = "l2_depth_wall"
+        source_penalty = 1.0
+        if wall_pressure is None or abs(wall_pressure) <= 0.0:
+            threshold = float(params["min_depth_imbalance"])
+            micro_threshold = float(params["min_microprice_bias"])
+            if abs(depth_value) < threshold or abs(micro_value) < micro_threshold:
+                _reject(
+                    prepared,
+                    self.setup_id,
+                    "pattern.wall_proxy_too_weak",
+                    depth_source=depth_source,
+                    depth_imbalance=depth_value,
+                    microprice_bias=micro_value,
+                )
+                return None
+            # FIX 2026-05-21: live diagnostics can have explicit public REST/L1
+            # depth without persistent L2 wall pressure. Use it only as a
+            # lower-scored proxy and label the source in the signal reason.
+            wall_pressure = depth_value
+            wall_source = f"{depth_source}_depth_proxy"
+            source_penalty = 0.62 if depth_source != "l2_depth" else 0.78
+        elif not _has_l2_depth(prepared):
+            source_penalty = 0.72
         spread = _finite_or_none(prepared.spread_bps)
         if spread is not None and spread > float(params["max_spread_bps"]):
             _reject(prepared, self.setup_id, "pattern.wall_proxy_too_weak", spread_bps=spread)
             return None
-        depth_value = float(depth)
-        micro_value = float(micro)
         work = prepared.work_15m
         vol_ratio = _last(work, "volume_ratio20", 1.0)
         volume_penalty = vol_ratio < float(params["min_volume_ratio"])
@@ -105,6 +126,7 @@ class WhaleWallsSetup(RoadmapSetup):
             return None
         context_penalty = _confirmed_context_conflict(prepared, direction)
         clarity = min(abs(depth_value), 1.0)
+        clarity *= source_penalty
         if volume_penalty:
             clarity *= 0.90
         if context_penalty:
@@ -117,8 +139,9 @@ class WhaleWallsSetup(RoadmapSetup):
             reasons=[
                 f"orderbook_wall_proxy_{direction}",
                 f"wall_pressure={wall_pressure:.3f}",
+                f"wall_source={wall_source}",
                 f"depth_imbalance={depth_value:.3f}",
-                f"depth_source={_orderbook_source(prepared)}",
+                f"depth_source={depth_source}",
                 f"micro={micro_value:.3f}",
                 f"close_position={close_position:.2f}",
                 f"volume_ratio={vol_ratio:.2f}",

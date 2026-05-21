@@ -26,19 +26,19 @@ class AggressionShiftSetup(RoadmapSetup):
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         params = self._params(prepared, settings)
         hit = detect_aggression_shift(prepared.work_15m, timeframe="15m")
-        if hit is None:
-            _reject(prepared, self.setup_id, "pattern.aggression_shift_too_small")
-            return None
-        return build_spec_signal(
-            prepared=prepared,
-            settings=settings,
-            setup_id=self.setup_id,
-            family=self.family,
-            hit=hit,
-            defaults=self.DEFAULTS,
-            params=params,
-        )
+        if hit is not None:
+            return build_spec_signal(
+                prepared=prepared,
+                settings=settings,
+                setup_id=self.setup_id,
+                family=self.family,
+                hit=hit,
+                defaults=self.DEFAULTS,
+                params=params,
+            )
 
+        # FIX 2026-05-21: strict spec miss must fall through to the configured
+        # public orderflow proxy path instead of making the fallback unreachable.
         explicit_shift = _finite_or_none(prepared.aggression_shift)
         if explicit_shift is not None:
             shift = explicit_shift

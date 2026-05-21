@@ -151,6 +151,50 @@ specification.
   wording. It must not render unknown placeholders such as `n/a`/`н/д` in the
   market-state message.
 
+## 2026-05-21 Zero-Hit Strategy Remediation
+
+Before this pass, the live detector surface had 15 zero-hit strategies on a
+20-symbol Binance USD-M sample. Most misses were not missing features; they
+were early returns after a strict `spec_patterns` miss, which made the older
+config-driven detectors unreachable.
+
+| Strategy | Classification | Concrete issue | Fix |
+|---|---|---|---|
+| absorption | implementation_bug | strict spec miss hid orderflow/candle fallback | fall through to fallback |
+| aggression_shift | implementation_bug | strict delta-vs-price spec hid configured shift proxy | fall through to fallback |
+| atr_expansion | implementation_bug | fixed spec TR threshold hid configured recent ATR expansion | fall through to fallback |
+| bb_squeeze | implementation_bug | last-bar spec release hid squeeze memory window | fall through to fallback |
+| depth_imbalance | source_gate | `rest_book_l1`/`l1_book` public sources were hard-rejected | accept as lower-scored explicit proxy |
+| fvg_setup | implementation_bug | strict FVG retest hid SMC zone scanner | fall through to fallback |
+| hidden_divergence | implementation_bug | strict 15m pivot spec hid 1h swing scan | fall through to fallback |
+| liquidation_heatmap | implementation_bug | documented public volume/wick proxy params were unused | add `source=volume_wick_proxy`; keep `force_order` reserved for real stream data |
+| rsi_divergence_bottom | implementation_bug | strict oversold spec hid configured divergence window | fall through to fallback |
+| squeeze_setup | implementation_bug | strict BB/KC spec hid prepared squeeze fallback | fall through to fallback |
+| stop_hunt_detection | implementation_bug | strict stop-hunt spec hid recent sweep/wick fallback | fall through to fallback |
+| structure_pullback | implementation_bug | strict fib-window spec hid trend/pullback-level fallback | fall through to fallback |
+| volume_anomaly | implementation_bug | strict latest-candle spec hid recent-bar anomaly fallback | fall through to fallback |
+| volume_climax_reversal | implementation_bug | strict climax spec hid configured reclaim fallback | fall through to fallback |
+| whale_walls | source_gate | persistent L2 wall pressure absent on REST/L1 diagnostics | allow lower-scored `*_depth_proxy` signal with explicit reason |
+| wick_trap_reversal | implementation_bug | strict wick-trap spec hid 1h swing trap fallback | fall through to fallback |
+| wyckoff_spring | implementation_bug | strict spring/upthrust spec hid range sweep fallback | fall through to fallback |
+
+Verification on 2026-05-21:
+
+- `python -m compileall bot/strategies` passed.
+- `python -m scripts.validate_config` passed.
+- `python -m scripts.live_check_strategies --limit 20 --concurrency 3`
+  prepared 20 symbols, ran 760 detectors, reported `strategy_errors=[]`, and
+  produced `detector_hits > 0` for 35/38 strategies.
+
+Documented market-condition zeroes in that run:
+
+- `funding_reversal`: sampled funding rates were below the configured
+  `funding_threshold=0.001`, so `indicator.funding_not_extreme` is expected.
+- `ls_ratio_extreme`: current symbols either were not extreme enough or lacked
+  contrarian price-position confirmation.
+- `supertrend_follow`: current symbols lacked a valid SuperTrend pullback or
+  failed volume/ADX gates.
+
 ## 2026-05-19 Strategy Logic Remediation
 
 Current remediation target: keep all 38 registered strategies active and repair

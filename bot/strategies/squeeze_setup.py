@@ -193,19 +193,19 @@ class SqueezeSetup(BaseSetup):
         defaults = self.get_optimizable_params(settings)
         effective_params = {**defaults, **dynamic_params}
         hit = detect_bb_squeeze_release(work_15m, timeframe="15m")
-        if hit is None:
-            _reject(prepared, self.setup_id, "indicator.no_bb_kc_squeeze")
-            return None
-        return build_spec_signal(
-            prepared=prepared,
-            settings=settings,
-            setup_id=self.setup_id,
-            family=self.family,
-            hit=hit,
-            defaults=defaults,
-            params=effective_params,
-        )
+        if hit is not None:
+            return build_spec_signal(
+                prepared=prepared,
+                settings=settings,
+                setup_id=self.setup_id,
+                family=self.family,
+                hit=hit,
+                defaults=defaults,
+                params=effective_params,
+            )
 
+        # FIX 2026-05-21: the spec layer is intentionally strict; when it misses,
+        # keep the prepared squeeze_on/off and compression-window fallback live.
         bb_squeeze_threshold = _as_float(
             dynamic_params.get("bb_squeeze_threshold", defaults["bb_squeeze_threshold"]),
             defaults["bb_squeeze_threshold"],

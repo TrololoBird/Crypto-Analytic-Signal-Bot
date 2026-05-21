@@ -57,19 +57,19 @@ class VolumeClimaxReversalSetup(BaseSetup):
         dynamic_params = get_dynamic_params(prepared, setup_id)
         effective_params = {**params, **dynamic_params}
         hit = detect_volume_climax_reversal(work, timeframe="15m")
-        if hit is None:
-            _reject(prepared, setup_id, "pattern.no_volume_climax_reclaim")
-            return None
-        return build_spec_signal(
-            prepared=prepared,
-            settings=settings,
-            setup_id=setup_id,
-            family=self.family,
-            hit=hit,
-            defaults=params,
-            params=effective_params,
-        )
+        if hit is not None:
+            return build_spec_signal(
+                prepared=prepared,
+                settings=settings,
+                setup_id=setup_id,
+                family=self.family,
+                hit=hit,
+                defaults=params,
+                params=effective_params,
+            )
 
+        # FIX 2026-05-21: spec requires a very large recent climax; fall through
+        # to the configured wick/body reclaim detector before rejecting.
         if work.height < 30:
             _reject(prepared, setup_id, "insufficient_15m_bars")
             return None

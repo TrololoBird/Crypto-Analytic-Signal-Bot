@@ -29,18 +29,19 @@ class BBSqueezeSetup(RoadmapSetup):
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         params = self._params(prepared, settings)
         hit = detect_bb_squeeze_release(prepared.work_15m, timeframe="15m")
-        if hit is None:
-            _reject(prepared, self.setup_id, "indicator.no_bb_kc_squeeze")
-            return None
-        return build_spec_signal(
-            prepared=prepared,
-            settings=settings,
-            setup_id=self.setup_id,
-            family=self.family,
-            hit=hit,
-            defaults=self.DEFAULTS,
-            params=params,
-        )
+        if hit is not None:
+            return build_spec_signal(
+                prepared=prepared,
+                settings=settings,
+                setup_id=self.setup_id,
+                family=self.family,
+                hit=hit,
+                defaults=self.DEFAULTS,
+                params=params,
+            )
+
+        # FIX 2026-05-21: strict spec release is last-bar only; fall through to
+        # the configured squeeze memory/release window before rejecting.
         work = prepared.work_15m
         missing = _missing_columns(work, ("bb_width", "squeeze_on", "squeeze_off", "roc10"))
         if missing:

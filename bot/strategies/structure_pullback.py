@@ -74,9 +74,9 @@ class StructurePullbackSetup(BaseSetup):
                 defaults=defaults,
                 params=dynamic_params,
             )
-        _reject(prepared, "structure_pullback", "pattern.no_valid_pullback_level")
-        return None
 
+        # FIX 2026-05-21: spec pullback only accepts a narrow fib window; on a
+        # miss, continue into the configured trend/pullback-level detector.
         min_trend_score = dynamic_params.get("min_trend_score", defaults["min_trend_score"])
         pullback_lookback = int(
             dynamic_params.get("pullback_lookback", defaults["pullback_lookback"])

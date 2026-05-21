@@ -33,19 +33,19 @@ class WyckoffSpringSetup(RoadmapSetup):
         params = self._params(prepared, settings)
         work = prepared.work_15m
         hit = detect_wyckoff_spring(work, timeframe="15m")
-        if hit is None:
-            _reject(prepared, self.setup_id, "pattern.no_liquidity_sweep_detected")
-            return None
-        return build_spec_signal(
-            prepared=prepared,
-            settings=settings,
-            setup_id=self.setup_id,
-            family=self.family,
-            hit=hit,
-            defaults=self.DEFAULTS,
-            params=params,
-        )
+        if hit is not None:
+            return build_spec_signal(
+                prepared=prepared,
+                settings=settings,
+                setup_id=self.setup_id,
+                family=self.family,
+                hit=hit,
+                defaults=self.DEFAULTS,
+                params=params,
+            )
 
+        # FIX 2026-05-21: if strict spec spring/upthrust is absent, keep the
+        # configured recent-range sweep fallback reachable.
         missing = _missing_columns(
             work,
             ("high", "low", "close", "prev_donchian_low20", "prev_donchian_high20"),

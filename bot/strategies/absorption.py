@@ -28,19 +28,19 @@ class AbsorptionSetup(RoadmapSetup):
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         params = self._params(prepared, settings)
         hit = detect_absorption(prepared.work_15m, timeframe="15m")
-        if hit is None:
-            _reject(prepared, self.setup_id, "pattern.absorption_not_confirmed")
-            return None
-        return build_spec_signal(
-            prepared=prepared,
-            settings=settings,
-            setup_id=self.setup_id,
-            family=self.family,
-            hit=hit,
-            defaults=self.DEFAULTS,
-            params=params,
-        )
+        if hit is not None:
+            return build_spec_signal(
+                prepared=prepared,
+                settings=settings,
+                setup_id=self.setup_id,
+                family=self.family,
+                hit=hit,
+                defaults=self.DEFAULTS,
+                params=params,
+            )
 
+        # FIX 2026-05-21: a strict spec miss must not bypass the configured
+        # orderflow/candle absorption fallback below.
         flow, flow_source = _flow_delta_with_source(prepared)
         if flow is None:
             _reject(prepared, self.setup_id, "orderflow_delta_missing")
