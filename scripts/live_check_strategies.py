@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import statistics
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -244,12 +245,197 @@ def _component_summary(values_by_name: dict[str, list[float]]) -> dict[str, dict
     return summary
 
 
+def _strategy_ids() -> tuple[str, ...]:
+    return tuple(strategy_class.setup_id for strategy_class in STRATEGY_CLASSES)
+
+
+def _counter_items(counter: Counter[str], limit: int | None = None) -> list[dict[str, Any]]:
+    items = counter.most_common(limit) if limit is not None else counter.most_common()
+    return [{"name": name, "count": count} for name, count in items]
+
+
+def _counter_map(counter: Counter[str]) -> dict[str, int]:
+    return {name: int(count) for name, count in counter.items()}
+
+
+def _hit_rate_summary(
+    *,
+    setup_ids: tuple[str, ...],
+    hits_by_setup: Counter[str],
+    rejects_by_setup: Counter[str],
+    skips_by_setup: Counter[str],
+    errors_by_setup: Counter[str],
+) -> dict[str, dict[str, Any]]:
+    summary: dict[str, dict[str, Any]] = {}
+    for setup_id in setup_ids:
+        hits = int(hits_by_setup.get(setup_id, 0))
+        rejects = int(rejects_by_setup.get(setup_id, 0))
+        skips = int(skips_by_setup.get(setup_id, 0))
+        errors = int(errors_by_setup.get(setup_id, 0))
+        runs = hits + rejects + skips + errors
+        summary[setup_id] = {
+            "hits": hits,
+            "rejects": rejects,
+            "skips": skips,
+            "errors": errors,
+            "observed_results": runs,
+            "hit_rate": round(hits / runs, 4) if runs else 0.0,
+            "reject_rate": round(rejects / runs, 4) if runs else 0.0,
+            "skip_rate": round(skips / runs, 4) if runs else 0.0,
+        }
+    return summary
+
+
+def _build_surface_summary(
+    *,
+    symbols: list[str],
+    selected_ids: set[str],
+    registered_ids: tuple[str, ...],
+    prepared_ok: int,
+    detector_runs: int,
+    failures: list[dict[str, Any]],
+    hits_by_setup: Counter[str],
+    errors_by_setup: Counter[str],
+    rejects_by_setup: Counter[str],
+    skips_by_setup: Counter[str],
+    reject_reasons: Counter[str],
+    skip_reasons: Counter[str],
+    scoring_summary: dict[str, Any],
+    component_summary: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    evaluated_ids = tuple(id_ for id_ in registered_ids if not selected_ids or id_ in selected_ids)
+    hit_ids = tuple(sorted(set(hits_by_setup)))
+    missing_hit_ids = tuple(id_ for id_ in evaluated_ids if hits_by_setup.get(id_, 0) <= 0)
+    error_ids = tuple(id_ for id_ in evaluated_ids if errors_by_setup.get(id_, 0) > 0)
+    return {
+        "symbols_requested": len(symbols),
+        "prepared_ok": prepared_ok,
+        "detector_runs": detector_runs,
+        "requested_strategies": sorted(selected_ids),
+        "registered_strategies": list(registered_ids),
+        "evaluated_strategies": list(evaluated_ids),
+        "hit_strategy_count": len(hit_ids),
+        "hit_strategies": list(hit_ids),
+        "missing_hit_strategies": list(missing_hit_ids),
+        "error_strategies": list(error_ids),
+        "confluence_score": scoring_summary,
+        "confluence_components": component_summary,
+        "strategy_hits": _counter_items(hits_by_setup),
+        "strategy_errors": _counter_items(errors_by_setup),
+        "strategy_rejects": _counter_items(rejects_by_setup),
+        "strategy_reject_reasons": _counter_items(reject_reasons),
+        "strategy_skips": _counter_items(skips_by_setup),
+        "strategy_skip_reasons": _counter_items(skip_reasons),
+        "strategy_counts": _hit_rate_summary(
+            setup_ids=evaluated_ids,
+            hits_by_setup=hits_by_setup,
+            rejects_by_setup=rejects_by_setup,
+            skips_by_setup=skips_by_setup,
+            errors_by_setup=errors_by_setup,
+        ),
+        "prepare_failures": failures,
+        "hit_counts": _counter_map(hits_by_setup),
+        "reject_counts": _counter_map(rejects_by_setup),
+        "skip_counts": _counter_map(skips_by_setup),
+        "error_counts": _counter_map(errors_by_setup),
+    }
+
+
+def _write_summary_json(path: str, summary: dict[str, Any]) -> None:
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _resolve_required_hit_ids(
+    raw: list[str] | None,
+    *,
+    selected_ids: set[str],
+    available_ids: set[str],
+) -> tuple[str, ...]:
+    parsed = _parse_strategy_filter(raw)
+    if not parsed:
+        return ()
+    if "all" in parsed:
+        base = selected_ids if selected_ids else available_ids
+        return tuple(sorted(base))
+    unknown = sorted(set(parsed) - available_ids)
+    if unknown:
+        raise ValueError(f"unknown strategies required for hits: {unknown}")
+    return tuple(dict.fromkeys(parsed))
+
+
+def _resolve_allowed_missing_hit_ids(
+    raw: list[str] | None,
+    *,
+    available_ids: set[str],
+) -> set[str]:
+    parsed = set(_parse_strategy_filter(raw))
+    unknown = sorted(parsed - available_ids)
+    if unknown:
+        raise ValueError(f"unknown strategies allowed missing hits: {unknown}")
+    return parsed
+
+
+def _validate_surface_requirements(
+    summary: dict[str, Any],
+    *,
+    required_hit_ids: tuple[str, ...],
+    allowed_missing_hit_ids: set[str],
+    min_hit_strategies: int,
+    min_prepared: int,
+    max_prepare_failures: int | None,
+    min_score_max: float | None,
+    min_score_stdev: float | None,
+) -> None:
+    failures: list[str] = []
+    if summary["prepared_ok"] < min_prepared:
+        failures.append(
+            f"prepared symbol count below requirement: {summary['prepared_ok']} < {min_prepared}"
+        )
+    if max_prepare_failures is not None:
+        prepare_failures = len(summary.get("prepare_failures", []))
+        if prepare_failures > max_prepare_failures:
+            failures.append(
+                f"prepare failures above requirement: {prepare_failures} > {max_prepare_failures}"
+            )
+    if summary["error_strategies"]:
+        failures.append(f"strategy errors detected: {summary['error_strategies']}")
+    if required_hit_ids:
+        hit_counts = summary.get("hit_counts", {})
+        missing = [
+            setup_id
+            for setup_id in required_hit_ids
+            if setup_id not in allowed_missing_hit_ids and hit_counts.get(setup_id, 0) <= 0
+        ]
+        if missing:
+            failures.append(f"required strategies without hits: {missing}")
+    if min_hit_strategies > 0 and summary["hit_strategy_count"] < min_hit_strategies:
+        failures.append(
+            "hit strategy count below requirement: "
+            f"{summary['hit_strategy_count']} < {min_hit_strategies}"
+        )
+    score_summary = summary.get("confluence_score", {})
+    if min_score_max is not None and score_summary.get("n", 0) > 0:
+        score_max = float(score_summary.get("max", 0.0))
+        if score_max < min_score_max:
+            failures.append(f"score max below requirement: {score_max:.4f} < {min_score_max:.4f}")
+    if min_score_stdev is not None and score_summary.get("n", 0) > 1:
+        score_stdev = float(score_summary.get("stdev", 0.0))
+        if score_stdev < min_score_stdev:
+            failures.append(
+                f"score stdev below requirement: {score_stdev:.4f} < {min_score_stdev:.4f}"
+            )
+    if failures:
+        raise RuntimeError("; ".join(failures))
+
+
 async def _run(
     symbols: list[str],
     concurrency: int,
     limit: int,
     strategy_filter: tuple[str, ...] = (),
-) -> None:
+) -> dict[str, Any]:
     settings = load_settings()
     minimums = min_required_bars(
         min_bars_15m=settings.filters.min_bars_15m,
@@ -258,7 +444,8 @@ async def _run(
     )
     registry = StrategyRegistry()
     selected_ids = set(strategy_filter)
-    available_ids = {strategy_class.setup_id for strategy_class in STRATEGY_CLASSES}
+    registered_ids = _strategy_ids()
+    available_ids = set(registered_ids)
     unknown_ids = sorted(selected_ids - available_ids)
     if unknown_ids:
         raise ValueError(f"unknown strategies requested: {unknown_ids}")
@@ -355,6 +542,22 @@ async def _run(
         await asyncio.gather(*[asyncio.create_task(_analyze(symbol)) for symbol in symbols])
         scoring_summary = _score_summary(confluence_scores)
         component_summary = _component_summary(confluence_components)
+        summary = _build_surface_summary(
+            symbols=symbols,
+            selected_ids=selected_ids,
+            registered_ids=registered_ids,
+            prepared_ok=prepared_ok,
+            detector_runs=detector_runs,
+            failures=failures,
+            hits_by_setup=hits_by_setup,
+            errors_by_setup=errors_by_setup,
+            rejects_by_setup=rejects_by_setup,
+            skips_by_setup=skips_by_setup,
+            reject_reasons=reject_reasons,
+            skip_reasons=skip_reasons,
+            scoring_summary=scoring_summary,
+            component_summary=component_summary,
+        )
         LOG.info(
             "strategy_surface_summary",
             symbols=len(symbols),
@@ -369,13 +572,11 @@ async def _run(
             strategy_reject_reasons=reject_reasons.most_common(15),
             strategy_skips=skips_by_setup.most_common(20),
             strategy_skip_reasons=skip_reasons.most_common(15),
+            missing_hit_strategies=summary["missing_hit_strategies"],
         )
-        if prepared_ok <= 0:
-            raise RuntimeError("no symbols prepared from live Binance data")
         if failures:
             LOG.info("strategy_prepare_failures", failures=failures[:20])
-        if errors_by_setup:
-            raise RuntimeError(f"strategy errors detected: {errors_by_setup.most_common()}")
+        return summary
     finally:
         await client.close()
 
@@ -392,6 +593,65 @@ def main() -> None:
         default=[],
         help="Optional setup ids to run; accepts space- or comma-separated ids.",
     )
+    parser.add_argument(
+        "--summary-json",
+        default="",
+        help="Optional path for a machine-readable live strategy surface summary.",
+    )
+    parser.add_argument(
+        "--print-summary-json",
+        action="store_true",
+        help="Print the machine-readable summary to stdout after the log summary.",
+    )
+    parser.add_argument(
+        "--require-hit-strategies",
+        nargs="*",
+        default=[],
+        help=(
+            "Fail unless these setup ids produce at least one signal. "
+            "Use 'all' to require every selected strategy, or every registered strategy "
+            "when no --strategies filter is set."
+        ),
+    )
+    parser.add_argument(
+        "--allow-missing-hit-strategies",
+        nargs="*",
+        default=[],
+        help=(
+            "Setup ids exempted from --require-hit-strategies. "
+            "Use this for deliberate schedule gates during outside-window checks."
+        ),
+    )
+    parser.add_argument(
+        "--min-hit-strategies",
+        type=int,
+        default=0,
+        help="Fail unless at least this many strategies produce detector hits.",
+    )
+    parser.add_argument(
+        "--min-prepared",
+        type=int,
+        default=1,
+        help="Fail unless at least this many symbols are prepared successfully.",
+    )
+    parser.add_argument(
+        "--max-prepare-failures",
+        type=int,
+        default=None,
+        help="Fail when more than this many requested symbols fail prepare_symbol().",
+    )
+    parser.add_argument(
+        "--min-score-max",
+        type=float,
+        default=None,
+        help="Fail when confluence score max is below this value.",
+    )
+    parser.add_argument(
+        "--min-score-stdev",
+        type=float,
+        default=None,
+        help="Fail when confluence score standard deviation is below this value.",
+    )
     args = parser.parse_args()
     fallback_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
     symbols = resolve_symbols(
@@ -407,15 +667,40 @@ def main() -> None:
         symbols = []
     elif args.limit > 0:
         symbols = symbols[: args.limit]
+    strategy_filter = _parse_strategy_filter(args.strategies)
+    required_hit_ids = _resolve_required_hit_ids(
+        args.require_hit_strategies,
+        selected_ids=set(strategy_filter),
+        available_ids=set(_strategy_ids()),
+    )
+    allowed_missing_hit_ids = _resolve_allowed_missing_hit_ids(
+        args.allow_missing_hit_strategies,
+        available_ids=set(_strategy_ids()),
+    )
     try:
-        asyncio.run(
+        summary = asyncio.run(
             _run(
                 symbols,
                 args.concurrency,
                 args.limit,
-                _parse_strategy_filter(args.strategies),
+                strategy_filter,
             )
         )
+        _validate_surface_requirements(
+            summary,
+            required_hit_ids=required_hit_ids,
+            allowed_missing_hit_ids=allowed_missing_hit_ids,
+            min_hit_strategies=max(0, int(args.min_hit_strategies)),
+            min_prepared=max(1, int(args.min_prepared)),
+            max_prepare_failures=args.max_prepare_failures,
+            min_score_max=args.min_score_max,
+            min_score_stdev=args.min_score_stdev,
+        )
+        if args.summary_json:
+            _write_summary_json(args.summary_json, summary)
+            LOG.info("strategy_surface_summary_json_written", path=args.summary_json)
+        if args.print_summary_json:
+            print(json.dumps(summary, indent=2, sort_keys=True))
     except MarketDataUnavailable as exc:
         LOG.error(
             "live_strategies_unavailable",

@@ -96,18 +96,16 @@ class PriceVelocitySetup(BaseSetup):
             lookback=int(effective_params.get("velocity_lookback", 5)),
             threshold=float(effective_params.get("velocity_norm_threshold", 0.5)),
         )
-        if hit is None:
-            _reject(prepared, setup_id, "pattern.velocity_too_low")
-            return None
-        return build_spec_signal(
-            prepared=prepared,
-            settings=settings,
-            setup_id=setup_id,
-            family=self.family,
-            hit=hit,
-            defaults=params,
-            params=effective_params,
-        )
+        if hit is not None:
+            return build_spec_signal(
+                prepared=prepared,
+                settings=settings,
+                setup_id=setup_id,
+                family=self.family,
+                hit=hit,
+                defaults=params,
+                params=effective_params,
+            )
         work = prepared.work_15m
         if work.height < 30:
             _reject(prepared, setup_id, "insufficient_15m_bars")

@@ -127,8 +127,6 @@ class StructureBreakRetestSetup(BaseSetup):
                 defaults=defaults,
                 params=dynamic_params,
             )
-        _reject(prepared, setup_id, "pattern.no_breakout_detected")
-        return None
 
         swing_lookback = max(
             2, int(dynamic_params.get("swing_lookback", defaults["swing_lookback"]))

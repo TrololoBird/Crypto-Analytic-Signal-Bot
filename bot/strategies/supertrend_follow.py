@@ -36,6 +36,9 @@ class SuperTrendFollowSetup(BaseSetup):
             "min_volume_ratio": 1.0,
             "volume_penalty": 0.92,
             "ema_pullback_atr": 0.65,
+            "ema_acceptance_atr": 0.35,
+            "ema_reclaim_lookback_bars": 6,
+            "max_ema_extension_atr": 1.25,
             "sl_buffer_atr": 0.65,
             "min_rr": 1.9,
         }
@@ -54,6 +57,7 @@ class SuperTrendFollowSetup(BaseSetup):
             return None
 
         required_15m = (
+            "open",
             "close",
             "low",
             "high",
@@ -105,6 +109,8 @@ class SuperTrendFollowSetup(BaseSetup):
         bias_1h = getattr(prepared, "bias_1h", prepared.bias_4h)
         direction: str | None = None
         stop_basis: float = 0.0
+        entry_basis: float = 0.0
+        confirmation_mode = ""
 
         line_buffer = atr * pullback_atr
         close_near_line = abs(close - supertrend_line) <= line_buffer
@@ -117,9 +123,56 @@ class SuperTrendFollowSetup(BaseSetup):
         if st_15m > 0 and st_1h > 0 and long_retest:
             direction = "long"
             stop_basis = min(low, supertrend_line)
+            entry_basis = min(supertrend_line, close)
+            confirmation_mode = "supertrend_line_retest"
         elif st_15m < 0 and st_1h < 0 and short_retest:
             direction = "short"
             stop_basis = max(high, supertrend_line)
+            entry_basis = max(supertrend_line, close)
+            confirmation_mode = "supertrend_line_retest"
+
+        if direction is None:
+            lookback = max(2, int(effective_params.get("ema_reclaim_lookback_bars", 6)))
+            acceptance_atr = max(0.0, float(effective_params.get("ema_acceptance_atr", 0.35)))
+            max_extension_atr = max(0.25, float(effective_params.get("max_ema_extension_atr", 1.25)))
+            recent = work_15m.tail(min(lookback, work_15m.height))
+            latest_close = close
+            latest_ema = ema20
+            latest_extension_atr = abs(latest_close - latest_ema) / atr
+            if st_15m > 0 and st_1h > 0 and latest_extension_atr <= max_extension_atr:
+                for local_idx in range(recent.height - 1, -1, -1):
+                    bar_open = _as_float(recent.item(local_idx, "open"))
+                    bar_low = _as_float(recent.item(local_idx, "low"))
+                    bar_close = _as_float(recent.item(local_idx, "close"))
+                    bar_ema = _as_float(recent.item(local_idx, "ema20"))
+                    if min(bar_open, bar_low, bar_close, bar_ema) <= 0.0:
+                        continue
+                    touched_ema = bar_low <= bar_ema + atr * pullback_atr
+                    reclaimed_ema = latest_close >= latest_ema - atr * acceptance_atr
+                    directional_close = bar_close >= bar_open or latest_close >= latest_ema
+                    if touched_ema and reclaimed_ema and directional_close:
+                        direction = "long"
+                        stop_basis = min(bar_low, bar_ema)
+                        entry_basis = min(latest_ema, latest_close)
+                        confirmation_mode = f"ema20_reclaim_lag={recent.height - 1 - local_idx}"
+                        break
+            elif st_15m < 0 and st_1h < 0 and latest_extension_atr <= max_extension_atr:
+                for local_idx in range(recent.height - 1, -1, -1):
+                    bar_open = _as_float(recent.item(local_idx, "open"))
+                    bar_high = _as_float(recent.item(local_idx, "high"))
+                    bar_close = _as_float(recent.item(local_idx, "close"))
+                    bar_ema = _as_float(recent.item(local_idx, "ema20"))
+                    if min(bar_open, bar_high, bar_close, bar_ema) <= 0.0:
+                        continue
+                    touched_ema = bar_high >= bar_ema - atr * pullback_atr
+                    reclaimed_ema = latest_close <= latest_ema + atr * acceptance_atr
+                    directional_close = bar_close <= bar_open or latest_close <= latest_ema
+                    if touched_ema and reclaimed_ema and directional_close:
+                        direction = "short"
+                        stop_basis = max(bar_high, bar_ema)
+                        entry_basis = max(latest_ema, latest_close)
+                        confirmation_mode = f"ema20_reclaim_lag={recent.height - 1 - local_idx}"
+                        break
 
         if direction is None:
             _reject(
@@ -132,14 +185,13 @@ class SuperTrendFollowSetup(BaseSetup):
                 low_line_distance_atr=abs(low - supertrend_line) / atr,
                 high_line_distance_atr=abs(high - supertrend_line) / atr,
                 pullback_atr=pullback_atr,
+                ema_distance_atr=abs(close - ema20) / atr,
             )
             return None
 
         sh_mask, sl_mask = _swing_points(work_1h, n=3, include_unconfirmed_tail=True)
         min_rr = float(effective_params["min_rr"])
-        price_anchor = (
-            min(supertrend_line, close) if direction == "long" else max(supertrend_line, close)
-        )
+        price_anchor = entry_basis
         stop, tp1, tp2 = build_structural_targets(
             direction=direction,
             price_anchor=price_anchor,
@@ -175,8 +227,10 @@ class SuperTrendFollowSetup(BaseSetup):
             base_score=base_score,
             vol_ratio=vol_ratio,
             rsi=rsi,
-            structure_clarity=0.55,
+            structure_clarity=0.68 if confirmation_mode.startswith("supertrend") else 0.52,
         )
+        if confirmation_mode.startswith("ema20"):
+            score *= float(effective_params.get("ema_pullback_score_penalty", 0.92))
         if volume_penalty:
             score *= float(effective_params.get("volume_penalty", 0.92))
 
@@ -192,6 +246,8 @@ class SuperTrendFollowSetup(BaseSetup):
             f"st_15m={st_15m:.0f}",
             f"st_1h={st_1h:.0f}",
             f"supertrend_line={supertrend_line:.4f}",
+            f"ema20={ema20:.4f}",
+            confirmation_mode,
             f"adx_1h={adx_1h:.1f}",
             f"volume_ratio={vol_ratio:.2f}",
             f"limit_entry={price_anchor:.4f}",

@@ -60,18 +60,16 @@ class EmaBounceSetup(BaseSetup):
         defaults = self.get_optimizable_params(settings)
         effective_params = {**defaults, **dynamic_params}
         hit = detect_ema_bounce(prepared.work_15m, timeframe="15m")
-        if hit is None:
-            _reject(prepared, setup_id, "pattern.no_bounce_pattern")
-            return None
-        return build_spec_signal(
-            prepared=prepared,
-            settings=settings,
-            setup_id=setup_id,
-            family=self.family,
-            hit=hit,
-            defaults=defaults,
-            params=effective_params,
-        )
+        if hit is not None:
+            return build_spec_signal(
+                prepared=prepared,
+                settings=settings,
+                setup_id=setup_id,
+                family=self.family,
+                hit=hit,
+                defaults=defaults,
+                params=effective_params,
+            )
 
         ema_touch_tolerance_pct = float(
             dynamic_params.get(

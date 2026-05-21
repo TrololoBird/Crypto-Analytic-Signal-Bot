@@ -90,18 +90,16 @@ class LiquiditySweepSetup(BaseSetup):
             dynamic_params.get("max_entry_distance_atr", defaults["max_entry_distance_atr"])
         )
         hit = detect_liquidity_sweep(prepared.work_15m, timeframe="15m")
-        if hit is None:
-            _reject(prepared, self.setup_id, "pattern.no_liquidity_sweep_detected")
-            return None
-        return build_spec_signal(
-            prepared=prepared,
-            settings=settings,
-            setup_id=self.setup_id,
-            family=self.family,
-            hit=hit,
-            defaults=defaults,
-            params={**defaults, **dynamic_params, "sl_buffer_atr": sl_buffer_atr},
-        )
+        if hit is not None:
+            return build_spec_signal(
+                prepared=prepared,
+                settings=settings,
+                setup_id=self.setup_id,
+                family=self.family,
+                hit=hit,
+                defaults=defaults,
+                params={**defaults, **dynamic_params, "sl_buffer_atr": sl_buffer_atr},
+            )
 
         try:
             return self._detect(

@@ -87,8 +87,6 @@ class OrderBlockSetup(BaseSetup):
                 defaults=defaults,
                 params=dynamic_params,
             )
-        _reject(prepared, setup_id, "data.order_block_impulse_missing")
-        return None
 
         sl_buffer_atr = float(
             dynamic_params.get("sl_buffer_atr", defaults.get("sl_buffer_atr", 1.5))

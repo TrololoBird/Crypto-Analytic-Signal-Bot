@@ -84,18 +84,16 @@ class IndicatorDivergenceSetup(BaseSetup):
         work = prepared.work_15m
         defaults = self.get_optimizable_params(settings)
         hit = detect_regular_divergence(work, timeframe="15m")
-        if hit is None:
-            _reject(prepared, setup_id, "data.regular_divergence_missing")
-            return None
-        return build_spec_signal(
-            prepared=prepared,
-            settings=settings,
-            setup_id=setup_id,
-            family=self.family,
-            hit=hit,
-            defaults=defaults,
-            params=params,
-        )
+        if hit is not None:
+            return build_spec_signal(
+                prepared=prepared,
+                settings=settings,
+                setup_id=setup_id,
+                family=self.family,
+                hit=hit,
+                defaults=defaults,
+                params=params,
+            )
 
         if work.height < 80:
             _reject(prepared, setup_id, "insufficient_15m_bars", bars=work.height)

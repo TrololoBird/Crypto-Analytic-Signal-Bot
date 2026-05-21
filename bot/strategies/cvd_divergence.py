@@ -82,18 +82,16 @@ class CVDDivergenceSetup(BaseSetup):
         defaults = self.get_optimizable_params(settings)
         effective_params = {**defaults, **dynamic_params}
         hit = detect_cvd_divergence(prepared.work_15m, timeframe="15m")
-        if hit is None:
-            _reject(prepared, self.setup_id, "indicator.delta_shift_too_small")
-            return None
-        return build_spec_signal(
-            prepared=prepared,
-            settings=settings,
-            setup_id=self.setup_id,
-            family=self.family,
-            hit=hit,
-            defaults=defaults,
-            params=effective_params,
-        )
+        if hit is not None:
+            return build_spec_signal(
+                prepared=prepared,
+                settings=settings,
+                setup_id=self.setup_id,
+                family=self.family,
+                hit=hit,
+                defaults=defaults,
+                params=effective_params,
+            )
 
         divergence_lookback = int(
             dynamic_params.get("divergence_lookback", defaults["divergence_lookback"])
