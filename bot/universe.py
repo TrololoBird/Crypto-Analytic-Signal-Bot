@@ -344,6 +344,8 @@ def _strategy_fits_for_row(
         enabled = set(setups_config.enabled_setup_ids())
     else:
         enabled = set(_ALL_SETUP_IDS)
+    if not enabled:
+        enabled = set(_ALL_SETUP_IDS)
     if symbol in pinned_set:
         return tuple(setup_id for setup_id in _ALL_SETUP_IDS if setup_id in enabled)
     return tuple(

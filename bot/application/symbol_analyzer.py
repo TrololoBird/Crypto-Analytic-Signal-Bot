@@ -626,6 +626,22 @@ class SymbolAnalyzer:
         if diagnostics is not None:
             diagnostics.record_symbol_analyzed(item.symbol)
         item = self._bot._refresh_universe_symbol_from_ws(item)
+        if not item.strategy_fits:
+            LOG.warning(
+                "%s: strategy_fits is EMPTY - no strategies will run. "
+                "shortlist_score=%.4f bucket=%s source=%s",
+                item.symbol,
+                item.shortlist_score or 0.0,
+                item.shortlist_bucket,
+                item.seed_source,
+            )
+        else:
+            LOG.debug(
+                "%s: strategy_fits=%d %s",
+                item.symbol,
+                len(item.strategy_fits),
+                list(item.strategy_fits)[:5],
+            )
 
         minimums = self._minimums()
         rows_4h = frames.df_4h.height if frames.df_4h is not None else 0

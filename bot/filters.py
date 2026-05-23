@@ -339,6 +339,54 @@ def _frame_is_fresh(frame: pl.DataFrame, max_age: timedelta) -> bool:
     return delta <= max_age
 
 
+def _market_atr_floor(prepared: PreparedSymbol, settings: BotSettings) -> float:
+    """Return an ATR floor adapted to current volatility conditions.
+
+    Static ATR floors can reject usable setups in confirmed low-volatility
+    markets. When 1h ADX is low, and especially when Bollinger width is also
+    narrow, reduce the configured floor instead of turning a market regime
+    mismatch into a hard no-signal state. Existing configurations below 0.20
+    are preserved so this helper never tightens an already-lower threshold.
+    """
+    base_min = float(settings.filters.min_atr_pct)
+    if base_min <= 0.20:
+        return base_min
+
+    adx_val = 0.0
+    if not prepared.work_1h.is_empty() and "adx14" in prepared.work_1h.columns:
+        try:
+            adx_val = float(prepared.work_1h.item(-1, "adx14") or 0.0)
+        except Exception:
+            adx_val = 0.0
+
+    bb_width: float | None = None
+    atr_frame = prepared.work_15m
+    if not atr_frame.is_empty() and "bb_width" in atr_frame.columns:
+        try:
+            bb_width = float(atr_frame.item(-1, "bb_width") or 0.0)
+        except Exception:
+            bb_width = None
+
+    low_adx = 0.0 < adx_val < 18.0
+    narrow_bb = bb_width is not None and bb_width < 3.0
+    if low_adx and narrow_bb:
+        return max(0.20, base_min * 0.55)
+    if low_adx:
+        return max(0.20, base_min * 0.70)
+    return base_min
+
+
+def _record_atr_sample(setup_id: str, atr_pct: float, *, passed: bool) -> None:
+    try:
+        from .signal_diagnostics import get_global_diagnostics
+
+        diagnostics = get_global_diagnostics()
+        if diagnostics is not None:
+            diagnostics.record_atr_sample(setup_id, atr_pct, passed=passed)
+    except Exception:
+        LOGGER.debug("ATR diagnostic sample recording failed", exc_info=True)
+
+
 def apply_global_filters(
     signal: Signal,
     prepared: PreparedSymbol,
@@ -459,8 +507,31 @@ def apply_global_filters(
     if atr_pct_raw is None or (isinstance(atr_pct_raw, float) and math.isnan(atr_pct_raw)):
         return _reject("atr_nan", replace(base, atr_pct=0.0))
     atr_pct = float(atr_pct_raw)
-    if atr_pct < settings.filters.min_atr_pct:
-        return _reject("atr_too_low", replace(base, atr_pct=atr_pct))
+    effective_min_atr = _market_atr_floor(prepared, settings)
+    atr_gate_passed = atr_pct >= effective_min_atr
+    _record_atr_sample(signal.setup_id, atr_pct, passed=atr_gate_passed)
+    if effective_min_atr < float(settings.filters.min_atr_pct):
+        passed.append(f"atr_floor_relaxed_to_{effective_min_atr:.3f}")
+    if not atr_gate_passed:
+        LOGGER.info(
+            "%s/%s: atr_too_low | atr_pct=%.4f effective_min_atr=%.4f min_atr_pct=%.4f "
+            "(config: filters.min_atr_pct=%.4f)",
+            signal.symbol,
+            signal.setup_id,
+            atr_pct,
+            effective_min_atr,
+            settings.filters.min_atr_pct,
+            settings.filters.min_atr_pct,
+        )
+        return _reject(
+            "atr_too_low",
+            replace(base, atr_pct=atr_pct),
+            details={
+                "atr_pct": atr_pct,
+                "effective_min_atr": effective_min_atr,
+                "config_min_atr": settings.filters.min_atr_pct,
+            },
+        )
     if atr_pct > settings.filters.max_atr_pct:
         return _reject("atr_too_high", replace(base, atr_pct=atr_pct))
     passed.append("atr_ok")

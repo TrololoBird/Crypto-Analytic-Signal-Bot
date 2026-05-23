@@ -77,6 +77,43 @@ class HealthManager:
                 market_ctx.get("btc_bias", "neutral"),
                 blacklisted if blacklisted else "not_blacklisted",
             )
+            async with self._bot._shortlist_lock:
+                shortlist = list(self._bot._shortlist)
+            if shortlist:
+                fit_counts = [len(item.strategy_fits) for item in shortlist]
+                zero_fit = sum(1 for count in fit_counts if count == 0)
+                avg_fit = sum(fit_counts) / len(fit_counts) if fit_counts else 0.0
+                pinned_symbols = {
+                    str(symbol).strip().upper()
+                    for symbol in self._bot.settings.universe.pinned_symbols
+                }
+                pinned_count = sum(
+                    1 for item in shortlist if item.symbol.upper() in pinned_symbols
+                )
+                dynamic_count = len(shortlist) - pinned_count
+                LOG.info(
+                    "shortlist health | total=%d pinned=%d dynamic=%d "
+                    "zero_strategy_fit=%d avg_strategy_fit=%.1f source=%s",
+                    len(shortlist),
+                    pinned_count,
+                    dynamic_count,
+                    zero_fit,
+                    avg_fit,
+                    self._bot._shortlist_source,
+                )
+                if zero_fit > len(shortlist) * 0.5:
+                    LOG.warning(
+                        "shortlist DEGRADED: >50%% symbols have zero strategy_fits "
+                        "(%d/%d) - strategies will not run for these symbols",
+                        zero_fit,
+                        len(shortlist),
+                    )
+                if dynamic_count < 10:
+                    LOG.warning(
+                        "shortlist DEGRADED: only %d dynamic symbols (expect >= 30) "
+                        "- check universe filter thresholds and WS-light fallback logic",
+                        dynamic_count,
+                    )
             diagnostics = getattr(self._bot, "_signal_diagnostics", None)
             if diagnostics is not None:
                 diagnostics.log_summary(LOG)

@@ -40,7 +40,7 @@ from ..core.engine import StrategyRegistry
 from ..feature_flags import FeatureFlags
 from ..market_data import BinanceFuturesMarketData
 from ..monitor_bot import HealthMonitor
-from ..signal_diagnostics import SignalDiagnostics
+from ..signal_diagnostics import SignalDiagnostics, set_global_diagnostics
 from ..setup_base import SetupParams
 from ..strategies import STRATEGY_CLASSES
 from ..telemetry import TelemetryStore
@@ -105,6 +105,7 @@ class SignalBot:
         self._modern_repo = container.repository
         self.quality_monitor = container.quality_monitor
         self._signal_diagnostics = SignalDiagnostics()
+        set_global_diagnostics(self._signal_diagnostics)
         LOG.info("MemoryRepository initialized | db=%s", self._modern_repo._db_path)
 
         # Note: All persistence now uses MemoryRepository (SQLite)
@@ -415,6 +416,9 @@ class SignalBot:
             LOG.info("modern repository initialized | SQLite ready")
         except Exception as exc:
             raise RuntimeError("modern repository init failed; runtime cannot track signals") from exc
+        from ..config_audit import run_startup_audit
+
+        run_startup_audit(self.settings)
 
         try:
             expired_count = await self._modern_repo.expire_open_signals_older_than(

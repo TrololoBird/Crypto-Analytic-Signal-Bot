@@ -55,6 +55,7 @@ class _SignalDiagnosticWindow:
     candidates_by_setup: Counter[str] = field(default_factory=Counter)
     delivered_by_setup: Counter[str] = field(default_factory=Counter)
     stage_rejects: Counter[str] = field(default_factory=Counter)
+    atr_samples_by_setup: dict[str, dict[str, list[float]]] = field(default_factory=dict)
 
     def total_detector_runs(self) -> int:
         return int(sum(self.detector_runs_by_setup.values()))
@@ -181,6 +182,42 @@ class SignalDiagnostics:
             window = self._current_window_unlocked()
             window.delivered_by_setup[setup] += 1
 
+    def record_atr_sample(self, setup_id: str, atr_pct: float, passed: bool) -> None:
+        """Record an ATR sample for threshold calibration.
+
+        Parameters
+        ----------
+        setup_id:
+            Strategy/setup identifier for the candidate being filtered.
+        atr_pct:
+            Current ATR percentage observed at the filter gate.
+        passed:
+            ``True`` when the sample passed the effective ATR floor, otherwise
+            ``False``.
+
+        Notes
+        -----
+        Only the most recent 200 passing and 200 failing samples are retained
+        per setup. This keeps memory bounded while still exposing enough
+        distribution shape to detect a stale ``filters.min_atr_pct`` setting.
+        """
+        setup = _clean_key(setup_id)
+        state = "pass" if passed else "fail"
+        try:
+            sample = round(float(atr_pct), 4)
+        except (TypeError, ValueError):
+            return
+        with self._lock:
+            window = self._current_window_unlocked()
+            buckets = window.atr_samples_by_setup.setdefault(
+                setup,
+                {"pass": [], "fail": []},
+            )
+            values = buckets.setdefault(state, [])
+            values.append(sample)
+            if len(values) > 200:
+                buckets[state] = values[-200:]
+
     def get_summary(self) -> dict[str, Any]:
         """Return all counters for the current window.
 
@@ -193,6 +230,56 @@ class SignalDiagnostics:
         with self._lock:
             window = self._current_window_unlocked()
             return self._summary_for_window_unlocked(window)
+
+    def get_atr_summary(self) -> dict[str, dict[str, float | int]]:
+        """Return ATR pass/fail medians per setup.
+
+        Returns
+        -------
+        dict
+            Mapping of setup id to summary fields such as ``pass_median``,
+            ``pass_count``, ``fail_median``, and ``fail_count``.
+        """
+        with self._lock:
+            window = self._current_window_unlocked()
+            return self._atr_summary_for_window_unlocked(window)
+
+    def get_pipeline_efficiency(self) -> dict[str, Any]:
+        """Compute pipeline efficiency metrics for the current window.
+
+        Returns
+        -------
+        dict
+            Summary with detector totals, hit rate, filter pass rate, top
+            rejection reasons, setups with detector runs but zero hits, and
+            ATR calibration data.
+        """
+        with self._lock:
+            window = self._current_window_unlocked()
+            detector_runs = window.total_detector_runs()
+            detector_hits = window.total_detector_hits()
+            candidates = window.total_candidates()
+            zero_hit_setups = [
+                setup_id
+                for setup_id, runs in window.detector_runs_by_setup.items()
+                if runs > 0 and window.detector_hits_by_setup.get(setup_id, 0) == 0
+            ]
+            return {
+                "detector_run_total": detector_runs,
+                "detector_hit_total": detector_hits,
+                "hit_rate": round(detector_hits / detector_runs, 6)
+                if detector_runs
+                else 0.0,
+                "filter_pass_rate": round(candidates / detector_hits, 6)
+                if detector_hits
+                else 0.0,
+                "top_rejects": [
+                    (reason, int(count))
+                    for reason, count in window.filter_rejects_by_reason.most_common(5)
+                ],
+                "top_zero_detector_setups": sorted(zero_hit_setups)[:20],
+                "atr_calibration": self._atr_summary_for_window_unlocked(window),
+            }
 
     def log_summary(self, logger: Any) -> None:
         """Log the current diagnostic summary.
@@ -259,6 +346,17 @@ class SignalDiagnostics:
         stale_rows = [{"symbol": symbol} for symbol in summary.get("symbols_with_stale_data", [])]
         lines.extend(self._markdown_table(stale_rows[:25]))
         lines.append("")
+        lines.append("## ATR Calibration")
+        atr_rows: list[dict[str, Any]] = []
+        atr_summary = summary.get("atr_summary", {})
+        if isinstance(atr_summary, dict):
+            for setup_id, values in sorted(atr_summary.items()):
+                row = {"setup_id": setup_id}
+                if isinstance(values, dict):
+                    row.update(values)
+                atr_rows.append(row)
+        lines.extend(self._markdown_table(atr_rows[:25]))
+        lines.append("")
         lines.append("## Zero Detector Symbols")
         zero_rows = [
             {"symbol": symbol} for symbol in summary.get("symbols_with_zero_detectors", [])
@@ -312,11 +410,33 @@ class SignalDiagnostics:
         return deltas
 
     def export_jsonl(self, path: Path) -> None:
-        """Append the current summary to ``path`` as one JSON line."""
+        """Append the current summary as one JSON line.
+
+        Parameters
+        ----------
+        path:
+            File to append to. The parent directory is created when missing.
+        """
         output_path = Path(path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with output_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(self.get_summary(), ensure_ascii=True, default=str) + "\n")
+
+    def reset_window(self) -> dict[str, Any]:
+        """Reset all counters and return the cleared window snapshot.
+
+        Returns
+        -------
+        dict
+            Summary for the diagnostic window that was active before reset.
+        """
+        with self._lock:
+            window = self._current_window_unlocked()
+            snapshot = self._summary_for_window_unlocked(window)
+            self._previous_windows.append(snapshot)
+            self._previous_windows = self._previous_windows[-8:]
+            self._window = self._new_window(_utc_now())
+            return snapshot
 
     def reset(self) -> None:
         """Start a fresh diagnostic window immediately."""
@@ -399,7 +519,32 @@ class SignalDiagnostics:
                 window.confirmation_rejects_by_reason
             ),
             "setup_hit_rates": self._setup_hit_rate_rows(window),
+            "atr_summary": self._atr_summary_for_window_unlocked(window),
         }
+
+    @staticmethod
+    def _median(values: list[float]) -> float:
+        ordered = sorted(values)
+        if not ordered:
+            return 0.0
+        index = len(ordered) // 2
+        return float(ordered[index])
+
+    def _atr_summary_for_window_unlocked(
+        self,
+        window: _SignalDiagnosticWindow,
+    ) -> dict[str, dict[str, float | int]]:
+        result: dict[str, dict[str, float | int]] = {}
+        for setup_id, buckets in window.atr_samples_by_setup.items():
+            setup_summary: dict[str, float | int] = {}
+            for state, values in buckets.items():
+                if not values:
+                    continue
+                setup_summary[f"{state}_median"] = round(self._median(values), 4)
+                setup_summary[f"{state}_count"] = int(len(values))
+            if setup_summary:
+                result[setup_id] = setup_summary
+        return result
 
     @staticmethod
     def _top_counter_rows(counter: Counter[str], *, limit: int = 20) -> list[dict[str, Any]]:
@@ -442,6 +587,20 @@ class SignalDiagnostics:
                 + " |"
             )
         return output
+
+
+_GLOBAL_DIAGNOSTICS: SignalDiagnostics | None = None
+
+
+def get_global_diagnostics() -> SignalDiagnostics | None:
+    """Return the process-wide diagnostics object, if initialized."""
+    return _GLOBAL_DIAGNOSTICS
+
+
+def set_global_diagnostics(diag: SignalDiagnostics) -> None:
+    """Register the process-wide diagnostics object."""
+    global _GLOBAL_DIAGNOSTICS
+    _GLOBAL_DIAGNOSTICS = diag
 
 _DIAGNOSTIC_REFERENCE_APPENDIX = """
 Signal diagnostics operator reference.
