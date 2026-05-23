@@ -360,7 +360,11 @@ class TurtleSoupSetup(BaseSetup):
             _reject(prepared, setup_id, "tp1_too_close_or_missing", tp1=tp1, risk=risk)
             return None  # Reject this turtle soup setup
         if tp2 is None:
-            tp2 = tp1  # Use TP1 as TP2 if no extended target found
+            tp2 = (
+                entry_price + risk * max(2.0, min_rr + 0.35)
+                if direction == "long"
+                else entry_price - risk * max(2.0, min_rr + 0.35)
+            )
         if direction == "long" and (tp1 <= entry_price or tp2 <= entry_price):
             _reject(
                 prepared,

@@ -93,47 +93,49 @@ class DeliveryOrchestrator:
         for signal in flat_candidates:
             same_direction.setdefault((signal.symbol, signal.direction), []).append(signal)
 
-        direction_representatives: list[Signal] = []
-        for peers in same_direction.values():
-            direction_representatives.append(self._apply_same_direction_confluence(peers))
-
-        by_symbol: dict[str, Signal] = {}
-        for signal in sorted(direction_representatives, key=self._rank_key, reverse=True):
-            if signal.symbol not in by_symbol:
-                by_symbol[signal.symbol] = signal
-        enriched = list(by_symbol.values())
-
         by_setup: dict[str, list[Signal]] = {}
-        for signal in sorted(enriched, key=self._rank_key, reverse=True):
+        for signal in sorted(flat_candidates, key=self._rank_key, reverse=True):
             by_setup.setdefault(signal.setup_id, []).append(signal)
 
         selected: list[Signal] = []
         selected_keys: set[str] = set()
-        independent_candidates: list[Signal] = []
-        for setup_signals in by_setup.values():
-            independent_candidates.extend(setup_signals[:2])
-        for signal in sorted(independent_candidates, key=self._rank_key, reverse=True):
-            if len(selected) >= max_signals:
-                break
-            key = signal.signal_key
-            if key in selected_keys:
-                continue
-            selected.append(signal)
-            selected_keys.add(key)
+        selected_symbols: set[str] = set()
 
-        for signal in sorted(enriched, key=self._rank_key, reverse=True):
+        def _enriched(signal: Signal) -> Signal:
+            peers = same_direction.get((signal.symbol, signal.direction), [signal])
+            return self._with_same_direction_confluence(signal, peers)
+
+        setup_lanes = sorted(
+            by_setup.values(),
+            key=lambda items: self._rank_key(items[0]) if items else (0.0, 0.0),
+            reverse=True,
+        )
+        for setup_signals in setup_lanes:
+            if len(selected) >= max_signals:
+                break
+            for signal in setup_signals:
+                key = signal.signal_key
+                if key in selected_keys or signal.symbol in selected_symbols:
+                    continue
+                selected.append(_enriched(signal))
+                selected_keys.add(key)
+                selected_symbols.add(signal.symbol)
+                break
+
+        for signal in sorted(flat_candidates, key=self._rank_key, reverse=True):
             if len(selected) >= max_signals:
                 break
             key = signal.signal_key
-            if key in selected_keys:
+            if key in selected_keys or signal.symbol in selected_symbols:
                 continue
-            selected.append(signal)
+            selected.append(_enriched(signal))
             selected_keys.add(key)
+            selected_symbols.add(signal.symbol)
 
         LOG.debug(
-            "select_and_rank | candidates=%d symbol_plans=%d setups=%d selected=%d independent_by_setup=true",
+            "select_and_rank | candidates=%d symbols=%d setups=%d selected=%d setup_first=true",
             len(flat_candidates),
-            len(enriched),
+            len({signal.symbol for signal in flat_candidates}),
             len(by_setup),
             len(selected),
         )

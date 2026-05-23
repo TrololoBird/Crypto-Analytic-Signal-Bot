@@ -246,8 +246,6 @@ class BOSCHOCHSetup(BaseSetup):
                 defaults=defaults,
                 params=dynamic_params,
             )
-        _reject(prepared, setup_id, "pattern.structure_break_too_old")
-        return None
 
         configured_swing_lookback = int(
             dynamic_params.get("swing_lookback", defaults["swing_lookback"])

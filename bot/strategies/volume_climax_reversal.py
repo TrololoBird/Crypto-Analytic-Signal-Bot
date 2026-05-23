@@ -292,19 +292,23 @@ class VolumeClimaxReversalSetup(BaseSetup):
         sl_buffer = float(effective_params["sl_buffer_atr"])
         min_rr = float(effective_params["min_rr"])
         signal_mid = (signal_high + signal_low) / 2.0
-        if reclaim_level > 0.0:
-            price_anchor = reclaim_level
-        elif direction == "long":
-            price_anchor = min(signal_mid, close)
-        else:
-            price_anchor = max(signal_mid, close)
         if direction == "long":
             stop = signal_low - atr * sl_buffer
+            if reclaim_level > signal_low:
+                price_anchor = reclaim_level
+            else:
+                price_anchor = min(signal_mid, close)
+            price_anchor = max(price_anchor, stop + atr * 0.10)
             risk = price_anchor - stop
             tp1 = price_anchor + risk * min_rr
             tp2 = price_anchor + risk * max(2.0, min_rr + 0.35)
         else:
             stop = signal_high + atr * sl_buffer
+            if 0.0 < reclaim_level < signal_high:
+                price_anchor = reclaim_level
+            else:
+                price_anchor = max(signal_mid, close)
+            price_anchor = min(price_anchor, stop - atr * 0.10)
             risk = stop - price_anchor
             tp1 = price_anchor - risk * min_rr
             tp2 = price_anchor - risk * max(2.0, min_rr + 0.35)

@@ -127,10 +127,6 @@ class PriceVelocitySetup(BaseSetup):
             _reject(prepared, setup_id, "missing_columns", missing_fields=missing)
             return None
 
-        params = self.get_optimizable_params(settings)
-        dynamic_params = get_dynamic_params(prepared, setup_id)
-        effective_params = {**params, **dynamic_params}
-
         open_ = _as_float(work.item(-1, "open"))
         high = _as_float(work.item(-1, "high"))
         low = _as_float(work.item(-1, "low"))

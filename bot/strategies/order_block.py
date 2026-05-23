@@ -39,7 +39,8 @@ class OrderBlockSetup(BaseSetup):
         """Tunable parameters for self-learner optimization."""
         defaults = {
             "base_score": 0.52,
-            "min_ob_impulse_atr": 0.9,
+            "min_ob_impulse_atr": 1.5,
+            "impulse_lookback_bars": 5,
             "ob_max_age": 72.0,
             "touch_buffer_atr": 0.25,
             "bias_mismatch_penalty": 0.75,
@@ -114,6 +115,10 @@ class OrderBlockSetup(BaseSetup):
         min_ob_impulse_atr = dynamic_params.get(
             "min_ob_impulse_atr", defaults["min_ob_impulse_atr"]
         )
+        impulse_lookback = max(
+            3,
+            int(dynamic_params.get("impulse_lookback_bars", defaults["impulse_lookback_bars"])),
+        )
         ob_max_age = dynamic_params.get("ob_max_age", defaults["ob_max_age"])
         touch_buffer_atr = float(dynamic_params.get("touch_buffer_atr", defaults["touch_buffer_atr"]))
         zone = latest_order_block(
@@ -159,7 +164,7 @@ class OrderBlockSetup(BaseSetup):
             return None
 
         impulse_start = zone.created_index + 1
-        impulse_end = min(impulse_start + 3, n_bars)
+        impulse_end = min(impulse_start + impulse_lookback, n_bars)
         impulse_dir = 1 if direction == "long" else -1
         impulse_moves = [
             (closes[k] - opens[k]) * impulse_dir for k in range(impulse_start, impulse_end)
@@ -235,7 +240,11 @@ class OrderBlockSetup(BaseSetup):
             sh_mask=sh_mask,
             sl_mask=sl_mask,
         )
-        stop = stop_calc if stop_calc != stop_basis else fallback_stop
+        stop = (
+            stop_calc
+            if not math.isclose(stop_calc, stop_basis, rel_tol=1e-9, abs_tol=1e-9)
+            else fallback_stop
+        )
         risk = abs(entry_price - stop)
         is_valid_rr, _ = validate_rr_or_penalty(entry_price, stop, tp1, min_rr)
         if not is_valid_rr and tp1 is not None:

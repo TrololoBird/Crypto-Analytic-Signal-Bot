@@ -97,8 +97,6 @@ class BreakerBlockSetup(BaseSetup):
                 defaults=defaults,
                 params=dynamic_params,
             )
-        _reject(prepared, setup_id, "pattern.no_breaker_block_detected")
-        return None
 
         scan_bars = max(15, int(dynamic_params.get("scan_bars", defaults["scan_bars"])))
         mitigation_threshold = float(

@@ -615,6 +615,8 @@ def _valid_order_block_rows(work: pl.DataFrame, max_age: int = 80) -> list[dict[
     rows = work.to_dicts()
     current_idx = int(work.item(-1, "_spec_idx"))
     zones: list[dict[str, object]] = []
+    impulse_lookback = 5
+    impulse_atr_mult = 1.5
     for pos, row in enumerate(rows[:-3]):
         idx = int(row["_spec_idx"])
         if current_idx - idx > max_age:
@@ -630,10 +632,12 @@ def _valid_order_block_rows(work: pl.DataFrame, max_age: int = 80) -> list[dict[
         volume_mean = as_float(row.get("spec_volume_mean20"))
         if min(open_, close, low, high, atr, volume_mean) <= 0.0:
             continue
-        future = rows[pos + 1 : pos + 4]
+        future = rows[pos + 1 : pos + 1 + impulse_lookback]
+        if len(future) < 3:
+            continue
         final_close = as_float(future[-1].get("close"))
-        bull_impulse = close < open_ and final_close - close > 2.0 * atr
-        bear_impulse = close > open_ and close - final_close > 2.0 * atr
+        bull_impulse = close < open_ and final_close - close > impulse_atr_mult * atr
+        bear_impulse = close > open_ and close - final_close > impulse_atr_mult * atr
         if bull_impulse and (prev_high <= 0.0 or final_close > prev_high):
             zones.append(
                 {
@@ -644,7 +648,7 @@ def _valid_order_block_rows(work: pl.DataFrame, max_age: int = 80) -> list[dict[
                     "age": current_idx - idx,
                     "volume_ok": volume >= volume_mean,
                     "impulse_close": final_close,
-                    "impulse_pos": pos + 3,
+                    "impulse_pos": pos + len(future),
                 }
             )
         if bear_impulse and (prev_low <= 0.0 or final_close < prev_low):
@@ -657,7 +661,7 @@ def _valid_order_block_rows(work: pl.DataFrame, max_age: int = 80) -> list[dict[
                     "age": current_idx - idx,
                     "volume_ok": volume >= volume_mean,
                     "impulse_close": final_close,
-                    "impulse_pos": pos + 3,
+                    "impulse_pos": pos + len(future),
                 }
             )
     return zones
@@ -1451,10 +1455,15 @@ def detect_hidden_divergence(frame: pl.DataFrame, *, timeframe: str = "15m") -> 
     atr = row.get("spec_atr14", 0.0)
     if atr <= 0.0:
         return None
+    min_rsi_separation = 4.0
     lows = _pivot_rows(work, price_column="low", indicator_column="rsi14", pivot="low")
     if row["close"] > row.get("spec_ema50", row["close"]) and len(lows) >= 2:
         old, new = lows[-2], lows[-1]
-        if new["price"] > old["price"] and new["indicator"] < old["indicator"]:
+        rsi_gap = old["indicator"] - new["indicator"]
+        if (
+            new["price"] > old["price"]
+            and rsi_gap >= min_rsi_separation
+        ):
             return SpecHit(
                 strategy="hidden_divergence",
                 direction="long",
@@ -1462,13 +1471,20 @@ def detect_hidden_divergence(frame: pl.DataFrame, *, timeframe: str = "15m") -> 
                 stop_basis=new["price"],
                 atr=atr,
                 timeframe=timeframe,
-                reasons=(f"hidden_bullish_div price_hl={new['price']:.4f}",),
+                reasons=(
+                    f"hidden_bullish_div price_hl={new['price']:.4f}",
+                    f"rsi_ll_gap={rsi_gap:.2f}",
+                ),
                 rsi=row.get("rsi14", 50.0),
             )
     highs = _pivot_rows(work, price_column="high", indicator_column="rsi14", pivot="high")
     if row["close"] < row.get("spec_ema50", row["close"]) and len(highs) >= 2:
         old, new = highs[-2], highs[-1]
-        if new["price"] < old["price"] and new["indicator"] > old["indicator"]:
+        rsi_gap = new["indicator"] - old["indicator"]
+        if (
+            new["price"] < old["price"]
+            and rsi_gap >= min_rsi_separation
+        ):
             return SpecHit(
                 strategy="hidden_divergence",
                 direction="short",
@@ -1476,7 +1492,10 @@ def detect_hidden_divergence(frame: pl.DataFrame, *, timeframe: str = "15m") -> 
                 stop_basis=new["price"],
                 atr=atr,
                 timeframe=timeframe,
-                reasons=(f"hidden_bearish_div price_lh={new['price']:.4f}",),
+                reasons=(
+                    f"hidden_bearish_div price_lh={new['price']:.4f}",
+                    f"rsi_hh_gap={rsi_gap:.2f}",
+                ),
                 rsi=row.get("rsi14", 50.0),
             )
     return None

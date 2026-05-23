@@ -9,8 +9,8 @@ from .roadmap_base import (
     _build_atr_signal,
     _finite_or_none,
     _last,
+    _prev,
     _reject,
-    _series_mean_tail,
 )
 from .spec_patterns import build_spec_signal, detect_aggression_shift
 
@@ -24,28 +24,37 @@ class AggressionShiftSetup(RoadmapSetup):
         "min_shift": 0.05,
         "min_proxy_shift": 0.025,
         "shift_std_mult": 0.75,
+        "delta_spike_mult": 2.0,
         "min_volume_ratio": 0.90,
     }
 
     @staticmethod
-    def _adaptive_shift_threshold(prepared: PreparedSymbol, params: dict[str, float]) -> float:
+    def _delta_shift_gate(
+        prepared: PreparedSymbol,
+        params: dict[str, float],
+    ) -> tuple[float, float, str] | None:
+        work = prepared.work_15m
         configured = float(params.get("min_shift", 0.05))
         proxy_floor = float(params.get("min_proxy_shift", 0.025))
-        std_mult = float(params.get("shift_std_mult", 0.75))
-        work = prepared.work_15m
-        if work.height < 8 or "delta_ratio" not in work.columns:
-            return max(0.015, min(configured, proxy_floor))
-        values = [
-            float(value) - 0.5
-            for value in work["delta_ratio"].tail(24).to_list()
-            if value is not None and math.isfinite(float(value))
-        ]
-        if len(values) < 6:
-            return max(0.015, min(configured, proxy_floor))
-        mean = sum(values) / len(values)
-        variance = sum((value - mean) ** 2 for value in values) / max(1, len(values) - 1)
-        adaptive = max(proxy_floor, math.sqrt(max(0.0, variance)) * std_mult)
-        return max(0.015, min(configured, adaptive))
+        spike_mult = float(params.get("delta_spike_mult", 2.0))
+        if work.height >= 22 and "delta_ratio" in work.columns:
+            values = [
+                float(value) - 0.5
+                for value in work["delta_ratio"].tail(21).to_list()
+                if value is not None and math.isfinite(float(value))
+            ]
+            if len(values) >= 6:
+                current = values[-1]
+                baseline = values[:-1][-20:]
+                mean_abs = sum(abs(value) for value in baseline) / max(1, len(baseline))
+                threshold = max(configured, proxy_floor, mean_abs * spike_mult)
+                return current, threshold, "ohlcv_delta_proxy"
+
+        explicit_shift = _finite_or_none(prepared.aggression_shift)
+        if explicit_shift is None:
+            return None
+        threshold = max(configured, proxy_floor)
+        return explicit_shift, threshold, str(getattr(prepared, "orderflow_source", None) or "agg_trade")
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         params = self._params(prepared, settings)
@@ -63,38 +72,41 @@ class AggressionShiftSetup(RoadmapSetup):
 
         # FIX 2026-05-21: strict spec miss must fall through to the configured
         # public orderflow proxy path instead of making the fallback unreachable.
-        explicit_shift = _finite_or_none(prepared.aggression_shift)
-        if explicit_shift is not None:
-            shift = explicit_shift
-            shift_source = str(getattr(prepared, "orderflow_source", None) or "agg_trade")
-        elif prepared.work_15m.height >= 6 and "delta_ratio" in prepared.work_15m.columns:
-            current_delta = _last(prepared.work_15m, "delta_ratio", 0.5)
-            shift = current_delta - _series_mean_tail(
-                prepared.work_15m.head(prepared.work_15m.height - 1),
-                "delta_ratio",
-                5,
-            )
-            shift_source = "ohlcv_delta_proxy"
-        else:
+        gate = self._delta_shift_gate(prepared, params)
+        if gate is None:
             _reject(prepared, self.setup_id, "aggression_shift_missing")
             return None
+        shift, threshold, shift_source = gate
         vol_ratio = _last(prepared.work_15m, "volume_ratio20", 1.0)
         volume_penalty = vol_ratio < float(params["min_volume_ratio"])
-        threshold = self._adaptive_shift_threshold(prepared, params)
-        if abs(shift) < threshold and "delta_ratio" in prepared.work_15m.columns:
-            current_delta = _last(prepared.work_15m, "delta_ratio", 0.5)
-            shift = current_delta - 0.5
-        if shift >= threshold:
-            direction = "long"
-        elif shift <= -threshold:
+        if abs(shift) < threshold:
+            _reject(
+                prepared,
+                self.setup_id,
+                "pattern.aggression_shift_too_small",
+                shift=shift,
+                threshold=threshold,
+            )
+            return None
+
+        close = _last(prepared.work_15m, "close")
+        prev_close = _prev(prepared.work_15m, "close")
+        if min(close, prev_close) <= 0.0:
+            _reject(prepared, self.setup_id, "price_context_missing")
+            return None
+        price_up = close > prev_close
+        price_down = close < prev_close
+        if price_up and shift < 0.0:
             direction = "short"
+        elif price_down and shift > 0.0:
+            direction = "long"
         else:
             _reject(
                 prepared,
                 self.setup_id,
-                "aggression_shift_too_small",
+                "pattern.no_direction_conflict",
                 shift=shift,
-                adaptive_threshold=threshold,
+                price_change=close - prev_close,
             )
             return None
         return _build_atr_signal(

@@ -323,9 +323,9 @@ class LiquiditySweepSetup(BaseSetup):
                     price=entry_price,
                 )
                 return None
-            tp2 = _as_float(tp2_candidates[-1]) if tp2_candidates.len() > 0 else None
+            tp2 = _as_float(tp2_candidates.min()) if tp2_candidates.len() > 0 else None
             if tp2 is None or abs(tp2 - entry_price) <= abs(tp1 - entry_price):
-                tp2 = tp1
+                tp2 = entry_price - risk * max(2.0, min_rr + 0.35)
 
             vol_ratio = _as_float(w.item(-1, "volume_ratio20"), 1.0)
             rsi = _as_float(w.item(-1, "rsi14"), 50.0)
@@ -407,9 +407,9 @@ class LiquiditySweepSetup(BaseSetup):
                 price=entry_price,
             )
             return None
-        tp2 = _as_float(tp2_candidates[-1]) if tp2_candidates.len() > 0 else None
+        tp2 = _as_float(tp2_candidates.max()) if tp2_candidates.len() > 0 else None
         if tp2 is None or abs(tp2 - entry_price) <= abs(tp1 - entry_price):
-            tp2 = tp1
+            tp2 = entry_price + risk * max(2.0, min_rr + 0.35)
 
         vol_ratio = _as_float(w.item(-1, "volume_ratio20"), 1.0)
         rsi = _as_float(w.item(-1, "rsi14"), 50.0)

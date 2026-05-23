@@ -202,10 +202,15 @@ class StructurePullbackSetup(BaseSetup):
             direction = "short"
             trend_reasons = short_reasons
 
+        if "adx14" not in work_1h.columns:
+            _reject(prepared, "structure_pullback", "missing_column_adx14")
+            return None
         adx_1h = _as_float(work_1h.item(-1, "adx14"))
         # Use per-setup min_adx from config if available, else fallback to global
         setup_params = self.get_optimizable_params(settings)
-        min_adx = setup_params.get("min_adx_1h", settings.filters.min_adx_1h)
+        _filters = getattr(settings, "filters", None)
+        global_min_adx = getattr(_filters, "min_adx_1h", 15.0)
+        min_adx = setup_params.get("min_adx_1h", global_min_adx)
         if adx_1h > 0.0 and adx_1h < min_adx:
             _reject(
                 prepared,

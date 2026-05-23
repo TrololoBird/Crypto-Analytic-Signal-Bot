@@ -81,6 +81,8 @@ class VWAPTrendSetup(BaseSetup):
             "rsi14",
         )
         missing = [column for column in required_columns if column not in work_15m.columns]
+        if "adx14" not in work_1h.columns:
+            missing.append("adx14")
         if missing:
             _reject(prepared, setup_id, "missing_columns", missing_fields=missing)
             return None

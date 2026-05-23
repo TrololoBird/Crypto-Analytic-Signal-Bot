@@ -272,7 +272,8 @@ class FundingReversalSetup(BaseSetup):
             entry_price = _as_float(recent["high"].max(), price)
             stop = entry_price + atr * sl_buffer_atr
             risk = stop - entry_price
-            tp1 = _as_float(w["low"].slice(-(trend_window + 1), trend_window).min())
+            trend_start = max(0, w.height - (trend_window + 1))
+            tp1 = _as_float(w["low"].slice(trend_start, trend_window).min())
             from ..features import _swing_points as _sp
 
             w1h = prepared.work_1h
@@ -295,7 +296,8 @@ class FundingReversalSetup(BaseSetup):
             entry_price = _as_float(recent["low"].min(), price)
             stop = entry_price - atr * sl_buffer_atr
             risk = entry_price - stop
-            tp1 = _as_float(w["high"].slice(-(trend_window + 1), trend_window).max())
+            trend_start = max(0, w.height - (trend_window + 1))
+            tp1 = _as_float(w["high"].slice(trend_start, trend_window).max())
             from ..features import _swing_points as _sp
 
             w1h = prepared.work_1h

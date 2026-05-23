@@ -188,7 +188,15 @@ class FVGSetup(BaseSetup):
                 ),
             )
             return None
-        mitigation_pct = abs(price - fvg_mid) / fvg_width if price_inside_gap and fvg_width > 0 else 0.0
+        if price_inside_gap and fvg_width > 0:
+            mitigation_pct = (
+                (fvg_high - price) / fvg_width
+                if direction == "long"
+                else (price - fvg_low) / fvg_width
+            )
+            mitigation_pct = max(0.0, min(1.0, mitigation_pct))
+        else:
+            mitigation_pct = 0.0
         if (
             fvg_width / price < (min_gap_width_bps / 10000)
             or fvg_width < atr * float(min_fvg_size_atr)
@@ -338,7 +346,11 @@ class FVGSetup(BaseSetup):
             score *= dynamic_params.get("tp_too_close_penalty", defaults["tp_too_close_penalty"])
 
         if tp2 is None or abs(tp2 - entry_price) <= abs(tp1 - entry_price):
-            tp2 = tp1  # Use TP1 as TP2 if no extended target found
+            tp2 = (
+                entry_price + risk * max(2.0, min_rr + 0.35)
+                if direction == "long"
+                else entry_price - risk * max(2.0, min_rr + 0.35)
+            )
 
         reasons = [
             f"FVG {direction}: gap [{fvg_low:.4f}-{fvg_high:.4f}] state={zone.state}",

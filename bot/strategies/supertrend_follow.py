@@ -35,6 +35,7 @@ class SuperTrendFollowSetup(BaseSetup):
             "min_adx_1h": 14.0,
             "min_volume_ratio": 1.0,
             "volume_penalty": 0.92,
+            "pullback_atr_threshold": 0.65,
             "ema_pullback_atr": 0.65,
             "ema_acceptance_atr": 0.35,
             "ema_reclaim_lookback_bars": 6,
@@ -105,7 +106,13 @@ class SuperTrendFollowSetup(BaseSetup):
         # pullback to 0.50 and checked only close-to-line distance. SuperTrend
         # retests are often wick touches that close back in trend direction, so
         # the candle range must participate in the confirmation.
-        pullback_atr = max(0.20, min(float(effective_params["ema_pullback_atr"]), 1.25))
+        configured_pullback = float(
+            effective_params.get(
+                "pullback_atr_threshold",
+                effective_params["ema_pullback_atr"],
+            )
+        )
+        pullback_atr = max(0.20, min(configured_pullback, 2.0))
         bias_1h = getattr(prepared, "bias_1h", prepared.bias_4h)
         direction: str | None = None
         stop_basis: float = 0.0

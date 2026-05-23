@@ -45,7 +45,6 @@ def _find_recent_hidden_divergence_pair(
     *,
     direction: str,
     min_oscillator_separation: float,
-    max_pair_gap: int,
 ) -> tuple[float, float] | None:
     price_values = _finite_series_values(prices)
     oscillator_values = _finite_series_values(oscillators)
@@ -54,23 +53,18 @@ def _find_recent_hidden_divergence_pair(
         return None
     price_values = price_values[-count:]
     oscillator_values = oscillator_values[-count:]
-    pair_gap = max(1, int(max_pair_gap))
-
-    for current_idx in range(count - 1, 0, -1):
-        first_idx = max(0, current_idx - pair_gap)
-        for previous_idx in range(current_idx - 1, first_idx - 1, -1):
-            previous_price = price_values[previous_idx]
-            current_price = price_values[current_idx]
-            previous_oscillator = oscillator_values[previous_idx]
-            current_oscillator = oscillator_values[current_idx]
-            if direction == "long":
-                oscillator_gap = previous_oscillator - current_oscillator
-                if current_price > previous_price and oscillator_gap >= min_oscillator_separation:
-                    return current_price, oscillator_gap
-            else:
-                oscillator_gap = current_oscillator - previous_oscillator
-                if current_price < previous_price and oscillator_gap >= min_oscillator_separation:
-                    return current_price, oscillator_gap
+    previous_price = price_values[-2]
+    current_price = price_values[-1]
+    previous_oscillator = oscillator_values[-2]
+    current_oscillator = oscillator_values[-1]
+    if direction == "long":
+        oscillator_gap = previous_oscillator - current_oscillator
+        if current_price > previous_price and oscillator_gap >= min_oscillator_separation:
+            return current_price, oscillator_gap
+    else:
+        oscillator_gap = current_oscillator - previous_oscillator
+        if current_price < previous_price and oscillator_gap >= min_oscillator_separation:
+            return current_price, oscillator_gap
     return None
 
 
@@ -142,9 +136,6 @@ class HiddenDivergenceSetup(BaseSetup):
         rsi_divergence_threshold = float(
             dynamic_params.get("rsi_divergence_threshold", defaults["rsi_divergence_threshold"])
         )
-        max_swing_pair_gap = int(
-            dynamic_params.get("max_swing_pair_gap", defaults["max_swing_pair_gap"])
-        )
         min_delta_threshold = float(
             dynamic_params.get("min_delta_threshold", defaults["min_delta_threshold"])
         )
@@ -179,18 +170,42 @@ class HiddenDivergenceSetup(BaseSetup):
         if vol_ratio_15m < min_volume_ratio:
             volume_penalty = True
 
-        # 1H context for 15M signals (not 4H - too lagging for <4h trades)
         bias_1h = getattr(prepared, "bias_1h", prepared.bias_4h)
+        close_1h = float(w1h.item(-1, "close") or 0.0)
+        ema20_1h = float(w1h.item(-1, "ema20") or 0.0) if "ema20" in w1h.columns else 0.0
+        ema50_1h = float(w1h.item(-1, "ema50") or 0.0) if "ema50" in w1h.columns else 0.0
+        if min(close_1h, ema50_1h) <= 0.0:
+            _reject(prepared, setup_id, "indicator.trend_context_missing")
+            return None
+        long_trend_context = (
+            close_1h > ema50_1h
+            and (ema20_1h <= 0.0 or ema20_1h >= ema50_1h)
+            and bias_1h != "downtrend"
+        )
+        short_trend_context = (
+            close_1h < ema50_1h
+            and (ema20_1h <= 0.0 or ema20_1h <= ema50_1h)
+            and bias_1h != "uptrend"
+        )
+        if not long_trend_context and not short_trend_context:
+            _reject(
+                prepared,
+                setup_id,
+                "pattern.no_trend_context",
+                bias_1h=bias_1h,
+                close_1h=close_1h,
+                ema50_1h=ema50_1h,
+            )
+            return None
+
         sh_mask, sl_mask = _swing_points(
-            w1h, n=max(2, rsi_divergence_lookback), include_unconfirmed_tail=True
+            w1h, n=max(2, rsi_divergence_lookback), include_unconfirmed_tail=False
         )
         sh_prices = w1h.filter(sh_mask)["high"]
         sh_rsi = w1h.filter(sh_mask)["rsi14"] if "rsi14" in w1h.columns else None
         sl_prices = w1h.filter(sl_mask)["low"]
         sl_rsi = w1h.filter(sl_mask)["rsi14"] if "rsi14" in w1h.columns else None
 
-        # Use 1H context for 15M signals (not 4H - too lagging for <4h trades)
-        bias_1h = getattr(prepared, "bias_1h", prepared.bias_4h)
         direction = None
         stop_price = None
         swing_ref = None
@@ -200,7 +215,7 @@ class HiddenDivergenceSetup(BaseSetup):
         impulse_size = None
         swing_ref = None
         if (
-            bias_1h in ("uptrend", "neutral")
+            long_trend_context
             and sl_prices.len() >= 2
             and sl_rsi is not None
             and sl_rsi.len() >= 2
@@ -210,7 +225,6 @@ class HiddenDivergenceSetup(BaseSetup):
                 sl_rsi,
                 direction="long",
                 min_oscillator_separation=rsi_divergence_threshold,
-                max_pair_gap=max_swing_pair_gap,
             )
             if match is not None:
                 direction = "long"
@@ -221,7 +235,7 @@ class HiddenDivergenceSetup(BaseSetup):
 
         # Hidden Bearish: price LH (sh[-1] < sh[-2]) + RSI HH (rsi_sh[-1] > rsi_sh[-2])
         if direction is None and (
-            bias_1h in ("downtrend", "neutral")
+            short_trend_context
             and sh_prices.len() >= 2
             and sh_rsi is not None
             and sh_rsi.len() >= 2
@@ -231,7 +245,6 @@ class HiddenDivergenceSetup(BaseSetup):
                 sh_rsi,
                 direction="short",
                 min_oscillator_separation=rsi_divergence_threshold,
-                max_pair_gap=max_swing_pair_gap,
             )
             if match is not None:
                 direction = "short"
@@ -240,7 +253,14 @@ class HiddenDivergenceSetup(BaseSetup):
                     impulse_size = abs(float(swing_ref) - float(sl_prices.to_numpy()[-1]))
 
         if direction is None or swing_ref is None:
-            _reject(prepared, setup_id, "no_hidden_divergence_detected")
+            _reject(
+                prepared,
+                setup_id,
+                "pattern.no_hidden_divergence",
+                swing_lows=sl_prices.len(),
+                swing_highs=sh_prices.len(),
+                min_rsi_separation=rsi_divergence_threshold,
+            )
             return None
 
         # 4H trend must align for continuation

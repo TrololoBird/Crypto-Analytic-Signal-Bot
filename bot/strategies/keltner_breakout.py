@@ -105,10 +105,6 @@ class KeltnerBreakoutSetup(BaseSetup):
             _reject(prepared, setup_id, "missing_columns", missing_fields=missing)
             return None
 
-        params = self.get_optimizable_params(settings)
-        dynamic_params = get_dynamic_params(prepared, setup_id)
-        effective_params = {**params, **dynamic_params}
-
         close = _as_float(work_15m.item(-1, "close"))
         ema20 = _as_float(work_15m.item(-1, "ema20"))
         atr = _as_float(work_15m.item(-1, "atr14"))

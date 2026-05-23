@@ -362,9 +362,9 @@ class SqueezeSetup(BaseSetup):
             reasons.append(reasons_rsi_penalty)
 
         # --- Compute structural SL/TP ---
-        pre_breakout = work_15m.slice(-11, 10)  # 10 bars before signal bar
+        pre_breakout = work_15m.slice(max(0, work_15m.height - 11), 10)
         if pre_breakout.height < 3:
-            pre_breakout = work_15m.slice(-6, 5)
+            pre_breakout = work_15m.slice(max(0, work_15m.height - 6), 5)
         price_anchor = (
             _as_float(pre_breakout["high"].max())
             if direction == "long"

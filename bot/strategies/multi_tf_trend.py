@@ -75,7 +75,7 @@ class MultiTFTrendSetup(RoadmapSetup):
         ]
         up_votes = sum(1 for value in context_values if value == "uptrend")
         down_votes = sum(1 for value in context_values if value == "downtrend")
-        min_votes = int(params.get("min_trend_votes", 3))
+        min_votes = int(params.get("min_trend_votes", self.DEFAULTS["min_trend_votes"]))
         if up_votes >= min_votes and up_votes > down_votes:
             direction = "long"
         elif down_votes >= min_votes and down_votes > up_votes:

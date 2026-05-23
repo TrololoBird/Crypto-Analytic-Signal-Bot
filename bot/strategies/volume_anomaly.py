@@ -94,10 +94,6 @@ class VolumeAnomalySetup(BaseSetup):
             _reject(prepared, setup_id, "missing_columns", missing_fields=missing)
             return None
 
-        params = self.get_optimizable_params(settings)
-        dynamic_params = get_dynamic_params(prepared, setup_id)
-        effective_params = {**params, **dynamic_params}
-
         close = _as_float(work.item(-1, "close"))
         atr = _as_float(work.item(-1, "atr14"))
         rsi = _as_float(work.item(-1, "rsi14"), 50.0)

@@ -273,9 +273,15 @@ def build_structural_targets(
             if last_4h_low < price_anchor * 0.98:  # At least 2% below
                 tp2 = last_4h_low
 
-    # Fallback: if tp2 is None, use tp1 as tp2
+    # Fallback: if tp2 is None, project a second target beyond TP1.
     if tp2 is None:
-        tp2 = tp1
+        risk = abs(price_anchor - stop)
+        if risk > 0.0:
+            tp2 = (
+                price_anchor + risk * max(2.0, min_rr + 0.35)
+                if direction == "long"
+                else price_anchor - risk * max(2.0, min_rr + 0.35)
+            )
     if tp1 is not None and tp2 is not None:
         normalized_targets = normalize_target_pair(direction, price_anchor, tp1, tp2)
         if normalized_targets is None:
