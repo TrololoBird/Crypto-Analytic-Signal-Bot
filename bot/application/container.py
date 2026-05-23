@@ -15,6 +15,7 @@ from ..delivery import SignalDelivery
 from ..market_data import BinanceFuturesMarketData
 from ..messaging import build_message_broadcaster
 from ..public_intelligence import PublicIntelligenceService
+from ..quality_monitor import SignalQualityMonitor
 from ..telemetry import TelemetryStore
 from ..tracking import SignalTracker
 from ..ws_manager import FuturesWSManager
@@ -34,6 +35,7 @@ class ApplicationContainer:
     delivery: SignalDelivery
     alerts: AlertCoordinator
     repository: MemoryRepository
+    quality_monitor: SignalQualityMonitor
     tracker: SignalTracker
     intelligence: PublicIntelligenceService | None
     registry: StrategyRegistry
@@ -87,12 +89,14 @@ def build_application_container(
         db_path=settings.db_path,
         data_dir=settings.data_dir / "parquet",
     )
+    quality_monitor = SignalQualityMonitor(persist_path=settings.data_dir / "quality_monitor.json")
 
     tracker = SignalTracker(
         settings,
         market_data=client,
         telemetry=telemetry_store,
         memory_repo=repository,
+        quality_monitor=quality_monitor,
     )
 
     intelligence: PublicIntelligenceService | None = None
@@ -112,6 +116,7 @@ def build_application_container(
         delivery=delivery,
         alerts=alerts,
         repository=repository,
+        quality_monitor=quality_monitor,
         tracker=tracker,
         intelligence=intelligence,
         registry=registry,

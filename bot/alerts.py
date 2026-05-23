@@ -76,7 +76,7 @@ def _make_ref_id(
     ts_utc = ts.astimezone(timezone.utc)
     time_part = ts_utc.strftime("%m%d-%H%M")
     raw = f"{symbol}|{setup_id}|{direction}|{level_name}|{ts_utc.isoformat()}"
-    hash_part = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:4].upper()
+    hash_part = hashlib.sha1(raw.encode("utf-8"), usedforsecurity=False).hexdigest()[:4].upper()
     return f"{base_asset}-{setup_short}-{time_part}-{hash_part}"
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from bisect import bisect_right
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import json
@@ -26,6 +27,7 @@ from .tracked_signals import TrackedSignalState, parse_state_dt
 
 if typing.TYPE_CHECKING:
     from .core.memory import MemoryRepository
+    from .quality_monitor import SignalQualityMonitor
 
 
 UTC = timezone.utc
@@ -90,11 +92,13 @@ class SignalTracker:
         telemetry: TelemetryStore,
         features_store: dict[str, SignalFeatures] | None = None,
         memory_repo: MemoryRepository,
+        quality_monitor: SignalQualityMonitor | None = None,
     ) -> None:
         self.settings = settings
         self.market_data = market_data
         self.telemetry = telemetry
         self.memory_repo = memory_repo
+        self.quality_monitor = quality_monitor
         self._features_file: Path | None = getattr(settings, "features_store_file", None)
         if features_store is not None:
             self.features_store = features_store
@@ -108,6 +112,7 @@ class SignalTracker:
         self._last_outcome_cleanup_ts: float = 0.0
         self._features_persist_lock = asyncio.Lock()
         self._symbol_review_locks: dict[str, asyncio.Lock] = {}
+        self._symbol_review_durations: dict[str, deque[float]] = {}
 
     def _symbol_review_lock(self, symbol: str) -> asyncio.Lock:
         key = str(symbol or "").upper()
@@ -116,6 +121,44 @@ class SignalTracker:
             lock = asyncio.Lock()
             self._symbol_review_locks[key] = lock
         return lock
+
+    def _cleanup_symbol_review_locks(self, active_symbols: set[str]) -> None:
+        if len(self._symbol_review_locks) <= 500:
+            return
+        active = {str(symbol or "").upper() for symbol in active_symbols}
+        stale = [symbol for symbol in self._symbol_review_locks if symbol not in active]
+        for symbol in stale:
+            self._symbol_review_locks.pop(symbol, None)
+            self._symbol_review_durations.pop(symbol, None)
+        if stale:
+            LOG.info(
+                "cleaned stale symbol review locks | removed=%d remaining=%d active_symbols=%d",
+                len(stale),
+                len(self._symbol_review_locks),
+                len(active),
+            )
+
+    def _record_symbol_review_duration(
+        self,
+        symbol: str,
+        *,
+        elapsed: float,
+        tracked_count: int,
+    ) -> None:
+        key = str(symbol or "").upper()
+        durations = self._symbol_review_durations.get(key)
+        if durations is None:
+            durations = deque(maxlen=100)
+            self._symbol_review_durations[key] = durations
+        durations.append(elapsed)
+        if elapsed > 5.0:
+            LOG.warning(
+                "slow symbol tracking review | symbol=%s elapsed=%.3fs tracked_rows=%d avg_100=%.3fs",
+                symbol,
+                elapsed,
+                tracked_count,
+                sum(durations) / max(len(durations), 1),
+            )
 
     async def _flush_pending_outcomes(self) -> None:
         """Flush pending outcomes to disk in batch."""
@@ -576,6 +619,7 @@ class SignalTracker:
         by_symbol: dict[str, list[TrackedSignalState]] = {}
         for tracked in tracked_rows:
             by_symbol.setdefault(tracked.symbol, []).append(tracked)
+        self._cleanup_symbol_review_locks(set(by_symbol))
 
         events: list[SignalTrackingEvent] = []
         for symbol in by_symbol:
@@ -1243,6 +1287,14 @@ class SignalTracker:
                     pnl_r_multiple=pnl_r_multiple,
                     was_profitable=(pnl_r_multiple > 0.0) if pnl_r_multiple is not None else None,
                 )
+                if self.quality_monitor is not None and pnl_r_multiple is not None:
+                    self.quality_monitor.update(
+                        tracked.tracking_id,
+                        tracked.setup_id,
+                        setup_outcome,
+                        pnl_r_multiple,
+                        symbol=tracked.symbol,
+                    )
             except (OSError, IOError, ValueError):
                 LOG.debug("record_outcome failed for %s (non-critical)", tracked.setup_id)
 
@@ -1404,9 +1456,17 @@ class SignalTracker:
         fallback_precision_mode: str,
         persist_error_context: str,
     ) -> list[SignalTrackingEvent]:
+        start = time.perf_counter()
+        tracked_count = 0
         async with self._symbol_review_lock(symbol):
             tracked_rows = await self._active_signals(symbol=symbol)
+            tracked_count = len(tracked_rows)
             if not tracked_rows:
+                self._record_symbol_review_duration(
+                    symbol,
+                    elapsed=time.perf_counter() - start,
+                    tracked_count=tracked_count,
+                )
                 return []
             tracked_rows.sort(key=lambda item: item.created_at)
             try:
@@ -1427,6 +1487,11 @@ class SignalTracker:
                     "tracking_events.jsonl",
                     event.to_log_row(stats=await self._stats_snapshot()),
                 )
+            self._record_symbol_review_duration(
+                symbol,
+                elapsed=time.perf_counter() - start,
+                tracked_count=tracked_count,
+            )
             return events
 
     async def on_agg_trade(

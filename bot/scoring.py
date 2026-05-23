@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 import math
 from typing import Any
 
@@ -10,6 +11,12 @@ from typing import Any
 from .domain.config import BotSettings
 from .features import _swing_points
 from .domain.schemas import PreparedSymbol, Signal
+
+
+LOG = logging.getLogger("bot.scoring")
+_FUNDING_DEFAULT_WARNING_EMITTED = False
+_DEFAULT_FUNDING_RATE_EXTREME = 0.001
+_DEFAULT_FUNDING_RATE_MODERATE = 0.0005
 
 
 @dataclass(frozen=True, slots=True)
@@ -206,8 +213,22 @@ def _funding_contrarian(prepared: PreparedSymbol, signal: Signal, settings: BotS
     funding = prepared.funding_rate
     if funding is None:
         return 0.5
-    extreme = settings.scoring.funding_rate_extreme
-    moderate = settings.scoring.funding_rate_moderate
+    scoring_cfg = getattr(settings, "scoring", None)
+    extreme = getattr(scoring_cfg, "funding_rate_extreme", None)
+    moderate = getattr(scoring_cfg, "funding_rate_moderate", None)
+    global _FUNDING_DEFAULT_WARNING_EMITTED
+    if extreme is None or moderate is None:
+        if not _FUNDING_DEFAULT_WARNING_EMITTED:
+            LOG.warning(
+                "funding scoring thresholds missing; using defaults extreme=%.6f moderate=%.6f",
+                _DEFAULT_FUNDING_RATE_EXTREME,
+                _DEFAULT_FUNDING_RATE_MODERATE,
+            )
+            _FUNDING_DEFAULT_WARNING_EMITTED = True
+        extreme = _DEFAULT_FUNDING_RATE_EXTREME if extreme is None else extreme
+        moderate = _DEFAULT_FUNDING_RATE_MODERATE if moderate is None else moderate
+    extreme = max(float(extreme), 1e-9)
+    moderate = max(float(moderate), 1e-9)
     if signal.direction == "long":
         if funding <= -extreme:
             return 1.0

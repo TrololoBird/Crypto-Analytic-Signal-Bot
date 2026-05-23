@@ -102,6 +102,7 @@ class SignalBot:
         self.telemetry = container.telemetry
         self.alerts = container.alerts
         self._modern_repo = container.repository
+        self.quality_monitor = container.quality_monitor
         LOG.info("MemoryRepository initialized | db=%s", self._modern_repo._db_path)
 
         # Note: All persistence now uses MemoryRepository (SQLite)

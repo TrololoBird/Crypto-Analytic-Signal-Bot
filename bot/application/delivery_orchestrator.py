@@ -148,6 +148,42 @@ class DeliveryOrchestrator:
             LOG.debug("supersede failed for %s: %s", new_signal.symbol, exc)
             return None
 
+    def _quality_monitor_rejects(
+        self,
+        signal: Signal,
+        rejected_rows: list[dict[str, Any]],
+    ) -> bool:
+        monitor = getattr(self._bot, "quality_monitor", None)
+        if monitor is None:
+            return False
+        health = monitor.get_setup_health(signal.setup_id)
+        throttle = bool(
+            health.get("recommendation") == "pause"
+            or monitor.should_throttle_delivery(signal.setup_id, signal.symbol)
+        )
+        if not throttle:
+            return False
+        rejected_rows.append(
+            {
+                "ts": datetime.now(UTC).isoformat(),
+                "symbol": signal.symbol,
+                "setup_id": signal.setup_id,
+                "direction": signal.direction,
+                "stage": "quality_monitor",
+                "reason": "quality_monitor_pause",
+                "quality_health": health,
+            }
+        )
+        LOG.warning(
+            "quality monitor paused delivery | symbol=%s setup=%s recommendation=%s consecutive_losses=%s win_rate=%s",
+            signal.symbol,
+            signal.setup_id,
+            health.get("recommendation"),
+            health.get("consecutive_losses"),
+            health.get("win_rate"),
+        )
+        return True
+
     async def deliver_tracking(self, events: list[SignalTrackingEvent]) -> None:
         outcome_map = {
             "tp1_hit": "tp1",
@@ -258,6 +294,8 @@ class DeliveryOrchestrator:
                 better_score = score_raw is not None and signal.score >= float(score_raw or 0.0) + 0.10
                 direction_flip = str(existing_direction or "") != signal.direction
                 if can_supersede_pending and (better_score or direction_flip):
+                    if self._quality_monitor_rejects(signal, rejected_rows):
+                        continue
                     closed = await self.close_superseded_signal(signal)
                     if closed:
                         await self.deliver_tracking(closed)
@@ -342,11 +380,15 @@ class DeliveryOrchestrator:
                 self._bot.settings.filters.cooldown_minutes,
             )
             if not is_cooldown_active:
+                if self._quality_monitor_rejects(signal, rejected_rows):
+                    continue
                 ready_to_send.append(signal)
                 queued_setup_ids.add(signal.setup_id)
                 queued_symbol_direction.add(symbol_direction_key)
                 continue
 
+            if self._quality_monitor_rejects(signal, rejected_rows):
+                continue
             closed = await self.close_superseded_signal(signal)
             if closed:
                 await self.deliver_tracking(closed)

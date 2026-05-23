@@ -1,5 +1,14 @@
+"""Internal compatibility layer for oscillator feature helpers.
+
+Canonical runtime preparation is `bot.features._prepare_frame`. The oscillator
+functions here are retained as import-compatible helpers for the decomposed
+feature modules, while live feature assembly is owned by `bot.features`.
+"""
+
 from __future__ import annotations
 
+import inspect
+import warnings
 from typing import Any, cast
 
 import polars as pl
@@ -14,6 +23,23 @@ __all__ = [
     "stochastic",
     "ultimate_oscillator",
 ]
+MODULE_STATUS = "internal_only"
+CANONICAL_FEATURE_API = "bot.features._prepare_frame"
+
+
+def _warn_if_direct_imported() -> None:
+    for frame in inspect.stack()[1:20]:
+        normalized = frame.filename.replace("\\", "/")
+        if normalized.endswith("/bot/features.py") or normalized.endswith("/bot/features_advanced.py"):
+            return
+    warnings.warn(
+        "bot.features_oscillators is internal_only; use bot.features._prepare_frame for runtime feature preparation.",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+
+
+_warn_if_direct_imported()
 
 
 def stochastic(

@@ -691,7 +691,31 @@ def build_shortlist(
     summary["strategy_fit_counts"] = {
         key: value for key, value in strategy_counts.items() if value > 0
     }
+    scores = sorted(float(row.shortlist_score or 0.0) for row in shortlist)
+    summary["score_p25"] = _percentile(scores, 0.25)
+    summary["score_p50"] = _percentile(scores, 0.50)
+    summary["score_p75"] = _percentile(scores, 0.75)
+    summary["score_p90"] = _percentile(scores, 0.90)
+    summary["strategy_fit_density"] = round(
+        sum(len(row.strategy_fits) for row in shortlist) / max(len(shortlist), 1),
+        6,
+    )
     return shortlist, summary
+
+
+def _percentile(values: list[float], fraction: float) -> float | None:
+    if not values:
+        return None
+    fraction = max(0.0, min(float(fraction), 1.0))
+    if len(values) == 1:
+        return round(values[0], 6)
+    position = (len(values) - 1) * fraction
+    lower = math.floor(position)
+    upper = math.ceil(position)
+    if lower == upper:
+        return round(values[lower], 6)
+    weight = position - lower
+    return round(values[lower] * (1.0 - weight) + values[upper] * weight, 6)
 
 
 def rerank_shortlist(

@@ -34,7 +34,7 @@ from .runtime_policy import (
     configured_primary_timeframe,
 )
 from .features_microstructure import add_microstructure_features
-from .features_shared import wilder_mean
+from .features_shared import supertrend_series, wilder_mean
 from .features_structure import (
     hull_moving_average as _hull_moving_average_external,
     ichimoku_lines as _ichimoku_lines_external,
@@ -138,20 +138,25 @@ class _FrameCache:
     cheaper than blocking the async analysis loop behind another frame update.
     """
 
-    __slots__ = ("_store", "_max_size", "_lock")
+    __slots__ = ("_store", "_max_size", "_lock", "_hits", "_misses")
 
     def __init__(self, max_size: int = 500) -> None:
         self._store: OrderedDict[_FrameCacheKey, pl.DataFrame] = OrderedDict()
         self._max_size = max_size
         self._lock = threading.Lock()
+        self._hits = 0
+        self._misses = 0
 
     def get(self, key: _FrameCacheKey) -> pl.DataFrame | None:
         if not self._lock.acquire(blocking=False):
+            self._misses += 1
             return None
         try:
             if key not in self._store:
+                self._misses += 1
                 return None
             self._store.move_to_end(key)
+            self._hits += 1
             return self._store[key]
         finally:
             self._lock.release()
@@ -168,9 +173,26 @@ class _FrameCache:
         finally:
             self._lock.release()
 
+    def cache_stats(self) -> dict[str, float | int]:
+        with self._lock:
+            hits = int(self._hits)
+            misses = int(self._misses)
+            total = hits + misses
+            return {
+                "hits": hits,
+                "misses": misses,
+                "size": len(self._store),
+                "hit_rate": round(hits / total, 6) if total else 0.0,
+            }
+
 
 # Module-level singleton kept for backward compatibility.
 _FRAME_CACHE = _FrameCache(max_size=_MAX_CACHE_ENTRIES)
+
+
+def cache_stats() -> dict[str, float | int]:
+    """Return frame preparation cache hit/miss counters for health telemetry."""
+    return _FRAME_CACHE.cache_stats()
 
 
 def _clean_non_finite(series: pl.Series, *, fill: float) -> pl.Series:
@@ -743,65 +765,6 @@ def _ichimoku_lines(
 # ---------------------------------------------------------------------------
 
 
-def _supertrend(
-    df: pl.DataFrame, period: int = 10, multiplier: float = 3.0
-) -> tuple[pl.Series, pl.Series]:
-    """SuperTrend indicator using canonical iterative band state updates."""
-    high_series = df["high"]
-    low_series = df["low"]
-    close_series = df["close"]
-
-    prev_close = close_series.shift(1)
-    tr = pl.max_horizontal(
-        (high_series - low_series).abs(),
-        (high_series - prev_close).abs(),
-        (low_series - prev_close).abs(),
-    )
-    atr = _materialize_series(
-        tr.ewm_mean(alpha=1.0 / period, adjust=False), df=df, name="supertrend_atr"
-    )
-
-    close = close_series.to_numpy().astype(float, copy=False)
-    high = high_series.to_numpy().astype(float, copy=False)
-    low = low_series.to_numpy().astype(float, copy=False)
-    atr_values = atr.to_numpy().astype(float, copy=False)
-    size = len(close)
-    if size == 0:
-        empty = pl.Series("supertrend", [], dtype=pl.Float64)
-        return empty, pl.Series("supertrend_dir", [], dtype=pl.Int8)
-
-    atr_values = np.nan_to_num(atr_values, nan=0.0, posinf=0.0, neginf=0.0)
-    hl2 = (high + low) / 2.0
-    upper_band = hl2 + multiplier * atr_values
-    lower_band = hl2 - multiplier * atr_values
-    final_upper = upper_band.copy()
-    final_lower = lower_band.copy()
-    direction = np.ones(size, dtype=np.int8)
-    for idx in range(1, size):
-        if close[idx - 1] > final_upper[idx - 1]:
-            final_upper[idx] = min(upper_band[idx], final_upper[idx - 1])
-        else:
-            final_upper[idx] = upper_band[idx]
-
-        if close[idx - 1] < final_lower[idx - 1]:
-            final_lower[idx] = max(lower_band[idx], final_lower[idx - 1])
-        else:
-            final_lower[idx] = lower_band[idx]
-
-        if direction[idx - 1] == -1 and close[idx] > final_upper[idx]:
-            direction[idx] = 1
-        elif direction[idx - 1] == 1 and close[idx] < final_lower[idx]:
-            direction[idx] = -1
-        else:
-            direction[idx] = direction[idx - 1]
-
-    line = np.where(direction == 1, final_lower, final_upper)
-    return (
-        pl.Series("supertrend", line, dtype=pl.Float64),
-        pl.Series("supertrend_dir", direction, dtype=pl.Int8),
-    )
-
-
 def _bollinger_bands(
     close: pl.Series, period: int = 20, nbdev: float = 2.0
 ) -> tuple[pl.Series, pl.Series, pl.Series]:
@@ -1043,7 +1006,7 @@ def _add_advanced_indicators(df: pl.DataFrame) -> pl.DataFrame:
     result = df
 
     # --- SuperTrend ---------------------------------------------------------
-    st, st_dir = _supertrend(df, period=10, multiplier=3.0)
+    st, st_dir = supertrend_series(df, period=10, multiplier=3.0)
     result = result.with_columns(
         [
             st.alias("supertrend"),
@@ -1732,6 +1695,139 @@ def _volume_poc(work: pl.DataFrame, lookback: int = 96, buckets: int = 20) -> fl
 # ---------------------------------------------------------------------------
 
 
+_EXPECTED_ZERO_COLUMNS = frozenset(
+    {
+        "macd_hist",
+        "obv",
+        "obv_ema20",
+        "obv_above_ema",
+        "squeeze_on",
+        "squeeze_off",
+        "squeeze_no",
+        "squeeze_hist",
+        "psar_reversal",
+        "chandelier_dir",
+        "session_asia",
+        "session_london",
+        "session_ny",
+        "session_overlap",
+        "session_asia_vol_20",
+        "session_london_vol_20",
+        "session_ny_vol_20",
+        "session_overlap_vol_20",
+        "delta_ratio",
+        "roc10",
+        "realized_vol_20",
+        "vwap_deviation_z20",
+        "aggression_shift",
+        "depth_imbalance",
+        "microprice_bias",
+        "depth_wall_pressure",
+    }
+)
+
+
+def _series_numeric_bounds(series: pl.Series) -> tuple[float | None, float | None]:
+    numeric = series.cast(pl.Float64, strict=False).drop_nulls()
+    if numeric.is_empty():
+        return None, None
+    try:
+        return _as_optional_float(numeric.min()), _as_optional_float(numeric.max())
+    except (TypeError, ValueError):
+        return None, None
+
+
+def _sanity_check_prepared_frame(work: pl.DataFrame, symbol: str, interval: str) -> list[str]:
+    """Return non-fatal warnings for impossible or suspicious prepared features.
+
+    The function is deliberately observational: it never raises, never mutates
+    the frame, and never blocks signal generation. It catches contract drift
+    early in telemetry when indicator ranges become impossible after changes to
+    Polars, optional feature backends, or exchange payload shape.
+    """
+    warnings: list[str] = []
+    if work.is_empty():
+        return [f"{symbol}/{interval}: prepared frame is empty"]
+
+    def _range_warning(column: str, low: float, high: float) -> None:
+        if column not in work.columns:
+            return
+        min_value, max_value = _series_numeric_bounds(work[column])
+        if min_value is None or max_value is None:
+            warnings.append(f"{column}: all values null or non-numeric")
+            return
+        if min_value < low or max_value > high:
+            warnings.append(
+                f"{column}: out of range [{low}, {high}] min={min_value:.6f} max={max_value:.6f}"
+            )
+
+    def _positive_warning(column: str, *, allow_zero: bool) -> None:
+        if column not in work.columns:
+            return
+        min_value, _ = _series_numeric_bounds(work[column])
+        if min_value is None:
+            warnings.append(f"{column}: all values null or non-numeric")
+            return
+        if allow_zero:
+            if min_value < 0.0:
+                warnings.append(f"{column}: negative value detected min={min_value:.6f}")
+        elif min_value <= 0.0:
+            warnings.append(f"{column}: non-positive value detected min={min_value:.6f}")
+
+    _range_warning("rsi14", 0.0, 100.0)
+    _range_warning("adx14", 0.0, 100.0)
+    _positive_warning("atr14", allow_zero=False)
+    _positive_warning("ema20", allow_zero=False)
+    _positive_warning("ema50", allow_zero=False)
+    _positive_warning("ema200", allow_zero=False)
+    _positive_warning("volume_ratio20", allow_zero=True)
+    _positive_warning("close", allow_zero=False)
+
+    for column in work.columns:
+        if column.startswith("_"):
+            continue
+        series = work[column]
+        if series.null_count() == work.height:
+            warnings.append(f"{column}: column is entirely null")
+            continue
+        if column in _EXPECTED_ZERO_COLUMNS:
+            continue
+        dtype = work.schema.get(column)
+        if dtype is None or not (
+            getattr(dtype, "is_numeric", lambda: False)() or dtype in {pl.Boolean}
+        ):
+            continue
+        numeric = series.cast(pl.Float64, strict=False).drop_nulls()
+        if numeric.is_empty():
+            continue
+        try:
+            min_value = float(numeric.min())
+            max_value = float(numeric.max())
+        except (TypeError, ValueError):
+            continue
+        if min_value == 0.0 and max_value == 0.0:
+            warnings.append(f"{column}: column is entirely 0.0")
+    return warnings
+
+
+def _sanity_check_all_frames(prepared: PreparedSymbol) -> dict[str, list[str]]:
+    """Run prepared-frame sanity checks for every available timeframe."""
+    frames: dict[str, pl.DataFrame | None] = {
+        "5m": prepared.work_5m,
+        "15m": prepared.work_15m,
+        "1h": prepared.work_1h,
+        "4h": prepared.work_4h,
+    }
+    report: dict[str, list[str]] = {}
+    for interval, frame in frames.items():
+        if frame is None:
+            continue
+        warnings = _sanity_check_prepared_frame(frame, prepared.symbol, interval)
+        if warnings:
+            report[interval] = warnings
+    return report
+
+
 def _cached_prepare_frame(
     frame: pl.DataFrame,
     *,
@@ -1742,11 +1838,14 @@ def _cached_prepare_frame(
 ) -> pl.DataFrame:
     """_prepare_frame with LRU cache keyed on (symbol, interval, close_time)."""
     if frame.is_empty() or "close_time" not in frame.columns or "close" not in frame.columns:
-        return _enrich_with_ws_data(
+        result = _enrich_with_ws_data(
             _prepare_frame(frame),
             symbol,
             ws_manager if interval == "15m" else None,
         )
+        for warning in _sanity_check_prepared_frame(result, symbol, interval):
+            LOG.info("prepared frame sanity warning | %s", warning)
+        return result
 
     last = frame.row(-1, named=True)
     first = frame.row(0, named=True)
@@ -1754,7 +1853,10 @@ def _cached_prepare_frame(
         first_close_time_ns = _timestamp_ns(first["close_time"])
         close_time_ns = _timestamp_ns(last["close_time"])
     except (KeyError, TypeError, ValueError, OverflowError):
-        return _prepare_frame(frame)
+        result = _prepare_frame(frame)
+        for warning in _sanity_check_prepared_frame(result, symbol, interval):
+            LOG.info("prepared frame sanity warning | %s", warning)
+        return result
 
     tail_signature = _tail_value_signature(last)
     key = (
@@ -1776,6 +1878,8 @@ def _cached_prepare_frame(
         symbol,
         ws_manager if interval == "15m" else None,
     )
+    for warning in _sanity_check_prepared_frame(result, symbol, interval):
+        LOG.info("prepared frame sanity warning | %s", warning)
     target_cache.put(key, result)
     return result
 

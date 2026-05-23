@@ -46,6 +46,10 @@ class ConfluenceResult:
     def weighted_model_score(self) -> float:
         return sum(c.contribution for c in self.components)
 
+    @property
+    def weight_sum_actual(self) -> float:
+        return round(sum(c.weight for c in self.components if c.available and c.weight > 0.0), 6)
+
     def to_scoring_result(self) -> ScoringResult:
         adjustments = {c.name: c.contribution for c in self.components}
         return ScoringResult(
@@ -69,6 +73,7 @@ class ConfluenceResult:
                 for c in self.components
             ],
             "weighted_model_score": self.weighted_model_score,
+            "weight_sum_actual": self.weight_sum_actual,
             "final_score": self.final_score,
         }
 
@@ -174,26 +179,52 @@ class ConfluenceEngine:
                 {**spec, "weight": max(0.0, float(spec["weight"])) / weight_total}
                 for spec in specs
             ]
-        return [
-            ComponentScore(
-                name=str(spec["name"]),
-                raw=round(max(0.0, min(float(spec["raw"]), 1.0)), 4),
-                weight=round(float(spec["weight"]), 4),
-                contribution=round(float(spec["weight"]) * float(spec["raw"]), 4),
-                available=bool(spec["available"]),
+        if __debug__:
+            active_weight_sum = sum(
+                max(0.0, float(spec["weight"]))
+                for spec in specs
+                if bool(spec["available"]) and float(spec["weight"]) > 0.0
             )
+            if weight_total > 0.0:
+                assert abs(active_weight_sum - 1.0) < 1e-9, active_weight_sum
+        return [
+            self._component_from_spec(spec)
             for spec in specs
         ]
 
     @staticmethod
-    def _calibrate_setup_prior(score: float) -> float:
-        numeric = max(0.0, min(float(score), 1.0))
-        return max(0.0, min(0.5 + (numeric - 0.5) * 1.15, 1.0))
+    def _component_from_spec(spec: dict[str, Any]) -> ComponentScore:
+        raw = max(0.0, min(float(spec["raw"]), 1.0))
+        weight = max(0.0, float(spec["weight"]))
+        return ComponentScore(
+            name=str(spec["name"]),
+            raw=round(raw, 4),
+            weight=round(weight, 4),
+            contribution=round(weight * raw, 4),
+            available=bool(spec["available"]),
+        )
 
     @staticmethod
-    def _calibrate_component_model(score: float) -> float:
+    def _soft_clip_score(score: float, *, strength: float) -> float:
+        """Monotone score calibration that avoids hard saturation at 0 or 1."""
         numeric = max(0.0, min(float(score), 1.0))
-        return max(0.0, min(0.5 + (numeric - 0.5) * 1.35, 1.0))
+        if numeric <= 0.0 or numeric >= 1.0:
+            return numeric
+        low = 1.0 / (1.0 + math.exp(strength * 5.0))
+        high = 1.0 / (1.0 + math.exp(-strength * 5.0))
+        value = 1.0 / (1.0 + math.exp(-strength * (numeric - 0.5) * 10.0))
+        span = max(high - low, 1e-12)
+        return max(0.001, min((value - low) / span, 0.999))
+
+    @classmethod
+    def _calibrate_setup_prior(score: float) -> float:
+        numeric = 0.5 + (max(0.0, min(float(score), 1.0)) - 0.5) * 1.15
+        return ConfluenceEngine._soft_clip_score(numeric, strength=0.72)
+
+    @classmethod
+    def _calibrate_component_model(score: float) -> float:
+        numeric = 0.5 + (max(0.0, min(float(score), 1.0)) - 0.5) * 1.35
+        return ConfluenceEngine._soft_clip_score(numeric, strength=0.68)
 
     @staticmethod
     def _apply_component_edge(

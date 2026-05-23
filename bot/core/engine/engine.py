@@ -24,6 +24,8 @@ _STRATEGY_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
     thread_name_prefix="signal-strategy",
 )
 _WARMED_EXECUTOR_WORKERS = 0
+_executor_timeout_count = 0
+_executor_timeout_by_strategy: dict[str, int] = {}
 
 
 def _executor_noop() -> None:
@@ -348,7 +350,19 @@ class SignalEngine:
 
             except asyncio.TimeoutError:
                 elapsed_ms = (time.perf_counter() - start_time) * 1000
+                global _executor_timeout_count
+                _executor_timeout_count += 1
+                _executor_timeout_by_strategy[strategy_id] = (
+                    _executor_timeout_by_strategy.get(strategy_id, 0) + 1
+                )
                 LOG.error("Strategy %s timed out after %.2fs", strategy_id, self._timeout)
+                if _executor_timeout_count % 10 == 0:
+                    LOG.warning(
+                        "strategy executor timeout count reached %d; latest timeout=%s latest_strategy_timeouts=%d",
+                        _executor_timeout_count,
+                        strategy_id,
+                        _executor_timeout_by_strategy[strategy_id],
+                    )
                 self._registry.record_performance(strategy_id, elapsed_ms, error=True)
                 decision = StrategyDecision.error_result(
                     setup_id=strategy_id,

@@ -343,7 +343,7 @@ class Signal:
 
     @property
     def tracking_ref(self) -> str:
-        digest = hashlib.sha1(self.tracking_id.encode("utf-8")).hexdigest()
+        digest = hashlib.sha1(self.tracking_id.encode("utf-8"), usedforsecurity=False).hexdigest()
         return digest[:8].upper()
 
     @property

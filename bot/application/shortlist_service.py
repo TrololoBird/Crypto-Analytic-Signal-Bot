@@ -451,6 +451,11 @@ class ShortlistService:
                 "pinned": summary.get("pinned"),
                 "mode": summary.get("mode", source),
                 "avg_score": summary.get("avg_score"),
+                "score_p25": summary.get("score_p25"),
+                "score_p50": summary.get("score_p50"),
+                "score_p75": summary.get("score_p75"),
+                "score_p90": summary.get("score_p90"),
+                "strategy_fit_density": summary.get("strategy_fit_density"),
                 "strategy_seed": summary.get("strategy_seed"),
                 "strategy_fit_counts": summary.get("strategy_fit_counts"),
                 "top_scores": [
@@ -467,7 +472,7 @@ class ShortlistService:
         )
 
         LOG.info(
-            "shortlist refresh complete | source=%s mode=%s size=%d eligible=%s dynamic_pool=%s pinned=%s avg_score=%s",
+            "shortlist refresh complete | source=%s mode=%s size=%d eligible=%s dynamic_pool=%s pinned=%s avg_score=%s p25=%s p50=%s p75=%s p90=%s fit_density=%s",
             source,
             summary.get("mode", source),
             len(shortlist),
@@ -475,6 +480,11 @@ class ShortlistService:
             _log_value(summary.get("dynamic_pool")),
             _log_value(summary.get("pinned")),
             _log_value(summary.get("avg_score")),
+            _log_value(summary.get("score_p25")),
+            _log_value(summary.get("score_p50")),
+            _log_value(summary.get("score_p75")),
+            _log_value(summary.get("score_p90")),
+            _log_value(summary.get("strategy_fit_density")),
         )
         self._schedule_context_preload()
         return shortlist

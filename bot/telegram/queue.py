@@ -122,7 +122,7 @@ class TelegramQueue:
         import hashlib
 
         # Check deduplication
-        content_hash = hashlib.md5(text.encode()).hexdigest()[:16]
+        content_hash = hashlib.md5(text.encode(), usedforsecurity=False).hexdigest()[:16]
         now = datetime.now(UTC)
 
         if content_hash in self._recent_hashes:

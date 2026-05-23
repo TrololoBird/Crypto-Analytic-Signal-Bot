@@ -5,6 +5,8 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from ..features import cache_stats as frame_cache_stats
+
 if TYPE_CHECKING:
     from bot.application.bot import SignalBot
 
@@ -37,6 +39,7 @@ class HealthManager:
                 0.0,
                 asyncio.get_running_loop().time() - self._bot._last_kline_event_ts,
             ),
+            "frame_cache": frame_cache_stats(),
             "feature_flags": await self._bot.feature_flags.snapshot(),
         }
 
@@ -97,6 +100,7 @@ class HealthManager:
             row: dict[str, Any] = {
                 "ts": datetime.now(UTC).isoformat(),
                 "prepare_error_count": self._bot._prepare_error_count,
+                "frame_cache": frame_cache_stats(),
             }
             if self._bot._last_prepare_error:
                 row["prepare_error_stage"] = self._bot._last_prepare_error.get("stage")

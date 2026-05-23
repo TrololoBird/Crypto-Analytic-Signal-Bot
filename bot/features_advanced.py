@@ -1,5 +1,15 @@
+"""Internal compatibility layer for advanced feature helpers.
+
+Canonical runtime preparation is `bot.features._prepare_frame`; this module's
+`add_advanced_indicators()` and `supertrend()` wrappers exist for older callers
+and for local decomposition boundaries. SuperTrend math is superseded by
+`bot.features_shared.supertrend_series`.
+"""
+
 from __future__ import annotations
 
+import inspect
+import warnings
 from typing import Any, cast
 
 import numpy as np
@@ -11,59 +21,37 @@ from .features_shared import (
     clean_non_finite,
     finite_float,
     materialize_series,
+    supertrend_series,
     true_range,
     wilder_mean,
 )
 from .features_structure import hull_moving_average, ichimoku_lines
 
 __all__ = ["add_advanced_indicators", "supertrend"]
+MODULE_STATUS = "internal_only"
+CANONICAL_FEATURE_API = "bot.features._prepare_frame"
+CANONICAL_SUPERTREND_API = "bot.features_shared.supertrend_series"
+
+
+def _warn_if_direct_imported() -> None:
+    for frame in inspect.stack()[1:20]:
+        if frame.filename.replace("\\", "/").endswith("/bot/features.py"):
+            return
+    warnings.warn(
+        "bot.features_advanced is internal_only; use bot.features._prepare_frame or bot.features_shared.supertrend_series.",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+
+
+_warn_if_direct_imported()
 
 
 def supertrend(
     df: pl.DataFrame, period: int = 10, multiplier: float = 3.0
 ) -> tuple[pl.Series, pl.Series]:
-    """Contract: input requires HLC; output (`supertrend`,`supertrend_dir`), dir ∈ {-1,1}."""
-    atr = atr_from_true_range(true_range(df), period=period, df=df, name="supertrend_atr")
-    close = df["close"].to_numpy().astype(float, copy=False)
-    high = df["high"].to_numpy().astype(float, copy=False)
-    low = df["low"].to_numpy().astype(float, copy=False)
-    atr_values = atr.to_numpy().astype(float, copy=False)
-    size = len(close)
-    if size == 0:
-        empty = pl.Series("supertrend", [], dtype=pl.Float64)
-        return empty, pl.Series("supertrend_dir", [], dtype=pl.Int8)
-
-    hl2 = (high + low) / 2.0
-    atr_values = np.nan_to_num(atr_values, nan=0.0, posinf=0.0, neginf=0.0)
-    upper_band = hl2 + multiplier * atr_values
-    lower_band = hl2 - multiplier * atr_values
-    final_upper = upper_band.copy()
-    final_lower = lower_band.copy()
-    direction = np.ones(size, dtype=np.int8)
-
-    for idx in range(1, size):
-        if close[idx - 1] > final_upper[idx - 1]:
-            final_upper[idx] = min(upper_band[idx], final_upper[idx - 1])
-        else:
-            final_upper[idx] = upper_band[idx]
-
-        if close[idx - 1] < final_lower[idx - 1]:
-            final_lower[idx] = max(lower_band[idx], final_lower[idx - 1])
-        else:
-            final_lower[idx] = lower_band[idx]
-
-        if direction[idx - 1] == -1 and close[idx] > final_upper[idx]:
-            direction[idx] = 1
-        elif direction[idx - 1] == 1 and close[idx] < final_lower[idx]:
-            direction[idx] = -1
-        else:
-            direction[idx] = direction[idx - 1]
-
-    line = np.where(direction == 1, final_lower, final_upper)
-    return (
-        pl.Series("supertrend", line, dtype=pl.Float64),
-        pl.Series("supertrend_dir", direction, dtype=pl.Int8),
-    )
+    """Compatibility wrapper for the canonical shared SuperTrend implementation."""
+    return supertrend_series(df, period=period, multiplier=multiplier)
 
 
 def _bollinger_bands(

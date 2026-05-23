@@ -128,6 +128,7 @@ class MessageBuffer:
         self._dropped_count = 0
         self._processed_count = 0
         self._last_compaction_log_count = 0
+        self._protected_kline_drop_count = 0
 
     @staticmethod
     def _message_priority(msg: JsonDict) -> int:
@@ -144,6 +145,19 @@ class MessageBuffer:
                 return 40
         return 10
 
+    @staticmethod
+    def _closed_kline_timestamp(msg: JsonDict) -> float | None:
+        data = msg.get("data")
+        if not isinstance(data, dict) or data.get("e") != "kline":
+            return None
+        kline = data.get("k")
+        if not isinstance(kline, dict) or not kline.get("x"):
+            return None
+        try:
+            return float(kline.get("t"))
+        except (TypeError, ValueError):
+            return None
+
     def _drop_oldest_batch(self) -> int:
         """Drop lower-value queued messages first when clearing backpressure."""
         maxsize = max(1, self._buffer.maxsize)
@@ -158,17 +172,43 @@ class MessageBuffer:
         if not batch:
             return 0
 
-        # Keep closed klines and liquidation events ahead of ticker noise. If the
-        # sampled batch is all high priority, drop the oldest one to guarantee room.
-        drop_candidates = sorted(
-            enumerate(batch), key=lambda item: (self._message_priority(item[1]), item[0])
-        )
-        drop_indexes = {drop_candidates[0][0]}
-        low_priority_indexes = [
-            idx for idx, msg in enumerate(batch) if self._message_priority(msg) < 50
+        closed_kline_indexes = [
+            idx for idx, msg in enumerate(batch) if self._message_priority(msg) == 100
         ]
-        if low_priority_indexes:
-            drop_indexes = set(low_priority_indexes)
+        if closed_kline_indexes:
+            self._protected_kline_drop_count += len(closed_kline_indexes)
+            LOG.warning(
+                "message buffer backpressure touched closed klines | protected=%d total_protection_events=%d",
+                len(closed_kline_indexes),
+                self._protected_kline_drop_count,
+            )
+
+        # Keep closed klines ahead of all other message types. Under mixed
+        # pressure, only non-closed messages can be selected for eviction.
+        non_closed_indexes = [
+            idx for idx, msg in enumerate(batch) if self._message_priority(msg) < 100
+        ]
+        if non_closed_indexes:
+            lowest_priority = min(self._message_priority(batch[idx]) for idx in non_closed_indexes)
+            drop_indexes = {
+                idx
+                for idx in non_closed_indexes
+                if self._message_priority(batch[idx]) == lowest_priority
+            }
+        else:
+            # The sampled window is all closed klines. Dropping the oldest closed
+            # candle is preferable to rejecting the incoming event and stalling
+            # the queue forever, but the counter/log above makes this visible.
+            drop_index, _ = min(
+                enumerate(batch),
+                key=lambda item: (
+                    self._closed_kline_timestamp(item[1])
+                    if self._closed_kline_timestamp(item[1]) is not None
+                    else float("inf"),
+                    item[0],
+                ),
+            )
+            drop_indexes = {drop_index}
 
         dropped = 0
         for idx, msg in enumerate(batch):
@@ -228,6 +268,7 @@ class MessageBuffer:
             "maxsize": self._buffer.maxsize,
             "dropped": self._dropped_count,
             "processed": self._processed_count,
+            "protected_kline_drop_count": self._protected_kline_drop_count,
         }
 
 
@@ -1676,7 +1717,11 @@ class FuturesWSManager:
                         [symbol],
                         name=f"gap_backfill:{symbol}:{interval}",
                     )
-            deq.append(row)
+            if deq and deq[-1].get("time") == row["time"]:
+                LOG.debug("duplicate closed kline replaced | symbol=%s interval=%s time=%s", symbol, interval, row["time"])
+                deq[-1] = row
+            else:
+                deq.append(row)
 
         # Fire candle-close callbacks (fire-and-forget; data already in deque)
         close_ts_ms = int(k.get("T", 0))

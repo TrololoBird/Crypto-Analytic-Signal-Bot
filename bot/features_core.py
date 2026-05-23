@@ -1,5 +1,15 @@
+"""Internal compatibility layer for decomposed core feature helpers.
+
+Canonical runtime preparation is `bot.features._prepare_frame` and
+`bot.features._cached_prepare_frame`. Public functions in this module mirror
+the core indicator helpers for compatibility with older imports, but they are
+not the orchestration path used by live signal preparation.
+"""
+
 from __future__ import annotations
 
+import inspect
+import warnings
 from datetime import date, datetime, timezone
 from typing import Any, cast
 
@@ -26,6 +36,22 @@ __all__ = [
     "safe_close_position",
     "vwap",
 ]
+MODULE_STATUS = "internal_only"
+CANONICAL_FEATURE_API = "bot.features._prepare_frame"
+
+
+def _warn_if_direct_imported() -> None:
+    for frame in inspect.stack()[1:20]:
+        if frame.filename.replace("\\", "/").endswith("/bot/features.py"):
+            return
+    warnings.warn(
+        "bot.features_core is internal_only; use bot.features._prepare_frame for runtime feature preparation.",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+
+
+_warn_if_direct_imported()
 
 
 def ema(df: pl.DataFrame, period: int, *, plta: Any = None, has_talib: bool = False) -> pl.Series:

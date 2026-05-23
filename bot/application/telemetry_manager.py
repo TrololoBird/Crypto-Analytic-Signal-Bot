@@ -234,6 +234,11 @@ class TelemetryManager:
                 "pinned": summary.get("pinned"),
                 "mode": summary.get("mode", source),
                 "avg_score": summary.get("avg_score"),
+                "score_p25": summary.get("score_p25"),
+                "score_p50": summary.get("score_p50"),
+                "score_p75": summary.get("score_p75"),
+                "score_p90": summary.get("score_p90"),
+                "strategy_fit_density": summary.get("strategy_fit_density"),
                 "enrich_errors_by_stage": dict(
                     getattr(self._bot, "_shortlist_enrich_error_counts", {})
                 ),

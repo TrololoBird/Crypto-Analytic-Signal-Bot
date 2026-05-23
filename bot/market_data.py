@@ -391,40 +391,64 @@ def _drop_incomplete_ohlcv_tail(df: pl.DataFrame, timeframe: str) -> pl.DataFram
 def _klines_to_frame(rows: Any) -> pl.DataFrame:
     """Convert raw Binance kline rows into a Polars DataFrame using vectorized operations.
 
-    Expected input is a list of lists, where each inner list contains at least 11 items.
+    Expected REST input is a list of lists with at least 11 items. The function
+    also accepts dict rows from WebSocket/backfill paths so callers can share
+    one conversion boundary without silently returning an empty frame.
     """
     if not rows:
         return pl.DataFrame()
 
-    # Pre-filter valid rows to ensure they are lists of sufficient length.
-    # We slice to 11 columns to match the expected schema.
-    valid_rows = [row[:11] for row in rows if isinstance(row, list) and len(row) >= 11]
+    columns = [
+        "time",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "close_time",
+        "quote_volume",
+        "num_trades",
+        "taker_buy_base_volume",
+        "taker_buy_quote_volume",
+    ]
 
-    if not valid_rows:
+    valid_rows: list[list[Any]] = []
+    dict_rows: list[dict[str, Any]] = []
+    for row in rows:
+        if isinstance(row, list) and len(row) >= 11:
+            valid_rows.append(row[:11])
+            continue
+        if isinstance(row, Mapping):
+            dict_rows.append({column: row.get(column) for column in columns})
+
+    if not valid_rows and not dict_rows:
         return pl.DataFrame()
 
-    # Build DataFrame from rows using vectorized construction and casting.
-    # This is ~75-80% faster than the original dict-based loop.
-    return pl.DataFrame(
-        valid_rows,
-        schema=[
-            "time",
-            "open",
-            "high",
-            "low",
-            "close",
-            "volume",
-            "close_time",
-            "quote_volume",
-            "num_trades",
-            "taker_buy_base_volume",
-            "taker_buy_quote_volume",
-        ],
-        orient="row",
-    ).with_columns(
+    frames: list[pl.DataFrame] = []
+    if valid_rows:
+        frames.append(pl.DataFrame(valid_rows, schema=columns, orient="row"))
+    if dict_rows:
+        frames.append(pl.DataFrame(dict_rows))
+    frame = frames[0] if len(frames) == 1 else pl.concat(frames, how="diagonal")
+
+    time_exprs: list[pl.Expr] = []
+    for column in ("time", "close_time"):
+        dtype = frame.schema.get(column)
+        if dtype is not None and getattr(dtype, "is_temporal", lambda: False)():
+            time_exprs.append(pl.col(column))
+        elif dtype == pl.String:
+            time_exprs.append(pl.col(column).str.to_datetime(strict=False, time_zone="UTC"))
+        else:
+            time_exprs.append(
+                pl.from_epoch(pl.col(column).cast(pl.Int64), time_unit="ms").dt.replace_time_zone(
+                    "UTC"
+                )
+            )
+
+    return frame.with_columns(
         [
-            pl.from_epoch(pl.col("time"), time_unit="ms").dt.replace_time_zone("UTC"),
-            pl.from_epoch(pl.col("close_time"), time_unit="ms").dt.replace_time_zone("UTC"),
+            time_exprs[0].alias("time"),
+            time_exprs[1].alias("close_time"),
             pl.col("open").cast(pl.Float64),
             pl.col("high").cast(pl.Float64),
             pl.col("low").cast(pl.Float64),
@@ -530,6 +554,7 @@ class BinanceFuturesMarketData:
         self._last_rest_weight_1m: int | None = None
         self._last_rest_response_time_ms: float | None = None
         self._rate_limit_pause_until = 0.0
+        self._futures_data_pause_until = 0.0
         self._rate_limit_error_streak = 0
         self._weight_window_weight: int = 0
         self._weight_window_start: float = 0.0
@@ -578,7 +603,24 @@ class BinanceFuturesMarketData:
             time.monotonic() + seconds,
         )
 
-    def _capture_retry_after(self, headers: Any) -> int | None:
+    def _set_futures_data_pause(self, seconds: float) -> None:
+        if seconds <= 0:
+            return
+        self._futures_data_pause_until = max(
+            self._futures_data_pause_until,
+            time.monotonic() + seconds,
+        )
+
+    def _uses_futures_data_pause(self, operation: str | None) -> bool:
+        return bool(operation and operation in _FUTURES_DATA_REQUEST_LIMITED_OPS)
+
+    def _set_operation_rate_limit_pause(self, operation: str | None, seconds: float) -> None:
+        if self._uses_futures_data_pause(operation):
+            self._set_futures_data_pause(seconds)
+        else:
+            self._set_rate_limit_pause(seconds)
+
+    def _capture_retry_after(self, headers: Any, *, operation: str | None = None) -> int | None:
         retry_after_raw = self._header_value(headers, "Retry-After")
         if retry_after_raw is None:
             return None
@@ -587,7 +629,7 @@ class BinanceFuturesMarketData:
         except (TypeError, ValueError):
             return None
         if retry_after > 0:
-            self._set_rate_limit_pause(retry_after)
+            self._set_operation_rate_limit_pause(operation, retry_after)
         return retry_after
 
     @staticmethod
@@ -727,7 +769,7 @@ class BinanceFuturesMarketData:
                 self._last_rest_response_time_ms = float(response_time_raw.rstrip("ms"))
         except (TypeError, ValueError):
             self._last_rest_response_time_ms = None
-        retry_after = self._capture_retry_after(headers)
+        retry_after = self._capture_retry_after(headers, operation=operation)
         if retry_after:
             LOG.info("binance rest requested backoff | retry_after=%ss", retry_after)
         if self._last_rest_weight_1m is not None:
@@ -802,7 +844,8 @@ class BinanceFuturesMarketData:
         if spec.ip_limited:
             limiter_wait_s = await self._futures_data_limiter.acquire(label=operation)
 
-        pause_remaining = self._rate_limit_pause_until - time.monotonic()
+        pause_until = self._futures_data_pause_until if spec.ip_limited else self._rate_limit_pause_until
+        pause_remaining = pause_until - time.monotonic()
         if pause_remaining > 0:
             LOG.debug(
                 "rate-limit backoff | sleeping=%.1fs operation=%s",
@@ -874,10 +917,10 @@ class BinanceFuturesMarketData:
                 )
             elif status_code == 429:
                 self._rate_limit_error_streak += 1
-                retry_after_header = self._capture_retry_after(headers)
+                retry_after_header = self._capture_retry_after(headers, operation=operation)
                 # Enforce aggressive 30-minute backoff for 429 to stay well clear of IP bans
                 effective_pause = max(1800.0, float(retry_after_header or 0))
-                self._set_rate_limit_pause(effective_pause)
+                self._set_operation_rate_limit_pause(operation, effective_pause)
                 LOG.error(
                     "binance rate limited (429) | retry_after_header=%s effective_pause=%.0fs streak=%d operation=%s",
                     retry_after_header,
@@ -940,10 +983,10 @@ class BinanceFuturesMarketData:
                         )
                     if status == 429:
                         self._rate_limit_error_streak += 1
-                        retry_after_header = self._capture_retry_after(headers)
+                        retry_after_header = self._capture_retry_after(headers, operation=operation)
                         # Enforce aggressive 30-minute backoff for 429
                         effective_pause = max(1800.0, float(retry_after_header or 0))
-                        self._set_rate_limit_pause(effective_pause)
+                        self._set_operation_rate_limit_pause(operation, effective_pause)
                         LOG.error(
                             "binance rate limited (429) | retry_after_header=%s effective_pause=%.0fs streak=%d operation=%s",
                             retry_after_header,
@@ -1039,6 +1082,8 @@ class BinanceFuturesMarketData:
     def state_snapshot(self) -> dict[str, float | int | str | None]:
         now = time.monotonic()
         open_circuits = sum(1 for v in self._circuit_open_until.values() if now < v)
+        rest_pause_remaining = max(0.0, self._rate_limit_pause_until - now)
+        futures_data_pause_remaining = max(0.0, self._futures_data_pause_until - now)
         return {
             "rest_weight_1m": float(self._last_rest_weight_1m)
             if self._last_rest_weight_1m is not None
@@ -1059,6 +1104,8 @@ class BinanceFuturesMarketData:
             if self._last_endpoint_response_age_s is not None
             else 0.0,
             "futures_data_limit_per_5m": int(self._futures_data_limit_per_5m),
+            "rest_rate_limit_pause_remaining_s": float(rest_pause_remaining),
+            "futures_data_pause_remaining_s": float(futures_data_pause_remaining),
         }
 
     async def preflight_check(self) -> None:

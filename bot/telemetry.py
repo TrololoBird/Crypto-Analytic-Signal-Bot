@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import csv
 import hashlib
 import json
 import re
 import shutil
+import threading
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -12,6 +14,10 @@ import polars as pl
 
 
 UTC = timezone.utc
+_CSV_LOCKS_GUARD = threading.Lock()
+_CSV_LOCKS: dict[str, threading.Lock] = {}
+_CSV_COMPACT_CALLS: dict[str, int] = {}
+_CSV_LAST_TIME: dict[str, str] = {}
 
 
 def symbol_storage_dirname(symbol: str) -> str:
@@ -23,7 +29,7 @@ def symbol_storage_dirname(symbol: str) -> str:
         safe = "symbol"
     if safe == raw and "/" not in raw and "\\" not in raw:
         return safe
-    digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:10]
+    digest = hashlib.sha1(raw.encode("utf-8"), usedforsecurity=False).hexdigest()[:10]
     return f"{safe}__{digest}"
 
 
@@ -168,39 +174,88 @@ class TelemetryStore:
             if column in frame.columns:
                 frame = frame.with_columns(pl.col(column).cast(pl.Utf8).alias(column))
         frame = frame.unique(subset=["time"], keep="last").sort("time")
-        if not path.exists() or path.stat().st_size == 0:
-            if max_rows > 0:
-                frame = frame.tail(max_rows)
-            frame.write_csv(path)
-            return
+        with self._csv_lock(path):
+            if not path.exists() or path.stat().st_size == 0:
+                initial = frame.tail(max_rows) if max_rows > 0 else frame
+                initial.write_csv(path)
+                self._remember_last_csv_time(path, initial)
+                return
 
-        tail_rows = min(max_rows if max_rows > 0 else len(frame), max(len(frame) * 3, 256))
-        existing_tail = self._read_csv_tail(path, tail_rows)
-        if existing_tail is None or existing_tail.is_empty():
-            combined = frame
-        else:
-            combined = pl.concat([existing_tail, frame], how="diagonal")
-            combined = combined.unique(subset=["time"], keep="last").sort("time")
-        # Write only new rows that don't exist in the file
-        if existing_tail is not None and not existing_tail.is_empty():
-            known_times = set(existing_tail["time"].cast(pl.Utf8).to_list())
-            append_rows = combined.filter(~pl.col("time").cast(pl.Utf8).is_in(list(known_times)))
-        else:
-            append_rows = combined
-        if not append_rows.is_empty():
-            # Polars doesn't support append mode - read existing, concat, write
-            try:
-                existing_full = pl.read_csv(path)
-                full_data = pl.concat([existing_full, append_rows], how="diagonal")
-                full_data = full_data.unique(subset=["time"], keep="last").sort("time")
-                if max_rows > 0:
-                    full_data = full_data.tail(max_rows)
-                full_data.write_csv(path)
-            except Exception:
-                # Fallback: just write the combined data
-                combined.write_csv(path)
-        if max_rows > 0:
-            self._compact_csv(path, max_rows)
+            last_time = _CSV_LAST_TIME.get(str(path)) or self._read_last_csv_time(path)
+            append_rows = frame
+            if last_time:
+                append_rows = frame.filter(pl.col("time").cast(pl.Utf8) > last_time)
+            appended_avg_bytes = 0.0
+            if not append_rows.is_empty():
+                csv_payload = append_rows.write_csv(include_header=False)
+                appended_avg_bytes = len(csv_payload.encode("utf-8")) / max(append_rows.height, 1)
+                with path.open("a", encoding="utf-8", newline="") as handle:
+                    handle.write(csv_payload)
+                self._remember_last_csv_time(path, append_rows)
+            if max_rows > 0 and self._should_compact_csv(
+                path,
+                max_rows=max_rows,
+                appended_avg_bytes=appended_avg_bytes,
+            ):
+                self._compact_csv(path, max_rows)
+                self._remember_last_csv_time(path, self._read_csv_tail(path, 1))
+
+    @staticmethod
+    def _csv_lock(path: Path) -> threading.Lock:
+        key = str(path)
+        with _CSV_LOCKS_GUARD:
+            lock = _CSV_LOCKS.get(key)
+            if lock is None:
+                lock = threading.Lock()
+                _CSV_LOCKS[key] = lock
+            return lock
+
+    @staticmethod
+    def _remember_last_csv_time(path: Path, frame: pl.DataFrame | None) -> None:
+        if frame is None or frame.is_empty() or "time" not in frame.columns:
+            return
+        value = frame["time"].cast(pl.Utf8).tail(1).item()
+        if value is not None:
+            _CSV_LAST_TIME[str(path)] = str(value)
+
+    @staticmethod
+    def _read_last_csv_time(path: Path) -> str | None:
+        if not path.exists() or path.stat().st_size == 0:
+            return None
+        try:
+            with path.open("r", encoding="utf-8", newline="") as handle:
+                reader = csv.DictReader(handle)
+                last: str | None = None
+                for row in reader:
+                    raw = row.get("time")
+                    if raw:
+                        last = str(raw)
+                if last:
+                    _CSV_LAST_TIME[str(path)] = last
+                return last
+        except (OSError, csv.Error):
+            return None
+
+    @staticmethod
+    def _should_compact_csv(
+        path: Path,
+        *,
+        max_rows: int,
+        appended_avg_bytes: float,
+    ) -> bool:
+        key = str(path)
+        calls = _CSV_COMPACT_CALLS.get(key, 0) + 1
+        _CSV_COMPACT_CALLS[key] = calls
+        if calls % 10 == 0:
+            return True
+        if max_rows <= 0 or appended_avg_bytes <= 0.0:
+            return False
+        try:
+            size = path.stat().st_size
+        except OSError:
+            return False
+        expected_size = max_rows * max(appended_avg_bytes, 128.0)
+        return size > expected_size * 2.0
 
     def _compact_csv(self, path: Path, max_rows: int) -> None:
         existing = self._read_csv_tail(path, max(max_rows * 3, 512))

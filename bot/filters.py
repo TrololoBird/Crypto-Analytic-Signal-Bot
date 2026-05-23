@@ -89,6 +89,39 @@ def _benchmark_context_guard(
         return True, None, {"benchmark_context_available": bool(context)}
 
     crypto_symbols = ("BTCUSDT", "ETHUSDT", "SOLUSDT")
+    pct_1h_values: list[float | None] = []
+    for benchmark in crypto_symbols:
+        payload = context.get(benchmark)
+        if not isinstance(payload, dict):
+            pct_1h_values.append(None)
+            continue
+        raw_pct = payload.get("pct_1h")
+        if raw_pct is None:
+            pct_1h_values.append(None)
+            continue
+        try:
+            pct_1h_values.append(float(raw_pct))
+        except (TypeError, ValueError):
+            pct_1h_values.append(None)
+    context_age_seconds = getattr(prepared, "context_snapshot_age_seconds", None)
+    try:
+        context_age = float(context_age_seconds) if context_age_seconds is not None else None
+    except (TypeError, ValueError):
+        context_age = None
+    benchmark_context_stale = bool(
+        context
+        and context_age is not None
+        and context_age > 600.0
+        and all(value is None or value == 0.0 for value in pct_1h_values)
+    )
+    if benchmark_context_stale:
+        LOGGER.info(
+            "benchmark context stale | symbol=%s age_seconds=%.1f pct_1h_values=%s",
+            symbol,
+            context_age,
+            pct_1h_values,
+        )
+
     votes: list[dict[str, Any]] = []
     for benchmark in crypto_symbols:
         payload = context.get(benchmark)
@@ -136,6 +169,8 @@ def _benchmark_context_guard(
         "opposed": opposed,
         "strong_opposed": strong_opposed,
         "macro_risk_mode": getattr(prepared, "macro_risk_mode", None),
+        "benchmark_context_stale": benchmark_context_stale,
+        "context_snapshot_age_seconds": context_age,
     }
     if len(strong_opposed) >= 2 and opposed > aligned:
         return False, "benchmark_context_conflict", details
@@ -207,6 +242,24 @@ def _expand_signal_to_min_stop(
         tp1 = plan.tp1
         tp2 = plan.tp2
         tp3 = plan.tp3
+        risk_reward = abs(tp1 - entry) / min_risk if min_risk > 0.0 else signal.risk_reward
+    if signal.direction == "long":
+        ordered = stop < entry < tp1 <= tp2 <= tp3
+    else:
+        ordered = stop > entry > tp1 >= tp2 >= tp3
+    if not ordered:
+        LOGGER.error(
+            "stop expansion produced invalid price ordering | symbol=%s setup=%s direction=%s entry=%.8f stop=%.8f tp1=%.8f tp2=%.8f tp3=%.8f",
+            signal.symbol,
+            signal.setup_id,
+            signal.direction,
+            entry,
+            stop,
+            tp1,
+            tp2,
+            tp3,
+        )
+        return signal, False
     return (
         replace(
             signal,
@@ -474,6 +527,8 @@ def apply_global_filters(
         passed.append("benchmark_context_ok")
     else:
         passed.append("benchmark_context_deep_override")
+    if benchmark_details.get("benchmark_context_stale"):
+        passed.append("benchmark_context_stale")
 
     # Compute delta_ratio from 15m candles (CVD proxy)
     delta_ratio: float | None = None
@@ -567,6 +622,13 @@ def apply_global_filters(
                     **scoring_result.adjustments,
                     "adx_policy_penalty": penalty_delta,
                 },
+            )
+        else:
+            scoring_result = ScoringResult(
+                base_score=pre_penalty_score,
+                adjustments={"adx_policy_penalty": penalty_delta},
+                final_score=adjusted_score,
+                setup_id=updated.setup_id,
             )
         updated = replace(
             updated,
