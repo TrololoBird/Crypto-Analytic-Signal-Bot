@@ -398,6 +398,24 @@ class ShortlistService:
             bot.settings,
             seed_source="ws_light",
         )
+        if (
+            cached_shortlist
+            and len(shortlist) < minimum_light_tickers
+            and len(cached_shortlist) > len(shortlist)
+        ):
+            LOG.info(
+                "light shortlist skipped: filtered ws shortlist too small | size=%d required=%d cached_shortlist=%d eligible=%s dynamic_pool=%s",
+                len(shortlist),
+                minimum_light_tickers,
+                len(cached_shortlist),
+                summary.get("eligible"),
+                summary.get("dynamic_pool"),
+            )
+            return [], {
+                **summary,
+                "mode": "ws_light_filtered_small",
+                "raw_tickers": len(raw_tickers),
+            }
         return shortlist, summary
 
     async def do_refresh_shortlist(self) -> list[UniverseSymbol]:

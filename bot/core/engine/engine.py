@@ -106,9 +106,14 @@ class SignalEngine:
         strategy_fits = set(getattr(universe, "strategy_fits", ()) or ())
         shortlist_score = getattr(universe, "shortlist_score", None)
         is_shortlist_asset = shortlist_score is not None
-        if not strategy_fits and not is_shortlist_asset:
+        pinned_symbols = {
+            str(item).strip().upper()
+            for item in getattr(getattr(self._settings, "universe", None), "pinned_symbols", ())
+        }
+        is_pinned_symbol = symbol.upper() in pinned_symbols
+        if not strategy_fits and not is_pinned_symbol:
             LOG.warning(
-                "%s: strategy_fits is EMPTY - no strategy will run for this symbol. "
+                "%s: strategy_fits is EMPTY - routing coverage is degraded for this symbol. "
                 "Check _strategy_fits_for_row() in universe.py",
                 symbol,
             )

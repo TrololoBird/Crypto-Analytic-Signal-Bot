@@ -186,17 +186,33 @@ class TelemetryStore:
 
             path_key = str(path)
             last_time = self._candle_last_time.get(path_key) or self._read_last_csv_time(path)
-            append_rows = frame
-            if last_time:
-                append_rows = frame.filter(pl.col("time").cast(pl.Utf8) > last_time)
+            first_new_time = str(frame.item(0, "time"))
             appended_avg_bytes = 0.0
-            if not append_rows.is_empty():
-                csv_payload = append_rows.write_csv(include_header=False)
-                appended_avg_bytes = len(csv_payload.encode("utf-8")) / max(append_rows.height, 1)
+            if last_time is None or first_new_time <= last_time:
+                existing = self._read_csv_tail(path, max(max_rows * 3, 512))
+                merged = frame if existing is None or existing.is_empty() else pl.concat(
+                    [existing, frame],
+                    how="diagonal_relaxed",
+                )
+                merged = merged.unique(subset=["time"], keep="last").sort("time")
+                if max_rows > 0:
+                    merged = merged.tail(max_rows)
+                merged.write_csv(path)
+                self._remember_last_csv_time(path, merged)
+                if not merged.is_empty() and "time" in merged.columns:
+                    self._candle_last_time[path_key] = str(merged.item(-1, "time"))
+                self._candle_append_counts[path_key] = 0
+                return
+
+            # Fast path: the whole incoming frame is newer than the last stored
+            # candle, so append without reading and rewriting the full CSV.
+            if not frame.is_empty():
+                csv_payload = frame.write_csv(include_header=False)
+                appended_avg_bytes = len(csv_payload.encode("utf-8")) / max(frame.height, 1)
                 with path.open("a", encoding="utf-8", newline="") as handle:
                     handle.write(csv_payload)
-                self._remember_last_csv_time(path, append_rows)
-                self._candle_last_time[path_key] = str(append_rows.item(-1, "time"))
+                self._remember_last_csv_time(path, frame)
+                self._candle_last_time[path_key] = str(frame.item(-1, "time"))
                 self._candle_append_counts[path_key] = (
                     self._candle_append_counts.get(path_key, 0) + 1
                 )
