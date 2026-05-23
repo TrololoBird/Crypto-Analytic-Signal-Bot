@@ -179,6 +179,29 @@ class ConfluenceEngine:
                 {**spec, "weight": max(0.0, float(spec["weight"])) / weight_total}
                 for spec in specs
             ]
+        actual_sum = sum(max(0.0, float(spec["weight"])) for spec in specs)
+        if weight_total > 0.0 and abs(actual_sum - 1.0) > 0.01:
+            LOG.warning(
+                "ConfluenceEngine weight normalization drift | sum=%.6f setup_id=%s",
+                actual_sum,
+                signal.setup_id,
+            )
+        for spec in specs:
+            weight = max(0.0, float(spec["weight"]))
+            if bool(spec["available"]) and 0.0 < weight < 0.01:
+                LOG.warning(
+                    "ConfluenceEngine tiny component weight | component=%s weight=%.6f setup_id=%s",
+                    spec["name"],
+                    weight,
+                    signal.setup_id,
+                )
+            if weight > 0.70:
+                LOG.warning(
+                    "ConfluenceEngine dominant component weight | component=%s weight=%.6f setup_id=%s",
+                    spec["name"],
+                    weight,
+                    signal.setup_id,
+                )
         if __debug__:
             active_weight_sum = sum(
                 max(0.0, float(spec["weight"]))

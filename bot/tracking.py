@@ -123,19 +123,23 @@ class SignalTracker:
         return lock
 
     def _cleanup_symbol_review_locks(self, active_symbols: set[str]) -> None:
-        if len(self._symbol_review_locks) <= 500:
+        if len(self._symbol_review_locks) <= 200:
             return
         active = {str(symbol or "").upper() for symbol in active_symbols}
         stale = [symbol for symbol in self._symbol_review_locks if symbol not in active]
+        removed = 0
         for symbol in stale:
+            lock = self._symbol_review_locks.get(symbol)
+            if lock is not None and lock.locked():
+                continue
             self._symbol_review_locks.pop(symbol, None)
             self._symbol_review_durations.pop(symbol, None)
-        if stale:
-            LOG.info(
-                "cleaned stale symbol review locks | removed=%d remaining=%d active_symbols=%d",
-                len(stale),
+            removed += 1
+        if removed:
+            LOG.debug(
+                "pruned %d stale symbol review locks | remaining=%d",
+                removed,
                 len(self._symbol_review_locks),
-                len(active),
             )
 
     def _record_symbol_review_duration(
@@ -612,6 +616,7 @@ class SignalTracker:
         if dry_run or not self.settings.tracking.enabled:
             return []
         tracked_rows = await self._active_signals()
+        self._cleanup_symbol_review_locks({row.symbol for row in tracked_rows})
         if not tracked_rows:
             return []
 
@@ -619,7 +624,6 @@ class SignalTracker:
         by_symbol: dict[str, list[TrackedSignalState]] = {}
         for tracked in tracked_rows:
             by_symbol.setdefault(tracked.symbol, []).append(tracked)
-        self._cleanup_symbol_review_locks(set(by_symbol))
 
         events: list[SignalTrackingEvent] = []
         for symbol in by_symbol:
@@ -791,7 +795,7 @@ class SignalTracker:
             parse_state_dt(tracked.last_checked_at) or parse_state_dt(tracked.created_at) or now
         )
         pending_expires_at = parse_state_dt(tracked.pending_expires_at) or now
-        active_expires_at = parse_state_dt(tracked.active_expires_at) or now
+        parse_state_dt(tracked.active_expires_at) or now
         last_price = tracked.last_price
 
         relevant = trades
@@ -870,7 +874,7 @@ class SignalTracker:
             parse_state_dt(tracked.last_checked_at) or parse_state_dt(tracked.created_at) or now
         )
         pending_expires_at = parse_state_dt(tracked.pending_expires_at) or now
-        active_expires_at = parse_state_dt(tracked.active_expires_at) or now
+        parse_state_dt(tracked.active_expires_at) or now
         last_price = tracked.last_price
 
         # Filter candles with close_time > last_checked using Polars

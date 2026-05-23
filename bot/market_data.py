@@ -844,8 +844,10 @@ class BinanceFuturesMarketData:
         if spec.ip_limited:
             limiter_wait_s = await self._futures_data_limiter.acquire(label=operation)
 
-        pause_until = self._futures_data_pause_until if spec.ip_limited else self._rate_limit_pause_until
-        pause_remaining = pause_until - time.monotonic()
+        if spec.ip_limited:
+            pause_remaining = self._futures_data_pause_until - time.monotonic()
+        else:
+            pause_remaining = self._rate_limit_pause_until - time.monotonic()
         if pause_remaining > 0:
             LOG.debug(
                 "rate-limit backoff | sleeping=%.1fs operation=%s",
@@ -853,6 +855,8 @@ class BinanceFuturesMarketData:
                 operation,
             )
             await asyncio.sleep(pause_remaining)
+            if spec.ip_limited:
+                self._futures_data_pause_until = 0.0
 
         estimated = self._estimate_weight(operation, params)
         weight_wait_s = await self._weight_budget.acquire(weight=estimated, label=operation)
@@ -918,16 +922,25 @@ class BinanceFuturesMarketData:
             elif status_code == 429:
                 self._rate_limit_error_streak += 1
                 retry_after_header = self._capture_retry_after(headers, operation=operation)
-                # Enforce aggressive 30-minute backoff for 429 to stay well clear of IP bans
-                effective_pause = max(1800.0, float(retry_after_header or 0))
-                self._set_operation_rate_limit_pause(operation, effective_pause)
-                LOG.error(
-                    "binance rate limited (429) | retry_after_header=%s effective_pause=%.0fs streak=%d operation=%s",
-                    retry_after_header,
-                    effective_pause,
-                    self._rate_limit_error_streak,
-                    operation,
-                )
+                is_ip_limited = bool(self._endpoint_spec(operation).ip_limited)
+                if is_ip_limited:
+                    effective_pause = max(60.0, float(retry_after_header or 60))
+                    self._set_futures_data_pause(effective_pause)
+                    LOG.warning(
+                        "futures-data IP rate limit 429 | operation=%s pause=%.0fs",
+                        operation,
+                        self._futures_data_pause_until - time.monotonic(),
+                    )
+                else:
+                    effective_pause = max(1800.0, float(retry_after_header or 0))
+                    self._set_rate_limit_pause(effective_pause)
+                    LOG.error(
+                        "binance rate limited (429) | retry_after_header=%s effective_pause=%.0fs streak=%d operation=%s",
+                        retry_after_header,
+                        effective_pause,
+                        self._rate_limit_error_streak,
+                        operation,
+                    )
             else:
                 self._rate_limit_error_streak = 0
                 self._record_circuit_failure(operation)
@@ -984,16 +997,30 @@ class BinanceFuturesMarketData:
                     if status == 429:
                         self._rate_limit_error_streak += 1
                         retry_after_header = self._capture_retry_after(headers, operation=operation)
-                        # Enforce aggressive 30-minute backoff for 429
-                        effective_pause = max(1800.0, float(retry_after_header or 0))
-                        self._set_operation_rate_limit_pause(operation, effective_pause)
-                        LOG.error(
-                            "binance rate limited (429) | retry_after_header=%s effective_pause=%.0fs streak=%d operation=%s",
-                            retry_after_header,
-                            effective_pause,
-                            self._rate_limit_error_streak,
-                            operation,
+                        is_ip_limited = bool(
+                            _PUBLIC_ENDPOINT_REGISTRY.get(
+                                operation,
+                                _PublicEndpointSpec("x"),
+                            ).ip_limited
                         )
+                        if is_ip_limited:
+                            effective_pause = max(60.0, float(retry_after_header or 60))
+                            self._set_futures_data_pause(effective_pause)
+                            LOG.warning(
+                                "futures-data IP rate limit 429 | operation=%s pause=%.0fs",
+                                operation,
+                                self._futures_data_pause_until - time.monotonic(),
+                            )
+                        else:
+                            effective_pause = max(1800.0, float(retry_after_header or 0))
+                            self._set_rate_limit_pause(effective_pause)
+                            LOG.error(
+                                "binance rate limited (429) | retry_after_header=%s effective_pause=%.0fs streak=%d operation=%s",
+                                retry_after_header,
+                                effective_pause,
+                                self._rate_limit_error_streak,
+                                operation,
+                            )
                         self._record_circuit_failure(operation)
                         raise MarketDataUnavailable(
                             operation=operation,

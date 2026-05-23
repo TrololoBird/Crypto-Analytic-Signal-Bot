@@ -68,6 +68,8 @@ class TelemetryStore:
         self.raw_dir.mkdir(parents=True, exist_ok=True)
         self.features_dir.mkdir(parents=True, exist_ok=True)
         self.replay_dir.mkdir(parents=True, exist_ok=True)
+        self._candle_append_counts: dict[str, int] = {}
+        self._candle_last_time: dict[str, str] = {}
         if run_id:
             metadata_path = self.base_dir / "run_metadata.json"
             if not metadata_path.exists():
@@ -179,9 +181,11 @@ class TelemetryStore:
                 initial = frame.tail(max_rows) if max_rows > 0 else frame
                 initial.write_csv(path)
                 self._remember_last_csv_time(path, initial)
+                self._candle_last_time[str(path)] = str(initial.item(-1, "time"))
                 return
 
-            last_time = _CSV_LAST_TIME.get(str(path)) or self._read_last_csv_time(path)
+            path_key = str(path)
+            last_time = self._candle_last_time.get(path_key) or self._read_last_csv_time(path)
             append_rows = frame
             if last_time:
                 append_rows = frame.filter(pl.col("time").cast(pl.Utf8) > last_time)
@@ -192,13 +196,20 @@ class TelemetryStore:
                 with path.open("a", encoding="utf-8", newline="") as handle:
                     handle.write(csv_payload)
                 self._remember_last_csv_time(path, append_rows)
+                self._candle_last_time[path_key] = str(append_rows.item(-1, "time"))
+                self._candle_append_counts[path_key] = (
+                    self._candle_append_counts.get(path_key, 0) + 1
+                )
             if max_rows > 0 and self._should_compact_csv(
                 path,
                 max_rows=max_rows,
                 appended_avg_bytes=appended_avg_bytes,
             ):
                 self._compact_csv(path, max_rows)
-                self._remember_last_csv_time(path, self._read_csv_tail(path, 1))
+                tail = self._read_csv_tail(path, 1)
+                self._remember_last_csv_time(path, tail)
+                if tail is not None and not tail.is_empty() and "time" in tail.columns:
+                    self._candle_last_time[path_key] = str(tail.item(-1, "time"))
 
     @staticmethod
     def _csv_lock(path: Path) -> threading.Lock:

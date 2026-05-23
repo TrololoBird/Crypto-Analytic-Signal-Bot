@@ -40,6 +40,7 @@ from ..core.engine import StrategyRegistry
 from ..feature_flags import FeatureFlags
 from ..market_data import BinanceFuturesMarketData
 from ..monitor_bot import HealthMonitor
+from ..signal_diagnostics import SignalDiagnostics
 from ..setup_base import SetupParams
 from ..strategies import STRATEGY_CLASSES
 from ..telemetry import TelemetryStore
@@ -103,6 +104,7 @@ class SignalBot:
         self.alerts = container.alerts
         self._modern_repo = container.repository
         self.quality_monitor = container.quality_monitor
+        self._signal_diagnostics = SignalDiagnostics()
         LOG.info("MemoryRepository initialized | db=%s", self._modern_repo._db_path)
 
         # Note: All persistence now uses MemoryRepository (SQLite)
@@ -161,6 +163,7 @@ class SignalBot:
         self._last_kline_event_ts: float = 0.0
         self._shortlist: list[UniverseSymbol] = []
         self._last_live_shortlist: list[UniverseSymbol] = []
+        self._last_shortlist_full_refresh_at: datetime | None = None
         self._symbol_meta_by_symbol: dict[str, Any] = {}
         self._shortlist_source: str = "startup"
         self._shortlist_lock = asyncio.Lock()

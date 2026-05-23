@@ -281,6 +281,7 @@ class ShortlistService:
 
     async def build_live_shortlist(self) -> tuple[list[UniverseSymbol], dict[str, Any]]:
         bot = self._bot
+        settings = bot.settings
         timeout_s = max(10.0, float(bot.settings.ws.rest_timeout_seconds) * 2.0)
         results = await asyncio.wait_for(
             asyncio.gather(
@@ -326,6 +327,26 @@ class ShortlistService:
             bot.settings,
             seed_source="rest_full",
         )
+        LOG.info(
+            "universe filter result | raw_tickers=%d eligible=%d passed_volume=%d "
+            "passed_change=%d min_volume=%.0f min_change=%.2f",
+            len(tickers_24h),
+            summary.get("eligible", 0),
+            sum(
+                1
+                for t in tickers_24h
+                if float(t.get("quote_volume") or 0.0)
+                >= settings.universe.min_quote_volume_usd
+            ),
+            sum(
+                1
+                for t in tickers_24h
+                if abs(float(t.get("price_change_percent") or 0.0))
+                >= settings.universe.min_price_change_pct
+            ),
+            settings.universe.min_quote_volume_usd,
+            settings.universe.min_price_change_pct,
+        )
         return shortlist, summary
 
     async def build_light_shortlist(
@@ -333,15 +354,44 @@ class ShortlistService:
     ) -> tuple[list[UniverseSymbol], dict[str, Any]]:
         bot = self._bot
         ws = getattr(bot, "_ws_manager", None)
-        if ws is None or not bot._symbol_meta_by_symbol or not ws.is_ticker_cache_warm():
+        if ws is None or not ws.is_ticker_cache_warm():
+            LOG.debug("light shortlist skipped: ws cache not warm")
             return [], {
-                "mode": "ws_light",
+                "mode": "ws_light_skipped",
+                "eligible": 0,
+                "dynamic_pool": 0,
+                "pinned": 0,
+            }
+        if not bot._symbol_meta_by_symbol:
+            LOG.info("light shortlist skipped: symbol_meta not loaded yet, triggering REST fetch")
+            return [], {
+                "mode": "ws_light_no_meta",
                 "eligible": 0,
                 "dynamic_pool": 0,
                 "pinned": 0,
             }
 
-        tickers = self._enrich_shortlist_rows(ws.get_global_ticker_data())
+        raw_tickers = ws.get_global_ticker_data()
+        cached_shortlist = list(getattr(bot, "_last_live_shortlist", []) or [])
+        pinned_count = len(getattr(bot.settings.universe, "pinned_symbols", ()) or ())
+        shortlist_limit = int(getattr(bot.settings.universe, "shortlist_limit", 50))
+        minimum_light_tickers = max(pinned_count + 3, min(shortlist_limit, len(cached_shortlist)))
+        if len(raw_tickers) < minimum_light_tickers:
+            LOG.info(
+                "light shortlist skipped: partial ws ticker cache | tickers=%d required=%d cached_shortlist=%d",
+                len(raw_tickers),
+                minimum_light_tickers,
+                len(cached_shortlist),
+            )
+            return [], {
+                "mode": "ws_light_partial_cache",
+                "eligible": 0,
+                "dynamic_pool": 0,
+                "pinned": 0,
+                "raw_tickers": len(raw_tickers),
+            }
+
+        tickers = self._enrich_shortlist_rows(raw_tickers)
         shortlist, summary = build_shortlist(
             list(bot._symbol_meta_by_symbol.values()),
             tickers,
@@ -353,6 +403,8 @@ class ShortlistService:
     async def do_refresh_shortlist(self) -> list[UniverseSymbol]:
         bot = self._bot
         LOG.info("refreshing shortlist...")
+        if not hasattr(bot, "_last_shortlist_full_refresh_at"):
+            bot._last_shortlist_full_refresh_at = None
 
         source_before = str(getattr(bot, "_shortlist_source", "") or "")
         source = "pinned_fallback"
@@ -399,6 +451,16 @@ class ShortlistService:
                 if full_refresh_due:
                     fallback_reason = FALLBACK_REASON_FULL_REFRESH_DUE
                 live_shortlist, live_summary = await self.build_live_shortlist()
+                LOG.info(
+                    "shortlist build result | source=%s eligible=%s dynamic_pool=%s "
+                    "pinned=%s total=%d strategy_fits_total=%d",
+                    "rest_full",
+                    live_summary.get("eligible"),
+                    live_summary.get("dynamic_pool"),
+                    live_summary.get("pinned"),
+                    len(live_shortlist),
+                    sum(len(item.strategy_fits) for item in live_shortlist),
+                )
                 if live_shortlist:
                     bot._last_shortlist_full_refresh_at = now
                     source = "rest_full"
@@ -430,6 +492,17 @@ class ShortlistService:
         bot._shortlist_source = source
         if source == "pinned_fallback" and fallback_reason is None:
             fallback_reason = FALLBACK_REASON_USING_PINNED
+        if (
+            len(shortlist) < len(bot.settings.universe.pinned_symbols) + 3
+            and source != "pinned_fallback"
+        ):
+            LOG.warning(
+                "shortlist suspiciously small | size=%d source=%s "
+                "eligible=%s - check universe filter thresholds in config.toml",
+                len(shortlist),
+                source,
+                summary.get("eligible"),
+            )
 
         bot.telemetry.append_jsonl(
             "shortlist.jsonl",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import logging
 import math
 import re
 from datetime import datetime, timedelta, timezone
@@ -12,6 +13,7 @@ from .strategy_asset_fit import calculate_strategy_fit_score
 
 
 UTC = timezone.utc
+LOG = logging.getLogger("bot.universe")
 STABLE_BASE_ASSETS = {"USDC", "BUSD", "FDUSD", "TUSD", "USDP", "USDS", "DAI"}
 SUPPORTED_USDM_CONTRACT_TYPES = {"PERPETUAL", "TRADIFI_PERPETUAL"}
 _ASCII_CONTRACT_RE = re.compile(r"^[A-Z0-9]{4,24}$")
@@ -217,6 +219,7 @@ def _strategy_fits_for_row(
     spread_bps = _safe_float(row.get("spread_bps"))
     crowding = _crowding_score(row)
     symbol = str(row.get("symbol") or "").strip().upper()
+    pinned_set = {str(s).strip().upper() for s in settings.universe.pinned_symbols}
 
     volume_floor = max(float(settings.universe.min_quote_volume_usd), 1.0)
     volume_multiple = quote_volume / volume_floor
@@ -225,7 +228,7 @@ def _strategy_fits_for_row(
     )
     liquid_enough = quote_volume >= max(volume_floor * 3.0, 30_000_000.0)
     top_liquidity = liquidity_rank is not None and liquidity_rank <= max(
-        int(settings.universe.shortlist_limit),
+        int(getattr(settings.universe, "shortlist_limit", 50)),
         30,
     )
     trending_move = price_change_pct <= 3.0
@@ -307,7 +310,7 @@ def _strategy_fits_for_row(
         )
         fits.extend(_PRICE_ACTION_COVERAGE_SETUP_IDS)
 
-    if symbol in set(settings.universe.pinned_symbols):
+    if symbol in pinned_set:
         fits.extend(_ALL_SETUP_IDS)
 
     if not fits and spread_ok and quote_volume >= volume_floor:
@@ -327,7 +330,7 @@ def _strategy_fits_for_row(
         "symbol": symbol,
         "base_asset": str(row.get("base_asset") or "").strip().upper(),
         "liquidity_rank": liquidity_rank,
-        "shortlist_limit": int(settings.universe.shortlist_limit),
+        "shortlist_limit": int(getattr(settings.universe, "shortlist_limit", 50)),
         "quote_volume": quote_volume,
         "price_change_pct": price_change_pct,
         "spread_bps": spread_bps,
@@ -341,6 +344,8 @@ def _strategy_fits_for_row(
         enabled = set(setups_config.enabled_setup_ids())
     else:
         enabled = set(_ALL_SETUP_IDS)
+    if symbol in pinned_set:
+        return tuple(setup_id for setup_id in _ALL_SETUP_IDS if setup_id in enabled)
     return tuple(
         setup_id
         for setup_id in dict.fromkeys(fits)
@@ -456,6 +461,12 @@ def build_shortlist(
     *,
     seed_source: str = "rest_full",
 ) -> tuple[list[UniverseSymbol], dict[str, Any]]:
+    shortlist_limit = int(getattr(settings.universe, "shortlist_limit", 50))
+    if shortlist_limit < 10:
+        LOG.warning(
+            "shortlist_limit=%d is very small - check config.toml [universe] section",
+            shortlist_limit,
+        )
     meta_map = {meta.symbol: meta for meta in symbol_meta}
     pinned = {symbol for symbol in settings.universe.pinned_symbols}
     min_onboard = datetime.now(UTC) - timedelta(days=settings.universe.min_listing_age_days)
@@ -602,7 +613,7 @@ def build_shortlist(
         shortlist.append(s_row)
         seen.add(s_row.symbol)
 
-    targets = _scaled_bucket_targets(max(settings.universe.shortlist_limit - len(shortlist), 0))
+    targets = _scaled_bucket_targets(max(shortlist_limit - len(shortlist), 0))
     summary: dict[str, Any] = {
         "mode": seed_source,
         "eligible": len(eligible),
@@ -623,7 +634,7 @@ def build_shortlist(
     for b_name in ("trend", "breakout", "reversal"):
         for b_row in bucket_pool[b_name]:
             if (
-                len(shortlist) >= settings.universe.shortlist_limit
+                len(shortlist) >= shortlist_limit
                 or cast(int, summary[b_name]) >= targets[b_name]
             ):
                 break
@@ -636,7 +647,7 @@ def build_shortlist(
             summary[b_name] = cast(int, summary[b_name]) + 1
 
     for setup_id in _ALL_SETUP_IDS:
-        if len(shortlist) >= settings.universe.shortlist_limit:
+        if len(shortlist) >= shortlist_limit:
             break
         candidates = [
             candidate
@@ -656,11 +667,11 @@ def build_shortlist(
             shortlist.append(cand_row)
             seen.add(cand_row.symbol)
             summary["strategy_seed"] = cast(int, summary["strategy_seed"]) + 1
-            if len(shortlist) >= settings.universe.shortlist_limit:
+            if len(shortlist) >= shortlist_limit:
                 break
 
     for dy_row in dynamic_pool:
-        if len(shortlist) >= settings.universe.shortlist_limit:
+        if len(shortlist) >= shortlist_limit:
             break
         if dy_row.symbol in seen:
             continue
@@ -691,15 +702,27 @@ def build_shortlist(
     summary["strategy_fit_counts"] = {
         key: value for key, value in strategy_counts.items() if value > 0
     }
-    scores = sorted(float(row.shortlist_score or 0.0) for row in shortlist)
-    summary["score_p25"] = _percentile(scores, 0.25)
-    summary["score_p50"] = _percentile(scores, 0.50)
-    summary["score_p75"] = _percentile(scores, 0.75)
-    summary["score_p90"] = _percentile(scores, 0.90)
-    summary["strategy_fit_density"] = round(
-        sum(len(row.strategy_fits) for row in shortlist) / max(len(shortlist), 1),
-        6,
-    )
+    scores = [
+        float(item.shortlist_score)
+        for item in shortlist
+        if item.shortlist_score is not None
+    ]
+    if scores:
+        scores_sorted = sorted(scores)
+        n = len(scores_sorted)
+
+        def pct(p: int) -> float:
+            idx = max(0, min(n - 1, int(n * p / 100)))
+            return round(scores_sorted[idx], 6)
+
+        summary["score_p25"] = pct(25)
+        summary["score_p50"] = pct(50)
+        summary["score_p75"] = pct(75)
+        summary["score_p90"] = pct(90)
+        summary["strategy_fit_density"] = round(
+            sum(len(item.strategy_fits) for item in shortlist) / max(len(shortlist), 1),
+            2,
+        )
     return shortlist, summary
 
 

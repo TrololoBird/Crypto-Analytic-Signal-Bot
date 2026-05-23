@@ -430,7 +430,10 @@ class SymbolAnalyzer:
         if regime_adx is not None:
             if signal.setup_id in trend_regime_setups and regime_adx < 20.0:
                 details["regime_filter"] = "trend_required_adx_lt_20"
-                return False, "context.market_regime_mismatch", details
+                details["soft_penalty_applied"] = True
+                details["penalty_factor"] = 0.90
+                details["penalty_reason"] = "context.low_adx_trend_setup_penalty"
+                return True, None, details
             if signal.setup_id in range_regime_setups and regime_adx > 40.0:
                 details["soft_penalty_applied"] = True
                 details["penalty_factor"] = 0.88
@@ -619,6 +622,9 @@ class SymbolAnalyzer:
         }
 
         LOG.info("%s: starting modern analysis | trigger=%s", item.symbol, trigger)
+        diagnostics = getattr(self._bot, "_signal_diagnostics", None)
+        if diagnostics is not None:
+            diagnostics.record_symbol_analyzed(item.symbol)
         item = self._bot._refresh_universe_symbol_from_ws(item)
 
         minimums = self._minimums()
@@ -902,6 +908,8 @@ class SymbolAnalyzer:
                 or getattr(result.signal, "setup_id", "unknown")
             )
             setup_id = str(setup_id)
+            if diagnostics is not None:
+                diagnostics.record_detector_run(setup_id)
             decision = result.decision
             if decision is None:
                 decision = StrategyDecision.error_result(
@@ -993,11 +1001,18 @@ class SymbolAnalyzer:
             funnel["raw_hits_by_setup"][signal.setup_id] = (
                 funnel["raw_hits_by_setup"].get(signal.setup_id, 0) + 1
             )
+            if diagnostics is not None:
+                diagnostics.record_detector_hit(signal.setup_id)
 
             ltf_ok, ltf_reason, ltf_details = self.check_family_confirmation(
                 signal, prepared, metadata
             )
             if not ltf_ok:
+                if diagnostics is not None:
+                    diagnostics.record_confirmation_reject(
+                        signal.setup_id,
+                        ltf_reason or "5m_confirmation_reject",
+                    )
                 rejected.append(
                     {
                         "ts": datetime.now(UTC).isoformat(),
@@ -1046,6 +1061,19 @@ class SymbolAnalyzer:
                 )
             )
             if not passed:
+                LOG.info(
+                    "%s: signal filtered | setup=%s dir=%s score=%.3f reason=%s",
+                    item.symbol,
+                    signal.setup_id,
+                    signal.direction,
+                    signal.score,
+                    filter_reason,
+                )
+                if diagnostics is not None:
+                    reason = filter_reason or "filter_rejected"
+                    diagnostics.record_filter_reject(signal.setup_id, reason)
+                    if reason.startswith("stale_"):
+                        diagnostics.record_stale_symbol(item.symbol)
                 reject_row: dict[str, Any] = {
                     "ts": datetime.now(UTC).isoformat(),
                     "symbol": item.symbol,
@@ -1065,6 +1093,8 @@ class SymbolAnalyzer:
                 continue
 
             candidates.append(filtered_signal)
+            if diagnostics is not None:
+                diagnostics.record_candidate(filtered_signal.setup_id)
             signals_added += 1
             LOG.debug(
                 "%s: candidate signal | setup=%s dir=%s score=%.3f rr=%.2f",
@@ -1085,6 +1115,8 @@ class SymbolAnalyzer:
             signals_added,
         )
         funnel["post_filter_candidates"] = len(candidates)
+        if diagnostics is not None and not signal_results:
+            diagnostics.record_zero_detector_symbol(item.symbol)
         _attach_rejection_rollups(funnel, rejected)
 
         return PipelineResult(

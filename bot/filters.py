@@ -389,6 +389,13 @@ def apply_global_filters(
         passed.append("deep_analysis_policy")
     primary_frame = _frame_for_timeframe(prepared, primary_timeframe)
     if primary_frame is None or not _frame_is_fresh(primary_frame, primary_freshness):
+        LOGGER.info(
+            "%s/%s: freshness fail | timeframe=%s freshness_limit=%s",
+            signal.symbol,
+            signal.setup_id,
+            primary_timeframe,
+            str(primary_freshness),
+        )
         return _reject(f"stale_{primary_timeframe}", base)
     passed.append(
         "fresh_15m" if primary_timeframe == "15m" else f"fresh_primary_{primary_timeframe}"
@@ -397,12 +404,24 @@ def apply_global_filters(
         prepared.work_1h,
         timedelta(hours=settings.filters.freshness_1h_hours),
     ):
+        LOGGER.info(
+            "%s/%s: freshness fail | timeframe=1h freshness_limit=%s",
+            signal.symbol,
+            signal.setup_id,
+            str(timedelta(hours=settings.filters.freshness_1h_hours)),
+        )
         return _reject("stale_1h", base)
     passed.append("fresh_1h")
     if prepared.work_4h is None or not _frame_is_fresh(
         prepared.work_4h,
         timedelta(hours=settings.filters.freshness_4h_hours),
     ):
+        LOGGER.info(
+            "%s/%s: freshness fail | timeframe=4h freshness_limit=%s",
+            signal.symbol,
+            signal.setup_id,
+            str(timedelta(hours=settings.filters.freshness_4h_hours)),
+        )
         return _reject("stale_4h", base)
     passed.append("fresh_4h")
     # --- 2. Mark price sanity ---
@@ -454,6 +473,21 @@ def apply_global_filters(
     min_adx_1h = float(setup_overrides.get("min_adx_1h", settings.filters.min_adx_1h))
     adx_penalty_factor = float(setup_overrides.get("adx_penalty_factor", 0.85))
     adx_policy = _resolve_adx_policy(signal)
+    market_regime = str(getattr(prepared, "market_regime", "neutral") or "neutral").lower()
+    if (
+        market_regime in {"neutral", "ranging", "choppy"}
+        and adx_policy == _ADX_POLICY_HARD_GATE
+    ):
+        adx_policy = _ADX_POLICY_PENALTY
+        adx_penalty_factor = max(adx_penalty_factor, 0.88)
+        LOGGER.info(
+            "%s/%s: ADX hard gate -> penalty (ranging market) | adx_1h=%.1f min=%.1f",
+            signal.symbol,
+            signal.setup_id,
+            adx_1h,
+            min_adx_1h,
+        )
+        passed.append("adx_ranging_market_downgrade")
     if deep_analysis_asset:
         min_adx_1h = min(min_adx_1h, 14.0 if primary_timeframe == "15m" else 12.0)
         if adx_policy == _ADX_POLICY_HARD_GATE:

@@ -36,6 +36,8 @@ Recommendation = Literal["keep", "reduce_score", "pause"]
 
 LOG = logging.getLogger("bot.quality_monitor")
 DEFAULT_PERSIST_PATH = Path("data") / "bot" / "quality_monitor.json"
+MIN_SAMPLES_FOR_REDUCE = 15
+MIN_SAMPLES_FOR_PAUSE = 30
 WIN_OUTCOMES = frozenset({"tp1_hit", "tp2_hit", "tp3_hit", "take_profit", "profit"})
 LOSS_OUTCOMES = frozenset({"stop_loss", "liquidation", "loss"})
 NEUTRAL_OUTCOMES = frozenset(
@@ -285,7 +287,7 @@ class SetupHealth:
     reasons: tuple[str, ...] = field(default_factory=tuple)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "setup_id": self.setup_id,
             "win_rate": round(self.win_rate, 6),
             "expectancy_r": round(self.expectancy_r, 6),
@@ -301,6 +303,9 @@ class SetupHealth:
             "last_r_multiple": round(self.last_r_multiple, 6),
             "reasons": list(self.reasons),
         }
+        if "insufficient_samples" in self.reasons or "insufficient_trade_samples" in self.reasons:
+            payload["note"] = "insufficient_samples"
+        return payload
 
 
 @dataclass(slots=True)
@@ -352,18 +357,18 @@ class SignalQualityMonitor:
         persist_path: str | Path | None = None,
         window: int = 200,
         pause_loss_streak: int = 5,
-        pause_min_samples: int = 20,
+        pause_min_samples: int = MIN_SAMPLES_FOR_PAUSE,
         pause_win_rate: float = 0.25,
-        reduce_min_samples: int = 10,
+        reduce_min_samples: int = MIN_SAMPLES_FOR_REDUCE,
         reduce_win_rate: float = 0.40,
         symbol_cooldown_updates: int = 3,
     ) -> None:
         self.persist_path = Path(persist_path) if persist_path is not None else DEFAULT_PERSIST_PATH
         self.window = max(1, int(window))
         self.pause_loss_streak = max(1, int(pause_loss_streak))
-        self.pause_min_samples = max(1, int(pause_min_samples))
+        self.pause_min_samples = max(MIN_SAMPLES_FOR_PAUSE, int(pause_min_samples))
         self.pause_win_rate = max(0.0, min(float(pause_win_rate), 1.0))
-        self.reduce_min_samples = max(1, int(reduce_min_samples))
+        self.reduce_min_samples = max(MIN_SAMPLES_FOR_REDUCE, int(reduce_min_samples))
         self.reduce_win_rate = max(0.0, min(float(reduce_win_rate), 1.0))
         self.symbol_cooldown_updates = max(1, int(symbol_cooldown_updates))
         self._lock = threading.Lock()
@@ -492,6 +497,8 @@ class SignalQualityMonitor:
         normalized_symbol = _normalize_symbol(symbol)
         with self._lock:
             health = self._compute_health_unlocked(normalized_setup)
+            if health.sample_count < MIN_SAMPLES_FOR_PAUSE:
+                return False
             if health.recommendation == "pause":
                 return True
             if normalized_symbol:
@@ -1216,10 +1223,21 @@ class SignalQualityMonitor:
 
     def _recommendation_for(self, aggregate: SetupAggregate) -> tuple[Recommendation, list[str]]:
         reasons: list[str] = []
-        if aggregate.consecutive_losses >= self.pause_loss_streak:
+        if aggregate.sample_count < self.reduce_min_samples:
+            reasons.append("insufficient_samples")
+            return "keep", reasons
+        if (
+            aggregate.sample_count >= self.pause_min_samples
+            and aggregate.trade_count >= self.pause_min_samples
+            and aggregate.consecutive_losses >= self.pause_loss_streak
+        ):
             reasons.append(f"consecutive_losses>={self.pause_loss_streak}")
             return "pause", reasons
-        if aggregate.trade_count >= self.pause_min_samples and aggregate.win_rate < self.pause_win_rate:
+        if (
+            aggregate.sample_count >= self.pause_min_samples
+            and aggregate.trade_count >= self.pause_min_samples
+            and aggregate.win_rate < self.pause_win_rate
+        ):
             reasons.append(
                 f"win_rate<{self.pause_win_rate:.2f}_after_{self.pause_min_samples}_samples"
             )

@@ -209,6 +209,11 @@ class MessageBuffer:
                 ),
             )
             drop_indexes = {drop_index}
+            LOG.warning(
+                "message buffer forced to drop a closed kline (all high-priority) | "
+                "dropped_total=%d",
+                self._dropped_count + 1,
+            )
 
         dropped = 0
         for idx, msg in enumerate(batch):
@@ -1718,7 +1723,12 @@ class FuturesWSManager:
                         name=f"gap_backfill:{symbol}:{interval}",
                     )
             if deq and deq[-1].get("time") == row["time"]:
-                LOG.debug("duplicate closed kline replaced | symbol=%s interval=%s time=%s", symbol, interval, row["time"])
+                LOG.debug(
+                    "kline dedup update | symbol=%s interval=%s time=%s",
+                    symbol,
+                    interval,
+                    row["time"],
+                )
                 deq[-1] = row
             else:
                 deq.append(row)

@@ -157,6 +157,10 @@ class DeliveryOrchestrator:
         if monitor is None:
             return False
         health = monitor.get_setup_health(signal.setup_id)
+        if health.get("recommendation") == "pause" and int(health.get("sample_count", 0)) < 30:
+            health["recommendation"] = "keep"
+            health.setdefault("reasons", [])
+            health["reasons"] = [*health["reasons"], "pause_override_insufficient_samples"]
         throttle = bool(
             health.get("recommendation") == "pause"
             or monitor.should_throttle_delivery(signal.setup_id, signal.symbol)

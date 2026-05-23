@@ -173,7 +173,7 @@ class _FrameCache:
         finally:
             self._lock.release()
 
-    def cache_stats(self) -> dict[str, float | int]:
+    def stats(self) -> dict[str, float | int]:
         with self._lock:
             hits = int(self._hits)
             misses = int(self._misses)
@@ -185,6 +185,9 @@ class _FrameCache:
                 "hit_rate": round(hits / total, 6) if total else 0.0,
             }
 
+    def cache_stats(self) -> dict[str, float | int]:
+        return self.stats()
+
 
 # Module-level singleton kept for backward compatibility.
 _FRAME_CACHE = _FrameCache(max_size=_MAX_CACHE_ENTRIES)
@@ -192,7 +195,7 @@ _FRAME_CACHE = _FrameCache(max_size=_MAX_CACHE_ENTRIES)
 
 def cache_stats() -> dict[str, float | int]:
     """Return frame preparation cache hit/miss counters for health telemetry."""
-    return _FRAME_CACHE.cache_stats()
+    return _FRAME_CACHE.stats()
 
 
 def _clean_non_finite(series: pl.Series, *, fill: float) -> pl.Series:

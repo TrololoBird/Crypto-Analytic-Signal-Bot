@@ -106,6 +106,12 @@ class SignalEngine:
         strategy_fits = set(getattr(universe, "strategy_fits", ()) or ())
         shortlist_score = getattr(universe, "shortlist_score", None)
         is_shortlist_asset = shortlist_score is not None
+        if not strategy_fits and not is_shortlist_asset:
+            LOG.warning(
+                "%s: strategy_fits is EMPTY - no strategy will run for this symbol. "
+                "Check _strategy_fits_for_row() in universe.py",
+                symbol,
+            )
         if is_shortlist_asset:
             LOG.debug(
                 "%s: shortlist routing expanded to all enabled strategies | strategy_fits=%d",
@@ -126,6 +132,13 @@ class SignalEngine:
                     routed.append(strategy)
                 elif emit_routing_skips:
                     decision = self._build_routing_skip_decision(strategy, prepared, strategy_fits)
+                    if len(routing_skips) < 3:
+                        LOG.info(
+                            "%s: strategy not routed | setup=%s strategy_fits_count=%d",
+                            symbol,
+                            strategy.strategy_id,
+                            len(strategy_fits),
+                        )
                     routing_skips.append(
                         SignalResult(
                             setup_id=strategy.strategy_id,

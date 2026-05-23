@@ -77,6 +77,9 @@ class HealthManager:
                 market_ctx.get("btc_bias", "neutral"),
                 blacklisted if blacklisted else "not_blacklisted",
             )
+            diagnostics = getattr(self._bot, "_signal_diagnostics", None)
+            if diagnostics is not None:
+                diagnostics.log_summary(LOG)
 
             if self._bot.metrics._enabled:
                 self._bot.metrics.update_bot_state(sl_size, open_signals, len(blacklisted))

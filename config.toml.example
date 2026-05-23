@@ -46,7 +46,7 @@ metrics_port = 9090
 [bot.universe]
 quote_asset = "USDT"
 dynamic_limit = 120
-shortlist_limit = 45
+shortlist_limit = 50
 min_quote_volume_usd = 50_000_000
 min_price_change_pct = 0.5
 min_trade_count_24h = 10_000

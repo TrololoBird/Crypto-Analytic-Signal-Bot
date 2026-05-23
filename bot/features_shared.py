@@ -71,7 +71,8 @@ def wilder_mean(
     subsequent = clean_series.slice(seed_end, size - seed_end)
     ewm_input = pl.concat([pl.Series([sma], dtype=pl.Float64), subsequent])
 
-    # Wilder smoothing is exactly ewm(alpha=1/period, adjust=False)
+    # Verified 2026-05-23 against the scalar Wilder loop: prepending the SMA
+    # makes ewm(alpha=1/period, adjust=False) mathematically equivalent.
     ewm_output = ewm_input.ewm_mean(alpha=1.0 / period, adjust=False)
 
     # Align with original series length by prepending nulls
