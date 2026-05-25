@@ -356,20 +356,8 @@ def _ema(df: pl.DataFrame, period: int) -> pl.Series:
 
 
 def _rsi(df: pl.DataFrame, period: int = 14) -> pl.Series:
-    """Wilder's RSI."""
-    if _USE_POLARS_TA_BACKEND and _HAS_POLARS_TA and hasattr(plta, "RSI"):
-        try:
-            rsi_series = _materialize_series(
-                plta.RSI(pl.col("close"), timeperiod=int(period)),
-                df=df,
-                name=f"rsi{period}",
-            )
-            return _normalize_rsi_scale(rsi_series, name=f"rsi{period}")
-        except Exception as exc:
-            _log_indicator_fallback("rsi_polars_ta", exc)
-
-    # Pure Polars Wilder's RSI (alpha = 1/period)
-    close = df["close"]
+    """Wilder's RSI using the project-verified RMA seed semantics."""
+    close = df["close"].cast(pl.Float64, strict=False)
     delta = close.diff()
     gains = delta.clip(lower_bound=0.0)
     losses = (-delta).clip(lower_bound=0.0)
@@ -411,26 +399,10 @@ def _rsi(df: pl.DataFrame, period: int = 14) -> pl.Series:
 
 
 def _atr(df: pl.DataFrame, period: int = 14) -> pl.Series:
-    """Average True Range using polars_ta or pure Polars."""
-    if _USE_POLARS_TA_BACKEND and _HAS_POLARS_TA and hasattr(plta, "ATR"):
-        try:
-            return _materialize_series(
-                plta.ATR(
-                    pl.col("high"),
-                    pl.col("low"),
-                    pl.col("close"),
-                    timeperiod=int(period),
-                ),
-                df=df,
-                name=f"atr{period}",
-            )
-        except Exception as exc:
-            _log_indicator_fallback("atr_polars_ta", exc)
-
-    # Pure Polars ATR
-    high = df["high"]
-    low = df["low"]
-    close = df["close"]
+    """Average True Range using Wilder smoothing with an SMA seed."""
+    high = df["high"].cast(pl.Float64, strict=False)
+    low = df["low"].cast(pl.Float64, strict=False)
+    close = df["close"].cast(pl.Float64, strict=False)
     prev_close = close.shift(1)
 
     tr = pl.max_horizontal(

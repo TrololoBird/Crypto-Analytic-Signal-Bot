@@ -75,24 +75,7 @@ def rsi(
 ) -> pl.Series:
     """Contract: input requires `close`; output RSI in [0,100] with neutral fill 50."""
     ensure_columns(df, ("close",), fn_name="rsi")
-    if has_talib:
-        raw = materialize_series(
-            cast(Any, plta).RSI(pl.col("close"), timeperiod=float(period)),
-            df=df,
-            name=f"rsi{period}",
-        )
-        numeric = raw.cast(pl.Float64, strict=False)
-        max_value = numeric.max()
-        min_value = numeric.min()
-        try:
-            max_float = float(max_value) if max_value is not None else 100.0
-            min_float = float(min_value) if min_value is not None else 0.0
-        except (TypeError, ValueError):
-            return clean_non_finite(numeric, fill=50.0).clip(0.0, 100.0).rename(f"rsi{period}")
-        if max_float <= 1.5 and min_float >= -0.01:
-            numeric = numeric * 100.0
-        return clean_non_finite(numeric, fill=50.0).clip(0.0, 100.0).rename(f"rsi{period}")
-    close = df["close"]
+    close = df["close"].cast(pl.Float64, strict=False)
     delta = close.diff()
     gains = delta.clip(lower_bound=0.0)
     losses = (-delta).clip(lower_bound=0.0)
@@ -136,14 +119,6 @@ def atr(
 ) -> pl.Series:
     """Contract: input requires OHLC; output ATR series named `atr{period}`."""
     ensure_columns(df, REQUIRED_OHLCV_COLUMNS, fn_name="atr")
-    if has_talib:
-        return materialize_series(
-            cast(Any, plta).ATR(
-                pl.col("high"), pl.col("low"), pl.col("close"), timeperiod=float(period)
-            ),
-            df=df,
-            name=f"atr{period}",
-        )
     return materialize_series(
         wilder_mean(true_range(df), period=period, name=f"atr{period}"),
         df=df,

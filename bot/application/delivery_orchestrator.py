@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from bot.domain.schemas import PreparedSymbol, Signal
 from bot.outcomes import build_prepared_feature_snapshot, extract_features_from_signal
+from bot.signal_contract import validate_signal_contract
 from bot.tracking import SignalTrackingEvent
 
 if TYPE_CHECKING:
@@ -56,6 +57,10 @@ class DeliveryOrchestrator:
     @staticmethod
     def _symbol_direction_cooldown_key(signal: Signal) -> str:
         return f"strategy_symbol_direction:{signal.symbol}:{signal.direction}"
+
+    @staticmethod
+    def _contract_issue_rows(signal: Signal) -> list[dict[str, object]]:
+        return [issue.to_dict() for issue in validate_signal_contract(signal)]
 
     def _record_delivery_attempt(
         self,
@@ -235,6 +240,27 @@ class DeliveryOrchestrator:
         queued_setup_ids: set[str] = set()
 
         for signal in signals:
+            contract_issues = self._contract_issue_rows(signal)
+            if contract_issues:
+                rejected_rows.append(
+                    {
+                        "ts": datetime.now(UTC).isoformat(),
+                        "symbol": signal.symbol,
+                        "setup_id": signal.setup_id,
+                        "direction": signal.direction,
+                        "stage": "contract",
+                        "reason": "invalid_signal_contract",
+                        "issues": contract_issues,
+                    }
+                )
+                LOG.warning(
+                    "invalid signal contract rejected | symbol=%s setup=%s direction=%s issues=%s",
+                    signal.symbol,
+                    signal.setup_id,
+                    signal.direction,
+                    contract_issues,
+                )
+                continue
             if signal.setup_id in queued_setup_ids:
                 rejected_rows.append(
                     {

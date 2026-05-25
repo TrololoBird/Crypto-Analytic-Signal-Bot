@@ -688,11 +688,25 @@ class MarketContextUpdater:
             100.0 - btc_volume_share - eth_volume_share - sol_volume_share - stable_volume_share,
         )
 
-        tf_4h, tf_1h, tf_15m = await asyncio.gather(
+        timeframe_results = await asyncio.gather(
             self._timeframe_line("BTCUSDT", "4h", ticker_by_symbol),
             self._timeframe_line("BTCUSDT", "1h", ticker_by_symbol),
             self._timeframe_line("BTCUSDT", "15m", ticker_by_symbol),
+            return_exceptions=True,
         )
+        timeframe_labels = ("4h", "1h", "15m")
+        timeframe_lines: list[str] = []
+        for label, result in zip(timeframe_labels, timeframe_results, strict=True):
+            if isinstance(result, Exception):
+                LOG.warning(
+                    "market context timeframe line failed | symbol=BTCUSDT timeframe=%s error=%s",
+                    label,
+                    result,
+                )
+                timeframe_lines.append(f"BTCUSDT {label}: n/a")
+            else:
+                timeframe_lines.append(result)
+        tf_4h, tf_1h, tf_15m = timeframe_lines
         corr_line, corr_narrative = await self._build_correlation_line(
             ticker_by_symbol,
             liquid_rows,

@@ -227,9 +227,9 @@ if False:
 
 def true_range(df: pl.DataFrame, *, name: str = "true_range") -> pl.Series:
     ensure_columns(df, REQUIRED_OHLCV_COLUMNS, fn_name="true_range")
-    high = df["high"]
-    low = df["low"]
-    close = df["close"]
+    high = df["high"].cast(pl.Float64, strict=False)
+    low = df["low"].cast(pl.Float64, strict=False)
+    close = df["close"].cast(pl.Float64, strict=False)
     prev_close = close.shift(1)
     return materialize_series(
         pl.max_horizontal(

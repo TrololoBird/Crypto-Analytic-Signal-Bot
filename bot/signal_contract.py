@@ -17,6 +17,7 @@ UTC = timezone.utc
 
 DEFAULT_SCALE_WEIGHTS: tuple[float, float, float] = (0.5, 0.3, 0.2)
 DEFAULT_TARGET_RR: tuple[float, float, float] = (1.9, 3.0, 5.0)
+MIN_SIGNAL_RISK_REWARD = 1.5
 
 _TIMEFRAME_MINUTES: dict[str, int] = {
     "1m": 1,
@@ -402,6 +403,7 @@ def validate_signal_contract(signal: Any, *, now: datetime | None = None) -> lis
     tp2 = positive_float(getattr(signal, "tp2", None) if hasattr(signal, "tp2") else getattr(signal, "take_profit_2", None))
     tp3 = positive_float(getattr(signal, "tp3", None) if hasattr(signal, "tp3") else getattr(signal, "take_profit_3", None))
     valid_until = getattr(signal, "valid_until", None)
+    scale_weights_raw = getattr(signal, "scale_weights", DEFAULT_SCALE_WEIGHTS)
 
     required_values = {
         "entry_low": entry_low,
@@ -428,6 +430,36 @@ def validate_signal_contract(signal: Any, *, now: datetime | None = None) -> lis
                 issues.append(SignalContractIssue("targets", "long_targets_not_ordered", (tp1, tp2, tp3)))
             if direction == "short" and not (entry_mid > tp1 >= tp2 >= tp3):
                 issues.append(SignalContractIssue("targets", "short_targets_not_ordered", (tp1, tp2, tp3)))
+            if stop_loss is not None:
+                risk = abs(entry_mid - stop_loss)
+                reward = abs(tp1 - entry_mid)
+                if risk <= 0.0:
+                    issues.append(SignalContractIssue("risk_reward", "zero_or_negative_risk", risk))
+                else:
+                    risk_reward = reward / risk
+                    if risk_reward < MIN_SIGNAL_RISK_REWARD:
+                        issues.append(
+                            SignalContractIssue(
+                                "risk_reward",
+                                "tp1_rr_below_minimum",
+                                round(risk_reward, 6),
+                            )
+                        )
+    try:
+        scale_weights = [float(item) for item in scale_weights_raw]
+    except (TypeError, ValueError):
+        scale_weights = []
+    if len(scale_weights) < 2:
+        issues.append(SignalContractIssue("scale_weights", "less_than_two_entry_allocations", scale_weights_raw))
+    elif any(not math.isfinite(item) or item <= 0.0 for item in scale_weights):
+        issues.append(SignalContractIssue("scale_weights", "non_positive_or_non_finite", scale_weights_raw))
+    else:
+        total_weight = sum(scale_weights)
+        max_weight = max(scale_weights)
+        if max_weight <= 1.0 and total_weight > 1.000001:
+            issues.append(SignalContractIssue("scale_weights", "fraction_sum_above_one", round(total_weight, 6)))
+        if max_weight > 1.0 and total_weight > 100.000001:
+            issues.append(SignalContractIssue("scale_weights", "percent_sum_above_100", round(total_weight, 6)))
     if not isinstance(valid_until, datetime):
         issues.append(SignalContractIssue("valid_until", "missing_or_not_datetime", valid_until))
     else:
