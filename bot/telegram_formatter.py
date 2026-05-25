@@ -1,0 +1,806 @@
+"""Telegram message formatting for signal-only analytics delivery.
+
+The runtime sends analytical plans, not orders. This module keeps that contract
+visible in every Telegram payload and centralizes HTML escaping, length limits,
+reason humanization, and preview validation.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
+import html
+import re
+from typing import Any, Iterable, Mapping
+
+
+TELEGRAM_TEXT_LIMIT = 4000
+TELEGRAM_SAFE_TEXT_LIMIT = 3900
+TELEGRAM_PARSE_MODE = "HTML"
+ALLOWED_HTML_TAGS = {
+    "b",
+    "strong",
+    "i",
+    "em",
+    "u",
+    "ins",
+    "s",
+    "strike",
+    "del",
+    "span",
+    "tg-spoiler",
+    "a",
+    "code",
+    "pre",
+    "blockquote",
+}
+LOCAL_TZ = datetime.now().astimezone().tzinfo or UTC
+
+
+SETUP_LABELS: dict[str, str] = {
+    "absorption": "Absorption",
+    "aggression_shift": "Aggression shift",
+    "altcoin_season_index": "Altcoin season",
+    "atr_expansion": "ATR expansion",
+    "bb_squeeze": "BB squeeze",
+    "bos_choch": "BOS/CHoCH",
+    "breaker_block": "Breaker block",
+    "btc_correlation": "BTC correlation",
+    "cvd_divergence": "CVD divergence",
+    "depth_imbalance": "Depth imbalance",
+    "ema_bounce": "EMA bounce",
+    "funding_reversal": "Funding reversal",
+    "fvg_setup": "FVG retest",
+    "hidden_divergence": "Hidden divergence",
+    "indicator_divergence": "Indicator divergence",
+    "keltner_breakout": "Keltner breakout",
+    "liquidation_heatmap": "Liquidation heatmap",
+    "liquidity_sweep": "Liquidity sweep",
+    "ls_ratio_extreme": "L/S ratio extreme",
+    "multi_tf_trend": "Multi-TF trend",
+    "oi_divergence": "OI divergence",
+    "order_block": "Order block",
+    "price_velocity": "Price velocity",
+    "rsi_divergence_bottom": "RSI divergence",
+    "session_killzone": "Session killzone",
+    "spread_strategy": "Spread strategy",
+    "squeeze_setup": "Squeeze release",
+    "stop_hunt_detection": "Stop hunt",
+    "structure_break_retest": "Break and retest",
+    "structure_pullback": "Structure pullback",
+    "supertrend_follow": "SuperTrend follow",
+    "turtle_soup": "Turtle soup",
+    "volume_anomaly": "Volume anomaly",
+    "volume_climax_reversal": "Volume climax",
+    "vwap_trend": "VWAP trend",
+    "whale_walls": "Whale walls",
+    "wick_trap_reversal": "Wick trap",
+    "wyckoff_spring": "Wyckoff spring",
+}
+
+
+REASON_LABELS: dict[str, str] = {
+    "adx_ok": "ADX supports trend",
+    "adx_ranging_market_downgrade": "ADX treated as penalty in ranging regime",
+    "atr_ok": "ATR passed volatility floor",
+    "bb_squeeze_release": "squeeze release confirmed",
+    "bos_confirmed": "break of structure confirmed",
+    "bounce_confirmed": "bounce confirmation",
+    "break_confirmed": "breakout confirmed",
+    "breakout_confirmed": "breakout confirmed",
+    "btc_bias_aligned": "BTC context aligned",
+    "choch_confirmed": "CHoCH confirmed",
+    "confluence_boost": "multi-setup confluence",
+    "cvd_divergence": "CVD divergence",
+    "depth_imbalance_ok": "order-book imbalance supports plan",
+    "entry_zone_valid": "entry zone valid",
+    "flow_aligned": "orderflow aligned",
+    "fresh_15m": "15m data fresh",
+    "fresh_1h": "1h data fresh",
+    "fresh_4h": "4h data fresh",
+    "funding_extreme": "funding crowding is extreme",
+    "fvg_touched": "FVG zone touched",
+    "liquidity_sweep": "liquidity sweep confirmed",
+    "mark_price_ok": "mark/ticker price aligned",
+    "market_regime_ok": "market regime supports setup",
+    "multi_tf_aligned": "multi-timeframe context aligned",
+    "order_block_held": "order block held",
+    "pullback_to_level": "pullback into actionable level",
+    "risk_reward_ok": "risk/reward passed",
+    "score_ok": "confluence score passed",
+    "spread_ok": "spread within limit",
+    "structure_aligned": "market structure aligned",
+    "supertrend_aligned": "SuperTrend aligned",
+    "sweep_confirmed": "sweep and reclaim confirmed",
+    "target_integrity_ok": "targets passed integrity check",
+    "volume_confirmed": "volume confirmation",
+    "volume_ok": "volume acceptable",
+    "vwap_reclaim": "VWAP reclaim",
+    "wick_closed_back": "wick trap closed back inside range",
+    "wick_pierced": "liquidity wick pierced level",
+}
+
+
+INVALIDATION_BY_SETUP: dict[str, str] = {
+    "absorption": "absorption low/high fails and price accepts beyond the stop zone",
+    "aggression_shift": "aggressive flow flips against the plan after entry",
+    "atr_expansion": "expansion candle loses range and closes back into prior compression",
+    "bb_squeeze": "price closes back inside the squeeze range after release",
+    "bos_choch": "price closes through the structural pivot used for the setup",
+    "breaker_block": "breaker block is reclaimed against the planned direction",
+    "cvd_divergence": "price makes a fresh extreme while CVD confirms against the setup",
+    "depth_imbalance": "book imbalance and microprice flip against the direction",
+    "ema_bounce": "body closes beyond the EMA acceptance zone",
+    "funding_reversal": "funding crowding normalizes without price confirmation",
+    "fvg_setup": "gap is fully mitigated and price accepts beyond the stop side",
+    "hidden_divergence": "trend swing invalidates the divergence structure",
+    "indicator_divergence": "indicator divergence is erased by a fresh confirmed extreme",
+    "keltner_breakout": "breakout closes back inside the Keltner channel",
+    "liquidation_heatmap": "liquidation proxy flips and price accepts through stop zone",
+    "liquidity_sweep": "sweep level fails to reclaim and price continues through liquidity",
+    "ls_ratio_extreme": "crowd positioning normalizes before price confirms reversal",
+    "multi_tf_trend": "1h/4h trend context loses alignment",
+    "oi_divergence": "OI and price reconnect without directional follow-through",
+    "order_block": "order block boundary fails on closing basis",
+    "price_velocity": "velocity candle mean-reverts below/above the trigger body",
+    "rsi_divergence_bottom": "RSI divergence is invalidated by a fresh extreme",
+    "session_killzone": "session range is lost after the killzone trigger",
+    "spread_strategy": "spread widens beyond execution-quality threshold",
+    "squeeze_setup": "release fails and closes back inside compression",
+    "stop_hunt_detection": "stop-hunt level continues instead of reclaiming",
+    "structure_break_retest": "breakout level fails on retest and closes back through it",
+    "structure_pullback": "pullback leg closes beyond the protected swing",
+    "supertrend_follow": "SuperTrend flips against the plan",
+    "turtle_soup": "false breakout becomes a real breakout",
+    "volume_anomaly": "volume impulse fails to hold candle acceptance",
+    "volume_climax_reversal": "climax wick is absorbed and price accepts beyond it",
+    "vwap_trend": "VWAP is lost and accepted against the plan",
+    "whale_walls": "wall pressure disappears or flips against the signal",
+    "wick_trap_reversal": "wick extreme is broken and accepted beyond stop",
+    "wyckoff_spring": "range spring/upthrust fails to reclaim the range",
+}
+
+
+TRACKING_TITLES: dict[str, str] = {
+    "activated": "ENTRY ACTIVATED",
+    "tp1_hit": "TP1 HIT",
+    "tp2_hit": "TP2 HIT",
+    "stop_loss": "STOP HIT",
+    "smart_exit": "ANALYTICAL EXIT",
+    "emergency_exit": "HARD INVALIDATION",
+    "expired": "PLAN EXPIRED",
+    "ambiguous_exit": "AMBIGUOUS EXIT",
+    "superseded": "SUPERSEDED",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class TelegramFormatPolicy:
+    """Formatting knobs for Telegram signal messages."""
+
+    text_limit: int = TELEGRAM_SAFE_TEXT_LIMIT
+    include_disclaimer: bool = True
+    include_chart_link: bool = True
+    include_reason_limit: int = 5
+    include_filter_limit: int = 7
+    language: str = "en"
+    compact: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class TelegramValidationIssue:
+    """One validation finding for an outgoing Telegram message."""
+
+    severity: str
+    code: str
+    message: str
+    offset: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TelegramValidationReport:
+    """Validation report for rendered Telegram HTML."""
+
+    ok: bool
+    length: int
+    issues: tuple[TelegramValidationIssue, ...] = ()
+
+    @property
+    def error_count(self) -> int:
+        return sum(1 for issue in self.issues if issue.severity == "error")
+
+    @property
+    def warning_count(self) -> int:
+        return sum(1 for issue in self.issues if issue.severity == "warning")
+
+
+@dataclass(slots=True)
+class SignalMessageFacts:
+    """Normalized facts extracted from a signal-like object."""
+
+    symbol: str
+    direction: str
+    setup_id: str
+    timeframe: str
+    tracking_ref: str
+    score: float
+    entry_low: float
+    entry_high: float
+    stop: float
+    take_profit_1: float
+    take_profit_2: float
+    take_profit_3: float | None
+    risk_reward: float
+    stop_distance_pct: float
+    valid_until: datetime | None
+    reasons: tuple[str, ...] = ()
+    passed_filters: tuple[str, ...] = ()
+    scale_weights: tuple[float, float, float] = (0.5, 0.3, 0.2)
+    atr_pct: float | None = None
+    spread_bps: float | None = None
+    adx_1h: float | None = None
+    volume_ratio: float | None = None
+    oi_change_pct: float | None = None
+    funding_rate: float | None = None
+    orderflow_delta_ratio: float | None = None
+    mark_price: float | None = None
+    btc_bias: str | None = None
+    eth_bias: str | None = None
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+def escape_text(value: object) -> str:
+    """Escape text for Telegram HTML."""
+    return html.escape(str(value if value is not None else ""), quote=True)
+
+
+def code(value: object) -> str:
+    """Render escaped text in a Telegram ``code`` tag."""
+    return f"<code>{escape_text(value)}</code>"
+
+
+def bold(value: object) -> str:
+    """Render escaped text in a Telegram ``b`` tag."""
+    return f"<b>{escape_text(value)}</b>"
+
+
+def _float(value: object, default: float = 0.0) -> float:
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+
+
+def _optional_float(value: object) -> float | None:
+    try:
+        return None if value is None else float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
+def format_price(value: float | None) -> str:
+    """Format a price compactly without losing low-price precision."""
+    if value is None:
+        return "n/a"
+    numeric = _float(value)
+    if abs(numeric) >= 10_000:
+        return f"{numeric:,.1f}"
+    if abs(numeric) >= 1_000:
+        return f"{numeric:,.2f}"
+    if abs(numeric) >= 10:
+        return f"{numeric:,.3f}"
+    if abs(numeric) >= 1:
+        return f"{numeric:,.4f}"
+    if abs(numeric) >= 0.01:
+        return f"{numeric:.5f}"
+    return f"{numeric:.8f}"
+
+
+def format_percent(value: float | None, *, multiply: bool = False, digits: int = 2) -> str:
+    """Format a percentage value."""
+    if value is None:
+        return "n/a"
+    numeric = _float(value)
+    if multiply:
+        numeric *= 100.0
+    sign = "+" if numeric > 0 else ""
+    return f"{sign}{numeric:.{digits}f}%"
+
+
+def format_score(score: float | None) -> str:
+    """Format score in percent."""
+    value = max(0.0, min(_float(score), 1.0))
+    return f"{value * 100:.0f}%"
+
+
+def confidence_label(score: float | None) -> str:
+    """Return compact qualitative score label."""
+    value = _float(score)
+    if value >= 0.78:
+        return "high"
+    if value >= 0.66:
+        return "medium"
+    if value >= 0.55:
+        return "moderate"
+    return "low"
+
+
+def direction_label(direction: str) -> str:
+    """Normalize a signal direction label."""
+    normalized = str(direction or "").strip().lower()
+    if normalized == "short":
+        return "SHORT"
+    return "LONG"
+
+
+def direction_side(direction: str) -> str:
+    """Return plain action side, still signal-only."""
+    return "sell setup" if direction_label(direction) == "SHORT" else "buy setup"
+
+
+def setup_label(setup_id: str) -> str:
+    """Return a human label for a setup id."""
+    normalized = str(setup_id or "").strip()
+    return SETUP_LABELS.get(normalized, normalized.replace("_", " ").title())
+
+
+def parse_datetime(value: object) -> datetime | None:
+    """Parse a datetime-like value into timezone-aware UTC."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def format_datetime(value: object) -> str:
+    """Format a datetime-like value in local timezone with offset."""
+    parsed = parse_datetime(value)
+    if parsed is None:
+        return "n/a"
+    local = parsed.astimezone(LOCAL_TZ)
+    offset = local.utcoffset() or timedelta(0)
+    sign = "+" if offset >= timedelta(0) else "-"
+    minutes = abs(int(offset.total_seconds() // 60))
+    hours, mins = divmod(minutes, 60)
+    return f"{local:%Y-%m-%d %H:%M} UTC{sign}{hours:02d}:{mins:02d}"
+
+
+def minutes_until(value: object) -> float | None:
+    """Return minutes from now until a timestamp."""
+    parsed = parse_datetime(value)
+    if parsed is None:
+        return None
+    return max(0.0, (parsed - datetime.now(UTC)).total_seconds() / 60.0)
+
+
+def tradingview_interval(timeframe: str) -> str:
+    """Convert bot timeframe labels to TradingView interval labels."""
+    raw = str(timeframe or "").strip().lower()
+    mapping = {
+        "1m": "1",
+        "3m": "3",
+        "5m": "5",
+        "15m": "15",
+        "30m": "30",
+        "45m": "45",
+        "1h": "60",
+        "2h": "120",
+        "4h": "240",
+        "1d": "1D",
+    }
+    if raw in mapping:
+        return mapping[raw]
+    for key, value in mapping.items():
+        if key in raw:
+            return value
+    return "15"
+
+
+def tradingview_chart_url(symbol: str, timeframe: str) -> str:
+    """Return a TradingView chart URL for Binance perpetual futures."""
+    safe_symbol = re.sub(r"[^A-Z0-9]", "", str(symbol or "").upper())
+    return (
+        "https://www.tradingview.com/chart/"
+        f"?symbol=BINANCE:{safe_symbol}.P&interval={tradingview_interval(timeframe)}"
+    )
+
+
+def reason_label(reason: str) -> str:
+    """Humanize a reason token."""
+    raw = str(reason or "").strip()
+    if not raw:
+        return ""
+    if raw in REASON_LABELS:
+        return REASON_LABELS[raw]
+    if raw.startswith("confluence_") and raw.endswith("_setups"):
+        count = raw.removeprefix("confluence_").removesuffix("_setups")
+        return f"{count} setup confluence" if count.isdigit() else "setup confluence"
+    if raw.startswith("confluence_setups="):
+        setups = [
+            setup_label(item.strip())
+            for item in raw.split("=", 1)[1].split(",")
+            if item.strip()
+        ]
+        return "confluence: " + ", ".join(setups[:5]) if setups else "setup confluence"
+    return raw.replace("_", " ").replace(".", ": ")
+
+
+def compact_reason_list(reasons: Iterable[str], *, limit: int) -> list[str]:
+    """Return unique human-readable reasons."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for reason in reasons:
+        label = reason_label(reason)
+        if not label or label in seen:
+            continue
+        seen.add(label)
+        out.append(label)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def extract_signal_facts(
+    signal: Any,
+    *,
+    pending_expiry_minutes: int | None = None,
+    btc_bias: str | None = None,
+    eth_bias: str | None = None,
+) -> SignalMessageFacts:
+    """Normalize a signal-like object for message rendering."""
+    created_at = parse_datetime(getattr(signal, "created_at", None)) or datetime.now(UTC)
+    valid_until = parse_datetime(getattr(signal, "valid_until", None))
+    if valid_until is None and pending_expiry_minutes is not None:
+        valid_until = created_at + timedelta(minutes=max(1, int(pending_expiry_minutes)))
+    scale = getattr(signal, "scale_weights", (0.5, 0.3, 0.2))
+    try:
+        scale_tuple = tuple(float(item) for item in scale)
+    except TypeError:
+        scale_tuple = (0.5, 0.3, 0.2)
+    if len(scale_tuple) != 3:
+        scale_tuple = (0.5, 0.3, 0.2)
+    return SignalMessageFacts(
+        symbol=str(getattr(signal, "symbol", "")),
+        direction=str(getattr(signal, "direction", "long")),
+        setup_id=str(getattr(signal, "setup_id", "")),
+        timeframe=str(getattr(signal, "timeframe", "15m")),
+        tracking_ref=str(getattr(signal, "tracking_ref", "") or getattr(signal, "tracking_id", "")),
+        score=_float(getattr(signal, "score", 0.0)),
+        entry_low=_float(getattr(signal, "entry_low", getattr(signal, "entry_price", 0.0))),
+        entry_high=_float(getattr(signal, "entry_high", getattr(signal, "entry_price", 0.0))),
+        stop=_float(getattr(signal, "stop", getattr(signal, "stop_price", 0.0))),
+        take_profit_1=_float(
+            getattr(signal, "take_profit_1", getattr(signal, "tp1_price", 0.0))
+        ),
+        take_profit_2=_float(
+            getattr(signal, "take_profit_2", getattr(signal, "tp2_price", 0.0))
+        ),
+        take_profit_3=_optional_float(
+            getattr(signal, "take_profit_3", getattr(signal, "tp3", None))
+        ),
+        risk_reward=_float(getattr(signal, "risk_reward", 0.0)),
+        stop_distance_pct=_float(getattr(signal, "stop_distance_pct", 0.0)),
+        valid_until=valid_until,
+        reasons=tuple(str(item) for item in getattr(signal, "reasons", ()) or ()),
+        passed_filters=tuple(str(item) for item in getattr(signal, "passed_filters", ()) or ()),
+        scale_weights=scale_tuple,  # type: ignore[arg-type]
+        atr_pct=_optional_float(getattr(signal, "atr_pct", None)),
+        spread_bps=_optional_float(getattr(signal, "spread_bps", None)),
+        adx_1h=_optional_float(getattr(signal, "adx_1h", None)),
+        volume_ratio=_optional_float(getattr(signal, "volume_ratio", None)),
+        oi_change_pct=_optional_float(getattr(signal, "oi_change_pct", None)),
+        funding_rate=_optional_float(getattr(signal, "funding_rate", None)),
+        orderflow_delta_ratio=_optional_float(getattr(signal, "orderflow_delta_ratio", None)),
+        mark_price=_optional_float(getattr(signal, "mark_price", None)),
+        btc_bias=btc_bias or getattr(signal, "btc_bias", None),
+        eth_bias=eth_bias or getattr(signal, "eth_bias", None),
+        created_at=created_at,
+    )
+
+
+def market_context_lines(facts: SignalMessageFacts) -> list[str]:
+    """Build compact context lines for the signal."""
+    items: list[str] = []
+    if facts.atr_pct is not None:
+        items.append(f"ATR {facts.atr_pct:.2f}%")
+    if facts.spread_bps is not None:
+        items.append(f"spread {facts.spread_bps:.1f} bps")
+    if facts.adx_1h is not None:
+        items.append(f"ADX1h {facts.adx_1h:.1f}")
+    if facts.volume_ratio is not None:
+        items.append(f"vol {facts.volume_ratio:.2f}x")
+    if facts.oi_change_pct is not None:
+        items.append(f"OI {format_percent(facts.oi_change_pct, multiply=True, digits=2)}")
+    if facts.funding_rate is not None:
+        items.append(f"funding {format_percent(facts.funding_rate, multiply=True, digits=4)}")
+    if facts.orderflow_delta_ratio is not None:
+        items.append(f"flow {facts.orderflow_delta_ratio:.2f}")
+    if facts.btc_bias and facts.btc_bias != "neutral":
+        items.append(f"BTC {facts.btc_bias}")
+    return items
+
+
+def invalidation_text(facts: SignalMessageFacts) -> str:
+    """Return setup-specific invalidation text."""
+    return INVALIDATION_BY_SETUP.get(facts.setup_id, "stop zone is accepted by the market")
+
+
+def status_line_for_signal(facts: SignalMessageFacts) -> str:
+    """Return the entry waiting status line."""
+    remaining = minutes_until(facts.valid_until)
+    if remaining is None:
+        return "wait for entry while setup remains valid"
+    if remaining <= 0:
+        return "entry plan expired"
+    return f"wait for entry up to {remaining:.0f} min"
+
+
+def target_line(facts: SignalMessageFacts) -> str:
+    """Render target plan."""
+    tp3 = facts.take_profit_3 if facts.take_profit_3 is not None else facts.take_profit_2
+    same_tp = abs(facts.take_profit_2 - facts.take_profit_1) <= max(
+        abs(facts.take_profit_1), 1.0
+    ) * 1e-8
+    if same_tp:
+        return f"TP {code(format_price(facts.take_profit_1))}"
+    weights = [int(round(max(0.0, weight) * 100.0)) for weight in facts.scale_weights]
+    return (
+        f"TP1 {code(format_price(facts.take_profit_1))} "
+        f"TP2 {code(format_price(facts.take_profit_2))} "
+        f"TP3 {code(format_price(tp3))} "
+        f"scale {code(f'{weights[0]}/{weights[1]}/{weights[2]}%')}"
+    )
+
+
+def validate_telegram_html(text: str, *, limit: int = TELEGRAM_TEXT_LIMIT) -> TelegramValidationReport:
+    """Validate the subset of Telegram HTML used by this formatter."""
+    issues: list[TelegramValidationIssue] = []
+    if len(text) > limit:
+        issues.append(
+            TelegramValidationIssue(
+                "error",
+                "message_too_long",
+                f"message has {len(text)} chars, Telegram limit is {limit}",
+            )
+        )
+    for match in re.finditer(r"<(/?)([a-zA-Z0-9-]+)(?:\\s+[^>]*)?>", text):
+        tag = match.group(2).lower()
+        if tag not in ALLOWED_HTML_TAGS:
+            issues.append(
+                TelegramValidationIssue(
+                    "error",
+                    "unsupported_tag",
+                    f"unsupported Telegram HTML tag: {tag}",
+                    match.start(),
+                )
+            )
+    raw_entity = re.search(r"&(?!amp;|lt;|gt;|quot;|#\\d+;|#x[0-9A-Fa-f]+;)", text)
+    if raw_entity:
+        issues.append(
+            TelegramValidationIssue(
+                "warning",
+                "raw_ampersand",
+                "raw ampersand may break Telegram HTML parsing",
+                raw_entity.start(),
+            )
+        )
+    return TelegramValidationReport(
+        ok=not any(issue.severity == "error" for issue in issues),
+        length=len(text),
+        issues=tuple(issues),
+    )
+
+
+def truncate_preserving_footer(text: str, *, limit: int = TELEGRAM_SAFE_TEXT_LIMIT) -> str:
+    """Trim a Telegram message while preserving the signal-only footer."""
+    if len(text) <= limit:
+        return text
+    footer = "\n<i>Signal-only analytics. No auto-trading.</i>"
+    room = max(100, limit - len(footer) - 12)
+    return text[:room].rstrip() + "\n...\n" + footer
+
+
+def format_signal_message(
+    signal: Any,
+    *,
+    pending_expiry_minutes: int,
+    btc_bias: str | None = None,
+    eth_bias: str | None = None,
+    policy: TelegramFormatPolicy | None = None,
+) -> str:
+    """Render the main Telegram signal message."""
+    policy = policy or TelegramFormatPolicy()
+    facts = extract_signal_facts(
+        signal,
+        pending_expiry_minutes=pending_expiry_minutes,
+        btc_bias=btc_bias,
+        eth_bias=eth_bias,
+    )
+    direction = direction_label(facts.direction)
+    entry = f"{format_price(facts.entry_low)} - {format_price(facts.entry_high)}"
+    reasons = compact_reason_list(facts.reasons, limit=policy.include_reason_limit)
+    filters = compact_reason_list(facts.passed_filters, limit=policy.include_filter_limit)
+    context = market_context_lines(facts)
+
+    lines = [
+        f"{bold('SIGNAL-ONLY PLAN')} {code(facts.symbol)} {code(direction)} {code('#' + facts.tracking_ref)}",
+        (
+            f"{bold(setup_label(facts.setup_id))} {code(facts.timeframe)} | "
+            f"score {code(format_score(facts.score))} {escape_text(confidence_label(facts.score))}"
+        ),
+        f"{bold('Entry zone')} {code(entry)}",
+        f"{bold('Stop')} {code(format_price(facts.stop))}",
+        f"{bold('Targets')} {target_line(facts)}",
+        (
+            f"{bold('Risk')} RR {code(f'{facts.risk_reward:.2f}')} | "
+            f"stop {code(f'{facts.stop_distance_pct:.2f}%')}"
+        ),
+        f"{bold('TTL')} {code(format_datetime(facts.valid_until))} - {escape_text(status_line_for_signal(facts))}",
+    ]
+    if reasons:
+        lines.append(f"{bold('Why')} " + "; ".join(escape_text(item) for item in reasons))
+    if context:
+        lines.append(f"{bold('Context')} {code(' | '.join(context))}")
+    if filters and not policy.compact:
+        lines.append(f"{bold('Filters')} " + "; ".join(escape_text(item) for item in filters))
+    lines.append(f"{bold('Invalidation')} {escape_text(invalidation_text(facts))}")
+    if policy.include_chart_link:
+        chart = html.escape(tradingview_chart_url(facts.symbol, facts.timeframe), quote=True)
+        lines.append(f'{bold("Chart")} <a href="{chart}">TradingView</a>')
+    if policy.include_disclaimer:
+        lines.append("<i>Signal-only analytics. No auto-trading.</i>")
+    rendered = "\n".join(lines)
+    return truncate_preserving_footer(rendered, limit=policy.text_limit)
+
+
+def tracking_status_text(state: Any) -> str:
+    """Render the state line for tracked signal cards."""
+    close_reason = getattr(state, "close_reason", None)
+    closed_at = getattr(state, "closed_at", None)
+    close_price = getattr(state, "close_price", None)
+    activated_at = getattr(state, "activated_at", None)
+    activation_price = getattr(state, "activation_price", None)
+    pending_expires_at = getattr(state, "pending_expires_at", None)
+    if close_reason:
+        return (
+            f"{str(close_reason).replace('_', ' ')} at "
+            f"{format_price(_optional_float(close_price))} on {format_datetime(closed_at)}"
+        )
+    if activated_at:
+        return f"active from {format_datetime(activated_at)} at {format_price(_optional_float(activation_price))}"
+    return f"pending until {format_datetime(pending_expires_at)}"
+
+
+def format_tracked_signal_message(tracked: Any) -> str:
+    """Render an editable tracked signal card."""
+    state = getattr(tracked, "tracked", tracked)
+    facts = extract_signal_facts(state, pending_expiry_minutes=None)
+    lines = [
+        f"{bold('SIGNAL STATUS')} {code(facts.symbol)} {code(direction_label(facts.direction))} {code('#' + facts.tracking_ref)}",
+        f"{bold(setup_label(facts.setup_id))} {code(facts.timeframe)} | score {code(format_score(facts.score))}",
+        f"{bold('Entry')} {code(format_price(facts.entry_low) + ' - ' + format_price(facts.entry_high))}",
+        f"{bold('Stop')} {code(format_price(facts.stop))}",
+        f"{bold('Targets')} {target_line(facts)}",
+        f"{bold('Status')} {escape_text(tracking_status_text(state))}",
+        "<i>Signal-only analytics. No auto-trading.</i>",
+    ]
+    return truncate_preserving_footer("\n".join(lines))
+
+
+def format_tracking_event_message(event: Any) -> str:
+    """Render a tracking follow-up message."""
+    tracked = getattr(event, "tracked", None)
+    if tracked is None:
+        return "<b>Signal tracking update</b>\n<i>Signal-only analytics. No auto-trading.</i>"
+    event_type = str(getattr(event, "event_type", "update"))
+    title = TRACKING_TITLES.get(event_type, event_type.replace("_", " ").upper())
+    price = _optional_float(getattr(event, "event_price", None))
+    note = str(getattr(event, "note", "") or "").strip()
+    lines = [
+        f"{bold(title)} {code(getattr(tracked, 'symbol', ''))} {code(direction_label(getattr(tracked, 'direction', 'long')))} {code('#' + str(getattr(tracked, 'tracking_ref', '')))}",
+        f"{bold('Time')} {code(format_datetime(getattr(event, 'occurred_at', None)))}",
+        f"{bold('Price')} {code(format_price(price))}",
+        f"{bold('Plan')} entry {code(format_price(_optional_float(getattr(tracked, 'entry_low', None))) + ' - ' + format_price(_optional_float(getattr(tracked, 'entry_high', None))))} | stop {code(format_price(_optional_float(getattr(tracked, 'stop', None))))}",
+    ]
+    if note:
+        lines.append(f"{bold('Note')} {escape_text(note)}")
+    lines.append("<i>Signal-only analytics. No auto-trading.</i>")
+    return truncate_preserving_footer("\n".join(lines))
+
+
+def format_analytics_companion_message(
+    signal: Any,
+    *,
+    btc_bias: str | None = None,
+    eth_bias: str | None = None,
+    policy: TelegramFormatPolicy | None = None,
+) -> str:
+    """Render optional explanatory companion text."""
+    policy = policy or TelegramFormatPolicy(text_limit=1800, compact=True)
+    facts = extract_signal_facts(
+        signal,
+        pending_expiry_minutes=None,
+        btc_bias=btc_bias,
+        eth_bias=eth_bias,
+    )
+    reasons = compact_reason_list(facts.reasons, limit=8)
+    lines = [
+        f"{bold('WHY THIS SIGNAL')} {code(facts.symbol)} {code(direction_label(facts.direction))}",
+        f"{bold('Setup')} {escape_text(setup_label(facts.setup_id))}",
+    ]
+    if reasons:
+        for idx, reason in enumerate(reasons, start=1):
+            lines.append(f"{idx}. {escape_text(reason)}")
+    context = market_context_lines(facts)
+    if context:
+        lines.append(f"{bold('Market context')} {code(' | '.join(context))}")
+    lines.append(f"{bold('Invalidation')} {escape_text(invalidation_text(facts))}")
+    lines.append("<i>Signal-only analytics. No auto-trading.</i>")
+    return truncate_preserving_footer("\n".join(lines), limit=policy.text_limit)
+
+
+def message_preview(text: str, *, max_lines: int = 12) -> dict[str, Any]:
+    """Return dashboard-friendly preview metadata for a rendered message."""
+    plain = re.sub(r"<[^>]+>", "", text)
+    plain = html.unescape(plain)
+    lines = [line for line in plain.splitlines() if line.strip()]
+    report = validate_telegram_html(text)
+    return {
+        "parse_mode": TELEGRAM_PARSE_MODE,
+        "chars": len(text),
+        "ok": report.ok,
+        "errors": [issue.message for issue in report.issues if issue.severity == "error"],
+        "warnings": [
+            issue.message for issue in report.issues if issue.severity == "warning"
+        ],
+        "preview_lines": lines[:max_lines],
+        "plain_preview": "\n".join(lines[:max_lines]),
+    }
+
+
+def sample_message_from_row(row: Mapping[str, Any]) -> str:
+    """Render a Telegram preview from a telemetry row."""
+    class RowSignal:
+        pass
+
+    signal = RowSignal()
+    for key, value in row.items():
+        setattr(signal, key, value)
+    if not hasattr(signal, "entry_low"):
+        setattr(signal, "entry_low", row.get("entry_price") or row.get("entry_mid") or 0.0)
+    if not hasattr(signal, "entry_high"):
+        setattr(signal, "entry_high", row.get("entry_price") or row.get("entry_mid") or 0.0)
+    if not hasattr(signal, "stop"):
+        setattr(signal, "stop", row.get("stop_price") or row.get("stop_loss") or 0.0)
+    if not hasattr(signal, "take_profit_1"):
+        setattr(signal, "take_profit_1", row.get("tp1_price") or row.get("tp1") or 0.0)
+    if not hasattr(signal, "take_profit_2"):
+        setattr(signal, "take_profit_2", row.get("tp2_price") or row.get("tp2") or 0.0)
+    if not hasattr(signal, "timeframe"):
+        setattr(signal, "timeframe", row.get("timeframe") or "15m")
+    if not hasattr(signal, "tracking_ref"):
+        setattr(signal, "tracking_ref", row.get("tracking_ref") or "preview")
+    if not hasattr(signal, "created_at"):
+        setattr(signal, "created_at", row.get("ts") or datetime.now(UTC))
+    return format_signal_message(signal, pending_expiry_minutes=180)
+
+
+def diagnostic_format_matrix(signal: Any) -> dict[str, Any]:
+    """Return all delivery renderings for live diagnostics."""
+    main = format_signal_message(signal, pending_expiry_minutes=180)
+    companion = format_analytics_companion_message(signal)
+    return {
+        "main": message_preview(main),
+        "companion": message_preview(companion),
+        "main_html": main,
+        "companion_html": companion,
+    }
+

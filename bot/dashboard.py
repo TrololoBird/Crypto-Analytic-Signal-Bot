@@ -12,6 +12,10 @@ import time
 from pathlib import Path
 from typing import Any, TYPE_CHECKING, cast
 
+from .dashboard_live import DashboardLiveData
+from .dashboard_ui import dashboard_html
+from .live_audit import audit_snapshot, build_dashboard_audit_snapshot
+
 UTC = timezone.utc
 
 if TYPE_CHECKING:
@@ -45,6 +49,7 @@ class BotDashboard:
         self._decision_cache: dict[
             tuple[int, int], tuple[float, tuple[tuple[str, float], ...], dict[str, Any]]
         ] = {}
+        self._live_data = DashboardLiveData(lambda: self.bot)
 
         if not self._enabled:
             LOG.info("fastapi not installed, dashboard disabled")
@@ -162,11 +167,16 @@ class BotDashboard:
                 since=since,
                 scope=normalized_scope,
             )
-            decision_summary = await asyncio.to_thread(
-                self._get_strategy_decision_summary,
-                limit_files=1,
-                max_rows=50_000,
-            )
+            try:
+                decision_summary = await asyncio.to_thread(
+                    self._get_strategy_decision_summary,
+                    limit_files=1,
+                    max_rows=50_000,
+                )
+            except RuntimeError as exc:
+                if "shutdown" in str(exc).lower():
+                    return {"error": "Server is shutting down"}
+                raise
             merged = self._merge_strategy_catalog(report, decision_summary=decision_summary)
 
             self._analytics_cache[cache_key] = (now, merged)
@@ -183,6 +193,10 @@ class BotDashboard:
                     limit_files=limit_files,
                     max_rows=max_rows,
                 )
+            except RuntimeError as exc:
+                if "shutdown" in str(exc).lower():
+                    return {"error": "Server is shutting down"}
+                raise
             except Exception as exc:
                 LOG.error("dashboard api strategy decisions error: %s", exc)
                 return {"error": "strategy_decisions_unavailable", "detail": str(exc)}
@@ -197,6 +211,150 @@ class BotDashboard:
             except Exception as exc:
                 LOG.error("dashboard api strategies error: %s", exc)
                 return []
+
+        @self.app.get("/api/live/overview")
+        async def live_overview() -> dict[str, Any]:
+            try:
+                return await asyncio.to_thread(self._live_data.overview)
+            except RuntimeError as exc:
+                if "shutdown" in str(exc).lower():
+                    return {"error": "Server is shutting down"}
+                raise
+            except Exception as exc:
+                LOG.exception("dashboard live overview error")
+                return {"error": "live_overview_unavailable", "detail": str(exc)}
+
+        @self.app.get("/api/live/funnel")
+        async def live_funnel(max_rows: int = 100_000) -> dict[str, Any]:
+            try:
+                max_rows = max(1_000, min(int(max_rows), 250_000))
+                return await asyncio.to_thread(self._live_data.funnel, max_rows=max_rows)
+            except RuntimeError as exc:
+                if "shutdown" in str(exc).lower():
+                    return {"error": "Server is shutting down"}
+                raise
+            except Exception as exc:
+                LOG.exception("dashboard live funnel error")
+                return {"error": "live_funnel_unavailable", "detail": str(exc)}
+
+        @self.app.get("/api/live/shortlist")
+        async def live_shortlist(limit: int = 80) -> dict[str, Any]:
+            try:
+                limit = max(1, min(int(limit), 200))
+                return await asyncio.to_thread(self._live_data.shortlist, limit=limit)
+            except RuntimeError as exc:
+                if "shutdown" in str(exc).lower():
+                    return {"error": "Server is shutting down"}
+                raise
+            except Exception as exc:
+                LOG.exception("dashboard live shortlist error")
+                return {"error": "live_shortlist_unavailable", "detail": str(exc)}
+
+        @self.app.get("/api/live/rejections")
+        async def live_rejections(
+            limit: int = 30,
+            max_rows: int = 100_000,
+        ) -> dict[str, Any]:
+            try:
+                limit = max(1, min(int(limit), 100))
+                max_rows = max(1_000, min(int(max_rows), 250_000))
+                return await asyncio.to_thread(
+                    self._live_data.rejections,
+                    limit=limit,
+                    max_rows=max_rows,
+                )
+            except RuntimeError as exc:
+                if "shutdown" in str(exc).lower():
+                    return {"error": "Server is shutting down"}
+                raise
+            except Exception as exc:
+                LOG.exception("dashboard live rejections error")
+                return {"error": "live_rejections_unavailable", "detail": str(exc)}
+
+        @self.app.get("/api/live/decisions")
+        async def live_decisions(
+            limit: int = 40,
+            max_rows: int = 100_000,
+        ) -> dict[str, Any]:
+            try:
+                limit = max(1, min(int(limit), 100))
+                max_rows = max(1_000, min(int(max_rows), 250_000))
+                return await asyncio.to_thread(
+                    self._live_data.decisions,
+                    limit=limit,
+                    max_rows=max_rows,
+                )
+            except RuntimeError as exc:
+                if "shutdown" in str(exc).lower():
+                    return {"error": "Server is shutting down"}
+                raise
+            except Exception as exc:
+                LOG.exception("dashboard live decisions error")
+                return {"error": "live_decisions_unavailable", "detail": str(exc)}
+
+        @self.app.get("/api/live/runtime")
+        async def live_runtime() -> dict[str, Any]:
+            try:
+                return await asyncio.to_thread(self._live_data.runtime)
+            except RuntimeError as exc:
+                if "shutdown" in str(exc).lower():
+                    return {"error": "Server is shutting down"}
+                raise
+            except Exception as exc:
+                LOG.exception("dashboard live runtime error")
+                return {"error": "live_runtime_unavailable", "detail": str(exc)}
+
+        @self.app.get("/api/live/delivery")
+        async def live_delivery(limit: int = 25) -> dict[str, Any]:
+            try:
+                limit = max(1, min(int(limit), 100))
+                return await asyncio.to_thread(self._live_data.delivery, limit=limit)
+            except RuntimeError as exc:
+                if "shutdown" in str(exc).lower():
+                    return {"error": "Server is shutting down"}
+                raise
+            except Exception as exc:
+                LOG.exception("dashboard live delivery error")
+                return {"error": "live_delivery_unavailable", "detail": str(exc)}
+
+        @self.app.get("/api/live/telegram-preview")
+        async def live_telegram_preview() -> dict[str, Any]:
+            try:
+                return await asyncio.to_thread(self._live_data.telegram_preview)
+            except RuntimeError as exc:
+                if "shutdown" in str(exc).lower():
+                    return {"error": "Server is shutting down"}
+                raise
+            except Exception as exc:
+                LOG.exception("dashboard live telegram preview error")
+                return {"error": "live_telegram_preview_unavailable", "detail": str(exc)}
+
+        @self.app.get("/api/live/audit")
+        async def live_audit(max_rows: int = 20_000) -> dict[str, Any]:
+            try:
+                max_rows = max(1_000, min(int(max_rows), 50_000))
+
+                def _build() -> dict[str, Any]:
+                    snapshot = build_dashboard_audit_snapshot(
+                        overview=self._live_data.overview(),
+                        funnel=self._live_data.funnel(max_rows=max_rows),
+                        shortlist=self._live_data.shortlist(),
+                        decisions=self._live_data.decisions(max_rows=max_rows),
+                        rejections=self._live_data.rejections(max_rows=max_rows),
+                        delivery=self._live_data.delivery(),
+                        runtime=self._live_data.runtime(),
+                        telegram=self._live_data.telegram_preview(),
+                    )
+                    return audit_snapshot(snapshot)
+
+                return await asyncio.to_thread(_build)
+            except RuntimeError as exc:
+                if "shutdown" in str(exc).lower():
+                    return {"error": "Server is shutting down"}
+                raise
+            except Exception as exc:
+                LOG.exception("dashboard live audit error")
+                return {"error": "live_audit_unavailable", "detail": str(exc)}
 
     def _cache_strategies(self) -> None:
         """Pre-load and cache strategies at startup."""
@@ -336,7 +494,7 @@ class BotDashboard:
         return report
 
     def _get_html_dashboard(self) -> str:
-        return DASHBOARD_HTML
+        return dashboard_html()
 
     def _current_run_id(self) -> str | None:
         telemetry = getattr(self.bot, "telemetry", None)
@@ -512,7 +670,30 @@ class BotDashboard:
 
         candidates_file = self._latest_analysis_file(telemetry_dir, "candidates.jsonl")
         candidates = self._read_recent_jsonl(candidates_file, limit=limit * 80)
-        return self._aggregate_recent_candidates(candidates, limit=limit)
+        aggregated = self._aggregate_recent_candidates(candidates, limit=limit)
+        if aggregated:
+            return aggregated
+
+        decisions = self._live_data.decisions(limit=max(limit, 20), max_rows=50_000)
+        rows: list[dict[str, Any]] = []
+        for row in decisions.get("setup_reports", []):
+            if int(row.get("signals") or 0) <= 0:
+                continue
+            rows.append(
+                {
+                    "symbol": "multi-symbol",
+                    "setup_id": row.get("setup_id"),
+                    "direction": "mixed",
+                    "score": row.get("signal_rate"),
+                    "source": "strategy_decisions",
+                    "delivery_status": "raw_detector_signal",
+                    "confluence_count": row.get("signals"),
+                    "ts": decisions.get("generated_at"),
+                }
+            )
+            if len(rows) >= limit:
+                break
+        return rows
 
     def _read_recent_jsonl(self, path: Path | None, *, limit: int) -> list[dict[str, Any]]:
         if path is None or limit <= 0:
