@@ -130,16 +130,22 @@ class WinRateCalculator:
 
         # Count results
         results = df["result"].value_counts()
-        for row in results.iter_rows(named=True):
-            result_type = row["result"]
-            count = row["count"]
-
-            if result_type == "win":
-                metrics.wins = count
-            elif result_type == "loss":
-                metrics.losses = count
-            else:
-                metrics.breakeven = count
+        counts_by_result = dict(
+            zip(
+                results["result"].to_list(),
+                results["count"].to_list(),
+                strict=False,
+            )
+        )
+        metrics.wins = int(counts_by_result.get("win", 0) or 0)
+        metrics.losses = int(counts_by_result.get("loss", 0) or 0)
+        metrics.breakeven = int(
+            sum(
+                int(count or 0)
+                for result_type, count in counts_by_result.items()
+                if result_type not in {"win", "loss"}
+            )
+        )
 
         # Calculate rates
         closed = metrics.wins + metrics.losses + metrics.breakeven

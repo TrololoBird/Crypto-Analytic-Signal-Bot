@@ -159,18 +159,40 @@ class SignalEngine:
                     )
             strategies = routed
         scheduled: list[Any] = []
-        schedule_skips = 0
+        schedule_skip_results: list[SignalResult] = []
         for strategy in strategies:
             if self._strategy_is_active_for_symbol(strategy, prepared):
                 scheduled.append(strategy)
             else:
-                schedule_skips += 1
-        if schedule_skips:
+                decision = StrategyDecision.skip(
+                    setup_id=strategy.strategy_id,
+                    reason_code="runtime.strategy_schedule_inactive",
+                    details={
+                        "symbol": symbol,
+                        "strategy_id": strategy.strategy_id,
+                    },
+                )
+                schedule_skip_results.append(
+                    SignalResult(
+                        setup_id=strategy.strategy_id,
+                        signal=None,
+                        decision=decision,
+                        metadata={
+                            "setup_id": strategy.strategy_id,
+                            "reason": decision.reason_code,
+                            "queue_wait_ms": 0.0,
+                            "compute_ms": 0.0,
+                        },
+                        calculation_time_ms=0.0,
+                    )
+                )
+        if schedule_skip_results:
             LOG.debug(
                 "%s: strategy schedule skipped without detector telemetry | skipped=%d",
                 symbol,
-                schedule_skips,
+                len(schedule_skip_results),
             )
+            routing_skips.extend(schedule_skip_results)
         strategies = scheduled
         LOG.info("%s: calculate_all called | strategies=%d", symbol, len(strategies))
 

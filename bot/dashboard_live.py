@@ -19,6 +19,14 @@ from .telegram_formatter import message_preview, sample_message_from_row
 
 
 JsonDict = dict[str, Any]
+PRIORITY_ASSET_SYMBOLS = (
+    "BTCUSDT",
+    "ETHUSDT",
+    "SOLUSDT",
+    "XAUUSDT",
+    "XAGUSDT",
+    "PAXGUSDT",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,6 +158,23 @@ class DashboardLiveData:
 
     def _settings(self) -> Any | None:
         return getattr(self._bot(), "settings", None)
+
+    def _priority_symbols(self) -> list[str]:
+        settings = self._settings()
+        symbols = {symbol.upper() for symbol in PRIORITY_ASSET_SYMBOLS}
+        universe = getattr(settings, "universe", None)
+        if universe is not None:
+            symbols.update(
+                str(symbol).strip().upper()
+                for symbol in getattr(universe, "pinned_symbols", ()) or ()
+                if str(symbol).strip()
+            )
+        assets = getattr(settings, "assets", {}) or {}
+        if isinstance(assets, dict):
+            for symbol, config in assets.items():
+                if bool(getattr(config, "deep_analysis", False)):
+                    symbols.add(str(symbol).strip().upper())
+        return sorted(symbols)
 
     def _telemetry_dir(self) -> Path | None:
         settings = self._settings()
@@ -334,6 +359,7 @@ class DashboardLiveData:
             str(symbol).strip().upper()
             for symbol in getattr(getattr(bot, "settings", None), "universe", object()).pinned_symbols
         } if getattr(getattr(bot, "settings", None), "universe", None) is not None else set()
+        priority_symbols = set(self._priority_symbols())
         items = []
         for item in list(getattr(bot, "_shortlist", []) or [])[: max(1, int(limit))]:
             symbol = str(getattr(item, "symbol", ""))
@@ -348,23 +374,92 @@ class DashboardLiveData:
                     "strategy_fit_count": len(getattr(item, "strategy_fits", ()) or ()),
                     "strategy_fits": list(getattr(item, "strategy_fits", ()) or ())[:12],
                     "pinned": symbol.upper() in pinned,
+                    "priority": symbol.upper() in priority_symbols,
                 }
             )
         telemetry_rows = list(self._iter_recent("shortlist", max_rows=50, limit_files=1))
         latest = telemetry_rows[0] if telemetry_rows else {}
         fit_counts = [row["strategy_fit_count"] for row in items]
+        item_by_symbol = {str(item["symbol"]).upper(): item for item in items}
+        telemetry_symbols = {
+            str(symbol).upper()
+            for symbol in (latest.get("symbols") or [])
+            if str(symbol).strip()
+        }
+        priority_activity = self._priority_activity(priority_symbols)
+        priority_rows = []
+        for rank, symbol in enumerate(sorted(priority_symbols), start=1):
+            item = item_by_symbol.get(symbol)
+            priority_rows.append(
+                {
+                    "symbol": symbol,
+                    "rank": rank,
+                    "in_memory": item is not None,
+                    "in_latest_telemetry": symbol in telemetry_symbols,
+                    "score": item.get("score") if item else None,
+                    "bucket": item.get("bucket") if item else None,
+                    "source": item.get("source") if item else None,
+                    "strategy_fit_count": item.get("strategy_fit_count") if item else 0,
+                    **priority_activity.get(symbol, {}),
+                }
+            )
         return {
             "run_id": self._preferred_run_id(),
             "source": getattr(bot, "_shortlist_source", latest.get("source", "unknown")),
             "total": len(items),
             "pinned": sum(1 for item in items if item["pinned"]),
+            "priority_total": len(priority_rows),
+            "priority_in_memory": sum(1 for item in priority_rows if item["in_memory"]),
+            "priority_in_telemetry": sum(
+                1 for item in priority_rows if item["in_latest_telemetry"]
+            ),
+            "priority_missing": [
+                item["symbol"] for item in priority_rows if not item["in_latest_telemetry"]
+            ],
             "dynamic": sum(1 for item in items if not item["pinned"]),
             "zero_fit": sum(1 for count in fit_counts if count == 0),
             "avg_fit": round(sum(fit_counts) / max(len(fit_counts), 1), 2),
             "latest_telemetry": latest,
             "telemetry_tail": telemetry_rows[:10],
+            "priority_assets": priority_rows,
             "items": items,
         }
+
+    def _priority_activity(self, symbols: set[str]) -> dict[str, JsonDict]:
+        if not symbols:
+            return {}
+        activity: dict[str, JsonDict] = {
+            symbol: {
+                "decision_rows": 0,
+                "candidate_rows": 0,
+                "selected_rows": 0,
+                "delivery_rows": 0,
+                "rejected_rows": 0,
+                "top_rejection": None,
+            }
+            for symbol in symbols
+        }
+        rejection_reasons: dict[str, Counter[str]] = {symbol: Counter() for symbol in symbols}
+        for stem, key, max_rows in (
+            ("strategy_decisions", "decision_rows", 50_000),
+            ("candidates", "candidate_rows", 20_000),
+            ("selected", "selected_rows", 10_000),
+            ("delivery", "delivery_rows", 10_000),
+            ("rejected", "rejected_rows", 50_000),
+        ):
+            for row in self._iter_recent(stem, max_rows=max_rows, limit_files=2):
+                symbol = str(row.get("symbol") or "").strip().upper()
+                if symbol not in activity:
+                    continue
+                activity[symbol][key] = int(activity[symbol].get(key, 0) or 0) + 1
+                if stem == "rejected":
+                    reason = str(row.get("reason") or "unknown")
+                    rejection_reasons[symbol][reason] += 1
+        for symbol, counter in rejection_reasons.items():
+            if counter:
+                reason, count = counter.most_common(1)[0]
+                activity[symbol]["top_rejection"] = {"reason": reason, "count": count}
+        return activity
 
     def _rejections_uncached(self, *, limit: int, max_rows: int) -> JsonDict:
         reasons: Counter[str] = Counter()

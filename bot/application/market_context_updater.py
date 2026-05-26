@@ -189,6 +189,7 @@ class MarketContextUpdater:
                         "SOLUSDT",
                         "XAUUSDT",
                         "XAGUSDT",
+                        "PAXGUSDT",
                     ]
                 )
             )

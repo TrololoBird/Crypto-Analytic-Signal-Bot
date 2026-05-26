@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from collections import Counter
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -61,6 +62,146 @@ class DeliveryOrchestrator:
     @staticmethod
     def _contract_issue_rows(signal: Signal) -> list[dict[str, object]]:
         return [issue.to_dict() for issue in validate_signal_contract(signal)]
+
+    @staticmethod
+    def _latest_float(frame: Any, column: str) -> float | None:
+        if frame is None or frame.is_empty() or column not in frame.columns:
+            return None
+        try:
+            raw = frame.item(-1, column)
+            value = float(raw) if raw is not None else None
+        except (IndexError, TypeError, ValueError):
+            return None
+        return value if value is not None and math.isfinite(value) else None
+
+    @staticmethod
+    def _tail_mean(frame: Any, column: str, window: int) -> float | None:
+        if frame is None or frame.is_empty() or column not in frame.columns:
+            return None
+        values: list[float] = []
+        for raw in frame[column].tail(max(1, int(window))).to_list():
+            try:
+                value = float(raw) if raw is not None else math.nan
+            except (TypeError, ValueError):
+                value = math.nan
+            if math.isfinite(value):
+                values.append(value)
+        if not values:
+            return None
+        return sum(values) / len(values)
+
+    @staticmethod
+    def _direction(signal: Signal) -> str:
+        return str(signal.direction or "").strip().lower()
+
+    @classmethod
+    def _hard_confluence_gate(
+        cls,
+        signal: Signal,
+        prepared: PreparedSymbol | None,
+    ) -> tuple[bool, dict[str, bool], dict[str, object]]:
+        """Require at least 3 independent confirmations before delivery."""
+        if prepared is None:
+            return (
+                False,
+                {
+                    "trend": False,
+                    "momentum": False,
+                    "volume": False,
+                    "htf": False,
+                    "microstructure": False,
+                },
+                {"reason": "prepared_context_missing"},
+            )
+
+        primary = getattr(prepared, "work_primary", None)
+        if primary is None:
+            primary = prepared.work_15m
+        direction = cls._direction(signal)
+        close = cls._latest_float(primary, "close")
+        ema20 = cls._latest_float(primary, "ema20")
+        ema50 = cls._latest_float(primary, "ema50")
+        rsi = cls._latest_float(primary, "rsi14")
+        volume = cls._latest_float(primary, "volume")
+        volume_avg = cls._tail_mean(primary, "volume", 20)
+
+        trend = False
+        if None not in (close, ema20, ema50):
+            if direction == "long":
+                trend = bool(close > ema20 > ema50)
+            elif direction == "short":
+                trend = bool(close < ema20 < ema50)
+
+        momentum = False
+        if rsi is not None:
+            if direction == "long":
+                momentum = 30.0 < rsi < 65.0
+            elif direction == "short":
+                momentum = 35.0 < rsi < 70.0
+
+        volume_ok = bool(
+            volume is not None
+            and volume_avg is not None
+            and volume_avg > 0.0
+            and volume > volume_avg * 1.2
+        )
+
+        regime_1h = str(
+            getattr(prepared, "regime_1h_confirmed", None)
+            or getattr(prepared, "bias_1h", None)
+            or "neutral"
+        ).lower()
+        regime_4h = str(
+            getattr(prepared, "regime_4h_confirmed", None)
+            or getattr(prepared, "bias_4h", None)
+            or "neutral"
+        ).lower()
+        htf = True
+        if direction == "long":
+            htf = regime_1h != "downtrend" and regime_4h != "downtrend"
+        elif direction == "short":
+            htf = regime_1h != "uptrend" and regime_4h != "uptrend"
+        else:
+            htf = False
+
+        funding = getattr(prepared, "funding_rate", None)
+        oi_change = getattr(prepared, "oi_change_pct", None)
+        try:
+            funding_value = float(funding) if funding is not None else 0.0
+        except (TypeError, ValueError):
+            funding_value = 0.0
+        try:
+            oi_value = float(oi_change) if oi_change is not None else 0.0
+        except (TypeError, ValueError):
+            oi_value = 0.0
+        if not math.isfinite(funding_value):
+            funding_value = 0.0
+        if not math.isfinite(oi_value):
+            oi_value = 0.0
+        microstructure = abs(funding_value) < 0.001 and abs(oi_value) < 12.0
+
+        confirmations = {
+            "trend": trend,
+            "momentum": momentum,
+            "volume": volume_ok,
+            "htf": htf,
+            "microstructure": microstructure,
+        }
+        details: dict[str, object] = {
+            "confirmed": sum(confirmations.values()),
+            "required": 3,
+            "close": close,
+            "ema20": ema20,
+            "ema50": ema50,
+            "rsi14": rsi,
+            "volume": volume,
+            "volume_mean20": volume_avg,
+            "regime_1h": regime_1h,
+            "regime_4h": regime_4h,
+            "funding_rate": funding_value,
+            "oi_change_pct": oi_value,
+        }
+        return sum(confirmations.values()) >= 3, confirmations, details
 
     def _record_delivery_attempt(
         self,
@@ -238,9 +379,16 @@ class DeliveryOrchestrator:
         rejected_rows: list[dict[str, Any]] = []
         queued_symbol_direction: set[str] = set()
         queued_setup_ids: set[str] = set()
+        contract_validated_tracking_ids: set[str] = set()
+        confluence_passed_tracking_ids: set[str] = set()
 
         for signal in signals:
             contract_issues = self._contract_issue_rows(signal)
+            contract_validated_tracking_ids.add(signal.tracking_id)
+            if signal.tracking_id not in contract_validated_tracking_ids:
+                raise ValueError(
+                    f"signal_contract validation was bypassed for {signal.tracking_id}"
+                )
             if contract_issues:
                 rejected_rows.append(
                     {
@@ -261,6 +409,35 @@ class DeliveryOrchestrator:
                     contract_issues,
                 )
                 continue
+            prepared = (
+                prepared_by_tracking_id.get(signal.tracking_id)
+                if prepared_by_tracking_id
+                else None
+            )
+            gate_passed, confirmations, gate_details = self._hard_confluence_gate(signal, prepared)
+            if not gate_passed:
+                rejected_rows.append(
+                    {
+                        "ts": datetime.now(UTC).isoformat(),
+                        "symbol": signal.symbol,
+                        "setup_id": signal.setup_id,
+                        "direction": signal.direction,
+                        "stage": "confluence",
+                        "reason": "hard_confluence_gate_failed",
+                        "confirmations": confirmations,
+                        "details": gate_details,
+                    }
+                )
+                LOG.info(
+                    "Signal rejected by hard confluence gate | symbol=%s setup=%s direction=%s confirmations=%s details=%s",
+                    signal.symbol,
+                    signal.setup_id,
+                    signal.direction,
+                    confirmations,
+                    gate_details,
+                )
+                continue
+            confluence_passed_tracking_ids.add(signal.tracking_id)
             if signal.setup_id in queued_setup_ids:
                 rejected_rows.append(
                     {
@@ -329,6 +506,14 @@ class DeliveryOrchestrator:
                     closed = await self.close_superseded_signal(signal)
                     if closed:
                         await self.deliver_tracking(closed)
+                    if signal.tracking_id not in contract_validated_tracking_ids:
+                        raise ValueError(
+                            f"signal_contract validation was bypassed for {signal.tracking_id}"
+                        )
+                    if signal.tracking_id not in confluence_passed_tracking_ids:
+                        raise ValueError(
+                            f"hard confluence gate was bypassed for {signal.tracking_id}"
+                        )
                     ready_to_send.append(signal)
                     queued_setup_ids.add(signal.setup_id)
                     queued_symbol_direction.add(self._symbol_direction_cooldown_key(signal))
@@ -412,6 +597,12 @@ class DeliveryOrchestrator:
             if not is_cooldown_active:
                 if self._quality_monitor_rejects(signal, rejected_rows):
                     continue
+                if signal.tracking_id not in contract_validated_tracking_ids:
+                    raise ValueError(
+                        f"signal_contract validation was bypassed for {signal.tracking_id}"
+                    )
+                if signal.tracking_id not in confluence_passed_tracking_ids:
+                    raise ValueError(f"hard confluence gate was bypassed for {signal.tracking_id}")
                 ready_to_send.append(signal)
                 queued_setup_ids.add(signal.setup_id)
                 queued_symbol_direction.add(symbol_direction_key)
@@ -422,6 +613,12 @@ class DeliveryOrchestrator:
             closed = await self.close_superseded_signal(signal)
             if closed:
                 await self.deliver_tracking(closed)
+                if signal.tracking_id not in contract_validated_tracking_ids:
+                    raise ValueError(
+                        f"signal_contract validation was bypassed for {signal.tracking_id}"
+                    )
+                if signal.tracking_id not in confluence_passed_tracking_ids:
+                    raise ValueError(f"hard confluence gate was bypassed for {signal.tracking_id}")
                 ready_to_send.append(signal)
                 queued_setup_ids.add(signal.setup_id)
                 queued_symbol_direction.add(symbol_direction_key)
@@ -437,6 +634,9 @@ class DeliveryOrchestrator:
                     }
                 )
 
+        if not ready_to_send:
+            return [], rejected_rows, Counter()
+
         delivered: list[Signal] = []
         delivery_status_counts: Counter[str] = Counter()
 
@@ -445,6 +645,12 @@ class DeliveryOrchestrator:
         eth_bias = market_ctx.get("eth_bias", "neutral")
 
         for signal in ready_to_send:
+            if signal.tracking_id not in contract_validated_tracking_ids:
+                raise ValueError(
+                    f"signal_contract validation was bypassed for {signal.tracking_id}"
+                )
+            if signal.tracking_id not in confluence_passed_tracking_ids:
+                raise ValueError(f"hard confluence gate was bypassed for {signal.tracking_id}")
             ok, results = await self._bot._wait_noncritical(
                 label=f"deliver {signal.symbol}/{signal.setup_id}",
                 timeout=self._bot._delivery_timeout_seconds,

@@ -11,6 +11,15 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from ..secrets import load_secrets
 
+REQUIRED_PINNED_SYMBOLS: tuple[str, ...] = (
+    "BTCUSDT",
+    "ETHUSDT",
+    "SOLUSDT",
+    "XAUUSDT",
+    "XAGUSDT",
+    "PAXGUSDT",
+)
+
 
 class RuntimeConfig(BaseModel):
     analysis_concurrency: int = Field(default=6, ge=1, le=20)
@@ -75,13 +84,7 @@ class UniverseConfig(BaseModel):
     full_refresh_interval_seconds: int = Field(default=7200, ge=60, le=86_400)
     shortlist_spread_max_bps: float = Field(default=8.0, ge=0.5, le=100.0)
     shortlist_book_stale_seconds: float = Field(default=90.0, ge=5.0, le=3600.0)
-    pinned_symbols: tuple[str, ...] = (
-        "BTCUSDT",
-        "ETHUSDT",
-        "SOLUSDT",
-        "XAUUSDT",
-        "XAGUSDT",
-    )
+    pinned_symbols: tuple[str, ...] = REQUIRED_PINNED_SYMBOLS
 
     @field_validator("quote_asset")
     @classmethod
@@ -92,6 +95,18 @@ class UniverseConfig(BaseModel):
     @classmethod
     def _normalize_pins(cls, value: tuple[str, ...] | list[str] | None) -> tuple[str, ...]:
         return tuple(str(item).strip().upper() for item in (value or ()) if str(item).strip())
+
+    @model_validator(mode="after")
+    def _require_core_pinned_symbols(self) -> "UniverseConfig":
+        pinned = set(self.pinned_symbols)
+        missing = [symbol for symbol in REQUIRED_PINNED_SYMBOLS if symbol not in pinned]
+        if missing:
+            raise ValueError(
+                "universe.pinned_symbols must include required core symbols: "
+                + ", ".join(REQUIRED_PINNED_SYMBOLS)
+            )
+        assert "PAXGUSDT" in pinned
+        return self
 
 
 class AssetConfig(BaseModel):

@@ -1,0 +1,15 @@
+#!/bin/sh
+echo "Pre-push: syntax and safety checks"
+
+files=$(find . -name "*.py" -not -path "./.git/*" -not -path "./.venv/*" | head -80)
+if [ -n "$files" ]; then
+  python -m py_compile $files || exit 1
+fi
+
+if grep -RInE "place_order|submit_order|execute_trade|AUTO_TRADE" --include="*.py" . \
+  | grep -vE "test|#|NOT_IMPLEMENTED"; then
+  echo "BLOCKED: possible auto-trading code detected"
+  exit 1
+fi
+
+echo "Pre-push checks passed"

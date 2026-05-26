@@ -145,6 +145,7 @@ class PreparedSymbol:
     sol_bias: str | None = None
     xau_bias: str | None = None
     xag_bias: str | None = None
+    pax_bias: str | None = None
     altcoin_season_index: float | None = None
     btc_phase: str | None = None
     macro_risk_mode: str | None = None
@@ -253,6 +254,17 @@ class Signal:
     premium_zscore_5m: float | None = None
     premium_slope_5m: float | None = None
     ls_ratio: float | None = None
+    microstructure_bias_score: float | None = None
+    microstructure_confidence: float | None = None
+    microstructure_label: str | None = None
+    microstructure_reason: str | None = None
+    microstructure_warnings: tuple[str, ...] = ()
+    btc_bias: str | None = None
+    eth_bias: str | None = None
+    sol_bias: str | None = None
+    xau_bias: str | None = None
+    xag_bias: str | None = None
+    pax_bias: str | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def __post_init__(self) -> None:
@@ -457,6 +469,25 @@ class Signal:
             "spread_bps": self.spread_bps,
             "atr_pct": self.atr_pct,
             "orderflow_delta_ratio": self.orderflow_delta_ratio,
+            "oi_change_pct": self.oi_change_pct,
+            "funding_rate": self.funding_rate,
+            "mark_price": self.mark_price,
+            "volume_ratio": self.volume_ratio,
+            "adx_1h": self.adx_1h,
+            "premium_zscore_5m": self.premium_zscore_5m,
+            "premium_slope_5m": self.premium_slope_5m,
+            "ls_ratio": self.ls_ratio,
+            "microstructure_bias_score": self.microstructure_bias_score,
+            "microstructure_confidence": self.microstructure_confidence,
+            "microstructure_label": self.microstructure_label,
+            "microstructure_reason": self.microstructure_reason,
+            "microstructure_warnings": list(self.microstructure_warnings),
+            "btc_bias": self.btc_bias,
+            "eth_bias": self.eth_bias,
+            "sol_bias": self.sol_bias,
+            "xau_bias": self.xau_bias,
+            "xag_bias": self.xag_bias,
+            "pax_bias": self.pax_bias,
             "strategy_family": self.strategy_family,
             "confirmation_profile": self.confirmation_profile,
             "target_integrity_status": self.target_integrity_status,

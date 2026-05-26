@@ -19,7 +19,7 @@ from .telemetry import TelemetryStore
 LOG = structlog.get_logger("bot.public_intelligence")
 UTC = timezone.utc
 _MACRO_TTL_S = 900.0
-_PLACEHOLDER_COLUMNS: frozenset[str] = frozenset()
+_OPTIONAL_ZERO_COLUMNS: frozenset[str] = frozenset()
 
 
 def _safe_float(value: Any) -> float | None:
@@ -590,14 +590,40 @@ class PublicIntelligenceService:
                 continue
             work = _cached_prepare_frame(_to_polars(df), symbol=symbol, interval="1h")
             swing_high, swing_low = _swing_points(work, n=3)
+            indexed = work.with_row_index("__harmonic_idx").with_columns(
+                [
+                    swing_high.alias("__swing_high"),
+                    swing_low.alias("__swing_low"),
+                ]
+            )
+            high_pivots = indexed.filter(pl.col("__swing_high")).select(
+                [
+                    "__harmonic_idx",
+                    "close_time",
+                    pl.col("high").alias("price"),
+                    pl.lit("high").alias("kind"),
+                ]
+            )
+            low_pivots = indexed.filter(pl.col("__swing_low")).select(
+                [
+                    "__harmonic_idx",
+                    "close_time",
+                    pl.col("low").alias("price"),
+                    pl.lit("low").alias("kind"),
+                ]
+            )
+            pivot_rows = pl.concat([high_pivots, low_pivots], how="vertical").sort(
+                "__harmonic_idx"
+            )
             pivots: list[tuple[int, float, str]] = []
-            for idx, row in enumerate(work.iter_rows(named=True)):
+            for row in pivot_rows.to_dicts():
                 ts_raw = row.get("close_time")
-                ts_val = int(ts_raw.timestamp()) if isinstance(ts_raw, datetime) else idx
-                if bool(swing_high[idx]):
-                    pivots.append((ts_val, float(row["high"]), "high"))
-                if bool(swing_low[idx]):
-                    pivots.append((ts_val, float(row["low"]), "low"))
+                ts_val = (
+                    int(ts_raw.timestamp())
+                    if isinstance(ts_raw, datetime)
+                    else int(row["__harmonic_idx"])
+                )
+                pivots.append((ts_val, float(row["price"]), str(row["kind"])))
             pivots.sort(key=lambda item: item[0])
             if len(pivots) < 4:
                 by_symbol[symbol] = {"available": False, "reason": "not_enough_pivots"}
@@ -694,7 +720,7 @@ class PublicIntelligenceService:
                 key = f"{interval}_{metric}"
                 value = _safe_float(last.get(metric))
                 features[key] = value
-                if metric in _PLACEHOLDER_COLUMNS:
+                if metric in _OPTIONAL_ZERO_COLUMNS:
                     placeholder_feature_count += 1
 
         latest = self._latest_snapshot or {}

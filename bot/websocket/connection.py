@@ -15,7 +15,7 @@ LOG = logging.getLogger("bot.ws_manager")
 _WS_PING_INTERVAL_SECONDS = 20.0
 _WS_PING_TIMEOUT_SECONDS = 60.0
 _WS_CLOSE_TIMEOUT_SECONDS = 10.0
-_WS_CONNECT_TIMEOUT_SECONDS = 30.0
+_WS_CONNECT_TIMEOUT_SECONDS = 60.0
 
 
 def build_stream_url(manager: Any, endpoint: str) -> str:
@@ -208,6 +208,7 @@ async def run_endpoint_loop(
 ) -> None:
     """Run reconnect loop for a websocket endpoint."""
     delay = 1.0
+    retry_streak = 0
     max_delay = manager._cfg.reconnect_max_delay_seconds
     url = build_stream_url(manager, endpoint)
     while manager._running:
@@ -229,6 +230,7 @@ async def run_endpoint_loop(
                 proactive_reconnect_after_seconds=proactive_reconnect_after_seconds,
                 parse_message=parse_message,
             )
+            retry_streak = 0
             if backoff_reset:
                 delay = 1.0
             if proactive_reconnect:
@@ -250,19 +252,25 @@ async def run_endpoint_loop(
                 return
 
             elapsed = time.monotonic() - connect_start
-            delay = compute_disconnect_delay(
-                manager,
-                endpoint=endpoint,
-                url=url,
-                exc=exc,
-                elapsed=elapsed,
-                delay=delay,
-            )
+            retry_streak += 1
+            if retry_streak <= 3:
+                LOG.info("ws fast-retry %d/3 | endpoint=%s error=%s", retry_streak, endpoint, exc)
+                delay = 0.5
+            else:
+                delay = compute_disconnect_delay(
+                    manager,
+                    endpoint=endpoint,
+                    url=url,
+                    exc=exc,
+                    elapsed=elapsed,
+                    delay=delay,
+                )
             try:
                 await asyncio.sleep(delay)
             except asyncio.CancelledError:
                 return
-            delay = min(delay * 2.0, max_delay)
+            if retry_streak > 3:
+                delay = min(delay * 2.0, max_delay)
             if endpoint == market_endpoint:
                 stale = stale_symbols()
                 await maybe_backfill_after_disconnect(
@@ -279,7 +287,8 @@ async def run_endpoint_loop(
             clear_endpoint_connection_state(manager, endpoint)
             if not manager._running:
                 return
-            delay = min(max(delay, 1.0) * 2.0, max_delay)
+            retry_streak += 1
+            delay = min(max(delay, 1.0) * 2.0, max_delay) if retry_streak > 3 else 0.5
             try:
                 await asyncio.sleep(delay)
             except asyncio.CancelledError:

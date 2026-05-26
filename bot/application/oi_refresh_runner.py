@@ -17,6 +17,14 @@ _DEGRADATION_ERRORS = (
     TimeoutError,
     asyncio.TimeoutError,
 )
+_DEFAULT_PRIORITY_CONTEXT_SYMBOLS = (
+    "BTCUSDT",
+    "ETHUSDT",
+    "SOLUSDT",
+    "XAUUSDT",
+    "XAGUSDT",
+    "PAXGUSDT",
+)
 
 
 class OIRefreshRunner:
@@ -26,6 +34,50 @@ class OIRefreshRunner:
         self._bot = bot
         self._last_refresh_monotonic: float = 0.0
         self._single_symbol_limiter: asyncio.Semaphore | None = None
+
+    def _priority_symbol_set(self) -> set[str]:
+        settings = getattr(self._bot, "settings", None)
+        universe = getattr(settings, "universe", None)
+        assets = getattr(settings, "assets", {}) or {}
+        symbols = {symbol.upper() for symbol in _DEFAULT_PRIORITY_CONTEXT_SYMBOLS}
+        if universe is not None:
+            symbols.update(
+                str(symbol).strip().upper()
+                for symbol in getattr(universe, "pinned_symbols", ()) or ()
+                if str(symbol).strip()
+            )
+        if isinstance(assets, dict):
+            for symbol, config in assets.items():
+                if bool(getattr(config, "deep_analysis", False)):
+                    symbols.add(str(symbol).strip().upper())
+        return symbols
+
+    def _prioritized_shortlist(
+        self,
+        shortlist: list[Any],
+        *,
+        symbol_limit: int | None,
+    ) -> list[Any]:
+        priority = self._priority_symbol_set()
+        seen: set[str] = set()
+        priority_items: list[Any] = []
+        normal_items: list[Any] = []
+        for item in shortlist:
+            symbol = str(getattr(item, "symbol", "") or "").strip().upper()
+            if not symbol or symbol in seen:
+                continue
+            seen.add(symbol)
+            if symbol in priority:
+                priority_items.append(item)
+            else:
+                normal_items.append(item)
+        ordered = [*priority_items, *normal_items]
+        if symbol_limit is None or symbol_limit <= 0:
+            return ordered
+        limit = int(symbol_limit)
+        protected = ordered[: len(priority_items)]
+        room = max(limit - len(protected), 0)
+        return [*protected, *normal_items[:room]]
 
     async def run(self) -> None:
         await asyncio.sleep(30)  # stagger after shortlist populates
@@ -58,8 +110,7 @@ class OIRefreshRunner:
         if max_age_seconds > 0 and now - self._last_refresh_monotonic < max_age_seconds:
             return 0
 
-        if symbol_limit is not None and symbol_limit > 0:
-            shortlist = shortlist[:symbol_limit]
+        shortlist = self._prioritized_shortlist(shortlist, symbol_limit=symbol_limit)
         if not shortlist:
             return 0
         deadline = (
@@ -87,6 +138,7 @@ class OIRefreshRunner:
                             self._safe_fetch(
                                 symbol,
                                 include_funding_history=include_funding_history,
+                                priority_symbol=symbol in self._priority_symbol_set(),
                             ),
                             timeout=timeout,
                         )
@@ -94,6 +146,7 @@ class OIRefreshRunner:
                         await self._safe_fetch(
                             symbol,
                             include_funding_history=include_funding_history,
+                            priority_symbol=symbol in self._priority_symbol_set(),
                         )
                 except (asyncio.TimeoutError, TimeoutError) as exc:
                     LOG.info(
@@ -209,6 +262,7 @@ class OIRefreshRunner:
                     self._safe_fetch(
                         symbol,
                         include_funding_history=include_funding_history,
+                        priority_symbol=symbol in self._priority_symbol_set(),
                     ),
                     timeout=timeout_seconds,
                 )
@@ -216,6 +270,7 @@ class OIRefreshRunner:
                 await self._safe_fetch(
                     symbol,
                     include_funding_history=include_funding_history,
+                    priority_symbol=symbol in self._priority_symbol_set(),
                 )
             return True
         except (asyncio.TimeoutError, TimeoutError) as exc:
@@ -252,6 +307,7 @@ class OIRefreshRunner:
         symbol: str,
         *,
         include_funding_history: bool = True,
+        priority_symbol: bool = False,
     ) -> None:
         client = self._bot.client
 
@@ -300,6 +356,16 @@ class OIRefreshRunner:
                 "funding_rate",
                 lambda: client.fetch_funding_rate(symbol),
             ),
+            (
+                "rest",
+                "basis_1h",
+                lambda: client.fetch_basis(symbol, period="1h", limit=6),
+            ),
+            (
+                "rest",
+                "basis_5m",
+                lambda: client.fetch_basis(symbol, period="5m", limit=12),
+            ),
         ]
         if include_funding_history:
             fetchers.append(
@@ -307,6 +373,29 @@ class OIRefreshRunner:
                     "rest",
                     "funding_rate_history",
                     lambda: client.fetch_funding_rate_history(symbol),
+                )
+            )
+        if priority_symbol:
+            fetchers.extend(
+                (
+                    (
+                        "rest",
+                        "priority_history_15m",
+                        lambda: client.fetch_priority_history_bundle(
+                            symbol,
+                            intervals=("15m",),
+                            limit=300,
+                        ),
+                    ),
+                    (
+                        "rest",
+                        "priority_history_1h_4h",
+                        lambda: client.fetch_priority_history_bundle(
+                            symbol,
+                            intervals=("1h", "4h"),
+                            limit=240,
+                        ),
+                    ),
                 )
             )
         for source, stage, fetch in fetchers:

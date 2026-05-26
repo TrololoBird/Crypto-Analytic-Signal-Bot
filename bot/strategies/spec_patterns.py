@@ -14,6 +14,7 @@ import polars as pl
 
 from ..domain.config import BotSettings
 from ..domain.schemas import PreparedSymbol, Signal
+from ..features_shared import wilder_mean
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 
 
@@ -137,7 +138,7 @@ def with_spec_columns(frame: pl.DataFrame) -> pl.DataFrame:
         ),
     ]
     work = work.with_columns(additions)
-    bb_std = pl.col("close").rolling_std(20)
+    bb_std = pl.col("close").rolling_std(window_size=20, ddof=1)
     kc15_upper, kc15_lower = _feature_pair_or_expr(
         work,
         "kc_upper_15",
@@ -206,18 +207,32 @@ def with_spec_columns(frame: pl.DataFrame) -> pl.DataFrame:
         ]
     )
     if "rsi14" not in work.columns:
-        delta = pl.col("close").diff()
+        close = work["close"].cast(pl.Float64, strict=False)
+        delta = close.diff()
         gain = delta.clip(lower_bound=0.0)
         loss = (-delta).clip(lower_bound=0.0)
-        avg_gain = gain.ewm_mean(alpha=1.0 / 14.0, adjust=False)
-        avg_loss = loss.ewm_mean(alpha=1.0 / 14.0, adjust=False)
+        avg_gain = wilder_mean(gain, period=14, name="spec_avg_gain", seed_offset=1)
+        avg_loss = wilder_mean(loss, period=14, name="spec_avg_loss", seed_offset=1)
+        raw_rsi = (100.0 - (100.0 / (1.0 + (avg_gain / avg_loss)))).fill_nan(50.0)
+        rsi_values: list[float] = []
+        for gain_value, loss_value, raw_value in zip(
+            avg_gain.to_list(),
+            avg_loss.to_list(),
+            raw_rsi.to_list(),
+            strict=False,
+        ):
+            gain_f = as_float(gain_value, 0.0)
+            loss_f = as_float(loss_value, 0.0)
+            if loss_f == 0.0 and gain_f > 0.0:
+                rsi_values.append(100.0)
+            elif gain_f == 0.0 and loss_f > 0.0:
+                rsi_values.append(0.0)
+            elif gain_f == 0.0 and loss_f == 0.0:
+                rsi_values.append(50.0)
+            else:
+                rsi_values.append(as_float(raw_value, 50.0))
         work = work.with_columns(
-            (
-                100.0 - (100.0 / (1.0 + (avg_gain / avg_loss.replace(0.0, None))))
-            )
-            .fill_nan(50.0)
-            .fill_null(50.0)
-            .alias("rsi14")
+            pl.Series("rsi14", rsi_values, dtype=pl.Float64).alias("rsi14")
         )
     else:
         work = work.with_columns(pl.col("rsi14").cast(pl.Float64, strict=False).alias("rsi14"))
@@ -319,29 +334,34 @@ def _pivot_rows(
 ) -> list[dict[str, float]]:
     if work.height < 7 or price_column not in work.columns or indicator_column not in work.columns:
         return []
-    if pivot == "low":
-        mask = (
-            (pl.col(price_column) < pl.col(price_column).shift(1))
-            & (pl.col(price_column) < pl.col(price_column).shift(2))
-            & (pl.col(price_column) < pl.col(price_column).shift(-1))
-            & (pl.col(price_column) < pl.col(price_column).shift(-2))
-        )
-    else:
-        mask = (
-            (pl.col(price_column) > pl.col(price_column).shift(1))
-            & (pl.col(price_column) > pl.col(price_column).shift(2))
-            & (pl.col(price_column) > pl.col(price_column).shift(-1))
-            & (pl.col(price_column) > pl.col(price_column).shift(-2))
-        )
     current_idx = int(work.item(-1, "_spec_idx"))
-    rows = work.filter(mask).tail(8).to_dicts()
+    rows = work.to_dicts()
+    confirmed: list[dict[str, object]] = []
+    left_bars = 2
+    for confirm_pos in range(left_bars + 1, len(rows)):
+        pivot_pos = confirm_pos - 1
+        pivot_row = rows[pivot_pos]
+        pivot_value = as_float(pivot_row.get(price_column), math.nan)
+        confirm_value = as_float(rows[confirm_pos].get(price_column), math.nan)
+        left_values = [
+            as_float(rows[pos].get(price_column), math.nan)
+            for pos in range(pivot_pos - left_bars, pivot_pos)
+        ]
+        if not all(math.isfinite(value) for value in [pivot_value, confirm_value, *left_values]):
+            continue
+        if pivot == "low":
+            is_pivot = pivot_value < min(left_values) and pivot_value < confirm_value
+        else:
+            is_pivot = pivot_value > max(left_values) and pivot_value > confirm_value
+        if is_pivot:
+            confirmed.append(pivot_row)
     return [
         {
             "idx": float(row["_spec_idx"]),
             "price": as_float(row.get(price_column)),
             "indicator": as_float(row.get(indicator_column)),
         }
-        for row in rows
+        for row in confirmed[-8:]
         if current_idx - int(row["_spec_idx"]) <= max_lookback
     ]
 
@@ -617,9 +637,15 @@ def _valid_order_block_rows(work: pl.DataFrame, max_age: int = 80) -> list[dict[
     zones: list[dict[str, object]] = []
     impulse_lookback = 5
     impulse_atr_mult = 1.5
-    for pos, row in enumerate(rows[:-3]):
+    for pos, row in enumerate(rows):
         idx = int(row["_spec_idx"])
         if current_idx - idx > max_age:
+            continue
+        confirm_end = min(pos + impulse_lookback, len(rows) - 1)
+        if confirm_end <= pos or current_idx < int(rows[confirm_end]["_spec_idx"]):
+            continue
+        confirmation_rows = rows[pos + 1 : confirm_end + 1]
+        if len(confirmation_rows) < 3:
             continue
         open_ = as_float(row.get("open"))
         close = as_float(row.get("close"))
@@ -632,10 +658,7 @@ def _valid_order_block_rows(work: pl.DataFrame, max_age: int = 80) -> list[dict[
         volume_mean = as_float(row.get("spec_volume_mean20"))
         if min(open_, close, low, high, atr, volume_mean) <= 0.0:
             continue
-        future = rows[pos + 1 : pos + 1 + impulse_lookback]
-        if len(future) < 3:
-            continue
-        final_close = as_float(future[-1].get("close"))
+        final_close = as_float(confirmation_rows[-1].get("close"))
         bull_impulse = close < open_ and final_close - close > impulse_atr_mult * atr
         bear_impulse = close > open_ and close - final_close > impulse_atr_mult * atr
         if bull_impulse and (prev_high <= 0.0 or final_close > prev_high):
@@ -648,7 +671,7 @@ def _valid_order_block_rows(work: pl.DataFrame, max_age: int = 80) -> list[dict[
                     "age": current_idx - idx,
                     "volume_ok": volume >= volume_mean,
                     "impulse_close": final_close,
-                    "impulse_pos": pos + len(future),
+                    "impulse_pos": confirm_end,
                 }
             )
         if bear_impulse and (prev_low <= 0.0 or final_close < prev_low):
@@ -661,7 +684,7 @@ def _valid_order_block_rows(work: pl.DataFrame, max_age: int = 80) -> list[dict[
                     "age": current_idx - idx,
                     "volume_ok": volume >= volume_mean,
                     "impulse_close": final_close,
-                    "impulse_pos": pos + len(future),
+                    "impulse_pos": confirm_end,
                 }
             )
     return zones

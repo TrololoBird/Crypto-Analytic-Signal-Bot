@@ -22,12 +22,14 @@ if TYPE_CHECKING:
     from fastapi import FastAPI
 
 try:
-    from fastapi import FastAPI as _FastAPI
-    from fastapi.middleware.cors import CORSMiddleware as _CORSMiddleware
-    from fastapi.responses import HTMLResponse as _HTMLResponse
-
+    from fastapi import FastAPI
+    from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.responses import HTMLResponse
     HAS_FASTAPI = True
 except ImportError:
+    FastAPI = None
+    CORSMiddleware = None
+    HTMLResponse = None
     HAS_FASTAPI = False
 
 LOG = logging.getLogger("bot.dashboard")
@@ -55,7 +57,7 @@ class BotDashboard:
             LOG.info("fastapi not installed, dashboard disabled")
             return
 
-        app = _FastAPI(title="Signal Bot Dashboard", version="2.0.0")
+        app = FastAPI(title="Signal Bot Dashboard", version="2.0.0")
 
         # Security: Restrict CORS origins based on configuration
         origins = ["http://127.0.0.1", "http://localhost"]
@@ -63,7 +65,7 @@ class BotDashboard:
             origins = list(self.bot.settings.runtime.dashboard_allow_origins)
 
         app.add_middleware(
-            _CORSMiddleware,
+            CORSMiddleware,
             allow_origins=origins,
             allow_credentials=False,
             allow_methods=["GET"],  # Security: Only allow GET for dashboard API
@@ -86,7 +88,7 @@ class BotDashboard:
         if not self.app:
             return
 
-        @self.app.get("/", response_class=_HTMLResponse)
+        @self.app.get("/", response_class=HTMLResponse)
         async def root() -> str:
             return self._get_html_dashboard()
 
@@ -175,6 +177,7 @@ class BotDashboard:
                 )
             except RuntimeError as exc:
                 if "shutdown" in str(exc).lower():
+                    LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
                     return {"error": "Server is shutting down"}
                 raise
             merged = self._merge_strategy_catalog(report, decision_summary=decision_summary)
@@ -195,6 +198,7 @@ class BotDashboard:
                 )
             except RuntimeError as exc:
                 if "shutdown" in str(exc).lower():
+                    LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
                     return {"error": "Server is shutting down"}
                 raise
             except Exception as exc:
@@ -218,6 +222,7 @@ class BotDashboard:
                 return await asyncio.to_thread(self._live_data.overview)
             except RuntimeError as exc:
                 if "shutdown" in str(exc).lower():
+                    LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
                     return {"error": "Server is shutting down"}
                 raise
             except Exception as exc:
@@ -231,6 +236,7 @@ class BotDashboard:
                 return await asyncio.to_thread(self._live_data.funnel, max_rows=max_rows)
             except RuntimeError as exc:
                 if "shutdown" in str(exc).lower():
+                    LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
                     return {"error": "Server is shutting down"}
                 raise
             except Exception as exc:
@@ -244,6 +250,7 @@ class BotDashboard:
                 return await asyncio.to_thread(self._live_data.shortlist, limit=limit)
             except RuntimeError as exc:
                 if "shutdown" in str(exc).lower():
+                    LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
                     return {"error": "Server is shutting down"}
                 raise
             except Exception as exc:
@@ -265,6 +272,7 @@ class BotDashboard:
                 )
             except RuntimeError as exc:
                 if "shutdown" in str(exc).lower():
+                    LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
                     return {"error": "Server is shutting down"}
                 raise
             except Exception as exc:
@@ -286,6 +294,7 @@ class BotDashboard:
                 )
             except RuntimeError as exc:
                 if "shutdown" in str(exc).lower():
+                    LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
                     return {"error": "Server is shutting down"}
                 raise
             except Exception as exc:
@@ -298,6 +307,7 @@ class BotDashboard:
                 return await asyncio.to_thread(self._live_data.runtime)
             except RuntimeError as exc:
                 if "shutdown" in str(exc).lower():
+                    LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
                     return {"error": "Server is shutting down"}
                 raise
             except Exception as exc:
@@ -311,6 +321,7 @@ class BotDashboard:
                 return await asyncio.to_thread(self._live_data.delivery, limit=limit)
             except RuntimeError as exc:
                 if "shutdown" in str(exc).lower():
+                    LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
                     return {"error": "Server is shutting down"}
                 raise
             except Exception as exc:
@@ -323,6 +334,7 @@ class BotDashboard:
                 return await asyncio.to_thread(self._live_data.telegram_preview)
             except RuntimeError as exc:
                 if "shutdown" in str(exc).lower():
+                    LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
                     return {"error": "Server is shutting down"}
                 raise
             except Exception as exc:
@@ -350,6 +362,7 @@ class BotDashboard:
                 return await asyncio.to_thread(_build)
             except RuntimeError as exc:
                 if "shutdown" in str(exc).lower():
+                    LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
                     return {"error": "Server is shutting down"}
                 raise
             except Exception as exc:
@@ -731,7 +744,7 @@ class BotDashboard:
             if price_raw is None:
                 price_raw = row.get("entry_mid")
             try:
-                price = round(float(price_raw), 3)
+                price = round(float(price_raw), 3) if price_raw is not None else 0.0
             except (TypeError, ValueError):
                 price = 0.0
             key = (symbol, direction, timeframe, price, ts_bucket)

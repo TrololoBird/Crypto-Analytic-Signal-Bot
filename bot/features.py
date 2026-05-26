@@ -18,6 +18,7 @@ import importlib
 from importlib import util as importlib_util
 from collections import OrderedDict
 from datetime import date, datetime, timezone
+import math
 import threading
 from typing import Any, Iterable, cast
 
@@ -1430,7 +1431,7 @@ def _prepare_frame(df: pl.DataFrame) -> pl.DataFrame:
                     pl.col("vwap_deviation_pct")
                     - pl.col("vwap_deviation_pct").rolling_mean(window_size=20)
                 )
-                / pl.col("vwap_deviation_pct").rolling_std(window_size=20)
+                / pl.col("vwap_deviation_pct").rolling_std(window_size=20, ddof=1)
             )
             .fill_nan(0.0)
             .alias("vwap_deviation_z20"),
@@ -1526,37 +1527,65 @@ def _swing_points(
     *,
     include_unconfirmed_tail: bool = False,
 ) -> tuple[pl.Series, pl.Series]:
-    """Detect swing highs and lows using n-bar look-around (vectorized)."""
+    """Detect live-safe swing highs and lows without right-side lookahead.
+
+    A pivot is confirmed only after the following bar has closed:
+    ``high[i-n:i] < high[i]`` and ``high[i] > high[i+1]`` for highs,
+    mirrored for lows. The implementation walks left-to-right and marks the
+    pivot bar only when the confirmation bar is already present in ``work``.
+    It deliberately avoids negative shifts / right-side rolling windows so a
+    strategy cannot see a swing before it would have been known live.
+    """
     if work.is_empty():
         return (
             pl.Series("swing_high", [], dtype=pl.Boolean),
             pl.Series("swing_low", [], dtype=pl.Boolean),
         )
+    if "high" not in work.columns or "low" not in work.columns:
+        return (
+            pl.Series("swing_high", [False] * work.height, dtype=pl.Boolean),
+            pl.Series("swing_low", [False] * work.height, dtype=pl.Boolean),
+        )
 
-    high = work["high"]
-    low = work["low"]
+    lookback = max(1, int(n))
+    highs = [float(value) if value is not None else float("nan") for value in work["high"]]
+    lows = [float(value) if value is not None else float("nan") for value in work["low"]]
+    swing_high_values = [False] * work.height
+    swing_low_values = [False] * work.height
 
-    # Current bar is strict max/min compared to n bars before and n bars after
-    left_max = high.rolling_max(window_size=n, min_samples=1).shift(1)
-    right_max = high.reverse().rolling_max(window_size=n, min_samples=1).reverse().shift(-1)
-    swing_high = (high > left_max.fill_null(-float("inf"))) & (
-        high > right_max.fill_null(-float("inf"))
-    )
+    def _finite(values: list[float]) -> bool:
+        return all(math.isfinite(value) for value in values)
 
-    left_min = low.rolling_min(window_size=n, min_samples=1).shift(1)
-    right_min = low.reverse().rolling_min(window_size=n, min_samples=1).reverse().shift(-1)
-    swing_low = (low < left_min.fill_null(float("inf"))) & (low < right_min.fill_null(float("inf")))
+    # confirm_idx is the just-closed candle that confirms pivot_idx.
+    for confirm_idx in range(lookback + 1, work.height):
+        pivot_idx = confirm_idx - 1
+        left_start = pivot_idx - lookback
+        left_highs = highs[left_start:pivot_idx]
+        left_lows = lows[left_start:pivot_idx]
+        pivot_high = highs[pivot_idx]
+        pivot_low = lows[pivot_idx]
+        confirm_high = highs[confirm_idx]
+        confirm_low = lows[confirm_idx]
 
-    if not include_unconfirmed_tail:
-        # Require full context (both sides)
-        indices = pl.Series(range(work.height))
-        mask = (indices >= n) & (indices < (work.height - n))
-        swing_high = swing_high & mask
-        swing_low = swing_low & mask
+        if _finite([*left_highs, pivot_high, confirm_high]):
+            swing_high_values[pivot_idx] = pivot_high > max(left_highs) and pivot_high > confirm_high
+        if _finite([*left_lows, pivot_low, confirm_low]):
+            swing_low_values[pivot_idx] = pivot_low < min(left_lows) and pivot_low < confirm_low
+
+    if include_unconfirmed_tail and work.height > lookback:
+        tail_idx = work.height - 1
+        left_highs = highs[tail_idx - lookback : tail_idx]
+        left_lows = lows[tail_idx - lookback : tail_idx]
+        tail_high = highs[tail_idx]
+        tail_low = lows[tail_idx]
+        if _finite([*left_highs, tail_high]):
+            swing_high_values[tail_idx] = tail_high > max(left_highs)
+        if _finite([*left_lows, tail_low]):
+            swing_low_values[tail_idx] = tail_low < min(left_lows)
 
     return (
-        swing_high.fill_null(False).rename("swing_high"),
-        swing_low.fill_null(False).rename("swing_low"),
+        pl.Series("swing_high", swing_high_values, dtype=pl.Boolean),
+        pl.Series("swing_low", swing_low_values, dtype=pl.Boolean),
     )
 
 

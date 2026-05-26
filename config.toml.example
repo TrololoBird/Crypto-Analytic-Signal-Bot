@@ -55,7 +55,7 @@ light_refresh_interval_seconds = 75
 full_refresh_interval_seconds = 7200
 shortlist_spread_max_bps = 8.0
 shortlist_book_stale_seconds = 90.0
-pinned_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XAUUSDT", "XAGUSDT"]
+pinned_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XAUUSDT", "XAGUSDT", "PAXGUSDT"]
 
 [bot.assets.BTCUSDT]
 primary_timeframe = "15m"

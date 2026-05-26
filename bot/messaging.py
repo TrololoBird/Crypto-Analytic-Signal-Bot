@@ -15,8 +15,8 @@ from typing import Any, Awaitable, Callable, ParamSpec, Protocol, TypeVar, cast
 import aiohttp
 import structlog
 
-# TODO: [Sentinel] Redundant implementation - this logic should be consolidated with bot/telegram/
-# aiogram for Telegram Bot API
+# Legacy Telegram sender retained for callers that still depend on this module.
+# New runtime delivery code lives under bot/telegram/.
 try:
     from aiogram import Bot
     from aiogram.client.session.aiohttp import AiohttpSession

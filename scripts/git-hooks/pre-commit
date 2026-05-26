@@ -1,0 +1,31 @@
+#!/bin/sh
+echo "Pre-commit: critical signal-bot checks"
+
+if grep -RInE "place_order|submit_order|execute_trade|AUTO_TRADE" --include="*.py" . \
+  | grep -vE "test|#|NOT_IMPLEMENTED"; then
+  echo "BLOCKED: possible auto-trading code detected"
+  exit 1
+fi
+
+if grep -RInE "api_key\s*=\s*['\"][A-Za-z0-9]|secret\s*=\s*['\"][A-Za-z0-9]" --include="*.py" . \
+  | grep -vE "os\.getenv|environ|test|#"; then
+  echo "BLOCKED: possible hard-coded secret detected"
+  exit 1
+fi
+
+files=$(git diff --cached --name-only --diff-filter=ACMRTUXB | grep "\.py$" || true)
+if [ -n "$files" ]; then
+  python -m py_compile $files || exit 1
+fi
+
+if git diff --cached -- "*.py" | grep "^+" | grep -q "iter_rows"; then
+  echo "BLOCKED: iter_rows found in staged additions"
+  exit 1
+fi
+
+if git diff --cached -- "*.py" | grep "^+" | grep -q "shift(-"; then
+  echo "BLOCKED: possible lookahead shift(-N) found in staged additions"
+  exit 1
+fi
+
+echo "Pre-commit checks passed"

@@ -244,8 +244,20 @@ class SignalMessageFacts:
     funding_rate: float | None = None
     orderflow_delta_ratio: float | None = None
     mark_price: float | None = None
+    premium_zscore_5m: float | None = None
+    premium_slope_5m: float | None = None
+    ls_ratio: float | None = None
+    microstructure_bias_score: float | None = None
+    microstructure_confidence: float | None = None
+    microstructure_label: str | None = None
+    microstructure_reason: str | None = None
+    microstructure_warnings: tuple[str, ...] = ()
     btc_bias: str | None = None
     eth_bias: str | None = None
+    sol_bias: str | None = None
+    xau_bias: str | None = None
+    xag_bias: str | None = None
+    pax_bias: str | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
@@ -500,8 +512,26 @@ def extract_signal_facts(
         funding_rate=_optional_float(getattr(signal, "funding_rate", None)),
         orderflow_delta_ratio=_optional_float(getattr(signal, "orderflow_delta_ratio", None)),
         mark_price=_optional_float(getattr(signal, "mark_price", None)),
+        premium_zscore_5m=_optional_float(getattr(signal, "premium_zscore_5m", None)),
+        premium_slope_5m=_optional_float(getattr(signal, "premium_slope_5m", None)),
+        ls_ratio=_optional_float(getattr(signal, "ls_ratio", None)),
+        microstructure_bias_score=_optional_float(
+            getattr(signal, "microstructure_bias_score", None)
+        ),
+        microstructure_confidence=_optional_float(
+            getattr(signal, "microstructure_confidence", None)
+        ),
+        microstructure_label=getattr(signal, "microstructure_label", None),
+        microstructure_reason=getattr(signal, "microstructure_reason", None),
+        microstructure_warnings=tuple(
+            str(item) for item in getattr(signal, "microstructure_warnings", ()) or ()
+        ),
         btc_bias=btc_bias or getattr(signal, "btc_bias", None),
         eth_bias=eth_bias or getattr(signal, "eth_bias", None),
+        sol_bias=getattr(signal, "sol_bias", None),
+        xau_bias=getattr(signal, "xau_bias", None),
+        xag_bias=getattr(signal, "xag_bias", None),
+        pax_bias=getattr(signal, "pax_bias", None),
         created_at=created_at,
     )
 
@@ -521,10 +551,29 @@ def market_context_lines(facts: SignalMessageFacts) -> list[str]:
         items.append(f"OI {format_percent(facts.oi_change_pct, multiply=True, digits=2)}")
     if facts.funding_rate is not None:
         items.append(f"funding {format_percent(facts.funding_rate, multiply=True, digits=4)}")
+    if facts.ls_ratio is not None:
+        items.append(f"L/S {facts.ls_ratio:.2f}")
+    if facts.premium_zscore_5m is not None:
+        items.append(f"premium z {facts.premium_zscore_5m:.2f}")
+    if facts.premium_slope_5m is not None:
+        items.append(f"basis slope {facts.premium_slope_5m:+.4f}")
     if facts.orderflow_delta_ratio is not None:
         items.append(f"flow {facts.orderflow_delta_ratio:.2f}")
+    if facts.microstructure_bias_score is not None:
+        label = facts.microstructure_label or "mixed"
+        confidence = facts.microstructure_confidence or 0.0
+        items.append(f"micro {label} {facts.microstructure_bias_score:+.2f}/{confidence:.2f}")
     if facts.btc_bias and facts.btc_bias != "neutral":
         items.append(f"BTC {facts.btc_bias}")
+    for label, value in (
+        ("ETH", facts.eth_bias),
+        ("SOL", facts.sol_bias),
+        ("XAU", facts.xau_bias),
+        ("XAG", facts.xag_bias),
+        ("PAXG", facts.pax_bias),
+    ):
+        if value and value != "neutral":
+            items.append(f"{label} {value}")
     return items
 
 
@@ -557,6 +606,21 @@ def target_line(facts: SignalMessageFacts) -> str:
         f"TP2 {code(format_price(facts.take_profit_2))} "
         f"TP3 {code(format_price(tp3))} "
         f"scale {code(f'{weights[0]}/{weights[1]}/{weights[2]}%')}"
+    )
+
+
+def entry_levels_line(facts: SignalMessageFacts) -> str:
+    """Render DCA-compatible limit entry levels with explicit size shares."""
+    weights = [int(round(max(0.0, weight) * 100.0)) for weight in facts.scale_weights]
+    mid = (facts.entry_low + facts.entry_high) / 2.0
+    if direction_label(facts.direction) == "SHORT":
+        levels = [facts.entry_low, mid, facts.entry_high]
+    else:
+        levels = [facts.entry_high, mid, facts.entry_low]
+    return (
+        f"E1 {code(format_price(levels[0]))} {code(str(weights[0]) + '%')} "
+        f"E2 {code(format_price(levels[1]))} {code(str(weights[1]) + '%')} "
+        f"E3 {code(format_price(levels[2]))} {code(str(weights[2]) + '%')}"
     )
 
 
@@ -625,7 +689,6 @@ def format_signal_message(
         eth_bias=eth_bias,
     )
     direction = direction_label(facts.direction)
-    entry = f"{format_price(facts.entry_low)} - {format_price(facts.entry_high)}"
     reasons = compact_reason_list(facts.reasons, limit=policy.include_reason_limit)
     filters = compact_reason_list(facts.passed_filters, limit=policy.include_filter_limit)
     context = market_context_lines(facts)
@@ -636,7 +699,8 @@ def format_signal_message(
             f"{bold(setup_label(facts.setup_id))} {code(facts.timeframe)} | "
             f"score {code(format_score(facts.score))} {escape_text(confidence_label(facts.score))}"
         ),
-        f"{bold('Entry zone')} {code(entry)}",
+        f"{bold('Type')} limit scale order (DCA-compatible)",
+        f"{bold('Entries')} {entry_levels_line(facts)}",
         f"{bold('Stop')} {code(format_price(facts.stop))}",
         f"{bold('Targets')} {target_line(facts)}",
         (
@@ -649,6 +713,13 @@ def format_signal_message(
         lines.append(f"{bold('Why')} " + "; ".join(escape_text(item) for item in reasons))
     if context:
         lines.append(f"{bold('Context')} {code(' | '.join(context))}")
+    if facts.microstructure_reason and not policy.compact:
+        lines.append(f"{bold('Microstructure')} {escape_text(facts.microstructure_reason)}")
+    if facts.microstructure_warnings and not policy.compact:
+        lines.append(
+            f"{bold('Warnings')} "
+            + ", ".join(escape_text(item.replace('_', ' ')) for item in facts.microstructure_warnings)
+        )
     if filters and not policy.compact:
         lines.append(f"{bold('Filters')} " + "; ".join(escape_text(item) for item in filters))
     lines.append(f"{bold('Invalidation')} {escape_text(invalidation_text(facts))}")
@@ -742,6 +813,8 @@ def format_analytics_companion_message(
     context = market_context_lines(facts)
     if context:
         lines.append(f"{bold('Market context')} {code(' | '.join(context))}")
+    if facts.microstructure_reason:
+        lines.append(f"{bold('Microstructure')} {escape_text(facts.microstructure_reason)}")
     lines.append(f"{bold('Invalidation')} {escape_text(invalidation_text(facts))}")
     lines.append("<i>Signal-only analytics. No auto-trading.</i>")
     return truncate_preserving_footer("\n".join(lines), limit=policy.text_limit)
@@ -803,4 +876,3 @@ def diagnostic_format_matrix(signal: Any) -> dict[str, Any]:
         "main_html": main,
         "companion_html": companion,
     }
-

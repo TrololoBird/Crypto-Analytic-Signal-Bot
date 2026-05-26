@@ -38,6 +38,43 @@ _PRICE_ACTION_COVERAGE_SETUP_IDS: tuple[str, ...] = (
     "wyckoff_spring",
     "volume_climax_reversal",
 )
+_DEEP_ANALYSIS_PRIORITY_SYMBOLS: tuple[str, ...] = (
+    "BTCUSDT",
+    "ETHUSDT",
+    "SOLUSDT",
+    "XAUUSDT",
+    "XAGUSDT",
+    "PAXGUSDT",
+)
+_DEEP_ANALYSIS_PRIORITY_BASES: frozenset[str] = frozenset(
+    {"BTC", "ETH", "SOL", "XAU", "XAG", "PAXG", "PAX"}
+)
+
+
+def _configured_deep_analysis_symbols(settings: BotSettings) -> set[str]:
+    assets = getattr(settings, "assets", {}) or {}
+    symbols: set[str] = set()
+    if isinstance(assets, dict):
+        for symbol, config in assets.items():
+            if bool(getattr(config, "deep_analysis", False)):
+                symbols.add(str(symbol).strip().upper())
+    return symbols
+
+
+def _priority_symbols(settings: BotSettings) -> set[str]:
+    configured = _configured_deep_analysis_symbols(settings)
+    pinned = {
+        str(symbol).strip().upper()
+        for symbol in getattr(settings.universe, "pinned_symbols", ())
+        if str(symbol).strip()
+    }
+    return set(_DEEP_ANALYSIS_PRIORITY_SYMBOLS) | configured | pinned
+
+
+def _is_priority_asset(row: dict[str, Any], settings: BotSettings) -> bool:
+    symbol = str(row.get("symbol") or "").strip().upper()
+    base_asset = str(row.get("base_asset") or "").strip().upper()
+    return symbol in _priority_symbols(settings) or base_asset in _DEEP_ANALYSIS_PRIORITY_BASES
 
 
 def _bucket_for_price_change(price_change_pct: float) -> str:
@@ -172,11 +209,12 @@ def _oi_participation_score(row: dict[str, Any]) -> float:
     return round(change_score * 0.65 + notional_score * 0.35, 6)
 
 
-def _funding_basis_sanity_score(row: dict[str, Any]) -> float:
+def _funding_basis_sanity_score(row: dict[str, Any], settings: BotSettings) -> float:
     funding_rate = _safe_float(row.get("funding_rate"))
     basis_pct = _safe_float(row.get("basis_pct"))
+    priority_asset = _is_priority_asset(row, settings)
     if funding_rate is None and basis_pct is None:
-        return 0.55
+        return 0.68 if priority_asset else 0.55
 
     funding_score = 0.7
     if funding_rate is not None:
@@ -201,7 +239,31 @@ def _funding_basis_sanity_score(row: dict[str, Any]) -> float:
             basis_score = 0.45
         else:
             basis_score = 0.15
-    return round(funding_score * 0.5 + basis_score * 0.5, 6)
+    score = funding_score * 0.5 + basis_score * 0.5
+    if priority_asset:
+        score = max(score, 0.68)
+    return round(score, 6)
+
+
+def _microstructure_opportunity_score(row: dict[str, Any]) -> float:
+    """Score whether the row has actionable public microstructure context."""
+    components: list[float] = []
+    taker_ratio = _safe_float(row.get("taker_ratio"))
+    if taker_ratio is not None and taker_ratio > 0.0:
+        taker_move = abs(taker_ratio - 1.0)
+        components.append(_clamp(0.45 + min(taker_move / 0.65, 1.0) * 0.45))
+    liq_score = _safe_float(row.get("liquidation_score"))
+    if liq_score is not None:
+        components.append(_clamp(0.45 + abs(liq_score) * 0.45))
+    premium_z = _safe_float(row.get("premium_zscore_5m"))
+    if premium_z is not None:
+        components.append(_clamp(0.45 + min(abs(premium_z) / 2.5, 1.0) * 0.40))
+    premium_slope = _safe_float(row.get("premium_slope_5m"))
+    if premium_slope is not None:
+        components.append(_clamp(0.50 + min(abs(premium_slope) / 0.08, 1.0) * 0.25))
+    if not components:
+        return 0.55
+    return round(sum(components) / len(components), 6)
 
 
 def _strategy_fits_for_row(
@@ -237,6 +299,7 @@ def _strategy_fits_for_row(
     oi_rising = oi_change_pct is not None and oi_change_pct >= 1.0
     oi_extreme = oi_change_pct is not None and abs(oi_change_pct) >= 3.0
     crowd_extreme = crowding <= 0.45
+    priority_asset = _is_priority_asset(row, settings)
 
     if spread_ok and volume_multiple >= 1.0 and trending_move:
         fits.extend(
@@ -310,7 +373,7 @@ def _strategy_fits_for_row(
         )
         fits.extend(_PRICE_ACTION_COVERAGE_SETUP_IDS)
 
-    if symbol in pinned_set:
+    if symbol in pinned_set or priority_asset:
         fits.extend(_ALL_SETUP_IDS)
 
     if not fits and spread_ok and quote_volume >= volume_floor:
@@ -338,6 +401,10 @@ def _strategy_fits_for_row(
         "funding_rate": funding_rate,
         "oi_current": _safe_float(row.get("oi_current")),
         "oi_change_pct": oi_change_pct,
+        "taker_ratio": _safe_float(row.get("taker_ratio")),
+        "liquidation_score": _safe_float(row.get("liquidation_score")),
+        "premium_zscore_5m": _safe_float(row.get("premium_zscore_5m")),
+        "premium_slope_5m": _safe_float(row.get("premium_slope_5m")),
     }
     setups_config = getattr(settings, "setups", None)
     if setups_config is not None and hasattr(setups_config, "enabled_setup_ids"):
@@ -346,7 +413,7 @@ def _strategy_fits_for_row(
         enabled = set(_ALL_SETUP_IDS)
     if not enabled:
         enabled = set(_ALL_SETUP_IDS)
-    if symbol in pinned_set:
+    if symbol in pinned_set or priority_asset:
         return tuple(setup_id for setup_id in _ALL_SETUP_IDS if setup_id in enabled)
     return tuple(
         setup_id
@@ -392,6 +459,7 @@ def _composite_score(
     min_onboard_ms: int,
 ) -> tuple[float, tuple[str, ...]]:
     shortlist_bucket = _bucket_for_price_change(float(row.get("price_change_percent") or 0.0))
+    priority_asset = _is_priority_asset(row, settings)
     liquidity_curve = 1.0 - ((liquidity_rank - 1) / max(eligible_count - 1, 1))
     volume_floor = max(float(getattr(settings.universe, "min_quote_volume_usd", 0.0)), 1.0)
     volume = float(row.get("quote_volume") or 0.0)
@@ -427,20 +495,26 @@ def _composite_score(
 
     freshness_score = _spread_freshness_score(row, settings)
     oi_score = _oi_participation_score(row)
-    sanity_score = _funding_basis_sanity_score(row)
+    sanity_score = _funding_basis_sanity_score(row, settings)
     crowding_score = _crowding_score(row)
+    micro_score = _microstructure_opportunity_score(row)
 
     score = (
-        liquidity_score * 0.32
+        liquidity_score * 0.29
         + age_score * 0.12
         + tradability_score * 0.18
         + freshness_score * 0.14
         + oi_score * 0.10
         + sanity_score * 0.08
-        + crowding_score * 0.06
+        + crowding_score * 0.05
+        + micro_score * 0.04
     )
+    if priority_asset:
+        score = max(score + 0.055, 0.70)
 
     reasons: list[str] = [f"bucket:{shortlist_bucket}"]
+    if priority_asset:
+        reasons.append("priority_deep_analysis")
     if liquidity_rank <= 10:
         reasons.append(f"liquidity_rank:{liquidity_rank}")
     if freshness_score >= 0.72:
@@ -451,9 +525,11 @@ def _composite_score(
         reasons.append("funding_basis_sane")
     if crowding_score <= 0.35:
         reasons.append("crowding_penalty")
+    if micro_score >= 0.72:
+        reasons.append("microstructure_active")
     if age_score >= 0.8:
         reasons.append("seasoned_listing")
-    return round(score, 6), tuple(reasons[:4])
+    return round(min(score, 1.0), 6), tuple(reasons[:5])
 
 
 def build_shortlist(
@@ -471,6 +547,7 @@ def build_shortlist(
         )
     meta_map = {meta.symbol: meta for meta in symbol_meta}
     pinned = {symbol for symbol in settings.universe.pinned_symbols}
+    priority_symbols = _priority_symbols(settings)
     min_onboard = datetime.now(UTC) - timedelta(days=settings.universe.min_listing_age_days)
     min_onboard_ms = int(min_onboard.timestamp() * 1000)
     eligible_rows: list[dict[str, Any]] = []
@@ -496,7 +573,8 @@ def build_shortlist(
         trade_count = int(float(ticker_row.get("trade_count") or 0.0))
         if quote_volume <= 0.0 or last_price <= 0.0:
             continue
-        if symbol not in pinned:
+        protected_symbol = symbol in pinned or symbol in priority_symbols
+        if not protected_symbol:
             if quote_volume < settings.universe.min_quote_volume_usd:
                 continue
             if abs(price_change_pct) < settings.universe.min_price_change_pct:
@@ -530,6 +608,11 @@ def build_shortlist(
                 "top_position_ls_ratio": _safe_float(ticker_row.get("top_position_ls_ratio")),
                 "global_account_ls_ratio": _safe_float(ticker_row.get("global_account_ls_ratio")),
                 "top_vs_global_ls_gap": _safe_float(ticker_row.get("top_vs_global_ls_gap")),
+                "taker_ratio": _safe_float(ticker_row.get("taker_ratio")),
+                "liquidation_score": _safe_float(ticker_row.get("liquidation_score")),
+                "premium_slope_5m": _safe_float(ticker_row.get("premium_slope_5m")),
+                "premium_zscore_5m": _safe_float(ticker_row.get("premium_zscore_5m")),
+                "funding_trend": ticker_row.get("funding_trend"),
             }
         )
 
@@ -586,6 +669,11 @@ def build_shortlist(
         reverse=True,
     )
     pinned_rows = [p_row for p_row in eligible if p_row.symbol in pinned]
+    priority_rows = [
+        p_row
+        for p_row in eligible
+        if p_row.symbol in priority_symbols and p_row.symbol not in pinned
+    ]
     dynamic_pool = [d_row for d_row in eligible if d_row.symbol not in pinned][
         : settings.universe.dynamic_limit
     ]
@@ -614,6 +702,11 @@ def build_shortlist(
             continue
         shortlist.append(s_row)
         seen.add(s_row.symbol)
+    for pr_row in priority_rows:
+        if pr_row.symbol in seen or len(shortlist) >= shortlist_limit:
+            continue
+        shortlist.append(pr_row)
+        seen.add(pr_row.symbol)
 
     targets = _scaled_bucket_targets(max(shortlist_limit - len(shortlist), 0))
     summary: dict[str, Any] = {
@@ -621,6 +714,7 @@ def build_shortlist(
         "eligible": len(eligible),
         "dynamic_pool": len(dynamic_pool),
         "pinned": len(pinned_rows),
+        "priority": len([item for item in eligible if item.symbol in priority_symbols]),
         "trend": 0,
         "breakout": 0,
         "reversal": 0,

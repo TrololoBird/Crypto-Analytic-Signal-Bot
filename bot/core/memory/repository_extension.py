@@ -202,6 +202,9 @@ class MemoryRepositoryExtension:
                     "xag_bias": str(
                         (benchmark_context.get("XAGUSDT") or {}).get("bias") or "neutral"
                     ),
+                    "pax_bias": str(
+                        (benchmark_context.get("PAXGUSDT") or {}).get("bias") or "neutral"
+                    ),
                     "altcoin_season_index": float(row["altcoin_season_index"])
                     if "altcoin_season_index" in row.keys()
                     and row["altcoin_season_index"] is not None
@@ -228,6 +231,7 @@ class MemoryRepositoryExtension:
                 "sol_bias": "neutral",
                 "xau_bias": "neutral",
                 "xag_bias": "neutral",
+                "pax_bias": "neutral",
                 "altcoin_season_index": 50.0,
                 "btc_phase": "sideways",
                 "high_funding_symbols": [],

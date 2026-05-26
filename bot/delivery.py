@@ -11,6 +11,12 @@ from collections import OrderedDict
 
 from .messaging import DeliveryResult
 from .domain.schemas import Signal
+from .telegram_formatter import (
+    format_analytics_companion_message,
+    format_signal_message,
+    format_tracked_signal_message,
+    format_tracking_event_message,
+)
 from .tracking import SignalTrackingEvent
 
 
@@ -320,227 +326,29 @@ def _market_context_line(oi_change_pct: float | None, funding_rate: float | None
 def format_signal_text(
     signal: Signal, *, pending_expiry_minutes: int, btc_bias: str | None = None
 ) -> str:
-    fallback_until = signal.created_at.astimezone(UTC) + timedelta(minutes=pending_expiry_minutes)
-    wait_until = signal.valid_until or fallback_until
-    if wait_until > fallback_until:
-        wait_until = fallback_until
-    return _render_signal_card(
-        symbol=signal.symbol,
-        direction=signal.direction,
-        tracking_ref=signal.tracking_ref,
-        timeframe=signal.timeframe,
-        setup_id=signal.setup_id,
-        entry_low=signal.entry_low,
-        entry_high=signal.entry_high,
-        stop=signal.stop,
-        take_profit_1=signal.take_profit_1,
-        take_profit_2=signal.take_profit_2,
-        take_profit_3=signal.tp3,
-        scale_weights=signal.scale_weights,
-        risk_reward=float(signal.risk_reward or 0.0),
-        stop_distance_pct=signal.stop_distance_pct,
-        reasons=signal.reasons,
-        status_line=f"waiting entry until <code>{_fmt_dt(wait_until)}</code>",
-        score=signal.score,
-        oi_change_pct=signal.oi_change_pct,
-        funding_rate=signal.funding_rate,
+    return format_signal_message(
+        signal,
+        pending_expiry_minutes=pending_expiry_minutes,
         btc_bias=btc_bias,
-        expiry_dt=wait_until,
     )
 
 
 def format_analytics_companion(
     signal: Signal, *, btc_bias: str | None = None, eth_bias: str | None = None
 ) -> str:
-    """Build actionable context companion — answers WHY this signal, WHY now, WHAT invalidates."""
-    sym = html.escape(signal.symbol)
-    direction = signal.direction
-    lines = [f"📋 <b>{sym}</b> — почему сейчас"]
-
-    # --- Trigger chain: what conditions aligned ---
-    if signal.reasons:
-        # Humanise the raw reason tokens into readable Russian phrases
-        _reason_map = {
-            "regime_confirmed": "4h тренд подтверждён",
-            "structure_aligned": "1h структура совпадает",
-            "price_above_ema20": "цена выше EMA20",
-            "price_below_ema20": "цена ниже EMA20",
-            "pullback_to_level": "откат к уровню",
-            "volume_confirmed": "объём подтверждает",
-            "bounce_confirmed": "отскок подтверждён",
-            "break_confirmed": "пробой подтверждён",
-            "retest_confirmed": "ретест уровня",
-            "wick_pierced": "свеча прокола уровня",
-            "wick_closed_back": "тело вернулось выше уровня",
-            "squeeze_released": "сжатие BB/KC прорвалось",
-            "adx_ok": "ADX подтверждает тренд",
-            "rsi_ok": "RSI в рабочей зоне",
-            "supertrend_aligned": "SuperTrend совпадает",
-            "ob_held": "ордер-блок устоял",
-            "fvg_touched": "FVG зона тронута",
-            "bos_confirmed": "BOS подтверждён",
-            "choch_confirmed": "CHoCH подтверждён",
-            "sweep_confirmed": "ликвидность сметена",
-            "funding_extreme": "фандинг в экстремуме",
-            "cvd_divergence": "CVD-дивергенция",
-        }
-        readable = [_reason_map.get(r, r) for r in signal.reasons[:5]]
-        lines.append("• Триггер: " + " → ".join(readable))
-
-    # --- Volume quality ---
-    if signal.volume_ratio is not None and signal.volume_ratio > 0:
-        if signal.volume_ratio >= 1.8:
-            vol_verdict = f"{signal.volume_ratio:.1f}× — сильное подтверждение"
-        elif signal.volume_ratio >= 1.2:
-            vol_verdict = f"{signal.volume_ratio:.1f}× — умеренное подтверждение"
-        else:
-            vol_verdict = f"{signal.volume_ratio:.1f}× — слабый объём, осторожно"
-        lines.append(f"• Объём: <code>{vol_verdict}</code>")
-
-    # --- Taker pressure (orderflow) ---
-    if signal.orderflow_delta_ratio is not None:
-        dr = signal.orderflow_delta_ratio
-        if direction == "long":
-            of_verdict = (
-                "покупатели агрессивны"
-                if dr >= 0.55
-                else ("нейтральный поток" if dr >= 0.45 else "продавцы давят — риск")
-            )
-        else:
-            of_verdict = (
-                "продавцы агрессивны"
-                if dr <= 0.45
-                else ("нейтральный поток" if dr <= 0.55 else "покупатели давят — риск")
-            )
-        lines.append(f"• Ордерфлоу: <code>{dr:.2f}</code> → {of_verdict}")
-
-    # --- Crowd positioning contrast (funding rate as contrarian signal) ---
-    if signal.funding_rate is not None:
-        fr_pct = signal.funding_rate * 100
-        if direction == "long" and fr_pct <= -0.04:
-            lines.append(
-                f"• Фандинг: <code>{fr_pct:+.4f}%</code> — толпа в шортах → попутный ветер для лонга"
-            )
-        elif direction == "short" and fr_pct >= 0.04:
-            lines.append(
-                f"• Фандинг: <code>{fr_pct:+.4f}%</code> — толпа в лонгах → попутный ветер для шорта"
-            )
-        elif abs(fr_pct) >= 0.04:
-            lines.append(
-                f"• Фандинг: <code>{fr_pct:+.4f}%</code> — перекос против направления, учитывай"
-            )
-
-    # --- BTC as market tailwind/headwind (15m momentum context) ---
-    btc_map = {"uptrend": "растёт ↑", "downtrend": "падает ↓", "neutral": "нейтральный"}
-    if btc_bias and btc_bias != "neutral":
-        btc_label = btc_map.get(btc_bias, btc_bias)
-        if (direction == "long" and btc_bias == "uptrend") or (
-            direction == "short" and btc_bias == "downtrend"
-        ):
-            lines.append(f"• BTC: {html.escape(btc_label)} — попутный ветер")
-        else:
-            lines.append(
-                f"• BTC: {html.escape(btc_label)} — встречный ветер, будь готов к волатильности"
-            )
-
-    # --- Invalidation condition ---
-    stop_pct = signal.stop_distance_pct
-    setup_invalidation = {
-        "structure_pullback": "закрытие ниже минимума отката",
-        "structure_break_retest": "закрытие обратно под пробитый уровень",
-        "wick_trap_reversal": "цена ниже экстремума фитиля",
-        "squeeze_setup": "возврат внутрь зоны сжатия KC",
-        "ema_bounce": "закрытие тела под EMA",
-        "order_block": "закрытие за пределы зоны OB",
-        "breaker_block": "цена пробивает уровень BRB повторно",
-        "fvg_setup": "полное закрытие гэпа",
-        "bos_choch": "ретест и пробой структурного пивота",
-        "liquidity_sweep": "продолжение движения за уровень ликвидности",
-        "turtle_soup": "новый экстремум за ложный пробой",
-        "cvd_divergence": "новый ценовой экстремум без CVD подтверждения",
-        "hidden_divergence": "разворот основного тренда",
-        "funding_reversal": "фандинг не нормализуется за 2 свечи",
-        "session_killzone": "выход за границы сессионного диапазона",
-    }.get(signal.setup_id, "пробой стопа")
-    lines.append(f"• Аннулирование: {setup_invalidation} (стоп {stop_pct:.1f}% от входа)")
-
-    return "\n".join(lines)
-
-
-def format_tracked_signal_text(tracked: SignalTrackingEvent | object) -> str:
-    state = tracked.tracked if isinstance(tracked, SignalTrackingEvent) else tracked
-    entry_mid = getattr(state, "entry_mid")
-    stop = getattr(state, "stop")
-    risk = abs(entry_mid - stop)
-    reward = abs(getattr(state, "take_profit_3", getattr(state, "take_profit_2")) - entry_mid)
-    risk_reward = (reward / risk) if risk > 0 else 0.0
-    stop_distance_pct = abs(entry_mid - stop) / entry_mid * 100.0 if entry_mid > 0 else 0.0
-    return _render_signal_card(
-        symbol=getattr(state, "symbol"),
-        direction=getattr(state, "direction"),
-        tracking_ref=getattr(state, "tracking_ref"),
-        timeframe=getattr(state, "timeframe"),
-        setup_id=getattr(state, "setup_id"),
-        entry_low=getattr(state, "entry_low"),
-        entry_high=getattr(state, "entry_high"),
-        stop=stop,
-        take_profit_1=getattr(state, "take_profit_1"),
-        take_profit_2=getattr(state, "take_profit_2"),
-        take_profit_3=getattr(state, "take_profit_3", getattr(state, "take_profit_2")),
-        scale_weights=getattr(state, "scale_weights", (0.5, 0.3, 0.2)),
-        risk_reward=risk_reward,
-        stop_distance_pct=stop_distance_pct,
-        reasons=getattr(state, "reasons", ()),
-        score=float(getattr(state, "score", 0.0) or 0.0),
-        status_line=_status_line_for_tracked(state),
+    return format_analytics_companion_message(
+        signal,
+        btc_bias=btc_bias,
+        eth_bias=eth_bias,
     )
 
 
+def format_tracked_signal_text(tracked: SignalTrackingEvent | object) -> str:
+    return format_tracked_signal_message(tracked)
+
+
 def format_tracking_event_text(event: SignalTrackingEvent) -> str:
-    tracked = event.tracked
-    single_target_mode = bool(getattr(tracked, "single_target_mode", False))
-    event_titles = {
-        "activated": "ENTRY FILLED",
-        "tp1_hit": "TP HIT" if single_target_mode else "TP1 HIT",
-        "tp2_hit": "TP2 HIT",
-        "stop_loss": "STOP LOSS",
-        "smart_exit": "SMART EXIT",
-        "emergency_exit": "HARD EXIT",
-        "expired": "EXPIRED",
-        "ambiguous_exit": "AMBIGUOUS EXIT",
-        "superseded": "SUPERSEDED",
-    }
-    if event.event_type == "stop_loss" and getattr(tracked, "moved_to_break_even_at", None):
-        try:
-            break_even = float(getattr(tracked, "activation_price", None) or tracked.entry_mid)
-            stop_px = float(event.event_price or tracked.stop)
-            if break_even > 0 and abs(stop_px - break_even) <= (break_even * 1e-6):
-                event_titles["stop_loss"] = "BREAKEVEN STOP"
-        except (TypeError, ValueError) as exc:
-            LOG.debug("stop-loss display adjustment skipped: %s", exc)
-    lines = [
-        f"<b>{html.escape(tracked.symbol)} {_direction_label(tracked.direction)}</b> <code>#{tracked.tracking_ref}</code> | <b>{event_titles.get(event.event_type, event.event_type)}</b>",
-        (
-            f"<b>Time</b> <code>{_fmt_dt(event.occurred_at)}</code> | "
-            f"<b>Price</b> <code>{_fmt_price(event.event_price or tracked.last_price or tracked.entry_mid)}</code>"
-        ),
-        (
-            f"<b>Plan</b> <code>Entry {_fmt_price(tracked.entry_low)}-{_fmt_price(tracked.entry_high)} | "
-            + (
-                f"SL {_fmt_price(tracked.stop)} | TP {_fmt_price(tracked.take_profit_1)}"
-                if single_target_mode
-                else (
-                    f"SL {_fmt_price(tracked.stop)} | TP1 {_fmt_price(tracked.take_profit_1)} | "
-                    f"TP2 {_fmt_price(tracked.take_profit_2)} | "
-                    f"TP3 {_fmt_price(getattr(tracked, 'take_profit_3', tracked.take_profit_2))}"
-                )
-            )
-            + "</code>"
-        ),
-    ]
-    if event.note:
-        lines.append(f"<b>Note</b> <code>{html.escape(event.note)}</code>")
-    return "\n".join(lines)
+    return format_tracking_event_message(event)
 
 
 class SignalDelivery:

@@ -61,6 +61,9 @@ _CACHE_TTL = {
     "funding_rate": 300,  # 5 minutes
     "funding_history": 1800,  # 30 minutes
     "basis": 600,
+    "continuous_klines": 1800,
+    "mark_price_klines": 1800,
+    "index_price_klines": 1800,
     "book_ticker": 5,  # 5 seconds - use WS primarily
     "order_book_depth": 5,  # 5 seconds - REST fallback when WS L2 is cold/stale
 }
@@ -91,6 +94,9 @@ _ENDPOINT_WEIGHTS: dict[str, int] = {
     "basis": 0,
     "premium_index": 1,
     "funding_rate_history": 1,
+    "continuous_kline_candlestick_data": 1,
+    "mark_price_kline_data": 1,
+    "index_price_kline_data": 1,
 }
 
 _FUTURES_DATA_REQUEST_LIMITED_OPS: set[str] = {
@@ -132,6 +138,9 @@ _PUBLIC_ENDPOINT_REGISTRY: dict[str, _PublicEndpointSpec] = {
     "order_book_depth": _PublicEndpointSpec("/fapi/v1/depth"),
     "compressed_aggregate_trades_list": _PublicEndpointSpec("/fapi/v1/aggTrades"),
     "premium_index": _PublicEndpointSpec("/fapi/v1/premiumIndex"),
+    "continuous_kline_candlestick_data": _PublicEndpointSpec("/fapi/v1/continuousKlines"),
+    "mark_price_kline_data": _PublicEndpointSpec("/fapi/v1/markPriceKlines"),
+    "index_price_kline_data": _PublicEndpointSpec("/fapi/v1/indexPriceKlines"),
     "open_interest": _PublicEndpointSpec("/fapi/v1/openInterest"),
     "funding_rate_history": _PublicEndpointSpec("/fapi/v1/fundingRate", ip_limited=True),
     "open_interest_statistics": _PublicEndpointSpec(
@@ -520,7 +529,7 @@ class BinanceFuturesMarketData:
         self,
         *,
         ws_manager: FuturesWSManager | None = None,
-        rest_timeout_seconds: float = 8.0,
+        rest_timeout_seconds: float = 20.0,
         futures_data_request_limit_per_5m: int = _FUTURES_DATA_IP_LIMIT_DEFAULT,
     ) -> None:
         self._rest_timeout = rest_timeout_seconds
@@ -572,12 +581,25 @@ class BinanceFuturesMarketData:
         # Klines cache to prevent REST stampedes on startup / reconnect backfills
         self._klines_cache: dict[tuple[str, str, int], tuple[float, pl.DataFrame]] = {}
         self._klines_locks: dict[tuple[str, str, int], asyncio.Lock] = {}
+        self._derived_klines_cache: dict[
+            tuple[str, str, str, int], tuple[float, pl.DataFrame]
+        ] = {}
+        self._derived_klines_locks: dict[tuple[str, str, str, int], asyncio.Lock] = {}
         # Circuit breaker state per operation
         self._circuit_failures: dict[str, int] = {}
         self._circuit_open_until: dict[str, float] = {}
         self._circuit_half_open: set[str] = set()
         self._circuit_failure_threshold = 3
         self._circuit_open_duration_seconds = 30.0
+
+        # Critical operations use a stricter threshold, non-critical are more permissive.
+        self._critical_operations = {
+            "kline_candlestick_data",
+            "symbol_order_book_ticker",
+            "order_book_depth",
+            "exchange_information"
+        }
+
         self._last_endpoint_name: str | None = None
         self._last_endpoint_source: str | None = None
         self._last_endpoint_cache_hit: bool = False
@@ -667,13 +689,20 @@ class BinanceFuturesMarketData:
             return
         failures = self._circuit_failures.get(operation, 0) + 1
         self._circuit_failures[operation] = failures
-        if failures >= self._circuit_failure_threshold:
+
+        # Critical operations use the standard threshold, non-critical are more permissive
+        threshold = self._circuit_failure_threshold
+        if operation not in self._critical_operations:
+            threshold = self._circuit_failure_threshold * 5 # 15 failures for non-critical
+
+        if failures >= threshold:
             open_until = time.monotonic() + self._circuit_open_duration_seconds
             self._circuit_open_until[operation] = open_until
             LOG.error(
-                "circuit breaker opened | operation=%s failures=%d duration=%.0fs",
+                "circuit breaker opened | operation=%s failures=%d threshold=%d duration=%.0fs",
                 operation,
                 failures,
+                threshold,
                 self._circuit_open_duration_seconds,
             )
             self._circuit_failures[operation] = 0
@@ -703,7 +732,12 @@ class BinanceFuturesMarketData:
 
     def _estimate_weight(self, operation: str, params: Mapping[str, Any] | None = None) -> int:
         """Return estimated request weight for client-side budget tracking."""
-        if operation.startswith("kline_candlestick_data"):
+        if operation in {
+            "kline_candlestick_data",
+            "continuous_kline_candlestick_data",
+            "mark_price_kline_data",
+            "index_price_kline_data",
+        }:
             try:
                 limit = int((params or {}).get("limit") or _DEFAULT_KLINE_FETCH_LIMIT)
             except (TypeError, ValueError):
@@ -1068,10 +1102,11 @@ class BinanceFuturesMarketData:
                 LOG.debug if operation in _FALLBACK_TIMEOUT_DEBUG_OPERATIONS else LOG.error
             )
             log_timeout(
-                "rest timeout | operation=%s symbol=%s timeout=%.1fs",
+                "rest timeout | operation=%s symbol=%s timeout=%.1fs exception=%s",
                 operation,
                 symbol,
                 self._rest_timeout,
+                type(exc).__name__,
             )
             raise MarketDataUnavailable(
                 operation=operation,
@@ -1342,6 +1377,173 @@ class BinanceFuturesMarketData:
             active_lock = self._klines_locks.get(key)
             if active_lock is lock and not lock.locked():
                 self._klines_locks.pop(key, None)
+
+    async def _fetch_derived_klines_uncached(
+        self,
+        kind: str,
+        symbol: str,
+        interval: str,
+        *,
+        limit: int,
+    ) -> pl.DataFrame:
+        validate_symbol(symbol)
+        validate_interval(interval)
+        validate_limit(limit)
+        if kind == "continuous":
+            rows = await self._call_public_http_json(
+                "continuous_kline_candlestick_data",
+                params={
+                    "pair": symbol,
+                    "contractType": "PERPETUAL",
+                    "interval": interval,
+                    "limit": limit,
+                },
+                symbol=symbol,
+            )
+        elif kind == "mark":
+            rows = await self._call_public_http_json(
+                "mark_price_kline_data",
+                params={"symbol": symbol, "interval": interval, "limit": limit},
+                symbol=symbol,
+            )
+        elif kind == "index":
+            rows = await self._call_public_http_json(
+                "index_price_kline_data",
+                params={"pair": symbol, "interval": interval, "limit": limit},
+                symbol=symbol,
+            )
+        else:
+            raise ValueError(f"unsupported derived kline kind: {kind!r}")
+        return _drop_incomplete_ohlcv_tail(_klines_to_frame(rows), interval)
+
+    async def _fetch_derived_klines_cached(
+        self,
+        kind: str,
+        symbol: str,
+        interval: str,
+        *,
+        limit: int,
+    ) -> pl.DataFrame:
+        validate_symbol(symbol)
+        validate_interval(interval)
+        validate_limit(limit)
+        cache_ttl_key = {
+            "continuous": "continuous_klines",
+            "mark": "mark_price_klines",
+            "index": "index_price_klines",
+        }.get(kind)
+        if cache_ttl_key is None:
+            raise ValueError(f"unsupported derived kline kind: {kind!r}")
+        key = (kind, symbol, interval, int(limit))
+        ttl = int(_CACHE_TTL.get(cache_ttl_key, 900))
+        now = time.monotonic()
+        cached = self._derived_klines_cache.get(key)
+        if cached is not None and (now - cached[0]) < ttl:
+            self._record_endpoint_snapshot(
+                f"{kind}_klines",
+                source="rest",
+                cache_hit=True,
+                fallback_used=False,
+                response_age_s=now - cached[0],
+            )
+            return cached[1]
+        lock = self._derived_klines_locks.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._derived_klines_locks[key] = lock
+        try:
+            async with lock:
+                now = time.monotonic()
+                cached = self._derived_klines_cache.get(key)
+                if cached is not None and (now - cached[0]) < ttl:
+                    self._record_endpoint_snapshot(
+                        f"{kind}_klines",
+                        source="rest",
+                        cache_hit=True,
+                        fallback_used=False,
+                        response_age_s=now - cached[0],
+                    )
+                    return cached[1]
+                frame = await self._fetch_derived_klines_uncached(
+                    kind,
+                    symbol,
+                    interval,
+                    limit=limit,
+                )
+                self._derived_klines_cache[key] = (time.monotonic(), frame)
+                return frame
+        finally:
+            active_lock = self._derived_klines_locks.get(key)
+            if active_lock is lock and not lock.locked():
+                self._derived_klines_locks.pop(key, None)
+
+    async def fetch_continuous_klines(
+        self, symbol: str, interval: str, *, limit: int = 500
+    ) -> pl.DataFrame:
+        """Fetch public continuous USD-M klines for backtest-stable history."""
+        return await self._fetch_derived_klines_cached(
+            "continuous",
+            symbol,
+            interval,
+            limit=limit,
+        )
+
+    async def fetch_mark_price_klines(
+        self, symbol: str, interval: str, *, limit: int = 500
+    ) -> pl.DataFrame:
+        """Fetch public mark-price klines for premium/basis analytics."""
+        return await self._fetch_derived_klines_cached("mark", symbol, interval, limit=limit)
+
+    async def fetch_index_price_klines(
+        self, symbol: str, interval: str, *, limit: int = 500
+    ) -> pl.DataFrame:
+        """Fetch public index-price klines for spot/futures divergence analytics."""
+        return await self._fetch_derived_klines_cached("index", symbol, interval, limit=limit)
+
+    async def fetch_priority_history_bundle(
+        self,
+        symbol: str,
+        *,
+        intervals: tuple[str, ...] = ("15m", "1h", "4h"),
+        limit: int = 300,
+    ) -> dict[str, pl.DataFrame]:
+        """Warm high-value public history for priority symbols.
+
+        The bundle intentionally stays public-only: trade klines, continuous
+        klines, mark-price klines and index-price klines. It gives dashboard,
+        backtest and signal-quality code enough context to compare traded,
+        continuous, mark and index curves without introducing authenticated
+        order endpoints.
+        """
+        validate_symbol(symbol)
+        frames: dict[str, pl.DataFrame] = {}
+        for interval in intervals:
+            validate_interval(interval)
+            settled_limit = max(1, min(int(limit), 1500))
+            fetches = await asyncio.gather(
+                self.fetch_klines_cached(symbol, interval, limit=settled_limit),
+                self.fetch_continuous_klines(symbol, interval, limit=settled_limit),
+                self.fetch_mark_price_klines(symbol, interval, limit=settled_limit),
+                self.fetch_index_price_klines(symbol, interval, limit=settled_limit),
+                return_exceptions=True,
+            )
+            for suffix, result in zip(
+                ("trade", "continuous", "mark", "index"),
+                fetches,
+                strict=True,
+            ):
+                key = f"{interval}:{suffix}"
+                if isinstance(result, Exception):
+                    LOG.info(
+                        "priority history fetch skipped | symbol=%s interval=%s kind=%s error=%s",
+                        symbol,
+                        interval,
+                        suffix,
+                        result,
+                    )
+                    continue
+                frames[key] = result
+        return frames
 
     def get_cached_klines(
         self,

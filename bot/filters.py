@@ -12,6 +12,7 @@ import polars as pl
 
 from .domain.config import BotSettings
 from .domain.schemas import PreparedSymbol, Signal
+from .features_microstructure import MicrostructureContext, build_microstructure_context
 from .runtime_policy import is_deep_analysis_symbol
 from .signal_contract import DEFAULT_TARGET_RR, build_trade_plan
 from .scoring import ScoringResult
@@ -179,6 +180,47 @@ def _benchmark_context_guard(
     if signal.direction == "long" and macro_risk_mode in {"risk_off", "panic", "stress"}:
         return False, "macro_risk_off_long", details
     return True, None, details
+
+
+def _latest_frame_float(frame: pl.DataFrame | None, column: str) -> float | None:
+    if frame is None or frame.is_empty() or column not in frame.columns:
+        return None
+    try:
+        value = frame.item(-1, column)
+    except (IndexError, TypeError, ValueError):
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    return numeric if math.isfinite(numeric) else None
+
+
+def _microstructure_context_for_signal(
+    signal: Signal,
+    prepared: PreparedSymbol,
+) -> MicrostructureContext:
+    """Build a direction-aware microstructure snapshot from the prepared symbol."""
+    row = {
+        "symbol": signal.symbol,
+        "direction": signal.direction,
+        "price_change_pct": prepared.universe.price_change_pct,
+        "funding_rate": prepared.funding_rate,
+        "oi_change_pct": prepared.oi_change_pct,
+        "global_account_ls_ratio": prepared.global_account_ls_ratio or prepared.global_ls_ratio,
+        "top_account_ls_ratio": prepared.top_account_ls_ratio or prepared.ls_ratio,
+        "top_position_ls_ratio": prepared.top_position_ls_ratio,
+        "taker_ratio": prepared.taker_ratio,
+        "taker_buy_base": _latest_frame_float(prepared.work_15m, "taker_buy_base_volume"),
+        "volume": _latest_frame_float(prepared.work_15m, "volume"),
+        "bid_price": prepared.bid_price,
+        "ask_price": prepared.ask_price,
+        "depth_imbalance": prepared.depth_imbalance,
+        "microprice_bias": prepared.microprice_bias,
+        "basis_pct": prepared.basis_pct,
+        "liquidation_score": prepared.liquidation_score,
+    }
+    return build_microstructure_context(row)
 
 
 def _expand_signal_to_min_stop(
@@ -641,6 +683,13 @@ def apply_global_filters(
         raw_delta = prepared.work_15m.item(-1, "delta_ratio")
         if raw_delta is not None:
             delta_ratio = float(raw_delta)
+    micro_context = _microstructure_context_for_signal(signal, prepared)
+    if micro_context.confidence >= 0.35:
+        passed.append(f"microstructure_{micro_context.label}")
+    else:
+        passed.append("microstructure_sparse")
+    if micro_context.warnings:
+        passed.append("microstructure_warning")
 
     updated = replace(
         signal,
@@ -650,6 +699,23 @@ def apply_global_filters(
         oi_change_pct=prepared.oi_change_pct,
         funding_rate=prepared.funding_rate,
         orderflow_delta_ratio=delta_ratio,
+        mark_price=prepared.mark_price,
+        volume_ratio=_latest_frame_float(prepared.work_15m, "volume_ratio20"),
+        adx_1h=adx_1h,
+        premium_zscore_5m=prepared.premium_zscore_5m,
+        premium_slope_5m=prepared.premium_slope_5m,
+        ls_ratio=prepared.ls_ratio or prepared.global_ls_ratio,
+        microstructure_bias_score=micro_context.bias_score,
+        microstructure_confidence=micro_context.confidence,
+        microstructure_label=micro_context.label,
+        microstructure_reason=micro_context.reason_line(),
+        microstructure_warnings=micro_context.warnings,
+        btc_bias=prepared.btc_bias,
+        eth_bias=prepared.eth_bias,
+        sol_bias=prepared.sol_bias,
+        xau_bias=prepared.xau_bias,
+        xag_bias=prepared.xag_bias,
+        pax_bias=prepared.pax_bias,
         passed_filters=tuple(passed),
     )
 

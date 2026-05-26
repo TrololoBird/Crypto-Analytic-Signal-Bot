@@ -881,7 +881,8 @@ class SignalTracker:
         relevant = candles.filter(pl.col("close_time") > last_checked)
         relevant = relevant.sort("close_time")
         last_processed_at: datetime | None = None
-        for row in relevant.iter_rows(named=True):
+        candle_rows = relevant.select(["close_time", "high", "low", "close"]).to_dicts()
+        for row in candle_rows:
             bar_close_time = row["close_time"]
             if isinstance(bar_close_time, str):
                 bar_close_time = datetime.fromisoformat(bar_close_time.replace("Z", "+00:00"))

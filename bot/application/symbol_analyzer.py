@@ -813,6 +813,7 @@ class SymbolAnalyzer:
                     "sol_bias",
                     "xau_bias",
                     "xag_bias",
+                    "pax_bias",
                     "altcoin_season_index",
                     "btc_phase",
                     "macro_risk_mode",
@@ -827,6 +828,7 @@ class SymbolAnalyzer:
                         ("SOLUSDT", "sol_bias"),
                         ("XAUUSDT", "xau_bias"),
                         ("XAGUSDT", "xag_bias"),
+                        ("PAXGUSDT", "pax_bias"),
                     ):
                         payload = benchmark_context.get(symbol)
                         if isinstance(payload, dict):

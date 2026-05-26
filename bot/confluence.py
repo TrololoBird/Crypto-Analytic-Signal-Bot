@@ -9,6 +9,7 @@ from typing import Any
 
 from .domain.config import BotSettings
 from .domain.schemas import PreparedSymbol, Signal
+from .features_microstructure import build_microstructure_context
 from .scoring import (
     ScoringResult,
     _crowd_position,
@@ -118,6 +119,9 @@ class ConfluenceEngine:
     ) -> list[ComponentScore]:
         funding_weight = max(0.0, min(cfg.weight_crowd_position * 0.5, cfg.weight_crowd_position))
         crowd_weight = max(0.0, cfg.weight_crowd_position - funding_weight)
+        micro_context = self._microstructure_context(prepared, signal)
+        micro_available = micro_context.confidence >= 0.35
+        micro_raw = 0.5 + (micro_context.bias_score * 0.5)
         raw_specs = [
             {
                 "name": "mtf_alignment",
@@ -160,6 +164,12 @@ class ConfluenceEngine:
                 "weight": cfg.weight_oi_momentum,
                 "raw": _oi_momentum(prepared, signal),
                 "available": self._has_oi_or_flow_context(prepared, signal),
+            },
+            {
+                "name": "microstructure_context",
+                "weight": max(float(cfg.weight_oi_momentum) * 0.85, 0.07),
+                "raw": micro_raw,
+                "available": micro_available,
             },
         ]
         specs: list[dict[str, Any]] = []
@@ -239,12 +249,12 @@ class ConfluenceEngine:
         span = max(high - low, 1e-12)
         return max(0.001, min((value - low) / span, 0.999))
 
-    @classmethod
+    @staticmethod
     def _calibrate_setup_prior(score: float) -> float:
         numeric = 0.5 + (max(0.0, min(float(score), 1.0)) - 0.5) * 1.15
         return ConfluenceEngine._soft_clip_score(numeric, strength=0.72)
 
-    @classmethod
+    @staticmethod
     def _calibrate_component_model(score: float) -> float:
         numeric = 0.5 + (max(0.0, min(float(score), 1.0)) - 0.5) * 1.35
         return ConfluenceEngine._soft_clip_score(numeric, strength=0.68)
@@ -360,3 +370,24 @@ class ConfluenceEngine:
         if getattr(signal, "orderflow_delta_ratio", None) is not None:
             return True
         return cls._has_latest_feature(prepared, "work_15m", "delta_ratio")
+
+    @staticmethod
+    def _microstructure_context(prepared: PreparedSymbol, signal: Signal) -> Any:
+        row = {
+            "symbol": signal.symbol,
+            "direction": signal.direction,
+            "price_change_pct": prepared.universe.price_change_pct,
+            "funding_rate": prepared.funding_rate,
+            "oi_change_pct": prepared.oi_change_pct,
+            "global_account_ls_ratio": prepared.global_account_ls_ratio or prepared.global_ls_ratio,
+            "top_account_ls_ratio": prepared.top_account_ls_ratio or prepared.ls_ratio,
+            "top_position_ls_ratio": prepared.top_position_ls_ratio,
+            "taker_ratio": prepared.taker_ratio,
+            "bid_price": prepared.bid_price,
+            "ask_price": prepared.ask_price,
+            "depth_imbalance": prepared.depth_imbalance,
+            "microprice_bias": prepared.microprice_bias,
+            "basis_pct": prepared.basis_pct,
+            "liquidation_score": prepared.liquidation_score,
+        }
+        return build_microstructure_context(row)

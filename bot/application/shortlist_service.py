@@ -146,6 +146,16 @@ class ShortlistService:
                         symbol,
                         exc,
                     )
+                try:
+                    liquidation = ws.get_liquidation_sentiment(symbol)
+                    if liquidation is not None:
+                        row["liquidation_score"] = float(liquidation)
+                except Exception as exc:
+                    LOG.debug(
+                        "shortlist liquidation sentiment unavailable | symbol=%s error=%s",
+                        symbol,
+                        exc,
+                    )
 
             if isinstance(client, BinanceFuturesMarketData):
                 oi_change = client.get_cached_oi_change(symbol)
@@ -160,6 +170,12 @@ class ShortlistService:
                 global_ratio = client.get_cached_global_ls_ratio(symbol)
                 if global_ratio is not None:
                     row["global_account_ls_ratio"] = float(global_ratio)
+                taker_ratio = client.get_cached_taker_ratio(symbol)
+                if taker_ratio is not None:
+                    row["taker_ratio"] = float(taker_ratio)
+                funding_trend = client.get_cached_funding_trend(symbol)
+                if funding_trend is not None:
+                    row["funding_trend"] = str(funding_trend)
                 if "top_account_ls_ratio" in row and "global_account_ls_ratio" in row:
                     row["top_vs_global_ls_gap"] = float(row["top_account_ls_ratio"]) - float(
                         row["global_account_ls_ratio"]
@@ -167,6 +183,14 @@ class ShortlistService:
                 basis_pct = client.get_cached_basis(symbol, period="1h")
                 if basis_pct is not None:
                     row["basis_pct"] = float(basis_pct)
+                basis_stats = client.get_cached_basis_stats(symbol, period="5m")
+                if basis_stats is not None:
+                    premium_slope = basis_stats.get("premium_slope_5m")
+                    premium_zscore = basis_stats.get("premium_zscore_5m")
+                    if premium_slope is not None:
+                        row["premium_slope_5m"] = float(premium_slope)
+                    if premium_zscore is not None:
+                        row["premium_zscore_5m"] = float(premium_zscore)
                 cached_oi = open_interest_cache.get(symbol)
                 if cached_oi is not None:
                     _ts, oi_value = cached_oi
@@ -260,14 +284,17 @@ class ShortlistService:
                     bot.settings.universe.quote_asset,
                 )
                 continue
+            meta = bot._symbol_meta_by_symbol.get(symbol)
+            contract_type = str(getattr(meta, "contract_type", "") or "PERPETUAL").upper()
+            onboard_date_ms = int(getattr(meta, "onboard_date_ms", 0) or 0)
             shortlist.append(
                 UniverseSymbol(
                     symbol=symbol,
                     base_asset=base_asset,
                     quote_asset=quote_asset,
-                    contract_type="PERPETUAL",
+                    contract_type=contract_type,
                     status="TRADING",
-                    onboard_date_ms=0,
+                    onboard_date_ms=onboard_date_ms,
                     quote_volume=0.0,
                     price_change_pct=0.0,
                     last_price=0.0,
