@@ -29,7 +29,10 @@ class MultiTFTrendSetup(RoadmapSetup):
         params = self._params(prepared, settings)
         htf = prepared.work_4h if prepared.work_4h is not None and prepared.work_4h.height >= 55 else prepared.work_1h
         ltf = prepared.work_15m
-        if htf.height < 55 or ltf.height < 10:
+        if ltf.height < 10:
+            _reject(prepared, self.setup_id, "insufficient_ltf_bars", bars=ltf.height)
+            return None
+        if htf.height < 55:
             _reject(
                 prepared,
                 self.setup_id,

@@ -51,7 +51,7 @@ class BreakerBlockSetup(BaseSetup):
             "base_score": 0.52,
             "scan_bars": 72,
             "mitigation_threshold": 0.30,
-            "sl_buffer_atr": 0.20,
+            "sl_buffer_atr": 0.50,
             "min_atr": 0.0001,
             "min_volume_ratio": 0.75,
             "min_acceptance_close_position_long": 0.45,

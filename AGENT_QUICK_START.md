@@ -45,6 +45,7 @@ python scripts\\live_check_binance_api.py
 python scripts\\live_check_indicators.py
 python scripts\\live_check_pipeline.py --symbols BTCUSDT ETHUSDT SOLUSDT --limit 3 --concurrency 2
 python scripts\\live_check_strategies.py --symbols BTCUSDT ETHUSDT SOLUSDT --limit 3 --concurrency 2 --require-signal-contract --summary-json data\\bot\\telemetry\\strategy_audit_after_codex.json --print-summary-json
+python scripts\\historical_strategy_audit.py --symbols BTCUSDT ETHUSDT SOLUSDT BNBUSDT XRPUSDT DOGEUSDT ADAUSDT LINKUSDT AVAXUSDT LTCUSDT --days 30 --warmup-days 45 --window-step-bars 48 --max-windows-per-symbol 8 --concurrency 3 --require-registered 38 --require-contract-clean --require-no-zero-signals
 ```
 
 Expected baseline on 2026-05-26:
@@ -53,6 +54,7 @@ Expected baseline on 2026-05-26:
 - 38 strategies registered/evaluated.
 - Strategy errors: 0.
 - Signal contract failures: 0.
+- Top-10 historical rolling audit: 80 windows, 3040 detector runs, 38/38 strategies hit, 0 contract failures.
 
 ## Delivery Trace To Preserve
 
@@ -64,6 +66,13 @@ strategy Signal
 ```
 
 Any path that reaches `delivery.deliver` without the first two steps is a critical bug.
+
+## Current Audit Scripts
+
+- `scripts/live_check_pipeline.py` proves the dry delivery funnel on current public data.
+- `scripts/live_check_strategies.py` proves live detector surface and signal-contract rows.
+- `scripts/historical_strategy_audit.py` proves closed-candle rolling activity for all 38 strategies.
+- `scripts/live_smoke_bot.py --runtime-seconds 1200` runs the 20-minute end-to-end public-data smoke without Telegram sends.
 
 ## Hooks
 

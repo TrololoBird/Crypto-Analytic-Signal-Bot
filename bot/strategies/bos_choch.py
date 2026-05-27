@@ -197,7 +197,7 @@ class BOSCHOCHSetup(BaseSetup):
             "external_swing_lookback": 20,
             "bos_lookback": 6,  # Backward-compatible alias.
             "choch_lookback": 6,  # Backward-compatible alias.
-            "sl_buffer_atr": 0.2,
+            "sl_buffer_atr": 0.5,
             "breakout_threshold_atr": 0.4,
             "max_break_age_bars": 6,
             "max_retest_age_bars": 16,

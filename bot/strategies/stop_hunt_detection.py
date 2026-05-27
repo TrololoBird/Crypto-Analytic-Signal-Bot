@@ -20,12 +20,13 @@ class StopHuntDetectionSetup(RoadmapSetup):
     DEFAULTS = {
         **RoadmapSetup.DEFAULTS,
         "sweep_tolerance_pct": 0.0010,
-        "min_volume_ratio": 1.05,
+        "min_volume_ratio": 1.00,
         "min_close_position_long": 0.55,
         "max_close_position_short": 0.45,
-        "signal_lookback_bars": 8,
-        "near_level_atr": 0.25,
-        "min_wick_atr": 0.45,
+        "signal_lookback_bars": 20,
+        "near_level_atr": 0.35,
+        "min_wick_atr": 0.35,
+        "max_entry_drift_atr": 1.25,
         "weak_reclaim_penalty": 0.84,
     }
 
@@ -54,16 +55,19 @@ class StopHuntDetectionSetup(RoadmapSetup):
             _reject(prepared, self.setup_id, "missing_columns", missing_fields=missing)
             return None
         close = _last(work, "close")
+        atr = _last(work, "atr14")
         tolerance = max(0.0003, min(float(params["sweep_tolerance_pct"]), 0.0012))
-        min_volume_ratio = max(float(params["min_volume_ratio"]), 1.05)
+        min_volume_ratio = max(float(params["min_volume_ratio"]), 1.0)
         min_close_position_long = max(float(params["min_close_position_long"]), 0.55)
         max_close_position_short = min(float(params["max_close_position_short"]), 0.45)
-        signal_lookback_bars = max(3, min(int(params.get("signal_lookback_bars", 8)), 8))
+        signal_lookback_bars = max(5, min(int(params.get("signal_lookback_bars", 20)), 24))
+        max_entry_drift_atr = max(0.50, min(float(params.get("max_entry_drift_atr", 1.25)), 2.0))
         recent = work.tail(min(signal_lookback_bars, work.height))
         direction = None
         level = 0.0
         signal_lag = 0
         vol_ratio = _last(work, "volume_ratio20", 1.0)
+        entry_drift_atr = 0.0
         reclaim_quality = 1.0
         for local_idx in range(recent.height - 1, -1, -1):
             high = _as_float(recent.item(local_idx, "high"))
@@ -73,32 +77,39 @@ class StopHuntDetectionSetup(RoadmapSetup):
             prev_high = _as_float(recent.item(local_idx, "prev_donchian_high20"))
             close_position = _as_float(recent.item(local_idx, "close_position"), 0.5)
             bar_vol_ratio = _as_float(recent.item(local_idx, "volume_ratio20"), 1.0)
-            volume_ok = bar_vol_ratio >= min_volume_ratio
+            volume_ok = max(bar_vol_ratio, vol_ratio) >= min_volume_ratio
+            long_drift_atr = (close - prev_low) / atr if atr > 0.0 and prev_low > 0.0 else 0.0
+            short_drift_atr = (prev_high - close) / atr if atr > 0.0 and prev_high > 0.0 else 0.0
             if (
-                low < prev_low * (1.0 - tolerance)
+                prev_low > 0.0
+                and low < prev_low * (1.0 - tolerance)
                 and max(bar_close, close) > prev_low
                 and close_position >= min_close_position_long
+                and 0.0 <= long_drift_atr <= max_entry_drift_atr
                 and volume_ok
             ):
                 direction = "long"
                 level = prev_low
+                entry_drift_atr = long_drift_atr
             elif (
-                high > prev_high * (1.0 + tolerance)
+                prev_high > 0.0
+                and high > prev_high * (1.0 + tolerance)
                 and min(bar_close, close) < prev_high
                 and close_position <= max_close_position_short
+                and 0.0 <= short_drift_atr <= max_entry_drift_atr
                 and volume_ok
             ):
                 direction = "short"
                 level = prev_high
+                entry_drift_atr = short_drift_atr
             if direction is not None:
                 signal_lag = recent.height - 1 - local_idx
                 vol_ratio = max(vol_ratio, bar_vol_ratio)
                 break
         if direction is None:
-            atr = _last(work, "atr14")
             if atr > 0.0 and recent.height > 0:
-                near_level_atr = min(float(params.get("near_level_atr", 0.25)), 0.25)
-                min_wick_atr = max(float(params.get("min_wick_atr", 0.45)), 0.45)
+                near_level_atr = max(0.10, min(float(params.get("near_level_atr", 0.35)), 0.50))
+                min_wick_atr = max(0.25, min(float(params.get("min_wick_atr", 0.35)), 0.75))
                 for local_idx in range(recent.height - 1, -1, -1):
                     open_ = _as_float(recent.item(local_idx, "open"))
                     high = _as_float(recent.item(local_idx, "high"))
@@ -110,30 +121,38 @@ class StopHuntDetectionSetup(RoadmapSetup):
                     bar_vol_ratio = _as_float(recent.item(local_idx, "volume_ratio20"), 1.0)
                     lower_wick_atr = (min(open_, bar_close) - low) / atr
                     upper_wick_atr = (high - max(open_, bar_close)) / atr
+                    long_drift_atr = (close - prev_low) / atr if prev_low > 0.0 else 0.0
+                    short_drift_atr = (prev_high - close) / atr if prev_high > 0.0 else 0.0
                     if (
-                        low <= prev_low + atr * near_level_atr
+                        prev_low > 0.0
+                        and low <= prev_low + atr * near_level_atr
                         and lower_wick_atr >= min_wick_atr
                         and close >= bar_close * 0.996
                         and close_position >= 0.50
-                        and bar_vol_ratio >= min_volume_ratio
+                        and 0.0 <= long_drift_atr <= max_entry_drift_atr
+                        and max(bar_vol_ratio, vol_ratio) >= min_volume_ratio
                     ):
                         direction = "long"
                         level = prev_low
                         signal_lag = recent.height - 1 - local_idx
                         vol_ratio = max(vol_ratio, bar_vol_ratio)
+                        entry_drift_atr = long_drift_atr
                         reclaim_quality = float(params.get("weak_reclaim_penalty", 0.84))
                         break
                     if (
-                        high >= prev_high - atr * near_level_atr
+                        prev_high > 0.0
+                        and high >= prev_high - atr * near_level_atr
                         and upper_wick_atr >= min_wick_atr
                         and close <= bar_close * 1.004
                         and close_position <= 0.50
-                        and bar_vol_ratio >= min_volume_ratio
+                        and 0.0 <= short_drift_atr <= max_entry_drift_atr
+                        and max(bar_vol_ratio, vol_ratio) >= min_volume_ratio
                     ):
                         direction = "short"
                         level = prev_high
                         signal_lag = recent.height - 1 - local_idx
                         vol_ratio = max(vol_ratio, bar_vol_ratio)
+                        entry_drift_atr = short_drift_atr
                         reclaim_quality = float(params.get("weak_reclaim_penalty", 0.84))
                         break
             if direction is None:
@@ -155,6 +174,7 @@ class StopHuntDetectionSetup(RoadmapSetup):
                 f"swept_level={level:.4f}",
                 f"signal_lag={signal_lag}",
                 f"vol_ratio={vol_ratio:.2f}",
+                f"entry_drift_atr={entry_drift_atr:.2f}",
                 f"reclaim_quality={reclaim_quality:.2f}",
             ],
             family=self.family,

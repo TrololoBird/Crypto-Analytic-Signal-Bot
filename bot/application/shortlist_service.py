@@ -468,7 +468,8 @@ class ShortlistService:
         ws = getattr(bot, "_ws_manager", None)
         try:
             ws_cache_warm = bool(ws is not None and ws.is_ticker_cache_warm())
-        except Exception:
+        except Exception as exc:
+            LOG.debug("shortlist ws cache warm check failed: %s", exc)
             ws_cache_warm = False
         has_symbol_meta = bool(getattr(bot, "_symbol_meta_by_symbol", None))
         cached_shortlist = list(getattr(bot, "_last_live_shortlist", []) or [])

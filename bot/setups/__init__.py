@@ -376,6 +376,8 @@ def _build_signal(
 
     trend_direction = getattr(prepared, "bias_1h", None)
     trend_score = getattr(prepared, "trend_score_1h", None)
+    # floor: no signal delivered below 0.38 after penalties
+    score = max(0.38, round(float(score), 4))
 
     return Signal(
         symbol=prepared.symbol,

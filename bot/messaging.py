@@ -239,7 +239,8 @@ class TelegramBroadcaster:
                     await self._send_immediate(
                         buffered, message_hash=buffered_hash, reply_to_message_id=None
                     )
-                except Exception:
+                except Exception as exc:
+                    LOG.debug("telegram buffered message retry failed", error=str(exc))
                     self._send_buffer.appendleft(buffered)
                     break
             return DeliveryResult(status="sent", message_id=sent_message_id)

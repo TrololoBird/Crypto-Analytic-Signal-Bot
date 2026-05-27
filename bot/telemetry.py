@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import logging
 import re
 import shutil
 import threading
@@ -14,6 +15,7 @@ import polars as pl
 
 
 UTC = timezone.utc
+LOG = logging.getLogger("bot.telemetry")
 _CSV_LOCKS_GUARD = threading.Lock()
 _CSV_LOCKS: dict[str, threading.Lock] = {}
 _CSV_COMPACT_CALLS: dict[str, int] = {}
@@ -306,5 +308,6 @@ class TelemetryStore:
             if max_rows > 0:
                 return df.tail(max_rows)
             return df
-        except Exception:
+        except Exception as exc:
+            LOG.debug("telemetry csv tail read failed | path=%s error=%s", path, exc)
             return None

@@ -11,6 +11,7 @@ from collections import Counter, defaultdict, deque
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import json
+import logging
 from pathlib import Path
 import time
 from typing import Any, Callable, Iterable, Mapping
@@ -19,6 +20,7 @@ from .telegram_formatter import message_preview, sample_message_from_row
 
 
 JsonDict = dict[str, Any]
+LOG = logging.getLogger("bot.dashboard_live")
 PRIORITY_ASSET_SYMBOLS = (
     "BTCUSDT",
     "ETHUSDT",
@@ -553,7 +555,8 @@ class DashboardLiveData:
         if ws is not None and hasattr(ws, "state_snapshot"):
             try:
                 ws_snapshot = ws.state_snapshot()
-            except Exception:
+            except Exception as exc:
+                LOG.debug("dashboard live ws snapshot unavailable: %s", exc)
                 ws_snapshot = {}
         diagnostics = getattr(bot, "_signal_diagnostics", None)
         diag_summary = diagnostics.get_summary() if diagnostics is not None else {}

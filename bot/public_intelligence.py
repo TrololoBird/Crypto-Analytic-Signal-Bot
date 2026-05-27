@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any, cast
 
 import aiohttp
+import polars as pl
 import structlog
 
 from .domain.config import BotSettings
@@ -335,7 +336,8 @@ class PublicIntelligenceService:
                     params=params_fn(symbol),
                     symbol=symbol,
                 )
-            except Exception:
+            except Exception as exc:
+                LOG.debug("public intelligence endpoint fetch failed", endpoint=endpoint, symbol=symbol, error=str(exc))
                 return None
 
         for index in range(0, len(symbols), 10):
@@ -352,7 +354,8 @@ class PublicIntelligenceService:
         async def _fetch_one(symbol: str) -> Any:
             try:
                 return await fetcher(symbol)
-            except Exception:
+            except Exception as exc:
+                LOG.debug("public intelligence value fetch failed", symbol=symbol, error=str(exc))
                 return None
 
         for index in range(0, len(symbols), 10):
@@ -551,7 +554,8 @@ class PublicIntelligenceService:
         ]:
             try:
                 df = await self._client.fetch_klines_cached(symbol, "5m", limit=limit)
-            except Exception:
+            except Exception as exc:
+                LOG.debug("barrier frame fetch failed", symbol=symbol, error=str(exc))
                 continue
             if df is None or df.height < 2:
                 continue
@@ -582,8 +586,13 @@ class PublicIntelligenceService:
         for symbol in symbols:
             try:
                 df = await self._client.fetch_klines_cached(symbol, "1h", limit=260)
-            except Exception:
-                by_symbol[symbol] = {"available": False, "reason": "frame_fetch_failed"}
+            except Exception as exc:
+                by_symbol[symbol] = {
+                    "available": False,
+                    "reason": "frame_fetch_failed",
+                    "error": exc.__class__.__name__,
+                }
+                LOG.debug("harmonic frame fetch failed", symbol=symbol, error=str(exc))
                 continue
             if df is None or df.is_empty():
                 by_symbol[symbol] = {"available": False, "reason": "no_frame_data"}
@@ -708,7 +717,13 @@ class PublicIntelligenceService:
                     interval,
                     limit=interval_limits[interval],
                 )
-            except Exception:
+            except Exception as exc:
+                LOG.debug(
+                    "multi-timeframe frame fetch failed",
+                    symbol=symbol,
+                    interval=interval,
+                    error=str(exc),
+                )
                 continue
             if frame is None or frame.is_empty():
                 continue

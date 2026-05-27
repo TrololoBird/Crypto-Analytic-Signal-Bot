@@ -429,6 +429,22 @@ def _strategy_fits_for_row(
     )
 
 
+def strategy_fits_for_market_row(
+    row: dict[str, Any],
+    *,
+    settings: BotSettings,
+    liquidity_rank: int | None,
+) -> tuple[str, ...]:
+    """Return strategy routing fits using the same logic as production shortlist builds.
+
+    Live audit tools and fallback analyzers construct synthetic ``UniverseSymbol``
+    objects from REST rows. If they leave ``strategy_fits`` empty, downstream logs
+    look like routing is broken even though production shortlist rows are healthy.
+    This public wrapper keeps those tools on the production scoring path.
+    """
+    return _strategy_fits_for_row(row, settings=settings, liquidity_rank=liquidity_rank)
+
+
 def _spread_freshness_score(row: dict[str, Any], settings: BotSettings) -> float:
     universe = settings.universe
     max_spread = float(getattr(universe, "shortlist_spread_max_bps", 8.0))

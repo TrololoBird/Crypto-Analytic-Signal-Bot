@@ -161,7 +161,8 @@ async def run_stream_session(
                     break
                 try:
                     msg = parse_message(raw)
-                except Exception:
+                except Exception as exc:
+                    LOG.debug("websocket message parse failed | endpoint=%s error=%s", endpoint, exc)
                     continue
                 await manager._handle_message(msg, endpoint)
             else:

@@ -69,6 +69,7 @@ If a signal is appended for delivery without contract validation or hard gate pa
 | Strategy engine | `bot/core/engine/engine.py` | Executes enabled strategies and now reports schedule skips explicitly. |
 | Strategy registry | `bot/strategies/__init__.py` | Exports all 38 strategy classes. |
 | Spec patterns | `bot/strategies/spec_patterns.py` | Shared detectors for order blocks, pivots, squeeze, divergences. |
+| Historical audit | `scripts/historical_strategy_audit.py` | Replays closed Binance Futures klines in rolling windows across all 38 strategies. |
 | Telegram formatting | `bot/telegram_formatter.py` | Manual signal message formatting. |
 | Tracking | `bot/tracking.py`, `bot/outcomes.py` | Signal lifecycle and outcome features. |
 | Cache | `bot/core/memory/cache.py` | Parquet time-series cache with monthly compaction. |
@@ -81,7 +82,7 @@ If a signal is appended for delivery without contract validation or hard gate pa
 | 2 | structure_break_retest | StructureBreakRetestSetup | `bot/strategies/structure_break_retest.py` | ran, no errors |
 | 3 | wick_trap_reversal | WickTrapReversalSetup | `bot/strategies/wick_trap_reversal.py` | ran, no errors |
 | 4 | squeeze_setup | SqueezeSetup | `bot/strategies/squeeze_setup.py` | ran, no errors |
-| 5 | ema_bounce | EmaBounceSetup | `bot/strategies/ema_bounce.py` | rejected by pattern filters, no errors |
+| 5 | ema_bounce | EmaBounceSetup | `bot/strategies/ema_bounce.py` | historical hits, contract clean |
 | 6 | fvg_setup | FVGSetup | `bot/strategies/fvg.py` | ran, no errors |
 | 7 | order_block | OrderBlockSetup | `bot/strategies/order_block.py` | ran, no errors |
 | 8 | liquidity_sweep | LiquiditySweepSetup | `bot/strategies/liquidity_sweep.py` | rejected by pattern filters, no errors |
@@ -103,14 +104,14 @@ If a signal is appended for delivery without contract validation or hard gate pa
 | 24 | spread_strategy | SpreadStrategySetup | `bot/strategies/spread_strategy.py` | ran, no errors |
 | 25 | depth_imbalance | DepthImbalanceSetup | `bot/strategies/depth_imbalance.py` | ran, no errors |
 | 26 | absorption | AbsorptionSetup | `bot/strategies/absorption.py` | rejected by pattern filters, no errors |
-| 27 | aggression_shift | AggressionShiftSetup | `bot/strategies/aggression_shift.py` | rejected by pattern filters, no errors |
+| 27 | aggression_shift | AggressionShiftSetup | `bot/strategies/aggression_shift.py` | recent closed-bar detector, historical hits |
 | 28 | liquidation_heatmap | LiquidationHeatmapSetup | `bot/strategies/liquidation_heatmap.py` | ran, no errors |
-| 29 | stop_hunt_detection | StopHuntDetectionSetup | `bot/strategies/stop_hunt_detection.py` | rejected by pattern filters, no errors |
+| 29 | stop_hunt_detection | StopHuntDetectionSetup | `bot/strategies/stop_hunt_detection.py` | bounded recent sweep window, historical hits |
 | 30 | multi_tf_trend | MultiTFTrendSetup | `bot/strategies/multi_tf_trend.py` | rejected by pattern filters, no errors |
 | 31 | rsi_divergence_bottom | RSIDivergenceBottomSetup | `bot/strategies/rsi_divergence_bottom.py` | ran, no errors |
 | 32 | wyckoff_spring | WyckoffSpringSetup | `bot/strategies/wyckoff_spring.py` | ran, no errors |
 | 33 | bb_squeeze | BBSqueezeSetup | `bot/strategies/bb_squeeze.py` | ran, no errors |
-| 34 | atr_expansion | ATRExpansionSetup | `bot/strategies/atr_expansion.py` | rejected by pattern filters, no errors |
+| 34 | atr_expansion | ATRExpansionSetup | `bot/strategies/atr_expansion.py` | recent closed-bar detector, historical hits |
 | 35 | ls_ratio_extreme | LSRatioExtremeSetup | `bot/strategies/ls_ratio_extreme.py` | ran, no errors |
 | 36 | oi_divergence | OIDivergenceSetup | `bot/strategies/oi_divergence.py` | ran, no errors |
 | 37 | btc_correlation | BTCCorrelationSetup | `bot/strategies/btc_correlation.py` | ran, no errors |
@@ -141,12 +142,15 @@ If a signal is appended for delivery without contract validation or hard gate pa
 | live indicators | 3 successes, 0 failures |
 | live pipeline | 3 dry-selected, 0 strategy errors |
 | live strategy surface | 38 registered/evaluated, 57 contracts checked, 0 contract failures |
+| top-10 historical rolling audit | 80 windows, 3040 detector runs, 38/38 strategies hit, 0 contract failures |
 | swing point 30d BTCUSDT 1h | no unconfirmed tail hits, no insufficient-left-context hits |
 | order-block detector before/after | 220 active zones before and after, 0 pre-confirm violations |
+| 20-minute live smoke | run artifact: `data/bot/telemetry/live_smoke_20260526_rerun/` |
 
 ## Known Operational Limits
 
 - Public Binance futures-data endpoints can exhaust request budgets during broad enrichment.
 - Book-ticker and microprice columns may be neutral/null in REST-only checks without live WS state.
 - Session-bound strategies can be inactive outside their market window; this is now reported as an explicit skip.
-- Historical win-rate claims require a longer offline replay/backtest window than the live smoke checks.
+- Historical audit uses closed public klines; OI/funding snapshots are attached for detector coverage, while live delivery still uses current enrichment.
+- Win-rate claims remain conservative: the rolling audit proves detector activity and contract safety, not production profitability.

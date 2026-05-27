@@ -32,6 +32,7 @@ from bot.market_data import BinanceFuturesMarketData, MarketDataUnavailable
 from bot.messaging import DeliveryResult
 from bot.domain.schemas import SymbolFrames, UniverseSymbol
 from bot.telemetry import TelemetryStore
+from bot.universe import strategy_fits_for_market_row
 
 
 LOG = configure_script_logging("scripts.live_check_pipeline")
@@ -132,11 +133,26 @@ def _build_universe_symbol(
     symbol: str,
     meta_map: dict[str, Any],
     ticker_map: dict[str, dict[str, Any]],
+    settings: Any,
 ) -> UniverseSymbol | None:
     meta = meta_map.get(symbol)
     if meta is None:
         return None
     ticker = ticker_map.get(symbol, {})
+    liquidity_rank = _liquidity_rank(symbol, ticker_rows=list(ticker_map.values()))
+    market_row = {
+        "symbol": symbol,
+        "base_asset": meta.base_asset,
+        "quote_asset": meta.quote_asset,
+        "contract_type": meta.contract_type,
+        "status": meta.status,
+        "onboard_date_ms": meta.onboard_date_ms,
+        "quote_volume": float(ticker.get("quote_volume") or 0.0),
+        "price_change_percent": float(ticker.get("price_change_percent") or 0.0),
+        "price_change_pct": float(ticker.get("price_change_percent") or 0.0),
+        "last_price": float(ticker.get("last_price") or 0.0),
+        "trade_count": int(float(ticker.get("trade_count") or 0.0)),
+    }
     return UniverseSymbol(
         symbol=symbol,
         base_asset=meta.base_asset,
@@ -144,11 +160,36 @@ def _build_universe_symbol(
         contract_type=meta.contract_type,
         status=meta.status,
         onboard_date_ms=meta.onboard_date_ms,
-        quote_volume=float(ticker.get("quote_volume") or 0.0),
-        price_change_pct=float(ticker.get("price_change_percent") or 0.0),
-        last_price=float(ticker.get("last_price") or 0.0),
+        quote_volume=float(market_row["quote_volume"]),
+        price_change_pct=float(market_row["price_change_pct"]),
+        last_price=float(market_row["last_price"]),
         shortlist_bucket="live_pipeline_check",
+        seed_source="live_pipeline_check",
+        liquidity_rank=liquidity_rank,
+        strategy_fits=strategy_fits_for_market_row(
+            market_row,
+            settings=settings,
+            liquidity_rank=liquidity_rank,
+        ),
     )
+
+
+def _liquidity_rank(symbol: str, *, ticker_rows: list[dict[str, Any]]) -> int | None:
+    ranked: list[tuple[str, float]] = []
+    for row in ticker_rows:
+        candidate = str(row.get("symbol") or "").upper()
+        if not candidate.endswith("USDT"):
+            continue
+        try:
+            volume = float(row.get("quote_volume") or 0.0)
+        except (TypeError, ValueError):
+            volume = 0.0
+        ranked.append((candidate, volume))
+    ranked.sort(key=lambda item: item[1], reverse=True)
+    for index, (candidate, _volume) in enumerate(ranked, start=1):
+        if candidate == symbol:
+            return index
+    return None
 
 
 def _top_volume_symbols(
@@ -234,7 +275,8 @@ def _indicator_tail(result: Any) -> dict[str, float | None]:
                 return None
             value = frame.item(-1, column)
             return None if value is None else float(value)
-        except Exception:
+        except Exception as exc:
+            LOG.debug("indicator_tail_read_failed", column=column, error=str(exc))
             return None
 
     return {
@@ -302,7 +344,7 @@ async def _run(
         async def analyze(symbol: str) -> None:
             nonlocal detector_runs, raw_hits, prepared_ok
             async with semaphore:
-                item = _build_universe_symbol(symbol, meta_map, ticker_map)
+                item = _build_universe_symbol(symbol, meta_map, ticker_map, bot.settings)
                 if item is None:
                     failures.append({"symbol": symbol, "stage": "metadata"})
                     return

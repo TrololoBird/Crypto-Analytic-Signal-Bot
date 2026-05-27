@@ -44,14 +44,9 @@ class LSRatioExtremeSetup(RoadmapSetup):
             return None
         ls_ratio = ratio
         long_account = ls_ratio / (1.0 + ls_ratio) if ls_ratio > 0.0 else 0.5
-        long_threshold = min(
-            float(params["long_account_threshold"]),
-            max(0.5, float(params.get("soft_long_account_threshold", 0.58))),
-        )
-        short_threshold = max(
-            float(params["short_account_threshold"]),
-            min(0.5, float(params.get("soft_short_account_threshold", 0.42))),
-        )
+        # soft thresholds are fallback - must be looser than hard thresholds
+        long_threshold = float(params.get("soft_long_account_threshold", 0.58))
+        short_threshold = float(params.get("soft_short_account_threshold", 0.42))
         soft_extreme = False
         if long_account >= float(params["long_account_threshold"]):
             direction = "short"

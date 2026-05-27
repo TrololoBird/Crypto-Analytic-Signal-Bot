@@ -18,6 +18,7 @@ UTC = timezone.utc
 DEFAULT_SCALE_WEIGHTS: tuple[float, float, float] = (0.5, 0.3, 0.2)
 DEFAULT_TARGET_RR: tuple[float, float, float] = (1.9, 3.0, 5.0)
 MIN_SIGNAL_RISK_REWARD = 1.5
+RISK_REWARD_EPSILON = 1e-9
 
 _TIMEFRAME_MINUTES: dict[str, int] = {
     "1m": 1,
@@ -437,7 +438,7 @@ def validate_signal_contract(signal: Any, *, now: datetime | None = None) -> lis
                     issues.append(SignalContractIssue("risk_reward", "zero_or_negative_risk", risk))
                 else:
                     risk_reward = reward / risk
-                    if risk_reward < MIN_SIGNAL_RISK_REWARD:
+                    if risk_reward + RISK_REWARD_EPSILON < MIN_SIGNAL_RISK_REWARD:
                         issues.append(
                             SignalContractIssue(
                                 "risk_reward",

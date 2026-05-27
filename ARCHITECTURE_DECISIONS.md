@@ -42,3 +42,15 @@ Silent omission makes the audit think fewer than 38 strategies were evaluated.
 
 Git does not track `.git/hooks`. Local hooks are installed for this checkout, and identical
 tracked copies are kept in `scripts/git-hooks/` for future agents.
+
+## ADR-009: Rolling Historical Audit Is A Gate
+
+Live snapshots can miss rare but valid detectors. A strategy is treated as audit-clean only
+when it can run in rolling closed-candle replay without runtime errors, without signal
+contract failures, and without zero hits across the configured top-symbol window.
+
+## ADR-010: Recent Closed-bar Detectors May Lag, But Must Not Drift
+
+Impulse, ATR expansion, aggression shift, and stop-hunt style detectors may emit from a
+bounded recent closed-bar window. They must never inspect future bars, and they must reject
+stale candidates when current price has drifted too far from the event by ATR.

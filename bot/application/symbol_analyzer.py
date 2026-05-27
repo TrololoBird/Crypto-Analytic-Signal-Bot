@@ -103,6 +103,8 @@ def _apply_setup_score_adjustment(
 
 
 class SymbolAnalyzer:
+    _DEGRADATION_ERRORS = (AttributeError, KeyError, TypeError, ValueError)
+
     def __init__(self, bot: SignalBot) -> None:
         self._bot = bot
 
@@ -189,6 +191,18 @@ class SymbolAnalyzer:
         return (
             numeric if numeric == numeric and numeric not in (float("inf"), float("-inf")) else None
         )
+
+    def _safe_ws_get(self, symbol: str, getter_name: str, *args: Any, **kwargs: Any) -> Any:
+        manager = self._bot._ws_manager
+        if manager is None:
+            return None
+        getter = getattr(manager, getter_name, None)
+        if not callable(getter):
+            return None
+        try:
+            return getter(symbol, *args, **kwargs)
+        except self._DEGRADATION_ERRORS:
+            return None
 
     @staticmethod
     def _crowding_flags(prepared: PreparedSymbol, direction: str) -> dict[str, Any]:
@@ -628,8 +642,8 @@ class SymbolAnalyzer:
         item = self._bot._refresh_universe_symbol_from_ws(item)
         if not item.strategy_fits:
             LOG.warning(
-                "%s: strategy_fits is EMPTY - no strategies will run. "
-                "shortlist_score=%.4f bucket=%s source=%s",
+                "%s: strategy_fits is EMPTY - routing bypassed and all enabled strategies "
+                "will run. shortlist_score=%.4f bucket=%s source=%s",
                 item.symbol,
                 item.shortlist_score or 0.0,
                 item.shortlist_bucket,
@@ -1306,74 +1320,49 @@ class SymbolAnalyzer:
         freshness_flags: set[str] = set()
         degradation_events: list[dict[str, Any]] = []
         if self._bot._ws_manager is not None:
-            try:
-                ticker = self._bot._ws_manager.get_ticker_snapshot(symbol)
-                ticker_age = self._bot._ws_manager.get_ticker_age_seconds(symbol)
-                if ticker:
-                    ticker_price = float(ticker.get("last_price") or 0.0)
-                    if ticker_price > 0:
-                        enrichments["ticker_price"] = ticker_price
-                    if ticker_age is not None:
-                        enrichments["ticker_price_age_seconds"] = ticker_age
-                        context_ages.append(ticker_age)
-                        if ticker_age > self._bot.settings.ws.market_ticker_freshness_seconds:
-                            freshness_flags.add("ticker_price_stale")
-                else:
-                    freshness_flags.add("ticker_price_missing")
-            except _DEGRADATION_ERRORS as exc:
-                degradation_events.append(
-                    self._degrade_event(
-                        symbol=symbol,
-                        stage="ticker_snapshot",
-                        source="ws",
-                        reason=type(exc).__name__,
-                        fallback_used="skip_ticker_enrichment",
-                        exception_type=type(exc).__name__,
-                    )
-                )
-                self._log_degradation(
-                    level=logging.INFO,
-                    symbol=symbol,
-                    stage="ticker_snapshot",
-                    source="ws",
-                    reason=str(exc),
-                    fallback_used="skip_ticker_enrichment",
-                    exception_type=type(exc).__name__,
-                )
-            try:
-                mark = self._bot._ws_manager.get_mark_price_snapshot(symbol)
-                mark_age = self._bot._ws_manager.get_mark_price_age_seconds(symbol)
-                if mark:
-                    mark_price = float(mark.get("mark_price") or 0.0)
-                    if mark_price > 0:
-                        enrichments["mark_price"] = mark_price
-                    if "funding_rate" in mark:
-                        enrichments["funding_rate"] = float(mark.get("funding_rate") or 0.0)
-                    index_price = float(mark.get("index_price") or 0.0)
-                    if mark_price > 0 and index_price > 0:
-                        basis_pct = (mark_price - index_price) / index_price * 100.0
-                        enrichments["basis_pct"] = basis_pct
-                        enrichments["mark_index_spread_bps"] = basis_pct * 100.0
-                if mark_age is not None:
-                    enrichments["mark_price_age_seconds"] = mark_age
-                    context_ages.append(mark_age)
-                    if mark_age > self._bot.settings.ws.market_ticker_freshness_seconds:
-                        freshness_flags.add("mark_price_stale")
-                        degrade_reason = "mark_price_stale"
-                        if mark is not None and "funding_rate" not in mark:
-                            degrade_reason = "mark_price_stale_funding_missing"
-                        degradation_events.append(
-                            self._degrade_event(
-                                symbol=symbol,
-                                stage="mark_snapshot",
-                                source="ws",
-                                reason=degrade_reason,
-                                fallback_used="rest_cached_funding",
-                                exception_type="stale_cache",
-                            )
-                        )
-                        self._log_degradation(
-                            level=logging.INFO,
+            max_age = self._bot.settings.ws.market_ticker_freshness_seconds
+
+            ticker = self._safe_ws_get(symbol, "get_ticker_snapshot")
+            ticker_age = self._safe_ws_get(symbol, "get_ticker_age_seconds")
+            if ticker:
+                ticker_price = float(ticker.get("last_price") or 0.0)
+                if ticker_price > 0.0:
+                    enrichments["ticker_price"] = ticker_price
+                if ticker_age is not None:
+                    ticker_age = float(ticker_age)
+                    enrichments["ticker_price_age_seconds"] = ticker_age
+                    context_ages.append(ticker_age)
+                    if ticker_age > max_age:
+                        freshness_flags.add("ticker_price_stale")
+            else:
+                freshness_flags.add("ticker_price_missing")
+
+            mark = self._safe_ws_get(symbol, "get_mark_price_snapshot")
+            mark_age = self._safe_ws_get(symbol, "get_mark_price_age_seconds")
+            if mark:
+                mark_price = float(mark.get("mark_price") or 0.0)
+                index_price = float(mark.get("index_price") or 0.0)
+                if mark_price > 0.0:
+                    enrichments["mark_price"] = mark_price
+                if "funding_rate" in mark:
+                    enrichments["funding_rate"] = float(mark.get("funding_rate") or 0.0)
+                if mark_price > 0.0 and index_price > 0.0:
+                    basis_pct = (mark_price - index_price) / index_price * 100.0
+                    enrichments["basis_pct"] = basis_pct
+                    enrichments["mark_index_spread_bps"] = basis_pct * 100.0
+            elif mark_age is None:
+                freshness_flags.add("mark_price_missing")
+            if mark_age is not None:
+                mark_age = float(mark_age)
+                enrichments["mark_price_age_seconds"] = mark_age
+                context_ages.append(mark_age)
+                if mark_age > max_age:
+                    freshness_flags.add("mark_price_stale")
+                    degrade_reason = "mark_price_stale"
+                    if mark is not None and "funding_rate" not in mark:
+                        degrade_reason = "mark_price_stale_funding_missing"
+                    degradation_events.append(
+                        self._degrade_event(
                             symbol=symbol,
                             stage="mark_snapshot",
                             source="ws",
@@ -1381,118 +1370,73 @@ class SymbolAnalyzer:
                             fallback_used="rest_cached_funding",
                             exception_type="stale_cache",
                         )
-                elif not mark:
-                    freshness_flags.add("mark_price_missing")
-            except _DEGRADATION_ERRORS as exc:
-                degradation_events.append(
-                    self._degrade_event(
+                    )
+                    self._log_degradation(
+                        level=logging.INFO,
                         symbol=symbol,
                         stage="mark_snapshot",
                         source="ws",
-                        reason=type(exc).__name__,
+                        reason=degrade_reason,
                         fallback_used="rest_cached_funding",
-                        exception_type=type(exc).__name__,
+                        exception_type="stale_cache",
                     )
+
+            depth_imbalance = self._safe_ws_get(symbol, "get_depth_imbalance")
+            if depth_imbalance is not None:
+                enrichments["depth_imbalance"] = float(depth_imbalance)
+                depth_source = self._safe_ws_get(symbol, "get_depth_imbalance_source")
+                if depth_source:
+                    enrichments["depth_imbalance_source"] = str(depth_source)
+            microprice_bias = self._safe_ws_get(symbol, "get_microprice_bias")
+            if microprice_bias is not None:
+                enrichments["microprice_bias"] = float(microprice_bias)
+                micro_source = self._safe_ws_get(symbol, "get_microprice_bias_source")
+                if micro_source:
+                    enrichments["microprice_bias_source"] = str(micro_source)
+            depth_age = self._safe_ws_get(symbol, "get_depth_book_age_seconds")
+            if depth_age is not None:
+                depth_age = float(depth_age)
+                enrichments["depth_book_age_seconds"] = depth_age
+                context_ages.append(depth_age)
+                if depth_age > max_age:
+                    freshness_flags.add("depth_book_stale")
+            wall_pressure = self._safe_ws_get(symbol, "get_depth_wall_pressure")
+            if wall_pressure is not None:
+                enrichments["depth_wall_pressure"] = float(wall_pressure)
+
+            short_flow = self._safe_ws_get(symbol, "get_agg_trade_snapshot", window_seconds=30)
+            long_flow = self._safe_ws_get(symbol, "get_agg_trade_snapshot", window_seconds=300)
+            if short_flow is not None and short_flow.delta_ratio is not None:
+                enrichments["agg_trade_delta_30s"] = float(short_flow.delta_ratio)
+                enrichments["orderflow_source"] = "agg_trade"
+            if (
+                short_flow is not None
+                and long_flow is not None
+                and short_flow.delta_ratio is not None
+                and long_flow.delta_ratio is not None
+            ):
+                enrichments["aggression_shift"] = float(
+                    short_flow.delta_ratio - long_flow.delta_ratio
                 )
-                self._log_degradation(
-                    level=logging.INFO,
-                    symbol=symbol,
-                    stage="mark_snapshot",
-                    source="ws",
-                    reason=str(exc),
-                    fallback_used="rest_cached_funding",
-                    exception_type=type(exc).__name__,
+                enrichments["orderflow_source"] = "agg_trade"
+
+            liquidation = self._safe_ws_get(
+                symbol,
+                "get_liquidation_sentiment",
+                window_seconds=900,
+            )
+            if liquidation is not None:
+                enrichments["liquidation_score"] = float(liquidation)
+                enrichments["liquidation_score_source"] = "force_order"
+                liq_age = self._safe_ws_get(
+                    symbol,
+                    "get_liquidation_age_seconds",
+                    window_seconds=900,
                 )
-            try:
-                depth_imbalance = self._bot._ws_manager.get_depth_imbalance(symbol)
-                if depth_imbalance is not None:
-                    enrichments["depth_imbalance"] = float(depth_imbalance)
-                    depth_source_getter = getattr(
-                        self._bot._ws_manager, "get_depth_imbalance_source", None
-                    )
-                    if callable(depth_source_getter):
-                        depth_source = depth_source_getter(symbol)
-                        if depth_source:
-                            enrichments["depth_imbalance_source"] = str(depth_source)
-                microprice_bias = self._bot._ws_manager.get_microprice_bias(symbol)
-                if microprice_bias is not None:
-                    enrichments["microprice_bias"] = float(microprice_bias)
-                    micro_source_getter = getattr(
-                        self._bot._ws_manager, "get_microprice_bias_source", None
-                    )
-                    if callable(micro_source_getter):
-                        micro_source = micro_source_getter(symbol)
-                        if micro_source:
-                            enrichments["microprice_bias_source"] = str(micro_source)
-                depth_age_getter = getattr(
-                    self._bot._ws_manager, "get_depth_book_age_seconds", None
-                )
-                if callable(depth_age_getter):
-                    depth_age = depth_age_getter(symbol)
-                    max_age = self._bot.settings.ws.market_ticker_freshness_seconds
-                    if depth_age is not None:
-                        enrichments["depth_book_age_seconds"] = float(depth_age)
-                        context_ages.append(float(depth_age))
-                        if depth_age > max_age:
-                            freshness_flags.add("depth_book_stale")
-                wall_getter = getattr(self._bot._ws_manager, "get_depth_wall_pressure", None)
-                if callable(wall_getter):
-                    wall_pressure = wall_getter(symbol)
-                    if wall_pressure is not None:
-                        enrichments["depth_wall_pressure"] = float(wall_pressure)
-                trade_snapshot_getter = getattr(
-                    self._bot._ws_manager, "get_agg_trade_snapshot", None
-                )
-                if callable(trade_snapshot_getter):
-                    short_flow = trade_snapshot_getter(symbol, window_seconds=30)
-                    long_flow = trade_snapshot_getter(symbol, window_seconds=300)
-                    if short_flow is not None and short_flow.delta_ratio is not None:
-                        enrichments["agg_trade_delta_30s"] = float(short_flow.delta_ratio)
-                        enrichments["orderflow_source"] = "agg_trade"
-                    if (
-                        short_flow is not None
-                        and long_flow is not None
-                        and short_flow.delta_ratio is not None
-                        and long_flow.delta_ratio is not None
-                    ):
-                        enrichments["aggression_shift"] = float(
-                            short_flow.delta_ratio - long_flow.delta_ratio
-                        )
-                        enrichments["orderflow_source"] = "agg_trade"
-                liquidation = self._bot._ws_manager.get_liquidation_sentiment(
-                    symbol=symbol, window_seconds=900
-                )
-                if liquidation is not None:
-                    enrichments["liquidation_score"] = float(liquidation)
-                    enrichments["liquidation_score_source"] = "force_order"
-                    liq_age_getter = getattr(
-                        self._bot._ws_manager, "get_liquidation_age_seconds", None
-                    )
-                    if callable(liq_age_getter):
-                        liq_age = liq_age_getter(symbol=symbol, window_seconds=900)
-                        if liq_age is not None:
-                            enrichments["liquidation_score_age_seconds"] = float(liq_age)
-                            context_ages.append(float(liq_age))
-            except _DEGRADATION_ERRORS as exc:
-                degradation_events.append(
-                    self._degrade_event(
-                        symbol=symbol,
-                        stage="microstructure_snapshot",
-                        source="ws",
-                        reason=type(exc).__name__,
-                        fallback_used="skip_microstructure_enrichment",
-                        exception_type=type(exc).__name__,
-                    )
-                )
-                self._log_degradation(
-                    level=logging.INFO,
-                    symbol=symbol,
-                    stage="microstructure_snapshot",
-                    source="ws",
-                    reason=str(exc),
-                    fallback_used="skip_microstructure_enrichment",
-                    exception_type=type(exc).__name__,
-                )
+                if liq_age is not None:
+                    liq_age = float(liq_age)
+                    enrichments["liquidation_score_age_seconds"] = liq_age
+                    context_ages.append(liq_age)
 
         if isinstance(self._bot.client, BinanceFuturesMarketData):
             premium = self._bot.client.get_cached_premium_index(symbol)

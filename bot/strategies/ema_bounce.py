@@ -17,6 +17,14 @@ from ..setups.utils import (
 from .spec_patterns import build_spec_signal, detect_ema_bounce
 
 
+def _as_float(value: object, default: float = 0.0) -> float:
+    if isinstance(value, bool):
+        return float(value)
+    if isinstance(value, (int, float)):
+        return float(value)
+    return default
+
+
 class EmaBounceSetup(BaseSetup):
     setup_id = "ema_bounce"
     family = "continuation"
@@ -166,6 +174,13 @@ class EmaBounceSetup(BaseSetup):
         reasons: list[str] = []
 
         bias_1h = getattr(prepared, "bias_1h", prepared.bias_4h)
+        # Use live 15m momentum to resolve neutral 1h bias before EMA fallback checks.
+        if bias_1h == "neutral":
+            roc10 = _as_float(work_15m.item(-1, "roc10"), 0.0) if "roc10" in work_15m.columns else 0.0
+            if roc10 > 0.20:
+                bias_1h = "uptrend"
+            elif roc10 < -0.20:
+                bias_1h = "downtrend"
         if bias_1h not in {"uptrend", "downtrend"}:
             if close_1h > ema50_1h and ema20_1h > ema50_1h:
                 bias_1h = "uptrend"

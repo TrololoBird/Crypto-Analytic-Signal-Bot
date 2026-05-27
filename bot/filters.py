@@ -398,7 +398,8 @@ def _market_atr_floor(prepared: PreparedSymbol, settings: BotSettings) -> float:
     if not prepared.work_1h.is_empty() and "adx14" in prepared.work_1h.columns:
         try:
             adx_val = float(prepared.work_1h.item(-1, "adx14") or 0.0)
-        except Exception:
+        except Exception as exc:
+            LOGGER.debug("ATR floor ADX read failed for %s: %s", prepared.symbol, exc)
             adx_val = 0.0
 
     bb_width: float | None = None
@@ -406,7 +407,8 @@ def _market_atr_floor(prepared: PreparedSymbol, settings: BotSettings) -> float:
     if not atr_frame.is_empty() and "bb_width" in atr_frame.columns:
         try:
             bb_width = float(atr_frame.item(-1, "bb_width") or 0.0)
-        except Exception:
+        except Exception as exc:
+            LOGGER.debug("ATR floor Bollinger width read failed for %s: %s", prepared.symbol, exc)
             bb_width = None
 
     low_adx = 0.0 < adx_val < 18.0

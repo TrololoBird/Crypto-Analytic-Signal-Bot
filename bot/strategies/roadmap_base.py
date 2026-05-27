@@ -62,7 +62,7 @@ def _flow_delta_with_source(prepared: PreparedSymbol) -> tuple[float | None, str
         return direct_delta, str(getattr(prepared, "orderflow_source", None) or "agg_trade")
     taker_ratio = _finite_or_none(prepared.taker_ratio)
     if taker_ratio is not None:
-        return taker_ratio - 1.0, "taker_ratio_rest"
+        return float(max(-1.0, min(1.0, taker_ratio - 1.0))), "taker_ratio_rest"
     work = prepared.work_15m
     if work.is_empty() or "delta_ratio" not in work.columns:
         return None, None
@@ -184,6 +184,8 @@ def _build_atr_signal(
         rsi=rsi,
         structure_clarity=max(0.0, min(1.0, structure_clarity)),
     )
+    # floor: no signal delivered below 0.38 after penalties
+    score = max(0.38, round(score, 4))
     return _build_signal(
         prepared=prepared,
         setup_id=setup_id,

@@ -64,8 +64,8 @@ def _check_field(prepared: Any, field: str) -> dict[str, Any]:
                         "type": "float",
                         "source": "work_1h.adx14",
                     }
-        except Exception:
-            pass
+        except Exception as exc:
+            LOG.debug("adx enrichment check failed", field=field, error=repr(exc))
 
     value = getattr(prepared, field, None)
     return {
@@ -96,8 +96,8 @@ def _collect_ws_enrichments(
                 if ticker_age is not None:
                     enrichments["ticker_price_age_seconds"] = ticker_age
                     context_ages.append(ticker_age)
-        except Exception:
-            pass
+        except Exception as exc:
+            LOG.debug("ticker ws enrichment failed", symbol=symbol, error=repr(exc))
         try:
             mp = ws_manager.get_mark_price_snapshot(symbol)
             mark_price_age = ws_manager.get_mark_price_age_seconds(symbol)
@@ -111,15 +111,15 @@ def _collect_ws_enrichments(
                 if mark_price_age is not None:
                     enrichments["mark_price_age_seconds"] = mark_price_age
                     context_ages.append(mark_price_age)
-        except Exception:
-            pass
+        except Exception as exc:
+            LOG.debug("mark price ws enrichment failed", symbol=symbol, error=repr(exc))
         try:
             book_age = ws_manager.get_book_ticker_age_seconds(symbol)
             if book_age is not None:
                 enrichments["book_ticker_age_seconds"] = book_age
                 context_ages.append(book_age)
-        except Exception:
-            pass
+        except Exception as exc:
+            LOG.debug("book ticker ws enrichment failed", symbol=symbol, error=repr(exc))
         try:
             liq = ws_manager.get_liquidation_sentiment(symbol, window_seconds=300)
             if liq is not None:
@@ -130,8 +130,8 @@ def _collect_ws_enrichments(
                     liq_age = liq_age_getter(symbol=symbol, window_seconds=300)
                     if liq_age is not None:
                         enrichments["liquidation_score_age_seconds"] = liq_age
-        except Exception:
-            pass
+        except Exception as exc:
+            LOG.debug("liquidation ws enrichment failed", symbol=symbol, error=repr(exc))
 
     # REST cache data from client
     oi_chg = client.get_cached_oi_change(symbol)

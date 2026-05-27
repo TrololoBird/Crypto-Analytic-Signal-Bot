@@ -11,6 +11,7 @@ Outcome tracking - сохранение результатов сигналов 
 from __future__ import annotations
 
 import math
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -22,6 +23,7 @@ from .tracked_signals import TrackedSignalState, parse_state_dt
 
 
 UTC = timezone.utc
+LOG = logging.getLogger("bot.outcomes")
 
 
 def _normalized_float(value: Any) -> float | None:
@@ -58,7 +60,8 @@ def build_prepared_feature_snapshot(prepared: Any) -> dict[str, Any]:
             return None
         try:
             return _normalized_float(frame.item(-1, column))
-        except Exception:
+        except Exception as exc:
+            LOG.debug("prepared feature snapshot read failed | column=%s error=%s", column, exc)
             return None
 
     def _ema_stack(frame: Any, fast: str, slow: str) -> bool | None:

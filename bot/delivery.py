@@ -11,6 +11,7 @@ from collections import OrderedDict
 
 from .messaging import DeliveryResult
 from .domain.schemas import Signal
+from .signal_contract import validate_signal_contract
 from .telegram_formatter import (
     format_analytics_companion_message,
     format_signal_message,
@@ -504,6 +505,24 @@ class SignalDelivery:
     ) -> list[DeliveredSignal]:
         delivered: list[DeliveredSignal] = []
         for signal in signals:
+            contract_issues = validate_signal_contract(signal)
+            if contract_issues:
+                issue_codes = ",".join(f"{issue.field}.{issue.reason}" for issue in contract_issues)
+                LOG.error(
+                    "blocked direct signal delivery with invalid contract | symbol=%s setup=%s issues=%s",
+                    signal.symbol,
+                    signal.setup_id,
+                    issue_codes,
+                )
+                delivered.append(
+                    DeliveredSignal(
+                        signal=signal,
+                        status="rejected_contract",
+                        message_id=None,
+                        reason=issue_codes,
+                    )
+                )
+                continue
             try:
                 text = format_signal_text(
                     signal,

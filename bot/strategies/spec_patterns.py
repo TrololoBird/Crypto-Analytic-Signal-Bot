@@ -7,6 +7,7 @@ REST calls, no private endpoints, no account state.
 
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -14,8 +15,11 @@ import polars as pl
 
 from ..domain.config import BotSettings
 from ..domain.schemas import PreparedSymbol, Signal
+from ..features import _swing_points
 from ..features_shared import wilder_mean
 from ..setups import _build_signal, _compute_dynamic_score, _reject
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +43,16 @@ def as_float(value: object, default: float = 0.0) -> float:
     except (TypeError, ValueError):
         return default
     return numeric if math.isfinite(numeric) else default
+
+
+def finite_or_none(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    return numeric if math.isfinite(numeric) else None
 
 
 def required_columns(frame: pl.DataFrame, columns: tuple[str, ...]) -> list[str]:
@@ -80,19 +94,76 @@ def with_spec_columns(frame: pl.DataFrame) -> pl.DataFrame:
     required = required_columns(frame, ("open", "high", "low", "close", "volume"))
     if required:
         return frame
-    work = frame if "_spec_idx" in frame.columns else frame.with_row_index("_spec_idx")
-    if "spec_tr" not in work.columns:
-        prev_close = pl.col("close").shift(1)
-        work = work.with_columns(
-            pl.max_horizontal(
-                pl.col("high") - pl.col("low"),
-                (pl.col("high") - prev_close).abs(),
-                (pl.col("low") - prev_close).abs(),
-            ).alias("spec_tr")
+    if "_spec_idx" in frame.columns:
+        return frame
+
+    work = frame.with_row_index("_spec_idx")
+    prev_close = pl.col("close").shift(1)
+    tr_expr = pl.max_horizontal(
+        pl.col("high") - pl.col("low"),
+        (pl.col("high") - prev_close).abs(),
+        (pl.col("low") - prev_close).abs(),
+    )
+    if {"taker_buy_base_volume", "volume"}.issubset(set(work.columns)):
+        spec_delta = 2.0 * pl.col("taker_buy_base_volume") - pl.col("volume")
+    elif "delta_ratio" in work.columns:
+        spec_delta = (pl.col("delta_ratio") - 0.5) * 2.0 * pl.col("volume")
+    else:
+        spec_delta = pl.lit(None).cast(pl.Float64)
+
+    if "rsi14" in work.columns:
+        rsi_expr: pl.Expr | pl.Series = pl.col("rsi14").cast(pl.Float64, strict=False).alias("rsi14")
+    else:
+        close = work["close"].cast(pl.Float64, strict=False)
+        delta = close.diff()
+        gain = delta.clip(lower_bound=0.0)
+        loss = (-delta).clip(lower_bound=0.0)
+        avg_gain = wilder_mean(gain, period=14, name="spec_avg_gain", seed_offset=1)
+        avg_loss = wilder_mean(loss, period=14, name="spec_avg_loss", seed_offset=1)
+        raw_rsi = (100.0 - (100.0 / (1.0 + (avg_gain / avg_loss)))).fill_nan(50.0)
+        rsi_values: list[float] = []
+        for gain_value, loss_value, raw_value in zip(
+            avg_gain.to_list(),
+            avg_loss.to_list(),
+            raw_rsi.to_list(),
+            strict=False,
+        ):
+            gain_f = as_float(gain_value, 0.0)
+            loss_f = as_float(loss_value, 0.0)
+            if loss_f == 0.0 and gain_f > 0.0:
+                rsi_values.append(100.0)
+            elif gain_f == 0.0 and loss_f > 0.0:
+                rsi_values.append(0.0)
+            elif gain_f == 0.0 and loss_f == 0.0:
+                rsi_values.append(50.0)
+            else:
+                rsi_values.append(as_float(raw_value, 50.0))
+        rsi_expr = pl.Series("rsi14", rsi_values, dtype=pl.Float64)
+
+    if "vwap" in work.columns:
+        vwap_expr = pl.col("vwap").cast(pl.Float64, strict=False).alias("vwap")
+    else:
+        time_column = next(
+            (column for column in ("open_time", "time", "close_time") if column in work.columns),
+            None,
         )
-    additions: list[pl.Expr] = [
-        _feature_or_expr(work, "atr14", pl.col("spec_tr").rolling_mean(14), "spec_atr14"),
-        _feature_or_expr(work, "atr20", pl.col("spec_tr").rolling_mean(20), "spec_atr20"),
+        typical_price = (pl.col("high") + pl.col("low") + pl.col("close")) / 3.0
+        if time_column is not None and getattr(
+            work.schema.get(time_column), "is_temporal", lambda: False
+        )():
+            vwap_expr = (
+                (typical_price * pl.col("volume")).cum_sum().over(pl.col(time_column).dt.date())
+                / pl.col("volume").cum_sum().over(pl.col(time_column).dt.date())
+            ).alias("vwap")
+        else:
+            vwap_expr = (
+                (typical_price * pl.col("volume")).cum_sum() / pl.col("volume").cum_sum()
+            ).alias("vwap")
+
+    pass1: list[pl.Expr | pl.Series] = [
+        tr_expr.alias("spec_tr"),
+        _feature_or_expr(work, "atr14", tr_expr.rolling_mean(14), "spec_atr14"),
+        _feature_or_expr(work, "atr20", tr_expr.rolling_mean(20), "spec_atr20"),
         _feature_or_expr(
             work,
             "volume_mean20",
@@ -136,44 +207,43 @@ def with_spec_columns(frame: pl.DataFrame) -> pl.DataFrame:
         (pl.min_horizontal(pl.col("open"), pl.col("close")) - pl.col("low")).alias(
             "spec_lower_wick"
         ),
+        spec_delta.alias("spec_delta"),
+        rsi_expr,
+        vwap_expr,
     ]
-    work = work.with_columns(additions)
+    work = work.with_columns(pass1)
+
     bb_std = pl.col("close").rolling_std(window_size=20, ddof=1)
-    kc15_upper, kc15_lower = _feature_pair_or_expr(
-        work,
-        "kc_upper_15",
-        "kc_lower_15",
-        pl.col("spec_ema20") + 1.5 * pl.col("spec_atr20"),
-        pl.col("spec_ema20") - 1.5 * pl.col("spec_atr20"),
-        "spec_kc15_upper",
-        "spec_kc15_lower",
-    )
-    kc20_upper, kc20_lower = _feature_pair_or_expr(
-        work,
-        "kc_upper",
-        "kc_lower",
-        pl.col("spec_ema20") + 2.0 * pl.col("spec_atr14"),
-        pl.col("spec_ema20") - 2.0 * pl.col("spec_atr14"),
-        "spec_kc20_upper",
-        "spec_kc20_lower",
-    )
-    bb_upper, bb_lower = _feature_pair_or_expr(
-        work,
-        "bb_upper",
-        "bb_lower",
-        pl.col("spec_sma20") + 2.0 * bb_std,
-        pl.col("spec_sma20") - 2.0 * bb_std,
-        "spec_bb_upper",
-        "spec_bb_lower",
-    )
+    if "kc_upper_15" in work.columns and "kc_lower_15" in work.columns:
+        kc15_upper_value = pl.col("kc_upper_15").cast(pl.Float64, strict=False)
+        kc15_lower_value = pl.col("kc_lower_15").cast(pl.Float64, strict=False)
+    else:
+        kc15_upper_value = pl.col("spec_ema20") + 1.5 * pl.col("spec_atr20")
+        kc15_lower_value = pl.col("spec_ema20") - 1.5 * pl.col("spec_atr20")
+    if "kc_upper" in work.columns and "kc_lower" in work.columns:
+        kc20_upper_value = pl.col("kc_upper").cast(pl.Float64, strict=False)
+        kc20_lower_value = pl.col("kc_lower").cast(pl.Float64, strict=False)
+    else:
+        kc20_upper_value = pl.col("spec_ema20") + 2.0 * pl.col("spec_atr14")
+        kc20_lower_value = pl.col("spec_ema20") - 2.0 * pl.col("spec_atr14")
+    if "bb_upper" in work.columns and "bb_lower" in work.columns:
+        bb_upper_value = pl.col("bb_upper").cast(pl.Float64, strict=False)
+        bb_lower_value = pl.col("bb_lower").cast(pl.Float64, strict=False)
+    else:
+        bb_upper_value = pl.col("spec_sma20") + 2.0 * bb_std
+        bb_lower_value = pl.col("spec_sma20") - 2.0 * bb_std
+
     work = work.with_columns(
         [
-            bb_upper,
-            bb_lower,
-            kc15_upper,
-            kc15_lower,
-            kc20_upper,
-            kc20_lower,
+            bb_upper_value.alias("spec_bb_upper"),
+            bb_lower_value.alias("spec_bb_lower"),
+            kc15_upper_value.alias("spec_kc15_upper"),
+            kc15_lower_value.alias("spec_kc15_lower"),
+            kc20_upper_value.alias("spec_kc20_upper"),
+            kc20_lower_value.alias("spec_kc20_lower"),
+            ((bb_upper_value < kc15_upper_value) & (bb_lower_value > kc15_lower_value)).alias(
+                "spec_squeeze"
+            ),
             (
                 pl.col("spec_body")
                 / pl.when(pl.col("spec_range") > 0.0).then(pl.col("spec_range")).otherwise(1e-8)
@@ -186,80 +256,11 @@ def with_spec_columns(frame: pl.DataFrame) -> pl.DataFrame:
                 pl.col("spec_lower_wick")
                 / pl.when(pl.col("spec_body") > 0.0).then(pl.col("spec_body")).otherwise(1e-8)
             ).alias("spec_lower_wick_ratio"),
-        ]
-    )
-    if "spec_delta" not in work.columns:
-        if {"taker_buy_base_volume", "volume"}.issubset(set(work.columns)):
-            work = work.with_columns(
-                (2.0 * pl.col("taker_buy_base_volume") - pl.col("volume")).alias("spec_delta")
-            )
-        elif "delta_ratio" in work.columns:
-            work = work.with_columns(
-                ((pl.col("delta_ratio") - 0.5) * 2.0 * pl.col("volume")).alias("spec_delta")
-            )
-        else:
-            work = work.with_columns(pl.lit(None).cast(pl.Float64).alias("spec_delta"))
-    work = work.with_columns(
-        [
             pl.col("spec_delta").abs().rolling_mean(20).alias("spec_abs_delta_mean20"),
             pl.col("spec_delta").rolling_std(20).alias("spec_delta_std20"),
             pl.col("spec_delta").fill_null(0.0).cum_sum().alias("spec_cvd"),
         ]
     )
-    if "rsi14" not in work.columns:
-        close = work["close"].cast(pl.Float64, strict=False)
-        delta = close.diff()
-        gain = delta.clip(lower_bound=0.0)
-        loss = (-delta).clip(lower_bound=0.0)
-        avg_gain = wilder_mean(gain, period=14, name="spec_avg_gain", seed_offset=1)
-        avg_loss = wilder_mean(loss, period=14, name="spec_avg_loss", seed_offset=1)
-        raw_rsi = (100.0 - (100.0 / (1.0 + (avg_gain / avg_loss)))).fill_nan(50.0)
-        rsi_values: list[float] = []
-        for gain_value, loss_value, raw_value in zip(
-            avg_gain.to_list(),
-            avg_loss.to_list(),
-            raw_rsi.to_list(),
-            strict=False,
-        ):
-            gain_f = as_float(gain_value, 0.0)
-            loss_f = as_float(loss_value, 0.0)
-            if loss_f == 0.0 and gain_f > 0.0:
-                rsi_values.append(100.0)
-            elif gain_f == 0.0 and loss_f > 0.0:
-                rsi_values.append(0.0)
-            elif gain_f == 0.0 and loss_f == 0.0:
-                rsi_values.append(50.0)
-            else:
-                rsi_values.append(as_float(raw_value, 50.0))
-        work = work.with_columns(
-            pl.Series("rsi14", rsi_values, dtype=pl.Float64).alias("rsi14")
-        )
-    else:
-        work = work.with_columns(pl.col("rsi14").cast(pl.Float64, strict=False).alias("rsi14"))
-    if "vwap" not in work.columns:
-        time_column = next(
-            (column for column in ("open_time", "time", "close_time") if column in work.columns),
-            None,
-        )
-        typical_price = (pl.col("high") + pl.col("low") + pl.col("close")) / 3.0
-        if time_column is not None and getattr(
-            work.schema.get(time_column), "is_temporal", lambda: False
-        )():
-            date_expr = pl.col(time_column).dt.date().alias("_spec_session")
-            work = work.with_columns(date_expr)
-            work = work.with_columns(
-                (
-                    (typical_price * pl.col("volume")).cum_sum().over("_spec_session")
-                    / pl.col("volume").cum_sum().over("_spec_session")
-                ).alias("vwap")
-            )
-        else:
-            work = work.with_columns(
-                (
-                    (typical_price * pl.col("volume")).cum_sum()
-                    / pl.col("volume").cum_sum()
-                ).alias("vwap")
-            )
     return work
 
 
@@ -335,26 +336,11 @@ def _pivot_rows(
     if work.height < 7 or price_column not in work.columns or indicator_column not in work.columns:
         return []
     current_idx = int(work.item(-1, "_spec_idx"))
-    rows = work.to_dicts()
-    confirmed: list[dict[str, object]] = []
-    left_bars = 2
-    for confirm_pos in range(left_bars + 1, len(rows)):
-        pivot_pos = confirm_pos - 1
-        pivot_row = rows[pivot_pos]
-        pivot_value = as_float(pivot_row.get(price_column), math.nan)
-        confirm_value = as_float(rows[confirm_pos].get(price_column), math.nan)
-        left_values = [
-            as_float(rows[pos].get(price_column), math.nan)
-            for pos in range(pivot_pos - left_bars, pivot_pos)
-        ]
-        if not all(math.isfinite(value) for value in [pivot_value, confirm_value, *left_values]):
-            continue
-        if pivot == "low":
-            is_pivot = pivot_value < min(left_values) and pivot_value < confirm_value
-        else:
-            is_pivot = pivot_value > max(left_values) and pivot_value > confirm_value
-        if is_pivot:
-            confirmed.append(pivot_row)
+    high_mask, low_mask = _swing_points(work, n=2, include_unconfirmed_tail=False)
+    mask = low_mask if pivot == "low" else high_mask
+    # Live-safe divergence pivots: exclude the two tail bars before comparing neighbors.
+    mask = mask & (work["_spec_idx"] <= current_idx - 2)
+    confirmed = work.filter(mask).to_dicts()
     return [
         {
             "idx": float(row["_spec_idx"]),
@@ -1063,7 +1049,7 @@ def detect_volume_climax_reversal(frame: pl.DataFrame, *, timeframe: str = "15m"
 
 def detect_ema_bounce(frame: pl.DataFrame, *, timeframe: str = "15m") -> SpecHit | None:
     work = with_spec_columns(frame)
-    if work.height < 205:
+    if work.height < 55:
         return None
     row = _latest_values(work)
     atr = row.get("spec_atr14", 0.0)
@@ -1235,18 +1221,19 @@ def detect_bb_squeeze_release(frame: pl.DataFrame, *, timeframe: str = "15m") ->
     work = with_spec_columns(frame)
     if work.height < 30:
         return None
-    work = work.with_columns(
-        (
-            (pl.col("spec_bb_upper") < pl.col("spec_kc15_upper"))
-            & (pl.col("spec_bb_lower") > pl.col("spec_kc15_lower"))
-        ).alias("spec_squeeze")
-    )
+    if "spec_squeeze" not in work.columns:
+        LOGGER.warning("bb_squeeze_release missing spec_squeeze column")
+        return None
+    assert "spec_squeeze" in work.columns
     row = _latest_values(work)
     atr = row.get("spec_atr14", 0.0)
     if atr <= 0.0:
         return None
-    was_squeeze = bool(work.item(-2, "spec_squeeze")) if work.height >= 2 else False
-    is_squeeze = bool(work.item(-1, "spec_squeeze"))
+    try:
+        was_squeeze = bool(work.item(-2, "spec_squeeze"))
+        is_squeeze = bool(work.item(-1, "spec_squeeze"))
+    except (IndexError, ValueError, TypeError):
+        return None
     if not was_squeeze or is_squeeze:
         return None
     direction = "long" if row["close"] > row.get("spec_ema20", row["close"]) else "short"
@@ -1380,13 +1367,32 @@ def detect_absorption(frame: pl.DataFrame, *, timeframe: str = "15m") -> SpecHit
         return None
     prev = work.row(-2, named=True)
     latest = _latest_values(work)
-    delta = as_float(prev.get("spec_delta"))
-    delta_mean = as_float(prev.get("spec_abs_delta_mean20"))
+    delta = finite_or_none(prev.get("spec_delta"))
+    delta_mean = finite_or_none(prev.get("spec_abs_delta_mean20"))
+    threshold_mult = 3.0
+    delta_source = "spec_delta"
+    if delta is None:
+        prev_volume = as_float(prev.get("volume"))
+        if prev_volume <= 0.0:
+            return None
+        delta = (as_float(prev.get("close")) - as_float(prev.get("open"))) / prev_volume
+        proxy_values = [
+            abs((as_float(row.get("close")) - as_float(row.get("open"))) / as_float(row.get("volume")))
+            for row in work.tail(22).head(20).to_dicts()
+            if as_float(row.get("volume")) > 0.0
+        ]
+        if not proxy_values:
+            return None
+        delta_mean = sum(proxy_values) / len(proxy_values)
+        threshold_mult = 1.5
+        delta_source = "ohlcv_body_volume_proxy"
+    if delta_mean is None:
+        return None
     atr = as_float(prev.get("spec_atr14"), latest.get("spec_atr14", 0.0))
     body = as_float(prev.get("spec_body"))
     if atr <= 0.0 or delta_mean <= 0.0:
         return None
-    absorbed = abs(delta) > delta_mean * 3.0 and body < atr * 0.3
+    absorbed = abs(delta) > delta_mean * threshold_mult and body < atr * 0.3
     if not absorbed:
         return None
     prev_close = as_float(prev.get("close"))
@@ -1398,7 +1404,10 @@ def detect_absorption(frame: pl.DataFrame, *, timeframe: str = "15m") -> SpecHit
             stop_basis=as_float(prev.get("low")),
             atr=atr,
             timeframe=timeframe,
-            reasons=(f"sell_delta_absorbed delta_x={abs(delta)/delta_mean:.2f}",),
+            reasons=(
+                f"sell_delta_absorbed delta_x={abs(delta)/delta_mean:.2f}",
+                f"delta_source={delta_source}",
+            ),
             structure_clarity=min(1.0, abs(delta) / max(delta_mean * 4.0, 1e-8)),
             vol_ratio=latest.get("volume_ratio20", 1.0),
             rsi=latest.get("rsi14", 50.0),
@@ -1411,7 +1420,10 @@ def detect_absorption(frame: pl.DataFrame, *, timeframe: str = "15m") -> SpecHit
             stop_basis=as_float(prev.get("high")),
             atr=atr,
             timeframe=timeframe,
-            reasons=(f"buy_delta_absorbed delta_x={abs(delta)/delta_mean:.2f}",),
+            reasons=(
+                f"buy_delta_absorbed delta_x={abs(delta)/delta_mean:.2f}",
+                f"delta_source={delta_source}",
+            ),
             structure_clarity=min(1.0, abs(delta) / max(delta_mean * 4.0, 1e-8)),
             vol_ratio=latest.get("volume_ratio20", 1.0),
             rsi=latest.get("rsi14", 50.0),

@@ -1,0 +1,947 @@
+{
+  "C:\\Users\\undea\\Documents\\bot2\\main.py": {
+    "mtime": 1778024322.771029,
+    "ast_hash": "2f84752cbb757fe7f7ab765651d0c78a",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\monitor_bot.py": {
+    "mtime": 1778718079.5971642,
+    "ast_hash": "a101ff151042cd2e7c90d6fd981e4cb1",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\run_check.py": {
+    "mtime": 1778718079.6011868,
+    "ast_hash": "30e5a1d037279f40f149ca0d23abfcb5",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\alerts.py": {
+    "mtime": 1779498933.8952506,
+    "ast_hash": "59c7aae03e2c5b584197ef2a13a9946b",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\analytics.py": {
+    "mtime": 1779400171.3160617,
+    "ast_hash": "afa9475a30846efbacf0c3d864fdf886",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\autotuner.py": {
+    "mtime": 1779155702.1181543,
+    "ast_hash": "79c3f6b4b066a060a5cda85f330a7fca",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\cli.py": {
+    "mtime": 1779174632.2903671,
+    "ast_hash": "8f267de27119d103340b0298aa776e54",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\config_audit.py": {
+    "mtime": 1779579127.2167344,
+    "ast_hash": "d655a858521eeaf85e40381ee14bb081",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\config_loader.py": {
+    "mtime": 1779155707.550705,
+    "ast_hash": "76a0905a7e51470063ea55d9509aab50",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\confluence.py": {
+    "mtime": 1779794696.3098063,
+    "ast_hash": "e60e4bc717a74b692e1ed79448cbc952",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\dashboard.py": {
+    "mtime": 1779844651.9771574,
+    "ast_hash": "465833e418239e7076a0905416d53bc8",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\dashboard_live.py": {
+    "mtime": 1779800764.9434717,
+    "ast_hash": "332d061a75de1fa7e074890b218fa418",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\dashboard_ui.py": {
+    "mtime": 1779844651.9728546,
+    "ast_hash": "4a7be78aebc23e6a20a7dd61c2cdb6e8",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\delivery.py": {
+    "mtime": 1779800981.4345672,
+    "ast_hash": "2a0bf219bd1a3f823fd7de6b6ebd4c0c",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\features.py": {
+    "mtime": 1779795002.9406579,
+    "ast_hash": "dd41e7e87c20fbadf33b6d436c0f8140",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\features_advanced.py": {
+    "mtime": 1779498467.5808291,
+    "ast_hash": "390e888e9f99fbbd5feba8bd1319a786",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\features_core.py": {
+    "mtime": 1779751238.6589806,
+    "ast_hash": "406c3ac48271874f64d25ffd28634793",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\features_microstructure.py": {
+    "mtime": 1779794696.3882117,
+    "ast_hash": "df58055f838fa2daa24feb5102e314f9",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\features_oscillators.py": {
+    "mtime": 1779498478.0026107,
+    "ast_hash": "9788be34cff278b46070b02f82b757db",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\features_shared.py": {
+    "mtime": 1779751238.6624913,
+    "ast_hash": "6ff9a4cb6e57db48ef809a4eb340d99d",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\features_structure.py": {
+    "mtime": 1778718079.226954,
+    "ast_hash": "d51ca888cfc08984d4fd4a2f2a496821",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\feature_flags.py": {
+    "mtime": 1778498009.79837,
+    "ast_hash": "fbc5876587a15fcb882b8b94ef354a3b",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\filters.py": {
+    "mtime": 1779800784.3158345,
+    "ast_hash": "8ec5d0622a89b46cbf70ca10e05ae901",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\journal.py": {
+    "mtime": 1778718079.2455256,
+    "ast_hash": "f5b680ddd2e27552a3d77544fd4cf6b4",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\live_audit.py": {
+    "mtime": 1779663200.7170038,
+    "ast_hash": "924f1c2f0f52fc3db10e52323231f6bc",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\logging_config.py": {
+    "mtime": 1777711061.47201,
+    "ast_hash": "ec21f43cd51714de4079b1179f5c17e2",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\market_data.py": {
+    "mtime": 1779799969.558192,
+    "ast_hash": "fd326195366c6012af2735d86d98217f",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\market_regime.py": {
+    "mtime": 1779058297.8713124,
+    "ast_hash": "2b8b424596e2cebbcf7f70513b687ab8",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\messaging.py": {
+    "mtime": 1779800803.097964,
+    "ast_hash": "930d9cf6c2d702a6001410c00f5e7623",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\metrics.py": {
+    "mtime": 1779155464.7589123,
+    "ast_hash": "ff15750e4086aefd776901f4cb37eeba",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\migrations.py": {
+    "mtime": 1778718079.319769,
+    "ast_hash": "c4ecd0a95c45971322b3b4415357925b",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\monitor_bot.py": {
+    "mtime": 1779155789.9366014,
+    "ast_hash": "afc752e49a62179a75f154b093bb53f7",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\outcomes.py": {
+    "mtime": 1779800776.7828746,
+    "ast_hash": "41a4a77154c7fac6d2c412cb61a34498",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\public_intelligence.py": {
+    "mtime": 1779800737.5865154,
+    "ast_hash": "b2fc84aee3691c75d118f25daae05f45",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\quality_monitor.py": {
+    "mtime": 1779525847.998683,
+    "ast_hash": "5a47118b36d6787acf5de0a50b441a79",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\runtime_policy.py": {
+    "mtime": 1778718079.4217503,
+    "ast_hash": "46b894418bdc916e38f0afd12c9aeb4e",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\scoring.py": {
+    "mtime": 1779497828.5258117,
+    "ast_hash": "5f606cbe90196168ceed1fca009e9bb2",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\setup_base.py": {
+    "mtime": 1778718079.428775,
+    "ast_hash": "9e61b4b585003a0fcac79e4c6bb3f034",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\signal_contract.py": {
+    "mtime": 1779799154.2586577,
+    "ast_hash": "a274a1c753789c713e0aab338189c691",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\signal_diagnostics.py": {
+    "mtime": 1779579626.2969859,
+    "ast_hash": "b7b8c9735287c2fa266fa353419c1c7d",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\startup_reporter.py": {
+    "mtime": 1779317238.005579,
+    "ast_hash": "dfb0c0f9650d1667e490b6aa225b18a1",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategy_asset_fit.py": {
+    "mtime": 1779153231.9624202,
+    "ast_hash": "562172bb76946cfe3cc7ab06cfe693c4",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\telegram_formatter.py": {
+    "mtime": 1779794696.4210918,
+    "ast_hash": "cdf1c2fd249392ca3879929156b91288",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\telemetry.py": {
+    "mtime": 1779800770.9074652,
+    "ast_hash": "38c71e498fe9cc6a480acf88cd5af208",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\tracked_signals.py": {
+    "mtime": 1779381605.894542,
+    "ast_hash": "9c36b27578fcef908e9c42ba6ade76a9",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\tracking.py": {
+    "mtime": 1779795273.4633422,
+    "ast_hash": "079da49ce67c5bac19c09aae8b6363f2",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\universe.py": {
+    "mtime": 1779796512.3397944,
+    "ast_hash": "cd77c5349003881535480669e9017703",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\ws_manager.py": {
+    "mtime": 1779800790.293402,
+    "ast_hash": "7fc2b93f717e1711f1117dfbfde0e32e",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\__init__.py": {
+    "mtime": 1778498009.275554,
+    "ast_hash": "e77d0285354d2e5533ac459191016be3",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\application\\bot.py": {
+    "mtime": 1779578617.4088178,
+    "ast_hash": "b39d3be766f49c0bf0683f7223f908ef",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\application\\container.py": {
+    "mtime": 1779498703.3576593,
+    "ast_hash": "814fb0bf4527a93ed7ccd8094bec840a",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\application\\cycle_runner.py": {
+    "mtime": 1779357180.4032218,
+    "ast_hash": "8fa8390e5240a8a6e5f66669c0efc0d9",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\application\\delivery_orchestrator.py": {
+    "mtime": 1779794696.288854,
+    "ast_hash": "e7be40355e22570e39842be5e62f3f25",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\application\\fallback_runner.py": {
+    "mtime": 1779154150.7986584,
+    "ast_hash": "d53d9b63fed06219a527d4f431b6e44a",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\application\\health_manager.py": {
+    "mtime": 1779578633.9071255,
+    "ast_hash": "797013d794aa5379748bbd3291a9b8d0",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\application\\intra_candle_scanner.py": {
+    "mtime": 1778718079.0622776,
+    "ast_hash": "a9f3915a1792f0bfe14c8849016a8804",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\application\\kline_handler.py": {
+    "mtime": 1778499433.8935516,
+    "ast_hash": "49989c92f9633e77ed72c19ed91fbbe5",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\application\\market_context_updater.py": {
+    "mtime": 1779794696.2923675,
+    "ast_hash": "ea40476f7d4f37461f52e03fca7a194b",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\application\\oi_refresh_runner.py": {
+    "mtime": 1779794696.2959197,
+    "ast_hash": "2878d7ee7a131a9ccf034de5bb586108",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\application\\shortlist_service.py": {
+    "mtime": 1779800742.7829652,
+    "ast_hash": "b0b78f8b2e8068761a2e8add23043b28",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\application\\symbol_analyzer.py": {
+    "mtime": 1779844613.0083423,
+    "ast_hash": "ac9ffd532ec7c88cc63d6f624e5d7b71",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\application\\telemetry_manager.py": {
+    "mtime": 1779498279.365903,
+    "ast_hash": "b66f36f30b8e67cf8d18d087bf5d8367",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\application\\__init__.py": {
+    "mtime": 1777711060.8453376,
+    "ast_hash": "92663dc91fb0d256bb4f77b727faa2a5",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\backtest\\engine.py": {
+    "mtime": 1778718079.0813818,
+    "ast_hash": "00af32a4a8d411c8e6a020f7e17f17b3",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\backtest\\metrics.py": {
+    "mtime": 1778718079.0833888,
+    "ast_hash": "a2a178369234cb16a06131d30715d5a9",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\backtest\\__init__.py": {
+    "mtime": 1777711061.0017397,
+    "ast_hash": "a963c02821bfca0b6f8a45aa8d36b2a9",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\backtest\\__main__.py": {
+    "mtime": 1778498009.4900992,
+    "ast_hash": "2f462f93bf5dca008f8de81b036516ac",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\core\\event_bus.py": {
+    "mtime": 1779155547.711672,
+    "ast_hash": "e9c3b0da0530027731ae487529444af5",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\core\\runtime_errors.py": {
+    "mtime": 1777711061.277177,
+    "ast_hash": "cea951dbb046e73403cf8f6a52aeec89",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\core\\__init__.py": {
+    "mtime": 1778498009.5405128,
+    "ast_hash": "f733769ccb859d62f396981e3b967321",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\core\\analyzer\\metrics.py": {
+    "mtime": 1779795273.4512515,
+    "ast_hash": "9e021e37b372f50db3bb23ecf6a209f7",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\core\\analyzer\\reporter.py": {
+    "mtime": 1778718079.0973763,
+    "ast_hash": "aff59139389925964b504879c476981d",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\core\\analyzer\\tracker.py": {
+    "mtime": 1779155723.148903,
+    "ast_hash": "6e6d9ce204af5bb02caf82359ba6d950",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\core\\analyzer\\__init__.py": {
+    "mtime": 1777711061.095091,
+    "ast_hash": "ebb2947eb228daed0b02cf72b1a81780",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\core\\diagnostics\\alerts.py": {
+    "mtime": 1778718079.1346004,
+    "ast_hash": "86d1af13028c0068dfc7708523a649bd",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\core\\diagnostics\\health.py": {
+    "mtime": 1778718079.1366093,
+    "ast_hash": "71466cba6cef45eff5a129b21c337f10",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\core\\diagnostics\\metrics.py": {
+    "mtime": 1778718079.1430984,
+    "ast_hash": "0e877d4298152a34342b9d80ccad90a3",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\core\\diagnostics\\strategy_audit.py": {
+    "mtime": 1779401293.301351,
+    "ast_hash": "2c8f42c75163d2fddf836e667a58ca81",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\core\\diagnostics\\__init__.py": {
+    "mtime": 1777711061.1601207,
+    "ast_hash": "929b4e3680fd10ad804c150511e10fb0",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\core\\engine\\base.py": {
+    "mtime": 1779064567.260172,
+    "ast_hash": "22713720d28084ec4eb250eab66e43b1",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\core\\engine\\engine.py": {
+    "mtime": 1779794696.3239923,
+    "ast_hash": "f1275413dc0c55c6dc60910aece9daf8",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\core\\engine\\registry.py": {
+    "mtime": 1779155557.5093052,
+    "ast_hash": "0c0d037375584a3ac411acb1474f16cf",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\core\\engine\\__init__.py": {
+    "mtime": 1778498009.6034822,
+    "ast_hash": "c290c23e00c66b01d385d991b98290cd",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\core\\memory\\cache.py": {
+    "mtime": 1779794696.3275447,
+    "ast_hash": "8354de57e368bb9ebff14e59fde1ab77",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\core\\memory\\repository.py": {
+    "mtime": 1779844493.7804265,
+    "ast_hash": "11bbfed9b1776a2a40e1865ae0592df7",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\core\\memory\\__init__.py": {
+    "mtime": 1777711061.2447746,
+    "ast_hash": "c833abc7ce7289e01acc90c9891b0b66",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\diagnostics\\runtime_analysis.py": {
+    "mtime": 1778718079.1721551,
+    "ast_hash": "48dce8d726fabfa38bc11decde8eb0c0",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\diagnostics\\__init__.py": {
+    "mtime": 1777711061.3177345,
+    "ast_hash": "20868f59679d10ee22a1ddb8c5f7f945",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\domain\\config.py": {
+    "mtime": 1779794696.3698826,
+    "ast_hash": "e4fad953346a80b92acca7a2607be33c",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\domain\\contracts.py": {
+    "mtime": 1778718079.1952994,
+    "ast_hash": "17e5551b82a93124956a7563879bcf1c",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\domain\\events.py": {
+    "mtime": 1778718079.1993203,
+    "ast_hash": "e399a772026a65290330e4ff8b7411c3",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\domain\\schemas.py": {
+    "mtime": 1779794696.3728821,
+    "ast_hash": "3e2d846a4037310bcbd4b02730183670",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\domain\\strategies.py": {
+    "mtime": 1779153225.8630426,
+    "ast_hash": "1d62f4b8c175919f2dd8928c89054252",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\domain\\__init__.py": {
+    "mtime": 1778498009.7238338,
+    "ast_hash": "b448420e6667cb47eadd120f04553229",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\regime\\composite_regime.py": {
+    "mtime": 1778718079.3553214,
+    "ast_hash": "cc8ad2a100edcffbcc115665c06a063d",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\regime\\gmm_var.py": {
+    "mtime": 1778718079.414101,
+    "ast_hash": "d5eea3afd09ff1a49b2a6cf720b76b39",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\regime\\hmm_regime.py": {
+    "mtime": 1778718079.4161093,
+    "ast_hash": "c68f600d55ea8d1d5bd67a067323139a",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\regime\\__init__.py": {
+    "mtime": 1777711061.6611228,
+    "ast_hash": "d67021bdaa028152978ba9868d08d9d1",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\setups\\smc.py": {
+    "mtime": 1779796973.4465024,
+    "ast_hash": "4d1aebbeec7a16a250d441f1ed0b174e",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\setups\\utils.py": {
+    "mtime": 1779493530.7569158,
+    "ast_hash": "da021bed56bcadbf8390533667569414",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\setups\\__init__.py": {
+    "mtime": 1779844063.973857,
+    "ast_hash": "0aa02a78db835b75aaaebfd9e5ba119c",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\absorption.py": {
+    "mtime": 1779352875.3351817,
+    "ast_hash": "026409fcc9a4e54b60c1e6c80215bada",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\aggression_shift.py": {
+    "mtime": 1779798021.0374432,
+    "ast_hash": "edfbbcc52d7d7317aa6668feda46c68c",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\altcoin_season_index.py": {
+    "mtime": 1779323024.9087875,
+    "ast_hash": "a3ed005cdb536a2380d16d34ade4fba1",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\atr_expansion.py": {
+    "mtime": 1779798124.2087908,
+    "ast_hash": "b2533c849de43248d2e5c983993ae37a",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\bb_squeeze.py": {
+    "mtime": 1779352312.6900907,
+    "ast_hash": "cdeac5c1b707db713f3f5fe3d4a9aff4",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\bos_choch.py": {
+    "mtime": 1779844280.4599016,
+    "ast_hash": "5160b6e23c941ee6a2c9f53690056b53",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\breaker_block.py": {
+    "mtime": 1779844275.812553,
+    "ast_hash": "d5927d4e0ff8143ff0b1ff1581317837",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\btc_correlation.py": {
+    "mtime": 1779323046.33437,
+    "ast_hash": "539d8f393c40a1d602fcef7aad0cb55a",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\common.py": {
+    "mtime": 1778803392.256693,
+    "ast_hash": "bef7564f772ff7a2672d3ee98a889133",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\cvd_divergence.py": {
+    "mtime": 1779844225.7336752,
+    "ast_hash": "cc0b7b17d7a6ac1ea3fe034c48d4dcd2",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\depth_imbalance.py": {
+    "mtime": 1779352447.3621945,
+    "ast_hash": "b5e1728d6c1f5a8da2ef444df5bf33e7",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\ema_bounce.py": {
+    "mtime": 1779844297.9602778,
+    "ast_hash": "7c1ba432d9464418599c8169644ee304",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\funding_reversal.py": {
+    "mtime": 1779844270.6770098,
+    "ast_hash": "7c7b94dccb73d3afbfc37d64ae95b4ec",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\fvg.py": {
+    "mtime": 1779493428.063157,
+    "ast_hash": "590d66db5cebb3012950557007caf7ec",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\hidden_divergence.py": {
+    "mtime": 1779438803.9034052,
+    "ast_hash": "d976fb199b206c3b55691a19fd3f4b39",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\indicator_divergence.py": {
+    "mtime": 1779844217.0571804,
+    "ast_hash": "4e92e9d4ac49f4e25f3d01e659435258",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\keltner_breakout.py": {
+    "mtime": 1779844305.926996,
+    "ast_hash": "3d4b343b9f8c5bb3d2517005c1fbcd73",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\liquidation_heatmap.py": {
+    "mtime": 1779352382.12014,
+    "ast_hash": "b043354f63c7cff16218ed4e79ebcb12",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\liquidity_sweep.py": {
+    "mtime": 1779493314.026552,
+    "ast_hash": "ecbbf95c292ba250cd30fa64bd33e266",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\ls_ratio_extreme.py": {
+    "mtime": 1779844253.2872283,
+    "ast_hash": "3bcc68a94f7755f0b5ad204757be7ec8",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\multi_tf_trend.py": {
+    "mtime": 1779844263.6386747,
+    "ast_hash": "23b4f847bd5252f02f16f37780292266",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\oi_divergence.py": {
+    "mtime": 1779322894.289584,
+    "ast_hash": "9f27eb4913dc61254428f56736f04f47",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\order_block.py": {
+    "mtime": 1779493401.2536623,
+    "ast_hash": "5029bc0c1fdb5a7a5cf581b7bf7cae38",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\price_velocity.py": {
+    "mtime": 1779493603.827513,
+    "ast_hash": "6183f490b8f88e78cbf08c9a2f99d41b",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\roadmap_base.py": {
+    "mtime": 1779844055.613293,
+    "ast_hash": "ef9e25b1652917fdeb585bd6dda6795d",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\rsi_divergence_bottom.py": {
+    "mtime": 1779391854.6423986,
+    "ast_hash": "944857f2e3def1de985fb404261baccc",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\session_killzone.py": {
+    "mtime": 1779362130.579943,
+    "ast_hash": "997b23b0dc15c8fe3170342b9aeb293c",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\spec_patterns.py": {
+    "mtime": 1779844205.9537785,
+    "ast_hash": "4359613fbd057f0eb0108630da3e9918",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\spread_strategy.py": {
+    "mtime": 1779322971.510527,
+    "ast_hash": "7adf5e4c99638db951c630e269737601",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\squeeze_setup.py": {
+    "mtime": 1779493461.3116076,
+    "ast_hash": "aad4833701fbf9dce5a672492d63920b",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\stop_hunt_detection.py": {
+    "mtime": 1779800181.1710665,
+    "ast_hash": "4bce72ebeb58986b4120706aee05a99b",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\structure_break_retest.py": {
+    "mtime": 1779365259.6684172,
+    "ast_hash": "3add18617dac721c918f4374d223b978",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\structure_pullback.py": {
+    "mtime": 1779844289.1666088,
+    "ast_hash": "c29a73cb840a4febf8fe9ce2ecae46ce",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\supertrend_follow.py": {
+    "mtime": 1779439441.2205136,
+    "ast_hash": "2968950f2cbf325353831918f4dd8336",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\turtle_soup.py": {
+    "mtime": 1779493563.464792,
+    "ast_hash": "79c23a4732e98244151009847dfe4a9f",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\volume_anomaly.py": {
+    "mtime": 1779493661.9632215,
+    "ast_hash": "cbf5000a74b04160bf0d305cfadab55b",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\volume_climax_reversal.py": {
+    "mtime": 1779439490.8913758,
+    "ast_hash": "10d988943f411b8bef51ef6cc79a109d",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\vwap_trend.py": {
+    "mtime": 1779493253.7547712,
+    "ast_hash": "05948be076effd95456acb7097a99292",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\whale_walls.py": {
+    "mtime": 1779352382.1177719,
+    "ast_hash": "b3524e76b49544a8fc5ae63818df9dab",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\wick_trap_reversal.py": {
+    "mtime": 1779844241.5254035,
+    "ast_hash": "02fe7c5a2962431a108eadbcaaec2a2a",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\wyckoff_spring.py": {
+    "mtime": 1779352875.3503854,
+    "ast_hash": "fd26db56b297c9f4a2aef54f7f5aebe1",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\strategies\\__init__.py": {
+    "mtime": 1779316186.3616197,
+    "ast_hash": "ba78be44608dbae3520e95e370e05c2a",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\telegram\\bot.py": {
+    "mtime": 1779155769.5834448,
+    "ast_hash": "c0bb0ce8df8b1b907529a1df6bd64f3f",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\telegram\\queue.py": {
+    "mtime": 1779498917.927139,
+    "ast_hash": "c6361fbc47328cbfc0e06e99e1c616a2",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\telegram\\sender.py": {
+    "mtime": 1779381596.096944,
+    "ast_hash": "c026b3312419084381ffd8df3fcfe6de",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\telegram\\__init__.py": {
+    "mtime": 1778498010.2680526,
+    "ast_hash": "90d4f7c05d4e8073cbbcf79a6f819721",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\websocket\\cache.py": {
+    "mtime": 1779316075.957839,
+    "ast_hash": "59e189af6a57103210a9ab2ed669e99c",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\websocket\\connection.py": {
+    "mtime": 1779800796.9241087,
+    "ast_hash": "0d36fa086617606817bcc84c1b6e6f7f",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\websocket\\enrichment.py": {
+    "mtime": 1778205052.1773434,
+    "ast_hash": "20cd297562726b9ec59230339ee90c9d",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\websocket\\health.py": {
+    "mtime": 1779155692.1679914,
+    "ast_hash": "c1ed13012daf6fb2e7029e7d54180ef5",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\websocket\\reconnect.py": {
+    "mtime": 1779174632.3564363,
+    "ast_hash": "3fe30784ac9db723fa25f020ae414cb3",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\websocket\\subscriptions.py": {
+    "mtime": 1779155740.4083786,
+    "ast_hash": "36fc2426a7b270e17980303e54722118",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\websocket\\__init__.py": {
+    "mtime": 1777711062.2331643,
+    "ast_hash": "639ecb9ab46daec5c3283eac55fbf749",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\scripts\\check_scripts_readme.py": {
+    "mtime": 1778718079.6031983,
+    "ast_hash": "6cb8eff4b2a55b81d1fbd0647332b631",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\scripts\\common.py": {
+    "mtime": 1779154633.7907233,
+    "ast_hash": "4dfcd4d307b5b1b387f6c566fab2df43",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\scripts\\historical_strategy_audit.py": {
+    "mtime": 1779800387.474044,
+    "ast_hash": "6ceed71ac0e53782e790a87a2c7880ee",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\scripts\\live_check_binance_api.py": {
+    "mtime": 1778718079.6084416,
+    "ast_hash": "f2fe4fa83fbc502b4c10934b3df49107",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\scripts\\live_check_enrichments.py": {
+    "mtime": 1779800287.2431252,
+    "ast_hash": "1d70454243439d82dd70e5563a351b65",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\scripts\\live_check_indicators.py": {
+    "mtime": 1778718079.6139705,
+    "ast_hash": "c30a876360511c562569ddfcfde2ad0e",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\scripts\\live_check_pipeline.py": {
+    "mtime": 1779801093.8371122,
+    "ast_hash": "8724256644deddb4ff8ee34d92bc8247",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\scripts\\live_check_strategies.py": {
+    "mtime": 1779797003.1600754,
+    "ast_hash": "de5008fabd765bf800605c4caead8e7b",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\scripts\\live_runtime_monitor.py": {
+    "mtime": 1779155837.6988888,
+    "ast_hash": "afd8336bfc10df117c34287afc8f1a6b",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\scripts\\live_smoke_bot.py": {
+    "mtime": 1779155843.0737593,
+    "ast_hash": "ee59ed2104d2bd4c3772737c05ea0ac7",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\scripts\\recompute_outcome_r_multiples.py": {
+    "mtime": 1778718079.6293645,
+    "ast_hash": "3e95ffc98bbcc3ed499a8e4ad0c9a3c2",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\scripts\\runtime_audit.py": {
+    "mtime": 1779174632.3604374,
+    "ast_hash": "cc4f39e559f33b40402b7dc3a7d1b00c",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\scripts\\strategy_audit_session.py": {
+    "mtime": 1779396310.6045322,
+    "ast_hash": "320a87551b693125cffca9664622faa2",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\scripts\\telemetry_analyzer.py": {
+    "mtime": 1778718079.6374173,
+    "ast_hash": "48e9a0e254d07315fbe96dcefe3ef44c",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\scripts\\validate_config.py": {
+    "mtime": 1778718079.64422,
+    "ast_hash": "5e046df6b04728419e4d477db10081a8",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\scripts\\ci\\check_doc_change.sh": {
+    "mtime": 1777711062.8447156,
+    "ast_hash": "08767eb74be7af86e8b317a78f0b56d7",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\scripts\\git-hooks\\pre-commit": {
+    "mtime": 1779794949.9442952,
+    "ast_hash": "4130f7ca90b723f158f1fb5e1ef5f6de",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\scripts\\git-hooks\\pre-push": {
+    "mtime": 1779794696.6759133,
+    "ast_hash": "8d2260891ea520a29695e46c1dafd0ba",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\tests\\test_indicators.py": {
+    "mtime": 1779751162.3657362,
+    "ast_hash": "07f58bf582323e3c76fde56882f338fa",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\tests\\test_market_context_updater.py": {
+    "mtime": 1779751162.3751392,
+    "ast_hash": "fbc381c21553341c77e3b5e192aae6b3",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\tests\\test_rate_limiter.py": {
+    "mtime": 1779751162.3725932,
+    "ast_hash": "6141944fac21970ff80eca87098fbf6a",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\tests\\test_signal_contract.py": {
+    "mtime": 1779751162.3705919,
+    "ast_hash": "c67784f78c3103312994cb224672f9e2",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\.pre-commit-config.yaml": {
+    "mtime": 1779316066.0768225,
+    "ast_hash": "b03ea9b6e9b6c3c8cea44f52789b3366",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\AGENTS.md": {
+    "mtime": 1779842660.1904204,
+    "ast_hash": "752aa83aa64361ac32860f882dcff932",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\AGENT_QUICK_START.md": {
+    "mtime": 1779799885.1747484,
+    "ast_hash": "d456945b53c9fcc018a7653701b1804b",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\ARCHITECTURE_DECISIONS.md": {
+    "mtime": 1779799893.5922282,
+    "ast_hash": "9df5ca5fd6ee3a2e48797224798140db",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\CHANGELOG.md": {
+    "mtime": 1779800119.6779318,
+    "ast_hash": "9783986e4c0632ef74f9f8e163964701",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\docker-compose.yml": {
+    "mtime": 1778564851.653188,
+    "ast_hash": "32616f9c63562547a0699277d4aaacff",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\PROJECT_MAP.md": {
+    "mtime": 1779800126.0034394,
+    "ast_hash": "c4f9251d8b3d49fd441b58fe4547b52b",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\requirements.txt": {
+    "mtime": 1779316075.9879744,
+    "ast_hash": "2347409ee3c0a32a1013a7c6838e407b",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\.github\\workflows\\auto-fix.yml": {
+    "mtime": 1777419549.2448845,
+    "ast_hash": "ff9a0682e2f28b26cb6099dd8b36c354",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\.github\\workflows\\ci.yml": {
+    "mtime": 1779316066.0722723,
+    "ast_hash": "85ea9cd4b727aa90ab1639084680cd23",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\.github\\workflows\\nightly-regression.yml": {
+    "mtime": 1777419549.252814,
+    "ast_hash": "6a4ce37b3de774f249dab697412a6b07",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\.github\\workflows\\quality-report.yml": {
+    "mtime": 1777419549.252814,
+    "ast_hash": "9f4b950c4e12a01692aefa76094b0d66",
+    "semantic_hash": ""
+  },
+  "C:\\Users\\undea\\Documents\\bot2\\bot\\static\\dashboard.html": {
+    "mtime": 1779844651.971296,
+    "ast_hash": "8b089f83e90d7fb1e278bd22a9c1d811",
+    "semantic_hash": ""
+  }
+}

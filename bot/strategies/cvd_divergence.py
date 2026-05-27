@@ -136,16 +136,29 @@ class CVDDivergenceSetup(BaseSetup):
         lows = w["low"].to_numpy()
         delta_vals = _signed_delta_values(w["delta_ratio"].to_numpy())
 
-        split = max(2, divergence_lookback)
+        split = max(5, divergence_lookback)
         compare = split * 2
+        if w.height < compare:
+            _reject(prepared, self.setup_id, "cvd_window_too_short")
+            return None
+        # split/compare windows pair the previous price leg against the latest leg.
         window_a = closes[-compare:-split]
         window_b = closes[-split:]
+        if len(window_a) < 5 or len(window_b) < 5:
+            _reject(prepared, self.setup_id, "cvd_window_too_short")
+            return None
+        assert len(window_a) >= 5 and len(window_b) >= 5
         high_window_b = highs[-split:]
         low_window_b = lows[-split:]
         delta_a = delta_vals[-compare:-split]
         delta_b = delta_vals[-split:]
 
-        if len(window_a) < 5 or len(window_b) < 5:
+        if (
+            len(window_a) < 5
+            or len(window_b) < 5
+            or len(delta_a) != len(window_a)
+            or len(delta_b) != len(window_b)
+        ):
             _reject(prepared, self.setup_id, "divergence_window_insufficient")
             return None
 

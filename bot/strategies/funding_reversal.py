@@ -47,7 +47,8 @@ class FundingReversalSetup(BaseSetup):
             "relative_funding_score_penalty": 0.82,
             "min_delta_threshold": 0.02,
             "confirmation_lookback_bars": 4,
-            "min_confirmation_score": 1.0,
+            # 0.70: single reversal bar (0.75) is sufficient for a signal
+            "min_confirmation_score": 0.70,
             "min_volume_ratio": 0.85,
             "sl_buffer_atr": 0.6,
             "bias_mismatch_penalty": 0.75,

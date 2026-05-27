@@ -159,43 +159,25 @@ def swing_highs_lows(
     highs = _series_to_float_array(ohlc["high"])
     lows = _series_to_float_array(ohlc["low"])
 
-    if mode == "live_safe":
-        swing_high, swing_low = _swing_points(
-            ohlc,
-            n=max(1, int(swing_length)),
-            include_unconfirmed_tail=include_unconfirmed_tail,
-        )
-        markers = np.where(
-            swing_high.to_numpy(),
-            1.0,
-            np.where(swing_low.to_numpy(), -1.0, np.nan),
-        ).astype(np.float64)
-        markers = _collapse_swing_markers(
-            markers,
-            highs,
-            lows,
-            keep_edge_adjustments=False,
-        )
-    else:
-        half = max(1, int(swing_length))
-        window = max(2, half * 2)
-        shifted_high_max = _series_to_float_array(
-            ohlc["high"].shift(-half).rolling_max(window_size=window)
-        )
-        shifted_low_min = _series_to_float_array(
-            ohlc["low"].shift(-half).rolling_min(window_size=window)
-        )
-        markers = np.where(
-            highs == shifted_high_max,
-            1.0,
-            np.where(lows == shifted_low_min, -1.0, np.nan),
-        ).astype(np.float64)
-        markers = _collapse_swing_markers(
-            markers,
-            highs,
-            lows,
-            keep_edge_adjustments=True,
-        )
+    if mode not in {"live_safe", "offline_parity"}:
+        raise ValueError(f"unsupported SMC swing mode: {mode}")
+
+    swing_high, swing_low = _swing_points(
+        ohlc,
+        n=max(1, int(swing_length)),
+        include_unconfirmed_tail=include_unconfirmed_tail,
+    )
+    markers = np.where(
+        swing_high.to_numpy(),
+        1.0,
+        np.where(swing_low.to_numpy(), -1.0, np.nan),
+    ).astype(np.float64)
+    markers = _collapse_swing_markers(
+        markers,
+        highs,
+        lows,
+        keep_edge_adjustments=False,
+    )
 
     levels = np.where(
         ~np.isnan(markers),

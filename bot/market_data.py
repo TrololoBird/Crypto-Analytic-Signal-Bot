@@ -1390,16 +1390,27 @@ class BinanceFuturesMarketData:
         validate_interval(interval)
         validate_limit(limit)
         if kind == "continuous":
-            rows = await self._call_public_http_json(
-                "continuous_kline_candlestick_data",
-                params={
-                    "pair": symbol,
-                    "contractType": "PERPETUAL",
-                    "interval": interval,
-                    "limit": limit,
-                },
-                symbol=symbol,
-            )
+            try:
+                rows = await self._call_public_http_json(
+                    "continuous_kline_candlestick_data",
+                    params={
+                        "pair": symbol,
+                        "contractType": "PERPETUAL",
+                        "interval": interval,
+                        "limit": limit,
+                    },
+                    symbol=symbol,
+                )
+            except RuntimeError as exc:
+                message = str(exc)
+                if '"code":-4104' in message or "Invalid contract type" in message:
+                    LOG.debug(
+                        "continuous klines unsupported for symbol | symbol=%s interval=%s",
+                        symbol,
+                        interval,
+                    )
+                    return pl.DataFrame()
+                raise
         elif kind == "mark":
             rows = await self._call_public_http_json(
                 "mark_price_kline_data",

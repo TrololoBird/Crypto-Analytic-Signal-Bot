@@ -121,6 +121,13 @@ class KeltnerBreakoutSetup(BaseSetup):
             return None
 
         bias_1h = getattr(prepared, "bias_1h", prepared.bias_4h)
+        # Use live 15m momentum to resolve neutral 1h bias before breakout checks.
+        if bias_1h == "neutral":
+            roc10 = _as_float(work_15m.item(-1, "roc10")) if "roc10" in work_15m.columns else 0.0
+            if roc10 > 0.20:
+                bias_1h = "uptrend"
+            elif roc10 < -0.20:
+                bias_1h = "downtrend"
         direction: str | None = None
         stop_basis: float = 0.0
         entry_price = 0.0

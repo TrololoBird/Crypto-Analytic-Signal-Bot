@@ -108,6 +108,13 @@ class StructurePullbackSetup(BaseSetup):
         regime_1h = prepared.regime_1h_confirmed
         regime_4h = prepared.regime_4h_confirmed
         bias_1h = prepared.bias_1h
+        # Use live 15m momentum to resolve neutral 1h bias for fresh pullbacks.
+        if bias_1h == "neutral":
+            roc10 = _as_float(work_15m.item(-1, "roc10")) if "roc10" in work_15m.columns else 0.0
+            if roc10 > 0.20:
+                bias_1h = "uptrend"
+            elif roc10 < -0.20:
+                bias_1h = "downtrend"
         structure = prepared.structure_1h
         penalty_multiplier = 1.0
         penalty_reasons: list[str] = []
@@ -231,7 +238,8 @@ class StructurePullbackSetup(BaseSetup):
 
         selected_level_name: str | None = None
         selected_level: float | None = None
-        touch_tolerance = max(atr * 0.20, trig_close * 0.0015)
+        # loosened for high-beta alts where atr*0.20 < tick noise
+        touch_tolerance = max(atr * 0.35, trig_close * 0.002)
         recent_pullback = work_15m.tail(int(max(2, pullback_lookback)))
         for level_name, level in _pullback_levels(prepared, direction):
             if level <= 0.0:

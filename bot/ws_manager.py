@@ -415,7 +415,8 @@ class FuturesWSManager:
             if not isinstance(sym, str) and hasattr(sym, "symbol"):
                 try:
                     sym = getattr(sym, "symbol")
-                except Exception:
+                except Exception as exc:
+                    LOG.debug("symbol normalization fallback failed: %s", exc)
                     sym = item
             sym = str(sym).strip().upper()
             if not sym:
