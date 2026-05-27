@@ -1050,6 +1050,7 @@ def detect_volume_climax_reversal(frame: pl.DataFrame, *, timeframe: str = "15m"
 def detect_ema_bounce(frame: pl.DataFrame, *, timeframe: str = "15m") -> SpecHit | None:
     work = with_spec_columns(frame)
     if work.height < 55:
+        # 55 bars = ~14h on 15m; 205 was never reachable in live snapshots
         return None
     row = _latest_values(work)
     atr = row.get("spec_atr14", 0.0)
@@ -1222,7 +1223,7 @@ def detect_bb_squeeze_release(frame: pl.DataFrame, *, timeframe: str = "15m") ->
     if work.height < 30:
         return None
     if "spec_squeeze" not in work.columns:
-        LOGGER.warning("bb_squeeze_release missing spec_squeeze column")
+        LOGGER.warning("detect_bb_squeeze_release: spec_squeeze column missing")
         return None
     assert "spec_squeeze" in work.columns
     row = _latest_values(work)
@@ -1372,18 +1373,21 @@ def detect_absorption(frame: pl.DataFrame, *, timeframe: str = "15m") -> SpecHit
     threshold_mult = 3.0
     delta_source = "spec_delta"
     if delta is None:
-        prev_volume = as_float(prev.get("volume"))
-        if prev_volume <= 0.0:
+        proxy_window = work.tail(22).head(20)
+        volume = proxy_window["volume"].cast(pl.Float64, strict=False)
+        valid_volume = volume.replace(0.0, None)
+        open_ = proxy_window["open"].cast(pl.Float64, strict=False)
+        close = proxy_window["close"].cast(pl.Float64, strict=False)
+        # proxy: normalized price-move per unit volume when real public delta is unavailable
+        proxy = (close - open_) / valid_volume
+        delta_proxy = finite_or_none(proxy.tail(1).mean())
+        delta_mean = finite_or_none(proxy.abs().mean())
+        if delta_proxy is None or delta_mean is None:
             return None
-        delta = (as_float(prev.get("close")) - as_float(prev.get("open"))) / prev_volume
-        proxy_values = [
-            abs((as_float(row.get("close")) - as_float(row.get("open"))) / as_float(row.get("volume")))
-            for row in work.tail(22).head(20).to_dicts()
-            if as_float(row.get("volume")) > 0.0
-        ]
-        if not proxy_values:
+        # relax threshold by 0.5x for proxy vs. real delta
+        if abs(delta_proxy) < delta_mean * 0.5:
             return None
-        delta_mean = sum(proxy_values) / len(proxy_values)
+        delta = delta_proxy
         threshold_mult = 1.5
         delta_source = "ohlcv_body_volume_proxy"
     if delta_mean is None:

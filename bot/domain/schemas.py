@@ -13,6 +13,7 @@ from ..signal_contract import (
     DEFAULT_TARGET_RR,
     default_ttl_bars,
     normalize_scale_weights,
+    validate_signal_contract,
     valid_until_from,
 )
 
@@ -318,6 +319,9 @@ class Signal:
             except ZeroDivisionError:
                 computed = 0.0
             object.__setattr__(self, "risk_reward", computed)
+        issues = validate_signal_contract(self)
+        if issues:
+            raise ValueError(f"Signal contract violations: {[issue.code for issue in issues]}")
 
     @property
     def entry_mid_raw(self) -> float:

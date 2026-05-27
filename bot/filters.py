@@ -390,6 +390,12 @@ def _market_atr_floor(prepared: PreparedSymbol, settings: BotSettings) -> float:
     mismatch into a hard no-signal state. Existing configurations below 0.20
     are preserved so this helper never tightens an already-lower threshold.
     """
+    atr = _latest_frame_float(prepared.work_15m, "atr_pct")
+    if atr is None:
+        atr = _latest_frame_float(prepared.work_1h, "atr_pct")
+    if atr is not None and atr <= 0.0:
+        return 0.0  # ATR pct: non-positive volatility data makes the floor invalid.
+
     base_min = float(settings.filters.min_atr_pct)
     if base_min <= 0.20:
         return base_min
@@ -432,6 +438,23 @@ def _record_atr_sample(setup_id: str, atr_pct: float, *, passed: bool) -> None:
 
 
 def apply_global_filters(
+    signal: Signal,
+    prepared: PreparedSymbol,
+    settings: BotSettings,
+    confluence_engine: "ConfluenceEngine",
+) -> tuple[bool, Signal, str | None, ScoringResult | None, dict[str, Any] | None] | None:
+    try:
+        return _run_filter_pipeline(signal, prepared, settings, confluence_engine)
+    except Exception as exc:
+        LOGGER.error(
+            "filter_pipeline_crash",
+            extra={"exc": str(exc), "setup_id": getattr(signal, "setup_id", "unknown")},
+            exc_info=True,
+        )
+        return None
+
+
+def _run_filter_pipeline(
     signal: Signal,
     prepared: PreparedSymbol,
     settings: BotSettings,

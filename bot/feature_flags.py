@@ -16,10 +16,10 @@ from .domain.config import BotSettings
 class FeatureFlags:
     settings: BotSettings
 
-    async def is_strategy_enabled(self, strategy_id: str) -> bool:
+    def is_strategy_enabled(self, strategy_id: str) -> bool:
         if not strategy_id:
             return False
-        return bool(getattr(self.settings.setups, strategy_id, False))
+        return bool(getattr(self.settings.setups, strategy_id, True))
 
     async def get_strategy_params(self, strategy_id: str) -> dict[str, float]:
         setups = getattr(getattr(self.settings, "filters", None), "setups", {})

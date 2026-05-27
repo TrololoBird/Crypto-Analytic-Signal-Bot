@@ -5,8 +5,10 @@ from typing import Any
 
 import polars as pl
 
-from .gmm_var import CentroidRegimeDetector
-from .hmm_regime import RuleBasedRegimeDetector
+from .gmm_var import HAS_SKLEARN, HAS_STATSMODELS, CentroidRegimeDetector
+from .hmm_regime import HAS_HMMLEARN, RuleBasedRegimeDetector
+
+ML_COMPONENTS_AVAILABLE = HAS_HMMLEARN and HAS_SKLEARN and HAS_STATSMODELS
 
 
 @dataclass(frozen=True)
@@ -34,6 +36,14 @@ class CompositeRegimeAnalyzer:
         funding = (
             float(next(iter((funding_rates or {"x": 0.0}).values()))) if funding_rates else 0.0
         )
+
+        if not ML_COMPONENTS_AVAILABLE:
+            return self._rule_based_fallback(
+                benchmark_context=benchmark_context,
+                returns=returns,
+                vol=vol,
+                funding=funding,
+            )
 
         centroid_regime, centroid_conf = self.centroid.current_regime(
             {"returns": returns, "vol": vol, "funding_rate": funding}
@@ -66,13 +76,37 @@ class CompositeRegimeAnalyzer:
 
     @property
     def gmm(self) -> CentroidRegimeDetector:
+        # backward-compat: remove in v9.0
         """Backward-compatible alias for older tests/callers."""
         return self.centroid
 
     @property
     def hmm(self) -> RuleBasedRegimeDetector:
+        # backward-compat: remove in v9.0
         """Backward-compatible alias for older tests/callers."""
         return self.rule_based
+
+    def _rule_based_fallback(
+        self,
+        *,
+        benchmark_context: dict[str, dict[str, Any]],
+        returns: float,
+        vol: float,
+        funding: float,
+    ) -> RegimeResult:
+        prediction = self.rule_based.predict(
+            self._build_rule_based_frame(
+                benchmark_context=benchmark_context,
+                returns=returns,
+                vol=vol,
+            )
+        )
+        rule_vote = self._map_rule_based(prediction.regime)
+        legacy_vote = self._legacy_vote(returns, vol, funding)
+        regime = rule_vote if rule_vote != "ranging" else legacy_vote
+        strength = max(0.45, min(0.8, prediction.confidence))
+        confidence = max(0.0, min(0.75, prediction.confidence))
+        return RegimeResult(regime=regime, strength=strength, confidence=confidence)
 
     @staticmethod
     def _build_rule_based_frame(

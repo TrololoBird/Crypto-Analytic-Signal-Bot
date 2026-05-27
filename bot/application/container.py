@@ -49,6 +49,7 @@ def build_application_container(
     market_data: BinanceFuturesMarketData | None = None,
     broadcaster: Any | None = None,
     telemetry: TelemetryStore | None = None,
+    feature_flags: Any | None = None,
 ) -> ApplicationContainer:
     """Build runtime dependencies for ``SignalBot``.
 
@@ -105,7 +106,7 @@ def build_application_container(
 
     registry = StrategyRegistry()
     register_strategies(registry)
-    engine = SignalEngine(registry, settings)
+    engine = SignalEngine(registry, settings, feature_flags=feature_flags)
 
     return ApplicationContainer(
         client=client,

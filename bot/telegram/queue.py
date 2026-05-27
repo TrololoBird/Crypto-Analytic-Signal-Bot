@@ -11,6 +11,7 @@ from typing import Any, Callable
 
 LOG = logging.getLogger("bot.telegram.queue")
 UTC = timezone.utc
+MAX_TG_LENGTH = 4096
 
 
 class MessagePriority(Enum):
@@ -120,6 +121,9 @@ class TelegramQueue:
             QueuedMessage or None if deduplicated or queue full
         """
         import hashlib
+
+        if len(text) > MAX_TG_LENGTH:
+            text = text[: MAX_TG_LENGTH - 1] + "\u2026"
 
         # Check deduplication
         content_hash = hashlib.md5(text.encode(), usedforsecurity=False).hexdigest()[:16]
@@ -235,10 +239,30 @@ class TelegramQueue:
                             msg.on_failed(str(exc))
 
             except asyncio.CancelledError:
-                break
+                await self._drain_high_priority(sender)
+                raise
             except Exception as exc:
                 LOG.exception("Queue worker error: %s", exc)
                 await asyncio.sleep(1)
+
+    async def _drain_high_priority(self, sender: Callable[[QueuedMessage], Any]) -> None:
+        for priority in (MessagePriority.CRITICAL, MessagePriority.HIGH):
+            queue = self._queues[priority]
+            while not queue.empty():
+                try:
+                    msg = queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+                try:
+                    await sender(msg)
+                    msg.status = MessageStatus.SENT
+                    self._stats["sent"] += 1
+                except Exception as exc:
+                    msg.status = MessageStatus.FAILED
+                    msg.error = str(exc)
+                    self._stats["failed"] += 1
+                    if msg.on_failed:
+                        msg.on_failed(str(exc))
 
     async def _get_next_message(self) -> QueuedMessage | None:
         """Get next message by priority."""

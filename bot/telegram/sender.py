@@ -216,27 +216,28 @@ class TelegramSender:
             except TelegramAPIError as exc:
                 LOG.error("Telegram API error: %s", exc)
                 last_error = exc
-                self._record_failure()
+                self._record_failure(exc)
 
                 if attempt < 2:
-                    wait = 2**attempt
+                    wait = min(2**attempt, 30)
                     LOG.info("Retrying in %ds (attempt %d/3)", wait, attempt + 1)
                     await asyncio.sleep(wait)
 
             except Exception as exc:
                 LOG.exception("Send failed: %s", exc)
                 last_error = exc
-                self._record_failure()
 
                 if attempt < 2:
-                    wait = 2**attempt
+                    wait = min(2**attempt, 30)
                     await asyncio.sleep(wait)
 
         # All retries exhausted
         raise last_error or Exception("Send failed after retries")
 
-    def _record_failure(self) -> None:
+    def _record_failure(self, exc: Exception) -> None:
         """Record failure for circuit breaker."""
+        if not isinstance(exc, TelegramAPIError):
+            return
         self._failures += 1
         self._last_failure = asyncio.get_running_loop().time()
 

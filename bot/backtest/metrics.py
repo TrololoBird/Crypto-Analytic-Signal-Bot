@@ -17,6 +17,9 @@ class BacktestResult:
     equity_curve: pl.DataFrame
     trade_count: int = 0
     expectancy: float = 0.0
+    total_signals: int = 0
+    expectancy_r: float = 0.0
+    max_drawdown_r: float = 0.0
     activation_rate: float = 0.0
     tp1_rate: float = 0.0
     tp2_rate: float = 0.0
@@ -127,7 +130,10 @@ class BacktestResult:
             trades=trades,
             equity_curve=equity_curve,
             trade_count=int(returns.len()),
+            total_signals=int(returns.len()),
             expectancy=expectancy,
+            expectancy_r=expectancy,
+            max_drawdown_r=max_dd,
             activation_rate=activation_rate,
             tp1_rate=tp1_rate,
             tp2_rate=tp2_rate,

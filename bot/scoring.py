@@ -29,7 +29,8 @@ class ScoringResult:
 
     @property
     def total_adjustment(self) -> float:
-        return self.final_score - self.base_score
+        raw_adjustment = self.final_score - self.base_score
+        return max(-0.5, min(0.5, raw_adjustment))  # clamp: adjustment cannot flip signal direction
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -120,7 +121,7 @@ def _oi_momentum(prepared: PreparedSymbol, signal: Signal) -> float:
     # --- OI component ---
     oi_chg = prepared.oi_change_pct
     if oi_chg is None:
-        oi_score = 0.5
+        return 0.0  # OI momentum score: no OI data means neutral component contribution.
     elif oi_chg >= 0.10:
         oi_score = 1.0
     elif oi_chg >= 0.05:
@@ -184,6 +185,9 @@ def _oi_momentum(prepared: PreparedSymbol, signal: Signal) -> float:
 
 
 def _risk_reward_quality(signal: Signal, settings: BotSettings) -> float:
+    stop_distance = float(getattr(signal, "stop_distance_pct", 0.0) or 0.0)
+    if stop_distance <= 0.0:
+        return 0.0  # stop distance pct: non-positive stop is invalid for R/R scoring.
     rr = float(signal.risk_reward or 0.0)
     filters = getattr(settings, "filters", None)
     setup_overrides = getattr(filters, "setups", {}) if filters is not None else {}

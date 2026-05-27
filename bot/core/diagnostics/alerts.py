@@ -13,6 +13,7 @@ from collections import deque
 from .health import HealthStatus, ComponentHealth
 
 LOG = logging.getLogger("bot.core.diagnostics.alerts")
+ALERT_THROTTLE_SECONDS = 300.0  # seconds: 5 minutes between identical alerts
 
 
 def _utcnow_naive() -> datetime:
@@ -52,7 +53,7 @@ class AlertManager:
 
     def __init__(
         self,
-        cooldown_seconds: float = 300.0,  # 5 min default cooldown
+        cooldown_seconds: float = ALERT_THROTTLE_SECONDS,
         max_history: int = 1000,
     ):
         self._cooldown = cooldown_seconds

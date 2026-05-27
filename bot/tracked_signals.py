@@ -62,7 +62,7 @@ def parse_state_dt(value: str | None) -> datetime | None:
     if not value:
         return None
     try:
-        dt = datetime.fromisoformat(value)
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except (ValueError, TypeError):
         return None
     if dt.tzinfo is None:

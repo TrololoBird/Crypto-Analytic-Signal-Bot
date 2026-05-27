@@ -36,6 +36,7 @@ from bot.universe import strategy_fits_for_market_row
 
 
 LOG = configure_script_logging("scripts.live_check_pipeline")
+LIVE_CHECK_HTTP_TIMEOUT_SECONDS = 30.0  # seconds: cap live REST smoke checks
 
 
 class FakeBroadcaster:
@@ -301,7 +302,10 @@ async def _run(
     os.environ.setdefault("BOT_DISABLE_HTTP_SERVERS", "1")
     settings = load_settings()
     client = BinanceFuturesMarketData(
-        rest_timeout_seconds=settings.ws.rest_timeout_seconds,
+        rest_timeout_seconds=min(
+            float(settings.ws.rest_timeout_seconds),
+            LIVE_CHECK_HTTP_TIMEOUT_SECONDS,
+        ),
         futures_data_request_limit_per_5m=settings.runtime.futures_data_request_limit_per_5m,
     )
     run_id = f"live_pipeline_check_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}"

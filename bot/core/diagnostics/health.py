@@ -13,6 +13,7 @@ from ..engine.registry import StrategyRegistry
 from ..analyzer.metrics import WinRateCalculator, PerformanceMetrics
 
 LOG = logging.getLogger("bot.core.diagnostics.health")
+HEALTH_CHECK_TIMEOUT_SECONDS = 5.0  # seconds: cap each component health probe
 
 
 def _utcnow_naive() -> datetime:
@@ -60,9 +61,9 @@ class HealthChecker:
     async def check_all(self) -> list[ComponentHealth]:
         """Run all health checks."""
         checks = [
-            self._check_strategies(),
-            self._check_performance(),
-            self._check_ws_health(),
+            self._check_with_timeout("strategies", self._check_strategies()),
+            self._check_with_timeout("performance", self._check_performance()),
+            self._check_with_timeout("websocket", self._check_ws_health()),
         ]
 
         results = await asyncio.gather(*checks, return_exceptions=True)
@@ -76,6 +77,19 @@ class HealthChecker:
 
         self._last_check = _utcnow_naive()
         return health_results
+
+    async def _check_with_timeout(
+        self, name: str, check: asyncio.Future[ComponentHealth] | Any
+    ) -> ComponentHealth:
+        try:
+            return await asyncio.wait_for(check, timeout=HEALTH_CHECK_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            LOG.warning("health_check_timeout", extra={"component": name})
+            return ComponentHealth(
+                name=name,
+                status=HealthStatus.DEGRADED,
+                message="Health check timed out",
+            )
 
     async def _check_strategies(self) -> ComponentHealth:
         """Check strategy health."""

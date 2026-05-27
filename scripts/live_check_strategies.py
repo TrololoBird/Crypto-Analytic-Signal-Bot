@@ -39,6 +39,7 @@ from bot.universe import strategy_fits_for_market_row
 
 
 LOG = configure_script_logging("scripts.live_check_strategies")
+LIVE_CHECK_HTTP_TIMEOUT_SECONDS = 30.0  # seconds: cap live REST smoke checks
 
 
 async def _build_prepared(
@@ -580,7 +581,10 @@ async def _run(
     engine = SignalEngine(registry, settings)
     confluence = ConfluenceEngine(settings)
     client = BinanceFuturesMarketData(
-        rest_timeout_seconds=settings.ws.rest_timeout_seconds,
+        rest_timeout_seconds=min(
+            float(settings.ws.rest_timeout_seconds),
+            LIVE_CHECK_HTTP_TIMEOUT_SECONDS,
+        ),
         futures_data_request_limit_per_5m=settings.runtime.futures_data_request_limit_per_5m,
     )
     try:

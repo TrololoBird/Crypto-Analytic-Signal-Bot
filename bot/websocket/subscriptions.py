@@ -11,12 +11,17 @@ from websockets import exceptions as ws_exceptions
 
 LOG = logging.getLogger("bot.ws_manager")
 DEFAULT_MAX_STREAMS_PER_CONNECTION = 300
+FORBIDDEN_STREAM_SUFFIXES = ("@userData", "@account", "@balanceUpdate")
+
+
+def _normalized_symbols(symbols: list[str]) -> list[str]:
+    normalized = [str(symbol or "").strip().lower() for symbol in symbols]
+    return list(dict.fromkeys(symbol for symbol in normalized if symbol))
 
 
 def base_streams_for_symbols(manager: Any, symbols: list[str]) -> list[str]:
     streams: list[str] = []
-    for symbol in symbols:
-        sym = symbol.lower()
+    for sym in _normalized_symbols(symbols):
         for interval in manager._cfg.kline_intervals:
             streams.append(f"{sym}@kline_{interval}")
     return streams
@@ -25,7 +30,12 @@ def base_streams_for_symbols(manager: Any, symbols: list[str]) -> list[str]:
 def public_streams_for_symbols(manager: Any, symbols: list[str]) -> list[str]:
     if not manager._cfg.subscribe_book_ticker:
         return []
-    return [f"{symbol.lower()}@bookTicker" for symbol in symbols]
+    streams = [f"{symbol}@bookTicker" for symbol in _normalized_symbols(symbols)]
+    return [
+        stream
+        for stream in streams
+        if not any(stream.endswith(forbidden) for forbidden in FORBIDDEN_STREAM_SUFFIXES)
+    ]
 
 
 def tracked_depth_streams(manager: Any, symbols: list[str]) -> list[str]:
@@ -39,7 +49,7 @@ def tracked_depth_streams(manager: Any, symbols: list[str]) -> list[str]:
         levels = 20
     speed = str(getattr(manager._cfg, "depth_speed", "500ms") or "500ms").lower()
     suffix = "" if speed == "250ms" else f"@{speed}"
-    return [f"{symbol.lower()}@depth{levels}{suffix}" for symbol in symbols[:limit]]
+    return [f"{symbol}@depth{levels}{suffix}" for symbol in _normalized_symbols(symbols)[:limit]]
 
 
 def stream_endpoint_class(stream: str) -> str:
@@ -68,7 +78,7 @@ def stream_endpoint_class(stream: str) -> str:
 def tracked_agg_trade_streams(manager: Any, symbols: list[str]) -> list[str]:
     if not manager._should_subscribe_agg_trade():
         return []
-    return [f"{symbol.lower()}@aggTrade" for symbol in symbols]
+    return [f"{symbol}@aggTrade" for symbol in _normalized_symbols(symbols)]
 
 
 def global_streams(manager: Any) -> list[str]:
@@ -90,7 +100,7 @@ def recompute_intended_streams(manager: Any) -> None:
     public_streams.update(tracked_depth_streams(manager, depth_symbols))
     market_streams = set(base_streams_for_symbols(manager, manager._symbols))
     market_streams.update(tracked_agg_trade_streams(manager, manager._tracked_symbols))
-    if manager._symbols:
+    if manager._symbols or manager._cfg.subscribe_market_streams:
         market_streams.update(global_streams(manager))
     manager._intended_streams_by_endpoint["public"] = public_streams
     manager._intended_streams_by_endpoint["market"] = market_streams
@@ -121,8 +131,11 @@ async def send_subscription_command(
     ws_conn = manager._ws_conns.get(endpoint)
     if ws_conn is None:
         return
-    chunk_size = manager._cfg.subscribe_chunk_size
-    delay_seconds = manager._cfg.subscribe_chunk_delay_ms / 1000.0
+    streams = sorted(dict.fromkeys(str(stream or "").strip() for stream in streams if stream))
+    if not streams:
+        return
+    chunk_size = max(1, int(getattr(manager._cfg, "subscribe_chunk_size", 100) or 100))
+    delay_seconds = max(0.0, float(getattr(manager._cfg, "subscribe_chunk_delay_ms", 0)) / 1000.0)
     for offset in range(0, len(streams), chunk_size):
         if manager._ws_conns.get(endpoint) is None:
             break
@@ -151,7 +164,7 @@ async def send_subscription_command(
 
 
 async def resubscribe_all(manager: Any, endpoint: str, ws: Any) -> None:
-    streams = list(manager._intended_streams_by_endpoint.get(endpoint, set()))
+    streams = sorted(manager._intended_streams_by_endpoint.get(endpoint, set()))
     if not streams:
         return
     if len(streams) > 200:

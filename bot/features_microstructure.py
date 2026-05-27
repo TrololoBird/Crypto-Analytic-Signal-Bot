@@ -1,11 +1,30 @@
 from __future__ import annotations
 
+import inspect
 import math
+import warnings
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Iterable, Mapping
 
 import polars as pl
+
+MODULE_STATUS = "internal_only"
+CANONICAL_FEATURE_API = "bot.features._prepare_frame"
+
+
+def _warn_if_direct_imported() -> None:
+    for frame_info in inspect.stack()[1:20]:
+        if frame_info.filename.replace("\\", "/").endswith("/bot/features.py"):
+            return
+    warnings.warn(
+        "bot.features_microstructure is internal_only; use bot.features._prepare_frame for runtime feature preparation.",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+
+
+_warn_if_direct_imported()
 
 
 def add_microstructure_features(df: pl.DataFrame) -> pl.DataFrame:
@@ -204,6 +223,26 @@ class MicrostructureContext:
     warnings: tuple[str, ...] = ()
     reasons: tuple[str, ...] = ()
     observed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+    @classmethod
+    def neutral(
+        cls,
+        *,
+        symbol: str = "UNKNOWN",
+        direction: str = "long",
+        observed_at: datetime | None = None,
+    ) -> "MicrostructureContext":
+        return cls(
+            symbol=symbol or "UNKNOWN",
+            direction=direction or "long",
+            bias_score=0.0,
+            confidence=0.0,
+            label="neutral",
+            scores=(),
+            warnings=("ws_microstructure_missing",),
+            reasons=(),
+            observed_at=observed_at or datetime.now(UTC),
+        )
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -468,6 +507,32 @@ def _score_liquidations(snapshot: MicrostructureSnapshot) -> MicrostructureScore
 
 def build_microstructure_context(snapshot: MicrostructureSnapshot | Mapping[str, Any]) -> MicrostructureContext:
     item = snapshot if isinstance(snapshot, MicrostructureSnapshot) else MicrostructureSnapshot.from_mapping(snapshot)
+    data_fields = (
+        "price_change_pct",
+        "funding_rate",
+        "open_interest_change_pct",
+        "global_long_short_ratio",
+        "top_trader_long_short_ratio",
+        "taker_ratio",
+        "taker_buy_base",
+        "volume",
+        "bid_qty",
+        "ask_qty",
+        "bid_price",
+        "ask_price",
+        "depth_imbalance",
+        "microprice_bias",
+        "basis_pct",
+        "liquidation_score",
+        "liquidation_long_notional",
+        "liquidation_short_notional",
+    )
+    if all(getattr(item, name) is None for name in data_fields):
+        return MicrostructureContext.neutral(
+            symbol=item.symbol,
+            direction=item.direction,
+            observed_at=item.observed_at,
+        )
     scores = (
         _score_funding(item),
         _score_long_short(item),

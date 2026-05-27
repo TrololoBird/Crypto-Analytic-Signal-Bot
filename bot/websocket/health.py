@@ -15,6 +15,25 @@ async def evaluate_endpoint_health(manager: Any, ws: Any, endpoint: str) -> bool
 
     Returns True if a reconnect was triggered (ws.close called), else False.
     """
+    max_silence = float(
+        getattr(
+            manager._cfg,
+            "silence_timeout_seconds",
+            getattr(manager._cfg, "health_check_silence_seconds", 60.0),
+        )
+    )
+    last_message_ts = manager._last_message_ts_by_endpoint.get(endpoint, 0.0)
+    if last_message_ts > 0.0:
+        last_message_age = time.monotonic() - last_message_ts
+        if last_message_age > max_silence:
+            LOG.info(
+                "ws endpoint silence exceeded | endpoint=%s age=%.1fs max=%.1fs",
+                endpoint,
+                last_message_age,
+                max_silence,
+            )
+            await ws.close()
+            return True
     grace_seconds = max(
         60.0,
         float(getattr(manager._cfg, "market_reconnect_grace_seconds", 60.0)),

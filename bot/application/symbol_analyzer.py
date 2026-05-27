@@ -1084,14 +1084,20 @@ class SymbolAnalyzer:
                     },
                 )
 
-            passed, filtered_signal, filter_reason, scoring_result, filter_details = (
-                apply_global_filters(
-                    signal,
-                    prepared,
-                    self._bot.settings,
-                    self._bot.confluence,
-                )
+            filter_result = apply_global_filters(
+                signal,
+                prepared,
+                self._bot.settings,
+                self._bot.confluence,
             )
+            if filter_result is None:
+                passed = False
+                filtered_signal = signal
+                filter_reason = "filter_pipeline_crash"
+                scoring_result = None
+                filter_details = None
+            else:
+                passed, filtered_signal, filter_reason, scoring_result, filter_details = filter_result
             if not passed:
                 LOG.info(
                     "%s: signal filtered | setup=%s dir=%s score=%.3f reason=%s",

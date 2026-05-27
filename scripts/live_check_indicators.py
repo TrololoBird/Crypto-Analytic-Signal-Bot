@@ -30,6 +30,7 @@ from bot.domain.schemas import SymbolFrames, UniverseSymbol
 
 
 LOG = configure_script_logging("scripts.live_check_indicators")
+LIVE_CHECK_HTTP_TIMEOUT_SECONDS = 30.0  # seconds: cap live REST smoke checks
 
 
 async def _build_universe_symbol(
@@ -61,7 +62,10 @@ async def _run(symbols: list[str], concurrency: int) -> None:
         min_bars_4h=settings.filters.min_bars_4h,
     )
     client = BinanceFuturesMarketData(
-        rest_timeout_seconds=settings.ws.rest_timeout_seconds,
+        rest_timeout_seconds=min(
+            float(settings.ws.rest_timeout_seconds),
+            LIVE_CHECK_HTTP_TIMEOUT_SECONDS,
+        ),
         futures_data_request_limit_per_5m=settings.runtime.futures_data_request_limit_per_5m,
     )
     try:

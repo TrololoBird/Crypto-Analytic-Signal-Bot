@@ -4,18 +4,14 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any
 
-from .metrics import PerformanceMetrics, WinRateCalculator
+from .metrics import PerformanceMetrics, WinRateCalculator, _utcnow_naive
 from ..memory.repository import MemoryRepository
 
 LOG = logging.getLogger("bot.core.analyzer.reporter")
-
-
-def _utcnow_naive() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class ReportFormat(Enum):
@@ -123,7 +119,7 @@ class DailyReporter:
         self,
         date: datetime | None = None,
         format: ReportFormat = ReportFormat.MARKDOWN,
-    ) -> DailyReport:
+    ) -> DailyReport | None:
         """Generate daily report.
 
         Args:
@@ -145,6 +141,8 @@ class DailyReporter:
             since=day_start,
             until=day_end,
         )
+        if overall.total_signals <= 0:
+            return None  # no signals for the period, do not send an empty report
 
         # Per-strategy metrics
         by_strategy = await self._calc.calculate_by_strategy(since=day_start)

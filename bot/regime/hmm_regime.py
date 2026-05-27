@@ -9,8 +9,10 @@ import polars as pl
 
 try:  # optional dependency
     from hmmlearn.hmm import GaussianHMM
-except Exception:  # pragma: no cover - optional
+    HAS_HMMLEARN = True
+except ImportError:  # pragma: no cover - optional
     GaussianHMM = None
+    HAS_HMMLEARN = False
 
 
 @dataclass(frozen=True)

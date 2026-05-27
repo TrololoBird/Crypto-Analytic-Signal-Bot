@@ -18,6 +18,18 @@ from bot.ws_manager import FuturesWSManager
 
 
 LOG = configure_script_logging("scripts.live_check_binance_api")
+LIVE_CHECK_HTTP_TIMEOUT_SECONDS = 30.0  # seconds: cap live REST smoke checks
+PUBLIC_FAPI_PATHS = {
+    "/fapi/v1/exchangeInfo",
+    "/fapi/v1/ticker/24hr",
+    "/fapi/v1/ticker/bookTicker",
+    "/fapi/v1/klines",
+}
+
+
+def _assert_public_endpoint(endpoint: str) -> None:
+    if endpoint not in PUBLIC_FAPI_PATHS:
+        raise RuntimeError(f"Non-public Binance endpoint in live check: {endpoint}")
 
 
 async def _run(
@@ -25,14 +37,21 @@ async def _run(
 ) -> None:
     settings = load_settings()
     client = BinanceFuturesMarketData(
-        rest_timeout_seconds=settings.ws.rest_timeout_seconds,
+        rest_timeout_seconds=min(
+            float(settings.ws.rest_timeout_seconds),
+            LIVE_CHECK_HTTP_TIMEOUT_SECONDS,
+        ),
         futures_data_request_limit_per_5m=settings.runtime.futures_data_request_limit_per_5m,
     )
     ws_manager = FuturesWSManager(client, settings.ws)
     try:
+        _assert_public_endpoint("/fapi/v1/exchangeInfo")
         exchange_symbols = await client.fetch_exchange_symbols()
+        _assert_public_endpoint("/fapi/v1/ticker/24hr")
         ticker_rows = await client.fetch_ticker_24h()
+        _assert_public_endpoint("/fapi/v1/ticker/bookTicker")
         book_bid, book_ask = await client.fetch_book_ticker(symbols[0])
+        _assert_public_endpoint("/fapi/v1/klines")
         klines_15m = await client.fetch_klines_cached(symbols[0], "15m", limit=64)
         LOG.info(
             "rest_checks_ok",

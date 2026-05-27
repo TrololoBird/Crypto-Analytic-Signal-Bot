@@ -26,24 +26,33 @@ UTC = timezone.utc
 LOG = logging.getLogger("bot.outcomes")
 
 
-def _normalized_float(value: Any) -> float | None:
+def _normalized_float(value: Any, default: float | None = None) -> float | None:
     if value is None:
-        return None
+        return default
     try:
         parsed = float(value)
     except (TypeError, ValueError):
-        return None
+        return default
     if math.isnan(parsed) or math.isinf(parsed):
-        return None
+        return default
     return parsed
 
 
-def _normalized_bool(value: Any) -> bool | None:
+def _normalized_bool(value: Any, default: bool | None = None) -> bool | None:
     if value is None:
-        return None
+        return default
     if isinstance(value, bool):
         return value
     return bool(value)
+
+
+def _metric(value: Any, default: float = 0.0) -> float:
+    parsed = _normalized_float(value)
+    return default if parsed is None else parsed
+
+
+def _round_metric(value: Any, digits: int = 4) -> float:
+    return round(_metric(value), digits)
 
 
 def build_prepared_feature_snapshot(prepared: Any) -> dict[str, Any]:
@@ -345,12 +354,12 @@ class SignalOutcome:
             "entry_price": self.entry_price,
             "exit_price": self.exit_price,
             "result": self.result,
-            "pnl_pct": round(self.pnl_pct, 4),
-            "pnl_r_multiple": round(self.pnl_r_multiple, 4),
-            "max_profit_pct": round(self.max_profit_pct, 4),
-            "max_loss_pct": round(self.max_loss_pct, 4),
-            "mae": round(self.mae, 4),
-            "mfe": round(self.mfe, 4),
+            "pnl_pct": _round_metric(self.pnl_pct),
+            "pnl_r_multiple": _round_metric(self.pnl_r_multiple),
+            "max_profit_pct": _round_metric(self.max_profit_pct),
+            "max_loss_pct": _round_metric(self.max_loss_pct),
+            "mae": _round_metric(self.mae),
+            "mfe": _round_metric(self.mfe),
             "time_to_entry_min": self.time_to_entry_min,
             "time_to_exit_min": self.time_to_exit_min,
             "features": self.features,
@@ -368,7 +377,7 @@ def extract_features_from_signal(
 ) -> SignalFeatures:
     """Извлекает признаки из сигнала для последующего сохранения."""
     return SignalFeatures(
-        base_score=signal.score,
+        base_score=_metric(signal.score),
         llm_verdict=llm_verdict,
         llm_reason=llm_reason,
         rsi_15m=prepared_data.get("rsi_15m") if prepared_data else None,
@@ -385,12 +394,12 @@ def extract_features_from_signal(
         else None,
         ema20_above_ema50_1h=prepared_data.get("ema20_above_ema50_1h") if prepared_data else None,
         ema50_above_ema200_1h=prepared_data.get("ema50_above_ema200_1h") if prepared_data else None,
-        spread_bps=signal.spread_bps,
-        quote_volume=signal.quote_volume,
-        delta_ratio=signal.orderflow_delta_ratio,
-        risk_reward=float(signal.risk_reward or 0.0),
-        stop_distance_pct=signal.stop_distance_pct,
-        entry_mid=signal.entry_mid,
+        spread_bps=_normalized_float(signal.spread_bps),
+        quote_volume=_normalized_float(signal.quote_volume),
+        delta_ratio=_normalized_float(signal.orderflow_delta_ratio),
+        risk_reward=_metric(signal.risk_reward),
+        stop_distance_pct=_metric(signal.stop_distance_pct),
+        entry_mid=_metric(signal.entry_mid),
         bias_4h=signal.bias_4h,
         setup_id=signal.setup_id,
         direction=signal.direction,
@@ -465,8 +474,10 @@ def create_outcome_from_tracked(
     is_active_expiry = raw_result == "expired" and activated_at is not None
     is_unactivated_close = activated_at is None and raw_result != "superseded"
     is_monitoring_close = is_unactivated_close or is_active_expiry or raw_result == "smart_exit"
-    entry_price = None if is_unactivated_close else (tracked.activation_price or tracked.entry_mid)
-    exit_price = None if is_unactivated_close else tracked.close_price
+    entry_price = (
+        None if is_unactivated_close else _normalized_float(tracked.activation_price)
+    ) or (None if is_unactivated_close else _normalized_float(tracked.entry_mid))
+    exit_price = None if is_unactivated_close else _normalized_float(tracked.close_price)
 
     pnl_pct = 0.0
     pnl_r_multiple = 0.0
@@ -478,8 +489,10 @@ def create_outcome_from_tracked(
 
         # R must use the original planned stop. Runtime tracking may move
         # tracked.stop to break-even after TP1, which would distort analytics.
-        risk_stop = tracked.initial_stop if tracked.initial_stop is not None else tracked.stop
-        risk = abs(entry_price - risk_stop)
+        risk_stop = _normalized_float(
+            tracked.initial_stop if tracked.initial_stop is not None else tracked.stop
+        )
+        risk = abs(entry_price - risk_stop) if risk_stop is not None else 0.0
         if risk > 0:
             pnl_r_multiple = pnl_pct / (risk / entry_price * 100.0) if risk > 0 else 0.0
 

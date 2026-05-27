@@ -168,6 +168,32 @@ class MarketRegimeAnalyzer:
                 btc_phase="sideways",
                 confidence=0.0,
             )
+        valid_changes: list[float] = []
+        for ticker in ticker_data:
+            raw_change = ticker.get("price_change_percent")
+            if raw_change is None:
+                continue
+            try:
+                valid_changes.append(float(raw_change))
+            except (TypeError, ValueError):
+                continue
+        if not valid_changes:
+            return MarketRegimeResult(
+                regime="ranging",
+                strength=0.0,
+                btc_bias="neutral",
+                eth_bias="neutral",
+                dominance_24h=0.0,
+                funding_sentiment="neutral",
+                oi_momentum="stable",
+                top_gainer_pct=0.0,
+                top_loser_pct=0.0,
+                altcoin_season_index=50.0,
+                volatility_regime="stable",
+                risk_on_off="neutral",
+                btc_phase="sideways",
+                confidence=0.0,
+            )
 
         # Find BTC and ETH
         btc_change = 0.0

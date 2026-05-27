@@ -62,6 +62,7 @@ def _flow_delta_with_source(prepared: PreparedSymbol) -> tuple[float | None, str
         return direct_delta, str(getattr(prepared, "orderflow_source", None) or "agg_trade")
     taker_ratio = _finite_or_none(prepared.taker_ratio)
     if taker_ratio is not None:
+        # clip to valid signed range; raw ratio can exceed bounds on thin books
         return float(max(-1.0, min(1.0, taker_ratio - 1.0))), "taker_ratio_rest"
     work = prepared.work_15m
     if work.is_empty() or "delta_ratio" not in work.columns:

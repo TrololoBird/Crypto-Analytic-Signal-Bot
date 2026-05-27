@@ -24,6 +24,7 @@ def make_signal(**overrides: object) -> SimpleNamespace:
         "tp1": 110.0,
         "tp2": 116.0,
         "tp3": 124.0,
+        "score": 0.75,
         "scale_weights": (0.5, 0.3, 0.2),
         "valid_until": datetime.now(UTC) + timedelta(hours=1),
     }

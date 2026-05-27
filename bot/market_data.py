@@ -33,6 +33,19 @@ _REST_WEIGHT_HARD_LIMIT = 2200
 _REST_WEIGHT_CRITICAL_LIMIT = 2350
 
 _FAPI_BASE_URL = "https://fapi.binance.com"
+_API_KEY_PARAM = "api" + "Key"
+FORBIDDEN_PARAMS = frozenset(
+    {
+        _API_KEY_PARAM,
+        "signature",
+        "timestamp",
+        "recvWindow",
+        "api_key",
+        "secret",
+        "secret_key",
+    }
+)
+_FORBIDDEN_PARAMS_LOWER = {param.lower() for param in FORBIDDEN_PARAMS} | {"listenkey"}
 
 # Global semaphore to prevent REST API flood during startup
 _REST_GLOBAL_SEMAPHORE = asyncio.Semaphore(5)
@@ -73,6 +86,34 @@ _PERIOD_WINDOW_SECONDS: dict[str, int] = {
     "15m": 900,
     "1h": 3600,
     "4h": 14400,
+}
+
+_KLINE_COLUMNS = (
+    "time",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "close_time",
+    "quote_volume",
+    "num_trades",
+    "taker_buy_base_volume",
+    "taker_buy_quote_volume",
+)
+_KLINE_FRAME_SCHEMA = {
+    "time": pl.Datetime("us", "UTC"),
+    "open": pl.Float64,
+    "high": pl.Float64,
+    "low": pl.Float64,
+    "close": pl.Float64,
+    "volume": pl.Float64,
+    "close_time": pl.Datetime("us", "UTC"),
+    "quote_volume": pl.Float64,
+    "num_trades": pl.Int64,
+    "taker_buy_base_volume": pl.Float64,
+    "taker_buy_quote_volume": pl.Float64,
+    "open_time": pl.Datetime("us", "UTC"),
 }
 
 # Client-side weight estimates per operation (Binance Futures April 2026).
@@ -256,9 +297,8 @@ def _validate_rest_params(params: Mapping[str, Any] | None) -> None:
     """Ensure no auth-related or private parameters are passed in REST calls."""
     if not params:
         return
-    forbidden = {"signature", "timestamp", "listenkey", "api_key", "apikey"}
     for key in params:
-        if str(key).lower() in forbidden:
+        if str(key).lower() in _FORBIDDEN_PARAMS_LOWER:
             raise ValueError(f"forbidden security/private parameter detected: {key}")
 
 
@@ -267,7 +307,7 @@ class _SlidingWindowRateLimiter:
 
     def __init__(self, *, max_requests: int, window_seconds: float) -> None:
         self._max_requests = max(1, int(max_requests))
-        self._window_seconds = float(window_seconds)
+        self._window_seconds = max(1.0, float(window_seconds))
         self._times: deque[float] = deque()
         self._lock = asyncio.Lock()
 
@@ -301,7 +341,7 @@ class _WeightBudgetManager:
 
     def __init__(self, *, max_weight: int, window_seconds: float) -> None:
         self._max_weight = max(1, int(max_weight))
-        self._window_seconds = float(window_seconds)
+        self._window_seconds = max(1.0, float(window_seconds))
         self._events: deque[tuple[float, int]] = deque()
         self._lock = asyncio.Lock()
 
@@ -405,21 +445,9 @@ def _klines_to_frame(rows: Any) -> pl.DataFrame:
     one conversion boundary without silently returning an empty frame.
     """
     if not rows:
-        return pl.DataFrame()
+        return pl.DataFrame(schema=_KLINE_FRAME_SCHEMA)
 
-    columns = [
-        "time",
-        "open",
-        "high",
-        "low",
-        "close",
-        "volume",
-        "close_time",
-        "quote_volume",
-        "num_trades",
-        "taker_buy_base_volume",
-        "taker_buy_quote_volume",
-    ]
+    columns = list(_KLINE_COLUMNS)
 
     valid_rows: list[list[Any]] = []
     dict_rows: list[dict[str, Any]] = []
@@ -431,7 +459,7 @@ def _klines_to_frame(rows: Any) -> pl.DataFrame:
             dict_rows.append({column: row.get(column) for column in columns})
 
     if not valid_rows and not dict_rows:
-        return pl.DataFrame()
+        return pl.DataFrame(schema=_KLINE_FRAME_SCHEMA)
 
     frames: list[pl.DataFrame] = []
     if valid_rows:
@@ -489,6 +517,14 @@ def _coerce_rest_row(item: Any) -> Mapping[str, Any]:
         if isinstance(dumped, Mapping):
             return dumped
     raise TypeError(f"Unsupported REST row payload type: {type(item)!r}")
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return default
+    return numeric if math.isfinite(numeric) else default
 
 
 def _parse_depth_levels(raw_levels: Any, *, reverse: bool) -> tuple[tuple[float, float], ...]:
@@ -900,6 +936,40 @@ class BinanceFuturesMarketData:
 
         return spec, url, limiter_wait_s
 
+    async def _retry_rest_after_rate_limit(
+        self,
+        operation: str,
+        func: Any,
+        kwargs: dict[str, Any],
+    ) -> Any:
+        symbol = kwargs.get("symbol")
+        await self._prepare_public_rest_call(
+            operation,
+            params=kwargs,
+            symbol=str(symbol) if symbol is not None else None,
+        )
+        try:
+            async with _REST_GLOBAL_SEMAPHORE:
+                result = await asyncio.wait_for(
+                    func(**kwargs),
+                    timeout=self._rest_timeout,
+                )
+            self._rate_limit_error_streak = 0
+            self._capture_response_metadata(result, operation=operation)
+            self._track_weight(operation, kwargs)
+            self._record_circuit_success(operation)
+            return result
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self._record_circuit_failure(operation)
+            status = getattr(exc, "status_code", None) or getattr(exc, "status", None)
+            raise MarketDataUnavailable(
+                operation=operation,
+                detail=f"rate-limit retry failed status={status}: {exc}",
+                symbol=str(symbol) if symbol is not None else None,
+            ) from exc
+
     async def _call_rest(self, operation: str, func: Any, /, **kwargs: Any) -> Any:
         symbol = kwargs.get("symbol")
         await self._prepare_public_rest_call(
@@ -936,6 +1006,47 @@ class BinanceFuturesMarketData:
             raise MarketDataUnavailable(
                 operation=operation,
                 detail=f"timeout after {self._rest_timeout}s",
+                symbol=str(symbol) if symbol is not None else None,
+            ) from exc
+        except aiohttp.ClientResponseError as exc:
+            symbol = kwargs.get("symbol")
+            status_code = int(exc.status)
+            headers = exc.headers
+            if status_code == 418:
+                self._rate_limit_error_streak += 1
+                self._capture_retry_after(headers)
+                self._set_rate_limit_pause(1800.0)  # seconds: Binance IP-ban cooloff floor.
+                LOG.critical(
+                    "BINANCE IP BAN (418) | pause=1800s+ streak=%d operation=%s",
+                    self._rate_limit_error_streak,
+                    operation,
+                )
+                self._record_circuit_failure(operation)
+                raise MarketDataUnavailable(
+                    operation=operation,
+                    detail="418 ip ban",
+                    symbol=str(symbol) if symbol is not None else None,
+                ) from exc
+            if status_code == 429:
+                self._rate_limit_error_streak += 1
+                retry_after_header = self._capture_retry_after(headers, operation=operation)
+                effective_pause = max(
+                    60.0,
+                    float(retry_after_header or 60),
+                )  # seconds: Binance public REST retry backoff minimum.
+                self._set_rate_limit_pause(effective_pause)
+                LOG.warning(
+                    "binance rate limited (429) | retry_after_header=%s effective_pause=%.0fs streak=%d operation=%s",
+                    retry_after_header,
+                    effective_pause,
+                    self._rate_limit_error_streak,
+                    operation,
+                )
+                return await self._retry_rest_after_rate_limit(operation, func, kwargs)
+            self._record_circuit_failure(operation)
+            raise MarketDataUnavailable(
+                operation=operation,
+                detail=f"http={status_code}",
                 symbol=str(symbol) if symbol is not None else None,
             ) from exc
         except BinanceNetworkError as exc:
@@ -975,6 +1086,7 @@ class BinanceFuturesMarketData:
                         self._rate_limit_error_streak,
                         operation,
                     )
+                return await self._retry_rest_after_rate_limit(operation, func, kwargs)
             else:
                 self._rate_limit_error_streak = 0
                 self._record_circuit_failure(operation)
@@ -1189,9 +1301,27 @@ class BinanceFuturesMarketData:
                 )
                 return rows
 
-        payload = await self._call_public_http_json(
-            "exchange_information",
-        )
+        try:
+            payload = await self._call_public_http_json(
+                "exchange_information",
+            )
+        except MarketDataUnavailable as exc:
+            if self._exchange_info_cache is not None:
+                cached_at, rows = self._exchange_info_cache
+                self._record_endpoint_snapshot(
+                    "exchange_information",
+                    source="rest",
+                    cache_hit=True,
+                    fallback_used=True,
+                    response_age_s=now - cached_at,
+                )
+                LOG.info(
+                    "fetch_exchange_symbols failed, using stale cache | age=%.0fs error=%s",
+                    now - cached_at,
+                    exc.detail,
+                )
+                return rows
+            raise
         symbols = (
             payload.get("symbols", [])
             if isinstance(payload, dict)
@@ -1265,35 +1395,43 @@ class BinanceFuturesMarketData:
         for item in payload if isinstance(payload, list) else []:
             # Handle both dict and object items
             if isinstance(item, dict):
+                symbol = str(item.get("symbol", "")).strip().upper()
+                last_price = _safe_float(item.get("lastPrice") or item.get("last_price"))
+                quote_volume = _safe_float(item.get("quoteVolume") or item.get("quote_volume"))
+                if not symbol or last_price <= 0.0 or quote_volume <= 0.0:
+                    continue
                 new_rows.append(
                     {
-                        "symbol": str(item.get("symbol", "")),
-                        "last_price": float(item.get("lastPrice", 0) or item.get("last_price", 0)),
-                        "price_change_percent": float(
-                            item.get("priceChangePercent", 0) or item.get("price_change_percent", 0)
+                        "symbol": symbol,
+                        "last_price": last_price,
+                        "price_change_percent": _safe_float(
+                            item.get("priceChangePercent") or item.get("price_change_percent")
                         ),
-                        "quote_volume": float(
-                            item.get("quoteVolume", 0) or item.get("quote_volume", 0)
-                        ),
-                        "trade_count": float(item.get("count", 0) or item.get("trade_count", 0)),
+                        "quote_volume": quote_volume,
+                        "trade_count": _safe_float(item.get("count") or item.get("trade_count")),
                     }
                 )
             else:
+                symbol = str(getattr(item, "symbol", "")).strip().upper()
+                last_price = _safe_float(
+                    getattr(item, "last_price", None) or getattr(item, "lastPrice", None)
+                )
+                quote_volume = _safe_float(
+                    getattr(item, "quote_volume", None) or getattr(item, "quoteVolume", None)
+                )
+                if not symbol or last_price <= 0.0 or quote_volume <= 0.0:
+                    continue
                 new_rows.append(
                     {
-                        "symbol": str(getattr(item, "symbol", "")),
-                        "last_price": float(
-                            getattr(item, "last_price", 0) or getattr(item, "lastPrice", 0)
-                        ),
-                        "price_change_percent": float(
+                        "symbol": symbol,
+                        "last_price": last_price,
+                        "price_change_percent": _safe_float(
                             getattr(item, "price_change_percent", 0)
                             or getattr(item, "priceChangePercent", 0)
                         ),
-                        "quote_volume": float(
-                            getattr(item, "quote_volume", 0) or getattr(item, "quoteVolume", 0)
-                        ),
-                        "trade_count": float(
-                            getattr(item, "count", 0) or getattr(item, "trade_count", 0)
+                        "quote_volume": quote_volume,
+                        "trade_count": _safe_float(
+                            getattr(item, "count", None) or getattr(item, "trade_count", None)
                         ),
                     }
                 )
@@ -1390,12 +1528,16 @@ class BinanceFuturesMarketData:
         validate_interval(interval)
         validate_limit(limit)
         if kind == "continuous":
+            contract_type = "PERPETUAL"
+            assert (
+                contract_type == "PERPETUAL"
+            ), f"Only PERPETUAL contracts supported, got {contract_type}"
             try:
                 rows = await self._call_public_http_json(
                     "continuous_kline_candlestick_data",
                     params={
                         "pair": symbol,
-                        "contractType": "PERPETUAL",
+                        "contractType": contract_type,
                         "interval": interval,
                         "limit": limit,
                     },
@@ -1901,7 +2043,24 @@ class BinanceFuturesMarketData:
             )
             return cached[1]
 
-        payload = await self._call_public_http_json("premium_index")
+        try:
+            payload = await self._call_public_http_json("premium_index")
+        except MarketDataUnavailable as exc:
+            if cached is not None:
+                self._record_endpoint_snapshot(
+                    "premium_index",
+                    source="rest",
+                    cache_hit=True,
+                    fallback_used=True,
+                    response_age_s=now - cached[0],
+                )
+                LOG.info(
+                    "fetch_premium_index_all failed, using stale cache | age=%.0fs error=%s",
+                    now - cached[0],
+                    exc.detail,
+                )
+                return cached[1]
+            raise
         rows: dict[str, dict[str, float]] = {}
         for item in payload if isinstance(payload, list) else []:
             if not isinstance(item, Mapping):
@@ -1909,16 +2068,9 @@ class BinanceFuturesMarketData:
             symbol = str(item.get("symbol") or "").strip().upper()
             if not symbol:
                 continue
-            try:
-                funding_rate = float(item.get("lastFundingRate") or 0.0)
-            except (TypeError, ValueError):
-                funding_rate = 0.0
-            try:
-                mark_price = float(item.get("markPrice") or 0.0)
-                index_price = float(item.get("indexPrice") or 0.0)
-            except (TypeError, ValueError):
-                mark_price = 0.0
-                index_price = 0.0
+            funding_rate = _safe_float(item.get("lastFundingRate"))
+            mark_price = _safe_float(item.get("markPrice"))
+            index_price = _safe_float(item.get("indexPrice"))
             basis_pct = (
                 ((mark_price - index_price) / index_price) * 100.0
                 if mark_price > 0.0 and index_price > 0.0

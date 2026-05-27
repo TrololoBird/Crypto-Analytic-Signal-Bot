@@ -109,6 +109,16 @@ class PublicIntelligenceService:
         }
 
     async def collect(self, shortlist_symbols: Iterable[str]) -> dict[str, Any]:
+        try:
+            return await asyncio.wait_for(
+                self._collect_unbounded(shortlist_symbols),
+                timeout=30.0,  # seconds: keep one slow public source from blocking the cycle.
+            )
+        except asyncio.TimeoutError:
+            LOG.warning("intelligence_collect_timeout")
+            return {}
+
+    async def _collect_unbounded(self, shortlist_symbols: Iterable[str]) -> dict[str, Any]:
         symbols = [str(item).strip().upper() for item in shortlist_symbols if str(item).strip()]
         symbols = list(dict.fromkeys(symbols))
         pinned_symbols = set(self._settings.universe.pinned_symbols)
@@ -501,6 +511,13 @@ class PublicIntelligenceService:
         confirmed_facts: list[str] = []
         for symbol in self._settings.intelligence.macro_symbols:
             snapshot = await self._fetch_yahoo_chart_snapshot(symbol)
+            if snapshot is None:
+                snapshot = {
+                    "available": False,
+                    "symbol": symbol,
+                    "provider": "yahoo_chart_public",
+                    "reason": "fetch_failed",
+                }
             by_symbol[symbol] = snapshot
             if bool(snapshot.get("available")):
                 confirmed_facts.append(f"{symbol}_public_macro_quote_available")
@@ -936,7 +953,7 @@ class PublicIntelligenceService:
     async def _fetch_options_mark_rows(self, underlying: str) -> list[dict[str, Any]]:
         return []
 
-    async def _fetch_yahoo_chart_snapshot(self, symbol: str) -> dict[str, Any]:
+    async def _fetch_yahoo_chart_snapshot(self, symbol: str) -> dict[str, Any] | None:
         now = time.monotonic()
         cached = self._macro_cache.get(symbol)
         if cached is not None and now - cached[0] < _MACRO_TTL_S:
@@ -955,24 +972,9 @@ class PublicIntelligenceService:
                     ),
                 },
             )
-        except aiohttp.ClientResponseError as exc:
-            snapshot = {
-                "available": False,
-                "symbol": symbol,
-                "provider": "yahoo_chart_public",
-                "reason": f"http_{exc.status}",
-            }
-            self._macro_cache[symbol] = (now, snapshot)
-            return snapshot
-        except (aiohttp.ClientError, TimeoutError) as exc:
-            snapshot = {
-                "available": False,
-                "symbol": symbol,
-                "provider": "yahoo_chart_public",
-                "reason": exc.__class__.__name__.lower(),
-            }
-            self._macro_cache[symbol] = (now, snapshot)
-            return snapshot
+        except Exception as exc:
+            LOG.debug("yahoo_fetch_failed", extra={"symbol": symbol, "exc": str(exc)})
+            return None
         result_rows = (
             cast(dict[str, Any], payload.get("chart") or {}).get("result")
             if isinstance(payload, dict)
@@ -1026,6 +1028,12 @@ class PublicIntelligenceService:
         headers: dict[str, str] | None = None,
         params: dict[str, Any] | None = None,
     ) -> Any:
+        auth_url_markers = ("api" + "Key=", "signature=", "timestamp=")
+        auth_param_keys = {"api" + "Key", "signature", "timestamp"}
+        if any(p in url for p in auth_url_markers):
+            raise RuntimeError(f"Auth params detected in public URL: {url}")
+        if params and any(str(key) in auth_param_keys for key in params):
+            raise RuntimeError(f"Auth params detected in public URL params: {url}")
         session = await self._client._get_http_session()
         timeout = aiohttp.ClientTimeout(
             total=max(5.0, float(self._settings.ws.rest_timeout_seconds))

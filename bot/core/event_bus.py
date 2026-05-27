@@ -43,6 +43,7 @@ class EventBus:
         self._high_water_mark = 0
         self._coalesced_count = 0
         self._dropped_count = 0
+        self._handler_tasks: set[asyncio.Task[None]] = set()
 
     def subscribe(self, event_type: type, handler: AsyncHandler) -> None:
         self._subscribers[event_type].append(handler)
@@ -124,7 +125,9 @@ class EventBus:
                         self._safe_call(handler, event),
                         name=f"bus:{event_type}",
                     )
+                    self._handler_tasks.add(task)
                     task.add_done_callback(self._task_done)
+                    task.add_done_callback(self._handler_tasks.discard)
 
                 with self._lock:
                     self._pending_events.pop(token, None)
@@ -132,6 +135,11 @@ class EventBus:
         except asyncio.CancelledError:
             LOG.debug("event bus dispatch loop stopped")
             self._running = False
+            for task in tuple(self._handler_tasks):
+                task.cancel()
+            if self._handler_tasks:
+                await asyncio.gather(*self._handler_tasks, return_exceptions=True)
+                self._handler_tasks.clear()
 
     def _pop_next_event(self) -> tuple[object | None, AnyEvent | None]:
         with self._lock:
@@ -168,7 +176,24 @@ class EventBus:
         return ("unique", self._sequence), False
 
     def _make_room_for(self, event: AnyEvent) -> bool:
+        from ..domain.events import KlineCloseEvent
+
         event_name = type(event).__name__
+        if isinstance(event, KlineCloseEvent):
+            for index, token in enumerate(self._queue):
+                queued = self._pending_events.get(token)
+                if queued is not None and not isinstance(queued, KlineCloseEvent):
+                    self._drop_queued_token(index, queued)
+                    LOG.debug("event bus evicted non-critical %s to admit KlineCloseEvent", type(queued).__name__)
+                    return True
+            for index, token in enumerate(self._queue):
+                queued = self._pending_events.get(token)
+                if isinstance(queued, KlineCloseEvent):
+                    self._coalesce_queued_token(index, queued)
+                    LOG.debug("event bus coalesced oldest KlineCloseEvent to admit newer close")
+                    return True
+            return False
+
         for index, token in enumerate(self._queue):
             queued = self._pending_events.get(token)
             if queued is not None and type(queued) is type(event):
@@ -187,6 +212,13 @@ class EventBus:
                 )
                 return True
         return False
+
+    def _coalesce_queued_token(self, index: int, event: AnyEvent) -> None:
+        token = self._queue[index]
+        del self._queue[index]
+        self._pending_events.pop(token, None)
+        self._coalescing_keys.discard(token)
+        self._coalesced_count += 1
 
     def _drop_queued_token(self, index: int, event: AnyEvent) -> None:
         token = self._queue[index]
@@ -216,13 +248,18 @@ class EventBus:
     async def _safe_call(handler: AsyncHandler, event: AnyEvent) -> None:
         try:
             await handler(event)
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
-            LOG.exception(
-                "event handler %s raised on %s: %s | error_class=%s",
-                getattr(handler, "__qualname__", repr(handler)),
-                type(event).__name__,
-                exc,
-                classify_runtime_error(exc),
+            LOG.error(
+                "event_bus_handler_error",
+                extra={
+                    "handler": getattr(handler, "__qualname__", repr(handler)),
+                    "event_type": type(event).__name__,
+                    "exc": str(exc),
+                    "error_class": classify_runtime_error(exc),
+                },
+                exc_info=True,
             )
 
     @staticmethod

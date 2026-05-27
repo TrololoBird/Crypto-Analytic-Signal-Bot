@@ -674,6 +674,7 @@ class BotSettings(BaseModel):
 
     def validate_for_runtime(self, *, require_telegram: bool) -> None:
         """Validate settings for runtime execution."""
+        self._validate_kline_intervals()
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.logs_dir.mkdir(parents=True, exist_ok=True)
 

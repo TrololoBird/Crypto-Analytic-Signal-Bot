@@ -7,13 +7,17 @@ import numpy as np
 
 try:  # optional dependencies
     from sklearn.mixture import GaussianMixture
-except Exception:  # pragma: no cover
+    HAS_SKLEARN = True
+except ImportError:  # pragma: no cover
     GaussianMixture = None
+    HAS_SKLEARN = False
 
 try:
     from statsmodels.tsa.api import VAR
-except Exception:  # pragma: no cover
+    HAS_STATSMODELS = True
+except ImportError:  # pragma: no cover
     VAR = None
+    HAS_STATSMODELS = False
 
 
 @dataclass(frozen=True)

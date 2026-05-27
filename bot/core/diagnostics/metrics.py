@@ -3,12 +3,25 @@
 from __future__ import annotations
 
 import logging
+import math
 import time
 from dataclasses import dataclass, field
 from typing import Any
 from collections import deque
 
 LOG = logging.getLogger("bot.core.diagnostics.metrics")
+
+
+def _finite_metric_value(value: float) -> float:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return numeric if math.isfinite(numeric) else 0.0
+
+
+def safe_set(gauge: "Gauge", value: float) -> None:
+    gauge.set(_finite_metric_value(value))
 
 
 @dataclass
@@ -21,7 +34,7 @@ class Gauge:
     labels: dict[str, str] = field(default_factory=dict)
 
     def set(self, value: float) -> None:
-        self.value = value
+        self.value = _finite_metric_value(value)
 
     def inc(self, amount: float = 1.0) -> None:
         self.value += amount
@@ -186,9 +199,9 @@ class BotMetrics:
 
     def update_performance(self, winrate: float, pf: float, sharpe: float) -> None:
         """Update performance metrics."""
-        self.winrate_24h.set(winrate)
-        self.profit_factor.set(pf)
-        self.sharpe_ratio.set(sharpe)
+        safe_set(self.winrate_24h, winrate)
+        safe_set(self.profit_factor, pf)
+        safe_set(self.sharpe_ratio, sharpe)
 
     def to_dict(self) -> dict[str, Any]:
         """Export all metrics as dictionary."""

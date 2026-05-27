@@ -5,6 +5,7 @@ import contextlib
 from dataclasses import dataclass
 import html
 import logging
+import math
 from datetime import datetime, timedelta, timezone
 from typing import Protocol
 from collections import OrderedDict
@@ -54,6 +55,8 @@ def _fmt_price(value: float | None) -> str:
         numeric = float(value)
     except (TypeError, ValueError):
         return "data_invalid"
+    if not math.isfinite(numeric):
+        return "data_invalid"
     if numeric >= 1_000.0:
         return f"{numeric:,.2f}"
     if numeric >= 1.0:
@@ -72,7 +75,14 @@ def _tz_label(value: datetime) -> str:
 def _fmt_dt(raw: str | datetime | None) -> str:
     if raw is None:
         return "time_missing"
-    value = raw if isinstance(raw, datetime) else datetime.fromisoformat(str(raw))
+    try:
+        value = (
+            raw
+            if isinstance(raw, datetime)
+            else datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        )
+    except (TypeError, ValueError):
+        return "time_invalid"
     if value.tzinfo is None:
         value = value.replace(tzinfo=UTC)
     value = value.astimezone(LOCAL_TZ)
@@ -163,7 +173,8 @@ def _tradingview_interval(timeframe: str) -> str:
 
 
 def tradingview_chart_url(symbol: str, timeframe: str) -> str:
-    tv_symbol = f"BINANCE:{symbol}.P"
+    clean_symbol = "".join(ch for ch in str(symbol or "").upper() if ch.isalnum())
+    tv_symbol = f"BINANCE:{clean_symbol}.P"
     interval = _tradingview_interval(timeframe)
     return f"https://www.tradingview.com/chart/?symbol={tv_symbol}&interval={interval}"
 
@@ -327,11 +338,29 @@ def _market_context_line(oi_change_pct: float | None, funding_rate: float | None
 def format_signal_text(
     signal: Signal, *, pending_expiry_minutes: int, btc_bias: str | None = None
 ) -> str:
-    return format_signal_message(
-        signal,
-        pending_expiry_minutes=pending_expiry_minutes,
-        btc_bias=btc_bias,
-    )
+    try:
+        return format_signal_message(
+            signal,
+            pending_expiry_minutes=pending_expiry_minutes,
+            btc_bias=btc_bias,
+        )
+    except (AttributeError, TypeError, ValueError) as exc:
+        LOG.warning("signal_format_fallback", extra={"exc": str(exc)})
+        symbol = html.escape(str(getattr(signal, "symbol", "UNKNOWN") or "UNKNOWN"))
+        setup_id = html.escape(str(getattr(signal, "setup_id", "unknown") or "unknown"))
+        direction = _direction_label(str(getattr(signal, "direction", "long") or "long"))
+        score = float(getattr(signal, "score", 0.0) or 0.0)
+        tp2 = getattr(signal, "tp2", None) or getattr(signal, "take_profit_2", "") or ""
+        tp3 = getattr(signal, "tp3", None) or getattr(signal, "take_profit_3", "") or ""
+        targets = [str(value) for value in (getattr(signal, "take_profit_1", ""), tp2, tp3) if value]
+        return "\n".join(
+            [
+                f"<b>LIMIT {direction} {symbol}</b>",
+                f"<b>Setup</b> <code>{setup_id}</code> | <b>Score</b> <code>{score * 100:.0f}%</code>",
+                f"<b>TP</b> <code>{html.escape(' / '.join(targets) or 'n/a')}</code>",
+                "<b>Status</b> pending",
+            ]
+        )
 
 
 def format_analytics_companion(
@@ -442,6 +471,8 @@ class SignalDelivery:
             await asyncio.sleep(_AUDIT_BATCH_INTERVAL_SECONDS)
             await self.flush_signal_audits()
         except asyncio.CancelledError:
+            if self._audit_batch_lines:
+                await self.flush_signal_audits()
             raise
         except Exception:
             LOG.exception("signal audit batch flush failed")
@@ -530,7 +561,19 @@ class SignalDelivery:
                     btc_bias=btc_bias,
                 )
             except Exception as exc:
-                LOG.error("failed to format signal text: %s", exc)
+                LOG.exception(
+                    "failed to format signal text | symbol=%s setup=%s",
+                    signal.symbol,
+                    signal.setup_id,
+                )
+                delivered.append(
+                    DeliveredSignal(
+                        signal=signal,
+                        status="format_error",
+                        message_id=None,
+                        reason=str(exc),
+                    )
+                )
                 continue
 
             if dry_run:
@@ -539,7 +582,23 @@ class SignalDelivery:
                     DeliveredSignal(signal=signal, status="sent", message_id=None, reason="dry_run")
                 )
                 continue
-            result = await self.broadcaster.send_html(text)
+            try:
+                result = await self.broadcaster.send_html(text)
+            except Exception as exc:
+                LOG.exception(
+                    "signal delivery send failed | symbol=%s setup=%s",
+                    signal.symbol,
+                    signal.setup_id,
+                )
+                delivered.append(
+                    DeliveredSignal(
+                        signal=signal,
+                        status="send_error",
+                        message_id=None,
+                        reason=str(exc),
+                    )
+                )
+                continue
             if result.status == "sent":
                 LOG.info("telegram signal sent\n%s", text)
             elif result.status == "logged":

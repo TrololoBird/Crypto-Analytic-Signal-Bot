@@ -33,6 +33,44 @@ class CycleRunner:
         ws_enrichments_override: dict[str, Any] | None = None,
     ) -> None:
         bot = self._bot
+        runtime = getattr(bot.settings, "runtime", bot.settings)
+        timeout = float(
+            getattr(
+                runtime,
+                "cycle_timeout_seconds",
+                60.0,  # seconds: fallback per-symbol cycle budget
+            )
+        )
+        try:
+            await asyncio.wait_for(
+                self._execute_symbol_cycle_unbounded(
+                    symbol=symbol,
+                    item=item,
+                    interval=interval,
+                    trigger=trigger,
+                    event_ts=event_ts,
+                    tracking_events=tracking_events,
+                    shortlist_size=shortlist_size,
+                    ws_enrichments_override=ws_enrichments_override,
+                ),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            LOG.warning("cycle_timeout", extra={"symbol": symbol, "timeout_seconds": timeout})
+
+    async def _execute_symbol_cycle_unbounded(
+        self,
+        *,
+        symbol: str,
+        item: UniverseSymbol,
+        interval: str,
+        trigger: str,
+        event_ts: datetime,
+        tracking_events: list[Any],
+        shortlist_size: int,
+        ws_enrichments_override: dict[str, Any] | None = None,
+    ) -> None:
+        bot = self._bot
         async with bot._analysis_semaphore:
             frames = await bot._fetch_frames(item)
             if frames is None:

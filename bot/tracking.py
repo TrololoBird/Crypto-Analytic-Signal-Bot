@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import json
 import logging
+import math
 import os
 from pathlib import Path
 import tempfile
@@ -262,6 +263,19 @@ class SignalTracker:
         row.setdefault("scale_weights", (0.5, 0.3, 0.2))
         if isinstance(row.get("scale_weights"), list):
             row["scale_weights"] = tuple(row["scale_weights"])
+        weights = row.get("scale_weights")
+        if not isinstance(weights, tuple) or len(weights) != 3:
+            row["scale_weights"] = (0.5, 0.3, 0.2)
+        else:
+            try:
+                normalized_weights = tuple(float(weight) for weight in weights)
+            except (TypeError, ValueError):
+                normalized_weights = (0.5, 0.3, 0.2)
+            if len(normalized_weights) != 3 or not all(
+                math.isfinite(weight) and weight >= 0.0 for weight in normalized_weights
+            ):
+                normalized_weights = (0.5, 0.3, 0.2)
+            row["scale_weights"] = typing.cast(tuple[float, float, float], normalized_weights)
         row.setdefault("ttl_bars", None)
         row.setdefault("single_target_mode", False)
         row.setdefault("target_integrity_status", "unchecked")
@@ -326,7 +340,14 @@ class SignalTracker:
         risk_stop = tracked.initial_stop if tracked.initial_stop is not None else tracked.stop
         if not entry_price or not risk_stop:
             return 0.0
-        return abs(float(entry_price) - float(risk_stop)) / float(entry_price) * 100.0
+        try:
+            entry = float(entry_price)
+            stop = float(risk_stop)
+        except (TypeError, ValueError):
+            return 0.0
+        if entry <= 0.0 or not math.isfinite(entry) or not math.isfinite(stop):
+            return 0.0
+        return abs(entry - stop) / entry * 100.0
 
     def _build_outcome_payload(self, tracked: TrackedSignalState) -> dict[str, Any]:
         features = self.features_store.get(tracked.tracking_id)
@@ -372,6 +393,9 @@ class SignalTracker:
         )
         if not closed_rows:
             return 0
+        MAX_BATCH = 50
+        # bounded batch: prevent event loop stall on large backlog
+        closed_rows = closed_rows[: min(max(1, int(limit)), MAX_BATCH)]
         existing = {
             str(row.get("tracking_id"))
             for row in await self.memory_repo.get_signal_outcomes(last_days=None)
@@ -558,13 +582,21 @@ class SignalTracker:
         risk_stop = tracked.initial_stop if tracked.initial_stop is not None else tracked.stop
         if not entry_price or not exit_price:
             return None
-        risk = abs(float(entry_price) - float(risk_stop))
+        try:
+            entry = float(entry_price)
+            exit_px = float(exit_price)
+            stop = float(risk_stop)
+        except (TypeError, ValueError):
+            return None
+        if not all(math.isfinite(value) for value in (entry, exit_px, stop)):
+            return None
+        risk = abs(entry - stop)
         if risk <= 0.0:
             return None
         if tracked.direction == "long":
-            pnl = float(exit_price) - float(entry_price)
+            pnl = exit_px - entry
         else:
-            pnl = float(entry_price) - float(exit_price)
+            pnl = entry - exit_px
         return pnl / risk
 
     async def arm_signals(self, signals: list[Signal], *, dry_run: bool) -> None:
@@ -1293,13 +1325,16 @@ class SignalTracker:
                     was_profitable=(pnl_r_multiple > 0.0) if pnl_r_multiple is not None else None,
                 )
                 if self.quality_monitor is not None and pnl_r_multiple is not None:
-                    self.quality_monitor.update(
-                        tracked.tracking_id,
-                        tracked.setup_id,
-                        setup_outcome,
-                        pnl_r_multiple,
-                        symbol=tracked.symbol,
-                    )
+                    try:
+                        self.quality_monitor.update(
+                            tracked.tracking_id,
+                            tracked.setup_id,
+                            setup_outcome,
+                            pnl_r_multiple,
+                            symbol=tracked.symbol,
+                        )
+                    except Exception as exc:
+                        LOG.warning("quality_monitor_update_failed", extra={"exc": str(exc)})
             except (OSError, IOError, ValueError):
                 LOG.debug("record_outcome failed for %s (non-critical)", tracked.setup_id)
 

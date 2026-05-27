@@ -76,7 +76,10 @@ def apply_connected_state(manager: Any, *, endpoint: str, ws: Any, url: str) -> 
     manager._connect_counts[endpoint] += 1
     manager._connect_count += 1
     if manager._connect_counts[endpoint] > 1 and manager._reconnect_cb is not None:
-        asyncio.create_task(manager._reconnect_cb())
+        task = asyncio.create_task(manager._reconnect_cb(), name=f"ws_reconnect_cb:{endpoint}")
+        track = getattr(manager, "_track_callback_task", None)
+        if callable(track):
+            track(task, label=f"ws_reconnect:{endpoint}")
 
     LOG.info(
         "ws connected | endpoint=%s url=%s streams=%d connect_count=%d endpoint_connect_count=%d",

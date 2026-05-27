@@ -47,8 +47,11 @@ def compute_disconnect_delay(
     else:
         min_delay = 1.0
 
-    next_delay = max(delay, min_delay)
-    next_delay += random.uniform(0.0, min(0.5, next_delay * 0.1))
+    next_delay = min(300.0, max(1.0, max(delay, min_delay)))
+    next_delay = min(
+        300.0,
+        next_delay + random.uniform(0.0, min(0.5, next_delay * 0.1)),
+    )  # seconds: reconnect backoff stays between 1s and 5min.
 
     manager._last_reconnect_reason = f"{endpoint}:{exc}"
     manager._last_reconnect_reason_by_endpoint[endpoint] = str(exc)

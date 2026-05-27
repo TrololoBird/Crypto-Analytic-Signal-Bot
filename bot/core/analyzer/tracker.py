@@ -41,6 +41,8 @@ class OutcomeTracker:
         current_price: float,
         current_high: float | None = None,
         current_low: float | None = None,
+        *,
+        commit: bool = True,
     ) -> OutcomeRecord | None:
         """Update outcome for a signal with current market data.
 
@@ -107,7 +109,7 @@ class OutcomeTracker:
         outcome.updated_at = now
 
         # Save
-        await self._repo.save_outcome(outcome)
+        await self._repo.save_outcome(outcome, commit=commit)
 
         return outcome
 
@@ -208,17 +210,25 @@ class OutcomeTracker:
         pending = await self.get_pending_signals(limit=200)
 
         updated = []
-        for signal in pending:
-            if signal.symbol in prices:
-                snapshot = prices[signal.symbol]
-                outcome = await self.update_outcomes(
-                    signal.signal_id,
-                    snapshot.price,
-                    snapshot.high,
-                    snapshot.low,
-                )
-                if outcome:
-                    updated.append(outcome)
+        conn = self._repo._require_conn()
+        await conn.execute("BEGIN")
+        try:
+            for signal in pending:
+                if signal.symbol in prices:
+                    snapshot = prices[signal.symbol]
+                    outcome = await self.update_outcomes(
+                        signal.signal_id,
+                        snapshot.price,
+                        snapshot.high,
+                        snapshot.low,
+                        commit=False,
+                    )
+                    if outcome:
+                        updated.append(outcome)
+            await conn.commit()
+        except Exception:
+            await conn.rollback()
+            raise
 
         LOG.info("Updated %d outcomes from batch", len(updated))
         return updated

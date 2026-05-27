@@ -17,6 +17,33 @@ from ...migrations import migrate_db
 
 LOG = logging.getLogger("bot.core.memory.repository")
 _REPOSITORY_SCHEMA_VERSION = 2
+SIGNAL_ANALYSIS_SCHEMA = {
+    "signal_id": pl.String,
+    "symbol": pl.String,
+    "strategy_id": pl.String,
+    "direction": pl.String,
+    "entry_price": pl.Float64,
+    "stop_loss": pl.Float64,
+    "take_profit_1": pl.Float64,
+    "take_profit_2": pl.Float64,
+    "score": pl.Float64,
+    "created_at": pl.String,
+    "timeframe": pl.String,
+    "atr_pct": pl.Float64,
+    "spread_bps": pl.Float64,
+    "rsi_1h": pl.Float64,
+    "adx_1h": pl.Float64,
+    "volume_ratio": pl.Float64,
+    "funding_rate": pl.Float64,
+    "oi_change_pct": pl.Float64,
+    "features": pl.String,
+    "metadata": pl.String,
+    "outcome_id": pl.String,
+    "result": pl.String,
+    "pnl_24h": pl.Float64,
+    "max_profit_pct": pl.Float64,
+    "max_loss_pct": pl.Float64,
+}
 
 
 @dataclass
@@ -850,7 +877,7 @@ class MemoryRepository:
         try:
             await self._conn.execute(
                 """
-                INSERT INTO signals (
+                INSERT OR REPLACE INTO signals (
                     signal_id, symbol, strategy_id, direction, entry_price,
                     stop_loss, take_profit_1, take_profit_2, score, created_at,
                     timeframe, atr_pct, spread_bps, rsi_1h, adx_1h, volume_ratio,
@@ -885,7 +912,7 @@ class MemoryRepository:
             LOG.error("failed to save signal %s: %s", record.signal_id, exc)
             raise
 
-    async def save_outcome(self, record: OutcomeRecord) -> None:
+    async def save_outcome(self, record: OutcomeRecord, *, commit: bool = True) -> None:
         """Save outcome record."""
         if not self._conn:
             raise RuntimeError("Repository not initialized")
@@ -943,7 +970,8 @@ class MemoryRepository:
                     record.time_to_sl_min,
                 ),
             )
-            await self._conn.commit()
+            if commit:
+                await self._conn.commit()
         except Exception as exc:
             LOG.error("failed to save outcome %s: %s", record.outcome_id, exc)
             raise
@@ -1054,7 +1082,7 @@ class MemoryRepository:
             rows = await cursor.fetchall()
 
         if not rows:
-            return pl.DataFrame()
+            return pl.DataFrame(schema=SIGNAL_ANALYSIS_SCHEMA)
 
         # Convert to dicts for Polars
         data = [dict(row) for row in rows]
@@ -1644,6 +1672,10 @@ class MemoryRepository:
         await self._conn.commit()
         if changed:
             await self.increment_tracking_stats(expired=changed)
+            LOG.info(
+                "signals_expired",
+                extra={"count": changed, "age_hours": max(1, int(max_age_minutes)) / 60.0},
+            )
         return changed
 
     async def update_signal_status(
@@ -2061,7 +2093,11 @@ class MemoryRepository:
         if not self._conn:
             raise RuntimeError("Repository not initialized")
         cursor = await self._conn.execute(
-            "DELETE FROM signal_outcomes WHERE COALESCE(closed_at, created_at) < ?",
+            """
+            DELETE FROM signal_outcomes
+            WHERE COALESCE(closed_at, created_at) < ?
+              AND result NOT IN ('active', 'pending')
+            """,
             (cutoff_iso,),
         )
         await self._conn.commit()

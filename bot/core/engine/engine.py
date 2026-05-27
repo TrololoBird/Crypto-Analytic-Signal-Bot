@@ -67,9 +67,11 @@ class SignalEngine:
         settings: BotSettings,
         timeout_seconds: float | None = None,
         strategy_concurrency: int | None = None,
+        feature_flags: Any | None = None,
     ):
         self._registry = registry
         self._settings = settings
+        self._feature_flags = feature_flags
         runtime = getattr(self._settings, "runtime", None)
         configured_timeout = (
             float(timeout_seconds)
@@ -395,7 +397,10 @@ class SignalEngine:
                 _executor_timeout_by_strategy[strategy_id] = (
                     _executor_timeout_by_strategy.get(strategy_id, 0) + 1
                 )
-                LOG.error("Strategy %s timed out after %.2fs", strategy_id, self._timeout)
+                LOG.warning(
+                    "strategy_timeout",
+                    extra={"setup_id": strategy_id, "timeout_seconds": self._timeout},
+                )
                 if _executor_timeout_count % 10 == 0:
                     LOG.warning(
                         "strategy executor timeout count reached %d; latest timeout=%s latest_strategy_timeouts=%d",
@@ -520,6 +525,10 @@ class SignalEngine:
         )
 
     def _strategy_is_active_for_symbol(self, strategy: Any, prepared: PreparedSymbol) -> bool:
+        strategy_id = str(getattr(strategy, "setup_id", getattr(strategy, "strategy_id", "")) or "")
+        if self._feature_flags is not None and hasattr(self._feature_flags, "is_strategy_enabled"):
+            if not self._feature_flags.is_strategy_enabled(strategy_id):
+                return False
         checker = getattr(strategy, "is_active_now", None)
         if not callable(checker):
             return True
@@ -594,7 +603,13 @@ class SignalEngine:
         Returns:
             Best Signal or None if no valid signals
         """
-        valid_signals = [r.signal for r in results if r.is_valid and r.signal is not None]
+        valid_signals = [
+            r.signal
+            for r in results
+            if r.is_valid
+            and r.signal is not None
+            and r.signal.score >= 0.38  # score floor: 0..1 confidence delivery minimum.
+        ]
 
         if not valid_signals:
             return None

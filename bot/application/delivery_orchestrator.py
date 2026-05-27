@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 
 
 LOG = logging.getLogger("bot.application.bot")
+MIN_CONFIRMATIONS = 3  # confirmations: ADR-003 hard confluence gate
 
 
 class DeliveryOrchestrator:
@@ -187,9 +188,10 @@ class DeliveryOrchestrator:
             "htf": htf,
             "microstructure": microstructure,
         }
+        confirmation_count = sum(confirmations.values())
         details: dict[str, object] = {
-            "confirmed": sum(confirmations.values()),
-            "required": 3,
+            "confirmed": confirmation_count,
+            "required": MIN_CONFIRMATIONS,
             "close": close,
             "ema20": ema20,
             "ema50": ema50,
@@ -201,7 +203,7 @@ class DeliveryOrchestrator:
             "funding_rate": funding_value,
             "oi_change_pct": oi_value,
         }
-        return sum(confirmations.values()) >= 3, confirmations, details
+        return confirmation_count >= MIN_CONFIRMATIONS, confirmations, details
 
     def _record_delivery_attempt(
         self,
@@ -728,12 +730,14 @@ class DeliveryOrchestrator:
                 )
                 notifier_settings = getattr(self._bot.settings, "notifiers", None)
                 if bool(getattr(notifier_settings, "send_analytics_companion", False)):
-                    asyncio.create_task(
+                    task = asyncio.create_task(
                         self._bot.delivery.send_analytics_companion(
                             item.signal, btc_bias=btc_bias, eth_bias=eth_bias
                         ),
                         name=f"analytics:{item.signal.symbol}",
                     )
+                    self._bot._background_tasks.add(task)
+                    task.add_done_callback(self._bot._background_tasks.discard)
 
         try:
             await self._bot.alerts.on_confirmed_signals(delivered, observed_at=datetime.now(UTC))

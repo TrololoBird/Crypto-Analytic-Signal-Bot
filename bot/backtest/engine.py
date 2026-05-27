@@ -24,6 +24,14 @@ class _LifecycleSignal:
 
 
 class VectorizedBacktester:
+    _OHLCV_DTYPES = {
+        "open": pl.Float64,
+        "high": pl.Float64,
+        "low": pl.Float64,
+        "close": pl.Float64,
+        "volume": pl.Float64,
+    }
+
     SUPPORTED_SETUPS = {
         "ema_cross",
         "momentum_breakout",
@@ -72,7 +80,7 @@ class VectorizedBacktester:
     def _load_ohlcv(self, symbol: str, timeframe: str) -> pl.DataFrame:
         parquet_path = self.settings.data_dir / "parquet" / f"{symbol}_{timeframe}.parquet"
         if parquet_path.exists():
-            return pl.read_parquet(parquet_path)
+            return self._ensure_ohlcv_schema(pl.read_parquet(parquet_path))
         return pl.DataFrame()
 
     def run(
@@ -330,7 +338,7 @@ class VectorizedBacktester:
                     exit_price = None
                     status = "expired"
 
-            ret = self._trade_return(status)
+            ret = self._trade_return(signal, exit_price, status)
             equity *= 1.0 + (0.01 * ret)
             equity_points.append({"ts": close_times[exit_index], "equity": equity})
             trades.append(
@@ -389,7 +397,17 @@ class VectorizedBacktester:
         }
 
     @staticmethod
-    def _trade_return(status: str) -> float:
+    def _trade_return(signal: _LifecycleSignal, exit_price: float | None, status: str) -> float:
+        if exit_price is not None:
+            entry_price = (signal.entry_low + signal.entry_high) / 2.0
+            stop_distance = abs(entry_price - signal.stop)
+            if entry_price > 0.0 and stop_distance > 0.0:
+                if signal.direction == "short":
+                    price_return = (entry_price - exit_price) / entry_price
+                else:
+                    price_return = (exit_price - entry_price) / entry_price
+                risk_pct = stop_distance / entry_price
+                return price_return / risk_pct
         if status == "tp2":
             return 2.0
         if status == "tp1":
@@ -397,6 +415,15 @@ class VectorizedBacktester:
         if status == "sl":
             return -1.0
         return 0.0
+
+    @classmethod
+    def _ensure_ohlcv_schema(cls, frame: pl.DataFrame) -> pl.DataFrame:
+        casts = [
+            pl.col(name).cast(dtype, strict=False).alias(name)
+            for name, dtype in cls._OHLCV_DTYPES.items()
+            if name in frame.columns
+        ]
+        return frame.with_columns(casts) if casts else frame
 
     @staticmethod
     def _prepare_frame(df: pl.DataFrame) -> pl.DataFrame:

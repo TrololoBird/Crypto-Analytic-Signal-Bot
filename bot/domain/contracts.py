@@ -52,9 +52,12 @@ PUBLIC_FEATURE_FIELDS: tuple[str, ...] = (
     "data_source_mix",
     "market_regime",
 )
+PRIVATE_KEYS = {"balance", "position", "order", "account", "margin"}
 
 
 def validate_public_feature_payload(payload: Mapping[str, Any]) -> None:
+    if any(key in payload for key in PRIVATE_KEYS):
+        raise ValueError(f"Private data in public feature payload: {payload.keys()}")
     expected = set(PUBLIC_FEATURE_FIELDS)
     provided = set(payload.keys())
 

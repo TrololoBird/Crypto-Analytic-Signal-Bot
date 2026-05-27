@@ -371,7 +371,7 @@ class SignalQualityMonitor:
         self.reduce_min_samples = max(MIN_SAMPLES_FOR_REDUCE, int(reduce_min_samples))
         self.reduce_win_rate = max(0.0, min(float(reduce_win_rate), 1.0))
         self.symbol_cooldown_updates = max(1, int(symbol_cooldown_updates))
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._records_by_setup: dict[str, deque[QualityRecord]] = {}
         self._records_global: deque[QualityRecord] = deque(maxlen=self.window)
         self._aggregates: dict[str, SetupAggregate] = {}
@@ -1374,3 +1374,7 @@ class SignalQualityMonitor:
                 losses = _safe_int(item.get("losses"))
                 if setup_id and symbol and losses > 0:
                     self._symbol_loss_streaks[(setup_id, symbol)] = losses
+        warnings = self.validate_state()
+        if warnings:
+            LOG.warning("quality_monitor_state_warnings", extra={"warnings": warnings})
+            self.repair_state()

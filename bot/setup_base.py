@@ -100,10 +100,9 @@ class BaseSetup(AbstractStrategy):
         """Run detection logic."""
         ...
 
-    @abstractmethod
     def get_optimizable_params(self, settings: "BotSettings | None" = None) -> dict[str, float]:
-        """Return tunable parameters for self-learner Optuna optimization."""
-        ...
+        """Return tunable parameters. Override in subclass to enable autotuning."""
+        return {}
 
     def calculate(self, prepared: PreparedSymbol) -> SignalResult:
         if self._settings is None:

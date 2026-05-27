@@ -28,6 +28,14 @@ MIGRATIONS: Sequence[tuple[int, str, str]] = (
 )
 
 
+async def _assert_integrity(conn: aiosqlite.Connection) -> None:
+    async with conn.execute("PRAGMA integrity_check") as cursor:
+        row = await cursor.fetchone()
+    status = str(row[0]) if row and row[0] is not None else "missing"
+    if status != "ok":
+        raise RuntimeError(f"DB integrity check failed after migration: {status}")
+
+
 async def migrate_db(conn: aiosqlite.Connection) -> int:
     await conn.execute(
         """
@@ -54,6 +62,7 @@ async def migrate_db(conn: aiosqlite.Connection) -> int:
             (version, description),
         )
         await conn.commit()
+        await _assert_integrity(conn)
         applied += 1
         LOG.info("db migration applied | version=%d description=%s", version, description)
     return applied

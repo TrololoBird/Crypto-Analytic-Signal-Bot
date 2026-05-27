@@ -125,6 +125,7 @@ _FRAME_CACHE_TAIL_COLUMNS = (
     "taker_buy_base_volume",
     "taker_buy_quote_volume",
 )
+REQUIRED_COLS = {"open", "high", "low", "close", "volume"}
 
 
 class _FrameCache:
@@ -293,6 +294,11 @@ def _as_optional_float(value: object) -> float | None:
     if numeric is None or not np.isfinite(numeric):
         return None
     return numeric
+
+
+def _finite_float(value: object, default: float = 0.0) -> float:
+    numeric = _as_optional_float(value)
+    return default if numeric is None else numeric
 
 
 def min_required_bars(
@@ -808,9 +814,9 @@ def _parabolic_sar(
     step: float = 0.02,
     max_step: float = 0.2,
 ) -> tuple[pl.Series, pl.Series, pl.Series]:
-    high_vals = [float(v or 0.0) for v in df["high"]]
-    low_vals = [float(v or 0.0) for v in df["low"]]
-    close_vals = [float(v or 0.0) for v in df["close"]]
+    high_vals = [_finite_float(v) for v in df["high"]]
+    low_vals = [_finite_float(v) for v in df["low"]]
+    close_vals = [_finite_float(v) for v in df["close"]]
     size = len(close_vals)
     if size == 0:
         empty = pl.Series("psar_long", [], dtype=pl.Float64)
@@ -880,10 +886,28 @@ def _aroon(df: pl.DataFrame, period: int = 14) -> tuple[pl.Series, pl.Series, pl
     low = df["low"]
 
     def bars_since_argmax(s: pl.Series) -> int:
-        return len(s) - 1 - cast(int, s.arg_max())
+        best_idx: int | None = None
+        best_value: float | None = None
+        for idx, raw in enumerate(s):
+            value = _as_optional_float(raw)
+            if value is None:
+                continue
+            if best_value is None or value > best_value:
+                best_idx = idx
+                best_value = value
+        return 0 if best_idx is None else len(s) - 1 - best_idx
 
     def bars_since_argmin(s: pl.Series) -> int:
-        return len(s) - 1 - cast(int, s.arg_min())
+        best_idx: int | None = None
+        best_value: float | None = None
+        for idx, raw in enumerate(s):
+            value = _as_optional_float(raw)
+            if value is None:
+                continue
+            if best_value is None or value < best_value:
+                best_idx = idx
+                best_value = value
+        return 0 if best_idx is None else len(s) - 1 - best_idx
 
     up_days = high.rolling_map(bars_since_argmax, window_size=period + 1)
     down_days = low.rolling_map(bars_since_argmin, window_size=period + 1)
@@ -899,9 +923,9 @@ def _aroon(df: pl.DataFrame, period: int = 14) -> tuple[pl.Series, pl.Series, pl
 
 
 def _fisher_transform(df: pl.DataFrame, period: int = 10) -> tuple[pl.Series, pl.Series]:
-    high = [float(v or 0.0) for v in df["high"]]
-    low = [float(v or 0.0) for v in df["low"]]
-    close = [float(v or 0.0) for v in df["close"]]
+    high = [_finite_float(v) for v in df["high"]]
+    low = [_finite_float(v) for v in df["low"]]
+    close = [_finite_float(v) for v in df["close"]]
     size = len(close)
     values: list[float] = [0.0] * size
     fisher: list[float] = [0.0] * size
@@ -935,7 +959,7 @@ def _squeeze_momentum(
         ((bb_lower < kc_lower) & (bb_upper > kc_upper)).cast(pl.Float64).rename("squeeze_off")
     )
     squeeze_no_values = [
-        max(0.0, min(1.0, 1.0 - max(float(on or 0.0), float(off or 0.0))))
+        max(0.0, min(1.0, 1.0 - max(_finite_float(on), _finite_float(off))))
         for on, off in zip(squeeze_on, squeeze_off, strict=False)
     ]
     squeeze_no = pl.Series("squeeze_no", squeeze_no_values, dtype=pl.Float64)
@@ -1046,7 +1070,7 @@ def _add_advanced_indicators(df: pl.DataFrame) -> pl.DataFrame:
         [
             kc_upper.alias("kc_upper"),
             kc_lower.alias("kc_lower"),
-            kc_width.fill_nan(0.04).alias("kc_width"),
+            _clean_non_finite(kc_width, fill=0.04).alias("kc_width"),
         ]
     )
 
@@ -1094,11 +1118,11 @@ def _add_advanced_indicators(df: pl.DataFrame) -> pl.DataFrame:
     # --- CCI, Williams %R, MFI, CMF, Ultimate Oscillator --------------------
     rolling_high = df["high"].rolling_max(window_size=14)
     rolling_low = df["low"].rolling_min(window_size=14)
-    willr = (((rolling_high - df["close"]) / (rolling_high - rolling_low)) * -100.0).fill_nan(-50.0)
+    willr = ((rolling_high - df["close"]) / (rolling_high - rolling_low)) * -100.0
     result = result.with_columns(
         [
             _cci(df, 20).fill_nan(0.0).alias("cci20"),
-            willr.alias("willr14"),
+            _clean_non_finite(willr, fill=-50.0).alias("willr14"),
             _mfi(df, 14).fill_nan(50.0).alias("mfi14"),
             _cmf(df, 20).fill_nan(0.0).alias("cmf20"),
             _ultimate_oscillator(df, 7, 14, 28).fill_nan(50.0).alias("uo"),
@@ -1150,7 +1174,7 @@ def _add_advanced_indicators(df: pl.DataFrame) -> pl.DataFrame:
     ).fill_nan(0.0)
     result = result.with_columns(
         [
-            zscore30.alias("zscore30"),
+            _clean_non_finite(zscore30, fill=0.0).alias("zscore30"),
             _roc(df, 5).fill_nan(0.0).alias("slope5"),
         ]
     )
@@ -1216,44 +1240,46 @@ def _add_polars_ols_features(df: pl.DataFrame) -> pl.DataFrame:
     """Add shared regression-slope features using polars_ols when available."""
     if df.is_empty() or "close" not in df.columns:
         return df
+    if not _HAS_POLARS_OLS:
+        LOG.debug("polars_ols_unavailable_skipping_ols_features")
+        return df
     index_expr = pl.int_range(0, pl.len()).cast(pl.Float64)
-    if _HAS_POLARS_OLS:
-        try:
-            rolling_kwargs = _polars_ols_ls.RollingKwargs(
-                window_size=20,
-                min_periods=20,
-                use_woodbury=None,
-                alpha=None,
-                null_policy="drop",
-            )
-            slope_struct = _polars_ols.compute_rolling_least_squares(
-                pl.col("close"),
-                index_expr,
-                add_intercept=True,
-                mode="coefficients",
-                rolling_kwargs=rolling_kwargs,
-            )
-            work = df.with_columns(slope_struct.alias("_ols_close20"))
-            work = work.with_columns(
-                pl.col("_ols_close20").struct.field("literal").alias("close_ols_slope20")
-            )
-            return work.drop("_ols_close20").with_columns(
-                [
-                    (pl.col("close_ols_slope20") / pl.col("close") * 100.0)
-                    .fill_nan(0.0)
-                    .fill_null(0.0)
-                    .alias("close_ols_slope_pct20"),
-                    (
-                        pl.col("close_ols_slope20")
-                        / pl.when(pl.col("atr14") > 0.0).then(pl.col("atr14")).otherwise(None)
-                    )
-                    .fill_nan(0.0)
-                    .fill_null(0.0)
-                    .alias("close_ols_slope_atr20"),
-                ]
-            )
-        except Exception as exc:
-            _log_indicator_fallback("polars_ols_close_slope20", exc)
+    try:
+        rolling_kwargs = _polars_ols_ls.RollingKwargs(
+            window_size=20,
+            min_periods=20,
+            use_woodbury=None,
+            alpha=None,
+            null_policy="drop",
+        )
+        slope_struct = _polars_ols.compute_rolling_least_squares(
+            pl.col("close"),
+            index_expr,
+            add_intercept=True,
+            mode="coefficients",
+            rolling_kwargs=rolling_kwargs,
+        )
+        work = df.with_columns(slope_struct.alias("_ols_close20"))
+        work = work.with_columns(
+            pl.col("_ols_close20").struct.field("literal").alias("close_ols_slope20")
+        )
+        return work.drop("_ols_close20").with_columns(
+            [
+                (pl.col("close_ols_slope20") / pl.col("close") * 100.0)
+                .fill_nan(0.0)
+                .fill_null(0.0)
+                .alias("close_ols_slope_pct20"),
+                (
+                    pl.col("close_ols_slope20")
+                    / pl.when(pl.col("atr14") > 0.0).then(pl.col("atr14")).otherwise(None)
+                )
+                .fill_nan(0.0)
+                .fill_null(0.0)
+                .alias("close_ols_slope_atr20"),
+            ]
+        )
+    except Exception as exc:
+        _log_indicator_fallback("polars_ols_close_slope20", exc)
 
     fallback_slope = (pl.col("close") - pl.col("close").shift(19)) / 19.0
     return df.with_columns(fallback_slope.alias("close_ols_slope20")).with_columns(
@@ -1750,8 +1776,12 @@ def _sanity_check_prepared_frame(work: pl.DataFrame, symbol: str, interval: str)
     Polars, optional feature backends, or exchange payload shape.
     """
     warnings: list[str] = []
+    missing = REQUIRED_COLS - set(work.columns)
+    if missing:
+        warnings.append(f"Missing required columns: {missing}")
     if work.is_empty():
-        return [f"{symbol}/{interval}: prepared frame is empty"]
+        warnings.append(f"{symbol}/{interval}: prepared frame is empty")
+        return warnings
 
     def _range_warning(column: str, low: float, high: float) -> None:
         if column not in work.columns:

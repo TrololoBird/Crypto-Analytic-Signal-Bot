@@ -9,11 +9,25 @@ import logging
 
 import structlog
 
+SENSITIVE_FIELDS = frozenset({"api_key", "signature", "password", "token"})
+
+
+def _redact_sensitive_fields(
+    _logger: object,
+    _method_name: str,
+    event_dict: dict[str, object],
+) -> dict[str, object]:
+    for key in list(event_dict):
+        if key.lower() in SENSITIVE_FIELDS:
+            event_dict[key] = "[redacted]"
+    return event_dict
+
 
 def configure_structlog(level: int = logging.INFO) -> None:
     structlog.configure(
         processors=[
             structlog.contextvars.merge_contextvars,
+            _redact_sensitive_fields,
             structlog.stdlib.add_logger_name,
             structlog.stdlib.add_log_level,
             structlog.processors.TimeStamper(fmt="iso", utc=True),

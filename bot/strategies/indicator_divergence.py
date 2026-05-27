@@ -61,8 +61,7 @@ class IndicatorDivergenceSetup(BaseSetup):
         defaults = {
             "base_score": 0.53,
             "swing_lookback": 4.0,
-            # Percentage points: 0.50 means a 0.50% price swing.
-            "min_price_delta_pct": 0.50,
+            "min_price_delta_pct": 0.50,  # unit: percentage points (0.50 = 0.50%)
             "min_indicator_votes": 2.0,
             "min_volume_ratio": 0.75,
             "max_rsi_long": 55.0,

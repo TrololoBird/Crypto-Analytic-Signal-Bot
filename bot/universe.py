@@ -514,16 +514,40 @@ def _composite_score(
     sanity_score = _funding_basis_sanity_score(row, settings)
     crowding_score = _crowding_score(row)
     micro_score = _microstructure_opportunity_score(row)
+    components = {
+        "liquidity_score": liquidity_score,
+        "age_score": age_score,
+        "tradability_score": tradability_score,
+        "freshness_score": freshness_score,
+        "oi_score": oi_score,
+        "sanity_score": sanity_score,
+        "crowding_score": crowding_score,
+        "micro_score": micro_score,
+    }
+    for name, value in list(components.items()):
+        if not (0.0 <= value <= 1.0):
+            LOG.warning(
+                "composite_score_component_out_of_range",
+                extra={"name": name, "value": value},
+            )
+            components[name] = max(0.0, min(1.0, value))
+    liquidity_score = components["liquidity_score"]
+    age_score = components["age_score"]
+    freshness_score = components["freshness_score"]
+    oi_score = components["oi_score"]
+    sanity_score = components["sanity_score"]
+    crowding_score = components["crowding_score"]
+    micro_score = components["micro_score"]
 
     score = (
-        liquidity_score * 0.29
-        + age_score * 0.12
-        + tradability_score * 0.18
-        + freshness_score * 0.14
-        + oi_score * 0.10
-        + sanity_score * 0.08
-        + crowding_score * 0.05
-        + micro_score * 0.04
+        components["liquidity_score"] * 0.29
+        + components["age_score"] * 0.12
+        + components["tradability_score"] * 0.18
+        + components["freshness_score"] * 0.14
+        + components["oi_score"] * 0.10
+        + components["sanity_score"] * 0.08
+        + components["crowding_score"] * 0.05
+        + components["micro_score"] * 0.04
     )
     if priority_asset:
         score = max(score + 0.055, 0.70)
@@ -556,6 +580,14 @@ def build_shortlist(
     seed_source: str = "rest_full",
 ) -> tuple[list[UniverseSymbol], dict[str, Any]]:
     shortlist_limit = int(getattr(settings.universe, "shortlist_limit", 50))
+    if not symbol_meta or not tickers_24h:
+        LOG.warning("build_shortlist_empty_input")
+        return [], {
+            "reason": "empty_input",
+            "symbol_meta_count": len(symbol_meta or []),
+            "ticker_count": len(tickers_24h or []),
+            "seed_source": seed_source,
+        }
     if shortlist_limit < 10:
         LOG.warning(
             "shortlist_limit=%d is very small - check config.toml [universe] section",
@@ -882,9 +914,15 @@ def rerank_shortlist(
         }
         if ticker:
             # Update dynamic metrics
-            new_volume = float(ticker.get("quote_volume") or item.quote_volume)
-            new_change = float(ticker.get("price_change_percent") or item.price_change_pct)
-            new_price = float(ticker.get("last_price") or item.last_price)
+            new_volume = _safe_float(ticker.get("quote_volume"), item.quote_volume)
+            if new_volume is None or new_volume <= 0.0:
+                new_volume = item.quote_volume
+            new_change = _safe_float(ticker.get("price_change_percent"), item.price_change_pct)
+            if new_change is None:
+                new_change = item.price_change_pct
+            new_price = _safe_float(ticker.get("last_price"), item.last_price)
+            if new_price is None or new_price <= 0.0:
+                new_price = item.last_price
             row.update(
                 {
                     "quote_volume": new_volume,
@@ -903,6 +941,11 @@ def rerank_shortlist(
                     "top_position_ls_ratio": _safe_float(ticker.get("top_position_ls_ratio")),
                     "global_account_ls_ratio": _safe_float(ticker.get("global_account_ls_ratio")),
                     "top_vs_global_ls_gap": _safe_float(ticker.get("top_vs_global_ls_gap")),
+                    "taker_ratio": _safe_float(ticker.get("taker_ratio")),
+                    "liquidation_score": _safe_float(ticker.get("liquidation_score")),
+                    "premium_slope_5m": _safe_float(ticker.get("premium_slope_5m")),
+                    "premium_zscore_5m": _safe_float(ticker.get("premium_zscore_5m")),
+                    "funding_trend": ticker.get("funding_trend"),
                 }
             )
 
@@ -959,15 +1002,14 @@ def rerank_shortlist(
             )
         )
 
-    # Re-sort using the standard priority
     pinned = set(settings.universe.pinned_symbols)
-    updated.sort(
+    return sorted(
+        updated,
         key=lambda item: (
             item.symbol not in pinned,
             -(item.shortlist_score or 0.0),
             -_bucket_priority(item)[0],
             -item.quote_volume,
             item.symbol,
-        )
+        ),
     )
-    return updated

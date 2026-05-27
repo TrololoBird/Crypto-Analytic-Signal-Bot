@@ -386,7 +386,10 @@ def handle_force_order(manager: Any, data: JsonDict) -> None:
         symbol = str(order.get("s") or "").upper()
         side = str(order.get("S") or "").upper()
         qty = float(order.get("q") or 0.0)
-        price = float(order.get("ap") or order.get("p") or 0.0)
+        try:
+            price = float(order.get("p", 0) or 0)
+        except (TypeError, ValueError):
+            price = 0.0
         ts_ms = int(order.get("T") or data.get("E") or (time.time() * 1000))
         if symbol and side in ("BUY", "SELL") and qty > 0:
             manager._force_order_buffer.append((ts_ms, symbol, side, qty, price))

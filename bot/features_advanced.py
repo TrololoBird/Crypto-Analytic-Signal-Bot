@@ -15,6 +15,14 @@ from typing import Any, cast
 import numpy as np
 import polars as pl
 
+try:
+    import polars_ta  # noqa: F401  # [live] extra
+
+    HAS_POLARS_TA = True
+except ImportError:
+    polars_ta = None  # type: ignore[assignment]
+    HAS_POLARS_TA = False
+
 from .features_oscillators import add_oscillator_features
 from .features_shared import (
     atr_from_true_range,

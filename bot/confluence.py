@@ -22,6 +22,7 @@ from .scoring import (
 )
 
 LOG = logging.getLogger("bot.confluence")
+MIN_HISTORY_SAMPLES = 20
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +40,7 @@ class ComponentScore:
 class ConfluenceResult:
     """Full quality assessment of a signal."""
 
+    setup_id: str
     setup_prior: float
     components: tuple[ComponentScore, ...]
     final_score: float
@@ -57,12 +59,13 @@ class ConfluenceResult:
             base_score=self.setup_prior,
             adjustments=adjustments,
             final_score=self.final_score,
-            setup_id="",
+            setup_id=self.setup_id,
         )
 
     def to_dict(self) -> dict[str, object]:
         return {
             "setup_prior": self.setup_prior,
+            "setup_id": self.setup_id,
             "components": [
                 {
                     "name": c.name,
@@ -97,7 +100,15 @@ class ConfluenceEngine:
         model_score = sum(c.contribution for c in components)
 
         prior_w = max(0.0, min(cfg.setup_prior_weight, 1.0))
-        calibrated_prior = self._calibrate_setup_prior(signal.score)
+        history_count = int(
+            getattr(
+                signal,
+                "setup_history_count",
+                getattr(signal, "history_count", MIN_HISTORY_SAMPLES),
+            )
+            or 0
+        )
+        calibrated_prior = self._calibrate_setup_prior(signal.score, history_count=history_count)
         calibrated_model = self._calibrate_component_model(model_score)
         blended = (calibrated_prior * prior_w) + (calibrated_model * (1.0 - prior_w))
         final = round(
@@ -106,6 +117,7 @@ class ConfluenceEngine:
         )
 
         return ConfluenceResult(
+            setup_id=signal.setup_id,
             setup_prior=signal.score,
             components=tuple(components),
             final_score=final,
@@ -250,7 +262,9 @@ class ConfluenceEngine:
         return max(0.001, min((value - low) / span, 0.999))
 
     @staticmethod
-    def _calibrate_setup_prior(score: float) -> float:
+    def _calibrate_setup_prior(score: float, *, history_count: int = MIN_HISTORY_SAMPLES) -> float:
+        if history_count < MIN_HISTORY_SAMPLES:
+            return 0.5  # ratio 0..1: neutral prior until 20 setup outcomes exist.
         numeric = 0.5 + (max(0.0, min(float(score), 1.0)) - 0.5) * 1.15
         return ConfluenceEngine._soft_clip_score(numeric, strength=0.72)
 

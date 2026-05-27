@@ -93,6 +93,7 @@ class SignalBot:
             market_data=market_data,
             broadcaster=broadcaster,
             telemetry=telemetry,
+            feature_flags=self.feature_flags,
             register_strategies=self._register_strategies_to_registry,
         )
         self.client = container.client
@@ -345,7 +346,9 @@ class SignalBot:
         all_candidates: dict[str, list[Signal]],
         max_signals: int,
     ) -> list[Signal]:
-        return self._delivery_orchestrator.select_and_rank(all_candidates, max_signals)
+        signals = self._delivery_orchestrator.select_and_rank(all_candidates, max_signals)
+        # score floor: 0..1 confidence, final guard matches runtime delivery minimum.
+        return [signal for signal in signals if signal.score >= 0.38]
 
     def _strategy_metadata(self, setup_id: str) -> Any | None:
         strategy = self._modern_registry.get(setup_id)
@@ -670,7 +673,11 @@ class SignalBot:
         await self._symbol_analyzer.preload_shortlist_frames()
 
     def _ws_cache_enrichments(self, symbol: str) -> dict[str, Any]:
-        return self._symbol_analyzer.ws_cache_enrichments(symbol)
+        try:
+            return self._symbol_analyzer.ws_cache_enrichments(symbol)
+        except (AttributeError, KeyError, TypeError, ValueError):
+            LOG.debug("ws_cache_enrichment_failed", extra={"symbol": symbol}, exc_info=True)
+            return {}
 
     def _refresh_universe_symbol_from_ws(self, item: UniverseSymbol) -> UniverseSymbol:
         return self._symbol_analyzer.refresh_universe_symbol_from_ws(item)

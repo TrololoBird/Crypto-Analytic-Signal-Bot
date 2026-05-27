@@ -18,6 +18,14 @@ class KlineHandler:
         self._bot = bot
 
     async def on_kline_close(self, event: KlineCloseEvent) -> None:
+        try:
+            await self._process_kline(event)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            LOG.error("kline_handler_error", exc_info=exc, extra={"symbol": event.symbol})
+
+    async def _process_kline(self, event: KlineCloseEvent) -> None:
         if event.interval != "15m":
             return
 

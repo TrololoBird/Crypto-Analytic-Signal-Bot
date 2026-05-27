@@ -388,8 +388,12 @@ class FuturesWSManager:
 
         # Message buffering with background draining.
         self._message_buffer = MessageBuffer(maxsize=10000)
+        self._rate_limiter = RateLimiter(
+            _MAX_INCOMING_MSG_PER_SECOND
+        )  # msg/sec: Binance WS inbound processing ceiling.
         self._buffer_processor_task: asyncio.Task[None] | None = None
         self._backfill_tasks: set[asyncio.Task[None]] = set()
+        self._callback_tasks: set[asyncio.Task[Any]] = set()
         self._backfill_symbols_inflight: set[str] = set()
         self._stale_event_drop_count: int = 0
         self._epoch_monotonic_offset_ms = (time.time() - time.monotonic()) * 1000.0
@@ -471,6 +475,11 @@ class FuturesWSManager:
                     LOG.exception("%s callback failed", label, exc_info=exc)
 
         task.add_done_callback(_done)
+
+    def _track_callback_task(self, task: asyncio.Task[Any], *, label: str) -> None:
+        self._callback_tasks.add(task)
+        task.add_done_callback(self._callback_tasks.discard)
+        self._attach_task_logging(task, label=label)
 
     def _schedule_backfill(
         self,
@@ -572,6 +581,12 @@ class FuturesWSManager:
             with contextlib.suppress(asyncio.CancelledError):
                 await asyncio.gather(*self._backfill_tasks, return_exceptions=True)
             self._backfill_tasks.clear()
+
+        if self._callback_tasks:
+            for task in list(self._callback_tasks):
+                task.cancel()
+            await asyncio.gather(*self._callback_tasks, return_exceptions=True)
+            self._callback_tasks.clear()
 
         LOG.info("ws_manager stopped")
 
@@ -903,11 +918,16 @@ class FuturesWSManager:
     async def _health_monitor(self, ws: Any, endpoint: str) -> None:
         """Monitor WebSocket health and reconnect on silence/recovery failures."""
         while True:
-            await asyncio.sleep(_HEALTH_CHECK_INTERVAL_SECONDS)
-            if await ws_health.monitor_connection_silence(self, ws, endpoint):
-                return
-            if await ws_health.evaluate_endpoint_health(self, ws, endpoint):
-                return
+            try:
+                await asyncio.sleep(_HEALTH_CHECK_INTERVAL_SECONDS)
+                if await ws_health.monitor_connection_silence(self, ws, endpoint):
+                    return
+                if await ws_health.evaluate_endpoint_health(self, ws, endpoint):
+                    return
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                LOG.warning("health_monitor_error", extra={"endpoint": endpoint, "exc": str(exc)})
 
     def _kline_close_age_seconds(self, symbol: str, interval: str) -> float | None:
         deq = self._klines.get(symbol, {}).get(interval)
@@ -1350,7 +1370,8 @@ class FuturesWSManager:
                 df = await self._rest.fetch_klines(
                     symbol, interval, limit=self._cfg.kline_cache_size
                 )
-            if df.is_empty():
+            if df is None or df.is_empty():
+                LOG.debug("backfill_empty_frame", extra={"symbol": symbol, "interval": interval})
                 return
             rows = df.to_dicts()
             deq: collections.deque[JsonDict] = collections.deque(
@@ -1578,6 +1599,18 @@ class FuturesWSManager:
         start_ts = time.monotonic()
         data = msg.get("data")
         stream = msg.get("stream", "unknown")
+        symbol_for_limit = "batch"
+        if isinstance(data, dict):
+            order = data.get("o")
+            symbol_for_limit = str(
+                data.get("s")
+                or (order.get("s") if isinstance(order, dict) else None)
+                or str(stream).split("@", 1)[0]
+                or "unknown"
+            ).upper()
+        if not await self._rate_limiter.acquire():
+            LOG.debug("ws_rate_limit_exceeded", extra={"symbol": symbol_for_limit})
+            return
 
         # P3: Per-stream latency tracking
         if stream not in self._stream_latency_ms:
@@ -1740,7 +1773,7 @@ class FuturesWSManager:
         if cbs:
             for _cb in cbs:
                 task = asyncio.create_task(_cb(symbol, interval, close_ts_ms))
-                self._attach_task_logging(task, label=f"kline_close:{symbol}:{interval}")
+                self._track_callback_task(task, label=f"kline_close:{symbol}:{interval}")
 
         # Publish to EventBus (primary path when SignalBot uses EventBus)
         if self._event_bus is not None:

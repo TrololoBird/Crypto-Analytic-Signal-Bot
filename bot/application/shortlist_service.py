@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from datetime import datetime, timezone
 from typing import Any
 
@@ -25,7 +26,7 @@ FALLBACK_REASON_UNKNOWN = "unknown"
 
 
 def normalize_shortlist_fallback_reason(value: object) -> str | None:
-    raw = str(value or "").strip().lower()
+    raw = str(value or "").strip().replace(" ", "_").lower()
     if not raw:
         return None
     aliases = {
@@ -38,6 +39,10 @@ def normalize_shortlist_fallback_reason(value: object) -> str | None:
         "live_empty": FALLBACK_REASON_LIVE_EMPTY,
         "empty_live": FALLBACK_REASON_LIVE_EMPTY,
         "ws_cache_cold": FALLBACK_REASON_WS_CACHE_COLD,
+        "ws_light_skipped": FALLBACK_REASON_WS_CACHE_COLD,
+        "ws_light_no_meta": FALLBACK_REASON_WS_CACHE_COLD,
+        "ws_light_partial_cache": FALLBACK_REASON_WS_CACHE_COLD,
+        "ws_light_filtered_small": FALLBACK_REASON_LIVE_EMPTY,
         "full_refresh_due": FALLBACK_REASON_FULL_REFRESH_DUE,
         "using_pinned": FALLBACK_REASON_USING_PINNED,
         "pinned": FALLBACK_REASON_USING_PINNED,
@@ -78,12 +83,25 @@ class ShortlistService:
 
     @staticmethod
     def _spread_bps(bid: float | None, ask: float | None) -> float | None:
-        if bid is None or ask is None or bid <= 0.0 or ask <= 0.0 or ask < bid:
+        try:
+            bid_value = float(bid) if bid is not None else None
+            ask_value = float(ask) if ask is not None else None
+        except (TypeError, ValueError):
             return None
-        mid = (bid + ask) / 2.0
+        if (
+            bid_value is None
+            or ask_value is None
+            or not math.isfinite(bid_value)
+            or not math.isfinite(ask_value)
+            or bid_value <= 0.0
+            or ask_value <= 0.0
+            or ask_value < bid_value
+        ):
+            return None
+        mid = (bid_value + ask_value) / 2.0
         if mid <= 0.0:
             return None
-        return ((ask - bid) / mid) * 10_000.0
+        return ((ask_value - bid_value) / mid) * 10_000.0
 
     def _enrich_shortlist_rows(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         bot = self._bot
@@ -648,24 +666,42 @@ class ShortlistService:
             return
 
         async with bot._shortlist_lock:
-            if not bot._shortlist:
-                return
+            current_shortlist = list(bot._shortlist)
+        if not current_shortlist:
+            return
 
-            tickers = ws.get_global_ticker_data()
-            if not tickers:
-                return
+        current_symbols = {item.symbol for item in current_shortlist}
+        raw_tickers = [
+            row
+            for row in ws.get_global_ticker_data()
+            if str(row.get("symbol") or "").strip().upper() in current_symbols
+        ]
+        if not raw_tickers:
+            return
 
-            original_top = [s.symbol for s in bot._shortlist[:5]]
-            bot._shortlist = rerank_shortlist(
-                bot._shortlist,
-                tickers,
-                bot.settings,
-            )
-            new_top = [s.symbol for s in bot._shortlist[:5]]
+        tickers = self._enrich_shortlist_rows(raw_tickers)
+        original_top = [s.symbol for s in current_shortlist[:5]]
+        reranked = rerank_shortlist(
+            current_shortlist,
+            tickers,
+            bot.settings,
+        )
+        new_top = [s.symbol for s in reranked[:5]]
 
-            if original_top != new_top:
-                LOG.debug(
-                    "shortlist reranked | top_before=%s top_after=%s",
-                    original_top,
-                    new_top,
+        async with bot._shortlist_lock:
+            latest_symbols = [s.symbol for s in bot._shortlist]
+            if latest_symbols == [s.symbol for s in current_shortlist]:
+                bot._shortlist = reranked
+            else:
+                bot._shortlist = rerank_shortlist(
+                    list(bot._shortlist),
+                    tickers,
+                    bot.settings,
                 )
+
+        if original_top != new_top:
+            LOG.debug(
+                "shortlist reranked | top_before=%s top_after=%s",
+                original_top,
+                new_top,
+            )

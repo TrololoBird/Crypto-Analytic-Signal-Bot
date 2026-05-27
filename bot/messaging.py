@@ -59,6 +59,15 @@ TELEGRAM_DUPLICATE_WINDOW_SECONDS = 180
 TELEGRAM_TEXT_LIMIT = 4000
 TELEGRAM_CAPTION_LIMIT = 1024
 TELEGRAM_LOG_PREVIEW_LIMIT = 500
+TELEGRAM_TAGS = re.compile(r"</?(?:b|i|code|pre|a)[^>]*>", flags=re.IGNORECASE)
+__all__ = (
+    "DeliveryResult",
+    "MessageBroadcaster",
+    "TelegramBroadcaster",
+    "DisabledBroadcaster",
+    "WebhookBroadcaster",
+    "build_message_broadcaster",
+)
 
 
 # Fallback retry decorator for when tenacity is not installed
@@ -553,7 +562,8 @@ def _extract_retry_after_seconds(description: str) -> int | None:
 
 
 def _html_to_plain_text(text: str) -> str:
-    stripped = re.sub(r"<[^>]+>", "", text or "")
+    stripped = TELEGRAM_TAGS.sub("", text or "")
+    stripped = re.sub(r"<[^>]+>", "", stripped)
     return html.unescape(stripped).strip()
 
 
