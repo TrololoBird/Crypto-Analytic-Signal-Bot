@@ -81,7 +81,7 @@ function _renderDiaryTrades(trades) {
     const meta = t.bot_signal_snapshot?.setup_id
       ? t.bot_signal_snapshot.setup_id
       : t.decision;
-    return el("div", { class: "row" }, [
+    const rowEl = el("div", { class: "row" }, [
       el("div", { class: "row-main" }, [
         el("div", {
           class: "row-title",
@@ -97,6 +97,12 @@ function _renderDiaryTrades(trades) {
         text: statusText,
       }),
     ]);
+    if (!t.exit_price) {
+      rowEl.style.cursor = "pointer";
+      rowEl.title = "Click to close trade";
+      rowEl.addEventListener("click", () => showDiaryCloseModal(t));
+    }
+    return rowEl;
   });
   setChildren("diary-trades", rowsOrEmpty(items, (i) => i, "No diary entries yet."));
 }

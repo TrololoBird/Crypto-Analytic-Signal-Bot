@@ -3,6 +3,7 @@ function renderOverview() {
   const topReject = o.top_rejection || {};
   setChildren("overview-kpis", [
     kpi("Shortlist", o.shortlist_size, o.shortlist_source, "blue"),
+    kpi("BTC bias", o.btc_bias || "-", "market context", "cyan"),
     kpi("Detector rows", number(o.decision_rows || 0), "strategy decisions", "cyan"),
     kpi("Raw signal rate", pct(o.decision_signal_rate || 0), "pre-filter detector surface", clsByValue(o.decision_signal_rate)),
     kpi("Candidates", o.last_cycle_candidates || 0, "last cycle", "yellow"),

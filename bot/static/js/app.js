@@ -142,8 +142,6 @@ const App = {
         ["delivery", "/api/live/delivery"],
         ["runtime", "/api/live/runtime"],
         ["telegram", "/api/live/telegram-preview"],
-        ["regime", "/api/market/regime"],
-        ["strategies", "/api/strategies"],
       ];
       const results = await Promise.allSettled(
         endpoints.map(([key, url]) =>
