@@ -257,10 +257,12 @@ class SignalTracker:
             row["reasons"] = tuple(row["reasons"])
         row.setdefault("initial_stop", row.get("stop"))
         row.setdefault("stop_price", row.get("stop"))
-        row.setdefault("tp1_price", row.get("take_profit_1"))
-        row.setdefault("tp2_price", row.get("take_profit_2"))
-        row.setdefault("take_profit_3", row.get("take_profit_2"))
-        row.setdefault("tp3_price", row.get("take_profit_3"))
+        row.setdefault("max_favorable_pct", 0.0)
+        row.setdefault("max_adverse_pct", 0.0)
+        if row.get("tp1_hit_at") and row.get("tp1_price") is None:
+            row["tp1_price"] = row.get("take_profit_1")
+        if row.get("tp2_hit_at") and row.get("tp2_price") is None:
+            row["tp2_price"] = row.get("take_profit_2")
         row.setdefault("valid_until", row.get("pending_expires_at"))
         row.setdefault("scale_weights", (0.5, 0.3, 0.2))
         if isinstance(row.get("scale_weights"), list):
@@ -351,28 +353,44 @@ class SignalTracker:
             return 0.0
         return abs(entry - stop) / entry * 100.0
 
+    @staticmethod
+    def _update_price_excursion(tracked: TrackedSignalState, price: float | None) -> None:
+        if price is None or price <= 0.0:
+            return
+        entry = tracked.activation_price or tracked.entry_mid
+        if not entry or entry <= 0.0:
+            return
+        direction_sign = 1.0 if tracked.direction == "long" else -1.0
+        move_pct = direction_sign * (float(price) - float(entry)) / float(entry) * 100.0
+        if move_pct > tracked.max_favorable_pct:
+            tracked.max_favorable_pct = move_pct
+        if move_pct < 0.0 and abs(move_pct) > tracked.max_adverse_pct:
+            tracked.max_adverse_pct = abs(move_pct)
+
     def _build_outcome_payload(self, tracked: TrackedSignalState) -> dict[str, Any]:
         features = self.features_store.get(tracked.tracking_id)
         if not features:
             features = self._fallback_features_for_tracked(tracked)
 
         entry_price = tracked.activation_price or tracked.entry_mid
-        max_profit_pct = 0.0
-        max_loss_pct = 0.0
-        if entry_price and entry_price > 0.0:
+        max_profit_pct = float(tracked.max_favorable_pct or 0.0)
+        max_loss_pct = float(tracked.max_adverse_pct or 0.0)
+        if entry_price and entry_price > 0.0 and max_profit_pct == 0.0 and max_loss_pct == 0.0:
             direction_sign = 1.0 if tracked.direction == "long" else -1.0
-            if tracked.tp2_price is not None:
-                max_profit_pct = (
-                    direction_sign * (tracked.tp2_price - entry_price) / entry_price * 100.0
+            if tracked.tp1_hit_at and tracked.tp1_price is not None:
+                max_profit_pct = max(
+                    max_profit_pct,
+                    direction_sign * (tracked.tp1_price - entry_price) / entry_price * 100.0,
                 )
-            elif tracked.tp1_price is not None:
-                max_profit_pct = (
-                    direction_sign * (tracked.tp1_price - entry_price) / entry_price * 100.0
+            if tracked.tp2_hit_at and tracked.tp2_price is not None:
+                max_profit_pct = max(
+                    max_profit_pct,
+                    direction_sign * (tracked.tp2_price - entry_price) / entry_price * 100.0,
                 )
-            if tracked.stop_price is not None:
-                max_loss_pct = (
-                    direction_sign * (tracked.stop_price - entry_price) / entry_price * 100.0
-                )
+            if tracked.close_reason == "stop_loss" and tracked.close_price is not None:
+                adverse = direction_sign * (tracked.close_price - entry_price) / entry_price * 100.0
+                if adverse < 0.0:
+                    max_loss_pct = max(max_loss_pct, abs(adverse))
 
         outcome = create_outcome_from_tracked(
             tracked,
@@ -454,11 +472,8 @@ class SignalTracker:
             stop=signal.stop,
             stop_price=signal.stop,
             take_profit_1=signal.take_profit_1,
-            tp1_price=signal.take_profit_1,
             take_profit_2=signal.take_profit_2,
-            tp2_price=signal.take_profit_2,
             take_profit_3=signal.tp3,
-            tp3_price=signal.tp3,
             valid_until=signal.valid_until_iso,
             scale_weights=signal.scale_weights,
             ttl_bars=signal.ttl_bars,
@@ -492,6 +507,7 @@ class SignalTracker:
         tracked.activation_price = price
         tracked.last_checked_at = activated_at.astimezone(UTC).isoformat()
         tracked.last_price = price
+        self._update_price_excursion(tracked, price)
         await self.memory_repo.save_active_signal(self._tracked_to_payload(tracked))
         await self.memory_repo.increment_tracking_stats(activated=1)
 
@@ -509,8 +525,9 @@ class SignalTracker:
         tracked.tp1_hit_at = occurred_at.astimezone(UTC).isoformat()
         tracked.tp1_price = price
         if move_stop_to_break_even:
-            tracked.stop = tracked.entry_mid
-            tracked.stop_price = tracked.entry_mid
+            be_price = tracked.activation_price or tracked.entry_mid
+            tracked.stop = be_price
+            tracked.stop_price = be_price
         await self.memory_repo.save_active_signal(self._tracked_to_payload(tracked))
         await self.memory_repo.increment_tracking_stats(tp1_hit=1)
 
@@ -524,6 +541,7 @@ class SignalTracker:
     ) -> None:
         tracked.last_checked_at = checked_at.astimezone(UTC).isoformat()
         tracked.last_price = last_price
+        self._update_price_excursion(tracked, last_price)
         await self.memory_repo.save_active_signal(self._tracked_to_payload(tracked))
 
     async def _close_signal(

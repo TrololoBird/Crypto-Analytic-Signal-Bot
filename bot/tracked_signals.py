@@ -55,6 +55,8 @@ class TrackedSignalState(msgspec.Struct, kw_only=True):
     tp2_hit_at: str | None = None
     last_checked_at: str | None = None
     last_price: float | None = None
+    max_favorable_pct: float = 0.0
+    max_adverse_pct: float = 0.0
 
 
 def parse_state_dt(value: str | None) -> datetime | None:
