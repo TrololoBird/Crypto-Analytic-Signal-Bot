@@ -21,7 +21,6 @@ except ModuleNotFoundError:  # pragma: no cover - direct script execution
 
 bootstrap_repo_path()
 
-from bot.confluence import ConfluenceEngine
 from bot.application.delivery_orchestrator import DeliveryOrchestrator
 from bot.core.engine import SignalEngine, StrategyRegistry
 from bot.domain.config import load_settings
@@ -543,6 +542,11 @@ async def run_audit(args: argparse.Namespace) -> dict[str, Any]:
                             decision = result.decision
                             if result.signal is not None:
                                 hits[setup_id] += 1
+                                outcome = _outcome_for_signal(
+                                    result.signal,
+                                    future,
+                                    horizon_bars=int(args.outcome_horizon_bars),
+                                )
                                 contract_errors = _contract_errors(result.signal)
                                 if contract_errors:
                                     contract_failures[setup_id] += 1
@@ -582,11 +586,6 @@ async def run_audit(args: argparse.Namespace) -> dict[str, Any]:
                                         for name, value in confirmations.items():
                                             if not value:
                                                 gate_reasons[f"missing_{name}"] += 1
-                                outcome = _outcome_for_signal(
-                                    result.signal,
-                                    future,
-                                    horizon_bars=int(args.outcome_horizon_bars),
-                                )
                                 outcomes[setup_id][outcome] += 1
                             elif decision is not None and decision.is_skip:
                                 skips[setup_id] += 1

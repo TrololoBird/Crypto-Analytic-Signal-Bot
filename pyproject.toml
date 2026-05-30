@@ -36,13 +36,18 @@ live = [
     "prometheus-client>=0.25.0",
     "orjson>=3.11.8",
     "polars_ta>=0.5.17",
-    "psutil>=7.2.2",
+    "polars-ols>=0.3.0",
+]
+test = [
+    "pytest>=8.3.0",
+    "pytest-cov>=6.0.0",
 ]
 regime = [
     "hmmlearn>=0.3.3",
     "scikit-learn>=1.8.0",
     "statsmodels>=0.14.6",
 ]
+# Offline ML experiments only — not imported by `python main.py` (no bot/ml/ package).
 ml = [
     "joblib>=1.5.3",
     "lightgbm>=4.6.0",

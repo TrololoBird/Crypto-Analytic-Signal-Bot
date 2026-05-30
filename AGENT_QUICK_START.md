@@ -30,7 +30,7 @@ No auto-trading, no order placement, no private Binance endpoints.
 ```powershell
 python -m venv .venv
 .\\.venv\\Scripts\\Activate.ps1
-pip install -e .
+pip install -e ".[live,dev,test]"
 python scripts\\validate_config.py
 python main.py
 ```

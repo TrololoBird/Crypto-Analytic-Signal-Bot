@@ -36,13 +36,16 @@ async def _run(
     symbols: Sequence[str], warmup_seconds: float, reconnect_wait_seconds: float
 ) -> None:
     settings = load_settings()
-    client = BinanceFuturesMarketData(
+    # Create BinanceClient implementation
+    from bot.infrastructure.binance_client import BinanceClientImpl
+    binance_client = BinanceClientImpl(
         rest_timeout_seconds=min(
             float(settings.ws.rest_timeout_seconds),
             LIVE_CHECK_HTTP_TIMEOUT_SECONDS,
         ),
         futures_data_request_limit_per_5m=settings.runtime.futures_data_request_limit_per_5m,
     )
+    client = BinanceFuturesMarketData(binance_client=binance_client)
     ws_manager = FuturesWSManager(client, settings.ws)
     try:
         _assert_public_endpoint("/fapi/v1/exchangeInfo")

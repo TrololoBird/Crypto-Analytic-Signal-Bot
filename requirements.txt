@@ -1,33 +1,77 @@
-# Consolidated dependency set for Python 3.13 on Windows 11.
-# Includes runtime, dev tooling, live-check, dashboard, and regime analytics.
+# Dependency manifest for crypto-signal-bot (Python 3.13).
+#
+# Canonical source of truth: pyproject.toml
+# Do NOT treat this file as "install everything listed below".
+#
+# Recommended installs:
+#   Minimal runtime (bot without dashboard/regime ML):
+#     pip install -e .
+#
+#   Production live bot (dashboard, faster JSON, polars_ta):
+#     pip install -e ".[live]"
+#
+#   Regime analytics (optional HMM/GMM; bot falls back to rules without these):
+#     pip install -e ".[regime]"
+#
+#   Development (lint, typecheck, hooks, tests):
+#     pip install -e ".[dev,test]"
+#
+#   Full local workstation (everything except unused ML stack):
+#     pip install -e ".[live,regime,dev,test]"
+#
+# ---------------------------------------------------------------------------
+# CORE RUNTIME  (imported on `python main.py` hot path)
+# ---------------------------------------------------------------------------
+# python-dotenv   -> bot/secrets.py
+# polars          -> features, strategies, market data, tracking
+# aiohttp         -> binance_client, messaging, public_intelligence
+# numpy           -> features*, regime helpers, setups/smc
+# aiogram         -> bot/messaging.py Telegram delivery (live path)
+# websockets      -> bot/websocket/connection.py, ws_manager
+# aiosqlite       -> repository, migrations, diary_store, cli db helpers
+# msgspec         -> domain/events, tracked_signals
+# structlog       -> logging_config, features, messaging, scripts
+# pydantic        -> domain/config.py
+# tenacity        -> bot/messaging.py retries (has stdlib fallback if missing)
+#
+# ---------------------------------------------------------------------------
+# LIVE EXTRA  [live]  — dashboard + performance helpers
+# ---------------------------------------------------------------------------
+# fastapi, uvicorn          -> bot/dashboard.py (optional; dashboard disabled if missing)
+# prometheus-client         -> bot/metrics.py (optional; no-op stubs if missing)
+# orjson                    -> bot/ws_manager.py (optional; stdlib json fallback)
+# polars_ta                 -> bot/features.py (optional; pure-Polars fallback)
+# polars-ols                -> bot/features.py OLS slopes (optional; skipped if missing)
+#
+# NOT USED anywhere in repo (removed from extras):
+#   psutil — was listed but never imported
+#
+# ---------------------------------------------------------------------------
+# REGIME EXTRA  [regime]  — optional; hmm_regime/gmm_var use try/except ImportError
+# ---------------------------------------------------------------------------
+# hmmlearn, scikit-learn, statsmodels -> bot/regime/*
+#
+# ---------------------------------------------------------------------------
+# DEV EXTRA  [dev]
+# ---------------------------------------------------------------------------
+# ruff, mypy, pre-commit
+#
+# ---------------------------------------------------------------------------
+# TEST EXTRA  [test]
+# ---------------------------------------------------------------------------
+# pytest, pytest-cov
+#
+# ---------------------------------------------------------------------------
+# ML EXTRA  [ml]  — NOT on live path; no bot/ml/ package in tree; CI reference stale
+# ---------------------------------------------------------------------------
+# joblib, lightgbm, xgboost, optuna, pandas, pyarrow — do not install unless ML work resumes
+#
+# ---------------------------------------------------------------------------
+# ORPHAN-ONLY IMPORTS (not in core deps; modules outside main.py runtime)
+# ---------------------------------------------------------------------------
+# aiogram (again) -> bot/telegram/* polling bot (duplicate stack; live uses messaging.py)
+#
+# Pin file for tools that require requirements.txt syntax (pip freeze helpers, etc.):
+# Uncomment ONE line matching the target environment.
 
-# Runtime
-python-dotenv>=1.2.2
-polars>=1.40.1
-aiohttp>=3.13.5
-numpy>=2.4.4
-aiogram>=3.27.0
-websockets>=16.0,<17.0
-aiosqlite>=0.22.1
-msgspec>=0.21.1
-tenacity>=9.1.4
-structlog>=25.5.0
-pydantic>=2.12.5,<2.13
-
-# Dev / quality
-ruff>=0.15.12
-mypy>=1.20.2
-pre-commit>=4.6.0
-
-# Dashboard / live checks / telemetry
-fastapi>=0.136.1
-uvicorn[standard]>=0.46.0
-prometheus-client>=0.25.0
-orjson>=3.11.8
-polars_ta>=0.5.17
-psutil>=7.2.2
-
-# Regime modeling
-hmmlearn>=0.3.3
-scikit-learn>=1.8.0
-statsmodels>=0.14.6
+-e .[live,dev,test]

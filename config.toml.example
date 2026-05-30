@@ -25,6 +25,7 @@ shortlist_refresh_interval_seconds = 7200
 emergency_fallback_seconds = 1800
 strict_data_quality = true
 emit_strategy_routing_skips = true
+route_all_enabled_strategies = true
 diagnostic_trace_limit_per_symbol = 20
 # Startup throttling to prevent REST API flood on startup
 startup_batch_size = 3

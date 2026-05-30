@@ -6,7 +6,6 @@ import argparse
 import json
 from pathlib import Path
 import subprocess
-import sys
 from typing import Any
 
 from bot.core.diagnostics.strategy_audit import (

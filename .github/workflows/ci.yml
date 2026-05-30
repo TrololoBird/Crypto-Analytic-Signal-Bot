@@ -65,7 +65,7 @@ jobs:
       - name: Install dependencies
         run: pip install -e '.[dev]' 2>&1 | grep -v 'Multiple top-level' || true
       - name: Run mypy on critical files
-        run: mypy bot/ml/filter.py bot/confluence.py --follow-imports=skip --ignore-missing-imports
+        run: mypy bot/confluence.py bot/domain/config.py --follow-imports=skip --ignore-missing-imports
         continue-on-error: false
 
   typecheck-full-report:
