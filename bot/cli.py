@@ -33,6 +33,13 @@ from .telemetry import TelemetryStore
 _LOGGER_STDERR_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?:,\d{3})?\s+\|")
 
 
+def _configure_stdio_for_unicode() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8")
+
+
 def _get_or_create_event_loop() -> asyncio.AbstractEventLoop:
     try:
         return asyncio.get_running_loop()
@@ -493,6 +500,7 @@ def run() -> None:
 
 
 def _run_runtime() -> None:
+    _configure_stdio_for_unicode()
     debug_mode = os.getenv("DEBUG_BOT", "0") in ("1", "true", "yes")
 
     if debug_mode:

@@ -34,6 +34,7 @@ emergency_context_warmup_timeout_seconds = 120.0
 emergency_context_warmup_symbol_limit = 45
 emergency_context_fetch_timeout_seconds = 20.0
 futures_data_request_limit_per_5m = 900
+cycle_timeout_seconds = 120.0
 min_restart_interval_seconds = 120
 # Dashboard settings
 dashboard_host = "127.0.0.1"

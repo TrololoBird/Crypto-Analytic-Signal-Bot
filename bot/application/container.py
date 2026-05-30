@@ -12,6 +12,7 @@ from ..core.engine import SignalEngine, StrategyRegistry
 from ..core.event_bus import EventBus
 from ..core.memory import MemoryRepository
 from ..delivery import SignalDelivery
+from ..infrastructure.binance_client import BinanceClientImpl
 from ..market_data import BinanceFuturesMarketData
 from ..messaging import build_message_broadcaster
 from ..public_intelligence import PublicIntelligenceService
@@ -57,8 +58,10 @@ def build_application_container(
     """
 
     client = market_data or BinanceFuturesMarketData(
-        rest_timeout_seconds=settings.ws.rest_timeout_seconds,
-        futures_data_request_limit_per_5m=settings.runtime.futures_data_request_limit_per_5m,
+        binance_client=BinanceClientImpl(
+            rest_timeout_seconds=settings.ws.rest_timeout_seconds,
+            futures_data_request_limit_per_5m=settings.runtime.futures_data_request_limit_per_5m,
+        )
     )
 
     bus = EventBus(

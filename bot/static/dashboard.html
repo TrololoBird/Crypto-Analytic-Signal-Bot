@@ -97,7 +97,7 @@
     .tabs {
       display: flex;
       align-items: center;
-      gap: 4px;
+      gap: 2px;
       border: 1px solid var(--line-soft);
       border-radius: 8px;
       padding: 4px;
@@ -109,9 +109,10 @@
       background: transparent;
       color: var(--muted);
       border-radius: 6px;
-      padding: 8px 11px;
+      padding: 7px 9px;
       cursor: pointer;
       white-space: nowrap;
+      font-size: 13px;
     }
     .tab:hover, .tab:focus-visible {
       color: var(--text);
@@ -121,6 +122,20 @@
     .tab.active {
       background: var(--panel-2);
       color: var(--text);
+    }
+    .tab-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 16px;
+      height: 16px;
+      border-radius: 999px;
+      padding: 0 5px;
+      font-size: 10px;
+      font-weight: 700;
+      background: var(--red);
+      color: #fff;
+      margin-left: 4px;
     }
     .toolbar {
       display: flex;
@@ -153,6 +168,7 @@
     .grid.kpi { grid-template-columns: repeat(6, minmax(150px, 1fr)); }
     .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
     .panel {
       border: 1px solid var(--line-soft);
       border-radius: 8px;
@@ -182,6 +198,7 @@
       font-family: var(--mono);
     }
     .panel-body { padding: 14px; }
+    .panel-body:empty { display: none; }
     .kpi-card {
       border: 1px solid var(--line-soft);
       border-radius: 8px;
@@ -386,9 +403,152 @@
       gap: 12px;
       flex-wrap: wrap;
     }
+
+    /* River / signal cards */
+    .river-grid {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    }
+    .signal-card {
+      border: 1px solid var(--line-soft);
+      border-radius: 10px;
+      background: var(--panel);
+      padding: 14px;
+      display: grid;
+      gap: 10px;
+    }
+    .signal-card .sc-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .sc-symbol {
+      font-family: var(--mono);
+      font-size: 16px;
+      font-weight: 700;
+    }
+    .sc-confluence {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      padding: 2px 10px;
+      font-family: var(--mono);
+      font-size: 14px;
+      font-weight: 700;
+      min-width: 48px;
+    }
+    .sc-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+    .sc-pill {
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .sc-meta {
+      display: flex;
+      gap: 10px;
+      color: var(--soft);
+      font-size: 12px;
+    }
+    .sc-zone {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 6px;
+    }
+    .sc-zone-item {
+      border: 1px solid var(--line-soft);
+      border-radius: 6px;
+      padding: 6px 8px;
+      text-align: center;
+    }
+    .sc-zone-label {
+      font-size: 10px;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+    .sc-zone-price {
+      font-family: var(--mono);
+      font-size: 13px;
+      margin-top: 2px;
+    }
+
+    /* Diary */
+    .diary-calendar {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 4px;
+    }
+    .diary-day {
+      aspect-ratio: 1;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--mono);
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .diary-day.profitable { background: #0ecb8120; color: var(--green); }
+    .diary-day.loss { background: #f6465d20; color: var(--red); }
+    .diary-day.neutral { background: var(--panel-2); color: var(--soft); }
+    .diary-day.empty { background: transparent; cursor: default; }
+
+    /* Modal */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+    .modal {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 24px;
+      max-width: 520px;
+      width: 90%;
+      max-height: 80vh;
+      overflow-y: auto;
+    }
+    .modal h2 { margin: 0 0 16px; font-size: 18px; }
+    .modal label { display: block; margin: 10px 0 4px; color: var(--muted); font-size: 12px; }
+    .modal input, .modal select, .modal textarea {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel-2);
+      color: var(--text);
+    }
+    .modal textarea { resize: vertical; min-height: 60px; }
+    .modal-buttons {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      margin-top: 16px;
+    }
+    .modal-buttons button {
+      padding: 8px 16px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel-2);
+      cursor: pointer;
+    }
+    .modal-buttons button.primary { background: var(--blue); color: #fff; border-color: var(--blue); }
+
     @media (max-width: 1160px) {
       .grid.kpi { grid-template-columns: repeat(3, minmax(150px, 1fr)); }
-      .grid.three { grid-template-columns: 1fr; }
+      .grid.three, .grid.four { grid-template-columns: 1fr; }
       .split, .grid.two { grid-template-columns: 1fr; }
     }
     @media (max-width: 720px) {
@@ -419,15 +579,22 @@
           <button class="tab" data-tab="funnel" type="button">Funnel</button>
           <button class="tab" data-tab="audit" type="button">Audit</button>
           <button class="tab" data-tab="shortlist" type="button">Shortlist</button>
-          <button class="tab" data-tab="strategies" type="button">Strategies</button>
+          <button class="tab" data-tab="strategies" type="button">Arena</button>
           <button class="tab" data-tab="delivery" type="button">Delivery</button>
-          <button class="tab" data-tab="runtime" type="button">Runtime</button>
+          <button class="tab" data-tab="runtime" type="button">Engine</button>
+          <button class="tab" data-tab="river" type="button">River</button>
+          <button class="tab" data-tab="diary" type="button">Diary <span id="diary-badge" class="tab-badge" style="display:none">0</span></button>
+          <button class="tab" data-tab="lab" type="button">Confluence</button>
+          <button class="tab" data-tab="alerts" type="button">Alerts</button>
+          <button class="tab" data-tab="settings" type="button">Settings</button>
+          <button class="tab" data-tab="sandbox" type="button">Sandbox</button>
         </nav>
-        <button class="icon-button" id="refresh-button" type="button" title="Refresh">R</button>
+        <button class="icon-button" id="refresh-button" type="button" title="Refresh (Ctrl+R)">↻</button>
       </div>
     </header>
 
     <main class="main">
+      <!-- Overview -->
       <section id="overview" class="section active">
         <div class="grid kpi" id="overview-kpis"></div>
         <div class="grid two" style="margin-top:14px">
@@ -442,6 +609,7 @@
         </div>
       </section>
 
+      <!-- Funnel -->
       <section id="funnel" class="section">
         <div class="grid kpi" id="funnel-kpis"></div>
         <div class="grid two" style="margin-top:14px">
@@ -460,6 +628,7 @@
         </div>
       </section>
 
+      <!-- Audit -->
       <section id="audit" class="section">
         <div class="grid kpi" id="audit-kpis"></div>
         <div class="grid two" style="margin-top:14px">
@@ -477,6 +646,7 @@
         </div>
       </section>
 
+      <!-- Shortlist -->
       <section id="shortlist" class="section">
         <div class="grid kpi" id="shortlist-kpis"></div>
         <div class="panel" style="margin-top:14px">
@@ -489,6 +659,7 @@
         </div>
       </section>
 
+      <!-- Strategies / Arena -->
       <section id="strategies" class="section">
         <div class="grid kpi" id="strategy-kpis"></div>
         <div class="grid two" style="margin-top:14px">
@@ -503,6 +674,7 @@
         </div>
       </section>
 
+      <!-- Delivery -->
       <section id="delivery" class="section">
         <div class="grid two">
           <div class="panel">
@@ -519,6 +691,7 @@
         </div>
       </section>
 
+      <!-- Runtime / Engine Room -->
       <section id="runtime" class="section">
         <div class="grid three">
           <div class="panel">
@@ -536,6 +709,152 @@
         </div>
       </section>
 
+      <!-- River (Module 1) -->
+      <section id="river" class="section">
+        <div class="grid kpi" id="river-kpis"></div>
+        <div class="panel" style="margin-top:14px">
+          <div class="panel-header"><h2 class="panel-title">Live Signal Feed</h2><span class="panel-subtitle">real-time via WebSocket</span></div>
+          <div class="panel-body"><div id="river-cards" class="river-grid"></div></div>
+        </div>
+      </section>
+
+      <!-- Diary (Module 6) -->
+      <section id="diary" class="section">
+        <div class="grid two">
+          <div class="panel">
+            <div class="panel-header"><h2 class="panel-title">Calendar</h2><span class="panel-subtitle">trade history</span></div>
+            <div class="panel-body"><div id="diary-calendar"></div></div>
+          </div>
+          <div class="panel">
+            <div class="panel-header"><h2 class="panel-title">Recent Trades</h2><span class="panel-subtitle">last 20 entries</span></div>
+            <div class="panel-body"><div id="diary-trades" class="row-list"></div></div>
+          </div>
+        </div>
+        <div class="panel" style="margin-top:14px">
+          <div class="panel-header"><h2 class="panel-title">Analytics</h2><span class="panel-subtitle">performance summary</span></div>
+          <div class="panel-body" id="diary-analytics"></div>
+        </div>
+      </section>
+
+      <!-- Confluence Lab (Module 4) -->
+      <section id="lab" class="section">
+        <div class="grid kpi" style="margin-bottom:14px">
+          <div class="panel" style="grid-column:1/-1">
+            <div class="panel-header"><h2 class="panel-title">What-If Simulator</h2><span class="panel-subtitle">adjust confluence weights</span></div>
+            <div class="panel-body">
+              <div class="grid two">
+                <div>
+                  <div id="sim-sliders"></div>
+                  <div class="modal-buttons" style="margin-top:12px">
+                    <button class="primary" onclick="_onConfluenceSimulate()" style="padding:8px 16px;border:1px solid var(--blue);border-radius:6px;background:var(--blue);color:#fff;cursor:pointer">Simulate</button>
+                  </div>
+                  <div id="sim-status" style="margin-top:8px;font-size:12px"></div>
+                </div>
+                <div>
+                  <pre id="sim-result" class="json-box" style="max-height:200px">Click Simulate to run what-if analysis</pre>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="grid two">
+          <div class="panel">
+            <div class="panel-header"><h2 class="panel-title">Strategy Overview</h2><span class="panel-subtitle">41 strategies</span></div>
+            <div class="panel-body"><div id="confluence-strategies" class="grid four" style="gap:8px"></div></div>
+          </div>
+          <div class="panel">
+            <div class="panel-header"><h2 class="panel-title">Veto Log</h2><span class="panel-subtitle">top rejection reasons</span></div>
+            <div class="panel-body"><div id="confluence-vetos" class="row-list"></div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Alerts (Module 9) -->
+      <section id="alerts" class="section">
+        <div class="grid kpi" id="alerts-kpis"></div>
+        <div class="panel" style="margin-top:14px">
+          <div class="panel-header"><h2 class="panel-title">Alert History</h2><span class="panel-subtitle">all events</span></div>
+          <div class="panel-body"><div id="alerts-list" class="finding-list"></div></div>
+        </div>
+      </section>
+
+      <!-- Settings (Module 10) -->
+      <section id="settings" class="section">
+        <div class="grid two">
+          <div class="panel">
+            <div class="panel-header"><h2 class="panel-title">Strategy Manager</h2><span class="panel-subtitle">toggle ON/OFF</span></div>
+            <div class="panel-body"><div id="settings-strategies" class="grid three" style="gap:6px"></div></div>
+          </div>
+          <div class="panel">
+            <div class="panel-header"><h2 class="panel-title">Confluence Weights</h2><span class="panel-subtitle">must sum to 100%</span></div>
+            <div class="panel-body">
+              <div id="settings-scoring" class="bar-list"></div>
+              <div id="scoring-status" style="margin-top:8px;font-size:12px;color:var(--soft)"></div>
+            </div>
+          </div>
+        </div>
+        <div class="grid two" style="margin-top:14px">
+          <div class="panel">
+            <div class="panel-header"><h2 class="panel-title">Killzone Editor</h2><span class="panel-subtitle">session boundaries UTC</span></div>
+            <div class="panel-body"><div id="settings-killzone" class="row-list"></div></div>
+          </div>
+          <div class="panel">
+            <div class="panel-header"><h2 class="panel-title">Diary Export</h2></div>
+            <div class="panel-body">
+              <button class="tab" onclick="window.open('/api/v1/diary/trades?limit=5000','_blank')" style="width:100%;padding:10px;border:1px solid var(--line);border-radius:6px">Export Trades JSON</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Sandbox (Module 7) -->
+      <section id="sandbox" class="section">
+        <div class="panel">
+          <div class="panel-header"><h2 class="panel-title">Historical Replay</h2><span class="panel-subtitle">sandbox simulation</span></div>
+          <div class="panel-body">
+            <div class="grid two">
+              <div>
+                <label style="display:block;margin-bottom:6px;color:var(--muted);font-size:12px">Hours to replay</label>
+                <input id="sandbox-hours" type="number" value="24" min="1" max="168" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--panel-2);color:var(--text)">
+                <div class="modal-buttons" style="margin-top:12px">
+                  <button class="primary" onclick="_onSandboxRun()" style="padding:8px 16px;border:1px solid var(--blue);border-radius:6px;background:var(--blue);color:#fff;cursor:pointer">Run Replay</button>
+                  <button onclick="_onSandboxPoll()" style="padding:8px 16px;border:1px solid var(--line);border-radius:6px;background:var(--panel-2);cursor:pointer">Poll Status</button>
+                </div>
+              </div>
+              <div>
+                <div id="sandbox-status" style="font-size:13px;color:var(--soft);margin-bottom:8px">Ready</div>
+                <pre id="sandbox-result" class="json-box" style="max-height:260px">Results appear here</pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Weather (Module 5) -->
+      <section id="weather" class="section">
+        <div class="grid four" id="weather-gauges"></div>
+        <div class="grid two" style="margin-top:14px">
+          <div class="panel">
+            <div class="panel-header"><h2 class="panel-title">Market Regime</h2></div>
+            <div class="panel-body"><div id="weather-regime" class="row-list"></div></div>
+          </div>
+          <div class="panel">
+            <div class="panel-header"><h2 class="panel-title">Funding & Correlation</h2></div>
+            <div class="panel-body"><div id="weather-funding" class="row-list"></div></div>
+          </div>
+        </div>
+        <div class="grid two" style="margin-top:14px">
+          <div class="panel">
+            <div class="panel-header"><h2 class="panel-title">Session Quality</h2></div>
+            <div class="panel-body"><div id="weather-sessions" class="row-list"></div></div>
+          </div>
+          <div class="panel">
+            <div class="panel-header"><h2 class="panel-title">Volatility (ATR 24h)</h2></div>
+            <div class="panel-body"><canvas id="weather-sparkline" width="300" height="60"></canvas></div>
+          </div>
+        </div>
+      </section>
+
       <div class="footer">
         <span id="last-update">Last update: never</span>
         <span id="run-id" class="mono"></span>
@@ -543,375 +862,29 @@
     </main>
   </div>
 
+  <!-- Modal container (hidden by default) -->
+  <div id="modal-container" style="display:none"></div>
+
+  <!-- JS modules -->
+  <script src="/static/js/lib/chart.js"></script>
+  <script src="/static/js/app.js"></script>
+  <script src="/static/js/tabs/overview.js"></script>
+  <script src="/static/js/tabs/funnel.js"></script>
+  <script src="/static/js/tabs/audit.js"></script>
+  <script src="/static/js/tabs/shortlist.js"></script>
+  <script src="/static/js/tabs/strategies.js"></script>
+  <script src="/static/js/tabs/delivery.js"></script>
+  <script src="/static/js/tabs/runtime.js"></script>
+  <script src="/static/js/tabs/diary.js"></script>
+  <script src="/static/js/tabs/river.js"></script>
+  <script src="/static/js/tabs/weather.js"></script>
+  <script src="/static/js/tabs/confluence_lab.js"></script>
+  <script src="/static/js/tabs/settings.js"></script>
+  <script src="/static/js/tabs/alerts.js"></script>
+  <script src="/static/js/tabs/sandbox.js"></script>
+  <script src="/static/js/tabs/engine_room.js"></script>
   <script>
-    const state = {
-      activeTab: "overview",
-      overview: null,
-      funnel: null,
-      shortlist: null,
-      decisions: null,
-      rejections: null,
-      delivery: null,
-      runtime: null,
-      telegram: null,
-      audit: null
-    };
-
-    function text(value) {
-      if (value === null || value === undefined || value === "") return "-";
-      return String(value);
-    }
-
-    function number(value, digits = 0) {
-      const n = Number(value || 0);
-      return n.toLocaleString(undefined, { maximumFractionDigits: digits, minimumFractionDigits: digits });
-    }
-
-    function pct(value, digits = 2) {
-      return number(Number(value || 0) * 100, digits) + "%";
-    }
-
-    function clsByValue(value) {
-      const n = Number(value || 0);
-      if (n > 0.25) return "green";
-      if (n > 0.05) return "yellow";
-      return "red";
-    }
-
-    function el(tag, attrs = {}, children = []) {
-      const node = document.createElement(tag);
-      for (const [key, value] of Object.entries(attrs)) {
-        if (key === "class") node.className = value;
-        else if (key === "text") node.textContent = value;
-        else if (key === "title") node.title = value;
-        else node.setAttribute(key, value);
-      }
-      for (const child of children) {
-        if (child === null || child === undefined) continue;
-        node.appendChild(typeof child === "string" ? document.createTextNode(child) : child);
-      }
-      return node;
-    }
-
-    function setChildren(id, children) {
-      const node = document.getElementById(id);
-      if (!node) return;
-      node.replaceChildren(...children);
-    }
-
-    function kpi(label, value, note = "", color = "") {
-      return el("div", { class: "kpi-card" }, [
-        el("div", { class: "kpi-label", text: label }),
-        el("div", { class: "kpi-value " + color, text: text(value) }),
-        el("div", { class: "kpi-note", text: text(note) })
-      ]);
-    }
-
-    function rowsOrEmpty(rows, renderer, emptyText) {
-      if (!Array.isArray(rows) || rows.length === 0) {
-        return [el("div", { class: "empty", text: emptyText })];
-      }
-      return rows.map(renderer);
-    }
-
-    function barList(rows, opts = {}) {
-      const max = Math.max(...(rows || []).map(r => Number(r.count || r.value || 0)), 1);
-      return rowsOrEmpty(rows, row => {
-        const value = Number(row.count || row.value || 0);
-        const width = Math.max(2, value / max * 100);
-        const fillClass = opts.fillClass || "";
-        return el("div", { class: "bar-row" }, [
-          el("div", { class: "bar-label", title: row.key || row.label || "-", text: row.key || row.label || "-" }),
-          el("div", {}, [
-            el("div", { class: "bar-track" }, [
-              el("div", { class: "bar-fill " + fillClass, style: "width:" + width + "%" })
-            ]),
-            el("div", { class: "mono muted", text: number(value, 0) })
-          ])
-        ]);
-      }, "No telemetry rows");
-    }
-
-    function simpleRow(title, meta, value, valueClass = "") {
-      return el("div", { class: "row" }, [
-        el("div", { class: "row-main" }, [
-          el("div", { class: "row-title", text: text(title) }),
-          el("div", { class: "row-meta", text: text(meta) })
-        ]),
-        el("div", { class: "row-value " + valueClass, text: text(value) })
-      ]);
-    }
-
-    function table(columns, rows) {
-      if (!rows || rows.length === 0) return el("div", { class: "empty", text: "No rows" });
-      const thead = el("thead", {}, [
-        el("tr", {}, columns.map(c => el("th", { text: c.label, style: c.width ? "width:" + c.width : "" })))
-      ]);
-      const tbody = el("tbody", {}, rows.map(row =>
-        el("tr", {}, columns.map(c => el("td", { class: c.class || "", text: text(c.get(row)) })))
-      ));
-      return el("table", { class: "table" }, [thead, tbody]);
-    }
-
-    async function getJson(url) {
-      const response = await fetch(url, { cache: "no-store" });
-      if (!response.ok) throw new Error(url + " -> HTTP " + response.status);
-      return response.json();
-    }
-
-    async function refreshAll() {
-      try {
-        const [overview, funnel, shortlist, decisions, rejections, delivery, runtime, telegram] = await Promise.all([
-          getJson("/api/live/overview"),
-          getJson("/api/live/funnel"),
-          getJson("/api/live/shortlist"),
-          getJson("/api/live/decisions"),
-          getJson("/api/live/rejections"),
-          getJson("/api/live/delivery"),
-          getJson("/api/live/runtime"),
-          getJson("/api/live/telegram-preview")
-        ]);
-        Object.assign(state, { overview, funnel, shortlist, decisions, rejections, delivery, runtime, telegram });
-        renderAll();
-        document.getElementById("status-dot").className = "dot ok";
-        document.getElementById("status-text").textContent = "online";
-        refreshAudit();
-      } catch (err) {
-        console.error(err);
-        document.getElementById("status-dot").className = "dot bad";
-        document.getElementById("status-text").textContent = "error";
-      }
-    }
-
-    async function refreshAudit() {
-      try {
-        state.audit = await getJson("/api/live/audit?max_rows=20000");
-      } catch (err) {
-        console.warn("audit refresh failed", err);
-        state.audit = {
-          status: "unavailable",
-          score: 0,
-          summary: { total: 1, by_severity: { warning: 1 } },
-          operator_brief: "Live audit is temporarily unavailable. Core dashboard panels are still current.",
-          action_plan: ["Retry refresh or inspect server logs for /api/live/audit."],
-          findings: [{
-            severity: "warning",
-            area: "dashboard",
-            code: "audit_unavailable",
-            title: "Live audit endpoint did not respond.",
-            detail: String(err && err.message ? err.message : err),
-            recommendation: "Keep using Overview/Funnel/Shortlist panels while audit cache warms."
-          }]
-        };
-      }
-      renderAudit();
-    }
-
-    function renderAll() {
-      renderOverview();
-      renderFunnel();
-      renderAudit();
-      renderShortlist();
-      renderStrategies();
-      renderDelivery();
-      renderRuntime();
-      document.getElementById("last-update").textContent = "Last update: " + new Date().toLocaleTimeString();
-      document.getElementById("run-id").textContent = "run " + (state.overview?.run_id || "-");
-    }
-
-    function renderOverview() {
-      const o = state.overview || {};
-      const topReject = o.top_rejection || {};
-      setChildren("overview-kpis", [
-        kpi("Shortlist", o.shortlist_size, o.shortlist_source, "blue"),
-        kpi("Detector rows", number(o.decision_rows || 0), "strategy decisions", "cyan"),
-        kpi("Raw signal rate", pct(o.decision_signal_rate || 0), "pre-filter detector surface", clsByValue(o.decision_signal_rate)),
-        kpi("Candidates", o.last_cycle_candidates || 0, "last cycle", "yellow"),
-        kpi("Delivered", o.last_cycle_delivered || 0, "last cycle", "green"),
-        kpi("Top reject", topReject.key || "-", (topReject.count || 0) + " rows", "orange")
-      ]);
-      const cycles = (state.funnel?.latest_cycles || []).slice(0, 10);
-      setChildren("cycle-list", rowsOrEmpty(cycles, row =>
-        simpleRow(
-          "shortlist " + text(row.shortlist_size) + " / detectors " + text(row.detector_runs),
-          "source " + text(row.shortlist_source) + " / candidates " + text(row.candidate_count),
-          text(row.delivered_count || 0),
-          Number(row.delivered_count || 0) ? "green" : "muted"
-        ), "No cycle telemetry"));
-      setChildren("overview-rejections", barList(state.rejections?.reasons || [], { fillClass: "red" }));
-    }
-
-    function renderFunnel() {
-      const f = state.funnel || {};
-      const totals = f.cycle_totals || {};
-      const decisions = f.decisions || {};
-      setChildren("funnel-kpis", [
-        kpi("Cycles", number(totals.cycles || 0), "tail window", "blue"),
-        kpi("Detector runs", number(totals.detector_runs || 0), "cycles tail", "cyan"),
-        kpi("Candidates", number(totals.candidates || 0), "post-filter", "yellow"),
-        kpi("Selected", number(totals.selected || 0), "delivery queue", "orange"),
-        kpi("Delivered", number(totals.delivered || 0), "notifier accepted", "green"),
-        kpi("Raw signal rate", pct(decisions.signal_rate || 0), "strategy decisions", clsByValue(decisions.signal_rate))
-      ]);
-      const statusRows = Object.entries(decisions.status_counts || {}).map(([key, count]) => ({ key, count }));
-      setChildren("decision-status", barList(statusRows, { fillClass: "green" }));
-      setChildren("rejection-stages", barList(state.rejections?.stages || [], { fillClass: "red" }));
-      const columns = [
-        { label: "shortlist", get: r => r.shortlist_size },
-        { label: "source", get: r => r.shortlist_source },
-        { label: "detectors", get: r => r.detector_runs },
-        { label: "candidates", get: r => r.candidate_count },
-        { label: "selected", get: r => r.selected_count || r.selected_signals || 0 },
-        { label: "delivered", get: r => r.delivered_count || 0 }
-      ];
-      setChildren("cycle-table", [table(columns, f.latest_cycles || [])]);
-    }
-
-    function renderAudit() {
-      const audit = state.audit || {};
-      const summary = audit.summary || {};
-      const bySeverity = summary.by_severity || {};
-      setChildren("audit-kpis", [
-        kpi("Health", (audit.score ?? 0) + "/100", audit.status || "unknown", Number(audit.score || 0) >= 80 ? "green" : Number(audit.score || 0) >= 50 ? "yellow" : "red"),
-        kpi("Critical", bySeverity.critical || 0, "must inspect", Number(bySeverity.critical || 0) ? "red" : "green"),
-        kpi("Warnings", bySeverity.warning || 0, "degraded areas", Number(bySeverity.warning || 0) ? "yellow" : "green"),
-        kpi("Info", bySeverity.info || 0, "context", "blue"),
-        kpi("Findings", summary.total || 0, "audit rows", "cyan"),
-        kpi("Generated", audit.generated_at ? new Date(audit.generated_at).toLocaleTimeString() : "-", "server time", "orange")
-      ]);
-      document.getElementById("audit-status").textContent = audit.status || "unknown";
-      document.getElementById("audit-brief").textContent = audit.operator_brief || "No audit report available.";
-      setChildren("audit-action-plan", rowsOrEmpty((audit.action_plan || []).map((item, index) => ({ item, index: index + 1 })), row =>
-        simpleRow("Action " + row.index, row.item, "", "cyan"),
-        "No action plan"));
-      setChildren("audit-findings", rowsOrEmpty(audit.findings || [], finding => {
-        const severity = text(finding.severity).toLowerCase();
-        return el("div", { class: "finding-card " + severity }, [
-          el("div", { class: "finding-head" }, [
-            el("div", { class: "finding-title", text: finding.title || finding.code || "-" }),
-            el("div", { class: "finding-meta", text: text(finding.severity) + " / " + text(finding.area) })
-          ]),
-          el("div", { class: "finding-detail", text: finding.detail || "-" }),
-          el("div", { class: "finding-recommendation", text: finding.recommendation || "No recommendation" })
-        ]);
-      }, "No audit findings"));
-    }
-
-    function renderShortlist() {
-      const s = state.shortlist || {};
-      setChildren("shortlist-kpis", [
-        kpi("Total", s.total || 0, "current memory", "blue"),
-        kpi("Dynamic", s.dynamic || 0, "non-pinned", Number(s.dynamic || 0) >= 30 ? "green" : "yellow"),
-        kpi("Pinned", s.pinned || 0, "protected symbols", "cyan"),
-        kpi("Priority", (s.priority_in_telemetry || 0) + "/" + (s.priority_total || 0), (s.priority_missing || []).join(", ") || "covered", Number(s.priority_missing?.length || 0) ? "red" : "green"),
-        kpi("Avg fits", number(s.avg_fit || 0, 1), "setups per symbol", "green"),
-        kpi("Source", s.source || "-", "refresh path", "orange")
-      ]);
-      document.getElementById("shortlist-source").textContent = "source " + text(s.source);
-      const priorityColumns = [
-        { label: "symbol", get: r => r.symbol, class: "mono" },
-        { label: "shortlist", get: r => r.in_latest_telemetry ? "yes" : (r.in_memory ? "memory" : "missing") },
-        { label: "score", get: r => r.score ? Number(r.score).toFixed(4) : "-" },
-        { label: "fits", get: r => r.strategy_fit_count || 0 },
-        { label: "decisions", get: r => r.decision_rows || 0 },
-        { label: "candidates", get: r => r.candidate_rows || 0 },
-        { label: "selected", get: r => r.selected_rows || 0 },
-        { label: "top reject", get: r => r.top_rejection ? (r.top_rejection.reason + " (" + r.top_rejection.count + ")") : "-" }
-      ];
-      setChildren("priority-assets-table", [table(priorityColumns, s.priority_assets || [])]);
-      const columns = [
-        { label: "symbol", get: r => r.symbol, class: "mono" },
-        { label: "bucket", get: r => r.bucket },
-        { label: "source", get: r => r.source },
-        { label: "score", get: r => r.score ? Number(r.score).toFixed(4) : "-" },
-        { label: "24h %", get: r => r.price_change_pct ? Number(r.price_change_pct).toFixed(2) : "-" },
-        { label: "priority", get: r => r.priority ? "yes" : "-" },
-        { label: "fits", get: r => r.strategy_fit_count },
-        { label: "sample fits", get: r => (r.strategy_fits || []).join(", ") }
-      ];
-      setChildren("shortlist-table", [table(columns, s.items || [])]);
-    }
-
-    function renderStrategies() {
-      const d = state.decisions || {};
-      const zero = d.zero_signal_setups || [];
-      setChildren("strategy-kpis", [
-        kpi("Rows", number(d.total_rows || 0), "decision telemetry", "cyan"),
-        kpi("Signals", number((d.status_counts || {}).signal || 0), "raw hits", "green"),
-        kpi("Rejects", number((d.status_counts || {}).reject || 0), "detector rejects", "red"),
-        kpi("Signal rate", pct(d.signal_rate || 0), "raw detector surface", clsByValue(d.signal_rate)),
-        kpi("Zero-hit setups", zero.length, "needs review", zero.length ? "yellow" : "green"),
-        kpi("Families", (d.reason_family_counts || []).length, "reason groups", "blue")
-      ]);
-      const columns = [
-        { label: "setup", get: r => r.setup_id },
-        { label: "rows", get: r => r.total },
-        { label: "signals", get: r => r.signals },
-        { label: "rate", get: r => pct(r.signal_rate || 0) },
-        { label: "top blocker", get: r => (r.top_blockers && r.top_blockers[0] && r.top_blockers[0].key) || "-" }
-      ];
-      setChildren("strategy-table", [table(columns, d.setup_reports || [])]);
-      setChildren("zero-signal-list", rowsOrEmpty(zero, row =>
-        simpleRow(row.setup_id, ((row.top_blockers || [])[0] || {}).key || "no blocker", row.total, "yellow"),
-        "No zero-signal setups in current decision telemetry"));
-    }
-
-    function renderDelivery() {
-      const t = state.telegram || {};
-      const preview = t.preview || {};
-      setChildren("telegram-preview-meta", [
-        simpleRow("Available", t.available ? "preview source exists" : (t.reason || "missing"), t.available ? "yes" : "no", t.available ? "green" : "yellow"),
-        simpleRow("HTML length", (preview.errors || []).join("; ") || "valid", preview.chars || 0, preview.ok ? "green" : "red"),
-        simpleRow("Parse mode", "Telegram Bot API", preview.parse_mode || "HTML", "cyan")
-      ]);
-      document.getElementById("telegram-preview").textContent = preview.plain_preview || "No signal-like telemetry row available for preview.";
-      const rows = state.delivery?.rows || [];
-      setChildren("delivery-list", rowsOrEmpty(rows, row =>
-        simpleRow(
-          text(row.symbol) + " " + text(row.setup_id) + " " + text(row.direction),
-          text(row.delivery_reason || row.source || row.ts),
-          text(row.delivery_status || row.status || "selected"),
-          row.delivery_status === "sent" ? "green" : "yellow"
-        ), "No selected/delivery telemetry in this run"));
-    }
-
-    function renderRuntime() {
-      const r = state.runtime || {};
-      document.getElementById("ws-json").textContent = JSON.stringify(r.ws_snapshot || {}, null, 2);
-      document.getElementById("quality-json").textContent = JSON.stringify({
-        data_quality: r.latest_data_quality || {},
-        fallback: r.latest_fallback || {},
-        public_intelligence: r.latest_public_intelligence || {}
-      }, null, 2);
-      document.getElementById("diagnostics-json").textContent = JSON.stringify(r.signal_diagnostics || {}, null, 2);
-    }
-
-    function switchTab(name) {
-      state.activeTab = name;
-      for (const button of document.querySelectorAll(".tab")) {
-        button.classList.toggle("active", button.dataset.tab === name);
-      }
-      for (const section of document.querySelectorAll(".section")) {
-        section.classList.toggle("active", section.id === name);
-      }
-    }
-
-    document.querySelectorAll(".tab").forEach(button => {
-      button.addEventListener("click", () => switchTab(button.dataset.tab));
-    });
-    document.getElementById("refresh-button").addEventListener("click", refreshAll);
-    document.addEventListener("keydown", event => {
-      if (event.key === "r" && (event.ctrlKey || event.metaKey)) {
-        event.preventDefault();
-        refreshAll();
-      }
-      const map = { "1": "overview", "2": "funnel", "3": "audit", "4": "shortlist", "5": "strategies", "6": "delivery", "7": "runtime" };
-      if (map[event.key] && !event.ctrlKey && !event.metaKey && !event.altKey) {
-        switchTab(map[event.key]);
-      }
-    });
-    refreshAll();
-    setInterval(refreshAll, 10000);
+    document.addEventListener("DOMContentLoaded", () => App.init());
   </script>
 </body>
 </html>

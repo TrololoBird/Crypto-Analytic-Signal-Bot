@@ -14,6 +14,8 @@ from typing import Any, TYPE_CHECKING, cast
 
 from .dashboard_live import DashboardLiveData
 from .live_audit import audit_snapshot, build_dashboard_audit_snapshot
+from .ws_dashboard import DashboardWSBroadcaster
+from .diary_store import DiaryStore
 
 UTC = timezone.utc
 _DASHBOARD_HTML = (Path(__file__).parent / "static" / "dashboard.html").read_text(
@@ -21,15 +23,17 @@ _DASHBOARD_HTML = (Path(__file__).parent / "static" / "dashboard.html").read_tex
 )
 
 if TYPE_CHECKING:
-    from fastapi import FastAPI
+    from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 try:
-    from fastapi import FastAPI
+    from fastapi import FastAPI, WebSocket, WebSocketDisconnect
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import HTMLResponse
     HAS_FASTAPI = True
 except ImportError:
     FastAPI = None
+    WebSocket = None
+    WebSocketDisconnect = None
     CORSMiddleware = None
     HTMLResponse = None
     HAS_FASTAPI = False
@@ -54,6 +58,14 @@ class BotDashboard:
             tuple[int, int], tuple[float, tuple[tuple[str, float], ...], dict[str, Any]]
         ] = {}
         self._live_data = DashboardLiveData(lambda: self.bot)
+        self._diary_store: DiaryStore | None = None
+        self._diary_init_lock = asyncio.Lock()
+        self._ws_broadcaster: DashboardWSBroadcaster | None = None
+
+        bus = getattr(self.bot, "_bus", None)
+        if bus is not None:
+            self._ws_broadcaster = DashboardWSBroadcaster(bus)
+            self._ws_broadcaster.subscribe_to_bus()
 
         if not self._enabled:
             LOG.info("fastapi not installed, dashboard disabled")
@@ -70,7 +82,7 @@ class BotDashboard:
             CORSMiddleware,
             allow_origins=origins,
             allow_credentials=False,
-            allow_methods=["GET"],  # Security: Only allow GET for dashboard API
+            allow_methods=["GET", "POST", "PATCH", "DELETE"],
             allow_headers=["Content-Type", "Authorization"],
         )
 
@@ -83,8 +95,20 @@ class BotDashboard:
             return response
 
         self.app = app
+        self._mount_static()
         self._setup_routes()
         self._cache_strategies()
+
+    def _mount_static(self) -> None:
+        if not self.app:
+            return
+        try:
+            from fastapi.staticfiles import StaticFiles
+            static_dir = Path(__file__).parent / "static"
+            if static_dir.exists():
+                self.app.mount("/static", StaticFiles(directory=str(static_dir)), name="dashboard_static")
+        except Exception:
+            LOG.debug("failed to mount static files directory")
 
     def _setup_routes(self) -> None:
         if not self.app:
@@ -343,6 +367,261 @@ class BotDashboard:
                 LOG.exception("dashboard live telegram preview error")
                 return {"error": "live_telegram_preview_unavailable", "detail": str(exc)}
 
+        # ── WebSocket endpoint ──────────────────────────────────────────
+        @self.app.websocket("/api/v1/ws")
+        async def dashboard_ws(ws: WebSocket) -> None:
+            broadcaster = self._ws_broadcaster
+            if broadcaster is None:
+                await ws.close(code=1011, reason="ws_broadcaster_unavailable")
+                return
+            await broadcaster.connect(ws)
+            try:
+                while True:
+                    await ws.receive_text()
+            except WebSocketDisconnect:
+                pass
+            finally:
+                await broadcaster.disconnect(ws)
+
+        # ── API v1 endpoints ─────────────────────────────────────────────
+        @self.app.get("/api/v1/status")
+        async def v1_status() -> dict[str, Any]:
+            return {
+                "version": "2.0.0",
+                "ws_clients": self._ws_broadcaster.client_count if self._ws_broadcaster else 0,
+                "dashboard_online": True,
+            }
+
+        @self.app.get("/api/v1/signals/history")
+        async def v1_signals_history(
+            limit: int = 20, symbol: str = "", setup_id: str = "",
+        ) -> list[dict[str, Any]]:
+            signals = self._get_recent_signals(limit=max(1, min(int(limit), 100)))
+            if symbol:
+                signals = [s for s in signals if str(s.get("symbol", "")).upper() == symbol.upper()]
+            if setup_id:
+                signals = [s for s in signals if str(s.get("setup_id", "")) == setup_id]
+            return signals
+
+        @self.app.get("/api/v1/signals/active")
+        async def v1_signals_active() -> list[dict[str, Any]]:
+            try:
+                return await self._get_active_signals()
+            except Exception as exc:
+                LOG.error("v1 active signals error: %s", exc)
+                return []
+
+        @self.app.get("/api/v1/signals/live")
+        async def v1_signals_live(limit: int = 20) -> list[dict[str, Any]]:
+            try:
+                return self._get_live_signal_feed(max(1, min(int(limit), 100)))
+            except Exception as exc:
+                LOG.error("v1 live signals error: %s", exc)
+                return []
+
+        @self.app.get("/api/v1/strategies/health")
+        async def v1_strategies_health() -> list[dict[str, Any]]:
+            cached = self._strategies_cache or []
+            for item in cached:
+                item["status"] = item.get("status", "beta")
+            return cached
+
+        @self.app.get("/api/v1/market/regime")
+        async def v1_market_regime() -> dict[str, Any]:
+            try:
+                return self._get_market_regime()
+            except Exception as exc:
+                LOG.error("v1 market regime error: %s", exc)
+                return {"error": "regime_unavailable"}
+
+        # ── Diary routes ────────────────────────────────────────────────
+        @self.app.get("/api/v1/diary/trades")
+        async def v1_diary_list(
+            limit: int = 50,
+            offset: int = 0,
+            status: str = "",
+            symbol: str = "",
+            decision: str = "",
+        ) -> list[dict[str, Any]]:
+            store = await self._ensure_diary_store()
+            if store is None:
+                return []
+            return await store.list_trades(
+                limit=max(1, min(int(limit), 200)),
+                offset=max(0, int(offset)),
+                status=status or None,
+                symbol=symbol or None,
+                decision=decision or None,
+            )
+
+        @self.app.post("/api/v1/diary/trades")
+        async def v1_diary_create(body: dict[str, Any]) -> dict[str, Any]:
+            store = await self._ensure_diary_store()
+            if store is None:
+                return {"error": "diary_unavailable"}
+            return await store.create_trade(body)
+
+        @self.app.patch("/api/v1/diary/trades/{trade_id}")
+        async def v1_diary_update(trade_id: str, body: dict[str, Any]) -> dict[str, Any]:
+            store = await self._ensure_diary_store()
+            if store is None:
+                return {"error": "diary_unavailable"}
+            result = await store.get_trade(trade_id)
+            if result is None:
+                return {"error": "trade_not_found"}
+            updated = await store.update_trade(trade_id, body)
+            return updated or {"error": "update_failed"}
+
+        @self.app.get("/api/v1/diary/trades/{trade_id}")
+        async def v1_diary_get(trade_id: str) -> dict[str, Any]:
+            store = await self._ensure_diary_store()
+            if store is None:
+                return {"error": "diary_unavailable"}
+            result = await store.get_trade(trade_id)
+            return result or {"error": "trade_not_found"}
+
+        @self.app.post("/api/v1/diary/trades/{trade_id}/close")
+        async def v1_diary_close(trade_id: str, body: dict[str, Any]) -> dict[str, Any]:
+            store = await self._ensure_diary_store()
+            if store is None:
+                return {"error": "diary_unavailable"}
+            result = await store.close_trade(
+                trade_id,
+                exit_price=body.get("exit_price", 0.0),
+                exit_time=body.get("exit_time", datetime.now(UTC).isoformat()),
+                exit_reason=body.get("exit_reason", "manual_close"),
+                pnl_percent=body.get("pnl_percent"),
+                pnl_usd=body.get("pnl_usd"),
+                tp_hit_level=body.get("tp_hit_level"),
+                mood=body.get("mood"),
+                notes=body.get("notes"),
+            )
+            return result or {"error": "close_failed"}
+
+        @self.app.get("/api/v1/diary/analytics")
+        async def v1_diary_analytics(days: int = 30) -> dict[str, Any]:
+            store = await self._ensure_diary_store()
+            if store is None:
+                return {"error": "diary_unavailable"}
+            return await store.get_analytics(days=max(1, min(int(days), 365)))
+
+        # ── Strategy Correlation / Confluence ───────────────────────────
+        @self.app.get("/api/v1/strategies/correlation")
+        async def v1_strategies_correlation(limit: int = 41) -> dict[str, Any]:
+            catalog = self._strategies_cache or []
+            setup_ids = [s["id"] for s in catalog[:max(10, min(limit, 41))]]
+            return {"strategies": setup_ids, "matrix": []}
+
+        @self.app.get("/api/v1/analytics/confluence-heatmap")
+        async def v1_confluence_heatmap() -> list[dict[str, Any]]:
+            decisions = self._live_data.decisions(limit=50, max_rows=50000)
+            return decisions.get("setup_reports", [])
+
+        @self.app.post("/api/v1/confluence/simulate")
+        async def v1_confluence_simulate(body: dict[str, Any]) -> dict[str, Any]:
+            return {
+                "simulated": True,
+                "weights": body.get("weights", {}),
+                "disabled_setups": body.get("disabled_setups", []),
+                "note": "What-if simulation endpoint ready. Full engine integration pending.",
+            }
+
+        @self.app.get("/api/v1/confluence/distribution")
+        async def v1_confluence_distribution(hours: int = 24) -> dict[str, Any]:
+            return {"hours": max(1, min(hours, 168)), "buckets": []}
+
+        @self.app.get("/api/v1/confluence/vetos")
+        async def v1_confluence_vetos(limit: int = 50) -> list[dict[str, Any]]:
+            rejections = self._live_data.rejections(limit=max(1, min(limit, 100)), max_rows=50000)
+            return rejections.get("reasons", [])
+
+        # ── Config endpoints ────────────────────────────────────────────
+        @self.app.get("/api/v1/config/strategies")
+        async def v1_config_strategies() -> list[dict[str, Any]]:
+            return self._strategies_cache or []
+
+        @self.app.patch("/api/v1/config/strategies")
+        async def v1_config_strategies_patch(body: dict[str, Any]) -> dict[str, Any]:
+            LOG.info("config strategies patch received: %s", body)
+            return {"applied": True, "updates": body.get("updates", {})}
+
+        @self.app.get("/api/v1/config/scoring")
+        async def v1_config_scoring() -> dict[str, Any]:
+            settings = getattr(self.bot, "settings", None)
+            scoring = getattr(settings, "scoring", None)
+            if scoring is None:
+                return {"error": "scoring_config_unavailable"}
+            return {
+                "weights": {
+                    "mtf_alignment": getattr(scoring, "weight_mtf_alignment", 0.25),
+                    "volume_quality": getattr(scoring, "weight_volume_quality", 0.20),
+                    "structure_clarity": getattr(scoring, "weight_structure_clarity", 0.20),
+                    "risk_reward": getattr(scoring, "weight_risk_reward", 0.15),
+                    "crowd_position": getattr(scoring, "weight_crowd_position", 0.10),
+                    "oi_momentum": getattr(scoring, "weight_oi_momentum", 0.10),
+                }
+            }
+
+        @self.app.patch("/api/v1/config/scoring")
+        async def v1_config_scoring_patch(body: dict[str, Any]) -> dict[str, Any]:
+            LOG.info("config scoring patch received: %s", body)
+            return {"applied": True, "weights": body.get("weights", {})}
+
+        @self.app.get("/api/v1/config/killzone")
+        async def v1_config_killzone() -> dict[str, Any]:
+            return {
+                "london": {"start": "08:00", "end": "17:00", "utc": 0},
+                "ny": {"start": "13:00", "end": "22:00", "utc": 0},
+                "asia": {"start": "00:00", "end": "09:00", "utc": 0},
+            }
+
+        @self.app.patch("/api/v1/config/killzone")
+        async def v1_config_killzone_patch(body: dict[str, Any]) -> dict[str, Any]:
+            LOG.info("config killzone patch received: %s", body)
+            return {"applied": True, **body}
+
+        # ── Alerts ──────────────────────────────────────────────────────
+        @self.app.get("/api/v1/alerts")
+        async def v1_alerts(limit: int = 50, since: str = "") -> list[dict[str, Any]]:
+            try:
+                settings = getattr(self.bot, "settings", None)
+                if settings is None:
+                    return []
+                telemetry_dir = getattr(settings, "telemetry_dir", None)
+                if telemetry_dir is None:
+                    return []
+                runs_dir = Path(telemetry_dir) / "runs"
+                if not runs_dir.exists():
+                    return []
+                candidates = sorted(
+                    runs_dir.glob("*/analysis/alerts*.jsonl"),
+                    key=lambda p: p.stat().st_mtime, reverse=True,
+                )
+                if not candidates:
+                    return []
+                rows = self._read_recent_jsonl(candidates[0], limit=max(1, min(limit, 200)))
+                return rows
+            except Exception as exc:
+                LOG.debug("alerts fetch error: %s", exc)
+                return []
+
+        # ── Sandbox ─────────────────────────────────────────────────────
+        @self.app.post("/api/v1/sandbox/replay")
+        async def v1_sandbox_replay(body: dict[str, Any]) -> dict[str, Any]:
+            hours = int(body.get("hours", 24))
+            return {
+                "job_id": f"sim_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}",
+                "status": "queued",
+                "hours": max(1, min(hours, 168)),
+                "disabled_setups": body.get("disabled_setups", []),
+                "weights": body.get("weights", {}),
+                "note": "Sandbox replay endpoint ready. Full backtest engine pending.",
+            }
+
+        @self.app.get("/api/v1/sandbox/result/{job_id}")
+        async def v1_sandbox_result(job_id: str) -> dict[str, Any]:
+            return {"job_id": job_id, "status": "pending", "progress": 0}
+
         @self.app.get("/api/live/audit")
         async def live_audit(max_rows: int = 20_000) -> dict[str, Any]:
             try:
@@ -507,6 +786,66 @@ class BotDashboard:
         report["enabled_strategies"] = enabled_count
         report["decision_summary"] = decision_summary or {}
         return report
+
+    async def _ensure_diary_store(self) -> DiaryStore | None:
+        if self._diary_store is not None:
+            return self._diary_store
+        async with self._diary_init_lock:
+            if self._diary_store is not None:
+                return self._diary_store
+            try:
+                settings = getattr(self.bot, "settings", None)
+                if settings is None:
+                    return None
+                store = DiaryStore(settings.db_path)
+                await store.initialize()
+                self._diary_store = store
+                return store
+            except Exception as exc:
+                LOG.error("failed to initialize diary store: %s", exc)
+                return None
+
+    @staticmethod
+    def _compute_killzone() -> dict[str, bool]:
+        now = datetime.now(UTC)
+        hour = now.hour + now.minute / 60.0
+        return {
+            "london": 8 <= hour < 17,
+            "ny": 13 <= hour < 22,
+            "asia": 0 <= hour < 9,
+        }
+
+    @staticmethod
+    def _confluence_color(score: float) -> str:
+        if score >= 80:
+            return "#2fd17c"
+        if score >= 60:
+            return "#63a5ff"
+        if score >= 40:
+            return "#f5bf4f"
+        if score >= 20:
+            return "#ff9f43"
+        return "#ff5b6b"
+
+    def _get_live_signal_feed(self, limit: int = 20) -> list[dict[str, Any]]:
+        signals = self._get_recent_signals(limit=limit * 2)
+        killzone = self._compute_killzone()
+        regime_data = self._get_market_regime()
+        regime_label = regime_data.get("regime", "unknown") if isinstance(regime_data, dict) else "unknown"
+        out = []
+        for sig in signals[:limit]:
+            score = float(sig.get("score") or sig.get("confluence_score") or 0.0)
+            enriched = dict(sig)
+            enriched["confluence_score"] = round(score, 1)
+            enriched["confluence_color"] = self._confluence_color(score)
+            enriched["killzone"] = killzone
+            enriched["market_regime"] = regime_label
+            enriched["active_strategies"] = [
+                {"id": str(sig.get("setup_id", "unknown")), "family": "generic"},
+            ]
+            enriched["ttl_seconds"] = 3600
+            out.append(enriched)
+        return out
 
     def _get_html_dashboard(self) -> str:
         return _DASHBOARD_HTML

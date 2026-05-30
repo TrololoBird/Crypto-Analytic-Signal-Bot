@@ -56,7 +56,12 @@ class CycleRunner:
                 timeout=timeout,
             )
         except asyncio.TimeoutError:
-            LOG.warning("cycle_timeout", extra={"symbol": symbol, "timeout_seconds": timeout})
+            LOG.warning(
+                "cycle_timeout | symbol=%s timeout_seconds=%.1f trigger=%s",
+                symbol,
+                timeout,
+                trigger,
+            )
 
     async def _execute_symbol_cycle_unbounded(
         self,

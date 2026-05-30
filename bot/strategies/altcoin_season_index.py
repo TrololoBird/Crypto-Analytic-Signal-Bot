@@ -22,6 +22,7 @@ class AltcoinSeasonIndexSetup(RoadmapSetup):
         "btc_dominance_threshold": 45.0,
         "min_volume_ratio": 0.80,
         "min_roc10_abs_pct": 0.10,
+        "sl_buffer_atr": 1.20,
     }
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:

@@ -25,6 +25,46 @@ MIGRATIONS: Sequence[tuple[int, str, str]] = (
         );
         """,
     ),
+    (
+        3,
+        "trader_diary",
+        """
+        CREATE TABLE IF NOT EXISTS trader_diary (
+            id TEXT PRIMARY KEY,
+            linked_signal_id TEXT,
+            decision TEXT NOT NULL DEFAULT 'took_signal'
+                CHECK(decision IN ('took_signal','ignored','counter_traded')),
+            entry_price REAL,
+            entry_time TEXT,
+            size_amount REAL,
+            leverage REAL,
+            risk_percent REAL,
+            sl_price REAL,
+            sl_source TEXT DEFAULT 'bot'
+                CHECK(sl_source IN ('bot','modified','manual')),
+            tp_prices TEXT,
+            tp_hit_level INTEGER,
+            exit_price REAL,
+            exit_time TEXT,
+            exit_reason TEXT
+                CHECK(exit_reason IN ('tp1','tp2','tp3','sl','breakeven','manual_close',NULL)),
+            pnl_percent REAL,
+            pnl_usd REAL,
+            mood TEXT,
+            tags TEXT,
+            notes TEXT,
+            screenshot_path TEXT,
+            bot_signal_snapshot TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            closed_at TEXT,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_diary_decision ON trader_diary(decision);
+        CREATE INDEX IF NOT EXISTS idx_diary_entry_time ON trader_diary(entry_time);
+        CREATE INDEX IF NOT EXISTS idx_diary_signal ON trader_diary(linked_signal_id);
+        CREATE INDEX IF NOT EXISTS idx_diary_closed ON trader_diary(closed_at);
+        """,
+    ),
 )
 
 

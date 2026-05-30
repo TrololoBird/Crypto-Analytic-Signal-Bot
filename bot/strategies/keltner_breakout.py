@@ -35,7 +35,7 @@ class KeltnerBreakoutSetup(BaseSetup):
             "base_score": 0.54,
             "min_volume_ratio": 1.30,
             "min_adx_1h": 14.0,
-            "sl_buffer_atr": 0.6,
+            "sl_buffer_atr": 0.9,
             "min_rr": 1.9,
             "breakout_lookback_bars": 8,
             "recent_breakout_bars": 5,

@@ -28,6 +28,7 @@ class StopHuntDetectionSetup(RoadmapSetup):
         "min_wick_atr": 0.35,
         "max_entry_drift_atr": 1.25,
         "weak_reclaim_penalty": 0.84,
+        "sl_buffer_atr": 1.20,
     }
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
@@ -164,6 +165,30 @@ class StopHuntDetectionSetup(RoadmapSetup):
                     signal_lookback_bars=signal_lookback_bars,
                 )
                 return None
+        
+        # Additional confirmation: require close to be at least 0.5*ATR from swept level
+        confirmation_atr_mult = 0.5
+        expected_level = level + (atr * confirmation_atr_mult) if direction == "long" else level - (atr * confirmation_atr_mult)
+        if direction == "long" and close < expected_level:
+            _reject(
+                prepared,
+                self.setup_id,
+                "stop_hunt_insufficient_close",
+                close=close,
+                expected_level=expected_level,
+                atr=atr,
+            )
+            return None
+        if direction == "short" and close > expected_level:
+            _reject(
+                prepared,
+                self.setup_id,
+                "stop_hunt_insufficient_close",
+                close=close,
+                expected_level=expected_level,
+                atr=atr,
+            )
+            return None
         return _build_atr_signal(
             prepared=prepared,
             setup_id=self.setup_id,

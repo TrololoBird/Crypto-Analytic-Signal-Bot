@@ -19,6 +19,7 @@ class BTCCorrelationSetup(RoadmapSetup):
         **RoadmapSetup.DEFAULTS,
         "min_roc10_abs_pct": 0.15,
         "min_volume_ratio": 0.70,
+        "sl_buffer_atr": 1.00,
     }
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:

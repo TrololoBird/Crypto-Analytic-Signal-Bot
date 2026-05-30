@@ -60,13 +60,13 @@ class IndicatorDivergenceSetup(BaseSetup):
     def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
         defaults = {
             "base_score": 0.53,
-            "swing_lookback": 4.0,
+            "swing_lookback": 6.0,
             "min_price_delta_pct": 0.50,  # unit: percentage points (0.50 = 0.50%)
             "min_indicator_votes": 2.0,
             "min_volume_ratio": 0.75,
             "max_rsi_long": 55.0,
             "min_rsi_short": 45.0,
-            "sl_buffer_atr": 0.90,
+            "sl_buffer_atr": 1.10,
             "min_rr": 1.9,
         }
         if settings is not None:

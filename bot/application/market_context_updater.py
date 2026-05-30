@@ -166,7 +166,8 @@ class MarketContextUpdater:
             funding_rates: dict[str, float] = {}
 
             for item in shortlist:
-                cached = self._bot.client._funding_rate_cache.get(item.symbol)
+                bc = getattr(self._bot.client, "_binance_client", self._bot.client)
+                cached = bc._funding_rate_cache.get(item.symbol)
                 if cached is None:
                     continue
                 _, fr = cached

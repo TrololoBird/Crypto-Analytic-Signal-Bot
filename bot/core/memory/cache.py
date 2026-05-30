@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import logging
+import asyncio
+import math
+import re
+from collections import defaultdict
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping, Sequence
 
 import polars as pl
 
@@ -294,14 +299,6 @@ class TimeSeriesCache:
 # These helpers extend the existing Parquet cache instead of introducing a
 # parallel storage package.  They are public-data-only utilities for candles,
 # resampling, and gap detection; they never place exchange orders.
-
-import asyncio
-import math
-import re
-from collections import defaultdict
-from dataclasses import dataclass, field
-from typing import Iterable, Mapping, Sequence
-
 
 TIMEFRAME_MILLISECONDS: dict[str, int] = {
     "1m": 60_000,

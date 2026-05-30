@@ -1753,6 +1753,8 @@ _EXPECTED_ZERO_COLUMNS = frozenset(
         "depth_imbalance",
         "microprice_bias",
         "depth_wall_pressure",
+        "tob_imbalance",
+        "microprice_deviation_pct",
     }
 )
 

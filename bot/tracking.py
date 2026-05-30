@@ -114,6 +114,8 @@ class SignalTracker:
         self._features_persist_lock = asyncio.Lock()
         self._symbol_review_locks: dict[str, asyncio.Lock] = {}
         self._symbol_review_durations: dict[str, deque[float]] = {}
+        # In-memory trailing stops: tracking_id -> current stop level
+        self._trailing_stops: dict[str, float] = {}
 
     def _symbol_review_lock(self, symbol: str) -> asyncio.Lock:
         key = str(symbol or "").upper()

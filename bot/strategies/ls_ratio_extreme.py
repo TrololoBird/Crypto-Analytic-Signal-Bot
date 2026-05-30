@@ -25,10 +25,10 @@ class LSRatioExtremeSetup(RoadmapSetup):
         "soft_short_account_threshold": 0.42,
         "min_close_position_long": 0.58,
         "max_close_position_short": 0.42,
-        "min_volume_ratio": 0.90,
+        "min_volume_ratio": 1.20,
         "max_adverse_depth_imbalance": 0.10,
         "max_adverse_microprice_bias": 0.10,
-        "sl_buffer_atr": 0.85,
+        "sl_buffer_atr": 1.10,
         "min_rr": 1.9,
     }
 

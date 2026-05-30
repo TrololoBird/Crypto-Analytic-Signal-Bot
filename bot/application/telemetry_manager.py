@@ -162,6 +162,34 @@ class TelemetryManager:
         if decision.error is not None:
             row["error"] = decision.error
         self._bot.telemetry.append_jsonl("strategy_decisions.jsonl", row)
+        # Persist raw signal row for session-level analysis when an actual signal is emitted.
+        if decision.status == "signal" and decision.signal is not None:
+            try:
+                s = decision.signal
+                signal_row = {
+                    "ts": datetime.now(UTC).isoformat(),
+                    "symbol": symbol,
+                    "setup_id": getattr(s, "setup_id", None),
+                    "trigger": trigger,
+                    "direction": getattr(s, "direction", None),
+                    "timeframe": getattr(s, "timeframe", None),
+                    "score": round(getattr(s, "score", 0.0), 6)
+                    if getattr(s, "score", None) is not None
+                    else None,
+                    "entry_low": getattr(s, "entry_low", None),
+                    "entry_high": getattr(s, "entry_high", None),
+                    "entry_mid": getattr(s, "entry_mid", None),
+                    "stop": getattr(s, "stop", None),
+                    "take_profit_1": getattr(s, "take_profit_1", None),
+                    "take_profit_2": getattr(s, "take_profit_2", None),
+                    "risk_reward": getattr(s, "risk_reward", None),
+                    "stop_distance_pct": getattr(s, "stop_distance_pct", None),
+                    "tracking_ref": getattr(s, "tracking_ref", None),
+                    "raw_decision": row,
+                }
+                self._bot.telemetry.append_raw_jsonl("signals.jsonl", signal_row)
+            except Exception as exc:
+                LOG.debug("signals.jsonl write failed | symbol=%s error=%s", symbol, exc)
         if decision.status in {"reject", "error"}:
             key = f"{decision.setup_id}:{decision.reason_code}"
             self._rejection_counts[key] += 1
