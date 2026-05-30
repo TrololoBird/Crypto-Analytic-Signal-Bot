@@ -321,7 +321,9 @@ class Signal:
             object.__setattr__(self, "risk_reward", computed)
         issues = validate_signal_contract(self)
         if issues:
-            raise ValueError(f"Signal contract violations: {[issue.code for issue in issues]}")
+            raise ValueError(
+                f"Signal contract violations: {[f'{issue.field}:{issue.reason}' for issue in issues]}"
+            )
 
     @property
     def entry_mid_raw(self) -> float:

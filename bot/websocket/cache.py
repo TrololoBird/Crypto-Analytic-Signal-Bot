@@ -158,6 +158,7 @@ def get_global_ticker_data(manager: Any) -> list[JsonDict]:
                 "quote_volume": ticker.get("quote_volume", 0.0),
                 "price_change_percent": ticker.get("price_change_percent", 0.0),
                 "last_price": ticker.get("last_price", 0.0),
+                "trade_count": int(float(ticker.get("trade_count") or 0)),
             }
         )
     return result
@@ -326,6 +327,7 @@ def handle_ticker(manager: Any, symbol: str, data: JsonDict) -> None:
             "open_price": float(data.get("o") or 0.0),
             "high_price": float(data.get("h") or 0.0),
             "low_price": float(data.get("l") or 0.0),
+            "trade_count": int(float(data.get("n") or 0)),
         }
         manager._ticker_cache_ts = time.monotonic()
     except (TypeError, ValueError):

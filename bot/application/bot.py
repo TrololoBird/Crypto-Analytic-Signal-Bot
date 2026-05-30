@@ -809,7 +809,10 @@ class SignalBot:
             await self.delivery.preflight_check()
             LOG.info("delivery preflight completed")
         except Exception as exc:
-            LOG.info("delivery preflight unavailable; continuing in signal-only mode: %s", exc)
+            LOG.warning(
+                "delivery preflight failed; continuing in signal-only/local mode: %s",
+                exc,
+            )
 
     async def _wait_noncritical(
         self, *, label: str, timeout: float, operation: Any

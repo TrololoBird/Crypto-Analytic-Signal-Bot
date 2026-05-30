@@ -10,6 +10,8 @@ from typing import Any
 
 from ..market_data import BinanceFuturesMarketData
 from ..domain.schemas import UniverseSymbol
+from ..domain.events import ShortlistUpdatedEvent
+from ..domain.config import _ALL_SETUP_IDS
 from ..universe import build_shortlist, rerank_shortlist
 
 UTC = timezone.utc
@@ -119,6 +121,12 @@ class ShortlistService:
             symbol = str(row.get("symbol") or "").strip().upper()
             if not symbol:
                 continue
+
+            rest_aux = getattr(bot, "_rest_ticker_aux_by_symbol", {}).get(symbol, {})
+            if int(float(row.get("trade_count") or 0)) <= 0:
+                rest_trade_count = int(rest_aux.get("trade_count") or 0)
+                if rest_trade_count > 0:
+                    row["trade_count"] = rest_trade_count
 
             if ws is not None:
                 try:
@@ -320,6 +328,7 @@ class ShortlistService:
                     shortlist_score=1.0,
                     shortlist_reasons=("pinned_symbol",),
                     seed_source="pinned_fallback",
+                    strategy_fits=tuple(_ALL_SETUP_IDS),
                 )
             )
         return shortlist
@@ -363,6 +372,13 @@ class ShortlistService:
             premium_by_symbol = dict(premium_result)
         bot._symbol_meta_by_symbol = {
             str(getattr(row, "symbol", "")).strip().upper(): row for row in symbol_meta_list
+        }
+        bot._rest_ticker_aux_by_symbol = {
+            str(t.get("symbol", "")).strip().upper(): {
+                "trade_count": int(float(t.get("trade_count") or 0)),
+            }
+            for t in tickers_24h
+            if t.get("symbol")
         }
         shortlist, summary = build_shortlist(
             symbol_meta_list,
@@ -445,7 +461,7 @@ class ShortlistService:
         )
         if (
             cached_shortlist
-            and len(shortlist) < minimum_light_tickers
+            and len(shortlist) < max(pinned_count + 3, int(shortlist_limit * 0.4))
             and len(cached_shortlist) > len(shortlist)
         ):
             LOG.info(
@@ -554,6 +570,21 @@ class ShortlistService:
         async with bot._shortlist_lock:
             bot._shortlist = shortlist
         bot._shortlist_source = source
+        new_symbols = [item.symbol for item in shortlist]
+        previous_symbols = list(getattr(bot, "_ws_subscribed_symbols", []) or [])
+        if bot._ws_manager is not None and set(new_symbols) != set(previous_symbols):
+            try:
+                await bot._ws_manager.subscribe(new_symbols)
+                bot._ws_subscribed_symbols = list(new_symbols)
+                await bot._bus.publish(ShortlistUpdatedEvent(symbols=tuple(new_symbols)))
+                LOG.info(
+                    "ws resubscribed after shortlist refresh | symbols=%d added=%d removed=%d",
+                    len(new_symbols),
+                    len(set(new_symbols) - set(previous_symbols)),
+                    len(set(previous_symbols) - set(new_symbols)),
+                )
+            except Exception:
+                LOG.exception("ws resubscribe failed after shortlist refresh")
         if source == "pinned_fallback" and fallback_reason is None:
             fallback_reason = FALLBACK_REASON_USING_PINNED
         if (

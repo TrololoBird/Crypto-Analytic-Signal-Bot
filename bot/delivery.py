@@ -602,14 +602,13 @@ class SignalDelivery:
             if result.status == "sent":
                 LOG.info("telegram signal sent\n%s", text)
             elif result.status == "logged":
-                LOG.info("local signal logged\n%s", text)
-                LOG.info(
-                    "signal delivery status is not sent | status=%s reason=%s symbol=%s setup=%s",
-                    result.status,
+                LOG.warning(
+                    "signal not sent to Telegram (local/log only) | reason=%s symbol=%s setup=%s",
                     result.reason,
                     signal.symbol,
                     signal.setup_id,
                 )
+                LOG.debug("local signal logged\n%s", text)
             else:
                 LOG.error(
                     "signal delivery status is not sent | status=%s reason=%s symbol=%s setup=%s",

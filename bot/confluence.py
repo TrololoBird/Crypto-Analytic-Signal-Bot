@@ -104,7 +104,7 @@ class ConfluenceEngine:
             getattr(
                 signal,
                 "setup_history_count",
-                getattr(signal, "history_count", MIN_HISTORY_SAMPLES),
+                getattr(signal, "history_count", 0),
             )
             or 0
         )

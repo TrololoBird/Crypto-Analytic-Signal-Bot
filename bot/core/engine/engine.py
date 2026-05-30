@@ -113,27 +113,30 @@ class SignalEngine:
             for item in getattr(getattr(self._settings, "universe", None), "pinned_symbols", ())
         }
         is_pinned_symbol = symbol.upper() in pinned_symbols
+        route_all_on_shortlist = bool(
+            getattr(getattr(self._settings, "runtime", None), "route_all_enabled_strategies", True)
+        )
         if not strategy_fits and not is_pinned_symbol:
             LOG.warning(
                 "%s: strategy_fits is EMPTY - routing coverage is degraded for this symbol. "
                 "Check _strategy_fits_for_row() in universe.py",
                 symbol,
             )
-        if is_shortlist_asset:
+        emit_routing_skips = bool(
+            getattr(
+                getattr(self._settings, "runtime", None),
+                "emit_strategy_routing_skips",
+                True,
+            )
+        )
+        if route_all_on_shortlist and (is_shortlist_asset or is_pinned_symbol):
             LOG.debug(
                 "%s: shortlist routing expanded to all enabled strategies | strategy_fits=%d",
                 symbol,
                 len(strategy_fits),
             )
-        elif strategy_fits:
+        elif strategy_fits and not route_all_on_shortlist:
             routed: list[Any] = []
-            emit_routing_skips = bool(
-                getattr(
-                    getattr(self._settings, "runtime", None),
-                    "emit_strategy_routing_skips",
-                    True,
-                )
-            )
             for strategy in strategies:
                 if strategy.strategy_id in strategy_fits:
                     routed.append(strategy)

@@ -1677,6 +1677,9 @@ class BinanceClientImpl(BinanceClient):
             if limit <= 500:
                 return 25
             return 50
+        if operation == "premium_index":
+            symbol = (params or {}).get("symbol") if isinstance(params, Mapping) else None
+            return 1 if symbol else 10
         return _ENDPOINT_WEIGHTS.get(operation, 10)
 
     def _track_weight(self, operation: str, params: Mapping[str, Any] | None = None) -> None:
