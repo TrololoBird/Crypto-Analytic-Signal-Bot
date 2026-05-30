@@ -172,6 +172,27 @@ class StrategyAnalytics:
         weighted_expectancy = sum(
             float(r["expectancy_r"]) * int(r["trades"]) for r in setup_reports
         )
+        all_trade_rows = [
+            row
+            for rows in by_setup.values()
+            for row in rows
+            if self._is_trade_outcome(row)
+        ]
+        avg_mae = (
+            sum(abs(float(r.get("mae") or 0.0)) for r in all_trade_rows) / len(all_trade_rows)
+            if all_trade_rows
+            else 0.0
+        )
+        avg_mfe = (
+            sum(float(r.get("mfe") or 0.0) for r in all_trade_rows) / len(all_trade_rows)
+            if all_trade_rows
+            else 0.0
+        )
+        avg_r = (
+            sum(float(r.get("pnl_r_multiple") or 0.0) for r in all_trade_rows) / len(all_trade_rows)
+            if all_trade_rows
+            else 0.0
+        )
 
         return {
             "generated_at": datetime.now(UTC).isoformat(),
@@ -183,6 +204,9 @@ class StrategyAnalytics:
                 "total_trades": total_trades,
                 "win_rate": (weighted_wins / total_trades) if total_trades else 0.0,
                 "avg_rr": (weighted_expectancy / total_trades) if total_trades else 0.0,
+                "avg_r_multiple": round(avg_r, 4),
+                "avg_mae": round(avg_mae, 4),
+                "avg_mfe": round(avg_mfe, 4),
             },
             "by_setup": {str(row["setup_id"]): row for row in setup_reports},
             "setup_reports": setup_reports,

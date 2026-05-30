@@ -3,6 +3,7 @@ const App = {
   state: {
     activeTab: "overview",
     overview: null,
+    analytics: null,
     funnel: null,
     shortlist: null,
     decisions: null,
@@ -34,8 +35,10 @@ const App = {
     const connect = () => {
       const ws = new WebSocket(wsUrl);
       ws.onopen = () => {
-        document.getElementById("status-dot").className = "dot ok";
-        document.getElementById("status-text").textContent = "online";
+        const dot = document.getElementById("status-dot");
+        const text = document.getElementById("status-text");
+        if (dot) dot.className = "dot ok";
+        if (text) text.textContent = "online";
         reconnectDelay = 1000;
       };
       ws.onmessage = (msg) => {
@@ -47,8 +50,10 @@ const App = {
         }
       };
       ws.onclose = () => {
-        document.getElementById("status-dot").className = "dot";
-        document.getElementById("status-text").textContent = "reconnecting";
+        const dot = document.getElementById("status-dot");
+        const text = document.getElementById("status-text");
+        if (dot) dot.className = "dot";
+        if (text) text.textContent = "reconnecting";
         setTimeout(connect, reconnectDelay);
         reconnectDelay = Math.min(reconnectDelay * 2, 30000);
       };
@@ -142,6 +147,7 @@ const App = {
         ["delivery", "/api/live/delivery"],
         ["runtime", "/api/live/runtime"],
         ["telegram", "/api/live/telegram-preview"],
+        ["analytics", "/api/analytics/report?days=30&scope=rolling"],
       ];
       const results = await Promise.allSettled(
         endpoints.map(([key, url]) =>
@@ -157,8 +163,10 @@ const App = {
         }
       }
       this._renderAll();
-      document.getElementById("status-dot").className = "dot ok";
-      document.getElementById("status-text").textContent = "online";
+      const dot = document.getElementById("status-dot");
+      const text = document.getElementById("status-text");
+      if (dot) dot.className = "dot ok";
+      if (text) text.textContent = "online";
       this._refreshAudit();
     } catch (err) {
       console.error("refreshAll error", err);
@@ -192,8 +200,10 @@ const App = {
     if (typeof renderStrategies === "function") renderStrategies();
     if (typeof renderDelivery === "function") renderDelivery();
     if (typeof renderRuntime === "function") renderRuntime();
-    document.getElementById("last-update").textContent = "Last update: " + new Date().toLocaleTimeString();
-    document.getElementById("run-id").textContent = "run " + (this.state.overview?.run_id || "-");
+    const lastUpdate = document.getElementById("last-update");
+    const runId = document.getElementById("run-id");
+    if (lastUpdate) lastUpdate.textContent = "Last update: " + new Date().toLocaleTimeString();
+    if (runId) runId.textContent = "run " + (this.state.overview?.run_id || "-");
   },
 };
 

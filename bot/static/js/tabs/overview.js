@@ -1,5 +1,6 @@
 function renderOverview() {
   const o = App.state.overview || {};
+  const a = App.state.analytics?.summary || {};
   const topReject = o.top_rejection || {};
   setChildren("overview-kpis", [
     kpi("Shortlist", o.shortlist_size, o.shortlist_source, "blue"),
@@ -8,6 +9,9 @@ function renderOverview() {
     kpi("Raw signal rate", pct(o.decision_signal_rate || 0), "pre-filter detector surface", clsByValue(o.decision_signal_rate)),
     kpi("Candidates", o.last_cycle_candidates || 0, "last cycle", "yellow"),
     kpi("Delivered", o.last_cycle_delivered || 0, "last cycle", "green"),
+    kpi("Avg R", number(a.avg_r_multiple || a.avg_rr || 0, 2), "30d outcomes", clsByValue(a.avg_r_multiple || a.avg_rr)),
+    kpi("Avg MAE", pct(a.avg_mae || 0), "adverse excursion", "red"),
+    kpi("Avg MFE", pct(a.avg_mfe || 0), "favorable excursion", "green"),
     kpi("Top reject", topReject.key || "-", (topReject.count || 0) + " rows", "orange"),
   ]);
   const cycles = (App.state.funnel?.latest_cycles || []).slice(0, 10);
