@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from ..domain.config import BotSettings
 from ..domain.schemas import PreparedSymbol, Signal
+from .common import orderflow_supports_reversal
 from .roadmap_base import (
     RoadmapSetup,
     _as_float,
@@ -27,8 +28,14 @@ class StopHuntDetectionSetup(RoadmapSetup):
         "near_level_atr": 0.35,
         "min_wick_atr": 0.35,
         "max_entry_drift_atr": 1.25,
+        "max_signal_lag_bars": 3,
         "weak_reclaim_penalty": 0.84,
         "sl_buffer_atr": 1.20,
+        "min_recovery_delta_long": 0.49,
+        "max_recovery_delta_short": 0.51,
+        "max_adverse_depth_imbalance": 0.08,
+        "max_adverse_microprice_bias": 0.08,
+        "orderflow_conflict_penalty": 0.86,
     }
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
@@ -67,6 +74,7 @@ class StopHuntDetectionSetup(RoadmapSetup):
         direction = None
         level = 0.0
         signal_lag = 0
+        sweep_extreme = 0.0
         vol_ratio = _last(work, "volume_ratio20", 1.0)
         entry_drift_atr = 0.0
         reclaim_quality = 1.0
@@ -91,6 +99,7 @@ class StopHuntDetectionSetup(RoadmapSetup):
             ):
                 direction = "long"
                 level = prev_low
+                sweep_extreme = low
                 entry_drift_atr = long_drift_atr
             elif (
                 prev_high > 0.0
@@ -102,6 +111,7 @@ class StopHuntDetectionSetup(RoadmapSetup):
             ):
                 direction = "short"
                 level = prev_high
+                sweep_extreme = high
                 entry_drift_atr = short_drift_atr
             if direction is not None:
                 signal_lag = recent.height - 1 - local_idx
@@ -135,6 +145,7 @@ class StopHuntDetectionSetup(RoadmapSetup):
                     ):
                         direction = "long"
                         level = prev_low
+                        sweep_extreme = low
                         signal_lag = recent.height - 1 - local_idx
                         vol_ratio = max(vol_ratio, bar_vol_ratio)
                         entry_drift_atr = long_drift_atr
@@ -151,6 +162,7 @@ class StopHuntDetectionSetup(RoadmapSetup):
                     ):
                         direction = "short"
                         level = prev_high
+                        sweep_extreme = high
                         signal_lag = recent.height - 1 - local_idx
                         vol_ratio = max(vol_ratio, bar_vol_ratio)
                         entry_drift_atr = short_drift_atr
@@ -165,6 +177,28 @@ class StopHuntDetectionSetup(RoadmapSetup):
                     signal_lookback_bars=signal_lookback_bars,
                 )
                 return None
+
+        max_signal_lag = max(0, min(int(params.get("max_signal_lag_bars", 3)), 8))
+        if signal_lag > max_signal_lag:
+            _reject(
+                prepared,
+                self.setup_id,
+                "stop_hunt_stale_sweep",
+                signal_lag=signal_lag,
+                max_signal_lag=max_signal_lag,
+            )
+            return None
+
+        flow_ok, flow_details = orderflow_supports_reversal(
+            prepared,
+            direction,
+            min_delta_long=float(params.get("min_recovery_delta_long", 0.49)),
+            max_delta_short=float(params.get("max_recovery_delta_short", 0.51)),
+            max_adverse_depth=float(params.get("max_adverse_depth_imbalance", 0.08)),
+            max_adverse_micro=float(params.get("max_adverse_microprice_bias", 0.08)),
+        )
+        orderflow_penalty = float(params.get("orderflow_conflict_penalty", 0.86))
+        reclaim_quality = reclaim_quality * (1.0 if flow_ok else orderflow_penalty)
         
         # Additional confirmation: require close to be at least 0.5*ATR from swept level
         confirmation_atr_mult = 0.5
@@ -201,9 +235,12 @@ class StopHuntDetectionSetup(RoadmapSetup):
                 f"vol_ratio={vol_ratio:.2f}",
                 f"entry_drift_atr={entry_drift_atr:.2f}",
                 f"reclaim_quality={reclaim_quality:.2f}",
+                f"orderflow_ok={flow_ok}",
             ],
             family=self.family,
             structure_clarity=0.7 * reclaim_quality,
+            entry_anchor=level if level > 0.0 else None,
+            stop_anchor=sweep_extreme if sweep_extreme > 0.0 else None,
         )
 
 

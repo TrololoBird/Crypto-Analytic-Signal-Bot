@@ -933,6 +933,25 @@ def detect_wyckoff_spring(frame: pl.DataFrame, *, timeframe: str = "15m") -> Spe
             vol_ratio=row.get("volume_ratio20", 1.0),
             rsi=row.get("rsi14", 50.0),
         )
+    resistance = row.get("spec_prev_high30", 0.0)
+    if (
+        atr > 0.0
+        and resistance > 0.0
+        and row["high"] > resistance
+        and row["close"] < resistance
+        and volume < volume_mean * 0.8
+    ):
+        return SpecHit(
+            strategy="wyckoff_spring",
+            direction="short",
+            entry=resistance,
+            stop_basis=row["high"],
+            atr=atr,
+            timeframe=timeframe,
+            reasons=(f"upthrust_resistance={resistance:.4f}", f"volume_vs_mean={volume/volume_mean:.2f}"),
+            vol_ratio=row.get("volume_ratio20", 1.0),
+            rsi=row.get("rsi14", 50.0),
+        )
     return None
 
 

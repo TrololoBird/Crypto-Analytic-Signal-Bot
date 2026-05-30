@@ -22,6 +22,7 @@ class AltcoinSeasonIndexSetup(RoadmapSetup):
         "btc_dominance_threshold": 45.0,
         "min_volume_ratio": 0.80,
         "min_roc10_abs_pct": 0.10,
+        "min_relative_vs_btc_pct": 0.15,
         "sl_buffer_atr": 1.20,
     }
 
@@ -42,19 +43,39 @@ class AltcoinSeasonIndexSetup(RoadmapSetup):
         vol_ratio = _last(prepared.work_15m, "volume_ratio20", 1.0)
         volume_penalty = vol_ratio < float(params["min_volume_ratio"])
         roc10 = _last(prepared.work_15m, "roc10", _price_change_pct(prepared.work_15m, 10))
+        symbol_change = float(getattr(prepared.universe, "price_change_pct", 0.0) or 0.0)
+        btc_ctx = prepared.benchmark_context.get("BTCUSDT", {}) if prepared.benchmark_context else {}
+        btc_change = _finite_or_none(btc_ctx.get("price_change_pct"))
+        if btc_change is None:
+            btc_change = _finite_or_none(getattr(prepared, "btc_change_24h", None))
+        relative_vs_btc = (
+            symbol_change - float(btc_change)
+            if btc_change is not None
+            else roc10
+        )
+        min_relative = float(params.get("min_relative_vs_btc_pct", 0.15))
+        direction: str | None = None
         if (
             alt_index >= float(params["altseason_long_threshold"])
             and prepared.bias_1h != "downtrend"
+            and relative_vs_btc >= min_relative
         ):
             direction = "long"
         elif (
-            alt_index <= float(params["btc_dominance_threshold"]) and prepared.bias_1h != "uptrend"
+            alt_index <= float(params["btc_dominance_threshold"])
+            and prepared.bias_1h != "uptrend"
+            and relative_vs_btc <= -min_relative
         ):
             direction = "short"
-        elif abs(roc10) >= float(params["min_roc10_abs_pct"]) and prepared.bias_1h in {
-            "uptrend",
-            "downtrend",
-        }:
+        elif (
+            abs(roc10) >= float(params["min_roc10_abs_pct"])
+            and prepared.bias_1h in {"uptrend", "downtrend"}
+            and abs(relative_vs_btc) >= min_relative * 0.75
+            and (
+                (prepared.bias_1h == "uptrend" and relative_vs_btc > 0.0)
+                or (prepared.bias_1h == "downtrend" and relative_vs_btc < 0.0)
+            )
+        ):
             direction = "long" if prepared.bias_1h == "uptrend" else "short"
         else:
             _reject(
@@ -62,6 +83,7 @@ class AltcoinSeasonIndexSetup(RoadmapSetup):
                 self.setup_id,
                 "altcoin_phase_not_actionable",
                 altcoin_season_index=alt_index,
+                relative_vs_btc=relative_vs_btc,
             )
             return None
         return _build_atr_signal(
@@ -73,6 +95,7 @@ class AltcoinSeasonIndexSetup(RoadmapSetup):
                 f"altcoin_season_{direction}",
                 f"alt_index={alt_index:.1f}",
                 f"roc10={roc10:.2f}",
+                f"relative_vs_btc={relative_vs_btc:.2f}",
             ],
             family=self.family,
             structure_clarity=max(abs(alt_index - 50.0) / 50.0, min(abs(roc10), 1.0))

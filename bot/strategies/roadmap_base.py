@@ -143,6 +143,7 @@ def _build_atr_signal(
     timeframe: str = "15m",
     structure_clarity: float = 0.5,
     entry_anchor: float | None = None,
+    stop_anchor: float | None = None,
 ) -> Signal | None:
     work = prepared.work_15m
     close = _last(work, "close")
@@ -165,12 +166,14 @@ def _build_atr_signal(
     else:
         price_anchor = max(candle_mid, close)
     if direction == "long":
-        stop = min(low, close - atr * sl_buffer) - atr * 0.05
+        sweep_stop = stop_anchor if stop_anchor is not None and stop_anchor > 0.0 else low
+        stop = min(sweep_stop, close - atr * sl_buffer) - atr * 0.05
         risk = price_anchor - stop
         tp1 = price_anchor + risk * min_rr
         tp2 = price_anchor + risk * max(min_rr + 0.4, 2.0)
     else:
-        stop = max(high, close + atr * sl_buffer) + atr * 0.05
+        sweep_stop = stop_anchor if stop_anchor is not None and stop_anchor > 0.0 else high
+        stop = max(sweep_stop, close + atr * sl_buffer) + atr * 0.05
         risk = stop - price_anchor
         tp1 = price_anchor - risk * min_rr
         tp2 = price_anchor - risk * max(min_rr + 0.4, 2.0)

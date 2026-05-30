@@ -30,6 +30,8 @@ class LSRatioExtremeSetup(RoadmapSetup):
         "max_adverse_microprice_bias": 0.10,
         "sl_buffer_atr": 1.10,
         "min_rr": 1.9,
+        "min_oi_change_pct": 0.5,
+        "oi_missing_penalty": 0.92,
     }
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
@@ -77,9 +79,9 @@ class LSRatioExtremeSetup(RoadmapSetup):
         else:
             volume_penalty = False
         if direction == "long":
-            close_ok = close_position <= float(params["max_close_position_short"])
-        else:
             close_ok = close_position >= float(params["min_close_position_long"])
+        else:
+            close_ok = close_position <= float(params["max_close_position_short"])
         if not close_ok:
             if soft_extreme:
                 price_confirmation_penalty = True
@@ -113,6 +115,21 @@ class LSRatioExtremeSetup(RoadmapSetup):
         context_penalty = False
         if _confirmed_context_conflict(prepared, direction):
             context_penalty = True
+        funding = _finite_or_none(prepared.funding_rate)
+        funding_penalty = False
+        if funding is not None:
+            if direction == "short" and funding <= 0.0:
+                funding_penalty = True
+            elif direction == "long" and funding >= 0.0:
+                funding_penalty = True
+        oi_change = _finite_or_none(prepared.oi_change_pct)
+        oi_penalty = False
+        min_oi_change = float(params.get("min_oi_change_pct", 0.5))
+        if oi_change is not None:
+            if abs(oi_change) < min_oi_change:
+                oi_penalty = True
+        else:
+            oi_penalty = True
         reasons = [
             f"ls_ratio_extreme_{direction}",
             f"ls_ratio={ls_ratio:.2f}",
@@ -130,6 +147,10 @@ class LSRatioExtremeSetup(RoadmapSetup):
             reasons.append("orderbook_against_penalty")
         if context_penalty:
             reasons.append("context_conflict_penalty")
+        if funding_penalty:
+            reasons.append("funding_not_confirming_crowd")
+        if oi_penalty:
+            reasons.append("oi_crowding_unconfirmed")
         score_multiplier = 1.0
         if soft_extreme:
             score_multiplier *= 0.86
@@ -141,6 +162,10 @@ class LSRatioExtremeSetup(RoadmapSetup):
             score_multiplier *= 0.86
         if context_penalty:
             score_multiplier *= 0.82
+        if funding_penalty:
+            score_multiplier *= 0.88
+        if oi_penalty:
+            score_multiplier *= float(params.get("oi_missing_penalty", 0.92))
         return _build_atr_signal(
             prepared=prepared,
             setup_id=self.setup_id,

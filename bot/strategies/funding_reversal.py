@@ -53,6 +53,8 @@ class FundingReversalSetup(BaseSetup):
             "sl_buffer_atr": 0.6,
             "bias_mismatch_penalty": 0.75,
             "min_rr": 1.9,
+            "min_oi_change_pct": 0.5,
+            "oi_unconfirmed_penalty": 0.90,
         }
         if settings is not None:
             filters = getattr(settings, "filters", None)
@@ -312,6 +314,25 @@ class FundingReversalSetup(BaseSetup):
         if vol_ratio >= min_volume_ratio:
             confirmation_score += 0.25
             confirmation_reasons.append(f"vol_ratio={vol_ratio:.2f}")
+        min_oi_change = _as_float(
+            dynamic_params.get("min_oi_change_pct", defaults.get("min_oi_change_pct", 0.5)),
+            0.5,
+        )
+        oi_penalty = 1.0
+        if prepared.oi_change_pct is not None:
+            oi_change = _as_float(prepared.oi_change_pct, 0.0)
+            if abs(oi_change) < min_oi_change:
+                oi_penalty = _as_float(
+                    dynamic_params.get("oi_unconfirmed_penalty", defaults["oi_unconfirmed_penalty"]),
+                    defaults["oi_unconfirmed_penalty"],
+                )
+                confirmation_reasons.append(f"oi_change_weak={oi_change:.2f}")
+            elif direction == "short" and oi_change <= 0.0:
+                oi_penalty = 0.92
+                confirmation_reasons.append("oi_not_building_longs")
+            elif direction == "long" and oi_change <= 0.0:
+                oi_penalty = 0.92
+                confirmation_reasons.append("oi_not_building_shorts")
         if funding_trend == "flat":
             confirmation_score *= 0.95
             confirmation_reasons.append("funding_trend_flat_penalty")
@@ -370,6 +391,7 @@ class FundingReversalSetup(BaseSetup):
         )
         score *= min(1.20, max(0.80, 0.85 + confirmation_score * 0.10))
         score *= funding_score_penalty
+        score *= oi_penalty
 
         reasons = [
             (
