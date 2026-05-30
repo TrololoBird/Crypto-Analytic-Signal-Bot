@@ -347,7 +347,32 @@ def _frame_for_timeframe(
     return prepared.work_15m
 
 
-def _frame_is_fresh(frame: pl.DataFrame, max_age: timedelta) -> bool:
+_TIMEFRAME_INTERVAL_SECONDS: dict[str, int] = {
+    "5m": 300,
+    "15m": 900,
+    "1h": 3600,
+    "4h": 14400,
+}
+
+
+def _timeframe_interval_seconds(timeframe: str) -> int:
+    return _TIMEFRAME_INTERVAL_SECONDS.get(timeframe, 900)
+
+
+def _expected_min_close(now: datetime, timeframe: str) -> datetime:
+    """Return the open time of the current candle period (latest expected close)."""
+    interval_secs = _timeframe_interval_seconds(timeframe)
+    epoch = int(now.timestamp())
+    period_start = epoch - (epoch % interval_secs)
+    return datetime.fromtimestamp(period_start, tz=UTC)
+
+
+def _frame_is_fresh(
+    frame: pl.DataFrame,
+    max_age: timedelta,
+    *,
+    timeframe: str | None = None,
+) -> bool:
     if frame.is_empty() or "close_time" not in frame.columns:
         return False
     try:
@@ -374,10 +399,23 @@ def _frame_is_fresh(frame: pl.DataFrame, max_age: timedelta) -> bool:
         return False
 
     try:
-        delta = datetime.now(UTC) - last_close
+        now = datetime.now(UTC)
+        delta = now - last_close
     except Exception as exc:
         LOGGER.debug("Freshness degraded: failed to compute freshness delta (%s)", exc)
         return False
+
+    # Forming candle: close_time is still in the future — stream is live.
+    if delta.total_seconds() < 0:
+        return True
+
+    if timeframe:
+        # Compare against the latest closed-bar boundary instead of raw age.
+        # After dropping an in-progress 15m tail, last_close can legitimately
+        # be one full interval old at the open of the next bar.
+        threshold = _expected_min_close(now, timeframe) - max_age
+        return last_close >= threshold
+
     return delta <= max_age
 
 
@@ -503,7 +541,11 @@ def _run_filter_pipeline(
     if deep_analysis_asset:
         passed.append("deep_analysis_policy")
     primary_frame = _frame_for_timeframe(prepared, primary_timeframe)
-    if primary_frame is None or not _frame_is_fresh(primary_frame, primary_freshness):
+    if primary_frame is None or not _frame_is_fresh(
+        primary_frame,
+        primary_freshness,
+        timeframe=primary_timeframe,
+    ):
         LOGGER.info(
             "%s/%s: freshness fail | timeframe=%s freshness_limit=%s",
             signal.symbol,
@@ -518,6 +560,7 @@ def _run_filter_pipeline(
     if not _frame_is_fresh(
         prepared.work_1h,
         timedelta(hours=settings.filters.freshness_1h_hours),
+        timeframe="1h",
     ):
         LOGGER.info(
             "%s/%s: freshness fail | timeframe=1h freshness_limit=%s",
@@ -530,6 +573,7 @@ def _run_filter_pipeline(
     if prepared.work_4h is None or not _frame_is_fresh(
         prepared.work_4h,
         timedelta(hours=settings.filters.freshness_4h_hours),
+        timeframe="4h",
     ):
         LOGGER.info(
             "%s/%s: freshness fail | timeframe=4h freshness_limit=%s",
