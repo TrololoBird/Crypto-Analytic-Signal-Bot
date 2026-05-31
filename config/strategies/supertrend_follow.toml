@@ -1,0 +1,16 @@
+# supertrend_follow — catalog defaults (ops-tunable)
+
+[strategy]
+enabled = true
+name = "supertrend_follow"
+
+[scoring]
+base_score = 0.56
+
+[filters]
+min_volume_ratio = 0.85
+min_adx = 12.0
+
+[risk_management]
+sl_buffer_atr = 0.85
+min_rr = 1.9

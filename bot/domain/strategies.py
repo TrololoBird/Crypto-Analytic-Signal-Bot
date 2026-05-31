@@ -26,6 +26,8 @@ class StrategyMetadata:
     requires_oi: bool = False  # Requires open interest data
     requires_funding: bool = False  # Requires funding rate data
     min_history_bars: int = 50  # Minimum bars needed for calculation
+    trigger_tf: str = "15m"
+    evidence_level: str = "A"
     asset_fit: dict[str, object] = field(default_factory=dict)
     score_calibration: str = "heuristic"
     risk_profile: str = "generic"
@@ -48,6 +50,8 @@ class StrategyMetadata:
             "requires_oi": self.requires_oi,
             "requires_funding": self.requires_funding,
             "min_history_bars": self.min_history_bars,
+            "trigger_tf": self.trigger_tf,
+            "evidence_level": self.evidence_level,
             "asset_fit": self.asset_fit,
             "score_calibration": self.score_calibration,
             "risk_profile": self.risk_profile,

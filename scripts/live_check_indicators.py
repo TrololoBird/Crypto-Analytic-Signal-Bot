@@ -25,7 +25,7 @@ bootstrap_repo_path()
 
 from bot.domain.config import load_settings
 from bot.features import min_required_bars, prepare_symbol
-from bot.market_data import BinanceFuturesMarketData, MarketDataUnavailable
+from bot.market.data import BinanceFuturesMarketData, MarketDataUnavailable
 from bot.domain.schemas import SymbolFrames, UniverseSymbol
 
 
@@ -61,13 +61,16 @@ async def _run(symbols: list[str], concurrency: int) -> None:
         min_bars_1h=settings.filters.min_bars_1h,
         min_bars_4h=settings.filters.min_bars_4h,
     )
-    client = BinanceFuturesMarketData(
+    from bot.market.rest import BinanceClientImpl
+
+    binance_client = BinanceClientImpl(
         rest_timeout_seconds=min(
             float(settings.ws.rest_timeout_seconds),
             LIVE_CHECK_HTTP_TIMEOUT_SECONDS,
         ),
         futures_data_request_limit_per_5m=settings.runtime.futures_data_request_limit_per_5m,
     )
+    client = BinanceFuturesMarketData(binance_client=binance_client)
     try:
         exchange_symbols = await client.fetch_exchange_symbols()
         ticker_rows = await client.fetch_ticker_24h()

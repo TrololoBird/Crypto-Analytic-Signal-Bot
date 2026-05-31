@@ -1,0 +1,24 @@
+# wyckoff_spring — catalog defaults (ops-tunable)
+
+[detection]
+signal_lookback_bars = 18
+max_signal_lag_bars = 6
+spring_volume_dryup_ratio = 1.10
+recovery_volume_ratio = 0.95
+min_close_position_long = 0.48
+max_close_position_short = 0.52
+
+[strategy]
+enabled = true
+name = "wyckoff_spring"
+
+[scoring]
+base_score = 0.52
+
+[filters]
+min_volume_ratio = 1.05
+min_adx = 15.0
+
+[risk_management]
+sl_buffer_atr = 0.85
+min_rr = 1.9

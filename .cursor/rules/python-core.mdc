@@ -1,0 +1,15 @@
+---
+description: Python 3.14 style for bot, scripts, and live tests
+globs: bot/**/*.py,scripts/**/*.py,tests/**/*.py
+alwaysApply: false
+---
+
+# Python 3.14
+
+- `from __future__ import annotations` at top of new modules
+- Type hints on all public functions; pydantic models for config/contracts
+- structlog for logging (not print/stdlib logging in runtime)
+- Line length 100; ruff target py314
+- Early returns; explicit exception handling — never bare `except:`
+
+Install: `pip install -e ".[live,dev,test]"`

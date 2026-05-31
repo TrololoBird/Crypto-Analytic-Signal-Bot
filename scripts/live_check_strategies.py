@@ -27,15 +27,15 @@ except ModuleNotFoundError:  # pragma: no cover - direct script execution
 bootstrap_repo_path()
 
 from bot.domain.config import load_settings
-from bot.confluence import ConfluenceEngine
-from bot.core.engine import SignalEngine, StrategyRegistry
+from bot.delivery.confluence import ConfluenceEngine
+from bot.engine import SignalEngine, StrategyRegistry
 from bot.features import min_required_bars, prepare_symbol
-from bot.market_data import BinanceFuturesMarketData, MarketDataUnavailable
+from bot.market.data import BinanceFuturesMarketData, MarketDataUnavailable
 from bot.domain.schemas import SymbolFrames, UniverseSymbol
-from bot.signal_contract import signal_contract_row, validate_signal_contract
-from bot.setup_base import SetupParams
+from bot.delivery.contract import signal_contract_row, validate_signal_contract
+from bot.setups.base import SetupParams
 from bot.strategies import STRATEGY_CLASSES
-from bot.universe import strategy_fits_for_market_row
+from bot.market.universe import strategy_fits_for_market_row
 
 
 LOG = configure_script_logging("scripts.live_check_strategies")
@@ -580,12 +580,16 @@ async def _run(
         LOG.info("strategy_filter_applied", strategies=sorted(selected_ids))
     engine = SignalEngine(registry, settings)
     confluence = ConfluenceEngine(settings)
+    from bot.market.rest import BinanceClientImpl
+
     client = BinanceFuturesMarketData(
-        rest_timeout_seconds=min(
-            float(settings.ws.rest_timeout_seconds),
-            LIVE_CHECK_HTTP_TIMEOUT_SECONDS,
+        binance_client=BinanceClientImpl(
+            rest_timeout_seconds=min(
+                float(settings.ws.rest_timeout_seconds),
+                LIVE_CHECK_HTTP_TIMEOUT_SECONDS,
+            ),
+            futures_data_request_limit_per_5m=settings.runtime.futures_data_request_limit_per_5m,
         ),
-        futures_data_request_limit_per_5m=settings.runtime.futures_data_request_limit_per_5m,
     )
     try:
         exchange_symbols = await client.fetch_exchange_symbols()

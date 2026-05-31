@@ -1,0 +1,29 @@
+---
+description: v9 package layout — where to put new code during refactor
+alwaysApply: true
+---
+
+# v9 Architecture (scaffold active)
+
+Import from v9 packages for new code; legacy root modules remain until Phase 2 move.
+
+| Package | Role | Import example |
+|---|---|---|
+| `bot/domain/` | Config, schemas, contracts | `from bot.domain import BotSettings` |
+| `bot/market/` | REST, WS, universe, enrichments | `from bot.market import BinanceFuturesMarketData, FuturesWSManager` |
+| `bot/runtime/` | Bot loop, analyzers, handlers | `from bot.runtime import SignalBot, SymbolAnalyzer` |
+| `bot/persistence/` | Tracking, outcomes, diary | `from bot.persistence import SignalTracker` |
+| `bot/engine/` | Strategy registry + executor | `from bot.engine import SignalEngine, StrategyRegistry` |
+| `bot/strategies/` | Setup detectors (38) | `from bot.strategies import ...` |
+| `bot/delivery.py` | Signal delivery (→ `bot/delivery/` Phase 2) | keep existing imports for now |
+| `bot/features.py` | Polars pipeline (→ `bot/features/` Phase 2) | keep existing imports for now |
+| `bot/messaging.py` | Telegram broadcasters | delivery path only |
+
+## Phase order
+
+1. **Phase 1** (now): scaffold + delete duplicates — do NOT split monoliths yet
+2. **Phase 2**: move code into `market/`, rename `features.py` → `features/` package
+3. **Phase 3**: slim `runtime/`, shrink `symbol_analyzer`
+4. **Phase 4**: strategy wave rewrites
+
+Full matrix: `docs/REFACTOR_PLAN.md`

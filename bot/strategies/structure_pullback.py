@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from ..domain.config import BotSettings
 from ..domain.schemas import PreparedSymbol, Signal
-from ..setup_base import BaseSetup
+from ..setups.base import BaseSetup
 from ..setups import (
     _build_signal,
     _compute_dynamic_score,
@@ -16,7 +16,7 @@ from ..setups import (
     _reject,
 )
 from ..setups.utils import get_dynamic_params, select_structural_target
-from .spec_patterns import build_spec_signal, detect_structure_pullback
+from ..setups.detectors import build_spec_signal, detect_structure_pullback
 
 
 def _as_float(value: object, default: float = 0.0) -> float:

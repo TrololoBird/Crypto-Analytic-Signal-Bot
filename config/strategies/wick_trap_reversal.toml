@@ -25,4 +25,4 @@ bias_mismatch_penalty = 0.75
 tp_too_close_penalty = 0.75
 
 [filters]
-min_volume_ratio = 0.8
+min_volume_ratio = 1.0

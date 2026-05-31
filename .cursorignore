@@ -1,0 +1,22 @@
+# Cursor indexing exclusions
+data/
+telemetry/
+logs/
+*.db
+*.db-journal
+*.parquet
+*.jsonl
+graphify-out/
+.git/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+node_modules/
+docs/generated/
+.trace_launch/

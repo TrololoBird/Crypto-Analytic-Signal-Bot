@@ -72,6 +72,16 @@ plan.md
 test_out.txt
 check_result.txt
 
+# Agent trace / scratch (not source)
+.trace_launch/
+*.trace_launch/
+
+# Migration scratch at repo root
+original_market_data*.py
+temp_original.py
+temp_methods.txt
+_find_ops.py
+
 # Windows shortcuts
 *.lnk
 Crypto Analytic Signal Bot/

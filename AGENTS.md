@@ -10,3 +10,12 @@ Rules:
 - If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
 - Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
 - After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
+
+## Cursor project config
+
+- Rules: `.cursor/rules/*.mdc` (guardrails, strategies, features, delivery)
+- Skills: `.cursor/skills/` (`live-binance-verify`, `refactor-module`, `zero-hit-strategy-triage`, `validate-delivery-path`)
+- Refactor plan: `docs/REFACTOR_PLAN.md`
+- Target research spec: `docs/research/README.md` (38 strategies, architecture, Binance public matrix, Telegram spec)
+- Live tests only: `tests/live/` with `PYTEST_LIVE=1`
+- Local venv (Python 3.14): `py -3.14 -m venv .venv` then `.\.venv\Scripts\pip install -e ".[live,dev,test]"`

@@ -17,6 +17,25 @@ if TYPE_CHECKING:
     from ..domain.schemas import PreparedSymbol, Signal
 
 
+def coerce_int(value: object, default: int) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return int(default)
+
+
+def coerce_float(value: object, default: float) -> float:
+    if isinstance(value, bool):
+        return float(value)
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return default
+    return numeric if math.isfinite(numeric) else default
+
+
 def _safe_float(value: object, default: float = 0.0) -> float:
     if isinstance(value, bool):
         return float(value)
@@ -406,4 +425,7 @@ def get_dynamic_params(prepared: "PreparedSymbol", setup_id: str) -> dict[str, f
         if legacy_key in setups_config:
             params = dict(setups_config.get(legacy_key, {}) or {})
 
-    return _relax_deep_asset_thresholds(prepared, params)
+    from ..domain.strategy_catalog import catalog_default_params
+
+    merged = {**catalog_default_params(setup_id), **params}
+    return _relax_deep_asset_thresholds(prepared, merged)

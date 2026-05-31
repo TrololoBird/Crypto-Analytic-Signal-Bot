@@ -8,14 +8,14 @@ from __future__ import annotations
 from ..domain.config import BotSettings
 from ..features import _swing_points
 from ..domain.schemas import PreparedSymbol, Signal
-from ..setup_base import BaseSetup
+from ..setups.base import BaseSetup
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.utils import (
     build_structural_targets,
     get_dynamic_params,
     validate_rr_or_penalty,
 )
-from .spec_patterns import build_spec_signal, detect_structure_break_retest
+from ..setups.detectors import build_spec_signal, detect_structure_break_retest
 
 
 def _as_float(value: object, default: float = 0.0) -> float:
@@ -128,8 +128,11 @@ class StructureBreakRetestSetup(BaseSetup):
                 params=dynamic_params,
             )
 
+        from ..setups.utils import coerce_int
+
         swing_lookback = max(
-            2, int(dynamic_params.get("swing_lookback", defaults["swing_lookback"]))
+            2,
+            coerce_int(dynamic_params.get("swing_lookback"), int(defaults["swing_lookback"])),
         )
         retest_atr_mult = float(
             dynamic_params.get(

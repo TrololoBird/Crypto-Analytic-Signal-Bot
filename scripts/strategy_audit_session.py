@@ -8,7 +8,7 @@ from pathlib import Path
 import subprocess
 from typing import Any
 
-from bot.core.diagnostics.strategy_audit import (
+from bot.diagnostics.runtime.strategy_audit import (
     SCHEDULED_SETUP_IDS,
     build_audit_report,
     gate_failures,

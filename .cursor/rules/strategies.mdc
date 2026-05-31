@@ -1,0 +1,13 @@
+---
+description: Strategy detectors and setup helpers
+globs: bot/strategies/**/*.py,bot/setups/**/*.py
+alwaysApply: false
+---
+
+# Strategies
+
+- Class with `strategy_id` and `calculate()` → `SignalResult` / `StrategyDecision`
+- Use prepared Polars columns on `PreparedSymbol`; no pandas on hot path
+- Shared logic in `spec_patterns.py` / `setups/` — do not duplicate indicators
+- Zero hits: telemetry triage before threshold changes; run `live_check_strategies.py`
+- Fix broken strategies; do not set `enabled=False` without documented reason in config

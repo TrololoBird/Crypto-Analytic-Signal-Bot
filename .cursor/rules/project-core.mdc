@@ -1,0 +1,37 @@
+---
+description: Core identity, guardrails, and graphify for crypto signal bot v9
+alwaysApply: true
+---
+
+# Crypto Signal Bot v9
+
+Event-driven Binance USDⓈ-M **public** signal bot. Telegram manual signals only. Python **3.14**, Polars pipeline, async runtime.
+
+## Non-negotiable guardrails
+
+- NO auto-trading, order placement, or private/auth Binance endpoints
+- Delivery path: `validate_signal_contract` → `hard_confluence_gate` (3-of-5) → `delivery.deliver` — never bypass
+- Strategy logic in `bot/strategies/`; orchestration in `bot/runtime/` (legacy: `bot/application/`)
+- Data plane: `bot/market/` | Features: `bot/features.py` → `bot/features/` in Phase 2
+- Delivery: `bot/delivery.py` + `messaging.py` → `bot/delivery/` in Phase 2
+- Persistence: `bot/persistence/` | Engine: `bot/engine/`
+- Prefer Polars expressions; Wilder ATR/RSI; BB std ddof=1; no `shift(-N)` on live path
+- Rewrite broken modules; do not disable strategies silently
+
+## Verification (truth tests)
+
+Unit tests in repo are **live Binance only** (`tests/live/`, `PYTEST_LIVE=1`). After changes:
+
+```powershell
+python -m compileall -q bot
+python scripts/validate_config.py --config config.toml
+$env:PYTEST_LIVE=1; pytest tests/live/ -v
+```
+
+## graphify
+
+When `graphify-out/graph.json` exists: `graphify query`, `graphify path`, `graphify explain` before broad grep. After code changes: `graphify update .`
+
+## Refactor target layout
+
+See `docs/REFACTOR_PLAN.md` — v9 packages: `market/`, `runtime/`, `persistence/`, `engine/` (Phase 1 scaffold). `features/` and `delivery/` packages land in Phase 2 after renaming legacy modules.

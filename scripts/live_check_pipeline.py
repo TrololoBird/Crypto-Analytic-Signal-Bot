@@ -26,13 +26,14 @@ except ModuleNotFoundError:  # pragma: no cover - direct script execution
 
 bootstrap_repo_path()
 
-from bot.application.bot import SignalBot
+from bot.runtime.bot import SignalBot
 from bot.domain.config import load_settings
-from bot.market_data import BinanceFuturesMarketData, MarketDataUnavailable
-from bot.messaging import DeliveryResult
+from bot.market.data import BinanceFuturesMarketData, MarketDataUnavailable
+from bot.market.rest import BinanceClientImpl
+from bot.delivery.telegram import DeliveryResult
 from bot.domain.schemas import SymbolFrames, UniverseSymbol
 from bot.telemetry import TelemetryStore
-from bot.universe import strategy_fits_for_market_row
+from bot.market.universe import strategy_fits_for_market_row
 
 
 LOG = configure_script_logging("scripts.live_check_pipeline")
@@ -302,11 +303,13 @@ async def _run(
     os.environ.setdefault("BOT_DISABLE_HTTP_SERVERS", "1")
     settings = load_settings()
     client = BinanceFuturesMarketData(
-        rest_timeout_seconds=min(
-            float(settings.ws.rest_timeout_seconds),
-            LIVE_CHECK_HTTP_TIMEOUT_SECONDS,
+        binance_client=BinanceClientImpl(
+            rest_timeout_seconds=min(
+                float(settings.ws.rest_timeout_seconds),
+                LIVE_CHECK_HTTP_TIMEOUT_SECONDS,
+            ),
+            futures_data_request_limit_per_5m=settings.runtime.futures_data_request_limit_per_5m,
         ),
-        futures_data_request_limit_per_5m=settings.runtime.futures_data_request_limit_per_5m,
     )
     run_id = f"live_pipeline_check_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}"
     telemetry = TelemetryStore(settings.telemetry_dir, run_id=run_id)

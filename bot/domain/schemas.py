@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
-from ..signal_contract import (
+from ..delivery.contract import (
     DEFAULT_SCALE_WEIGHTS,
     DEFAULT_TARGET_RR,
     default_ttl_bars,
@@ -210,6 +210,26 @@ class PreparedSymbol:
         if self.work_15m.is_empty() or "atr_pct" not in self.work_15m.columns:
             return None
         value = self.work_15m.item(-1, "atr_pct")
+        try:
+            return None if value is None else float(value)
+        except (TypeError, ValueError):
+            return None
+
+    @property
+    def volume_ratio(self) -> float | None:
+        if self.work_15m.is_empty() or "volume_ratio20" not in self.work_15m.columns:
+            return None
+        value = self.work_15m.item(-1, "volume_ratio20")
+        try:
+            return None if value is None else float(value)
+        except (TypeError, ValueError):
+            return None
+
+    @property
+    def adx_1h(self) -> float | None:
+        if self.work_1h.is_empty() or "adx14" not in self.work_1h.columns:
+            return None
+        value = self.work_1h.item(-1, "adx14")
         try:
             return None if value is None else float(value)
         except (TypeError, ValueError):

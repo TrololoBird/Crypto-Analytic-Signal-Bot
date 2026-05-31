@@ -10,10 +10,10 @@ from datetime import datetime, timezone
 from ..domain.config import BotSettings
 from ..features import _swing_points
 from ..domain.schemas import PreparedSymbol, Signal
-from ..setup_base import BaseSetup
+from ..setups.base import BaseSetup
 from ..setups import _build_signal, _compute_dynamic_score, _last_swing_prices, _reject
 from ..setups.utils import get_dynamic_params, normalize_trade_levels
-from .spec_patterns import build_spec_signal, detect_wick_trap
+from ..setups.detectors import build_spec_signal, detect_wick_trap
 
 
 def _as_float(value: object, default: float = 0.0) -> float:
@@ -48,7 +48,7 @@ class WickTrapReversalSetup(BaseSetup):
             "wick_through_atr_mult": 0.3,
             "closed_back_atr_mult": 0.10,
             "min_volume_ratio": 1.20,
-            "max_confirmation_bars": 4,
+            "max_confirmation_bars": 8,
         }
         if settings is not None:
             filters = getattr(settings, "filters", None)

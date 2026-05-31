@@ -20,5 +20,5 @@ target_atr_mult = 2.0
 base_score = 0.52
 
 [filters]
-min_adx = 18.0
+min_adx = 15.0
 require_trend_alignment = true

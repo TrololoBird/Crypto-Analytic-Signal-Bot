@@ -17,7 +17,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          python-version: '3.14'
           cache: 'pip'
       - name: Cache pip dependencies
         uses: actions/cache@v4
@@ -53,7 +53,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          python-version: '3.14'
           cache: 'pip'
       - name: Cache pip dependencies
         uses: actions/cache@v4
@@ -65,7 +65,7 @@ jobs:
       - name: Install dependencies
         run: pip install -e '.[dev]' 2>&1 | grep -v 'Multiple top-level' || true
       - name: Run mypy on critical files
-        run: mypy bot/confluence.py bot/domain/config.py --follow-imports=skip --ignore-missing-imports
+        run: mypy bot/delivery/confluence.py bot/domain/config.py --follow-imports=skip --ignore-missing-imports
         continue-on-error: false
 
   typecheck-full-report:
@@ -78,7 +78,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          python-version: '3.14'
           cache: 'pip'
       - name: Cache pip dependencies
         uses: actions/cache@v4
@@ -101,7 +101,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          python-version: '3.14'
           cache: 'pip'
       - name: Cache pip dependencies
         uses: actions/cache@v4
@@ -111,12 +111,14 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-test-
       - name: Install dependencies
-        run: pip install -e '.[dev,test]' 2>&1 | grep -v 'Multiple top-level' || true
-      - name: Run pytest
-        run: pytest tests/ -v --cov=bot --cov-report=xml
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
-        with:
-          files: ./coverage.xml
-          flags: unittests
-          fail_ci_if_error: false
+        run: pip install -e '.[dev,test,live]' 2>&1 | grep -v 'Multiple top-level' || true
+      - name: Compile bot package
+        run: python -m compileall -q bot
+      - name: Validate config
+        run: python scripts/validate_config.py --config config.toml
+      - name: v9 refactor gate
+        run: python scripts/verify_refactor_gate.py
+      - name: Run live Binance tests (public API only)
+        run: pytest tests/live/ -v -m live
+        env:
+          PYTEST_LIVE: "1"

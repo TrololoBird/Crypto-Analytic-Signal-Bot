@@ -1,0 +1,16 @@
+# depth_imbalance — catalog defaults (ops-tunable)
+
+[strategy]
+enabled = true
+name = "depth_imbalance"
+
+[scoring]
+base_score = 0.52
+
+[filters]
+min_volume_ratio = 0.8
+min_adx = 0.0
+
+[risk_management]
+sl_buffer_atr = 0.85
+min_rr = 1.9

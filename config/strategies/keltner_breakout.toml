@@ -1,0 +1,16 @@
+# keltner_breakout — catalog defaults (ops-tunable)
+
+[strategy]
+enabled = true
+name = "keltner_breakout"
+
+[scoring]
+base_score = 0.54
+
+[filters]
+min_volume_ratio = 1.25
+min_adx = 15.0
+
+[risk_management]
+sl_buffer_atr = 0.85
+min_rr = 1.9

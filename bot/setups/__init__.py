@@ -15,7 +15,7 @@ import polars as pl
 from ..domain.strategies import StrategyDecision
 from ..features import _swing_points  # shared swing detection helper
 from ..domain.schemas import PreparedSymbol, Signal
-from ..signal_contract import build_trade_plan
+from ..delivery.contract import build_trade_plan
 from .utils import (
     apply_graded_penalty,
     build_structural_targets,

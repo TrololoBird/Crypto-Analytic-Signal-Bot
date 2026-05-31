@@ -14,14 +14,14 @@ from __future__ import annotations
 import logging
 import math
 
-from ..setup_base import BaseSetup
+from ..setups.base import BaseSetup
 from ..domain.config import BotSettings
 from ..domain.schemas import PreparedSymbol, Signal
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..features import _swing_points
 from ..setups.utils import get_dynamic_params
 from .common import as_float
-from .spec_patterns import build_spec_signal, detect_hidden_divergence
+from ..setups.detectors import build_spec_signal, detect_hidden_divergence
 
 LOG = logging.getLogger("bot.strategies.hidden_divergence")
 

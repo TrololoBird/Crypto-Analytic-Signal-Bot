@@ -1,0 +1,16 @@
+# price_velocity — catalog defaults (ops-tunable)
+
+[strategy]
+enabled = true
+name = "price_velocity"
+
+[scoring]
+base_score = 0.53
+
+[filters]
+min_volume_ratio = 1.0
+min_adx = 16.0
+
+[risk_management]
+sl_buffer_atr = 0.85
+min_rr = 1.9

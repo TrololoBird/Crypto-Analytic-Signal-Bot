@@ -9,7 +9,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
-import ctypes
 import json
 import logging
 import logging.handlers
@@ -23,11 +22,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import re
 import shutil
-from typing import Any, cast
+from typing import Any
 
 from . import BotSettings, SignalBot, load_settings
 from .logging_config import configure_structlog
-from .startup_reporter import generate_and_send_startup_report, run_daily_summary_loop
+from .ops.pid_utils import pid_is_alive as _pid_is_alive
+from .ops.startup_report import generate_and_send_startup_report, run_daily_summary_loop
 from .telemetry import TelemetryStore
 
 _LOGGER_STDERR_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?:,\d{3})?\s+\|")
@@ -245,25 +245,6 @@ def configure_logging(settings: BotSettings, *, debug_mode: bool = False) -> Non
     logger.info("DEBUG MODE | %s", debug_mode)
     logger.info("ASYNCIO DEBUG | %s", loop.get_debug())
     logger.info("=" * 80)
-
-
-def _pid_is_alive(pid: int) -> bool:
-    if pid <= 0:
-        return False
-    if os.name == "nt":
-        process_query_limited_information = 0x1000
-        # Access windll only if on Windows
-        kernel32 = cast(Any, ctypes).windll.kernel32
-        handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
-        if handle:
-            kernel32.CloseHandle(handle)
-            return True
-        return ctypes.get_last_error() == 5
-    try:
-        os.kill(pid, 0)
-    except OSError:
-        return False
-    return True
 
 
 def _read_pid_value(pid_file: Path) -> int:
@@ -660,7 +641,7 @@ async def _db_migrate_command() -> None:
 async def _db_clean_command(*, days: int) -> None:
     from datetime import timedelta
 
-    from .core.memory import MemoryRepository
+    from .persistence.repository import MemoryRepository
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     settings = load_settings("config.toml")

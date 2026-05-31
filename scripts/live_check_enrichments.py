@@ -30,9 +30,10 @@ import structlog
 
 from bot.domain.config import load_settings
 from bot.features import min_required_bars, prepare_symbol
-from bot.market_data import BinanceFuturesMarketData
+from bot.market.data import BinanceFuturesMarketData
+from bot.market.rest import BinanceClientImpl
 from bot.domain.schemas import SymbolFrames, UniverseSymbol
-from bot.ws_manager import FuturesWSManager
+from bot.market.ws import FuturesWSManager
 
 LOG = structlog.get_logger("scripts.live_check_enrichments")
 LIVE_CHECK_HTTP_TIMEOUT_SECONDS = 30.0  # seconds: cap live REST smoke checks
@@ -255,11 +256,13 @@ async def _run(
         min_bars_4h=settings.filters.min_bars_4h,
     )
     client = BinanceFuturesMarketData(
-        rest_timeout_seconds=min(
-            float(settings.ws.rest_timeout_seconds),
-            LIVE_CHECK_HTTP_TIMEOUT_SECONDS,
+        binance_client=BinanceClientImpl(
+            rest_timeout_seconds=min(
+                float(settings.ws.rest_timeout_seconds),
+                LIVE_CHECK_HTTP_TIMEOUT_SECONDS,
+            ),
+            futures_data_request_limit_per_5m=settings.runtime.futures_data_request_limit_per_5m,
         ),
-        futures_data_request_limit_per_5m=settings.runtime.futures_data_request_limit_per_5m,
     )
     ws_manager = FuturesWSManager(client, settings.ws)
 

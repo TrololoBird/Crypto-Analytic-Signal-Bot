@@ -3,8 +3,10 @@
 check:
 	@echo "=== Compile check ==="
 	@python -m compileall -q bot
+	@echo "=== v9 refactor gate ==="
+	@python scripts/verify_refactor_gate.py
 	@echo "=== Import check ==="
-	@python -c "from bot.application.bot import SignalBot; print('Imports OK')"
+	@python -c "from bot.runtime.bot import SignalBot; print('Imports OK')"
 	@echo "=== Strategy export check ==="
 	@python -c "from bot.strategies import STRATEGY_CLASSES; print(f'Strategies: {len(STRATEGY_CLASSES)}')"
 

@@ -14,10 +14,10 @@ import math
 
 from ..domain.config import BotSettings
 from ..domain.schemas import PreparedSymbol, Signal
-from ..setup_base import BaseSetup
+from ..setups.base import BaseSetup
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.utils import get_dynamic_params, normalize_trade_levels
-from .spec_patterns import build_spec_signal, detect_turtle_soup
+from ..setups.detectors import build_spec_signal, detect_turtle_soup
 
 LOG = logging.getLogger("bot.strategies.turtle_soup")
 

@@ -10,10 +10,10 @@ import math
 from ..domain.config import BotSettings
 from ..features import _swing_points
 from ..domain.schemas import PreparedSymbol, Signal
-from ..setup_base import BaseSetup
+from ..setups.base import BaseSetup
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.utils import build_structural_targets, get_dynamic_params
-from .spec_patterns import build_spec_signal, detect_keltner_breakout
+from ..setups.detectors import build_spec_signal, detect_keltner_breakout
 
 
 def _as_float(value: object, default: float = 0.0) -> float:
@@ -33,8 +33,8 @@ class KeltnerBreakoutSetup(BaseSetup):
     def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
         defaults = {
             "base_score": 0.54,
-            "min_volume_ratio": 1.30,
-            "min_adx_1h": 14.0,
+            "min_volume_ratio": 1.15,
+            "min_adx_1h": 13.0,
             "sl_buffer_atr": 0.9,
             "min_rr": 1.9,
             "breakout_lookback_bars": 8,
@@ -44,7 +44,7 @@ class KeltnerBreakoutSetup(BaseSetup):
             "acceptance_band_pct": 0.015,
             "wick_acceptance_band_pct": 0.006,
             "min_body_ratio": 0.28,
-            "soft_min_volume_ratio": 1.05,
+            "soft_min_volume_ratio": 0.95,
             "max_retest_distance_atr": 1.25,
             "volume_penalty": 0.90,
             "wick_breakout_penalty": 0.92,

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from .application.bot import SignalBot
+    from .runtime.bot import SignalBot
     from .domain.config import BotSettings
 
 __all__ = ["SignalBot", "BotSettings", "load_settings"]
@@ -11,7 +11,7 @@ __all__ = ["SignalBot", "BotSettings", "load_settings"]
 
 def __getattr__(name: str) -> Any:
     if name == "SignalBot":
-        from .application.bot import SignalBot as _SignalBot
+        from .runtime.bot import SignalBot as _SignalBot
 
         return _SignalBot
     if name == "BotSettings":

@@ -1,0 +1,16 @@
+# volume_anomaly — catalog defaults (ops-tunable)
+
+[strategy]
+enabled = true
+name = "volume_anomaly"
+
+[scoring]
+base_score = 0.52
+
+[filters]
+min_volume_ratio = 1.6
+min_adx = 15.0
+
+[risk_management]
+sl_buffer_atr = 0.85
+min_rr = 1.9

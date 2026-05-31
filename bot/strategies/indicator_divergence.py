@@ -15,11 +15,11 @@ import polars as pl
 from ..domain.config import BotSettings
 from ..domain.schemas import PreparedSymbol, Signal
 from ..features import _swing_points
-from ..setup_base import BaseSetup
+from ..setups.base import BaseSetup
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.utils import get_dynamic_params
 from .common import as_float as _as_float
-from .spec_patterns import build_spec_signal, detect_regular_divergence
+from ..setups.detectors import build_spec_signal, detect_regular_divergence
 
 
 def _tail_pair(values: list[float]) -> tuple[float, float] | None:
@@ -61,8 +61,8 @@ class IndicatorDivergenceSetup(BaseSetup):
         defaults = {
             "base_score": 0.53,
             "swing_lookback": 6.0,
-            "min_price_delta_pct": 0.50,  # unit: percentage points (0.50 = 0.50%)
-            "min_indicator_votes": 2.0,
+            "min_price_delta_pct": 0.35,
+            "min_indicator_votes": 1.5,
             "min_volume_ratio": 0.75,
             "max_rsi_long": 55.0,
             "min_rsi_short": 45.0,

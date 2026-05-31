@@ -11,9 +11,9 @@ from typing import Any
 
 import structlog
 
-from bot.application.bot import SignalBot
+from bot.runtime.bot import SignalBot
 from bot.domain.config import load_settings
-from bot.messaging import DeliveryResult
+from bot.delivery.telegram import DeliveryResult
 
 
 LOG = structlog.get_logger("scripts.live_smoke_bot")

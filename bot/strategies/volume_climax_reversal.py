@@ -9,10 +9,10 @@ import math
 
 from ..domain.config import BotSettings
 from ..domain.schemas import PreparedSymbol, Signal
-from ..setup_base import BaseSetup
+from ..setups.base import BaseSetup
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.utils import get_dynamic_params
-from .spec_patterns import build_spec_signal, detect_volume_climax_reversal
+from ..setups.detectors import build_spec_signal, detect_volume_climax_reversal
 
 
 def _as_float(value: object, default: float = 0.0) -> float:

@@ -15,6 +15,7 @@ REQUIRED_PINNED_SYMBOLS: tuple[str, ...] = (
     "BTCUSDT",
     "ETHUSDT",
     "SOLUSDT",
+    "XRPUSDT",
     "XAUUSDT",
     "XAGUSDT",
     "PAXGUSDT",
@@ -55,7 +56,9 @@ class RuntimeConfig(BaseModel):
     emergency_fallback_seconds: int = Field(default=1800, ge=300, le=7200)
     strict_data_quality: bool = True
     emit_strategy_routing_skips: bool = True
-    route_all_enabled_strategies: bool = True
+    route_all_enabled_strategies: bool = False
+    max_setup_families_per_symbol: int = Field(default=15, ge=1, le=38)
+    analysis_kline_intervals: tuple[str, ...] = ("5m", "15m", "1h")
     diagnostic_trace_limit_per_symbol: int = Field(default=20, ge=0, le=500)
     # Startup throttling to prevent REST API flood
     startup_batch_size: int = Field(default=3, ge=1, le=10)
@@ -72,6 +75,15 @@ class RuntimeConfig(BaseModel):
     @classmethod
     def _normalize_log_level(cls, value: str) -> str:
         return str(value or "INFO").strip().upper()
+
+    @field_validator("analysis_kline_intervals", mode="before")
+    @classmethod
+    def _normalize_analysis_intervals(cls, value: object) -> tuple[str, ...]:
+        if value is None:
+            return ("5m", "15m", "1h")
+        if isinstance(value, str):
+            return (value.strip(),)
+        return tuple(str(item).strip() for item in value if str(item).strip())
 
 
 class UniverseConfig(BaseModel):
@@ -326,6 +338,15 @@ class ScoringConfig(BaseModel):
         return self
 
 
+class DeliveryConfig(BaseModel):
+    """Telegram tier thresholds and delivery policy gates."""
+
+    action_min_score: float = Field(default=0.72, ge=0.0, le=1.0)
+    watch_min_score: float = Field(default=0.55, ge=0.0, le=1.0)
+    r_class_watch_only: bool = True
+    public_audit_enabled: bool = True
+
+
 class AlertConfig(BaseModel):
     """Pre-alert funnel configuration.
 
@@ -576,6 +597,7 @@ class BotSettings(BaseModel):
     setups: SetupConfig = Field(default_factory=SetupConfig)
     ws: WSConfig = Field(default_factory=WSConfig)
     scoring: ScoringConfig = Field(default_factory=ScoringConfig)
+    delivery: DeliveryConfig = Field(default_factory=DeliveryConfig)
     alerts: AlertConfig = Field(default_factory=AlertConfig)
     notifiers: NotifierConfig = Field(default_factory=NotifierConfig)
     spot_companion: SpotCompanionConfig = Field(default_factory=SpotCompanionConfig)
@@ -601,6 +623,10 @@ class BotSettings(BaseModel):
     @property
     def pid_file(self) -> Path:
         return self.data_dir / "bot.pid"
+
+    @property
+    def public_audit_dir(self) -> Path:
+        return self.data_dir / "public_audit"
 
     @property
     def log_level(self) -> str:

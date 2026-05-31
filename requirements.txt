@@ -1,4 +1,4 @@
-# Dependency manifest for crypto-signal-bot (Python 3.13).
+# Dependency manifest for crypto-signal-bot (Python 3.14).
 #
 # Canonical source of truth: pyproject.toml
 # Do NOT treat this file as "install everything listed below".

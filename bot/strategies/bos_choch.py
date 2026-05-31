@@ -14,14 +14,14 @@ import math
 
 import polars as pl
 
-from ..setup_base import BaseSetup
+from ..setups.base import BaseSetup
 from ..domain.config import BotSettings
 from ..domain.schemas import PreparedSymbol, Signal
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..features import _swing_points
 from ..setups.smc import latest_structure_break, swing_highs_lows
 from ..setups.utils import get_dynamic_params
-from .spec_patterns import build_spec_signal, detect_bos_choch
+from ..setups.detectors import build_spec_signal, detect_bos_choch
 
 LOG = logging.getLogger("bot.strategies.bos_choch")
 
@@ -247,15 +247,24 @@ class BOSCHOCHSetup(BaseSetup):
                 params=dynamic_params,
             )
 
-        configured_swing_lookback = int(
-            dynamic_params.get("swing_lookback", defaults["swing_lookback"])
+        from ..setups.utils import coerce_int
+
+        configured_swing_lookback = coerce_int(
+            dynamic_params.get("swing_lookback"), int(defaults["swing_lookback"])
         )
-        bos_lookback = int(dynamic_params.get("bos_lookback", configured_swing_lookback))
-        choch_lookback = int(dynamic_params.get("choch_lookback", configured_swing_lookback))
+        bos_lookback = coerce_int(
+            dynamic_params.get("bos_lookback"), configured_swing_lookback
+        )
+        choch_lookback = coerce_int(
+            dynamic_params.get("choch_lookback"), configured_swing_lookback
+        )
         swing_lookback = max(2, max(bos_lookback, choch_lookback, configured_swing_lookback))
         external_swing_lookback = max(
             swing_lookback + 1,
-            int(dynamic_params.get("external_swing_lookback", defaults["external_swing_lookback"])),
+            coerce_int(
+                dynamic_params.get("external_swing_lookback"),
+                int(defaults["external_swing_lookback"]),
+            ),
         )
         sl_buffer_atr = float(dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]))
         min_rr = float(dynamic_params.get("min_rr", defaults["min_rr"]))
@@ -263,11 +272,11 @@ class BOSCHOCHSetup(BaseSetup):
         breakout_threshold_atr = float(
             dynamic_params.get("breakout_threshold_atr", defaults["breakout_threshold_atr"])
         )
-        max_break_age_bars = int(
-            dynamic_params.get("max_break_age_bars", defaults["max_break_age_bars"])
+        max_break_age_bars = coerce_int(
+            dynamic_params.get("max_break_age_bars"), int(defaults["max_break_age_bars"])
         )
-        max_retest_age_bars = int(
-            dynamic_params.get("max_retest_age_bars", defaults["max_retest_age_bars"])
+        max_retest_age_bars = coerce_int(
+            dynamic_params.get("max_retest_age_bars"), int(defaults["max_retest_age_bars"])
         )
         retest_atr_mult = float(
             dynamic_params.get("retest_atr_mult", defaults["retest_atr_mult"])
@@ -333,7 +342,8 @@ class BOSCHOCHSetup(BaseSetup):
 
         # Need at least 3 of each to determine prior trend + break
         min_swings = max(
-            3, int(dynamic_params.get("min_swings", defaults["min_swings"]))
+            3,
+            coerce_int(dynamic_params.get("min_swings"), int(defaults["min_swings"])),
         )
         if sh_prices.len() < min_swings or sl_prices.len() < min_swings:
             _reject(

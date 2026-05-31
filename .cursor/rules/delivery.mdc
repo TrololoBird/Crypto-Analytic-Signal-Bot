@@ -1,0 +1,13 @@
+---
+description: Signal contract, confluence gate, and Telegram delivery
+globs: bot/delivery/**/*.py,bot/runtime/delivery_orchestrator.py
+alwaysApply: false
+---
+
+# Delivery path (NON-BYPASSABLE)
+
+1. `validate_signal_contract(signal)` — `bot/delivery/contract.py`
+2. `hard_confluence_gate` — 3 of 5 (`bot/delivery/confluence.py`)
+3. `delivery.deliver` — `bot/delivery/deliver.py`
+
+Track attempts in telemetry. Enforce cooldowns and symbol blacklists. Telegram via `bot/delivery/telegram.py`. Watch funnel via `bot/delivery/watch.py`.

@@ -21,18 +21,18 @@ except ModuleNotFoundError:  # pragma: no cover - direct script execution
 
 bootstrap_repo_path()
 
-from bot.application.delivery_orchestrator import DeliveryOrchestrator
-from bot.core.engine import SignalEngine, StrategyRegistry
+from bot.runtime.delivery_orchestrator import DeliveryOrchestrator
+from bot.engine import SignalEngine, StrategyRegistry
 from bot.domain.config import load_settings
 from bot.domain.schemas import Signal, SymbolFrames, SymbolMeta, UniverseSymbol
 from bot.features import min_required_bars, prepare_symbol
-from bot.market_data import (
+from bot.market.data import (
     BinanceFuturesMarketData,
     _drop_incomplete_ohlcv_tail,
     _klines_to_frame,
 )
-from bot.signal_contract import validate_signal_contract
-from bot.setup_base import SetupParams
+from bot.delivery.contract import validate_signal_contract
+from bot.setups.base import SetupParams
 from bot.strategies import STRATEGY_CLASSES
 
 

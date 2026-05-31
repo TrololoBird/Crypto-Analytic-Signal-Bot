@@ -73,6 +73,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=120,
         help="Expected minimum bar request size for live checks.",
     )
+    parser.add_argument(
+        "--startup-audit",
+        action="store_true",
+        help="Run runtime startup config audit (warnings only, does not block).",
+    )
     return parser.parse_args(argv)
 
 
@@ -132,12 +137,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not path.exists():
             path.mkdir(parents=True, exist_ok=True)
 
-    # 2) Импорт экспортов стратегий
+    # 2) Импорт экспортов стратегий + PR10 catalog wiring
     try:
         from bot.strategies import STRATEGY_CLASSES
+        from bot.domain.strategy_catalog import verify_strategy_wiring
 
         if not STRATEGY_CLASSES:
             errors.append("No strategies exported via bot.strategies.STRATEGY_CLASSES")
+        else:
+            errors.extend(verify_strategy_wiring(STRATEGY_CLASSES))
     except Exception as exc:  # pragma: no cover - defensive CLI script
         errors.append(f"Strategy import failed: {exc}")
 
@@ -181,6 +189,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                     )
     except Exception as exc:  # pragma: no cover - defensive CLI script
         errors.append(f"Indicator validation failed: {exc}")
+
+    if getattr(args, "startup_audit", False):
+        try:
+            from bot.diagnostics.config_audit import run_startup_audit
+
+            run_startup_audit(settings)
+            print("  [OK] Startup config audit (warnings only, see logs)")
+        except Exception as exc:  # pragma: no cover - defensive CLI script
+            errors.append(f"Startup audit failed: {exc}")
 
     if errors:
         print("VALIDATION FAILED:")

@@ -11,13 +11,13 @@ from __future__ import annotations
 import logging
 import math
 
-from ..setup_base import BaseSetup
+from ..setups.base import BaseSetup
 from ..domain.config import BotSettings
 from ..domain.schemas import PreparedSymbol, Signal
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.smc import latest_breaker_block
 from ..setups.utils import get_dynamic_params
-from .spec_patterns import build_spec_signal, detect_breaker_block
+from ..setups.detectors import build_spec_signal, detect_breaker_block
 
 LOG = logging.getLogger("bot.strategies.breaker_block")
 

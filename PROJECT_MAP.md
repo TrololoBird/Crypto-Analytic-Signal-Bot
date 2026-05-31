@@ -1,6 +1,6 @@
 # PROJECT MAP - Binance public signal-only bot
 
-Updated: 2026-05-26
+Updated: 2026-05-31
 
 ## Mission
 
@@ -9,19 +9,19 @@ orders. The runtime prepares market data, evaluates strategy signals, validates 
 contract, applies hard delivery gates, and sends only manual-trading signal messages to
 Telegram.
 
-## Data Flow
+## Data Flow (v9)
 
 ```text
 Binance REST/WS
-  -> bot/market_data.py and bot/ws_manager.py
-  -> bot/application/shortlist_service.py + bot/universe.py
-  -> bot/features.py + bot/features_microstructure.py
-  -> bot/core/engine/engine.py + bot/strategies/*
-  -> bot/filters.py + bot/confluence.py
-  -> bot/application/delivery_orchestrator.py
-  -> bot/signal_contract.py validate_signal_contract()
+  -> bot/market/rest.py + bot/market/ws.py (+ ws_* helpers)
+  -> bot/runtime/shortlist_service.py + bot/market/universe.py
+  -> bot/features/prepare.py (+ feature submodules)
+  -> bot/engine/ + bot/strategies/*
+  -> bot/delivery/filters.py + bot/delivery/confluence.py
+  -> bot/runtime/delivery_orchestrator.py
+  -> bot/delivery/contract.py validate_signal_contract()
   -> hard 3-of-5 delivery confluence gate
-  -> bot/delivery.py + bot/telegram_formatter.py
+  -> bot/delivery/deliver.py + bot/delivery/telegram.py
   -> Telegram group for manual execution
 ```
 
@@ -32,7 +32,7 @@ The enforced delivery path is:
 ```text
 strategy Signal
   -> DeliveryOrchestrator._contract_issue_rows()
-  -> signal_contract.validate_signal_contract()
+  -> signal_contract.validate_signal_contract()  # bot/delivery/contract.py
   -> DeliveryOrchestrator._hard_confluence_gate()
   -> cooldown/tracking/quality checks
   -> delivery.deliver()
@@ -59,20 +59,21 @@ If a signal is appended for delivery without contract validation or hard gate pa
 
 | Area | File | Role |
 |---|---|---|
-| Config | `bot/domain/config.py` | Pinned symbols, thresholds, runtime settings. |
-| Contract | `bot/signal_contract.py` | Signal format and level validation. |
-| Delivery gate | `bot/application/delivery_orchestrator.py` | Final validation, hard confluence gate, cooldown, delivery. |
-| Universe | `bot/universe.py` | Multifactor dynamic shortlist scoring and strategy fit routing. |
-| Shortlist service | `bot/application/shortlist_service.py` | Enriches candidates with funding, spread, OI, basis, liquidation data. |
-| Features | `bot/features.py` | Main indicator pipeline, swing points, ATR/RSI/BB features. |
-| Shared math | `bot/features_shared.py` | Wilder smoothing and common indicator primitives. |
-| Strategy engine | `bot/core/engine/engine.py` | Executes enabled strategies and now reports schedule skips explicitly. |
+| Config | `bot/domain/config.py` | Pinned symbols (incl. XRPUSDT), thresholds, runtime settings. |
+| Contract | `bot/delivery/contract.py` | Signal format and level validation. |
+| Delivery gate | `bot/runtime/delivery_orchestrator.py` | Final validation, hard confluence gate, cooldown, delivery. |
+| Universe | `bot/market/universe.py` | Multifactor shortlist scoring and strategy fit routing. |
+| Shortlist service | `bot/runtime/shortlist_service.py` | Enriches candidates with funding, spread, OI, basis, liquidation data. |
+| Features | `bot/features/prepare.py` | Main indicator pipeline, swing points, ATR/RSI/BB features. |
+| Shared math | `bot/features/shared.py` | Wilder smoothing and common indicator primitives. |
+| Strategy engine | `bot/engine/engine.py` | Executes enabled strategies (lanes cap per symbol). |
 | Strategy registry | `bot/strategies/__init__.py` | Exports all 38 strategy classes. |
 | Spec patterns | `bot/strategies/spec_patterns.py` | Shared detectors for order blocks, pivots, squeeze, divergences. |
 | Historical audit | `scripts/historical_strategy_audit.py` | Replays closed Binance Futures klines in rolling windows across all 38 strategies. |
-| Telegram formatting | `bot/telegram_formatter.py` | Manual signal message formatting. |
-| Tracking | `bot/tracking.py`, `bot/outcomes.py` | Signal lifecycle and outcome features. |
-| Cache | `bot/core/memory/cache.py` | Parquet time-series cache with monthly compaction. |
+| Telegram formatting | `bot/delivery/formatting.py` | Manual signal message formatting. |
+| Tracking | `bot/persistence/tracking.py`, `bot/persistence/outcomes.py` | Signal lifecycle and outcome features. |
+| Cache | `bot/persistence/repository/cache.py` | Parquet time-series cache with monthly compaction. |
+| PID lock | `bot/ops/pid_utils.py` | Shared process lock helpers (cli + supervised sessions). |
 
 ## Strategies
 
@@ -93,7 +94,7 @@ If a signal is appended for delivery without contract validation or hard gate pa
 | 13 | cvd_divergence | CVDDivergenceSetup | `bot/strategies/cvd_divergence.py` | rejected by pattern filters, no errors |
 | 14 | session_killzone | SessionKillzoneSetup | `bot/strategies/session_killzone.py` | explicit schedule skip when inactive |
 | 15 | breaker_block | BreakerBlockSetup | `bot/strategies/breaker_block.py` | ran, no errors |
-| 16 | turtle_soup | TurtleSoupSetup | `bot/strategies/turtle_soup.py` | rejected by pattern filters, no errors |
+| 16 | turtle_soup | TurtleSoupSetup | `bot/strategies/turtle_soup.py` | live hits on top-volume slice (2026-05-31) |
 | 17 | vwap_trend | VWAPTrendSetup | `bot/strategies/vwap_trend.py` | rejected by pattern filters, no errors |
 | 18 | supertrend_follow | SuperTrendFollowSetup | `bot/strategies/supertrend_follow.py` | rejected by pattern filters, no errors |
 | 19 | price_velocity | PriceVelocitySetup | `bot/strategies/price_velocity.py` | ran, no errors |
@@ -132,20 +133,17 @@ If a signal is appended for delivery without contract validation or hard gate pa
 
 ## Verification Snapshot
 
-2026-05-26 checks:
+2026-05-31 checks (`.venv` Python 3.14.5):
 
 | Check | Result |
 |---|---|
-| `pytest -q` | 30 passed |
-| changed-file `py_compile` | passed |
-| live Binance API | REST OK, WS public/market OK, 3 warm symbols |
-| live indicators | 3 successes, 0 failures |
-| live pipeline | 3 dry-selected, 0 strategy errors |
-| live strategy surface | 38 registered/evaluated, 57 contracts checked, 0 contract failures |
-| top-10 historical rolling audit | 80 windows, 3040 detector runs, 38/38 strategies hit, 0 contract failures |
-| swing point 30d BTCUSDT 1h | no unconfirmed tail hits, no insufficient-left-context hits |
-| order-block detector before/after | 220 active zones before and after, 0 pre-confirm violations |
-| 20-minute live smoke | run artifact: `data/bot/telemetry/live_smoke_20260526_rerun/` |
+| `verify_refactor_gate.py` | passed |
+| `compileall bot` | passed |
+| `validate_config.py` | passed |
+| `pytest tests/live/` (PYTEST_LIVE=1) | 6 passed |
+| supervised session (2 min, takeover) | cycles=14, delivered=2, no pid conflict |
+
+Run with: `.\.venv\Scripts\python.exe` (requires-python 3.14).
 
 ## Known Operational Limits
 

@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import math
 
-from ..setup_base import BaseSetup
+from ..setups.base import BaseSetup
 from ..domain.config import BotSettings
 from ..domain.schemas import PreparedSymbol, Signal
 from ..setups import _build_signal, _compute_dynamic_score, _reject
@@ -23,7 +23,7 @@ from ..setups.utils import (
     validate_rr_or_penalty,
     get_dynamic_params,
 )
-from .spec_patterns import build_spec_signal, detect_fvg
+from ..setups.detectors import build_spec_signal, detect_fvg
 
 LOG = logging.getLogger("bot.strategies.fvg")
 

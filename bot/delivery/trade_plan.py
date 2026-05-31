@@ -1,0 +1,74 @@
+"""Trade plan builder — centralized entry/TP/SL math for manual signals."""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any
+
+from .contract import (
+    DEFAULT_SCALE_WEIGHTS,
+    DEFAULT_TARGET_RR,
+    TradePlan,
+    build_trade_plan,
+    default_ttl_bars,
+    normalize_scale_weights,
+    valid_until_from,
+)
+
+__all__ = [
+    "DEFAULT_SCALE_WEIGHTS",
+    "DEFAULT_TARGET_RR",
+    "TradePlan",
+    "TradePlanBuilder",
+    "build_trade_plan",
+    "default_ttl_bars",
+    "normalize_scale_weights",
+    "valid_until_from",
+]
+
+
+class TradePlanBuilder:
+    """Thin facade over ``contract.build_trade_plan`` for delivery/runtime."""
+
+    @staticmethod
+    def build(
+        *,
+        direction: str,
+        setup_id: str,
+        strategy_family: str,
+        timeframe: str,
+        price_anchor: float,
+        atr: float,
+        stop_loss: float,
+        tp1: float,
+        tp2: float,
+        entry_pad_atr_mult: float = 0.08,
+        now: datetime | None = None,
+    ) -> TradePlan | None:
+        return build_trade_plan(
+            direction=direction,
+            setup_id=setup_id,
+            strategy_family=strategy_family,
+            timeframe=timeframe,
+            price_anchor=price_anchor,
+            atr=atr,
+            stop_loss=stop_loss,
+            tp1=tp1,
+            tp2=tp2,
+            entry_pad_atr_mult=entry_pad_atr_mult,
+            now=now,
+        )
+
+    @staticmethod
+    def from_signal_fields(signal: Any, *, atr: float, price_anchor: float) -> TradePlan | None:
+        return build_trade_plan(
+            direction=str(getattr(signal, "direction", "") or ""),
+            setup_id=str(getattr(signal, "setup_id", "") or ""),
+            strategy_family=str(getattr(signal, "strategy_family", "") or "continuation"),
+            timeframe=str(getattr(signal, "timeframe", "") or "15m"),
+            price_anchor=price_anchor,
+            atr=atr,
+            stop_loss=float(getattr(signal, "stop", 0.0) or 0.0),
+            tp1=float(getattr(signal, "take_profit_1", 0.0) or 0.0),
+            tp2=float(getattr(signal, "take_profit_2", 0.0) or 0.0),
+        )

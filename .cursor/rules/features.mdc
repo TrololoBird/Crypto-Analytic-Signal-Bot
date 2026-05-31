@@ -1,0 +1,13 @@
+---
+description: Polars feature pipeline and indicators
+globs: bot/features*.py,bot/features/**/*.py
+alwaysApply: false
+---
+
+# Features pipeline
+
+- Polars + polars_ta; pure-Polars fallbacks when optional deps missing
+- Lazy/streaming for large work: `.set_streaming(True)` in backtests
+- Wilder smoothing ATR/RSI; BB std ddof=1
+- New columns: add to `PUBLIC_FEATURE_FIELDS` in `bot/domain/contracts.py`
+- Refactor goal: split monolith into `bot/features/` package (see REFACTOR_PLAN.md)

@@ -1,19 +1,27 @@
-"""Diagnostics helpers for offline runtime telemetry analysis."""
+"""Diagnostics — signals funnel, runtime health, config audit, quality."""
 
-from .runtime_analysis import (
-    aggregate_cycle_stats,
-    aggregate_rejection_funnel,
-    aggregate_symbol_funnel,
-    find_latest_run_dir,
-    parse_cycle_log_lines,
-    read_jsonl,
-)
+from __future__ import annotations
 
-__all__ = [
-    "aggregate_cycle_stats",
-    "aggregate_rejection_funnel",
-    "aggregate_symbol_funnel",
-    "find_latest_run_dir",
-    "parse_cycle_log_lines",
-    "read_jsonl",
-]
+import importlib
+from typing import Any
+
+from .signals import SignalDiagnostics, set_global_diagnostics
+
+_LAZY = {
+    "AlertManager": (".runtime", "AlertManager"),
+    "AlertSeverity": (".runtime", "AlertSeverity"),
+    "BotMetrics": (".runtime", "BotMetrics"),
+    "HealthChecker": (".runtime", "HealthChecker"),
+    "HealthStatus": (".runtime", "HealthStatus"),
+    "MetricsExporter": (".runtime", "MetricsExporter"),
+}
+
+__all__ = ["SignalDiagnostics", "set_global_diagnostics", *sorted(_LAZY)]
+
+
+def __getattr__(name: str) -> Any:
+    spec = _LAZY.get(name)
+    if spec is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module = importlib.import_module(spec[0], __name__)
+    return getattr(module, spec[1])
