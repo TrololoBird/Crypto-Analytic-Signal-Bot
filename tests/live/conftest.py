@@ -15,10 +15,7 @@ _GEO_SKIP_REASON: str | None = None
 def _restricted_location_reason(exc: MarketDataUnavailable) -> str | None:
     text = f"{exc.operation} {exc.detail}".lower()
     if "restricted location" in text or "service unavailable from a restricted" in text:
-        return (
-            "Binance public API blocked from this network (geo-restricted); "
-            "live tests skipped"
-        )
+        return "Binance public API blocked from this network (geo-restricted); live tests skipped"
     return None
 
 
