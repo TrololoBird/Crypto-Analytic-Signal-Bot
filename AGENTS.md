@@ -19,3 +19,62 @@ Rules:
 - Target research spec: `docs/research/README.md` (38 strategies, architecture, Binance public matrix, Telegram spec)
 - Live tests only: `tests/live/` with `PYTEST_LIVE=1`
 - Local venv (Python 3.14): `py -3.14 -m venv .venv` then `.\.venv\Scripts\pip install -e ".[live,dev,test]"`
+
+## Cursor Cloud specific instructions
+
+### Python and dependencies
+
+The repo requires **Python 3.14** (`requires-python = ">=3.14,<3.15"`). Cloud VMs often ship 3.12 only — install 3.14 with [uv](https://docs.astral.sh/uv/):
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+uv python install 3.14
+uv venv .venv --python 3.14
+source .venv/bin/activate
+uv pip install -e ".[live,dev,test]"
+```
+
+### Config (first run)
+
+`config.toml` is gitignored. Copy once per workspace:
+
+```bash
+cp config.toml.example config.toml
+python scripts/validate_config.py --config config.toml
+```
+
+For smoke runs without Telegram: `provider = "none"` in config (see `config.toml.example`) or `BOT_NOTIFIER_PROVIDER=none`.
+
+### Services (single process)
+
+| Port | Service |
+|------|---------|
+| — | `python main.py run` — main bot (WS + REST + strategies + SQLite) |
+| 8080 | Embedded FastAPI dashboard (`/api/health`, `/api/status`, …) |
+| 9090 | Prometheus metrics (`/metrics`) |
+
+Disable dashboard/metrics for scripts: `BOT_DISABLE_HTTP_SERVERS=1`.
+
+Standard commands: `Makefile` (`make check`, `make run`, `make live-smoke`), `AGENT_QUICK_START.md`.
+
+### Binance geo-restriction (important)
+
+Many cloud/datacenter IPs are **blocked by Binance public REST** (`Service unavailable from a restricted location`). In that case:
+
+- WebSocket to `fstream.binance.com` may still connect.
+- REST (`exchangeInfo`, klines, tickers) fails; live pytest and `live_check_*` scripts that fetch REST will fail.
+- `python main.py run` still starts (doctor OK, 38 strategies, dashboard `/api/health` can show `ws_connected: true`) but enrichment uses **pinned_fallback** and skips kline preload.
+
+Full live verification requires a network path Binance allows (local machine, allowed region, or corporate proxy). This is an external constraint, not a broken venv.
+
+### Verify in Cloud
+
+```bash
+source .venv/bin/activate
+make check
+python scripts/validate_config.py --config config.toml
+PYTEST_LIVE=1 pytest tests/live/test_strategy_catalog_wiring.py -v   # no REST
+# When Binance REST is reachable:
+PYTEST_LIVE=1 pytest tests/live/ -v
+python scripts/live_check_pipeline.py --symbols BTCUSDT --limit 1
+```
