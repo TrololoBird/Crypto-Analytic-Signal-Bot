@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import inspect
 import warnings
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from typing import Any, cast
 
 import numpy as np
@@ -45,7 +45,10 @@ def _warn_if_direct_imported() -> None:
         if frame.filename.replace("\\", "/").endswith("/bot/features/prepare.py"):
             return
     warnings.warn(
-        "bot.features.core is internal_only; use bot.features._prepare_frame for runtime feature preparation.",
+        (
+            "bot.features.core is internal_only; "
+            "use bot.features._prepare_frame for runtime feature preparation."
+        ),
         DeprecationWarning,
         stacklevel=3,
     )
@@ -59,7 +62,7 @@ def ema(df: pl.DataFrame, period: int, *, plta: Any = None, has_talib: bool = Fa
     ensure_columns(df, ("close",), fn_name="ema")
     if has_talib:
         return materialize_series(
-            cast(Any, plta).EMA(pl.col("close"), timeperiod=float(period)),
+            cast("Any", plta).EMA(pl.col("close"), timeperiod=float(period)),
             df=df,
             name=f"ema{period}",
         )
@@ -71,7 +74,7 @@ def ema(df: pl.DataFrame, period: int, *, plta: Any = None, has_talib: bool = Fa
 
 
 def rsi(
-    df: pl.DataFrame, period: int = 14, *, plta: Any = None, has_talib: bool = False
+    df: pl.DataFrame, period: int = 14, *, _plta: Any = None, _has_talib: bool = False
 ) -> pl.Series:
     """Contract: input requires `close`; output RSI in [0,100] with neutral fill 50."""
     ensure_columns(df, ("close",), fn_name="rsi")
@@ -115,7 +118,7 @@ def rsi(
 
 
 def atr(
-    df: pl.DataFrame, period: int = 14, *, plta: Any = None, has_talib: bool = False
+    df: pl.DataFrame, period: int = 14, *, _plta: Any = None, _has_talib: bool = False
 ) -> pl.Series:
     """Contract: input requires OHLC; output ATR series named `atr{period}`."""
     ensure_columns(df, REQUIRED_OHLCV_COLUMNS, fn_name="atr")
@@ -133,7 +136,7 @@ def adx(
     ensure_columns(df, REQUIRED_OHLCV_COLUMNS, fn_name="adx")
     if has_talib:
         return materialize_series(
-            cast(Any, plta).ADX(
+            cast("Any", plta).ADX(
                 pl.col("high"), pl.col("low"), pl.col("close"), timeperiod=float(period)
             ),
             df=df,
@@ -171,7 +174,7 @@ def adx(
 
 def _vwap_session_key(value: object) -> date | None:
     if isinstance(value, datetime):
-        return value.astimezone(timezone.utc).date() if value.tzinfo else value.date()
+        return value.astimezone(UTC).date() if value.tzinfo else value.date()
     if isinstance(value, date):
         return value
     return None
@@ -209,7 +212,7 @@ def roc(
     ensure_columns(df, ("close",), fn_name="roc")
     if has_talib:
         return materialize_series(
-            cast(Any, plta).ROC(pl.col("close"), timeperiod=float(period)),
+            cast("Any", plta).ROC(pl.col("close"), timeperiod=float(period)),
             df=df,
             name=f"roc{period}",
         )
@@ -245,7 +248,7 @@ def realized_volatility(df: pl.DataFrame, period: int = 20) -> pl.Series:
 def add_core_features(
     df: pl.DataFrame, *, plta: Any = None, has_talib: bool = False
 ) -> pl.DataFrame:
-    """Contract: input requires OHLCV (+ optional taker_buy_base_volume); output adds core trend/vol columns."""
+    """Contract: OHLCV (+ optional taker_buy_base_volume); adds core trend/vol columns."""
     work = df.with_columns(
         [
             ema(df, 20, plta=plta, has_talib=has_talib).alias("ema20"),

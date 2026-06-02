@@ -9,42 +9,38 @@ import random
 import time
 from collections import deque
 from collections.abc import Mapping
-from typing import Any, Deque, Dict, List, Optional, Set, Tuple, cast
+from typing import TYPE_CHECKING, Any, cast
 
-import aiohttp
 import polars as pl
 
+from bot.domain.config import NetworkConfig
 from bot.domain.schemas import (
     AggTrade,
     AggTradeSnapshot,
     SymbolFrames,
     SymbolMeta,
 )
-
+from bot.market.data import (
+    _CACHE_TTL,
+    _DEFAULT_KLINE_FETCH_LIMIT,
+    _DEFAULT_ORDER_BOOK_DEPTH_LIMIT,
+    _FAPI_BASE_URL,
+    _FUTURES_DATA_IP_LIMIT_DEFAULT,
+    _FUTURES_DATA_IP_LIMIT_OFFICIAL_MAX,
+    _FUTURES_DATA_IP_LIMIT_WINDOW_S,
+    _PERIOD_WINDOW_SECONDS,
+    _PUBLIC_ENDPOINT_REGISTRY,
+    _REST_WEIGHT_SOFT_LIMIT,
+    MarketDataUnavailable,
+    _PublicEndpointSpec,
+)
+from bot.market.network_proxy import apply_proxy_env, mask_proxy_url, resolve_proxy_url
+from bot.market.proxy_pool import ProxyPool
 from bot.market.rate_limit import (
     _SlidingWindowRateLimiter,
     _WeightBudgetManager,
 )
-from bot.market.data import (
-    MarketDataUnavailable,
-    _REST_WEIGHT_SOFT_LIMIT,
-    _FAPI_BASE_URL,
-    _FUTURES_DATA_IP_LIMIT_WINDOW_S,
-    _FUTURES_DATA_IP_LIMIT_OFFICIAL_MAX,
-    _FUTURES_DATA_IP_LIMIT_DEFAULT,
-    _CACHE_TTL,
-    _PERIOD_WINDOW_SECONDS,
-    _DEFAULT_KLINE_FETCH_LIMIT,
-    _DEFAULT_ORDER_BOOK_DEPTH_LIMIT,
-    _PublicEndpointSpec,
-    _PUBLIC_ENDPOINT_REGISTRY,
-)
-from bot.market.rest_validators import (
-    validate_interval,
-    validate_limit,
-    validate_order_book_depth_limit,
-    validate_symbol,
-)
+from bot.market.rest_abc import BinanceClient
 from bot.market.rest_frames import (
     _coerce_rest_row,
     _drop_incomplete_ohlcv_tail,
@@ -52,13 +48,18 @@ from bot.market.rest_frames import (
     _parse_depth_levels,
     _safe_float,
 )
+from bot.market.rest_http import RestHttpMixin
+from bot.market.rest_validators import (
+    validate_interval,
+    validate_limit,
+    validate_order_book_depth_limit,
+    validate_symbol,
+)
 
 LOG = logging.getLogger("bot.market.rest")
 
-
-from bot.market.network_proxy import apply_proxy_env, resolve_proxy_url
-from bot.market.rest_abc import BinanceClient
-from bot.market.rest_http import RestHttpMixin
+if TYPE_CHECKING:
+    import aiohttp
 
 
 class BinanceClientImpl(RestHttpMixin, BinanceClient):
@@ -72,11 +73,34 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         futures_data_request_limit_per_5m: int = _FUTURES_DATA_IP_LIMIT_DEFAULT,
         proxy_url: str | None = None,
         trust_env: bool = True,
+        network: NetworkConfig | None = None,
     ) -> None:
-        self._proxy_url = resolve_proxy_url(config_url=proxy_url, trust_env=trust_env)
-        self._trust_env = trust_env
+        net = network or NetworkConfig(proxy_url=proxy_url, trust_env=trust_env)
+        self._trust_env = net.trust_env
+        self._proxy_failover_enabled = bool(net.failover_enabled)
+        urls = net.effective_proxy_urls()
+        if not urls and net.trust_env:
+            env_only = resolve_proxy_url(config_url=None, trust_env=True)
+            if env_only:
+                urls = [env_only]
+        self._proxy_pool = ProxyPool.from_urls(
+            urls,
+            cooldown_seconds=net.failover_cooldown_seconds,
+        )
+        self._proxy_url = (
+            self._proxy_pool.current()
+            if self._proxy_pool is not None
+            else resolve_proxy_url(config_url=proxy_url, trust_env=trust_env)
+        )
         if self._proxy_url:
             apply_proxy_env(self._proxy_url)
+        if self._proxy_pool is not None:
+            LOG.info(
+                "proxy pool ready | active=%s endpoints=%d failover=%s",
+                mask_proxy_url(self._proxy_url or ""),
+                len(self._proxy_pool.urls),
+                self._proxy_failover_enabled,
+            )
         self._rest_timeout = rest_timeout_seconds
         self._futures_data_limit_per_5m = max(
             30,
@@ -86,22 +110,22 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             ),
         )
         self.client: Any = None
-        self._exchange_info_cache: Tuple[float, List[SymbolMeta]] | None = None
-        self._ticker_24h_cache: Tuple[float, List[Dict[str, float | str]]] | None = None
-        self._premium_index_all_cache: Tuple[float, Dict[str, Dict[str, float]]] | None = None
-        self._funding_rate_cache: Dict[str, Tuple[float, float]] = {}
-        self._open_interest_cache: Dict[str, Tuple[float, float]] = {}
-        self._open_interest_change_cache: Dict[Tuple[str, str], Tuple[float, float]] = {}
-        self._long_short_ratio_cache: Dict[Tuple[str, str], Tuple[float, float]] = {}
-        self._taker_ratio_cache: Dict[Tuple[str, str], Tuple[float, float]] = {}
-        self._global_ls_ratio_cache: Dict[Tuple[str, str], Tuple[float, float]] = {}
-        self._top_position_ls_ratio_cache: Dict[Tuple[str, str], Tuple[float, float]] = {}
-        self._funding_history_cache: Dict[str, Tuple[float, List[Dict[str, Any]]]] = {}
-        self._basis_cache: Dict[Tuple[str, str], Tuple[float, float | None]] = {}
-        self._basis_stats_cache: Dict[Tuple[str, str], Tuple[float, Dict[str, float | None]]] = {}
-        self._basis_ws_history: Dict[Tuple[str, str], Deque[Tuple[float, float]]] = {}
-        self._order_book_depth_cache: Dict[
-            Tuple[str, int], Tuple[float, Dict[str, float | None]]
+        self._exchange_info_cache: tuple[float, list[SymbolMeta]] | None = None
+        self._ticker_24h_cache: tuple[float, list[dict[str, float | str]]] | None = None
+        self._premium_index_all_cache: tuple[float, dict[str, dict[str, float]]] | None = None
+        self._funding_rate_cache: dict[str, tuple[float, float]] = {}
+        self._open_interest_cache: dict[str, tuple[float, float]] = {}
+        self._open_interest_change_cache: dict[tuple[str, str], tuple[float, float]] = {}
+        self._long_short_ratio_cache: dict[tuple[str, str], tuple[float, float]] = {}
+        self._taker_ratio_cache: dict[tuple[str, str], tuple[float, float]] = {}
+        self._global_ls_ratio_cache: dict[tuple[str, str], tuple[float, float]] = {}
+        self._top_position_ls_ratio_cache: dict[tuple[str, str], tuple[float, float]] = {}
+        self._funding_history_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+        self._basis_cache: dict[tuple[str, str], tuple[float, float | None]] = {}
+        self._basis_stats_cache: dict[tuple[str, str], tuple[float, dict[str, float | None]]] = {}
+        self._basis_ws_history: dict[tuple[str, str], deque[tuple[float, float]]] = {}
+        self._order_book_depth_cache: dict[
+            tuple[str, int], tuple[float, dict[str, float | None]]
         ] = {}
         self._ws: Any = ws_manager
         self._last_rest_weight_1m: int | None = None
@@ -120,13 +144,13 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             window_seconds=_FUTURES_DATA_IP_LIMIT_WINDOW_S,
         )
         self._http_session: aiohttp.ClientSession | None = None
-        self._klines_cache: Dict[Tuple[str, str, int], Tuple[float, Any]] = {}
-        self._klines_locks: Dict[Tuple[str, str, int], asyncio.Lock] = {}
-        self._derived_klines_cache: Dict[Tuple[str, str, str, int], Tuple[float, Any]] = {}
-        self._derived_klines_locks: Dict[Tuple[str, str, str, int], asyncio.Lock] = {}
-        self._circuit_failures: Dict[str, int] = {}
-        self._circuit_open_until: Dict[str, float] = {}
-        self._circuit_half_open: Set[str] = set()
+        self._klines_cache: dict[tuple[str, str, int], tuple[float, Any]] = {}
+        self._klines_locks: dict[tuple[str, str, int], asyncio.Lock] = {}
+        self._derived_klines_cache: dict[tuple[str, str, str, int], tuple[float, Any]] = {}
+        self._derived_klines_locks: dict[tuple[str, str, str, int], asyncio.Lock] = {}
+        self._circuit_failures: dict[str, int] = {}
+        self._circuit_open_until: dict[str, float] = {}
+        self._circuit_half_open: set[str] = set()
         self._circuit_failure_threshold = 3
         self._circuit_open_duration_seconds = 30.0
         self._critical_operations = {
@@ -142,11 +166,43 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         self._last_endpoint_limiter_wait_ms: float = 0.0
         self._last_endpoint_response_age_s: float | None = None
 
+    async def _apply_active_proxy(self, url: str | None) -> None:
+        self._proxy_url = url
+        if url:
+            apply_proxy_env(url)
+        if self._http_session is not None and not self._http_session.closed:
+            await self._http_session.close()
+        self._http_session = None
+        ws = self._ws
+        if ws is not None and hasattr(ws, "update_proxy_url"):
+            ws.update_proxy_url(url, trust_env=self._trust_env)
+
+    async def _try_failover_proxy(self, reason: str) -> bool:
+        if not self._proxy_failover_enabled:
+            return False
+        pool = self._proxy_pool
+        if pool is None or not pool.has_alternatives():
+            return False
+        nxt = pool.rotate_after_failure(self._proxy_url, reason)
+        if not nxt:
+            return False
+        await self._apply_active_proxy(nxt)
+        return True
+
+    def proxy_pool_snapshot(self) -> dict[str, object]:
+        pool = self._proxy_pool
+        if pool is None:
+            return {"enabled": False, "active": mask_proxy_url(self._proxy_url or "")}
+        snap = pool.snapshot()
+        snap["enabled"] = True
+        snap["failover_enabled"] = self._proxy_failover_enabled
+        return snap
+
     # Implementation of all abstract methods follows...
     # For brevity, I'll show a few key implementations and note that the rest
     # would follow the same pattern from the original market_data.py
 
-    async def fetch_exchange_symbols(self) -> List[SymbolMeta]:
+    async def fetch_exchange_symbols(self) -> list[SymbolMeta]:
         now = time.monotonic()
         if self._exchange_info_cache is not None:
             cached_at, rows = self._exchange_info_cache
@@ -210,7 +266,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         self._exchange_info_cache = (now, rows)
         return rows
 
-    async def fetch_ticker_24h(self) -> List[Dict[str, float | str]]:
+    async def fetch_ticker_24h(self) -> list[dict[str, float | str]]:
         now = time.monotonic()
         if self._ticker_24h_cache is not None:
             cached_at, rows = self._ticker_24h_cache
@@ -248,7 +304,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
                 return stale_rows
             raise
 
-        new_rows: List[Dict[str, float | str]] = []
+        new_rows: list[dict[str, float | str]] = []
         for item in payload if isinstance(payload, list) else []:
             # Handle both dict and object items
             if isinstance(item, dict):
@@ -299,7 +355,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         self._ticker_24h_cache = (now, new_rows)
         return new_rows
 
-    def _is_cache_valid(self, cache_entry: Tuple[float, Any] | None, ttl_seconds: int) -> bool:
+    def _is_cache_valid(self, cache_entry: tuple[float, Any] | None, ttl_seconds: int) -> bool:
         if cache_entry is None:
             return False
         cached_at, _ = cache_entry
@@ -355,7 +411,8 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
                 symbol=symbol,
             )
         else:
-            raise ValueError(f"unsupported derived kline kind: {kind!r}")
+            msg = f"unsupported derived kline kind: {kind!r}"
+            raise ValueError(msg)
         return _drop_incomplete_ohlcv_tail(_klines_to_frame(rows), interval)
 
     async def _fetch_derived_klines_cached(
@@ -375,7 +432,8 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             "index": "index_price_klines",
         }.get(kind)
         if cache_ttl_key is None:
-            raise ValueError(f"unsupported derived kline kind: {kind!r}")
+            msg = f"unsupported derived kline kind: {kind!r}"
+            raise ValueError(msg)
         key = (kind, symbol, interval, int(limit))
         ttl = int(_CACHE_TTL.get(cache_ttl_key, 900))
         now = time.monotonic()
@@ -437,11 +495,11 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         self,
         symbol: str,
         *,
-        intervals: Tuple[str, ...] = ("15m", "1h", "4h"),
+        intervals: tuple[str, ...] = ("15m", "1h", "4h"),
         limit: int = 300,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         validate_symbol(symbol)
-        frames: Dict[str, Any] = {}
+        frames: dict[str, Any] = {}
         for interval in intervals:
             validate_interval(interval)
             settled_limit = max(1, min(int(limit), 1500))
@@ -492,7 +550,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
 
     async def fetch_order_book_depth_snapshot(
         self, symbol: str, *, limit: int = _DEFAULT_ORDER_BOOK_DEPTH_LIMIT
-    ) -> Dict[str, float | None]:
+    ) -> dict[str, float | None]:
         validate_symbol(symbol)
         limit = validate_order_book_depth_limit(limit)
         key = (symbol, limit)
@@ -535,7 +593,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             last_update_id = float(last_update_raw) if last_update_raw is not None else None
         except (TypeError, ValueError):
             last_update_id = None
-        snapshot: Dict[str, float | None] = {
+        snapshot: dict[str, float | None] = {
             "bid_price": bids[0][0],
             "ask_price": asks[0][0],
             "bid_qty": sum(qty for _price, qty in bids),
@@ -545,7 +603,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         self._order_book_depth_cache[key] = (time.monotonic(), snapshot)
         return dict(snapshot)
 
-    async def _fetch_order_book_context_rest_detail(self, symbol: str) -> Dict[str, float | None]:
+    async def _fetch_order_book_context_rest_detail(self, symbol: str) -> dict[str, float | None]:
         try:
             return await self.fetch_order_book_depth_snapshot(
                 symbol,
@@ -559,7 +617,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             )
             return await self._fetch_book_ticker_rest_detail(symbol)
 
-    async def _fetch_book_ticker_rest_detail(self, symbol: str) -> Dict[str, float | None]:
+    async def _fetch_book_ticker_rest_detail(self, symbol: str) -> dict[str, float | None]:
         validate_symbol(symbol)
         max_attempts = 3
         for attempt in range(1, max_attempts + 1):
@@ -579,16 +637,10 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
                     ask_raw = getattr(payload, "ask_price", None)
                     bid_qty_raw = getattr(payload, "bid_qty", None)
                     ask_qty_raw = getattr(payload, "ask_qty", None)
-                bid = float(bid_raw) if bid_raw is not None else None
-                ask = float(ask_raw) if ask_raw is not None else None
-                bid_qty = float(bid_qty_raw) if bid_qty_raw is not None else None
-                ask_qty = float(ask_qty_raw) if ask_qty_raw is not None else None
-                return {
-                    "bid_price": bid,
-                    "ask_price": ask,
-                    "bid_qty": bid_qty,
-                    "ask_qty": ask_qty,
-                }
+                float(bid_raw) if bid_raw is not None else None
+                float(ask_raw) if ask_raw is not None else None
+                float(bid_qty_raw) if bid_qty_raw is not None else None
+                float(ask_qty_raw) if ask_qty_raw is not None else None
             except MarketDataUnavailable as exc:
                 detail = (exc.detail or "").lower()
                 if attempt < max_attempts and "timeout" in detail:
@@ -621,7 +673,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             "ask_qty": None,
         }
 
-    async def _fetch_book_ticker_rest(self, symbol: str) -> Tuple[Optional[float], Optional[float]]:
+    async def _fetch_book_ticker_rest(self, symbol: str) -> tuple[float | None, float | None]:
         detail = await self._fetch_book_ticker_rest_detail(symbol)
         return detail.get("bid_price"), detail.get("ask_price")
 
@@ -638,7 +690,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         buy_qty = 0.0
         sell_qty = 0.0
         trade_count = 0
-        payload_rows = cast(List[Any], payload)
+        payload_rows = cast("list[Any]", payload)
         for item in payload_rows:
             row = _coerce_rest_row(item)
             qty = float(row.get("q") or 0.0)
@@ -660,7 +712,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             delta_ratio=delta_ratio,
         )
 
-    async def fetch_book_ticker(self, symbol: str) -> Tuple[Optional[float], Optional[float]]:
+    async def fetch_book_ticker(self, symbol: str) -> tuple[float | None, float | None]:
         if self._ws is not None:
             cached = await self._ws.get_book_ticker(symbol)
             if cached is not None:
@@ -682,9 +734,9 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         end_time_ms: int,
         page_limit: int,
         page_size: int,
-    ) -> Tuple[List[AggTrade], bool]:
+    ) -> tuple[list[AggTrade], bool]:
         validate_symbol(symbol)
-        rows: List[AggTrade] = []
+        rows: list[AggTrade] = []
         pages = 0
         complete = True
         window_start_ms = max(int(start_time_ms), 0)
@@ -694,7 +746,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             window_end_ms = min(window_start_ms + max_window_ms, final_end_ms)
             next_from_id: int | None = None
             while pages < page_limit:
-                kwargs: Dict[str, Any] = {"symbol": symbol, "limit": page_size}
+                kwargs: dict[str, Any] = {"symbol": symbol, "limit": page_size}
                 if next_from_id is None:
                     kwargs["startTime"] = window_start_ms
                     kwargs["endTime"] = window_end_ms
@@ -705,8 +757,8 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
                     params=kwargs,
                     symbol=symbol,
                 )
-                batch: List[AggTrade] = []
-                payload_rows = cast(List[Any], payload)
+                batch: list[AggTrade] = []
+                payload_rows = cast("list[Any]", payload)
                 for item in payload_rows:
                     row = _coerce_rest_row(item)
                     trade_time_ms = int(row.get("T") or 0)
@@ -739,7 +791,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
                 complete = False
                 break
             window_start_ms = window_end_ms + 1
-        deduped: Dict[int, AggTrade] = {}
+        deduped: dict[int, AggTrade] = {}
         for item in rows:
             deduped[item.trade_id] = item
         sorted_rows = sorted(deduped.values(), key=lambda item: (item.trade_time_ms, item.trade_id))
@@ -747,7 +799,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             complete = False
         return sorted_rows, complete
 
-    async def fetch_funding_rate(self, symbol: str) -> Optional[float]:
+    async def fetch_funding_rate(self, symbol: str) -> float | None:
         validate_symbol(symbol)
         now = time.monotonic()
         cached = self._funding_rate_cache.get(symbol)
@@ -785,7 +837,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             self._funding_rate_cache[symbol] = (now, value)
         return value
 
-    async def fetch_premium_index_all(self) -> Dict[str, Dict[str, float]]:
+    async def fetch_premium_index_all(self) -> dict[str, dict[str, float]]:
         now = time.monotonic()
         cached = self._premium_index_all_cache
         if cached is not None and now - cached[0] < 300:
@@ -816,7 +868,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
                 )
                 return cached[1]
             raise
-        rows: Dict[str, Dict[str, float]] = {}
+        rows: dict[str, dict[str, float]] = {}
         for item in payload if isinstance(payload, list) else []:
             if not isinstance(item, Mapping):
                 continue
@@ -842,7 +894,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         self._premium_index_all_cache = (now, rows)
         return rows
 
-    async def fetch_open_interest(self, symbol: str) -> Optional[float]:
+    async def fetch_open_interest(self, symbol: str) -> float | None:
         validate_symbol(symbol)
         now = time.monotonic()
         cached = self._open_interest_cache.get(symbol)
@@ -857,6 +909,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             )
             return cached[1] if cached else None
 
+        value: float | None = None
         try:
             payload = await self._call_public_http_json(
                 "open_interest",
@@ -868,7 +921,6 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             value = float(value_raw) if value_raw is not None else None
             if value is not None:
                 self._open_interest_cache[symbol] = (now, value)
-            return value
         except MarketDataUnavailable:
             if cached is not None:
                 self._record_endpoint_snapshot(
@@ -881,10 +933,10 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
                 LOG.debug("OI graceful degradation | symbol=%s using stale cache", symbol)
                 return cached[1]
             return None
+        else:
+            return value
 
-    async def fetch_open_interest_change(
-        self, symbol: str, *, period: str = "1h"
-    ) -> Optional[float]:
+    async def fetch_open_interest_change(self, symbol: str, *, period: str = "1h") -> float | None:
         validate_symbol(symbol)
         cache_key = (symbol, period)
         now = time.monotonic()
@@ -900,6 +952,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             )
             return cached[1] if cached else None
 
+        change: float | None = None
         try:
             payload = await self._call_public_http_json(
                 "open_interest_statistics",
@@ -922,7 +975,6 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
                 return None
             change = (curr / prev) - 1.0
             self._open_interest_change_cache[cache_key] = (now, change)
-            return change
         except MarketDataUnavailable:
             if cached is not None:
                 self._record_endpoint_snapshot(
@@ -939,8 +991,10 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
                 )
                 return cached[1]
             return None
+        else:
+            return change
 
-    async def fetch_long_short_ratio(self, symbol: str, *, period: str = "1h") -> Optional[float]:
+    async def fetch_long_short_ratio(self, symbol: str, *, period: str = "1h") -> float | None:
         validate_symbol(symbol)
         cache_key = (symbol, period)
         now = time.monotonic()
@@ -956,6 +1010,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             )
             return cached[1] if cached else None
 
+        value: float | None = None
         try:
             payload = await self._call_public_http_json(
                 "top_trader_long_short_ratio_accounts",
@@ -970,7 +1025,6 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             value = float(value_raw) if value_raw is not None else None
             if value is not None:
                 self._long_short_ratio_cache[cache_key] = (now, value)
-            return value
         except MarketDataUnavailable:
             if cached is not None:
                 self._record_endpoint_snapshot(
@@ -987,10 +1041,10 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
                 )
                 return cached[1]
             return None
+        else:
+            return value
 
-    async def fetch_top_position_ls_ratio(
-        self, symbol: str, *, period: str = "1h"
-    ) -> Optional[float]:
+    async def fetch_top_position_ls_ratio(self, symbol: str, *, period: str = "1h") -> float | None:
         validate_symbol(symbol)
         cache_key = (symbol, period)
         now = time.monotonic()
@@ -1006,6 +1060,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             )
             return cached[1]
 
+        value: float | None = None
         try:
             payload = await self._call_public_http_json(
                 "top_trader_long_short_ratio_positions",
@@ -1020,7 +1075,6 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             value = float(value_raw) if value_raw is not None else None
             if value is not None:
                 self._top_position_ls_ratio_cache[cache_key] = (now, value)
-            return value
         except MarketDataUnavailable:
             if cached is not None:
                 self._record_endpoint_snapshot(
@@ -1032,8 +1086,10 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
                 )
                 return cached[1]
             return None
+        else:
+            return value
 
-    async def fetch_taker_ratio(self, symbol: str, *, period: str = "1h") -> Optional[float]:
+    async def fetch_taker_ratio(self, symbol: str, *, period: str = "1h") -> float | None:
         validate_symbol(symbol)
         cache_key = (symbol, period)
         now = time.monotonic()
@@ -1075,7 +1131,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             self._taker_ratio_cache[cache_key] = (now, value)
         return value
 
-    async def fetch_global_ls_ratio(self, symbol: str, *, period: str = "1h") -> Optional[float]:
+    async def fetch_global_ls_ratio(self, symbol: str, *, period: str = "1h") -> float | None:
         validate_symbol(symbol)
         cache_key = (symbol, period)
         now = time.monotonic()
@@ -1119,7 +1175,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
 
     async def fetch_funding_rate_history(
         self, symbol: str, *, limit: int = 10
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         validate_symbol(symbol)
         validate_limit(limit, max_val=100)
         now = time.monotonic()
@@ -1205,8 +1261,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             params={"symbol": symbol, "interval": interval, "limit": limit},
             symbol=symbol,
         )
-        frame = _drop_incomplete_ohlcv_tail(_klines_to_frame(rows), interval)
-        return frame
+        return _drop_incomplete_ohlcv_tail(_klines_to_frame(rows), interval)
 
     async def fetch_klines_cached(self, symbol: str, interval: str, *, limit: int) -> pl.DataFrame:
         """Fetch klines with a TTL cache to prevent REST stampedes."""
@@ -1281,7 +1336,8 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         try:
             return _PUBLIC_ENDPOINT_REGISTRY[operation]
         except KeyError as exc:
-            raise ValueError(f"unsupported public endpoint operation={operation}") from exc
+            msg = f"unsupported public endpoint operation={operation}"
+            raise ValueError(msg) from exc
 
     def _endpoint_url(self, operation: str) -> str:
         spec = self._endpoint_spec(operation)
@@ -1289,7 +1345,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
 
     def get_cached_oi_change(
         self, symbol: str, period: str = "1h", max_age_s: float = 1800.0
-    ) -> Optional[float]:
+    ) -> float | None:
         cached = self._open_interest_change_cache.get((symbol, period))
         if cached is None:
             return None
@@ -1298,7 +1354,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             return None
         return value
 
-    def get_cached_open_interest(self, symbol: str, max_age_s: float = 1800.0) -> Optional[float]:
+    def get_cached_open_interest(self, symbol: str, max_age_s: float = 1800.0) -> float | None:
         cached = self._open_interest_cache.get(symbol)
         if cached is None:
             return None
@@ -1309,7 +1365,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
 
     def get_cached_ls_ratio(
         self, symbol: str, period: str = "1h", max_age_s: float = 1800.0
-    ) -> Optional[float]:
+    ) -> float | None:
         cached = self._long_short_ratio_cache.get((symbol, period))
         if cached is None:
             return None
@@ -1318,7 +1374,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             return None
         return value
 
-    def get_cached_funding_rate(self, symbol: str, max_age_s: float = 1800.0) -> Optional[float]:
+    def get_cached_funding_rate(self, symbol: str, max_age_s: float = 1800.0) -> float | None:
         cached = self._funding_rate_cache.get(symbol)
         if cached is None:
             return None
@@ -1329,7 +1385,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
 
     def get_cached_premium_index(
         self, symbol: str, max_age_s: float = 300.0
-    ) -> Optional[Dict[str, float]]:
+    ) -> dict[str, float] | None:
         cached = self._premium_index_all_cache
         if cached is None:
             return None
@@ -1343,7 +1399,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         symbol: str,
         period: str = "1h",
         max_age_s: float = 1800.0,
-    ) -> Optional[float]:
+    ) -> float | None:
         cached = self._top_position_ls_ratio_cache.get((symbol, period))
         if cached is None:
             return None
@@ -1354,7 +1410,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
 
     def get_cached_taker_ratio(
         self, symbol: str, period: str = "1h", max_age_s: float = 1800.0
-    ) -> Optional[float]:
+    ) -> float | None:
         cached = self._taker_ratio_cache.get((symbol, period))
         if cached is None:
             return None
@@ -1365,7 +1421,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
 
     def get_cached_global_ls_ratio(
         self, symbol: str, period: str = "1h", max_age_s: float = 1800.0
-    ) -> Optional[float]:
+    ) -> float | None:
         cached = self._global_ls_ratio_cache.get((symbol, period))
         if cached is None:
             return None
@@ -1374,7 +1430,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             return None
         return value
 
-    def get_cached_funding_trend(self, symbol: str, max_age_s: float = 1800.0) -> Optional[str]:
+    def get_cached_funding_trend(self, symbol: str, max_age_s: float = 1800.0) -> str | None:
         cached = self._funding_history_cache.get(symbol)
         if cached is None:
             return None
@@ -1400,7 +1456,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         *,
         max_age_hours: float = 48.0,
         max_cache_age_s: float = 1800.0,
-    ) -> Optional[Tuple[float, float]]:
+    ) -> tuple[float, float] | None:
         cached = self._funding_history_cache.get(symbol)
         if cached is None:
             return None
@@ -1411,7 +1467,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             return None
         now_ms = int(time.time() * 1000)
         max_age_ms = max(0.0, float(max_age_hours)) * 3600.0 * 1000.0
-        candidates: List[Tuple[float, float]] = []
+        candidates: list[tuple[float, float]] = []
         for row in rows:
             try:
                 rate = float(row.get("fundingRate") or 0.0)
@@ -1427,9 +1483,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             return None
         return max(candidates, key=lambda item: abs(item[0]))
 
-    async def fetch_basis(
-        self, symbol: str, *, period: str = "1h", limit: int = 3
-    ) -> Optional[float]:
+    async def fetch_basis(self, symbol: str, *, period: str = "1h", limit: int = 3) -> float | None:
         validate_symbol(symbol)
         """Fetch most recent basis (futures - index price as %) from /futures/data/basis.
 
@@ -1477,7 +1531,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
 
         # Sort by timestamp, take the most recent
         payload.sort(key=lambda r: int(r.get("timestamp") or 0))
-        basis_series: List[float] = []
+        basis_series: list[float] = []
         for row in payload:
             try:
                 futures_price = float(row.get("futuresPrice") or 0.0)
@@ -1515,7 +1569,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
 
     def get_cached_basis(
         self, symbol: str, period: str = "1h", max_age_s: float = 1800.0
-    ) -> Optional[float]:
+    ) -> float | None:
         """Return cached basis pct if fresh, else None (no REST call)."""
         cached = self._basis_cache.get((symbol, period))
         if cached is None:
@@ -1530,7 +1584,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         symbol: str,
         period: str = "1h",
         max_age_s: float = 1800.0,
-    ) -> Optional[Dict[str, Optional[float]]]:
+    ) -> dict[str, float | None] | None:
         cached = self._basis_stats_cache.get((symbol, period))
         if cached is None:
             return None
@@ -1543,9 +1597,9 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         self,
         symbol: str,
         mark_price: float,
-        index_price: Optional[float] = None,
+        index_price: float | None = None,
         period: str = "5m",
-    ) -> Optional[Dict[str, Optional[float]]]:
+    ) -> dict[str, float | None] | None:
         """Update basis cache from WebSocket mark price data (zero I/O).
 
         If index_price is None, uses mark_price as fallback (spread = 0).
@@ -1558,17 +1612,14 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         cache_key = (symbol, period)
         window_seconds = _PERIOD_WINDOW_SECONDS.get(period, 300)
 
-        basis_pct: Optional[float]
+        basis_pct: float | None
         if index_price is not None and index_price > 0.0:
             basis_pct = (mark_price - index_price) / index_price * 100.0
             mark_index_spread_bps = basis_pct * 100.0  # Convert to bps
         else:
             # No index price available - use cached basis or mark price
             cached = self._basis_cache.get(cache_key)
-            if cached is not None:
-                basis_pct = cached[1]  # Use existing basis
-            else:
-                basis_pct = None
+            basis_pct = cached[1] if cached is not None else None  # Use existing basis
             mark_index_spread_bps = None  # Can't calculate without index
 
         if basis_pct is not None:

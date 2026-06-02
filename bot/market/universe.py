@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-from dataclasses import replace
 import logging
 import math
 import re
-from datetime import datetime, timedelta, timezone
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
-from ..domain.config import BotSettings, _ALL_SETUP_IDS
+from bot.coercion import row_float
+
+from ..domain.config import _ALL_SETUP_IDS, BotSettings
 from ..domain.schemas import SymbolMeta, UniverseSymbol
 from ..market.fit import calculate_strategy_fit_score
 
-
-UTC = timezone.utc
 LOG = logging.getLogger("bot.universe")
 STABLE_BASE_ASSETS = {"USDC", "BUSD", "FDUSD", "TUSD", "USDP", "USDS", "DAI"}
 SUPPORTED_USDM_CONTRACT_TYPES = {"PERPETUAL", "TRADIFI_PERPETUAL"}
@@ -90,9 +90,9 @@ def _bucket_for_price_change(price_change_pct: float) -> str:
 def _scaled_bucket_targets(total_slots: int) -> dict[str, int]:
     base = {"trend": 12, "breakout": 10, "reversal": 8}
     if total_slots <= 0:
-        return {key: 0 for key in base}
+        return dict.fromkeys(base, 0)
     base_total = sum(base.values())
-    scaled = {key: int(round(total_slots * weight / base_total)) for key, weight in base.items()}
+    scaled = {key: round(total_slots * weight / base_total) for key, weight in base.items()}
     assigned = sum(scaled.values())
     if assigned < total_slots:
         for key in ("trend", "breakout", "reversal"):
@@ -111,9 +111,7 @@ def _scaled_bucket_targets(total_slots: int) -> dict[str, int]:
 def _is_supported_contract_symbol(symbol: str, base_asset: str) -> bool:
     if not _ASCII_CONTRACT_RE.fullmatch(symbol):
         return False
-    if not _ASCII_ASSET_RE.fullmatch(base_asset):
-        return False
-    return True
+    return _ASCII_ASSET_RE.fullmatch(base_asset)
 
 
 def _bucket_priority(item: UniverseSymbol) -> tuple[float, float, str]:
@@ -464,10 +462,9 @@ def _spread_freshness_score(row: dict[str, Any], settings: BotSettings) -> float
     if spread_bps is not None and spread_bps > 0.0:
         spread_score = _clamp(1.0 - (spread_bps / max_spread))
 
-    freshness_values: list[float] = []
-    for age in (ticker_age, book_age, mark_age):
-        if age is not None:
-            freshness_values.append(_clamp(1.0 - (age / stale_s)))
+    freshness_values = [
+        _clamp(1.0 - (age / stale_s)) for age in (ticker_age, book_age, mark_age) if age is not None
+    ]
     freshness_score = sum(freshness_values) / len(freshness_values) if freshness_values else 0.55
     return round(spread_score * 0.55 + freshness_score * 0.45, 6)
 
@@ -508,9 +505,7 @@ def _composite_score(
     if (
         row.get("status") != "TRADING"
         or str(row.get("contract_type") or "").upper() not in SUPPORTED_USDM_CONTRACT_TYPES
-    ):
-        tradability_score = 0.0
-    elif float(row.get("last_price") or 0.0) <= 0.0:
+    ) or float(row.get("last_price") or 0.0) <= 0.0:
         tradability_score = 0.0
     else:
         tradability_score = 0.75 + bucket_fit * 0.25
@@ -534,7 +529,7 @@ def _composite_score(
         if not (0.0 <= value <= 1.0):
             LOG.warning(
                 "composite_score_component_out_of_range",
-                extra={"name": name, "value": value},
+                extra={"component": name, "value": value},
             )
             components[name] = max(0.0, min(1.0, value))
     liquidity_score = components["liquidity_score"]
@@ -600,7 +595,7 @@ def build_shortlist(
             shortlist_limit,
         )
     meta_map = {meta.symbol: meta for meta in symbol_meta}
-    pinned = {symbol for symbol in settings.universe.pinned_symbols}
+    pinned = set(settings.universe.pinned_symbols)
     priority_symbols = _priority_symbols(settings)
     min_onboard = datetime.now(UTC) - timedelta(days=settings.universe.min_listing_age_days)
     min_onboard_ms = int(min_onboard.timestamp() * 1000)
@@ -783,7 +778,7 @@ def build_shortlist(
 
     for b_name in ("trend", "breakout", "reversal"):
         for b_row in bucket_pool[b_name]:
-            if len(shortlist) >= shortlist_limit or cast(int, summary[b_name]) >= targets[b_name]:
+            if len(shortlist) >= shortlist_limit or cast("int", summary[b_name]) >= targets[b_name]:
                 break
             if b_row.symbol in seen:
                 continue
@@ -791,7 +786,7 @@ def build_shortlist(
                 continue
             shortlist.append(b_row)
             seen.add(b_row.symbol)
-            summary[b_name] = cast(int, summary[b_name]) + 1
+            summary[b_name] = cast("int", summary[b_name]) + 1
 
     for setup_id in _ALL_SETUP_IDS:
         if len(shortlist) >= shortlist_limit:
@@ -813,7 +808,7 @@ def build_shortlist(
         for cand_row in candidates[:_RESERVED_PER_STRATEGY]:
             shortlist.append(cand_row)
             seen.add(cand_row.symbol)
-            summary["strategy_seed"] = cast(int, summary["strategy_seed"]) + 1
+            summary["strategy_seed"] = cast("int", summary["strategy_seed"]) + 1
             if len(shortlist) >= shortlist_limit:
                 break
 
@@ -826,7 +821,7 @@ def build_shortlist(
             continue
         shortlist.append(dy_row)
         seen.add(dy_row.symbol)
-        summary["fill"] = cast(int, summary["fill"]) + 1
+        summary["fill"] = cast("int", summary["fill"]) + 1
 
     shortlist.sort(
         key=lambda item: (
@@ -841,7 +836,7 @@ def build_shortlist(
         sum((avg_row.shortlist_score or 0.0) for avg_row in shortlist) / max(len(shortlist), 1),
         6,
     )
-    strategy_counts = {setup_id: 0 for setup_id in _ALL_SETUP_IDS}
+    strategy_counts = dict.fromkeys(_ALL_SETUP_IDS, 0)
     for count_row in shortlist:
         for setup_id in count_row.strategy_fits:
             if setup_id in strategy_counts:
@@ -959,7 +954,7 @@ def rerank_shortlist(
     previous_volume: float | None = None
     liquidity_rank = 0
     for index, (item, row) in enumerate(ranked_rows, start=1):
-        volume = float(row.get("quote_volume") or 0.0)
+        volume = row_float(row, "quote_volume")
         if previous_volume is None or not math.isclose(
             volume, previous_volume, rel_tol=0.0, abs_tol=1e-9
         ):
@@ -984,11 +979,13 @@ def rerank_shortlist(
         updated.append(
             replace(
                 item,
-                quote_volume=float(row.get("quote_volume") or item.quote_volume),
-                price_change_pct=float(row.get("price_change_percent") or item.price_change_pct),
-                last_price=float(row.get("last_price") or item.last_price),
+                quote_volume=row_float(row, "quote_volume", float(item.quote_volume)),
+                price_change_pct=row_float(
+                    row, "price_change_percent", float(item.price_change_pct)
+                ),
+                last_price=row_float(row, "last_price", float(item.last_price)),
                 shortlist_bucket=_bucket_for_price_change(
-                    float(row.get("price_change_percent") or item.price_change_pct)
+                    row_float(row, "price_change_percent", float(item.price_change_pct))
                 ),
                 shortlist_score=shortlist_score,
                 shortlist_reasons=reasons,

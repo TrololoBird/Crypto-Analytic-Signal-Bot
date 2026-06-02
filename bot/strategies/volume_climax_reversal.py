@@ -1,20 +1,21 @@
-"""volume_climax_reversal — strategy module (bot/strategies/)."""
+"""volume_climax_reversal — canonical strategy detector."""
 
 from __future__ import annotations
 
-from ..domain.config import BotSettings
-from ..setups.spec_runtime import SpecDetectorSetup
+import math
+from typing import TYPE_CHECKING, ClassVar
 
-
-import polars as pl
-
+from ..setups import _build_signal, _compute_dynamic_score, _reject
+from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
 from ._common import SpecHit, as_float, with_spec_columns
 
+if TYPE_CHECKING:
+    import polars as pl
+
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
+
 __all__ = ["detect_volume_climax_reversal"]
-from ..domain.schemas import PreparedSymbol, Signal
-from ..setups import _build_signal, _compute_dynamic_score, _reject
-import math
-from ..setups.spec_runtime import run_setup_detection
 
 
 def detect_volume_climax_reversal(frame: pl.DataFrame, *, timeframe: str = "15m") -> SpecHit | None:
@@ -73,13 +74,12 @@ def _as_float(value: object, default: float = 0.0) -> float:
 
 def _detect_volume_climax_reversal_extended(
     prepared: PreparedSymbol,
-    settings: BotSettings,
-    defaults: dict[str, float],
+    _settings: BotSettings,
+    _defaults: dict[str, float],
     effective: dict[str, float],
     setup_id: str,
     family: str,
 ) -> Signal | None:
-    dynamic_params = effective
     work = prepared.work_15m
     effective_params = effective
     # FIX 2026-05-21: spec requires a very large recent climax; fall through
@@ -302,10 +302,7 @@ def _detect_volume_climax_reversal_extended(
     signal_mid = (signal_high + signal_low) / 2.0
     if direction == "long":
         stop = signal_low - atr * sl_buffer
-        if reclaim_level > signal_low:
-            price_anchor = reclaim_level
-        else:
-            price_anchor = min(signal_mid, close)
+        price_anchor = reclaim_level if reclaim_level > signal_low else min(signal_mid, close)
         price_anchor = max(price_anchor, stop + atr * 0.10)
         risk = price_anchor - stop
         tp1 = price_anchor + risk * min_rr
@@ -334,15 +331,15 @@ def _detect_volume_climax_reversal_extended(
     )
 
     # Graded bias alignment
-    if direction == "long" and bias_1h == "downtrend":
-        score *= effective_params.get("bias_mismatch_penalty", 0.75)
-    elif direction == "short" and bias_1h == "uptrend":
+    if (direction == "long" and bias_1h == "downtrend") or (
+        direction == "short" and bias_1h == "uptrend"
+    ):
         score *= effective_params.get("bias_mismatch_penalty", 0.75)
 
     # RSI extremes graded penalty
-    if direction == "long" and rsi > float(effective_params["max_rsi_long"]):
-        score *= 0.85
-    elif direction == "short" and rsi < float(effective_params["min_rsi_short"]):
+    if (direction == "long" and rsi > float(effective_params["max_rsi_long"])) or (
+        direction == "short" and rsi < float(effective_params["min_rsi_short"])
+    ):
         score *= 0.85
 
     reasons = [
@@ -393,9 +390,9 @@ def detect_volume_climax_reversal_setup(
 
 
 __all__ = [
+    "_detect_volume_climax_reversal_extended",
     "detect_volume_climax_reversal",
     "detect_volume_climax_reversal_setup",
-    "_detect_volume_climax_reversal_extended",
 ]
 
 
@@ -405,7 +402,7 @@ class VolumeClimaxReversalSetup(SpecDetectorSetup):
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)
 
-    DEFAULTS = {
+    DEFAULTS: ClassVar[dict[str, float]] = {
         "base_score": 0.52,
         "min_volume_ratio": 1.8,
         "adaptive_min_volume_ratio": 1.3,

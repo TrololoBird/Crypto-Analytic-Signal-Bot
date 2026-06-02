@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import hashlib
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from bot.domain.schemas import Signal
 from bot.persistence.public_audit import PublicAuditLedger
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _sample_signal() -> Signal:

@@ -1,17 +1,17 @@
 """Core engine for pluggable strategy system."""
 
-from .registry import StrategyRegistry, StrategyMetadata
+from ..domain.strategies import StrategyDecision
 from .base import AbstractStrategy, SignalResult
 from .engine import SignalEngine
 from .lanes import select_lane_setups
-from ..domain.strategies import StrategyDecision
+from .registry import StrategyMetadata, StrategyRegistry
 
 __all__ = [
-    "StrategyRegistry",
-    "StrategyMetadata",
     "AbstractStrategy",
+    "SignalEngine",
     "SignalResult",
     "StrategyDecision",
-    "SignalEngine",
+    "StrategyMetadata",
+    "StrategyRegistry",
     "select_lane_setups",
 ]

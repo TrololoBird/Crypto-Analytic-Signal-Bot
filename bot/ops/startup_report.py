@@ -7,18 +7,20 @@ import os
 import re
 from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from typing import Any
+from datetime import UTC, datetime, timedelta, timezone
+from typing import TYPE_CHECKING, Any
 
-from ..domain.config import BotSettings, load_settings
-from ..persistence.repository import MemoryRepository
-from ..persistence.journal import build_config_suggestions
+from bot.core.runtime_errors import DEFENSIVE_EXC
+
 from ..delivery.telegram import TelegramBroadcaster
+from ..domain.config import BotSettings, load_settings
+from ..persistence.journal import build_config_suggestions
+from ..persistence.repository import MemoryRepository
 from ..persistence.tracked import parse_state_dt
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
-UTC = timezone.utc
 MSK = timezone(timedelta(hours=3))
 _SESSION_MARKER_RE = re.compile(
     r"BOT SESSION STARTED \| (?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC)"
@@ -90,7 +92,7 @@ def _load_runtime_policy(repo_root: Path) -> dict[str, Any]:
     config_path = repo_root / "config.toml"
     try:
         settings = load_settings(config_path)
-    except Exception:
+    except DEFENSIVE_EXC:
         return {
             "config_loaded": False,
             "runtime_mode": None,
@@ -487,6 +489,14 @@ def _top_counter(counter: Counter[str], *, limit: int = 5) -> list[tuple[str, in
     return [(key, count) for key, count in counter.most_common(limit)]
 
 
+def _json_md(value: Any, *, sort_keys: bool = False) -> str:
+    return json.dumps(value, ensure_ascii=True, sort_keys=sort_keys)
+
+
+def _md_json_line(label: str, value: Any, *, sort_keys: bool = False) -> str:
+    return f"- {label}: `{_json_md(value, sort_keys=sort_keys)}`"
+
+
 def _counter_percentages(counter: Counter[str]) -> list[dict[str, Any]]:
     total = sum(counter.values())
     if total <= 0:
@@ -509,7 +519,9 @@ def _derive_suspicious_modules(snapshot: dict[str, Any]) -> list[dict[str, str]]
         modules.append(
             {
                 "module": "bot.app",
-                "reason": "symbol_analysis rows contain runtime errors from the previous session window",
+                "reason": (
+                    "symbol_analysis rows contain runtime errors from the previous session window"
+                ),
             }
         )
     if snapshot["rejection_stage_counts"].get("global_filters", 0) > 0:
@@ -523,7 +535,10 @@ def _derive_suspicious_modules(snapshot: dict[str, Any]) -> list[dict[str, str]]
         modules.append(
             {
                 "module": "bot.delivery.filters",
-                "reason": "orderflow confirmation vetoed or penalized candidates in the previous session window",
+                "reason": (
+                    "orderflow confirmation vetoed or penalized candidates "
+                    "in the previous session window"
+                ),
             }
         )
     if snapshot["cycle_count"] > 0 and snapshot["detector_runs_total"] == 0:
@@ -547,7 +562,9 @@ def _derive_suspicious_modules(snapshot: dict[str, Any]) -> list[dict[str, str]]
         modules.append(
             {
                 "module": "bot.market.ws",
-                "reason": f"latest cycle recorded reconnect_reason={latest_cycle.get('reconnect_reason')}",
+                "reason": (
+                    f"latest cycle recorded reconnect_reason={latest_cycle.get('reconnect_reason')}"
+                ),
             }
         )
     if (
@@ -567,17 +584,19 @@ def _derive_suspicious_modules(snapshot: dict[str, Any]) -> list[dict[str, str]]
                 "reason": "delivery telemetry contains non-sent statuses",
             }
         )
-    if snapshot["open_by_status"]:
-        if (
-            snapshot["open_by_status"].get("pending", 0) > 0
-            or snapshot["open_by_status"].get("active", 0) > 0
-        ):
-            modules.append(
-                {
-                    "module": "bot.persistence.tracking",
-                    "reason": "startup found persisted open tracked signals that still require lifecycle handling",
-                }
-            )
+    if snapshot["open_by_status"] and (
+        snapshot["open_by_status"].get("pending", 0) > 0
+        or snapshot["open_by_status"].get("active", 0) > 0
+    ):
+        modules.append(
+            {
+                "module": "bot.persistence.tracking",
+                "reason": (
+                    "startup found persisted open tracked signals "
+                    "that still require lifecycle handling"
+                ),
+            }
+        )
     deduped: list[dict[str, str]] = []
     seen: set[tuple[str, str]] = set()
     for row in modules:
@@ -596,7 +615,10 @@ def _derive_recommended_fixes(snapshot: dict[str, Any]) -> list[dict[str, str]]:
             {
                 "priority": "high",
                 "module": "bot.setups",
-                "action": "Inspect detector thresholds and add per-detector miss telemetry for symbols with detector_runs=0.",
+                "action": (
+                    "Inspect detector thresholds and add per-detector miss telemetry "
+                    "for symbols with detector_runs=0."
+                ),
             }
         )
     elif snapshot["symbol_rows"]:
@@ -606,7 +628,10 @@ def _derive_recommended_fixes(snapshot: dict[str, Any]) -> list[dict[str, str]]:
                 {
                     "priority": "high",
                     "module": "bot.setups",
-                    "action": "Add detector-level miss counters to explain why most symbols produced no detector runs.",
+                    "action": (
+                        "Add detector-level miss counters to explain why most symbols "
+                        "produced no detector runs."
+                    ),
                 }
             )
     _top_rejection = snapshot["rejection_reason_counts"].most_common(1)
@@ -616,7 +641,10 @@ def _derive_recommended_fixes(snapshot: dict[str, Any]) -> list[dict[str, str]]:
             {
                 "priority": "medium",
                 "module": "bot.delivery.filters",
-                "action": f"Review the dominant rejection reason `{top_reason}` against intended thresholds and recent market regime.",
+                "action": (
+                    f"Review the dominant rejection reason `{top_reason}` "
+                    "against intended thresholds and recent market regime."
+                ),
             }
         )
     if snapshot["runtime_errors"]:
@@ -624,7 +652,10 @@ def _derive_recommended_fixes(snapshot: dict[str, Any]) -> list[dict[str, str]]:
             {
                 "priority": "high",
                 "module": "bot.app",
-                "action": "Review symbol-analysis error rows and add targeted handling or telemetry before changing strategy logic.",
+                "action": (
+                    "Review symbol-analysis error rows and add targeted handling "
+                    "or telemetry before changing strategy logic."
+                ),
             }
         )
     latest_cycle = snapshot["latest_cycle"]
@@ -636,7 +667,10 @@ def _derive_recommended_fixes(snapshot: dict[str, Any]) -> list[dict[str, str]]:
             {
                 "priority": "medium",
                 "module": "bot.market.data",
-                "action": "Reduce bursty REST usage or add adaptive backoff when Binance used weight approaches the minute limit.",
+                "action": (
+                    "Reduce bursty REST usage or add adaptive backoff when Binance "
+                    "used weight approaches the minute limit."
+                ),
             }
         )
     if snapshot["delivery_status_counts"] and set(snapshot["delivery_status_counts"]) != {"sent"}:
@@ -644,7 +678,10 @@ def _derive_recommended_fixes(snapshot: dict[str, Any]) -> list[dict[str, str]]:
             {
                 "priority": "medium",
                 "module": "bot.delivery.deliver",
-                "action": "Audit non-sent delivery outcomes and confirm whether they were expected suppressions or actual transport failures.",
+                "action": (
+                    "Audit non-sent delivery outcomes and confirm whether they were "
+                    "expected suppressions or actual transport failures."
+                ),
             }
         )
     if not fixes:
@@ -652,7 +689,10 @@ def _derive_recommended_fixes(snapshot: dict[str, Any]) -> list[dict[str, str]]:
             {
                 "priority": "low",
                 "module": "bot.ops.startup_report",
-                "action": "No strong corrective action stands out from persisted telemetry alone; collect another full runtime session.",
+                "action": (
+                    "No strong corrective action stands out from persisted telemetry alone; "
+                    "collect another full runtime session."
+                ),
             }
         )
     return fixes
@@ -666,9 +706,7 @@ def _market_context_is_fresh(snapshot: dict[str, Any]) -> bool:
     if updated_at is None:
         return False
     session_start = snapshot.get("session_start")
-    if isinstance(session_start, datetime) and updated_at < session_start:
-        return False
-    return True
+    return not (isinstance(session_start, datetime) and updated_at < session_start)
 
 
 def _live_market_context(snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -811,9 +849,18 @@ def _build_structured_summary(
     inferred_focus: list[str] = []
     project_state_notes = [
         "Live Binance runtime is not verified end-to-end by startup artifacts alone.",
-        "Startup snapshot marks market_regime=`live_warmup` until persisted runtime context explicitly confirms it.",
-        "Startup snapshot keeps public_intelligence_ts=`null` when persisted intelligence predates the analyzed session.",
-        "Smart Levels / Nearby is not a separate module yet; current runtime exposes 5m/1h hooks and an explicit funnel instead.",
+        (
+            "Startup snapshot marks market_regime=`live_warmup` until persisted "
+            "runtime context explicitly confirms it."
+        ),
+        (
+            "Startup snapshot keeps public_intelligence_ts=`null` when persisted "
+            "intelligence predates the analyzed session."
+        ),
+        (
+            "Smart Levels / Nearby is not a separate module yet; current runtime exposes "
+            "5m/1h hooks and an explicit funnel instead."
+        ),
     ]
 
     if snapshot["session_start"] is None:
@@ -855,10 +902,12 @@ def _build_structured_summary(
             f"smart_exit_mode={runtime_policy['smart_exit_mode']} "
             f"gamma_semantics={runtime_policy['gamma_semantics']}."
         )
+        max_losses = runtime_policy["max_consecutive_stop_losses"]
+        pause_hours = runtime_policy["stop_loss_pause_hours"]
         confirmed_facts.append(
             "Configured loss-streak pause: "
-            f"{runtime_policy['max_consecutive_stop_losses']} consecutive losses pause new tracked signals for "
-            f"{runtime_policy['stop_loss_pause_hours']}h."
+            f"{max_losses} consecutive losses pause new tracked signals for "
+            f"{pause_hours}h."
         )
         if runtime_policy["source_policy"] == "binance_only":
             project_state_notes.append(
@@ -866,7 +915,8 @@ def _build_structured_summary(
             )
     if not _market_context_is_fresh(snapshot):
         confirmed_facts.append(
-            "Persisted market_context predates the analyzed session and is not treated as live readiness."
+            "Persisted market_context predates the analyzed session and is not "
+            "treated as live readiness."
         )
 
     if snapshot["cycle_count"] > 0 and snapshot["detector_runs_total"] == 0:
@@ -877,7 +927,8 @@ def _build_structured_summary(
         zero_ratio = snapshot["zero_detector_symbols"] / max(len(snapshot["symbol_rows"]), 1)
         if zero_ratio >= 0.8:
             inferred_focus.append(
-                "Most analyzed symbols ended with detector_runs=0; detector conditions may be too strict or market regime mismatch dominated."
+                "Most analyzed symbols ended with detector_runs=0; detector conditions "
+                "may be too strict or market regime mismatch dominated."
             )
     _top_focus = snapshot["rejection_reason_counts"].most_common(1)
     if _top_focus:
@@ -893,17 +944,20 @@ def _build_structured_summary(
         )
     if snapshot["runtime_errors"]:
         inferred_focus.append(
-            "Runtime symbol-analysis errors were observed and should be reviewed before blaming strategies."
+            "Runtime symbol-analysis errors were observed and should be reviewed "
+            "before blaming strategies."
         )
     if snapshot["data_quality_rows"]:
         inferred_focus.append(
-            "Strict data-quality rows were persisted; missing/invalid inputs now appear as explicit evidence."
+            "Strict data-quality rows were persisted; missing/invalid inputs now "
+            "appear as explicit evidence."
         )
     if snapshot["delivery_status_counts"] and set(snapshot["delivery_status_counts"]) != {"sent"}:
         inferred_focus.append("Delivery path had non-sent statuses in the previous session window.")
     if snapshot["telemetry_mismatch_rows"]:
         inferred_focus.append(
-            "Telemetry mismatch rows indicate file-level parity issues that should be resolved before tuning thresholds."
+            "Telemetry mismatch rows indicate file-level parity issues that should be "
+            "resolved before tuning thresholds."
         )
     if not inferred_focus:
         inferred_focus.append(
@@ -1046,7 +1100,8 @@ def _render_markdown(
         "- Analyze the persisted evidence from the previous bot run before the new runtime starts."
     )
     lines.append(
-        "- Preserve an AI-readable handoff for debugging strategy, filters, tracking, delivery, and transport."
+        "- Preserve an AI-readable handoff for debugging strategy, filters, "
+        "tracking, delivery, and transport."
     )
     lines.append("")
     lines.append("## Data Sources")
@@ -1055,29 +1110,26 @@ def _render_markdown(
     lines.append(f"- SQLite db: `{context.db_path}`")
     lines.append("")
     lines.append("## Confirmed Facts")
-    for item in summary["confirmed_facts"]:
-        lines.append(f"- {item}")
+    lines.extend(f"- {item}" for item in summary["confirmed_facts"])
     lines.append("")
     lines.append("## Inferred Focus Areas")
-    for item in summary["inferred_focus_areas"]:
-        lines.append(f"- {item}")
+    lines.extend(f"- {item}" for item in summary["inferred_focus_areas"])
     lines.append("")
     lines.append("## Project State Notes")
-    for item in summary.get("project_state_notes", []):
-        lines.append(f"- {item}")
+    lines.extend(f"- {item}" for item in summary.get("project_state_notes", []))
     lines.append("")
     lines.append("## Recommended Fixes")
-    for item in summary["recommended_fixes"]:
-        lines.append(f"- [{item['priority']}] `{item['module']}`: {item['action']}")
+    lines.extend(
+        f"- [{item['priority']}] `{item['module']}`: {item['action']}"
+        for item in summary["recommended_fixes"]
+    )
     lines.append("")
     lines.append("## Suspicious Modules")
-    for item in summary["suspicious_modules"]:
-        lines.append(f"- `{item['module']}`: {item['reason']}")
+    suspicious = summary["suspicious_modules"]
+    lines.extend(f"- `{item['module']}`: {item['reason']}" for item in suspicious)
     lines.append("")
     lines.append("## Previous Run Metrics")
-    lines.append(
-        f"- Runtime policy: `{json.dumps(summary.get('runtime_policy', {}), ensure_ascii=True, sort_keys=True)}`"
-    )
+    lines.append(_md_json_line("Runtime policy", summary.get("runtime_policy", {}), sort_keys=True))
     lines.append(f"- Cycle count: `{summary['metrics']['cycle_count']}`")
     lines.append(f"- Cycle age minutes: `{summary['metrics']['cycle_age_minutes']}`")
     lines.append(f"- Detector runs total: `{summary['metrics']['detector_runs_total']}`")
@@ -1094,108 +1146,76 @@ def _render_markdown(
     lines.append(f"- Cooldown entries: `{summary['metrics']['cooldown_entries']}`")
     lines.append("")
     lines.append("## Strategy Analytics")
+    setup_counts = summary["setup_counts"]
+    pct = summary["percentages"]
     lines.append(
-        f"- Cycle setup counts: `{json.dumps(summary['setup_counts']['cycle_setup_counts'], ensure_ascii=True, sort_keys=True)}`"
+        _md_json_line("Cycle setup counts", setup_counts["cycle_setup_counts"], sort_keys=True)
     )
     lines.append(
-        f"- Selected setup counts: `{json.dumps(summary['setup_counts']['selected_setup_counts'], ensure_ascii=True, sort_keys=True)}`"
+        _md_json_line(
+            "Selected setup counts", setup_counts["selected_setup_counts"], sort_keys=True
+        )
     )
     lines.append(
-        f"- Outcome setup counts: `{json.dumps(summary['setup_counts']['outcome_setup_counts'], ensure_ascii=True, sort_keys=True)}`"
+        _md_json_line("Outcome setup counts", setup_counts["outcome_setup_counts"], sort_keys=True)
     )
     lines.append(
-        f"- Outcome result counts: `{json.dumps(summary['outcome_result_counts'], ensure_ascii=True, sort_keys=True)}`"
+        _md_json_line("Outcome result counts", summary["outcome_result_counts"], sort_keys=True)
     )
     lines.append(
-        f"- Outcome quality counts: `{json.dumps(summary['outcome_quality_counts'], ensure_ascii=True, sort_keys=True)}`"
+        _md_json_line("Outcome quality counts", summary["outcome_quality_counts"], sort_keys=True)
     )
-    lines.append(
-        f"- Cycle setup percentages: `{json.dumps(summary['percentages']['cycle_setup_counts'], ensure_ascii=True)}`"
-    )
-    lines.append(
-        f"- Selected setup percentages: `{json.dumps(summary['percentages']['selected_setup_counts'], ensure_ascii=True)}`"
-    )
-    lines.append(
-        f"- Outcome setup percentages: `{json.dumps(summary['percentages']['outcome_setup_counts'], ensure_ascii=True)}`"
-    )
-    lines.append(
-        f"- Outcome result percentages: `{json.dumps(summary['percentages']['outcome_result_counts'], ensure_ascii=True)}`"
-    )
+    lines.append(_md_json_line("Cycle setup percentages", pct["cycle_setup_counts"]))
+    lines.append(_md_json_line("Selected setup percentages", pct["selected_setup_counts"]))
+    lines.append(_md_json_line("Outcome setup percentages", pct["outcome_setup_counts"]))
+    lines.append(_md_json_line("Outcome result percentages", pct["outcome_result_counts"]))
     lines.append("")
     lines.append("## Filter Analytics")
-    lines.append(
-        f"- Top rejection reasons: `{json.dumps(summary['top_rejection_reasons'], ensure_ascii=True)}`"
-    )
-    lines.append(
-        f"- Top rejection stages: `{json.dumps(summary['top_rejection_stages'], ensure_ascii=True)}`"
-    )
-    lines.append(
-        f"- Top decision reasons: `{json.dumps(summary['top_decision_reasons'], ensure_ascii=True)}`"
-    )
-    lines.append(
-        f"- Top decision stages: `{json.dumps(summary['top_decision_stages'], ensure_ascii=True)}`"
-    )
-    lines.append(
-        f"- Rejection reason percentages: `{json.dumps(summary['percentages']['rejection_reasons'], ensure_ascii=True)}`"
-    )
-    lines.append(
-        f"- Rejection stage percentages: `{json.dumps(summary['percentages']['rejection_stages'], ensure_ascii=True)}`"
-    )
-    lines.append(
-        f"- Decision reason percentages: `{json.dumps(summary['percentages']['decision_reasons'], ensure_ascii=True)}`"
-    )
-    lines.append(
-        f"- Decision stage percentages: `{json.dumps(summary['percentages']['decision_stages'], ensure_ascii=True)}`"
-    )
+    lines.append(_md_json_line("Top rejection reasons", summary["top_rejection_reasons"]))
+    lines.append(_md_json_line("Top rejection stages", summary["top_rejection_stages"]))
+    lines.append(_md_json_line("Top decision reasons", summary["top_decision_reasons"]))
+    lines.append(_md_json_line("Top decision stages", summary["top_decision_stages"]))
+    lines.append(_md_json_line("Rejection reason percentages", pct["rejection_reasons"]))
+    lines.append(_md_json_line("Rejection stage percentages", pct["rejection_stages"]))
+    lines.append(_md_json_line("Decision reason percentages", pct["decision_reasons"]))
+    lines.append(_md_json_line("Decision stage percentages", pct["decision_stages"]))
     lines.append("")
     lines.append("## Runtime Analytics")
+    lines.append(_md_json_line("Latest cycle summary", latest_cycle_summary, sort_keys=True))
     lines.append(
-        f"- Latest cycle summary: `{json.dumps(latest_cycle_summary, ensure_ascii=True, sort_keys=True)}`"
+        _md_json_line("Delivery status counts", summary["delivery_status_counts"], sort_keys=True)
     )
     lines.append(
-        f"- Delivery status counts: `{json.dumps(summary['delivery_status_counts'], ensure_ascii=True, sort_keys=True)}`"
+        _md_json_line("Decision status counts", summary["decision_status_counts"], sort_keys=True)
+    )
+    lines.append(_md_json_line("Zero-hit setups", summary["zero_hit_setups"]))
+    lines.append(_md_json_line("Data quality", summary["data_quality"], sort_keys=True))
+    lines.append(
+        _md_json_line(
+            "Telemetry mismatch counts", summary["telemetry_mismatch_counts"], sort_keys=True
+        )
     )
     lines.append(
-        f"- Decision status counts: `{json.dumps(summary['decision_status_counts'], ensure_ascii=True, sort_keys=True)}`"
+        _md_json_line("Tracking event counts", summary["tracking_event_counts"], sort_keys=True)
     )
-    lines.append(
-        f"- Zero-hit setups: `{json.dumps(summary['zero_hit_setups'], ensure_ascii=True)}`"
-    )
-    lines.append(
-        f"- Data quality: `{json.dumps(summary['data_quality'], ensure_ascii=True, sort_keys=True)}`"
-    )
-    lines.append(
-        f"- Telemetry mismatch counts: `{json.dumps(summary['telemetry_mismatch_counts'], ensure_ascii=True, sort_keys=True)}`"
-    )
-    lines.append(
-        f"- Tracking event counts: `{json.dumps(summary['tracking_event_counts'], ensure_ascii=True, sort_keys=True)}`"
-    )
-    lines.append(
-        f"- Open signal counts: `{json.dumps(summary['open_signal_counts'], ensure_ascii=True, sort_keys=True)}`"
-    )
-    lines.append(
-        f"- Delivery status percentages: `{json.dumps(summary['percentages']['delivery_statuses'], ensure_ascii=True)}`"
-    )
-    lines.append(
-        f"- Tracking event percentages: `{json.dumps(summary['percentages']['tracking_events'], ensure_ascii=True)}`"
-    )
+    lines.append(_md_json_line("Open signal counts", summary["open_signal_counts"], sort_keys=True))
+    lines.append(_md_json_line("Delivery status percentages", pct["delivery_statuses"]))
+    lines.append(_md_json_line("Tracking event percentages", pct["tracking_events"]))
     lines.append("")
     lines.append("## Current Market State")
-    lines.append(
-        f"- Market state: `{json.dumps(summary['current_market_state'], ensure_ascii=True, sort_keys=True)}`"
-    )
+    lines.append(_md_json_line("Market state", summary["current_market_state"], sort_keys=True))
     lines.append("")
     lines.append("## Current Runtime Readiness")
     lines.append(
-        f"- Runtime readiness: `{json.dumps(summary['current_runtime_readiness'], ensure_ascii=True, sort_keys=True)}`"
+        _md_json_line("Runtime readiness", summary["current_runtime_readiness"], sort_keys=True)
     )
     if summary["runtime_errors"]:
         lines.append("")
         lines.append("## Runtime Errors")
-        for row in summary["runtime_errors"]:
-            lines.append(
-                f"- `{row.get('symbol')}` status=`{row.get('status')}` error=`{row.get('error')}`"
-            )
+        lines.extend(
+            f"- `{row.get('symbol')}` status=`{row.get('status')}` error=`{row.get('error')}`"
+            for row in summary["runtime_errors"]
+        )
     lines.append("")
     lines.append("## Shortlist Preview")
     shortlist_preview = (
@@ -1249,8 +1269,14 @@ def _build_telegram_message(summary: dict[str, Any]) -> str:
         if risk_label == "risk-off"
         else "continuation long допускается только после прогрева фильтров"
         if risk_label == "risk-on"
-        else "приоритет только сетапам с сильным confluence"
+        else "приоритет только сетапам \u0441 сильным confluence"
     )
+    runtime_mode = html.escape(clean(runtime_policy.get("runtime_mode"), "signal_only"))
+    source_policy = html.escape(clean(runtime_policy.get("source_policy"), "binance_only"))
+    pause_losses = html.escape(clean(runtime_policy.get("max_consecutive_stop_losses"), "3"))
+    pause_hours = html.escape(clean(runtime_policy.get("stop_loss_pause_hours"), "5"))
+    shortlist_source = html.escape(clean(readiness.get("shortlist_source"), "rest_full"))
+    shortlist_size = html.escape(clean(readiness.get("shortlist_size"), "0"))
     return "\n".join(
         [
             "🧭 <b>Контекст рынка</b> <code>startup</code>",
@@ -1274,14 +1300,26 @@ def _build_telegram_message(summary: dict[str, Any]) -> str:
             ),
             f"Latest cycle: <code>{html.escape(latest_ts)}</code>",
             (
-                f"Policy: runtime=<code>{html.escape(clean(runtime_policy.get('runtime_mode'), 'signal_only'))}</code> "
-                f"source=<code>{html.escape(clean(runtime_policy.get('source_policy'), 'binance_only'))}</code> "
-                f"pause=<code>{html.escape(clean(runtime_policy.get('max_consecutive_stop_losses'), '3'))}"
-                f"/{html.escape(clean(runtime_policy.get('stop_loss_pause_hours'), '5'))}h</code>"
+                f"Policy: runtime=<code>{runtime_mode}</code> "
+                f"source=<code>{source_policy}</code> "
+                f"pause=<code>{pause_losses}/{pause_hours}h</code>"
             ),
-            f"Shortlist: source=<code>{html.escape(clean(readiness.get('shortlist_source'), 'rest_full'))}</code> size=<code>{html.escape(clean(readiness.get('shortlist_size'), '0'))}</code>",
-            f"WS: streams=<code>{html.escape(clean(ws_health.get('active_stream_count'), '0'))}</code> reconnect=<code>{html.escape(clean(ws_health.get('reconnect_reason'), 'steady'))}</code>",
-            f"Frames ready: 15m=<code>{frame_readiness.get('15m_ready_symbols', 0)}</code> 1h=<code>{frame_readiness.get('1h_ready_symbols', 0)}</code> 4h=<code>{frame_readiness.get('4h_ready_symbols', 0)}</code>",
+            (
+                f"Shortlist: source=<code>{shortlist_source}</code> "
+                f"size=<code>{shortlist_size}</code>"
+            ),
+            (
+                "WS: streams="
+                f"<code>{html.escape(clean(ws_health.get('active_stream_count'), '0'))}</code> "
+                "reconnect="
+                f"<code>{html.escape(clean(ws_health.get('reconnect_reason'), 'steady'))}</code>"
+            ),
+            (
+                "Frames ready: 15m="
+                f"<code>{frame_readiness.get('15m_ready_symbols', 0)}</code> "
+                f"1h=<code>{frame_readiness.get('1h_ready_symbols', 0)}</code> "
+                f"4h=<code>{frame_readiness.get('4h_ready_symbols', 0)}</code>"
+            ),
         ]
     )
 
@@ -1328,7 +1366,7 @@ def generate_startup_report(
         if real_suggestions and not any("Not enough" in s for s in suggestions[:2]):
             advisor_text = "\n\n<b>CONFIG ADVISOR</b>\n" + html.escape("\n".join(real_suggestions))
             telegram_message = telegram_message + advisor_text
-    except Exception:
+    except DEFENSIVE_EXC:
         pass
 
     stamp = context.report_ts.astimezone(MSK).strftime("%Y%m%d_%H%M%S")
@@ -1379,7 +1417,7 @@ async def run_daily_summary_loop(
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
             continue
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
         try:
             await generate_and_send_startup_report(
@@ -1390,6 +1428,6 @@ async def run_daily_summary_loop(
             )
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except DEFENSIVE_EXC:
             # Keep loop alive in runtime regardless of report failure.
             continue

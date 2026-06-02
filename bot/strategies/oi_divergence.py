@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-from ..domain.config import BotSettings
-from ..domain.schemas import PreparedSymbol, Signal
-from .roadmap_base import RoadmapSetup
-
+from typing import TYPE_CHECKING, ClassVar
 
 from ._roadmap import (
     _build_atr_signal,
@@ -11,13 +8,18 @@ from ._roadmap import (
     _price_change_pct,
     _reject,
 )
+from .roadmap_base import RoadmapSetup
+
+if TYPE_CHECKING:
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
 
 __all__ = ["detect_oi_divergence"]
 
 
 def detect_oi_divergence(
     prepared: PreparedSymbol,
-    settings: BotSettings,
+    _settings: BotSettings,
     effective_params: dict[str, float],
     *,
     setup_id: str,
@@ -69,7 +71,7 @@ class OIDivergenceSetup(RoadmapSetup):
     family = "sentiment"
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)
-    DEFAULTS = {
+    DEFAULTS: ClassVar[dict[str, float]] = {
         **RoadmapSetup.DEFAULTS,
         "min_abs_oi_change_pct": 0.005,
         "min_price_change_pct": 0.06,

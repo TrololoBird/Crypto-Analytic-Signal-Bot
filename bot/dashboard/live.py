@@ -7,17 +7,21 @@ telemetry JSONL files and returns bounded, JSON-serializable summaries.
 
 from __future__ import annotations
 
+import json
+import logging
+import time
 from collections import Counter, defaultdict, deque
 from dataclasses import dataclass
 from datetime import UTC, datetime
-import json
-import logging
 from pathlib import Path
-import time
-from typing import Any, Callable, Iterable, Mapping
+from typing import TYPE_CHECKING, Any
+
+from bot.core.runtime_errors import DEFENSIVE_EXC
 
 from ..delivery.formatting import message_preview, sample_message_from_row
 
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable, Mapping
 
 JsonDict = dict[str, Any]
 LOG = logging.getLogger("bot.dashboard_live")
@@ -66,7 +70,7 @@ def _parse_ts(value: Any) -> datetime | None:
     if isinstance(value, datetime):
         return value if value.tzinfo else value.replace(tzinfo=UTC)
     try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(str(value))
     except (TypeError, ValueError):
         return None
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
@@ -559,7 +563,7 @@ class DashboardLiveData:
         if ws is not None and hasattr(ws, "state_snapshot"):
             try:
                 ws_snapshot = ws.state_snapshot()
-            except Exception as exc:
+            except DEFENSIVE_EXC as exc:
                 LOG.debug("dashboard live ws snapshot unavailable: %s", exc)
                 ws_snapshot = {}
         diagnostics = getattr(bot, "_signal_diagnostics", None)
@@ -580,12 +584,12 @@ class DashboardLiveData:
     def _delivery_uncached(self, *, limit: int) -> JsonDict:
         selected = list(self._iter_recent("selected", max_rows=max(50, limit * 4), limit_files=2))
         delivery = list(self._iter_recent("delivery", max_rows=max(50, limit * 4), limit_files=2))
-        rows = []
-        for row in delivery[:limit]:
-            rows.append({**row, "source": "delivery"})
+        rows = [{**row, "source": "delivery"} for row in delivery[:limit]]
         if not rows:
-            for row in selected[:limit]:
-                rows.append({**row, "source": "selected", "delivery_status": "selected"})
+            rows = [
+                {**row, "source": "selected", "delivery_status": "selected"}
+                for row in selected[:limit]
+            ]
         return {
             "run_id": self._preferred_run_id(),
             "selected_count": len(selected),

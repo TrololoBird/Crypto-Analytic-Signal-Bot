@@ -9,17 +9,21 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
-from typing import Any, TYPE_CHECKING
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
+
+from bot.core.runtime_errors import DEFENSIVE_EXC
+
+from ..domain.events import KlineCloseEvent, ReconnectEvent, ShortlistUpdatedEvent
 
 if TYPE_CHECKING:
     from fastapi import WebSocket
+
     from ..core.event_bus import EventBus
 
 from .live import funnel_stage_counts_from_cycle
 
 LOG = logging.getLogger("bot.ws_dashboard")
-UTC = timezone.utc
 
 
 def build_ws_health_payload(bot: Any) -> dict[str, Any]:
@@ -51,23 +55,18 @@ class DashboardWSBroadcaster:
         self._clients: set[WebSocket] = set()
         self._lock = asyncio.Lock()
         self._subscribed = False
+        self._broadcast_tasks: set[asyncio.Task[None]] = set()
 
     def subscribe_to_bus(self) -> None:
         if self._subscribed:
             return
         try:
-            from ..domain.events import (
-                KlineCloseEvent,
-                ShortlistUpdatedEvent,
-                ReconnectEvent,
-            )
-
             self._bus.subscribe(KlineCloseEvent, self._on_kline_close)
             self._bus.subscribe(ShortlistUpdatedEvent, self._on_shortlist_updated)
             self._bus.subscribe(ReconnectEvent, self._on_reconnect)
             self._subscribed = True
             LOG.info("dashboard ws broadcaster subscribed to event bus events")
-        except Exception:
+        except DEFENSIVE_EXC:
             LOG.exception("failed to subscribe ws broadcaster to event bus")
 
     async def connect(self, ws: WebSocket) -> None:
@@ -90,7 +89,7 @@ class DashboardWSBroadcaster:
             for ws in self._clients:
                 try:
                     await ws.send_text(msg)
-                except Exception:
+                except DEFENSIVE_EXC:
                     dead.append(ws)
             for ws in dead:
                 self._clients.discard(ws)
@@ -172,7 +171,9 @@ class DashboardWSBroadcaster:
     def _schedule_broadcast(self, payload: dict[str, Any]) -> None:
         try:
             loop = asyncio.get_running_loop()
-            loop.create_task(self.broadcast(payload))
+            task = loop.create_task(self.broadcast(payload))
+            self._broadcast_tasks.add(task)
+            task.add_done_callback(self._broadcast_tasks.discard)
         except RuntimeError:
             pass
 

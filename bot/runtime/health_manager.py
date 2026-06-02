@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
+
+from bot.core.runtime_errors import DEFENSIVE_EXC
 
 from ..features import cache_stats as frame_cache_stats
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from bot.runtime.bot import SignalBot
 
 
@@ -27,7 +30,7 @@ class HealthManager:
             active_signals = len(
                 [r for r in active_rows if r.get("status") in ("pending", "active")]
             )
-        except Exception:
+        except DEFENSIVE_EXC:
             LOG.debug("health check active signal count failed", exc_info=True)
             active_signals = 0
         return {
@@ -76,7 +79,7 @@ class HealthManager:
                 ws_age,
                 regime_info,
                 market_ctx.get("btc_bias", "neutral"),
-                blacklisted if blacklisted else "not_blacklisted",
+                blacklisted or "not_blacklisted",
             )
             async with self._bot._shortlist_lock:
                 shortlist = list(self._bot._shortlist)
@@ -185,7 +188,7 @@ class HealthMonitor:
                 self._failure_streak = 0
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:
+            except DEFENSIVE_EXC as exc:
                 self._failure_streak += 1
                 LOG.exception(
                     "health monitor failure | streak=%d",

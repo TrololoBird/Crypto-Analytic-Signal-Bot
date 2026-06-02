@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-from ..domain.config import BotSettings
-from ..domain.schemas import PreparedSymbol, Signal
-from .roadmap_base import RoadmapSetup
-
+from typing import TYPE_CHECKING, ClassVar
 
 from ._roadmap import (
     _as_float,
@@ -13,13 +10,18 @@ from ._roadmap import (
     _last,
     _reject,
 )
+from .roadmap_base import RoadmapSetup
+
+if TYPE_CHECKING:
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
 
 __all__ = ["detect_liquidation_heatmap"]
 
 
 def detect_liquidation_heatmap(
     prepared: PreparedSymbol,
-    settings: BotSettings,
+    _settings: BotSettings,
     effective_params: dict[str, float],
     *,
     setup_id: str,
@@ -138,7 +140,7 @@ class LiquidationHeatmapSetup(RoadmapSetup):
     family = "liquidity"
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)
-    DEFAULTS = {
+    DEFAULTS: ClassVar[dict[str, float]] = {
         **RoadmapSetup.DEFAULTS,
         "min_liquidation_score": 0.30,
         "min_oi_drop_pct": 0.03,

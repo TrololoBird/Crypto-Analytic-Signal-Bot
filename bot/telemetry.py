@@ -7,14 +7,16 @@ import logging
 import re
 import shutil
 import threading
-from datetime import date, datetime, timezone
-from pathlib import Path
-from typing import Any
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
+from bot.core.runtime_errors import DEFENSIVE_EXC
 
-UTC = timezone.utc
+if TYPE_CHECKING:
+    from pathlib import Path
+
 LOG = logging.getLogger("bot.telemetry")
 _CSV_LOCKS_GUARD = threading.Lock()
 _CSV_LOCKS: dict[str, threading.Lock] = {}
@@ -41,7 +43,7 @@ def rotate_file_if_needed(path: Path, max_size_mb: int) -> None:
     max_bytes = max_size_mb * 1024 * 1024
     if path.stat().st_size <= max_bytes:
         return
-    stamp = date.today().isoformat()
+    stamp = datetime.now(UTC).date().isoformat()
     archive = path.with_name(f"{path.stem}.{stamp}{path.suffix}")
     counter = 1
     while archive.exists():
@@ -116,7 +118,8 @@ class TelemetryStore:
         elif bucket == "replay":
             base_dir = self.replay_dir
         else:
-            raise ValueError(f"unsupported telemetry bucket: {bucket}")
+            msg = f"unsupported telemetry bucket: {bucket}"
+            raise ValueError(msg)
         path = base_dir / "by_symbol" / symbol_storage_dirname(symbol) / relative_name
         self._append_jsonl_path(path, row)
 
@@ -311,7 +314,8 @@ class TelemetryStore:
                 return None
             if max_rows > 0:
                 return df.tail(max_rows)
-            return df
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.debug("telemetry csv tail read failed | path=%s error=%s", path, exc)
             return None
+        else:
+            return df

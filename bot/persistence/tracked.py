@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import msgspec
-
-
-UTC = timezone.utc
 
 
 class TrackedSignalState(msgspec.Struct, kw_only=True):
@@ -64,7 +61,7 @@ def parse_state_dt(value: str | None) -> datetime | None:
     if not value:
         return None
     try:
-        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(str(value))
     except (ValueError, TypeError):
         return None
     if dt.tzinfo is None:

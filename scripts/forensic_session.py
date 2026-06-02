@@ -68,12 +68,12 @@ def _analyze_jsonl(path: Path, *, key: str, limit: int = 5000) -> Counter[str]:
     if not path.is_file():
         return counts
     lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-    for line in lines[-limit:]:
-        line = line.strip()
-        if not line:
+    for raw_line in lines[-limit:]:
+        stripped = raw_line.strip()
+        if not stripped:
             continue
         try:
-            row = json.loads(line)
+            row = json.loads(stripped)
         except json.JSONDecodeError:
             continue
         if isinstance(row, dict):

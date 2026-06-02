@@ -2,25 +2,32 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Any, Callable
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
-from ..delivery.watch import AlertCoordinator
-from ..domain import BotSettings
-from ..engine import SignalEngine, StrategyRegistry
 from ..core.event_bus import EventBus
-from ..persistence.repository import MemoryRepository
 from ..delivery import SignalDelivery
-from ..market.rest import BinanceClientImpl
-from ..market.data import BinanceFuturesMarketData, configure_rest_concurrency
 from ..delivery.telegram import build_message_broadcaster
-from ..market.enrichment import PublicIntelligenceService
+from ..delivery.watch import AlertCoordinator
 from ..diagnostics.quality import SignalQualityMonitor
-from ..telemetry import TelemetryStore
-from ..persistence.public_audit import PublicAuditLedger
-from ..persistence.tracking import SignalTracker
+from ..engine import SignalEngine, StrategyRegistry
+from ..market.data import BinanceFuturesMarketData, configure_rest_concurrency
+from ..market.enrichment import PublicIntelligenceService
+from ..market.proxy_bootstrap import ensure_network_ready
+from ..market.rest import BinanceClientImpl
 from ..market.ws import FuturesWSManager
+from ..persistence.public_audit import PublicAuditLedger
+from ..persistence.repository import MemoryRepository
+from ..persistence.tracking import SignalTracker
+from ..telemetry import TelemetryStore
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from ..domain import BotSettings
 
 LOG = logging.getLogger("bot.runtime.container")
 
@@ -45,7 +52,60 @@ class ApplicationContainer:
     public_audit: PublicAuditLedger
 
 
+async def build_application_container_async(
+    settings: BotSettings,
+    *,
+    register_strategies: Callable[[StrategyRegistry], None],
+    market_data: BinanceFuturesMarketData | None = None,
+    broadcaster: Any | None = None,
+    telemetry: TelemetryStore | None = None,
+    feature_flags: Any | None = None,
+    config_path: str | Path = "config.toml",
+) -> ApplicationContainer:
+    settings = await ensure_network_ready(settings, config_path=Path(config_path))
+    return _build_application_container_impl(
+        settings,
+        register_strategies=register_strategies,
+        market_data=market_data,
+        broadcaster=broadcaster,
+        telemetry=telemetry,
+        feature_flags=feature_flags,
+    )
+
+
 def build_application_container(
+    settings: BotSettings,
+    *,
+    register_strategies: Callable[[StrategyRegistry], None],
+    market_data: BinanceFuturesMarketData | None = None,
+    broadcaster: Any | None = None,
+    telemetry: TelemetryStore | None = None,
+    feature_flags: Any | None = None,
+) -> ApplicationContainer:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(
+            build_application_container_async(
+                settings,
+                register_strategies=register_strategies,
+                market_data=market_data,
+                broadcaster=broadcaster,
+                telemetry=telemetry,
+                feature_flags=feature_flags,
+            )
+        )
+    return _build_application_container_impl(
+        settings,
+        register_strategies=register_strategies,
+        market_data=market_data,
+        broadcaster=broadcaster,
+        telemetry=telemetry,
+        feature_flags=feature_flags,
+    )
+
+
+def _build_application_container_impl(
     settings: BotSettings,
     *,
     register_strategies: Callable[[StrategyRegistry], None],
@@ -61,14 +121,12 @@ def build_application_container(
 
     configure_rest_concurrency(settings.runtime.max_concurrent_rest_requests)
 
-    client = market_data or BinanceFuturesMarketData(
-        binance_client=BinanceClientImpl(
-            rest_timeout_seconds=settings.ws.rest_timeout_seconds,
-            futures_data_request_limit_per_5m=settings.runtime.futures_data_request_limit_per_5m,
-            proxy_url=settings.network.proxy_url,
-            trust_env=settings.network.trust_env,
-        )
+    binance_client = BinanceClientImpl(
+        rest_timeout_seconds=settings.ws.rest_timeout_seconds,
+        futures_data_request_limit_per_5m=settings.runtime.futures_data_request_limit_per_5m,
+        network=settings.network,
     )
+    client = market_data or BinanceFuturesMarketData(binance_client=binance_client)
 
     bus = EventBus(
         max_size=settings.runtime.event_bus_max_size,
@@ -80,12 +138,13 @@ def build_application_container(
         ws_manager = FuturesWSManager(
             client,
             settings.ws,
-            proxy_url=settings.network.proxy_url,
+            proxy_url=binance_client._proxy_url,
             trust_env=settings.network.trust_env,
         )
         ws_manager.set_event_bus(bus)
         if hasattr(client, "_ws"):
             client._ws = ws_manager
+        binance_client._ws = ws_manager
         LOG.info(
             "ws_manager initialized | pinned_symbols=%d",
             len(settings.universe.pinned_symbols),

@@ -3,12 +3,14 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from ..domain.events import KlineCloseEvent
-from ..domain.strategies import StrategyMetadata
-from ..domain.schemas import PipelineResult, Signal
 from ..market.scheduler import analysis_intervals
+
+if TYPE_CHECKING:
+    from ..domain.events import KlineCloseEvent
+    from ..domain.schemas import PipelineResult, Signal
+    from ..domain.strategies import StrategyMetadata
 
 LOG = logging.getLogger("bot.runtime.kline_handler")
 
@@ -33,7 +35,7 @@ class KlineHandler:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            LOG.error("kline_handler_error", exc_info=exc, extra={"symbol": event.symbol})
+            LOG.exception("kline_handler_error", exc_info=exc, extra={"symbol": event.symbol})
 
     async def _process_kline(self, event: KlineCloseEvent) -> None:
         if event.interval not in self._allowed_intervals():

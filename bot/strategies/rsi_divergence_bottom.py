@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-from ..domain.config import BotSettings
-from ..domain.schemas import PreparedSymbol, Signal
+from typing import TYPE_CHECKING, ClassVar
+
+from ..domain.strategy_catalog import catalog_default_params
+from ._common import build_spec_signal
+from ._roadmap import _as_float, _build_atr_signal, _missing_columns, _reject
+from .indicator_divergence import detect_regular_divergence
 from .roadmap_base import RoadmapSetup
 
-
-from ._roadmap import _as_float, _build_atr_signal, _missing_columns, _reject
-from ._common import build_spec_signal
-from ..domain.strategy_catalog import catalog_default_params
-from .indicator_divergence import detect_regular_divergence
+if TYPE_CHECKING:
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
 
 __all__ = ["detect_rsi_divergence_bottom"]
 
@@ -226,7 +228,7 @@ class RSIDivergenceBottomSetup(RoadmapSetup):
     family = "reversal"
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)
-    DEFAULTS = {
+    DEFAULTS: ClassVar[dict[str, float]] = {
         **RoadmapSetup.DEFAULTS,
         "divergence_window": 18,
         "min_rsi_delta": 1.0,

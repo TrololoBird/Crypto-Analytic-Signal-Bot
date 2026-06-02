@@ -4,9 +4,19 @@ from __future__ import annotations
 
 import logging
 import os
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 import aiohttp
+
+try:
+    from aiohttp_socks import ProxyConnector
+except ImportError:
+    ProxyConnector = None  # type: ignore[misc, assignment]
+
+try:
+    import python_socks
+except ImportError:
+    python_socks = None  # type: ignore[misc, assignment]
 
 LOG = logging.getLogger("bot.market.network_proxy")
 
@@ -43,6 +53,14 @@ def is_socks_proxy(url: str) -> bool:
     return proxy_scheme(url).startswith("socks")
 
 
+def normalize_proxy_url(url: str) -> str:
+    """Map ``socks5h`` to ``socks5`` for libraries that only accept ``socks5`` (DNS via rdns)."""
+    parsed = urlparse(url)
+    if parsed.scheme.lower() == "socks5h":
+        return urlunparse(parsed._replace(scheme="socks5"))
+    return url
+
+
 def mask_proxy_url(url: str) -> str:
     parsed = urlparse(url)
     if not parsed.hostname:
@@ -77,19 +95,16 @@ def create_aiohttp_session(
     connector_limit: int,
 ) -> aiohttp.ClientSession:
     if proxy_url and is_socks_proxy(proxy_url):
-        try:
-            from aiohttp_socks import ProxyConnector
-        except ImportError as exc:  # pragma: no cover - dependency guard
-            raise RuntimeError(
-                "SOCKS proxy requires aiohttp-socks (pip install aiohttp-socks)"
-            ) from exc
-        connector = ProxyConnector.from_url(
-            proxy_url,
+        if ProxyConnector is None:  # pragma: no cover - dependency guard
+            msg = "SOCKS proxy requires aiohttp-socks (pip install aiohttp-socks)"
+            raise RuntimeError(msg)
+        socks_connector = ProxyConnector.from_url(
+            normalize_proxy_url(proxy_url),
             limit=connector_limit,
             rdns=True,
         )
         LOG.info("rest proxy enabled | mode=socks url=%s", mask_proxy_url(proxy_url))
-        return aiohttp.ClientSession(timeout=timeout, connector=connector, trust_env=False)
+        return aiohttp.ClientSession(timeout=timeout, connector=socks_connector, trust_env=False)
 
     connector = aiohttp.TCPConnector(
         limit=connector_limit,
@@ -106,7 +121,7 @@ def create_aiohttp_session(
         trust_env=use_env,
     )
     if proxy_url:
-        session._binance_explicit_proxy = proxy_url  # type: ignore[attr-defined]
+        session._binance_explicit_proxy = proxy_url
     return session
 
 
@@ -130,17 +145,16 @@ def websockets_connect_kwargs(
         if is_socks_proxy(proxy_url):
             _ensure_python_socks()
         LOG.info("ws proxy enabled | url=%s", mask_proxy_url(proxy_url))
-        return {"proxy": proxy_url}
+        return {"proxy": normalize_proxy_url(proxy_url)}
     if trust_env:
         return {}
     return {"proxy": None}
 
 
 def _ensure_python_socks() -> None:
-    try:
-        import python_socks  # noqa: F401
-    except ImportError as exc:  # pragma: no cover
-        raise RuntimeError(
+    if python_socks is None:  # pragma: no cover
+        msg = (
             "SOCKS WebSocket proxy requires python-socks[asyncio] "
             "(pip install 'python-socks[asyncio]')"
-        ) from exc
+        )
+        raise RuntimeError(msg)

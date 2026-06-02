@@ -13,20 +13,23 @@ import json as _stdlib_json
 import logging
 import time
 from collections.abc import Callable, Coroutine
-from datetime import datetime, timezone
-from types import ModuleType
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 import polars as pl
 from websockets import exceptions as ws_exceptions
 
-from .data import MarketDataUnavailable
+from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.market.network_proxy import apply_proxy_env, mask_proxy_url, normalize_proxy_url
+
+from ..domain.events import KlineCloseEvent
 from ..domain.schemas import AggTrade, AggTradeSnapshot, SymbolFrames
-from . import ws_cache
-from . import ws_connection
-from . import ws_health
-from . import ws_reconnect
-from . import ws_subscriptions
+from . import ws_cache, ws_connection, ws_health, ws_reconnect, ws_subscriptions
+from .data import MarketDataUnavailable
+from .universe import build_shortlist
+
+if TYPE_CHECKING:
+    from types import ModuleType
 
 # Use orjson for faster JSON parsing if available
 _json: ModuleType
@@ -42,12 +45,11 @@ except ImportError:
     _USE_ORJSON = False
 
 if TYPE_CHECKING:
-    from ..domain.config import WSConfig
     from ..core.event_bus import EventBus
+    from ..domain.config import WSConfig
     from .data import BinanceFuturesMarketData
 
 
-UTC = timezone.utc
 _BACKOFF_RESET_AFTER_SECONDS = 90.0
 _PROACTIVE_RECONNECT_AFTER_SECONDS = 23 * 3600 + 50 * 60
 _HEALTH_CHECK_INTERVAL_SECONDS = 30.0
@@ -117,7 +119,14 @@ class RateLimiter:
     async def wait_for_slot(self) -> None:
         """Wait until a slot is available."""
         while not await self.acquire():
-            await asyncio.sleep(0.05)  # 50ms wait
+            ready = asyncio.Event()
+            loop = asyncio.get_running_loop()
+            if self._timestamps:
+                delay = max(0.01, 1.0 - (time.monotonic() - self._timestamps[0]))
+            else:
+                delay = 0.05
+            loop.call_later(delay, ready.set)
+            await ready.wait()
 
 
 class MessageBuffer:
@@ -154,7 +163,10 @@ class MessageBuffer:
         if not isinstance(kline, dict) or not kline.get("x"):
             return None
         try:
-            return float(kline.get("t"))
+            open_time = kline.get("t")
+            if open_time is None:
+                return None
+            return float(open_time)
         except (TypeError, ValueError):
             return None
 
@@ -178,7 +190,10 @@ class MessageBuffer:
         if closed_kline_indexes:
             self._protected_kline_drop_count += len(closed_kline_indexes)
             LOG.warning(
-                "message buffer backpressure touched closed klines | protected=%d total_protection_events=%d",
+                (
+                    "message buffer backpressure touched closed klines | protected=%d "
+                    "total_protection_events=%d"
+                ),
                 len(closed_kline_indexes),
                 self._protected_kline_drop_count,
             )
@@ -228,7 +243,6 @@ class MessageBuffer:
         """Add message to buffer, dropping oldest queued data under backpressure."""
         try:
             self._buffer.put_nowait(msg)
-            return True
         except asyncio.QueueFull:
             dropped = self._drop_oldest_batch()
             if dropped <= 0:
@@ -256,15 +270,18 @@ class MessageBuffer:
                     self._buffer.qsize(),
                 )
             return buffered
+        else:
+            return True
 
     async def get(self) -> JsonDict | None:
         """Get message from buffer. Returns None if empty."""
         try:
             msg = self._buffer.get_nowait()
             self._processed_count += 1
-            return msg
         except asyncio.QueueEmpty:
             return None
+        else:
+            return msg
 
     def get_stats(self) -> dict[str, int]:
         """Return buffer statistics."""
@@ -337,39 +354,31 @@ class FuturesWSManager:
         )
 
         self._stream_task: asyncio.Task[None] | None = None
-        self._stream_tasks: dict[str, asyncio.Task[None] | None] = {
-            endpoint: None for endpoint in _WS_ENDPOINTS
-        }
+        self._stream_tasks: dict[str, asyncio.Task[None] | None] = dict.fromkeys(_WS_ENDPOINTS)
         self._running = False
         self._connected = asyncio.Event()
         self._connected_endpoints: dict[str, asyncio.Event] = {
             endpoint: asyncio.Event() for endpoint in _WS_ENDPOINTS
         }
         self._ws_conn: Any | None = None
-        self._ws_conns: dict[str, Any | None] = {endpoint: None for endpoint in _WS_ENDPOINTS}
+        self._ws_conns: dict[str, Any | None] = dict.fromkeys(_WS_ENDPOINTS)
         self._subscribe_id = 1
         self._intended_streams: set[str] = set()
         self._intended_streams_by_endpoint: dict[str, set[str]] = {
             endpoint: set() for endpoint in _WS_ENDPOINTS
         }
         self._last_message_ts = 0.0
-        self._last_message_ts_by_endpoint: dict[str, float] = {
-            endpoint: 0.0 for endpoint in _WS_ENDPOINTS
-        }
+        self._last_message_ts_by_endpoint: dict[str, float] = dict.fromkeys(_WS_ENDPOINTS, 0.0)
         self._last_event_lag_ms: float | None = None
         self._short_lived_streak = 0
         self._last_reconnect_reason = "not_started"
-        self._last_reconnect_reason_by_endpoint: dict[str, str] = {
-            endpoint: "not_started" for endpoint in _WS_ENDPOINTS
-        }
-        self._connected_urls: dict[str, str | None] = {endpoint: None for endpoint in _WS_ENDPOINTS}
-        self._connected_at_by_endpoint: dict[str, float] = {
-            endpoint: 0.0 for endpoint in _WS_ENDPOINTS
-        }
-        self._subscription_errors: dict[str, Any | None] = {
-            endpoint: None for endpoint in _WS_ENDPOINTS
-        }
-        self._subscription_ack_count: dict[str, int] = {endpoint: 0 for endpoint in _WS_ENDPOINTS}
+        self._last_reconnect_reason_by_endpoint: dict[str, str] = dict.fromkeys(
+            _WS_ENDPOINTS, "not_started"
+        )
+        self._connected_urls: dict[str, str | None] = dict.fromkeys(_WS_ENDPOINTS)
+        self._connected_at_by_endpoint: dict[str, float] = dict.fromkeys(_WS_ENDPOINTS, 0.0)
+        self._subscription_errors: dict[str, Any | None] = dict.fromkeys(_WS_ENDPOINTS)
+        self._subscription_ack_count: dict[str, int] = dict.fromkeys(_WS_ENDPOINTS, 0)
         self._backfill_cooldowns: dict[str, float] = {}
         self._last_latency_warning_by_symbol: dict[str, float] = {}
         self._last_stale_warning_by_stream: dict[str, float] = {}
@@ -411,7 +420,7 @@ class FuturesWSManager:
         self._slow_streams: set[str] = set()  # streams with avg latency > 5000ms
         self._stream_last_message_ts: dict[str, float] = {}  # last message timestamp per stream
         self._connect_count: int = 0  # incremented each successful connection
-        self._connect_counts: dict[str, int] = {endpoint: 0 for endpoint in _WS_ENDPOINTS}
+        self._connect_counts: dict[str, int] = dict.fromkeys(_WS_ENDPOINTS, 0)
 
         # EventBus integration (optional — set via set_event_bus())
         self._event_bus: EventBus | None = None
@@ -424,8 +433,8 @@ class FuturesWSManager:
             sym: Any = item
             if not isinstance(sym, str) and hasattr(sym, "symbol"):
                 try:
-                    sym = getattr(sym, "symbol")
-                except Exception as exc:
+                    sym = sym.symbol
+                except DEFENSIVE_EXC as exc:
                     LOG.debug("symbol normalization fallback failed: %s", exc)
                     sym = item
             sym = str(sym).strip().upper()
@@ -463,7 +472,7 @@ class FuturesWSManager:
         """
         self._reconnect_cb = cb
 
-    def set_event_bus(self, bus: "EventBus") -> None:
+    def set_event_bus(self, bus: EventBus) -> None:
         """Attach an EventBus.  When set, kline_close events are published to it
         in addition to (or instead of) the legacy callback system.
 
@@ -549,6 +558,36 @@ class FuturesWSManager:
         if self._symbols:
             self._schedule_backfill(self._symbols, name="ws_backfill_initial")
 
+    def update_proxy_url(self, proxy_url: str | None, *, trust_env: bool | None = None) -> None:
+        """Switch egress proxy and force WS reconnect when already running."""
+        self._proxy_url = normalize_proxy_url(proxy_url) if proxy_url else None
+        if trust_env is not None:
+            self._trust_env = trust_env
+        if self._proxy_url:
+            apply_proxy_env(self._proxy_url)
+        LOG.info("ws proxy updated | url=%s", mask_proxy_url(self._proxy_url or ""))
+        if self._running:
+            task = asyncio.create_task(self._close_connections_for_proxy_failover())
+            self._backfill_tasks.add(task)
+            task.add_done_callback(self._backfill_tasks.discard)
+
+    async def _close_connections_for_proxy_failover(self) -> None:
+        for endpoint, ws in list(self._ws_conns.items()):
+            if ws is None:
+                continue
+            with contextlib.suppress(Exception):
+                await ws.close()
+            self._last_reconnect_reason_by_endpoint[endpoint] = "proxy_failover"
+        self._last_reconnect_reason = "proxy_failover"
+
+    async def close(self) -> None:
+        """Alias for ``stop()`` (market data facade compatibility)."""
+        await self.stop()
+
+    async def preflight_check(self) -> None:
+        """No-op preflight; connectivity is validated on ``start()``."""
+        return
+
     async def stop(self) -> None:
         """Stop the WebSocket manager and close all connections."""
         if not self._running:
@@ -568,16 +607,14 @@ class FuturesWSManager:
             task.cancel()
         if tasks_to_cancel:
             await asyncio.gather(*tasks_to_cancel, return_exceptions=True)
-        self._stream_tasks = {endpoint: None for endpoint in _WS_ENDPOINTS}
+        self._stream_tasks = dict.fromkeys(_WS_ENDPOINTS)
         self._stream_task = None
 
         # P1: Stop buffer processor
         if self._buffer_processor_task and not self._buffer_processor_task.done():
             self._buffer_processor_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._buffer_processor_task
-            except asyncio.CancelledError:
-                pass
         self._buffer_processor_task = None
 
         # Cancel any in-flight REST backfills (non-fatal, best-effort).
@@ -596,18 +633,18 @@ class FuturesWSManager:
 
         LOG.info("ws_manager stopped")
 
-    async def wait_until_connected(self, timeout: float | None = None) -> bool:
+    async def wait_until_connected(self, *, max_wait_s: float | None = None) -> bool:
         """Wait until the WebSocket connection is established.
 
         Args:
-            timeout: Maximum time to wait in seconds. None means wait forever.
+            max_wait_s: Maximum time to wait in seconds. None means wait forever.
 
         Returns:
             True if connected, False if timeout occurred.
         """
         try:
-            await asyncio.wait_for(self._connected.wait(), timeout=timeout)
-        except asyncio.TimeoutError:
+            await asyncio.wait_for(self._connected.wait(), timeout=max_wait_s)
+        except TimeoutError:
             return False
         return True
 
@@ -723,10 +760,11 @@ class FuturesWSManager:
         """Calculate current WebSocket latency in milliseconds."""
         if not self._stream_latency_ms:
             return self._last_event_lag_ms
-        all_latencies: list[float] = []
-        for latencies in self._stream_latency_ms.values():
-            if latencies:
-                all_latencies.append(sum(latencies) / len(latencies))
+        all_latencies = [
+            sum(latencies) / len(latencies)
+            for latencies in self._stream_latency_ms.values()
+            if latencies
+        ]
         if all_latencies:
             return float(round(sum(all_latencies) / len(all_latencies), 2))
         return self._last_event_lag_ms
@@ -943,7 +981,7 @@ class FuturesWSManager:
                     return
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:
+            except DEFENSIVE_EXC as exc:
                 LOG.warning("health_monitor_error", extra={"endpoint": endpoint, "exc": str(exc)})
 
     def _kline_close_age_seconds(self, symbol: str, interval: str) -> float | None:
@@ -955,7 +993,7 @@ class FuturesWSManager:
             return None
         try:
             if isinstance(close_time, str):
-                close_ts = datetime.fromisoformat(close_time.replace("Z", "+00:00"))
+                close_ts = datetime.fromisoformat(close_time)
             else:
                 close_ts = close_time
             return max(0.0, (datetime.now(UTC) - close_ts).total_seconds())
@@ -1007,8 +1045,7 @@ class FuturesWSManager:
         )
         if elapsed >= _SHORT_DISCONNECT_BACKFILL_GRACE_SECONDS:
             return True
-        missing_cache = any(symbol not in self._klines for symbol in stale_symbols)
-        return missing_cache
+        return any(symbol not in self._klines for symbol in stale_symbols)
 
     async def _maybe_backfill_after_disconnect(
         self, *, elapsed: float, stale_symbols: list[str]
@@ -1049,9 +1086,7 @@ class FuturesWSManager:
                 return False
             if not self._is_interval_fresh(symbol, interval):
                 return False
-        if self._cfg.subscribe_book_ticker and symbol not in self._book:
-            return False
-        return True
+        return not (self._cfg.subscribe_book_ticker and symbol not in self._book)
 
     async def get_symbol_frames(self, symbol: str) -> SymbolFrames | None:
         """Get structured market data frames for a symbol.
@@ -1329,9 +1364,6 @@ class FuturesWSManager:
             self._last_shortlist_rebuild_ts = now
             LOG.debug("shortlist rebuild triggered | age=%.1fs", time_since_last)
 
-            # Import here to avoid circular dependency
-            from .universe import build_shortlist
-
             if self.is_ticker_cache_warm():
                 tickers = self.get_global_ticker_data()
                 LOG.debug("shortlist from WS cache | symbols=%d", len(tickers))
@@ -1493,7 +1525,10 @@ class FuturesWSManager:
                             usage_pct = (count / limit_val) * 100 if limit_val > 0 else 0
                             if usage_pct > 95:
                                 LOG.error(
-                                    "ws rate limit high usage | endpoint=%s type=%s interval=%s count=%d limit=%d usage=%.1f%%",
+                                    (
+                                        "ws rate limit high usage | endpoint=%s type=%s "
+                                        "interval=%s count=%d limit=%d usage=%.1f%%"
+                                    ),
                                     endpoint,
                                     limit_type,
                                     interval,
@@ -1503,7 +1538,10 @@ class FuturesWSManager:
                                 )
                             elif usage_pct > 80:
                                 LOG.info(
-                                    "ws rate limit elevated usage | endpoint=%s type=%s interval=%s count=%d limit=%d usage=%.1f%%",
+                                    (
+                                        "ws rate limit elevated usage | endpoint=%s type=%s "
+                                        "interval=%s count=%d limit=%d usage=%.1f%%"
+                                    ),
                                     endpoint,
                                     limit_type,
                                     interval,
@@ -1614,10 +1652,9 @@ class FuturesWSManager:
         start_ts = time.monotonic()
         data = msg.get("data")
         stream = msg.get("stream", "unknown")
-        symbol_for_limit = "batch"
         if isinstance(data, dict):
             order = data.get("o")
-            symbol_for_limit = str(
+            str(
                 data.get("s")
                 or (order.get("s") if isinstance(order, dict) else None)
                 or str(stream).split("@", 1)[0]
@@ -1648,7 +1685,8 @@ class FuturesWSManager:
                 if event_type == "forceOrder":
                     await self._dispatch_event(item)
                 elif event_type == "24hrTicker":
-                    # Save ALL tickers to cache for shortlist building, but only dispatch for shortlist
+                    # Save ALL tickers to cache for shortlist building;
+                    # dispatch only for shortlist symbols
                     self._handle_ticker(sym, item)
                     if sym in symbol_set:
                         await self._dispatch_event(item)
@@ -1708,7 +1746,7 @@ class FuturesWSManager:
                     await asyncio.sleep(0)
             except asyncio.CancelledError:
                 break
-            except Exception as exc:
+            except DEFENSIVE_EXC as exc:
                 LOG.debug("buffer processor error: %s", exc)
                 await asyncio.sleep(0.5)
 
@@ -1789,8 +1827,6 @@ class FuturesWSManager:
 
         # Publish to EventBus (primary path when SignalBot uses EventBus)
         if self._event_bus is not None:
-            from ..domain.events import KlineCloseEvent
-
             self._event_bus.publish_nowait(
                 KlineCloseEvent(symbol=symbol, interval=interval, close_ts=close_ts_ms)
             )

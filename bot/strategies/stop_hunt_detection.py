@@ -1,15 +1,20 @@
+"""stop_hunt_detection — canonical strategy detector."""
+
 from __future__ import annotations
 
-from ..domain.config import BotSettings
-from ..domain.schemas import PreparedSymbol, Signal
-from .roadmap_base import RoadmapSetup
-
+from typing import TYPE_CHECKING, ClassVar
 
 import polars as pl
 
-from ._common import SpecHit, with_spec_columns, _latest_values, build_spec_signal
 from ..domain.strategy_catalog import catalog_default_params
-from ._roadmap import _build_atr_signal, _last, _reject, _as_float
+from ._common import SpecHit, _latest_values, build_spec_signal, with_spec_columns
+from ._roadmap import _as_float, _build_atr_signal, _last, _missing_columns, _reject
+from .common import orderflow_supports_reversal
+from .roadmap_base import RoadmapSetup
+
+if TYPE_CHECKING:
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
 
 __all__ = ["detect_stop_hunt", "detect_stop_hunt_prepared"]
 
@@ -71,15 +76,6 @@ def detect_stop_hunt(frame: pl.DataFrame, *, timeframe: str = "15m") -> SpecHit 
             rsi=row.get("rsi14", 50.0),
         )
     return None
-
-
-"""stop_hunt_detection detector."""
-from ._roadmap import (
-    _missing_columns,
-)
-from .common import orderflow_supports_reversal
-
-__all__ = ["detect_stop_hunt_prepared", "detect_stop_hunt_detection"]
 
 
 def detect_stop_hunt_prepared(
@@ -240,7 +236,7 @@ def detect_stop_hunt_prepared(
         )
         return None
 
-    flow_ok, flow_details = orderflow_supports_reversal(
+    flow_ok, _flow_details = orderflow_supports_reversal(
         prepared,
         direction,
         min_delta_long=float(params.get("min_recovery_delta_long", 0.49)),
@@ -307,7 +303,7 @@ class StopHuntDetectionSetup(RoadmapSetup):
     family = "liquidity"
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)
-    DEFAULTS = {
+    DEFAULTS: ClassVar[dict[str, float]] = {
         **RoadmapSetup.DEFAULTS,
         "sweep_tolerance_pct": 0.0010,
         "min_volume_ratio": 0.80,

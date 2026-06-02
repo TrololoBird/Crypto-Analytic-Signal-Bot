@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +16,6 @@ import aiosqlite
 
 from ..migrations import migrate_db
 
-UTC = timezone.utc
 LOG = logging.getLogger("bot.diary_store")
 
 TRADE_COLS = [
@@ -74,7 +73,8 @@ class DiaryStore:
 
     def _conn_or_raise(self) -> aiosqlite.Connection:
         if self._conn is None:
-            raise RuntimeError("DiaryStore not initialized")
+            msg = "DiaryStore not initialized"
+            raise RuntimeError(msg)
         return self._conn
 
     async def create_trade(self, trade: dict[str, Any]) -> dict[str, Any]:

@@ -1,25 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from .domain.config import BotSettings, load_settings
+from .runtime.bot import SignalBot
 
-if TYPE_CHECKING:
-    from .runtime.bot import SignalBot
-    from .domain.config import BotSettings
-
-__all__ = ["SignalBot", "BotSettings", "load_settings"]
-
-
-def __getattr__(name: str) -> Any:
-    if name == "SignalBot":
-        from .runtime.bot import SignalBot as _SignalBot
-
-        return _SignalBot
-    if name == "BotSettings":
-        from .domain.config import BotSettings as _BotSettings
-
-        return _BotSettings
-    if name == "load_settings":
-        from .domain.config import load_settings as _load_settings
-
-        return _load_settings
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__all__ = ["BotSettings", "SignalBot", "load_settings"]

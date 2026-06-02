@@ -1,84 +1,30 @@
-# Доступ к Binance API из России
+# Доступ к Binance API из России (автоматика)
 
-Binance блокирует запросы из ряда регионов (включая РФ) на уровне CDN. Бот использует **только публичные** REST/WebSocket endpoints — приватные ключи и автоторговля не нужны.
+Бот **сам** поддерживает egress для 24/7:
 
-## Рекомендуемый подход (без встраивания «чужих» прокси в код)
+1. При старте: если прямой доступ и настроенный пул недоступны — `scripts/discover_binance_proxies.py` (через `bot.market.proxy_bootstrap`).
+2. В рантайме: failover по `proxy_urls` при transport/geo-ошибках (REST + переподключение WS).
+3. Прямой доступ: `trust_env = true` — используется, пока не сработает geo-block.
 
-Не подключайте в репозиторий списки бесплатных публичных прокси: они нестабильны и могут перехватывать трафик.
-
-Вместо этого поднимите **локальный** клиент (один раз на машине):
-
-| Клиент | Локальный SOCKS5 | Регистрация |
-|--------|------------------|-------------|
-| Clash Verge / Mihomo / v2rayN | `127.0.0.1:7890` | Зависит от подписки/узлов |
-| Tor Browser / tor service | `127.0.0.1:9050` | Не нужна (медленно) |
-| Корпоративный HTTP proxy | `http://host:8080` | По политике IT |
-
-Бот читает прокси из `config.toml`, `.env` или переменных окружения.
-
-## Настройка
-
-### 1. `config.toml`
-
-```toml
-[bot.network]
-proxy_url = "socks5h://127.0.0.1:7890"
-trust_env = true
-```
-
-`trust_env = true` — дополнительно учитывать `HTTPS_PROXY` / `BINANCE_PROXY_URL`.
-
-### 2. `.env` (приоритет через `BINANCE_PROXY_URL`)
-
-```env
-BINANCE_PROXY_URL=socks5h://127.0.0.1:7890
-```
-
-### 3. PowerShell (сессия)
+## Обновление пула вручную (агент/CI)
 
 ```powershell
-$env:BINANCE_PROXY_URL = "socks5h://127.0.0.1:7890"
-python scripts/probe_binance_access.py
+.\.venv\Scripts\python.exe scripts\discover_binance_proxies.py --config config.toml
 ```
 
-### 4. Автоподбор локальных портов
+Результат пишется в `[bot.network]` в `config.toml` (gitignored у оператора).
 
-```powershell
-python scripts/probe_binance_access.py --try-local-ports
-```
+## Поля `[bot.network]`
 
-Скрипт перебирает типичные порты Clash/Tor и выводит рабочий URL.
+| Поле | Назначение |
+|------|------------|
+| `proxy_url` | Основной endpoint (пусто = сначала direct при `trust_env`) |
+| `proxy_urls` | Цепочка резерва |
+| `failover_enabled` | Автопереключение |
+| `failover_cooldown_seconds` | Пауза на сбойный endpoint |
 
 ## Проверка
 
 ```powershell
-pip install -e ".[live,dev,test]"
-python scripts/probe_binance_access.py
-$env:PYTEST_LIVE=1; pytest tests/live/test_binance_public_api.py -q
-python scripts/live_check_binance_api.py
+.\.venv\Scripts\python.exe scripts\probe_binance_access.py --all-configured
 ```
-
-## Live-запуск бота
-
-```powershell
-$env:BINANCE_PROXY_URL = "socks5h://127.0.0.1:7890"
-python main.py
-```
-
-или smoke с Telegram (нужны секреты в `.env`):
-
-```powershell
-python scripts/live_smoke_bot.py --minutes 15
-```
-
-## WebSocket
-
-Для SOCKS5 установлены зависимости `aiohttp-socks` и `python-socks[asyncio]`. WebSocket использует тот же `proxy_url` / `WSS_PROXY`.
-
-## CI (GitHub Actions)
-
-Раннеры в заблокированных регионах пропускают live-тесты (`tests/live/conftest.py`). Локальная проверка с прокси — обязательна перед продакшен-запуском из РФ.
-
-## Правовая оговорка
-
-Использование VPN/прокси для доступа к зарубежным биржам может регулироваться местным законодательством. Ответственность за соблюдение правил — на операторе бота.

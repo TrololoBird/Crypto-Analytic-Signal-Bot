@@ -27,7 +27,8 @@ def test_weighted_moving_average_leading_bars_stay_null() -> None:
     assert series.null_count() >= 2
     assert len(series.drop_nulls()) >= 1
     tail = series.drop_nulls().tail(1).item()
-    assert tail is not None and math.isfinite(float(tail))
+    assert tail is not None
+    assert math.isfinite(float(tail))
 
 
 def test_hull_and_ichimoku_no_all_zero_fill() -> None:

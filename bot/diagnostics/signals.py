@@ -8,14 +8,13 @@ question "why are signals not being generated right now?"
 
 from __future__ import annotations
 
+import json
+import threading
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-import json
-import threading
 from pathlib import Path
 from typing import Any
-
 
 DEFAULT_WINDOW_MINUTES = 15
 
@@ -199,7 +198,7 @@ class SignalDiagnostics:
             window.filter_rejects_by_reason[f"{stage_key}:{reject_reason}"] += 1
             window.filter_rejects_by_setup[setup] += 1
 
-    def record_atr_sample(self, setup_id: str, atr_pct: float, passed: bool) -> None:
+    def record_atr_sample(self, setup_id: str, atr_pct: float, *, passed: bool) -> None:
         """Record an ATR sample for threshold calibration.
 
         Parameters
@@ -377,7 +376,7 @@ class SignalDiagnostics:
         lines.extend(self._markdown_table(zero_rows[:25]))
         return "\n".join(lines) + "\n"
 
-    def compare_windows(self, other: "SignalDiagnostics") -> dict[str, Any]:
+    def compare_windows(self, other: SignalDiagnostics) -> dict[str, Any]:
         """Compare this diagnostic window against another instance.
 
         Parameters
@@ -548,7 +547,7 @@ class SignalDiagnostics:
                 if not values:
                     continue
                 setup_summary[f"{state}_median"] = round(self._median(values), 4)
-                setup_summary[f"{state}_count"] = int(len(values))
+                setup_summary[f"{state}_count"] = len(values)
             if setup_summary:
                 result[setup_id] = setup_summary
         return result
@@ -584,20 +583,20 @@ class SignalDiagnostics:
             "| " + " | ".join(columns) + " |",
             "| " + " | ".join("---" for _ in columns) + " |",
         ]
-        for row in rows:
-            output.append("| " + " | ".join(str(row.get(column, "")) for column in columns) + " |")
+        output.extend(
+            "| " + " | ".join(str(row.get(column, "")) for column in columns) + " |" for row in rows
+        )
         return output
 
 
-_GLOBAL_DIAGNOSTICS: SignalDiagnostics | None = None
+_GLOBAL_DIAGNOSTICS: list[SignalDiagnostics | None] = [None]
 
 
 def get_global_diagnostics() -> SignalDiagnostics | None:
     """Return the process-wide diagnostics object, if initialized."""
-    return _GLOBAL_DIAGNOSTICS
+    return _GLOBAL_DIAGNOSTICS[0]
 
 
 def set_global_diagnostics(diag: SignalDiagnostics) -> None:
     """Register the process-wide diagnostics object."""
-    global _GLOBAL_DIAGNOSTICS
-    _GLOBAL_DIAGNOSTICS = diag
+    _GLOBAL_DIAGNOSTICS[0] = diag

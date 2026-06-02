@@ -36,7 +36,10 @@ class SlidingWindowRateLimiter:
                     return waited_s
                 sleep_s = max(0.0, (self._times[0] + self._window_seconds) - now) + 0.05
                 LOG.info(
-                    "futures-data request budget exhausted | sleeping=%.2fs label=%s used=%d limit=%d window=%.0fs",
+                    (
+                        "futures-data request budget exhausted | sleeping=%.2fs label=%s "
+                        "used=%d limit=%d window=%.0fs"
+                    ),
                     sleep_s,
                     label,
                     len(self._times),
@@ -80,7 +83,10 @@ class WeightBudgetManager:
                 oldest_ts = self._events[0][0] if self._events else now
                 sleep_s = max(0.0, (oldest_ts + self._window_seconds) - now) + 0.05
                 LOG.info(
-                    "REST weight budget exhausted | sleeping=%.2fs label=%s used=%d requested=%d limit=%d window=%.0fs",
+                    (
+                        "REST weight budget exhausted | sleeping=%.2fs label=%s used=%d "
+                        "requested=%d limit=%d window=%.0fs"
+                    ),
                     sleep_s,
                     label,
                     used,

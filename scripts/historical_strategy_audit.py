@@ -1,4 +1,3 @@
-# ruff: noqa: E402
 from __future__ import annotations
 
 import argparse
@@ -19,24 +18,23 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - direct script execution
     from common import bootstrap_repo_path, configure_script_logging
 
-bootstrap_repo_path()
-
-from bot.runtime.delivery_orchestrator import DeliveryOrchestrator
-from bot.engine import SignalEngine, StrategyRegistry
+from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.delivery.contract import validate_signal_contract
 from bot.domain.config import load_settings
 from bot.domain.schemas import Signal, SymbolFrames, SymbolMeta, UniverseSymbol
+from bot.engine import SignalEngine, StrategyRegistry
 from bot.features import min_required_bars, prepare_symbol
 from bot.market.data import (
     BinanceFuturesMarketData,
     _drop_incomplete_ohlcv_tail,
     _klines_to_frame,
 )
-from bot.delivery.contract import validate_signal_contract
+from bot.runtime.delivery_orchestrator import DeliveryOrchestrator
 from bot.setups.base import SetupParams
 from bot.strategies import STRATEGY_CLASSES
 
-
 LOG = configure_script_logging("scripts.historical_strategy_audit")
+
 BINANCE_FAPI = "https://fapi.binance.com"
 
 
@@ -58,7 +56,8 @@ def _interval_ms(interval: str) -> int:
     try:
         return mapping[interval]
     except KeyError as exc:
-        raise ValueError(f"unsupported interval: {interval}") from exc
+        msg = f"unsupported interval: {interval}"
+        raise ValueError(msg) from exc
 
 
 async def _fetch_json(
@@ -75,12 +74,14 @@ async def _fetch_json(
             async with session.get(url, params=params) as response:
                 text = await response.text()
                 if response.status >= 400:
-                    raise RuntimeError(f"HTTP {response.status}: {text[:240]}")
+                    msg = f"HTTP {response.status}: {text[:240]}"
+                    raise RuntimeError(msg)
                 return json.loads(text)
-        except Exception as exc:  # noqa: BLE001 - script must record flaky REST failures
+        except DEFENSIVE_EXC as exc:
             last_error = exc
             await asyncio.sleep(min(8.0, 0.75 * (2**attempt)))
-    raise RuntimeError(f"Binance request failed: {path} {params}: {last_error!r}")
+    msg = f"Binance request failed: {path} {params}: {last_error!r}"
+    raise RuntimeError(msg)
 
 
 async def _fetch_klines_range(
@@ -336,7 +337,7 @@ async def _current_book_context(
 ) -> dict[str, float | None]:
     try:
         return await client._fetch_book_ticker_rest_detail(symbol)
-    except Exception as exc:  # noqa: BLE001 - audit can run without L1 context
+    except DEFENSIVE_EXC as exc:
         LOG.debug("book context fetch failed", symbol=symbol, error=repr(exc))
         return {}
 
@@ -354,7 +355,7 @@ async def _warm_microstructure(client: BinanceFuturesMarketData, symbol: str) ->
     ):
         try:
             await fetch()
-        except Exception as exc:  # noqa: BLE001 - audit records degraded enrichment
+        except DEFENSIVE_EXC as exc:
             LOG.debug("microstructure warmup failed", symbol=symbol, error=repr(exc))
 
 
@@ -447,7 +448,8 @@ async def run_audit(args: argparse.Namespace) -> dict[str, Any]:
             meta_map, ticker_map = await _exchange_meta_and_tickers(session)
             symbols = [symbol.upper() for symbol in args.symbols if symbol.upper() in meta_map]
             if not symbols:
-                raise RuntimeError("no requested symbols are available on Binance futures")
+                msg = "no requested symbols are available on Binance futures"
+                raise RuntimeError(msg)
 
             hits: Counter[str] = Counter()
             rejects: Counter[str] = Counter()
@@ -612,7 +614,7 @@ async def run_audit(args: argparse.Namespace) -> dict[str, Any]:
         await client.close()
 
     zero_signal = [setup_id for setup_id in strategy_ids if hits[setup_id] == 0]
-    summary = {
+    return {
         "generated_at": datetime.now(UTC).isoformat(),
         "days": int(args.days),
         "warmup_days": int(args.warmup_days),
@@ -677,11 +679,16 @@ async def run_audit(args: argparse.Namespace) -> dict[str, Any]:
         ),
         "notes": [
             "Historical audit replays closed Binance Futures klines in rolling windows.",
-            "Current microstructure snapshot is attached only to exercise OI/funding-aware detectors; live delivery gate still uses current values.",
-            "Outcome model is conservative: if TP1 and SL are touched in the same future candle, SL is counted first.",
+            (
+                "Current microstructure snapshot is attached only to exercise "
+                "OI/funding-aware detectors; live delivery gate still uses current values."
+            ),
+            (
+                "Outcome model is conservative: if TP1 and SL are touched in the same "
+                "future candle, SL is counted first."
+            ),
         ],
     }
-    return summary
 
 
 def parse_args() -> argparse.Namespace:
@@ -738,6 +745,7 @@ async def main_async() -> int:
 
 
 def main() -> int:
+    bootstrap_repo_path()
     return asyncio.run(main_async())
 
 

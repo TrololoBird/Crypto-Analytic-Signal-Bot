@@ -1,25 +1,31 @@
 from __future__ import annotations
 
 import asyncio
-import html
 import hashlib
+import html
 import logging
 import re
 import time
-from dataclasses import dataclass
 from collections import deque
-from datetime import datetime, timedelta, timezone
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from functools import wraps
-from typing import Any, Awaitable, Callable, ParamSpec, Protocol, TypeVar, cast
+from typing import TYPE_CHECKING, Any, ParamSpec, Protocol, TypeVar, cast
 
 import aiohttp
 import structlog
+
+from bot.core.runtime_errors import DEFENSIVE_EXC
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
 
 # Legacy Telegram sender retained for callers that still depend on this module.
 # New runtime delivery code lives under bot/telegram/.
 try:
     from aiogram import Bot
     from aiogram.client.session.aiohttp import AiohttpSession
+    from aiogram.types import BufferedInputFile
 
     try:
         from aiogram.exceptions import TelegramAPIError as _AiogramAPIError
@@ -32,15 +38,16 @@ try:
     _HAS_AIogram = True
 except ImportError:
     _HAS_AIogram = False
+    BufferedInputFile = None  # type: ignore[misc, assignment]
 
 # tenacity for retries
 try:
     from tenacity import (
+        before_sleep_log,
         retry,
+        retry_if_exception_type,
         stop_after_attempt,
         wait_exponential,
-        retry_if_exception_type,
-        before_sleep_log,
     )
 
     HAS_TENACITY = True
@@ -50,7 +57,6 @@ except ImportError:
 
 LOG = structlog.get_logger("bot.messaging")
 RETRY_LOG = logging.getLogger("bot.messaging")
-UTC = timezone.utc
 P = ParamSpec("P")
 R = TypeVar("R")
 NETWORK_RETRIES = 3
@@ -62,9 +68,9 @@ TELEGRAM_LOG_PREVIEW_LIMIT = 500
 TELEGRAM_TAGS = re.compile(r"</?(?:b|i|code|pre|a)[^>]*>", flags=re.IGNORECASE)
 __all__ = (
     "DeliveryResult",
+    "DisabledBroadcaster",
     "MessageBroadcaster",
     "TelegramBroadcaster",
-    "DisabledBroadcaster",
     "WebhookBroadcaster",
     "build_message_broadcaster",
 )
@@ -103,17 +109,16 @@ def _simple_retry(
 
 
 def _buffered_input_file_class() -> Any:
-    try:
-        from aiogram.types import BufferedInputFile
-    except ImportError as exc:
-        raise RuntimeError("BufferedInputFile is unavailable") from exc
+    if BufferedInputFile is None:
+        msg = "BufferedInputFile is unavailable"
+        raise RuntimeError(msg)
     return BufferedInputFile
 
 
 def _telegram_retry() -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
     if HAS_TENACITY:
         return cast(
-            Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]],
+            "Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]",
             retry(
                 stop=stop_after_attempt(3),
                 wait=wait_exponential(multiplier=1, min=2, max=10),
@@ -152,22 +157,25 @@ class DisabledBroadcaster:
     """No-op broadcaster for runtime modes with external delivery disabled."""
 
     async def preflight_check(self) -> None:
-        raise RuntimeError("notifier provider is disabled; signal delivery is local/log only")
+        msg = "notifier provider is disabled; signal delivery is local/log only"
+        raise RuntimeError(msg)
 
     async def send_html(
         self, text: str, *, reply_to_message_id: int | None = None
     ) -> DeliveryResult:
+        del text, reply_to_message_id
         return DeliveryResult(status="logged", reason="notifier_disabled")
 
     async def edit_html(self, message_id: int, text: str) -> None:
-        return None
+        del message_id, text
+        return
 
     async def send_photo(
         self,
-        photo_bytes: bytes,
-        caption: str,
+        _photo_bytes: bytes,
+        _caption: str,
         *,
-        reply_to_message_id: int | None = None,
+        _reply_to_message_id: int | None = None,
     ) -> None:
         return None
 
@@ -181,7 +189,8 @@ class TelegramBroadcaster:
 
     def __init__(self, token: str, target_chat_id: str) -> None:
         if not _HAS_AIogram:
-            raise RuntimeError("aiogram not installed. Run: pip install aiogram>=3.27.0")
+            msg = "aiogram not installed. Run: pip install aiogram>=3.27.0"
+            raise RuntimeError(msg)
 
         self.token = token
         self.target_chat_id = target_chat_id
@@ -204,8 +213,9 @@ class TelegramBroadcaster:
 
             chat = await self.bot.get_chat(self.target_chat_id)
             LOG.info("telegram chat access confirmed", chat_id=chat.id, type=chat.type)
-        except Exception as exc:
-            raise RuntimeError(f"telegram preflight failed: {exc}") from exc
+        except DEFENSIVE_EXC as exc:
+            msg = f"telegram preflight failed: {exc}"
+            raise RuntimeError(msg) from exc
 
     async def send_html(
         self, text: str, *, reply_to_message_id: int | None = None
@@ -237,7 +247,7 @@ class TelegramBroadcaster:
                     message_hash=message_hash,
                     reply_to_message_id=reply_to_message_id,
                 )
-            except Exception as exc:
+            except DEFENSIVE_EXC as exc:
                 return DeliveryResult(status="failed", reason=f"{exc.__class__.__name__}: {exc}")
             while self._send_buffer:
                 buffered = self._send_buffer.popleft()
@@ -248,7 +258,7 @@ class TelegramBroadcaster:
                     await self._send_immediate(
                         buffered, message_hash=buffered_hash, reply_to_message_id=None
                     )
-                except Exception as exc:
+                except DEFENSIVE_EXC as exc:
                     LOG.debug("telegram buffered message retry failed", error=str(exc))
                     self._send_buffer.appendleft(buffered)
                     break
@@ -270,7 +280,7 @@ class TelegramBroadcaster:
                 self._circuit_state = "half_open"
             try:
                 await self._edit_immediate(message_id, text)
-            except Exception as exc:
+            except DEFENSIVE_EXC as exc:
                 self._record_send_failure(exc)
                 raise
             self._failure_count = 0
@@ -301,7 +311,7 @@ class TelegramBroadcaster:
                     reply_to_message_id=reply_to_message_id,
                 )
                 self._mark_send_timestamp()
-            except Exception as exc:
+            except DEFENSIVE_EXC as exc:
                 error_str = str(exc).lower()
                 # Try plain text fallback if HTML parsing failed
                 if "parse" in error_str or "html" in error_str or "caption" in error_str:
@@ -317,11 +327,11 @@ class TelegramBroadcaster:
                             reply_to_message_id=reply_to_message_id,
                         )
                         self._mark_send_timestamp()
-                    except Exception as fallback_exc:
-                        LOG.error("telegram photo send failed (fallback): %s", fallback_exc)
+                    except DEFENSIVE_EXC:
+                        LOG.exception("telegram photo send failed (fallback)")
                         raise
                 else:
-                    LOG.error("telegram photo send failed: %s", exc)
+                    LOG.exception("telegram photo send failed")
                     raise
 
     def _prune_recent_hashes(self) -> None:
@@ -352,8 +362,7 @@ class TelegramBroadcaster:
             )
             self._record_send_success(message_hash)
             LOG.info("telegram message sent", chars=len(text), preview=_message_preview(text))
-            return result.message_id
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             # Try plain text fallback if HTML parsing failed
             error_str = str(exc).lower()
             if "parse" in error_str or "html" in error_str or "tag" in error_str:
@@ -369,12 +378,15 @@ class TelegramBroadcaster:
                         )
                         self._record_send_success(message_hash)
                         LOG.info("telegram message sent (plain text)", chars=len(plain_text))
-                        return result.message_id
-                    except Exception as fallback_exc:
+                    except DEFENSIVE_EXC as fallback_exc:
                         self._record_send_failure(fallback_exc)
                         raise
+                    else:
+                        return result.message_id
             self._record_send_failure(exc)
             raise
+        else:
+            return result.message_id
 
     @_telegram_retry()
     async def _edit_immediate(self, message_id: int, text: str) -> None:
@@ -388,7 +400,7 @@ class TelegramBroadcaster:
                 parse_mode="HTML",
                 disable_web_page_preview=True,
             )
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             error_str = str(exc).lower()
             # Message not modified is OK
             if "not modified" in error_str or "message is not modified" in error_str:
@@ -405,11 +417,12 @@ class TelegramBroadcaster:
                             text=plain_text,
                             disable_web_page_preview=True,
                         )
-                        return
-                    except Exception as fallback_exc:
+                    except DEFENSIVE_EXC as fallback_exc:
                         if "not modified" in str(fallback_exc).lower():
                             return
                         raise
+                    else:
+                        return
             raise
 
     def _mark_send_timestamp(self) -> None:
@@ -586,7 +599,8 @@ class WebhookBroadcaster:
 
     async def preflight_check(self) -> None:
         if not self.webhook_url:
-            raise RuntimeError(f"{self.provider} webhook_url is required")
+            msg = f"{self.provider} webhook_url is required"
+            raise RuntimeError(msg)
         LOG.info("webhook broadcaster configured", provider=self.provider)
 
     async def send_html(
@@ -615,7 +629,7 @@ class WebhookBroadcaster:
                         body[:200],
                     )
                     return DeliveryResult(status="failed", reason=f"http_{response.status}")
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.exception("webhook delivery failed | provider=%s", self.provider)
             return DeliveryResult(status="failed", reason=f"{exc.__class__.__name__}: {exc}")
         return DeliveryResult(status="sent")
@@ -664,9 +678,8 @@ def build_message_broadcaster(settings: Any) -> MessageBroadcaster:
 
     provider_config = getattr(settings.notifiers, provider, None)
     if provider_config is None or not getattr(provider_config, "webhook_url", None):
-        raise RuntimeError(
-            f"notifier provider {provider!r} requires notifiers.{provider}.webhook_url"
-        )
+        msg = f"notifier provider {provider!r} requires notifiers.{provider}.webhook_url"
+        raise RuntimeError(msg)
 
     return WebhookBroadcaster(
         provider=provider,

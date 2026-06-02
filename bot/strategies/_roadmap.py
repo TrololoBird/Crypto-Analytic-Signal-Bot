@@ -7,18 +7,30 @@ exchange APIs and they do not place orders.
 
 from __future__ import annotations
 
-import polars as pl
+from typing import TYPE_CHECKING
 
-from ..domain.config import BotSettings
-from ..domain.schemas import PreparedSymbol, Signal
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ._common import (
     as_float as _as_float,
+)
+from ._common import (
     finite_or_none as _finite_or_none,
+)
+from ._common import (
     first_finite as _first_finite,
+)
+from ._common import (
     last as _last,
+)
+from ._common import (
     previous as _prev,
 )
+
+if TYPE_CHECKING:
+    import polars as pl
+
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
 
 
 def _missing_columns(frame: pl.DataFrame, columns: tuple[str, ...]) -> list[str]:
@@ -200,3 +212,25 @@ def _build_atr_signal(
         price_anchor=price_anchor,
         atr=atr,
     )
+
+
+__all__ = [
+    "_as_float",
+    "_build_atr_signal",
+    "_configured_params",
+    "_confirmed_context_conflict",
+    "_finite_or_none",
+    "_first_finite",
+    "_flow_delta",
+    "_flow_delta_with_source",
+    "_has_l2_depth",
+    "_last",
+    "_missing_columns",
+    "_orderbook_source",
+    "_prev",
+    "_price_change_pct",
+    "_reject",
+    "_series_max_tail",
+    "_series_mean_tail",
+    "_series_min_tail",
+]

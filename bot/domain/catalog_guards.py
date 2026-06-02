@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from .schemas import PreparedSymbol
+from typing import TYPE_CHECKING
+
+from ..setups import _reject
+
+if TYPE_CHECKING:
+    from .schemas import PreparedSymbol
 
 
 def catalog_allows_signal(
@@ -15,8 +20,6 @@ def catalog_allows_signal(
     params: dict[str, float],
 ) -> bool:
     """Apply catalog gates before emitting a spec-built signal."""
-    from ..setups import _reject
-
     min_volume = float(params.get("min_volume_ratio", 0.0) or 0.0)
     if min_volume > 0.0:
         vol = prepared.volume_ratio

@@ -5,12 +5,13 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, cast
+
+from bot.core.runtime_errors import DEFENSIVE_EXC
 
 from ..domain.schemas import PipelineResult, PreparedSymbol, Signal, UniverseSymbol
 
-UTC = timezone.utc
 LOG = logging.getLogger("bot.runtime.cycle_runner")
 
 
@@ -55,7 +56,7 @@ class CycleRunner:
                 ),
                 timeout=timeout,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             LOG.warning(
                 "cycle_timeout | symbol=%s timeout_seconds=%.1f trigger=%s",
                 symbol,
@@ -103,7 +104,7 @@ class CycleRunner:
                     )
                     if warmed:
                         ws_enrichments.update(bot._ws_cache_enrichments(symbol))
-                except Exception as exc:
+                except DEFENSIVE_EXC as exc:
                     LOG.info(
                         "symbol derivatives context warmup skipped | symbol=%s error=%s",
                         symbol,
@@ -169,12 +170,15 @@ class CycleRunner:
                 )
                 if warmed:
                     LOG.info(
-                        "emergency cycle context warmup | symbols=%d budget_s=%.1f symbol_limit=%d funding_history=true",
+                        (
+                            "emergency cycle context warmup | symbols=%d budget_s=%.1f "
+                            "symbol_limit=%d funding_history=true"
+                        ),
                         warmed,
                         runtime.emergency_context_warmup_timeout_seconds,
                         runtime.emergency_context_warmup_symbol_limit,
                     )
-            except Exception:
+            except DEFENSIVE_EXC:
                 LOG.exception("emergency cycle context warmup failed")
 
         async def _analyze_one(item: UniverseSymbol) -> PipelineResult | None:
@@ -190,7 +194,7 @@ class CycleRunner:
                     ws_enrichments=ws_enrichments,
                     kline_interval="emergency_fallback",
                 )
-                return cast(PipelineResult | None, result)
+                return cast("PipelineResult | None", result)
 
         tasks = [asyncio.create_task(_analyze_one(item)) for item in shortlist]
         results = await asyncio.gather(*tasks, return_exceptions=True)

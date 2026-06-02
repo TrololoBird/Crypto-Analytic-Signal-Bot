@@ -2,42 +2,55 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
-import webbrowser
-import asyncio
-from collections import Counter, deque
-from datetime import datetime, timedelta, timezone
+import threading
 import time
+import webbrowser
+from collections import Counter, deque
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, TYPE_CHECKING, cast
+from threading import Thread
+from typing import TYPE_CHECKING, Any, cast
 
+from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.strategies import STRATEGY_CLASSES
+
+from ..domain.strategies import RISK_PROFILE_BY_ID, STRATEGY_STATUS_BY_ID
+from ..persistence.diary_store import DiaryStore
+from .analytics import StrategyAnalytics
 from .live import DashboardLiveData
 from .live_audit import audit_snapshot, build_dashboard_audit_snapshot
 from .operator_alerts import build_live_operator_alerts
 from .ws_broadcast import DashboardWSBroadcaster
-from ..persistence.diary_store import DiaryStore
 
-UTC = timezone.utc
 _STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 _DASHBOARD_HTML = (_STATIC_DIR / "dashboard.html").read_text(encoding="utf-8")
 
 if TYPE_CHECKING:
     from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+    from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.responses import HTMLResponse
 
 try:
     from fastapi import FastAPI, WebSocket, WebSocketDisconnect
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import HTMLResponse
+    from fastapi.staticfiles import StaticFiles
 
     HAS_FASTAPI = True
 except ImportError:
-    FastAPI = None
-    WebSocket = None
-    WebSocketDisconnect = None
-    CORSMiddleware = None
-    HTMLResponse = None
     HAS_FASTAPI = False
+    StaticFiles = None  # type: ignore[misc, assignment]
+
+try:
+    import uvicorn
+
+    HAS_UVICORN = True
+except ImportError:
+    HAS_UVICORN = False
+    uvicorn = None  # type: ignore[misc, assignment]
 
 LOG = logging.getLogger("bot.dashboard")
 
@@ -102,14 +115,12 @@ class BotDashboard:
         if not self.app:
             return
         try:
-            from fastapi.staticfiles import StaticFiles
-
             static_dir = _STATIC_DIR
-            if static_dir.exists():
+            if StaticFiles is not None and static_dir.exists():
                 self.app.mount(
                     "/static", StaticFiles(directory=str(static_dir)), name="dashboard_static"
                 )
-        except Exception:
+        except DEFENSIVE_EXC:
             LOG.debug("failed to mount static files directory")
 
     def _setup_routes(self) -> None:
@@ -124,16 +135,16 @@ class BotDashboard:
         async def status() -> dict[str, Any]:
             try:
                 return await self._get_status()
-            except Exception as exc:
-                LOG.error("dashboard api status error: %s", exc)
+            except DEFENSIVE_EXC as exc:
+                LOG.exception("dashboard api status error")
                 return {"error": "status_unavailable", "detail": str(exc)}
 
         @self.app.get("/api/signals/active")
         async def active_signals() -> list[dict[str, Any]]:
             try:
                 return await self._get_active_signals()
-            except Exception as exc:
-                LOG.error("dashboard api active signals error: %s", exc)
+            except DEFENSIVE_EXC:
+                LOG.exception("dashboard api active signals error")
                 return []
 
         @self.app.get("/api/signals/recent")
@@ -141,42 +152,36 @@ class BotDashboard:
             try:
                 limit = max(1, min(int(limit), 100))
                 return self._get_recent_signals(limit)
-            except Exception as exc:
-                LOG.error("dashboard api recent signals error: %s", exc)
+            except DEFENSIVE_EXC:
+                LOG.exception("dashboard api recent signals error")
                 return []
 
         @self.app.get("/api/market/regime")
         async def market_regime() -> dict[str, Any]:
             try:
                 return self._get_market_regime()
-            except Exception as exc:
-                LOG.error("dashboard api market regime error: %s", exc)
+            except DEFENSIVE_EXC as exc:
+                LOG.exception("dashboard api market regime error")
                 return {"error": "regime_unavailable", "detail": str(exc)}
 
         @self.app.get("/api/metrics")
         async def metrics() -> dict[str, Any]:
             try:
                 return await self._get_metrics()
-            except Exception as exc:
-                LOG.error("dashboard api metrics error: %s", exc)
+            except DEFENSIVE_EXC as exc:
+                LOG.exception("dashboard api metrics error")
                 return {"error": "metrics_unavailable", "detail": str(exc)}
 
         @self.app.get("/api/health")
         async def health() -> dict[str, Any]:
             try:
-                return cast(dict[str, Any], await self.bot.health_check())
-            except Exception as exc:
-                LOG.error("dashboard api health error: %s", exc)
+                return cast("dict[str, Any]", await self.bot.health_check())
+            except DEFENSIVE_EXC as exc:
+                LOG.exception("dashboard api health error")
                 return {"status": "error", "detail": str(exc)}
 
         @self.app.get("/api/analytics/report")
         async def analytics_report(days: int = 30, scope: str = "current_run") -> dict[str, Any]:
-            try:
-                from .analytics import StrategyAnalytics
-            except ImportError as exc:
-                LOG.error("failed to import StrategyAnalytics: %s", exc)
-                return {"error": "analytics_unavailable"}
-
             days = max(1, min(int(days), 365))
             normalized_scope = str(scope or "current_run").strip().lower()
             if normalized_scope not in {"current_run", "rolling", "all"}:
@@ -236,8 +241,8 @@ class BotDashboard:
                     LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
                     return {"error": "Server is shutting down"}
                 raise
-            except Exception as exc:
-                LOG.error("dashboard api strategy decisions error: %s", exc)
+            except DEFENSIVE_EXC as exc:
+                LOG.exception("dashboard api strategy decisions error")
                 return {"error": "strategy_decisions_unavailable", "detail": str(exc)}
 
         @self.app.get("/api/strategies")
@@ -246,9 +251,10 @@ class BotDashboard:
             try:
                 if self._strategies_cache is not None:
                     return self._strategies_cache
+            except DEFENSIVE_EXC:
+                LOG.exception("dashboard api strategies error")
                 return []
-            except Exception as exc:
-                LOG.error("dashboard api strategies error: %s", exc)
+            else:
                 return []
 
         @self.app.get("/api/live/overview")
@@ -260,7 +266,7 @@ class BotDashboard:
                     LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
                     return {"error": "Server is shutting down"}
                 raise
-            except Exception as exc:
+            except DEFENSIVE_EXC as exc:
                 LOG.exception("dashboard live overview error")
                 return {"error": "live_overview_unavailable", "detail": str(exc)}
 
@@ -274,7 +280,7 @@ class BotDashboard:
                     LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
                     return {"error": "Server is shutting down"}
                 raise
-            except Exception as exc:
+            except DEFENSIVE_EXC as exc:
                 LOG.exception("dashboard live funnel error")
                 return {"error": "live_funnel_unavailable", "detail": str(exc)}
 
@@ -288,7 +294,7 @@ class BotDashboard:
                     LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
                     return {"error": "Server is shutting down"}
                 raise
-            except Exception as exc:
+            except DEFENSIVE_EXC as exc:
                 LOG.exception("dashboard live shortlist error")
                 return {"error": "live_shortlist_unavailable", "detail": str(exc)}
 
@@ -310,7 +316,7 @@ class BotDashboard:
                     LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
                     return {"error": "Server is shutting down"}
                 raise
-            except Exception as exc:
+            except DEFENSIVE_EXC as exc:
                 LOG.exception("dashboard live rejections error")
                 return {"error": "live_rejections_unavailable", "detail": str(exc)}
 
@@ -332,7 +338,7 @@ class BotDashboard:
                     LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
                     return {"error": "Server is shutting down"}
                 raise
-            except Exception as exc:
+            except DEFENSIVE_EXC as exc:
                 LOG.exception("dashboard live decisions error")
                 return {"error": "live_decisions_unavailable", "detail": str(exc)}
 
@@ -345,7 +351,7 @@ class BotDashboard:
                     LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
                     return {"error": "Server is shutting down"}
                 raise
-            except Exception as exc:
+            except DEFENSIVE_EXC as exc:
                 LOG.exception("dashboard live runtime error")
                 return {"error": "live_runtime_unavailable", "detail": str(exc)}
 
@@ -359,7 +365,7 @@ class BotDashboard:
                     LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
                     return {"error": "Server is shutting down"}
                 raise
-            except Exception as exc:
+            except DEFENSIVE_EXC as exc:
                 LOG.exception("dashboard live delivery error")
                 return {"error": "live_delivery_unavailable", "detail": str(exc)}
 
@@ -372,7 +378,7 @@ class BotDashboard:
                     LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
                     return {"error": "Server is shutting down"}
                 raise
-            except Exception as exc:
+            except DEFENSIVE_EXC as exc:
                 LOG.exception("dashboard live telegram preview error")
                 return {"error": "live_telegram_preview_unavailable", "detail": str(exc)}
 
@@ -425,16 +431,16 @@ class BotDashboard:
         async def v1_signals_active() -> list[dict[str, Any]]:
             try:
                 return await self._get_active_signals()
-            except Exception as exc:
-                LOG.error("v1 active signals error: %s", exc)
+            except DEFENSIVE_EXC:
+                LOG.exception("v1 active signals error")
                 return []
 
         @self.app.get("/api/v1/signals/live")
         async def v1_signals_live(limit: int = 20) -> list[dict[str, Any]]:
             try:
                 return self._get_live_signal_feed(max(1, min(int(limit), 100)))
-            except Exception as exc:
-                LOG.error("v1 live signals error: %s", exc)
+            except DEFENSIVE_EXC:
+                LOG.exception("v1 live signals error")
                 return []
 
         @self.app.get("/api/v1/strategies/health")
@@ -467,8 +473,8 @@ class BotDashboard:
         async def v1_market_regime() -> dict[str, Any]:
             try:
                 return self._get_market_regime()
-            except Exception as exc:
-                LOG.error("v1 market regime error: %s", exc)
+            except DEFENSIVE_EXC:
+                LOG.exception("v1 market regime error")
                 return {"error": "regime_unavailable"}
 
         # ── Diary routes ────────────────────────────────────────────────
@@ -635,7 +641,7 @@ class BotDashboard:
                         )
                         if candidates:
                             rows = self._read_recent_jsonl(candidates[0], limit=cap)
-            except Exception as exc:
+            except DEFENSIVE_EXC as exc:
                 LOG.debug("alerts telemetry fetch error: %s", exc)
             try:
                 live_rows = await asyncio.to_thread(
@@ -643,7 +649,7 @@ class BotDashboard:
                     self.bot,
                     self._live_data,
                 )
-            except Exception as exc:
+            except DEFENSIVE_EXC as exc:
                 LOG.debug("alerts live synthesis error: %s", exc)
                 live_rows = []
             merged = live_rows + [
@@ -696,7 +702,7 @@ class BotDashboard:
                     if isinstance(runtime, dict)
                     else {},
                 }
-            except Exception as exc:
+            except DEFENSIVE_EXC as exc:
                 LOG.exception("dashboard live ws-health error")
                 return {"error": "ws_health_unavailable", "detail": str(exc)}
 
@@ -732,7 +738,7 @@ class BotDashboard:
                     LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
                     return {"error": "Server is shutting down"}
                 raise
-            except Exception as exc:
+            except DEFENSIVE_EXC as exc:
                 LOG.exception("dashboard live audit error")
                 return {"error": "live_audit_unavailable", "detail": str(exc)}
 
@@ -745,9 +751,6 @@ class BotDashboard:
     def _cache_strategies(self) -> None:
         """Pre-load and cache strategies at startup."""
         try:
-            from bot.strategies import STRATEGY_CLASSES
-            from ..domain.strategies import RISK_PROFILE_BY_ID, STRATEGY_STATUS_BY_ID
-
             settings = getattr(self.bot, "settings", None)
             setups = getattr(settings, "setups", None)
             if setups is not None and hasattr(setups, "enabled_setup_ids"):
@@ -775,7 +778,7 @@ class BotDashboard:
                     }
                 )
             LOG.info("dashboard cached %d strategies", len(self._strategies_cache))
-        except Exception:
+        except DEFENSIVE_EXC:
             LOG.exception("failed to cache strategies")
             self._strategies_cache = []
 
@@ -892,10 +895,11 @@ class BotDashboard:
                 store = DiaryStore(settings.db_path)
                 await store.initialize()
                 self._diary_store = store
-                return store
-            except Exception as exc:
-                LOG.error("failed to initialize diary store: %s", exc)
+            except DEFENSIVE_EXC:
+                LOG.exception("failed to initialize diary store")
                 return None
+            else:
+                return store
 
     @staticmethod
     def _compute_killzone() -> dict[str, bool]:
@@ -989,7 +993,7 @@ class BotDashboard:
         if isinstance(value, datetime):
             return value if value.tzinfo else value.replace(tzinfo=UTC)
         try:
-            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(str(value))
         except (TypeError, ValueError):
             return None
         return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
@@ -1012,13 +1016,13 @@ class BotDashboard:
         try:
             stats = await asyncio.wait_for(bot._modern_repo.get_tracking_stats(), timeout=1.0)
             open_signals_count = stats.get("active", 0)
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.debug("dashboard status tracking stats unavailable: %s", exc)
         try:
             get_market_context = getattr(bot._modern_repo, "get_market_context", None)
             if callable(get_market_context):
                 market_context = await asyncio.wait_for(get_market_context(), timeout=1.0)
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.debug("dashboard status market context unavailable: %s", exc)
             market_context = {}
 
@@ -1080,10 +1084,10 @@ class BotDashboard:
                 }
                 for sig in signals
             ]
-        except asyncio.TimeoutError:
+        except TimeoutError:
             LOG.debug("timeout fetching active signals for dashboard")
             return []
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.debug("error fetching active signals: %s", exc)
             return []
 
@@ -1158,7 +1162,7 @@ class BotDashboard:
                     rows.append(json.loads(line))
                 except json.JSONDecodeError:
                     continue
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.debug("failed to read telemetry file %s: %s", path, exc)
         return rows
 
@@ -1382,7 +1386,7 @@ class BotDashboard:
         regime = getattr(bot.market_regime, "_last_result", None)
         if not regime:
             return {"error": "No market data available"}
-        return cast(dict[str, Any], regime.to_dict())
+        return cast("dict[str, Any]", regime.to_dict())
 
     async def _get_metrics(self) -> dict[str, Any]:
         bot = self.bot
@@ -1394,7 +1398,7 @@ class BotDashboard:
         try:
             stats = await asyncio.wait_for(bot._modern_repo.get_tracking_stats(), timeout=1.0)
             open_signals_count = stats.get("active", 0)
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.debug("dashboard metrics tracking stats unavailable: %s", exc)
 
         # Get market regime safely
@@ -1403,7 +1407,7 @@ class BotDashboard:
             regime = getattr(bot.market_regime, "_last_result", None)
             if regime:
                 regime_data = regime.to_dict()
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.debug("dashboard metrics market regime unavailable: %s", exc)
 
         # Get engine stats safely
@@ -1412,7 +1416,7 @@ class BotDashboard:
             engine = getattr(bot, "_modern_engine", None)
             if engine:
                 engine_stats = engine.get_engine_stats()
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.debug("dashboard metrics engine stats unavailable: %s", exc)
 
         return {
@@ -1439,19 +1443,15 @@ class BotDashboard:
             LOG.debug("dashboard server disabled (fastapi not installed)")
             return
 
-        from threading import Thread
-
         def run_server() -> None:
             if self.app is None:
                 return
-            try:
-                import uvicorn
-            except Exception as exc:
-                LOG.error("dashboard server failed to import uvicorn: %s", exc)
+            if not HAS_UVICORN or uvicorn is None:
+                LOG.exception("dashboard server failed to import uvicorn")
                 return
             try:
                 uvicorn.run(self.app, host=self.host, port=self.port, log_level="warning")
-            except Exception:
+            except DEFENSIVE_EXC:
                 LOG.exception("dashboard server crashed")
 
         thread = Thread(target=run_server, daemon=True)
@@ -1463,8 +1463,6 @@ class BotDashboard:
 
     def _schedule_browser_open(self, delay_seconds: float) -> None:
         """Open browser after server is ready."""
-        import threading
-        import time
 
         def open_browser() -> None:
             time.sleep(delay_seconds)
@@ -1472,7 +1470,7 @@ class BotDashboard:
             try:
                 webbrowser.open(url, new=2)  # new=2 opens in new tab
                 LOG.info("opened dashboard in browser: %s", url)
-            except Exception as exc:
+            except DEFENSIVE_EXC as exc:
                 LOG.debug("failed to open browser: %s", exc)
                 LOG.info("dashboard available at: %s", url)
 

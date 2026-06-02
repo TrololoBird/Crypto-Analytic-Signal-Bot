@@ -1,21 +1,23 @@
-"""keltner_breakout — detector in setups/detectors/."""
+"""keltner_breakout — canonical strategy detector."""
 
 from __future__ import annotations
 
+import math
+from typing import TYPE_CHECKING, ClassVar
+
 import polars as pl
 
-from ..setups.spec_runtime import SpecDetectorSetup
-from ._common import SpecHit, _latest_values, as_float, with_spec_columns
-
-__all__ = ["detect_keltner_breakout"]
-import math
-
-from ..domain.config import BotSettings
-from ..domain.schemas import PreparedSymbol, Signal
 from ..features import _swing_points
 from ..setups import _build_signal, _compute_dynamic_score, _reject
-from ..setups.spec_runtime import run_setup_detection
+from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
 from ..setups.utils import build_structural_targets
+from ._common import SpecHit, _latest_values, as_float, with_spec_columns
+
+if TYPE_CHECKING:
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
+
+__all__ = ["detect_keltner_breakout"]
 
 
 def detect_keltner_breakout(
@@ -145,13 +147,12 @@ def _spec_detect_kwargs(effective: dict[str, float]) -> dict[str, object]:
 
 def _detect_keltner_breakout_extended(
     prepared: PreparedSymbol,
-    settings: BotSettings,
-    defaults: dict[str, float],
+    _settings: BotSettings,
+    _defaults: dict[str, float],
     effective: dict[str, float],
     setup_id: str,
     family: str,
 ) -> Signal | None:
-    dynamic_params = effective
     effective_params = effective
     work_15m = prepared.work_15m
     work_1h = prepared.work_1h
@@ -414,9 +415,9 @@ def _detect_keltner_breakout_extended(
     score *= score_penalty
 
     # Graded bias alignment
-    if direction == "long" and bias_1h == "downtrend":
-        score *= effective_params.get("bias_mismatch_penalty", 0.75)
-    elif direction == "short" and bias_1h == "uptrend":
+    if (direction == "long" and bias_1h == "downtrend") or (
+        direction == "short" and bias_1h == "uptrend"
+    ):
         score *= effective_params.get("bias_mismatch_penalty", 0.75)
 
     reasons = [
@@ -469,9 +470,9 @@ def detect_keltner_breakout_setup(
 
 
 __all__ = [
+    "_detect_keltner_breakout_extended",
     "detect_keltner_breakout",
     "detect_keltner_breakout_setup",
-    "_detect_keltner_breakout_extended",
 ]
 
 
@@ -481,7 +482,7 @@ class KeltnerBreakoutSetup(SpecDetectorSetup):
     confirmation_profile = "breakout_acceptance"
     required_context = ("futures_flow",)
 
-    DEFAULTS = {
+    DEFAULTS: ClassVar[dict[str, float]] = {
         "base_score": 0.54,
         "min_volume_ratio": 1.15,
         "min_adx_1h": 13.0,

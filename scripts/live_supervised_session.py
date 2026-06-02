@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -17,7 +18,7 @@ import sqlite3
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -28,8 +29,54 @@ from bot.diagnostics.runtime_analysis import (
     parse_cycle_log_lines,
     read_jsonl,
 )
+from bot.ops.pid_utils import (
+    clear_stale_pid_file,
+    find_bot_main_pids,
+    pid_is_alive,
+    read_pid_file,
+    stop_bot_processes,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _launch_bot_subprocess(
+    cmd: list[str],
+    bot_log: Path,
+    env: dict[str, str],
+) -> subprocess.Popen[Any]:
+    with bot_log.open("a", encoding="utf-8") as out:
+        out.write(f"\n--- start {datetime.now(UTC).isoformat()} ---\n")
+        return subprocess.Popen(
+            cmd,
+            cwd=str(ROOT),
+            stdout=out,
+            stderr=subprocess.STDOUT,
+            env=env,
+        )
+
+
+async def _wait_until_poll(proc: subprocess.Popen[Any], end_at: float, poll_s: float) -> None:
+    loop = asyncio.get_running_loop()
+    while proc.poll() is None and time.time() < end_at:
+        ready = asyncio.Event()
+        delay = min(poll_s, max(0.0, end_at - time.time()))
+        loop.call_later(delay, ready.set)
+        await ready.wait()
+
+
+def _read_log_delta(log_path: Path, offset: int) -> tuple[list[str], int]:
+    if not log_path.exists():
+        return [], offset
+    size = log_path.stat().st_size
+    if size < offset:
+        offset = 0
+    with log_path.open("r", encoding="utf-8", errors="ignore") as handle:
+        handle.seek(offset)
+        chunk = handle.read()
+        return chunk.splitlines(), handle.tell()
+
+
 LOG = structlog.get_logger("scripts.live_supervised_session")
 
 _ERROR_MARKERS = (
@@ -74,21 +121,15 @@ def _pid_file() -> Path:
 
 
 def _read_pid_value(pid_file: Path) -> int:
-    from bot.ops.pid_utils import read_pid_file
-
     return read_pid_file(pid_file)
 
 
 def _pid_is_alive(pid: int) -> bool:
-    from bot.ops.pid_utils import pid_is_alive
-
     return pid_is_alive(pid)
 
 
 def _stop_existing_bot(*, exclude_pids: set[int]) -> list[int]:
     """Terminate processes holding the bot PID lock (supervisor PID excluded)."""
-    from bot.ops.pid_utils import stop_bot_processes
-
     stopped = stop_bot_processes(
         repo_root=ROOT,
         pid_file=_pid_file(),
@@ -138,10 +179,9 @@ def _read_log_tail(path: Path, *, max_bytes: int = 256_000) -> list[str]:
 
 
 def _extract_errors(lines: list[str]) -> list[str]:
-    hits: list[str] = []
-    for line in lines:
-        if any(marker in line for marker in _ERROR_MARKERS):
-            hits.append(line.strip()[:500])
+    hits = [
+        line.strip()[:500] for line in lines if any(marker in line for marker in _ERROR_MARKERS)
+    ]
     return hits[-30:]
 
 
@@ -167,7 +207,8 @@ def _fetch_tracking_summary(conn: sqlite3.Connection, since_iso: str) -> dict[st
         )
         rows = conn.execute(
             """
-            SELECT tracking_id, symbol, setup_id, direction, score, created_at, closed_at, close_reason
+            SELECT tracking_id, symbol, setup_id, direction, score,
+                   created_at, closed_at, close_reason
             FROM active_signals
             WHERE created_at >= ? OR closed_at >= ?
             ORDER BY COALESCE(closed_at, created_at) DESC
@@ -230,33 +271,22 @@ async def _snapshot_loop(
     }
     while time.time() < end_at:
         tick += 1
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         lines: list[str] = []
         session_log: Path | None = None
-        if bot_log.exists():
-            size = bot_log.stat().st_size
-            offset = stdout_offset[0]
-            if size < offset:
-                offset = 0
-            with bot_log.open("r", encoding="utf-8", errors="ignore") as handle:
-                handle.seek(offset)
-                chunk = handle.read()
-                stdout_offset[0] = handle.tell()
-            lines = chunk.splitlines()
+        stdout_lines, stdout_offset[0] = await asyncio.to_thread(
+            _read_log_delta, bot_log, stdout_offset[0]
+        )
+        lines.extend(stdout_lines)
         holder_log = _holder_bot_log()
         session_log = holder_log or _latest_bot_log()
         if session_log is not None and session_log != bot_log:
             key = str(session_log)
             offset = log_offsets.get(key, 0)
-            size = session_log.stat().st_size
-            if size < offset:
-                offset = 0
-            with session_log.open("r", encoding="utf-8", errors="ignore") as handle:
-                handle.seek(offset)
-                chunk = handle.read()
-                log_offsets[key] = handle.tell()
-            if chunk:
-                lines.extend(chunk.splitlines())
+            session_lines, log_offsets[key] = await asyncio.to_thread(
+                _read_log_delta, session_log, offset
+            )
+            lines.extend(session_lines)
 
         parsed = parse_cycle_log_lines(lines)
         totals["cycles"] += parsed["cycles"]
@@ -330,8 +360,12 @@ def _stdout_has_pid_conflict(bot_log: Path) -> int | None:
 
 async def _wait_for_holder(end_at: float, holder_pid: int) -> int:
     LOG.info("bot_monitor_holder", holder_pid=holder_pid)
+    loop = asyncio.get_running_loop()
     while time.time() < end_at and _pid_is_alive(holder_pid):
-        await asyncio.sleep(5.0)
+        ready = asyncio.Event()
+        delay = min(5.0, max(0.0, end_at - time.time()))
+        loop.call_later(delay, ready.set)
+        await ready.wait()
     return 0 if time.time() >= end_at else int(holder_pid)
 
 
@@ -346,10 +380,8 @@ async def _run_bot(
     holder = _read_pid_value(_pid_file())
     if holder and not _pid_is_alive(holder):
         LOG.warning("stale_pid_lock_cleared", holder_pid=holder)
-        try:
+        with contextlib.suppress(OSError):
             _pid_file().unlink()
-        except OSError:
-            pass
         holder = 0
     if holder and _pid_is_alive(holder):
         LOG.info("bot_reuse_existing_holder", holder_pid=holder)
@@ -357,8 +389,6 @@ async def _run_bot(
 
     cmd = [sys.executable, str(ROOT / "main.py")]
     if allow_takeover:
-        from bot.ops.pid_utils import clear_stale_pid_file, find_bot_main_pids
-
         stopped = _stop_existing_bot(exclude_pids={os.getpid()})
         if stopped:
             LOG.info("prestart_stopped_pids", pids=stopped)
@@ -375,18 +405,9 @@ async def _run_bot(
         await asyncio.sleep(2.0)
 
     LOG.info("bot_start", cmd=" ".join(cmd))
-    with bot_log.open("a", encoding="utf-8") as out:
-        out.write(f"\n--- start {datetime.now(timezone.utc).isoformat()} ---\n")
-        proc = subprocess.Popen(
-            cmd,
-            cwd=str(ROOT),
-            stdout=out,
-            stderr=subprocess.STDOUT,
-            env=os.environ.copy(),
-        )
+    proc = await asyncio.to_thread(_launch_bot_subprocess, cmd, bot_log, os.environ.copy())
     try:
-        while proc.poll() is None and time.time() < end_at:
-            await asyncio.sleep(2.0)
+        await _wait_until_poll(proc, end_at, 2.0)
         if proc.poll() is None:
             proc.terminate()
             try:
@@ -418,7 +439,7 @@ async def _run_bot(
 
 
 async def _run_one_session(args: argparse.Namespace, session_index: int) -> dict[str, Any]:
-    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     if session_index > 0:
         run_id = f"{run_id}_s{session_index}"
     log_dir = ROOT / "data" / "live_watch" / run_id
@@ -429,7 +450,7 @@ async def _run_one_session(args: argparse.Namespace, session_index: int) -> dict
 
     session_seconds = float(args.minutes) * 60.0
     end_at = time.time() + session_seconds
-    session_start = datetime.now(timezone.utc)
+    session_start = datetime.now(UTC)
 
     LOG.info(
         "session_start",
@@ -475,7 +496,7 @@ async def _run_one_session(args: argparse.Namespace, session_index: int) -> dict
         "run_id": run_id,
         "session_index": session_index,
         "started_at": session_start.isoformat(),
-        "ended_at": datetime.now(timezone.utc).isoformat(),
+        "ended_at": datetime.now(UTC).isoformat(),
         "minutes": args.minutes,
         "snapshots": len(all_snaps),
         "bot_exit_code": bot_exit,
@@ -507,10 +528,7 @@ async def _main_async(args: argparse.Namespace) -> int:
         await asyncio.sleep(float(args.gap_seconds))
 
     rollup = (
-        ROOT
-        / "data"
-        / "live_watch"
-        / f"rollup_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.json"
+        ROOT / "data" / "live_watch" / f"rollup_{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.json"
     )
     rollup.parent.mkdir(parents=True, exist_ok=True)
     rollup.write_text(json.dumps({"sessions": summaries}, indent=2, default=str), encoding="utf-8")

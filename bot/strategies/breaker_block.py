@@ -1,27 +1,32 @@
-"""breaker_block — detector in setups/detectors/."""
+"""breaker_block — canonical strategy detector."""
 
 from __future__ import annotations
 
-from ..domain.config import BotSettings
-from ..domain.schemas import PreparedSymbol, Signal
-from ..setups import _reject
 import logging
+import math
+from typing import TYPE_CHECKING, ClassVar
+
+from ..features import _swing_points as _sp
+from ..setups import _build_signal, _compute_dynamic_score, _reject
+from ..setups.smc import latest_breaker_block
+from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
+from ._common import (
+    SpecHit,
+    _latest_values,
+    _valid_order_block_rows,
+    as_float,
+    with_spec_columns,
+)
+
+if TYPE_CHECKING:
+    import polars as pl
+
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
 
 LOG = logging.getLogger("bot.strategies.breaker_block")
 
-from ..setups.spec_runtime import SpecDetectorSetup
-
-
-import polars as pl
-
-from ._common import SpecHit, as_float, with_spec_columns, _latest_values, _valid_order_block_rows
-
 __all__ = ["detect_breaker_block"]
-from ..setups import _build_signal, _compute_dynamic_score
-import math
-
-from ..setups.smc import latest_breaker_block
-from ..setups.spec_runtime import run_setup_detection
 
 
 def detect_breaker_block(frame: pl.DataFrame, *, timeframe: str = "1h") -> SpecHit | None:
@@ -101,7 +106,7 @@ def _last(frame: object, column: str, default: float = 0.0) -> float:
 
 def _detect_breaker_block_extended(
     prepared: PreparedSymbol,
-    settings: BotSettings,
+    _settings: BotSettings,
     defaults: dict[str, float],
     effective: dict[str, float],
     setup_id: str,
@@ -193,10 +198,8 @@ def _detect_breaker_block_extended(
         return None
 
     # --- Compute structural SL/TP ---
-    from ..features import _swing_points as _sp
-
     if direction == "long":
-        # SL: beyond breaker block level + sl_buffer_atr×ATR.
+        # SL: beyond breaker block level + sl_buffer_atrxATR.
         stop = bb_low - sl_buffer_atr * atr
         risk = entry_price - stop
         if risk <= 0:
@@ -222,7 +225,7 @@ def _detect_breaker_block_extended(
             tp2_cands = sh4_prices.filter(sh4_prices > entry_price)
             tp2 = float(tp2_cands[0]) if tp2_cands.len() > 0 else None
     else:
-        # SL: beyond breaker block level + sl_buffer_atr×ATR.
+        # SL: beyond breaker block level + sl_buffer_atrxATR.
         stop = bb_high + sl_buffer_atr * atr
         risk = stop - entry_price
         if risk <= 0:
@@ -316,7 +319,7 @@ def detect_breaker_block_setup(
     )
 
 
-__all__ = ["detect_breaker_block", "detect_breaker_block_setup", "_detect_breaker_block_extended"]
+__all__ = ["_detect_breaker_block_extended", "detect_breaker_block", "detect_breaker_block_setup"]
 
 
 class BreakerBlockSetup(SpecDetectorSetup):
@@ -325,7 +328,7 @@ class BreakerBlockSetup(SpecDetectorSetup):
     confirmation_profile = "breakout_acceptance"
     required_context = ("futures_flow",)
 
-    DEFAULTS = {
+    DEFAULTS: ClassVar[dict[str, float]] = {
         "base_score": 0.52,
         "scan_bars": 72,
         "mitigation_threshold": 0.3,

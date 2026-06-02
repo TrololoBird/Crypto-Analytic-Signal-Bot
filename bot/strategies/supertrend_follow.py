@@ -1,29 +1,29 @@
 from __future__ import annotations
 
-from ..domain.config import BotSettings
-from ..domain.schemas import PreparedSymbol, Signal
-from .roadmap_base import RoadmapSetup
-
-
 import math
+from typing import TYPE_CHECKING, ClassVar
 
 from ..features import _swing_points
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.utils import build_structural_targets
 from .common import as_float as _as_float
+from .roadmap_base import RoadmapSetup
+
+if TYPE_CHECKING:
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
 
 __all__ = ["detect_supertrend_follow"]
 
 
 def detect_supertrend_follow(
     prepared: PreparedSymbol,
-    settings: BotSettings,
+    _settings: BotSettings,
     effective_params: dict[str, float],
     *,
     setup_id: str,
     family: str,
 ) -> Signal | None:
-    setup_id = setup_id
     work_15m = prepared.work_15m
     work_1h = prepared.work_1h
     if work_15m.height < 30 or work_1h.height < 30:
@@ -48,8 +48,6 @@ def detect_supertrend_follow(
     if missing:
         _reject(prepared, setup_id, "missing_columns", missing_fields=missing)
         return None
-
-    params = effective_params
 
     close = _as_float(work_15m.item(-1, "close"))
     low = _as_float(work_15m.item(-1, "low"))
@@ -209,9 +207,9 @@ def detect_supertrend_follow(
         score *= float(effective_params.get("volume_penalty", 0.92))
 
     # Graded bias alignment
-    if direction == "long" and bias_1h == "downtrend":
-        score *= effective_params.get("bias_mismatch_penalty", 0.75)
-    elif direction == "short" and bias_1h == "uptrend":
+    if (direction == "long" and bias_1h == "downtrend") or (
+        direction == "short" and bias_1h == "uptrend"
+    ):
         score *= effective_params.get("bias_mismatch_penalty", 0.75)
 
     reasons = [
@@ -250,7 +248,7 @@ class SuperTrendFollowSetup(RoadmapSetup):
     confirmation_profile = "trend_follow"
     required_context = ("futures_flow",)
 
-    DEFAULTS = {
+    DEFAULTS: ClassVar[dict[str, float]] = {
         **RoadmapSetup.DEFAULTS,
         "base_score": 0.56,
         "min_adx_1h": 12.0,

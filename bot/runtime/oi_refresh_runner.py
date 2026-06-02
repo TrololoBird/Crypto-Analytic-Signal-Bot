@@ -91,7 +91,7 @@ class OIRefreshRunner:
             # 45 symbols x 6 public requests = 270 requests every 30min.
             try:
                 await asyncio.wait_for(self._bot._shutdown.wait(), timeout=1800)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
 
     async def refresh_once(
@@ -148,16 +148,22 @@ class OIRefreshRunner:
                             include_funding_history=include_funding_history,
                             priority_symbol=symbol in self._priority_symbol_set(),
                         )
-                except (asyncio.TimeoutError, TimeoutError) as exc:
+                except TimeoutError as exc:
                     LOG.info(
-                        "oi refresh symbol skipped | symbol=%s reason=context_fetch_timeout detail=%s exception_type=%s",
+                        (
+                            "oi refresh symbol skipped | symbol=%s "
+                            "reason=context_fetch_timeout detail=%s exception_type=%s"
+                        ),
                         symbol,
                         str(exc),
                         type(exc).__name__,
                     )
                 except _DEGRADATION_ERRORS as exc:
                     LOG.info(
-                        "oi refresh symbol skipped | symbol=%s reason=context_fetch_error detail=%s exception_type=%s",
+                        (
+                            "oi refresh symbol skipped | symbol=%s "
+                            "reason=context_fetch_error detail=%s exception_type=%s"
+                        ),
                         symbol,
                         str(exc),
                         type(exc).__name__,
@@ -169,7 +175,10 @@ class OIRefreshRunner:
             if deadline is not None and time.monotonic() >= deadline:
                 budget_reached = True
                 LOG.info(
-                    "oi/ls cache refresh partial | attempted=%d total=%d budget_s=%.1f reason=time_budget",
+                    (
+                        "oi/ls cache refresh partial | attempted=%d total=%d "
+                        "budget_s=%.1f reason=time_budget"
+                    ),
                     processed,
                     len(shortlist),
                     float(time_budget_seconds or 0.0),
@@ -192,7 +201,10 @@ class OIRefreshRunner:
 
         self._last_refresh_monotonic = time.monotonic()
         LOG.info(
-            "oi/ls cache refreshed | symbols=%d total=%d batches=%d rest_concurrency=%d funding_history=%s partial=%s",
+            (
+                "oi/ls cache refreshed | symbols=%d total=%d batches=%d "
+                "rest_concurrency=%d funding_history=%s partial=%s"
+            ),
             processed,
             len(shortlist),
             (len(shortlist) + batch_size - 1) // batch_size,
@@ -241,7 +253,10 @@ class OIRefreshRunner:
         limiter = self._get_single_symbol_limiter()
         if limiter.locked():
             LOG.debug(
-                "symbol derivatives context warmup skipped | symbol=%s reason=single_symbol_limiter_saturated",
+                (
+                    "symbol derivatives context warmup skipped | symbol=%s "
+                    "reason=single_symbol_limiter_saturated"
+                ),
                 symbol,
             )
             return False
@@ -250,9 +265,12 @@ class OIRefreshRunner:
             try:
                 await asyncio.wait_for(limiter.acquire(), timeout=0.05)
                 acquired_limiter = True
-            except (asyncio.TimeoutError, TimeoutError):
+            except TimeoutError:
                 LOG.debug(
-                    "symbol derivatives context warmup skipped | symbol=%s reason=single_symbol_limiter_busy",
+                    (
+                        "symbol derivatives context warmup skipped | symbol=%s "
+                        "reason=single_symbol_limiter_busy"
+                    ),
                     symbol,
                 )
                 return False
@@ -271,22 +289,29 @@ class OIRefreshRunner:
                     include_funding_history=include_funding_history,
                     priority_symbol=symbol in self._priority_symbol_set(),
                 )
-            return True
-        except (asyncio.TimeoutError, TimeoutError) as exc:
+        except TimeoutError as exc:
             LOG.debug(
-                "symbol derivatives context warmup skipped | symbol=%s reason=context_fetch_timeout exception_type=%s",
+                (
+                    "symbol derivatives context warmup skipped | symbol=%s "
+                    "reason=context_fetch_timeout exception_type=%s"
+                ),
                 symbol,
                 type(exc).__name__,
             )
             return False
         except _DEGRADATION_ERRORS as exc:
             LOG.info(
-                "symbol derivatives context warmup skipped | symbol=%s reason=context_fetch_error detail=%s exception_type=%s",
+                (
+                    "symbol derivatives context warmup skipped | symbol=%s "
+                    "reason=context_fetch_error detail=%s exception_type=%s"
+                ),
                 symbol,
                 str(exc),
                 type(exc).__name__,
             )
             return False
+        else:
+            return True
         finally:
             if acquired_limiter:
                 limiter.release()
@@ -402,7 +427,10 @@ class OIRefreshRunner:
                 await fetch()
             except _DEGRADATION_ERRORS as exc:
                 LOG.info(
-                    "oi refresh optional stage skipped | symbol=%s stage=%s source=%s reason=context_fetch_error detail=%s exception_type=%s",
+                    (
+                        "oi refresh optional stage skipped | symbol=%s stage=%s source=%s "
+                        "reason=context_fetch_error detail=%s exception_type=%s"
+                    ),
                     symbol,
                     stage,
                     source,

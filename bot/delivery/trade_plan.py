@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .contract import (
     DEFAULT_SCALE_WEIGHTS,
@@ -14,6 +13,9 @@ from .contract import (
     normalize_scale_weights,
     valid_until_from,
 )
+
+if TYPE_CHECKING:
+    from datetime import datetime
 
 __all__ = [
     "DEFAULT_SCALE_WEIGHTS",

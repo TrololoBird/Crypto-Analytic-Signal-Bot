@@ -5,9 +5,12 @@ import math
 import warnings
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Iterable, Mapping
+from typing import TYPE_CHECKING, Any
 
 import polars as pl
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Mapping
 
 MODULE_STATUS = "internal_only"
 CANONICAL_FEATURE_API = "bot.features._prepare_frame"
@@ -18,7 +21,10 @@ def _warn_if_direct_imported() -> None:
         if frame_info.filename.replace("\\", "/").endswith("/bot/features/prepare.py"):
             return
     warnings.warn(
-        "bot.features.microstructure is internal_only; use bot.features._prepare_frame for runtime feature preparation.",
+        (
+            "bot.features.microstructure is internal_only; "
+            "use bot.features._prepare_frame for runtime feature preparation."
+        ),
         DeprecationWarning,
         stacklevel=3,
     )
@@ -80,7 +86,7 @@ def add_microstructure_features(df: pl.DataFrame) -> pl.DataFrame:
 
 def _finite_float(value: object, default: float | None = None) -> float | None:
     try:
-        numeric = float(value)  # type: ignore[arg-type]
+        numeric = float(value)
     except (TypeError, ValueError):
         return default
     return numeric if math.isfinite(numeric) else default
@@ -147,7 +153,7 @@ class MicrostructureSnapshot:
         *,
         symbol: str | None = None,
         direction: str | None = None,
-    ) -> "MicrostructureSnapshot":
+    ) -> MicrostructureSnapshot:
         return cls(
             symbol=str(symbol or row.get("symbol") or "").upper(),
             direction=str(direction or row.get("direction") or "long").lower(),
@@ -237,7 +243,7 @@ class MicrostructureContext:
         symbol: str = "UNKNOWN",
         direction: str = "long",
         observed_at: datetime | None = None,
-    ) -> "MicrostructureContext":
+    ) -> MicrostructureContext:
         return cls(
             symbol=symbol or "UNKNOWN",
             direction=direction or "long",
@@ -273,7 +279,15 @@ class MicrostructureContext:
 def _score_funding(snapshot: MicrostructureSnapshot) -> MicrostructureScore:
     funding = snapshot.funding_rate
     if funding is None:
-        return MicrostructureScore("funding", 0.0, 0.18, False, "missing", None, "funding_missing")
+        return MicrostructureScore(
+            "funding",
+            0.0,
+            0.18,
+            available=False,
+            label="missing",
+            value=None,
+            reason="funding_missing",
+        )
     direction = _direction_sign(snapshot.direction)
     abs_rate = abs(funding)
     if abs_rate < 0.0002:
@@ -292,10 +306,10 @@ def _score_funding(snapshot: MicrostructureSnapshot) -> MicrostructureScore:
         "funding",
         round(_clamp(raw, -1.0, 1.0), 6),
         0.18,
-        True,
-        label,
-        funding,
-        f"funding={funding:.6f}:{label}",
+        available=True,
+        label=label,
+        value=funding,
+        reason=f"funding={funding:.6f}:{label}",
     )
 
 
@@ -303,7 +317,13 @@ def _score_long_short(snapshot: MicrostructureSnapshot) -> MicrostructureScore:
     ratio = snapshot.global_long_short_ratio or snapshot.top_trader_long_short_ratio
     if ratio is None or ratio <= 0.0:
         return MicrostructureScore(
-            "long_short_ratio", 0.0, 0.15, False, "missing", None, "ls_ratio_missing"
+            "long_short_ratio",
+            0.0,
+            0.15,
+            available=False,
+            label="missing",
+            value=None,
+            reason="ls_ratio_missing",
         )
     direction = _direction_sign(snapshot.direction)
     label = "neutral"
@@ -324,10 +344,10 @@ def _score_long_short(snapshot: MicrostructureSnapshot) -> MicrostructureScore:
         "long_short_ratio",
         round(_clamp(raw, -1.0, 1.0), 6),
         0.15,
-        True,
-        label,
-        ratio,
-        f"ls_ratio={ratio:.3f}:{label}",
+        available=True,
+        label=label,
+        value=ratio,
+        reason=f"ls_ratio={ratio:.3f}:{label}",
     )
 
 
@@ -339,7 +359,13 @@ def _score_taker(snapshot: MicrostructureSnapshot) -> MicrostructureScore:
             ratio = buy_fraction / max(1e-9, 1.0 - buy_fraction)
     if ratio is None or ratio <= 0.0:
         return MicrostructureScore(
-            "taker_pressure", 0.0, 0.18, False, "missing", None, "taker_missing"
+            "taker_pressure",
+            0.0,
+            0.18,
+            available=False,
+            label="missing",
+            value=None,
+            reason="taker_missing",
         )
     direction = _direction_sign(snapshot.direction)
     if ratio >= 1.25:
@@ -355,17 +381,25 @@ def _score_taker(snapshot: MicrostructureSnapshot) -> MicrostructureScore:
         "taker_pressure",
         round(_clamp(raw, -1.0, 1.0), 6),
         0.18,
-        True,
-        label,
-        ratio,
-        f"taker_ratio={ratio:.3f}:{label}",
+        available=True,
+        label=label,
+        value=ratio,
+        reason=f"taker_ratio={ratio:.3f}:{label}",
     )
 
 
 def _score_open_interest(snapshot: MicrostructureSnapshot) -> MicrostructureScore:
     oi_change = snapshot.open_interest_change_pct
     if oi_change is None:
-        return MicrostructureScore("open_interest", 0.0, 0.16, False, "missing", None, "oi_missing")
+        return MicrostructureScore(
+            "open_interest",
+            0.0,
+            0.16,
+            available=False,
+            label="missing",
+            value=None,
+            reason="oi_missing",
+        )
     price_change = snapshot.price_change_pct
     direction = _direction_sign(snapshot.direction)
     raw = 0.0
@@ -388,10 +422,10 @@ def _score_open_interest(snapshot: MicrostructureSnapshot) -> MicrostructureScor
         "open_interest",
         round(_clamp(raw, -1.0, 1.0), 6),
         0.16,
-        True,
-        label,
-        oi_change,
-        f"oi_change={oi_change:.3f}%:{label}",
+        available=True,
+        label=label,
+        value=oi_change,
+        reason=f"oi_change={oi_change:.3f}%:{label}",
     )
 
 
@@ -401,7 +435,13 @@ def _score_book(snapshot: MicrostructureSnapshot) -> MicrostructureScore:
     if bid is None or ask is None or bid + ask <= 0.0:
         if snapshot.depth_imbalance is None:
             return MicrostructureScore(
-                "book_imbalance", 0.0, 0.12, False, "missing", None, "book_missing"
+                "book_imbalance",
+                0.0,
+                0.12,
+                available=False,
+                label="missing",
+                value=None,
+                reason="book_missing",
             )
         imbalance = _clamp(snapshot.depth_imbalance, -1.0, 1.0)
     else:
@@ -417,10 +457,10 @@ def _score_book(snapshot: MicrostructureSnapshot) -> MicrostructureScore:
         "book_imbalance",
         round(_clamp(signed, -1.0, 1.0), 6),
         0.12,
-        True,
-        label,
-        round(imbalance, 6),
-        f"book_imbalance={imbalance:.3f}:{label}",
+        available=True,
+        label=label,
+        value=round(imbalance, 6),
+        reason=f"book_imbalance={imbalance:.3f}:{label}",
     )
 
 
@@ -428,7 +468,13 @@ def _score_microprice(snapshot: MicrostructureSnapshot) -> MicrostructureScore:
     bias = snapshot.microprice_bias
     if bias is None:
         return MicrostructureScore(
-            "microprice", 0.0, 0.07, False, "missing", None, "microprice_missing"
+            "microprice",
+            0.0,
+            0.07,
+            available=False,
+            label="missing",
+            value=None,
+            reason="microprice_missing",
         )
     signed = _clamp(bias, -1.0, 1.0) * _direction_sign(snapshot.direction)
     label = (
@@ -442,10 +488,10 @@ def _score_microprice(snapshot: MicrostructureSnapshot) -> MicrostructureScore:
         "microprice",
         round(_clamp(signed, -1.0, 1.0), 6),
         0.07,
-        True,
-        label,
-        round(bias, 6),
-        f"microprice_bias={bias:.3f}:{label}",
+        available=True,
+        label=label,
+        value=round(bias, 6),
+        reason=f"microprice_bias={bias:.3f}:{label}",
     )
 
 
@@ -453,7 +499,15 @@ def _score_spread(snapshot: MicrostructureSnapshot) -> MicrostructureScore:
     bid = snapshot.bid_price
     ask = snapshot.ask_price
     if bid is None or ask is None or bid <= 0.0 or ask <= 0.0:
-        return MicrostructureScore("spread", 0.0, 0.06, False, "missing", None, "spread_missing")
+        return MicrostructureScore(
+            "spread",
+            0.0,
+            0.06,
+            available=False,
+            label="missing",
+            value=None,
+            reason="spread_missing",
+        )
     mid = (bid + ask) / 2.0
     spread_bps = (ask - bid) / mid * 10_000.0 if mid else 0.0
     if spread_bps <= 2.0:
@@ -469,17 +523,25 @@ def _score_spread(snapshot: MicrostructureSnapshot) -> MicrostructureScore:
         "spread",
         raw,
         0.06,
-        True,
-        label,
-        round(spread_bps, 6),
-        f"spread={spread_bps:.2f}bps:{label}",
+        available=True,
+        label=label,
+        value=round(spread_bps, 6),
+        reason=f"spread={spread_bps:.2f}bps:{label}",
     )
 
 
 def _score_basis(snapshot: MicrostructureSnapshot) -> MicrostructureScore:
     basis = snapshot.basis_pct
     if basis is None:
-        return MicrostructureScore("basis", 0.0, 0.07, False, "missing", None, "basis_missing")
+        return MicrostructureScore(
+            "basis",
+            0.0,
+            0.07,
+            available=False,
+            label="missing",
+            value=None,
+            reason="basis_missing",
+        )
     direction = _direction_sign(snapshot.direction)
     if basis > 0.08:
         raw = 0.18 if direction > 0 else -0.12
@@ -491,7 +553,13 @@ def _score_basis(snapshot: MicrostructureSnapshot) -> MicrostructureScore:
         raw = 0.0
         label = "neutral"
     return MicrostructureScore(
-        "basis", round(raw, 6), 0.07, True, label, basis, f"basis={basis:.4f}%:{label}"
+        "basis",
+        round(raw, 6),
+        0.07,
+        available=True,
+        label=label,
+        value=basis,
+        reason=f"basis={basis:.4f}%:{label}",
     )
 
 
@@ -503,17 +571,23 @@ def _score_liquidations(snapshot: MicrostructureSnapshot) -> MicrostructureScore
             "liquidations",
             round(_clamp(signed, -1.0, 1.0), 6),
             0.08,
-            True,
-            label,
-            snapshot.liquidation_score,
-            f"liq_score={snapshot.liquidation_score:.3f}:{label}",
+            available=True,
+            label=label,
+            value=snapshot.liquidation_score,
+            reason=f"liq_score={snapshot.liquidation_score:.3f}:{label}",
         )
     long_value = max(0.0, snapshot.liquidation_long_notional or 0.0)
     short_value = max(0.0, snapshot.liquidation_short_notional or 0.0)
     total = long_value + short_value
     if total <= 0.0:
         return MicrostructureScore(
-            "liquidations", 0.0, 0.08, False, "missing", None, "liquidations_missing"
+            "liquidations",
+            0.0,
+            0.08,
+            available=False,
+            label="missing",
+            value=None,
+            reason="liquidations_missing",
         )
     bias = (short_value - long_value) / total
     signed = bias * _direction_sign(snapshot.direction)
@@ -522,10 +596,10 @@ def _score_liquidations(snapshot: MicrostructureSnapshot) -> MicrostructureScore
         "liquidations",
         round(_clamp(signed, -1.0, 1.0), 6),
         0.08,
-        True,
-        label,
-        round(bias, 6),
-        f"liquidation_bias={bias:.3f}:{label}",
+        available=True,
+        label=label,
+        value=round(bias, 6),
+        reason=f"liquidation_bias={bias:.3f}:{label}",
     )
 
 

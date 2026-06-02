@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-from ..domain.config import BotSettings
-from ..domain.schemas import PreparedSymbol, Signal
-from .roadmap_base import RoadmapSetup
-
+from typing import TYPE_CHECKING, ClassVar
 
 from ._roadmap import (
     _build_atr_signal,
@@ -15,13 +12,18 @@ from ._roadmap import (
     _price_change_pct,
     _reject,
 )
+from .roadmap_base import RoadmapSetup
+
+if TYPE_CHECKING:
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
 
 __all__ = ["detect_depth_imbalance"]
 
 
 def detect_depth_imbalance(
     prepared: PreparedSymbol,
-    settings: BotSettings,
+    _settings: BotSettings,
     effective_params: dict[str, float],
     *,
     setup_id: str,
@@ -125,7 +127,7 @@ class DepthImbalanceSetup(RoadmapSetup):
     family = "orderbook"
     confirmation_profile = "breakout_acceptance"
     required_context = ("futures_flow",)
-    DEFAULTS = {
+    DEFAULTS: ClassVar[dict[str, float]] = {
         **RoadmapSetup.DEFAULTS,
         "min_depth_imbalance": 0.3334,
         "min_microprice_bias": 0.05,

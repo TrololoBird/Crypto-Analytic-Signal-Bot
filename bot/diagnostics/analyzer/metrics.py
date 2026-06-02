@@ -4,19 +4,20 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from typing import Any
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING, Any
 
-import polars as pl
 import numpy as np
+import polars as pl
 
-from ...persistence.repository import MemoryRepository
+if TYPE_CHECKING:
+    from ...persistence.repository import MemoryRepository
 
 LOG = logging.getLogger("bot.core.analyzer.metrics")
 
 
 def _utcnow_naive() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 def _as_float(value: object, default: float = 0.0) -> float:

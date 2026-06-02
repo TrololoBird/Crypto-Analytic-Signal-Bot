@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import polars as pl
@@ -53,7 +53,7 @@ class SignalRecord:
     take_profit_3: float | None = None
     valid_until: datetime | None = None
     scale_weights: tuple[float, float, float] = (0.5, 0.3, 0.2)
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     timeframe: str = "1h"
     atr_pct: float = 0.0
@@ -84,19 +84,26 @@ class SignalRecord:
 
     def validate(self) -> None:
         if not self.signal_id:
-            raise ValueError("signal_id cannot be empty")
+            msg = "signal_id cannot be empty"
+            raise ValueError(msg)
         if not self.symbol:
-            raise ValueError("symbol cannot be empty")
+            msg = "symbol cannot be empty"
+            raise ValueError(msg)
         if self.entry_price <= 0:
-            raise ValueError(f"invalid entry_price: {self.entry_price}")
+            msg = f"invalid entry_price: {self.entry_price}"
+            raise ValueError(msg)
         if self.stop_loss <= 0:
-            raise ValueError(f"invalid stop_loss: {self.stop_loss}")
+            msg = f"invalid stop_loss: {self.stop_loss}"
+            raise ValueError(msg)
         if self.take_profit_1 <= 0:
-            raise ValueError(f"invalid take_profit_1: {self.take_profit_1}")
+            msg = f"invalid take_profit_1: {self.take_profit_1}"
+            raise ValueError(msg)
         if self.take_profit_2 <= 0:
-            raise ValueError(f"invalid take_profit_2: {self.take_profit_2}")
+            msg = f"invalid take_profit_2: {self.take_profit_2}"
+            raise ValueError(msg)
         if self.take_profit_3 is not None and self.take_profit_3 <= 0:
-            raise ValueError(f"invalid take_profit_3: {self.take_profit_3}")
+            msg = f"invalid take_profit_3: {self.take_profit_3}"
+            raise ValueError(msg)
 
 
 @dataclass
@@ -125,7 +132,7 @@ class OutcomeRecord:
     hit_sl: bool = False
     result: str = ""
 
-    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     closed_at: datetime | None = None
 
     time_to_tp1_min: int | None = None
@@ -150,8 +157,11 @@ class OutcomeRecord:
 
     def validate(self) -> None:
         if not self.outcome_id:
-            raise ValueError("outcome_id cannot be empty")
+            msg = "outcome_id cannot be empty"
+            raise ValueError(msg)
         if not self.signal_id:
-            raise ValueError("signal_id cannot be empty")
+            msg = "signal_id cannot be empty"
+            raise ValueError(msg)
         if not self.symbol:
-            raise ValueError("symbol cannot be empty")
+            msg = "symbol cannot be empty"
+            raise ValueError(msg)

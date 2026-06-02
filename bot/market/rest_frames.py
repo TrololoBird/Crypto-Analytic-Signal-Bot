@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from __future__ import annotations
-
 import math
+from collections.abc import Mapping
 from datetime import datetime, timedelta
-from typing import Any, Mapping
+from typing import Any
 
 import polars as pl
 
-from bot.market.data import UTC, _KLINE_COLUMNS, _KLINE_FRAME_SCHEMA
+from bot.market.data import _KLINE_COLUMNS, _KLINE_FRAME_SCHEMA, UTC
 
 
 def _timeframe_to_seconds(timeframe: str) -> int | None:
@@ -125,7 +124,7 @@ def _klines_to_frame(rows: Any) -> pl.DataFrame:
 
 
 def _unwrap_model(value: Any) -> Any:
-    if hasattr(value, "actual_instance") and getattr(value, "actual_instance") is not None:
+    if hasattr(value, "actual_instance") and value.actual_instance is not None:
         return value.actual_instance
     return value
 
@@ -138,7 +137,8 @@ def _coerce_rest_row(item: Any) -> Mapping[str, Any]:
         dumped = row.model_dump()
         if isinstance(dumped, Mapping):
             return dumped
-    raise TypeError(f"Unsupported REST row payload type: {type(item)!r}")
+    msg = f"Unsupported REST row payload type: {type(item)!r}"
+    raise TypeError(msg)
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:

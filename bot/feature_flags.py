@@ -7,9 +7,10 @@ switch to DB/remote flags later without interface changes.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from .domain.config import BotSettings
+if TYPE_CHECKING:
+    from .domain.config import BotSettings
 
 
 @dataclass(slots=True)
@@ -30,9 +31,7 @@ class FeatureFlags:
             return {}
         out: dict[str, float] = {}
         for key, value in params.items():
-            if isinstance(value, bool):
-                out[str(key)] = float(value)
-            elif isinstance(value, (int, float)):
+            if isinstance(value, (bool, int, float)):
                 out[str(key)] = float(value)
         return out
 

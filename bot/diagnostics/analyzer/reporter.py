@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .metrics import PerformanceMetrics, WinRateCalculator, _utcnow_naive
-from ...persistence.repository import MemoryRepository
+
+if TYPE_CHECKING:
+    from ...persistence.repository import MemoryRepository
 
 LOG = logging.getLogger("bot.core.analyzer.reporter")
 
@@ -88,8 +91,7 @@ class DailyReport:
 
         if self.alerts:
             lines.extend(["", "### ⚠️ Alerts", ""])
-            for alert in self.alerts:
-                lines.append(f"- {alert}")
+            lines.extend(f"- {alert}" for alert in self.alerts)
 
         return "\n".join(lines)
 
@@ -118,7 +120,7 @@ class DailyReporter:
     async def generate(
         self,
         date: datetime | None = None,
-        format: ReportFormat = ReportFormat.MARKDOWN,
+        _format: ReportFormat = ReportFormat.MARKDOWN,
     ) -> DailyReport | None:
         """Generate daily report.
 
@@ -188,20 +190,18 @@ class DailyReporter:
             ),
             reverse=True,
         )
-        top_rows: list[dict[str, Any]] = []
-        for row in filtered[:limit]:
-            top_rows.append(
-                {
-                    "symbol": str(row.get("symbol") or ""),
-                    "setup_id": str(row.get("setup_id") or ""),
-                    "direction": str(row.get("direction") or ""),
-                    "result": str(row.get("result") or ""),
-                    "pnl_r_multiple": round(float(row.get("pnl_r_multiple") or 0.0), 4),
-                    "pnl_pct": round(float(row.get("pnl_pct") or 0.0), 4),
-                    "tracking_ref": row.get("tracking_ref"),
-                }
-            )
-        return top_rows
+        return [
+            {
+                "symbol": str(row.get("symbol") or ""),
+                "setup_id": str(row.get("setup_id") or ""),
+                "direction": str(row.get("direction") or ""),
+                "result": str(row.get("result") or ""),
+                "pnl_r_multiple": round(float(row.get("pnl_r_multiple") or 0.0), 4),
+                "pnl_pct": round(float(row.get("pnl_pct") or 0.0), 4),
+                "tracking_ref": row.get("tracking_ref"),
+            }
+            for row in filtered[:limit]
+        ]
 
     async def _check_alerts(
         self,
@@ -233,11 +233,9 @@ class DailyReporter:
         """Format report to specified output."""
         if format == ReportFormat.TEXT:
             return report.to_text()
-        elif format == ReportFormat.MARKDOWN:
+        if format == ReportFormat.MARKDOWN:
             return report.to_markdown()
-        elif format == ReportFormat.JSON:
-            import json
-
+        if format == ReportFormat.JSON:
             return json.dumps(report.to_dict(), indent=2)
-        else:
-            raise ValueError(f"Unsupported format: {format}")
+        msg = f"Unsupported format: {format}"
+        raise ValueError(msg)

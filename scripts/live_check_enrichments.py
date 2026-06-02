@@ -28,11 +28,12 @@ from typing import Any
 
 import structlog
 
+from bot.core.runtime_errors import DEFENSIVE_EXC
 from bot.domain.config import load_settings
+from bot.domain.schemas import SymbolFrames, UniverseSymbol
 from bot.features import min_required_bars, prepare_symbol
 from bot.market.data import BinanceFuturesMarketData
 from bot.market.rest import BinanceClientImpl
-from bot.domain.schemas import SymbolFrames, UniverseSymbol
 from bot.market.ws import FuturesWSManager
 
 LOG = structlog.get_logger("scripts.live_check_enrichments")
@@ -66,7 +67,7 @@ def _check_field(prepared: Any, field: str) -> dict[str, Any]:
                         "type": "float",
                         "source": "work_1h.adx14",
                     }
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.debug("adx enrichment check failed", field=field, error=repr(exc))
 
     value = getattr(prepared, field, None)
@@ -98,7 +99,7 @@ def _collect_ws_enrichments(
                 if ticker_age is not None:
                     enrichments["ticker_price_age_seconds"] = ticker_age
                     context_ages.append(ticker_age)
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.debug("ticker ws enrichment failed", symbol=symbol, error=repr(exc))
         try:
             mp = ws_manager.get_mark_price_snapshot(symbol)
@@ -113,14 +114,14 @@ def _collect_ws_enrichments(
                 if mark_price_age is not None:
                     enrichments["mark_price_age_seconds"] = mark_price_age
                     context_ages.append(mark_price_age)
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.debug("mark price ws enrichment failed", symbol=symbol, error=repr(exc))
         try:
             book_age = ws_manager.get_book_ticker_age_seconds(symbol)
             if book_age is not None:
                 enrichments["book_ticker_age_seconds"] = book_age
                 context_ages.append(book_age)
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.debug("book ticker ws enrichment failed", symbol=symbol, error=repr(exc))
         try:
             liq = ws_manager.get_liquidation_sentiment(symbol, window_seconds=300)
@@ -132,7 +133,7 @@ def _collect_ws_enrichments(
                     liq_age = liq_age_getter(symbol=symbol, window_seconds=300)
                     if liq_age is not None:
                         enrichments["liquidation_score_age_seconds"] = liq_age
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.debug("liquidation ws enrichment failed", symbol=symbol, error=repr(exc))
 
     # REST cache data from client
@@ -275,9 +276,10 @@ async def _run(
         # Start WebSocket to get live data
         await ws_manager.start(list(symbols))
         await ws_manager.set_tracked_symbols(list(symbols))
-        connected = await ws_manager.wait_until_connected(timeout=30.0)
+        connected = await ws_manager.wait_until_connected(max_wait_s=30.0)
         if not connected:
-            raise RuntimeError("ws_manager failed to connect within 30 seconds")
+            msg = "ws_manager failed to connect within 30 seconds"
+            raise RuntimeError(msg)
 
         LOG.info("ws_connected | warmup=%.1fs", warmup_seconds)
         await asyncio.sleep(warmup_seconds)
@@ -300,8 +302,8 @@ async def _run(
                     LOG.info("fetch_basis_result | symbol=%s basis=%s", symbol, basis_result)
                 # Fetch global LS ratio
                 await client.fetch_global_ls_ratio(symbol)
-            except Exception as exc:
-                LOG.error("prefetch_error | symbol=%s error=%s", symbol, exc)
+            except DEFENSIVE_EXC:
+                LOG.exception("prefetch_error | symbol=%s", symbol)
 
         LOG.info("rest_prefetch_complete")
 
@@ -472,7 +474,8 @@ async def _run(
         else:
             LOG.error("FAILURE: %d fields still missing", total_missing)
             if not all_results:
-                raise RuntimeError("no symbols were prepared; enrichment check is invalid")
+                msg = "no symbols were prepared; enrichment check is invalid"
+                raise RuntimeError(msg)
 
     finally:
         await ws_manager.stop()
@@ -493,7 +496,10 @@ def main() -> None:
     parser.add_argument(
         "--require-depth",
         action="store_true",
-        help="Require depth/microprice fields. Off by default because aggTrade is tracked-symbol only.",
+        help=(
+            "Require depth/microprice fields. Off by default because aggTrade is "
+            "tracked-symbol only."
+        ),
     )
     args = parser.parse_args()
 

@@ -1,13 +1,21 @@
-"""vwap_trend — strategy module (bot/strategies/)."""
+"""vwap_trend — canonical strategy detector."""
 
 from __future__ import annotations
 
-from ..setups.spec_runtime import SpecDetectorSetup
+import math
+from typing import TYPE_CHECKING, ClassVar
 
-
-import polars as pl
-
+from ..features import _swing_points
+from ..setups import _build_signal, _compute_dynamic_score, _reject
+from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
+from ..setups.utils import build_structural_targets
 from ._common import SpecHit, as_float, with_spec_columns
+
+if TYPE_CHECKING:
+    import polars as pl
+
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
 
 __all__ = ["detect_vwap_reclaim"]
 
@@ -52,15 +60,6 @@ def detect_vwap_reclaim(frame: pl.DataFrame, *, timeframe: str = "15m") -> SpecH
 
 detect_vwap_trend = detect_vwap_reclaim
 
-import math
-
-from ..domain.config import BotSettings
-from ..domain.schemas import PreparedSymbol, Signal
-from ..setups import _build_signal, _compute_dynamic_score, _reject
-from ..setups.utils import build_structural_targets
-from ..features import _swing_points
-from ..setups.spec_runtime import run_setup_detection
-
 
 def _as_float(value: object, default: float = 0.0) -> float:
     if isinstance(value, bool):
@@ -72,13 +71,12 @@ def _as_float(value: object, default: float = 0.0) -> float:
 
 def _detect_vwap_trend_extended(
     prepared: PreparedSymbol,
-    settings: BotSettings,
-    defaults: dict[str, float],
+    _settings: BotSettings,
+    _defaults: dict[str, float],
     effective: dict[str, float],
     setup_id: str,
     family: str,
 ) -> Signal | None:
-    dynamic_params = effective
     work_15m = prepared.work_15m
     work_1h = prepared.work_1h
     effective_params = effective
@@ -238,9 +236,9 @@ def _detect_vwap_trend_extended(
         score *= float(effective_params.get("volume_penalty", 0.90))
 
     # Graded bias alignment
-    if direction == "long" and bias_1h == "downtrend":
-        score *= effective_params.get("bias_mismatch_penalty", 0.75)
-    elif direction == "short" and bias_1h == "uptrend":
+    if (direction == "long" and bias_1h == "downtrend") or (
+        direction == "short" and bias_1h == "uptrend"
+    ):
         score *= effective_params.get("bias_mismatch_penalty", 0.75)
 
     reasons = [
@@ -290,7 +288,7 @@ def detect_vwap_trend_setup(
     )
 
 
-__all__ = ["detect_vwap_reclaim", "detect_vwap_trend_setup", "_detect_vwap_trend_extended"]
+__all__ = ["_detect_vwap_trend_extended", "detect_vwap_reclaim", "detect_vwap_trend_setup"]
 
 
 class VWAPTrendSetup(SpecDetectorSetup):
@@ -299,7 +297,7 @@ class VWAPTrendSetup(SpecDetectorSetup):
     confirmation_profile = "trend_follow"
     required_context = ("futures_flow",)
 
-    DEFAULTS = {
+    DEFAULTS: ClassVar[dict[str, float]] = {
         "base_score": 0.55,
         "min_adx_1h": 15.0,
         "min_volume_ratio": 1.05,

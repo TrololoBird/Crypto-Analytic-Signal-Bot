@@ -11,37 +11,37 @@ Provides metrics endpoint for monitoring:
 from __future__ import annotations
 
 import logging
-from importlib import import_module
 from dataclasses import dataclass
+from importlib import import_module
 from typing import Any, cast
 
 try:
     prometheus_client = import_module("prometheus_client")
     prometheus_core = import_module("prometheus_client.core")
-    CollectorRegistry = cast(Any, prometheus_core.CollectorRegistry)
-    REGISTRY = cast(Any, prometheus_client.REGISTRY)
-    generate_latest = cast(Any, prometheus_client.generate_latest)
-    _PromCounterClass = cast(Any, prometheus_client.Counter)
-    _PromGaugeClass = cast(Any, prometheus_client.Gauge)
-    _PromHistogramClass = cast(Any, prometheus_client.Histogram)
-    _PromInfoClass = cast(Any, prometheus_client.Info)
-    _prom_start_http_server = cast(Any, prometheus_client.start_http_server)
+    CollectorRegistry = cast("Any", prometheus_core.CollectorRegistry)
+    REGISTRY = cast("Any", prometheus_client.REGISTRY)
+    generate_latest = cast("Any", prometheus_client.generate_latest)
+    _PromCounterClass = cast("Any", prometheus_client.Counter)
+    _PromGaugeClass = cast("Any", prometheus_client.Gauge)
+    _PromHistogramClass = cast("Any", prometheus_client.Histogram)
+    _PromInfoClass = cast("Any", prometheus_client.Info)
+    _prom_start_http_server = cast("Any", prometheus_client.start_http_server)
     HAS_PROMETHEUS = True
 except ImportError:
     HAS_PROMETHEUS = False
 
     # Stubs for when prometheus_client is not installed
-    class _PromCounterClass:  # type: ignore
+    class _PromCounterClass:  # type: ignore[no-redef, misc]
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             pass
 
         def inc(self, *args: Any, **kwargs: Any) -> None:
             pass
 
-        def labels(self, *args: Any, **kwargs: Any) -> Any:
+        def labels(self, *_args: Any, **_kwargs: Any) -> Any:
             return self
 
-    class _PromGaugeClass:  # type: ignore
+    class _PromGaugeClass:  # type: ignore[no-redef, misc]
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             pass
 
@@ -54,14 +54,14 @@ except ImportError:
         def dec(self, *args: Any, **kwargs: Any) -> None:
             pass
 
-    class _PromHistogramClass:  # type: ignore
+    class _PromHistogramClass:  # type: ignore[no-redef, misc]
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             pass
 
         def observe(self, *args: Any, **kwargs: Any) -> None:
             pass
 
-    class _PromInfoClass:  # type: ignore
+    class _PromInfoClass:  # type: ignore[no-redef, misc]
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             pass
 
@@ -71,7 +71,7 @@ except ImportError:
     def _prom_start_http_server(*args: Any, **kwargs: Any) -> None:
         pass
 
-    def generate_latest(*args: Any, **kwargs: Any) -> bytes:
+    def generate_latest(*_args: Any, **_kwargs: Any) -> bytes:
         return b""
 
     REGISTRY = None
@@ -80,7 +80,7 @@ PromCounter = _PromCounterClass
 PromGauge = _PromGaugeClass
 PromHistogram = _PromHistogramClass
 PromInfo = _PromInfoClass
-prom_start_http_server = cast(Any, _prom_start_http_server)
+prom_start_http_server = cast("Any", _prom_start_http_server)
 
 
 LOG = logging.getLogger("bot.metrics")
@@ -217,8 +217,8 @@ class BotMetricsCollector:
         try:
             prom_start_http_server(self.port, addr=self.host)
             LOG.info("metrics server started on %s:%d", self.host, self.port)
-        except Exception as exc:
-            LOG.error("failed to start metrics server: %s", exc)
+        except Exception:
+            LOG.exception("failed to start metrics server")
 
     def record_signal_detected(
         self,
@@ -351,4 +351,4 @@ class BotMetricsCollector:
         """Get current metrics in Prometheus text format."""
         if not self._enabled or REGISTRY is None:
             return b"# prometheus_client not installed\n"
-        return cast(bytes, generate_latest(REGISTRY))
+        return cast("bytes", generate_latest(REGISTRY))

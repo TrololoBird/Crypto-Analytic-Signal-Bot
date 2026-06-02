@@ -5,7 +5,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-
 from bot.domain.config import BotSettings, RuntimeConfig
 from bot.domain.strategies import StrategyMetadata
 from bot.engine.engine import SignalEngine

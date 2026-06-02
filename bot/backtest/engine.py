@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import polars as pl
 
 from .metrics import BacktestResult
-from ..domain.config import BotSettings
+
+if TYPE_CHECKING:
+    from ..domain.config import BotSettings
 
 
 @dataclass(slots=True)
@@ -24,7 +26,7 @@ class _LifecycleSignal:
 
 
 class VectorizedBacktester:
-    _OHLCV_DTYPES = {
+    _OHLCV_DTYPES: ClassVar[dict[str, pl.DataType]] = {
         "open": pl.Float64,
         "high": pl.Float64,
         "low": pl.Float64,
@@ -32,47 +34,49 @@ class VectorizedBacktester:
         "volume": pl.Float64,
     }
 
-    SUPPORTED_SETUPS = {
-        "ema_cross",
-        "momentum_breakout",
-        "structure_pullback",
-        "structure_break_retest",
-        "wick_trap_reversal",
-        "squeeze_setup",
-        "ema_bounce",
-        "fvg_setup",
-        "order_block",
-        "liquidity_sweep",
-        "bos_choch",
-        "hidden_divergence",
-        "funding_reversal",
-        "cvd_divergence",
-        "session_killzone",
-        "breaker_block",
-        "turtle_soup",
-        "vwap_trend",
-        "supertrend_follow",
-        "price_velocity",
-        "volume_anomaly",
-        "volume_climax_reversal",
-        "keltner_breakout",
-        "whale_walls",
-        "spread_strategy",
-        "depth_imbalance",
-        "absorption",
-        "aggression_shift",
-        "liquidation_heatmap",
-        "stop_hunt_detection",
-        "multi_tf_trend",
-        "rsi_divergence_bottom",
-        "wyckoff_spring",
-        "bb_squeeze",
-        "atr_expansion",
-        "ls_ratio_extreme",
-        "oi_divergence",
-        "btc_correlation",
-        "altcoin_season_index",
-    }
+    SUPPORTED_SETUPS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "ema_cross",
+            "momentum_breakout",
+            "structure_pullback",
+            "structure_break_retest",
+            "wick_trap_reversal",
+            "squeeze_setup",
+            "ema_bounce",
+            "fvg_setup",
+            "order_block",
+            "liquidity_sweep",
+            "bos_choch",
+            "hidden_divergence",
+            "funding_reversal",
+            "cvd_divergence",
+            "session_killzone",
+            "breaker_block",
+            "turtle_soup",
+            "vwap_trend",
+            "supertrend_follow",
+            "price_velocity",
+            "volume_anomaly",
+            "volume_climax_reversal",
+            "keltner_breakout",
+            "whale_walls",
+            "spread_strategy",
+            "depth_imbalance",
+            "absorption",
+            "aggression_shift",
+            "liquidation_heatmap",
+            "stop_hunt_detection",
+            "multi_tf_trend",
+            "rsi_divergence_bottom",
+            "wyckoff_spring",
+            "bb_squeeze",
+            "atr_expansion",
+            "ls_ratio_extreme",
+            "oi_divergence",
+            "btc_correlation",
+            "altcoin_season_index",
+        }
+    )
 
     def __init__(self, settings: BotSettings) -> None:
         self.settings = settings
@@ -95,9 +99,8 @@ class VectorizedBacktester:
     ) -> BacktestResult:
         setup = (setup_id or "ema_cross").strip().lower()
         if setup not in self.SUPPORTED_SETUPS:
-            raise ValueError(
-                f"unsupported setup_id={setup!r}, supported={sorted(self.SUPPORTED_SETUPS)}"
-            )
+            msg = f"unsupported setup_id={setup!r}, supported={sorted(self.SUPPORTED_SETUPS)}"
+            raise ValueError(msg)
 
         df = self._load_ohlcv(symbol, timeframe)
         if not df.is_empty() and "close_time" in df.columns:
@@ -144,7 +147,7 @@ class VectorizedBacktester:
         if isinstance(signals, list):
             signal_frame = pl.DataFrame(signals)
         else:
-            signal_frame = cast(pl.DataFrame, signals)
+            signal_frame = cast("pl.DataFrame", signals)
 
         if signal_frame is not None and not signal_frame.is_empty():
             return self._signals_from_explicit_rows(frame, signal_frame, default_setup_id=setup_id)

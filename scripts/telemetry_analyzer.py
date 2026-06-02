@@ -4,9 +4,12 @@ import argparse
 import json
 from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 try:
     from scripts.common import bootstrap_repo_path
@@ -66,7 +69,7 @@ class TelemetryAnalyzer:
 
     def analyze_strategy_performance(self, strategy_id: str, hours: int = 24) -> dict[str, object]:
         """Return signal/reject distribution for a single strategy."""
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=max(1, int(hours)))
+        cutoff = datetime.now(UTC) - timedelta(hours=max(1, int(hours)))
         rows = [
             row
             for row in self.records
@@ -223,31 +226,32 @@ class TelemetryAnalyzer:
             "",
             f"Run: `{self._source_label()}`",
             f"Records: {len(self.records)}",
-            f"Generated: {datetime.now(timezone.utc).isoformat(timespec='seconds')}",
+            f"Generated: {datetime.now(UTC).isoformat(timespec='seconds')}",
             "",
             "## Strategy Performance",
             "",
             "| Strategy | Rows | Signals | Signal/hour | Top Reject |",
             "| --- | ---: | ---: | ---: | --- |",
         ]
-        for row in performances:
-            lines.append(
-                f"| `{row['strategy_id']}` | {row['rows']} | {row['signal_count']} | {row['signal_rate_per_hour']} | `{row['top_reject_reason']}` |"
-            )
+        lines.extend(
+            f"| `{row['strategy_id']}` | {row['rows']} | {row['signal_count']} | "
+            f"{row['signal_rate_per_hour']} | `{row['top_reject_reason']}` |"
+            for row in performances
+        )
         lines.extend(["", "## Calibration Issues", ""])
         if issues:
-            for issue in issues:
-                lines.append(
-                    f"- `{issue.severity}` `{issue.kind}` `{issue.subject}`: {issue.detail}"
-                )
+            lines.extend(
+                f"- `{issue.severity}` `{issue.kind}` `{issue.subject}`: {issue.detail}"
+                for issue in issues
+            )
         else:
             lines.append("- None detected from loaded telemetry.")
         lines.extend(["", "## Threshold Review Targets", ""])
         if recommendations:
-            for item in recommendations:
-                lines.append(
-                    f"- `{item['strategy_id']}`: `{item['target']}` ({item['evidence_rows']} rows)"
-                )
+            lines.extend(
+                f"- `{item['strategy_id']}`: `{item['target']}` ({item['evidence_rows']} rows)"
+                for item in recommendations
+            )
         else:
             lines.append("- None.")
         output.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -312,13 +316,13 @@ class TelemetryAnalyzer:
         raw = row.get("ts") or row.get("timestamp") or row.get("health_monitor_ts")
         if isinstance(raw, str):
             try:
-                return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                return datetime.fromisoformat(raw)
             except ValueError:
-                return datetime.min.replace(tzinfo=timezone.utc)
+                return datetime.min.replace(tzinfo=UTC)
         raw_ms = row.get("timestamp_ms")
         if isinstance(raw_ms, int | float):
-            return datetime.fromtimestamp(float(raw_ms) / 1000.0, tz=timezone.utc)
-        return datetime.min.replace(tzinfo=timezone.utc)
+            return datetime.fromtimestamp(float(raw_ms) / 1000.0, tz=UTC)
+        return datetime.min.replace(tzinfo=UTC)
 
     @staticmethod
     def _strategy_id(row: Mapping[str, Any]) -> str:
@@ -334,9 +338,9 @@ class TelemetryAnalyzer:
             return True
         if isinstance(row.get("signal_count"), int | float) and float(row["signal_count"]) > 0:
             return True
-        if isinstance(row.get("signals_found"), int | float) and float(row["signals_found"]) > 0:
-            return True
-        return False
+        return bool(
+            isinstance(row.get("signals_found"), int | float) and float(row["signals_found"]) > 0
+        )
 
 
 def main() -> int:

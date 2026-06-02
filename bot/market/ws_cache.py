@@ -6,9 +6,10 @@ import asyncio
 import collections
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
+from ..domain.events import BookTickerEvent
 from ..domain.schemas import AggTrade
 from .ws_enrichment import depth_imbalance_from_book, microprice_bias_from_book
 
@@ -63,7 +64,7 @@ def _l2_depth_imbalance(manager: Any, symbol: str) -> float | None:
     wall_pressure = manager._depth_wall_pressure.get(symbol)
     if wall_pressure is not None:
         imbalance = (imbalance * 0.65) + (float(wall_pressure) * 0.35)
-    return round(max(-1.0, min(1.0, imbalance)), 4)
+    return float(round(max(-1.0, min(1.0, imbalance)), 4))
 
 
 def _update_depth_wall_pressure(
@@ -423,8 +424,6 @@ async def handle_book_ticker(manager: Any, symbol: str, data: JsonDict) -> None:
         manager._book_update_times[symbol] = time.monotonic()
 
     if manager._event_bus is not None:
-        from ..domain.events import BookTickerEvent
-
         manager._event_bus.publish_nowait(
             BookTickerEvent(symbol=symbol, bid=bid, ask=ask, event_ts_ms=event_ts_ms)
         )
@@ -480,7 +479,7 @@ async def handle_agg_trade(manager: Any, symbol: str, data: JsonDict) -> None:
     manager._agg_trades[symbol].extend(batch)
 
     if manager._agg_trade_cbs:
-        trade_dt = datetime.fromtimestamp(batch[-1].trade_time_ms / 1000.0, tz=timezone.utc)
+        trade_dt = datetime.fromtimestamp(batch[-1].trade_time_ms / 1000.0, tz=UTC)
         for callback in manager._agg_trade_cbs:
             task = asyncio.create_task(callback(symbol, batch[-1].price, trade_dt))
             manager._attach_task_logging(task, label=f"agg_trade:{symbol}")

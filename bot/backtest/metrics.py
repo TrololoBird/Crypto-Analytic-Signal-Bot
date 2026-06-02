@@ -36,7 +36,7 @@ class BacktestResult:
         return payload
 
     @classmethod
-    def from_frames(cls, trades: pl.DataFrame, equity_curve: pl.DataFrame) -> "BacktestResult":
+    def from_frames(cls, trades: pl.DataFrame, equity_curve: pl.DataFrame) -> BacktestResult:
         def _as_float(value: Any, default: float = 0.0) -> float:
             try:
                 return float(value)

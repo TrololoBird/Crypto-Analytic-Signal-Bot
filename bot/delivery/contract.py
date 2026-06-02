@@ -7,13 +7,10 @@ individual detectors do not drift into point entries or partial target gaps.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
 import math
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Any
-
-
-UTC = timezone.utc
 
 DEFAULT_SCALE_WEIGHTS: tuple[float, float, float] = (0.5, 0.3, 0.2)
 DEFAULT_TARGET_RR: tuple[float, float, float] = (1.9, 3.0, 5.0)
@@ -193,10 +190,7 @@ def valid_until_from(
     ttl_bars: int | None = None,
 ) -> datetime:
     anchor = created_at or datetime.now(UTC)
-    if anchor.tzinfo is None:
-        anchor = anchor.replace(tzinfo=UTC)
-    else:
-        anchor = anchor.astimezone(UTC)
+    anchor = anchor.replace(tzinfo=UTC) if anchor.tzinfo is None else anchor.astimezone(UTC)
     bars = (
         int(ttl_bars)
         if ttl_bars is not None

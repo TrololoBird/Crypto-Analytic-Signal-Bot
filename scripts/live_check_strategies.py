@@ -1,4 +1,3 @@
-# ruff: noqa: E402
 from __future__ import annotations
 
 import argparse
@@ -24,21 +23,21 @@ except ModuleNotFoundError:  # pragma: no cover - direct script execution
         resolve_symbols,
     )
 
-bootstrap_repo_path()
-
-from bot.domain.config import load_settings
+from bot.core.runtime_errors import DEFENSIVE_EXC
 from bot.delivery.confluence import ConfluenceEngine
+from bot.delivery.contract import signal_contract_row, validate_signal_contract
+from bot.domain.config import load_settings
+from bot.domain.schemas import SymbolFrames, UniverseSymbol
 from bot.engine import SignalEngine, StrategyRegistry
 from bot.features import min_required_bars, prepare_symbol
 from bot.market.data import BinanceFuturesMarketData, MarketDataUnavailable
-from bot.domain.schemas import SymbolFrames, UniverseSymbol
-from bot.delivery.contract import signal_contract_row, validate_signal_contract
+from bot.market.rest import BinanceClientImpl
+from bot.market.universe import strategy_fits_for_market_row
 from bot.setups.base import SetupParams
 from bot.strategies import STRATEGY_CLASSES
-from bot.market.universe import strategy_fits_for_market_row
-
 
 LOG = configure_script_logging("scripts.live_check_strategies")
+
 LIVE_CHECK_HTTP_TIMEOUT_SECONDS = 30.0  # seconds: cap live REST smoke checks
 
 
@@ -103,7 +102,7 @@ async def _build_prepared(
         frames.ask_price = book_context.get("ask_price")
         frames.bid_qty = book_context.get("bid_qty")
         frames.ask_qty = book_context.get("ask_qty")
-    except Exception as exc:
+    except DEFENSIVE_EXC as exc:
         LOG.debug("book ticker enrichment failed", symbol=symbol, error=repr(exc))
     for fetch in (
         lambda: client.fetch_open_interest(symbol),
@@ -117,7 +116,7 @@ async def _build_prepared(
     ):
         try:
             await fetch()
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.debug("microstructure enrichment failed", symbol=symbol, error=repr(exc))
             continue
     prepared = prepare_symbol(item, frames, minimums=minimums, settings=settings)
@@ -126,7 +125,7 @@ async def _build_prepared(
     try:
         premium_rows = await client.fetch_premium_index_all()
         premium = premium_rows.get(symbol, {})
-    except Exception as exc:
+    except DEFENSIVE_EXC as exc:
         LOG.debug("premium index enrichment failed", symbol=symbol, error=repr(exc))
         premium = {}
     mark_price = premium.get("mark_price")
@@ -470,11 +469,12 @@ def _resolve_required_hit_ids(
     if not parsed:
         return ()
     if "all" in parsed:
-        base = selected_ids if selected_ids else available_ids
+        base = selected_ids or available_ids
         return tuple(sorted(base))
     unknown = sorted(set(parsed) - available_ids)
     if unknown:
-        raise ValueError(f"unknown strategies required for hits: {unknown}")
+        msg = f"unknown strategies required for hits: {unknown}"
+        raise ValueError(msg)
     return tuple(dict.fromkeys(parsed))
 
 
@@ -486,7 +486,8 @@ def _resolve_allowed_missing_hit_ids(
     parsed = set(_parse_strategy_filter(raw))
     unknown = sorted(parsed - available_ids)
     if unknown:
-        raise ValueError(f"unknown strategies allowed missing hits: {unknown}")
+        msg = f"unknown strategies allowed missing hits: {unknown}"
+        raise ValueError(msg)
     return parsed
 
 
@@ -573,7 +574,8 @@ async def _run(
     available_ids = set(registered_ids)
     unknown_ids = sorted(selected_ids - available_ids)
     if unknown_ids:
-        raise ValueError(f"unknown strategies requested: {unknown_ids}")
+        msg = f"unknown strategies requested: {unknown_ids}"
+        raise ValueError(msg)
     for strategy_class in STRATEGY_CLASSES:
         if selected_ids and strategy_class.setup_id not in selected_ids:
             continue
@@ -582,8 +584,6 @@ async def _run(
         LOG.info("strategy_filter_applied", strategies=sorted(selected_ids))
     engine = SignalEngine(registry, settings)
     confluence = ConfluenceEngine(settings)
-    from bot.market.rest import BinanceClientImpl
-
     client = BinanceFuturesMarketData(
         binance_client=BinanceClientImpl(
             rest_timeout_seconds=min(
@@ -729,6 +729,7 @@ async def _run(
 
 
 def main() -> None:
+    bootstrap_repo_path()
     parser = argparse.ArgumentParser(description="Live strategy detector-surface review")
     parser.add_argument("--symbols", nargs="*", default=[])
     parser.add_argument("--symbols-from-run", default="")
@@ -802,7 +803,9 @@ def main() -> None:
     parser.add_argument(
         "--require-signal-contract",
         action="store_true",
-        help="Fail when any emitted signal misses entry zone, SL, TP1/TP2/TP3, TTL or scale weights.",
+        help=(
+            "Fail when any emitted signal misses entry zone, SL, TP1/TP2/TP3, TTL or scale weights."
+        ),
     )
     args = parser.parse_args()
     fallback_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
@@ -855,7 +858,7 @@ def main() -> None:
         if args.print_summary_json:
             print(json.dumps(summary, indent=2, sort_keys=True))
     except MarketDataUnavailable as exc:
-        LOG.error(
+        LOG.exception(
             "live_strategies_unavailable",
             operation=exc.operation,
             detail=exc.detail,

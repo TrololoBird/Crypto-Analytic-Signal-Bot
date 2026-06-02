@@ -9,6 +9,8 @@ from typing import Any, Literal, cast
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from bot.core.runtime_errors import DEFENSIVE_EXC
+
 from ..secrets import load_secrets
 
 REQUIRED_PINNED_SYMBOLS: tuple[str, ...] = (
@@ -89,25 +91,27 @@ class RuntimeConfig(BaseModel):
         if isinstance(value, str):
             return (value.strip(),)
         if not isinstance(value, (list, tuple, set)):
-            raise TypeError(
+            msg = (
                 "analysis_kline_intervals must be a string or sequence of strings, "
                 f"got {type(value).__name__}"
             )
+            raise TypeError(msg)
         return tuple(str(item).strip() for item in value if str(item).strip())
 
     @model_validator(mode="after")
-    def _validate_setup_family_bounds(self) -> "RuntimeConfig":
+    def _validate_setup_family_bounds(self) -> RuntimeConfig:
         if not (
             self.min_setup_families_per_symbol
             <= self.target_setup_families_per_symbol
             <= self.max_setup_families_per_symbol
         ):
-            raise ValueError(
+            msg = (
                 "runtime setup family caps must satisfy: "
                 "min_setup_families_per_symbol <= "
                 "target_setup_families_per_symbol <= "
                 "max_setup_families_per_symbol"
             )
+            raise ValueError(msg)
         return self
 
 
@@ -136,7 +140,7 @@ class UniverseConfig(BaseModel):
         return tuple(str(item).strip().upper() for item in (value or ()) if str(item).strip())
 
     @model_validator(mode="after")
-    def _require_core_pinned_symbols(self) -> "UniverseConfig":
+    def _require_core_pinned_symbols(self) -> UniverseConfig:
         pinned = set(self.pinned_symbols)
         missing = [symbol for symbol in REQUIRED_PINNED_SYMBOLS if symbol not in pinned]
         if missing:
@@ -206,13 +210,14 @@ class FilterConfig(BaseModel):
                 key = str(param_name)
                 coerced = float(param_value)
                 if not math.isfinite(coerced):
-                    raise ValueError(f"filters.setups.{setup_id}.{key} must be finite")
+                    msg = f"filters.setups.{setup_id}.{key} must be finite"
+                    raise ValueError(msg)
                 if key in {"sl_buffer_atr", "sl_atr_mult"} and coerced < 0.05:
-                    raise ValueError(
-                        f"filters.setups.{setup_id}.{key} must be >= 0.05 (ATR fraction scale)"
-                    )
+                    msg = f"filters.setups.{setup_id}.{key} must be >= 0.05 (ATR fraction scale)"
+                    raise ValueError(msg)
                 if key == "min_rr" and coerced < 0.5:
-                    raise ValueError(f"filters.setups.{setup_id}.{key} must be >= 0.5")
+                    msg = f"filters.setups.{setup_id}.{key} must be >= 0.5"
+                    raise ValueError(msg)
                 normalized_setup[key] = coerced
             normalized[str(setup_id)] = normalized_setup
         return normalized
@@ -321,11 +326,9 @@ class SetupConfig(BaseModel):
     altcoin_season_index: bool = True
 
     def enabled_setup_ids(self) -> tuple[str, ...]:
-        enabled: list[str] = []
-        for setup_id in _ALL_SETUP_IDS:
-            if bool(getattr(self, setup_id, False)):
-                enabled.append(setup_id)
-        return tuple(enabled)
+        return tuple(
+            setup_id for setup_id in _ALL_SETUP_IDS if bool(getattr(self, setup_id, False))
+        )
 
 
 class ScoringConfig(BaseModel):
@@ -343,7 +346,7 @@ class ScoringConfig(BaseModel):
     funding_rate_moderate: float = Field(default=0.0005, ge=0.0, le=0.01)
 
     @model_validator(mode="after")
-    def _validate_weights_not_effectively_disabled(self) -> "ScoringConfig":
+    def _validate_weights_not_effectively_disabled(self) -> ScoringConfig:
         if not self.enabled:
             return self
         weights = {
@@ -356,7 +359,8 @@ class ScoringConfig(BaseModel):
         }
         total_weight = sum(weights.values())
         if total_weight <= 0.0:
-            raise ValueError("ScoringConfig: model component weights must have positive total")
+            msg = "ScoringConfig: model component weights must have positive total"
+            raise ValueError(msg)
         if abs(total_weight - 1.0) > 1e-6:
             for key, value in weights.items():
                 object.__setattr__(self, key, value / total_weight)
@@ -386,11 +390,10 @@ class DeliveryConfig(BaseModel):
     public_audit_enabled: bool = True
 
     @model_validator(mode="after")
-    def _validate_tier_caps(self) -> "DeliveryConfig":
+    def _validate_tier_caps(self) -> DeliveryConfig:
         if self.watch_cap_per_cycle < self.action_cap_per_cycle:
-            raise ValueError(
-                "delivery.watch_cap_per_cycle must be >= delivery.action_cap_per_cycle"
-            )
+            msg = "delivery.watch_cap_per_cycle must be >= delivery.action_cap_per_cycle"
+            raise ValueError(msg)
         return self
 
 
@@ -511,18 +514,39 @@ class IntelligenceConfig(BaseModel):
 class NetworkConfig(BaseModel):
     """Egress proxy for Binance public REST/WebSocket (Russia/geo-blocked regions).
 
-    Prefer a local client (Clash/Mihomo/V2Ray) exposing SOCKS5 on 127.0.0.1 without
-    embedding third-party proxy lists in the bot.
+    Supply **your own** endpoints (local Clash ports, Tor, VPS SOCKS you control).
+    On transport/geo failure the bot rotates through ``proxy_urls`` for 24/7 uptime.
     """
 
     proxy_url: str | None = None
+    proxy_urls: list[str] = Field(default_factory=list)
     trust_env: bool = True
+    failover_enabled: bool = True
+    failover_cooldown_seconds: float = 300.0
 
     @field_validator("proxy_url")
     @classmethod
     def _normalize_proxy_url(cls, value: str | None) -> str | None:
         raw = str(value or "").strip()
         return raw or None
+
+    @field_validator("proxy_urls")
+    @classmethod
+    def _normalize_proxy_urls(cls, value: list[str] | tuple[str, ...] | None) -> list[str]:
+        out: list[str] = []
+        for raw in value or ():
+            item = str(raw or "").strip()
+            if item and item not in out:
+                out.append(item)
+        return out
+
+    def effective_proxy_urls(self) -> list[str]:
+        out: list[str] = []
+        for raw in (self.proxy_url, *self.proxy_urls):
+            item = str(raw or "").strip()
+            if item and item not in out:
+                out.append(item)
+        return out
 
 
 class WSConfig(BaseModel):
@@ -590,7 +614,8 @@ class WSConfig(BaseModel):
     def _normalize_subscription_scope(cls, value: str) -> str:
         raw = str(value or "shortlist").strip().lower()
         if raw not in {"tracked_only", "shortlist"}:
-            raise ValueError("ws.subscription_scope must be one of: tracked_only, shortlist")
+            msg = "ws.subscription_scope must be one of: tracked_only, shortlist"
+            raise ValueError(msg)
         return raw
 
     @field_validator("kline_intervals")
@@ -603,11 +628,12 @@ class WSConfig(BaseModel):
     def _normalize_depth_speed(cls, value: str) -> str:
         raw = str(value or "500ms").strip().lower()
         if raw not in {"100ms", "250ms", "500ms"}:
-            raise ValueError("ws.depth_speed must be one of: 100ms, 250ms, 500ms")
+            msg = "ws.depth_speed must be one of: 100ms, 250ms, 500ms"
+            raise ValueError(msg)
         return raw
 
     @model_validator(mode="after")
-    def _resolve_endpoint_urls(self) -> "WSConfig":
+    def _resolve_endpoint_urls(self) -> WSConfig:
         normalized_root = str(self.base_url or "wss://fstream.binance.com").strip().rstrip("/")
         for suffix in ("/public", "/market"):
             if normalized_root.endswith(suffix):
@@ -640,7 +666,8 @@ class WSConfig(BaseModel):
             return self.public_base_url
         if endpoint_class == "market":
             return self.market_base_url
-        raise ValueError(f"unsupported ws endpoint_class={endpoint_class}")
+        msg = f"unsupported ws endpoint_class={endpoint_class}"
+        raise ValueError(msg)
 
 
 class BotSettings(BaseModel):
@@ -700,7 +727,8 @@ class BotSettings(BaseModel):
         if token:
             allowed_chars = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_:-")
             if not all(c in allowed_chars for c in token):
-                raise ValueError("tg_token contains invalid characters")
+                msg = "tg_token contains invalid characters"
+                raise ValueError(msg)
         return token
 
     @field_validator("target_chat_id")
@@ -711,19 +739,20 @@ class BotSettings(BaseModel):
             # Can be numeric ID or channel username (starts with @)
             if chat_id.startswith("@"):
                 if len(chat_id) < 2:
-                    raise ValueError("target_chat_id channel username too short")
+                    msg = "target_chat_id channel username too short"
+                    raise ValueError(msg)
             elif not chat_id.lstrip("-").isdigit():
-                raise ValueError("target_chat_id must be numeric ID or @channel")
+                msg = "target_chat_id must be numeric ID or @channel"
+                raise ValueError(msg)
         return chat_id
 
     @model_validator(mode="after")
-    def _validate_timing_coherence(self) -> "BotSettings":
+    def _validate_timing_coherence(self) -> BotSettings:
         cooldown = self.filters.cooldown_minutes
         pending = self.tracking.pending_expiry_minutes
         if cooldown > pending:
-            raise ValueError(
-                f"cooldown_minutes ({cooldown}) must be <= pending_expiry_minutes ({pending})"
-            )
+            msg = f"cooldown_minutes ({cooldown}) must be <= pending_expiry_minutes ({pending})"
+            raise ValueError(msg)
         return self
 
     @staticmethod
@@ -748,15 +777,16 @@ class BotSettings(BaseModel):
         }
         for interval in intervals:
             if interval not in valid_intervals:
-                raise ValueError(f"Invalid kline interval: {interval}. Valid: {valid_intervals}")
+                msg = f"Invalid kline interval: {interval}. Valid: {valid_intervals}"
+                raise ValueError(msg)
 
     @model_validator(mode="after")
-    def _validate_kline_intervals(self) -> "BotSettings":
-        self._assert_supported_kline_intervals(cast(list[str], self.ws.kline_intervals))
+    def _validate_kline_intervals(self) -> BotSettings:
+        self._assert_supported_kline_intervals(cast("list[str]", self.ws.kline_intervals))
         return self
 
     @model_validator(mode="after")
-    def _normalize_asset_overrides(self) -> "BotSettings":
+    def _normalize_asset_overrides(self) -> BotSettings:
         self.assets = {
             str(symbol).strip().upper(): config for symbol, config in self.assets.items()
         }
@@ -764,7 +794,7 @@ class BotSettings(BaseModel):
 
     def validate_for_runtime(self, *, require_telegram: bool) -> None:
         """Validate settings for runtime execution."""
-        self._assert_supported_kline_intervals(cast(list[str], self.ws.kline_intervals))
+        self._assert_supported_kline_intervals(cast("list[str]", self.ws.kline_intervals))
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.logs_dir.mkdir(parents=True, exist_ok=True)
 
@@ -773,8 +803,9 @@ class BotSettings(BaseModel):
         try:
             test_file.write_text("test")
             test_file.unlink()
-        except Exception as exc:
-            raise ValueError(f"data_dir is not writable: {self.data_dir} ({exc})")
+        except DEFENSIVE_EXC as exc:
+            msg = f"data_dir is not writable: {self.data_dir} ({exc})"
+            raise ValueError(msg) from exc
 
         ws_urls = {
             "ws.base_url": self.ws.base_url,
@@ -785,23 +816,27 @@ class BotSettings(BaseModel):
         for label, url in ws_urls.items():
             lowered = str(url or "").strip().lower()
             if any(token in lowered for token in forbidden_tokens):
-                raise ValueError(f"{label} must point to Binance public market streams only: {url}")
+                msg = f"{label} must point to Binance public market streams only: {url}"
+                raise ValueError(msg)
         if str(self.ws.public_base_url).rstrip("/").lower().endswith("/public") is False:
-            raise ValueError(
-                f"ws.public_base_url must use Binance /public routed endpoint: {self.ws.public_base_url}"
-            )
+            public_url = self.ws.public_base_url
+            msg = f"ws.public_base_url must use Binance /public routed endpoint: {public_url}"
+            raise ValueError(msg)
         if str(self.ws.market_base_url).rstrip("/").lower().endswith("/market") is False:
-            raise ValueError(
-                f"ws.market_base_url must use Binance /market routed endpoint: {self.ws.market_base_url}"
-            )
+            market_url = self.ws.market_base_url
+            msg = f"ws.market_base_url must use Binance /market routed endpoint: {market_url}"
+            raise ValueError(msg)
 
         if require_telegram:
             if not self.tg_token.strip():
-                raise ValueError("TG_TOKEN is required for runtime (set in .env)")
+                msg = "TG_TOKEN is required for runtime (set in .env)"
+                raise ValueError(msg)
             if not self.target_chat_id.strip():
-                raise ValueError("TARGET_CHAT_ID is required for runtime (set in .env)")
+                msg = "TARGET_CHAT_ID is required for runtime (set in .env)"
+                raise ValueError(msg)
             if len(self.tg_token) < 20:
-                raise ValueError("TG_TOKEN looks too short (expected ~46 chars)")
+                msg = "TG_TOKEN looks too short (expected ~46 chars)"
+                raise ValueError(msg)
 
 
 def _load_toml(path: Path) -> dict[str, Any]:
@@ -880,7 +915,7 @@ def load_settings(config_path: str | Path = "config.toml") -> BotSettings:
     resolved_config = _resolve_config_source(config_file)
     parsed = _load_toml(resolved_config)
     bot_raw = parsed.get("bot") if isinstance(parsed.get("bot"), dict) else {}
-    payload = _convert_toml_dict(cast(dict[Any, Any], bot_raw))
+    payload = _convert_toml_dict(cast("dict[Any, Any]", bot_raw))
     secrets = load_secrets()
     payload["tg_token"] = secrets.tg_token
     payload["target_chat_id"] = secrets.target_chat_id
@@ -907,6 +942,11 @@ def load_settings(config_path: str | Path = "config.toml") -> BotSettings:
         env_proxy = str(os.getenv("BINANCE_PROXY_URL", "") or "").strip()
         if env_proxy:
             network_payload["proxy_url"] = env_proxy
+        env_proxy_list = str(os.getenv("BINANCE_PROXY_URLS", "") or "").strip()
+        if env_proxy_list:
+            network_payload["proxy_urls"] = [
+                item.strip() for item in env_proxy_list.split(",") if item.strip()
+            ]
     legacy_overrides = _load_legacy_strategy_overrides(config_file.parent)
     for setup_id, legacy_params in legacy_overrides.items():
         existing = setup_overrides.get(setup_id)

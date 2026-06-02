@@ -1,28 +1,26 @@
 """
-Outcome tracking - сохранение результатов сигналов для ML обучения.
+Outcome tracking for ML training.
 
-Сохраняет полные данные о сигналах:
-- Входные признаки (features)
-- Результат (TP/SL/expired)
-- Метрики качества (PnL, MAE, MFE)
-- LLM вердикты и их точность
+Persists full signal records: input features, TP/SL/expired result,
+quality metrics (PnL, MAE, MFE), and LLM verdict accuracy.
 """
 
 from __future__ import annotations
 
-import math
 import logging
+import math
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
+from bot.core.runtime_errors import DEFENSIVE_EXC
 
 from ..domain.contracts import PUBLIC_FEATURE_FIELDS, normalize_public_feature_payload
-from ..domain.schemas import Signal
 from ..persistence.tracked import TrackedSignalState, parse_state_dt
 
+if TYPE_CHECKING:
+    from ..domain.schemas import Signal
 
-UTC = timezone.utc
 LOG = logging.getLogger("bot.outcomes")
 
 
@@ -38,7 +36,7 @@ def _normalized_float(value: Any, default: float | None = None) -> float | None:
     return parsed
 
 
-def _normalized_bool(value: Any, default: bool | None = None) -> bool | None:
+def _normalized_bool(value: Any, *, default: bool | None = None) -> bool | None:
     if value is None:
         return default
     if isinstance(value, bool):
@@ -58,7 +56,7 @@ def _round_metric(value: Any, digits: int = 4) -> float:
 def build_prepared_feature_snapshot(prepared: Any) -> dict[str, Any]:
     """Build a normalized feature snapshot from PreparedSymbol-like data."""
     if prepared is None:
-        return normalize_public_feature_payload({name: None for name in PUBLIC_FEATURE_FIELDS})
+        return normalize_public_feature_payload(dict.fromkeys(PUBLIC_FEATURE_FIELDS))
 
     features: dict[str, Any] = {}
 
@@ -69,7 +67,7 @@ def build_prepared_feature_snapshot(prepared: Any) -> dict[str, Any]:
             return None
         try:
             return _normalized_float(frame.item(-1, column))
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.debug("prepared feature snapshot read failed | column=%s error=%s", column, exc)
             return None
 

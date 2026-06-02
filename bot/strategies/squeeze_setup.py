@@ -1,18 +1,21 @@
-"""squeeze_setup — detector in setups/detectors/."""
+"""squeeze_setup — canonical strategy detector."""
 
 from __future__ import annotations
 
-from ..domain.config import BotSettings
-from ..setups.spec_runtime import SpecDetectorSetup
+from typing import TYPE_CHECKING, ClassVar
 
-
-import polars as pl
-
+from ..features import _swing_points as _sp
+from ..setups import _build_signal, _compute_dynamic_score, _reject
+from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
 from .bb_squeeze import detect_bb_squeeze_release
 
-from ..domain.schemas import PreparedSymbol, Signal
-from ..setups import _build_signal, _compute_dynamic_score, _reject
-from ..setups.spec_runtime import run_setup_detection
+if TYPE_CHECKING:
+    import polars as pl
+
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
+
+__all__ = ["detect_squeeze_setup"]
 
 
 def _as_float(value: object, default: float = 0.0) -> float:
@@ -152,15 +155,14 @@ def _bb_kc_squeeze_release(
 
 def _detect_squeeze_setup_extended(
     prepared: PreparedSymbol,
-    settings: BotSettings,
+    _settings: BotSettings,
     defaults: dict[str, float],
     effective: dict[str, float],
-    setup_id: str,
+    _setup_id: str,
     family: str,
 ) -> Signal | None:
     dynamic_params = effective
     work_15m = prepared.work_15m
-    effective_params = {**defaults, **dynamic_params}
     # FIX 2026-05-21: the spec layer is intentionally strict; when it misses,
     # keep the prepared squeeze_on/off and compression-window fallback live.
     bb_squeeze_threshold = _as_float(
@@ -333,9 +335,7 @@ def _detect_squeeze_setup_extended(
         # SL: below pre-breakout swing low + configured ATR buffer
         stop = _as_float(pre_breakout["low"].min()) - atr * sl_buffer_atr
         # TP1: first swing/fractal in breakout direction on 15m
-        from ..features import _swing_points as _sp
-
-        _sh_mask, sl_mask = _sp(work_15m, n=3, include_unconfirmed_tail=True)
+        _sh_mask, _sl_mask = _sp(work_15m, n=3, include_unconfirmed_tail=True)
         sh_prices = work_15m.filter(_sh_mask)["high"]
         tp1_candidates = sh_prices.filter(sh_prices > price_anchor)
         tp1 = _as_float(tp1_candidates[0]) if tp1_candidates.len() > 0 else None
@@ -345,8 +345,6 @@ def _detect_squeeze_setup_extended(
     else:
         # SL: above pre-breakout swing high + configured ATR buffer
         stop = _as_float(pre_breakout["high"].max()) + atr * sl_buffer_atr
-        from ..features import _swing_points as _sp
-
         _, _sl15 = _sp(work_15m, n=2)
         sl_prices = work_15m.filter(_sl15)["low"]
         tp1_candidates = sl_prices.filter(sl_prices < price_anchor)
@@ -418,7 +416,7 @@ def detect_squeeze_setup(
     )
 
 
-__all__ = ["detect_bb_squeeze_release", "detect_squeeze_setup", "_detect_squeeze_setup_extended"]
+__all__ = ["_detect_squeeze_setup_extended", "detect_bb_squeeze_release", "detect_squeeze_setup"]
 
 
 class SqueezeSetup(SpecDetectorSetup):
@@ -427,7 +425,7 @@ class SqueezeSetup(SpecDetectorSetup):
     confirmation_profile = "breakout_acceptance"
     required_context = ("futures_flow",)
 
-    DEFAULTS = {
+    DEFAULTS: ClassVar[dict[str, float]] = {
         "base_score": 0.55,
         "bb_squeeze_threshold": 4.5,
         "min_bb_compression_width": 4.5,

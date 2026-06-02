@@ -1,4 +1,3 @@
-# ruff: noqa: E402
 from __future__ import annotations
 
 import argparse
@@ -21,15 +20,15 @@ except ModuleNotFoundError:  # pragma: no cover - direct script execution
         resolve_symbols,
     )
 
-bootstrap_repo_path()
-
+from bot.core.runtime_errors import DEFENSIVE_EXC
 from bot.domain.config import load_settings
+from bot.domain.schemas import SymbolFrames, UniverseSymbol
 from bot.features import min_required_bars, prepare_symbol
 from bot.market.data import BinanceFuturesMarketData, MarketDataUnavailable
-from bot.domain.schemas import SymbolFrames, UniverseSymbol
-
+from bot.market.rest import BinanceClientImpl
 
 LOG = configure_script_logging("scripts.live_check_indicators")
+
 LIVE_CHECK_HTTP_TIMEOUT_SECONDS = 30.0  # seconds: cap live REST smoke checks
 
 
@@ -61,8 +60,6 @@ async def _run(symbols: list[str], concurrency: int) -> None:
         min_bars_1h=settings.filters.min_bars_1h,
         min_bars_4h=settings.filters.min_bars_4h,
     )
-    from bot.market.rest import BinanceClientImpl
-
     binance_client = BinanceClientImpl(
         rest_timeout_seconds=min(
             float(settings.ws.rest_timeout_seconds),
@@ -117,7 +114,7 @@ async def _run(symbols: list[str], concurrency: int) -> None:
                         minimums=minimums,
                         settings=settings,
                     )
-                except Exception as exc:
+                except DEFENSIVE_EXC as exc:
                     failures.append(
                         {
                             "symbol": symbol,
@@ -157,12 +154,14 @@ async def _run(symbols: list[str], concurrency: int) -> None:
         )
         if failures:
             LOG.error("indicator_check_failures", failures=failures[:20])
-            raise RuntimeError(f"indicator/prepare checks failed for {len(failures)} symbols")
+            msg = f"indicator/prepare checks failed for {len(failures)} symbols"
+            raise RuntimeError(msg)
     finally:
         await client.close()
 
 
 def main() -> None:
+    bootstrap_repo_path()
     parser = argparse.ArgumentParser(description="Live prepare_symbol + indicator verification")
     parser.add_argument("--symbols", nargs="*", default=[])
     parser.add_argument("--symbols-from-run", default="20260421_215817_70948")
@@ -184,7 +183,7 @@ def main() -> None:
     try:
         asyncio.run(_run(symbols, args.concurrency))
     except MarketDataUnavailable as exc:
-        LOG.error(
+        LOG.exception(
             "live_indicators_unavailable",
             operation=exc.operation,
             detail=exc.detail,

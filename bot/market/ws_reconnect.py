@@ -47,7 +47,7 @@ def compute_disconnect_delay(
     else:
         min_delay = 1.0
 
-    next_delay = min(300.0, max(1.0, max(delay, min_delay)))
+    next_delay = min(300.0, max(1.0, delay, min_delay))
     next_delay = min(
         300.0,
         next_delay + random.uniform(0.0, min(0.5, next_delay * 0.1)),
@@ -59,7 +59,10 @@ def compute_disconnect_delay(
     log_reason = "keepalive_ping_timeout" if keepalive_timeout else str(exc)
     LOG.log(
         level,
-        "ws disconnected | endpoint=%s url=%s reason=%s close_detail=%s uptime=%.1fs retry_in=%.1fs streak=%d",
+        (
+            "ws disconnected | endpoint=%s url=%s reason=%s close_detail=%s "
+            "uptime=%.1fs retry_in=%.1fs streak=%d"
+        ),
         endpoint,
         url,
         log_reason,

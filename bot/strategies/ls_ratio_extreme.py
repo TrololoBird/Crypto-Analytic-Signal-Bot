@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-from ..domain.config import BotSettings
-from ..domain.schemas import PreparedSymbol, Signal
-from .roadmap_base import RoadmapSetup
-
+from typing import TYPE_CHECKING, ClassVar
 
 from ._roadmap import (
     _build_atr_signal,
@@ -13,13 +10,18 @@ from ._roadmap import (
     _last,
     _reject,
 )
+from .roadmap_base import RoadmapSetup
+
+if TYPE_CHECKING:
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
 
 __all__ = ["detect_ls_ratio_extreme"]
 
 
 def detect_ls_ratio_extreme(
     prepared: PreparedSymbol,
-    settings: BotSettings,
+    _settings: BotSettings,
     effective_params: dict[str, float],
     *,
     setup_id: str,
@@ -64,10 +66,7 @@ def detect_ls_ratio_extreme(
     work = prepared.work_15m
     close_position = _last(work, "close_position", 0.5)
     volume_ratio = _last(work, "volume_ratio20", 1.0)
-    if volume_ratio < float(params["min_volume_ratio"]):
-        volume_penalty = True
-    else:
-        volume_penalty = False
+    volume_penalty = volume_ratio < float(params["min_volume_ratio"])
     if direction == "long":
         close_ok = close_position >= float(params["min_close_position_long"])
     else:
@@ -98,20 +97,16 @@ def detect_ls_ratio_extreme(
     else:
         adverse_depth = depth is not None and depth > max_depth
         adverse_micro = micro is not None and micro > max_micro
-    if adverse_depth or adverse_micro:
-        orderbook_penalty = True
-    else:
-        orderbook_penalty = False
+    orderbook_penalty = bool(adverse_depth or adverse_micro)
     context_penalty = False
     if _confirmed_context_conflict(prepared, direction):
         context_penalty = True
     funding = _finite_or_none(prepared.funding_rate)
     funding_penalty = False
-    if funding is not None:
-        if direction == "short" and funding <= 0.0:
-            funding_penalty = True
-        elif direction == "long" and funding >= 0.0:
-            funding_penalty = True
+    if funding is not None and (
+        (direction == "short" and funding <= 0.0) or (direction == "long" and funding >= 0.0)
+    ):
+        funding_penalty = True
     oi_change = _finite_or_none(prepared.oi_change_pct)
     oi_penalty = False
     min_oi_change = float(params.get("min_oi_change_pct", 0.5))
@@ -172,7 +167,7 @@ class LSRatioExtremeSetup(RoadmapSetup):
     family = "sentiment"
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)
-    DEFAULTS = {
+    DEFAULTS: ClassVar[dict[str, float]] = {
         **RoadmapSetup.DEFAULTS,
         "long_account_threshold": 0.65,
         "short_account_threshold": 0.35,

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import math
-
 import polars as pl
+
+from bot.coercion import as_float
 
 REQUIRED_OHLCV_COLUMNS: tuple[str, ...] = ("open", "high", "low", "close", "volume")
 
@@ -10,7 +10,8 @@ REQUIRED_OHLCV_COLUMNS: tuple[str, ...] = ("open", "high", "low", "close", "volu
 def ensure_columns(df: pl.DataFrame, required: tuple[str, ...], *, fn_name: str) -> None:
     missing = [name for name in required if name not in df.columns]
     if missing:
-        raise ValueError(f"{fn_name} requires columns={required}, missing={tuple(missing)}")
+        msg = f"{fn_name} requires columns={required}, missing={tuple(missing)}"
+        raise ValueError(msg)
 
 
 def clean_non_finite(series: pl.Series, *, fill: float) -> pl.Series:
@@ -19,7 +20,7 @@ def clean_non_finite(series: pl.Series, *, fill: float) -> pl.Series:
 
 
 def materialize_series(
-    value: pl.Series | pl.Expr | int | float,
+    value: pl.Series | pl.Expr | float,
     *,
     df: pl.DataFrame,
     name: str,
@@ -32,11 +33,7 @@ def materialize_series(
 
 
 def finite_float(value: object, *, fill: float = 0.0) -> float:
-    try:
-        result = float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return fill
-    return result if math.isfinite(result) else fill
+    return as_float(value, default=fill)
 
 
 def wilder_mean(
@@ -119,7 +116,7 @@ def supertrend_series(
     low_values = [finite_float(value) for value in df["low"].to_list()]
     close_values = [finite_float(value) for value in df["close"].to_list()]
     true_ranges: list[float] = []
-    for idx, (high, low, close) in enumerate(
+    for idx, (high, low, _close) in enumerate(
         zip(high_values, low_values, close_values, strict=False)
     ):
         if idx == 0:

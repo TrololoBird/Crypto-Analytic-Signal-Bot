@@ -158,7 +158,7 @@ def _scan_live_path_patterns(files: tuple[str, ...]) -> list[dict[str, str]]:
 
 
 def _run_cmd(name: str, cmd: list[str]) -> dict[str, object]:
-    proc = subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True, text=True)
+    proc = subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True, text=True, check=False)
     return {
         "name": name,
         "cmd": " ".join(cmd),
@@ -198,11 +198,12 @@ def main() -> int:
         }
         if rel.startswith("bot") and rel.endswith(".py"):
             report.stale_bot_py.append(entry)
-        elif rel.startswith(("bot/", "scripts/", "tests/", "config/")) and not rel.endswith(
-            (".pyc", ".log", ".json")
+        elif (
+            rel.startswith(("bot/", "scripts/", "tests/", "config/"))
+            and not rel.endswith((".pyc", ".log", ".json"))
+            and len(report.stale_other_notable) < 80
         ):
-            if len(report.stale_other_notable) < 80:
-                report.stale_other_notable.append(entry)
+            report.stale_other_notable.append(entry)
 
     for rel in FORBIDDEN_PATHS:
         if (REPO_ROOT / rel).exists():

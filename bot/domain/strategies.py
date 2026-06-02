@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from .schemas import Signal
+if TYPE_CHECKING:
+    from .schemas import Signal
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,7 +104,7 @@ class StrategyDecision:
         stage: str = "strategy",
         reason_code: str = "pattern.raw_hit",
         details: dict[str, Any] | None = None,
-    ) -> "StrategyDecision":
+    ) -> StrategyDecision:
         return cls(
             setup_id=setup_id,
             status="signal",
@@ -123,7 +124,7 @@ class StrategyDecision:
         details: dict[str, Any] | None = None,
         missing_fields: tuple[str, ...] = (),
         invalid_fields: tuple[str, ...] = (),
-    ) -> "StrategyDecision":
+    ) -> StrategyDecision:
         return cls(
             setup_id=setup_id,
             status="reject",
@@ -143,7 +144,7 @@ class StrategyDecision:
         details: dict[str, Any] | None = None,
         missing_fields: tuple[str, ...] = (),
         invalid_fields: tuple[str, ...] = (),
-    ) -> "StrategyDecision":
+    ) -> StrategyDecision:
         return cls(
             setup_id=setup_id,
             status="skip",
@@ -163,7 +164,7 @@ class StrategyDecision:
         error: str,
         stage: str = "runtime",
         details: dict[str, Any] | None = None,
-    ) -> "StrategyDecision":
+    ) -> StrategyDecision:
         return cls(
             setup_id=setup_id,
             status="error",

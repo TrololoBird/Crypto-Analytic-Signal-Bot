@@ -4,16 +4,20 @@ from __future__ import annotations
 
 import logging
 import math
+from typing import TYPE_CHECKING, ClassVar
 
 import polars as pl
 
-from ..domain.config import BotSettings
-from ..domain.schemas import PreparedSymbol, Signal
+from ..features import _swing_points as _sp
 from ..setups import _build_signal, _compute_dynamic_score, _reject
-from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
 from ..setups.smc import latest_fvg_zone
+from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
 from ..setups.utils import select_structural_target, validate_rr_or_penalty
 from ._common import SpecHit, as_float, with_spec_columns
+
+if TYPE_CHECKING:
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
 
 LOG = logging.getLogger("bot.strategies.fvg")
 
@@ -82,7 +86,7 @@ def _spec_detect_kwargs(effective: dict[str, float]) -> dict[str, object]:
 
 def _detect_fvg_setup_extended(
     prepared: PreparedSymbol,
-    settings: BotSettings,
+    _settings: BotSettings,
     defaults: dict[str, float],
     effective: dict[str, float],
     setup_id: str,
@@ -255,8 +259,6 @@ def _detect_fvg_setup_extended(
     # A mitigated FVG is the entry zone; its midpoint/opposite boundary is
     # not a meaningful profit target. Target the next structure level, then
     # fall back to a deterministic RR projection.
-    from ..features import _swing_points as _sp
-
     sh_mask = sl_mask = None
     if prepared.work_1h.height >= 8:
         sh_mask, sl_mask = _sp(prepared.work_1h, n=3, include_unconfirmed_tail=True)
@@ -386,7 +388,7 @@ def detect_fvg_setup(
     )
 
 
-__all__ = ["detect_fvg", "detect_fvg_setup", "_detect_fvg_setup_extended"]
+__all__ = ["_detect_fvg_setup_extended", "detect_fvg", "detect_fvg_setup"]
 
 
 class FVGSetup(SpecDetectorSetup):
@@ -395,7 +397,7 @@ class FVGSetup(SpecDetectorSetup):
     confirmation_profile = "trend_follow"
     required_context = ("futures_flow",)
 
-    DEFAULTS = {
+    DEFAULTS: ClassVar[dict[str, float]] = {
         "base_score": 0.55,
         "min_gap_width_bps": 15.0,
         "min_volume_ratio": 1.1,

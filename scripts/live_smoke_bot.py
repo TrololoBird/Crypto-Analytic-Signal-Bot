@@ -6,28 +6,28 @@ import contextlib
 import logging
 import os
 import sqlite3
-import sys
-from pathlib import Path
-from typing import Any
+import tracemalloc
+from typing import TYPE_CHECKING, Any
 
-_REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
+import structlog
 
 try:
     from scripts.common import bootstrap_repo_path
 except ModuleNotFoundError:  # pragma: no cover
     from common import bootstrap_repo_path
 
-bootstrap_repo_path()
-
-import structlog
-
-from bot.runtime.bot import SignalBot
-from bot.domain.config import load_settings
+from bot.cli import configure_logging
 from bot.delivery.telegram import DeliveryResult
-from scripts.live_check_binance_api import _wait_for_mark_prices
+from bot.domain.config import load_settings
+from bot.runtime.bot import SignalBot
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
+try:
+    from scripts.live_check_binance_api import _wait_for_mark_prices
+except ModuleNotFoundError:  # pragma: no cover - direct script execution
+    from live_check_binance_api import _wait_for_mark_prices
 
 LOG = structlog.get_logger("scripts.live_smoke_bot")
 _MISSING_LOG_VALUE = "not_available"
@@ -43,11 +43,13 @@ class FakeBroadcaster:
     async def send_html(
         self, text: str, *, reply_to_message_id: int | None = None
     ) -> DeliveryResult:
+        del text, reply_to_message_id
         self._message_id += 1
         return DeliveryResult(status="sent", message_id=self._message_id, reason="live_smoke_bot")
 
     async def edit_html(self, message_id: int, text: str) -> None:
-        return None
+        del message_id, text
+        return
 
     async def close(self) -> None:
         return None
@@ -57,18 +59,17 @@ def _configure_logging(*, debug: bool = False) -> None:
     settings = load_settings()
     if debug:
         os.environ["DEBUG_BOT"] = "1"
-    from bot.cli import configure_logging
-
     configure_logging(
         settings, debug_mode=debug or os.getenv("DEBUG_BOT", "0") in ("1", "true", "yes")
     )
-    logging.captureWarnings(True)
+    logging.captureWarnings(capture=True)
 
 
 def _install_asyncio_exception_logging() -> None:
     loop = asyncio.get_running_loop()
 
     def _log_exception(loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
+        del loop
         msg = context.get("exception", context.get("message"))
         logging.getLogger("asyncio").exception(
             "Unhandled asyncio exception: %s",
@@ -84,7 +85,8 @@ def _fetch_active_signal_row(db_path: Path, tracking_id: str) -> dict[str, Any] 
     conn.row_factory = sqlite3.Row
     try:
         row = conn.execute(
-            "SELECT tracking_id, status, pending_expires_at, active_expires_at, activated_at, closed_at, close_reason "
+            "SELECT tracking_id, status, pending_expires_at, active_expires_at, "
+            "activated_at, closed_at, close_reason "
             "FROM active_signals WHERE tracking_id = ?",
             (tracking_id,),
         ).fetchone()
@@ -171,32 +173,36 @@ async def _run(
             ws_snapshot=_sanitize_log_value(ws_snapshot),
             emergency_cycle_summary=_sanitize_log_value(summary),
         )
-        if before is not None and before.get("status") in {"pending", "active"}:
-            if after is not None and after.get("status") in {"pending", "active"}:
-                raise RuntimeError(
-                    f"startup sweep did not close expired tracked signal: before={before} after={after}"
-                )
-        if bot._prepare_error_count != 0:
-            raise RuntimeError(
-                f"prepare errors observed during live smoke: {bot._prepare_error_count}"
+        if (
+            before is not None
+            and before.get("status") in {"pending", "active"}
+            and after is not None
+            and after.get("status") in {"pending", "active"}
+        ):
+            msg = (
+                f"startup sweep did not close expired tracked signal: before={before} after={after}"
             )
+            raise RuntimeError(msg)
+        if bot._prepare_error_count != 0:
+            msg = f"prepare errors observed during live smoke: {bot._prepare_error_count}"
+            raise RuntimeError(msg)
         ticker_ok = int(ws_snapshot.get("fresh_tickers") or 0) > 0
         if not ticker_ok and bot._ws_manager is not None:
             ticker_ok = bool(bot._ws_manager.is_ticker_cache_warm())
         mark_ok = int(ws_snapshot.get("fresh_mark_prices") or 0) > 0
         if not ticker_ok and not mark_ok:
-            raise RuntimeError(
-                f"ticker/market cache not warm in live smoke snapshot: {ws_snapshot}"
-            )
+            msg = f"ticker/market cache not warm in live smoke snapshot: {ws_snapshot}"
+            raise RuntimeError(msg)
         if not mark_ok:
-            raise RuntimeError(f"mark price cache not warm in live smoke snapshot: {ws_snapshot}")
+            msg = f"mark price cache not warm in live smoke snapshot: {ws_snapshot}"
+            raise RuntimeError(msg)
     finally:
         bot.request_shutdown()
         if runtime_task is not None:
             try:
                 await asyncio.wait_for(runtime_task, timeout=shutdown_timeout_seconds)
             except TimeoutError:
-                LOG.error(
+                LOG.exception(
                     "runtime task did not stop within timeout; cancelling",
                     timeout_seconds=shutdown_timeout_seconds,
                 )
@@ -206,7 +212,7 @@ async def _run(
         try:
             await asyncio.wait_for(bot.close(), timeout=shutdown_timeout_seconds)
         except TimeoutError:
-            LOG.error(
+            LOG.exception(
                 "bot close timed out after live smoke summary",
                 timeout_seconds=shutdown_timeout_seconds,
             )
@@ -216,6 +222,7 @@ async def _run(
 
 
 def main() -> None:
+    bootstrap_repo_path()
     parser = argparse.ArgumentParser(
         description="End-to-end live smoke test without Telegram sends"
     )
@@ -228,7 +235,10 @@ def main() -> None:
         "--runtime-seconds",
         type=float,
         default=0.0,
-        help="Run full EventBus/background runtime for this many seconds before the final emergency cycle.",
+        help=(
+            "Run full EventBus/background runtime for this many seconds "
+            "before the final emergency cycle."
+        ),
     )
     parser.add_argument(
         "--shutdown-timeout-seconds",
@@ -250,7 +260,9 @@ def main() -> None:
     parser.add_argument(
         "--skip-final-emergency-cycle",
         action="store_true",
-        help="Only validate the configured live runtime window; do not add an extra emergency cycle.",
+        help=(
+            "Only validate the configured live runtime window; do not add an extra emergency cycle."
+        ),
     )
     parser.add_argument(
         "--debug",
@@ -261,8 +273,6 @@ def main() -> None:
 
     _configure_logging(debug=bool(args.debug))
     if args.debug:
-        import tracemalloc
-
         tracemalloc.start(25)
     asyncio.run(
         _run(

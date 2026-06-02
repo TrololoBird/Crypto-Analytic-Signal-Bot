@@ -1,16 +1,10 @@
 from __future__ import annotations
 
-from ..domain.config import BotSettings
-from ..domain.schemas import PreparedSymbol, Signal
-from .roadmap_base import RoadmapSetup
-
-
 import math
+from typing import TYPE_CHECKING, ClassVar
 
-import polars as pl
-
-from ._common import SpecHit, as_float, with_spec_columns, _latest_values, build_spec_signal
 from ..domain.strategy_catalog import catalog_default_params
+from ._common import SpecHit, _latest_values, as_float, build_spec_signal, with_spec_columns
 from ._roadmap import (
     _build_atr_signal,
     _finite_or_none,
@@ -18,6 +12,13 @@ from ._roadmap import (
     _prev,
     _reject,
 )
+from .roadmap_base import RoadmapSetup
+
+if TYPE_CHECKING:
+    import polars as pl
+
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
 
 __all__ = ["detect_aggression_shift", "detect_aggression_shift_prepared"]
 
@@ -206,7 +207,7 @@ class AggressionShiftSetup(RoadmapSetup):
     family = "orderflow"
     confirmation_profile = "breakout_acceptance"
     required_context = ("futures_flow",)
-    DEFAULTS = {
+    DEFAULTS: ClassVar[dict[str, float]] = {
         **RoadmapSetup.DEFAULTS,
         "min_shift": 0.05,
         "min_proxy_shift": 0.025,

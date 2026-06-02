@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import importlib
-import sys
 from typing import NamedTuple
 
 # Maps pyproject extra -> modules that must import when extra is installed
@@ -58,9 +57,10 @@ class Check(NamedTuple):
 def _try_import(name: str) -> str | None:
     try:
         importlib.import_module(name)
-        return None
     except ImportError as exc:
         return str(exc)
+    else:
+        return None
 
 
 def _run_checks(label: str, modules: tuple[str, ...], *, optional: bool) -> list[str]:

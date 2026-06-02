@@ -15,7 +15,7 @@ import sqlite3
 import subprocess
 import sys
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +23,31 @@ import structlog
 
 ROOT = Path(__file__).resolve().parents[1]
 LOG = structlog.get_logger("scripts.live_run_watchdog")
+
+
+def _launch_bot_subprocess(
+    cmd: list[str],
+    bot_log: Path,
+    env: dict[str, str],
+) -> subprocess.Popen[Any]:
+    with bot_log.open("a", encoding="utf-8") as out:
+        out.write(f"\n--- start {datetime.now(UTC).isoformat()} ---\n")
+        return subprocess.Popen(
+            cmd,
+            cwd=str(ROOT),
+            stdout=out,
+            stderr=subprocess.STDOUT,
+            env=env,
+        )
+
+
+async def _wait_until_poll(proc: subprocess.Popen[Any], end_at: float, poll_s: float) -> None:
+    loop = asyncio.get_running_loop()
+    while proc.poll() is None and time.time() < end_at:
+        ready = asyncio.Event()
+        delay = min(poll_s, max(0.0, end_at - time.time()))
+        loop.call_later(delay, ready.set)
+        await ready.wait()
 
 
 def _configure_logging(log_path: Path) -> None:
@@ -106,7 +131,7 @@ async def _monitor_sl_loop(
     db = _tracking_db_path()
     while time.time() < end_at:
         if db.exists():
-            since = (datetime.now(timezone.utc) - timedelta(hours=12)).isoformat()
+            since = (datetime.now(UTC) - timedelta(hours=12)).isoformat()
             with sqlite3.connect(db) as conn:
                 for row in _fetch_recent_stop_losses(conn, since):
                     tid = str(row.get("tracking_id") or "")
@@ -131,18 +156,9 @@ async def _run_bot_subprocess(
     env = os.environ.copy()
     while time.time() < end_at:
         LOG.info("bot_start", cmd=" ".join(cmd))
-        with bot_log.open("a", encoding="utf-8") as out:
-            out.write(f"\n--- start {datetime.now(timezone.utc).isoformat()} ---\n")
-            proc = subprocess.Popen(
-                cmd,
-                cwd=str(ROOT),
-                stdout=out,
-                stderr=subprocess.STDOUT,
-                env=env,
-            )
+        proc = await asyncio.to_thread(_launch_bot_subprocess, cmd, bot_log, env)
         try:
-            while proc.poll() is None and time.time() < end_at:
-                await asyncio.sleep(5.0)
+            await _wait_until_poll(proc, end_at, 5.0)
             if proc.poll() is None:
                 proc.terminate()
                 try:
@@ -158,7 +174,7 @@ async def _run_bot_subprocess(
 
 
 async def _main_async(args: argparse.Namespace) -> int:
-    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     log_dir = ROOT / "data" / "live_watch" / run_id
     bot_log = log_dir / "bot_stdout.log"
     sl_log = log_dir / "stop_loss_events.jsonl"

@@ -5,9 +5,9 @@ from __future__ import annotations
 import logging
 import math
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Any
-from collections import deque
 
 LOG = logging.getLogger("bot.core.diagnostics.metrics")
 
@@ -20,7 +20,7 @@ def _finite_metric_value(value: float) -> float:
     return numeric if math.isfinite(numeric) else 0.0
 
 
-def safe_set(gauge: "Gauge", value: float) -> None:
+def safe_set(gauge: Gauge, value: float) -> None:
     gauge.set(_finite_metric_value(value))
 
 
@@ -169,7 +169,7 @@ class BotMetrics:
             )
         self.signals_by_strategy[strategy_id].inc()
 
-    def record_strategy_calc(self, duration_ms: float, error: bool = False) -> None:
+    def record_strategy_calc(self, duration_ms: float, *, error: bool = False) -> None:
         """Record strategy calculation."""
         self.strategy_calc_time.observe(duration_ms)
         if error:
@@ -184,13 +184,13 @@ class BotMetrics:
         self.ws_messages.inc()
         self.ws_latency_ms.observe(latency_ms)
 
-    def record_rest_request(self, error: bool = False) -> None:
+    def record_rest_request(self, *, error: bool = False) -> None:
         """Record REST API request."""
         self.rest_requests.inc()
         if error:
             self.rest_errors.inc()
 
-    def record_telegram_sent(self, error: bool = False) -> None:
+    def record_telegram_sent(self, *, error: bool = False) -> None:
         """Record Telegram message."""
         if error:
             self.telegram_errors.inc()
@@ -241,7 +241,7 @@ class MetricsExporter:
             return "{" + ",".join(pairs) + "}"
 
         # Export all counters and gauges
-        for name, metric in self._metrics.__dict__.items():
+        for metric in self._metrics.__dict__.values():
             if isinstance(metric, (Counter, Gauge)):
                 lines.append(f"# HELP {metric.name} {metric.description}")
                 lines.append(

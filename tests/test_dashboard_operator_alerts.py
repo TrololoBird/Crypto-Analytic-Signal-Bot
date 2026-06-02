@@ -15,7 +15,7 @@ class _FakeLiveData:
         self._runtime = runtime
         self._overview = overview
 
-    def decisions(self, *, limit: int = 41, max_rows: int = 50_000) -> dict:
+    def decisions(self, *, _limit: int = 41, _max_rows: int = 50_000) -> dict:
         return self._decisions
 
     def runtime(self) -> dict:
@@ -73,7 +73,7 @@ def test_build_live_operator_alerts_ws_stale() -> None:
 
 def test_dashboard_live_data_zero_signal_setups() -> None:
     """DashboardLiveData exposes zero_signal_setups for strategy arena UI."""
-    data = DashboardLiveData(lambda: None)
+    DashboardLiveData(lambda: None)
     reports = [
         {
             "setup_id": "a",

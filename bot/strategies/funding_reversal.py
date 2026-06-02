@@ -1,16 +1,17 @@
 from __future__ import annotations
 
-from ..domain.config import BotSettings
-from ..domain.schemas import PreparedSymbol, Signal
-from .roadmap_base import RoadmapSetup
-
-
 import logging
 import math
+from typing import TYPE_CHECKING, ClassVar
 
 from ..features import _swing_points
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from .common import as_float as _as_float
+from .roadmap_base import RoadmapSetup
+
+if TYPE_CHECKING:
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
 
 LOG = logging.getLogger(__name__)
 
@@ -19,7 +20,7 @@ __all__ = ["detect_funding_reversal"]
 
 def detect_funding_reversal(
     prepared: PreparedSymbol,
-    settings: BotSettings,
+    _settings: BotSettings,
     effective_params: dict[str, float],
     *,
     setup_id: str,
@@ -269,10 +270,9 @@ def detect_funding_reversal(
     if funding_trend == "flat":
         confirmation_score *= 0.95
         confirmation_reasons.append("funding_trend_flat_penalty")
-    elif direction == "short" and funding_trend == "falling":
-        confirmation_score *= 0.90
-        confirmation_reasons.append("funding_unwinding_penalty")
-    elif direction == "long" and funding_trend == "rising":
+    elif (direction == "short" and funding_trend == "falling") or (
+        direction == "long" and funding_trend == "rising"
+    ):
         confirmation_score *= 0.90
         confirmation_reasons.append("funding_unwinding_penalty")
 
@@ -362,7 +362,7 @@ class FundingReversalSetup(RoadmapSetup):
     required_context = ("futures_flow",)
     requires_funding = True
 
-    DEFAULTS = {
+    DEFAULTS: ClassVar[dict[str, float]] = {
         **RoadmapSetup.DEFAULTS,
         "base_score": 0.52,
         "funding_threshold": 0.0010,

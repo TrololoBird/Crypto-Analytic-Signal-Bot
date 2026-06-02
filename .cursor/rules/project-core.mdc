@@ -7,6 +7,15 @@ alwaysApply: true
 
 Event-driven Binance USDⓈ-M **public** signal bot. Telegram manual signals only. Python **3.14.5**, Polars pipeline, async runtime.
 
+## Agent execution policy
+
+See **`.cursor/rules/agent-sole-executor.mdc`** (always on). Summary:
+
+- User: architecture and direction only. Agent: every command, config change, probe, and terminal lifecycle.
+- **Forbidden:** “configure/run/close/kill yourself”, operator checklists, delegating proxy or config setup.
+- **Background shells:** `Await` until `exit_code`; then `powershell -File scripts/reap_agent_terminals.ps1` for any agent shells still missing a footer.
+- Proxy: `scripts/discover_binance_proxies.py` + runtime failover — agent-owned, not user-owned.
+
 ## Non-negotiable guardrails
 
 - NO auto-trading, order placement, or private/auth Binance endpoints

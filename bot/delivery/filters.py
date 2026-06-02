@@ -2,27 +2,29 @@
 
 from __future__ import annotations
 
-import math
 import logging
+import math
 from dataclasses import replace
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-import polars as pl
+from bot.core.runtime_errors import DEFENSIVE_EXC
 
-from ..domain.config import BotSettings
-from ..domain.schemas import PreparedSymbol, Signal
+from ..diagnostics.signals import get_global_diagnostics
 from ..features.microstructure import MicrostructureContext, build_microstructure_context
 from ..runtime_policy import is_deep_analysis_symbol
 from .contract import DEFAULT_TARGET_RR
-from .trade_plan import TradePlanBuilder
 from .scoring import ScoringResult
+from .trade_plan import TradePlanBuilder
 
 if TYPE_CHECKING:
+    import polars as pl
+
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
     from .confluence import ConfluenceEngine
 
 
-UTC = timezone.utc
 LOGGER = logging.getLogger(__name__)
 
 
@@ -246,11 +248,9 @@ def _expand_signal_to_min_stop(
     min_risk = entry * (min_stop_distance_pct / 100.0)
     rr_floor = max(1.0, float(min_rr))
     tp2_rr = max(rr_floor * 1.5, rr_floor + 0.5)
-    reasons = tuple(
-        [
-            *signal.reasons,
-            f"min_stop_normalized={min_stop_distance_pct:.2f}% rr_floor={rr_floor:.2f}",
-        ]
+    reasons = (
+        *signal.reasons,
+        f"min_stop_normalized={min_stop_distance_pct:.2f}% rr_floor={rr_floor:.2f}",
     )
 
     if signal.direction == "long":
@@ -291,8 +291,11 @@ def _expand_signal_to_min_stop(
     else:
         ordered = stop > entry > tp1 >= tp2 >= tp3
     if not ordered:
-        LOGGER.error(
-            "stop expansion produced invalid price ordering | symbol=%s setup=%s direction=%s entry=%.8f stop=%.8f tp1=%.8f tp2=%.8f tp3=%.8f",
+        LOGGER.exception(
+            (
+                "stop expansion produced invalid price ordering | symbol=%s setup=%s "
+                "direction=%s entry=%.8f stop=%.8f tp1=%.8f tp2=%.8f tp3=%.8f"
+            ),
             signal.symbol,
             signal.setup_id,
             signal.direction,
@@ -381,7 +384,7 @@ def _frame_is_fresh(
     try:
         last_close = frame["close_time"].item(-1)
         if isinstance(last_close, str):
-            last_close = datetime.fromisoformat(last_close.replace("Z", "+00:00"))
+            last_close = datetime.fromisoformat(last_close)
         elif isinstance(last_close, datetime):
             pass
         elif isinstance(last_close, (int, float)):
@@ -397,14 +400,14 @@ def _frame_is_fresh(
             last_close = last_close.replace(tzinfo=UTC)
         else:
             last_close = last_close.astimezone(UTC)
-    except Exception as exc:
+    except DEFENSIVE_EXC as exc:
         LOGGER.debug("Freshness degraded: failed to normalize close_time (%s)", exc)
         return False
 
     try:
         now = datetime.now(UTC)
         delta = now - last_close
-    except Exception as exc:
+    except DEFENSIVE_EXC as exc:
         LOGGER.debug("Freshness degraded: failed to compute freshness delta (%s)", exc)
         return False
 
@@ -445,7 +448,7 @@ def _market_atr_floor(prepared: PreparedSymbol, settings: BotSettings) -> float:
     if not prepared.work_1h.is_empty() and "adx14" in prepared.work_1h.columns:
         try:
             adx_val = float(prepared.work_1h.item(-1, "adx14") or 0.0)
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOGGER.debug("ATR floor ADX read failed for %s: %s", prepared.symbol, exc)
             adx_val = 0.0
 
@@ -454,7 +457,7 @@ def _market_atr_floor(prepared: PreparedSymbol, settings: BotSettings) -> float:
     if not atr_frame.is_empty() and "bb_width" in atr_frame.columns:
         try:
             bb_width = float(atr_frame.item(-1, "bb_width") or 0.0)
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOGGER.debug("ATR floor Bollinger width read failed for %s: %s", prepared.symbol, exc)
             bb_width = None
 
@@ -469,28 +472,25 @@ def _market_atr_floor(prepared: PreparedSymbol, settings: BotSettings) -> float:
 
 def _record_atr_sample(setup_id: str, atr_pct: float, *, passed: bool) -> None:
     try:
-        from ..diagnostics.signals import get_global_diagnostics
-
         diagnostics = get_global_diagnostics()
         if diagnostics is not None:
             diagnostics.record_atr_sample(setup_id, atr_pct, passed=passed)
-    except Exception:
-        LOGGER.debug("ATR diagnostic sample recording failed", exc_info=True)
+    except DEFENSIVE_EXC:
+        LOGGER.debug("ATR diagnostic sample recording failed")
 
 
 def apply_global_filters(
     signal: Signal,
     prepared: PreparedSymbol,
     settings: BotSettings,
-    confluence_engine: "ConfluenceEngine",
+    confluence_engine: ConfluenceEngine,
 ) -> tuple[bool, Signal, str | None, ScoringResult | None, dict[str, Any] | None] | None:
     try:
         return _run_filter_pipeline(signal, prepared, settings, confluence_engine)
-    except Exception as exc:
-        LOGGER.error(
+    except DEFENSIVE_EXC as exc:
+        LOGGER.exception(
             "filter_pipeline_crash",
             extra={"exc": str(exc), "setup_id": getattr(signal, "setup_id", "unknown")},
-            exc_info=True,
         )
         return None
 
@@ -499,7 +499,7 @@ def _run_filter_pipeline(
     signal: Signal,
     prepared: PreparedSymbol,
     settings: BotSettings,
-    confluence_engine: "ConfluenceEngine",
+    confluence_engine: ConfluenceEngine,
 ) -> tuple[bool, Signal, str | None, ScoringResult | None, dict[str, Any] | None]:
     """Apply hard gates, scoring, and optional ML enhancement.
 
@@ -676,7 +676,10 @@ def _run_filter_pipeline(
             adx_policy = _ADX_POLICY_PENALTY
             adx_penalty_factor = max(adx_penalty_factor, 0.90)
             LOGGER.info(
-                "deep-analysis ADX hard gate downgraded to score penalty | symbol=%s setup=%s primary_timeframe=%s min_adx_1h=%.2f",
+                (
+                    "deep-analysis ADX hard gate downgraded to score penalty | "
+                    "symbol=%s setup=%s primary_timeframe=%s min_adx_1h=%.2f"
+                ),
                 signal.symbol,
                 signal.setup_id,
                 primary_timeframe,
@@ -710,9 +713,9 @@ def _run_filter_pipeline(
         or getattr(prepared, "bias_1h", None)
         or "neutral"
     ).lower()
-    if signal.direction == "long" and dominant_1h == "downtrend":
-        trend_conflict = True
-    elif signal.direction == "short" and dominant_1h == "uptrend":
+    if (signal.direction == "long" and dominant_1h == "downtrend") or (
+        signal.direction == "short" and dominant_1h == "uptrend"
+    ):
         trend_conflict = True
     else:
         trend_conflict = False
@@ -815,7 +818,7 @@ def _run_filter_pipeline(
         )
     if updated.stop_distance_pct > settings.tracking.max_stop_distance_pct:
         return _reject("stop_too_wide", updated)
-    updated = replace(updated, passed_filters=tuple([*updated.passed_filters, "stop_ok"]))
+    updated = replace(updated, passed_filters=(*updated.passed_filters, "stop_ok"))
 
     # --- 6. Risk / Reward (runtime gate uses TP1; TP2 RR remains analytical) ---
     risk = abs(updated.entry_mid - updated.stop)
@@ -837,7 +840,7 @@ def _run_filter_pipeline(
                 "primary_timeframe": primary_timeframe,
             },
         )
-    updated = replace(updated, passed_filters=tuple([*updated.passed_filters, "rr_ok"]))
+    updated = replace(updated, passed_filters=(*updated.passed_filters, "rr_ok"))
 
     # --- 7. Scoring (ConfluenceEngine — unified path) ---
     scoring_result: ScoringResult | None = None
@@ -874,7 +877,7 @@ def _run_filter_pipeline(
             )
         updated = replace(
             updated,
-            passed_filters=tuple([*updated.passed_filters, "adx_penalty_applied"]),
+            passed_filters=(*updated.passed_filters, "adx_penalty_applied"),
         )
 
     if trend_conflict_penalty_applied:
@@ -893,7 +896,7 @@ def _run_filter_pipeline(
             )
         updated = replace(
             updated,
-            passed_filters=tuple([*updated.passed_filters, "trend_conflict_1h_penalty_applied"]),
+            passed_filters=(*updated.passed_filters, "trend_conflict_1h_penalty_applied"),
         )
 
     # --- 9. Minimum score gate (final gate after ALL adjustments) ---

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from dataclasses import dataclass, field
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
-from bot.domain.schemas import Signal
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from bot.domain.schemas import Signal
 
 DEFAULT_ACTION_WINDOW_HOURS = 4.0
 
@@ -126,14 +128,14 @@ class MetaSignalMerger:
                 continue
             ranked = sorted(metas, key=lambda meta: self._rank_key(meta.primary), reverse=True)
             winners.append(ranked[0])
-            for loser in ranked[1:]:
-                conflicts.append(
-                    self._mark_direction_conflict(
-                        loser,
-                        winner=ranked[0].primary,
-                        reason_tag="direction_conflict_same_batch",
-                    )
+            conflicts.extend(
+                self._mark_direction_conflict(
+                    loser,
+                    winner=ranked[0].primary,
+                    reason_tag="direction_conflict_same_batch",
                 )
+                for loser in ranked[1:]
+            )
         return winners, conflicts
 
     def _apply_recent_action_conflicts(

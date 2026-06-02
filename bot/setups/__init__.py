@@ -7,15 +7,12 @@ import math
 import re
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
-from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import polars as pl
-
+from ..delivery.trade_plan import TradePlanBuilder
+from ..domain.schemas import PreparedSymbol, Signal
 from ..domain.strategies import StrategyDecision
 from ..features import _swing_points  # shared swing detection helper
-from ..domain.schemas import PreparedSymbol, Signal
-from ..delivery.trade_plan import TradePlanBuilder
 from .utils import (
     apply_graded_penalty,
     build_structural_targets,
@@ -24,9 +21,19 @@ from .utils import (
     validate_rr_or_penalty,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    import polars as pl
+
 LOG = logging.getLogger("bot.setups")
 
 __all__ = [
+    "_build_signal",
+    "_compute_dynamic_score",
+    "_last_swing_prices",
+    "_pullback_levels",
+    "_reject",
     "apply_graded_penalty",
     "begin_strategy_decision_capture",
     "build_structural_targets",
@@ -35,11 +42,6 @@ __all__ = [
     "normalize_trade_levels",
     "reset_strategy_decision_capture",
     "validate_rr_or_penalty",
-    "_build_signal",
-    "_compute_dynamic_score",
-    "_last_swing_prices",
-    "_pullback_levels",
-    "_reject",
 ]
 
 
@@ -53,7 +55,7 @@ _ALLOWED_REASON_PREFIXES = {
     "runtime",
     "delivery",
 }
-_CURRENT_DECISION_CAPTURE: ContextVar["_DecisionCapture | None"] = ContextVar(
+_CURRENT_DECISION_CAPTURE: ContextVar[_DecisionCapture | None] = ContextVar(
     "bot_setups_current_decision_capture",
     default=None,
 )
@@ -133,8 +135,7 @@ def _infer_reason_category(slug: str) -> str:
         return "runtime"
     if (
         "target" in slug
-        or slug.startswith("tp")
-        or slug.startswith("risk_")
+        or slug.startswith(("tp", "risk_"))
         or slug.endswith("_stop")
         or "stop_" in slug
     ):

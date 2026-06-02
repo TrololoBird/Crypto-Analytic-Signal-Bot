@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 import math
-from typing import Any
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
-from ..domain.config import BotSettings
-from ..domain.schemas import PreparedSymbol, Signal
 from ..features.microstructure import build_microstructure_context
 from .scoring import (
     ScoringResult,
@@ -20,6 +18,10 @@ from .scoring import (
     _structure_clarity,
     _volume_quality,
 )
+
+if TYPE_CHECKING:
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
 
 LOG = logging.getLogger("bot.confluence")
 MIN_HISTORY_SAMPLES = 20
@@ -218,7 +220,10 @@ class ConfluenceEngine:
                 )
             if weight > 0.70:
                 LOG.warning(
-                    "ConfluenceEngine dominant component weight | component=%s weight=%.6f setup_id=%s",
+                    (
+                        "ConfluenceEngine dominant component weight | component=%s "
+                        "weight=%.6f setup_id=%s"
+                    ),
                     spec["name"],
                     weight,
                     signal.setup_id,

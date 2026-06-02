@@ -2,23 +2,26 @@
 
 from __future__ import annotations
 
-import logging
 import asyncio
+import logging
 import math
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import polars as pl
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
 
 LOG = logging.getLogger("bot.persistence.repository.cache")
 
 
 def _utcnow_naive() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 class ParquetCache:
@@ -149,7 +152,7 @@ class ParquetCache:
                 date_str = parts[-1]
                 if len(date_str) != 8:
                     continue
-                chunk_date = datetime.strptime(date_str, "%Y%m%d")
+                chunk_date = datetime.strptime(date_str, "%Y%m%d").replace(tzinfo=UTC)
                 if chunk_date >= cutoff:
                     continue
                 symbol = parts[0]
@@ -165,8 +168,7 @@ class ParquetCache:
             frames: list[pl.DataFrame] = []
             if monthly_path.exists():
                 frames.append(pl.read_parquet(monthly_path))
-            for chunk in chunks:
-                frames.append(pl.read_parquet(chunk))
+            frames.extend(pl.read_parquet(chunk) for chunk in chunks)
             if not frames:
                 continue
             merged = pl.concat(frames, how="diagonal_relaxed").unique(
@@ -275,7 +277,7 @@ class TimeSeriesCache:
     def invalidate(self, symbol: str | None = None) -> None:
         """Invalidate cache entries."""
         if symbol:
-            keys_to_remove = [k for k in self._memory.keys() if k.startswith(f"{symbol}:")]
+            keys_to_remove = [k for k in self._memory if k.startswith(f"{symbol}:")]
             for key in keys_to_remove:
                 del self._memory[key]
                 del self._access_times[key]
@@ -317,7 +319,7 @@ TIMEFRAME_MILLISECONDS: dict[str, int] = {
     "1w": 604_800_000,
 }
 
-CANONICAL_CANDLE_SCHEMA: dict[str, pl.DataType] = {
+CANONICAL_CANDLE_SCHEMA: dict[str, Any] = {
     "open_time": pl.Int64,
     "open": pl.Float64,
     "high": pl.Float64,
@@ -340,14 +342,16 @@ CANONICAL_CANDLE_SCHEMA: dict[str, pl.DataType] = {
 def normalize_cache_symbol(symbol: str) -> str:
     normalized = str(symbol or "").strip().upper()
     if not re.fullmatch(r"[A-Z0-9]{5,30}", normalized):
-        raise ValueError(f"invalid symbol: {symbol!r}")
+        msg = f"invalid symbol: {symbol!r}"
+        raise ValueError(msg)
     return normalized
 
 
 def normalize_cache_timeframe(timeframe: str) -> str:
     normalized = str(timeframe or "").strip().lower()
     if normalized not in TIMEFRAME_MILLISECONDS:
-        raise ValueError(f"unsupported timeframe: {timeframe!r}")
+        msg = f"unsupported timeframe: {timeframe!r}"
+        raise ValueError(msg)
     return normalized
 
 
@@ -355,14 +359,21 @@ def cache_timeframe_ms(timeframe: str) -> int:
     return TIMEFRAME_MILLISECONDS[normalize_cache_timeframe(timeframe)]
 
 
-def _cache_ms_to_datetime(value: int | float) -> datetime:
-    return datetime.fromtimestamp(int(value) / 1000.0, tz=timezone.utc)
+def _cache_ms_to_datetime(value: float) -> datetime:
+    return datetime.fromtimestamp(int(value) / 1000.0, tz=UTC)
 
 
 def _cache_finite_float(value: object, *, default: float | None = None) -> float | None:
-    try:
-        numeric = float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        numeric = float(value)
+    elif isinstance(value, str):
+        try:
+            numeric = float(value)
+        except ValueError:
+            return default
+    else:
         return default
     return numeric if math.isfinite(numeric) else default
 
@@ -371,7 +382,7 @@ def _cache_finite_int(value: object, *, default: int | None = None) -> int | Non
     try:
         if value is None:
             return default
-        return int(float(value))  # type: ignore[arg-type]
+        return int(float(value))
     except (TypeError, ValueError):
         return default
 
@@ -411,10 +422,7 @@ def normalize_candle_frame(
     """Return a canonical OHLCV frame suitable for Parquet storage."""
 
     tf = normalize_cache_timeframe(timeframe)
-    if isinstance(data, pl.DataFrame):
-        frame = data.clone()
-    else:
-        frame = pl.DataFrame(data)
+    frame = data.clone() if isinstance(data, pl.DataFrame) else pl.DataFrame(data)
     if frame.is_empty():
         return _empty_candle_frame()
     aliases = {
@@ -443,7 +451,8 @@ def normalize_candle_frame(
         if name not in frame.columns
     ]
     if missing:
-        raise ValueError(f"candle frame missing required columns: {missing}")
+        msg = f"candle frame missing required columns: {missing}"
+        raise ValueError(msg)
     frame = frame.with_columns(
         [
             _coerce_epoch_ms(frame["open_time"]).alias("open_time"),
@@ -464,13 +473,13 @@ def normalize_candle_frame(
         if column in frame.columns:
             frame = frame.with_columns(pl.col(column).cast(dtype, strict=False).alias(column))
         elif dtype == pl.Boolean:
-            frame = frame.with_columns(pl.lit(True).alias(column))
+            frame = frame.with_columns(pl.lit(value=True).alias(column))
         elif dtype == pl.Utf8:
             frame = frame.with_columns(pl.lit(source).alias(column))
         else:
             frame = frame.with_columns(pl.lit(None, dtype=dtype).alias(column))
     if closed_only:
-        frame = frame.filter(pl.col("is_closed").fill_null(True))
+        frame = frame.filter(pl.col("is_closed").fill_null(value=True))
     frame = frame.filter(
         pl.col("open_time").is_not_null()
         & pl.col("open").is_finite()
@@ -608,8 +617,8 @@ class HotColdParquetCache:
             symbol=symbol,
             timeframe=timeframe,
             rows=frame.height,
-            start_ms=int(frame["open_time"].min()),
-            end_ms=int(frame["open_time"].max()),
+            start_ms=_cache_finite_int(frame["open_time"].min(), default=0) or 0,
+            end_ms=_cache_finite_int(frame["open_time"].max(), default=0) or 0,
             source=source,
             min_close=_cache_finite_float(frame["close"].min()),
             max_close=_cache_finite_float(frame["close"].max()),
@@ -649,11 +658,13 @@ class HotColdParquetCache:
         duplicates = 0
         for partition_value in frame["open_time"].unique().to_list():
             path = self._partition_path(symbol, timeframe, int(partition_value))
+
+            def _same_partition(value: int, *, target: Path = path) -> bool:
+                return self._partition_path(symbol, timeframe, int(value)) == target
+
             chunk = frame.filter(
                 pl.col("open_time").map_elements(
-                    lambda value, target=path: (
-                        self._partition_path(symbol, timeframe, int(value)) == target
-                    ),
+                    _same_partition,
                     return_dtype=pl.Boolean,
                 )
             )
@@ -673,7 +684,14 @@ class HotColdParquetCache:
                 before = chunk.height
                 merged = chunk.unique(subset=["open_time"], keep="last").sort("open_time")
                 duplicates += max(0, before - merged.height)
-            merged.write_parquet(path, compression=self.config.compression, statistics=True)
+            merged.write_parquet(
+                path,
+                compression=cast(
+                    "Literal['lz4', 'uncompressed', 'snappy', 'gzip', 'brotli', 'zstd']",
+                    self.config.compression,
+                ),
+                statistics=True,
+            )
         buffer.clear()
         self._flush_count += 1
         return self._summary(symbol, timeframe, frame, source="flush", duplicates=duplicates)
@@ -785,7 +803,8 @@ def resample_ohlcv_frame(
     source_minutes = cache_timeframe_ms(source_tf) // 60_000
     target_minutes = cache_timeframe_ms(target_tf) // 60_000
     if target_minutes < source_minutes or target_minutes % source_minutes != 0:
-        raise ValueError(f"cannot resample {source_tf} to {target_tf}")
+        msg = f"cannot resample {source_tf} to {target_tf}"
+        raise ValueError(msg)
     source = normalize_candle_frame(frame, timeframe=source_tf, source="resample")
     if source.is_empty() or source_tf == target_tf:
         return source
@@ -855,8 +874,8 @@ def htf_trend_label(
     if frame.height < ema_period + 5:
         return "neutral"
     work = frame.with_columns(pl.col("close").ewm_mean(span=ema_period, adjust=False).alias("_ema"))
-    close = _cache_finite_float(work.item(-1, "close"), 0.0) or 0.0
-    ema = _cache_finite_float(work.item(-1, "_ema"), close) or close
+    close = _cache_finite_float(work.item(-1, "close"), default=0.0) or 0.0
+    ema = _cache_finite_float(work.item(-1, "_ema"), default=close) or close
     if ema <= 0.0:
         return "neutral"
     diff_pct = (close - ema) / ema * 100.0

@@ -8,34 +8,37 @@ import logging
 import random
 import time
 from collections.abc import Mapping
-from typing import Any, Dict, Tuple, cast
+from typing import TYPE_CHECKING, Any
 
 import aiohttp
 
-
 from bot.market.data import (
-    MarketDataUnavailable,
-    _REST_WEIGHT_SOFT_LIMIT,
-    _REST_WEIGHT_HARD_LIMIT,
-    _REST_GLOBAL_SEMAPHORE,
-    _HTTP_CONNECTOR_LIMIT,
-    _ENDPOINT_WEIGHTS,
-    _FUTURES_DATA_REQUEST_LIMITED_OPS,
     _DEFAULT_KLINE_FETCH_LIMIT,
     _DEFAULT_ORDER_BOOK_DEPTH_LIMIT,
+    _ENDPOINT_WEIGHTS,
     _FALLBACK_TIMEOUT_DEBUG_OPERATIONS,
-    _PublicEndpointSpec,
+    _FUTURES_DATA_REQUEST_LIMITED_OPS,
+    _HTTP_CONNECTOR_LIMIT,
     _PUBLIC_ENDPOINT_REGISTRY,
+    _REST_WEIGHT_HARD_LIMIT,
+    _REST_WEIGHT_SOFT_LIMIT,
+    MarketDataUnavailable,
+    _PublicEndpointSpec,
+    rest_global_semaphore,
 )
 from bot.market.network_proxy import (
     aiohttp_request_proxy,
     create_aiohttp_session,
 )
+from bot.market.proxy_pool import is_proxy_transport_error
 from bot.market.rest_validators import (
+    _validate_rest_params,
     validate_order_book_depth_limit,
     validate_runtime_public_rest_url,
-    _validate_rest_params,
 )
+
+if TYPE_CHECKING:
+    from bot.market.rate_limit import _SlidingWindowRateLimiter, _WeightBudgetManager
 
 LOG = logging.getLogger("bot.market.rest")
 
@@ -43,11 +46,100 @@ LOG = logging.getLogger("bot.market.rest")
 class RestHttpMixin:
     """HTTP session, rate limits, circuit breaker, and public REST calls."""
 
+    _proxy_url: str | None
+    _trust_env: bool
+    _rest_timeout: float
+    _futures_data_limit_per_5m: int
+    _rate_limit_pause_until: float
+    _futures_data_pause_until: float
+    _rate_limit_error_streak: int
+    _weight_window_weight: int
+    _weight_window_start: float
+    _weight_budget: _WeightBudgetManager
+    _futures_data_limiter: _SlidingWindowRateLimiter
+    _http_session: aiohttp.ClientSession | None
+    _last_rest_weight_1m: int | None
+    _last_rest_response_time_ms: float | None
+    _circuit_failures: dict[str, int]
+    _circuit_open_until: dict[str, float]
+    _circuit_half_open: set[str]
+    _circuit_failure_threshold: int
+    _circuit_open_duration_seconds: float
+    _critical_operations: set[str]
+    _last_endpoint_name: str | None
+    _last_endpoint_source: str | None
+    _last_endpoint_cache_hit: bool
+    _last_endpoint_fallback_used: bool
+    _last_endpoint_limiter_wait_ms: float
+    _last_endpoint_response_age_s: float | None
+
+    def _endpoint_spec(self, operation: str) -> _PublicEndpointSpec:
+        raise NotImplementedError
+
+    def _endpoint_url(self, operation: str) -> str:
+        raise NotImplementedError
+
+    def _record_endpoint_snapshot(
+        self,
+        endpoint_name: str,
+        *,
+        source: str,
+        cache_hit: bool,
+        fallback_used: bool,
+        limiter_wait_ms: float = 0.0,
+        response_age_s: float | None = None,
+    ) -> None:
+        raise NotImplementedError
+
     async def _call_public_http_json(
         self,
         operation: str,
         *,
-        params: Dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+        symbol: str | None = None,
+    ) -> Any:
+        pool = getattr(self, "_proxy_pool", None)
+        failover = bool(getattr(self, "_proxy_failover_enabled", False))
+        attempts = len(pool.urls) if pool and failover else 1
+        last_error: Exception | None = None
+        for attempt in range(max(1, attempts)):
+            try:
+                return await self._call_public_http_json_attempt(
+                    operation,
+                    params=params,
+                    symbol=symbol,
+                )
+            except MarketDataUnavailable as exc:
+                last_error = exc
+                detail = str(exc.detail or "")
+                if attempt + 1 < attempts and await self._try_failover_proxy(detail):
+                    continue
+                raise
+            except aiohttp.ClientError as exc:
+                last_error = exc
+                if (
+                    attempt + 1 < attempts
+                    and is_proxy_transport_error(exc)
+                    and await self._try_failover_proxy(str(exc))
+                ):
+                    continue
+                self._record_circuit_failure(operation)
+                raise MarketDataUnavailable(
+                    operation=operation,
+                    detail=f"aiohttp:{exc.__class__.__name__}:{exc}",
+                    symbol=symbol,
+                ) from exc
+        if last_error is not None:
+            raise last_error
+        raise MarketDataUnavailable(
+            operation=operation, detail="proxy_pool_exhausted", symbol=symbol
+        )
+
+    async def _call_public_http_json_attempt(
+        self,
+        operation: str,
+        *,
+        params: dict[str, Any] | None = None,
         symbol: str | None = None,
     ) -> Any:
         """Call a public REST endpoint via aiohttp with the same circuit/rate-limit guards."""
@@ -64,7 +156,7 @@ class RestHttpMixin:
                 self.headers = headers
 
         try:
-            async with _REST_GLOBAL_SEMAPHORE:
+            async with rest_global_semaphore():
                 session = await self._get_http_session()
                 request_proxy = aiohttp_request_proxy(session, getattr(self, "_proxy_url", None))
                 async with session.get(url, params=params, proxy=request_proxy) as response:
@@ -75,7 +167,10 @@ class RestHttpMixin:
                         retry_after = self._capture_retry_after(headers)
                         self._set_rate_limit_pause(1800.0)
                         LOG.critical(
-                            "BINANCE IP BAN (418) | retry_after=%s pause=1800s+ streak=%d operation=%s",
+                            (
+                                "BINANCE IP BAN (418) | retry_after=%s pause=1800s+ "
+                                "streak=%d operation=%s"
+                            ),
                             retry_after,
                             self._rate_limit_error_streak,
                             operation,
@@ -105,7 +200,10 @@ class RestHttpMixin:
                             effective_pause = max(1800.0, float(retry_after_header or 0))
                             self._set_rate_limit_pause(effective_pause)
                             LOG.error(
-                                "binance rate limited (429) | retry_after_header=%s effective_pause=%.0fs streak=%d operation=%s",
+                                (
+                                    "binance rate limited (429) | retry_after_header=%s "
+                                    "effective_pause=%.0fs streak=%d operation=%s"
+                                ),
                                 retry_after_header,
                                 effective_pause,
                                 self._rate_limit_error_streak,
@@ -153,7 +251,7 @@ class RestHttpMixin:
                 return payload
         except asyncio.CancelledError:
             raise
-        except (asyncio.TimeoutError, TimeoutError) as exc:
+        except TimeoutError as exc:
             self._record_circuit_failure(operation)
             log_timeout = (
                 LOG.debug if operation in _FALLBACK_TIMEOUT_DEBUG_OPERATIONS else LOG.error
@@ -170,21 +268,14 @@ class RestHttpMixin:
                 detail=f"timeout after {self._rest_timeout}s",
                 symbol=symbol,
             ) from exc
-        except aiohttp.ClientError as exc:
-            self._record_circuit_failure(operation)
-            raise MarketDataUnavailable(
-                operation=operation,
-                detail=f"aiohttp:{exc.__class__.__name__}:{exc}",
-                symbol=symbol,
-            ) from exc
 
     async def _prepare_public_rest_call(
         self,
         operation: str,
         *,
-        params: Dict[str, Any] | None,
+        params: dict[str, Any] | None,
         symbol: str | None,
-    ) -> Tuple[_PublicEndpointSpec, str, float]:
+    ) -> tuple[_PublicEndpointSpec, str, float]:
         spec = self._endpoint_spec(operation)
         url = self._endpoint_url(operation)
         if self._is_circuit_open(operation):
@@ -361,7 +452,7 @@ class RestHttpMixin:
             return 1 if symbol else 10
         return _ENDPOINT_WEIGHTS.get(operation, 10)
 
-    def _track_weight(self, operation: str, params: Mapping[str, Any] | None = None) -> None:
+    def _track_weight(self, operation: str, _params: Mapping[str, Any] | None = None) -> None:
         """Record the current client-side REST weight estimate."""
         self._weight_window_weight = self._weight_budget.used_weight
         self._weight_window_start = time.monotonic()
@@ -410,7 +501,9 @@ class RestHttpMixin:
                 timeout=timeout,
                 connector_limit=_HTTP_CONNECTOR_LIMIT,
             )
-        return cast(aiohttp.ClientSession, self._http_session)
+        session = self._http_session
+        assert session is not None
+        return session
 
     async def close(self) -> None:
         """Close aiohttp session."""
@@ -418,9 +511,9 @@ class RestHttpMixin:
             await self._http_session.close()
             self._http_session = None
 
-    def state_snapshot(self) -> Dict[str, float | int | str | None]:
+    def state_snapshot(self) -> dict[str, float | int | str | None]:
         now = time.monotonic()
-        open_circuits = sum(1 for v in self._circuit_open_until.values() if now < v)
+        open_circuits = sum(1 for v in self._circuit_open_until.values() if now < float(v))
         rest_pause_remaining = max(0.0, self._rate_limit_pause_until - now)
         futures_data_pause_remaining = max(0.0, self._futures_data_pause_until - now)
         return {

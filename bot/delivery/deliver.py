@@ -2,16 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from dataclasses import dataclass
 import html
 import logging
 import math
-from datetime import datetime, timedelta, timezone
-from typing import Any, Protocol
 from collections import OrderedDict
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING, Any, Protocol
 
-from .telegram import DeliveryResult
-from ..domain.schemas import Signal
+from bot.core.runtime_errors import DEFENSIVE_EXC
+
+from ..persistence.tracking import SignalTrackingEvent
 from .contract import validate_signal_contract
 from .formatting import (
     format_analytics_companion_message,
@@ -19,11 +20,12 @@ from .formatting import (
     format_tracked_signal_message,
     format_tracking_event_message,
 )
-from ..persistence.tracking import SignalTrackingEvent
+from .telegram import DeliveryResult
 
+if TYPE_CHECKING:
+    from ..domain.schemas import Signal
 
 LOG = logging.getLogger("bot.delivery.deliver")
-UTC = timezone.utc
 LOCAL_TZ = datetime.now().astimezone().tzinfo or UTC
 _AUDIT_BATCH_LABELS = {"RAW", "CANDIDATE"}
 _AUDIT_BATCH_INTERVAL_SECONDS = 5.0
@@ -76,11 +78,7 @@ def _fmt_dt(raw: str | datetime | None) -> str:
     if raw is None:
         return "time_missing"
     try:
-        value = (
-            raw
-            if isinstance(raw, datetime)
-            else datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
-        )
+        value = raw if isinstance(raw, datetime) else datetime.fromisoformat(str(raw))
     except (TypeError, ValueError):
         return "time_invalid"
     if value.tzinfo is None:
@@ -193,13 +191,15 @@ def _status_line_for_tracked(tracked: SignalTrackingEvent | object) -> str:
     entry_mid = getattr(state, "entry_mid", None)
     activation_price = getattr(state, "activation_price", None)
     if close_reason == "tp1_hit" and single_target_mode:
-        return f"closed at TP on <code>{_fmt_dt(closed_at)}</code> at <code>{_fmt_price(close_price or getattr(state, 'take_profit_1'))}</code>"
+        tp_px = _fmt_price(close_price or state.take_profit_1)
+        return f"closed at TP on <code>{_fmt_dt(closed_at)}</code> at <code>{tp_px}</code>"
     if close_reason == "tp2_hit":
-        return f"closed at TP2 on <code>{_fmt_dt(closed_at)}</code> at <code>{_fmt_price(close_price or getattr(state, 'take_profit_2'))}</code>"
+        tp_px = _fmt_price(close_price or state.take_profit_2)
+        return f"closed at TP2 on <code>{_fmt_dt(closed_at)}</code> at <code>{tp_px}</code>"
     if close_reason == "stop_loss":
         # If stop was moved to break-even (TP1) and then hit, show it explicitly.
         break_even = activation_price or entry_mid
-        stop_px = close_price or getattr(state, "stop")
+        stop_px = close_price or state.stop
         is_break_even = False
         if moved_to_break_even_at and break_even and stop_px:
             try:
@@ -211,13 +211,13 @@ def _status_line_for_tracked(tracked: SignalTrackingEvent | object) -> str:
         label = "stopped (break-even)" if is_break_even else "stopped"
         return f"{label} on <code>{_fmt_dt(closed_at)}</code> at <code>{_fmt_price(stop_px)}</code>"
     if close_reason == "smart_exit":
-        exit_px = close_price or getattr(state, "last_price") or entry_mid
+        exit_px = close_price or state.last_price or entry_mid
         return (
             "analytical smart-exit on "
             f"<code>{_fmt_dt(closed_at)}</code> at <code>{_fmt_price(exit_px)}</code>"
         )
     if close_reason == "emergency_exit":
-        exit_px = close_price or getattr(state, "last_price") or entry_mid
+        exit_px = close_price or state.last_price or entry_mid
         return (
             "analytical hard-barrier exit on "
             f"<code>{_fmt_dt(closed_at)}</code> at <code>{_fmt_price(exit_px)}</code>"
@@ -233,7 +233,8 @@ def _status_line_for_tracked(tracked: SignalTrackingEvent | object) -> str:
             return f"TP1 hit on <code>{_fmt_dt(tp1_hit_at)}</code>; stop moved to break-even"
         return f"TP1 hit on <code>{_fmt_dt(tp1_hit_at)}</code>; TP2 still open"
     if activated_at:
-        return f"active since <code>{_fmt_dt(activated_at)}</code> at <code>{_fmt_price(activation_price or getattr(state, 'entry_mid'))}</code>"
+        entry_px = _fmt_price(activation_price or state.entry_mid)
+        return f"active since <code>{_fmt_dt(activated_at)}</code> at <code>{entry_px}</code>"
     return f"waiting entry until <code>{_fmt_dt(pending_expires_at)}</code>"
 
 
@@ -276,7 +277,7 @@ def _render_signal_card(
     weights = tuple(scale_weights or (0.5, 0.3, 0.2))
     if len(weights) != 3:
         weights = (0.5, 0.3, 0.2)
-    weight_labels = tuple(int(round(float(weight) * 100.0)) for weight in weights)
+    weight_labels = tuple(round(float(weight) * 100.0) for weight in weights)
 
     lines: list[str] = []
 
@@ -285,8 +286,10 @@ def _render_signal_card(
     elif btc_bias == "uptrend" and direction == "short":
         lines.append("<b>BTC risk</b> <code>uptrend vs SHORT</code>")
 
+    direction_label = _direction_label(direction)
+    symbol_html = html.escape(symbol)
     lines += [
-        f"<b>LIMIT {_direction_label(direction)} {html.escape(symbol)}</b> <code>#{tracking_ref}</code>",
+        (f"<b>LIMIT {direction_label} {symbol_html}</b> <code>#{tracking_ref}</code>"),
         (
             f"<b>Setup</b> <code>{html.escape(setup_id)} {html.escape(timeframe)}</code> | "
             f"<b>Score</b> <code>{score * 100:.0f}% {_confidence_label(score)}</code>"
@@ -306,7 +309,10 @@ def _render_signal_card(
             f"<b>Scale</b> <code>{weight_labels[0]}% / {weight_labels[1]}% / "
             f"{weight_labels[2]}%</code>"
         ),
-        f"<b>RR</b> <code>{risk_reward:.2f}</code> | <b>Risk</b> <code>{stop_distance_pct:.2f}%</code>",
+        (
+            f"<b>RR</b> <code>{risk_reward:.2f}</code> | "
+            f"<b>Risk</b> <code>{stop_distance_pct:.2f}%</code>"
+        ),
     ]
     ctx = _market_context_line(oi_change_pct, funding_rate)
     if ctx:
@@ -314,9 +320,8 @@ def _render_signal_card(
     confluence = _confluence_summary(reasons)
     if confluence:
         lines.append(f"<b>Confluence</b> <code>{confluence}</code>")
-    lines.append(
-        f'<b>Chart</b> <a href="{html.escape(tradingview_chart_url(symbol, timeframe), quote=True)}">TradingView</a>'
-    )
+    chart_url = html.escape(tradingview_chart_url(symbol, timeframe), quote=True)
+    lines.append(f'<b>Chart</b> <a href="{chart_url}">TradingView</a>')
     if expiry_dt:
         lines.append(f"<b>Wait entry until</b> <code>{_fmt_dt(expiry_dt)}</code>")
     else:
@@ -358,7 +363,10 @@ def format_signal_text(
         return "\n".join(
             [
                 f"<b>LIMIT {direction} {symbol}</b>",
-                f"<b>Setup</b> <code>{setup_id}</code> | <b>Score</b> <code>{score * 100:.0f}%</code>",
+                (
+                    f"<b>Setup</b> <code>{setup_id}</code> | "
+                    f"<b>Score</b> <code>{score * 100:.0f}%</code>"
+                ),
                 f"<b>TP</b> <code>{html.escape(' / '.join(targets) or 'n/a')}</code>",
                 "<b>Status</b> pending",
             ]
@@ -478,7 +486,7 @@ class SignalDelivery:
             if self._audit_batch_lines:
                 await self.flush_signal_audits()
             raise
-        except Exception:
+        except DEFENSIVE_EXC:
             LOG.exception("signal audit batch flush failed")
 
     async def flush_signal_audits(self) -> None:
@@ -545,7 +553,10 @@ class SignalDelivery:
             if contract_issues:
                 issue_codes = ",".join(f"{issue.field}.{issue.reason}" for issue in contract_issues)
                 LOG.error(
-                    "blocked direct signal delivery with invalid contract | symbol=%s setup=%s issues=%s",
+                    (
+                        "blocked direct signal delivery with invalid contract | "
+                        "symbol=%s setup=%s issues=%s"
+                    ),
                     signal.symbol,
                     signal.setup_id,
                     issue_codes,
@@ -565,7 +576,7 @@ class SignalDelivery:
                     pending_expiry_minutes=self.pending_expiry_minutes,
                     btc_bias=btc_bias,
                 )
-            except Exception as exc:
+            except DEFENSIVE_EXC as exc:
                 LOG.exception(
                     "failed to format signal text | symbol=%s setup=%s",
                     signal.symbol,
@@ -590,7 +601,7 @@ class SignalDelivery:
             delivery_tier = str((tier_by_tracking_id or {}).get(signal.tracking_id) or "action")
             try:
                 result = await self.broadcaster.send_html(text)
-            except Exception as exc:
+            except DEFENSIVE_EXC as exc:
                 LOG.exception(
                     "signal delivery send failed | symbol=%s setup=%s",
                     signal.symbol,
@@ -651,7 +662,7 @@ class SignalDelivery:
         try:
             text = format_analytics_companion(signal, btc_bias=btc_bias, eth_bias=eth_bias)
             await self.broadcaster.send_html(text)
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.debug("analytics companion send failed: %s", exc)
 
     async def deliver_tracking_updates(
@@ -679,7 +690,7 @@ class SignalDelivery:
                     )
                     LOG.info("telegram signal card edited\n%s", tracked_card)
                     edited = True
-                except Exception:
+                except DEFENSIVE_EXC:
                     LOG.exception(
                         "telegram signal card edit failed for %s",
                         final_event.tracked.tracking_ref,
@@ -695,17 +706,16 @@ class SignalDelivery:
             if dry_run:
                 LOG.info("dry-run tracking update\n%s", text)
                 continue
-            reply_to_message_id = (
-                final_event.tracked.signal_message_id
-                if final_event.tracked.signal_message_id
-                else None
-            )
+            reply_to_message_id = final_event.tracked.signal_message_id or None
             result = await self.broadcaster.send_html(text, reply_to_message_id=reply_to_message_id)
             if result.status == "sent":
                 LOG.info("telegram tracking update sent\n%s", text)
             else:
                 LOG.debug(
-                    "telegram tracking update not delivered | status=%s reason=%s tracking_ref=%s event=%s",
+                    (
+                        "telegram tracking update not delivered | status=%s reason=%s "
+                        "tracking_ref=%s event=%s"
+                    ),
                     result.status,
                     result.reason,
                     final_event.tracked.tracking_ref,
@@ -716,7 +726,7 @@ class SignalDelivery:
     def _coalesce_tracking_events(
         events: list[SignalTrackingEvent],
     ) -> list[list[SignalTrackingEvent]]:
-        grouped: "OrderedDict[str, list[SignalTrackingEvent]]" = OrderedDict()
+        grouped: OrderedDict[str, list[SignalTrackingEvent]] = OrderedDict()
         for event in events:
             grouped.setdefault(event.tracked.tracking_id, []).append(event)
         return list(grouped.values())

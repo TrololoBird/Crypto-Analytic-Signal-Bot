@@ -14,43 +14,43 @@ delivery, and tracking.
 from __future__ import annotations
 
 import asyncio
-from collections import Counter
 import contextlib
 import html
 import inspect
 import logging
 import os
 from dataclasses import replace
-from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.dashboard import BotDashboard
+from bot.regime.market import MarketRegimeAnalyzer
+from bot.runtime.metrics import BotMetricsCollector
+
+from ..delivery.confluence import ConfluenceEngine
+from ..diagnostics.config_audit import run_startup_audit
+from ..diagnostics.signals import SignalDiagnostics, set_global_diagnostics
 from ..domain import (
-    BotSettings,
     BookTickerEvent,
+    BotSettings,
     KlineCloseEvent,
-    ReconnectEvent,
+    PipelineResult,
     PreparedSymbol,
+    ReconnectEvent,
     Signal,
+    StrategyDecision,
     SymbolFrames,
     UniverseSymbol,
-    PipelineResult,
-    StrategyDecision,
 )
-from ..engine import StrategyRegistry
 from ..feature_flags import FeatureFlags
 from ..market.data import BinanceFuturesMarketData
-from .health_manager import HealthMonitor
-from ..diagnostics.signals import SignalDiagnostics, set_global_diagnostics
 from ..setups.base import SetupParams
 from ..strategies import STRATEGY_CLASSES
-from ..telemetry import TelemetryStore
-from ..persistence.tracking import SignalTrackingEvent
-from ..delivery.confluence import ConfluenceEngine
 from .container import build_application_container
 from .cycle_runner import CycleRunner
 from .delivery_orchestrator import DeliveryOrchestrator
 from .fallback_runner import FallbackRunner
-from .health_manager import HealthManager
+from .health_manager import HealthManager, HealthMonitor
 from .intra_candle_scanner import IntraCandleScanner
 from .kline_handler import KlineHandler
 from .market_context_updater import MarketContextUpdater
@@ -59,7 +59,14 @@ from .shortlist_service import ShortlistService
 from .symbol_analyzer import SymbolAnalyzer
 from .telemetry_manager import TelemetryManager
 
-UTC = timezone.utc
+if TYPE_CHECKING:
+    from collections import Counter
+    from datetime import datetime
+
+    from ..engine import StrategyRegistry
+    from ..persistence.tracking import SignalTrackingEvent
+    from ..telemetry import TelemetryStore
+
 LOG = logging.getLogger("bot.runtime.bot")
 
 
@@ -115,13 +122,7 @@ class SignalBot:
 
         self.confluence = ConfluenceEngine(settings)
 
-        # Market regime analyzer
-        from bot.regime.market import MarketRegimeAnalyzer
-
         self.market_regime = MarketRegimeAnalyzer(settings)
-
-        # Metrics collector
-        from bot.runtime.metrics import BotMetricsCollector
 
         self.metrics = BotMetricsCollector(
             settings.runtime.metrics_port, host=settings.runtime.metrics_host
@@ -133,13 +134,11 @@ class SignalBot:
         )
         if disable_http_servers:
             LOG.info(
-                "http servers disabled via BOT_DISABLE_HTTP_SERVERS=1 (metrics/dashboard not started)"
+                "http servers disabled via BOT_DISABLE_HTTP_SERVERS=1 "
+                "(metrics/dashboard not started)"
             )
         else:
             self.metrics.start_server()
-
-        # Dashboard
-        from bot.dashboard import BotDashboard
 
         self.dashboard = BotDashboard(
             self, settings.runtime.dashboard_port, host=settings.runtime.dashboard_host
@@ -201,9 +200,9 @@ class SignalBot:
         )
 
         # Subscribe to EventBus events
-        self._bus.subscribe(KlineCloseEvent, self._on_kline_close)  # type: ignore[arg-type]
-        self._bus.subscribe(ReconnectEvent, self._on_reconnect)  # type: ignore[arg-type]
-        self._bus.subscribe(BookTickerEvent, self._on_book_ticker)  # type: ignore[arg-type]
+        self._bus.subscribe(KlineCloseEvent, self._on_kline_close)
+        self._bus.subscribe(ReconnectEvent, self._on_reconnect)
+        self._bus.subscribe(BookTickerEvent, self._on_book_ticker)
         LOG.info(
             "EventBus subscriptions registered | handlers=3 (kline_close, reconnect, book_ticker)"
         )
@@ -420,12 +419,9 @@ class SignalBot:
         try:
             await self._modern_repo.initialize()
             LOG.info("modern repository initialized | SQLite ready")
-        except Exception as exc:
-            raise RuntimeError(
-                "modern repository init failed; runtime cannot track signals"
-            ) from exc
-        from ..diagnostics.config_audit import run_startup_audit
-
+        except DEFENSIVE_EXC as exc:
+            msg = "modern repository init failed; runtime cannot track signals"
+            raise RuntimeError(msg) from exc
         run_startup_audit(self.settings)
 
         try:
@@ -441,7 +437,7 @@ class SignalBot:
                     expired_count,
                     purged_cooldowns,
                 )
-        except Exception:
+        except DEFENSIVE_EXC:
             LOG.exception("startup stale state cleanup failed")
 
         try:
@@ -452,7 +448,7 @@ class SignalBot:
                     len(startup_tracking_events),
                 )
                 await self._deliver_tracking(startup_tracking_events)
-        except Exception:
+        except DEFENSIVE_EXC:
             LOG.exception("startup tracking sweep failed")
 
         try:
@@ -461,7 +457,7 @@ class SignalBot:
                 LOG.info(
                     "startup reconciled closed signal outcomes | count=%d", reconciled_outcomes
                 )
-        except Exception:
+        except DEFENSIVE_EXC:
             LOG.exception("startup outcome reconciliation failed")
 
         # Get modern repository summary
@@ -491,20 +487,20 @@ class SignalBot:
                     len(symbols),
                     shortlist_timeout_s,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 LOG.info(
                     "shortlist build timed out; using pinned | timeout=%.1fs pinned=%d",
                     shortlist_timeout_s,
                     len(self.settings.universe.pinned_symbols),
                 )
                 symbols = list(self.settings.universe.pinned_symbols)
-            except Exception:
+            except DEFENSIVE_EXC:
                 LOG.exception("shortlist build failed, using pinned fallback")
                 symbols = list(self.settings.universe.pinned_symbols)
 
             try:
                 await self._ws_manager.start(symbols)
-            except Exception:
+            except DEFENSIVE_EXC:
                 LOG.exception("ws_manager start failed; continuing with REST fallback")
 
         # Preload historical frames in the background so `prepare_symbol` can
@@ -581,7 +577,7 @@ class SignalBot:
                 result = persist()
                 if inspect.isawaitable(result):
                     await result
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.debug("tracker persist failed (non-fatal): %s", exc)
 
         if self._ws_manager is not None:
@@ -592,18 +588,18 @@ class SignalBot:
                 result = delivery_close()
                 if inspect.isawaitable(result):
                     await result
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.debug("delivery close failed (non-fatal): %s", exc)
         # Modern repository auto-closes with connection
         try:
             await self.alerts.close()
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.debug("alerts.close() failed (non-fatal): %s", exc)
 
         # Close external resources (best-effort).
         try:
             await self._modern_repo.close()
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.debug("modern repo close failed (non-fatal): %s", exc)
 
         try:
@@ -612,7 +608,7 @@ class SignalBot:
                 result = close_md()
                 if inspect.isawaitable(result):
                     await result
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.debug("market data close failed (non-fatal): %s", exc)
 
         try:
@@ -621,7 +617,7 @@ class SignalBot:
                 result = close_tg()
                 if inspect.isawaitable(result):
                     await result
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.debug("telegram close failed (non-fatal): %s", exc)
 
     async def health_check(self) -> dict[str, Any]:
@@ -744,7 +740,7 @@ class SignalBot:
                 }
             )
             await self._ws_manager.set_tracked_symbols(tracked_symbols)
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.debug("tracked-symbol sync failed (non-fatal): %s", exc)
 
     async def _do_refresh_shortlist(self) -> list[UniverseSymbol]:
@@ -762,7 +758,7 @@ class SignalBot:
             }
             LOG.info("background fetch: got %d exchange symbols", len(symbol_meta_list))
             # Could update shortlist here if needed, but pinned symbols are sufficient
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.debug("background fetch: failed to get exchange symbols: %s", exc)
 
     async def _refresh_shortlist_periodic(self) -> None:
@@ -815,23 +811,25 @@ class SignalBot:
         try:
             await self.delivery.preflight_check()
             LOG.info("delivery preflight completed")
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.warning(
                 "delivery preflight failed; continuing in signal-only/local mode: %s",
                 exc,
             )
 
     async def _wait_noncritical(
-        self, *, label: str, timeout: float, operation: Any
+        self, *, label: str, max_wait_s: float, operation: Any
     ) -> tuple[bool, Any | None]:
         try:
-            result = await asyncio.wait_for(operation, timeout=timeout)
-        except asyncio.TimeoutError:
-            LOG.info("%s timed out after %.1fs; skipping noncritical startup task", label, timeout)
+            result = await asyncio.wait_for(operation, timeout=max_wait_s)
+        except TimeoutError:
+            LOG.info(
+                "%s timed out after %.1fs; skipping noncritical startup task", label, max_wait_s
+            )
             return False, None
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.exception("%s failed; skipped noncritical startup task", label)
-            await self._alert_critical(exc, {"label": label, "timeout": timeout})
+            await self._alert_critical(exc, {"label": label, "max_wait_s": max_wait_s})
             return False, None
         return True, result
 
@@ -845,7 +843,7 @@ class SignalBot:
                 f"<code>{html.escape(type(exc).__name__)}: {html.escape(str(exc))}</code>\n"
                 f"<code>context={html.escape(str(context))}</code>"
             )
-        except Exception:
+        except DEFENSIVE_EXC:
             LOG.debug("critical alert dispatch failed", exc_info=True)
 
     def _emit_telemetry_mismatch(

@@ -13,8 +13,11 @@ import json
 import logging
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Iterator, cast
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from pathlib import Path
 
 LOG = logging.getLogger("bot.journal")
 
@@ -36,16 +39,16 @@ OutcomeItem = tuple[JsonRow, str]
 def _iter_jsonl(path: Path) -> Iterator[JsonRow]:
     if not path.exists():
         return
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        stripped = raw_line.strip()
+        if not stripped:
             continue
         try:
-            row = json.loads(line)
+            row = json.loads(stripped)
         except json.JSONDecodeError:
             continue
         if isinstance(row, dict):
-            yield cast(JsonRow, row)
+            yield cast("JsonRow", row)
 
 
 def build_journal_report(telemetry_root: Path) -> JournalReport:
@@ -209,7 +212,8 @@ def build_config_suggestions(telemetry_root: Path) -> list[str]:
         if len(items) >= MIN_BIN:
             wins, losses, expired = _win_rate(items)
             atr_lines.append(
-                f"  ATR {label:>9}%  n={len(items):>3}  wr={_wr_str(wins, losses)}  (wins={wins} sl={losses} exp={expired})"
+                f"  ATR {label:>9}%  n={len(items):>3}  wr={_wr_str(wins, losses)}  "
+                f"(wins={wins} sl={losses} exp={expired})"
             )
     if len(atr_lines) >= 2:
         suggestions.append("[SUGGEST] min_atr_pct — win rate by ATR band:")
@@ -253,7 +257,8 @@ def build_config_suggestions(telemetry_root: Path) -> list[str]:
         if len(items) >= MIN_BIN:
             wins, losses, expired = _win_rate(items)
             score_lines.append(
-                f"  score {label:>9}  n={len(items):>3}  wr={_wr_str(wins, losses)}  (wins={wins} sl={losses} exp={expired})"
+                f"  score {label:>9}  n={len(items):>3}  wr={_wr_str(wins, losses)}  "
+                f"(wins={wins} sl={losses} exp={expired})"
             )
     if len(score_lines) >= 2:
         suggestions.append("[SUGGEST] min_score — win rate by score band:")
@@ -267,8 +272,11 @@ def build_config_suggestions(telemetry_root: Path) -> list[str]:
             lt = lw + ll
             ht = hw + hl
             if lt > 0 and ht > 0 and (lw / lt) < (hw / ht) - 0.15:
+                low_wr = _wr_str(lw, ll)
+                high_wr = _wr_str(hw, hl)
                 suggestions.append(
-                    f"  → Clear quality gap (low={_wr_str(lw, ll)} vs high={_wr_str(hw, hl)}) suggests raising min_score to 0.68+"
+                    f"  → Clear quality gap (low={low_wr} vs high={high_wr}) "
+                    "suggests raising min_score to 0.68+"
                 )
         suggestions.append("")
 
@@ -294,7 +302,8 @@ def build_config_suggestions(telemetry_root: Path) -> list[str]:
         if len(items) >= MIN_BIN:
             wins, losses, expired = _win_rate(items)
             rr_lines.append(
-                f"  RR {label:>9}  n={len(items):>3}  wr={_wr_str(wins, losses)}  (wins={wins} sl={losses} exp={expired})"
+                f"  RR {label:>9}  n={len(items):>3}  wr={_wr_str(wins, losses)}  "
+                f"(wins={wins} sl={losses} exp={expired})"
             )
     if len(rr_lines) >= 2:
         suggestions.append("[SUGGEST] min_risk_reward — win rate by RR band:")

@@ -1,29 +1,27 @@
-"""order_block — detector in setups/detectors/."""
+"""order_block — canonical strategy detector."""
 
 from __future__ import annotations
 
-from ..domain.config import BotSettings
-from ..domain.schemas import PreparedSymbol, Signal
-from ..setups import _reject
 import logging
+import math
+from typing import TYPE_CHECKING, ClassVar
+
+from ..features import _swing_points as _sp
+from ..setups import _build_signal, _compute_dynamic_score, _reject
+from ..setups.smc import latest_order_block
+from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
+from ..setups.utils import build_structural_targets, validate_rr_or_penalty
+from ._common import SpecHit, _latest_values, _valid_order_block_rows, as_float, with_spec_columns
+
+if TYPE_CHECKING:
+    import polars as pl
+
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
 
 LOG = logging.getLogger("bot.strategies.order_block")
 
-from ..setups.spec_runtime import SpecDetectorSetup
-
-
-import math
-
-import polars as pl
-
-from ._common import SpecHit, as_float, with_spec_columns, _latest_values, _valid_order_block_rows
-
 __all__ = ["detect_order_block"]
-
-from ..setups import _build_signal, _compute_dynamic_score
-from ..setups.utils import build_structural_targets, validate_rr_or_penalty
-from ..setups.smc import latest_order_block
-from ..setups.spec_runtime import run_setup_detection
 
 
 def detect_order_block(frame: pl.DataFrame, *, timeframe: str = "1h") -> SpecHit | None:
@@ -61,7 +59,7 @@ _MAX_OB_AGE = 30  # 1h bars
 
 def _detect_order_block_extended(
     prepared: PreparedSymbol,
-    settings: BotSettings,
+    _settings: BotSettings,
     defaults: dict[str, float],
     effective: dict[str, float],
     setup_id: str,
@@ -168,8 +166,6 @@ def _detect_order_block_extended(
     rsi_check = float(w1h.item(-1, "rsi14") or 50.0)
 
     # --- Compute structural SL/TP via unified utility ---
-    from ..features import _swing_points as _sp
-
     sh_mask, sl_mask = _sp(w1h, n=3, include_unconfirmed_tail=True)
     stop_basis = ob_low if direction == "long" else ob_high
     fallback_stop = ob_low - 0.5 * atr if direction == "long" else ob_high + 0.5 * atr
@@ -291,7 +287,7 @@ def detect_order_block_setup(
     )
 
 
-__all__ = ["detect_order_block", "detect_order_block_setup", "_detect_order_block_extended"]
+__all__ = ["_detect_order_block_extended", "detect_order_block", "detect_order_block_setup"]
 
 
 class OrderBlockSetup(SpecDetectorSetup):
@@ -300,7 +296,7 @@ class OrderBlockSetup(SpecDetectorSetup):
     confirmation_profile = "trend_follow"
     required_context = ("futures_flow",)
 
-    DEFAULTS = {
+    DEFAULTS: ClassVar[dict[str, float]] = {
         "base_score": 0.52,
         "min_ob_impulse_atr": 1.5,
         "impulse_lookback_bars": 5,

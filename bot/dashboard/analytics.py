@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
-from ..persistence.repository import MemoryRepository
-
-UTC = timezone.utc
+if TYPE_CHECKING:
+    from ..persistence.repository import MemoryRepository
 
 
 @dataclass(slots=True)
@@ -210,7 +209,7 @@ class StrategyAnalytics:
         if isinstance(value, datetime):
             return value if value.tzinfo else value.replace(tzinfo=UTC)
         try:
-            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(str(value))
         except (TypeError, ValueError):
             return None
         return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)

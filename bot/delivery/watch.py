@@ -4,13 +4,16 @@ import asyncio
 import hashlib
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
-from ..domain.config import AlertConfig, BotSettings
-from ..domain.schemas import PreparedSymbol, Signal
-from ..telemetry import TelemetryStore
-from .telegram import DeliveryResult, MessageBroadcaster
 from .tiers import classify_tier
+
+if TYPE_CHECKING:
+    from ..domain.config import AlertConfig, BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
+    from ..telemetry import TelemetryStore
+    from .telegram import DeliveryResult, MessageBroadcaster
 
 LOG = logging.getLogger("bot.alerts")
 
@@ -74,7 +77,7 @@ def _make_ref_id(
         "ema_bounce": "EMA",
     }.get(setup_id, str(setup_id)[:4].upper())
     base_asset = symbol.replace("USDT", "").replace("BUSD", "")
-    ts_utc = ts.astimezone(timezone.utc)
+    ts_utc = ts.astimezone(UTC)
     time_part = ts_utc.strftime("%m%d-%H%M")
     raw = f"{symbol}|{setup_id}|{direction}|{level_name}|{ts_utc.isoformat()}"
     hash_part = hashlib.sha1(raw.encode("utf-8"), usedforsecurity=False).hexdigest()[:4].upper()
@@ -311,20 +314,21 @@ class AlertCoordinator:
                 )
                 if invalid_action is not None:
                     action = invalid_action
-                elif self._cfg.enable_entry_zone and state.status == "watch_sent":
-                    if (
-                        candidate.entry_low <= price <= candidate.entry_high
-                        and self._can_send_entry(symbol, observed_at)
-                    ):
-                        state.status = "entry_sending"
-                        state.entry_sent_at = observed_at
-                        self._last_entry_by_symbol[symbol] = observed_at
-                        action = {
-                            "type": "entry",
-                            "candidate": candidate,
-                            "price": price,
-                            "reply_to_message_id": state.watch_message_id,
-                        }
+                elif (
+                    self._cfg.enable_entry_zone
+                    and state.status == "watch_sent"
+                    and candidate.entry_low <= price <= candidate.entry_high
+                    and self._can_send_entry(symbol, observed_at)
+                ):
+                    state.status = "entry_sending"
+                    state.entry_sent_at = observed_at
+                    self._last_entry_by_symbol[symbol] = observed_at
+                    action = {
+                        "type": "entry",
+                        "candidate": candidate,
+                        "price": price,
+                        "reply_to_message_id": state.watch_message_id,
+                    }
 
         if action is None:
             return
@@ -648,7 +652,11 @@ class AlertCoordinator:
                 "",
                 f"REF: <code>{ref_id}</code>",
                 f"Level: <b>{cand.level_name}</b> @ <b>{_fmt_price(cand.level_price)}</b>",
-                f"Interest zone ({_fmt_pct(self._cfg.watch_interest_pct)}): <b>{_fmt_price(cand.interest_low)}</b> – <b>{_fmt_price(cand.interest_high)}</b>",
+                (
+                    f"Interest zone ({_fmt_pct(self._cfg.watch_interest_pct)}): "
+                    f"<b>{_fmt_price(cand.interest_low)}</b> - "
+                    f"<b>{_fmt_price(cand.interest_high)}</b>"
+                ),
                 f"Now: <b>{_fmt_price(current_price)}</b>",
                 "",
                 "Подтверждение (Level 3) — на close 15m, если паттерн сохранится.",
@@ -665,7 +673,11 @@ class AlertCoordinator:
                 f"🟦 <b>ENTRY ZONE</b>: <b>{cand.symbol}</b> <b>{direction}</b>",
                 "",
                 f"REF: <code>{ref_id}</code>",
-                f"Zone ({_fmt_pct(self._cfg.entry_zone_pct)}): <b>{_fmt_price(cand.entry_low)}</b> – <b>{_fmt_price(cand.entry_high)}</b>",
+                (
+                    f"Zone ({_fmt_pct(self._cfg.entry_zone_pct)}): "
+                    f"<b>{_fmt_price(cand.entry_low)}</b> - "
+                    f"<b>{_fmt_price(cand.entry_high)}</b>"
+                ),
                 f"Now: <b>{_fmt_price(current_price)}</b>",
                 "",
                 "Важно: свеча 15m ещё может не закрыться — это раннее предупреждение.",

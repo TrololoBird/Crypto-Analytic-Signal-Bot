@@ -13,21 +13,28 @@ import json
 import logging
 import logging.handlers
 import os
+import re
+import shutil
 import signal
 import sqlite3
 import subprocess
 import sys
 import time
-from datetime import datetime, timedelta, timezone
+import tracemalloc
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-import re
-import shutil
 from typing import Any
+
+import aiosqlite
+
+from bot.core.runtime_errors import DEFENSIVE_EXC
 
 from . import BotSettings, SignalBot, load_settings
 from .logging_config import configure_structlog
+from .migrations import migrate_db
 from .ops.pid_utils import pid_is_alive as _pid_is_alive
 from .ops.startup_report import generate_and_send_startup_report, run_daily_summary_loop
+from .persistence.repository import MemoryRepository
 from .telemetry import TelemetryStore
 
 _LOGGER_STDERR_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?:,\d{3})?\s+\|")
@@ -87,7 +94,7 @@ def _run_doctor_check(settings: BotSettings) -> None:
             },
         }
         logging.getLogger("bot.cli").info("DOCTOR OK | %s", json.dumps(report, default=str))
-    except Exception:
+    except DEFENSIVE_EXC:
         logging.getLogger("bot.cli").exception("DOCTOR DEGRADED")
 
 
@@ -104,11 +111,11 @@ def _bootstrap_env_if_missing() -> None:
 
 def _cleanup_runtime_artifacts(settings: BotSettings) -> None:
     logger = logging.getLogger("bot.cli")
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     def _safe_mtime(path: Path) -> datetime:
         try:
-            return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+            return datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)
         except OSError:
             return now
 
@@ -204,7 +211,7 @@ def _rotate_session_log(log_path: Path, *, stamp: str) -> None:
 
 
 def configure_logging(settings: BotSettings, *, debug_mode: bool = False) -> None:
-    session_dt = datetime.now(timezone.utc)
+    session_dt = datetime.now(UTC)
     session_stamp = session_dt.strftime("%Y%m%d_%H%M%S")
     handlers: list[logging.Handler] = [logging.StreamHandler()]
 
@@ -277,11 +284,11 @@ async def _acquire_pid_lock(pid_file: Path) -> None:
                 )
             finally:
                 await asyncio.to_thread(os.close, fd)
-            return
         except FileExistsError:
             existing_pid = await asyncio.to_thread(_read_pid_value, pid_file)
             if existing_pid and existing_pid != os.getpid() and _pid_is_alive(existing_pid):
-                raise SystemExit(f"another bot process is already running with pid {existing_pid}")
+                msg = f"another bot process is already running with pid {existing_pid}"
+                raise SystemExit(msg) from None
             # Race hardening for empty/initializing PID file:
             # never unlink immediately; first give other process enough time
             # to finish writing its PID.
@@ -300,9 +307,12 @@ async def _acquire_pid_lock(pid_file: Path) -> None:
             except FileNotFoundError:
                 continue
             except OSError as exc:
-                raise SystemExit(f"failed to remove stale pid lock {pid_file}: {exc}") from exc
+                msg = f"failed to remove stale pid lock {pid_file}: {exc}"
+                raise SystemExit(msg) from exc
             # After successful unlink, retry the lock acquisition
             continue
+        else:
+            return
 
 
 def _release_pid_lock(pid_file: Path) -> None:
@@ -321,7 +331,7 @@ def _setup_signal_handlers(bot: SignalBot) -> None:
     def _request_shutdown() -> None:
         try:
             bot.request_shutdown()
-        except Exception:
+        except DEFENSIVE_EXC:
             logging.getLogger("bot.cli").exception("failed to request shutdown")
 
     for sig in (signal.SIGTERM, signal.SIGINT):
@@ -338,7 +348,7 @@ def _setup_signal_handlers(bot: SignalBot) -> None:
                 logging.getLogger("bot.cli").debug(
                     "signal.signal unavailable for %s (%s)", sig, repr(exc2)
                 )
-        except Exception:
+        except DEFENSIVE_EXC:
             logging.getLogger("bot.cli").exception("signal handler setup failed")
 
 
@@ -356,11 +366,11 @@ async def _main() -> None:
 
     try:
         await generate_and_send_startup_report(
-            Path(".").resolve(),
+            Path.cwd(),
             send_telegram=use_telegram,
             config_path="config.toml",
         )
-    except Exception as exc:
+    except DEFENSIVE_EXC as exc:
         sys.stderr.write(f"[ERROR] startup report failed: {exc}\n")
 
     debug_mode = os.getenv("DEBUG_BOT", "0") in ("1", "true", "yes")
@@ -368,7 +378,7 @@ async def _main() -> None:
     _cleanup_runtime_artifacts(settings)
 
     # Capture all warnings as log entries
-    logging.captureWarnings(True)
+    logging.captureWarnings(capture=True)
 
     # Redirect stderr to logger while preserving original output
     _orig_stderr = sys.stderr
@@ -401,6 +411,7 @@ async def _main() -> None:
 
     # Hook to log unhandled exceptions
     def _log_exception(loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
+        del loop
         msg = context.get("exception", context["message"])
         logging.getLogger("asyncio").exception(
             "Unhandled exception: %s",
@@ -411,7 +422,7 @@ async def _main() -> None:
     asyncio.get_running_loop().set_exception_handler(_log_exception)
 
     _run_doctor_check(settings)
-    run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S") + f"_{os.getpid()}"
+    run_id = datetime.now(UTC).strftime("%Y%m%d_%H%M%S") + f"_{os.getpid()}"
     telemetry = TelemetryStore(settings.telemetry_dir, run_id=run_id)
     bot = SignalBot(settings, telemetry=telemetry)
     summary_task: asyncio.Task[None] | None = None
@@ -420,7 +431,7 @@ async def _main() -> None:
         _setup_signal_handlers(bot)
         summary_task = asyncio.create_task(
             run_daily_summary_loop(
-                Path(".").resolve(),
+                Path.cwd(),
                 stop_event=bot._shutdown,  # internal runtime stop event
                 config_path=str(settings.config_path),
                 send_telegram=use_telegram,
@@ -498,21 +509,19 @@ def _run_runtime() -> None:
 
     if debug_mode:
         # Enable tracemalloc to track unawaited coroutines (without asyncio spam)
-        import tracemalloc
-
         tracemalloc.start(25)
         sys.stderr.write("[DEBUG] tracemalloc enabled | logging level=DEBUG\n")
 
     if sys.platform == "win32":
-        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        policy_factory = getattr(asyncio, "WindowsSelectorEventLoopPolicy", None)
+        if policy_factory is not None:
+            asyncio.set_event_loop_policy(policy_factory())
     try:
         asyncio.run(_main())
     except KeyboardInterrupt:
         logging.getLogger("bot.cli").info("bot stopped by user")
     finally:
         if debug_mode:
-            import tracemalloc
-
             current, peak = tracemalloc.get_traced_memory()
             logging.getLogger("bot.cli").debug(
                 "Memory: current=%.2fMB peak=%.2fMB",
@@ -569,7 +578,8 @@ def _run_stop_command() -> None:
             detail = (
                 completed.stderr or completed.stdout or ""
             ).strip() or f"exit={completed.returncode}"
-            raise SystemExit(f"failed to stop pid {pid} via taskkill: {detail}")
+            msg = f"failed to stop pid {pid} via taskkill: {detail}"
+            raise SystemExit(msg)
         print(f"Stopped pid {pid} via taskkill.")
         return
     os.kill(pid, signal.SIGTERM)
@@ -579,7 +589,8 @@ def _run_stop_command() -> None:
 def _run_backtest_command(*, days: int, setup_id: str = "") -> None:
     settings = load_settings("config.toml")
     if not settings.db_path.exists():
-        raise SystemExit(f"db not found: {settings.db_path}")
+        msg = f"db not found: {settings.db_path}"
+        raise SystemExit(msg)
     query = """
         SELECT setup_id, COUNT(*) AS total,
                SUM(CASE WHEN pnl_pct > 0 THEN 1 ELSE 0 END) AS wins,
@@ -620,7 +631,8 @@ def _run_replay_command(*, tail: int) -> None:
     settings = load_settings("config.toml")
     replay_dir = settings.telemetry_dir / "replay"
     if not replay_dir.exists():
-        raise SystemExit(f"replay dir not found: {replay_dir}")
+        msg = f"replay dir not found: {replay_dir}"
+        raise SystemExit(msg)
     rows: list[str] = []
     for path in sorted(replay_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True):
         data = path.read_text(encoding="utf-8", errors="ignore").splitlines()
@@ -635,9 +647,6 @@ def _run_replay_command(*, tail: int) -> None:
 
 
 async def _db_migrate_command() -> None:
-    from .migrations import migrate_db
-    import aiosqlite
-
     settings = load_settings("config.toml")
     settings.db_path.parent.mkdir(parents=True, exist_ok=True)
     async with aiosqlite.connect(settings.db_path) as conn:
@@ -651,11 +660,7 @@ async def _db_migrate_command() -> None:
 
 
 async def _db_clean_command(*, days: int) -> None:
-    from datetime import timedelta
-
-    from .persistence.repository import MemoryRepository
-
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    cutoff = datetime.now(UTC) - timedelta(days=days)
     settings = load_settings("config.toml")
     repo = MemoryRepository(settings.db_path, data_dir=settings.data_dir)
     await repo.initialize()

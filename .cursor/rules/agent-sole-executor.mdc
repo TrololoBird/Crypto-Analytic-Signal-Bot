@@ -1,0 +1,33 @@
+---
+description: User is architect only — agent executes everything (config, shells, cleanup)
+alwaysApply: true
+---
+
+# Sole executor (non-negotiable)
+
+## User role
+
+The user is **architect / vibe coder** only: direction, priorities, acceptance. They do **not** run commands, edit `config.toml`, close terminals, install deps, or fix CI unless they explicitly choose to pair.
+
+## Agent role
+
+The agent **owns all execution**:
+
+- Edit config, `.env`, code, docs; run probes, tests, discovery, commits (when asked).
+- Start and **finish** shell work: prefer foreground + adequate timeout; if background — **`Await` until `exit_code`** in the terminal file.
+- **Reap zombie terminals** the agent left behind: kill stale PIDs (`Stop-Process`), append terminal `exit_code` footers via `scripts/reap_agent_terminals.ps1` — never tell the user to “close tab” or “run this yourself”.
+- Report **outcomes** (pass/fail, paths, numbers), not homework for the user.
+
+## Forbidden closings
+
+Never end with:
+
+- “Configure / set / copy / run …”
+- “Close the terminal / kill the process yourself”
+- “Checklist for you to …”
+
+Replace with what the agent already did or will do next in the same turn.
+
+## Proxy / network
+
+Maintain `[bot.network]` via `scripts/discover_binance_proxies.py` and `bot.market.proxy_bootstrap` — no manual proxy lists for the user.

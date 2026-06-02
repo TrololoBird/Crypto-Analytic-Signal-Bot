@@ -4,17 +4,18 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from ..domain.config import BotSettings
-from ..domain.schemas import PreparedSymbol, Signal
-from ..domain.strategies import STRATEGY_STATUS_BY_ID, RISK_PROFILE_BY_ID
+from bot.core.runtime_errors import DEFENSIVE_EXC
+
+from ..core.runtime_errors import classify_runtime_error
+from ..domain.strategies import RISK_PROFILE_BY_ID, STRATEGY_STATUS_BY_ID, StrategyDecision
+from ..domain.strategy_catalog import CATALOG_BY_ID
 from ..engine.base import (
     AbstractStrategy,
     SignalResult,
     StrategyMetadata,
 )
-from ..domain.strategies import StrategyDecision
-from ..core.runtime_errors import classify_runtime_error
 from ..market.fit import (
     ASSET_FIT_PROFILES,
     DEFAULT_ASSET_FIT,
@@ -22,12 +23,15 @@ from ..market.fit import (
     asset_fit_reject_reason,
     market_context_from_prepared,
 )
-from ..domain.strategy_catalog import CATALOG_BY_ID
 from . import (
     begin_strategy_decision_capture,
     finalize_strategy_decision,
     reset_strategy_decision_capture,
 )
+
+if TYPE_CHECKING:
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
 
 
 @dataclass(frozen=True)
@@ -116,7 +120,7 @@ class BaseSetup(AbstractStrategy):
         """Run detection logic."""
         ...
 
-    def get_optimizable_params(self, settings: "BotSettings | None" = None) -> dict[str, float]:
+    def get_optimizable_params(self, _settings: BotSettings | None = None) -> dict[str, float]:
         """Return tunable parameters. Override in subclass to enable autotuning."""
         return {}
 
@@ -145,7 +149,7 @@ class BaseSetup(AbstractStrategy):
         try:
             try:
                 outcome = self.detect(prepared, self._settings)
-            except Exception as exc:
+            except DEFENSIVE_EXC as exc:
                 error_class = classify_runtime_error(exc)
                 decision = StrategyDecision.error_result(
                     setup_id=self.setup_id,

@@ -3,18 +3,20 @@
 from __future__ import annotations
 
 from ..setups.spec_runtime import SpecDetectorSetup
-
-
-import polars as pl
-
-from ._common import SpecHit, with_spec_columns, _latest_values
+from ._common import SpecHit, _latest_values, with_spec_columns
 
 __all__ = ["detect_volume_anomaly"]
-from ..domain.config import BotSettings
-from ..domain.schemas import PreparedSymbol, Signal
-from ..setups import _build_signal, _compute_dynamic_score, _reject
 import math
+from typing import TYPE_CHECKING, ClassVar
+
+from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.spec_runtime import run_setup_detection
+
+if TYPE_CHECKING:
+    import polars as pl
+
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
 
 
 def detect_volume_anomaly(frame: pl.DataFrame, *, timeframe: str = "15m") -> SpecHit | None:
@@ -57,13 +59,12 @@ def _as_float(value: object, default: float = 0.0) -> float:
 
 def _detect_volume_anomaly_extended(
     prepared: PreparedSymbol,
-    settings: BotSettings,
-    defaults: dict[str, float],
+    _settings: BotSettings,
+    _defaults: dict[str, float],
     effective: dict[str, float],
     setup_id: str,
     family: str,
 ) -> Signal | None:
-    dynamic_params = effective
     effective_params = effective
     # FIX 2026-05-21: spec demands a decisive latest candle; keep the
     # configured recent-bar volume anomaly fallback live on a miss.
@@ -270,15 +271,15 @@ def _detect_volume_anomaly_extended(
     score *= score_penalty
 
     # Graded bias alignment
-    if direction == "long" and bias_1h == "downtrend":
-        score *= effective_params.get("bias_mismatch_penalty", 0.75)
-    elif direction == "short" and bias_1h == "uptrend":
+    if (direction == "long" and bias_1h == "downtrend") or (
+        direction == "short" and bias_1h == "uptrend"
+    ):
         score *= effective_params.get("bias_mismatch_penalty", 0.75)
 
     # RSI extremes graded penalty
-    if direction == "long" and rsi > float(effective_params["max_rsi_long"]):
-        score *= 0.85
-    elif direction == "short" and rsi < float(effective_params["min_rsi_short"]):
+    if (direction == "long" and rsi > float(effective_params["max_rsi_long"])) or (
+        direction == "short" and rsi < float(effective_params["min_rsi_short"])
+    ):
         score *= 0.85
 
     reasons = [
@@ -331,9 +332,9 @@ def detect_volume_anomaly_setup(
 
 
 __all__ = [
+    "_detect_volume_anomaly_extended",
     "detect_volume_anomaly",
     "detect_volume_anomaly_setup",
-    "_detect_volume_anomaly_extended",
 ]
 
 
@@ -343,7 +344,7 @@ class VolumeAnomalySetup(SpecDetectorSetup):
     confirmation_profile = "breakout_acceptance"
     required_context = ("futures_flow",)
 
-    DEFAULTS = {
+    DEFAULTS: ClassVar[dict[str, float]] = {
         "base_score": 0.52,
         "min_volume_ratio": 1.35,
         "adaptive_volume_floor": 1.1,

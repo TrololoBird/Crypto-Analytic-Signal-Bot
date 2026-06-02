@@ -7,15 +7,21 @@ import contextlib
 import logging
 import threading
 from collections import defaultdict, deque
-from typing import TYPE_CHECKING, Any, Callable, Coroutine
+from collections.abc import Callable, Coroutine
+from typing import Any, TypeVar
 
+from ..domain.events import (
+    AnyEvent,
+    BookTickerEvent,
+    KlineCloseEvent,
+    OIRefreshDueEvent,
+    ShortlistUpdatedEvent,
+)
 from .runtime_errors import classify_runtime_error
-
-if TYPE_CHECKING:
-    from ..domain.events import AnyEvent
 
 LOG = logging.getLogger("bot.core.event_bus")
 
+E = TypeVar("E", bound="AnyEvent")
 AsyncHandler = Callable[["AnyEvent"], Coroutine[Any, Any, None]]
 
 
@@ -45,8 +51,12 @@ class EventBus:
         self._dropped_count = 0
         self._handler_tasks: set[asyncio.Task[None]] = set()
 
-    def subscribe(self, event_type: type, handler: AsyncHandler) -> None:
-        self._subscribers[event_type].append(handler)
+    def subscribe(
+        self,
+        event_type: type[E],
+        handler: Callable[[E], Coroutine[Any, Any, None]],
+    ) -> None:
+        self._subscribers[event_type].append(handler)  # type: ignore[arg-type]
 
     async def publish(self, event: AnyEvent) -> None:
         self.publish_nowait(event)
@@ -158,13 +168,6 @@ class EventBus:
         await self._ready.wait()
 
     def _event_token(self, event: AnyEvent) -> tuple[object, bool]:
-        from ..domain.events import (
-            BookTickerEvent,
-            KlineCloseEvent,
-            OIRefreshDueEvent,
-            ShortlistUpdatedEvent,
-        )
-
         if isinstance(event, KlineCloseEvent):
             return ("kline_close", event.symbol, event.interval), True
         if isinstance(event, BookTickerEvent):
@@ -176,8 +179,6 @@ class EventBus:
         return ("unique", self._sequence), False
 
     def _make_room_for(self, event: AnyEvent) -> bool:
-        from ..domain.events import KlineCloseEvent
-
         event_name = type(event).__name__
         if isinstance(event, KlineCloseEvent):
             for index, token in enumerate(self._queue):
@@ -216,7 +217,7 @@ class EventBus:
                 return True
         return False
 
-    def _coalesce_queued_token(self, index: int, event: AnyEvent) -> None:
+    def _coalesce_queued_token(self, index: int, _event: AnyEvent) -> None:
         token = self._queue[index]
         del self._queue[index]
         self._pending_events.pop(token, None)
@@ -254,7 +255,7 @@ class EventBus:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            LOG.error(
+            LOG.exception(
                 "event_bus_handler_error",
                 extra={
                     "handler": getattr(handler, "__qualname__", repr(handler)),
@@ -262,7 +263,6 @@ class EventBus:
                     "exc": str(exc),
                     "error_class": classify_runtime_error(exc),
                 },
-                exc_info=True,
             )
 
     @staticmethod

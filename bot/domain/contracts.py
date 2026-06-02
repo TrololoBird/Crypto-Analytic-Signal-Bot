@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
-from collections.abc import Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 # --- Feature Contract ---
 
@@ -57,7 +59,8 @@ PRIVATE_KEYS = {"balance", "position", "order", "account", "margin"}
 
 def validate_public_feature_payload(payload: Mapping[str, Any]) -> None:
     if any(key in payload for key in PRIVATE_KEYS):
-        raise ValueError(f"Private data in public feature payload: {payload.keys()}")
+        msg = f"Private data in public feature payload: {payload.keys()}"
+        raise ValueError(msg)
     expected = set(PUBLIC_FEATURE_FIELDS)
     provided = set(payload.keys())
 
@@ -113,9 +116,8 @@ def imported_module_names(file_path: Path) -> set[str]:
 def assert_runtime_import_contract(imported_names: set[str]) -> None:
     for blocked in SCAFFOLD_IMPORT_BLOCKLIST:
         if any(blocked in name for name in imported_names):
-            raise ValueError(
-                f"runtime import contract violation: blocked import fragment {blocked!r}"
-            )
+            msg = f"runtime import contract violation: blocked import fragment {blocked!r}"
+            raise ValueError(msg)
 
 
 def assert_runtime_call_path_is_clean() -> None:

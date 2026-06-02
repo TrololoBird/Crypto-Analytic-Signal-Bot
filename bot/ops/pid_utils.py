@@ -5,8 +5,10 @@ from __future__ import annotations
 import ctypes
 import os
 import subprocess
-from pathlib import Path
-from typing import cast, Any
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def pid_is_alive(pid: int) -> bool:
@@ -15,13 +17,14 @@ def pid_is_alive(pid: int) -> bool:
         return False
     if os.name == "nt":
         process_query_limited_information = 0x1000
-        kernel32 = cast(Any, ctypes).windll.kernel32
-        handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
+        kernel32 = cast("Any", ctypes).windll.kernel32
+        inherit_handles = False
+        handle = kernel32.OpenProcess(process_query_limited_information, inherit_handles, pid)
         if handle:
             kernel32.CloseHandle(handle)
             return True
         # ERROR_ACCESS_DENIED (5): process exists but we cannot query it.
-        return int(ctypes.get_last_error()) == 5
+        return int(kernel32.GetLastError()) == 5
     try:
         os.kill(pid, 0)
     except OSError:
@@ -53,9 +56,13 @@ def clear_stale_pid_file(pid_file: Path) -> bool:
 def find_bot_main_pids(repo_root: Path) -> list[int]:
     """Find python.exe processes running this repo's main.py."""
     root = str(repo_root.resolve()).replace("'", "''")
+    where_clause = (
+        f"Where-Object {{ $_.CommandLine -like '*{root}*' "
+        f"-and $_.CommandLine -like '*main.py*' }} | "
+    )
     script = (
         "Get-CimInstance Win32_Process -Filter \"name='python.exe'\" | "
-        f"Where-Object {{ $_.CommandLine -like '*{root}*' -and $_.CommandLine -like '*main.py*' }} | "
+        f"{where_clause}"
         "Select-Object -ExpandProperty ProcessId"
     )
     try:
@@ -68,10 +75,10 @@ def find_bot_main_pids(repo_root: Path) -> list[int]:
     except (subprocess.CalledProcessError, OSError, subprocess.TimeoutExpired):
         return []
     pids: list[int] = []
-    for line in raw.splitlines():
-        line = line.strip()
-        if line.isdigit():
-            pids.append(int(line))
+    for raw_line in raw.splitlines():
+        stripped = raw_line.strip()
+        if stripped.isdigit():
+            pids.append(int(stripped))
     return pids
 
 

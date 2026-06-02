@@ -18,14 +18,18 @@ from collections import Counter
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from bot.domain.delivery_policy import r_class_blocks_action
-from bot.domain.schemas import PreparedSymbol, Signal
-from bot.persistence.outcomes import build_prepared_feature_snapshot, extract_features_from_signal
+from bot.core.runtime_errors import DEFENSIVE_EXC
 from bot.delivery.contract import validate_signal_contract
-from bot.delivery.tiers import decide_with_caps, rank_key as tier_rank_key
-from bot.persistence.tracking import SignalTrackingEvent
+from bot.delivery.tiers import decide_with_caps
+from bot.delivery.tiers import rank_key as tier_rank_key
+from bot.domain.delivery_policy import r_class_blocks_action
+from bot.persistence.outcomes import build_prepared_feature_snapshot, extract_features_from_signal
+
+from .merge import DEFAULT_ACTION_WINDOW_HOURS, MetaSignalMerger
 
 if TYPE_CHECKING:
+    from bot.domain.schemas import PreparedSymbol, Signal
+    from bot.persistence.tracking import SignalTrackingEvent
     from bot.runtime.bot import SignalBot
 
 
@@ -130,7 +134,7 @@ class DeliveryOrchestrator:
         volume_avg = cls._tail_mean(primary, "volume", 20)
 
         trend = False
-        if None not in (close, ema20, ema50):
+        if close is not None and ema20 is not None and ema50 is not None:
             if direction == "long":
                 trend = bool(close > ema20 > ema50)
             elif direction == "short":
@@ -284,7 +288,7 @@ class DeliveryOrchestrator:
     async def close_superseded_signal(self, new_signal: Signal) -> list[SignalTrackingEvent] | None:
         try:
             return await self._bot.tracker.supersede_open_signal(new_signal, dry_run=False)
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.debug("supersede failed for %s: %s", new_signal.symbol, exc)
             return None
 
@@ -319,7 +323,10 @@ class DeliveryOrchestrator:
             }
         )
         LOG.warning(
-            "quality monitor paused delivery | symbol=%s setup=%s recommendation=%s consecutive_losses=%s win_rate=%s",
+            (
+                "quality monitor paused delivery | symbol=%s setup=%s recommendation=%s "
+                "consecutive_losses=%s win_rate=%s"
+            ),
             signal.symbol,
             signal.setup_id,
             health.get("recommendation"),
@@ -356,7 +363,7 @@ class DeliveryOrchestrator:
         await self._bot._sync_ws_tracked_symbols()
         await self._bot._wait_noncritical(
             label="tracking delivery",
-            timeout=self._bot._delivery_timeout_seconds,
+            max_wait_s=self._bot._delivery_timeout_seconds,
             operation=self._bot.delivery.deliver_tracking_updates(events, dry_run=False),
         )
 
@@ -396,14 +403,14 @@ class DeliveryOrchestrator:
             tier_map = {signal.tracking_id: "watch"}
             armed_ok, _ = await self._bot._wait_noncritical(
                 label=f"journal conflict {signal.symbol}/{signal.setup_id}",
-                timeout=self._bot._noncritical_timeout_seconds,
+                max_wait_s=self._bot._noncritical_timeout_seconds,
                 operation=self._bot.tracker.arm_signals([signal], dry_run=False),
             )
             if not armed_ok:
                 continue
             ok, results = await self._bot._wait_noncritical(
                 label=f"deliver conflict {signal.symbol}/{signal.setup_id}",
-                timeout=self._bot._delivery_timeout_seconds,
+                max_wait_s=self._bot._delivery_timeout_seconds,
                 operation=self._bot.delivery.deliver(
                     [signal],
                     dry_run=False,
@@ -425,7 +432,7 @@ class DeliveryOrchestrator:
                 if item.message_id is not None:
                     await self._bot._wait_noncritical(
                         label=f"link conflict {item.signal.symbol}/{item.signal.setup_id}",
-                        timeout=self._bot._noncritical_timeout_seconds,
+                        max_wait_s=self._bot._noncritical_timeout_seconds,
                         operation=self._bot.tracker.update_signal_message_ids(
                             {item.signal.tracking_id: item.message_id},
                             dry_run=False,
@@ -441,8 +448,6 @@ class DeliveryOrchestrator:
     ) -> tuple[list[Signal], list[dict[str, Any]], Counter[str]]:
         if not signals:
             return [], [], Counter()
-
-        from .merge import DEFAULT_ACTION_WINDOW_HOURS, MetaSignalMerger
 
         ledger = getattr(self._bot, "public_audit", None)
         recent_actions: list[Signal] = []
@@ -479,9 +484,8 @@ class DeliveryOrchestrator:
             contract_issues = self._contract_issue_rows(signal)
             contract_validated_tracking_ids.add(signal.tracking_id)
             if signal.tracking_id not in contract_validated_tracking_ids:
-                raise ValueError(
-                    f"signal_contract validation was bypassed for {signal.tracking_id}"
-                )
+                msg = f"signal_contract validation was bypassed for {signal.tracking_id}"
+                raise ValueError(msg)
             if contract_issues:
                 self._record_delivery_diag_reject(
                     "contract", "invalid_signal_contract", setup_id=signal.setup_id
@@ -526,7 +530,10 @@ class DeliveryOrchestrator:
                     }
                 )
                 LOG.info(
-                    "Signal rejected by hard confluence gate | symbol=%s setup=%s direction=%s confirmations=%s details=%s",
+                    (
+                        "Signal rejected by hard confluence gate | symbol=%s setup=%s "
+                        "direction=%s confirmations=%s details=%s"
+                    ),
                     signal.symbol,
                     signal.setup_id,
                     signal.direction,
@@ -658,15 +665,14 @@ class DeliveryOrchestrator:
                     if closed:
                         await self.deliver_tracking(closed)
                     if signal.tracking_id not in contract_validated_tracking_ids:
-                        raise ValueError(
-                            f"signal_contract validation was bypassed for {signal.tracking_id}"
-                        )
+                        msg = f"signal_contract validation was bypassed for {signal.tracking_id}"
+                        raise ValueError(msg)
                     if signal.tracking_id not in confluence_passed_tracking_ids:
-                        raise ValueError(
-                            f"hard confluence gate was bypassed for {signal.tracking_id}"
-                        )
+                        msg = f"hard confluence gate was bypassed for {signal.tracking_id}"
+                        raise ValueError(msg)
                     if signal.tracking_id not in tier_allowed_tracking_ids:
-                        raise ValueError(f"tier cap policy was bypassed for {signal.tracking_id}")
+                        msg = f"tier cap policy was bypassed for {signal.tracking_id}"
+                        raise ValueError(msg)
                     ready_to_send.append(signal)
                     queued_setup_ids.add(signal.setup_id)
                     queued_symbol_direction.add(self._symbol_direction_cooldown_key(signal))
@@ -750,13 +756,14 @@ class DeliveryOrchestrator:
                 if self._quality_monitor_rejects(signal, rejected_rows):
                     continue
                 if signal.tracking_id not in contract_validated_tracking_ids:
-                    raise ValueError(
-                        f"signal_contract validation was bypassed for {signal.tracking_id}"
-                    )
+                    msg = f"signal_contract validation was bypassed for {signal.tracking_id}"
+                    raise ValueError(msg)
                 if signal.tracking_id not in confluence_passed_tracking_ids:
-                    raise ValueError(f"hard confluence gate was bypassed for {signal.tracking_id}")
+                    msg = f"hard confluence gate was bypassed for {signal.tracking_id}"
+                    raise ValueError(msg)
                 if signal.tracking_id not in tier_allowed_tracking_ids:
-                    raise ValueError(f"tier cap policy was bypassed for {signal.tracking_id}")
+                    msg = f"tier cap policy was bypassed for {signal.tracking_id}"
+                    raise ValueError(msg)
                 ready_to_send.append(signal)
                 queued_setup_ids.add(signal.setup_id)
                 queued_symbol_direction.add(symbol_direction_key)
@@ -768,13 +775,14 @@ class DeliveryOrchestrator:
             if closed:
                 await self.deliver_tracking(closed)
                 if signal.tracking_id not in contract_validated_tracking_ids:
-                    raise ValueError(
-                        f"signal_contract validation was bypassed for {signal.tracking_id}"
-                    )
+                    msg = f"signal_contract validation was bypassed for {signal.tracking_id}"
+                    raise ValueError(msg)
                 if signal.tracking_id not in confluence_passed_tracking_ids:
-                    raise ValueError(f"hard confluence gate was bypassed for {signal.tracking_id}")
+                    msg = f"hard confluence gate was bypassed for {signal.tracking_id}"
+                    raise ValueError(msg)
                 if signal.tracking_id not in tier_allowed_tracking_ids:
-                    raise ValueError(f"tier cap policy was bypassed for {signal.tracking_id}")
+                    msg = f"tier cap policy was bypassed for {signal.tracking_id}"
+                    raise ValueError(msg)
                 ready_to_send.append(signal)
                 queued_setup_ids.add(signal.setup_id)
                 queued_symbol_direction.add(symbol_direction_key)
@@ -802,19 +810,20 @@ class DeliveryOrchestrator:
 
         for signal in ready_to_send:
             if signal.tracking_id not in contract_validated_tracking_ids:
-                raise ValueError(
-                    f"signal_contract validation was bypassed for {signal.tracking_id}"
-                )
+                msg = f"signal_contract validation was bypassed for {signal.tracking_id}"
+                raise ValueError(msg)
             if signal.tracking_id not in confluence_passed_tracking_ids:
-                raise ValueError(f"hard confluence gate was bypassed for {signal.tracking_id}")
+                msg = f"hard confluence gate was bypassed for {signal.tracking_id}"
+                raise ValueError(msg)
             if signal.tracking_id not in tier_allowed_tracking_ids:
-                raise ValueError(f"tier cap policy was bypassed for {signal.tracking_id}")
+                msg = f"tier cap policy was bypassed for {signal.tracking_id}"
+                raise ValueError(msg)
             tier_decision = tier_by_tracking_id.get(signal.tracking_id)
             delivery_tier = tier_decision.tier if tier_decision is not None else "action"
             tier_map = {signal.tracking_id: delivery_tier}
             armed_ok, _ = await self._bot._wait_noncritical(
                 label=f"journal {signal.symbol}/{signal.setup_id}",
-                timeout=self._bot._noncritical_timeout_seconds,
+                max_wait_s=self._bot._noncritical_timeout_seconds,
                 operation=self._bot.tracker.arm_signals([signal], dry_run=False),
             )
             if not armed_ok:
@@ -834,7 +843,7 @@ class DeliveryOrchestrator:
                 continue
             ok, results = await self._bot._wait_noncritical(
                 label=f"deliver {signal.symbol}/{signal.setup_id}",
-                timeout=self._bot._delivery_timeout_seconds,
+                max_wait_s=self._bot._delivery_timeout_seconds,
                 operation=self._bot.delivery.deliver(
                     [signal],
                     dry_run=False,
@@ -873,7 +882,10 @@ class DeliveryOrchestrator:
                         }
                     )
                     LOG.info(
-                        "delivery result not sent | status=%s reason=%s symbol=%s setup=%s tracking_id=%s",
+                        (
+                            "delivery result not sent | status=%s reason=%s symbol=%s "
+                            "setup=%s tracking_id=%s"
+                        ),
                         item.status,
                         item.reason,
                         item.signal.symbol,
@@ -914,7 +926,7 @@ class DeliveryOrchestrator:
                 if item.message_id is not None:
                     await self._bot._wait_noncritical(
                         label=f"link {item.signal.symbol}/{item.signal.setup_id}",
-                        timeout=self._bot._noncritical_timeout_seconds,
+                        max_wait_s=self._bot._noncritical_timeout_seconds,
                         operation=self._bot.tracker.update_signal_message_ids(
                             {item.signal.tracking_id: item.message_id},
                             dry_run=False,
@@ -933,7 +945,7 @@ class DeliveryOrchestrator:
 
         try:
             await self._bot.alerts.on_confirmed_signals(delivered, observed_at=datetime.now(UTC))
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.debug("alerts.on_confirmed_signals failed: %s", exc)
         if delivered:
             await self._bot._sync_ws_tracked_symbols()

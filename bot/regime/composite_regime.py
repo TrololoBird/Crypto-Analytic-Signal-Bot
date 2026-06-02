@@ -25,7 +25,7 @@ class CompositeRegimeAnalyzer:
 
     def analyze(
         self,
-        ticker_data: list[dict[str, Any]],
+        _ticker_data: list[dict[str, Any]],
         funding_rates: dict[str, float] | None,
         benchmark_context: dict[str, dict[str, Any]] | None,
     ) -> RegimeResult:

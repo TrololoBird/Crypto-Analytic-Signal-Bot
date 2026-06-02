@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from bot.domain.config import BotSettings
-from bot.domain.strategies import StrategyMetadata
-from bot.engine.registry import StrategyRegistry
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from bot.domain.config import BotSettings
+    from bot.domain.strategies import StrategyMetadata
+    from bot.engine.registry import StrategyRegistry
 
 
 def analysis_intervals(settings: BotSettings) -> tuple[str, ...]:

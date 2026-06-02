@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable
+from typing import TYPE_CHECKING
 
 import numpy as np
-from numpy.typing import NDArray
-import polars as pl
+
+from bot.core.runtime_errors import DEFENSIVE_EXC
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    import polars as pl
+    from numpy.typing import NDArray
 
 try:  # optional dependency
     from hmmlearn.hmm import GaussianHMM
@@ -52,7 +58,7 @@ class RuleBasedRegimeDetector:
                 states = model.predict(matrix)
                 self._state_to_regime = self._infer_state_regimes(matrix, states)
                 self._hmm_model = model
-            except Exception:
+            except DEFENSIVE_EXC:
                 self._hmm_model = None
                 self._state_to_regime = {}
         pred = self.predict(df_4h)
@@ -79,7 +85,7 @@ class RuleBasedRegimeDetector:
                     return HMMRegimePrediction(
                         regime=regime, confidence=max(0.0, min(0.99, confidence))
                     )
-            except Exception:
+            except DEFENSIVE_EXC:
                 pass
 
         return self._rule_predict(df_4h)
@@ -121,10 +127,7 @@ class RuleBasedRegimeDetector:
                 col = np.zeros(df_4h.height, dtype=float)
             matrix_cols.append(col)
         matrix = np.vstack(matrix_cols).T if matrix_cols else np.empty((0, 0), dtype=float)
-        matrix = np.nan_to_num(matrix, nan=0.0, posinf=0.0, neginf=0.0).astype(
-            np.float64, copy=False
-        )
-        return matrix
+        return np.nan_to_num(matrix, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float64, copy=False)
 
     @staticmethod
     def _infer_state_regimes(matrix: np.ndarray, states: np.ndarray) -> dict[int, str]:

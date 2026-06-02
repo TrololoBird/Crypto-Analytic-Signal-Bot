@@ -3,16 +3,24 @@ Deep Runtime Audit - Live analysis of bot signal generation pipeline.
 Tracks: strategy hits, filter rejections, data preparation, setup performance.
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import sqlite3
 import subprocess
 import sys
-from collections import Counter, defaultdict
-from datetime import datetime, timezone
-from pathlib import Path
 import time
+from collections import Counter, defaultdict
+from datetime import UTC, datetime
+from pathlib import Path
 
+try:
+    from scripts.common import bootstrap_repo_path
+except ModuleNotFoundError:  # pragma: no cover - direct script execution
+    from common import bootstrap_repo_path
+
+from bot.core.runtime_errors import DEFENSIVE_EXC
 from bot.diagnostics.runtime_analysis import (
     aggregate_cycle_stats,
     aggregate_rejection_funnel,
@@ -44,7 +52,7 @@ def analyze_rejection_funnel(run_dir: Path) -> dict:
         return {"error": "No rejected.jsonl found"}
     try:
         return aggregate_rejection_funnel(read_jsonl(rejected_file))
-    except Exception as e:
+    except DEFENSIVE_EXC as e:
         return {"error": str(e)}
 
 
@@ -55,7 +63,7 @@ def analyze_symbol_funnel(run_dir: Path) -> dict:
         return {"error": "No symbol_analysis.jsonl found"}
     try:
         return aggregate_symbol_funnel(read_jsonl(analysis_file))
-    except Exception as e:
+    except DEFENSIVE_EXC as e:
         return {"error": str(e)}
 
 
@@ -111,7 +119,7 @@ def analyze_strategy_decisions(run_dir: Path) -> dict:
                                 "details": row.get("details"),
                             }
                         )
-    except Exception as exc:
+    except DEFENSIVE_EXC as exc:
         return {"error": str(exc)}
 
     stats["zero_hit_setups"] = sorted(
@@ -156,7 +164,7 @@ def analyze_data_quality(run_dir: Path) -> dict:
                     stats["strict_none_violations"] += 1
                 stats["missing_fields"].update(str(field) for field in missing_fields)
                 stats["invalid_fields"].update(str(field) for field in invalid_fields)
-    except Exception as exc:
+    except DEFENSIVE_EXC as exc:
         return {"error": str(exc)}
     return stats
 
@@ -185,7 +193,7 @@ def analyze_null_fields(run_dir: Path) -> dict:
     ]
 
     try:
-        with open(rejected_file, "r", encoding="utf-8") as f:
+        with rejected_file.open(encoding="utf-8") as f:
             for line in f:
                 if not line.strip():
                     continue
@@ -240,7 +248,7 @@ def analyze_null_fields(run_dir: Path) -> dict:
             print(f"\n  [CRITICAL] Fields always NULL: {', '.join(all_null)}")
             print("  -> These fields may indicate data pipeline bugs!")
 
-    except Exception as e:
+    except DEFENSIVE_EXC as e:
         print(f"  ERROR analyzing null fields: {e}")
 
     return dict(null_stats)
@@ -253,7 +261,7 @@ def analyze_cycles(run_dir: Path) -> dict:
         return {"error": "No cycles.jsonl found"}
     try:
         return aggregate_cycle_stats(read_jsonl(cycles_file))
-    except Exception as e:
+    except DEFENSIVE_EXC as e:
         return {"error": str(e)}
 
 
@@ -275,7 +283,8 @@ def analyze_database() -> dict:
         # Signals table
         if "signals" in tables:
             cursor.execute(
-                "SELECT strategy_id, direction, COUNT(*) FROM signals GROUP BY strategy_id, direction"
+                "SELECT strategy_id, direction, COUNT(*) FROM signals "
+                "GROUP BY strategy_id, direction"
             )
             stats["signals_by_setup"] = cursor.fetchall()
             cursor.execute("SELECT COUNT(*) FROM active_signals WHERE status='active'")
@@ -284,7 +293,8 @@ def analyze_database() -> dict:
         # Rejected table (if exists)
         if "rejected" in tables:
             cursor.execute(
-                "SELECT stage, reason, COUNT(*) FROM rejected GROUP BY stage, reason ORDER BY COUNT(*) DESC"
+                "SELECT stage, reason, COUNT(*) FROM rejected "
+                "GROUP BY stage, reason ORDER BY COUNT(*) DESC"
             )
             stats["rejections_by_stage_reason"] = cursor.fetchall()
 
@@ -294,7 +304,7 @@ def analyze_database() -> dict:
             stats["active_cooldowns"] = cursor.fetchone()[0]
 
         conn.close()
-    except Exception as e:
+    except DEFENSIVE_EXC as e:
         return {"error": str(e)}
 
     return stats
@@ -311,11 +321,13 @@ def check_bot_process() -> dict:
             ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV"],
             capture_output=True,
             text=True,
+            check=False,
         )
         is_running = str(pid) in result.stdout
-        return {"running": is_running, "pid": pid}
-    except Exception as e:
+    except DEFENSIVE_EXC as e:
         return {"running": False, "error": str(e)}
+    else:
+        return {"running": is_running, "pid": pid}
 
 
 def print_audit_report(
@@ -330,10 +342,10 @@ def print_audit_report(
 ):
     """Print comprehensive audit report"""
     print_header("RUNTIME AUDIT REPORT")
-    print(f"Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
-    print(
-        f"Bot Status: {'RUNNING' if process.get('running') else 'STOPPED'} (PID: {process.get('pid')})"
-    )
+    print(f"Generated: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')}")
+    status = "RUNNING" if process.get("running") else "STOPPED"
+    pid = process.get("pid")
+    print(f"Bot Status: {status} (PID: {pid})")
 
     # TRUE FUNNEL ANALYSIS (from symbol_analysis.jsonl)
     print_header("TRUE SIGNAL FUNNEL (from symbol_analysis.jsonl)")
@@ -387,7 +399,8 @@ def print_audit_report(
         )[:10]
         for sym, data in by_sym:
             print(
-                f"  {sym}: {data['cycles']} cycles, {data['detectors']} detectors, {data['candidates']} candidates, {data['delivered']} delivered"
+                f"  {sym}: {data['cycles']} cycles, {data['detectors']} detectors, "
+                f"{data['candidates']} candidates, {data['delivered']} delivered"
             )
 
     # Rejection Analysis
@@ -494,7 +507,8 @@ def print_audit_report(
         )
         if no_raw_hit_pct > 90:
             print(
-                f"[ISSUE] {no_raw_hit_pct:.1f}% rejections are 'no_raw_hit' - detectors not finding patterns"
+                f"[ISSUE] {no_raw_hit_pct:.1f}% rejections are 'no_raw_hit' - "
+                "detectors not finding patterns"
             )
             print("  -> Check strategy thresholds in config.toml [bot.filters.setups]")
         else:
@@ -505,7 +519,8 @@ def print_audit_report(
     print(f"\n{'=' * 80}\n")
 
 
-def main():
+def main() -> None:
+    bootstrap_repo_path()
     parser = argparse.ArgumentParser(description="Audit persisted bot runtime telemetry")
     parser.add_argument(
         "--run",
@@ -571,7 +586,7 @@ def main():
         try:
             while True:
                 time.sleep(30)
-                print(f"\n--- Update at {datetime.now(timezone.utc).strftime('%H:%M:%S')} ---")
+                print(f"\n--- Update at {datetime.now(UTC).strftime('%H:%M:%S')} ---")
                 run_dir = get_latest_run_dir(args.run) or run_dir
                 rejection_stats = analyze_rejection_funnel(run_dir)
                 cycle_stats = analyze_cycles(run_dir)

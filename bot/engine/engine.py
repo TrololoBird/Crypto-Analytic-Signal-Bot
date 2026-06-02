@@ -7,17 +7,21 @@ import concurrent.futures
 import logging
 import os
 import time
-from collections.abc import Callable
-from typing import Any, cast
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, cast
 
-from .lanes import is_standard_kline_interval, select_lane_setups
-from .registry import StrategyRegistry
-from .base import SignalResult
-from ..domain.strategies import StrategyDecision
-from ..domain.schemas import PreparedSymbol, Signal
-from ..domain.config import BotSettings
-from ..market.fit import asset_fit_reject_reason, market_context_from_prepared
 from ..core.runtime_errors import classify_runtime_error
+from ..domain.strategies import StrategyDecision
+from ..market.fit import asset_fit_reject_reason, market_context_from_prepared
+from .base import SignalResult
+from .lanes import is_standard_kline_interval, select_lane_setups
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
+    from .registry import StrategyRegistry
 
 LOG = logging.getLogger("bot.engine.engine")
 
@@ -31,9 +35,16 @@ _STRATEGY_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
     max_workers=_default_executor_workers(),
     thread_name_prefix="signal-strategy",
 )
-_WARMED_EXECUTOR_WORKERS = 0
-_executor_timeout_count = 0
-_executor_timeout_by_strategy: dict[str, int] = {}
+
+
+@dataclass
+class _ExecutorModuleState:
+    warmed_workers: int = 0
+    timeout_count: int = 0
+    timeout_by_strategy: dict[str, int] = field(default_factory=dict)
+
+
+_EXECUTOR_MODULE_STATE = _ExecutorModuleState()
 
 
 def _executor_noop() -> None:
@@ -311,7 +322,7 @@ class SignalEngine:
         for strategy, result in zip(strategies, results, strict=True):
             if isinstance(result, BaseException):
                 error_class = classify_runtime_error(result)
-                LOG.error(
+                LOG.exception(
                     "%s: Strategy %s failed: %s | error_class=%s",
                     symbol,
                     strategy.strategy_id,
@@ -465,25 +476,27 @@ class SignalEngine:
                     result.signal is not None,
                 )
 
-                return cast(SignalResult, result)
+                return cast("SignalResult", result)
 
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 elapsed_ms = (time.perf_counter() - start_time) * 1000
-                global _executor_timeout_count
-                _executor_timeout_count += 1
-                _executor_timeout_by_strategy[strategy_id] = (
-                    _executor_timeout_by_strategy.get(strategy_id, 0) + 1
+                _EXECUTOR_MODULE_STATE.timeout_count += 1
+                _EXECUTOR_MODULE_STATE.timeout_by_strategy[strategy_id] = (
+                    _EXECUTOR_MODULE_STATE.timeout_by_strategy.get(strategy_id, 0) + 1
                 )
                 LOG.warning(
                     "strategy_timeout",
                     extra={"setup_id": strategy_id, "timeout_seconds": self._timeout},
                 )
-                if _executor_timeout_count % 10 == 0:
+                if _EXECUTOR_MODULE_STATE.timeout_count % 10 == 0:
                     LOG.warning(
-                        "strategy executor timeout count reached %d; latest timeout=%s latest_strategy_timeouts=%d",
-                        _executor_timeout_count,
+                        (
+                            "strategy executor timeout count reached %d; latest timeout=%s "
+                            "latest_strategy_timeouts=%d"
+                        ),
+                        _EXECUTOR_MODULE_STATE.timeout_count,
                         strategy_id,
-                        _executor_timeout_by_strategy[strategy_id],
+                        _EXECUTOR_MODULE_STATE.timeout_by_strategy[strategy_id],
                     )
                 self._registry.record_performance(strategy_id, elapsed_ms, error=True)
                 decision = StrategyDecision.error_result(
@@ -514,12 +527,7 @@ class SignalEngine:
             except Exception as exc:
                 elapsed_ms = (time.perf_counter() - start_time) * 1000
                 error_class = classify_runtime_error(exc)
-                LOG.exception(
-                    "Strategy %s failed: %s | error_class=%s",
-                    strategy_id,
-                    exc,
-                    error_class,
-                )
+                LOG.exception("Strategy %s failed | error_class=%s", strategy_id, error_class)
                 self._registry.record_performance(strategy_id, elapsed_ms, error=True)
                 decision = StrategyDecision.error_result(
                     setup_id=strategy_id,
@@ -571,7 +579,7 @@ class SignalEngine:
             asset_fit = getattr(strategy, "asset_fit", None)
             to_dict = getattr(asset_fit, "to_dict", None)
             if callable(to_dict):
-                details["asset_fit"] = cast(Callable[[], dict[str, Any]], to_dict)()
+                details["asset_fit"] = cast("Callable[[], dict[str, Any]]", to_dict)()
         elif prepared.work_1h is None or prepared.work_1h.is_empty():
             missing_fields.append("work_1h")
             reason_code = "data.work_1h_missing"
@@ -603,9 +611,12 @@ class SignalEngine:
 
     def _strategy_is_active_for_symbol(self, strategy: Any, prepared: PreparedSymbol) -> bool:
         strategy_id = str(getattr(strategy, "setup_id", getattr(strategy, "strategy_id", "")) or "")
-        if self._feature_flags is not None and hasattr(self._feature_flags, "is_strategy_enabled"):
-            if not self._feature_flags.is_strategy_enabled(strategy_id):
-                return False
+        if (
+            self._feature_flags is not None
+            and hasattr(self._feature_flags, "is_strategy_enabled")
+            and not self._feature_flags.is_strategy_enabled(strategy_id)
+        ):
+            return False
         checker = getattr(strategy, "is_active_now", None)
         if not callable(checker):
             return True
@@ -649,23 +660,24 @@ class SignalEngine:
         )
 
     async def _ensure_executor_warmed(self, worker_count: int) -> None:
-        global _WARMED_EXECUTOR_WORKERS
         if self._executor_warmed or worker_count <= 0:
             return
         async with self._executor_warm_lock:
             if self._executor_warmed:
                 return
-            if _WARMED_EXECUTOR_WORKERS >= worker_count:
+            if worker_count <= _EXECUTOR_MODULE_STATE.warmed_workers:
                 self._executor_warmed = True
                 return
             loop = asyncio.get_running_loop()
             await asyncio.gather(
                 *[
                     loop.run_in_executor(_STRATEGY_EXECUTOR, _executor_noop)
-                    for _ in range(worker_count - _WARMED_EXECUTOR_WORKERS)
+                    for _ in range(worker_count - _EXECUTOR_MODULE_STATE.warmed_workers)
                 ]
             )
-            _WARMED_EXECUTOR_WORKERS = max(_WARMED_EXECUTOR_WORKERS, worker_count)
+            _EXECUTOR_MODULE_STATE.warmed_workers = max(
+                _EXECUTOR_MODULE_STATE.warmed_workers, worker_count
+            )
             self._executor_warmed = True
 
     def close(self) -> None:
@@ -709,11 +721,11 @@ class SignalEngine:
         Returns:
             List of Signals meeting threshold
         """
-        signals = []
-        for result in results:
-            if result.is_valid and result.signal is not None:
-                if result.signal.score >= min_score:
-                    signals.append(result.signal)
+        signals = [
+            result.signal
+            for result in results
+            if result.is_valid and result.signal is not None and result.signal.score >= min_score
+        ]
 
         # Sort by score descending
         signals.sort(key=lambda s: s.score, reverse=True)

@@ -30,12 +30,13 @@ CANONICAL_FEATURE_API = "bot.features._prepare_frame"
 def _warn_if_direct_imported() -> None:
     for frame in inspect.stack()[1:20]:
         normalized = frame.filename.replace("\\", "/")
-        if normalized.endswith("/bot/features/prepare.py") or normalized.endswith(
-            "/bot/features/advanced.py"
-        ):
+        if normalized.endswith(("/bot/features/prepare.py", "/bot/features/advanced.py")):
             return
     warnings.warn(
-        "bot.features.oscillators is internal_only; use bot.features._prepare_frame for runtime feature preparation.",
+        (
+            "bot.features.oscillators is internal_only; "
+            "use bot.features._prepare_frame for runtime feature preparation."
+        ),
         DeprecationWarning,
         stacklevel=3,
     )
@@ -60,11 +61,11 @@ def stochastic(
 def cci(
     df: pl.DataFrame, period: int = 20, *, plta: Any = None, has_talib: bool = False
 ) -> pl.Series:
-    """Contract: input requires HLC; output CCI series named `cci{period}` with non-finite sanitized to 0."""
+    """Contract: input requires HLC; output CCI series `cci{period}` (non-finite -> 0)."""
     ensure_columns(df, ("high", "low", "close"), fn_name="cci")
     if has_talib:
         return materialize_series(
-            cast(Any, plta).CCI(
+            cast("Any", plta).CCI(
                 pl.col("high"), pl.col("low"), pl.col("close"), timeperiod=float(period)
             ),
             df=df,
@@ -79,11 +80,11 @@ def cci(
 def mfi(
     df: pl.DataFrame, period: int = 14, *, plta: Any = None, has_talib: bool = False
 ) -> pl.Series:
-    """Contract: input requires OHLCV; output MFI series named `mfi{period}` with neutral fill 50."""
+    """Contract: input requires OHLCV; output MFI series `mfi{period}` (neutral fill 50)."""
     ensure_columns(df, ("high", "low", "close", "volume"), fn_name="mfi")
     if has_talib:
         return materialize_series(
-            cast(Any, plta).MFI(
+            cast("Any", plta).MFI(
                 pl.col("high"),
                 pl.col("low"),
                 pl.col("close"),
@@ -163,7 +164,7 @@ def ultimate_oscillator(df: pl.DataFrame, p1: int = 7, p2: int = 14, p3: int = 2
 def add_oscillator_features(
     df: pl.DataFrame, *, plta: Any = None, has_talib: bool = False
 ) -> pl.DataFrame:
-    """Contract: input requires OHLCV; output adds oscillators: stoch*, cci20, mfi14, cmf20, uo, willr14."""
+    """Contract: input OHLCV; adds stoch*, cci20, mfi14, cmf20, uo, willr14."""
     stoch_k, stoch_d = stochastic(df)
     rolling_high = df["high"].rolling_max(window_size=14)
     rolling_low = df["low"].rolling_min(window_size=14)

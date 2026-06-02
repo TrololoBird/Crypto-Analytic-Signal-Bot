@@ -15,12 +15,14 @@ from typing import Any, cast
 import numpy as np
 import polars as pl
 
+from bot.core.runtime_errors import DEFENSIVE_EXC
+
 try:
-    import polars_ta  # noqa: F401  # [live] extra
+    import polars_ta  # [live] extra
 
     HAS_POLARS_TA = True
 except ImportError:
-    polars_ta = None  # type: ignore[assignment]
+    polars_ta = None
     HAS_POLARS_TA = False
 
 from .oscillators import add_oscillator_features
@@ -46,7 +48,10 @@ def _warn_if_direct_imported() -> None:
         if frame.filename.replace("\\", "/").endswith("/bot/features/prepare.py"):
             return
     warnings.warn(
-        "bot.features.advanced is internal_only; use bot.features._prepare_frame or bot.features.shared.supertrend_series.",
+        (
+            "bot.features.advanced is internal_only; "
+            "use bot.features._prepare_frame or bot.features.shared.supertrend_series."
+        ),
         DeprecationWarning,
         stacklevel=3,
     )
@@ -154,10 +159,10 @@ def _aroon(df: pl.DataFrame, period: int = 14) -> tuple[pl.Series, pl.Series, pl
     low = df["low"]
 
     def bars_since_argmax(s: pl.Series) -> int:
-        return len(s) - 1 - cast(int, s.arg_max())
+        return len(s) - 1 - cast("int", s.arg_max())
 
     def bars_since_argmin(s: pl.Series) -> int:
-        return len(s) - 1 - cast(int, s.arg_min())
+        return len(s) - 1 - cast("int", s.arg_min())
 
     up_days = high.rolling_map(bars_since_argmax, window_size=period + 1)
     down_days = low.rolling_map(bars_since_argmin, window_size=period + 1)
@@ -304,7 +309,7 @@ def add_advanced_indicators(
     roc_fn: Any,
     log_fallback: Any,
 ) -> pl.DataFrame:
-    """Contract: input requires core OHLCV+`close`; output adds advanced + oscillator columns used by strategies."""
+    """Contract: core OHLCV+`close`; adds advanced + oscillator columns for strategies."""
     result = df
     st, st_dir = supertrend(df)
     result = result.with_columns([st.alias("supertrend"), st_dir.alias("supertrend_dir")])
@@ -330,7 +335,7 @@ def add_advanced_indicators(
                 (obv > obv_ema).cast(pl.Float64).alias("obv_above_ema"),
             ]
         )
-    except Exception as exc:
+    except DEFENSIVE_EXC as exc:
         log_fallback("obv", exc)
         result = result.with_columns(
             [
@@ -370,7 +375,7 @@ def add_advanced_indicators(
     squeeze_hist, squeeze_on, squeeze_off, squeeze_no = _squeeze_momentum(df)
     chand_l, chand_s, chand_d = _chandelier_exit(df, atr_fn=atr_fn)
     tenkan, kijun, senkou_a, senkou_b = ichimoku_lines(result)
-    result = result.with_columns(
+    return result.with_columns(
         [
             fisher,
             fisher_signal,
@@ -395,4 +400,3 @@ def add_advanced_indicators(
             senkou_b.alias("ichi_senkou_b"),
         ]
     )
-    return result

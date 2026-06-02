@@ -51,7 +51,10 @@ async def evaluate_endpoint_health(manager: Any, ws: Any, endpoint: str) -> bool
                     or int(snapshot.get("fresh_mark_prices") or 0) == 0
                 ):
                     LOG.error(
-                        "ws market recovery failed | endpoint=%s age=%.1fs fresh_tickers=%s fresh_mark_prices=%s - forcing reconnect",
+                        (
+                            "ws market recovery failed | endpoint=%s age=%.1fs "
+                            "fresh_tickers=%s fresh_mark_prices=%s - forcing reconnect"
+                        ),
                         endpoint,
                         recovery_age,
                         snapshot.get("fresh_tickers"),
@@ -65,12 +68,17 @@ async def evaluate_endpoint_health(manager: Any, ws: Any, endpoint: str) -> bool
             preview = stale_streams[:3]
             stale_symbols = list({s.split(":")[0] for s in stale_streams})
             LOG.info(
-                "ws stale kline data | endpoint=%s streams=%d sample=%s - backfilling (not reconnecting)",
+                (
+                    "ws stale kline data | endpoint=%s streams=%d sample=%s - "
+                    "backfilling (not reconnecting)"
+                ),
                 endpoint,
                 len(stale_streams),
                 preview,
             )
-            asyncio.create_task(manager._backfill(stale_symbols))
+            task = asyncio.create_task(manager._backfill(stale_symbols))
+            manager._backfill_tasks.add(task)
+            task.add_done_callback(manager._backfill_tasks.discard)
         return False
 
     if endpoint == "public":
@@ -84,7 +92,10 @@ async def evaluate_endpoint_health(manager: Any, ws: Any, endpoint: str) -> bool
             connected_at = manager._connected_at_by_endpoint.get(endpoint, 0.0)
             if connected_at > 0.0 and time.monotonic() - connected_at >= grace_seconds:
                 LOG.error(
-                    "ws public recovery failed | endpoint=%s fresh_book_tickers=0 - forcing reconnect",
+                    (
+                        "ws public recovery failed | endpoint=%s fresh_book_tickers=0 - "
+                        "forcing reconnect"
+                    ),
                     endpoint,
                 )
                 await ws.close()

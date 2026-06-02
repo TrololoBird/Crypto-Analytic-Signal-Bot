@@ -7,9 +7,12 @@ import os
 
 import pytest
 
+from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.domain.config import load_settings
 from bot.market.data import BinanceFuturesMarketData, MarketDataUnavailable
+from bot.market.rest import BinanceClientImpl
 
-_GEO_SKIP_REASON: str | None = None
+_GEO_SKIP_REASON: list[str | None] = [None]
 
 
 def _restricted_location_reason(exc: MarketDataUnavailable) -> str | None:
@@ -20,9 +23,6 @@ def _restricted_location_reason(exc: MarketDataUnavailable) -> str | None:
 
 
 async def _probe_binance_access() -> str | None:
-    from bot.domain.config import load_settings
-    from bot.market.rest import BinanceClientImpl
-
     settings = load_settings()
     binance_client = BinanceClientImpl(
         rest_timeout_seconds=30.0,
@@ -50,19 +50,18 @@ def _live_tests_requested(session: pytest.Session) -> bool:
 
 
 def pytest_sessionstart(session: pytest.Session) -> None:
-    global _GEO_SKIP_REASON
     if not _live_tests_requested(session):
         return
     try:
-        _GEO_SKIP_REASON = asyncio.run(_probe_binance_access())
-    except Exception:
-        _GEO_SKIP_REASON = None
+        _GEO_SKIP_REASON[0] = asyncio.run(_probe_binance_access())
+    except DEFENSIVE_EXC:
+        _GEO_SKIP_REASON[0] = None
 
 
-def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    if _GEO_SKIP_REASON is None:
+def pytest_collection_modifyitems(_config: pytest.Config, items: list[pytest.Item]) -> None:
+    if _GEO_SKIP_REASON[0] is None:
         return
-    skip = pytest.mark.skip(reason=_GEO_SKIP_REASON)
+    skip = pytest.mark.skip(reason=_GEO_SKIP_REASON[0])
     for item in items:
         if "live" in item.keywords:
             item.add_marker(skip)

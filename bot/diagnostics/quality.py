@@ -20,17 +20,19 @@ invoked from executor-backed paths. No asyncio primitives are used here.
 
 from __future__ import annotations
 
-from collections import Counter, deque
-from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime
 import json
 import logging
 import math
-import os
-from pathlib import Path
 import tempfile
 import threading
+from collections import Counter, deque
+from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Literal
+
+from bot.coercion import as_int
+from bot.core.runtime_errors import DEFENSIVE_EXC
 
 Recommendation = Literal["keep", "reduce_score", "pause"]
 
@@ -136,7 +138,7 @@ class QualityRecord:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "QualityRecord":
+    def from_dict(cls, payload: dict[str, Any]) -> QualityRecord:
         return cls(
             tracking_id=str(payload.get("tracking_id") or ""),
             setup_id=_normalize_setup_id(str(payload.get("setup_id") or "")),
@@ -250,7 +252,7 @@ class SetupAggregate:
         }
 
     @classmethod
-    def from_dict(cls, setup_id: str, payload: dict[str, Any]) -> "SetupAggregate":
+    def from_dict(cls, setup_id: str, payload: dict[str, Any]) -> SetupAggregate:
         return cls(
             setup_id=_normalize_setup_id(str(payload.get("setup_id") or setup_id)),
             sample_count=_safe_int(payload.get("sample_count")),
@@ -583,7 +585,7 @@ class SignalQualityMonitor:
             ]
         rows.sort(
             key=lambda row: (
-                int(row["consecutive_losses"]),
+                as_int(row.get("consecutive_losses")),
                 str(row["setup_id"]),
                 str(row["symbol"]),
             ),
@@ -1026,8 +1028,7 @@ class SignalQualityMonitor:
         max_drawdown_index = 0
         for point in curve:
             cumulative = _safe_float(point.get("cumulative_r"), 0.0)
-            if cumulative > peak:
-                peak = cumulative
+            peak = max(peak, cumulative)
             drawdown = peak - cumulative
             if drawdown > max_drawdown:
                 max_drawdown = drawdown
@@ -1096,7 +1097,8 @@ class SignalQualityMonitor:
                 trade_count = sum(1 for record in records if record.is_trade)
                 if aggregate.trade_count != trade_count:
                     warnings.append(
-                        f"{setup_id}: aggregate trade_count={aggregate.trade_count} records={trade_count}"
+                        f"{setup_id}: aggregate trade_count={aggregate.trade_count} "
+                        f"records={trade_count}"
                     )
                 wins = sum(1 for record in records if record.is_win)
                 if aggregate.win_count != wins:
@@ -1297,9 +1299,9 @@ class SignalQualityMonitor:
                 tmp_name = handle.name
                 json.dump(snapshot, handle, ensure_ascii=True, indent=2, sort_keys=True)
                 handle.write("\n")
-            os.replace(tmp_name, self.persist_path)
+            Path(tmp_name).replace(self.persist_path)
             self._last_persist_error = None
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             self._last_persist_error = str(exc)
             LOG.warning("quality monitor persist failed | path=%s error=%s", self.persist_path, exc)
 
@@ -1315,7 +1317,7 @@ class SignalQualityMonitor:
             return
         try:
             payload = json.loads(self.persist_path.read_text(encoding="utf-8"))
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             self._last_persist_error = str(exc)
             LOG.warning("quality monitor load failed | path=%s error=%s", self.persist_path, exc)
             return

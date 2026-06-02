@@ -2,37 +2,26 @@
 
 from __future__ import annotations
 
+import itertools
 import logging
 import math
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 import polars as pl
 
-from ..domain.config import BotSettings
-from ..domain.schemas import PreparedSymbol, Signal
-from ..features import _swing_points
-from ..features.shared import wilder_mean
 from ..domain.catalog_guards import catalog_allows_signal
 from ..domain.strategy_catalog import catalog_default_params
+from ..features import _swing_points
+from ..features.shared import wilder_mean
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 
+if TYPE_CHECKING:
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
+
 LOGGER = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True, slots=True)
-class SpecHit:
-    strategy: str
-    direction: str
-    entry: float
-    stop_basis: float
-    atr: float
-    timeframe: str
-    reasons: tuple[str, ...]
-    structure_clarity: float = 0.6
-    vol_ratio: float = 1.0
-    rsi: float = 50.0
-    source_index: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -303,7 +292,7 @@ def with_spec_columns(frame: pl.DataFrame) -> pl.DataFrame:
 def build_spec_signal(
     *,
     prepared: PreparedSymbol,
-    settings: BotSettings,
+    _settings: BotSettings,
     setup_id: str,
     family: str,
     hit: SpecHit,
@@ -410,7 +399,7 @@ def _clean_impulse(work: pl.DataFrame, start_idx: int, end_idx: int, direction: 
     if end_idx - start_idx < 3:
         return False
     rows = work.slice(start_idx, end_idx - start_idx + 1).to_dicts()
-    for prev, row in zip(rows, rows[1:], strict=False):
+    for prev, row in itertools.pairwise(rows):
         close = as_float(row.get("close"))
         prev_open = as_float(prev.get("open"))
         if direction == "long" and close < prev_open:
@@ -481,16 +470,12 @@ def _valid_order_block_rows(work: pl.DataFrame, max_age: int = 80) -> list[dict[
 
 def current_utc_hour(frame: pl.DataFrame) -> int:
     if frame.is_empty():
-        return datetime.now(timezone.utc).hour
+        return datetime.now(UTC).hour
     for column in ("open_time", "time", "close_time"):
         if column not in frame.columns:
             continue
         value = frame.item(-1, column)
         if isinstance(value, datetime):
-            dt = (
-                value.astimezone(timezone.utc)
-                if value.tzinfo
-                else value.replace(tzinfo=timezone.utc)
-            )
+            dt = value.astimezone(UTC) if value.tzinfo else value.replace(tzinfo=UTC)
             return dt.hour
-    return datetime.now(timezone.utc).hour
+    return datetime.now(UTC).hour

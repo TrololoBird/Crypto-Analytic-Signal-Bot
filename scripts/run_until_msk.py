@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
-import os
-import signal
 import subprocess
 import sys
 import time
 from datetime import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 MSK = ZoneInfo("Europe/Moscow")
@@ -18,12 +16,13 @@ MSK = ZoneInfo("Europe/Moscow")
 def _parse_target(value: str) -> datetime:
     for fmt in ("%Y-%m-%d %H:%M:%S", "%H:%M"):
         try:
-            parsed = datetime.strptime(value, fmt)
+            parsed = datetime.strptime(value, fmt).replace(tzinfo=MSK)
             break
         except ValueError:
             parsed = None
     if parsed is None:
-        raise argparse.ArgumentTypeError(f"invalid time: {value!r}")
+        msg = f"invalid time: {value!r}"
+        raise argparse.ArgumentTypeError(msg)
     now_msk = datetime.now(MSK)
     if fmt == "%H:%M":
         target = now_msk.replace(hour=parsed.hour, minute=parsed.minute, second=0, microsecond=0)
@@ -45,7 +44,7 @@ def main() -> int:
     target = _parse_target(args.until)
     print(f"Starting bot; will stop at {target.strftime('%Y-%m-%d %H:%M:%S %Z')}")
 
-    proc = subprocess.Popen([sys.executable, "main.py"], cwd=os.getcwd())
+    proc = subprocess.Popen([sys.executable, "main.py"], cwd=str(Path.cwd()))
     try:
         while proc.poll() is None:
             if datetime.now(MSK) >= target:
@@ -57,11 +56,12 @@ def main() -> int:
                     proc.kill()
                 return 0
             time.sleep(15)
-        return proc.returncode or 0
     except KeyboardInterrupt:
         proc.terminate()
         proc.wait(timeout=15)
         return 130
+    else:
+        return proc.returncode or 0
 
 
 if __name__ == "__main__":

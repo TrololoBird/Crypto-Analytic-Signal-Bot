@@ -1,27 +1,26 @@
-"""turtle_soup — detector in setups/detectors/."""
+"""turtle_soup — canonical strategy detector."""
 
 from __future__ import annotations
 
-from ..domain.config import BotSettings
-from ..domain.schemas import PreparedSymbol, Signal
-from ..setups import _reject
 import logging
+import math
+from typing import TYPE_CHECKING, ClassVar
+
+from ..features import _swing_points as _sp
+from ..setups import _build_signal, _compute_dynamic_score, _reject
+from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
+from ..setups.utils import normalize_trade_levels
+from ._common import SpecHit, _latest_values, with_spec_columns
+
+if TYPE_CHECKING:
+    import polars as pl
+
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
 
 LOG = logging.getLogger("bot.strategies.turtle_soup")
 
-from ..setups.spec_runtime import SpecDetectorSetup
-
-
-import math
-
-import polars as pl
-
-from ._common import SpecHit, with_spec_columns, _latest_values
-
 __all__ = ["detect_turtle_soup"]
-from ..setups import _build_signal, _compute_dynamic_score
-from ..setups.utils import normalize_trade_levels
-from ..setups.spec_runtime import run_setup_detection
 
 
 def detect_turtle_soup(frame: pl.DataFrame, *, timeframe: str = "15m") -> SpecHit | None:
@@ -124,7 +123,7 @@ def _orderflow_recovered(
 
 def _detect_turtle_soup_extended(
     prepared: PreparedSymbol,
-    settings: BotSettings,
+    _settings: BotSettings,
     defaults: dict[str, float],
     effective: dict[str, float],
     setup_id: str,
@@ -285,13 +284,11 @@ def _detect_turtle_soup_extended(
         flow_details["orderflow_conflict"] = 1.0
 
     # --- Compute structural SL/TP ---
-    from ..features import _swing_points as _sp
-
     range_before = max(rolling_high - rolling_low, atr)
     entry_price = rolling_low if direction == "long" else rolling_high
 
     if direction == "long":
-        # SL: beyond false breakout extreme + sl_buffer_atr×ATR
+        # SL: beyond false breakout extreme + sl_buffer_atrxATR
         stop = wick_extreme - sl_buffer_atr * atr
         risk = entry_price - stop
         if risk <= 0:
@@ -315,7 +312,7 @@ def _detect_turtle_soup_extended(
             else max(tp1 + range_before, entry_price + risk * (min_rr + 0.5))
         )
     else:
-        # SL: beyond false breakout extreme + sl_buffer_atr×ATR
+        # SL: beyond false breakout extreme + sl_buffer_atrxATR
         stop = wick_extreme + sl_buffer_atr * atr
         risk = stop - entry_price
         if risk <= 0:
@@ -454,7 +451,7 @@ def detect_turtle_soup_setup(
     )
 
 
-__all__ = ["detect_turtle_soup", "detect_turtle_soup_setup", "_detect_turtle_soup_extended"]
+__all__ = ["_detect_turtle_soup_extended", "detect_turtle_soup", "detect_turtle_soup_setup"]
 
 
 class TurtleSoupSetup(SpecDetectorSetup):
@@ -463,7 +460,7 @@ class TurtleSoupSetup(SpecDetectorSetup):
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)
 
-    DEFAULTS = {
+    DEFAULTS: ClassVar[dict[str, float]] = {
         "base_score": 0.52,
         "roll_bars": 20.0,
         "break_atr_mult": 0.1,

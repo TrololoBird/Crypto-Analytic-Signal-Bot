@@ -6,13 +6,11 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from bot.market.data import MarketDataUnavailable
-from bot.domain.schemas import (
-    Signal,
-)
-
 
 if TYPE_CHECKING:
-    pass
+    from bot.domain.schemas import (
+        Signal,
+    )
 
 
 LOG = logging.getLogger("bot.runtime.bot")

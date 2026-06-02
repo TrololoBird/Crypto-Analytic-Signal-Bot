@@ -1,4 +1,3 @@
-# ruff: noqa: E402
 from __future__ import annotations
 
 import argparse
@@ -7,7 +6,7 @@ import os
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Sequence
+from typing import TYPE_CHECKING, Any
 
 try:
     from scripts.common import (
@@ -24,19 +23,21 @@ except ModuleNotFoundError:  # pragma: no cover - direct script execution
         resolve_symbols,
     )
 
-bootstrap_repo_path()
-
-from bot.runtime.bot import SignalBot
+from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.delivery.telegram import DeliveryResult
 from bot.domain.config import load_settings
+from bot.domain.schemas import SymbolFrames, UniverseSymbol
 from bot.market.data import BinanceFuturesMarketData, MarketDataUnavailable
 from bot.market.rest import BinanceClientImpl
-from bot.delivery.telegram import DeliveryResult
-from bot.domain.schemas import SymbolFrames, UniverseSymbol
-from bot.telemetry import TelemetryStore
 from bot.market.universe import strategy_fits_for_market_row
+from bot.runtime.bot import SignalBot
+from bot.telemetry import TelemetryStore
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 LOG = configure_script_logging("scripts.live_check_pipeline")
+
 LIVE_CHECK_HTTP_TIMEOUT_SECONDS = 30.0  # seconds: cap live REST smoke checks
 
 
@@ -47,69 +48,75 @@ class FakeBroadcaster:
     async def send_html(
         self, text: str, *, reply_to_message_id: int | None = None
     ) -> DeliveryResult:
+        del text, reply_to_message_id
         return DeliveryResult(status="suppressed", message_id=None, reason="pipeline_check")
 
     async def edit_html(self, message_id: int, text: str) -> None:
-        return None
+        del message_id, text
+        return
 
     async def close(self) -> None:
         return None
 
 
-async def _safe_call(label: str, operation: Any, *, timeout: float) -> tuple[str, bool]:
+async def _safe_call(label: str, operation: Any, *, max_wait_s: float) -> tuple[str, bool]:
     try:
-        await asyncio.wait_for(operation(), timeout=timeout)
-        return label, True
-    except Exception as exc:
-        LOG.error("context_prefetch_failed", label=label, error=str(exc))
+        await asyncio.wait_for(operation(), timeout=max_wait_s)
+    except DEFENSIVE_EXC as exc:
+        LOG.exception("context_prefetch_failed", label=label, error=str(exc))
         return label, False
+    else:
+        return label, True
 
 
-async def _wait_for(label: str, operation: Any, *, timeout: float) -> Any:
+async def _wait_for(label: str, operation: Any, *, max_wait_s: float) -> Any:
     try:
-        return await asyncio.wait_for(operation(), timeout=timeout)
-    except Exception as exc:
-        raise RuntimeError(f"{label} failed or timed out: {exc}") from exc
+        return await asyncio.wait_for(operation(), timeout=max_wait_s)
+    except DEFENSIVE_EXC as exc:
+        msg = f"{label} failed or timed out: {exc}"
+        raise RuntimeError(msg) from exc
 
 
 async def _warm_public_context(
     client: BinanceFuturesMarketData,
     symbol: str,
     *,
-    timeout: float,
+    max_wait_s: float,
     include_basis: bool,
 ) -> Counter[str]:
     operations = [
         _safe_call(
             "oi_change_1h",
             lambda: client.fetch_open_interest_change(symbol, period="1h"),
-            timeout=timeout,
+            max_wait_s=max_wait_s,
         ),
         _safe_call(
             "top_account_ls_ratio_1h",
             lambda: client.fetch_long_short_ratio(symbol, period="1h"),
-            timeout=timeout,
+            max_wait_s=max_wait_s,
         ),
         _safe_call(
             "top_position_ls_ratio_1h",
             lambda: client.fetch_top_position_ls_ratio(symbol, period="1h"),
-            timeout=timeout,
+            max_wait_s=max_wait_s,
         ),
         _safe_call(
             "global_ls_ratio_1h",
             lambda: client.fetch_global_ls_ratio(symbol, period="1h"),
-            timeout=timeout,
+            max_wait_s=max_wait_s,
         ),
         _safe_call(
             "taker_ratio_1h",
             lambda: client.fetch_taker_ratio(symbol, period="1h"),
-            timeout=timeout,
+            max_wait_s=max_wait_s,
         ),
-        _safe_call("funding_rate", lambda: client.fetch_funding_rate(symbol), timeout=timeout),
+        _safe_call(
+            "funding_rate", lambda: client.fetch_funding_rate(symbol), max_wait_s=max_wait_s
+        ),
         _safe_call(
             "funding_rate_history",
             lambda: client.fetch_funding_rate_history(symbol),
-            timeout=timeout,
+            max_wait_s=max_wait_s,
         ),
     ]
     if include_basis:
@@ -118,12 +125,12 @@ async def _warm_public_context(
                 _safe_call(
                     "basis_1h",
                     lambda: client.fetch_basis(symbol, period="1h", limit=5),
-                    timeout=timeout,
+                    max_wait_s=max_wait_s,
                 ),
                 _safe_call(
                     "basis_5m",
                     lambda: client.fetch_basis(symbol, period="5m", limit=5),
-                    timeout=timeout,
+                    max_wait_s=max_wait_s,
                 ),
             ]
         )
@@ -224,33 +231,33 @@ async def _fetch_frames(
     client: BinanceFuturesMarketData,
     symbol: str,
     *,
-    timeout: float,
+    max_wait_s: float,
 ) -> SymbolFrames:
     book_context = await _wait_for(
         "order_book_depth",
         lambda: client.fetch_order_book_depth_snapshot(symbol, limit=20),
-        timeout=timeout,
+        max_wait_s=max_wait_s,
     )
     df_1h, df_15m, df_5m, df_4h = await asyncio.gather(
         _wait_for(
             "klines_1h",
             lambda: client.fetch_klines_cached(symbol, "1h", limit=500),
-            timeout=timeout,
+            max_wait_s=max_wait_s,
         ),
         _wait_for(
             "klines_15m",
             lambda: client.fetch_klines_cached(symbol, "15m", limit=500),
-            timeout=timeout,
+            max_wait_s=max_wait_s,
         ),
         _wait_for(
             "klines_5m",
             lambda: client.fetch_klines_cached(symbol, "5m", limit=300),
-            timeout=timeout,
+            max_wait_s=max_wait_s,
         ),
         _wait_for(
             "klines_4h",
             lambda: client.fetch_klines_cached(symbol, "4h", limit=500),
-            timeout=timeout,
+            max_wait_s=max_wait_s,
         ),
     )
     return SymbolFrames(
@@ -277,7 +284,7 @@ def _indicator_tail(result: Any) -> dict[str, float | None]:
                 return None
             value = frame.item(-1, column)
             return None if value is None else float(value)
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.debug("indicator_tail_read_failed", column=column, error=str(exc))
             return None
 
@@ -296,6 +303,7 @@ def _indicator_tail(result: Any) -> dict[str, float | None]:
 async def _run(
     symbols: Sequence[str],
     concurrency: int,
+    *,
     warm_context: bool,
     include_basis: bool,
     limit: int,
@@ -363,13 +371,13 @@ async def _run(
                         await _warm_public_context(
                             client,
                             symbol,
-                            timeout=max(3.0, float(settings.ws.rest_timeout_seconds)),
+                            max_wait_s=max(3.0, float(settings.ws.rest_timeout_seconds)),
                             include_basis=include_basis,
                         )
                     )
                 try:
                     frame_timeout = max(5.0, float(settings.ws.rest_timeout_seconds))
-                    frames = await _fetch_frames(client, symbol, timeout=frame_timeout)
+                    frames = await _fetch_frames(client, symbol, max_wait_s=frame_timeout)
                     engine_timeout = max(
                         15.0,
                         float(
@@ -392,7 +400,7 @@ async def _run(
                         ),
                         timeout=engine_timeout,
                     )
-                except Exception as exc:
+                except DEFENSIVE_EXC as exc:
                     failures.append(
                         {
                             "symbol": symbol,
@@ -464,12 +472,14 @@ async def _run(
         if failures:
             LOG.error("pipeline_failures", failures=failures[:20])
         if detector_runs <= 0 or prepared_ok <= 0:
-            raise RuntimeError("pipeline check did not execute any prepared detector runs")
+            msg = "pipeline check did not execute any prepared detector runs"
+            raise RuntimeError(msg)
     finally:
         await bot.close()
 
 
 def main() -> None:
+    bootstrap_repo_path()
     parser = argparse.ArgumentParser(
         description="Live prepare->strategy->confirmation->filters check without Telegram delivery"
     )
@@ -514,7 +524,7 @@ def main() -> None:
             )
         )
     except MarketDataUnavailable as exc:
-        LOG.error(
+        LOG.exception(
             "live_pipeline_unavailable",
             operation=exc.operation,
             detail=exc.detail,

@@ -1,18 +1,20 @@
-"""ema_bounce — trend continuation pullback (detector in setups/detectors/)."""
+"""ema_bounce — canonical strategy detector."""
 
 from __future__ import annotations
 
-from ..setups.spec_runtime import SpecDetectorSetup
+from typing import TYPE_CHECKING, ClassVar
 
-
-import polars as pl
-
-from ..domain.config import BotSettings
-from ..domain.schemas import PreparedSymbol, Signal
+from ..features import _swing_points as _sp
 from ..setups import _build_signal, _compute_dynamic_score, _reject
-from ..setups.spec_runtime import run_setup_detection
+from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
 from ..setups.utils import build_structural_targets, validate_rr_or_penalty
-from ._common import SpecHit, as_float, with_spec_columns, _latest_values
+from ._common import SpecHit, _latest_values, as_float, with_spec_columns
+
+if TYPE_CHECKING:
+    import polars as pl
+
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
 
 __all__ = ["detect_ema_bounce", "detect_ema_bounce_setup"]
 
@@ -59,7 +61,7 @@ def detect_ema_bounce(frame: pl.DataFrame, *, timeframe: str = "15m") -> SpecHit
 
 def _detect_ema_bounce_extended(
     prepared: PreparedSymbol,
-    settings: BotSettings,
+    _settings: BotSettings,
     defaults: dict[str, float],
     effective: dict[str, float],
     setup_id: str,
@@ -224,8 +226,6 @@ def _detect_ema_bounce_extended(
         _reject(prepared, setup_id, "adx_too_low", adx_1h=adx_1h, min_adx=min_adx)
         return None
 
-    from ..features import _swing_points as _sp
-
     sh_mask, sl_mask = _sp(work_1h, n=3, include_unconfirmed_tail=True)
     if signal_direction == "long":
         bounce_ema = min(ema20, ema50) if prev_close <= ema50 * 1.01 else ema20
@@ -335,7 +335,7 @@ class EmaBounceSetup(SpecDetectorSetup):
     confirmation_profile = "trend_follow"
     required_context = ("futures_flow",)
 
-    DEFAULTS = {
+    DEFAULTS: ClassVar[dict[str, float]] = {
         "base_score": 0.55,
         "min_adx_1h": 15.0,
         "vol_ratio_threshold": 1.0,

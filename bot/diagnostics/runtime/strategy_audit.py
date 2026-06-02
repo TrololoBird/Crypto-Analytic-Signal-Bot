@@ -8,16 +8,17 @@ verify every registered setup without relying on a screenshot or stale notes.
 
 from __future__ import annotations
 
+import json
+import math
+import sqlite3
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-import json
-import math
 from pathlib import Path
-import sqlite3
 from typing import Any
 
+from bot.strategies import STRATEGY_CLASSES
 
 NON_TRADING_OUTCOMES: frozenset[str] = frozenset(
     {
@@ -442,8 +443,6 @@ class StrategyAuditReport:
 
 
 def load_strategy_catalog() -> dict[str, dict[str, Any]]:
-    from bot.strategies import STRATEGY_CLASSES
-
     catalog: dict[str, dict[str, Any]] = {}
     for strategy_class in STRATEGY_CLASSES:
         setup_id = getattr(strategy_class, "setup_id", strategy_class.__name__)
@@ -766,7 +765,7 @@ def load_signal_contract_stats(summary_path: str | Path) -> SignalContractStats:
 
 def classify_strategy(
     *,
-    setup_id: str,
+    _setup_id: str,
     enabled: bool,
     detector: DetectorStats,
     outcomes: OutcomeStats,

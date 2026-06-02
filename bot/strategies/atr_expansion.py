@@ -1,18 +1,20 @@
 from __future__ import annotations
 
-from ..domain.config import BotSettings
-from ..domain.schemas import PreparedSymbol, Signal
-from .roadmap_base import RoadmapSetup
-
+from typing import TYPE_CHECKING, ClassVar
 
 from ._roadmap import (
+    _as_float,
     _build_atr_signal,
     _missing_columns,
     _reject,
-    _as_float,
 )
+from .roadmap_base import RoadmapSetup
 
-__all__ = ["detect_atr_expansion_prepared", "_current_expansion_candidate"]
+if TYPE_CHECKING:
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
+
+__all__ = ["_current_expansion_candidate", "detect_atr_expansion_prepared"]
 
 
 def _current_expansion_candidate(
@@ -62,7 +64,7 @@ def _current_expansion_candidate(
 
 def detect_atr_expansion_prepared(
     prepared: PreparedSymbol,
-    settings: BotSettings,
+    _settings: BotSettings,
     effective_params: dict[str, float],
     *,
     setup_id: str,
@@ -113,7 +115,7 @@ class ATRExpansionSetup(RoadmapSetup):
     family = "volatility"
     confirmation_profile = "breakout_acceptance"
     required_context = ("futures_flow",)
-    DEFAULTS = {
+    DEFAULTS: ClassVar[dict[str, float]] = {
         **RoadmapSetup.DEFAULTS,
         "atr_mean_window": 20,
         "min_atr_expansion_ratio": 1.75,

@@ -35,13 +35,14 @@ def fix_tree(root: Path) -> int:
         lines = text.splitlines(keepends=True)
         new_lines: list[str] = []
         file_changed = False
-        for line in lines:
-            if line.lstrip().startswith("except "):
-                fixed = fix_line(line.rstrip("\n"))
-                if fixed != line.rstrip("\n"):
-                    line = fixed + ("\n" if line.endswith("\n") else "")
+        for raw_line in lines:
+            current = raw_line
+            if current.lstrip().startswith("except "):
+                fixed = fix_line(current.rstrip("\n"))
+                if fixed != current.rstrip("\n"):
+                    current = fixed + ("\n" if current.endswith("\n") else "")
                     file_changed = True
-            new_lines.append(line)
+            new_lines.append(current)
         if file_changed:
             py.write_text("".join(new_lines), encoding="utf-8")
             changed += 1

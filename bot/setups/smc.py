@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import numpy as np
-from numpy.typing import NDArray
 import polars as pl
 
 from ..features import _swing_points
+
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
 
 SMCMode = Literal["offline_parity", "live_safe"]
 ZoneState = Literal["fresh", "mitigated", "invalidated"]
@@ -41,7 +43,8 @@ def _normalize_ohlcv(frame: pl.DataFrame, *, require_volume: bool = False) -> pl
         required.add("volume")
     missing = sorted(required.difference(normalized.columns))
     if missing:
-        raise LookupError(f"missing ohlcv columns: {', '.join(missing)}")
+        msg = f"missing ohlcv columns: {', '.join(missing)}"
+        raise LookupError(msg)
     return normalized
 
 
@@ -129,11 +132,8 @@ def fvg(
             bottom[i] = np.nan
 
     mitigated_index = np.full(length, np.nan, dtype=np.float64)
-    for i in cast(Any, np.flatnonzero(~np.isnan(gap))):
-        if gap[i] == 1.0:
-            mask = close[i + 2 :] <= top[i]
-        else:
-            mask = close[i + 2 :] >= bottom[i]
+    for i in cast("Any", np.flatnonzero(~np.isnan(gap))):
+        mask = close[i + 2 :] <= top[i] if gap[i] == 1.0 else close[i + 2 :] >= bottom[i]
         if np.any(mask):
             mitigated_index[i] = float(np.argmax(mask) + i + 2)
     mitigated_index = np.where(np.isnan(gap), np.nan, mitigated_index)
@@ -160,7 +160,8 @@ def swing_highs_lows(
     lows = _series_to_float_array(ohlc["low"])
 
     if mode not in {"live_safe", "offline_parity"}:
-        raise ValueError(f"unsupported SMC swing mode: {mode}")
+        msg = f"unsupported SMC swing mode: {mode}"
+        raise ValueError(msg)
 
     swing_high, swing_low = _swing_points(
         ohlc,
@@ -255,7 +256,7 @@ def bos_choch(
 
     broken = np.zeros(length, dtype=np.int32)
     active_indices = np.flatnonzero((bos != 0) | (choch != 0))
-    for i in cast(Any, active_indices):
+    for i in cast("Any", active_indices):
         if bos[i] == 1 or choch[i] == 1:
             mask = breaks_source[i + 2 :] > levels_out[i]
         else:
@@ -293,7 +294,7 @@ def order_blocks(
     volume = _series_to_float_array(ohlcv["volume"])
     swing_hl = _series_to_float_array(swings["HighLow"])
 
-    crossed = np.full(length, False, dtype=bool)
+    crossed = np.full(length, fill_value=False, dtype=bool)
     ob = np.zeros(length, dtype=np.int32)
     top_arr = np.zeros(length, dtype=np.float64)
     bottom_arr = np.zeros(length, dtype=np.float64)
@@ -302,7 +303,7 @@ def order_blocks(
     high_volume = np.zeros(length, dtype=np.float64)
     percentage = np.zeros(length, dtype=np.float64)
     mitigated_index = np.full(length, np.nan, dtype=np.float64)
-    breaker = np.full(length, False, dtype=bool)
+    breaker = np.full(length, fill_value=False, dtype=bool)
 
     swing_high_indices = np.flatnonzero(swing_hl == 1.0)
     swing_low_indices = np.flatnonzero(swing_hl == -1.0)
@@ -572,7 +573,7 @@ def _optional_index(value: float | None) -> int | None:
     """Return ``None`` for null/NaN index values, otherwise an ``int``."""
     if _is_missing(value):
         return None
-    return int(cast(Any, value))
+    return int(cast("Any", value))
 
 
 def _is_missing(value: object) -> bool:
@@ -580,7 +581,7 @@ def _is_missing(value: object) -> bool:
     if value is None:
         return True
     try:
-        return bool(np.isnan(cast(Any, value)))
+        return bool(np.isnan(cast("Any", value)))
     except (TypeError, ValueError):
         return False
 
@@ -610,10 +611,7 @@ def _fvg_invalidation_index(
     start = created_index + 2
     if start >= ohlc.height:
         return None
-    if direction == "long":
-        mask = low[start:] <= bottom
-    else:
-        mask = high[start:] >= top
+    mask = low[start:] <= bottom if direction == "long" else high[start:] >= top
     if not np.any(mask):
         return None
     return int(np.argmax(mask) + start)
@@ -634,11 +632,11 @@ def _fvg_fill_metrics(
         fill_pct = 0.0
     elif direction == "long":
         after_lows = frame["low"].slice(created_index + 1)
-        lowest = float(cast(Any, after_lows.min())) if after_lows.len() else float(top)
+        lowest = float(cast("Any", after_lows.min())) if after_lows.len() else float(top)
         fill_pct = (float(top) - lowest) / width
     else:
         after_highs = frame["high"].slice(created_index + 1)
-        highest = float(cast(Any, after_highs.max())) if after_highs.len() else float(bottom)
+        highest = float(cast("Any", after_highs.max())) if after_highs.len() else float(bottom)
         fill_pct = (highest - float(bottom)) / width
     fill_pct = max(0.0, min(1.0, fill_pct))
     fill_penalty = 0.75 if fill_pct > 0.50 else 1.0
@@ -668,10 +666,7 @@ def _order_block_touch_indices(
     intersects = (low[start:] <= top) & (high[start:] >= bottom)
     mitigation_index = int(np.argmax(intersects) + start) if np.any(intersects) else None
 
-    if direction == "long":
-        invalidation_mask = low[start:] < bottom
-    else:
-        invalidation_mask = high[start:] > top
+    invalidation_mask = low[start:] < bottom if direction == "long" else high[start:] > top
     invalidation_index = (
         int(np.argmax(invalidation_mask) + start) if np.any(invalidation_mask) else None
     )
@@ -692,10 +687,7 @@ def _liquidity_state(
     start = swept_index + 1
     if start >= ohlc.height:
         return "mitigated", None
-    if raw_direction > 0:
-        invalidation_mask = close[start:] > level
-    else:
-        invalidation_mask = close[start:] < level
+    invalidation_mask = close[start:] > level if raw_direction > 0 else close[start:] < level
     invalidation_index = (
         int(np.argmax(invalidation_mask) + start) if np.any(invalidation_mask) else None
     )
@@ -731,9 +723,10 @@ def latest_fvg_zone(
             continue
         low = min(top, bottom)
         high = max(top, bottom)
-        if current_price is not None:
-            if not ((low - touch_buffer) <= current_price <= (high + touch_buffer)):
-                continue
+        if current_price is not None and not (
+            (low - touch_buffer) <= current_price <= (high + touch_buffer)
+        ):
+            continue
         return SMCZone(
             kind="fvg",
             direction=direction,
@@ -746,7 +739,7 @@ def latest_fvg_zone(
             mitigation_index=mitigation_index,
             invalidation_index=invalidation_index,
             metadata=cast(
-                dict[str, float | int | str | None],
+                "dict[str, float | int | str | None]",
                 _fvg_fill_metrics(
                     frame, direction=direction, top=high, bottom=low, created_index=idx
                 ),
@@ -793,9 +786,10 @@ def latest_order_block(
             continue
         low = bottom
         high = top
-        if current_price is not None:
-            if not ((low - touch_buffer) <= current_price <= (high + touch_buffer)):
-                continue
+        if current_price is not None and not (
+            (low - touch_buffer) <= current_price <= (high + touch_buffer)
+        ):
+            continue
         return SMCZone(
             kind="order_block",
             direction=direction,
@@ -929,9 +923,10 @@ def latest_breaker_block(
             continue
         low = bottom
         high = top
-        if current_price is not None:
-            if not ((low - retest_buffer) <= current_price <= (high + retest_buffer)):
-                continue
+        if current_price is not None and not (
+            (low - retest_buffer) <= current_price <= (high + retest_buffer)
+        ):
+            continue
         trade_direction = "short" if direction == "long" else "long"
         return SMCZone(
             kind="breaker_block",
@@ -954,8 +949,8 @@ def latest_breaker_block(
 
 
 __all__ = [
-    "SMCZone",
     "SMCMode",
+    "SMCZone",
     "ZoneState",
     "bos_choch",
     "fvg",

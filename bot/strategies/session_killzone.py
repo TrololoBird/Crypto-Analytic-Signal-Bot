@@ -1,18 +1,19 @@
 from __future__ import annotations
 
-from ..domain.config import BotSettings
-from ..domain.schemas import PreparedSymbol, Signal
-from .roadmap_base import RoadmapSetup
-from ..setups.utils import get_dynamic_params
-
-
 import logging
 import math
-from datetime import datetime, timezone
-from typing import Any, cast
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
+from ..domain.strategies import StrategyDecision
 from ..features import _swing_points
 from ..setups import _build_signal, _compute_dynamic_score, _reject
+from ..setups.utils import get_dynamic_params
+from .roadmap_base import RoadmapSetup
+
+if TYPE_CHECKING:
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
 
 LOG = logging.getLogger(__name__)
 
@@ -78,7 +79,7 @@ _DEFAULT_KILLZONE_WINDOWS: tuple[tuple[str, int, int], ...] = (
 def _hour_param(params: dict[str, object], key: str, default: int) -> int:
     value = params.get(key, default)
     try:
-        hour = int(float(cast(Any, value)))
+        hour = int(float(cast("Any", value)))
     except (TypeError, ValueError):
         return default
     return max(0, min(hour, 24))
@@ -140,11 +141,11 @@ def _latest_bar_time_utc(prepared: PreparedSymbol) -> datetime:
         last_bar_time = frame.item(-1, "time")
         if isinstance(last_bar_time, datetime):
             return (
-                last_bar_time.replace(tzinfo=timezone.utc)
+                last_bar_time.replace(tzinfo=UTC)
                 if last_bar_time.tzinfo is None
-                else last_bar_time.astimezone(timezone.utc)
+                else last_bar_time.astimezone(UTC)
             )
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 __all__ = ["detect_session_killzone"]
@@ -152,7 +153,7 @@ __all__ = ["detect_session_killzone"]
 
 def detect_session_killzone(
     prepared: PreparedSymbol,
-    settings: BotSettings,
+    _settings: BotSettings,
     effective_params: dict[str, float],
     *,
     setup_id: str,
@@ -200,10 +201,8 @@ def detect_session_killzone(
         _reject(prepared, setup_id, "time_missing")
         return None
     now_utc = _latest_bar_time_utc(prepared)
-    session_name = _active_killzone_name(now_utc.hour, cast(dict[str, object], effective_params))
+    session_name = _active_killzone_name(now_utc.hour, cast("dict[str, object]", effective_params))
     if session_name is None:
-        from ..domain.strategies import StrategyDecision
-
         return StrategyDecision.skip(
             setup_id=setup_id,
             reason_code="schedule.outside_killzone",
@@ -258,8 +257,8 @@ def detect_session_killzone(
         )
         return None
 
-    bullish_bars = sum(1 for o, c in zip(opens, closes) if c > o)
-    bearish_bars = sum(1 for o, c in zip(opens, closes) if c < o)
+    bullish_bars = sum(1 for o, c in zip(opens, closes, strict=False) if c > o)
+    bearish_bars = sum(1 for o, c in zip(opens, closes, strict=False) if c < o)
 
     if bullish_bars >= 2:
         direction = "long"
@@ -420,7 +419,7 @@ def detect_session_killzone(
         killzone_range = session_high - session_low
         tp2 = session_low - killzone_range * 0.5 if killzone_range > 0 else None
 
-    # Validate: TP1 must be at least 1.5× risk distance.
+    # Validate: TP1 must be at least 1.5x risk distance.
     # If structural target is missing/too close, use deterministic RR fallback
     # instead of dropping an otherwise valid setup.
     min_required = risk * min_rr
@@ -497,7 +496,7 @@ class SessionKillzoneSetup(RoadmapSetup):
     confirmation_profile = "breakout_acceptance"
     required_context = ("futures_flow",)
 
-    DEFAULTS = {
+    DEFAULTS: ClassVar[dict[str, float]] = {
         **RoadmapSetup.DEFAULTS,
         "base_score": 0.55,
         "min_volume_ratio": 1.0,

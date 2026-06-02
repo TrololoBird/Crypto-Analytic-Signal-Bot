@@ -1,22 +1,24 @@
 from __future__ import annotations
 
-from ..domain.config import BotSettings
-from ..domain.schemas import PreparedSymbol, Signal
-from .roadmap_base import RoadmapSetup
-
+from typing import TYPE_CHECKING, ClassVar
 
 import polars as pl
 
+from ..domain.strategy_catalog import catalog_default_params
 from ._common import (
     SpecHit,
+    _latest_values,
     as_float,
+    build_spec_signal,
     finite_or_none,
     with_spec_columns,
-    _latest_values,
-    build_spec_signal,
 )
-from ..domain.strategy_catalog import catalog_default_params
 from ._roadmap import _build_atr_signal, _flow_delta_with_source, _last, _reject
+from .roadmap_base import RoadmapSetup
+
+if TYPE_CHECKING:
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
 
 __all__ = ["detect_absorption", "detect_absorption_prepared"]
 
@@ -177,7 +179,7 @@ class AbsorptionSetup(RoadmapSetup):
     family = "orderflow"
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)
-    DEFAULTS = {
+    DEFAULTS: ClassVar[dict[str, float]] = {
         **RoadmapSetup.DEFAULTS,
         "min_abs_flow_delta": 0.05,
         "min_close_position_long": 0.55,

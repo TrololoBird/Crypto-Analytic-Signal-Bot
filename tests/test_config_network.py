@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-import pytest
+from typing import TYPE_CHECKING
 
 from bot.domain.config import NetworkConfig, load_settings
+
+if TYPE_CHECKING:
+    import pytest
 
 
 def test_network_config_defaults() -> None:

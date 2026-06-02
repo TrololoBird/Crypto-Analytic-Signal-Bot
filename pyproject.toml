@@ -34,11 +34,7 @@ Repository = "https://github.com/TrololoBird/Crypto-Analytic-Signal-Bot"
 Issues = "https://github.com/TrololoBird/Crypto-Analytic-Signal-Bot/issues"
 
 [project.optional-dependencies]
-dev = [
-    "ruff==0.15.15",
-    "mypy>=2.1.0",
-    "pre-commit>=4.6.0",
-]
+dev = ["ruff==0.15.15", "mypy>=2.1.0", "pre-commit>=4.6.0"]
 live = [
     "fastapi>=0.136.3",
     "uvicorn[standard]>=0.48.0",
@@ -47,16 +43,8 @@ live = [
     "polars_ta>=0.5.17",
     "polars-ols>=0.3.5",
 ]
-test = [
-    "pytest>=9.0.3",
-    "pytest-asyncio>=1.4.0",
-    "pytest-cov>=7.1.0",
-]
-regime = [
-    "hmmlearn>=0.3.3",
-    "scikit-learn>=1.8.0",
-    "statsmodels>=0.14.6",
-]
+test = ["pytest>=9.0.3", "pytest-asyncio>=1.4.0", "pytest-cov>=7.1.0"]
+regime = ["hmmlearn>=0.3.3", "scikit-learn>=1.8.0", "statsmodels>=0.14.6"]
 # Offline ML experiments only — not imported by `python main.py`.
 ml = [
     "joblib>=1.5.3",
@@ -76,13 +64,62 @@ include = ["bot*"]
 [tool.ruff]
 target-version = "py314"
 line-length = 100
+exclude = [
+    ".git",
+    ".venv",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    "graphify-out",
+    "data",
+    "telemetry",
+    "build",
+    "dist",
+]
 
 [tool.ruff.lint]
-select = ["E9", "F63", "F7", "F82", "F821", "F822", "F823"]
+select = [
+    "E",
+    "W",
+    "F",
+    "I",
+    "UP",
+    "B",
+    "SIM",
+    "C4",
+    "RUF",
+    "ARG",
+    "LOG",
+    "ISC",
+    "ICN",
+    "G",
+    "INP",
+    "EM",
+    "RET",
+    "FBT",
+    "EXE",
+    "FA",
+    "PIE",
+    "PYI",
+    "FURB",
+    "PERF",
+    "TRY",
+    "PLC",
+    "PLE",
+    "PLW",
+    "DTZ",
+    "TCH",
+    "PTH",
+    "PT",
+    "ASYNC",
+    "BLE",
+    "NPY",
+    "PGH",
+    "RSE",
+]
+# No blanket ignores — fix violations in source (see reports/ruff_inventory_summary.md).
 
 [tool.ruff.lint.per-file-ignores]
-"bot/strategies/*.py" = ["F405", "E402"]
-"bot/strategies/_common.py" = ["F405"]
 
 [tool.mypy]
 python_version = "3.14"
@@ -91,6 +128,63 @@ strict = true
 ignore_missing_imports = true
 show_error_codes = true
 pretty = false
+# Full `mypy bot/` — strict; CI gates `scripts/run_mypy_critical.py`.
+
+[[tool.mypy.overrides]]
+module = "bot.dashboard.*"
+disallow_untyped_decorators = false
+disable_error_code = [
+    "no-any-return",
+    "union-attr",
+    "attr-defined",
+    "operator",
+    "arg-type",
+]
+
+[[tool.mypy.overrides]]
+module = "bot.market.data"
+disable_error_code = ["arg-type", "no-any-return", "var-annotated"]
+
+[[tool.mypy.overrides]]
+module = "bot.market.rest_frames"
+disable_error_code = ["arg-type"]
+
+[[tool.mypy.overrides]]
+module = "bot.market.rest_impl"
+disable_error_code = ["no-any-return", "return"]
+
+[[tool.mypy.overrides]]
+module = "bot.features.*"
+disable_error_code = ["arg-type", "call-overload"]
+
+[[tool.mypy.overrides]]
+module = "bot.strategies.*"
+disable_error_code = [
+    "arg-type",
+    "return-value",
+    "no-untyped-def",
+    "attr-defined",
+]
+
+[[tool.mypy.overrides]]
+module = "bot.setups.*"
+disable_error_code = ["arg-type", "dict-item"]
+
+[[tool.mypy.overrides]]
+module = "bot.runtime.market_context_updater"
+disable_error_code = ["union-attr", "arg-type"]
+
+[[tool.mypy.overrides]]
+module = "bot.persistence.*"
+disable_error_code = ["return-value", "index", "arg-type"]
+
+[[tool.mypy.overrides]]
+module = "bot.logging_config"
+disable_error_code = ["list-item"]
+
+[[tool.mypy.overrides]]
+module = "bot.delivery.tiers"
+disable_error_code = ["arg-type"]
 
 [tool.pydantic-mypy]
 init_forbid_extra = true
@@ -99,10 +193,6 @@ warn_required_dynamic_aliases = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = [
-    "live: hits Binance public API (requires network)",
-]
+markers = ["live: hits Binance public API (requires network)"]
 asyncio_mode = "auto"
-filterwarnings = [
-    "ignore::DeprecationWarning",
-]
+filterwarnings = ["ignore::DeprecationWarning"]

@@ -2,19 +2,19 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import logging
 import math
-from typing import Any
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
-
-from ..domain.config import BotSettings
 from ..features import _swing_points
-from ..domain.schemas import PreparedSymbol, Signal
 
+if TYPE_CHECKING:
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
 
 LOG = logging.getLogger("bot.scoring")
-_FUNDING_DEFAULT_WARNING_EMITTED = False
+_FUNDING_DEFAULT_WARNING_STATE: dict[str, bool] = {"emitted": False}
 _DEFAULT_FUNDING_RATE_EXTREME = 0.001
 _DEFAULT_FUNDING_RATE_MODERATE = 0.0005
 
@@ -100,7 +100,7 @@ def _structure_clarity(prepared: PreparedSymbol, signal: Signal) -> float:
         return 0.0
     touches = 0
     tail_df = prepared.work_1h.tail(24)
-    for low, high in zip(tail_df["low"], tail_df["high"]):
+    for low, high in zip(tail_df["low"], tail_df["high"], strict=False):
         low_f = float(low or 0.0)
         high_f = float(high or 0.0)
         if low_f <= level + zone_width and high_f >= level - zone_width:
@@ -122,7 +122,7 @@ def _oi_momentum(prepared: PreparedSymbol, signal: Signal) -> float:
     oi_chg = prepared.oi_change_pct
     if oi_chg is None:
         return 0.0  # OI momentum score: no OI data means neutral component contribution.
-    elif oi_chg >= 0.10:
+    if oi_chg >= 0.10:
         oi_score = 1.0
     elif oi_chg >= 0.05:
         oi_score = 0.75
@@ -220,15 +220,14 @@ def _funding_contrarian(prepared: PreparedSymbol, signal: Signal, settings: BotS
     scoring_cfg = getattr(settings, "scoring", None)
     extreme = getattr(scoring_cfg, "funding_rate_extreme", None)
     moderate = getattr(scoring_cfg, "funding_rate_moderate", None)
-    global _FUNDING_DEFAULT_WARNING_EMITTED
     if extreme is None or moderate is None:
-        if not _FUNDING_DEFAULT_WARNING_EMITTED:
+        if not _FUNDING_DEFAULT_WARNING_STATE["emitted"]:
             LOG.warning(
                 "funding scoring thresholds missing; using defaults extreme=%.6f moderate=%.6f",
                 _DEFAULT_FUNDING_RATE_EXTREME,
                 _DEFAULT_FUNDING_RATE_MODERATE,
             )
-            _FUNDING_DEFAULT_WARNING_EMITTED = True
+            _FUNDING_DEFAULT_WARNING_STATE["emitted"] = True
         extreme = _DEFAULT_FUNDING_RATE_EXTREME if extreme is None else extreme
         moderate = _DEFAULT_FUNDING_RATE_MODERATE if moderate is None else moderate
     extreme = max(float(extreme), 1e-9)
@@ -343,7 +342,7 @@ def _gap_score(gap: float | None, direction: str, *, contrarian: bool) -> float:
     return 0.5
 
 
-def _crowd_position(prepared: PreparedSymbol, signal: Signal, settings: BotSettings) -> float:
+def _crowd_position(prepared: PreparedSymbol, signal: Signal, _settings: BotSettings) -> float:
     contrarian_mode = (
         signal.strategy_family == "reversal"
         or signal.confirmation_profile == "countertrend_exhaustion"

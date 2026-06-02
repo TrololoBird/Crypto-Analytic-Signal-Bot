@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from .base import AbstractStrategy
 from ..domain.strategies import StrategyMetadata
+
+if TYPE_CHECKING:
+    from .base import AbstractStrategy
 
 LOG = logging.getLogger("bot.engine.registry")
 __all__ = ["StrategyMetadata", "StrategyRegistry"]
@@ -29,7 +31,7 @@ class StrategyRegistry:
         self._performance: dict[str, dict[str, Any]] = {}
         self._lock = threading.RLock()
 
-    def register(self, strategy: AbstractStrategy, enabled: bool = True) -> None:
+    def register(self, strategy: AbstractStrategy, *, enabled: bool = True) -> None:
         """Register a strategy instance.
 
         Args:
@@ -125,7 +127,7 @@ class StrategyRegistry:
         return True
 
     def record_performance(
-        self, strategy_id: str, calculation_ms: float, error: bool = False
+        self, strategy_id: str, calculation_ms: float, *, error: bool = False
     ) -> None:
         """Record performance metrics for a strategy."""
         with self._lock:
@@ -154,23 +156,19 @@ class StrategyRegistry:
 
     def filter_by_tags(self, tags: list[str]) -> list[AbstractStrategy]:
         """Get strategies matching all specified tags."""
-        result = []
         with self._lock:
             strategies = tuple(self._strategies.values())
-        for strategy in strategies:
-            if all(tag in strategy.metadata.tags for tag in tags):
-                result.append(strategy)
-        return result
+        return [
+            strategy
+            for strategy in strategies
+            if all(tag in strategy.metadata.tags for tag in tags)
+        ]
 
     def filter_by_timeframe(self, timeframe: str) -> list[AbstractStrategy]:
         """Get strategies supporting specific timeframe."""
-        result = []
         with self._lock:
             strategies = tuple(self._strategies.values())
-        for strategy in strategies:
-            if timeframe in strategy.metadata.timeframes:
-                result.append(strategy)
-        return result
+        return [strategy for strategy in strategies if timeframe in strategy.metadata.timeframes]
 
     def clear(self) -> None:
         """Clear all registered strategies."""

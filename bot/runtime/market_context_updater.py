@@ -2,17 +2,19 @@ from __future__ import annotations
 
 import asyncio
 import html
+import itertools
 import logging
 import math
 import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
+from bot.core.runtime_errors import DEFENSIVE_EXC
 from bot.market.data import BinanceFuturesMarketData
-from bot.regime.market import MarketRegimeResult
-from bot.domain.schemas import UniverseSymbol
 
 if TYPE_CHECKING:
+    from bot.domain.schemas import UniverseSymbol
+    from bot.regime.market import MarketRegimeResult
     from bot.runtime.bot import SignalBot
 
 
@@ -35,7 +37,7 @@ class MarketContextUpdater:
                 if shortlist:
                     await self.update_memory_market_context(shortlist)
                     LOG.debug("market regime periodic update completed")
-            except Exception as exc:
+            except DEFENSIVE_EXC as exc:
                 LOG.debug("market regime periodic update failed: %s", exc)
             try:
                 await asyncio.wait_for(self._bot._shutdown.wait(), timeout=60)
@@ -56,15 +58,15 @@ class MarketContextUpdater:
                     await self.apply_public_guardrails(snapshot)
                     LOG.info(
                         "public intelligence updated | barrier_long=%s barrier_short=%s macro=%s",
-                        cast(dict[str, Any], snapshot.get("barrier") or {}).get(
+                        cast("dict[str, Any]", snapshot.get("barrier") or {}).get(
                             "long_barrier_triggered"
                         ),
-                        cast(dict[str, Any], snapshot.get("barrier") or {}).get(
+                        cast("dict[str, Any]", snapshot.get("barrier") or {}).get(
                             "short_barrier_triggered"
                         ),
-                        cast(dict[str, Any], snapshot.get("macro") or {}).get("risk_mode"),
+                        cast("dict[str, Any]", snapshot.get("macro") or {}).get("risk_mode"),
                     )
-            except Exception:
+            except DEFENSIVE_EXC:
                 LOG.exception("public intelligence update failed")
             try:
                 await asyncio.wait_for(
@@ -84,7 +86,7 @@ class MarketContextUpdater:
         if not open_rows:
             return
 
-        barrier = cast(dict[str, Any], snapshot.get("barrier") or {})
+        barrier = cast("dict[str, Any]", snapshot.get("barrier") or {})
         barrier_events = []
         closed_tracking_ids: set[str] = set()
 
@@ -148,7 +150,7 @@ class MarketContextUpdater:
                         [tracking_id],
                         reason="smart_exit",
                         occurred_at=datetime.now(UTC),
-                        note=";".join(cast(list[str], smart_exit.get("reasons") or [])[:6]),
+                        note=";".join(cast("list[str]", smart_exit.get("reasons") or [])[:6]),
                     )
                 )
 
@@ -194,9 +196,7 @@ class MarketContextUpdater:
                     ]
                 )
             )
-            benchmark_biases: dict[str, str] = {
-                symbol: "neutral" for symbol in configured_benchmarks
-            }
+            benchmark_biases: dict[str, str] = dict.fromkeys(configured_benchmarks, "neutral")
             if self._bot._ws_manager is not None:
                 for sym in configured_benchmarks:
                     benchmark_biases[sym] = self.compute_price_bias(sym)
@@ -267,7 +267,7 @@ class MarketContextUpdater:
             )
             macro_risk_mode = self._macro_proxy_mode(regime_result)
             if intelligence_snapshot:
-                macro_snapshot = cast(dict[str, Any], intelligence_snapshot.get("macro") or {})
+                macro_snapshot = cast("dict[str, Any]", intelligence_snapshot.get("macro") or {})
                 snapshot_mode = str(macro_snapshot.get("risk_mode") or "").strip()
                 if snapshot_mode and not snapshot_mode.startswith("disabled_"):
                     macro_risk_mode = snapshot_mode
@@ -302,7 +302,7 @@ class MarketContextUpdater:
                 shortlist=shortlist,
             )
 
-        except Exception:
+        except DEFENSIVE_EXC:
             LOG.exception("memory market context update failed")
 
     def _cached_kline_change_pct(self, symbol: str, interval: str) -> float | None:
@@ -450,7 +450,7 @@ class MarketContextUpdater:
                 self._bot.client.fetch_klines_cached(symbol, interval, limit=limit),
                 timeout=8.0,
             )
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.debug(
                 "market-state kline fetch failed | symbol=%s interval=%s error=%s",
                 symbol,
@@ -524,7 +524,7 @@ class MarketContextUpdater:
     @staticmethod
     def _returns(values: list[float]) -> list[float]:
         returns: list[float] = []
-        for left, right in zip(values, values[1:], strict=False):
+        for left, right in itertools.pairwise(values):
             if left > 0.0 and right > 0.0:
                 returns.append((right / left) - 1.0)
         return returns
@@ -612,16 +612,16 @@ class MarketContextUpdater:
         for label, corr in pairs:
             if label == "ETH":
                 if corr >= 0.65:
-                    narrative.append("ETH движется синхронно с BTC")
+                    narrative.append("ETH движется синхронно \u0441 BTC")
                 elif corr <= -0.35:
-                    narrative.append("ETH расходится с BTC")
+                    narrative.append("ETH расходится \u0441 BTC")
             if label == "ALTS":
                 if abs(corr) <= 0.25:
                     narrative.append("альт-бета распалась")
                 elif corr >= 0.60:
-                    narrative.append("альты синхронны с BTC")
+                    narrative.append("альты синхронны \u0441 BTC")
             if label in {"PAXG", "XAU", "XAG"} and corr >= 0.40:
-                narrative.append("металлы движутся вместе с BTC")
+                narrative.append("металлы движутся вместе \u0441 BTC")
         if not narrative:
             narrative.append("корреляции умеренные; рынок без одного доминирующего драйвера")
         return "corr 1h/7d proxy: " + " | ".join(rendered), " | ".join(dict.fromkeys(narrative))
@@ -668,7 +668,9 @@ class MarketContextUpdater:
                 "рынок поддерживает continuation/breakout long; short требует сильного свипа"
             )
         else:
-            practical = "рынок смешанный; приоритет сетапам с подтвержденной ликвидностью и объемом"
+            practical = (
+                "рынок смешанный; приоритет сетапам \u0441 подтвержденной ликвидностью и объемом"
+            )
 
         total_quote_volume = sum(self._ticker_quote_volume(row) for row in liquid_rows) or 1.0
         stable_bases = {"USDC", "BUSD", "FDUSD", "TUSD", "USDE", "DAI", "USDP", "PYUSD"}
@@ -836,7 +838,7 @@ class MarketContextUpdater:
         stats: dict[str, Any] = {}
         try:
             stats = await asyncio.wait_for(self._bot._modern_repo.get_tracking_stats(), timeout=1.0)
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.debug("market-state tracking stats unavailable: %s", exc)
 
         text = await self._build_market_state_text(
@@ -849,7 +851,7 @@ class MarketContextUpdater:
             await sender(text)
             self._last_market_state_alert_key = key
             self._last_market_state_alert_at = now
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.debug("market-state telegram update failed: %s", exc)
 
     def compute_price_bias(self, symbol: str) -> str:

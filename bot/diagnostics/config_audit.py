@@ -40,7 +40,7 @@ def _safe_int(value: Any, default: int = 0) -> int:
         return default
 
 
-def _safe_bool(value: Any, default: bool = False) -> bool:
+def _safe_bool(value: Any, *, default: bool = False) -> bool:
     if "unittest.mock" in type(value).__module__:
         return default
     return bool(value)
@@ -105,7 +105,7 @@ def audit_lanes_config(settings: Any) -> list[str]:
     if runtime is None:
         return warnings
 
-    lanes_enabled = _safe_bool(getattr(runtime, "enable_strategy_lanes", True), True)
+    lanes_enabled = _safe_bool(getattr(runtime, "enable_strategy_lanes", True), default=True)
     route_all = _safe_bool(getattr(runtime, "route_all_enabled_strategies", False))
     min_fam = _safe_int(getattr(runtime, "min_setup_families_per_symbol", 8), 8)
     target_fam = _safe_int(getattr(runtime, "target_setup_families_per_symbol", 12), 12)

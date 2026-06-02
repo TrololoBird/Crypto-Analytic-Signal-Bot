@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Sequence, Type
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 @dataclass(frozen=True, slots=True)
@@ -449,7 +452,7 @@ def intervals_for_catalog_entry(entry: CatalogEntry) -> tuple[str, ...]:
     )
 
 
-def verify_strategy_wiring(strategy_classes: Sequence[Type[Any]]) -> list[str]:
+def verify_strategy_wiring(strategy_classes: Sequence[type[Any]]) -> list[str]:
     errors: list[str] = []
     if len(strategy_classes) != len(CATALOG_ENTRIES):
         errors.append(
@@ -487,6 +490,6 @@ def verify_strategy_wiring(strategy_classes: Sequence[Type[Any]]) -> list[str]:
     return errors
 
 
-def wave_status(strategy_classes: Sequence[Type[Any]]) -> dict[int, bool]:
+def wave_status(strategy_classes: Sequence[type[Any]]) -> dict[int, bool]:
     registered = {getattr(c, "setup_id", "") for c in strategy_classes}
     return {wave: ids.issubset(registered) for wave, ids in PR10_WAVES.items()}

@@ -11,6 +11,16 @@ Rules:
 - Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
 - After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
 
+## Agent execution policy (sole executor)
+
+**User = architect / vibe coder only.** **Agent = all execution** (code, config, shells, cleanup, verification).
+
+- **Never** ask the user to run commands, edit config, install deps, close terminals, or “do X manually”.
+- **Always** finish what you start: `Await` background shells; reap zombies with `powershell -File scripts/reap_agent_terminals.ps1` (kill stale PIDs + write `exit_code` footers).
+- Proxy/network: `python scripts/discover_binance_proxies.py` + `probe_binance_access.py --all-configured` — agent maintains `[bot.network]`.
+
+Hard rule file: `.cursor/rules/agent-sole-executor.mdc` (`alwaysApply: true`).
+
 ## Cursor project config
 
 - Rules: `.cursor/rules/*.mdc` (guardrails, strategies, features, delivery)

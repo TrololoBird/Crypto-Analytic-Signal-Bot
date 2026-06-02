@@ -14,26 +14,28 @@ import argparse
 import json
 import statistics
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
+
+from bot.core.runtime_errors import DEFENSIVE_EXC
 
 
-def _read_jsonl(path: Path) -> List[Dict[str, Any]]:
-    rows: List[Dict[str, Any]] = []
+def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
     if not path or not path.exists():
         return rows
     with path.open("r", encoding="utf-8") as fh:
-        for line in fh:
-            line = line.strip()
-            if not line:
+        for raw_line in fh:
+            stripped = raw_line.strip()
+            if not stripped:
                 continue
             try:
-                rows.append(json.loads(line))
-            except Exception:
+                rows.append(json.loads(stripped))
+            except DEFENSIVE_EXC:
                 continue
     return rows
 
 
-def _find_file(run_dir: Path, names: List[str]) -> Optional[Path]:
+def _find_file(run_dir: Path, names: list[str]) -> Path | None:
     candidates = [run_dir / "raw", run_dir / "analysis", run_dir]
     for base in candidates:
         for name in names:
@@ -43,14 +45,14 @@ def _find_file(run_dir: Path, names: List[str]) -> Optional[Path]:
     return None
 
 
-def _aggregate(signals: List[Dict[str, Any]], outcomes: List[Dict[str, Any]]) -> Dict[str, Any]:
-    outcomes_by_signal: Dict[str, List[Dict[str, Any]]] = {}
+def _aggregate(signals: list[dict[str, Any]], outcomes: list[dict[str, Any]]) -> dict[str, Any]:
+    outcomes_by_signal: dict[str, list[dict[str, Any]]] = {}
     for o in outcomes:
         key = o.get("signal_id") or o.get("tracking_id") or o.get("tracking_ref")
         if key:
             outcomes_by_signal.setdefault(key, []).append(o)
 
-    per_setup: Dict[str, Dict[str, Any]] = {}
+    per_setup: dict[str, dict[str, Any]] = {}
     for s in signals:
         setup = s.get("setup_id") or s.get("strategy") or "<unknown>"
         rec = per_setup.setdefault(
@@ -69,29 +71,28 @@ def _aggregate(signals: List[Dict[str, Any]], outcomes: List[Dict[str, Any]]) ->
             try:
                 if o.get("pnl_r_multiple") is not None:
                     rec["pnls"].append(float(o.get("pnl_r_multiple") or 0.0))
-            except Exception:
+            except DEFENSIVE_EXC:
                 pass
 
-    for k, v in per_setup.items():
+    for v in per_setup.values():
         v["sl_rate"] = (v["stop_loss"] / v["outcomes"] * 100.0) if v["outcomes"] else None
         v["tp_rate"] = (v["tp"] / v["outcomes"] * 100.0) if v["outcomes"] else None
         v["avg_r"] = statistics.mean(v["pnls"]) if v["pnls"] else None
 
-    result_counts: Dict[str, int] = {}
+    result_counts: dict[str, int] = {}
     for o in outcomes:
         r = o.get("result") or "unknown"
         result_counts[r] = result_counts.get(r, 0) + 1
 
-    report = {
+    return {
         "total_signals": len(signals),
         "total_outcomes": len(outcomes),
         "result_counts": result_counts,
         "per_setup": per_setup,
     }
-    return report
 
 
-def _write_report(report: Dict[str, Any], out_json: Path, out_md: Path) -> None:
+def _write_report(report: dict[str, Any], out_json: Path, out_md: Path) -> None:
     with out_json.open("w", encoding="utf-8") as fh:
         json.dump(report, fh, indent=2, ensure_ascii=False)
 
@@ -114,10 +115,11 @@ def _write_report(report: Dict[str, Any], out_json: Path, out_md: Path) -> None:
             fh.write("\n")
 
 
-def analyze_run(run_dir: str | Path, out_dir: Optional[str | Path] = None) -> Tuple[str, str]:
+def analyze_run(run_dir: str | Path, out_dir: str | Path | None = None) -> tuple[str, str]:
     run_dir = Path(run_dir)
     if not run_dir.exists():
-        raise FileNotFoundError(f"run_dir not found: {run_dir}")
+        msg = f"run_dir not found: {run_dir}"
+        raise FileNotFoundError(msg)
 
     signals_path = _find_file(run_dir, ["signals.jsonl"]) or run_dir / "raw" / "signals.jsonl"
     outcomes_path = (

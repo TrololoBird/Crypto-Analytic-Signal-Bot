@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import ClassVar
 
 from ...persistence.repository import MemoryRepository, OutcomeRecord, SignalRecord
 
@@ -30,7 +31,7 @@ class OutcomeTracker:
     """
 
     # Time checkpoints for tracking (hours)
-    CHECKPOINTS = [1, 4, 24]
+    CHECKPOINTS: ClassVar[tuple[int, ...]] = (1, 4, 24)
 
     def __init__(self, repository: MemoryRepository):
         self._repo = repository
@@ -73,7 +74,7 @@ class OutcomeTracker:
             )
 
         # Calculate time elapsed
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         elapsed_hours = (now - signal.created_at).total_seconds() / 3600
 
         # Update price checkpoints
@@ -97,10 +98,8 @@ class OutcomeTracker:
             outcome.mfe = max(outcome.mfe, pnl_pct) if pnl_pct > 0 else outcome.mfe
             outcome.mae = min(outcome.mae, pnl_pct) if pnl_pct < 0 else outcome.mae
 
-            if outcome.max_profit_pct < pnl_pct:
-                outcome.max_profit_pct = pnl_pct
-            if outcome.max_loss_pct > pnl_pct:
-                outcome.max_loss_pct = pnl_pct
+            outcome.max_profit_pct = max(outcome.max_profit_pct, pnl_pct)
+            outcome.max_loss_pct = min(outcome.max_loss_pct, pnl_pct)
 
         # Check TP/SL hits
         self._check_targets(outcome, signal, current_price, current_high, current_low)
@@ -120,16 +119,16 @@ class OutcomeTracker:
 
         if signal.direction == "long":
             return (current_price - signal.entry_price) / signal.entry_price * 100
-        else:  # short
-            return (signal.entry_price - current_price) / signal.entry_price * 100
+        # short
+        return (signal.entry_price - current_price) / signal.entry_price * 100
 
     def _check_targets(
         self,
         outcome: OutcomeRecord,
         signal: SignalRecord,
         price: float,
-        high: float | None,
-        low: float | None,
+        _high: float | None,
+        _low: float | None,
     ) -> None:
         """Check if TP or SL levels were hit."""
         if signal.direction == "long":
@@ -137,21 +136,21 @@ class OutcomeTracker:
             if not outcome.hit_tp1 and price >= signal.take_profit_1:
                 outcome.hit_tp1 = True
                 if outcome.time_to_tp1_min is None:
-                    elapsed = (datetime.now(timezone.utc) - signal.created_at).total_seconds() / 60
+                    elapsed = (datetime.now(UTC) - signal.created_at).total_seconds() / 60
                     outcome.time_to_tp1_min = int(elapsed)
 
             # Check TP2 hit
             if not outcome.hit_tp2 and price >= signal.take_profit_2:
                 outcome.hit_tp2 = True
                 if outcome.time_to_tp2_min is None:
-                    elapsed = (datetime.now(timezone.utc) - signal.created_at).total_seconds() / 60
+                    elapsed = (datetime.now(UTC) - signal.created_at).total_seconds() / 60
                     outcome.time_to_tp2_min = int(elapsed)
 
             # Check SL hit
             if not outcome.hit_sl and price <= signal.stop_loss:
                 outcome.hit_sl = True
                 if outcome.time_to_sl_min is None:
-                    elapsed = (datetime.now(timezone.utc) - signal.created_at).total_seconds() / 60
+                    elapsed = (datetime.now(UTC) - signal.created_at).total_seconds() / 60
                     outcome.time_to_sl_min = int(elapsed)
 
         else:  # short
@@ -159,24 +158,24 @@ class OutcomeTracker:
             if not outcome.hit_tp1 and price <= signal.take_profit_1:
                 outcome.hit_tp1 = True
                 if outcome.time_to_tp1_min is None:
-                    elapsed = (datetime.now(timezone.utc) - signal.created_at).total_seconds() / 60
+                    elapsed = (datetime.now(UTC) - signal.created_at).total_seconds() / 60
                     outcome.time_to_tp1_min = int(elapsed)
 
             # Check TP2 hit
             if not outcome.hit_tp2 and price <= signal.take_profit_2:
                 outcome.hit_tp2 = True
                 if outcome.time_to_tp2_min is None:
-                    elapsed = (datetime.now(timezone.utc) - signal.created_at).total_seconds() / 60
+                    elapsed = (datetime.now(UTC) - signal.created_at).total_seconds() / 60
                     outcome.time_to_tp2_min = int(elapsed)
 
             # Check SL hit
             if not outcome.hit_sl and price >= signal.stop_loss:
                 outcome.hit_sl = True
                 if outcome.time_to_sl_min is None:
-                    elapsed = (datetime.now(timezone.utc) - signal.created_at).total_seconds() / 60
+                    elapsed = (datetime.now(UTC) - signal.created_at).total_seconds() / 60
                     outcome.time_to_sl_min = int(elapsed)
 
-    def _classify_result(self, outcome: OutcomeRecord, signal: SignalRecord) -> str:
+    def _classify_result(self, outcome: OutcomeRecord, _signal: SignalRecord) -> str:
         """Classify final outcome."""
         # Priority: SL hit = loss, TP hit = win
         if outcome.hit_sl:
@@ -189,7 +188,7 @@ class OutcomeTracker:
         if outcome.pnl_24h is not None:
             if outcome.pnl_24h > 0.5:  # > 0.5% profit
                 return "win"
-            elif outcome.pnl_24h < -0.5:  # > 0.5% loss
+            if outcome.pnl_24h < -0.5:  # > 0.5% loss
                 return "loss"
 
         return "breakeven"

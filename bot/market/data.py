@@ -5,26 +5,31 @@ import logging
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
-from ..domain.schemas import AggTrade, AggTradeSnapshot, SymbolFrames, SymbolMeta
+from .rate_limit import (
+    REST_WEIGHT_CRITICAL_LIMIT,
+    REST_WEIGHT_HARD_LIMIT,
+    REST_WEIGHT_SOFT_LIMIT,
+)
 
 # Avoid importing implementation modules at runtime to prevent circular imports.
 # Import concrete types only for type checking; provide lightweight runtime
 # fallbacks so other modules can reference `BinanceNetworkError` and
 # `BinanceClient` without importing `bot.infrastructure.binance_client` early.
 if TYPE_CHECKING:
-    from .rest import BinanceClient, BinanceNetworkError
+    from ..domain.schemas import AggTrade, AggTradeSnapshot, SymbolFrames, SymbolMeta
+    from .rest import BinanceClient
+    from .rest_impl import BinanceClientImpl
     from .ws import FuturesWSManager
 else:
-    BinanceNetworkError = Exception
     BinanceClient = Any
+    BinanceClientImpl = Any
 
 
-UTC = timezone.utc
 LOG = logging.getLogger("bot.market_data")
 
 # Constants imported by infrastructure layer (to avoid circular imports)
@@ -43,13 +48,13 @@ FORBIDDEN_PARAMS = frozenset(
 )
 _FORBIDDEN_PARAMS_LOWER = frozenset({k.lower() for k in FORBIDDEN_PARAMS})
 # Default matches runtime.max_concurrent_rest_requests; override via configure_rest_concurrency().
-_REST_GLOBAL_SEMAPHORE = asyncio.Semaphore(3)
+_REST_GLOBAL_SEMAPHORE_STATE: list[asyncio.Semaphore] = [asyncio.Semaphore(3)]
 
-from .rate_limit import (  # noqa: E402 — after module constants, before REST client wiring
-    REST_WEIGHT_HARD_LIMIT,
-    REST_WEIGHT_SOFT_LIMIT,
-    REST_WEIGHT_CRITICAL_LIMIT,
-)
+
+def rest_global_semaphore() -> asyncio.Semaphore:
+    """Return the process-wide REST concurrency gate (reconfigured at runtime)."""
+    return _REST_GLOBAL_SEMAPHORE_STATE[0]
+
 
 _REST_WEIGHT_SOFT_LIMIT = REST_WEIGHT_SOFT_LIMIT
 _REST_WEIGHT_HARD_LIMIT = REST_WEIGHT_HARD_LIMIT
@@ -58,9 +63,8 @@ _REST_WEIGHT_CRITICAL_LIMIT = REST_WEIGHT_CRITICAL_LIMIT
 
 def configure_rest_concurrency(max_concurrent: int) -> None:
     """Align global REST gate with BotSettings (Binance weight budget is separate)."""
-    global _REST_GLOBAL_SEMAPHORE
     limit = max(1, min(int(max_concurrent), 20))
-    _REST_GLOBAL_SEMAPHORE = asyncio.Semaphore(limit)
+    _REST_GLOBAL_SEMAPHORE_STATE[0] = asyncio.Semaphore(limit)
     LOG.info("rest_concurrency_configured | max_concurrent=%d", limit)
 
 
@@ -358,7 +362,7 @@ def _klines_to_frame(rows: Any) -> pl.DataFrame:
 
 
 def _unwrap_model(value: Any) -> Any:
-    if hasattr(value, "actual_instance") and getattr(value, "actual_instance") is not None:
+    if hasattr(value, "actual_instance") and value.actual_instance is not None:
         return value.actual_instance
     return value
 
@@ -371,7 +375,8 @@ def _coerce_rest_row(item: Any) -> Mapping[str, Any]:
         dumped = row.model_dump()
         if isinstance(dumped, Mapping):
             return dumped
-    raise TypeError(f"Unsupported REST row payload type: {type(item)!r}")
+    msg = f"Unsupported REST row payload type: {type(item)!r}"
+    raise TypeError(msg)
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
@@ -404,14 +409,15 @@ def _parse_depth_levels(raw_levels: Any, *, reverse: bool) -> tuple[tuple[float,
 def _validate_public_endpoint_registry() -> None:
     for operation, spec in _PUBLIC_ENDPOINT_REGISTRY.items():
         if not spec.path.startswith(_PUBLIC_PATH_PREFIXES):
-            raise ValueError(f"unsupported public endpoint path for {operation}: {spec.path}")
+            msg = f"unsupported public endpoint path for {operation}: {spec.path}"
+            raise ValueError(msg)
 
 
 class BinanceFuturesMarketData:
     def __init__(
         self,
         *,
-        binance_client: BinanceClient,
+        binance_client: BinanceClientImpl,
         ws_manager: FuturesWSManager | None = None,
     ) -> None:
         self._binance_client = binance_client
@@ -476,6 +482,20 @@ class BinanceFuturesMarketData:
     async def _fetch_book_ticker_rest_detail(self, symbol: str) -> dict[str, float | None]:
         return await self._binance_client._fetch_book_ticker_rest_detail(symbol)
 
+    async def _call_public_http_json(
+        self,
+        operation: str,
+        *,
+        params: dict[str, Any] | None = None,
+        symbol: str | None = None,
+    ) -> Any:
+        return await self._binance_client._call_public_http_json(
+            operation, params=params, symbol=symbol
+        )
+
+    async def _get_http_session(self) -> Any:
+        return await self._binance_client._get_http_session()
+
     async def fetch_funding_rate(self, symbol: str) -> float | None:
         return await self._binance_client.fetch_funding_rate(symbol)
 
@@ -531,15 +551,17 @@ class BinanceFuturesMarketData:
     async def close(self) -> None:
         await self._binance_client.close()
         if self._ws is not None:
-            await self._ws.close()
+            stop = getattr(self._ws, "stop", None)
+            if callable(stop):
+                await stop()
 
     def state_snapshot(self) -> dict[str, float | int | str | None]:
         # Combine state from both clients
         binance_state = self._binance_client.state_snapshot()
-        ws_state = {}
+        ws_state: dict[str, float | int | str | None] = {}
         if self._ws is not None:
             # Assuming WS manager has a similar state method
-            ws_state = getattr(self._ws, "state_snapshot", lambda: {})()
+            ws_state = getattr(self._ws, "state_snapshot", dict)()
 
         # Merge states (binance state takes precedence for conflicts)
         state = {**ws_state, **binance_state}
@@ -551,7 +573,9 @@ class BinanceFuturesMarketData:
     async def preflight_check(self) -> None:
         await self._binance_client.preflight_check()
         if self._ws is not None:
-            await self._ws.preflight_check()
+            preflight = getattr(self._ws, "preflight_check", None)
+            if callable(preflight):
+                await preflight()
 
     # Cache accessors - delegate to binance client
     def get_cached_oi_change(

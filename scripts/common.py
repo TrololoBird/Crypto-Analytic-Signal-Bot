@@ -4,10 +4,12 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import TYPE_CHECKING
 
 import structlog
 
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
 
 _COMMON_LOG = structlog.get_logger("scripts.common")
 

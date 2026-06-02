@@ -4,11 +4,14 @@ import logging
 import time
 from collections import Counter
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from ..engine import StrategyDecision
-from ..domain.schemas import PipelineResult, Signal
-from ..persistence.tracking import SignalTrackingEvent
+from bot.core.runtime_errors import DEFENSIVE_EXC
+
+if TYPE_CHECKING:
+    from ..domain.schemas import PipelineResult, Signal
+    from ..engine import StrategyDecision
+    from ..persistence.tracking import SignalTrackingEvent
 
 LOG = logging.getLogger("bot.runtime.telemetry_manager")
 _INDICATOR_COLUMNS = (
@@ -188,7 +191,7 @@ class TelemetryManager:
                     "raw_decision": row,
                 }
                 self._bot.telemetry.append_raw_jsonl("signals.jsonl", signal_row)
-            except Exception as exc:
+            except DEFENSIVE_EXC as exc:
                 LOG.debug("signals.jsonl write failed | symbol=%s error=%s", symbol, exc)
         if decision.status in {"reject", "error"}:
             key = f"{decision.setup_id}:{decision.reason_code}"
@@ -499,5 +502,5 @@ class TelemetryManager:
                 cycle_row=cycle_row,
                 funnel=funnel,
             )
-        except Exception:
+        except DEFENSIVE_EXC:
             LOG.debug("dashboard ws cycle notify failed", exc_info=True)

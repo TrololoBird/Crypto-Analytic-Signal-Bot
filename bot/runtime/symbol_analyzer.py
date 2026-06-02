@@ -2,12 +2,8 @@
 
 from __future__ import annotations
 
-from bot.runtime.analyzer.pipeline import (
-    AnalyzerContextMixin,
-    AnalyzerFramesMixin,
-    AnalyzerPipelineMixin,
-)
+from bot.runtime.analyzer.pipeline import AnalyzerPipelineMixin
 
 
-class SymbolAnalyzer(AnalyzerContextMixin, AnalyzerFramesMixin, AnalyzerPipelineMixin):
+class SymbolAnalyzer(AnalyzerPipelineMixin):
     """Per-symbol pipeline: frames → prepare → engine → filters."""

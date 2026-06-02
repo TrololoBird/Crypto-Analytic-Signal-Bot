@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-from ..domain.config import BotSettings
-from ..domain.schemas import PreparedSymbol, Signal
-from .roadmap_base import RoadmapSetup
-
+from typing import TYPE_CHECKING, ClassVar
 
 from ._roadmap import (
     _build_atr_signal,
@@ -11,13 +8,18 @@ from ._roadmap import (
     _last,
     _reject,
 )
+from .roadmap_base import RoadmapSetup
+
+if TYPE_CHECKING:
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
 
 __all__ = ["detect_multi_tf_trend"]
 
 
 def detect_multi_tf_trend(
     prepared: PreparedSymbol,
-    settings: BotSettings,
+    _settings: BotSettings,
     effective_params: dict[str, float],
     *,
     setup_id: str,
@@ -161,7 +163,7 @@ class MultiTFTrendSetup(RoadmapSetup):
     family = "continuation"
     confirmation_profile = "trend_follow"
     required_context = ("futures_flow",)
-    DEFAULTS = {
+    DEFAULTS: ClassVar[dict[str, float]] = {
         **RoadmapSetup.DEFAULTS,
         "min_adx_1h": 15.0,
         "min_volume_ratio": 0.90,

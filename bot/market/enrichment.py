@@ -4,21 +4,25 @@ import asyncio
 import json
 import math
 import time
-from collections.abc import Iterable
-from datetime import datetime, timezone
-from typing import Any, cast
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any, cast
 
 import aiohttp
 import polars as pl
 import structlog
 
-from ..domain.config import BotSettings
+from bot.core.runtime_errors import DEFENSIVE_EXC
+
 from ..features.prepare import _cached_prepare_frame, _swing_points, _to_polars
-from .data import BinanceFuturesMarketData
-from ..telemetry import TelemetryStore
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from ..domain.config import BotSettings
+    from ..telemetry import TelemetryStore
+    from .data import BinanceFuturesMarketData
 
 LOG = structlog.get_logger("bot.public_intelligence")
-UTC = timezone.utc
 _MACRO_TTL_S = 900.0
 _OPTIONAL_ZERO_COLUMNS: frozenset[str] = frozenset()
 
@@ -114,7 +118,7 @@ class PublicIntelligenceService:
                 self._collect_unbounded(shortlist_symbols),
                 timeout=30.0,  # seconds: keep one slow public source from blocking the cycle.
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             LOG.warning("intelligence_collect_timeout")
             return {}
 
@@ -191,10 +195,10 @@ class PublicIntelligenceService:
         direction = _normalize_direction(direction)
         feature_grid = await self._build_feature_grid(symbol)
         latest = self._latest_snapshot or {}
-        macro = cast(dict[str, Any], latest.get("macro") or {})
-        options = cast(dict[str, Any], latest.get("options") or {})
-        derivatives = cast(dict[str, Any], latest.get("derivatives") or {})
-        barrier = cast(dict[str, Any], latest.get("barrier") or {})
+        macro = cast("dict[str, Any]", latest.get("macro") or {})
+        options = cast("dict[str, Any]", latest.get("options") or {})
+        derivatives = cast("dict[str, Any]", latest.get("derivatives") or {})
+        barrier = cast("dict[str, Any]", latest.get("barrier") or {})
 
         if not feature_grid.get("available", False):
             return {
@@ -214,7 +218,7 @@ class PublicIntelligenceService:
             }
 
         macro_enabled = bool(macro.get("enabled", True))
-        features = cast(dict[str, float | None], feature_grid["features"])
+        features = cast("dict[str, float | None]", feature_grid["features"])
         reasons: list[str] = []
         votes = 0
         max_votes = 0
@@ -268,10 +272,12 @@ class PublicIntelligenceService:
                 _against_short(supertrend_dir, 0.0, f"{interval}_supertrend_positive")
 
         symbol_derivatives = cast(
-            dict[str, Any],
-            cast(dict[str, Any], derivatives.get("by_symbol") or {}).get(symbol) or {},
+            "dict[str, Any]",
+            cast("dict[str, Any]", derivatives.get("by_symbol") or {}).get(symbol) or {},
         )
-        benchmark_options = cast(dict[str, Any], options.get("by_underlying") or {}).get("BTC", {})
+        benchmark_options = cast("dict[str, Any]", options.get("by_underlying") or {}).get(
+            "BTC", {}
+        )
         put_call_ratio = _safe_float(benchmark_options.get("put_call_oi_ratio"))
         basis_pct = _safe_float(symbol_derivatives.get("basis_pct"))
         taker_ratio = _safe_float(symbol_derivatives.get("taker_ratio"))
@@ -346,7 +352,7 @@ class PublicIntelligenceService:
                     params=params_fn(symbol),
                     symbol=symbol,
                 )
-            except Exception as exc:
+            except DEFENSIVE_EXC as exc:
                 LOG.debug(
                     "public intelligence endpoint fetch failed",
                     endpoint=endpoint,
@@ -369,7 +375,7 @@ class PublicIntelligenceService:
         async def _fetch_one(symbol: str) -> Any:
             try:
                 return await fetcher(symbol)
-            except Exception as exc:
+            except DEFENSIVE_EXC as exc:
                 LOG.debug("public intelligence value fetch failed", symbol=symbol, error=str(exc))
                 return None
 
@@ -570,13 +576,13 @@ class PublicIntelligenceService:
         short_barrier_triggered = False
 
         window_minutes = int(self._settings.intelligence.hard_barrier_window_minutes)
-        limit = max(6, int(math.ceil(window_minutes / 5.0)) + 1)
+        limit = max(6, math.ceil(window_minutes / 5.0) + 1)
         for symbol in benchmark_symbols[
             : max(1, int(self._settings.intelligence.barrier_symbol_count))
         ]:
             try:
                 df = await self._client.fetch_klines_cached(symbol, "5m", limit=limit)
-            except Exception as exc:
+            except DEFENSIVE_EXC as exc:
                 LOG.debug("barrier frame fetch failed", symbol=symbol, error=str(exc))
                 continue
             if df is None or df.height < 2:
@@ -608,7 +614,7 @@ class PublicIntelligenceService:
         for symbol in symbols:
             try:
                 df = await self._client.fetch_klines_cached(symbol, "1h", limit=260)
-            except Exception as exc:
+            except DEFENSIVE_EXC as exc:
                 by_symbol[symbol] = {
                     "available": False,
                     "reason": "frame_fetch_failed",
@@ -737,7 +743,7 @@ class PublicIntelligenceService:
                     interval,
                     limit=interval_limits[interval],
                 )
-            except Exception as exc:
+            except DEFENSIVE_EXC as exc:
                 LOG.debug(
                     "multi-timeframe frame fetch failed",
                     symbol=symbol,
@@ -760,10 +766,10 @@ class PublicIntelligenceService:
 
         latest = self._latest_snapshot or {}
         derivatives_by_symbol = cast(
-            dict[str, Any],
-            cast(dict[str, Any], latest.get("derivatives") or {}).get("by_symbol") or {},
+            "dict[str, Any]",
+            cast("dict[str, Any]", latest.get("derivatives") or {}).get("by_symbol") or {},
         )
-        symbol_derivatives = cast(dict[str, Any], derivatives_by_symbol.get(symbol) or {})
+        symbol_derivatives = cast("dict[str, Any]", derivatives_by_symbol.get(symbol) or {})
         for key in (
             "funding_rate",
             "oi_current",
@@ -775,14 +781,14 @@ class PublicIntelligenceService:
         ):
             features[key] = _safe_float(symbol_derivatives.get(key))
 
-        macro = cast(dict[str, Any], latest.get("macro") or {})
+        macro = cast("dict[str, Any]", latest.get("macro") or {})
         features["macro_risk_off"] = 1.0 if str(macro.get("risk_mode") or "") == "risk_off" else 0.0
         features["macro_risk_on"] = 1.0 if str(macro.get("risk_mode") or "") == "risk_on" else 0.0
         options = cast(
-            dict[str, Any],
-            cast(dict[str, Any], latest.get("options") or {}).get("by_underlying") or {},
+            "dict[str, Any]",
+            cast("dict[str, Any]", latest.get("options") or {}).get("by_underlying") or {},
         )
-        btc_options = cast(dict[str, Any], options.get("BTC") or {})
+        btc_options = cast("dict[str, Any]", options.get("BTC") or {})
         features["btc_put_call_oi_ratio"] = _safe_float(btc_options.get("put_call_oi_ratio"))
         features["btc_gamma_balance_ratio"] = _safe_float(btc_options.get("gamma_balance_ratio"))
 
@@ -803,15 +809,15 @@ class PublicIntelligenceService:
         barrier: dict[str, Any],
         aggregates: dict[str, Any],
     ) -> dict[str, list[str]]:
-        confirmed_facts = list(cast(list[str], derivatives.get("confirmed_facts") or []))
-        confirmed_facts.extend(cast(list[str], options.get("confirmed_facts") or []))
-        confirmed_facts.extend(cast(list[str], macro.get("confirmed_facts") or []))
+        confirmed_facts = list(cast("list[str]", derivatives.get("confirmed_facts") or []))
+        confirmed_facts.extend(cast("list[str]", options.get("confirmed_facts") or []))
+        confirmed_facts.extend(cast("list[str]", macro.get("confirmed_facts") or []))
         if bool(barrier.get("long_barrier_triggered")) or bool(
             barrier.get("short_barrier_triggered")
         ):
             confirmed_facts.append("hard_barrier_threshold_breached_on_public_benchmark_data")
 
-        inferences = list(cast(list[str], options.get("inferences") or []))
+        inferences = list(cast("list[str]", options.get("inferences") or []))
         macro_enabled = bool(macro.get("enabled", True))
         macro_risk_mode = str(
             macro.get("risk_mode") or ("neutral_binance_proxy" if not macro_enabled else "normal")
@@ -819,11 +825,11 @@ class PublicIntelligenceService:
         if macro_enabled and macro_risk_mode != "normal":
             inferences.append(f"macro_risk_mode_{macro_risk_mode}")
         sentiment_label = str(
-            cast(dict[str, Any], aggregates.get("sentiment") or {}).get("label") or "neutral"
+            cast("dict[str, Any]", aggregates.get("sentiment") or {}).get("label") or "neutral"
         )
         inferences.append(f"aggregated_sentiment_{sentiment_label}")
 
-        assumptions = list(cast(list[str], options.get("assumptions") or []))
+        assumptions = list(cast("list[str]", options.get("assumptions") or []))
         assumptions.append(
             "fund_flows_are_public_derivatives_flow_proxies_not_custody_or_etf_settlement_flows"
         )
@@ -851,8 +857,8 @@ class PublicIntelligenceService:
         options: dict[str, Any],
         macro: dict[str, Any],
     ) -> dict[str, Any]:
-        by_symbol = cast(dict[str, Any], derivatives.get("by_symbol") or {})
-        by_underlying = cast(dict[str, Any], options.get("by_underlying") or {})
+        by_symbol = cast("dict[str, Any]", derivatives.get("by_symbol") or {})
+        by_underlying = cast("dict[str, Any]", options.get("by_underlying") or {})
         macro_mode = str(macro.get("risk_mode") or "normal")
 
         taker_values = [_safe_float(row.get("taker_ratio")) for row in by_symbol.values()]
@@ -873,8 +879,8 @@ class PublicIntelligenceService:
             "oi_change_pct_avg": _avg(oi_change_values),
             "flow_regime": "neutral",
         }
-        taker_avg = cast(float | None, flows["taker_ratio_avg"])
-        oi_avg = cast(float | None, flows["oi_change_pct_avg"])
+        taker_avg = cast("float | None", flows["taker_ratio_avg"])
+        oi_avg = cast("float | None", flows["oi_change_pct_avg"])
 
         if taker_avg is not None and oi_avg is not None:
             if taker_avg > 1.02 and oi_avg > 0:
@@ -888,7 +894,7 @@ class PublicIntelligenceService:
             "basis_pct_avg": _avg(basis_values),
             "basis_regime": "flat",
         }
-        basis_avg = cast(float | None, basis["basis_pct_avg"])
+        basis_avg = cast("float | None", basis["basis_pct_avg"])
         if basis_avg is not None:
             if basis_avg > 0.02:
                 basis["basis_regime"] = "contango"
@@ -899,7 +905,7 @@ class PublicIntelligenceService:
             "oi_change_pct_avg": _avg(oi_change_values),
             "oi_momentum": "flat",
         }
-        oi_momentum_avg = cast(float | None, oi["oi_change_pct_avg"])
+        oi_momentum_avg = cast("float | None", oi["oi_change_pct_avg"])
         if oi_momentum_avg is not None:
             if oi_momentum_avg > 0.5:
                 oi["oi_momentum"] = "expanding"
@@ -943,17 +949,17 @@ class PublicIntelligenceService:
             },
         }
 
-    async def _fetch_options_exchange_info(self, underlying_asset: str) -> list[dict[str, Any]]:
+    async def _fetch_options_exchange_info(self, _underlying_asset: str) -> list[dict[str, Any]]:
         return []
 
     async def _fetch_options_open_interest(
         self,
-        underlying_asset: str,
-        expiry_code: str,
+        _underlying_asset: str,
+        _expiry_code: str,
     ) -> list[dict[str, Any]]:
         return []
 
-    async def _fetch_options_mark_rows(self, underlying: str) -> list[dict[str, Any]]:
+    async def _fetch_options_mark_rows(self, _underlying: str) -> list[dict[str, Any]]:
         return []
 
     async def _fetch_yahoo_chart_snapshot(self, symbol: str) -> dict[str, Any] | None:
@@ -975,11 +981,11 @@ class PublicIntelligenceService:
                     ),
                 },
             )
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.debug("yahoo_fetch_failed", extra={"symbol": symbol, "exc": str(exc)})
             return None
         result_rows = (
-            cast(dict[str, Any], payload.get("chart") or {}).get("result")
+            cast("dict[str, Any]", payload.get("chart") or {}).get("result")
             if isinstance(payload, dict)
             else None
         )
@@ -994,8 +1000,8 @@ class PublicIntelligenceService:
             return snapshot
 
         result = result_rows[0]
-        meta = cast(dict[str, Any], result.get("meta") or {})
-        indicators = cast(dict[str, Any], result.get("indicators") or {})
+        meta = cast("dict[str, Any]", result.get("meta") or {})
+        indicators = cast("dict[str, Any]", result.get("indicators") or {})
         quote_rows = indicators.get("quote") if isinstance(indicators, dict) else None
         close_values = (
             quote_rows[0].get("close") if quote_rows and isinstance(quote_rows[0], dict) else []
@@ -1008,7 +1014,7 @@ class PublicIntelligenceService:
             previous = closes[-2]
         change_pct = None
         if current is not None and previous not in (None, 0.0):
-            change_pct = ((current / cast(float, previous)) - 1.0) * 100.0
+            change_pct = ((current / cast("float", previous)) - 1.0) * 100.0
 
         snapshot = {
             "available": True,
@@ -1034,9 +1040,11 @@ class PublicIntelligenceService:
         auth_url_markers = ("api" + "Key=", "signature=", "timestamp=")
         auth_param_keys = {"api" + "Key", "signature", "timestamp"}
         if any(p in url for p in auth_url_markers):
-            raise RuntimeError(f"Auth params detected in public URL: {url}")
+            msg = f"Auth params detected in public URL: {url}"
+            raise RuntimeError(msg)
         if params and any(str(key) in auth_param_keys for key in params):
-            raise RuntimeError(f"Auth params detected in public URL params: {url}")
+            msg = f"Auth params detected in public URL params: {url}"
+            raise RuntimeError(msg)
         session = await self._client._get_http_session()
         timeout = aiohttp.ClientTimeout(
             total=max(5.0, float(self._settings.ws.rest_timeout_seconds))
@@ -1060,7 +1068,8 @@ class PublicIntelligenceService:
                 if attempt >= 2:
                     raise
                 await asyncio.sleep(0.5 * (2**attempt))
-        raise RuntimeError("unreachable fetch retry state")
+        msg = "unreachable fetch retry state"
+        raise RuntimeError(msg)
 
     async def _write_latest_snapshot(self, snapshot: dict[str, Any]) -> None:
         latest_json = self._reports_dir / "latest_public_intelligence.json"
@@ -1103,26 +1112,31 @@ class PublicIntelligenceService:
         )
 
     def _render_markdown(self, snapshot: dict[str, Any]) -> str:
-        barrier = cast(dict[str, Any], snapshot.get("barrier") or {})
-        macro = cast(dict[str, Any], snapshot.get("macro") or {})
-        options = cast(dict[str, Any], snapshot.get("options") or {})
-        derivatives = cast(dict[str, Any], snapshot.get("derivatives") or {})
-        harmonic = cast(dict[str, Any], snapshot.get("harmonic") or {})
-        policy = cast(dict[str, Any], snapshot.get("policy") or {})
+        barrier = cast("dict[str, Any]", snapshot.get("barrier") or {})
+        macro = cast("dict[str, Any]", snapshot.get("macro") or {})
+        options = cast("dict[str, Any]", snapshot.get("options") or {})
+        derivatives = cast("dict[str, Any]", snapshot.get("derivatives") or {})
+        harmonic = cast("dict[str, Any]", snapshot.get("harmonic") or {})
+        policy = cast("dict[str, Any]", snapshot.get("policy") or {})
+        runtime_mode = snapshot.get("runtime_mode") or policy.get("runtime_mode") or "unknown"
+        source_policy = snapshot.get("source_policy") or policy.get("source_policy") or "unknown"
+        smart_exit_mode = (
+            snapshot.get("smart_exit_mode") or policy.get("smart_exit_mode") or "unknown"
+        )
+        gamma_semantics = (
+            snapshot.get("gamma_semantics") or policy.get("gamma_semantics") or "unknown"
+        )
 
         lines = [
             f"# Public Intelligence {snapshot['ts']}",
             "",
             "## Scope",
             "- Binance public USDⓈ-M futures endpoints only for runtime mode.",
-            f"- Runtime mode: `{snapshot.get('runtime_mode') or policy.get('runtime_mode') or 'unknown'}`.",
-            f"- Source policy: `{snapshot.get('source_policy') or policy.get('source_policy') or 'unknown'}`.",
+            f"- Runtime mode: `{runtime_mode}`.",
+            f"- Source policy: `{source_policy}`.",
+            (f"- Smart exit mode: `{smart_exit_mode}` analytical exit only; no order placement."),
             (
-                f"- Smart exit mode: `{snapshot.get('smart_exit_mode') or policy.get('smart_exit_mode') or 'unknown'}` "
-                "analytical exit only; no order placement."
-            ),
-            (
-                f"- Gamma semantics: `{snapshot.get('gamma_semantics') or policy.get('gamma_semantics') or 'unknown'}`; "
+                f"- Gamma semantics: `{gamma_semantics}`; "
                 "proxy only and not observed dealer inventory."
             ),
             "- Output optimized for bot telemetry and AI-agent debugging.",
@@ -1132,17 +1146,15 @@ class PublicIntelligenceService:
             "",
             "## Confirmed Facts",
         ]
-        for item in cast(list[str], snapshot.get("confirmed_facts") or []):
-            lines.append(f"- {item}")
+        lines.extend(
+            f"- {item}" for item in cast("list[str]", snapshot.get("confirmed_facts") or [])
+        )
         lines.extend(["", "## Inferences"])
-        for item in cast(list[str], snapshot.get("inferences") or []):
-            lines.append(f"- {item}")
+        lines.extend(f"- {item}" for item in cast("list[str]", snapshot.get("inferences") or []))
         lines.extend(["", "## Assumptions"])
-        for item in cast(list[str], snapshot.get("assumptions") or []):
-            lines.append(f"- {item}")
+        lines.extend(f"- {item}" for item in cast("list[str]", snapshot.get("assumptions") or []))
         lines.extend(["", "## Uncertainty"])
-        for item in cast(list[str], snapshot.get("uncertainty") or []):
-            lines.append(f"- {item}")
+        lines.extend(f"- {item}" for item in cast("list[str]", snapshot.get("uncertainty") or []))
         lines.extend(
             [
                 "",

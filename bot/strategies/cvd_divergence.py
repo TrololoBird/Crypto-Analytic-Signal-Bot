@@ -1,28 +1,25 @@
-"""cvd_divergence — detector in setups/detectors/."""
+"""cvd_divergence — canonical strategy detector."""
 
 from __future__ import annotations
 
-from ..domain.config import BotSettings
-from ..domain.schemas import PreparedSymbol, Signal
-from ..setups import _reject
 import logging
+import math
+from typing import TYPE_CHECKING, Any, ClassVar, cast
+
+from ..features import _swing_points
+from ..setups import _build_signal, _compute_dynamic_score, _reject
+from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
+from ._common import SpecHit, _pivot_rows, as_float, with_spec_columns
+
+if TYPE_CHECKING:
+    import polars as pl
+
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
 
 LOG = logging.getLogger("bot.strategies.cvd_divergence")
 
-from ..setups.spec_runtime import SpecDetectorSetup
-
-
-from typing import Any, cast
-
-import polars as pl
-
-from ..features import _swing_points
-from ._common import SpecHit, as_float, with_spec_columns, _pivot_rows
-
 __all__ = ["detect_cvd_divergence"]
-from ..setups import _build_signal, _compute_dynamic_score
-import math
-from ..setups.spec_runtime import run_setup_detection
 
 
 def detect_cvd_divergence(frame: pl.DataFrame, *, timeframe: str = "15m") -> SpecHit | None:
@@ -83,14 +80,13 @@ def _signed_delta_values(values: Any) -> Any:
 
 def _detect_cvd_divergence_extended(
     prepared: PreparedSymbol,
-    settings: BotSettings,
+    _settings: BotSettings,
     defaults: dict[str, float],
     effective: dict[str, float],
     setup_id: str,
     family: str,
 ) -> Signal | None:
     dynamic_params = effective
-    effective_params = {**defaults, **dynamic_params}
     divergence_lookback = int(
         dynamic_params.get("divergence_lookback", defaults["divergence_lookback"])
     )
@@ -145,7 +141,8 @@ def _detect_cvd_divergence_extended(
     if len(window_a) < 5 or len(window_b) < 5:
         _reject(prepared, setup_id, "cvd_window_too_short")
         return None
-    assert len(window_a) >= 5 and len(window_b) >= 5
+    assert len(window_a) >= 5
+    assert len(window_b) >= 5
     high_window_b = highs[-split:]
     low_window_b = lows[-split:]
     delta_a = delta_vals[-compare:-split]
@@ -162,8 +159,8 @@ def _detect_cvd_divergence_extended(
 
     price_hh = float(max(window_b)) > float(max(window_a))
     price_ll = float(min(window_b)) < float(min(window_a))
-    delta_mean_a = float(cast(Any, delta_a).mean())
-    delta_mean_b = float(cast(Any, delta_b).mean())
+    delta_mean_a = float(cast("Any", delta_a).mean())
+    delta_mean_b = float(cast("Any", delta_b).mean())
     delta_shift = delta_mean_b - delta_mean_a
 
     if math.isnan(delta_mean_a) or math.isnan(delta_mean_b):
@@ -337,9 +334,9 @@ def detect_cvd_divergence_setup(
 
 
 __all__ = [
+    "_detect_cvd_divergence_extended",
     "detect_cvd_divergence",
     "detect_cvd_divergence_setup",
-    "_detect_cvd_divergence_extended",
 ]
 
 
@@ -349,7 +346,7 @@ class CVDDivergenceSetup(SpecDetectorSetup):
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)
 
-    DEFAULTS = {
+    DEFAULTS: ClassVar[dict[str, float]] = {
         "base_score": 0.5,
         "divergence_lookback": 5,
         "delta_lookback": 3,

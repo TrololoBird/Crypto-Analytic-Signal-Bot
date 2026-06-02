@@ -1,14 +1,21 @@
-"""wick_trap_reversal — detector in setups/detectors/."""
+"""wick_trap_reversal — canonical strategy detector."""
 
 from __future__ import annotations
 
-from ..domain.config import BotSettings
-from ..setups.spec_runtime import SpecDetectorSetup
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, ClassVar
 
+from ..features import _swing_points
+from ..setups import _build_signal, _compute_dynamic_score, _last_swing_prices, _reject
+from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
+from ..setups.utils import normalize_trade_levels
+from ._common import SpecHit, _latest_values, with_spec_columns
 
-import polars as pl
+if TYPE_CHECKING:
+    import polars as pl
 
-from ._common import SpecHit, with_spec_columns, _latest_values
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
 
 __all__ = ["detect_wick_trap"]
 
@@ -57,15 +64,6 @@ def detect_wick_trap(frame: pl.DataFrame, *, timeframe: str = "15m") -> SpecHit 
 
 detect_wick_trap_reversal = detect_wick_trap
 
-"""wick_trap_reversal — extended 1h swing sweep detection."""
-from datetime import datetime, timezone
-
-from ..domain.schemas import PreparedSymbol, Signal
-from ..features import _swing_points
-from ..setups import _build_signal, _compute_dynamic_score, _last_swing_prices, _reject
-from ..setups.spec_runtime import run_setup_detection
-from ..setups.utils import normalize_trade_levels
-
 
 def _as_float(value: object, default: float = 0.0) -> float:
     if isinstance(value, bool):
@@ -78,12 +76,12 @@ def _as_float(value: object, default: float = 0.0) -> float:
 def _to_utc(dt: datetime | None) -> datetime | None:
     if dt is None:
         return None
-    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
 def _detect_wick_trap_reversal_extended(
     prepared: PreparedSymbol,
-    settings: BotSettings,
+    _settings: BotSettings,
     defaults: dict[str, float],
     effective: dict[str, float],
     setup_id: str,
@@ -392,9 +390,9 @@ def detect_wick_trap_reversal_setup(
 
 
 __all__ = [
+    "_detect_wick_trap_reversal_extended",
     "detect_wick_trap",
     "detect_wick_trap_reversal_setup",
-    "_detect_wick_trap_reversal_extended",
 ]
 
 
@@ -404,7 +402,7 @@ class WickTrapReversalSetup(SpecDetectorSetup):
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)
 
-    DEFAULTS = {
+    DEFAULTS: ClassVar[dict[str, float]] = {
         "base_score": 0.55,
         "bias_mismatch_penalty": 0.75,
         "tp_too_close_penalty": 0.75,

@@ -4,20 +4,23 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from enum import Enum
-from typing import Any, Callable
 from collections import deque
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from enum import Enum
+from typing import TYPE_CHECKING, Any
 
-from .health import HealthStatus, ComponentHealth
+from .health import ComponentHealth, HealthStatus
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 LOG = logging.getLogger("bot.core.diagnostics.alerts")
 ALERT_THROTTLE_SECONDS = 300.0  # seconds: 5 minutes between identical alerts
 
 
 def _utcnow_naive() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 class AlertSeverity(Enum):
@@ -61,6 +64,7 @@ class AlertManager:
         self._recent_alerts: dict[str, datetime] = {}  # Alert ID -> last sent
         self._history: deque[Alert] = deque(maxlen=max_history)
         self._alert_count = 0
+        self._handler_tasks: set[asyncio.Task[None]] = set()
 
     def add_handler(self, handler: Callable[[Alert], None]) -> None:
         """Add notification handler."""
@@ -109,11 +113,13 @@ class AlertManager:
         for handler in self._handlers:
             try:
                 if asyncio.iscoroutinefunction(handler):
-                    asyncio.create_task(handler(alert))
+                    task = asyncio.create_task(handler(alert))
+                    self._handler_tasks.add(task)
+                    task.add_done_callback(self._handler_tasks.discard)
                 else:
                     handler(alert)
-            except Exception as exc:
-                LOG.error("Alert handler failed: %s", exc)
+            except Exception:
+                LOG.exception("Alert handler failed")
 
         LOG.info("Alert created: [%s] %s - %s", severity.value, component, message)
         return alert

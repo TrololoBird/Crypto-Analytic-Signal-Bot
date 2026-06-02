@@ -6,9 +6,12 @@ Lightweight forward-only migration registry.
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
-import aiosqlite
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    import aiosqlite
 
 LOG = logging.getLogger("bot.migrations")
 
@@ -73,7 +76,8 @@ async def _assert_integrity(conn: aiosqlite.Connection) -> None:
         row = await cursor.fetchone()
     status = str(row[0]) if row and row[0] is not None else "missing"
     if status != "ok":
-        raise RuntimeError(f"DB integrity check failed after migration: {status}")
+        msg = f"DB integrity check failed after migration: {status}"
+        raise RuntimeError(msg)
 
 
 async def migrate_db(conn: aiosqlite.Connection) -> int:

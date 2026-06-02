@@ -1,20 +1,22 @@
-"""structure_pullback — detector in setups/detectors/."""
+"""structure_pullback — canonical strategy detector."""
 
 from __future__ import annotations
 
-from ..domain.config import BotSettings
-from ..setups.spec_runtime import SpecDetectorSetup
+from typing import TYPE_CHECKING, ClassVar
 
+from ..features import _swing_points as _sp
+from ..setups import _build_signal, _compute_dynamic_score, _pullback_levels, _reject
+from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
+from ..setups.utils import select_structural_target
+from ._common import SpecHit, _clean_impulse, _latest_values, as_float, with_spec_columns
 
-import polars as pl
+if TYPE_CHECKING:
+    import polars as pl
 
-from ._common import SpecHit, as_float, with_spec_columns, _latest_values, _clean_impulse
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
 
 __all__ = ["detect_structure_pullback"]
-from ..domain.schemas import PreparedSymbol, Signal
-from ..setups import _build_signal, _compute_dynamic_score, _pullback_levels, _reject
-from ..setups.spec_runtime import run_setup_detection
-from ..setups.utils import select_structural_target
 
 
 def detect_structure_pullback(frame: pl.DataFrame, *, timeframe: str = "15m") -> SpecHit | None:
@@ -94,7 +96,7 @@ def _detect_structure_pullback_extended(
     settings: BotSettings,
     defaults: dict[str, float],
     effective: dict[str, float],
-    setup_id: str,
+    _setup_id: str,
     family: str,
 ) -> Signal | None:
     dynamic_params = effective
@@ -271,10 +273,15 @@ def _detect_structure_pullback_extended(
             local_high = _as_float(recent_pullback["high"].max(), prev_high)
             touched = max(prev_high, local_high) >= level - touch_tolerance
             bounced = trig_close < level
-        if touched and bounced:
-            if selected_level is None or abs(trig_close - level) < abs(trig_close - selected_level):
-                selected_level_name = level_name
-                selected_level = level
+        if (
+            touched
+            and bounced
+            and (
+                selected_level is None or abs(trig_close - level) < abs(trig_close - selected_level)
+            )
+        ):
+            selected_level_name = level_name
+            selected_level = level
 
     if selected_level is None or selected_level_name is None:
         _reject(prepared, "structure_pullback", "no_valid_pullback_level")
@@ -340,8 +347,6 @@ def _detect_structure_pullback_extended(
     reasons.append(f"limit_entry={price_anchor:.4f}")
 
     # --- Compute structural SL/TP ---
-    from ..features import _swing_points as _sp
-
     work_15m_tail = work_15m.tail(10)
     _sh15, _sl15 = _sp(work_15m_tail, n=2)
     sh_1h_mask, sl_1h_mask = _sp(work_1h, n=3, include_unconfirmed_tail=True)
@@ -351,7 +356,7 @@ def _detect_structure_pullback_extended(
         sh_4h_mask, sl_4h_mask = _sp(work_4h, n=2)
 
     if direction == "long":
-        # SL: below pullback swing low (last 3-5 15m bars) + 0.15×ATR noise buffer
+        # SL: below pullback swing low (last 3-5 15m bars) + 0.15xATR noise buffer
         last_10_lows = work_15m_tail["low"]
         sl_candidates = last_10_lows.filter(_sl15) if _sl15 is not None else last_10_lows
         fallback_low = work_15m.tail(5)["low"].min()
@@ -381,7 +386,7 @@ def _detect_structure_pullback_extended(
         else:
             tp2 = None
     else:
-        # SL: above pullback swing high + 0.4×ATR noise buffer
+        # SL: above pullback swing high + 0.4xATR noise buffer
         last_10_highs = work_15m_tail["high"]
         sh_candidates = last_10_highs.filter(_sh15) if _sh15 is not None else last_10_highs
         fallback_high = work_15m.tail(5)["high"].max()
@@ -411,7 +416,7 @@ def _detect_structure_pullback_extended(
         else:
             tp2 = None
 
-    # Validate: TP1 must be at least 1.5× risk distance, else reject setup
+    # Validate: TP1 must be at least 1.5x risk distance, else reject setup
     risk = abs(price_anchor - stop)
     if risk <= 0:
         _reject(prepared, "structure_pullback", "invalid_stop", stop=stop)
@@ -419,10 +424,7 @@ def _detect_structure_pullback_extended(
     min_rr_cfg = float(min_rr)
     min_required = risk * min_rr_cfg
     if tp1 is None or abs(tp1 - price_anchor) < min_required:
-        if direction == "long":
-            tp1 = price_anchor + min_required
-        else:
-            tp1 = price_anchor - min_required
+        tp1 = price_anchor + min_required if direction == "long" else price_anchor - min_required
         reasons.append("tp1_rr_fallback")
     if tp2 is None or abs(tp2 - price_anchor) <= abs(tp1 - price_anchor):
         tp2 = (
@@ -479,9 +481,9 @@ def detect_structure_pullback_setup(
 
 
 __all__ = [
+    "_detect_structure_pullback_extended",
     "detect_structure_pullback",
     "detect_structure_pullback_setup",
-    "_detect_structure_pullback_extended",
 ]
 
 
@@ -491,7 +493,7 @@ class StructurePullbackSetup(SpecDetectorSetup):
     confirmation_profile = "trend_follow"
     required_context = ("futures_flow",)
 
-    DEFAULTS = {
+    DEFAULTS: ClassVar[dict[str, float]] = {
         "base_score": 0.55,
         "bias_mismatch_penalty": 0.75,
         "tp_too_close_penalty": 0.75,

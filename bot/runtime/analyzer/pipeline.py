@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
-from dataclasses import replace
-
-from bot.core.runtime_errors import build_runtime_error_payload, classify_runtime_error
+from bot.core.runtime_errors import (
+    DEFENSIVE_EXC,
+    build_runtime_error_payload,
+    classify_runtime_error,
+)
 from bot.delivery.filters import apply_global_filters
-from bot.domain.strategies import StrategyDecision
 from bot.domain.schemas import (
     PipelineResult,
     PreparedSymbol,
@@ -17,23 +19,25 @@ from bot.domain.schemas import (
     SymbolFrames,
     UniverseSymbol,
 )
+from bot.domain.strategies import StrategyDecision
 from bot.features.prepare import prepare_symbol
 from bot.features.prepare_frame import min_required_bars
 from bot.market.data import BinanceFuturesMarketData, MarketDataUnavailable
-from bot.runtime_policy import is_deep_analysis_symbol
+from bot.runtime.analyzer._base import AnalyzerMixinBase
 from bot.runtime.analyzer.common import (
-    LOG,
     _DEGRADATION_ERRORS,
+    LOG,
     _apply_setup_score_adjustment,
     _attach_rejection_rollups,
     _history_fetch_limit,
 )
+from bot.runtime_policy import is_deep_analysis_symbol
 
 if TYPE_CHECKING:
     from bot.runtime.bot import SignalBot
 
 
-class AnalyzerContextMixin:
+class AnalyzerContextMixin(AnalyzerMixinBase):
     def __init__(self, bot: SignalBot) -> None:
         self._bot = bot
 
@@ -92,7 +96,10 @@ class AnalyzerContextMixin:
     ) -> None:
         LOG.log(
             level,
-            "enrichment degraded | symbol=%s stage=%s source=%s reason=%s fallback_used=%s exception_type=%s",
+            (
+                "enrichment degraded | symbol=%s stage=%s source=%s reason=%s "
+                "fallback_used=%s exception_type=%s"
+            ),
             symbol,
             stage,
             source,
@@ -130,7 +137,7 @@ class AnalyzerContextMixin:
             return None
         try:
             return getter(symbol, *args, **kwargs)
-        except self._DEGRADATION_ERRORS:
+        except _DEGRADATION_ERRORS:
             return None
 
     @staticmethod
@@ -529,7 +536,7 @@ class AnalyzerContextMixin:
         return False, f"5m_opposes_{signal.direction}", details
 
 
-class AnalyzerFramesMixin:
+class AnalyzerFramesMixin(AnalyzerContextMixin):
     async def fetch_frames(self, item: UniverseSymbol) -> SymbolFrames | None:
         symbol = item.symbol
         minimums = self._minimums()
@@ -618,11 +625,11 @@ class AnalyzerFramesMixin:
                     ask_qty=ask_qty,
                 )
 
-            return await cast(Any, self._bot.client.fetch_symbol_frames(symbol))
+            return await cast("Any", self._bot.client.fetch_symbol_frames(symbol))
         except MarketDataUnavailable as exc:
             LOG.info("frame fetch failed for %s: %s", symbol, exc)
             return None
-        except Exception:
+        except DEFENSIVE_EXC:
             LOG.exception("unexpected frame fetch failure for %s", symbol)
             raise
 
@@ -864,13 +871,13 @@ class AnalyzerFramesMixin:
             if basis_stats is not None:
                 premium_slope = basis_stats.get("premium_slope_5m")
                 if premium_slope is not None:
-                    enrichments["premium_slope_5m"] = float(cast(Any, premium_slope))
+                    enrichments["premium_slope_5m"] = float(cast("Any", premium_slope))
                 premium_zscore = basis_stats.get("premium_zscore_5m")
                 if premium_zscore is not None:
-                    enrichments["premium_zscore_5m"] = float(cast(Any, premium_zscore))
+                    enrichments["premium_zscore_5m"] = float(cast("Any", premium_zscore))
                 mark_spread = basis_stats.get("mark_index_spread_bps")
                 if mark_spread is not None:
-                    enrichments["mark_index_spread_bps"] = float(cast(Any, mark_spread))
+                    enrichments["mark_index_spread_bps"] = float(cast("Any", mark_spread))
             top = enrichments.get("ls_ratio")
             global_ls = enrichments.get("global_ls_ratio")
             if isinstance(top, (int, float)) and isinstance(global_ls, (int, float)):
@@ -916,7 +923,7 @@ class AnalyzerFramesMixin:
         return replace(item, last_price=next_last_price)
 
 
-class AnalyzerPipelineMixin:
+class AnalyzerPipelineMixin(AnalyzerFramesMixin):
     async def run_modern_analysis(
         self,
         item: UniverseSymbol,
@@ -924,6 +931,7 @@ class AnalyzerPipelineMixin:
         trigger: str = "modern_engine",
         event_ts: datetime | None = None,
         ws_enrichments: dict[str, Any] | None = None,
+        kline_interval: str | None = None,
     ) -> PipelineResult:
         """Run modern SignalEngine analysis for a symbol.
 
@@ -933,10 +941,12 @@ class AnalyzerPipelineMixin:
             PipelineResult compatible with legacy pipeline output
         """
         event_ts = event_ts or datetime.now(UTC)
+        funnel_kline_interval = str(kline_interval) if kline_interval else None
         candidates: list[Signal] = []
         rejected: list[dict[str, Any]] = []
         prepared: PreparedSymbol | None = None
         funnel: dict[str, Any] = {
+            "kline_interval": funnel_kline_interval,
             "shortlist_entered": True,
             "frame_rows": {},
             "frame_readiness": {},
@@ -1027,7 +1037,10 @@ class AnalyzerPipelineMixin:
                 }
             )
             LOG.info(
-                "%s: insufficient required history for analysis | 5m=%d/%d 15m=%d/%d 1h=%d/%d 4h=%d/%d",
+                (
+                    "%s: insufficient required history for analysis | 5m=%d/%d 15m=%d/%d "
+                    "1h=%d/%d 4h=%d/%d"
+                ),
                 item.symbol,
                 rows_5m,
                 minimums["5m"],
@@ -1071,7 +1084,7 @@ class AnalyzerPipelineMixin:
                 if prepared is not None and prepared.work_1h is not None
                 else 0,
             )
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             self._bot._prepare_error_count += 1
             error_payload = build_runtime_error_payload(
                 component="symbol_analyzer.prepare_symbol",
@@ -1125,7 +1138,7 @@ class AnalyzerPipelineMixin:
                     fallback_used="skip_ws_enrichment",
                     exception_type=type(exc).__name__,
                 )
-            except Exception as exc:
+            except DEFENSIVE_EXC as exc:
                 self._log_degradation(
                     level=logging.INFO,
                     symbol=item.symbol,
@@ -1177,7 +1190,7 @@ class AnalyzerPipelineMixin:
                     fallback_used="skip_multi_asset_context",
                     exception_type=type(exc).__name__,
                 )
-            except Exception as exc:
+            except DEFENSIVE_EXC as exc:
                 self._log_degradation(
                     level=logging.INFO,
                     symbol=item.symbol,
@@ -1222,7 +1235,7 @@ class AnalyzerPipelineMixin:
                 item.symbol,
                 len(signal_results),
             )
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             error_class = classify_runtime_error(exc)
             funnel["engine_error_class"] = error_class
             LOG.exception(
@@ -1408,6 +1421,7 @@ class AnalyzerPipelineMixin:
                 self._bot.settings,
                 self._bot.confluence,
             )
+            filter_reason: str | None
             if filter_result is None:
                 passed = False
                 filtered_signal = signal
@@ -1464,7 +1478,10 @@ class AnalyzerPipelineMixin:
             )
 
         LOG.info(
-            "%s: analysis complete | trigger=%s raw_strategies=%d signals_found=%d perf_rejected=%d candidates=%d",
+            (
+                "%s: analysis complete | trigger=%s raw_strategies=%d signals_found=%d "
+                "perf_rejected=%d candidates=%d"
+            ),
             item.symbol,
             trigger,
             len(signal_results),

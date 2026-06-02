@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import logging
 from types import SimpleNamespace
-
-import pytest
+from typing import TYPE_CHECKING
 
 from bot.diagnostics.config_audit import run_full_audit, run_startup_audit
 from bot.domain.config import BotSettings, DeliveryConfig, FilterConfig
+
+if TYPE_CHECKING:
+    import pytest
 
 
 def _settings(**overrides: object) -> BotSettings:

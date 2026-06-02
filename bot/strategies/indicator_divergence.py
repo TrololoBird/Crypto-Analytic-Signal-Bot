@@ -3,19 +3,21 @@
 from __future__ import annotations
 
 from ..setups.spec_runtime import SpecDetectorSetup
-
-
-import polars as pl
-
-from ._common import SpecHit, as_float, with_spec_columns, _pivot_rows
+from ._common import SpecHit, _pivot_rows, as_float, with_spec_columns
 
 __all__ = ["detect_regular_divergence"]
-from ..domain.config import BotSettings
-from ..domain.schemas import PreparedSymbol, Signal
-from ..setups import _build_signal, _compute_dynamic_score, _reject
-from ..features import _swing_points
 import math
+from typing import TYPE_CHECKING, ClassVar
+
+from ..features import _swing_points
+from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.spec_runtime import run_setup_detection
+
+if TYPE_CHECKING:
+    import polars as pl
+
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
 
 
 def detect_regular_divergence(
@@ -33,22 +35,25 @@ def detect_regular_divergence(
     lows = _pivot_rows(work, price_column="low", indicator_column="rsi14", pivot="low")
     if len(lows) >= 2:
         old, new = lows[-2], lows[-1]
-        if new["price"] < old["price"] and new["indicator"] > old["indicator"]:
-            if not require_oversold or min(old["indicator"], new["indicator"]) < 35.0:
-                strategy = "rsi_divergence_bottom" if require_oversold else "indicator_divergence"
-                return SpecHit(
-                    strategy=strategy,
-                    direction="long",
-                    entry=as_float(work.item(-1, "close")),
-                    stop_basis=new["price"],
-                    atr=atr,
-                    timeframe=timeframe,
-                    reasons=(
-                        f"regular_bullish_div price_ll={new['price']:.4f}",
-                        f"rsi_hl={new['indicator']:.1f}",
-                    ),
-                    rsi=as_float(work.item(-1, "rsi14"), 50.0),
-                )
+        if (
+            new["price"] < old["price"]
+            and new["indicator"] > old["indicator"]
+            and (not require_oversold or min(old["indicator"], new["indicator"]) < 35.0)
+        ):
+            strategy = "rsi_divergence_bottom" if require_oversold else "indicator_divergence"
+            return SpecHit(
+                strategy=strategy,
+                direction="long",
+                entry=as_float(work.item(-1, "close")),
+                stop_basis=new["price"],
+                atr=atr,
+                timeframe=timeframe,
+                reasons=(
+                    f"regular_bullish_div price_ll={new['price']:.4f}",
+                    f"rsi_hl={new['indicator']:.1f}",
+                ),
+                rsi=as_float(work.item(-1, "rsi14"), 50.0),
+            )
     highs = _pivot_rows(work, price_column="high", indicator_column="rsi14", pivot="high")
     if len(highs) >= 2 and not require_oversold:
         old, new = highs[-2], highs[-1]
@@ -99,13 +104,12 @@ def _swing_values(
 
 def _detect_indicator_divergence_extended(
     prepared: PreparedSymbol,
-    settings: BotSettings,
-    defaults: dict[str, float],
+    _settings: BotSettings,
+    _defaults: dict[str, float],
     effective: dict[str, float],
     setup_id: str,
     family: str,
 ) -> Signal | None:
-    dynamic_params = effective
     params = effective
     work = prepared.work_15m
     if work.height < 80:
@@ -285,9 +289,9 @@ def detect_indicator_divergence_setup(
 
 
 __all__ = [
-    "detect_regular_divergence",
-    "detect_indicator_divergence_setup",
     "_detect_indicator_divergence_extended",
+    "detect_indicator_divergence_setup",
+    "detect_regular_divergence",
 ]
 
 
@@ -298,7 +302,7 @@ class IndicatorDivergenceSetup(SpecDetectorSetup):
     required_context = ("futures_flow",)
     required_features = ("rsi14", "macd_hist", "obv", "delta_ratio")
 
-    DEFAULTS = {
+    DEFAULTS: ClassVar[dict[str, float]] = {
         "base_score": 0.53,
         "swing_lookback": 6.0,
         "min_price_delta_pct": 0.35,

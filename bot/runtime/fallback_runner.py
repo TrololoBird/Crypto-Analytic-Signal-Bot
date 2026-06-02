@@ -5,6 +5,8 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
+from bot.core.runtime_errors import DEFENSIVE_EXC
+
 LOG = logging.getLogger("bot.runtime.fallback_runner")
 
 
@@ -28,14 +30,14 @@ class FallbackRunner:
                 tracked_symbols = int(
                     snapshot.get("total_symbols") or snapshot.get("tracked_symbols") or 0
                 )
-            except Exception:
+            except DEFENSIVE_EXC:
                 LOG.debug("fallback health ws snapshot failed", exc_info=True)
         bus_depth = 0
         bus_stats = getattr(self._bot._bus, "stats", None)
         if callable(bus_stats):
             try:
                 bus_depth = int((bus_stats() or {}).get("current_depth") or 0)
-            except Exception:
+            except DEFENSIVE_EXC:
                 LOG.debug("fallback health bus stats failed", exc_info=True)
                 bus_depth = 0
         analysis_permits = int(getattr(self._bot._analysis_semaphore, "_value", 0))
@@ -58,8 +60,8 @@ class FallbackRunner:
                 tracking_events = await self._bot.tracker.review_open_signals(dry_run=False)
                 if tracking_events:
                     await self._bot._deliver_tracking(tracking_events)
-            except Exception as exc:
-                LOG.exception("tracking_review_periodic failed: %s", exc)
+            except DEFENSIVE_EXC:
+                LOG.exception("tracking_review_periodic failed")
 
     async def emergency_fallback_scan(self) -> None:
         fallback_sec = self._bot.settings.runtime.emergency_fallback_seconds
@@ -118,5 +120,5 @@ class FallbackRunner:
             )
             try:
                 await self._bot._run_emergency_cycle()
-            except Exception:
+            except DEFENSIVE_EXC:
                 LOG.exception("emergency fallback failed")

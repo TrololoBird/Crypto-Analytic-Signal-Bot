@@ -4,12 +4,22 @@
 from __future__ import annotations
 
 import argparse
-import sys
 import math
+import sys
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import TYPE_CHECKING
 
 import polars as pl
+
+from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.diagnostics.config_audit import run_startup_audit
+from bot.domain.config import load_settings
+from bot.domain.strategy_catalog import verify_strategy_wiring
+from bot.features import _add_advanced_indicators
+from bot.strategies import STRATEGY_CLASSES
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -116,14 +126,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     errors: list[str] = []
 
     try:
-        from bot.domain.config import load_settings
-
         config_path = Path(args.config)
         if not config_path.exists() and config_path.name != "config.toml":
             errors.append(f"Config file not found: {config_path}")
         settings = load_settings(config_path)
         settings.validate_for_runtime(require_telegram=settings.notifiers.provider == "telegram")
-    except Exception as exc:  # pragma: no cover - defensive CLI script
+    except DEFENSIVE_EXC as exc:  # pragma: no cover - defensive CLI script
         errors.append(f"Config validation failed: {exc}")
 
     symbols = _validate_symbols(_split_values(args.symbol), errors)
@@ -139,20 +147,15 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     # 2) Импорт экспортов стратегий + PR10 catalog wiring
     try:
-        from bot.strategies import STRATEGY_CLASSES
-        from bot.domain.strategy_catalog import verify_strategy_wiring
-
         if not STRATEGY_CLASSES:
             errors.append("No strategies exported via bot.strategies.STRATEGY_CLASSES")
         else:
             errors.extend(verify_strategy_wiring(STRATEGY_CLASSES))
-    except Exception as exc:  # pragma: no cover - defensive CLI script
+    except DEFENSIVE_EXC as exc:  # pragma: no cover - defensive CLI script
         errors.append(f"Strategy import failed: {exc}")
 
     # 3) Проверка advanced indicators на константные placeholder-профили
     try:
-        from bot.features import _add_advanced_indicators
-
         closes = [100.0 + math.sin(i / 4.0) * 3.0 + i * 0.02 for i in range(120)]
         df = pl.DataFrame(
             {
@@ -187,16 +190,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                     errors.append(
                         f"Indicator appears placeholder-like constant ({only_value}): {column}"
                     )
-    except Exception as exc:  # pragma: no cover - defensive CLI script
+    except DEFENSIVE_EXC as exc:  # pragma: no cover - defensive CLI script
         errors.append(f"Indicator validation failed: {exc}")
 
     if getattr(args, "startup_audit", False):
         try:
-            from bot.diagnostics.config_audit import run_startup_audit
-
             run_startup_audit(settings)
             print("  [OK] Startup config audit (warnings only, see logs)")
-        except Exception as exc:  # pragma: no cover - defensive CLI script
+        except DEFENSIVE_EXC as exc:  # pragma: no cover - defensive CLI script
             errors.append(f"Startup audit failed: {exc}")
 
     if errors:

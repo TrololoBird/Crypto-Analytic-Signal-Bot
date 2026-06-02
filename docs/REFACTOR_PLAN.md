@@ -87,7 +87,7 @@ See `pyproject.toml` — latest stable for all core/live/dev/test deps.
 |---|---|
 | `bot/features.py` + `features_*.py` | → `bot/features/` package: `core`, `trend`, `volatility`, `microstructure`, `prepare.py` |
 | `bot/application/symbol_analyzer.py` | 1557 → orchestration only; move prep to features |
-| `bot/strategies/spec_patterns.py` | 1613 → shared detectors in `bot/setups/detectors/` |
+| `bot/strategies/spec_patterns.py` | 1613 → merged into `bot/strategies/*` + `_common` (no `setups/detectors/`) |
 | `bot/core/memory/repository.py` | 2105 → split schema / queries / migrations |
 | `bot/dashboard.py` + `dashboard_live.py` | Single `bot/dashboard/app.py` + static/ |
 | `bot/tracking.py` + `outcomes.py` + `diary_store.py` + `journal.py` | → `bot/persistence/` |

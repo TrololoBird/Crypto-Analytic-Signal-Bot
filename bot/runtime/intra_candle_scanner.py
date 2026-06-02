@@ -4,9 +4,12 @@ import asyncio
 import logging
 import time
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from ..domain.events import BookTickerEvent
+from bot.core.runtime_errors import DEFENSIVE_EXC
+
+if TYPE_CHECKING:
+    from ..domain.events import BookTickerEvent
 
 LOG = logging.getLogger("bot.runtime.intra_candle_scanner")
 
@@ -113,7 +116,7 @@ class IntraCandleScanner:
                     ws_enrichments_override=ws_override,
                 )
                 LOG.debug("intra_candle scan complete | symbol=%s", symbol)
-            except Exception as exc:
+            except DEFENSIVE_EXC as exc:
                 LOG.debug("intra_candle scan failed for %s: %s", symbol, exc)
             finally:
                 self._bot._intra_inflight_symbols.discard(symbol)

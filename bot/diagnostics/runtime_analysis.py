@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import json
 from collections import Counter, defaultdict
-from pathlib import Path
-from typing import Any, Iterable
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+    from pathlib import Path
 
 
 def file_has_rows(path: Path) -> bool:

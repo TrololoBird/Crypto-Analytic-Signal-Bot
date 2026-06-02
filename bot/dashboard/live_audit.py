@@ -9,7 +9,10 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 JsonDict = dict[str, Any]
 _SEV_RANK = {"critical": 0, "warning": 1, "info": 2}
@@ -40,7 +43,7 @@ def _float(value: Any) -> float:
         return 0.0
 
 
-def _maybe(findings: list[AuditFinding], ok: bool, finding: AuditFinding) -> None:
+def _maybe(findings: list[AuditFinding], *, ok: bool, finding: AuditFinding) -> None:
     if not ok:
         findings.append(finding)
 
@@ -67,8 +70,8 @@ def _collect_findings(snap: Mapping[str, Any]) -> list[AuditFinding]:
 
     _maybe(
         out,
-        bool(ov.get("running", True)),
-        AuditFinding(
+        ok=bool(ov.get("running", True)),
+        finding=AuditFinding(
             "critical",
             "overview",
             "bot_not_running",
@@ -80,8 +83,8 @@ def _collect_findings(snap: Mapping[str, Any]) -> list[AuditFinding]:
     )
     _maybe(
         out,
-        not (dec_rows > 0 and dec_rate > 0 and last_c <= 0),
-        AuditFinding(
+        ok=not (dec_rows > 0 and dec_rate > 0 and last_c <= 0),
+        finding=AuditFinding(
             "warning",
             "overview",
             "raw_hits_not_selected",
@@ -97,8 +100,8 @@ def _collect_findings(snap: Mapping[str, Any]) -> list[AuditFinding]:
     )
     _maybe(
         out,
-        not (last_c > 0 and last_d <= 0),
-        AuditFinding(
+        ok=not (last_c > 0 and last_d <= 0),
+        finding=AuditFinding(
             "warning",
             "overview",
             "selection_delivery_gap",
@@ -123,8 +126,8 @@ def _collect_findings(snap: Mapping[str, Any]) -> list[AuditFinding]:
         )
     _maybe(
         out,
-        not (total_sl and total_sl < 30),
-        AuditFinding(
+        ok=not (total_sl and total_sl < 30),
+        finding=AuditFinding(
             "critical",
             "shortlist",
             "shortlist_too_small",
@@ -136,8 +139,8 @@ def _collect_findings(snap: Mapping[str, Any]) -> list[AuditFinding]:
     )
     _maybe(
         out,
-        not (dynamic_sl and dynamic_sl < 30),
-        AuditFinding(
+        ok=not (dynamic_sl and dynamic_sl < 30),
+        finding=AuditFinding(
             "warning",
             "shortlist",
             "dynamic_pool_small",
@@ -149,8 +152,8 @@ def _collect_findings(snap: Mapping[str, Any]) -> list[AuditFinding]:
     )
     _maybe(
         out,
-        not (total_sl and zero_fit > total_sl * 0.25),
-        AuditFinding(
+        ok=not (total_sl and zero_fit > total_sl * 0.25),
+        finding=AuditFinding(
             "critical",
             "shortlist",
             "strategy_routing_empty",
@@ -174,8 +177,8 @@ def _collect_findings(snap: Mapping[str, Any]) -> list[AuditFinding]:
         )
     _maybe(
         out,
-        not (cycles > 0 and detectors <= 0),
-        AuditFinding(
+        ok=not (cycles > 0 and detectors <= 0),
+        finding=AuditFinding(
             "critical",
             "funnel",
             "no_detector_runs",
@@ -187,8 +190,8 @@ def _collect_findings(snap: Mapping[str, Any]) -> list[AuditFinding]:
     )
     _maybe(
         out,
-        not (detectors > 0 and signal_rate <= 0.0),
-        AuditFinding(
+        ok=not (detectors > 0 and signal_rate <= 0.0),
+        finding=AuditFinding(
             "critical",
             "funnel",
             "zero_raw_signal_rate",
@@ -200,8 +203,8 @@ def _collect_findings(snap: Mapping[str, Any]) -> list[AuditFinding]:
     )
     _maybe(
         out,
-        not (detectors > 0 and candidates <= 0),
-        AuditFinding(
+        ok=not (detectors > 0 and candidates <= 0),
+        finding=AuditFinding(
             "warning",
             "funnel",
             "zero_post_filter_candidates",
@@ -213,8 +216,8 @@ def _collect_findings(snap: Mapping[str, Any]) -> list[AuditFinding]:
     )
     _maybe(
         out,
-        not (candidates > 0 and delivered <= 0),
-        AuditFinding(
+        ok=not (candidates > 0 and delivered <= 0),
+        finding=AuditFinding(
             "warning",
             "funnel",
             "candidate_delivery_gap",
@@ -439,8 +442,11 @@ def audit_snapshot(snapshot: Mapping[str, Any]) -> JsonDict:
         if not findings
         else " ".join(
             [
-                f"Live audit: {by_sev.get('critical', 0)} critical, {by_sev.get('warning', 0)} warning, "
-                f"health score {_health_score(findings)}/100.",
+                (
+                    f"Live audit: {by_sev.get('critical', 0)} critical, "
+                    f"{by_sev.get('warning', 0)} warning, "
+                    f"health score {_health_score(findings)}/100."
+                ),
                 f"Top finding: {top.area}/{top.code} - {top.title}" if top else "",
                 f"First action: {plan[0]}" if plan else "",
             ]

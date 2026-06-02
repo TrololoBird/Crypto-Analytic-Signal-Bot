@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from bot.domain.config import BotSettings
+if TYPE_CHECKING:
+    from bot.domain.config import BotSettings
 
 
 def light_scan_rows(

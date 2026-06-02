@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import os
-
-import pytest
+from typing import TYPE_CHECKING
 
 from bot.market.network_proxy import is_socks_proxy, mask_proxy_url, resolve_proxy_url
+
+if TYPE_CHECKING:
+    import pytest
 
 
 def test_resolve_proxy_prefers_config(monkeypatch: pytest.MonkeyPatch) -> None:

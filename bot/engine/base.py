@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-
-from ..domain.schemas import PreparedSymbol
 from ..domain.strategies import (
-    StrategyMetadata,
     SignalResult,
-    StrategyDecision as StrategyDecision,
+    StrategyDecision,
+    StrategyMetadata,
 )
+
+if TYPE_CHECKING:
+    from ..domain.schemas import PreparedSymbol
 
 __all__ = ["AbstractStrategy", "SignalResult", "StrategyDecision", "StrategyMetadata"]
 
@@ -56,7 +57,6 @@ class AbstractStrategy(ABC):
     @abstractmethod
     def metadata(self) -> StrategyMetadata:
         """Return strategy metadata for registration."""
-        pass
 
     @abstractmethod
     def calculate(self, prepared: PreparedSymbol) -> SignalResult:
@@ -68,7 +68,6 @@ class AbstractStrategy(ABC):
         Returns:
             SignalResult with signal or None if no setup
         """
-        pass
 
     def can_calculate(self, prepared: PreparedSymbol) -> bool:
         """Check if strategy can calculate with available data.
@@ -92,10 +91,7 @@ class AbstractStrategy(ABC):
         if _missing_required_features(prepared, tuple(metadata.required_features or ())):
             return False
 
-        if _missing_required_enrichment(prepared, tuple(metadata.required_enrichment or ())):
-            return False
-
-        return True
+        return not _missing_required_enrichment(prepared, tuple(metadata.required_enrichment or ()))
 
     def update_parameters(self, parameters: dict[str, Any]) -> None:
         """Hot-update strategy parameters from optimizer."""

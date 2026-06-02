@@ -10,7 +10,7 @@ import argparse
 import asyncio
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import structlog
@@ -31,7 +31,7 @@ class RuntimeMonitor:
     def __init__(self, log_dir: Path = Path("data/bot/logs")):
         self.log_dir = log_dir
         self._offsets: dict[Path, int] = {}
-        self.start_time = datetime.now()
+        self.start_time = datetime.now(UTC)
         self.stats = {
             "cycles": 0,
             "symbols_processed": set(),
@@ -55,7 +55,7 @@ class RuntimeMonitor:
 
         end_time = self.start_time + timedelta(seconds=duration_seconds)
 
-        while self.running and datetime.now() < end_time:
+        while self.running and datetime.now(UTC) < end_time:
             await self._collect_snapshot()
             await asyncio.sleep(poll_interval)
 
@@ -83,7 +83,7 @@ class RuntimeMonitor:
             lines = chunk.splitlines()
             self._parse_log_lines(lines)
         except Exception as exc:
-            LOG.error("Failed to read log", error=str(exc))
+            LOG.exception("Failed to read log", error=str(exc))
 
     def _parse_log_lines(self, lines: list[str]):
         """Parse log lines for statistics."""
@@ -95,7 +95,7 @@ class RuntimeMonitor:
         self.stats["delivered_total"] += parsed["delivered_total"]
         self.stats["rejected_total"] += parsed["rejected_total"]
 
-        now = datetime.now().isoformat()
+        now = datetime.now(UTC).isoformat()
         for item in parsed["symbols_with_candidates"]:
             self.stats["symbols_with_candidates"].append(
                 {
@@ -117,12 +117,12 @@ class RuntimeMonitor:
 
     async def _generate_report(self):
         """Generate final runtime report."""
-        runtime = datetime.now() - self.start_time
+        runtime = datetime.now(UTC) - self.start_time
 
         report = {
             "monitoring_session": {
                 "started_at": self.start_time.isoformat(),
-                "ended_at": datetime.now().isoformat(),
+                "ended_at": datetime.now(UTC).isoformat(),
                 "duration_seconds": runtime.total_seconds(),
             },
             "statistics": {

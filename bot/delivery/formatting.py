@@ -7,12 +7,17 @@ reason humanization, and preview validation.
 
 from __future__ import annotations
 
+import html
+import math
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-import html
-import re
-from typing import Any, Iterable, Mapping
+from typing import TYPE_CHECKING, Any
 
+from bot.coercion import as_float as _float
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Mapping
 
 TELEGRAM_TEXT_LIMIT = 4000
 TELEGRAM_SAFE_TEXT_LIMIT = 3900
@@ -276,18 +281,11 @@ def bold(value: object) -> str:
     return f"<b>{escape_text(value)}</b>"
 
 
-def _float(value: object, default: float = 0.0) -> float:
-    try:
-        return float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return default
-
-
 def _optional_float(value: object) -> float | None:
-    try:
-        return None if value is None else float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
+    if value is None:
         return None
+    numeric = _float(value, default=math.nan)
+    return None if not math.isfinite(numeric) else numeric
 
 
 def format_price(value: float | None) -> str:
@@ -364,7 +362,7 @@ def parse_datetime(value: object) -> datetime | None:
         parsed = value
     else:
         try:
-            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(str(value))
         except (TypeError, ValueError):
             return None
     if parsed.tzinfo is None:
@@ -594,7 +592,7 @@ def target_line(facts: SignalMessageFacts) -> str:
     )
     if same_tp:
         return f"TP {code(format_price(facts.take_profit_1))}"
-    weights = [int(round(max(0.0, weight) * 100.0)) for weight in facts.scale_weights]
+    weights = [round(max(0.0, weight) * 100.0) for weight in facts.scale_weights]
     return (
         f"TP1 {code(format_price(facts.take_profit_1))} "
         f"TP2 {code(format_price(facts.take_profit_2))} "
@@ -605,7 +603,7 @@ def target_line(facts: SignalMessageFacts) -> str:
 
 def entry_levels_line(facts: SignalMessageFacts) -> str:
     """Render DCA-compatible limit entry levels with explicit size shares."""
-    weights = [int(round(max(0.0, weight) * 100.0)) for weight in facts.scale_weights]
+    weights = [round(max(0.0, weight) * 100.0) for weight in facts.scale_weights]
     mid = (facts.entry_low + facts.entry_high) / 2.0
     if direction_label(facts.direction) == "SHORT":
         levels = [facts.entry_low, mid, facts.entry_high]
@@ -689,8 +687,9 @@ def format_signal_message(
     filters = compact_reason_list(facts.passed_filters, limit=policy.include_filter_limit)
     context = market_context_lines(facts)
 
+    tracking_ref = code("#" + facts.tracking_ref)
     lines = [
-        f"{bold('SIGNAL-ONLY PLAN')} {code(facts.symbol)} {code(direction)} {code('#' + facts.tracking_ref)}",
+        (f"{bold('SIGNAL-ONLY PLAN')} {code(facts.symbol)} {code(direction)} {tracking_ref}"),
         (
             f"{bold(setup_label(facts.setup_id))} {code(facts.timeframe)} | "
             f"score {code(format_score(facts.score))} {escape_text(confidence_label(facts.score))}"
@@ -703,7 +702,10 @@ def format_signal_message(
             f"{bold('Risk')} RR {code(f'{facts.risk_reward:.2f}')} | "
             f"stop {code(f'{facts.stop_distance_pct:.2f}%')}"
         ),
-        f"{bold('TTL')} {code(format_datetime(facts.valid_until))} - {escape_text(status_line_for_signal(facts))}",
+        (
+            f"{bold('TTL')} {code(format_datetime(facts.valid_until))} - "
+            f"{escape_text(status_line_for_signal(facts))}"
+        ),
     ]
     if reasons:
         lines.append(f"{bold('Why')} " + "; ".join(escape_text(item) for item in reasons))
@@ -744,7 +746,8 @@ def tracking_status_text(state: Any) -> str:
             f"{format_price(_optional_float(close_price))} on {format_datetime(closed_at)}"
         )
     if activated_at:
-        return f"active from {format_datetime(activated_at)} at {format_price(_optional_float(activation_price))}"
+        act_px = format_price(_optional_float(activation_price))
+        return f"active from {format_datetime(activated_at)} at {act_px}"
     return f"pending until {format_datetime(pending_expires_at)}"
 
 
@@ -752,10 +755,18 @@ def format_tracked_signal_message(tracked: Any) -> str:
     """Render an editable tracked signal card."""
     state = getattr(tracked, "tracked", tracked)
     facts = extract_signal_facts(state, pending_expiry_minutes=None)
+    tracking_ref = code("#" + facts.tracking_ref)
+    entry_span = format_price(facts.entry_low) + " - " + format_price(facts.entry_high)
     lines = [
-        f"{bold('SIGNAL STATUS')} {code(facts.symbol)} {code(direction_label(facts.direction))} {code('#' + facts.tracking_ref)}",
-        f"{bold(setup_label(facts.setup_id))} {code(facts.timeframe)} | score {code(format_score(facts.score))}",
-        f"{bold('Entry')} {code(format_price(facts.entry_low) + ' - ' + format_price(facts.entry_high))}",
+        (
+            f"{bold('SIGNAL STATUS')} {code(facts.symbol)} "
+            f"{code(direction_label(facts.direction))} {tracking_ref}"
+        ),
+        (
+            f"{bold(setup_label(facts.setup_id))} {code(facts.timeframe)} | "
+            f"score {code(format_score(facts.score))}"
+        ),
+        f"{bold('Entry')} {code(entry_span)}",
         f"{bold('Stop')} {code(format_price(facts.stop))}",
         f"{bold('Targets')} {target_line(facts)}",
         f"{bold('Status')} {escape_text(tracking_status_text(state))}",
@@ -773,11 +784,17 @@ def format_tracking_event_message(event: Any) -> str:
     title = TRACKING_TITLES.get(event_type, event_type.replace("_", " ").upper())
     price = _optional_float(getattr(event, "event_price", None))
     note = str(getattr(event, "note", "") or "").strip()
+    symbol = code(getattr(tracked, "symbol", ""))
+    direction = code(direction_label(getattr(tracked, "direction", "long")))
+    tracking_ref = code("#" + str(getattr(tracked, "tracking_ref", "")))
+    entry_low = format_price(_optional_float(getattr(tracked, "entry_low", None)))
+    entry_high = format_price(_optional_float(getattr(tracked, "entry_high", None)))
+    stop_px = format_price(_optional_float(getattr(tracked, "stop", None)))
     lines = [
-        f"{bold(title)} {code(getattr(tracked, 'symbol', ''))} {code(direction_label(getattr(tracked, 'direction', 'long')))} {code('#' + str(getattr(tracked, 'tracking_ref', '')))}",
+        f"{bold(title)} {symbol} {direction} {tracking_ref}",
         f"{bold('Time')} {code(format_datetime(getattr(event, 'occurred_at', None)))}",
         f"{bold('Price')} {code(format_price(price))}",
-        f"{bold('Plan')} entry {code(format_price(_optional_float(getattr(tracked, 'entry_low', None))) + ' - ' + format_price(_optional_float(getattr(tracked, 'entry_high', None))))} | stop {code(format_price(_optional_float(getattr(tracked, 'stop', None))))}",
+        (f"{bold('Plan')} entry {code(entry_low + ' - ' + entry_high)} | stop {code(stop_px)}"),
     ]
     if note:
         lines.append(f"{bold('Note')} {escape_text(note)}")
@@ -845,21 +862,21 @@ def sample_message_from_row(row: Mapping[str, Any]) -> str:
     for key, value in row.items():
         setattr(signal, key, value)
     if not hasattr(signal, "entry_low"):
-        setattr(signal, "entry_low", row.get("entry_price") or row.get("entry_mid") or 0.0)
+        signal.entry_low = row.get("entry_price") or row.get("entry_mid") or 0.0
     if not hasattr(signal, "entry_high"):
-        setattr(signal, "entry_high", row.get("entry_price") or row.get("entry_mid") or 0.0)
+        signal.entry_high = row.get("entry_price") or row.get("entry_mid") or 0.0
     if not hasattr(signal, "stop"):
-        setattr(signal, "stop", row.get("stop_price") or row.get("stop_loss") or 0.0)
+        signal.stop = row.get("stop_price") or row.get("stop_loss") or 0.0
     if not hasattr(signal, "take_profit_1"):
-        setattr(signal, "take_profit_1", row.get("tp1_price") or row.get("tp1") or 0.0)
+        signal.take_profit_1 = row.get("tp1_price") or row.get("tp1") or 0.0
     if not hasattr(signal, "take_profit_2"):
-        setattr(signal, "take_profit_2", row.get("tp2_price") or row.get("tp2") or 0.0)
+        signal.take_profit_2 = row.get("tp2_price") or row.get("tp2") or 0.0
     if not hasattr(signal, "timeframe"):
-        setattr(signal, "timeframe", row.get("timeframe") or "15m")
+        signal.timeframe = row.get("timeframe") or "15m"
     if not hasattr(signal, "tracking_ref"):
-        setattr(signal, "tracking_ref", row.get("tracking_ref") or "preview")
+        signal.tracking_ref = row.get("tracking_ref") or "preview"
     if not hasattr(signal, "created_at"):
-        setattr(signal, "created_at", row.get("ts") or datetime.now(UTC))
+        signal.created_at = row.get("ts") or datetime.now(UTC)
     return format_signal_message(signal, pending_expiry_minutes=180)
 
 

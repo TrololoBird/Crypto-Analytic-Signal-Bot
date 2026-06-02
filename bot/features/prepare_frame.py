@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 import importlib
+from datetime import UTC, date, datetime
 from importlib import util as importlib_util
-from datetime import date, datetime, timezone
-from collections.abc import Iterable
-from typing import Any, cast
-
-from ..domain.schemas import SymbolFrames
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import polars as pl
 import structlog
+
+from bot.core.runtime_errors import DEFENSIVE_EXC
 
 from . import advanced as _features_advanced_module
 from . import core as _features_core_module
@@ -21,9 +20,18 @@ from .microstructure import add_microstructure_features
 from .shared import supertrend_series, wilder_mean
 from .structure import (
     hull_moving_average as _hull_moving_average_external,
+)
+from .structure import (
     ichimoku_lines as _ichimoku_lines_external,
+)
+from .structure import (
     weighted_moving_average as _weighted_moving_average_external,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from ..domain.schemas import SymbolFrames
 
 # Optional polars_ta import. TA-Lib itself is deliberately not imported:
 # Windows/Python 3.13 deployments are brittle with that native dependency,
@@ -34,10 +42,10 @@ except (ImportError, ModuleNotFoundError):
     _plta_module = None
 
 if _plta_module is not None:
-    plta = cast(Any, importlib.import_module("polars_ta.ta"))
+    plta = cast("Any", importlib.import_module("polars_ta.ta"))
     _HAS_POLARS_TA = True
 else:
-    plta = cast(Any, None)
+    plta = cast("Any", None)
     _HAS_POLARS_TA = False
 _USE_POLARS_TA_BACKEND = _HAS_POLARS_TA
 
@@ -47,12 +55,12 @@ except (ImportError, ModuleNotFoundError):
     _polars_ols_module = None
 
 if _polars_ols_module is not None:
-    _polars_ols = cast(Any, importlib.import_module("polars_ols"))
-    _polars_ols_ls = cast(Any, importlib.import_module("polars_ols.least_squares"))
+    _polars_ols = cast("Any", importlib.import_module("polars_ols"))
+    _polars_ols_ls = cast("Any", importlib.import_module("polars_ols.least_squares"))
     _HAS_POLARS_OLS = True
 else:
-    _polars_ols = cast(Any, None)
-    _polars_ols_ls = cast(Any, None)
+    _polars_ols = cast("Any", None)
+    _polars_ols_ls = cast("Any", None)
     _HAS_POLARS_OLS = False
 
 # Compatibility name for the decomposed feature modules/tests. This tracks the
@@ -109,12 +117,10 @@ def _clean_non_finite(series: pl.Series, *, fill: float) -> pl.Series:
 
 def _timestamp_ns(value: object) -> int:
     if isinstance(value, str):
-        from datetime import datetime
-
-        value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        value = datetime.fromisoformat(value)
     if hasattr(value, "timestamp"):
         return int(value.timestamp() * 1e9)
-    return int(cast(Any, value))
+    return int(cast("Any", value))
 
 
 def _tail_value_signature(row: dict[str, object]) -> tuple[_FrameCacheValue, ...]:
@@ -125,7 +131,7 @@ def _tail_value_signature(row: dict[str, object]) -> tuple[_FrameCacheValue, ...
             values.append(None)
             continue
         try:
-            value = float(cast(Any, raw))
+            value = float(cast("Any", raw))
         except (TypeError, ValueError):
             values.append(None)
             continue
@@ -142,7 +148,7 @@ def _log_indicator_fallback(indicator: str, exc: Exception) -> None:
 
 
 def _materialize_series(
-    value: pl.Series | pl.Expr | int | float,
+    value: pl.Series | pl.Expr | float,
     *,
     df: pl.DataFrame,
     name: str,
@@ -190,7 +196,7 @@ def _as_float_like(value: object, default: float = 0.0) -> float:
 
 def _as_optional_float(value: object) -> float | None:
     try:
-        numeric = float(cast(Any, value)) if value is not None else None
+        numeric = float(cast("Any", value)) if value is not None else None
     except (TypeError, ValueError):
         return None
     if numeric is None or not np.isfinite(numeric):
@@ -257,7 +263,7 @@ def _ema(df: pl.DataFrame, period: int) -> pl.Series:
                 df=df,
                 name=f"ema{period}",
             )
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             _log_indicator_fallback("ema_polars_ta", exc)
     return _materialize_series(
         df["close"].ewm_mean(span=period, adjust=False), df=df, name=f"ema{period}"
@@ -367,7 +373,7 @@ def _adx(df: pl.DataFrame, period: int = 14) -> pl.Series:
 
 def _vwap_session_key(value: object) -> date | None:
     if isinstance(value, datetime):
-        return value.astimezone(timezone.utc).date() if value.tzinfo else value.date()
+        return value.astimezone(UTC).date() if value.tzinfo else value.date()
     if isinstance(value, date):
         return value
     return None
@@ -456,7 +462,7 @@ def _roc(df: pl.DataFrame, period: int = 10) -> pl.Series:
                 df=df,
                 name=f"roc{period}",
             )
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             _log_indicator_fallback("roc_polars_ta", exc)
     prev_close = df["close"].shift(period)
     return (((df["close"] / prev_close) - 1.0) * 100.0).fill_nan(0.0).rename(f"roc{period}")
@@ -942,7 +948,7 @@ def _add_advanced_indicators(df: pl.DataFrame) -> pl.DataFrame:
                 (obv > obv_ema).cast(pl.Float64).alias("obv_above_ema"),
             ]
         )
-    except Exception as exc:
+    except DEFENSIVE_EXC as exc:
         _log_indicator_fallback("obv", exc)
         result = result.with_columns(
             [
@@ -965,7 +971,7 @@ def _add_advanced_indicators(df: pl.DataFrame) -> pl.DataFrame:
     )
 
     # --- Keltner Channels - pure Polars implementation -----------------------
-    kc_upper, kc_middle, kc_lower = _keltner_channels(df, period=20, multiplier=2.0)
+    kc_upper, _kc_middle, kc_lower = _keltner_channels(df, period=20, multiplier=2.0)
     close_safe = _clean_non_finite(df["close"].abs(), fill=1e-10).clip(lower_bound=1e-10)
     kc_width = (kc_upper - kc_lower) / close_safe
     result = result.with_columns(
@@ -1083,7 +1089,7 @@ def _add_advanced_indicators(df: pl.DataFrame) -> pl.DataFrame:
 
     # --- Ichimoku Cloud - UNUSED by strategies -----------------------------
     tenkan, kijun, senkou_a, senkou_b = _ichimoku_lines(result)
-    result = result.with_columns(
+    return result.with_columns(
         [
             tenkan.alias("ichi_tenkan"),
             kijun.alias("ichi_kijun"),
@@ -1091,8 +1097,6 @@ def _add_advanced_indicators(df: pl.DataFrame) -> pl.DataFrame:
             senkou_b.alias("ichi_senkou_b"),
         ]
     )
-
-    return result
 
 
 def _volume_profile(df: pl.DataFrame, bins: int = 12) -> pl.Expr:
@@ -1180,7 +1184,7 @@ def _add_polars_ols_features(df: pl.DataFrame) -> pl.DataFrame:
                 .alias("close_ols_slope_atr20"),
             ]
         )
-    except Exception as exc:
+    except DEFENSIVE_EXC as exc:
         _log_indicator_fallback("polars_ols_close_slope20", exc)
 
     fallback_slope = (pl.col("close") - pl.col("close").shift(19)) / 19.0
@@ -1380,12 +1384,12 @@ def _prepare_frame(df: pl.DataFrame) -> pl.DataFrame:
 
 
 __all__ = [
-    "_prepare_frame",
     "_add_advanced_indicators",
-    "_as_optional_float",
     "_as_float_like",
+    "_as_optional_float",
     "_finite_float",
     "_numeric_item",
-    "min_required_bars",
+    "_prepare_frame",
     "has_minimum_bars",
+    "min_required_bars",
 ]

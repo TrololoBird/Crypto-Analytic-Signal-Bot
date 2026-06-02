@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from .event_bus import EventBus
 from ..domain.events import (
     AnyEvent,
     KlineCloseEvent,
@@ -10,12 +9,13 @@ from ..domain.events import (
     ReconnectEvent,
     ShortlistUpdatedEvent,
 )
+from .event_bus import EventBus
 
 __all__ = [
-    "EventBus",
     "AnyEvent",
+    "EventBus",
     "KlineCloseEvent",
-    "ShortlistUpdatedEvent",
-    "ReconnectEvent",
     "OIRefreshDueEvent",
+    "ReconnectEvent",
+    "ShortlistUpdatedEvent",
 ]

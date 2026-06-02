@@ -7,11 +7,17 @@ import argparse
 import sys
 from pathlib import Path
 
+from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.domain.strategy_catalog import PR10_WAVES, verify_strategy_wiring, wave_status
+from bot.runtime.bot import SignalBot  # noqa: F401
+from bot.strategies import STRATEGY_CLASSES
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 FORBIDDEN_PATHS = (
+    "bot/setups/detectors",
     "bot/application",
     "bot/telegram",
     "bot/websocket",
@@ -33,6 +39,7 @@ FORBIDDEN_PATHS = (
 )
 
 FORBIDDEN_IMPORT_SNIPPETS = (
+    "from bot.setups.detectors",
     "from bot.application",
     "import bot.application",
     "from bot.market_data",
@@ -72,26 +79,20 @@ def _scan_imports() -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="v9 refactor structural gate")
     parser.parse_args()
-    errors: list[str] = []
-
-    for rel in FORBIDDEN_PATHS:
-        if (REPO_ROOT / rel).exists():
-            errors.append(f"legacy path still exists: {rel}")
+    errors: list[str] = [
+        f"legacy path still exists: {rel}" for rel in FORBIDDEN_PATHS if (REPO_ROOT / rel).exists()
+    ]
 
     errors.extend(_scan_imports())
 
     try:
-        from bot.runtime.bot import SignalBot  # noqa: F401
-        from bot.strategies import STRATEGY_CLASSES
-        from bot.domain.strategy_catalog import PR10_WAVES, verify_strategy_wiring, wave_status
-
         errors.extend(verify_strategy_wiring(STRATEGY_CLASSES))
         waves = wave_status(STRATEGY_CLASSES)
         for wave, ok in sorted(waves.items()):
             if not ok:
                 missing = sorted(PR10_WAVES[wave] - {c.setup_id for c in STRATEGY_CLASSES})
                 errors.append(f"PR10 wave {wave} incomplete: missing {missing}")
-    except Exception as exc:
+    except DEFENSIVE_EXC as exc:
         errors.append(f"import/wiring check failed: {exc}")
 
     if errors:

@@ -1,25 +1,26 @@
-"""liquidity_sweep — detector in setups/detectors/."""
+"""liquidity_sweep — canonical strategy detector."""
 
 from __future__ import annotations
 
 import logging
+import math
+from typing import TYPE_CHECKING, ClassVar
 
-from ..domain.config import BotSettings
-from ..domain.schemas import PreparedSymbol, Signal
-from ..setups import _reject
-from ..setups.spec_runtime import SpecDetectorSetup
+from ..features import _swing_points as _sp
+from ..setups import _build_signal, _compute_dynamic_score, _reject
+from ..setups.smc import latest_liquidity_sweep
+from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
+from ._common import SpecHit, _latest_values, with_spec_columns
+
+if TYPE_CHECKING:
+    import polars as pl
+
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
 
 LOG = logging.getLogger("bot.strategies.liquidity_sweep")
 
-
-import math
-
-import polars as pl
-
-from ..setups import _build_signal, _compute_dynamic_score
-from ..setups.spec_runtime import run_setup_detection
-from ..setups.smc import latest_liquidity_sweep
-from ._common import SpecHit, with_spec_columns, _latest_values
+__all__ = ["detect_liquidity_sweep"]
 
 
 def detect_liquidity_sweep(frame: pl.DataFrame, *, timeframe: str = "15m") -> SpecHit | None:
@@ -78,7 +79,7 @@ def _as_float(value: object, default: float = 0.0) -> float:
 
 def _detect_liquidity_sweep_extended(
     prepared: PreparedSymbol,
-    settings: BotSettings,
+    _settings: BotSettings,
     defaults: dict[str, float],
     effective: dict[str, float],
     setup_id: str,
@@ -258,7 +259,6 @@ def _detect_liquidity_sweep_extended(
             return None
 
         rr_tp1 = entry_price - risk * min_rr
-        from ..features import _swing_points as _sp
 
         _, sl_mask = _sp(w, n=3, include_unconfirmed_tail=True)
         sl_prices = w.filter(sl_mask)["low"]
@@ -342,7 +342,6 @@ def _detect_liquidity_sweep_extended(
         return None
 
     rr_tp1 = entry_price + risk * min_rr
-    from ..features import _swing_points as _sp
 
     sh_mask, _ = _sp(w, n=3, include_unconfirmed_tail=True)
     sh_prices = w.filter(sh_mask)["high"]
@@ -421,9 +420,9 @@ def detect_liquidity_sweep_setup(
 
 
 __all__ = [
+    "_detect_liquidity_sweep_extended",
     "detect_liquidity_sweep",
     "detect_liquidity_sweep_setup",
-    "_detect_liquidity_sweep_extended",
 ]
 
 
@@ -433,7 +432,7 @@ class LiquiditySweepSetup(SpecDetectorSetup):
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)
 
-    DEFAULTS = {
+    DEFAULTS: ClassVar[dict[str, float]] = {
         "base_score": 0.50,
         "equal_level_tol": 0.0015,
         "threshold_tol": 0.0015,

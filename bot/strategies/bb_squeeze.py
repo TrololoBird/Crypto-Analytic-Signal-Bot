@@ -1,14 +1,9 @@
 from __future__ import annotations
 
-from ..domain.config import BotSettings
-from ..domain.schemas import PreparedSymbol, Signal
-from .roadmap_base import RoadmapSetup
+from typing import TYPE_CHECKING, ClassVar
 
-
-import polars as pl
-
-from ._common import SpecHit, with_spec_columns, _latest_values, build_spec_signal, LOGGER
 from ..domain.strategy_catalog import catalog_default_params
+from ._common import LOGGER, SpecHit, _latest_values, build_spec_signal, with_spec_columns
 from ._roadmap import (
     _build_atr_signal,
     _last,
@@ -16,6 +11,13 @@ from ._roadmap import (
     _reject,
     _series_max_tail,
 )
+from .roadmap_base import RoadmapSetup
+
+if TYPE_CHECKING:
+    import polars as pl
+
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
 
 __all__ = ["detect_bb_squeeze_release"]
 
@@ -130,7 +132,7 @@ class BBSqueezeSetup(RoadmapSetup):
     family = "volatility"
     confirmation_profile = "breakout_acceptance"
     required_context = ("futures_flow",)
-    DEFAULTS = {
+    DEFAULTS: ClassVar[dict[str, float]] = {
         **RoadmapSetup.DEFAULTS,
         "max_bb_width": 5.0,
         "min_volume_ratio": 0.90,

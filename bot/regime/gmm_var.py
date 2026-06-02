@@ -5,6 +5,8 @@ from typing import Any
 
 import numpy as np
 
+from bot.core.runtime_errors import DEFENSIVE_EXC
+
 try:  # optional dependencies
     from sklearn.mixture import GaussianMixture
 
@@ -54,14 +56,14 @@ class CentroidRegimeDetector:
                     gmm_model.fit(matrix)
                     self._gmm = gmm_model
                     self._component_labels = self._label_components(gmm_model.means_)
-                except Exception:
+                except DEFENSIVE_EXC:
                     self._gmm = None
                     self._component_labels = {}
             if VAR is not None and matrix.shape[0] >= 30:
                 try:
                     series = matrix[:, :2]  # returns + log-vol
                     self._var = VAR(series).fit(maxlags=2)
-                except Exception:
+                except DEFENSIVE_EXC:
                     self._var = None
 
     def current_regime(self, features: dict[str, float]) -> tuple[str, float]:
@@ -77,7 +79,7 @@ class CentroidRegimeDetector:
                 confidence = float(np.max(probs))
                 regime = self._adjust_with_var(regime)
                 return regime, max(0.0, min(0.99, confidence))
-            except Exception:
+            except DEFENSIVE_EXC:
                 pass
         dist = float(np.linalg.norm(vec - self._centroid))
         confidence = max(0.0, min(0.99, 1.0 / (1.0 + dist)))
@@ -115,8 +117,9 @@ class CentroidRegimeDetector:
                 return "calm_up"
             if regime == "neutral" and next_ret < 0:
                 return "calm_down"
+        except DEFENSIVE_EXC:
             return regime
-        except Exception:
+        else:
             return regime
 
 

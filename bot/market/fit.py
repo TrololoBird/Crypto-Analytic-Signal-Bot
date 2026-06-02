@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass, field
 import math
+from dataclasses import dataclass, field
 from math import isfinite
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
-from ..domain.schemas import PreparedSymbol
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from ..domain.schemas import PreparedSymbol
 
 VolatilityRegime = Literal["low", "medium", "high", "any"]
 
@@ -155,15 +157,18 @@ def market_asset_tags(
         else None
     )
     high_volume_rank_cutoff = (
-        max(1, int(math.ceil(shortlist_limit * 0.4))) if shortlist_limit is not None else 50
+        max(1, math.ceil(shortlist_limit * 0.4)) if shortlist_limit is not None else 50
     )
     if rank is not None and rank <= high_volume_rank_cutoff:
         tags.add("HIGH_VOLUME")
 
     quote_volume_raw = market_context.get("quote_volume")
-    if isinstance(quote_volume_raw, int | float) and isfinite(float(quote_volume_raw)):
-        if float(quote_volume_raw) >= 30_000_000.0:
-            tags.add("HIGH_VOLUME")
+    if (
+        isinstance(quote_volume_raw, int | float)
+        and isfinite(float(quote_volume_raw))
+        and float(quote_volume_raw) >= 30_000_000.0
+    ):
+        tags.add("HIGH_VOLUME")
 
     move_raw = market_context.get("price_change_pct")
     move = abs(float(move_raw)) if isinstance(move_raw, int | float) else 0.0
@@ -216,7 +221,7 @@ def asset_fit_reject_reason(
     assets = getattr(settings, "assets", {}) if settings is not None else {}
     asset_config = assets.get(normalized_symbol) if isinstance(assets, dict) else None
     excluded = getattr(asset_config, "excluded_strategies", ()) if asset_config is not None else ()
-    if strategy_id in set(str(item) for item in excluded):
+    if strategy_id in {str(item) for item in excluded}:
         return "asset_fit.config_excluded"
 
     if normalized_symbol in profile.excludes or profile.excludes.intersection(tags):

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 import pytest
 
 from scripts.live_check_binance_api import _run

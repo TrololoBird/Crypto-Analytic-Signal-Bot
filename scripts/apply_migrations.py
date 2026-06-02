@@ -9,10 +9,11 @@ import aiosqlite
 
 from bot.migrations import migrate_db
 
+_DB_PATH = Path(__file__).resolve().parents[1] / "data" / "bot" / "bot.db"
+
 
 async def main() -> None:
-    db_path = Path(__file__).resolve().parents[1] / "data" / "bot" / "bot.db"
-    conn = await aiosqlite.connect(str(db_path))
+    conn = await aiosqlite.connect(str(_DB_PATH))
     try:
         applied = await migrate_db(conn)
         print(f"applied migrations: {applied}")

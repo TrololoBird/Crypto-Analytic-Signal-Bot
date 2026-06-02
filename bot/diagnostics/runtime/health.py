@@ -2,22 +2,24 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 import asyncio
 import logging
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from enum import Enum
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
-from bot.engine.registry import StrategyRegistry
-from ..analyzer.metrics import WinRateCalculator, PerformanceMetrics
+if TYPE_CHECKING:
+    from bot.engine.registry import StrategyRegistry
+
+    from ..analyzer.metrics import PerformanceMetrics, WinRateCalculator
 
 LOG = logging.getLogger("bot.core.diagnostics.health")
 HEALTH_CHECK_TIMEOUT_SECONDS = 5.0  # seconds: cap each component health probe
 
 
 def _utcnow_naive() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 class HealthStatus(Enum):
@@ -73,7 +75,7 @@ class HealthChecker:
             if isinstance(result, Exception):
                 LOG.error("Health check failed: %s", result)
                 continue
-            health_results.append(cast(ComponentHealth, result))
+            health_results.append(cast("ComponentHealth", result))
 
         self._last_check = _utcnow_naive()
         return health_results
@@ -83,7 +85,7 @@ class HealthChecker:
     ) -> ComponentHealth:
         try:
             return await asyncio.wait_for(check, timeout=HEALTH_CHECK_TIMEOUT_SECONDS)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             LOG.warning("health_check_timeout", extra={"component": name})
             return ComponentHealth(
                 name=name,

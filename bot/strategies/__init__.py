@@ -1,23 +1,23 @@
 """Modern strategy exports."""
 
+from .absorption import AbsorptionSetup
+from .aggression_shift import AggressionShiftSetup
+from .altcoin_season_index import AltcoinSeasonIndexSetup
+from .atr_expansion import ATRExpansionSetup
+from .bb_squeeze import BBSqueezeSetup
 from .bos_choch import BOSCHOCHSetup
 from .breaker_block import BreakerBlockSetup
+from .btc_correlation import BTCCorrelationSetup
 from .cvd_divergence import CVDDivergenceSetup
+from .depth_imbalance import DepthImbalanceSetup
 from .ema_bounce import EmaBounceSetup
 from .funding_reversal import FundingReversalSetup
 from .fvg import FVGSetup
 from .hidden_divergence import HiddenDivergenceSetup
 from .indicator_divergence import IndicatorDivergenceSetup
 from .keltner_breakout import KeltnerBreakoutSetup
-from .liquidity_sweep import LiquiditySweepSetup
-from .absorption import AbsorptionSetup
-from .aggression_shift import AggressionShiftSetup
-from .altcoin_season_index import AltcoinSeasonIndexSetup
-from .atr_expansion import ATRExpansionSetup
-from .bb_squeeze import BBSqueezeSetup
-from .btc_correlation import BTCCorrelationSetup
-from .depth_imbalance import DepthImbalanceSetup
 from .liquidation_heatmap import LiquidationHeatmapSetup
+from .liquidity_sweep import LiquiditySweepSetup
 from .ls_ratio_extreme import LSRatioExtremeSetup
 from .multi_tf_trend import MultiTFTrendSetup
 from .oi_divergence import OIDivergenceSetup
@@ -81,42 +81,42 @@ STRATEGY_CLASSES = (
 )
 
 __all__ = [
+    "STRATEGY_CLASSES",
+    "ATRExpansionSetup",
     "AbsorptionSetup",
     "AggressionShiftSetup",
     "AltcoinSeasonIndexSetup",
-    "ATRExpansionSetup",
     "BBSqueezeSetup",
     "BOSCHOCHSetup",
-    "BreakerBlockSetup",
     "BTCCorrelationSetup",
+    "BreakerBlockSetup",
     "CVDDivergenceSetup",
     "DepthImbalanceSetup",
     "EmaBounceSetup",
-    "FundingReversalSetup",
     "FVGSetup",
+    "FundingReversalSetup",
     "HiddenDivergenceSetup",
     "IndicatorDivergenceSetup",
     "KeltnerBreakoutSetup",
-    "LiquiditySweepSetup",
-    "LiquidationHeatmapSetup",
     "LSRatioExtremeSetup",
+    "LiquidationHeatmapSetup",
+    "LiquiditySweepSetup",
     "MultiTFTrendSetup",
     "OIDivergenceSetup",
     "OrderBlockSetup",
     "PriceVelocitySetup",
     "RSIDivergenceBottomSetup",
     "SessionKillzoneSetup",
-    "SqueezeSetup",
     "SpreadStrategySetup",
-    "STRATEGY_CLASSES",
+    "SqueezeSetup",
     "StopHuntDetectionSetup",
     "StructureBreakRetestSetup",
     "StructurePullbackSetup",
     "SuperTrendFollowSetup",
     "TurtleSoupSetup",
+    "VWAPTrendSetup",
     "VolumeAnomalySetup",
     "VolumeClimaxReversalSetup",
-    "VWAPTrendSetup",
     "WhaleWallsSetup",
     "WickTrapReversalSetup",
     "WyckoffSpringSetup",

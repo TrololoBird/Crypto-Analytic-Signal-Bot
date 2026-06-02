@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from typing import TYPE_CHECKING
 
-from bot.domain.config import BotSettings
-from bot.domain.strategies import StrategyMetadata
-from bot.engine.registry import StrategyRegistry
+from bot.market.universe import strategy_fits_for_market_row
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from bot.domain.config import BotSettings
+    from bot.domain.strategies import StrategyMetadata
+    from bot.engine.registry import StrategyRegistry
 
 _STANDARD_KLINE_INTERVALS = frozenset(
     {
@@ -56,8 +61,6 @@ def select_lane_setups(
         enabled = [m for m in enabled if m.strategy_id in fit_set]
     elif not route_all:
         if market_row is not None:
-            from bot.market.universe import strategy_fits_for_market_row
-
             fits = strategy_fits_for_market_row(market_row)
             fit_set = set(fits)
             enabled = [m for m in enabled if m.strategy_id in fit_set]

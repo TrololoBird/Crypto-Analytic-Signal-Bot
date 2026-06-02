@@ -3,35 +3,38 @@
 from __future__ import annotations
 
 import asyncio
-from bisect import bisect_right
-from collections import deque
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+import contextlib
 import json
 import logging
 import math
-import os
-from pathlib import Path
 import tempfile
 import time
 import typing
-from typing import Any, Mapping
+from bisect import bisect_right
+from collections import deque
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
 
 import polars as pl
 
-from ..domain.config import BotSettings
+from bot.core.runtime_errors import DEFENSIVE_EXC
+
 from ..market.data import MarketDataUnavailable
-from ..domain.schemas import AggTrade, Signal
-from .outcomes import SignalFeatures, create_outcome_from_tracked
-from ..telemetry import TelemetryStore
 from ..persistence.tracked import TrackedSignalState, parse_state_dt
+from .outcomes import SignalFeatures, create_outcome_from_tracked
 
 if typing.TYPE_CHECKING:
-    from ..persistence.repository import MemoryRepository
+    from collections.abc import Mapping
+
     from ..diagnostics.quality import SignalQualityMonitor
+    from ..domain.config import BotSettings
+    from ..domain.schemas import AggTrade, Signal
+    from ..persistence.repository import MemoryRepository
+    from ..telemetry import TelemetryStore
 
 
-UTC = timezone.utc
 LOG = logging.getLogger("bot.tracking")
 
 
@@ -160,7 +163,10 @@ class SignalTracker:
         durations.append(elapsed)
         if elapsed > 5.0:
             LOG.warning(
-                "slow symbol tracking review | symbol=%s elapsed=%.3fs tracked_rows=%d avg_100=%.3fs",
+                (
+                    "slow symbol tracking review | symbol=%s elapsed=%.3fs tracked_rows=%d "
+                    "avg_100=%.3fs"
+                ),
                 symbol,
                 elapsed,
                 tracked_count,
@@ -179,7 +185,7 @@ class SignalTracker:
         if outcomes_to_flush:
             try:
                 await self.memory_repo.save_signal_outcomes_batch(outcomes_to_flush)
-            except Exception:
+            except DEFENSIVE_EXC:
                 LOG.exception("batch outcome flush failed")
 
     def _load_features_store(self) -> dict[str, SignalFeatures]:
@@ -196,10 +202,11 @@ class SignalTracker:
                     LOG.debug("features_store entry skipped | tracking_id=%s error=%s", tid, exc)
             if result:
                 LOG.info("features_store loaded | entries=%d", len(result))
-            return result
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.debug("features_store load failed: %s", exc)
             return {}
+        else:
+            return result
 
     def _persist_features_store(self) -> None:
         """Persist features to disk so they survive bot restarts."""
@@ -220,14 +227,12 @@ class SignalTracker:
                 tmp_path = handle.name
                 handle.write(json.dumps(data, indent=2))
                 handle.flush()
-            os.replace(tmp_path, self._features_file)
-        except Exception as exc:
+            Path(tmp_path).replace(self._features_file)
+        except DEFENSIVE_EXC as exc:
             LOG.debug("features_store persist failed: %s", exc)
             if tmp_path:
-                try:
+                with contextlib.suppress(OSError):
                     Path(tmp_path).unlink(missing_ok=True)
-                except OSError:
-                    pass
 
     async def _persist_features_store_async(self) -> None:
         if not self._features_file:
@@ -279,7 +284,7 @@ class SignalTracker:
                 math.isfinite(weight) and weight >= 0.0 for weight in normalized_weights
             ):
                 normalized_weights = (0.5, 0.3, 0.2)
-            row["scale_weights"] = typing.cast(tuple[float, float, float], normalized_weights)
+            row["scale_weights"] = normalized_weights
         row.setdefault("ttl_bars", None)
         row.setdefault("single_target_mode", False)
         row.setdefault("target_integrity_status", "unchecked")
@@ -320,7 +325,7 @@ class SignalTracker:
                     deleted,
                     retention_days,
                 )
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.debug("tracking cleanup failed (non-fatal): %s", exc)
         finally:
             self._last_outcome_cleanup_ts = now_ts
@@ -362,8 +367,7 @@ class SignalTracker:
             return
         direction_sign = 1.0 if tracked.direction == "long" else -1.0
         move_pct = direction_sign * (float(price) - float(entry)) / float(entry) * 100.0
-        if move_pct > tracked.max_favorable_pct:
-            tracked.max_favorable_pct = move_pct
+        tracked.max_favorable_pct = max(tracked.max_favorable_pct, move_pct)
         if move_pct < 0.0 and abs(move_pct) > tracked.max_adverse_pct:
             tracked.max_adverse_pct = abs(move_pct)
 
@@ -500,7 +504,7 @@ class SignalTracker:
         *,
         activated_at: datetime,
         price: float,
-        precision_mode: str,
+        _precision_mode: str,
     ) -> None:
         tracked.status = "active"
         tracked.activated_at = activated_at.astimezone(UTC).isoformat()
@@ -517,7 +521,7 @@ class SignalTracker:
         *,
         occurred_at: datetime,
         price: float,
-        precision_mode: str,
+        _precision_mode: str,
         move_stop_to_break_even: bool,
     ) -> None:
         if tracked.tp1_hit_at is not None:
@@ -537,7 +541,7 @@ class SignalTracker:
         *,
         checked_at: datetime,
         last_price: float | None,
-        precision_mode: str,
+        _precision_mode: str,
     ) -> None:
         tracked.last_checked_at = checked_at.astimezone(UTC).isoformat()
         tracked.last_price = last_price
@@ -551,7 +555,7 @@ class SignalTracker:
         reason: str,
         occurred_at: datetime,
         price: float | None,
-        precision_mode: str,
+        _precision_mode: str,
     ) -> None:
         tracked.status = "closed"
         tracked.closed_at = occurred_at.astimezone(UTC).isoformat()
@@ -613,10 +617,7 @@ class SignalTracker:
         risk = abs(entry - stop)
         if risk <= 0.0:
             return None
-        if tracked.direction == "long":
-            pnl = exit_px - entry
-        else:
-            pnl = entry - exit_px
+        pnl = exit_px - entry if tracked.direction == "long" else entry - exit_px
         return pnl / risk
 
     async def arm_signals(self, signals: list[Signal], *, dry_run: bool) -> None:
@@ -759,7 +760,9 @@ class SignalTracker:
                     symbol,
                     now=now,
                     fallback_precision_mode="time_fallback",
-                    persist_error_context="tracking state persist failed (continuing without persistence)",
+                    persist_error_context=(
+                        "tracking state persist failed (continuing without persistence)"
+                    ),
                 )
             )
         return events
@@ -803,7 +806,7 @@ class SignalTracker:
         if tracked_rows:
             try:
                 await self._persist_tracking_state()
-            except (OSError, IOError):
+            except OSError:
                 LOG.exception("tracking state persist failed for forced close (continuing)")
         stats = await self._stats_snapshot()
         for event in events:
@@ -822,8 +825,7 @@ class SignalTracker:
             last_checked = (
                 parse_state_dt(tracked.last_checked_at) or parse_state_dt(tracked.created_at) or now
             )
-            if last_checked < oldest_check:
-                oldest_check = last_checked
+            oldest_check = min(oldest_check, last_checked)
         start_time_ms = int(oldest_check.timestamp() * 1000)
         end_time_ms = int(now.timestamp() * 1000)
 
@@ -838,7 +840,7 @@ class SignalTracker:
                 ),
                 timeout=self.settings.ws.rest_timeout_seconds,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             LOG.debug("agg trades timed out for %s; falling back to candles", symbol)
             trades = []
             complete = False
@@ -856,7 +858,7 @@ class SignalTracker:
             )
             trades = []
             complete = False
-        except Exception:
+        except DEFENSIVE_EXC:
             LOG.exception("agg trades review failed for %s; falling back to candles", symbol)
             trades = []
             complete = False
@@ -885,7 +887,7 @@ class SignalTracker:
                 now=now,
                 precision_mode="time_fallback",
             )
-        except Exception:
+        except DEFENSIVE_EXC:
             LOG.exception("tracking candle review failed for %s; using time fallback", symbol)
             return await self._apply_time_fallback_rows(
                 tracked_rows,
@@ -896,7 +898,7 @@ class SignalTracker:
         for tracked in tracked_rows:
             try:
                 events.extend(await self._apply_candle_rows(tracked, candles, now=now))
-            except Exception:
+            except DEFENSIVE_EXC:
                 LOG.exception(
                     "tracking candle application failed for %s/%s; using time fallback",
                     symbol,
@@ -1014,7 +1016,7 @@ class SignalTracker:
         for row in candle_rows:
             bar_close_time = row["close_time"]
             if isinstance(bar_close_time, str):
-                bar_close_time = datetime.fromisoformat(bar_close_time.replace("Z", "+00:00"))
+                bar_close_time = datetime.fromisoformat(bar_close_time)
             bar_high = float(row["high"])
             bar_low = float(row["low"])
             bar_close = float(row["close"])
@@ -1430,9 +1432,9 @@ class SignalTracker:
                             pnl_r_multiple,
                             symbol=tracked.symbol,
                         )
-                    except Exception as exc:
+                    except DEFENSIVE_EXC as exc:
                         LOG.warning("quality_monitor_update_failed", extra={"exc": str(exc)})
-            except (OSError, IOError, ValueError):
+            except (OSError, ValueError):
                 LOG.debug("record_outcome failed for %s (non-critical)", tracked.setup_id)
 
         # Persist outcome before returning the close event. Fire-and-forget lost
@@ -1441,7 +1443,7 @@ class SignalTracker:
         try:
             await self._queue_outcome_for_batch(tracked, event_type)
             await self._flush_pending_outcomes()
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.debug(
                 "save_signal_outcome failed for %s/%s: %s",
                 tracked.setup_id,
@@ -1458,7 +1460,7 @@ class SignalTracker:
             note=note,
         )
 
-    def _save_outcome(self, tracked: TrackedSignalState, event_type: str) -> None:
+    def _save_outcome(self, tracked: TrackedSignalState, _event_type: str) -> None:
         """Сохраняет outcome завершенного сигнала."""
         outcome = self._build_outcome_payload(tracked)
         try:
@@ -1482,7 +1484,7 @@ class SignalTracker:
         self.features_store.pop(tracked.tracking_id, None)
         self._persist_features_store()
 
-    async def _queue_outcome_for_batch(self, tracked: TrackedSignalState, event_type: str) -> None:
+    async def _queue_outcome_for_batch(self, tracked: TrackedSignalState, _event_type: str) -> None:
         """Queue outcome for batched I/O."""
         outcome = self._build_outcome_payload(tracked)
 
@@ -1546,7 +1548,7 @@ class SignalTracker:
             if events:
                 try:
                     await self._persist_tracking_state()
-                except (OSError, IOError):
+                except OSError:
                     LOG.exception("tracking state persist failed for supersede (continuing)")
 
                 for event in events:
@@ -1555,7 +1557,7 @@ class SignalTracker:
                         event.to_log_row(stats=await self._stats_snapshot()),
                     )
 
-            return events if events else None
+            return events or None
 
     # ------------------------------------------------------------------
     # Event-driven additions (Фаза 1 рефакторинга)
@@ -1607,7 +1609,7 @@ class SignalTracker:
             tracked_rows.sort(key=lambda item: item.created_at)
             try:
                 events = await self._review_symbol(symbol, tracked_rows, now=now)
-            except Exception:
+            except DEFENSIVE_EXC:
                 LOG.exception("tracking review failed for %s; using time fallback", symbol)
                 events = await self._apply_time_fallback_rows(
                     tracked_rows,
@@ -1616,7 +1618,7 @@ class SignalTracker:
                 )
             try:
                 await self._persist_tracking_state()
-            except (OSError, IOError):
+            except OSError:
                 LOG.exception(persist_error_context)
             for event in events:
                 self.telemetry.append_jsonl(
@@ -1667,9 +1669,12 @@ class SignalTracker:
             if events:
                 try:
                     await self._persist_tracking_state()
-                except (OSError, IOError):
+                except OSError:
                     LOG.exception(
-                        "tracking state persist failed for realtime trade %s (continuing without persistence)",
+                        (
+                            "tracking state persist failed for realtime trade %s "
+                            "(continuing without persistence)"
+                        ),
                         symbol,
                     )
                 for event in events:

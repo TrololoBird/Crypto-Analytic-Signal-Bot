@@ -5,16 +5,17 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
-from ..market.data import BinanceFuturesMarketData
-from ..domain.schemas import UniverseSymbol
-from ..domain.events import ShortlistUpdatedEvent
+from bot.core.runtime_errors import DEFENSIVE_EXC
+
 from ..domain.config import _ALL_SETUP_IDS
+from ..domain.events import ShortlistUpdatedEvent
+from ..domain.schemas import UniverseSymbol
+from ..market.data import BinanceFuturesMarketData
 from ..market.universe import build_shortlist, rerank_shortlist
 
-UTC = timezone.utc
 LOG = logging.getLogger("bot.runtime.shortlist_service")
 _LOG_MISSING_VALUE = "not_available"
 
@@ -133,7 +134,7 @@ class ShortlistService:
                     ticker_age = ws.get_ticker_age_seconds(symbol)
                     if ticker_age is not None:
                         row["ticker_age_seconds"] = float(ticker_age)
-                except Exception as exc:
+                except DEFENSIVE_EXC as exc:
                     LOG.debug(
                         "shortlist ticker age unavailable | symbol=%s error=%s",
                         symbol,
@@ -152,7 +153,7 @@ class ShortlistService:
                         index_price = float(mark.get("index_price") or 0.0)
                         if mark_price > 0.0 and index_price > 0.0:
                             row["basis_pct"] = ((mark_price - index_price) / index_price) * 100.0
-                except Exception as exc:
+                except DEFENSIVE_EXC as exc:
                     LOG.debug(
                         "shortlist mark price unavailable | symbol=%s error=%s",
                         symbol,
@@ -166,7 +167,7 @@ class ShortlistService:
                     book_age = ws.get_book_ticker_age_seconds(symbol)
                     if book_age is not None:
                         row["book_age_seconds"] = float(book_age)
-                except Exception as exc:
+                except DEFENSIVE_EXC as exc:
                     LOG.debug(
                         "shortlist book snapshot unavailable | symbol=%s error=%s",
                         symbol,
@@ -176,7 +177,7 @@ class ShortlistService:
                     liquidation = ws.get_liquidation_sentiment(symbol)
                     if liquidation is not None:
                         row["liquidation_score"] = float(liquidation)
-                except Exception as exc:
+                except DEFENSIVE_EXC as exc:
                     LOG.debug(
                         "shortlist liquidation sentiment unavailable | symbol=%s error=%s",
                         symbol,
@@ -251,7 +252,7 @@ class ShortlistService:
                     self._bot.client.fetch_exchange_symbols(),
                     timeout=10.0,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 LOG.info(
                     "fetch_exchange_symbols attempt %d/%d timed out",
                     attempt + 1,
@@ -261,7 +262,7 @@ class ShortlistService:
                     await asyncio.sleep(1.0)
                 else:
                     raise
-            except Exception:
+            except DEFENSIVE_EXC:
                 LOG.exception(
                     "fetch_exchange_symbols attempt %d/%d failed",
                     attempt + 1,
@@ -305,7 +306,10 @@ class ShortlistService:
             base_asset, quote_asset = self.extract_symbol_assets(symbol)
             if not base_asset or not quote_asset:
                 LOG.error(
-                    "skipping pinned symbol due to unresolved base/quote assets | symbol=%s configured_quote_asset=%s",
+                    (
+                        "skipping pinned symbol due to unresolved base/quote assets | "
+                        "symbol=%s configured_quote_asset=%s"
+                    ),
                     symbol,
                     bot.settings.universe.quote_asset,
                 )
@@ -352,7 +356,10 @@ class ShortlistService:
             if not cached_meta:
                 raise symbol_meta_result
             LOG.info(
-                "shortlist symbol metadata refresh failed; using cached metadata | count=%d error=%s",
+                (
+                    "shortlist symbol metadata refresh failed; using cached metadata | "
+                    "count=%d error=%s"
+                ),
                 len(cached_meta),
                 symbol_meta_result,
             )
@@ -365,7 +372,10 @@ class ShortlistService:
         if isinstance(premium_result, Exception):
             premium_by_symbol = {}
             LOG.info(
-                "shortlist premium-index refresh failed; continuing without premium context | error=%s",
+                (
+                    "shortlist premium-index refresh failed; "
+                    "continuing without premium context | error=%s"
+                ),
                 premium_result,
             )
         else:
@@ -438,7 +448,10 @@ class ShortlistService:
         minimum_light_tickers = max(pinned_count + 3, min(shortlist_limit, len(cached_shortlist)))
         if len(raw_tickers) < minimum_light_tickers:
             LOG.info(
-                "light shortlist skipped: partial ws ticker cache | tickers=%d required=%d cached_shortlist=%d",
+                (
+                    "light shortlist skipped: partial ws ticker cache | tickers=%d "
+                    "required=%d cached_shortlist=%d"
+                ),
                 len(raw_tickers),
                 minimum_light_tickers,
                 len(cached_shortlist),
@@ -464,7 +477,10 @@ class ShortlistService:
             and len(cached_shortlist) > len(shortlist)
         ):
             LOG.info(
-                "light shortlist skipped: filtered ws shortlist too small | size=%d required=%d cached_shortlist=%d eligible=%s dynamic_pool=%s",
+                (
+                    "light shortlist skipped: filtered ws shortlist too small | "
+                    "size=%d required=%d cached_shortlist=%d eligible=%s dynamic_pool=%s"
+                ),
                 len(shortlist),
                 minimum_light_tickers,
                 len(cached_shortlist),
@@ -501,7 +517,7 @@ class ShortlistService:
         ws = getattr(bot, "_ws_manager", None)
         try:
             ws_cache_warm = bool(ws is not None and ws.is_ticker_cache_warm())
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.debug("shortlist ws cache warm check failed: %s", exc)
             ws_cache_warm = False
         has_symbol_meta = bool(getattr(bot, "_symbol_meta_by_symbol", None))
@@ -556,7 +572,7 @@ class ShortlistService:
                 shortlist = list(cached_shortlist)
                 source = "cached"
                 fallback_reason = FALLBACK_REASON_USING_CACHED
-        except Exception:
+        except DEFENSIVE_EXC:
             if cached_shortlist:
                 shortlist = list(cached_shortlist)
                 source = "cached"
@@ -582,7 +598,7 @@ class ShortlistService:
                     len(set(new_symbols) - set(previous_symbols)),
                     len(set(previous_symbols) - set(new_symbols)),
                 )
-            except Exception:
+            except DEFENSIVE_EXC:
                 LOG.exception("ws resubscribe failed after shortlist refresh")
         if source == "pinned_fallback" and fallback_reason is None:
             fallback_reason = FALLBACK_REASON_USING_PINNED
@@ -639,7 +655,11 @@ class ShortlistService:
         )
 
         LOG.info(
-            "shortlist refresh complete | source=%s mode=%s size=%d eligible=%s dynamic_pool=%s pinned=%s avg_score=%s p25=%s p50=%s p75=%s p90=%s fit_density=%s",
+            (
+                "shortlist refresh complete | source=%s mode=%s size=%d eligible=%s "
+                "dynamic_pool=%s pinned=%s avg_score=%s p25=%s p50=%s p75=%s p90=%s "
+                "fit_density=%s"
+            ),
             source,
             summary.get("mode", source),
             len(shortlist),
@@ -685,7 +705,7 @@ class ShortlistService:
                     bot._shutdown.wait(),
                     timeout=wait_timeout,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
 
     async def do_rerank_shortlist(self) -> None:

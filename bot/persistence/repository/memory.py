@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import math
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -40,7 +40,8 @@ class MemoryRepository:
     def _require_conn(self) -> aiosqlite.Connection:
         conn = self._conn
         if conn is None:
-            raise RuntimeError("Repository not initialized")
+            msg = "Repository not initialized"
+            raise RuntimeError(msg)
         return conn
 
     async def _repository_schema_version(self) -> int:
@@ -100,11 +101,11 @@ class MemoryRepository:
                 metadata TEXT,  -- JSON
                 outcome_id TEXT  -- Reference to outcome
             );
-            
+
             CREATE INDEX IF NOT EXISTS idx_signals_symbol ON signals(symbol);
             CREATE INDEX IF NOT EXISTS idx_signals_strategy ON signals(strategy_id);
             CREATE INDEX IF NOT EXISTS idx_signals_created ON signals(created_at);
-            
+
             CREATE TABLE IF NOT EXISTS outcomes (
                 outcome_id TEXT PRIMARY KEY,
                 signal_id TEXT NOT NULL,
@@ -130,18 +131,18 @@ class MemoryRepository:
                 time_to_sl_min INTEGER,
                 FOREIGN KEY (signal_id) REFERENCES signals(signal_id)
             );
-            
+
             CREATE INDEX IF NOT EXISTS idx_outcomes_symbol ON outcomes(symbol);
             CREATE INDEX IF NOT EXISTS idx_outcomes_signal ON outcomes(signal_id);
             CREATE INDEX IF NOT EXISTS idx_outcomes_result ON outcomes(result);
-            
+
             CREATE TABLE IF NOT EXISTS config_versions (
                 version_id TEXT PRIMARY KEY,
                 config_json TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 is_active INTEGER DEFAULT 0
             );
-            
+
             -- Cooldown tracking (replaces SignalCooldownStore JSON)
             CREATE TABLE IF NOT EXISTS cooldowns (
                 cooldown_key TEXT PRIMARY KEY,
@@ -150,10 +151,10 @@ class MemoryRepository:
                 symbol TEXT,
                 cooldown_type TEXT DEFAULT 'signal_key'  -- 'signal_key' or 'symbol'
             );
-            
+
             CREATE INDEX IF NOT EXISTS idx_cooldowns_symbol ON cooldowns(symbol);
             CREATE INDEX IF NOT EXISTS idx_cooldowns_setup ON cooldowns(setup_id);
-            
+
             -- Setup adaptive scoring (replaces setup_score_adjustments JSON)
             CREATE TABLE IF NOT EXISTS setup_scores (
                 setup_id TEXT PRIMARY KEY,
@@ -161,7 +162,7 @@ class MemoryRepository:
                 outcome_window TEXT,  -- JSON array of last 20 outcomes
                 updated_at TEXT NOT NULL
             );
-            
+
             -- Active signal tracking (replaces SignalTrackingStore JSON)
             CREATE TABLE IF NOT EXISTS active_signals (
                 tracking_id TEXT PRIMARY KEY,
@@ -210,7 +211,7 @@ class MemoryRepository:
                 close_reason TEXT,
                 close_price REAL
             );
-            
+
             CREATE INDEX IF NOT EXISTS idx_active_signals_symbol ON active_signals(symbol);
             CREATE INDEX IF NOT EXISTS idx_active_signals_status ON active_signals(status);
             CREATE INDEX IF NOT EXISTS idx_active_signals_setup ON active_signals(setup_id);
@@ -297,7 +298,8 @@ class MemoryRepository:
     async def _ensure_table_columns(self, table_name: str, columns: dict[str, str]) -> None:
         """Add missing columns for existing databases."""
         if not self._conn:
-            raise RuntimeError("Repository not initialized")
+            msg = "Repository not initialized"
+            raise RuntimeError(msg)
 
         async with self._conn.execute(f"PRAGMA table_info({table_name})") as cursor:
             existing_rows = await cursor.fetchall()
@@ -352,7 +354,10 @@ class MemoryRepository:
                 ),
                 (
                     "market_regime_confirmed",
-                    "ALTER TABLE market_context ADD COLUMN market_regime_confirmed INTEGER DEFAULT 0",
+                    (
+                        "ALTER TABLE market_context ADD COLUMN market_regime_confirmed "
+                        "INTEGER DEFAULT 0"
+                    ),
                 ),
                 (
                     "macro_risk_mode",
@@ -360,7 +365,10 @@ class MemoryRepository:
                 ),
                 (
                     "benchmark_context_json",
-                    "ALTER TABLE market_context ADD COLUMN benchmark_context_json TEXT DEFAULT '{}'",
+                    (
+                        "ALTER TABLE market_context ADD COLUMN benchmark_context_json "
+                        "TEXT DEFAULT '{}'"
+                    ),
                 ),
                 (
                     "intelligence_json",
@@ -419,7 +427,7 @@ class MemoryRepository:
 
         await conn.execute(
             """
-            INSERT OR REPLACE INTO market_context 
+            INSERT OR REPLACE INTO market_context
             (
                 id,
                 btc_bias,
@@ -444,7 +452,7 @@ class MemoryRepository:
                 str(btc_phase or "sideways"),
                 json.dumps(high_funding_symbols),
                 json.dumps(low_funding_symbols),
-                datetime.now(timezone.utc).isoformat(),
+                datetime.now(UTC).isoformat(),
                 market_regime,
                 1 if market_regime_confirmed else 0,
                 macro_risk_mode,
@@ -463,15 +471,9 @@ class MemoryRepository:
             row = await cursor.fetchone()
             if row:
                 intelligence_snapshot: dict[str, Any] = {}
-                raw_intelligence = (
-                    row["intelligence_json"] if "intelligence_json" in row.keys() else None
-                )
+                raw_intelligence = row.get("intelligence_json", None)
                 benchmark_context: dict[str, Any] = {}
-                raw_benchmarks = (
-                    row["benchmark_context_json"]
-                    if "benchmark_context_json" in row.keys()
-                    else None
-                )
+                raw_benchmarks = row.get("benchmark_context_json", None)
                 if raw_benchmarks:
                     try:
                         parsed_benchmarks = json.loads(raw_benchmarks)
@@ -500,22 +502,17 @@ class MemoryRepository:
                         (benchmark_context.get("PAXGUSDT") or {}).get("bias") or "neutral"
                     ),
                     "altcoin_season_index": float(row["altcoin_season_index"])
-                    if "altcoin_season_index" in row.keys()
-                    and row["altcoin_season_index"] is not None
+                    if "altcoin_season_index" in row and row["altcoin_season_index"] is not None
                     else 50.0,
-                    "btc_phase": row["btc_phase"] if "btc_phase" in row.keys() else "sideways",
+                    "btc_phase": row.get("btc_phase", "sideways"),
                     "high_funding_symbols": json.loads(row["high_funding_symbols"]),
                     "low_funding_symbols": json.loads(row["low_funding_symbols"]),
                     "updated_at": row["updated_at"],
-                    "market_regime": row["market_regime"]
-                    if "market_regime" in row.keys()
-                    else "unknown",
+                    "market_regime": row.get("market_regime", "unknown"),
                     "market_regime_confirmed": bool(row["market_regime_confirmed"])
-                    if "market_regime_confirmed" in row.keys()
+                    if "market_regime_confirmed" in row
                     else False,
-                    "macro_risk_mode": row["macro_risk_mode"]
-                    if "macro_risk_mode" in row.keys()
-                    else "normal",
+                    "macro_risk_mode": row.get("macro_risk_mode", "normal"),
                     "benchmark_context": benchmark_context,
                     "intelligence_snapshot": intelligence_snapshot,
                 }
@@ -552,7 +549,9 @@ class MemoryRepository:
         # Update symbol stats
         await conn.execute(
             """
-            INSERT INTO symbol_stats (symbol, total_signals, tp1_hits, tp2_hits, sl_hits, consecutive_sl, last_signal_ts)
+            INSERT INTO symbol_stats (
+                symbol, total_signals, tp1_hits, tp2_hits, sl_hits, consecutive_sl, last_signal_ts
+            )
             VALUES (?, 1, ?, ?, ?, ?, ?)
             ON CONFLICT(symbol) DO UPDATE SET
                 total_signals = total_signals + 1,
@@ -568,12 +567,12 @@ class MemoryRepository:
                 1 if outcome == "tp2" else 0,
                 1 if outcome == "loss" else 0,
                 1 if outcome == "loss" else 0,
-                datetime.now(timezone.utc).isoformat(),
+                datetime.now(UTC).isoformat(),
                 1 if outcome in ("tp1", "tp2") else 0,
                 1 if outcome == "tp2" else 0,
                 1 if outcome == "loss" else 0,
                 outcome,
-                datetime.now(timezone.utc).isoformat(),
+                datetime.now(UTC).isoformat(),
             ),
         )
 
@@ -628,8 +627,8 @@ class MemoryRepository:
             except (TypeError, ValueError):
                 return True
             if last_signal_ts.tzinfo is None:
-                last_signal_ts = last_signal_ts.replace(tzinfo=timezone.utc)
-            return (datetime.now(timezone.utc) - last_signal_ts) < timedelta(hours=pause_hours)
+                last_signal_ts = last_signal_ts.replace(tzinfo=UTC)
+            return (datetime.now(UTC) - last_signal_ts) < timedelta(hours=pause_hours)
 
     async def get_consecutive_sl(self, symbol: str) -> int:
         """Get consecutive SL streak for symbol."""
@@ -666,7 +665,7 @@ class MemoryRepository:
                     win_rate = wins / total
                     if win_rate >= 0.65:
                         return 1.10
-                    elif win_rate <= 0.40:
+                    if win_rate <= 0.40:
                         return 0.90
             return 1.0
 
@@ -712,7 +711,8 @@ class MemoryRepository:
     async def save_signal(self, record: SignalRecord) -> None:
         """Save signal record."""
         if not self._conn:
-            raise RuntimeError("Repository not initialized")
+            msg = "Repository not initialized"
+            raise RuntimeError(msg)
 
         record.validate()
         try:
@@ -749,14 +749,15 @@ class MemoryRepository:
                 ),
             )
             await self._conn.commit()
-        except Exception as exc:
-            LOG.error("failed to save signal %s: %s", record.signal_id, exc)
+        except Exception:
+            LOG.exception("failed to save signal %s", record.signal_id)
             raise
 
     async def save_outcome(self, record: OutcomeRecord, *, commit: bool = True) -> None:
         """Save outcome record."""
         if not self._conn:
-            raise RuntimeError("Repository not initialized")
+            msg = "Repository not initialized"
+            raise RuntimeError(msg)
 
         record.validate()
         try:
@@ -813,14 +814,15 @@ class MemoryRepository:
             )
             if commit:
                 await self._conn.commit()
-        except Exception as exc:
-            LOG.error("failed to save outcome %s: %s", record.outcome_id, exc)
+        except Exception:
+            LOG.exception("failed to save outcome %s", record.outcome_id)
             raise
 
     async def get_signal(self, signal_id: str) -> SignalRecord | None:
         """Get signal by ID."""
         if not self._conn:
-            raise RuntimeError("Repository not initialized")
+            msg = "Repository not initialized"
+            raise RuntimeError(msg)
 
         async with self._conn.execute(
             "SELECT * FROM signals WHERE signal_id = ?", (signal_id,)
@@ -833,7 +835,8 @@ class MemoryRepository:
     async def get_outcome(self, outcome_id: str) -> OutcomeRecord | None:
         """Get outcome by ID."""
         if not self._conn:
-            raise RuntimeError("Repository not initialized")
+            msg = "Repository not initialized"
+            raise RuntimeError(msg)
 
         async with self._conn.execute(
             "SELECT * FROM outcomes WHERE outcome_id = ?", (outcome_id,)
@@ -846,7 +849,8 @@ class MemoryRepository:
     async def get_outcome_by_signal(self, signal_id: str) -> OutcomeRecord | None:
         """Get outcome for a signal."""
         if not self._conn:
-            raise RuntimeError("Repository not initialized")
+            msg = "Repository not initialized"
+            raise RuntimeError(msg)
 
         async with self._conn.execute(
             "SELECT * FROM outcomes WHERE signal_id = ?", (signal_id,)
@@ -859,7 +863,8 @@ class MemoryRepository:
     async def get_signals_without_outcome(self, limit: int = 100) -> list[SignalRecord]:
         """Get signals that don't have outcomes yet."""
         if not self._conn:
-            raise RuntimeError("Repository not initialized")
+            msg = "Repository not initialized"
+            raise RuntimeError(msg)
 
         async with self._conn.execute(
             """
@@ -879,7 +884,8 @@ class MemoryRepository:
     ) -> list[SignalRecord]:
         """Get signals for a strategy."""
         if not self._conn:
-            raise RuntimeError("Repository not initialized")
+            msg = "Repository not initialized"
+            raise RuntimeError(msg)
 
         query = "SELECT * FROM signals WHERE strategy_id = ?"
         params: list[Any] = [strategy_id]
@@ -903,7 +909,8 @@ class MemoryRepository:
     ) -> pl.DataFrame:
         """Get signals as Polars DataFrame for analysis."""
         if not self._conn:
-            raise RuntimeError("Repository not initialized")
+            msg = "Repository not initialized"
+            raise RuntimeError(msg)
 
         query = """
             SELECT s.*, o.result, o.pnl_24h, o.max_profit_pct, o.max_loss_pct
@@ -932,9 +939,10 @@ class MemoryRepository:
     async def save_config_version(self, config_json: str) -> str:
         """Save config version."""
         if not self._conn:
-            raise RuntimeError("Repository not initialized")
+            msg = "Repository not initialized"
+            raise RuntimeError(msg)
 
-        version_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        version_id = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
 
         try:
             await self._conn.execute(
@@ -942,7 +950,7 @@ class MemoryRepository:
                 INSERT INTO config_versions (version_id, config_json, created_at, is_active)
                 VALUES (?, ?, ?, 1)
             """,
-                (version_id, config_json, datetime.now(timezone.utc).isoformat()),
+                (version_id, config_json, datetime.now(UTC).isoformat()),
             )
 
             # Deactivate previous versions
@@ -955,15 +963,16 @@ class MemoryRepository:
             )
 
             await self._conn.commit()
-        except Exception as exc:
-            LOG.error("failed to save config version: %s", exc)
+        except Exception:
+            LOG.exception("failed to save config version")
             raise
         return version_id
 
     async def get_active_config(self) -> str | None:
         """Get active config JSON."""
         if not self._conn:
-            raise RuntimeError("Repository not initialized")
+            msg = "Repository not initialized"
+            raise RuntimeError(msg)
 
         async with self._conn.execute(
             "SELECT config_json FROM config_versions WHERE is_active = 1 LIMIT 1"
@@ -978,14 +987,20 @@ class MemoryRepository:
         if data.get("features"):
             try:
                 data["features"] = json.loads(data["features"])
-            except json.JSONDecodeError as exc:
-                LOG.error("failed to decode features for signal %s: %s", data.get("signal_id"), exc)
+            except json.JSONDecodeError:
+                LOG.exception(
+                    "failed to decode features for signal %s",
+                    data.get("signal_id"),
+                )
                 data["features"] = {}
         if data.get("metadata"):
             try:
                 data["metadata"] = json.loads(data["metadata"])
-            except json.JSONDecodeError as exc:
-                LOG.error("failed to decode metadata for signal %s: %s", data.get("signal_id"), exc)
+            except json.JSONDecodeError:
+                LOG.exception(
+                    "failed to decode metadata for signal %s",
+                    data.get("signal_id"),
+                )
                 data["metadata"] = {}
         return SignalRecord.from_dict(data)
 
@@ -1005,7 +1020,8 @@ class MemoryRepository:
     async def get_cooldown(self, cooldown_key: str) -> datetime | None:
         """Get last sent time for a cooldown key."""
         if not self._conn:
-            raise RuntimeError("Repository not initialized")
+            msg = "Repository not initialized"
+            raise RuntimeError(msg)
 
         async with self._conn.execute(
             "SELECT last_sent_at FROM cooldowns WHERE cooldown_key = ?", (cooldown_key,)
@@ -1020,9 +1036,10 @@ class MemoryRepository:
     ) -> int:
         """Delete persisted cooldown rows older than the cleanup age."""
         if not self._conn:
-            raise RuntimeError("Repository not initialized")
+            msg = "Repository not initialized"
+            raise RuntimeError(msg)
 
-        now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        now = (now or datetime.now(UTC)).astimezone(UTC)
         cutoff = now - timedelta(minutes=max(1, int(max_age_minutes)))
         cursor = await self._conn.execute(
             "DELETE FROM cooldowns WHERE last_sent_at < ?",
@@ -1043,7 +1060,8 @@ class MemoryRepository:
     ) -> None:
         """Set cooldown for a key."""
         if not self._conn:
-            raise RuntimeError("Repository not initialized")
+            msg = "Repository not initialized"
+            raise RuntimeError(msg)
 
         await self._conn.execute(
             """
@@ -1070,7 +1088,7 @@ class MemoryRepository:
         if not last_sent:
             return False
 
-        now = now or datetime.now(timezone.utc)
+        now = now or datetime.now(UTC)
         return (now - last_sent) < timedelta(minutes=cooldown_minutes)
 
     # ------------------------------------------------------------------
@@ -1087,7 +1105,8 @@ class MemoryRepository:
         down-ranked before they keep producing more signals.
         """
         if not self._conn:
-            raise RuntimeError("Repository not initialized")
+            msg = "Repository not initialized"
+            raise RuntimeError(msg)
 
         async with self._conn.execute(
             "SELECT score_adjustment FROM setup_scores WHERE setup_id = ?", (setup_id,)
@@ -1112,9 +1131,10 @@ class MemoryRepository:
         min_outcomes: int = 3,
     ) -> float:
         if not self._conn:
-            raise RuntimeError("Repository not initialized")
+            msg = "Repository not initialized"
+            raise RuntimeError(msg)
 
-        since = datetime.now(timezone.utc) - timedelta(days=last_days)
+        since = datetime.now(UTC) - timedelta(days=last_days)
         async with self._conn.execute(
             """
             SELECT
@@ -1196,7 +1216,8 @@ class MemoryRepository:
         Replaces SignalCooldownStore.record_outcome()
         """
         if not self._conn:
-            raise RuntimeError("Repository not initialized")
+            msg = "Repository not initialized"
+            raise RuntimeError(msg)
 
         # Get current window
         async with self._conn.execute(
@@ -1207,8 +1228,8 @@ class MemoryRepository:
             if row is not None and row["outcome_window"]:
                 try:
                     window = json.loads(row["outcome_window"])
-                except json.JSONDecodeError as exc:
-                    LOG.error("failed to decode outcome window for setup %s: %s", setup_id, exc)
+                except json.JSONDecodeError:
+                    LOG.exception("failed to decode outcome window for setup %s", setup_id)
                     window = []
 
         # Add new outcome. New entries include R data; older string-only
@@ -1271,7 +1292,7 @@ class MemoryRepository:
                 setup_id,
                 adjustment,
                 json.dumps(window),
-                datetime.now(timezone.utc).isoformat(),
+                datetime.now(UTC).isoformat(),
             ),
         )
         await self._conn.commit()
@@ -1313,13 +1334,15 @@ class MemoryRepository:
         signal_data must contain: tracking_id, tracking_ref, signal_key, symbol, setup_id, direction
         """
         if not self._conn:
-            raise RuntimeError("Repository not initialized")
+            msg = "Repository not initialized"
+            raise RuntimeError(msg)
 
         # Basic validation
         required = {"tracking_id", "tracking_ref", "signal_key", "symbol", "setup_id", "direction"}
         missing = required - set(signal_data.keys())
         if missing:
-            raise ValueError(f"missing required fields in signal_data: {missing}")
+            msg = f"missing required fields in signal_data: {missing}"
+            raise ValueError(msg)
 
         # Build columns and values
         columns = [
@@ -1393,19 +1416,21 @@ class MemoryRepository:
                 values,
             )
             await self._conn.commit()
-        except Exception as exc:
-            LOG.error("failed to save active signal %s: %s", signal_data.get("tracking_id"), exc)
+        except Exception:
+            LOG.exception("failed to save active signal %s", signal_data.get("tracking_id"))
             raise
 
     async def get_active_signals(
         self,
         symbol: str | None = None,
         status: str | None = None,
+        *,
         include_closed: bool = False,
     ) -> list[dict[str, Any]]:
         """Get active signals with optional filtering."""
         if not self._conn:
-            raise RuntimeError("Repository not initialized")
+            msg = "Repository not initialized"
+            raise RuntimeError(msg)
 
         query = "SELECT * FROM active_signals WHERE 1=1"
         params: list[Any] = []
@@ -1430,27 +1455,24 @@ class MemoryRepository:
                     if data.get("reasons"):
                         try:
                             data["reasons"] = json.loads(data["reasons"])
-                        except json.JSONDecodeError as exc:
-                            LOG.error(
-                                "failed to decode reasons for signal %s: %s",
-                                data.get("tracking_id"),
-                                exc,
+                        except json.JSONDecodeError:
+                            LOG.exception(
+                                "failed to decode reasons for signal %s", data.get("tracking_id")
                             )
                             data["reasons"] = []
                     if data.get("scale_weights"):
                         try:
                             data["scale_weights"] = tuple(json.loads(data["scale_weights"]))
-                        except (json.JSONDecodeError, TypeError, ValueError) as exc:
-                            LOG.error(
-                                "failed to decode scale_weights for signal %s: %s",
+                        except (json.JSONDecodeError, TypeError, ValueError):
+                            LOG.exception(
+                                "failed to decode scale_weights for signal %s",
                                 data.get("tracking_id"),
-                                exc,
                             )
                             data["scale_weights"] = (0.5, 0.3, 0.2)
                     result.append(data)
                 return result
-        except Exception as exc:
-            LOG.error("failed to get active signals: %s", exc)
+        except Exception:
+            LOG.exception("failed to get active signals")
             return []
 
     async def close_active_signal(
@@ -1462,9 +1484,10 @@ class MemoryRepository:
     ) -> None:
         """Close an active signal."""
         if not self._conn:
-            raise RuntimeError("Repository not initialized")
+            msg = "Repository not initialized"
+            raise RuntimeError(msg)
 
-        closed_at = closed_at or datetime.now(timezone.utc)
+        closed_at = closed_at or datetime.now(UTC)
 
         try:
             await self._conn.execute(
@@ -1479,8 +1502,8 @@ class MemoryRepository:
                 (close_reason, close_price, closed_at.isoformat(), tracking_id),
             )
             await self._conn.commit()
-        except Exception as exc:
-            LOG.error("failed to close active signal %s: %s", tracking_id, exc)
+        except Exception:
+            LOG.exception("failed to close active signal %s", tracking_id)
             raise
 
     async def expire_open_signals_older_than(
@@ -1488,9 +1511,10 @@ class MemoryRepository:
     ) -> int:
         """Close pending/active signals older than a hard runtime age limit."""
         if not self._conn:
-            raise RuntimeError("Repository not initialized")
+            msg = "Repository not initialized"
+            raise RuntimeError(msg)
 
-        now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        now = (now or datetime.now(UTC)).astimezone(UTC)
         cutoff = now - timedelta(minutes=max(1, int(max_age_minutes)))
         cursor = await self._conn.execute(
             """
@@ -1524,7 +1548,8 @@ class MemoryRepository:
     ) -> None:
         """Update signal status (e.g., pending -> active)."""
         if not self._conn:
-            raise RuntimeError("Repository not initialized")
+            msg = "Repository not initialized"
+            raise RuntimeError(msg)
 
         try:
             if status == "active" and activated_at:
@@ -1542,14 +1567,15 @@ class MemoryRepository:
                     (status, tracking_id),
                 )
             await self._conn.commit()
-        except Exception as exc:
-            LOG.error("failed to update signal status for %s: %s", tracking_id, exc)
+        except Exception:
+            LOG.exception("failed to update signal status for %s", tracking_id)
             raise
 
     async def get_tracking_stats(self) -> dict[str, int]:
         """Return tracking lifecycle counters."""
         if not self._conn:
-            raise RuntimeError("Repository not initialized")
+            msg = "Repository not initialized"
+            raise RuntimeError(msg)
 
         async with self._conn.execute(
             """
@@ -1574,7 +1600,8 @@ class MemoryRepository:
             }
         )
         async with self._conn.execute(
-            "SELECT COUNT(*) AS active_count FROM active_signals WHERE status IN ('pending', 'active')"
+            "SELECT COUNT(*) AS active_count FROM active_signals "
+            "WHERE status IN ('pending', 'active')"
         ) as cursor:
             active_row = await cursor.fetchone()
         stats["active"] = int(active_row["active_count"]) if active_row else 0
@@ -1584,7 +1611,8 @@ class MemoryRepository:
     async def increment_tracking_stats(self, **deltas: int) -> None:
         """Increment one or more tracking counters."""
         if not self._conn:
-            raise RuntimeError("Repository not initialized")
+            msg = "Repository not initialized"
+            raise RuntimeError(msg)
 
         allowed = {
             "signals_sent",
@@ -1613,8 +1641,8 @@ class MemoryRepository:
                 params,
             )
             await self._conn.commit()
-        except Exception as exc:
-            LOG.error("failed to increment tracking stats: %s", exc)
+        except Exception:
+            LOG.exception("failed to increment tracking stats")
             raise
 
     async def save_signal_outcome(self, outcome_data: dict[str, Any]) -> None:
@@ -1624,7 +1652,8 @@ class MemoryRepository:
     async def save_signal_outcomes_batch(self, outcomes_data: list[dict[str, Any]]) -> None:
         """Persist completed tracked-signal outcomes in batch."""
         if not self._conn:
-            raise RuntimeError("Repository not initialized")
+            msg = "Repository not initialized"
+            raise RuntimeError(msg)
         if not outcomes_data:
             return
 
@@ -1641,9 +1670,8 @@ class MemoryRepository:
         for i, item in enumerate(outcomes_data):
             missing = required - set(item.keys())
             if missing:
-                raise ValueError(
-                    f"missing required fields in outcomes_data at index {i}: {missing}"
-                )
+                msg = f"missing required fields in outcomes_data at index {i}: {missing}"
+                raise ValueError(msg)
 
         query = """
             INSERT INTO signal_outcomes (
@@ -1714,8 +1742,8 @@ class MemoryRepository:
         try:
             await self._conn.executemany(query, rows)
             await self._conn.commit()
-        except Exception as exc:
-            LOG.error("failed to save signal outcomes batch: %s", exc)
+        except Exception:
+            LOG.exception("failed to save signal outcomes batch")
             raise
 
     async def get_setup_stats(
@@ -1727,7 +1755,8 @@ class MemoryRepository:
     ) -> list[dict[str, Any]]:
         """Aggregate tracked-signal outcome performance by setup."""
         if not self._conn:
-            raise RuntimeError("Repository not initialized")
+            msg = "Repository not initialized"
+            raise RuntimeError(msg)
 
         query = """
             SELECT
@@ -1832,7 +1861,7 @@ class MemoryRepository:
             query += " AND COALESCE(closed_at, created_at) >= ?"
             params.append(since_iso)
         elif last_days is not None:
-            since = datetime.now(timezone.utc) - timedelta(days=last_days)
+            since = datetime.now(UTC) - timedelta(days=last_days)
             query += " AND COALESCE(closed_at, created_at) >= ?"
             params.append(since.isoformat())
         query += " GROUP BY setup_id ORDER BY total DESC, setup_id ASC"
@@ -1870,7 +1899,8 @@ class MemoryRepository:
     ) -> list[dict[str, Any]]:
         """Return persisted tracked-signal outcomes."""
         if not self._conn:
-            raise RuntimeError("Repository not initialized")
+            msg = "Repository not initialized"
+            raise RuntimeError(msg)
 
         query = "SELECT * FROM signal_outcomes WHERE 1 = 1"
         params: list[Any] = []
@@ -1888,7 +1918,7 @@ class MemoryRepository:
             query += " AND COALESCE(closed_at, created_at) >= ?"
             params.append(since_iso)
         elif last_days is not None:
-            since = datetime.now(timezone.utc) - timedelta(days=last_days)
+            since = datetime.now(UTC) - timedelta(days=last_days)
             query += " AND COALESCE(closed_at, created_at) >= ?"
             params.append(since.isoformat())
 
@@ -1920,7 +1950,8 @@ class MemoryRepository:
     async def get_cooldown_count(self) -> int:
         """Return number of persisted cooldown entries."""
         if not self._conn:
-            raise RuntimeError("Repository not initialized")
+            msg = "Repository not initialized"
+            raise RuntimeError(msg)
         async with self._conn.execute("SELECT COUNT(*) AS count FROM cooldowns") as cursor:
             row = await cursor.fetchone()
         return int(row["count"]) if row else 0
@@ -1928,7 +1959,8 @@ class MemoryRepository:
     async def cleanup_signal_outcomes_before(self, cutoff_iso: str) -> int:
         """Delete old outcomes and return deleted row count."""
         if not self._conn:
-            raise RuntimeError("Repository not initialized")
+            msg = "Repository not initialized"
+            raise RuntimeError(msg)
         cursor = await self._conn.execute(
             """
             DELETE FROM signal_outcomes

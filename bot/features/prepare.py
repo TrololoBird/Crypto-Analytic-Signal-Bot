@@ -14,22 +14,24 @@ Other columns exist for backward compatibility but return neutral values.
 
 from __future__ import annotations
 
-from collections import OrderedDict
+import logging
 import math
 import threading
+from collections import OrderedDict
 from typing import Any, cast
 
 import polars as pl
 import structlog
 
+from bot.core.runtime_errors import DEFENSIVE_EXC
+
 from ..domain.schemas import PreparedSymbol, SymbolFrames, UniverseSymbol
+from ..market.ws_enrichment import depth_imbalance_from_book, microprice_bias_from_book
 from ..runtime_policy import (
     configured_context_timeframes,
     configured_primary_timeframe,
 )
-from ..market.ws_enrichment import depth_imbalance_from_book, microprice_bias_from_book
 from .microstructure import add_microstructure_features
-
 from .prepare_frame import (
     _add_advanced_indicators,
     _as_optional_float,
@@ -77,7 +79,7 @@ class _FrameCache:
     cheaper than blocking the async analysis loop behind another frame update.
     """
 
-    __slots__ = ("_store", "_max_size", "_lock", "_hits", "_misses")
+    __slots__ = ("_hits", "_lock", "_max_size", "_misses", "_store")
 
     def __init__(self, max_size: int = 500) -> None:
         self._store: OrderedDict[_FrameCacheKey, pl.DataFrame] = OrderedDict()
@@ -492,7 +494,7 @@ def _sanity_check_prepared_frame(work: pl.DataFrame, symbol: str, interval: str)
             continue
         dtype = work.schema.get(column)
         if dtype is None or not (
-            getattr(dtype, "is_numeric", lambda: False)() or dtype in {pl.Boolean}
+            getattr(dtype, "is_numeric", lambda: False)() or dtype == pl.Boolean
         ):
             continue
         numeric = series.cast(pl.Float64, strict=False).drop_nulls()
@@ -596,7 +598,7 @@ def _ws_enrichment_signature(
     if callable(getter):
         try:
             snapshot = getter(symbol)
-        except Exception:
+        except DEFENSIVE_EXC:
             snapshot = None
 
     def _rounded(value: object) -> float | None:
@@ -658,7 +660,7 @@ def _enrich_with_ws_data(
     if callable(getter):
         try:
             snapshot = getter(symbol)
-        except Exception:
+        except DEFENSIVE_EXC:
             snapshot = None
     if snapshot is not None:
         buy_qty = _as_optional_float(getattr(snapshot, "buy_qty", None)) or 0.0
@@ -701,8 +703,9 @@ def _to_polars(df: object) -> pl.DataFrame:
     if isinstance(df, pl.DataFrame):
         return df
     if type(df).__module__.startswith("pandas"):
-        raise TypeError("prepare_symbol expects Polars frames; pandas inputs are unsupported")
-    return pl.DataFrame(cast(Any, df))
+        msg = "prepare_symbol expects Polars frames; pandas inputs are unsupported"
+        raise TypeError(msg)
+    return pl.DataFrame(cast("Any", df))
 
 
 def prepare_symbol(
@@ -717,8 +720,6 @@ def prepare_symbol(
 
     Returns None if there is insufficient historical data.
     """
-    import logging
-
     _log = logging.getLogger("bot.features")
 
     sym = universe_symbol.symbol
@@ -778,7 +779,10 @@ def prepare_symbol(
 
     if min(work_len_1h, work_len_15m) < 30:
         _log.info(
-            "%s: insufficient processed data | work_1h=%d work_15m=%d optional_5m=%d optional_4h=%d need=30",
+            (
+                "%s: insufficient processed data | work_1h=%d work_15m=%d "
+                "optional_5m=%d optional_4h=%d need=30"
+            ),
             sym,
             work_len_1h,
             work_len_15m,
@@ -808,7 +812,10 @@ def prepare_symbol(
         )
 
     _log.info(
-        "%s: prepared symbol successfully | primary_timeframe=%s work_primary=%d work_15m=%d work_1h=%d work_5m=%d optional_4h=%d",
+        (
+            "%s: prepared symbol successfully | primary_timeframe=%s work_primary=%d "
+            "work_15m=%d work_1h=%d work_5m=%d optional_4h=%d"
+        ),
         sym,
         primary_timeframe,
         len(primary_work) if primary_work is not None else 0,
@@ -871,3 +878,15 @@ def prepare_symbol(
         context_timeframes=context_timeframes,
         settings=settings,
     )
+
+
+__all__ = [
+    "PreparedSymbol",
+    "_add_advanced_indicators",
+    "_cached_prepare_frame",
+    "_prepare_frame",
+    "_swing_points",
+    "cache_stats",
+    "min_required_bars",
+    "prepare_symbol",
+]

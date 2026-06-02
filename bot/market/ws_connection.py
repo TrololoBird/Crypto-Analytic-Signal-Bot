@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import socket
 import logging
+import socket
 import time
 from typing import Any
 
 import websockets
 
+from bot.core.runtime_errors import DEFENSIVE_EXC
 from bot.market.network_proxy import websockets_connect_kwargs
 
 LOG = logging.getLogger("bot.ws_manager")
@@ -41,7 +42,7 @@ def get_ws_url_version(manager: Any, endpoint: str) -> str:
     return "unknown"
 
 
-def apply_tcp_keepalive(manager: Any, ws: Any) -> None:
+def apply_tcp_keepalive(_manager: Any, ws: Any) -> None:
     try:
         transport = getattr(ws, "transport", None)
         sock = transport.get_extra_info("socket") if transport is not None else None
@@ -123,7 +124,9 @@ async def run_stream_session(
     """
     proxy_url = getattr(manager, "_proxy_url", None)
     trust_env = bool(getattr(manager, "_trust_env", True))
-    connect_kwargs = websockets_connect_kwargs(proxy_url=proxy_url, trust_env=trust_env)
+    connect_kwargs: dict[str, Any] = websockets_connect_kwargs(
+        proxy_url=proxy_url, trust_env=trust_env
+    )
     ws = await asyncio.wait_for(
         websockets.connect(
             url,
@@ -170,7 +173,7 @@ async def run_stream_session(
                     break
                 try:
                     msg = parse_message(raw)
-                except Exception as exc:
+                except DEFENSIVE_EXC as exc:
                     LOG.debug(
                         "websocket message parse failed | endpoint=%s error=%s", endpoint, exc
                     )
@@ -182,10 +185,8 @@ async def run_stream_session(
                     graceful_close = True
         finally:
             health_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await health_task
-            except asyncio.CancelledError:
-                pass
 
     clear_endpoint_connection_state(manager, endpoint)
     if reconnect_reason == "24h_proactive":
@@ -202,7 +203,8 @@ async def run_stream_session(
         manager._last_reconnect_reason_by_endpoint[endpoint] = "graceful_close"
         LOG.info("ws graceful close | endpoint=%s", endpoint)
         return backoff_reset, False
-    raise ConnectionError("stream closed without explicit close frame")
+    msg_0 = "stream closed without explicit close frame"
+    raise ConnectionError(msg_0)
 
 
 async def run_endpoint_loop(
@@ -289,11 +291,10 @@ async def run_endpoint_loop(
                     elapsed=elapsed,
                     stale_symbols=stale,
                 )
-        except Exception as exc:
-            LOG.error(
-                "ws unexpected error during connection | endpoint=%s error=%s (%s)",
+        except DEFENSIVE_EXC as exc:
+            LOG.exception(
+                "ws unexpected error during connection | endpoint=%s (%s)",
                 endpoint,
-                exc,
                 type(exc).__name__,
             )
             clear_endpoint_connection_state(manager, endpoint)

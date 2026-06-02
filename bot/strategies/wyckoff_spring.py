@@ -1,16 +1,18 @@
 from __future__ import annotations
 
-from ..domain.config import BotSettings
-from ..domain.schemas import PreparedSymbol, Signal
-from .roadmap_base import RoadmapSetup
+from typing import TYPE_CHECKING, ClassVar
 
-
-import polars as pl
-
-from ._common import SpecHit, with_spec_columns, _latest_values, build_spec_signal
 from ..domain.strategy_catalog import catalog_default_params
+from ._common import SpecHit, _latest_values, build_spec_signal, with_spec_columns
 from ._roadmap import _as_float, _build_atr_signal, _last, _missing_columns, _reject
 from .common import orderflow_supports_reversal
+from .roadmap_base import RoadmapSetup
+
+if TYPE_CHECKING:
+    import polars as pl
+
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
 
 __all__ = ["detect_wyckoff_spring", "detect_wyckoff_spring_prepared"]
 
@@ -247,7 +249,7 @@ class WyckoffSpringSetup(RoadmapSetup):
     family = "reversal"
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)
-    DEFAULTS = {
+    DEFAULTS: ClassVar[dict[str, float]] = {
         **RoadmapSetup.DEFAULTS,
         "sweep_tolerance_pct": 0.0010,
         "min_volume_ratio": 1.05,

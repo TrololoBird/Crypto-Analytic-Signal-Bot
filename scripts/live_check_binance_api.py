@@ -1,23 +1,25 @@
-# ruff: noqa: E402
 from __future__ import annotations
 
 import argparse
 import asyncio
-from typing import Sequence
 
 try:
     from scripts.common import bootstrap_repo_path, configure_script_logging
 except ModuleNotFoundError:  # pragma: no cover - direct script execution
     from common import bootstrap_repo_path, configure_script_logging
 
-bootstrap_repo_path()
+from typing import TYPE_CHECKING
 
 from bot.domain.config import load_settings
 from bot.market.data import BinanceFuturesMarketData, MarketDataUnavailable
+from bot.market.rest import BinanceClientImpl
 from bot.market.ws import FuturesWSManager
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 LOG = configure_script_logging("scripts.live_check_binance_api")
+
 LIVE_CHECK_HTTP_TIMEOUT_SECONDS = 30.0  # seconds: cap live REST smoke checks
 PUBLIC_FAPI_PATHS = {
     "/fapi/v1/exchangeInfo",
@@ -78,16 +80,14 @@ async def _wait_for_market_reconnect(
 
 def _assert_public_endpoint(endpoint: str) -> None:
     if endpoint not in PUBLIC_FAPI_PATHS:
-        raise RuntimeError(f"Non-public Binance endpoint in live check: {endpoint}")
+        msg = f"Non-public Binance endpoint in live check: {endpoint}"
+        raise RuntimeError(msg)
 
 
 async def _run(
     symbols: Sequence[str], warmup_seconds: float, reconnect_wait_seconds: float
 ) -> None:
     settings = load_settings()
-    # Create BinanceClient implementation
-    from bot.market.rest import BinanceClientImpl
-
     binance_client = BinanceClientImpl(
         rest_timeout_seconds=min(
             float(settings.ws.rest_timeout_seconds),
@@ -124,39 +124,48 @@ async def _run(
         )
 
         await ws_manager.start(list(symbols))
-        connected = await ws_manager.wait_until_connected(timeout=30.0)
+        connected = await ws_manager.wait_until_connected(max_wait_s=30.0)
         if not connected:
-            raise RuntimeError("ws_manager failed to connect within 30 seconds")
+            msg = "ws_manager failed to connect within 30 seconds"
+            raise RuntimeError(msg)
 
         before = await _wait_for_ws_warmup(ws_manager, warmup_seconds)
         if int(before.get("fresh_mark_prices") or 0) <= 0:
             before = await _wait_for_mark_prices(ws_manager, min(20.0, warmup_seconds))
         LOG.info("ws_snapshot_before_reconnect", snapshot=before)
         if not ws_manager.is_ticker_cache_warm() and int(before.get("fresh_tickers") or 0) <= 0:
-            raise RuntimeError(f"ticker cache did not warm up: {before}")
+            msg = f"ticker cache did not warm up: {before}"
+            raise RuntimeError(msg)
         if int(before.get("fresh_mark_prices") or 0) <= 0:
-            raise RuntimeError(f"fresh_mark_prices did not warm up: {before}")
+            msg = f"fresh_mark_prices did not warm up: {before}"
+            raise RuntimeError(msg)
         if int(before.get("fresh_book_tickers") or 0) <= 0:
-            raise RuntimeError(f"fresh_book_tickers did not warm up: {before}")
+            msg = f"fresh_book_tickers did not warm up: {before}"
+            raise RuntimeError(msg)
 
         market_ws = ws_manager._ws_conns.get("market")
         if market_ws is None:
-            raise RuntimeError("market ws connection is missing before forced reconnect")
+            msg = "market ws connection is missing before forced reconnect"
+            raise RuntimeError(msg)
         await market_ws.close()
         after = await _wait_for_market_reconnect(ws_manager, reconnect_wait_seconds)
         LOG.info("ws_snapshot_after_reconnect", snapshot=after)
         if int(after.get("market_connect_count") or 0) < 2:
-            raise RuntimeError(f"market reconnect was not observed: {after}")
+            msg = f"market reconnect was not observed: {after}"
+            raise RuntimeError(msg)
         if not ws_manager.is_ticker_cache_warm() and int(after.get("fresh_tickers") or 0) <= 0:
-            raise RuntimeError(f"ticker cache was not restored after reconnect: {after}")
+            msg = f"ticker cache was not restored after reconnect: {after}"
+            raise RuntimeError(msg)
         if int(after.get("fresh_mark_prices") or 0) <= 0:
-            raise RuntimeError(f"fresh_mark_prices were not restored after reconnect: {after}")
+            msg = f"fresh_mark_prices were not restored after reconnect: {after}"
+            raise RuntimeError(msg)
     finally:
         await ws_manager.stop()
         await client.close()
 
 
 def main() -> None:
+    bootstrap_repo_path()
     parser = argparse.ArgumentParser(description="Live REST/WS Binance API smoke check")
     parser.add_argument("--symbols", nargs="+", default=["BTCUSDT", "ETHUSDT", "SOLUSDT"])
     parser.add_argument("--warmup-seconds", type=float, default=20.0)
@@ -165,7 +174,7 @@ def main() -> None:
     try:
         asyncio.run(_run(args.symbols, args.warmup_seconds, args.reconnect_wait_seconds))
     except MarketDataUnavailable as exc:
-        LOG.error(
+        LOG.exception(
             "live_binance_api_unavailable",
             operation=exc.operation,
             detail=exc.detail,

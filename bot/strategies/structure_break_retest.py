@@ -1,21 +1,22 @@
-"""structure_break_retest — detector in setups/detectors/."""
+"""structure_break_retest — canonical strategy detector."""
 
 from __future__ import annotations
 
-from ..domain.config import BotSettings
-from ..setups.spec_runtime import SpecDetectorSetup
+from typing import TYPE_CHECKING, ClassVar
 
+from ..features import _swing_points
+from ..setups import _build_signal, _compute_dynamic_score, _reject
+from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
+from ..setups.utils import build_structural_targets, coerce_int, validate_rr_or_penalty
+from ._common import SpecHit, _latest_values, as_float, with_spec_columns
 
-import polars as pl
+if TYPE_CHECKING:
+    import polars as pl
 
-from ._common import SpecHit, as_float, with_spec_columns, _latest_values
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
 
 __all__ = ["detect_structure_break_retest"]
-from ..domain.schemas import PreparedSymbol, Signal
-from ..setups import _build_signal, _compute_dynamic_score, _reject
-from ..setups.utils import build_structural_targets, validate_rr_or_penalty, coerce_int
-from ..features import _swing_points
-from ..setups.spec_runtime import run_setup_detection
 
 
 def detect_structure_break_retest(
@@ -147,7 +148,7 @@ def _detect_15m_range_retest(
 
 def _detect_structure_break_retest_extended(
     prepared: PreparedSymbol,
-    settings: BotSettings,
+    _settings: BotSettings,
     defaults: dict[str, float],
     effective: dict[str, float],
     setup_id: str,
@@ -213,12 +214,14 @@ def _detect_structure_break_retest_extended(
             for i in range(lookback_start, work_1h.height):
                 bar_close = float(work_1h.item(i, "close"))
                 vol_ratio_bar = _as_float(work_1h.item(i, "volume_ratio20"), 1.0)
-                if bar_close > last_sh_price * (1 + breakout_threshold):
-                    if vol_ratio_bar >= min_vol_breakout:
-                        breakout_detected = True
-                        broken_level = last_sh_price
-                        breakout_bar_idx = i
-                        break
+                if (
+                    bar_close > last_sh_price * (1 + breakout_threshold)
+                    and vol_ratio_bar >= min_vol_breakout
+                ):
+                    breakout_detected = True
+                    broken_level = last_sh_price
+                    breakout_bar_idx = i
+                    break
             if breakout_detected and broken_level is not None:
                 retest_distance = abs(trig_close - broken_level)
                 if retest_distance < atr * retest_atr_mult and trig_close > broken_level * 1.001:
@@ -234,12 +237,14 @@ def _detect_structure_break_retest_extended(
             for i in range(lookback_start, work_1h.height):
                 bar_close = float(work_1h.item(i, "close"))
                 vol_ratio_bar = _as_float(work_1h.item(i, "volume_ratio20"), 1.0)
-                if bar_close < last_sl_price * (1 - breakout_threshold):
-                    if vol_ratio_bar >= min_vol_breakout:
-                        breakout_detected = True
-                        broken_level = last_sl_price
-                        breakout_bar_idx = i
-                        break
+                if (
+                    bar_close < last_sl_price * (1 - breakout_threshold)
+                    and vol_ratio_bar >= min_vol_breakout
+                ):
+                    breakout_detected = True
+                    broken_level = last_sl_price
+                    breakout_bar_idx = i
+                    break
             if breakout_detected and broken_level is not None:
                 retest_distance = abs(trig_close - broken_level)
                 if retest_distance < atr * retest_atr_mult and trig_close < broken_level * 0.999:
@@ -413,9 +418,9 @@ def detect_structure_break_retest_setup(
 
 
 __all__ = [
+    "_detect_structure_break_retest_extended",
     "detect_structure_break_retest",
     "detect_structure_break_retest_setup",
-    "_detect_structure_break_retest_extended",
 ]
 
 
@@ -425,7 +430,7 @@ class StructureBreakRetestSetup(SpecDetectorSetup):
     confirmation_profile = "breakout_acceptance"
     required_context = ("futures_flow",)
 
-    DEFAULTS = {
+    DEFAULTS: ClassVar[dict[str, float]] = {
         "base_score": 0.62,
         "swing_lookback": 3,
         "min_vol_breakout": 1.3,

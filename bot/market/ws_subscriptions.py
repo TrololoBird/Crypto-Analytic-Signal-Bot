@@ -20,11 +20,11 @@ def _normalized_symbols(symbols: list[str]) -> list[str]:
 
 
 def base_streams_for_symbols(manager: Any, symbols: list[str]) -> list[str]:
-    streams: list[str] = []
-    for sym in _normalized_symbols(symbols):
-        for interval in manager._cfg.kline_intervals:
-            streams.append(f"{sym}@kline_{interval}")
-    return streams
+    return [
+        f"{sym}@kline_{interval}"
+        for sym in _normalized_symbols(symbols)
+        for interval in manager._cfg.kline_intervals
+    ]
 
 
 def public_streams_for_symbols(manager: Any, symbols: list[str]) -> list[str]:
@@ -58,7 +58,8 @@ def stream_endpoint_class(stream: str) -> str:
         token in normalized
         for token in ("listenkey", "/private", "userdatastream", "@account", "@order")
     ):
-        raise ValueError(f"private/auth websocket streams are not allowed: {stream}")
+        msg = f"private/auth websocket streams are not allowed: {stream}"
+        raise ValueError(msg)
     if "@bookticker" in normalized or "@depth" in normalized:
         return "public"
     allowed_market = (
@@ -73,7 +74,8 @@ def stream_endpoint_class(stream: str) -> str:
     )
     if any(token in normalized for token in allowed_market):
         return "market"
-    raise ValueError(f"unsupported public websocket stream: {stream}")
+    msg = f"unsupported public websocket stream: {stream}"
+    raise ValueError(msg)
 
 
 def tracked_agg_trade_streams(manager: Any, symbols: list[str]) -> list[str]:
@@ -115,10 +117,11 @@ def validate_endpoint_stream_limits(manager: Any) -> None:
     )
     for endpoint, streams in manager._intended_streams_by_endpoint.items():
         if len(streams) > max_streams:
-            raise ValueError(
+            msg = (
                 "websocket stream count exceeds configured safety limit "
                 f"| endpoint={endpoint} streams={len(streams)} max={max_streams}"
             )
+            raise ValueError(msg)
 
 
 async def send_subscription_command(

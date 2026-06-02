@@ -21,17 +21,21 @@ __all__ = [
     "BinanceClient",
     "BinanceClientImpl",
     "BinanceFuturesMarketData",
+    "FuturesWSManager",
     "MarketDataUnavailable",
+    "MessageBuffer",
+    "PublicIntelligenceService",
+    "RateLimiter",
     "build_shortlist",
     "rerank_shortlist",
     "strategy_fits_for_market_row",
-    *sorted(_LAZY),
 ]
 
 
 def __getattr__(name: str) -> Any:
     spec = _LAZY.get(name)
     if spec is None:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+        msg = f"module {__name__!r} has no attribute {name!r}"
+        raise AttributeError(msg)
     module = importlib.import_module(spec[0], __name__)
     return getattr(module, spec[1])

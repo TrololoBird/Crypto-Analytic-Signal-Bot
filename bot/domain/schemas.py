@@ -3,25 +3,22 @@ from __future__ import annotations
 import hashlib
 import math
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
-
-import polars as pl
 
 from ..delivery.contract import (
     DEFAULT_SCALE_WEIGHTS,
     DEFAULT_TARGET_RR,
     default_ttl_bars,
     normalize_scale_weights,
-    validate_signal_contract,
     valid_until_from,
+    validate_signal_contract,
 )
 
 if TYPE_CHECKING:
+    import polars as pl
+
     from .config import BotSettings
-
-
-UTC = timezone.utc
 
 
 @dataclass(frozen=True, slots=True)
@@ -341,9 +338,9 @@ class Signal:
             object.__setattr__(self, "risk_reward", computed)
         issues = validate_signal_contract(self)
         if issues:
-            raise ValueError(
-                f"Signal contract violations: {[f'{issue.field}:{issue.reason}' for issue in issues]}"
-            )
+            detail = [f"{issue.field}:{issue.reason}" for issue in issues]
+            msg = f"Signal contract violations: {detail}"
+            raise ValueError(msg)
 
     @property
     def entry_mid_raw(self) -> float:
@@ -356,9 +353,13 @@ class Signal:
     @property
     def entry_reference_price(self) -> float:
         mid = self.entry_mid_raw
-        if self.mark_price and self.mark_price > 0 and mid > 0:
-            if abs(mid - self.mark_price) / mid < 0.002:
-                return self.mark_price
+        if (
+            self.mark_price
+            and self.mark_price > 0
+            and mid > 0
+            and abs(mid - self.mark_price) / mid < 0.002
+        ):
+            return self.mark_price
         return mid
 
     @property
@@ -422,7 +423,8 @@ class Signal:
 
     @property
     def scale_weight_pct(self) -> tuple[int, int, int]:
-        return tuple(int(round(weight * 100)) for weight in self.scale_weights)  # type: ignore[return-value]
+        # type: ignore[return-value]
+        return tuple(round(weight * 100) for weight in self.scale_weights)
 
     @property
     def time_to_expiry_minutes(self) -> float:

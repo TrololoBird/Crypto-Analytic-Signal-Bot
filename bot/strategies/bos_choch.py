@@ -1,28 +1,27 @@
-"""bos_choch — detector in setups/detectors/."""
+"""bos_choch — canonical strategy detector."""
 
 from __future__ import annotations
 
-from ..domain.config import BotSettings
-from ..domain.schemas import PreparedSymbol, Signal
-from ..setups import _reject
 import logging
+import math
+from typing import TYPE_CHECKING, Any, ClassVar, cast
+
+from ..features import _swing_points
+from ..setups import _build_signal, _compute_dynamic_score, _reject
+from ..setups.smc import latest_structure_break, swing_highs_lows
+from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
+from ..setups.utils import coerce_int
+from ._common import SpecHit, _latest_values, _row_volume_ratio, as_float, with_spec_columns
+
+if TYPE_CHECKING:
+    import polars as pl
+
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
 
 LOG = logging.getLogger("bot.strategies.bos_choch")
 
-from ..setups.spec_runtime import SpecDetectorSetup
-
-
-import logging
-import math
-from typing import Any, cast
-
-import polars as pl
-
-from ..features import _swing_points
-from ..setups import _build_signal, _compute_dynamic_score
-from ..setups.spec_runtime import run_setup_detection
-from ..setups.smc import latest_structure_break, swing_highs_lows
-from ._common import SpecHit, as_float, with_spec_columns, _latest_values, _row_volume_ratio
+__all__ = ["detect_bos_choch"]
 
 
 def detect_bos_choch(
@@ -118,7 +117,7 @@ def _select_external_stop_level(
     for idx in range(bounded_end, -1, -1):
         raw_marker = markers[idx]
         try:
-            marker_value = float(cast(Any, raw_marker)) if raw_marker is not None else 0.0
+            marker_value = float(cast("Any", raw_marker)) if raw_marker is not None else 0.0
         except (TypeError, ValueError):
             invalid_markers += 1
             continue
@@ -130,7 +129,7 @@ def _select_external_stop_level(
             invalid_levels += 1
             continue
         try:
-            level = float(cast(Any, raw_level))
+            level = float(cast("Any", raw_level))
         except (TypeError, ValueError):
             invalid_levels += 1
             continue
@@ -213,12 +212,15 @@ def _select_stop_level_with_fallback(
 
     if frame.height >= 2:
         previous_level = float(frame.item(-2, "high" if above_price else "low"))
-        if math.isfinite(previous_level) and previous_level > 0.0:
-            if previous_level > price if above_price else previous_level < price:
-                details["stop_source"] = "previous_candle"
-                details["fallback_used"] = "previous_candle_stop"
-                details["previous_candle_stop_level"] = previous_level
-                return previous_level, "previous_candle", details
+        if (
+            math.isfinite(previous_level)
+            and previous_level > 0.0
+            and (previous_level > price if above_price else previous_level < price)
+        ):
+            details["stop_source"] = "previous_candle"
+            details["fallback_used"] = "previous_candle_stop"
+            details["previous_candle_stop_level"] = previous_level
+            return previous_level, "previous_candle", details
 
     internal_level, internal_details = _select_external_stop_level(
         markers=internal_markers,
@@ -239,27 +241,26 @@ def _select_stop_level_with_fallback(
     return None, None, details
 
 
-def _spec_detect_kwargs(effective: dict[str, float]) -> dict[str, object]:
+def _spec_detect_kwargs(_effective: dict[str, float]) -> dict[str, object]:
     return {"max_age": 20}
 
 
 def _detect_bos_choch_extended(
     prepared: PreparedSymbol,
-    settings: BotSettings,
+    _settings: BotSettings,
     defaults: dict[str, float],
     effective: dict[str, float],
     setup_id: str,
     family: str,
 ) -> Signal | None:
     dynamic_params = effective
-    from ..setups.utils import coerce_int
 
     configured_swing_lookback = coerce_int(
         dynamic_params.get("swing_lookback"), int(defaults["swing_lookback"])
     )
     bos_lookback = coerce_int(dynamic_params.get("bos_lookback"), configured_swing_lookback)
     choch_lookback = coerce_int(dynamic_params.get("choch_lookback"), configured_swing_lookback)
-    swing_lookback = max(2, max(bos_lookback, choch_lookback, configured_swing_lookback))
+    swing_lookback = max(2, bos_lookback, choch_lookback, configured_swing_lookback)
     external_swing_lookback = max(
         swing_lookback + 1,
         coerce_int(
@@ -474,7 +475,7 @@ def _detect_bos_choch_extended(
                 "swing_stop_missing_long",
                 external_swing_lookback=external_swing_lookback,
                 swing_lookback=swing_lookback,
-                **cast(Any, stop_details),
+                **cast("Any", stop_details),
             )
             return None
         stop_price = (
@@ -523,7 +524,7 @@ def _detect_bos_choch_extended(
                 "swing_stop_missing_short",
                 external_swing_lookback=external_swing_lookback,
                 swing_lookback=swing_lookback,
-                **cast(Any, stop_details),
+                **cast("Any", stop_details),
             )
             return None
         stop_price = (
@@ -625,7 +626,7 @@ def detect_bos_choch_setup(
     )
 
 
-__all__ = ["detect_bos_choch", "detect_bos_choch_setup", "_detect_bos_choch_extended"]
+__all__ = ["_detect_bos_choch_extended", "detect_bos_choch", "detect_bos_choch_setup"]
 
 
 class BOSCHOCHSetup(SpecDetectorSetup):
@@ -634,7 +635,7 @@ class BOSCHOCHSetup(SpecDetectorSetup):
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)
 
-    DEFAULTS = {
+    DEFAULTS: ClassVar[dict[str, float]] = {
         "base_score": 0.55,
         "swing_lookback": 6,
         "external_swing_lookback": 20,
@@ -684,7 +685,7 @@ class BOSCHOCHSetup(SpecDetectorSetup):
         try:
             return super().detect(prepared, settings)
         except (ValueError, KeyError, IndexError) as e:
-            LOG.exception("%s bos_choch: detection error: %s", prepared.symbol, e)
+            LOG.exception("%s bos_choch: detection error", prepared.symbol)
             _reject(
                 prepared,
                 self.setup_id,

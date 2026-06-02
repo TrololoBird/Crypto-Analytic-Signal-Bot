@@ -52,8 +52,16 @@ metrics_port = 9090
 # Examples: socks5h://127.0.0.1:7890 (Clash/Mihomo), socks5h://127.0.0.1:9050 (Tor)
 # Or set BINANCE_PROXY_URL / HTTPS_PROXY in .env (see docs/BINANCE_PROXY_RU.md).
 [bot.network]
+# Primary egress (optional). Use your own Clash/Tor/VPS endpoints — never commit untrusted public lists.
 proxy_url = ""
+# Failover chain: bot rotates on transport/geo errors for 24/7 uptime.
+proxy_urls = [
+  # "socks5://127.0.0.1:7890",
+  # "socks5://127.0.0.1:7891",
+]
 trust_env = true
+failover_enabled = true
+failover_cooldown_seconds = 300
 
 [bot.universe]
 quote_asset = "USDT"

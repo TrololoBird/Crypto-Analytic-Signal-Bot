@@ -4,7 +4,7 @@ import argparse
 import json
 import shutil
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +20,7 @@ DEFAULT_REPORT = ROOT / "logs" / "21_outcome_r_recompute.md"
 
 
 def _now_stamp() -> str:
-    return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    return datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
 
 
 def _setup_quality(r_multiple: float) -> str:
@@ -160,13 +160,19 @@ def write_report(summary: dict[str, Any], report_path: Path) -> None:
     lines = [
         "# Outcome R-Multiple Recompute",
         "",
-        f"Generated: {datetime.now(timezone.utc).isoformat(timespec='seconds')}",
+        f"Generated: {datetime.now(UTC).isoformat(timespec='seconds')}",
         "",
         "## Evidence Boundary",
         "",
-        "- Confirmed: recompute uses persisted `signal_outcomes` joined to `active_signals.initial_stop` by `tracking_id`.",
+        (
+            "- Confirmed: recompute uses persisted `signal_outcomes` joined to "
+            "`active_signals.initial_stop` by `tracking_id`."
+        ),
         "- Confirmed: `--apply` creates a timestamped SQLite backup before updating rows.",
-        "- Inference: `initial_stop` is treated as the original planned risk anchor for R-multiple analytics.",
+        (
+            "- Inference: `initial_stop` is treated as the original planned risk anchor "
+            "for R-multiple analytics."
+        ),
         "",
         "## Summary",
         "",
@@ -180,15 +186,18 @@ def write_report(summary: dict[str, Any], report_path: Path) -> None:
         "",
         "## Largest Changes",
         "",
-        "| Tracking ID | Symbol | Setup | Result | Old R | New R | Old Max Loss % | New Max Loss % |",
+        (
+            "| Tracking ID | Symbol | Setup | Result | Old R | New R | "
+            "Old Max Loss % | New Max Loss % |"
+        ),
         "| --- | --- | --- | --- | ---: | ---: | ---: | ---: |",
     ]
     for row in summary["examples"]:
-        lines.append(
-            "| {tracking_id} | {symbol} | {setup_id} | {result} | {old_r:.4f} | {new_r:.4f} | {old_max_loss_pct:.4f} | {new_max_loss_pct:.4f} |".format(
-                **row
-            )
+        row_line = (
+            "| {tracking_id} | {symbol} | {setup_id} | {result} | "
+            "{old_r:.4f} | {new_r:.4f} | {old_max_loss_pct:.4f} | {new_max_loss_pct:.4f} |"
         )
+        lines.append(row_line.format(**row))
     report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 

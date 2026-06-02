@@ -1,26 +1,25 @@
-"""hidden_divergence — detector in setups/detectors/."""
+"""hidden_divergence — canonical strategy detector."""
 
 from __future__ import annotations
 
-from ..domain.config import BotSettings
-from ..domain.schemas import PreparedSymbol, Signal
-from ..setups import _reject
 import logging
+import math
+from typing import TYPE_CHECKING, ClassVar
+
+from ..features import _swing_points
+from ..setups import _build_signal, _compute_dynamic_score, _reject
+from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
+from ._common import SpecHit, _latest_values, _pivot_rows, as_float, with_spec_columns
+
+if TYPE_CHECKING:
+    import polars as pl
+
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol, Signal
 
 LOG = logging.getLogger("bot.strategies.hidden_divergence")
 
-from ..setups.spec_runtime import SpecDetectorSetup
-
-
-import polars as pl
-
-from ._common import SpecHit, as_float, with_spec_columns, _pivot_rows, _latest_values
-
 __all__ = ["detect_hidden_divergence"]
-from ..setups import _build_signal, _compute_dynamic_score
-from ..features import _swing_points
-import math
-from ..setups.spec_runtime import run_setup_detection
 
 
 def detect_hidden_divergence(frame: pl.DataFrame, *, timeframe: str = "15m") -> SpecHit | None:
@@ -115,14 +114,13 @@ def _find_recent_hidden_divergence_pair(
 
 def _detect_hidden_divergence_extended(
     prepared: PreparedSymbol,
-    settings: BotSettings,
+    _settings: BotSettings,
     defaults: dict[str, float],
     effective: dict[str, float],
     setup_id: str,
     family: str,
 ) -> Signal | None:
     dynamic_params = effective
-    effective_params = {**defaults, **dynamic_params}
     # FIX 2026-05-21: spec divergence only checks the latest 15m pivots; on
     # a miss, keep the existing 1h confirmed-swing hidden divergence scan.
     rsi_divergence_lookback = int(
@@ -269,7 +267,7 @@ def _detect_hidden_divergence_extended(
 
     # --- Compute structural SL/TP ---
     if direction == "long":
-        # SL: beyond hidden divergence extreme (swing low) + 0.15×ATR
+        # SL: beyond hidden divergence extreme (swing low) + 0.15xATR
         entry_price = swing_ref
         stop_price = swing_ref - atr * sl_buffer_atr
         risk = entry_price - stop_price
@@ -282,7 +280,7 @@ def _detect_hidden_divergence_extended(
                 price=entry_price,
             )
             return None
-        # TP1/TP2: Fibonacci 1.272× and 1.618× extension of last impulse wave
+        # TP1/TP2: Fibonacci 1.272x and 1.618x extension of last impulse wave
         if impulse_size and impulse_size > 0:
             tp1 = entry_price + impulse_size * 1.272
             tp2 = entry_price + impulse_size * 1.618
@@ -290,7 +288,7 @@ def _detect_hidden_divergence_extended(
             tp1 = None
             tp2 = None
     else:
-        # SL: beyond hidden divergence extreme (swing high) + 0.15×ATR
+        # SL: beyond hidden divergence extreme (swing high) + 0.15xATR
         entry_price = swing_ref
         stop_price = swing_ref + atr * sl_buffer_atr
         risk = stop_price - entry_price
@@ -387,9 +385,9 @@ def detect_hidden_divergence_setup(
 
 
 __all__ = [
+    "_detect_hidden_divergence_extended",
     "detect_hidden_divergence",
     "detect_hidden_divergence_setup",
-    "_detect_hidden_divergence_extended",
 ]
 
 
@@ -399,7 +397,7 @@ class HiddenDivergenceSetup(SpecDetectorSetup):
     confirmation_profile = "trend_follow"
     required_context = ("futures_flow",)
 
-    DEFAULTS = {
+    DEFAULTS: ClassVar[dict[str, float]] = {
         "base_score": 0.5,
         "min_swings": 2.0,
         "bias_mismatch_penalty": 0.75,

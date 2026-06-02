@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
-from ..domain.config import BotSettings
-from ..domain.schemas import PreparedSymbol
 from ..setups.base import BaseSetup
 from ..setups.utils import get_dynamic_params
 from ._roadmap import (
@@ -28,6 +26,10 @@ from ._roadmap import (
     _series_mean_tail,
     _series_min_tail,
 )
+
+if TYPE_CHECKING:
+    from ..domain.config import BotSettings
+    from ..domain.schemas import PreparedSymbol
 
 
 class RoadmapSetup(BaseSetup):

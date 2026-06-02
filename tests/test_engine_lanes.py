@@ -204,5 +204,5 @@ def test_non_standard_interval_without_filter_still_caps_families() -> None:
         ("not-an-interval", False),
     ],
 )
-def test_is_standard_kline_interval(interval: str, expected: bool) -> None:
+def test_is_standard_kline_interval(interval: str, *, expected: bool) -> None:
     assert is_standard_kline_interval(interval) is expected

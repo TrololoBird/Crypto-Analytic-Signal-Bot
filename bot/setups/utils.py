@@ -5,15 +5,16 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 import math
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
-import polars as pl
-
+from ..domain.strategy_catalog import catalog_default_params
 from ..runtime_policy import is_deep_analysis_symbol
 
 if TYPE_CHECKING:
+    import polars as pl
+
     from ..domain.schemas import PreparedSymbol, Signal
 
 
@@ -342,11 +343,12 @@ def validate_rr_or_penalty(
 
 
 def apply_graded_penalty(
-    signal: "Signal",
+    signal: Signal,
+    *,
     condition: bool,
     penalty: float = 0.75,
     reason: str = "",
-) -> "Signal":
+) -> Signal:
     """Apply graded penalty to signal score if condition is True.
 
     Instead of rejecting signal completely, reduce score by penalty factor.
@@ -371,7 +373,7 @@ def apply_graded_penalty(
 
 
 def _relax_deep_asset_thresholds(
-    prepared: "PreparedSymbol",
+    prepared: PreparedSymbol,
     params: dict[str, float],
 ) -> dict[str, float]:
     if not params or not is_deep_analysis_symbol(prepared):
@@ -392,7 +394,7 @@ def _relax_deep_asset_thresholds(
     return adjusted
 
 
-def get_dynamic_params(prepared: "PreparedSymbol", setup_id: str) -> dict[str, float]:
+def get_dynamic_params(prepared: PreparedSymbol, setup_id: str) -> dict[str, float]:
     """Get dynamic parameters from prepared symbol for specific setup.
 
     This retrieves setup-specific configuration from settings or falls back
@@ -424,8 +426,6 @@ def get_dynamic_params(prepared: "PreparedSymbol", setup_id: str) -> dict[str, f
         legacy_key = setup_id.removesuffix("_setup")
         if legacy_key in setups_config:
             params = dict(setups_config.get(legacy_key, {}) or {})
-
-    from ..domain.strategy_catalog import catalog_default_params
 
     merged = {**catalog_default_params(setup_id), **params}
     return _relax_deep_asset_thresholds(prepared, merged)

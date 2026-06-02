@@ -8,11 +8,13 @@ import logging
 from collections import deque
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from threading import Lock
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from bot.domain.schemas import Signal
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from bot.domain.schemas import Signal
 
 LOG = logging.getLogger("bot.persistence.public_audit")
 
@@ -133,7 +135,7 @@ class PublicAuditLedger:
                 digest = hashlib.sha256(csv_path.read_bytes()).hexdigest()
                 sha_path.write_text(f"{digest}  {csv_path.name}\n", encoding="utf-8")
             except OSError as exc:
-                LOG.warning("public_audit_append_failed", error=str(exc))
+                LOG.warning("public_audit_append_failed: %s", exc)
 
     def latest_manifest(self) -> dict[str, Any]:
         """Return newest daily file paths and digests for dashboard/API."""
@@ -158,7 +160,11 @@ class PublicAuditLedger:
 def _optional_float(value: object) -> float | None:
     if value is None:
         return None
-    try:
+    if isinstance(value, (int, float)):
         return float(value)
-    except (TypeError, ValueError):
-        return None
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None

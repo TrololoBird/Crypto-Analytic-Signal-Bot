@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import math
+from typing import TYPE_CHECKING
 
-import polars as pl
+if TYPE_CHECKING:
+    import polars as pl
 
 
 def as_float(value: object, default: float = 0.0) -> float:

@@ -10,6 +10,8 @@ import urllib.request
 from collections import OrderedDict
 from pathlib import Path
 
+from bot.core.runtime_errors import DEFENSIVE_EXC
+
 QUERIES = [
     ("popular_futures", "binance futures trading bot language:python", "stars"),
     ("popular_signal", "crypto signal bot telegram binance language:python", "stars"),
@@ -76,21 +78,20 @@ def search_repos(query: str, sort: str, per_page: int = 10) -> list[dict]:
         data = api_get(url)
     except urllib.error.HTTPError as exc:
         return [{"error": str(exc), "query": query}]
-    items = []
-    for repo in data.get("items", []):
-        items.append(
-            {
-                "full_name": repo["full_name"],
-                "stars": repo.get("stargazers_count", 0),
-                "forks": repo.get("forks_count", 0),
-                "updated_at": repo.get("updated_at", ""),
-                "open_issues": repo.get("open_issues_count", 0),
-                "description": (repo.get("description") or "")[:120],
-                "language": repo.get("language"),
-                "query_bucket": query,
-                "sort": sort,
-            }
-        )
+    items = [
+        {
+            "full_name": repo["full_name"],
+            "stars": repo.get("stargazers_count", 0),
+            "forks": repo.get("forks_count", 0),
+            "updated_at": repo.get("updated_at", ""),
+            "open_issues": repo.get("open_issues_count", 0),
+            "description": (repo.get("description") or "")[:120],
+            "language": repo.get("language"),
+            "query_bucket": query,
+            "sort": sort,
+        }
+        for repo in data.get("items", [])
+    ]
     time.sleep(2)  # rate limit courtesy
     return items
 
@@ -109,7 +110,7 @@ def count_py_files(full_name: str) -> int | None:
             and "test_" not in p.split("/")[-1][:6]
         ]
         return len(prod)
-    except Exception:
+    except DEFENSIVE_EXC:
         return None
 
 
@@ -142,7 +143,7 @@ def main() -> None:
                 "source": "curated",
             }
             time.sleep(0.5)
-        except Exception:
+        except DEFENSIVE_EXC:
             pass
 
     # Top 30 by stars for py count sampling (expensive)

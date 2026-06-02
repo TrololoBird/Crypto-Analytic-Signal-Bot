@@ -3,19 +3,21 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import ClassVar
-
-import polars as pl
+from typing import TYPE_CHECKING, ClassVar
 
 from ..domain.config import BotSettings
 from ..domain.schemas import PreparedSymbol, Signal
 from ..domain.strategy_catalog import CATALOG_BY_ID, catalog_default_params
 from ..setups.utils import get_dynamic_params
-from .base import BaseSetup
 from ..strategies._common import SpecHit, build_spec_signal
+from ..strategies._roadmap import _configured_params
+from .base import BaseSetup
+
+if TYPE_CHECKING:
+    import polars as pl
 
 SetupSignalFn = Callable[
-    [PreparedSymbol, BotSettings, dict[str, float], str, str],
+    [PreparedSymbol, BotSettings, dict[str, float], dict[str, float], str, str],
     Signal | None,
 ]
 
@@ -125,8 +127,6 @@ class SpecDetectorSetup(BaseSetup):
     detect_setup: ClassVar[SetupSignalFn | None] = None
 
     def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
-        from ..strategies._roadmap import _configured_params
-
         return _configured_params(settings, self.setup_id, dict(self.DEFAULTS))
 
     def effective_params(
@@ -139,16 +139,17 @@ class SpecDetectorSetup(BaseSetup):
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         detector = type(self).detect_setup
         if detector is None:
-            raise NotImplementedError(f"{self.setup_id}: detect_setup not wired")
+            msg = f"{self.setup_id}: detect_setup not wired"
+            raise NotImplementedError(msg)
         defaults, effective = self.effective_params(prepared, settings)
         return detector(prepared, settings, defaults, effective, self.setup_id, self.family)
 
 
 __all__ = [
-    "SpecDetectorSetup",
-    "SpecDetectFn",
     "ExtendedDetectFn",
     "SetupSignalFn",
+    "SpecDetectFn",
+    "SpecDetectorSetup",
     "effective_setup_params",
     "pattern_dataframe",
     "pattern_timeframe",

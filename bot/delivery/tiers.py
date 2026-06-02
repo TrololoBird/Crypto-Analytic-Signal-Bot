@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
-from ..domain.config import BotSettings
 from ..domain.delivery_policy import effective_action_min_score, is_r_class_setup
-from ..domain.schemas import Signal
+
+if TYPE_CHECKING:
+    from ..domain.config import BotSettings
+    from ..domain.schemas import Signal
 
 
 @dataclass(frozen=True, slots=True)

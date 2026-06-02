@@ -7,9 +7,9 @@ and strength. Used for signal filtering and market context in alerts.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
-
 
 from .composite_regime import CompositeRegimeAnalyzer
 
@@ -43,12 +43,12 @@ class MarketRegimeResult:
     @property
     def is_bullish(self) -> bool:
         """Quick check if overall market is bullish."""
-        return self.regime in ("bull",) and self.strength > 0.5
+        return self.regime == "bull" and self.strength > 0.5
 
     @property
     def is_bearish(self) -> bool:
         """Quick check if overall market is bearish."""
-        return self.regime in ("bear",) and self.strength > 0.5
+        return self.regime == "bear" and self.strength > 0.5
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
@@ -98,8 +98,6 @@ class MarketRegimeAnalyzer:
         Returns:
             MarketRegimeResult with full analysis
         """
-        import time
-
         now = time.monotonic()
         if self._last_result is not None and now - self._last_update_ts < self._cache_ttl_seconds:
             return self._last_result
@@ -146,7 +144,7 @@ class MarketRegimeAnalyzer:
         self,
         ticker_data: list[dict[str, Any]],
         funding_rates: dict[str, float] | None = None,
-        open_interest: dict[str, float] | None = None,
+        _open_interest: dict[str, float] | None = None,
         benchmark_context: dict[str, dict[str, Any]] | None = None,
     ) -> MarketRegimeResult:
         """Calculate market regime from raw data."""
@@ -379,7 +377,7 @@ class MarketRegimeAnalyzer:
         """Convert price change to bias string."""
         if change_pct > 2.0:
             return "bull"
-        elif change_pct < -2.0:
+        if change_pct < -2.0:
             return "bear"
         return "neutral"
 

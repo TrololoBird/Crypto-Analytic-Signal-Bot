@@ -4,16 +4,16 @@ from __future__ import annotations
 
 import pytest
 
+from bot.delivery.tiers import classify_tier
 from bot.domain.config import BotSettings, DeliveryConfig
 from bot.domain.delivery_policy import R_CLASS_SETUP_IDS, r_class_blocks_action
+from bot.domain.schemas import Signal
 from bot.domain.strategy_catalog import (
     CATALOG_SETUP_IDS,
     PR10_WAVES,
     verify_strategy_wiring,
     wave_status,
 )
-from bot.delivery.tiers import classify_tier
-from bot.domain.schemas import Signal
 from bot.strategies import STRATEGY_CLASSES
 
 
@@ -33,8 +33,9 @@ def test_pr10_all_waves_registered() -> None:
 
 @pytest.mark.live
 def test_r_class_watch_only_policy() -> None:
-    assert R_CLASS_SETUP_IDS == frozenset(
-        {"price_velocity", "whale_walls", "spread_strategy", "depth_imbalance"}
+    assert (
+        frozenset({"price_velocity", "whale_walls", "spread_strategy", "depth_imbalance"})
+        == R_CLASS_SETUP_IDS
     )
     settings = BotSettings(
         tg_token="x",
