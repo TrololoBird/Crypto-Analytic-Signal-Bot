@@ -78,6 +78,8 @@ $env:PYTEST_LIVE=1
 pytest tests/live/ -v -m live
 ```
 
+On geo-restricted networks (including some GitHub Actions regions), live tests **skip** automatically after a public API probe.
+
 ## Scripts
 
 | Script | Description |
