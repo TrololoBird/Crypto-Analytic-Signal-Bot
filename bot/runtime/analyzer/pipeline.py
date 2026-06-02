@@ -2,13 +2,25 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
-from bot.domain.schemas import SymbolFrames, UniverseSymbol
+from dataclasses import replace
+
+from bot.core.runtime_errors import build_runtime_error_payload
+from bot.domain.schemas import (
+    PipelineResult,
+    PreparedSymbol,
+    Signal,
+    SymbolFrames,
+    UniverseSymbol,
+)
+from bot.features.prepare import prepare_symbol
 from bot.features.prepare_frame import min_required_bars
 from bot.market.data import BinanceFuturesMarketData, MarketDataUnavailable
-from bot.runtime.analyzer.common import *  # noqa: F403
 from bot.runtime.analyzer.common import (
+    LOG,
+    _DEGRADATION_ERRORS,
     _apply_setup_score_adjustment,
     _attach_rejection_rollups,
     _history_fetch_limit,

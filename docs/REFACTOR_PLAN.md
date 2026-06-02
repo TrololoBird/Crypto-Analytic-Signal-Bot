@@ -262,4 +262,4 @@ python -m scripts.live_smoke_bot --runtime-seconds 600
 | 5 | **Data plane** — MARKET_DATA_PRINCIPLES (semaphore, OI off hot path) | Partial |
 | 6 | **Consolidation wave** — merge split modules back or delete elsewhere | Deferred |
 
-Live verification (`PYTEST_LIVE`, smoke bot) only when Binance reachable (VPN).
+Live verification (`PYTEST_LIVE`, smoke bot) when Binance reachable — use `[bot.network]` / `BINANCE_PROXY_URL` ([BINANCE_PROXY_RU.md](BINANCE_PROXY_RU.md)).

@@ -11,6 +11,8 @@
 | python-dotenv | 1.2.2 | `bot/secrets.py` |
 | polars | 1.41.2 | features, market, strategies, persistence |
 | aiohttp | 3.13.5 | `bot/market/rest_*`, messaging (3.14 blocked by aiogram 3.28) |
+| aiohttp-socks | 0.10.1 | `bot/market/network_proxy.py` (SOCKS REST) |
+| python-socks[asyncio] | 2.7.x | `network_proxy` + `websockets` SOCKS |
 | numpy | 2.4.6 | features, regime, setups/smc |
 | aiogram | 3.28.2 | `bot/delivery/telegram.py` |
 | websockets | 16.0 | `bot/market/ws*.py` |
@@ -40,7 +42,9 @@
 ## Not on live path
 
 - `[regime]` — hmmlearn, sklearn, statsmodels (`bot/regime/`, ImportError fallback)
-- `[ml]` — lightgbm, xgboost, etc. (no `bot/ml/` package)
+- `[ml]` — lightgbm, xgboost, **pandas**, optuna (offline experiments only; **no** `import pandas` in `bot/`)
+
+Hot path is **Polars-only**; `prepare.py` rejects pandas DataFrames explicitly.
 
 ## Verification commands
 

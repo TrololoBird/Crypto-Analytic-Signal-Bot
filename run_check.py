@@ -1,42 +1,27 @@
 #!/usr/bin/env python
-"""Check if all dependencies are installed"""
+"""Legacy venv smoke check — delegates to scripts/verify_dependencies.py."""
 
+from __future__ import annotations
+
+import subprocess
 import sys
+from pathlib import Path
 
-log_file = "check_result.txt"
-
-
-def log(msg):
-    with open(log_file, "a", encoding="utf-8") as f:
-        f.write(msg + "\n")
-    print(msg)
+_REPO = Path(__file__).resolve().parent
+_SCRIPT = _REPO / "scripts" / "verify_dependencies.py"
 
 
-# Clear old log
-with open(log_file, "w", encoding="utf-8") as f:
-    f.write("")
+def main() -> int:
+    if not _SCRIPT.is_file():
+        print(f"Missing {_SCRIPT}")
+        return 1
+    result = subprocess.run(
+        [sys.executable, str(_SCRIPT)],
+        cwd=_REPO,
+        check=False,
+    )
+    return int(result.returncode)
 
-log("=" * 50)
-log("CHECKING DEPENDENCIES")
-log("=" * 50)
 
-modules = ["polars", "aiohttp", "toml", "numpy", "pandas", "pydantic"]
-
-all_ok = True
-for mod in modules:
-    try:
-        __import__(mod)
-        log(f"[OK] {mod}")
-    except ImportError as e:
-        log(f"[FAIL] {mod}: {e}")
-        all_ok = False
-
-log("=" * 50)
-if all_ok:
-    log("ALL DEPENDENCIES INSTALLED!")
-else:
-    log("MISSING DEPENDENCIES - INSTALL WITH:")
-    log("pip install polars aiohttp toml numpy pandas pydantic")
-log("=" * 50)
-
-sys.exit(0 if all_ok else 1)
+if __name__ == "__main__":
+    raise SystemExit(main())

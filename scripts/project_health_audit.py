@@ -60,8 +60,7 @@ FORBIDDEN_IMPORT_SNIPPETS = (
 )
 
 LIVE_PATH_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("shift_negative_lookahead", re.compile(r"\.shift\s*\(\s*-\s*\d+")),
-    ("pandas_shift_negative", re.compile(r"shift\s*\(\s*-\s*\d+")),
+    ("shift_negative_lookahead", re.compile(r"shift\s*\(\s*-\s*\d+")),
 )
 
 HOT_FEATURE_FILES = (

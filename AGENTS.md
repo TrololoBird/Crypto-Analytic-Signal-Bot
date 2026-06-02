@@ -68,7 +68,9 @@ Many cloud/datacenter IPs are **blocked by Binance public REST** (`Service unava
 - REST (`exchangeInfo`, klines, tickers) fails; live pytest and `live_check_*` scripts that fetch REST will fail.
 - `python main.py run` still starts (doctor OK, 38 strategies, dashboard `/api/health` can show `ws_connected: true`) but enrichment uses **pinned_fallback** and skips kline preload.
 
-Full live verification requires a network path Binance allows (local machine, allowed region, or corporate proxy). This is an external constraint, not a broken venv.
+Full live verification requires a network path Binance allows (local machine, allowed region, or proxy). Configure `[bot.network]` / `BINANCE_PROXY_URL` — see [docs/BINANCE_PROXY_RU.md](docs/BINANCE_PROXY_RU.md). This is an external constraint, not a broken venv.
+
+Hot path uses **Polars only**; `pandas` is optional in `[ml]` extra (offline experiments), not installed by default.
 
 ### Verify in Cloud
 
