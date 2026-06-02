@@ -347,7 +347,12 @@ class PublicIntelligenceService:
                     symbol=symbol,
                 )
             except Exception as exc:
-                LOG.debug("public intelligence endpoint fetch failed", endpoint=endpoint, symbol=symbol, error=str(exc))
+                LOG.debug(
+                    "public intelligence endpoint fetch failed",
+                    endpoint=endpoint,
+                    symbol=symbol,
+                    error=str(exc),
+                )
                 return None
 
         for index in range(0, len(symbols), 10):
@@ -638,9 +643,7 @@ class PublicIntelligenceService:
                     pl.lit("low").alias("kind"),
                 ]
             )
-            pivot_rows = pl.concat([high_pivots, low_pivots], how="vertical").sort(
-                "__harmonic_idx"
-            )
+            pivot_rows = pl.concat([high_pivots, low_pivots], how="vertical").sort("__harmonic_idx")
             pivots: list[tuple[int, float, str]] = []
             for row in pivot_rows.to_dicts():
                 ts_raw = row.get("close_time")

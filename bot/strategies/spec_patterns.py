@@ -1,3 +1,5 @@
-"""Re-export — canonical pattern detectors live in ``bot.setups.detectors.patterns``."""
+"""Re-export spec detector primitives from canonical ``bot.strategies._common``."""
 
-from ..setups.detectors import *  # noqa: F403
+from __future__ import annotations
+
+from ._common import *  # noqa: F403

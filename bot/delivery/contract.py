@@ -197,10 +197,14 @@ def valid_until_from(
         anchor = anchor.replace(tzinfo=UTC)
     else:
         anchor = anchor.astimezone(UTC)
-    bars = int(ttl_bars) if ttl_bars is not None else default_ttl_bars(
-        setup_id,
-        strategy_family,
-        timeframe,
+    bars = (
+        int(ttl_bars)
+        if ttl_bars is not None
+        else default_ttl_bars(
+            setup_id,
+            strategy_family,
+            timeframe,
+        )
     )
     bars = max(1, min(bars, 96))
     return anchor + timedelta(minutes=timeframe_minutes(timeframe) * bars)
@@ -229,7 +233,9 @@ def _target_from_risk(direction: str, entry_mid: float, risk: float, rr: float) 
     return entry_mid - risk * rr
 
 
-def _target_is_ordered(direction: str, entry_mid: float, targets: tuple[float, float, float]) -> bool:
+def _target_is_ordered(
+    direction: str, entry_mid: float, targets: tuple[float, float, float]
+) -> bool:
     tp1, tp2, tp3 = targets
     if direction == "long":
         return entry_mid < tp1 <= tp2 <= tp3
@@ -256,7 +262,9 @@ def _normalize_targets(
     ]
     for idx, value in enumerate(target_values):
         if value is None:
-            target_values[idx] = _target_from_risk(direction, entry_mid, risk, DEFAULT_TARGET_RR[idx])
+            target_values[idx] = _target_from_risk(
+                direction, entry_mid, risk, DEFAULT_TARGET_RR[idx]
+            )
     targets = tuple(float(value) for value in target_values)
     if direction == "long":
         candidates = sorted(targets)
@@ -354,10 +362,14 @@ def build_trade_plan(
     risk = abs(entry_mid - stop_value)
     if risk <= 0.0:
         return None
-    ttl = int(ttl_bars) if ttl_bars is not None else default_ttl_bars(
-        setup_id,
-        strategy_family,
-        timeframe,
+    ttl = (
+        int(ttl_bars)
+        if ttl_bars is not None
+        else default_ttl_bars(
+            setup_id,
+            strategy_family,
+            timeframe,
+        )
     )
     entry_zone_width_pct = (entry_high - entry_low) / entry_mid * 100.0 if entry_mid > 0 else 0.0
     return TradePlan(
@@ -386,11 +398,15 @@ def build_trade_plan(
     )
 
 
-def validate_signal_contract(signal: Any, *, now: datetime | None = None) -> list[SignalContractIssue]:
+def validate_signal_contract(
+    signal: Any, *, now: datetime | None = None
+) -> list[SignalContractIssue]:
     issues: list[SignalContractIssue] = []
     direction = normalize_direction(getattr(signal, "direction", ""))
     if direction is None:
-        issues.append(SignalContractIssue("direction", "invalid", getattr(signal, "direction", None)))
+        issues.append(
+            SignalContractIssue("direction", "invalid", getattr(signal, "direction", None))
+        )
         direction = "long"
 
     entry_low = positive_float(getattr(signal, "entry_low", None))
@@ -400,9 +416,21 @@ def validate_signal_contract(signal: Any, *, now: datetime | None = None) -> lis
         if hasattr(signal, "stop_loss")
         else getattr(signal, "stop", None)
     )
-    tp1 = positive_float(getattr(signal, "tp1", None) if hasattr(signal, "tp1") else getattr(signal, "take_profit_1", None))
-    tp2 = positive_float(getattr(signal, "tp2", None) if hasattr(signal, "tp2") else getattr(signal, "take_profit_2", None))
-    tp3 = positive_float(getattr(signal, "tp3", None) if hasattr(signal, "tp3") else getattr(signal, "take_profit_3", None))
+    tp1 = positive_float(
+        getattr(signal, "tp1", None)
+        if hasattr(signal, "tp1")
+        else getattr(signal, "take_profit_1", None)
+    )
+    tp2 = positive_float(
+        getattr(signal, "tp2", None)
+        if hasattr(signal, "tp2")
+        else getattr(signal, "take_profit_2", None)
+    )
+    tp3 = positive_float(
+        getattr(signal, "tp3", None)
+        if hasattr(signal, "tp3")
+        else getattr(signal, "take_profit_3", None)
+    )
     valid_until = getattr(signal, "valid_until", None)
     scale_weights_raw = getattr(signal, "scale_weights", DEFAULT_SCALE_WEIGHTS)
 
@@ -416,21 +444,31 @@ def validate_signal_contract(signal: Any, *, now: datetime | None = None) -> lis
     }
     for field, value in required_values.items():
         if value is None:
-            issues.append(SignalContractIssue(field, "missing_or_non_positive", getattr(signal, field, None)))
+            issues.append(
+                SignalContractIssue(field, "missing_or_non_positive", getattr(signal, field, None))
+            )
     if entry_low is not None and entry_high is not None:
         if entry_low >= entry_high:
             issues.append(SignalContractIssue("entry_zone", "not_a_range", (entry_low, entry_high)))
         entry_mid = (entry_low + entry_high) / 2.0
         if stop_loss is not None:
             if direction == "long" and stop_loss >= entry_mid:
-                issues.append(SignalContractIssue("stop_loss", "long_stop_not_below_entry", stop_loss))
+                issues.append(
+                    SignalContractIssue("stop_loss", "long_stop_not_below_entry", stop_loss)
+                )
             if direction == "short" and stop_loss <= entry_mid:
-                issues.append(SignalContractIssue("stop_loss", "short_stop_not_above_entry", stop_loss))
+                issues.append(
+                    SignalContractIssue("stop_loss", "short_stop_not_above_entry", stop_loss)
+                )
         if tp1 is not None and tp2 is not None and tp3 is not None:
             if direction == "long" and not (entry_mid < tp1 <= tp2 <= tp3):
-                issues.append(SignalContractIssue("targets", "long_targets_not_ordered", (tp1, tp2, tp3)))
+                issues.append(
+                    SignalContractIssue("targets", "long_targets_not_ordered", (tp1, tp2, tp3))
+                )
             if direction == "short" and not (entry_mid > tp1 >= tp2 >= tp3):
-                issues.append(SignalContractIssue("targets", "short_targets_not_ordered", (tp1, tp2, tp3)))
+                issues.append(
+                    SignalContractIssue("targets", "short_targets_not_ordered", (tp1, tp2, tp3))
+                )
             if stop_loss is not None:
                 risk = abs(entry_mid - stop_loss)
                 reward = abs(tp1 - entry_mid)
@@ -451,16 +489,30 @@ def validate_signal_contract(signal: Any, *, now: datetime | None = None) -> lis
     except (TypeError, ValueError):
         scale_weights = []
     if len(scale_weights) < 2:
-        issues.append(SignalContractIssue("scale_weights", "less_than_two_entry_allocations", scale_weights_raw))
+        issues.append(
+            SignalContractIssue(
+                "scale_weights", "less_than_two_entry_allocations", scale_weights_raw
+            )
+        )
     elif any(not math.isfinite(item) or item <= 0.0 for item in scale_weights):
-        issues.append(SignalContractIssue("scale_weights", "non_positive_or_non_finite", scale_weights_raw))
+        issues.append(
+            SignalContractIssue("scale_weights", "non_positive_or_non_finite", scale_weights_raw)
+        )
     else:
         total_weight = sum(scale_weights)
         max_weight = max(scale_weights)
         if max_weight <= 1.0 and total_weight > 1.000001:
-            issues.append(SignalContractIssue("scale_weights", "fraction_sum_above_one", round(total_weight, 6)))
+            issues.append(
+                SignalContractIssue(
+                    "scale_weights", "fraction_sum_above_one", round(total_weight, 6)
+                )
+            )
         if max_weight > 1.0 and total_weight > 100.000001:
-            issues.append(SignalContractIssue("scale_weights", "percent_sum_above_100", round(total_weight, 6)))
+            issues.append(
+                SignalContractIssue(
+                    "scale_weights", "percent_sum_above_100", round(total_weight, 6)
+                )
+            )
     if not isinstance(valid_until, datetime):
         issues.append(SignalContractIssue("valid_until", "missing_or_not_datetime", valid_until))
     else:
@@ -489,7 +541,9 @@ def signal_contract_row(signal: Any) -> dict[str, object]:
         "tp1": getattr(signal, "tp1", getattr(signal, "take_profit_1", None)),
         "tp2": getattr(signal, "tp2", getattr(signal, "take_profit_2", None)),
         "tp3": getattr(signal, "tp3", getattr(signal, "take_profit_3", None)),
-        "valid_until": valid_until.isoformat() if isinstance(valid_until, datetime) else valid_until,
+        "valid_until": valid_until.isoformat()
+        if isinstance(valid_until, datetime)
+        else valid_until,
         "scale_weights": list(getattr(signal, "scale_weights", DEFAULT_SCALE_WEIGHTS)),
         "ok": not issues,
         "issues": [issue.to_dict() for issue in issues],

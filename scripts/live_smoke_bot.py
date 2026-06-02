@@ -6,14 +6,27 @@ import contextlib
 import logging
 import os
 import sqlite3
+import sys
 from pathlib import Path
 from typing import Any
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+try:
+    from scripts.common import bootstrap_repo_path
+except ModuleNotFoundError:  # pragma: no cover
+    from common import bootstrap_repo_path
+
+bootstrap_repo_path()
 
 import structlog
 
 from bot.runtime.bot import SignalBot
 from bot.domain.config import load_settings
 from bot.delivery.telegram import DeliveryResult
+from scripts.live_check_binance_api import _wait_for_mark_prices
 
 
 LOG = structlog.get_logger("scripts.live_smoke_bot")
@@ -40,12 +53,30 @@ class FakeBroadcaster:
         return None
 
 
-def _configure_logging() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s | %(levelname)-7s | %(name)s | %(message)s",
-        force=True,
-    )
+def _configure_logging(*, debug: bool = False) -> None:
+    settings = load_settings()
+    if debug:
+        os.environ["DEBUG_BOT"] = "1"
+    from bot.cli import configure_logging
+
+    configure_logging(settings, debug_mode=debug or os.getenv("DEBUG_BOT", "0") in ("1", "true", "yes"))
+    logging.captureWarnings(True)
+
+
+def _install_asyncio_exception_logging() -> None:
+    loop = asyncio.get_running_loop()
+
+    def _log_exception(
+        loop: asyncio.AbstractEventLoop, context: dict[str, Any]
+    ) -> None:
+        msg = context.get("exception", context.get("message"))
+        logging.getLogger("asyncio").exception(
+            "Unhandled asyncio exception: %s",
+            msg,
+            exc_info=msg if isinstance(msg, BaseException) else None,
+        )
+
+    loop.set_exception_handler(_log_exception)
 
 
 def _fetch_active_signal_row(db_path: Path, tracking_id: str) -> dict[str, Any] | None:
@@ -96,6 +127,7 @@ async def _run(
     bot = SignalBot(settings, broadcaster=FakeBroadcaster())
     runtime_task: asyncio.Task[None] | None = None
     try:
+        _install_asyncio_exception_logging()
         await bot.start()
         if runtime_seconds > 0.0:
             runtime_task = asyncio.create_task(bot.run_forever(), name="live_smoke_runtime")
@@ -131,6 +163,8 @@ async def _run(
             row_present=after is not None,
             row=_sanitize_log_value(after) if after is not None else {},
         )
+        if bot._ws_manager is not None and int(ws_snapshot.get("fresh_mark_prices") or 0) <= 0:
+            ws_snapshot = await _wait_for_mark_prices(bot._ws_manager, timeout_seconds=30.0)
         LOG.info(
             "live_smoke_summary",
             prepare_error_count=bot._prepare_error_count,
@@ -212,9 +246,18 @@ def main() -> None:
         action="store_true",
         help="Only validate the configured live runtime window; do not add an extra emergency cycle.",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="DEBUG logs with func:line, asyncio loop debug, file log under data/bot/logs/",
+    )
     args = parser.parse_args()
 
-    _configure_logging()
+    _configure_logging(debug=bool(args.debug))
+    if args.debug:
+        import tracemalloc
+
+        tracemalloc.start(25)
     asyncio.run(
         _run(
             args.tracking_id,

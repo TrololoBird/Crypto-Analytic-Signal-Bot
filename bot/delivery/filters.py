@@ -14,7 +14,8 @@ from ..domain.config import BotSettings
 from ..domain.schemas import PreparedSymbol, Signal
 from ..features.microstructure import MicrostructureContext, build_microstructure_context
 from ..runtime_policy import is_deep_analysis_symbol
-from .contract import DEFAULT_TARGET_RR, build_trade_plan
+from .contract import DEFAULT_TARGET_RR
+from .trade_plan import TradePlanBuilder
 from .scoring import ScoringResult
 
 if TYPE_CHECKING:
@@ -264,7 +265,7 @@ def _expand_signal_to_min_stop(
         tp3 = min(float(signal.tp3), tp2, entry - min_risk * DEFAULT_TARGET_RR[2])
 
     risk_reward = abs(tp1 - entry) / min_risk if min_risk > 0.0 else signal.risk_reward
-    plan = build_trade_plan(
+    plan = TradePlanBuilder.build(
         direction=signal.direction,
         setup_id=signal.setup_id,
         strategy_family=signal.strategy_family,
@@ -313,7 +314,9 @@ def _expand_signal_to_min_stop(
             target_integrity_status=(
                 plan.integrity_status if plan is not None else signal.target_integrity_status
             ),
-            entry_plan_status=plan.integrity_status if plan is not None else signal.entry_plan_status,
+            entry_plan_status=plan.integrity_status
+            if plan is not None
+            else signal.entry_plan_status,
             reasons=reasons,
         ),
         True,
@@ -656,10 +659,7 @@ def _run_filter_pipeline(
     adx_penalty_factor = float(setup_overrides.get("adx_penalty_factor", 0.85))
     adx_policy = _resolve_adx_policy(signal)
     market_regime = str(getattr(prepared, "market_regime", "neutral") or "neutral").lower()
-    if (
-        market_regime in {"neutral", "ranging", "choppy"}
-        and adx_policy == _ADX_POLICY_HARD_GATE
-    ):
+    if market_regime in {"neutral", "ranging", "choppy"} and adx_policy == _ADX_POLICY_HARD_GATE:
         adx_policy = _ADX_POLICY_PENALTY
         adx_penalty_factor = max(adx_penalty_factor, 0.88)
         LOGGER.info(
@@ -738,7 +738,9 @@ def _run_filter_pipeline(
 
     benchmark_ok, benchmark_reason, benchmark_details = _benchmark_context_guard(signal, prepared)
     if not benchmark_ok and not deep_analysis_asset:
-        return _reject(benchmark_reason or "benchmark_context_conflict", base, details=benchmark_details)
+        return _reject(
+            benchmark_reason or "benchmark_context_conflict", base, details=benchmark_details
+        )
     if benchmark_ok:
         passed.append("benchmark_context_ok")
     else:
@@ -891,9 +893,7 @@ def _run_filter_pipeline(
             )
         updated = replace(
             updated,
-            passed_filters=tuple(
-                [*updated.passed_filters, "trend_conflict_1h_penalty_applied"]
-            ),
+            passed_filters=tuple([*updated.passed_filters, "trend_conflict_1h_penalty_applied"]),
         )
 
     # --- 9. Minimum score gate (final gate after ALL adjustments) ---

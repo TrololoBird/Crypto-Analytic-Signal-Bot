@@ -227,9 +227,13 @@ def configure_logging(settings: BotSettings, *, debug_mode: bool = False) -> Non
     )
     configure_structlog(log_level)
 
-    # Keep asyncio debug disabled to avoid slow-task spam (tracemalloc handles coroutine tracking)
+    if debug_mode:
+        logging.getLogger("bot").setLevel(logging.DEBUG)
+        logging.getLogger("scripts").setLevel(logging.DEBUG)
+
     loop = _get_or_create_event_loop()
-    loop.set_debug(False)
+    # Full asyncio task/callback traces only in explicit debug mode.
+    loop.set_debug(bool(debug_mode))
 
     # Reduce noise from external libraries but keep warnings
     logging.getLogger("websockets").setLevel(logging.INFO)
@@ -438,6 +442,11 @@ async def _main() -> None:
 
 def run() -> None:
     parser = argparse.ArgumentParser(prog="crypto-signal-bot")
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Full DEBUG logs, asyncio loop debug, tracemalloc (or set DEBUG_BOT=1)",
+    )
     sub = parser.add_subparsers(dest="command")
     sub.add_parser("run", help="Run live bot runtime (default)")
     sub.add_parser("status", help="Show runtime/db status")
@@ -453,6 +462,9 @@ def run() -> None:
     db_clean = db_sub.add_parser("clean", help="Cleanup old outcomes by retention window")
     db_clean.add_argument("--days", type=int, default=30)
     args = parser.parse_args()
+
+    if getattr(args, "debug", False):
+        os.environ["DEBUG_BOT"] = "1"
 
     if args.command in (None, "run"):
         _run_runtime()

@@ -11,20 +11,30 @@ Snapshot: May 2026.
 | **Правда** | `docs/research/*` + веб/OSS/Binance |
 | **Legacy** | Текущий `bot2` — реализует spec **частично и нестабильно** |
 
+## Implementation status (2026-06-01)
+
+| P0 item | Status |
+|---------|--------|
+| Multi-TF scheduler + WS union | Wired (`kline_handler`, `market/scheduler`) |
+| **8–15 strategy lanes** | Wired: `select_lane_setups` → `SignalEngine._route_strategies` when `runtime.enable_strategy_lanes=true` and `event_interval` set from `cycle_runner` |
+| Shortlist 40–55 | Wired (`market/universe`, screener) |
+
+`route_all_enabled_strategies=true` bypasses lanes (debug / legacy override).
+
 ## Work queue (приоритет реализации spec)
 
 | P | Target capability | Заметка для рефакторинга |
 |---|-------------------|-------------------------|
-| **P0** | `StrategyTimeframeProfile` + scheduler on each `KlineClose` | Заменить 15m-only kline path |
-| **P0** | 8–15 strategy lanes per symbol | Не 38× detect на каждый tick |
-| **P0** | Universe screener → shortlist 40–55 | Light refresh + deep refresh |
-| **P1** | MetaSignalMerger + direction conflict 4h | [SIGNAL_COLLISION_AND_DEDUP.md](SIGNAL_COLLISION_AND_DEDUP.md) |
-| **P1** | Tiered WATCH/ACTION + burst/daily caps | [TELEGRAM_CHANNEL_SPEC.md](TELEGRAM_CHANNEL_SPEC.md) |
-| **P1** | Unified TradePlanBuilder | Zones, TTL, invalidation |
-| **P2** | 7 anchors incl. **XRPUSDT** + stricter ACTION | [BENCHMARK_ANCHORS.md](BENCHMARK_ANCHORS.md) |
-| **P2** | R-class WATCH-only / redesign | [STRATEGY_MANUAL_SUITABILITY.md](STRATEGY_MANUAL_SUITABILITY.md) |
-| **P3** | Operator funnel dashboard | Funnel, zero-hit, WS health |
-| **P3** | Public audit CSV + SHA256 | Trust ledger |
+| **P0** | `StrategyTimeframeProfile` + scheduler on each `KlineClose` | Done — multi-interval kline path |
+| **P0** | 8–15 strategy lanes per symbol | Done — `enable_strategy_lanes` + `event_interval` on hot path |
+| **P0** | Universe screener → shortlist 40–55 | Done |
+| **P1** | MetaSignalMerger + direction conflict 4h | Partial — merge + WATCH conflict delivery; ledger feeds 4h window |
+| **P1** | Tiered WATCH/ACTION + burst/daily caps | Partial — per-cycle caps wired |
+| **P1** | Unified TradePlanBuilder | Partial |
+| **P2** | 7 anchors incl. **XRPUSDT** + stricter ACTION | Partial — `anchor_action_score_delta` in `classify_tier` |
+| **P2** | R-class WATCH-only / redesign | Done — `r_class_watch_only` |
+| **P3** | Operator funnel dashboard | Partial — REST funnel + WS `funnel_update` / `ws_health` after each cycle |
+| **P3** | Public audit CSV + SHA256 | Partial — ledger + `/api/v1/public-audit` |
 
 ## Spec areas (всё в research pack)
 

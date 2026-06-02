@@ -1,29 +1,18 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from collections import Counter
 from dataclasses import replace
-from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
-from bot.engine import StrategyDecision
-from bot.core.runtime_errors import build_runtime_error_payload, classify_runtime_error
-from bot.features import min_required_bars, prepare_symbol
-from bot.delivery.filters import apply_global_filters
-from bot.market.data import BinanceFuturesMarketData, MarketDataUnavailable
+from bot.market.data import MarketDataUnavailable
 from bot.domain.schemas import (
-    PipelineResult,
-    PreparedSymbol,
     Signal,
-    SymbolFrames,
-    UniverseSymbol,
 )
-from bot.runtime_policy import is_deep_analysis_symbol
 
 
 if TYPE_CHECKING:
-    from bot.runtime.bot import SignalBot
+    pass
 
 
 LOG = logging.getLogger("bot.runtime.bot")

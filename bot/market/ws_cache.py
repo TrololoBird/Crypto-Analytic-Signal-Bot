@@ -16,9 +16,7 @@ LOG = logging.getLogger("bot.ws_manager")
 JsonDict = dict[str, Any]
 
 
-def _parse_depth_levels(
-    raw_levels: Any, *, reverse: bool
-) -> tuple[tuple[float, float], ...]:
+def _parse_depth_levels(raw_levels: Any, *, reverse: bool) -> tuple[tuple[float, float], ...]:
     parsed: list[tuple[float, float]] = []
     if not isinstance(raw_levels, list):
         return ()
@@ -363,6 +361,8 @@ def handle_mini_ticker(manager: Any, symbol: str, data: JsonDict) -> None:
 
 
 def handle_mark_price(manager: Any, symbol: str, data: JsonDict) -> None:
+    if not symbol:
+        return
     if should_throttle_mark_price_update(manager, symbol):
         return
     try:
@@ -371,13 +371,19 @@ def handle_mark_price(manager: Any, symbol: str, data: JsonDict) -> None:
         funding_rate = (
             float(funding_str) if funding_str is not None and funding_str not in ("", "0") else 0.0
         )
+        mark_price = float(data.get("p") or 0.0)
+        if mark_price <= 0.0:
+            return
+        now = time.monotonic()
         manager._mark_price_cache[symbol] = {
             "symbol": symbol,
-            "mark_price": float(data.get("p") or 0.0),
+            "mark_price": mark_price,
             "index_price": float(data.get("i") or 0.0),
             "funding_rate": funding_rate,
             "next_funding_time_ms": int(data.get("T") or 0),
+            "updated_at": now,
         }
+        manager._mark_price_update_times[symbol] = now
     except (TypeError, ValueError):
         return
 
@@ -470,9 +476,7 @@ async def handle_agg_trade(manager: Any, symbol: str, data: JsonDict) -> None:
     manager._last_agg_trade_flush_ts[symbol] = now
 
     if symbol not in manager._agg_trades:
-        manager._agg_trades[symbol] = collections.deque(
-            maxlen=manager._cfg.max_agg_trade_buffer
-        )
+        manager._agg_trades[symbol] = collections.deque(maxlen=manager._cfg.max_agg_trade_buffer)
     manager._agg_trades[symbol].extend(batch)
 
     if manager._agg_trade_cbs:

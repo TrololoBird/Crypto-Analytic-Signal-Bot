@@ -182,6 +182,23 @@ class SignalDiagnostics:
             window = self._current_window_unlocked()
             window.delivered_by_setup[setup] += 1
 
+    def record_delivery_stage_reject(
+        self,
+        stage: str,
+        reason: str,
+        *,
+        setup_id: str | None = None,
+    ) -> None:
+        """Record a post-candidate delivery funnel rejection (contract/tier/delivery)."""
+        stage_key = _clean_key(stage)
+        reject_reason = _clean_key(reason)
+        setup = _clean_key(setup_id) if setup_id else "unknown"
+        with self._lock:
+            window = self._current_window_unlocked()
+            window.stage_rejects[stage_key] += 1
+            window.filter_rejects_by_reason[f"{stage_key}:{reject_reason}"] += 1
+            window.filter_rejects_by_setup[setup] += 1
+
     def record_atr_sample(self, setup_id: str, atr_pct: float, passed: bool) -> None:
         """Record an ATR sample for threshold calibration.
 
@@ -267,12 +284,8 @@ class SignalDiagnostics:
             return {
                 "detector_run_total": detector_runs,
                 "detector_hit_total": detector_hits,
-                "hit_rate": round(detector_hits / detector_runs, 6)
-                if detector_runs
-                else 0.0,
-                "filter_pass_rate": round(candidates / detector_hits, 6)
-                if detector_hits
-                else 0.0,
+                "hit_rate": round(detector_hits / detector_runs, 6) if detector_runs else 0.0,
+                "filter_pass_rate": round(candidates / detector_hits, 6) if detector_hits else 0.0,
                 "top_rejects": [
                     (reason, int(count))
                     for reason, count in window.filter_rejects_by_reason.most_common(5)
@@ -403,9 +416,7 @@ class SignalDiagnostics:
             delta_counter = current_counter - baseline_counter
             negative_counter = baseline_counter - current_counter
             merged = {item_key: int(value) for item_key, value in delta_counter.items()}
-            merged.update(
-                {item_key: -int(value) for item_key, value in negative_counter.items()}
-            )
+            merged.update({item_key: -int(value) for item_key, value in negative_counter.items()})
             deltas[f"{key}_delta"] = dict(sorted(merged.items()))
         return deltas
 
@@ -479,9 +490,7 @@ class SignalDiagnostics:
             "confirmation_rejects_by_reason": _counter_to_dict(
                 window.confirmation_rejects_by_reason
             ),
-            "confirmation_rejects_by_setup": _counter_to_dict(
-                window.confirmation_rejects_by_setup
-            ),
+            "confirmation_rejects_by_setup": _counter_to_dict(window.confirmation_rejects_by_setup),
             "stage_rejects": _counter_to_dict(window.stage_rejects),
             "candidates_by_setup": _counter_to_dict(window.candidates_by_setup),
             "delivered_by_setup": _counter_to_dict(window.delivered_by_setup),
@@ -512,9 +521,7 @@ class SignalDiagnostics:
             )
             if candidates_total
             else 0.0,
-            "top_filter_reject_reasons": self._top_counter_rows(
-                window.filter_rejects_by_reason
-            ),
+            "top_filter_reject_reasons": self._top_counter_rows(window.filter_rejects_by_reason),
             "top_confirmation_reject_reasons": self._top_counter_rows(
                 window.confirmation_rejects_by_reason
             ),
@@ -548,10 +555,7 @@ class SignalDiagnostics:
 
     @staticmethod
     def _top_counter_rows(counter: Counter[str], *, limit: int = 20) -> list[dict[str, Any]]:
-        return [
-            {"key": key, "count": int(value)}
-            for key, value in counter.most_common(limit)
-        ]
+        return [{"key": key, "count": int(value)} for key, value in counter.most_common(limit)]
 
     @staticmethod
     def _setup_hit_rate_rows(window: _SignalDiagnosticWindow) -> list[dict[str, Any]]:
@@ -581,11 +585,7 @@ class SignalDiagnostics:
             "| " + " | ".join("---" for _ in columns) + " |",
         ]
         for row in rows:
-            output.append(
-                "| "
-                + " | ".join(str(row.get(column, "")) for column in columns)
-                + " |"
-            )
+            output.append("| " + " | ".join(str(row.get(column, "")) for column in columns) + " |")
         return output
 
 

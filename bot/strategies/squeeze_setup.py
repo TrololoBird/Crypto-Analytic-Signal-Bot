@@ -1,18 +1,18 @@
-"""squeeze_setup — BB + Keltner Channel squeeze (Сквиз).
-
-# WINDSURF_REVIEW: unified + vectorized + 1H context + graded
-"""
+"""squeeze_setup — detector in setups/detectors/."""
 
 from __future__ import annotations
 
+from ..domain.config import BotSettings
+from ..setups.spec_runtime import SpecDetectorSetup
+
+
 import polars as pl
 
-from ..domain.config import BotSettings
+from .bb_squeeze import detect_bb_squeeze_release
+
 from ..domain.schemas import PreparedSymbol, Signal
-from ..setups.base import BaseSetup
 from ..setups import _build_signal, _compute_dynamic_score, _reject
-from ..setups.utils import get_dynamic_params
-from ..setups.detectors import build_spec_signal, detect_bb_squeeze_release
+from ..setups.spec_runtime import run_setup_detection
 
 
 def _as_float(value: object, default: float = 0.0) -> float:
@@ -95,7 +95,11 @@ def _bb_kc_squeeze_release(
         was_squeezed = bool(prior["squeeze_on"].fill_null(0).max())
         released_now = _as_float(work_15m.item(-1, "squeeze_off")) > 0.0
         if was_squeezed and released_now:
-            hist = _as_float(work_15m.item(-1, "squeeze_hist")) if "squeeze_hist" in work_15m.columns else 0.0
+            hist = (
+                _as_float(work_15m.item(-1, "squeeze_hist"))
+                if "squeeze_hist" in work_15m.columns
+                else 0.0
+            )
             roc10 = _as_float(work_15m.item(-1, "roc10")) if "roc10" in work_15m.columns else 0.0
             direction = "long" if (hist > 0.0 or roc10 > 0.0) else "short"
             if hist == 0.0 and roc10 == 0.0:
@@ -129,23 +133,15 @@ def _bb_kc_squeeze_release(
             else bb_squeeze_threshold
         )
     if width_q25 > 0:
-        compression_cap = (
-            min(compression_cap, width_q25) if compression_cap > 0 else width_q25
-        )
+        compression_cap = min(compression_cap, width_q25) if compression_cap > 0 else width_q25
     if compressed_width <= 0.0 or compressed_width > compression_cap:
         return False, "", ""
     if current_width < compressed_width * max(1.0, min_width_expansion):
         return False, "", ""
 
-    breakout_up = (
-        close > kc_upper
-        and bb_pct_b >= bb_pct_b_threshold
-        and roc10 >= min_roc10_abs_pct
-    )
+    breakout_up = close > kc_upper and bb_pct_b >= bb_pct_b_threshold and roc10 >= min_roc10_abs_pct
     breakout_down = (
-        close < kc_lower
-        and bb_pct_b <= (1.0 - bb_pct_b_threshold)
-        and roc10 <= -min_roc10_abs_pct
+        close < kc_lower and bb_pct_b <= (1.0 - bb_pct_b_threshold) and roc10 <= -min_roc10_abs_pct
     )
     if breakout_up:
         return True, "long", "bb_kc_recent_compression_release_long"
@@ -154,11 +150,301 @@ def _bb_kc_squeeze_release(
     return False, "", ""
 
 
-class SqueezeSetup(BaseSetup):
+def _detect_squeeze_setup_extended(
+    prepared: PreparedSymbol,
+    settings: BotSettings,
+    defaults: dict[str, float],
+    effective: dict[str, float],
+    setup_id: str,
+    family: str,
+) -> Signal | None:
+    dynamic_params = effective
+    work_15m = prepared.work_15m
+    effective_params = {**defaults, **dynamic_params}
+    # FIX 2026-05-21: the spec layer is intentionally strict; when it misses,
+    # keep the prepared squeeze_on/off and compression-window fallback live.
+    bb_squeeze_threshold = _as_float(
+        dynamic_params.get("bb_squeeze_threshold", defaults["bb_squeeze_threshold"]),
+        defaults["bb_squeeze_threshold"],
+    )
+    min_bb_compression_width = _as_float(
+        dynamic_params.get("min_bb_compression_width", defaults["min_bb_compression_width"]),
+        defaults["min_bb_compression_width"],
+    )
+    bb_pct_b_threshold = _as_float(
+        dynamic_params.get("bb_pct_b_threshold", defaults["bb_pct_b_threshold"]),
+        defaults["bb_pct_b_threshold"],
+    )
+    volume_threshold = _as_float(
+        dynamic_params.get("volume_threshold", defaults["volume_threshold"]),
+        defaults["volume_threshold"],
+    )
+    sl_buffer_atr = _as_float(
+        dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]),
+        defaults["sl_buffer_atr"],
+    )
+    min_rr = _as_float(dynamic_params.get("min_rr", defaults["min_rr"]), defaults["min_rr"])
+    base_score = _as_float(
+        dynamic_params.get("base_score", defaults["base_score"]),
+        defaults["base_score"],
+    )
+    funding_extreme_threshold = _as_float(
+        dynamic_params.get("funding_extreme_threshold", defaults["funding_extreme_threshold"]),
+        defaults["funding_extreme_threshold"],
+    )
+    liquidation_extreme_threshold = _as_float(
+        dynamic_params.get(
+            "liquidation_extreme_threshold",
+            defaults["liquidation_extreme_threshold"],
+        ),
+        defaults["liquidation_extreme_threshold"],
+    )
+    release_lookback = max(
+        3,
+        int(dynamic_params.get("release_lookback", defaults["release_lookback"])),
+    )
+    min_release_width_expansion = _as_float(
+        dynamic_params.get(
+            "min_release_width_expansion",
+            defaults["min_release_width_expansion"],
+        ),
+        defaults["min_release_width_expansion"],
+    )
+    min_release_roc10_abs_pct = _as_float(
+        dynamic_params.get(
+            "min_release_roc10_abs_pct",
+            defaults["min_release_roc10_abs_pct"],
+        ),
+        defaults["min_release_roc10_abs_pct"],
+    )
+    no_crowd_confirmation_penalty = _as_float(
+        dynamic_params.get(
+            "no_crowd_confirmation_penalty",
+            defaults["no_crowd_confirmation_penalty"],
+        ),
+        defaults["no_crowd_confirmation_penalty"],
+    )
+
+    if work_15m.height < 30:
+        _reject(prepared, "squeeze_setup", "insufficient_bars")
+        return None
+
+    is_squeeze, squeeze_dir = _bb_kc_squeeze_active(
+        work_15m,
+        bb_squeeze_threshold=bb_squeeze_threshold,
+        min_bb_compression_width=min_bb_compression_width,
+        bb_pct_b_threshold=bb_pct_b_threshold,
+    )
+    release_reason = ""
+    if not is_squeeze:
+        is_squeeze, squeeze_dir, release_reason = _bb_kc_squeeze_release(
+            work_15m,
+            bb_squeeze_threshold=bb_squeeze_threshold,
+            min_bb_compression_width=min_bb_compression_width,
+            bb_pct_b_threshold=bb_pct_b_threshold,
+            release_lookback=release_lookback,
+            min_width_expansion=min_release_width_expansion,
+            min_roc10_abs_pct=min_release_roc10_abs_pct,
+        )
+    if not is_squeeze:
+        _reject(prepared, "squeeze_setup", "no_bb_kc_squeeze")
+        return None
+
+    funding = prepared.funding_rate
+    liq_score = prepared.liquidation_score
+    crowd_aligned = False
+    crowd_reason = ""
+
+    if funding is not None and abs(funding) >= funding_extreme_threshold:
+        if funding > 0 and squeeze_dir == "short":
+            crowd_aligned = True
+            crowd_reason = f"funding={funding:.4f} (longs crowded)"
+        elif funding < 0 and squeeze_dir == "long":
+            crowd_aligned = True
+            crowd_reason = f"funding={funding:.4f} (shorts crowded)"
+
+    if liq_score is not None and abs(liq_score) >= liquidation_extreme_threshold:
+        if liq_score > 0 and squeeze_dir == "long":
+            crowd_aligned = True
+            crowd_reason = f"liq_score={liq_score:.3f} (short liquidations bullish)"
+        elif liq_score < 0 and squeeze_dir == "short":
+            crowd_aligned = True
+            crowd_reason = f"liq_score={liq_score:.3f} (long liquidations bearish)"
+
+    direction = squeeze_dir
+
+    oi_chg = prepared.oi_change_pct
+    oi_drop_limit = -8.0 if oi_chg is not None and abs(oi_chg) > 1.0 else -0.08
+    if oi_chg is not None and oi_chg < oi_drop_limit:
+        _reject(prepared, "squeeze_setup", "oi_falling_too_fast", oi_change_pct=oi_chg)
+        return None
+
+    atr = _as_float(work_15m.item(-1, "atr14"))
+    if atr <= 0.0:
+        _reject(prepared, "squeeze_setup", "atr_non_positive", atr=atr)
+        return None
+    vol_ratio = _as_float(work_15m.item(-1, "volume_ratio20"), 1.0)
+    rsi = _as_float(work_15m.item(-1, "rsi14"), 50.0)
+
+    if vol_ratio < volume_threshold:
+        strong_release = (
+            release_reason == "polars_squeeze_release"
+            and "squeeze_hist" in work_15m.columns
+            and abs(_as_float(work_15m.item(-1, "squeeze_hist"))) >= atr * 0.15
+        )
+        if not strong_release:
+            _reject(prepared, "squeeze_setup", "volume_too_low", vol_ratio=vol_ratio)
+            return None
+
+    if direction == "short" and rsi > 70.0:
+        reasons_rsi_penalty = "rsi_short_overbought_penalty"
+    elif direction == "long" and rsi < 30.0:
+        reasons_rsi_penalty = "rsi_long_oversold_penalty"
+    else:
+        reasons_rsi_penalty = None
+
+    reasons = [
+        f"bb_kc_squeeze breakout={direction} bb_pct_b>{bb_pct_b_threshold:.2f}",
+        f"vol_ratio={vol_ratio:.2f} min={volume_threshold:.2f}",
+        f"bb_width<={min_bb_compression_width:.4f} sl_buffer_atr={sl_buffer_atr:.2f}",
+        f"rsi={rsi:.1f}",
+    ]
+    if release_reason:
+        reasons.append(release_reason)
+    if crowd_aligned:
+        reasons.append(crowd_reason)
+    else:
+        reasons.append("crowd_context_neutral")
+    if reasons_rsi_penalty:
+        reasons.append(reasons_rsi_penalty)
+
+    # --- Compute structural SL/TP ---
+    pre_breakout = work_15m.slice(max(0, work_15m.height - 11), 10)
+    if pre_breakout.height < 3:
+        pre_breakout = work_15m.slice(max(0, work_15m.height - 6), 5)
+    price_anchor = (
+        _as_float(pre_breakout["high"].max())
+        if direction == "long"
+        else _as_float(pre_breakout["low"].min())
+    )
+    reasons.append(f"limit_entry={price_anchor:.4f}")
+
+    if direction == "long":
+        # SL: below pre-breakout swing low + configured ATR buffer
+        stop = _as_float(pre_breakout["low"].min()) - atr * sl_buffer_atr
+        # TP1: first swing/fractal in breakout direction on 15m
+        from ..features import _swing_points as _sp
+
+        _sh_mask, sl_mask = _sp(work_15m, n=3, include_unconfirmed_tail=True)
+        sh_prices = work_15m.filter(_sh_mask)["high"]
+        tp1_candidates = sh_prices.filter(sh_prices > price_anchor)
+        tp1 = _as_float(tp1_candidates[0]) if tp1_candidates.len() > 0 else None
+        # TP2: squeeze range height projected from entry
+        squeeze_range = _as_float(pre_breakout["high"].max()) - _as_float(pre_breakout["low"].min())
+        tp2 = price_anchor + squeeze_range if squeeze_range > 0 else None
+    else:
+        # SL: above pre-breakout swing high + configured ATR buffer
+        stop = _as_float(pre_breakout["high"].max()) + atr * sl_buffer_atr
+        from ..features import _swing_points as _sp
+
+        _, _sl15 = _sp(work_15m, n=2)
+        sl_prices = work_15m.filter(_sl15)["low"]
+        tp1_candidates = sl_prices.filter(sl_prices < price_anchor)
+        tp1 = _as_float(tp1_candidates[-1]) if tp1_candidates.len() > 0 else None
+        squeeze_range = _as_float(pre_breakout["high"].max()) - _as_float(pre_breakout["low"].min())
+        tp2 = price_anchor - squeeze_range if squeeze_range > 0 else None
+
+    risk = abs(price_anchor - stop)
+    if risk <= 0:
+        _reject(prepared, "squeeze_setup", "invalid_stop", stop=stop)
+        return None
+    if tp1 is None or abs(tp1 - price_anchor) < risk * min_rr:
+        tp1 = price_anchor + risk * min_rr if direction == "long" else price_anchor - risk * min_rr
+        reasons.append(f"tp1_rr_fallback_{min_rr:.2f}")
+    if tp2 is None or abs(tp2 - price_anchor) <= abs(tp1 - price_anchor):
+        tp2 = (
+            price_anchor + risk * max(2.0, min_rr + 0.35)
+            if direction == "long"
+            else price_anchor - risk * max(2.0, min_rr + 0.35)
+        )
+
+    score = _compute_dynamic_score(
+        direction=direction,
+        base_score=base_score,
+        vol_ratio=vol_ratio,
+        rsi=rsi,
+        structure_clarity=0.5,
+    )
+    if not crowd_aligned:
+        score *= no_crowd_confirmation_penalty
+    if reasons_rsi_penalty:
+        score *= 0.90
+
+    return _build_signal(
+        prepared=prepared,
+        setup_id="squeeze_setup",
+        direction=direction,
+        score=score,
+        timeframe="15m",
+        reasons=reasons,
+        strategy_family=family,
+        stop=stop,
+        tp1=tp1,
+        tp2=tp2,
+        price_anchor=price_anchor,
+        atr=atr,
+    )
+
+
+def detect_squeeze_setup(
+    prepared: PreparedSymbol,
+    settings: BotSettings,
+    defaults: dict[str, float],
+    effective: dict[str, float],
+    setup_id: str,
+    family: str,
+) -> Signal | None:
+    spec_kwargs = None
+    return run_setup_detection(
+        prepared=prepared,
+        settings=settings,
+        setup_id=setup_id,
+        family=family,
+        defaults=defaults,
+        effective=effective,
+        spec_detect=detect_bb_squeeze_release,
+        extended_detect=_detect_squeeze_setup_extended,
+        spec_kwargs=spec_kwargs,
+    )
+
+
+__all__ = ["detect_bb_squeeze_release", "detect_squeeze_setup", "_detect_squeeze_setup_extended"]
+
+
+class SqueezeSetup(SpecDetectorSetup):
     setup_id = "squeeze_setup"
     family = "breakout"
     confirmation_profile = "breakout_acceptance"
     required_context = ("futures_flow",)
+
+    DEFAULTS = {
+        "base_score": 0.55,
+        "bb_squeeze_threshold": 4.5,
+        "min_bb_compression_width": 4.5,
+        "bb_pct_b_threshold": 0.8,
+        "volume_threshold": 1.2,
+        "sl_buffer_atr": 0.4,
+        "bias_mismatch_penalty": 0.75,
+        "min_rr": 1.9,
+        "funding_extreme_threshold": 0.00015,
+        "liquidation_extreme_threshold": 0.2,
+        "release_lookback": 12,
+        "min_release_width_expansion": 1.5,
+        "min_release_roc10_abs_pct": 0.35,
+        "no_crowd_confirmation_penalty": 0.92,
+    }
+
+    detect_setup = detect_squeeze_setup
 
     def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
         """Tunable parameters for self-learner optimization."""
@@ -186,262 +472,5 @@ class SqueezeSetup(BaseSetup):
                     return {**defaults, **setups_config.get(self.setup_id, {})}
         return defaults
 
-    def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
-        work_15m = prepared.work_15m
 
-        dynamic_params = get_dynamic_params(prepared, self.setup_id)
-        defaults = self.get_optimizable_params(settings)
-        effective_params = {**defaults, **dynamic_params}
-        hit = detect_bb_squeeze_release(work_15m, timeframe="15m")
-        if hit is not None:
-            return build_spec_signal(
-                prepared=prepared,
-                settings=settings,
-                setup_id=self.setup_id,
-                family=self.family,
-                hit=hit,
-                defaults=defaults,
-                params=effective_params,
-            )
-
-        # FIX 2026-05-21: the spec layer is intentionally strict; when it misses,
-        # keep the prepared squeeze_on/off and compression-window fallback live.
-        bb_squeeze_threshold = _as_float(
-            dynamic_params.get("bb_squeeze_threshold", defaults["bb_squeeze_threshold"]),
-            defaults["bb_squeeze_threshold"],
-        )
-        min_bb_compression_width = _as_float(
-            dynamic_params.get("min_bb_compression_width", defaults["min_bb_compression_width"]),
-            defaults["min_bb_compression_width"],
-        )
-        bb_pct_b_threshold = _as_float(
-            dynamic_params.get("bb_pct_b_threshold", defaults["bb_pct_b_threshold"]),
-            defaults["bb_pct_b_threshold"],
-        )
-        volume_threshold = _as_float(
-            dynamic_params.get("volume_threshold", defaults["volume_threshold"]),
-            defaults["volume_threshold"],
-        )
-        sl_buffer_atr = _as_float(
-            dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]),
-            defaults["sl_buffer_atr"],
-        )
-        min_rr = _as_float(dynamic_params.get("min_rr", defaults["min_rr"]), defaults["min_rr"])
-        base_score = _as_float(
-            dynamic_params.get("base_score", defaults["base_score"]),
-            defaults["base_score"],
-        )
-        funding_extreme_threshold = _as_float(
-            dynamic_params.get("funding_extreme_threshold", defaults["funding_extreme_threshold"]),
-            defaults["funding_extreme_threshold"],
-        )
-        liquidation_extreme_threshold = _as_float(
-            dynamic_params.get(
-                "liquidation_extreme_threshold",
-                defaults["liquidation_extreme_threshold"],
-            ),
-            defaults["liquidation_extreme_threshold"],
-        )
-        release_lookback = max(
-            3,
-            int(dynamic_params.get("release_lookback", defaults["release_lookback"])),
-        )
-        min_release_width_expansion = _as_float(
-            dynamic_params.get(
-                "min_release_width_expansion",
-                defaults["min_release_width_expansion"],
-            ),
-            defaults["min_release_width_expansion"],
-        )
-        min_release_roc10_abs_pct = _as_float(
-            dynamic_params.get(
-                "min_release_roc10_abs_pct",
-                defaults["min_release_roc10_abs_pct"],
-            ),
-            defaults["min_release_roc10_abs_pct"],
-        )
-        no_crowd_confirmation_penalty = _as_float(
-            dynamic_params.get(
-                "no_crowd_confirmation_penalty",
-                defaults["no_crowd_confirmation_penalty"],
-            ),
-            defaults["no_crowd_confirmation_penalty"],
-        )
-
-        if work_15m.height < 30:
-            _reject(prepared, "squeeze_setup", "insufficient_bars")
-            return None
-
-        is_squeeze, squeeze_dir = _bb_kc_squeeze_active(
-            work_15m,
-            bb_squeeze_threshold=bb_squeeze_threshold,
-            min_bb_compression_width=min_bb_compression_width,
-            bb_pct_b_threshold=bb_pct_b_threshold,
-        )
-        release_reason = ""
-        if not is_squeeze:
-            is_squeeze, squeeze_dir, release_reason = _bb_kc_squeeze_release(
-                work_15m,
-                bb_squeeze_threshold=bb_squeeze_threshold,
-                min_bb_compression_width=min_bb_compression_width,
-                bb_pct_b_threshold=bb_pct_b_threshold,
-                release_lookback=release_lookback,
-                min_width_expansion=min_release_width_expansion,
-                min_roc10_abs_pct=min_release_roc10_abs_pct,
-            )
-        if not is_squeeze:
-            _reject(prepared, "squeeze_setup", "no_bb_kc_squeeze")
-            return None
-
-        funding = prepared.funding_rate
-        liq_score = prepared.liquidation_score
-        crowd_aligned = False
-        crowd_reason = ""
-
-        if funding is not None and abs(funding) >= funding_extreme_threshold:
-            if funding > 0 and squeeze_dir == "short":
-                crowd_aligned = True
-                crowd_reason = f"funding={funding:.4f} (longs crowded)"
-            elif funding < 0 and squeeze_dir == "long":
-                crowd_aligned = True
-                crowd_reason = f"funding={funding:.4f} (shorts crowded)"
-
-        if liq_score is not None and abs(liq_score) >= liquidation_extreme_threshold:
-            if liq_score > 0 and squeeze_dir == "long":
-                crowd_aligned = True
-                crowd_reason = f"liq_score={liq_score:.3f} (short liquidations bullish)"
-            elif liq_score < 0 and squeeze_dir == "short":
-                crowd_aligned = True
-                crowd_reason = f"liq_score={liq_score:.3f} (long liquidations bearish)"
-
-        direction = squeeze_dir
-
-        oi_chg = prepared.oi_change_pct
-        oi_drop_limit = -8.0 if oi_chg is not None and abs(oi_chg) > 1.0 else -0.08
-        if oi_chg is not None and oi_chg < oi_drop_limit:
-            _reject(prepared, "squeeze_setup", "oi_falling_too_fast", oi_change_pct=oi_chg)
-            return None
-
-        atr = _as_float(work_15m.item(-1, "atr14"))
-        if atr <= 0.0:
-            _reject(prepared, "squeeze_setup", "atr_non_positive", atr=atr)
-            return None
-        vol_ratio = _as_float(work_15m.item(-1, "volume_ratio20"), 1.0)
-        rsi = _as_float(work_15m.item(-1, "rsi14"), 50.0)
-
-        if vol_ratio < volume_threshold:
-            strong_release = (
-                release_reason == "polars_squeeze_release"
-                and "squeeze_hist" in work_15m.columns
-                and abs(_as_float(work_15m.item(-1, "squeeze_hist"))) >= atr * 0.15
-            )
-            if not strong_release:
-                _reject(prepared, "squeeze_setup", "volume_too_low", vol_ratio=vol_ratio)
-                return None
-
-        if direction == "short" and rsi > 70.0:
-            reasons_rsi_penalty = "rsi_short_overbought_penalty"
-        elif direction == "long" and rsi < 30.0:
-            reasons_rsi_penalty = "rsi_long_oversold_penalty"
-        else:
-            reasons_rsi_penalty = None
-
-        reasons = [
-            f"bb_kc_squeeze breakout={direction} bb_pct_b>{bb_pct_b_threshold:.2f}",
-            f"vol_ratio={vol_ratio:.2f} min={volume_threshold:.2f}",
-            f"bb_width<={min_bb_compression_width:.4f} sl_buffer_atr={sl_buffer_atr:.2f}",
-            f"rsi={rsi:.1f}",
-        ]
-        if release_reason:
-            reasons.append(release_reason)
-        if crowd_aligned:
-            reasons.append(crowd_reason)
-        else:
-            reasons.append("crowd_context_neutral")
-        if reasons_rsi_penalty:
-            reasons.append(reasons_rsi_penalty)
-
-        # --- Compute structural SL/TP ---
-        pre_breakout = work_15m.slice(max(0, work_15m.height - 11), 10)
-        if pre_breakout.height < 3:
-            pre_breakout = work_15m.slice(max(0, work_15m.height - 6), 5)
-        price_anchor = (
-            _as_float(pre_breakout["high"].max())
-            if direction == "long"
-            else _as_float(pre_breakout["low"].min())
-        )
-        reasons.append(f"limit_entry={price_anchor:.4f}")
-
-        if direction == "long":
-            # SL: below pre-breakout swing low + configured ATR buffer
-            stop = _as_float(pre_breakout["low"].min()) - atr * sl_buffer_atr
-            # TP1: first swing/fractal in breakout direction on 15m
-            from ..features import _swing_points as _sp
-
-            _sh_mask, sl_mask = _sp(work_15m, n=3, include_unconfirmed_tail=True)
-            sh_prices = work_15m.filter(_sh_mask)["high"]
-            tp1_candidates = sh_prices.filter(sh_prices > price_anchor)
-            tp1 = _as_float(tp1_candidates[0]) if tp1_candidates.len() > 0 else None
-            # TP2: squeeze range height projected from entry
-            squeeze_range = _as_float(pre_breakout["high"].max()) - _as_float(
-                pre_breakout["low"].min()
-            )
-            tp2 = price_anchor + squeeze_range if squeeze_range > 0 else None
-        else:
-            # SL: above pre-breakout swing high + configured ATR buffer
-            stop = _as_float(pre_breakout["high"].max()) + atr * sl_buffer_atr
-            from ..features import _swing_points as _sp
-
-            _, _sl15 = _sp(work_15m, n=2)
-            sl_prices = work_15m.filter(_sl15)["low"]
-            tp1_candidates = sl_prices.filter(sl_prices < price_anchor)
-            tp1 = _as_float(tp1_candidates[-1]) if tp1_candidates.len() > 0 else None
-            squeeze_range = _as_float(pre_breakout["high"].max()) - _as_float(
-                pre_breakout["low"].min()
-            )
-            tp2 = price_anchor - squeeze_range if squeeze_range > 0 else None
-
-        risk = abs(price_anchor - stop)
-        if risk <= 0:
-            _reject(prepared, "squeeze_setup", "invalid_stop", stop=stop)
-            return None
-        if tp1 is None or abs(tp1 - price_anchor) < risk * min_rr:
-            tp1 = (
-                price_anchor + risk * min_rr
-                if direction == "long"
-                else price_anchor - risk * min_rr
-            )
-            reasons.append(f"tp1_rr_fallback_{min_rr:.2f}")
-        if tp2 is None or abs(tp2 - price_anchor) <= abs(tp1 - price_anchor):
-            tp2 = (
-                price_anchor + risk * max(2.0, min_rr + 0.35)
-                if direction == "long"
-                else price_anchor - risk * max(2.0, min_rr + 0.35)
-            )
-
-        score = _compute_dynamic_score(
-            direction=direction,
-            base_score=base_score,
-            vol_ratio=vol_ratio,
-            rsi=rsi,
-            structure_clarity=0.5,
-        )
-        if not crowd_aligned:
-            score *= no_crowd_confirmation_penalty
-        if reasons_rsi_penalty:
-            score *= 0.90
-
-        return _build_signal(
-            prepared=prepared,
-            setup_id="squeeze_setup",
-            direction=direction,
-            score=score,
-            timeframe="15m",
-            reasons=reasons,
-            strategy_family=self.family,
-            stop=stop,
-            tp1=tp1,
-            tp2=tp2,
-            price_anchor=price_anchor,
-            atr=atr,
-        )
+__all__ = ["SqueezeSetup"]

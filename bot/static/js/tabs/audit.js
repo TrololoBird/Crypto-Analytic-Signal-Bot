@@ -13,6 +13,17 @@ function renderAudit() {
   ]);
   document.getElementById("audit-status").textContent = audit.status || "unknown";
   document.getElementById("audit-brief").textContent = audit.operator_brief || "No audit report available.";
+  const pub = App.state.publicAudit || {};
+  const pubFiles = pub.files || [];
+  const pubLine = pub.enabled === false
+    ? "Public audit ledger: disabled."
+    : pubFiles.length
+      ? "Public audit: " + pubFiles[0].csv + " (sha256 " + (pubFiles[0].sha256 || "pending") + ", rows " + (pubFiles[0].rows || 0) + ")"
+      : "Public audit: no daily CSV yet.";
+  const briefEl = document.getElementById("audit-brief");
+  if (briefEl && !briefEl.textContent.includes("Public audit:")) {
+    briefEl.textContent = briefEl.textContent + "\n\n" + pubLine;
+  }
   setChildren("audit-action-plan", rowsOrEmpty(
     (audit.action_plan || []).map((item, index) => ({ item, index: index + 1 })),
     (row) => simpleRow("Action " + row.index, row.item, "", "cyan"),

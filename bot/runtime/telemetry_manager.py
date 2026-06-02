@@ -473,3 +473,31 @@ class TelemetryManager:
             len(rejected),
             result.status or "ok",
         )
+        self._notify_dashboard_cycle(
+            symbol=symbol,
+            cycle_row=cycle_row,
+            funnel=result.funnel if isinstance(result.funnel, dict) else None,
+        )
+
+    def _notify_dashboard_cycle(
+        self,
+        *,
+        symbol: str,
+        cycle_row: dict[str, Any],
+        funnel: dict[str, Any] | None,
+    ) -> None:
+        dashboard = getattr(self._bot, "dashboard", None)
+        if dashboard is None:
+            return
+        broadcaster = getattr(dashboard, "_ws_broadcaster", None)
+        if broadcaster is None:
+            return
+        try:
+            broadcaster.notify_cycle_complete(
+                self._bot,
+                symbol=symbol,
+                cycle_row=cycle_row,
+                funnel=funnel,
+            )
+        except Exception:
+            LOG.debug("dashboard ws cycle notify failed", exc_info=True)

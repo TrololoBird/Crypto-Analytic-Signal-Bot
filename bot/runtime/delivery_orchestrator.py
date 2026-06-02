@@ -1,10 +1,20 @@
+"""Delivery orchestration: merge → contract → confluence → tiers → journal → Telegram.
+
+Persistence ordering (crash-safe):
+1. ``SignalTracker.arm_signals`` writes the pending journal row (SQLite + tracking_events).
+2. ``SignalDelivery.deliver`` sends Telegram (and public audit CSV on success).
+3. ``SignalTracker.update_signal_message_ids`` links the Telegram message id.
+4. On non-sent delivery, ``cancel_pending_delivery`` closes the pending journal row.
+
+Telemetry ``selected.jsonl`` is appended by ``cycle_runner`` after this orchestrator returns.
+"""
+
 from __future__ import annotations
 
 import asyncio
 import logging
 import math
 from collections import Counter
-from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -12,6 +22,7 @@ from bot.domain.delivery_policy import r_class_blocks_action
 from bot.domain.schemas import PreparedSymbol, Signal
 from bot.persistence.outcomes import build_prepared_feature_snapshot, extract_features_from_signal
 from bot.delivery.contract import validate_signal_contract
+from bot.delivery.tiers import decide_with_caps, rank_key as tier_rank_key
 from bot.persistence.tracking import SignalTrackingEvent
 
 if TYPE_CHECKING:
@@ -26,36 +37,27 @@ class DeliveryOrchestrator:
     def __init__(self, bot: SignalBot) -> None:
         self._bot = bot
 
+    def _record_delivery_diag_reject(
+        self,
+        stage: str,
+        reason: str,
+        *,
+        setup_id: str,
+    ) -> None:
+        diagnostics = getattr(self._bot, "_signal_diagnostics", None)
+        if diagnostics is None:
+            return
+        diagnostics.record_delivery_stage_reject(stage, reason, setup_id=setup_id)
+
+    def _record_delivery_diag_delivered(self, setup_id: str) -> None:
+        diagnostics = getattr(self._bot, "_signal_diagnostics", None)
+        if diagnostics is None:
+            return
+        diagnostics.record_delivered(setup_id)
+
     @staticmethod
     def _rank_key(signal: Signal) -> tuple[float, float]:
-        return (float(signal.score), float(signal.risk_reward or 0.0))
-
-    @staticmethod
-    def _apply_same_direction_confluence(signals: list[Signal]) -> Signal:
-        ranked = sorted(signals, key=DeliveryOrchestrator._rank_key, reverse=True)
-        best = ranked[0]
-        return DeliveryOrchestrator._with_same_direction_confluence(best, ranked)
-
-    @staticmethod
-    def _with_same_direction_confluence(signal: Signal, peers: list[Signal]) -> Signal:
-        ranked = sorted(peers, key=DeliveryOrchestrator._rank_key, reverse=True)
-        setup_ids = sorted({signal.setup_id for signal in ranked})
-        setup_count = len(setup_ids)
-        if setup_count <= 1:
-            return signal
-        boost = min(0.05, 0.015 * float(setup_count - 1))
-        reason = f"confluence_{setup_count}_setups"
-        setup_reason = f"confluence_setups={','.join(setup_ids)}"
-        reasons = list(signal.reasons)
-        if reason not in reasons:
-            reasons.append(reason)
-        if setup_reason not in reasons:
-            reasons.append(setup_reason)
-        return replace(
-            signal,
-            score=round(min(1.0, float(signal.score) + boost), 4),
-            reasons=tuple(reasons),
-        )
+        return tier_rank_key(signal)
 
     @staticmethod
     def _symbol_direction_cooldown_key(signal: Signal) -> str:
@@ -238,21 +240,12 @@ class DeliveryOrchestrator:
         if not flat_candidates:
             return []
 
-        same_direction: dict[tuple[str, str], list[Signal]] = {}
-        for signal in flat_candidates:
-            same_direction.setdefault((signal.symbol, signal.direction), []).append(signal)
-
         by_setup: dict[str, list[Signal]] = {}
         for signal in sorted(flat_candidates, key=self._rank_key, reverse=True):
             by_setup.setdefault(signal.setup_id, []).append(signal)
 
         selected: list[Signal] = []
         selected_keys: set[str] = set()
-        selected_symbols: set[str] = set()
-
-        def _enriched(signal: Signal) -> Signal:
-            peers = same_direction.get((signal.symbol, signal.direction), [signal])
-            return self._with_same_direction_confluence(signal, peers)
 
         setup_lanes = sorted(
             by_setup.values(),
@@ -264,22 +257,20 @@ class DeliveryOrchestrator:
                 break
             for signal in setup_signals:
                 key = signal.signal_key
-                if key in selected_keys or signal.symbol in selected_symbols:
+                if key in selected_keys:
                     continue
-                selected.append(_enriched(signal))
+                selected.append(signal)
                 selected_keys.add(key)
-                selected_symbols.add(signal.symbol)
                 break
 
         for signal in sorted(flat_candidates, key=self._rank_key, reverse=True):
             if len(selected) >= max_signals:
                 break
             key = signal.signal_key
-            if key in selected_keys or signal.symbol in selected_symbols:
+            if key in selected_keys:
                 continue
-            selected.append(_enriched(signal))
+            selected.append(signal)
             selected_keys.add(key)
-            selected_symbols.add(signal.symbol)
 
         LOG.debug(
             "select_and_rank | candidates=%d symbols=%d setups=%d selected=%d setup_first=true",
@@ -369,6 +360,79 @@ class DeliveryOrchestrator:
             operation=self._bot.delivery.deliver_tracking_updates(events, dry_run=False),
         )
 
+    async def _deliver_direction_conflict_watch(
+        self,
+        conflict_signals: list[Signal],
+        *,
+        prepared_by_tracking_id: dict[str, PreparedSymbol] | None,
+        rejected_rows: list[dict[str, Any]],
+        delivery_status_counts: Counter[str],
+        btc_bias: str,
+        eth_bias: str,
+    ) -> list[Signal]:
+        """Send merge losers as WATCH conflict (P1 SIGNAL_COLLISION spec)."""
+        delivered: list[Signal] = []
+        for signal in conflict_signals:
+            if self._contract_issue_rows(signal):
+                continue
+            prepared = (
+                prepared_by_tracking_id.get(signal.tracking_id) if prepared_by_tracking_id else None
+            )
+            gate_passed, confirmations, gate_details = self._hard_confluence_gate(signal, prepared)
+            if not gate_passed:
+                rejected_rows.append(
+                    {
+                        "ts": datetime.now(UTC).isoformat(),
+                        "symbol": signal.symbol,
+                        "setup_id": signal.setup_id,
+                        "direction": signal.direction,
+                        "stage": "confluence",
+                        "reason": "direction_conflict_watch_gate_failed",
+                        "confirmations": confirmations,
+                        "details": gate_details,
+                    }
+                )
+                continue
+            tier_map = {signal.tracking_id: "watch"}
+            armed_ok, _ = await self._bot._wait_noncritical(
+                label=f"journal conflict {signal.symbol}/{signal.setup_id}",
+                timeout=self._bot._noncritical_timeout_seconds,
+                operation=self._bot.tracker.arm_signals([signal], dry_run=False),
+            )
+            if not armed_ok:
+                continue
+            ok, results = await self._bot._wait_noncritical(
+                label=f"deliver conflict {signal.symbol}/{signal.setup_id}",
+                timeout=self._bot._delivery_timeout_seconds,
+                operation=self._bot.delivery.deliver(
+                    [signal],
+                    dry_run=False,
+                    btc_bias=btc_bias,
+                    eth_bias=eth_bias,
+                    tier_by_tracking_id=tier_map,
+                ),
+            )
+            if not ok or not results:
+                await self._bot.tracker.cancel_pending_delivery(signal)
+                continue
+            for item in results:
+                delivery_status_counts[item.status] += 1
+                if item.status != "sent":
+                    await self._bot.tracker.cancel_pending_delivery(item.signal)
+                    continue
+                delivered.append(item.signal)
+                self._record_delivery_diag_delivered(item.signal.setup_id)
+                if item.message_id is not None:
+                    await self._bot._wait_noncritical(
+                        label=f"link conflict {item.signal.symbol}/{item.signal.setup_id}",
+                        timeout=self._bot._noncritical_timeout_seconds,
+                        operation=self._bot.tracker.update_signal_message_ids(
+                            {item.signal.tracking_id: item.message_id},
+                            dry_run=False,
+                        ),
+                    )
+        return delivered
+
     async def select_and_deliver(
         self,
         signals: list[Signal],
@@ -378,9 +442,21 @@ class DeliveryOrchestrator:
         if not signals:
             return [], [], Counter()
 
-        from .merge import merge_candidates
+        from .merge import DEFAULT_ACTION_WINDOW_HOURS, MetaSignalMerger
 
-        signals = [meta.primary for meta in merge_candidates(signals)]
+        ledger = getattr(self._bot, "public_audit", None)
+        recent_actions: list[Signal] = []
+        if ledger is not None and hasattr(ledger, "recent_action_signals"):
+            recent_actions = ledger.recent_action_signals(within_hours=DEFAULT_ACTION_WINDOW_HOURS)
+
+        merge_result = MetaSignalMerger().merge(
+            signals,
+            recent_actions=recent_actions,
+        )
+        merged_meta = merge_result.merged
+        direction_conflict_signals = [meta.primary for meta in merge_result.direction_conflicts]
+        merge_meta_by_tracking_id = {meta.primary.tracking_id: meta for meta in merged_meta}
+        signals = [meta.primary for meta in merged_meta]
 
         ready_to_send: list[Signal] = []
         rejected_rows: list[dict[str, Any]] = []
@@ -388,6 +464,16 @@ class DeliveryOrchestrator:
         queued_setup_ids: set[str] = set()
         contract_validated_tracking_ids: set[str] = set()
         confluence_passed_tracking_ids: set[str] = set()
+        tier_allowed_tracking_ids: set[str] = set()
+        tier_ranked_signals = sorted(signals, key=tier_rank_key, reverse=True)
+        tier_decisions = decide_with_caps(tier_ranked_signals, self._bot.settings)
+        tier_by_tracking_id = dict(
+            zip(
+                [signal.tracking_id for signal in tier_ranked_signals],
+                tier_decisions,
+                strict=True,
+            )
+        )
 
         for signal in signals:
             contract_issues = self._contract_issue_rows(signal)
@@ -397,6 +483,9 @@ class DeliveryOrchestrator:
                     f"signal_contract validation was bypassed for {signal.tracking_id}"
                 )
             if contract_issues:
+                self._record_delivery_diag_reject(
+                    "contract", "invalid_signal_contract", setup_id=signal.setup_id
+                )
                 rejected_rows.append(
                     {
                         "ts": datetime.now(UTC).isoformat(),
@@ -417,12 +506,13 @@ class DeliveryOrchestrator:
                 )
                 continue
             prepared = (
-                prepared_by_tracking_id.get(signal.tracking_id)
-                if prepared_by_tracking_id
-                else None
+                prepared_by_tracking_id.get(signal.tracking_id) if prepared_by_tracking_id else None
             )
             gate_passed, confirmations, gate_details = self._hard_confluence_gate(signal, prepared)
             if not gate_passed:
+                self._record_delivery_diag_reject(
+                    "confluence", "hard_confluence_gate_failed", setup_id=signal.setup_id
+                )
                 rejected_rows.append(
                     {
                         "ts": datetime.now(UTC).isoformat(),
@@ -445,7 +535,47 @@ class DeliveryOrchestrator:
                 )
                 continue
             confluence_passed_tracking_ids.add(signal.tracking_id)
-            if r_class_blocks_action(signal.setup_id, self._bot.settings):
+            tier_decision = tier_by_tracking_id.get(signal.tracking_id)
+            if tier_decision is None:
+                rejected_rows.append(
+                    {
+                        "ts": datetime.now(UTC).isoformat(),
+                        "symbol": signal.symbol,
+                        "setup_id": signal.setup_id,
+                        "direction": signal.direction,
+                        "stage": "tier",
+                        "reason": "tier_decision_missing",
+                    }
+                )
+                continue
+            if not tier_decision.allow:
+                self._record_delivery_diag_reject(
+                    "tier",
+                    tier_decision.drop_reason or "tier_cap_rejected",
+                    setup_id=signal.setup_id,
+                )
+                merge_meta = merge_meta_by_tracking_id.get(signal.tracking_id)
+                rejected_rows.append(
+                    {
+                        "ts": datetime.now(UTC).isoformat(),
+                        "symbol": signal.symbol,
+                        "setup_id": signal.setup_id,
+                        "direction": signal.direction,
+                        "stage": "tier",
+                        "reason": tier_decision.drop_reason or "tier_cap_rejected",
+                        "tier": tier_decision.tier,
+                        "tier_reason": tier_decision.reason,
+                        "aligned_setup_ids": (
+                            list(merge_meta.aligned_setup_ids) if merge_meta is not None else []
+                        ),
+                        "score_boost": merge_meta.score_boost if merge_meta is not None else 0.0,
+                    }
+                )
+                continue
+            tier_allowed_tracking_ids.add(signal.tracking_id)
+            if tier_decision.tier == "action" and r_class_blocks_action(
+                signal.setup_id, self._bot.settings
+            ):
                 rejected_rows.append(
                     {
                         "ts": datetime.now(UTC).isoformat(),
@@ -517,7 +647,9 @@ class DeliveryOrchestrator:
                     else getattr(existing_same_setup, "direction", None)
                 )
                 can_supersede_pending = str(existing_status) == "pending"
-                better_score = score_raw is not None and signal.score >= float(score_raw or 0.0) + 0.10
+                better_score = (
+                    score_raw is not None and signal.score >= float(score_raw or 0.0) + 0.10
+                )
                 direction_flip = str(existing_direction or "") != signal.direction
                 if can_supersede_pending and (better_score or direction_flip):
                     if self._quality_monitor_rejects(signal, rejected_rows):
@@ -533,6 +665,8 @@ class DeliveryOrchestrator:
                         raise ValueError(
                             f"hard confluence gate was bypassed for {signal.tracking_id}"
                         )
+                    if signal.tracking_id not in tier_allowed_tracking_ids:
+                        raise ValueError(f"tier cap policy was bypassed for {signal.tracking_id}")
                     ready_to_send.append(signal)
                     queued_setup_ids.add(signal.setup_id)
                     queued_symbol_direction.add(self._symbol_direction_cooldown_key(signal))
@@ -570,8 +704,7 @@ class DeliveryOrchestrator:
                 (
                     r
                     for r in active_signals
-                    if r.get("symbol") == signal.symbol
-                    and r.get("status") in ("pending", "active")
+                    if r.get("symbol") == signal.symbol and r.get("status") in ("pending", "active")
                 ),
                 None,
             )
@@ -622,6 +755,8 @@ class DeliveryOrchestrator:
                     )
                 if signal.tracking_id not in confluence_passed_tracking_ids:
                     raise ValueError(f"hard confluence gate was bypassed for {signal.tracking_id}")
+                if signal.tracking_id not in tier_allowed_tracking_ids:
+                    raise ValueError(f"tier cap policy was bypassed for {signal.tracking_id}")
                 ready_to_send.append(signal)
                 queued_setup_ids.add(signal.setup_id)
                 queued_symbol_direction.add(symbol_direction_key)
@@ -638,6 +773,8 @@ class DeliveryOrchestrator:
                     )
                 if signal.tracking_id not in confluence_passed_tracking_ids:
                     raise ValueError(f"hard confluence gate was bypassed for {signal.tracking_id}")
+                if signal.tracking_id not in tier_allowed_tracking_ids:
+                    raise ValueError(f"tier cap policy was bypassed for {signal.tracking_id}")
                 ready_to_send.append(signal)
                 queued_setup_ids.add(signal.setup_id)
                 queued_symbol_direction.add(symbol_direction_key)
@@ -670,12 +807,43 @@ class DeliveryOrchestrator:
                 )
             if signal.tracking_id not in confluence_passed_tracking_ids:
                 raise ValueError(f"hard confluence gate was bypassed for {signal.tracking_id}")
+            if signal.tracking_id not in tier_allowed_tracking_ids:
+                raise ValueError(f"tier cap policy was bypassed for {signal.tracking_id}")
+            tier_decision = tier_by_tracking_id.get(signal.tracking_id)
+            delivery_tier = tier_decision.tier if tier_decision is not None else "action"
+            tier_map = {signal.tracking_id: delivery_tier}
+            armed_ok, _ = await self._bot._wait_noncritical(
+                label=f"journal {signal.symbol}/{signal.setup_id}",
+                timeout=self._bot._noncritical_timeout_seconds,
+                operation=self._bot.tracker.arm_signals([signal], dry_run=False),
+            )
+            if not armed_ok:
+                self._record_delivery_diag_reject(
+                    "journal", "arm_timeout", setup_id=signal.setup_id
+                )
+                rejected_rows.append(
+                    {
+                        "ts": datetime.now(UTC).isoformat(),
+                        "symbol": signal.symbol,
+                        "setup_id": signal.setup_id,
+                        "direction": signal.direction,
+                        "stage": "journal",
+                        "reason": "arm_timeout",
+                    }
+                )
+                continue
             ok, results = await self._bot._wait_noncritical(
                 label=f"deliver {signal.symbol}/{signal.setup_id}",
                 timeout=self._bot._delivery_timeout_seconds,
-                operation=self._bot.delivery.deliver([signal], dry_run=False, btc_bias=btc_bias),
+                operation=self._bot.delivery.deliver(
+                    [signal],
+                    dry_run=False,
+                    btc_bias=btc_bias,
+                    tier_by_tracking_id=tier_map,
+                ),
             )
             if not ok or not results:
+                await self._bot.tracker.cancel_pending_delivery(signal)
                 continue
 
             for item in results:
@@ -687,6 +855,12 @@ class DeliveryOrchestrator:
                     message_id=item.message_id,
                 )
                 if item.status != "sent":
+                    await self._bot.tracker.cancel_pending_delivery(item.signal)
+                    self._record_delivery_diag_reject(
+                        "delivery",
+                        f"delivery_{item.status}",
+                        setup_id=item.signal.setup_id,
+                    )
                     rejected_rows.append(
                         {
                             "ts": datetime.now(UTC).isoformat(),
@@ -708,6 +882,7 @@ class DeliveryOrchestrator:
                     )
                     continue
                 delivered.append(item.signal)
+                self._record_delivery_diag_delivered(item.signal.setup_id)
                 prepared = (
                     prepared_by_tracking_id.get(item.signal.tracking_id)
                     if prepared_by_tracking_id
@@ -736,15 +911,15 @@ class DeliveryOrchestrator:
                         item.signal.symbol,
                         "symbol_direction",
                     )
-                await self._bot._wait_noncritical(
-                    label=f"arm {item.signal.symbol}/{item.signal.setup_id}",
-                    timeout=self._bot._noncritical_timeout_seconds,
-                    operation=self._bot.tracker.arm_signals_with_messages(
-                        [item.signal],
-                        dry_run=False,
-                        message_ids={item.signal.tracking_id: item.message_id},
-                    ),
-                )
+                if item.message_id is not None:
+                    await self._bot._wait_noncritical(
+                        label=f"link {item.signal.symbol}/{item.signal.setup_id}",
+                        timeout=self._bot._noncritical_timeout_seconds,
+                        operation=self._bot.tracker.update_signal_message_ids(
+                            {item.signal.tracking_id: item.message_id},
+                            dry_run=False,
+                        ),
+                    )
                 notifier_settings = getattr(self._bot.settings, "notifiers", None)
                 if bool(getattr(notifier_settings, "send_analytics_companion", False)):
                     task = asyncio.create_task(
@@ -762,5 +937,16 @@ class DeliveryOrchestrator:
             LOG.debug("alerts.on_confirmed_signals failed: %s", exc)
         if delivered:
             await self._bot._sync_ws_tracked_symbols()
+
+        if direction_conflict_signals:
+            conflict_delivered = await self._deliver_direction_conflict_watch(
+                direction_conflict_signals,
+                prepared_by_tracking_id=prepared_by_tracking_id,
+                rejected_rows=rejected_rows,
+                delivery_status_counts=delivery_status_counts,
+                btc_bias=btc_bias,
+                eth_bias=eth_bias,
+            )
+            delivered.extend(conflict_delivered)
 
         return delivered, rejected_rows, delivery_status_counts

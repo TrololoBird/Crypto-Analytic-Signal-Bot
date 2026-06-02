@@ -148,6 +148,7 @@ const App = {
         ["runtime", "/api/live/runtime"],
         ["telegram", "/api/live/telegram-preview"],
         ["analytics", "/api/analytics/report?days=30&scope=rolling"],
+        ["publicAudit", "/api/v1/public-audit"],
       ];
       const results = await Promise.allSettled(
         endpoints.map(([key, url]) =>

@@ -58,9 +58,7 @@ class StrategyAnalytics:
             active_rows = [
                 row
                 for row in active_rows
-                if (
-                    created_at := self._parse_dt(row.get("created_at"))
-                ) is not None
+                if (created_at := self._parse_dt(row.get("created_at"))) is not None
                 and created_at >= since
             ]
         tracking_ids_with_outcome = {
@@ -102,9 +100,7 @@ class StrategyAnalytics:
             trade_rows = [row for row in rows if self._is_trade_outcome(row)]
             trades = int(setup.get("total") or 0)
             win_rate = float(setup.get("win_rate") or 0.0)
-            gross_profit = sum(
-                max(float(r.get("pnl_r_multiple") or 0.0), 0.0) for r in trade_rows
-            )
+            gross_profit = sum(max(float(r.get("pnl_r_multiple") or 0.0), 0.0) for r in trade_rows)
             gross_loss = sum(
                 abs(min(float(r.get("pnl_r_multiple") or 0.0), 0.0)) for r in trade_rows
             )
@@ -130,9 +126,7 @@ class StrategyAnalytics:
                     "pending_signals": int(counts.get("pending_signals", 0) or 0),
                     "active_signals": int(counts.get("active_signals", 0) or 0),
                     "closed_signals": int(counts.get("closed_signals", 0) or 0),
-                    "closed_missing_outcomes": int(
-                        counts.get("closed_missing_outcomes", 0) or 0
-                    ),
+                    "closed_missing_outcomes": int(counts.get("closed_missing_outcomes", 0) or 0),
                     "win_rate": round(win_rate, 4),
                     "expectancy_r": round(expectancy, 4),
                     "avg_rr": round(expectancy, 4),
@@ -154,9 +148,7 @@ class StrategyAnalytics:
                     "pending_signals": int(counts.get("pending_signals", 0) or 0),
                     "active_signals": int(counts.get("active_signals", 0) or 0),
                     "closed_signals": int(counts.get("closed_signals", 0) or 0),
-                    "closed_missing_outcomes": int(
-                        counts.get("closed_missing_outcomes", 0) or 0
-                    ),
+                    "closed_missing_outcomes": int(counts.get("closed_missing_outcomes", 0) or 0),
                     "win_rate": 0.0,
                     "expectancy_r": 0.0,
                     "avg_rr": 0.0,
@@ -173,10 +165,7 @@ class StrategyAnalytics:
             float(r["expectancy_r"]) * int(r["trades"]) for r in setup_reports
         )
         all_trade_rows = [
-            row
-            for rows in by_setup.values()
-            for row in rows
-            if self._is_trade_outcome(row)
+            row for rows in by_setup.values() for row in rows if self._is_trade_outcome(row)
         ]
         avg_mae = (
             sum(abs(float(r.get("mae") or 0.0)) for r in all_trade_rows) / len(all_trade_rows)

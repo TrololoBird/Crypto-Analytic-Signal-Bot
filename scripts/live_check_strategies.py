@@ -645,7 +645,7 @@ async def _run(
                     )
                     return
                 prepared_ok += 1
-                results = await engine.calculate_all(prepared)
+                results = await engine.calculate_all(prepared, event_interval="15m")
                 detector_runs += len(results)
                 for result in results:
                     setup_id = str(
@@ -660,7 +660,7 @@ async def _run(
                     if decision is not None and decision.is_skip:
                         skips_by_setup.update([setup_id])
                         skip_reasons.update([decision.reason_code])
-                    if result.error:
+                    if decision is not None and decision.is_error:
                         errors_by_setup.update([setup_id])
                     elif result.signal is not None:
                         hits_by_setup.update([result.signal.setup_id])

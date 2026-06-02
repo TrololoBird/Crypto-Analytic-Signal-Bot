@@ -20,7 +20,9 @@ def _has_oi_context(prepared: PreparedSymbol) -> bool:
     return prepared.oi_current is not None or prepared.oi_change_pct is not None
 
 
-def _missing_required_features(prepared: PreparedSymbol, features: tuple[str, ...]) -> tuple[str, ...]:
+def _missing_required_features(
+    prepared: PreparedSymbol, features: tuple[str, ...]
+) -> tuple[str, ...]:
     if not features:
         return ()
     columns: set[str] = set()
@@ -34,9 +36,7 @@ def _missing_required_features(prepared: PreparedSymbol, features: tuple[str, ..
 def _missing_required_enrichment(
     prepared: PreparedSymbol, enrichment_fields: tuple[str, ...]
 ) -> tuple[str, ...]:
-    return tuple(
-        field for field in enrichment_fields if getattr(prepared, field, None) is None
-    )
+    return tuple(field for field in enrichment_fields if getattr(prepared, field, None) is None)
 
 
 class AbstractStrategy(ABC):

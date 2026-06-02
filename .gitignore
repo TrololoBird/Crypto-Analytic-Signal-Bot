@@ -85,3 +85,14 @@ _find_ops.py
 # Windows shortcuts
 *.lnk
 Crypto Analytic Signal Bot/
+
+# graphify incremental cache (regenerate locally)
+graphify-out/cache/ast/
+
+# Survey / scratch at repo root
+methods.txt
+methods_found.txt
+implemented_methods.txt
+tmp.txt
+scripts/_github_bot_survey_out.json
+scripts/_github_bot_survey_30.json

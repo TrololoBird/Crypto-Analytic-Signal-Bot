@@ -65,6 +65,7 @@ def stream_endpoint_class(stream: str) -> str:
         "@kline_",
         "@aggtrade",
         "@markprice",
+        "!markprice@arr@1s",
         "!markprice@arr",
         "!ticker@arr",
         "!miniticker@arr",
@@ -86,7 +87,7 @@ def global_streams(manager: Any) -> list[str]:
         return []
     streams = [
         "!ticker@arr",
-        "!markPrice@arr",
+        "!markPrice@arr@1s",
         "!forceOrder@arr",
     ]
     if not manager.is_ticker_cache_warm():

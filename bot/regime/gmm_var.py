@@ -7,6 +7,7 @@ import numpy as np
 
 try:  # optional dependencies
     from sklearn.mixture import GaussianMixture
+
     HAS_SKLEARN = True
 except ImportError:  # pragma: no cover
     GaussianMixture = None
@@ -14,6 +15,7 @@ except ImportError:  # pragma: no cover
 
 try:
     from statsmodels.tsa.api import VAR
+
     HAS_STATSMODELS = True
 except ImportError:  # pragma: no cover
     VAR = None

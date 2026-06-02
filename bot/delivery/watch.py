@@ -10,7 +10,7 @@ from ..domain.config import AlertConfig, BotSettings
 from ..domain.schemas import PreparedSymbol, Signal
 from ..telemetry import TelemetryStore
 from .telegram import DeliveryResult, MessageBroadcaster
-from .tiers import TierDecision, classify_tier
+from .tiers import classify_tier
 
 LOG = logging.getLogger("bot.alerts")
 

@@ -184,7 +184,10 @@ class EventBus:
                 queued = self._pending_events.get(token)
                 if queued is not None and not isinstance(queued, KlineCloseEvent):
                     self._drop_queued_token(index, queued)
-                    LOG.debug("event bus evicted non-critical %s to admit KlineCloseEvent", type(queued).__name__)
+                    LOG.debug(
+                        "event bus evicted non-critical %s to admit KlineCloseEvent",
+                        type(queued).__name__,
+                    )
                     return True
             for index, token in enumerate(self._queue):
                 queued = self._pending_events.get(token)

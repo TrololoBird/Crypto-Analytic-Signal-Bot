@@ -17,6 +17,7 @@ from bot.market.data import (
     _VALID_ORDER_BOOK_DEPTH_LIMITS,
 )
 
+
 def validate_symbol(symbol: str) -> None:
     """Validate Binance symbol format (e.g., BTCUSDT)."""
     if not symbol or not isinstance(symbol, str):
@@ -68,9 +69,7 @@ def validate_runtime_public_rest_url(url: str) -> None:
             f"public REST URL must start with one of {_ALLOWED_PUBLIC_REST_PATHS}: {url!r}"
         )
     if any(marker in url.lower() for marker in _FORBIDDEN_PUBLIC_PATH_MARKERS):
-        raise ValueError(
-            f"public REST URL contains forbidden marker: {url!r}"
-        )
+        raise ValueError(f"public REST URL contains forbidden marker: {url!r}")
 
 
 def _validate_rest_params(params: Mapping[str, Any] | None) -> None:
@@ -82,4 +81,3 @@ def _validate_rest_params(params: Mapping[str, Any] | None) -> None:
             raise ValueError(f"forbidden parameter: {key}")
         if key_text.lower() in _FORBIDDEN_PARAMS_LOWER:
             raise ValueError(f"forbidden parameter: {key}")
-

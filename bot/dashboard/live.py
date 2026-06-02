@@ -357,10 +357,16 @@ class DashboardLiveData:
 
     def _shortlist_uncached(self, *, limit: int) -> JsonDict:
         bot = self._bot()
-        pinned = {
-            str(symbol).strip().upper()
-            for symbol in getattr(getattr(bot, "settings", None), "universe", object()).pinned_symbols
-        } if getattr(getattr(bot, "settings", None), "universe", None) is not None else set()
+        pinned = (
+            {
+                str(symbol).strip().upper()
+                for symbol in getattr(
+                    getattr(bot, "settings", None), "universe", object()
+                ).pinned_symbols
+            }
+            if getattr(getattr(bot, "settings", None), "universe", None) is not None
+            else set()
+        )
         priority_symbols = set(self._priority_symbols())
         items = []
         for item in list(getattr(bot, "_shortlist", []) or [])[: max(1, int(limit))]:
@@ -384,9 +390,7 @@ class DashboardLiveData:
         fit_counts = [row["strategy_fit_count"] for row in items]
         item_by_symbol = {str(item["symbol"]).upper(): item for item in items}
         telemetry_symbols = {
-            str(symbol).upper()
-            for symbol in (latest.get("symbols") or [])
-            if str(symbol).strip()
+            str(symbol).upper() for symbol in (latest.get("symbols") or []) if str(symbol).strip()
         }
         priority_activity = self._priority_activity(priority_symbols)
         priority_rows = []
@@ -587,7 +591,10 @@ class DashboardLiveData:
             "selected_count": len(selected),
             "delivery_count": len(delivery),
             "delivery_status_counts": dict(
-                Counter(str(row.get("delivery_status") or row.get("status") or "unknown") for row in delivery)
+                Counter(
+                    str(row.get("delivery_status") or row.get("status") or "unknown")
+                    for row in delivery
+                )
             ),
             "rows": rows,
         }
@@ -685,7 +692,48 @@ class DashboardLiveData:
         }
 
 
-def summarize_rows_by_symbol(rows: Iterable[Mapping[str, Any]], *, limit: int = 20) -> list[JsonDict]:
+def funnel_stage_counts(funnel: Mapping[str, Any]) -> JsonDict:
+    """Compact stage counts for dashboard WS ``funnel_update`` payloads."""
+    totals = funnel.get("cycle_totals") if isinstance(funnel.get("cycle_totals"), dict) else {}
+    decisions = funnel.get("decisions") if isinstance(funnel.get("decisions"), dict) else {}
+    status_counts = (
+        decisions.get("status_counts") if isinstance(decisions.get("status_counts"), dict) else {}
+    )
+    return {
+        "detected": _safe_int(totals.get("detector_runs")),
+        "merged": _safe_int(totals.get("candidates")),
+        "confluence": _safe_int(status_counts.get("signal")),
+        "tier": _safe_int(totals.get("selected")),
+        "delivered": _safe_int(totals.get("delivered")),
+    }
+
+
+def funnel_stage_counts_from_cycle(
+    *,
+    cycle_row: Mapping[str, Any],
+    funnel: Mapping[str, Any] | None = None,
+) -> JsonDict:
+    """Per-cycle stage counts derived from telemetry cycle rows."""
+    nested = funnel if isinstance(funnel, dict) else {}
+    selected = _safe_int(
+        cycle_row.get("selected_count", cycle_row.get("selected_signals")),
+    )
+    return {
+        "detected": _safe_int(nested.get("raw_hits", cycle_row.get("detector_runs"))),
+        "merged": _safe_int(
+            nested.get("post_filter_candidates", cycle_row.get("candidate_count")),
+        ),
+        "confluence": selected,
+        "tier": selected,
+        "delivered": _safe_int(
+            cycle_row.get("delivered_count", cycle_row.get("delivered_signals")),
+        ),
+    }
+
+
+def summarize_rows_by_symbol(
+    rows: Iterable[Mapping[str, Any]], *, limit: int = 20
+) -> list[JsonDict]:
     """Summarize arbitrary telemetry rows by symbol."""
     counter: Counter[str] = Counter()
     setups: dict[str, Counter[str]] = defaultdict(Counter)

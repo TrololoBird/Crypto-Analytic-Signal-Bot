@@ -13,7 +13,7 @@ from ..core.event_bus import EventBus
 from ..persistence.repository import MemoryRepository
 from ..delivery import SignalDelivery
 from ..market.rest import BinanceClientImpl
-from ..market.data import BinanceFuturesMarketData
+from ..market.data import BinanceFuturesMarketData, configure_rest_concurrency
 from ..delivery.telegram import build_message_broadcaster
 from ..market.enrichment import PublicIntelligenceService
 from ..diagnostics.quality import SignalQualityMonitor
@@ -58,6 +58,8 @@ def build_application_container(
 
     ``register_strategies`` is provided by ``SignalBot`` to keep strategy wiring in one place.
     """
+
+    configure_rest_concurrency(settings.runtime.max_concurrent_rest_requests)
 
     client = market_data or BinanceFuturesMarketData(
         binance_client=BinanceClientImpl(

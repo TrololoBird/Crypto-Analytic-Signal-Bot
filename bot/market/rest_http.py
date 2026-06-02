@@ -5,76 +5,32 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import math
 import random
 import time
-from abc import ABC, abstractmethod
-from collections import deque
 from collections.abc import Mapping
-from datetime import datetime, timedelta
-from typing import Any, Deque, Dict, List, Optional, Set, Tuple, cast
-from urllib.parse import urlparse
+from typing import Any, Dict, Tuple, cast
 
 import aiohttp
-import polars as pl
 
-from bot.domain.schemas import (
-    AggTrade,
-    AggTradeSnapshot,
-    SymbolFrames,
-    SymbolMeta,
-)
 
-from bot.market.rate_limit import (
-    _SlidingWindowRateLimiter,
-    _WeightBudgetManager,
-)
 from bot.market.data import (
     MarketDataUnavailable,
-    UTC,
     _REST_WEIGHT_SOFT_LIMIT,
     _REST_WEIGHT_HARD_LIMIT,
-    _FAPI_BASE_URL,
-    FORBIDDEN_PARAMS,
-    _FORBIDDEN_PARAMS_LOWER,
     _REST_GLOBAL_SEMAPHORE,
-    _FUTURES_DATA_IP_LIMIT_WINDOW_S,
-    _FUTURES_DATA_IP_LIMIT_OFFICIAL_MAX,
-    _FUTURES_DATA_IP_LIMIT_DEFAULT,
     _HTTP_CONNECTOR_LIMIT,
-    _CACHE_TTL,
-    _PERIOD_WINDOW_SECONDS,
-    _KLINE_COLUMNS,
-    _KLINE_FRAME_SCHEMA,
     _ENDPOINT_WEIGHTS,
     _FUTURES_DATA_REQUEST_LIMITED_OPS,
     _DEFAULT_KLINE_FETCH_LIMIT,
     _DEFAULT_ORDER_BOOK_DEPTH_LIMIT,
-    _VALID_ORDER_BOOK_DEPTH_LIMITS,
     _FALLBACK_TIMEOUT_DEBUG_OPERATIONS,
     _PublicEndpointSpec,
     _PUBLIC_ENDPOINT_REGISTRY,
-    _ALLOWED_PUBLIC_REST_PATHS,
-    _FORBIDDEN_PUBLIC_PATH_MARKERS,
-    _VALID_INTERVALS,
 )
 from bot.market.rest_validators import (
-    validate_interval,
-    validate_limit,
     validate_order_book_depth_limit,
     validate_runtime_public_rest_url,
-    validate_symbol,
     _validate_rest_params,
-)
-from bot.market.rest_frames import (
-    _coerce_rest_row,
-    _drop_incomplete_ohlcv_tail,
-    _klines_to_frame,
-    _ohlcv_frame_has_incomplete_tail,
-    _parse_depth_levels,
-    _safe_float,
-    _timeframe_to_seconds,
-    _unwrap_model,
 )
 
 LOG = logging.getLogger("bot.market.rest")
@@ -487,4 +443,3 @@ class RestHttpMixin:
             "rest_rate_limit_pause_remaining_s": float(rest_pause_remaining),
             "futures_data_pause_remaining_s": float(futures_data_pause_remaining),
         }
-

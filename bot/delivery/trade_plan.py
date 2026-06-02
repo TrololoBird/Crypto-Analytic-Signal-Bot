@@ -42,7 +42,11 @@ class TradePlanBuilder:
         stop_loss: float,
         tp1: float,
         tp2: float,
+        tp3: float | None = None,
         entry_pad_atr_mult: float = 0.08,
+        created_at: datetime | None = None,
+        ttl_bars: int | None = None,
+        scale_weights: tuple[float, float, float] | list[float] | None = None,
         now: datetime | None = None,
     ) -> TradePlan | None:
         return build_trade_plan(
@@ -55,8 +59,11 @@ class TradePlanBuilder:
             stop_loss=stop_loss,
             tp1=tp1,
             tp2=tp2,
+            tp3=tp3,
             entry_pad_atr_mult=entry_pad_atr_mult,
-            now=now,
+            created_at=created_at if created_at is not None else now,
+            ttl_bars=ttl_bars,
+            scale_weights=scale_weights,
         )
 
     @staticmethod

@@ -528,11 +528,9 @@ class SignalQualityMonitor:
                 for record in records
             }
             self._records_global = deque(
-                [
-                    record
-                    for records in self._records_by_setup.values()
-                    for record in records
-                ][-self.window :],
+                [record for records in self._records_by_setup.values() for record in records][
+                    -self.window :
+                ],
                 maxlen=self.window,
             )
             self._persist_snapshot_unlocked(self._state_snapshot_unlocked())
@@ -762,11 +760,9 @@ class SignalQualityMonitor:
                 if pair in active_pairs and losses > 0
             }
             self._records_global = deque(
-                [
-                    record
-                    for records in self._records_by_setup.values()
-                    for record in records
-                ][-self.window :],
+                [record for records in self._records_by_setup.values() for record in records][
+                    -self.window :
+                ],
                 maxlen=self.window,
             )
             self._seen_tracking_ids = {
@@ -936,10 +932,7 @@ class SignalQualityMonitor:
                 "win_rate": summary["win_rate"],
                 "expectancy_r": summary["expectancy_r"],
                 "recommendations": self.recommendation_counts(),
-                "unhealthy_setups": [
-                    row.get("setup_id")
-                    for row in self.unhealthy_setups()[:10]
-                ],
+                "unhealthy_setups": [row.get("setup_id") for row in self.unhealthy_setups()[:10]],
                 "symbol_streaks": self.get_symbol_streaks()[:10],
                 "last_persist_error": summary.get("last_persist_error"),
             }
@@ -1136,11 +1129,9 @@ class SignalQualityMonitor:
                 if record.tracking_id
             }
             self._records_global = deque(
-                [
-                    record
-                    for records in self._records_by_setup.values()
-                    for record in records
-                ][-self.window :],
+                [record for records in self._records_by_setup.values() for record in records][
+                    -self.window :
+                ],
                 maxlen=self.window,
             )
             self._persist_snapshot_unlocked(self._state_snapshot_unlocked())

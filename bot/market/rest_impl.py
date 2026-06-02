@@ -3,17 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import math
 import random
 import time
-from abc import ABC, abstractmethod
 from collections import deque
 from collections.abc import Mapping
-from datetime import datetime, timedelta
 from typing import Any, Deque, Dict, List, Optional, Set, Tuple, cast
-from urllib.parse import urlparse
 
 import aiohttp
 import polars as pl
@@ -31,50 +27,30 @@ from bot.market.rate_limit import (
 )
 from bot.market.data import (
     MarketDataUnavailable,
-    UTC,
     _REST_WEIGHT_SOFT_LIMIT,
-    _REST_WEIGHT_HARD_LIMIT,
     _FAPI_BASE_URL,
-    FORBIDDEN_PARAMS,
-    _FORBIDDEN_PARAMS_LOWER,
-    _REST_GLOBAL_SEMAPHORE,
     _FUTURES_DATA_IP_LIMIT_WINDOW_S,
     _FUTURES_DATA_IP_LIMIT_OFFICIAL_MAX,
     _FUTURES_DATA_IP_LIMIT_DEFAULT,
-    _HTTP_CONNECTOR_LIMIT,
     _CACHE_TTL,
     _PERIOD_WINDOW_SECONDS,
-    _KLINE_COLUMNS,
-    _KLINE_FRAME_SCHEMA,
-    _ENDPOINT_WEIGHTS,
-    _FUTURES_DATA_REQUEST_LIMITED_OPS,
     _DEFAULT_KLINE_FETCH_LIMIT,
     _DEFAULT_ORDER_BOOK_DEPTH_LIMIT,
-    _VALID_ORDER_BOOK_DEPTH_LIMITS,
-    _FALLBACK_TIMEOUT_DEBUG_OPERATIONS,
     _PublicEndpointSpec,
     _PUBLIC_ENDPOINT_REGISTRY,
-    _ALLOWED_PUBLIC_REST_PATHS,
-    _FORBIDDEN_PUBLIC_PATH_MARKERS,
-    _VALID_INTERVALS,
 )
 from bot.market.rest_validators import (
     validate_interval,
     validate_limit,
     validate_order_book_depth_limit,
-    validate_runtime_public_rest_url,
     validate_symbol,
-    _validate_rest_params,
 )
 from bot.market.rest_frames import (
     _coerce_rest_row,
     _drop_incomplete_ohlcv_tail,
     _klines_to_frame,
-    _ohlcv_frame_has_incomplete_tail,
     _parse_depth_levels,
     _safe_float,
-    _timeframe_to_seconds,
-    _unwrap_model,
 )
 
 LOG = logging.getLogger("bot.market.rest")
@@ -139,9 +115,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         self._http_session: aiohttp.ClientSession | None = None
         self._klines_cache: Dict[Tuple[str, str, int], Tuple[float, Any]] = {}
         self._klines_locks: Dict[Tuple[str, str, int], asyncio.Lock] = {}
-        self._derived_klines_cache: Dict[
-            Tuple[str, str, str, int], Tuple[float, Any]
-        ] = {}
+        self._derived_klines_cache: Dict[Tuple[str, str, str, int], Tuple[float, Any]] = {}
         self._derived_klines_locks: Dict[Tuple[str, str, str, int], asyncio.Lock] = {}
         self._circuit_failures: Dict[str, int] = {}
         self._circuit_open_until: Dict[str, float] = {}
@@ -152,7 +126,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             "kline_candlestick_data",
             "symbol_order_book_ticker",
             "order_book_depth",
-            "exchange_information"
+            "exchange_information",
         }
         self._last_endpoint_name: str | None = None
         self._last_endpoint_source: str | None = None
@@ -337,9 +311,9 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         validate_limit(limit)
         if kind == "continuous":
             contract_type = "PERPETUAL"
-            assert (
-                contract_type == "PERPETUAL"
-            ), f"Only PERPETUAL contracts supported, got {contract_type}"
+            assert contract_type == "PERPETUAL", (
+                f"Only PERPETUAL contracts supported, got {contract_type}"
+            )
             try:
                 rows = await self._call_public_http_json(
                     "continuous_kline_candlestick_data",
@@ -438,15 +412,11 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             if active_lock is lock and not lock.locked():
                 self._derived_klines_locks.pop(key, None)
 
-    async def fetch_continuous_klines(
-        self, symbol: str, interval: str, *, limit: int = 500
-    ) -> Any:
+    async def fetch_continuous_klines(self, symbol: str, interval: str, *, limit: int = 500) -> Any:
         """Fetch public continuous USD-M klines for backtest-stable history."""
         return await self._fetch_derived_klines_cached("continuous", symbol, interval, limit=limit)
 
-    async def fetch_mark_price_klines(
-        self, symbol: str, interval: str, *, limit: int = 500
-    ) -> Any:
+    async def fetch_mark_price_klines(self, symbol: str, interval: str, *, limit: int = 500) -> Any:
         """Fetch public mark-price klines for premium/basis analytics."""
         return await self._fetch_derived_klines_cached("mark", symbol, interval, limit=limit)
 
@@ -568,9 +538,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         self._order_book_depth_cache[key] = (time.monotonic(), snapshot)
         return dict(snapshot)
 
-    async def _fetch_order_book_context_rest_detail(
-        self, symbol: str
-    ) -> Dict[str, float | None]:
+    async def _fetch_order_book_context_rest_detail(self, symbol: str) -> Dict[str, float | None]:
         try:
             return await self.fetch_order_book_depth_snapshot(
                 symbol,
@@ -934,8 +902,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             if not payload:
                 return None
             rows = [
-                item.model_dump() if hasattr(item, "model_dump") else dict(item)
-                for item in payload
+                item.model_dump() if hasattr(item, "model_dump") else dict(item) for item in payload
             ]
             rows.sort(key=lambda row: int(row.get("timestamp") or 0))
             if len(rows) < 2:
@@ -966,9 +933,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
                 return cached[1]
             return None
 
-    async def fetch_long_short_ratio(
-        self, symbol: str, *, period: str = "1h"
-    ) -> Optional[float]:
+    async def fetch_long_short_ratio(self, symbol: str, *, period: str = "1h") -> Optional[float]:
         validate_symbol(symbol)
         cache_key = (symbol, period)
         now = time.monotonic()
@@ -1315,7 +1280,6 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         spec = self._endpoint_spec(operation)
         return f"{_FAPI_BASE_URL}{spec.path}"
 
-
     def get_cached_oi_change(
         self, symbol: str, period: str = "1h", max_age_s: float = 1800.0
     ) -> Optional[float]:
@@ -1327,9 +1291,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             return None
         return value
 
-    def get_cached_open_interest(
-        self, symbol: str, max_age_s: float = 1800.0
-    ) -> Optional[float]:
+    def get_cached_open_interest(self, symbol: str, max_age_s: float = 1800.0) -> Optional[float]:
         cached = self._open_interest_cache.get(symbol)
         if cached is None:
             return None
@@ -1458,7 +1420,9 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             return None
         return max(candidates, key=lambda item: abs(item[0]))
 
-    async def fetch_basis(self, symbol: str, *, period: str = "1h", limit: int = 3) -> Optional[float]:
+    async def fetch_basis(
+        self, symbol: str, *, period: str = "1h", limit: int = 3
+    ) -> Optional[float]:
         validate_symbol(symbol)
         """Fetch most recent basis (futures - index price as %) from /futures/data/basis.
 
@@ -1636,10 +1600,8 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         return stats
 
     async def fetch_symbol_frames(self, symbol: str) -> SymbolFrames:
-        if self._ws is not None and hasattr(self._ws, 'is_warm') and self._ws.is_warm(symbol):
+        if self._ws is not None and hasattr(self._ws, "is_warm") and self._ws.is_warm(symbol):
             frames = await self._ws.get_symbol_frames(symbol)
             if frames is not None:
                 return frames
         return await self._fetch_symbol_frames_rest(symbol)
-
-

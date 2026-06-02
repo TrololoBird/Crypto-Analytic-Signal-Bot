@@ -1,4 +1,9 @@
-"""Optional FastAPI dashboard (v9 package)."""
+"""Optional FastAPI dashboard (v9 package).
+
+Canonical entry: ``bot.dashboard.app.BotDashboard`` (mounted by ``SignalBot``).
+``live.py`` / ``analytics.py`` / ``ws_broadcast.py`` are helpers — do not add
+parallel FastAPI apps.
+"""
 
 from __future__ import annotations
 

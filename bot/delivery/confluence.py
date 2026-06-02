@@ -198,8 +198,7 @@ class ConfluenceEngine:
         weight_total = sum(max(0.0, float(spec["weight"])) for spec in specs)
         if weight_total > 0.0:
             specs = [
-                {**spec, "weight": max(0.0, float(spec["weight"])) / weight_total}
-                for spec in specs
+                {**spec, "weight": max(0.0, float(spec["weight"])) / weight_total} for spec in specs
             ]
         actual_sum = sum(max(0.0, float(spec["weight"])) for spec in specs)
         if weight_total > 0.0 and abs(actual_sum - 1.0) > 0.01:
@@ -232,10 +231,7 @@ class ConfluenceEngine:
             )
             if weight_total > 0.0:
                 assert abs(active_weight_sum - 1.0) < 1e-9, active_weight_sum
-        return [
-            self._component_from_spec(spec)
-            for spec in specs
-        ]
+        return [self._component_from_spec(spec) for spec in specs]
 
     @staticmethod
     def _component_from_spec(spec: dict[str, Any]) -> ComponentScore:

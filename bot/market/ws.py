@@ -648,11 +648,18 @@ class FuturesWSManager:
             for sym, ts in self._ticker_update_times.items()
             if now - ts <= self._cfg.market_ticker_freshness_seconds
         )
+        freshness = self._cfg.market_ticker_freshness_seconds
         fresh_mark_prices = sum(
-            1
-            for sym, ts in self._mark_price_update_times.items()
-            if now - ts <= self._cfg.market_ticker_freshness_seconds
+            1 for sym, ts in self._mark_price_update_times.items() if sym and now - ts <= freshness
         )
+        if fresh_mark_prices <= 0:
+            fresh_mark_prices = sum(
+                1
+                for sym, row in self._mark_price_cache.items()
+                if sym
+                and float(row.get("mark_price") or 0.0) > 0.0
+                and now - float(row.get("updated_at") or 0.0) <= freshness
+            )
         fresh_book_tickers = sum(
             1
             for sym, ts in self._book_update_times.items()
@@ -838,7 +845,11 @@ class FuturesWSManager:
 
         if getattr(self._cfg, "subscribe_depth", False):
             public_task = self._stream_tasks[_WS_PUBLIC]
-            if self._running and (public_task is None or public_task.done()) and current_public_streams:
+            if (
+                self._running
+                and (public_task is None or public_task.done())
+                and current_public_streams
+            ):
                 self._stream_tasks[_WS_PUBLIC] = asyncio.create_task(
                     self._run_stream(_WS_PUBLIC),
                     name="ws_manager_stream:public",
@@ -1532,9 +1543,7 @@ class FuturesWSManager:
         event_time = data.get("E")
         if event_time is not None:
             try:
-                self._last_event_lag_ms = max(
-                    0.0, self._now_epoch_ms() - float(event_time)
-                )
+                self._last_event_lag_ms = max(0.0, self._now_epoch_ms() - float(event_time))
                 if (
                     symbol
                     and event_type in _LATENCY_WARNING_EVENTS
@@ -1608,9 +1617,8 @@ class FuturesWSManager:
                 or str(stream).split("@", 1)[0]
                 or "unknown"
             ).upper()
-        if not await self._rate_limiter.acquire():
-            LOG.debug("ws_rate_limit_exceeded", extra={"symbol": symbol_for_limit})
-            return
+        # Binance: ≤10 incoming messages/s per connection — pace, do not drop market data.
+        await self._rate_limiter.wait_for_slot()
 
         # P3: Per-stream latency tracking
         if stream not in self._stream_latency_ms:
@@ -1707,9 +1715,7 @@ class FuturesWSManager:
             return False
         if event_ms <= 0:
             return False
-        max_age_seconds = float(
-            getattr(self._cfg, "market_ticker_freshness_seconds", 30.0)
-        )
+        max_age_seconds = float(getattr(self._cfg, "market_ticker_freshness_seconds", 30.0))
         age_ms = self._now_epoch_ms() - event_ms
         return age_ms > (max_age_seconds * 1000.0)
 
@@ -1782,9 +1788,7 @@ class FuturesWSManager:
             self._event_bus.publish_nowait(
                 KlineCloseEvent(symbol=symbol, interval=interval, close_ts=close_ts_ms)
             )
-            LOG.debug(
-                "kline published to EventBus | symbol=%s interval=%s", symbol, interval
-            )
+            LOG.debug("kline published to EventBus | symbol=%s interval=%s", symbol, interval)
         else:
             if not self._event_bus_missing_logged:
                 LOG.info("kline EventBus publish skipped because EventBus is not attached")

@@ -437,9 +437,7 @@ def reason_label(reason: str) -> str:
         return f"{count} setup confluence" if count.isdigit() else "setup confluence"
     if raw.startswith("confluence_setups="):
         setups = [
-            setup_label(item.strip())
-            for item in raw.split("=", 1)[1].split(",")
-            if item.strip()
+            setup_label(item.strip()) for item in raw.split("=", 1)[1].split(",") if item.strip()
         ]
         return "confluence: " + ", ".join(setups[:5]) if setups else "setup confluence"
     return raw.replace("_", " ").replace(".", ": ")
@@ -489,12 +487,8 @@ def extract_signal_facts(
         entry_low=_float(getattr(signal, "entry_low", getattr(signal, "entry_price", 0.0))),
         entry_high=_float(getattr(signal, "entry_high", getattr(signal, "entry_price", 0.0))),
         stop=_float(getattr(signal, "stop", getattr(signal, "stop_price", 0.0))),
-        take_profit_1=_float(
-            getattr(signal, "take_profit_1", getattr(signal, "tp1_price", 0.0))
-        ),
-        take_profit_2=_float(
-            getattr(signal, "take_profit_2", getattr(signal, "tp2_price", 0.0))
-        ),
+        take_profit_1=_float(getattr(signal, "take_profit_1", getattr(signal, "tp1_price", 0.0))),
+        take_profit_2=_float(getattr(signal, "take_profit_2", getattr(signal, "tp2_price", 0.0))),
         take_profit_3=_optional_float(
             getattr(signal, "take_profit_3", getattr(signal, "tp3", None))
         ),
@@ -595,9 +589,9 @@ def status_line_for_signal(facts: SignalMessageFacts) -> str:
 def target_line(facts: SignalMessageFacts) -> str:
     """Render target plan."""
     tp3 = facts.take_profit_3 if facts.take_profit_3 is not None else facts.take_profit_2
-    same_tp = abs(facts.take_profit_2 - facts.take_profit_1) <= max(
-        abs(facts.take_profit_1), 1.0
-    ) * 1e-8
+    same_tp = (
+        abs(facts.take_profit_2 - facts.take_profit_1) <= max(abs(facts.take_profit_1), 1.0) * 1e-8
+    )
     if same_tp:
         return f"TP {code(format_price(facts.take_profit_1))}"
     weights = [int(round(max(0.0, weight) * 100.0)) for weight in facts.scale_weights]
@@ -624,7 +618,9 @@ def entry_levels_line(facts: SignalMessageFacts) -> str:
     )
 
 
-def validate_telegram_html(text: str, *, limit: int = TELEGRAM_TEXT_LIMIT) -> TelegramValidationReport:
+def validate_telegram_html(
+    text: str, *, limit: int = TELEGRAM_TEXT_LIMIT
+) -> TelegramValidationReport:
     """Validate the subset of Telegram HTML used by this formatter."""
     issues: list[TelegramValidationIssue] = []
     if len(text) > limit:
@@ -718,7 +714,9 @@ def format_signal_message(
     if facts.microstructure_warnings and not policy.compact:
         lines.append(
             f"{bold('Warnings')} "
-            + ", ".join(escape_text(item.replace('_', ' ')) for item in facts.microstructure_warnings)
+            + ", ".join(
+                escape_text(item.replace("_", " ")) for item in facts.microstructure_warnings
+            )
         )
     if filters and not policy.compact:
         lines.append(f"{bold('Filters')} " + "; ".join(escape_text(item) for item in filters))
@@ -831,9 +829,7 @@ def message_preview(text: str, *, max_lines: int = 12) -> dict[str, Any]:
         "chars": len(text),
         "ok": report.ok,
         "errors": [issue.message for issue in report.issues if issue.severity == "error"],
-        "warnings": [
-            issue.message for issue in report.issues if issue.severity == "warning"
-        ],
+        "warnings": [issue.message for issue in report.issues if issue.severity == "warning"],
         "preview_lines": lines[:max_lines],
         "plain_preview": "\n".join(lines[:max_lines]),
     }
@@ -841,6 +837,7 @@ def message_preview(text: str, *, max_lines: int = 12) -> dict[str, Any]:
 
 def sample_message_from_row(row: Mapping[str, Any]) -> str:
     """Render a Telegram preview from a telemetry row."""
+
     class RowSignal:
         pass
 

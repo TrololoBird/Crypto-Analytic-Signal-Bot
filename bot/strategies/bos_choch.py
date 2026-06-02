@@ -1,29 +1,87 @@
-"""Break of Structure / Change of Character (BOS/CHoCH) setup detector.
-
-Uses SMC swing structure on work_15m. BOS is handled as continuation/
-acceptance, CHoCH as reversal; both are valid events for this setup_id.
-
-# WINDSURF_REVIEW: unified + vectorized + 1H context + graded
-"""
+"""bos_choch — detector in setups/detectors/."""
 
 from __future__ import annotations
 
-from typing import Any, cast
+from ..domain.config import BotSettings
+from ..domain.schemas import PreparedSymbol, Signal
+from ..setups import _reject
+import logging
+
+LOG = logging.getLogger("bot.strategies.bos_choch")
+
+from ..setups.spec_runtime import SpecDetectorSetup
+
+
 import logging
 import math
+from typing import Any, cast
 
 import polars as pl
 
-from ..setups.base import BaseSetup
-from ..domain.config import BotSettings
-from ..domain.schemas import PreparedSymbol, Signal
-from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..features import _swing_points
+from ..setups import _build_signal, _compute_dynamic_score
+from ..setups.spec_runtime import run_setup_detection
 from ..setups.smc import latest_structure_break, swing_highs_lows
-from ..setups.utils import get_dynamic_params
-from ..setups.detectors import build_spec_signal, detect_bos_choch
+from ._common import SpecHit, as_float, with_spec_columns, _latest_values, _row_volume_ratio
 
-LOG = logging.getLogger("bot.strategies.bos_choch")
+
+def detect_bos_choch(
+    frame: pl.DataFrame,
+    *,
+    timeframe: str = "15m",
+    max_age: int = 28,
+) -> SpecHit | None:
+    work = with_spec_columns(frame)
+    if work.height < 25:
+        return None
+    current = _latest_values(work)
+    current_idx = int(work.item(-1, "_spec_idx"))
+    current_close = current.get("close", 0.0)
+    current_atr = current.get("spec_atr14", 0.0)
+    if current_close <= 0.0 or current_atr <= 0.0:
+        return None
+    candidates = work.tail(max_age + 1).to_dicts()
+    for row in reversed(candidates):
+        idx = int(row["_spec_idx"])
+        age = current_idx - idx
+        if age > max_age:
+            continue
+        close = as_float(row.get("close"))
+        prev_high = as_float(row.get("spec_prev_high20"))
+        prev_low = as_float(row.get("spec_prev_low20"))
+        atr = as_float(row.get("spec_atr14"), current_atr)
+        if min(close, prev_high, prev_low, atr) <= 0.0:
+            continue
+        if close > prev_high and current_close > prev_high:
+            return SpecHit(
+                strategy="bos_choch",
+                direction="long",
+                entry=current_close if age == 0 else prev_high,
+                stop_basis=prev_high - atr,
+                atr=atr,
+                timeframe=timeframe,
+                reasons=(f"body_break_above_swing={prev_high:.4f}", f"break_age={age}"),
+                structure_clarity=min(1.0, (close - prev_high) / max(atr, 1e-8)),
+                vol_ratio=_row_volume_ratio(row),
+                rsi=as_float(row.get("rsi14"), 50.0),
+                source_index=idx,
+            )
+        if close < prev_low and current_close < prev_low:
+            return SpecHit(
+                strategy="bos_choch",
+                direction="short",
+                entry=current_close if age == 0 else prev_low,
+                stop_basis=prev_low + atr,
+                atr=atr,
+                timeframe=timeframe,
+                reasons=(f"body_break_below_swing={prev_low:.4f}", f"break_age={age}"),
+                structure_clarity=min(1.0, (prev_low - close) / max(atr, 1e-8)),
+                vol_ratio=_row_volume_ratio(row),
+                rsi=as_float(row.get("rsi14"), 50.0),
+                source_index=idx,
+            )
+    return None
+
 
 _MIN_SWINGS = 6  # Need 3+ of each type for trend context
 
@@ -181,13 +239,419 @@ def _select_stop_level_with_fallback(
     return None, None, details
 
 
-class BOSCHOCHSetup(BaseSetup):
-    """BOS/CHoCH strategy detector for structural break signals."""
+def _spec_detect_kwargs(effective: dict[str, float]) -> dict[str, object]:
+    return {"max_age": 20}
 
+
+def _detect_bos_choch_extended(
+    prepared: PreparedSymbol,
+    settings: BotSettings,
+    defaults: dict[str, float],
+    effective: dict[str, float],
+    setup_id: str,
+    family: str,
+) -> Signal | None:
+    dynamic_params = effective
+    from ..setups.utils import coerce_int
+
+    configured_swing_lookback = coerce_int(
+        dynamic_params.get("swing_lookback"), int(defaults["swing_lookback"])
+    )
+    bos_lookback = coerce_int(dynamic_params.get("bos_lookback"), configured_swing_lookback)
+    choch_lookback = coerce_int(dynamic_params.get("choch_lookback"), configured_swing_lookback)
+    swing_lookback = max(2, max(bos_lookback, choch_lookback, configured_swing_lookback))
+    external_swing_lookback = max(
+        swing_lookback + 1,
+        coerce_int(
+            dynamic_params.get("external_swing_lookback"),
+            int(defaults["external_swing_lookback"]),
+        ),
+    )
+    sl_buffer_atr = float(dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]))
+    min_rr = float(dynamic_params.get("min_rr", defaults["min_rr"]))
+    base_score = float(dynamic_params.get("base_score", defaults["base_score"]))
+    breakout_threshold_atr = float(
+        dynamic_params.get("breakout_threshold_atr", defaults["breakout_threshold_atr"])
+    )
+    max_break_age_bars = coerce_int(
+        dynamic_params.get("max_break_age_bars"), int(defaults["max_break_age_bars"])
+    )
+    max_retest_age_bars = coerce_int(
+        dynamic_params.get("max_retest_age_bars"), int(defaults["max_retest_age_bars"])
+    )
+    retest_atr_mult = float(dynamic_params.get("retest_atr_mult", defaults["retest_atr_mult"]))
+    min_volume_ratio = float(dynamic_params.get("min_volume_ratio", defaults["min_volume_ratio"]))
+
+    w = prepared.work_15m
+    min_height = external_swing_lookback * 2 + 1
+    if w.height < min_height:
+        _reject(
+            prepared,
+            setup_id,
+            "insufficient_height",
+            actual=w.height,
+            required=min_height,
+            external_swing_lookback=external_swing_lookback,
+        )
+        return None
+
+    atr = float(w.item(-1, "atr14") or 0.0)
+    if atr <= 0 or math.isnan(atr):
+        _reject(prepared, setup_id, "atr_invalid", atr=atr)
+        return None
+
+    price = prepared.mark_price or prepared.universe.last_price
+    if not price or price <= 0:
+        _reject(prepared, setup_id, "price_missing")
+        return None
+
+    last_bar_is_closed = True
+    if "is_closed" in w.columns:
+        last_bar_is_closed = bool(w["is_closed"].item(-1))
+    if not last_bar_is_closed:
+        unconfirmed_zone = latest_structure_break(
+            w,
+            swing_length=swing_lookback,
+            prefer_kind="choch",
+        )
+        if (
+            unconfirmed_zone is not None
+            and unconfirmed_zone.kind in {"bos", "choch"}
+            and int(unconfirmed_zone.broken_index or 0) >= w.height - 1
+        ):
+            _reject(prepared, setup_id, "structure_break_on_unconfirmed_bar")
+            return None
+
+    scan = w if last_bar_is_closed else w.head(w.height - 1)
+    if scan.height < min_height:
+        _reject(
+            prepared,
+            setup_id,
+            "insufficient_confirmed_15m_bars",
+            bars=scan.height,
+            required=min_height,
+        )
+        return None
+
+    sh_mask, sl_mask = _swing_points(scan, n=swing_lookback)
+    sh_prices = scan.filter(sh_mask)["high"]
+    sl_prices = scan.filter(sl_mask)["low"]
+
+    # Need at least 3 of each to determine prior trend + break
+    min_swings = max(
+        3,
+        coerce_int(dynamic_params.get("min_swings"), int(defaults["min_swings"])),
+    )
+    if sh_prices.len() < min_swings or sl_prices.len() < min_swings:
+        _reject(
+            prepared,
+            setup_id,
+            "insufficient_swing_points",
+            swing_highs=sh_prices.len(),
+            swing_lows=sl_prices.len(),
+            min_swings=min_swings,
+        )
+        return None
+
+    sh_vals = sh_prices.to_numpy()
+    sl_vals = sl_prices.to_numpy()
+
+    structure_zone = latest_structure_break(
+        scan,
+        swing_length=swing_lookback,
+        prefer_kind="choch",
+    )
+    if structure_zone is None:
+        _reject(prepared, setup_id, "no_bos_choch_detected")
+        return None
+    if structure_zone.kind not in {"bos", "choch"}:
+        _reject(prepared, setup_id, "invalid_structure_break_kind", kind=structure_zone.kind)
+        return None
+    break_kind = str(structure_zone.kind)
+    direction = structure_zone.direction
+    if structure_zone.level is None or structure_zone.broken_index is None:
+        _reject(
+            prepared,
+            setup_id,
+            "invalid_bos_choch_zone",
+            level=structure_zone.level,
+            broken_index=structure_zone.broken_index,
+        )
+        return None
+    broken_index = int(structure_zone.broken_index)
+    broken_index = max(0, min(broken_index, scan.height - 1))
+    break_age = scan.height - 1 - broken_index
+    break_level = float(structure_zone.level)
+    retest_active = break_age <= max_retest_age_bars and abs(price - break_level) <= (
+        atr * retest_atr_mult
+    )
+    if break_age > max_break_age_bars and not retest_active:
+        _reject(
+            prepared,
+            setup_id,
+            "structure_break_too_old",
+            break_age=break_age,
+            max_break_age_bars=max_break_age_bars,
+            max_retest_age_bars=max_retest_age_bars,
+            distance_atr=abs(price - break_level) / atr,
+            kind=break_kind,
+        )
+        return None
+    raw_break_close = scan.item(broken_index, "close")
+    if raw_break_close is None:
+        _reject(prepared, setup_id, "break_close_missing", broken_index=broken_index)
+        return None
+    break_close = float(raw_break_close)
+    break_distance = break_close - break_level if direction == "long" else break_level - break_close
+    min_break_distance = atr * breakout_threshold_atr
+    if break_distance < min_break_distance:
+        _reject(
+            prepared,
+            setup_id,
+            "structure_break_too_weak",
+            break_distance=break_distance,
+            min_break_distance=min_break_distance,
+            breakout_threshold_atr=breakout_threshold_atr,
+            kind=break_kind,
+        )
+        return None
+    vol_ratio = float(scan.item(broken_index, "volume_ratio20") or 1.0)
+    if vol_ratio < min_volume_ratio:
+        _reject(
+            prepared,
+            setup_id,
+            "structure_break_volume_too_low",
+            vol_ratio=vol_ratio,
+            min_volume_ratio=min_volume_ratio,
+            kind=break_kind,
+        )
+        return None
+    stop_price = None
+    pivot_level = None
+    entry_price = break_level
+
+    external_swings = swing_highs_lows(
+        scan,
+        swing_length=external_swing_lookback,
+        mode="live_safe",
+    )
+    external_markers = external_swings["HighLow"].to_list()
+    external_levels = external_swings["Level"].to_list()
+    internal_swings = swing_highs_lows(
+        scan,
+        swing_length=swing_lookback,
+        mode="live_safe",
+    )
+    internal_markers = internal_swings["HighLow"].to_list()
+    internal_levels = internal_swings["Level"].to_list()
+    external_search_end = min(
+        int(structure_zone.broken_index),
+        len(external_markers) - 1,
+        len(external_levels) - 1,
+        len(internal_markers) - 1,
+        len(internal_levels) - 1,
+    )
+
+    # --- Compute structural SL/TP ---
+    if direction == "long":
+        pivot_level, stop_source, stop_details = _select_stop_level_with_fallback(
+            frame=scan,
+            external_markers=external_markers,
+            external_levels=external_levels,
+            internal_markers=internal_markers,
+            internal_levels=internal_levels,
+            search_end=external_search_end,
+            marker=-1.0,
+            price=entry_price,
+            break_level=entry_price,
+            atr=atr,
+            above_price=False,
+        )
+        if pivot_level is None:
+            _reject(
+                prepared,
+                setup_id,
+                "swing_stop_missing_long",
+                external_swing_lookback=external_swing_lookback,
+                swing_lookback=swing_lookback,
+                **cast(Any, stop_details),
+            )
+            return None
+        stop_price = (
+            pivot_level
+            if stop_source in {"atr_stop", "previous_candle"}
+            else pivot_level - sl_buffer_atr * atr
+        )
+        risk = entry_price - stop_price
+        if risk <= 0:
+            _reject(
+                prepared,
+                setup_id,
+                "risk_non_positive_long",
+                stop=stop_price,
+                price=entry_price,
+            )
+            return None
+        # TP1: last swing high before the structural break
+        tp1 = float(sh_vals[-2]) if sh_vals[-2] > entry_price else None
+        # TP2: 4h swing target
+        w4h = prepared.work_4h
+        tp2 = None
+        if w4h is not None and w4h.height > 5:
+            sh4_mask, _ = _swing_points(w4h, n=2)
+            sh4_prices = w4h.filter(sh4_mask)["high"]
+            tp2_cands = sh4_prices.filter(sh4_prices > entry_price)
+            tp2 = float(tp2_cands[0]) if tp2_cands.len() > 0 else None
+    else:
+        pivot_level, stop_source, stop_details = _select_stop_level_with_fallback(
+            frame=scan,
+            external_markers=external_markers,
+            external_levels=external_levels,
+            internal_markers=internal_markers,
+            internal_levels=internal_levels,
+            search_end=external_search_end,
+            marker=1.0,
+            price=entry_price,
+            break_level=entry_price,
+            atr=atr,
+            above_price=True,
+        )
+        if pivot_level is None:
+            _reject(
+                prepared,
+                setup_id,
+                "swing_stop_missing_short",
+                external_swing_lookback=external_swing_lookback,
+                swing_lookback=swing_lookback,
+                **cast(Any, stop_details),
+            )
+            return None
+        stop_price = (
+            pivot_level
+            if stop_source in {"atr_stop", "previous_candle"}
+            else pivot_level + sl_buffer_atr * atr
+        )
+        risk = stop_price - entry_price
+        if risk <= 0:
+            _reject(
+                prepared,
+                setup_id,
+                "risk_non_positive_short",
+                stop=stop_price,
+                price=entry_price,
+            )
+            return None
+        # TP1: last swing low before the structural break
+        tp1 = float(sl_vals[-2]) if sl_vals[-2] < entry_price else None
+        # TP2: 4h swing target
+        w4h = prepared.work_4h
+        tp2 = None
+        if w4h is not None and w4h.height > 5:
+            _, sl4_mask = _swing_points(w4h, n=2)
+            sl4_prices = w4h.filter(sl4_mask)["low"]
+            tp2_cands = sl4_prices.filter(sl4_prices < entry_price)
+            tp2 = float(tp2_cands[-1]) if tp2_cands.len() > 0 else None
+
+    fallback_note = None
+    if tp1 is None or abs(tp1 - entry_price) < risk * min_rr:
+        tp1 = entry_price + risk * min_rr if direction == "long" else entry_price - risk * min_rr
+        fallback_note = f"tp1_rr_fallback_{min_rr:.2f}"
+    if direction == "long":
+        if tp2 is None or tp2 <= tp1:
+            tp2 = entry_price + risk * max(2.0, min_rr + 0.35)
+    else:
+        if tp2 is None or tp2 >= tp1:
+            tp2 = entry_price - risk * max(2.0, min_rr + 0.35)
+
+    rsi = float(w.item(-1, "rsi14") or 50.0)
+    score = _compute_dynamic_score(
+        direction=direction,
+        base_score=base_score,
+        vol_ratio=vol_ratio,
+        rsi=rsi,
+    )
+    if break_kind == "bos":
+        score *= float(dynamic_params.get("bos_score_multiplier", 0.94))
+
+    reasons = [
+        f"{break_kind.upper()} {direction}: structure level={structure_zone.level:.4f}",
+        f"break_close={break_close:.4f} break_age={break_age}",
+        f"price={price:.4f} limit_entry={entry_price:.4f}",
+        f"break_distance_atr={break_distance / atr:.2f}",
+        f"retest_active={retest_active}",
+        f"vol_ratio={vol_ratio:.2f}",
+        f"{stop_source}_sl={pivot_level:.4f}",
+        f"sh[-3]={sh_vals[-3]:.4f} sh[-2]={sh_vals[-2]:.4f} sh[-1]={sh_vals[-1]:.4f}",
+        f"sl[-3]={sl_vals[-3]:.4f} sl[-2]={sl_vals[-2]:.4f} sl[-1]={sl_vals[-1]:.4f}",
+    ]
+    if fallback_note:
+        reasons.append(fallback_note)
+
+    return _build_signal(
+        prepared=prepared,
+        setup_id=setup_id,
+        direction=direction,
+        score=score,
+        timeframe="15m",
+        reasons=reasons,
+        strategy_family=family,
+        stop=stop_price,
+        tp1=tp1,
+        tp2=tp2,
+        price_anchor=entry_price,
+        atr=atr,
+    )
+
+
+def detect_bos_choch_setup(
+    prepared: PreparedSymbol,
+    settings: BotSettings,
+    defaults: dict[str, float],
+    effective: dict[str, float],
+    setup_id: str,
+    family: str,
+) -> Signal | None:
+    spec_kwargs = _spec_detect_kwargs(effective)
+    return run_setup_detection(
+        prepared=prepared,
+        settings=settings,
+        setup_id=setup_id,
+        family=family,
+        defaults=defaults,
+        effective=effective,
+        spec_detect=detect_bos_choch,
+        extended_detect=_detect_bos_choch_extended,
+        spec_kwargs=spec_kwargs,
+    )
+
+
+__all__ = ["detect_bos_choch", "detect_bos_choch_setup", "_detect_bos_choch_extended"]
+
+
+class BOSCHOCHSetup(SpecDetectorSetup):
     setup_id = "bos_choch"
     family = "reversal"
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)
+
+    DEFAULTS = {
+        "base_score": 0.55,
+        "swing_lookback": 6,
+        "external_swing_lookback": 20,
+        "bos_lookback": 6,
+        "choch_lookback": 6,
+        "sl_buffer_atr": 0.5,
+        "breakout_threshold_atr": 0.4,
+        "max_break_age_bars": 6,
+        "max_retest_age_bars": 16,
+        "retest_atr_mult": 1.25,
+        "min_volume_ratio": 1.05,
+        "bias_mismatch_penalty": 0.75,
+        "min_rr": 1.9,
+        "min_swings": 3,
+    }
+
+    detect_setup = detect_bos_choch_setup
 
     def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
         """Tunable parameters for self-learner optimization."""
@@ -218,7 +682,7 @@ class BOSCHOCHSetup(BaseSetup):
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         """Detect BOS/CHoCH signal for given symbol."""
         try:
-            return self._detect(prepared, settings)
+            return super().detect(prepared, settings)
         except (ValueError, KeyError, IndexError) as e:
             LOG.exception("%s bos_choch: detection error: %s", prepared.symbol, e)
             _reject(
@@ -230,383 +694,5 @@ class BOSCHOCHSetup(BaseSetup):
             )
             return None
 
-    def _detect(self, prepared: PreparedSymbol, _settings: BotSettings) -> Signal | None:
-        setup_id = self.setup_id
-        dynamic_params = get_dynamic_params(prepared, setup_id)
-        defaults = self.get_optimizable_params(_settings)
 
-        hit = detect_bos_choch(prepared.work_15m, timeframe="15m", max_age=20)
-        if hit is not None:
-            return build_spec_signal(
-                prepared=prepared,
-                settings=_settings,
-                setup_id=setup_id,
-                family=self.family,
-                hit=hit,
-                defaults=defaults,
-                params=dynamic_params,
-            )
-
-        from ..setups.utils import coerce_int
-
-        configured_swing_lookback = coerce_int(
-            dynamic_params.get("swing_lookback"), int(defaults["swing_lookback"])
-        )
-        bos_lookback = coerce_int(
-            dynamic_params.get("bos_lookback"), configured_swing_lookback
-        )
-        choch_lookback = coerce_int(
-            dynamic_params.get("choch_lookback"), configured_swing_lookback
-        )
-        swing_lookback = max(2, max(bos_lookback, choch_lookback, configured_swing_lookback))
-        external_swing_lookback = max(
-            swing_lookback + 1,
-            coerce_int(
-                dynamic_params.get("external_swing_lookback"),
-                int(defaults["external_swing_lookback"]),
-            ),
-        )
-        sl_buffer_atr = float(dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]))
-        min_rr = float(dynamic_params.get("min_rr", defaults["min_rr"]))
-        base_score = float(dynamic_params.get("base_score", defaults["base_score"]))
-        breakout_threshold_atr = float(
-            dynamic_params.get("breakout_threshold_atr", defaults["breakout_threshold_atr"])
-        )
-        max_break_age_bars = coerce_int(
-            dynamic_params.get("max_break_age_bars"), int(defaults["max_break_age_bars"])
-        )
-        max_retest_age_bars = coerce_int(
-            dynamic_params.get("max_retest_age_bars"), int(defaults["max_retest_age_bars"])
-        )
-        retest_atr_mult = float(
-            dynamic_params.get("retest_atr_mult", defaults["retest_atr_mult"])
-        )
-        min_volume_ratio = float(
-            dynamic_params.get("min_volume_ratio", defaults["min_volume_ratio"])
-        )
-
-        w = prepared.work_15m
-        min_height = external_swing_lookback * 2 + 1
-        if w.height < min_height:
-            _reject(
-                prepared,
-                setup_id,
-                "insufficient_height",
-                actual=w.height,
-                required=min_height,
-                external_swing_lookback=external_swing_lookback,
-            )
-            return None
-
-        atr = float(w.item(-1, "atr14") or 0.0)
-        if atr <= 0 or math.isnan(atr):
-            _reject(prepared, setup_id, "atr_invalid", atr=atr)
-            return None
-
-        price = prepared.mark_price or prepared.universe.last_price
-        if not price or price <= 0:
-            _reject(prepared, setup_id, "price_missing")
-            return None
-
-        last_bar_is_closed = True
-        if "is_closed" in w.columns:
-            last_bar_is_closed = bool(w["is_closed"].item(-1))
-        if not last_bar_is_closed:
-            unconfirmed_zone = latest_structure_break(
-                w,
-                swing_length=swing_lookback,
-                prefer_kind="choch",
-            )
-            if (
-                unconfirmed_zone is not None
-                and unconfirmed_zone.kind in {"bos", "choch"}
-                and int(unconfirmed_zone.broken_index or 0) >= w.height - 1
-            ):
-                _reject(prepared, setup_id, "structure_break_on_unconfirmed_bar")
-                return None
-
-        scan = w if last_bar_is_closed else w.head(w.height - 1)
-        if scan.height < min_height:
-            _reject(
-                prepared,
-                setup_id,
-                "insufficient_confirmed_15m_bars",
-                bars=scan.height,
-                required=min_height,
-            )
-            return None
-
-        sh_mask, sl_mask = _swing_points(scan, n=swing_lookback)
-        sh_prices = scan.filter(sh_mask)["high"]
-        sl_prices = scan.filter(sl_mask)["low"]
-
-        # Need at least 3 of each to determine prior trend + break
-        min_swings = max(
-            3,
-            coerce_int(dynamic_params.get("min_swings"), int(defaults["min_swings"])),
-        )
-        if sh_prices.len() < min_swings or sl_prices.len() < min_swings:
-            _reject(
-                prepared,
-                setup_id,
-                "insufficient_swing_points",
-                swing_highs=sh_prices.len(),
-                swing_lows=sl_prices.len(),
-                min_swings=min_swings,
-            )
-            return None
-
-        sh_vals = sh_prices.to_numpy()
-        sl_vals = sl_prices.to_numpy()
-
-        structure_zone = latest_structure_break(
-            scan,
-            swing_length=swing_lookback,
-            prefer_kind="choch",
-        )
-        if structure_zone is None:
-            _reject(prepared, setup_id, "no_bos_choch_detected")
-            return None
-        if structure_zone.kind not in {"bos", "choch"}:
-            _reject(prepared, setup_id, "invalid_structure_break_kind", kind=structure_zone.kind)
-            return None
-        break_kind = str(structure_zone.kind)
-        direction = structure_zone.direction
-        if structure_zone.level is None or structure_zone.broken_index is None:
-            _reject(
-                prepared,
-                setup_id,
-                "invalid_bos_choch_zone",
-                level=structure_zone.level,
-                broken_index=structure_zone.broken_index,
-            )
-            return None
-        broken_index = int(structure_zone.broken_index)
-        broken_index = max(0, min(broken_index, scan.height - 1))
-        break_age = scan.height - 1 - broken_index
-        break_level = float(structure_zone.level)
-        retest_active = break_age <= max_retest_age_bars and abs(price - break_level) <= (
-            atr * retest_atr_mult
-        )
-        if break_age > max_break_age_bars and not retest_active:
-            _reject(
-                prepared,
-                setup_id,
-                "structure_break_too_old",
-                break_age=break_age,
-                max_break_age_bars=max_break_age_bars,
-                max_retest_age_bars=max_retest_age_bars,
-                distance_atr=abs(price - break_level) / atr,
-                kind=break_kind,
-            )
-            return None
-        raw_break_close = scan.item(broken_index, "close")
-        if raw_break_close is None:
-            _reject(prepared, setup_id, "break_close_missing", broken_index=broken_index)
-            return None
-        break_close = float(raw_break_close)
-        break_distance = (
-            break_close - break_level if direction == "long" else break_level - break_close
-        )
-        min_break_distance = atr * breakout_threshold_atr
-        if break_distance < min_break_distance:
-            _reject(
-                prepared,
-                setup_id,
-                "structure_break_too_weak",
-                break_distance=break_distance,
-                min_break_distance=min_break_distance,
-                breakout_threshold_atr=breakout_threshold_atr,
-                kind=break_kind,
-            )
-            return None
-        vol_ratio = float(scan.item(broken_index, "volume_ratio20") or 1.0)
-        if vol_ratio < min_volume_ratio:
-            _reject(
-                prepared,
-                setup_id,
-                "structure_break_volume_too_low",
-                vol_ratio=vol_ratio,
-                min_volume_ratio=min_volume_ratio,
-                kind=break_kind,
-            )
-            return None
-        stop_price = None
-        pivot_level = None
-        entry_price = break_level
-
-        external_swings = swing_highs_lows(
-            scan,
-            swing_length=external_swing_lookback,
-            mode="live_safe",
-        )
-        external_markers = external_swings["HighLow"].to_list()
-        external_levels = external_swings["Level"].to_list()
-        internal_swings = swing_highs_lows(
-            scan,
-            swing_length=swing_lookback,
-            mode="live_safe",
-        )
-        internal_markers = internal_swings["HighLow"].to_list()
-        internal_levels = internal_swings["Level"].to_list()
-        external_search_end = min(
-            int(structure_zone.broken_index),
-            len(external_markers) - 1,
-            len(external_levels) - 1,
-            len(internal_markers) - 1,
-            len(internal_levels) - 1,
-        )
-
-        # --- Compute structural SL/TP ---
-        if direction == "long":
-            pivot_level, stop_source, stop_details = _select_stop_level_with_fallback(
-                frame=scan,
-                external_markers=external_markers,
-                external_levels=external_levels,
-                internal_markers=internal_markers,
-                internal_levels=internal_levels,
-                search_end=external_search_end,
-                marker=-1.0,
-                price=entry_price,
-                break_level=entry_price,
-                atr=atr,
-                above_price=False,
-            )
-            if pivot_level is None:
-                _reject(
-                    prepared,
-                    setup_id,
-                    "swing_stop_missing_long",
-                    external_swing_lookback=external_swing_lookback,
-                    swing_lookback=swing_lookback,
-                    **cast(Any, stop_details),
-                )
-                return None
-            stop_price = (
-                pivot_level
-                if stop_source in {"atr_stop", "previous_candle"}
-                else pivot_level - sl_buffer_atr * atr
-            )
-            risk = entry_price - stop_price
-            if risk <= 0:
-                _reject(
-                    prepared,
-                    setup_id,
-                    "risk_non_positive_long",
-                    stop=stop_price,
-                    price=entry_price,
-                )
-                return None
-            # TP1: last swing high before the structural break
-            tp1 = float(sh_vals[-2]) if sh_vals[-2] > entry_price else None
-            # TP2: 4h swing target
-            w4h = prepared.work_4h
-            tp2 = None
-            if w4h is not None and w4h.height > 5:
-                sh4_mask, _ = _swing_points(w4h, n=2)
-                sh4_prices = w4h.filter(sh4_mask)["high"]
-                tp2_cands = sh4_prices.filter(sh4_prices > entry_price)
-                tp2 = float(tp2_cands[0]) if tp2_cands.len() > 0 else None
-        else:
-            pivot_level, stop_source, stop_details = _select_stop_level_with_fallback(
-                frame=scan,
-                external_markers=external_markers,
-                external_levels=external_levels,
-                internal_markers=internal_markers,
-                internal_levels=internal_levels,
-                search_end=external_search_end,
-                marker=1.0,
-                price=entry_price,
-                break_level=entry_price,
-                atr=atr,
-                above_price=True,
-            )
-            if pivot_level is None:
-                _reject(
-                    prepared,
-                    setup_id,
-                    "swing_stop_missing_short",
-                    external_swing_lookback=external_swing_lookback,
-                    swing_lookback=swing_lookback,
-                    **cast(Any, stop_details),
-                )
-                return None
-            stop_price = (
-                pivot_level
-                if stop_source in {"atr_stop", "previous_candle"}
-                else pivot_level + sl_buffer_atr * atr
-            )
-            risk = stop_price - entry_price
-            if risk <= 0:
-                _reject(
-                    prepared,
-                    setup_id,
-                    "risk_non_positive_short",
-                    stop=stop_price,
-                    price=entry_price,
-                )
-                return None
-            # TP1: last swing low before the structural break
-            tp1 = float(sl_vals[-2]) if sl_vals[-2] < entry_price else None
-            # TP2: 4h swing target
-            w4h = prepared.work_4h
-            tp2 = None
-            if w4h is not None and w4h.height > 5:
-                _, sl4_mask = _swing_points(w4h, n=2)
-                sl4_prices = w4h.filter(sl4_mask)["low"]
-                tp2_cands = sl4_prices.filter(sl4_prices < entry_price)
-                tp2 = float(tp2_cands[-1]) if tp2_cands.len() > 0 else None
-
-        fallback_note = None
-        if tp1 is None or abs(tp1 - entry_price) < risk * min_rr:
-            tp1 = (
-                entry_price + risk * min_rr
-                if direction == "long"
-                else entry_price - risk * min_rr
-            )
-            fallback_note = f"tp1_rr_fallback_{min_rr:.2f}"
-        if direction == "long":
-            if tp2 is None or tp2 <= tp1:
-                tp2 = entry_price + risk * max(2.0, min_rr + 0.35)
-        else:
-            if tp2 is None or tp2 >= tp1:
-                tp2 = entry_price - risk * max(2.0, min_rr + 0.35)
-
-        rsi = float(w.item(-1, "rsi14") or 50.0)
-        score = _compute_dynamic_score(
-            direction=direction,
-            base_score=base_score,
-            vol_ratio=vol_ratio,
-            rsi=rsi,
-        )
-        if break_kind == "bos":
-            score *= float(dynamic_params.get("bos_score_multiplier", 0.94))
-
-        reasons = [
-            f"{break_kind.upper()} {direction}: structure level={structure_zone.level:.4f}",
-            f"break_close={break_close:.4f} break_age={break_age}",
-            f"price={price:.4f} limit_entry={entry_price:.4f}",
-            f"break_distance_atr={break_distance / atr:.2f}",
-            f"retest_active={retest_active}",
-            f"vol_ratio={vol_ratio:.2f}",
-            f"{stop_source}_sl={pivot_level:.4f}",
-            f"sh[-3]={sh_vals[-3]:.4f} sh[-2]={sh_vals[-2]:.4f} sh[-1]={sh_vals[-1]:.4f}",
-            f"sl[-3]={sl_vals[-3]:.4f} sl[-2]={sl_vals[-2]:.4f} sl[-1]={sl_vals[-1]:.4f}",
-        ]
-        if fallback_note:
-            reasons.append(fallback_note)
-
-        return _build_signal(
-            prepared=prepared,
-            setup_id=self.setup_id,
-            direction=direction,
-            score=score,
-            timeframe="15m",
-            reasons=reasons,
-            strategy_family=self.family,
-            stop=stop_price,
-            tp1=tp1,
-            tp2=tp2,
-            price_anchor=entry_price,
-            atr=atr,
-        )
+__all__ = ["BOSCHOCHSetup"]

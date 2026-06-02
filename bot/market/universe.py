@@ -433,8 +433,8 @@ def _strategy_fits_for_row(
 def strategy_fits_for_market_row(
     row: dict[str, Any],
     *,
-    settings: BotSettings,
-    liquidity_rank: int | None,
+    settings: BotSettings | None = None,
+    liquidity_rank: int | None = None,
 ) -> tuple[str, ...]:
     """Return strategy routing fits using the same logic as production shortlist builds.
 
@@ -443,6 +443,11 @@ def strategy_fits_for_market_row(
     look like routing is broken even though production shortlist rows are healthy.
     This public wrapper keeps those tools on the production scoring path.
     """
+    if settings is None:
+        existing = row.get("strategy_fits")
+        if isinstance(existing, (list, tuple)):
+            return tuple(str(item) for item in existing if str(item).strip())
+        return ()
     return _strategy_fits_for_row(row, settings=settings, liquidity_rank=liquidity_rank)
 
 
@@ -778,10 +783,7 @@ def build_shortlist(
 
     for b_name in ("trend", "breakout", "reversal"):
         for b_row in bucket_pool[b_name]:
-            if (
-                len(shortlist) >= shortlist_limit
-                or cast(int, summary[b_name]) >= targets[b_name]
-            ):
+            if len(shortlist) >= shortlist_limit or cast(int, summary[b_name]) >= targets[b_name]:
                 break
             if b_row.symbol in seen:
                 continue
@@ -847,11 +849,7 @@ def build_shortlist(
     summary["strategy_fit_counts"] = {
         key: value for key, value in strategy_counts.items() if value > 0
     }
-    scores = [
-        float(item.shortlist_score)
-        for item in shortlist
-        if item.shortlist_score is not None
-    ]
+    scores = [float(item.shortlist_score) for item in shortlist if item.shortlist_score is not None]
     if scores:
         scores_sorted = sorted(scores)
         n = len(scores_sorted)

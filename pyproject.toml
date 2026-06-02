@@ -68,6 +68,13 @@ include = ["bot*"]
 target-version = "py314"
 line-length = 100
 
+[tool.ruff.lint]
+select = ["E9", "F63", "F7", "F82", "F821", "F822", "F823"]
+
+[tool.ruff.lint.per-file-ignores]
+"bot/strategies/*.py" = ["F405", "E402"]
+"bot/strategies/_common.py" = ["F405"]
+
 [tool.mypy]
 python_version = "3.14"
 files = ["bot"]

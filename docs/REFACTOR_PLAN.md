@@ -187,7 +187,7 @@ Structural packages: `market/`, `runtime/`, `persistence/`, `engine/`, `features
 
 ### Phase 2 — Data plane rewrite ✅ (structure, 2026-05-31)
 
-1. ~~`bot/features/` package~~
+1. ~~`bot/features/` package~~ (`prepare_cache`, `prepare_context`, `prepare_numeric`, `prepare_ws`, `prepare_sanity`; `_prepare_frame` still central)
 2. ~~`bot/market/` (rest, ws, ws_lib, data, universe, enrichment)~~
 3. Lazy Polars streaming on live path — **ongoing tuning**
 4. Live checks: `tests/live/` + `scripts/live_check_*`
@@ -195,9 +195,10 @@ Structural packages: `market/`, `runtime/`, `persistence/`, `engine/`, `features
 ### Phase 3 — Runtime rewrite ✅ (structure, 2026-05-31)
 
 1. ~~`bot/runtime/` (ex `application/`)~~
-2. Slim `symbol_analyzer` (<400 LOC) — **deferred** (orchestration split)
+2. Slim `symbol_analyzer` (<400 LOC) — **partial** (entry 7 LOC; mixins split into `family_gates`, `ws_enrichments`, `context` ~106, `frames` ~180; `pipeline` ~558 remains)
 3. Engine bounded concurrency — **ongoing**
-4. `live_smoke_bot` — manual / nightly
+4. Strategy lanes on kline hot path — **wired** (`enable_strategy_lanes`, `event_interval` from `cycle_runner` → `calculate_all`)
+5. `live_smoke_bot` — manual / nightly
 
 ### Phase 4 — Strategies wave rewrite ✅ (wiring gate, 2026-05-31)
 
@@ -244,3 +245,20 @@ python -m scripts.live_smoke_bot --runtime-seconds 600
 | 3.14 not on dev machine | winget install Python 3.14 |
 | Strategy zero-hits | Telemetry triage before threshold changes |
 | Removing telegram/ breaks import | Grep + compileall before delete |
+
+---
+
+## 7. Execution priority (2026-06-02)
+
+**Freeze monolith splits.** Further file splits (`prepare_*`, `analyzer/*`) increase count (~232 `.py` vs target ~85–95) without closing functional gaps. Do **not** add submodules until de-bloat lands.
+
+| Order | Work | Status |
+|---|---|---|
+| 1 | **De-bloat** — delete/merge Phase 1–2 matrix orphans | Ongoing — `config_audit` 1299→233 LOC; `live_audit` 759→348 LOC |
+| 2 | **P2** — benchmark anchors: stricter ACTION, XRP/PAXG in intelligence + `deep_analysis` | Partial — `anchor_action_score_delta` wired |
+| 3 | **P1** — merger 4h direction conflict | Partial — merge + ledger recent_actions + conflict→WATCH |
+| 4 | **P3** — dashboard funnel, public audit | Partial — REST + WS `funnel_update` / `ws_health` push |
+| 5 | **Data plane** — MARKET_DATA_PRINCIPLES (semaphore, OI off hot path) | Partial |
+| 6 | **Consolidation wave** — merge split modules back or delete elsewhere | Deferred |
+
+Live verification (`PYTEST_LIVE`, smoke bot) only when Binance reachable (VPN).

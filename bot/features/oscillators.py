@@ -30,7 +30,9 @@ CANONICAL_FEATURE_API = "bot.features._prepare_frame"
 def _warn_if_direct_imported() -> None:
     for frame in inspect.stack()[1:20]:
         normalized = frame.filename.replace("\\", "/")
-        if normalized.endswith("/bot/features/prepare.py") or normalized.endswith("/bot/features/advanced.py"):
+        if normalized.endswith("/bot/features/prepare.py") or normalized.endswith(
+            "/bot/features/advanced.py"
+        ):
             return
     warnings.warn(
         "bot.features.oscillators is internal_only; use bot.features._prepare_frame for runtime feature preparation.",

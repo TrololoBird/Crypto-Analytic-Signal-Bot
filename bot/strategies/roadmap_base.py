@@ -1,4 +1,5 @@
-"""Roadmap strategy base — params wiring; detect logic in setups/detectors/."""
+"""Roadmap strategy base — params wiring; detect logic in bot/strategies/."""
+
 from __future__ import annotations
 
 from typing import ClassVar
@@ -7,7 +8,7 @@ from ..domain.config import BotSettings
 from ..domain.schemas import PreparedSymbol
 from ..setups.base import BaseSetup
 from ..setups.utils import get_dynamic_params
-from ..setups.detectors._roadmap import (
+from ._roadmap import (
     _as_float,
     _build_atr_signal,
     _configured_params,

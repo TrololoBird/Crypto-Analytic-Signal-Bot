@@ -116,6 +116,7 @@ class CycleRunner:
                 trigger=trigger,
                 event_ts=event_ts,
                 ws_enrichments=ws_enrichments,
+                kline_interval=interval,
             )
 
         candidates, rejected, delivered = await bot._select_and_deliver_for_symbol(symbol, result)
@@ -187,6 +188,7 @@ class CycleRunner:
                     frames,
                     trigger="emergency_fallback",
                     ws_enrichments=ws_enrichments,
+                    kline_interval="emergency_fallback",
                 )
                 return cast(PipelineResult | None, result)
 

@@ -76,15 +76,25 @@ class BaseSetup(AbstractStrategy):
     def metadata(self) -> StrategyMetadata:
         catalog = CATALOG_BY_ID.get(self.setup_id)
         trigger_tf = catalog.trigger_tf if catalog is not None else "15m"
+        trigger_intervals = catalog.trigger_intervals if catalog is not None else ()
+        pattern_tf = catalog.pattern_tf if catalog is not None else "15m"
+        required_tfs = catalog.required_tfs if catalog is not None else (trigger_tf,)
         evidence_level = catalog.evidence_level if catalog is not None else "A"
+        # Trigger routing only — required_tfs are for data/WS union, not lane fallback.
+        timeframes = list(dict.fromkeys((trigger_tf, *trigger_intervals)))
         return StrategyMetadata(
             strategy_id=self.setup_id,
             name=self.setup_id.replace("_", " ").title(),
             description=f"{self.setup_id} setup",
             status=self.status,
+            tags=[],
+            timeframes=list(timeframes),
             family=self.family,
             confirmation_profile=self.confirmation_profile,
             trigger_tf=trigger_tf,
+            trigger_intervals=trigger_intervals,
+            pattern_tf=pattern_tf,
+            required_tfs=required_tfs,
             evidence_level=evidence_level,
             required_context=self.required_context,
             required_features=self.required_features,

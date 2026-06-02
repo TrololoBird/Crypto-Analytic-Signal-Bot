@@ -12,6 +12,7 @@ import polars as pl
 
 from bot.market.data import UTC, _KLINE_COLUMNS, _KLINE_FRAME_SCHEMA
 
+
 def _timeframe_to_seconds(timeframe: str) -> int | None:
     mapping = {
         "1m": 60,

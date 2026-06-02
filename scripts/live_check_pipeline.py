@@ -386,6 +386,7 @@ async def _run(
                             trigger="live_pipeline_check",
                             event_ts=datetime.now(UTC),
                             ws_enrichments=bot._ws_cache_enrichments(symbol),
+                            kline_interval="15m",
                         ),
                         timeout=engine_timeout,
                     )

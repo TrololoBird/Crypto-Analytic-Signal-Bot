@@ -26,6 +26,7 @@ emergency_fallback_seconds = 1800
 strict_data_quality = true
 emit_strategy_routing_skips = true
 route_all_enabled_strategies = false
+enable_strategy_lanes = true
 max_setup_families_per_symbol = 15
 analysis_kline_intervals = ["5m", "15m", "1h"]
 diagnostic_trace_limit_per_symbol = 20
@@ -74,6 +75,12 @@ excluded_strategies = []
 deep_analysis = true
 
 [bot.assets.SOLUSDT]
+primary_timeframe = "15m"
+context_timeframes = ["1h", "4h"]
+excluded_strategies = []
+deep_analysis = true
+
+[bot.assets.XRPUSDT]
 primary_timeframe = "15m"
 context_timeframes = ["1h", "4h"]
 excluded_strategies = []

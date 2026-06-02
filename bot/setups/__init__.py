@@ -15,7 +15,7 @@ import polars as pl
 from ..domain.strategies import StrategyDecision
 from ..features import _swing_points  # shared swing detection helper
 from ..domain.schemas import PreparedSymbol, Signal
-from ..delivery.contract import build_trade_plan
+from ..delivery.trade_plan import TradePlanBuilder
 from .utils import (
     apply_graded_penalty,
     build_structural_targets,
@@ -336,7 +336,7 @@ def _build_signal(
         )
         return None
     signal_timeframe = str(timeframe or "15m")
-    trade_plan = build_trade_plan(
+    trade_plan = TradePlanBuilder.build(
         direction=direction,
         setup_id=setup_id,
         strategy_family=strategy_family,

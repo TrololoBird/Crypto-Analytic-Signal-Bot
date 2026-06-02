@@ -396,8 +396,7 @@ class ShortlistService:
             sum(
                 1
                 for t in tickers_24h
-                if float(t.get("quote_volume") or 0.0)
-                >= settings.universe.min_quote_volume_usd
+                if float(t.get("quote_volume") or 0.0) >= settings.universe.min_quote_volume_usd
             ),
             sum(
                 1

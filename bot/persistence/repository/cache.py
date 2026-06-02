@@ -14,7 +14,7 @@ from typing import Any, Mapping, Sequence
 
 import polars as pl
 
-LOG = logging.getLogger("bot.core.memory.cache")
+LOG = logging.getLogger("bot.persistence.repository.cache")
 
 
 def _utcnow_naive() -> datetime:
@@ -430,10 +430,18 @@ def normalize_candle_frame(
         "V": "taker_buy_base",
         "Q": "taker_buy_quote",
     }
-    rename = {old: new for old, new in aliases.items() if old in frame.columns and new not in frame.columns}
+    rename = {
+        old: new
+        for old, new in aliases.items()
+        if old in frame.columns and new not in frame.columns
+    }
     if rename:
         frame = frame.rename(rename)
-    missing = [name for name in ("open_time", "open", "high", "low", "close", "volume") if name not in frame.columns]
+    missing = [
+        name
+        for name in ("open_time", "open", "high", "low", "close", "volume")
+        if name not in frame.columns
+    ]
     if missing:
         raise ValueError(f"candle frame missing required columns: {missing}")
     frame = frame.with_columns(
@@ -447,7 +455,9 @@ def normalize_candle_frame(
         ]
     )
     if "close_time" not in frame.columns:
-        frame = frame.with_columns((pl.col("open_time") + cache_timeframe_ms(tf) - 1).alias("close_time"))
+        frame = frame.with_columns(
+            (pl.col("open_time") + cache_timeframe_ms(tf) - 1).alias("close_time")
+        )
     else:
         frame = frame.with_columns(_coerce_epoch_ms(frame["close_time"]).alias("close_time"))
     for column, dtype in CANONICAL_CANDLE_SCHEMA.items():
@@ -476,7 +486,9 @@ def normalize_candle_frame(
     )
     ordered = [column for column in CANONICAL_CANDLE_SCHEMA if column in frame.columns]
     extras = [column for column in frame.columns if column not in ordered]
-    return frame.select(ordered + extras).unique(subset=["open_time"], keep="last").sort("open_time")
+    return (
+        frame.select(ordered + extras).unique(subset=["open_time"], keep="last").sort("open_time")
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -570,7 +582,13 @@ class HotColdParquetCache:
         dt = _cache_ms_to_datetime(open_time)
         root = self.base_dir / f"symbol={symbol}" / f"timeframe={timeframe}"
         if self.config.partition == "day":
-            return root / f"year={dt.year:04d}" / f"month={dt.month:02d}" / f"day={dt.day:02d}" / "candles.parquet"
+            return (
+                root
+                / f"year={dt.year:04d}"
+                / f"month={dt.month:02d}"
+                / f"day={dt.day:02d}"
+                / "candles.parquet"
+            )
         if self.config.partition == "year":
             return root / f"year={dt.year:04d}" / "candles.parquet"
         return root / f"year={dt.year:04d}" / f"month={dt.month:02d}" / "candles.parquet"
@@ -579,9 +597,13 @@ class HotColdParquetCache:
         root = self.base_dir / f"symbol={symbol}" / f"timeframe={timeframe}"
         return sorted(root.rglob("*.parquet")) if root.exists() else []
 
-    def _summary(self, symbol: str, timeframe: str, frame: pl.DataFrame, *, source: str, duplicates: int = 0) -> CandleCacheSummary:
+    def _summary(
+        self, symbol: str, timeframe: str, frame: pl.DataFrame, *, source: str, duplicates: int = 0
+    ) -> CandleCacheSummary:
         if frame.is_empty():
-            return CandleCacheSummary(symbol, timeframe, 0, None, None, source, duplicates_removed=duplicates)
+            return CandleCacheSummary(
+                symbol, timeframe, 0, None, None, source, duplicates_removed=duplicates
+            )
         return CandleCacheSummary(
             symbol=symbol,
             timeframe=timeframe,
@@ -605,12 +627,16 @@ class HotColdParquetCache:
         closed_only: bool = False,
     ) -> CandleCacheSummary:
         symbol, timeframe = self._key(symbol, timeframe)
-        normalized = normalize_candle_frame(frame, timeframe=timeframe, source=source, closed_only=closed_only)
+        normalized = normalize_candle_frame(
+            frame, timeframe=timeframe, source=source, closed_only=closed_only
+        )
         async with self._locks[(symbol, timeframe)]:
             buffer = self._buffers[(symbol, timeframe)]
             buffer.append(normalized)
             if len(buffer.rows) > self.config.hot_rows:
-                buffer.rows = buffer.to_frame(timeframe=timeframe).tail(self.config.hot_rows).to_dicts()
+                buffer.rows = (
+                    buffer.to_frame(timeframe=timeframe).tail(self.config.hot_rows).to_dicts()
+                )
             if flush or len(buffer.rows) >= self.config.flush_rows:
                 await self._flush_locked(symbol, timeframe)
         return self._summary(symbol, timeframe, normalized, source=source)
@@ -625,7 +651,9 @@ class HotColdParquetCache:
             path = self._partition_path(symbol, timeframe, int(partition_value))
             chunk = frame.filter(
                 pl.col("open_time").map_elements(
-                    lambda value, target=path: self._partition_path(symbol, timeframe, int(value)) == target,
+                    lambda value, target=path: (
+                        self._partition_path(symbol, timeframe, int(value)) == target
+                    ),
                     return_dtype=pl.Boolean,
                 )
             )
@@ -635,7 +663,11 @@ class HotColdParquetCache:
             if path.exists():
                 existing = pl.read_parquet(path)
                 before = existing.height + chunk.height
-                merged = pl.concat([existing, chunk], how="diagonal_relaxed").unique(subset=["open_time"], keep="last").sort("open_time")
+                merged = (
+                    pl.concat([existing, chunk], how="diagonal_relaxed")
+                    .unique(subset=["open_time"], keep="last")
+                    .sort("open_time")
+                )
                 duplicates += max(0, before - merged.height)
             else:
                 before = chunk.height
@@ -687,7 +719,11 @@ class HotColdParquetCache:
                 frames.append(hot)
         if not frames:
             return _empty_candle_frame()
-        return pl.concat(frames, how="diagonal_relaxed").unique(subset=["open_time"], keep="last").sort("open_time")
+        return (
+            pl.concat(frames, how="diagonal_relaxed")
+            .unique(subset=["open_time"], keep="last")
+            .sort("open_time")
+        )
 
     async def latest(self, symbol: str, timeframe: str, *, limit: int) -> pl.DataFrame:
         if limit <= 0:
@@ -699,7 +735,11 @@ class HotColdParquetCache:
         return detect_candle_gaps(frame, symbol=symbol, timeframe=timeframe)
 
     def stats(self) -> dict[str, object]:
-        hot = {f"{symbol}:{timeframe}": len(buffer.rows) for (symbol, timeframe), buffer in self._buffers.items() if buffer.rows}
+        hot = {
+            f"{symbol}:{timeframe}": len(buffer.rows)
+            for (symbol, timeframe), buffer in self._buffers.items()
+            if buffer.rows
+        }
         return {
             "base_dir": str(self.base_dir),
             "hot_buffers": hot,
@@ -753,7 +793,13 @@ def resample_ohlcv_frame(
     result = (
         source.with_columns(pl.from_epoch(pl.col("open_time"), time_unit="ms").alias("_dt"))
         .sort("_dt")
-        .group_by_dynamic("_dt", every=f"{target_minutes}m", period=f"{target_minutes}m", closed="left", label="left")
+        .group_by_dynamic(
+            "_dt",
+            every=f"{target_minutes}m",
+            period=f"{target_minutes}m",
+            closed="left",
+            label="left",
+        )
         .agg(
             [
                 pl.col("open").first().alias("open"),
@@ -773,7 +819,9 @@ def resample_ohlcv_frame(
         .with_columns(
             [
                 (pl.col("_dt").cast(pl.Int64) // 1_000).alias("open_time"),
-                (pl.col("_dt").cast(pl.Int64) // 1_000 + cache_timeframe_ms(target_tf) - 1).alias("close_time"),
+                (pl.col("_dt").cast(pl.Int64) // 1_000 + cache_timeframe_ms(target_tf) - 1).alias(
+                    "close_time"
+                ),
                 (pl.col("bar_count") >= expected).alias("is_closed"),
             ]
         )
@@ -801,7 +849,9 @@ def build_mtf_frames(
     }
 
 
-def htf_trend_label(frame: pl.DataFrame, *, ema_period: int = 50, threshold_pct: float = 0.2) -> str:
+def htf_trend_label(
+    frame: pl.DataFrame, *, ema_period: int = 50, threshold_pct: float = 0.2
+) -> str:
     if frame.height < ema_period + 5:
         return "neutral"
     work = frame.with_columns(pl.col("close").ewm_mean(span=ema_period, adjust=False).alias("_ema"))
@@ -817,7 +867,9 @@ def htf_trend_label(frame: pl.DataFrame, *, ema_period: int = 50, threshold_pct:
     return "neutral"
 
 
-def signal_allowed_by_mtf(direction: str, mtf_frames: Mapping[str, pl.DataFrame]) -> tuple[bool, str]:
+def signal_allowed_by_mtf(
+    direction: str, mtf_frames: Mapping[str, pl.DataFrame]
+) -> tuple[bool, str]:
     normalized = str(direction or "").strip().lower()
     if normalized not in {"long", "short"}:
         return False, "invalid_direction"

@@ -10,6 +10,7 @@ import time
 from collections.abc import Callable
 from typing import Any, cast
 
+from .lanes import is_standard_kline_interval, select_lane_setups
 from .registry import StrategyRegistry
 from .base import SignalResult
 from ..domain.strategies import StrategyDecision
@@ -19,6 +20,8 @@ from ..market.fit import asset_fit_reject_reason, market_context_from_prepared
 from ..core.runtime_errors import classify_runtime_error
 
 LOG = logging.getLogger("bot.engine.engine")
+
+
 def _default_executor_workers() -> int:
     cpus = os.cpu_count() or 4
     return max(2, min(16, cpus * 2))
@@ -97,50 +100,94 @@ class SignalEngine:
         self._executor_warmed = False
         self._executor_warm_lock = asyncio.Lock()
 
-    async def calculate_all(self, prepared: PreparedSymbol) -> list[SignalResult]:
-        """Calculate signals from all enabled strategies.
-
-        Args:
-            prepared: Prepared symbol data
-
-        Returns:
-            List of SignalResult from all strategies
-        """
+    def _route_strategies(
+        self,
+        prepared: PreparedSymbol,
+        *,
+        event_interval: str | None,
+    ) -> tuple[list[Any], list[SignalResult]]:
+        """Select enabled strategies for this symbol/event (fits, lanes, route_all)."""
         symbol = prepared.symbol if prepared else "unknown"
-        strategies = self._registry.get_enabled()
+        all_enabled = self._registry.get_enabled()
         routing_skips: list[SignalResult] = []
+        runtime = self._settings.runtime
         universe = getattr(prepared, "universe", None)
         strategy_fits = set(getattr(universe, "strategy_fits", ()) or ())
         shortlist_score = getattr(universe, "shortlist_score", None)
         is_shortlist_asset = shortlist_score is not None
         pinned_symbols = {
             str(item).strip().upper()
-            for item in getattr(getattr(self._settings, "universe", None), "pinned_symbols", ())
+            for item in getattr(self._settings.universe, "pinned_symbols", ())
         }
         is_pinned_symbol = symbol.upper() in pinned_symbols
-        route_all_on_shortlist = bool(
-            getattr(getattr(self._settings, "runtime", None), "route_all_enabled_strategies", True)
-        )
+        route_all = bool(runtime.route_all_enabled_strategies)
+        enable_lanes = bool(runtime.enable_strategy_lanes)
+        emit_routing_skips = bool(runtime.emit_strategy_routing_skips)
+
         if not strategy_fits and not is_pinned_symbol:
             LOG.warning(
                 "%s: strategy_fits is EMPTY - routing coverage is degraded for this symbol. "
                 "Check _strategy_fits_for_row() in universe.py",
                 symbol,
             )
-        emit_routing_skips = bool(
-            getattr(
-                getattr(self._settings, "runtime", None),
-                "emit_strategy_routing_skips",
-                True,
+
+        if enable_lanes and event_interval and not route_all:
+            apply_interval = is_standard_kline_interval(event_interval)
+            fits_arg = tuple(strategy_fits) if strategy_fits else None
+            lane_metas = select_lane_setups(
+                self._registry,
+                symbol=symbol,
+                interval=event_interval if apply_interval else "",
+                settings=self._settings,
+                strategy_fits=fits_arg,
+                apply_interval_filter=apply_interval,
             )
-        )
-        if route_all_on_shortlist and (is_shortlist_asset or is_pinned_symbol):
+            lane_ids = {meta.strategy_id for meta in lane_metas}
+            strategies = [strategy for strategy in all_enabled if strategy.strategy_id in lane_ids]
+            if emit_routing_skips:
+                for strategy in all_enabled:
+                    if strategy.strategy_id in lane_ids:
+                        continue
+                    decision = StrategyDecision.skip(
+                        setup_id=strategy.strategy_id,
+                        reason_code="runtime.strategy_lane_excluded",
+                        details={
+                            "symbol": symbol,
+                            "event_interval": event_interval,
+                            "lane_setup_count": len(lane_ids),
+                            "lane_family_count": len({m.family for m in lane_metas}),
+                        },
+                    )
+                    routing_skips.append(
+                        SignalResult(
+                            setup_id=strategy.strategy_id,
+                            signal=None,
+                            decision=decision,
+                            metadata={
+                                "setup_id": strategy.strategy_id,
+                                "reason": decision.reason_code,
+                                "event_interval": event_interval,
+                            },
+                            calculation_time_ms=0.0,
+                        )
+                    )
+            LOG.info(
+                "%s: lane routing | interval=%s families=%d setups=%d",
+                symbol,
+                event_interval,
+                len({meta.family for meta in lane_metas}),
+                len(strategies),
+            )
+            return strategies, routing_skips
+
+        strategies = list(all_enabled)
+        if route_all and (is_shortlist_asset or is_pinned_symbol):
             LOG.debug(
                 "%s: shortlist routing expanded to all enabled strategies | strategy_fits=%d",
                 symbol,
                 len(strategy_fits),
             )
-        elif strategy_fits and not route_all_on_shortlist:
+        elif strategy_fits and not route_all:
             routed: list[Any] = []
             for strategy in strategies:
                 if strategy.strategy_id in strategy_fits:
@@ -168,6 +215,28 @@ class SignalEngine:
                         )
                     )
             strategies = routed
+        return strategies, routing_skips
+
+    async def calculate_all(
+        self,
+        prepared: PreparedSymbol,
+        *,
+        event_interval: str | None = None,
+    ) -> list[SignalResult]:
+        """Calculate signals for strategies routed to this symbol/event.
+
+        Args:
+            prepared: Prepared symbol data
+            event_interval: Kline (or cycle) interval for lane selection (target spec)
+
+        Returns:
+            List of SignalResult from routed strategies
+        """
+        symbol = prepared.symbol if prepared else "unknown"
+        strategies, routing_skips = self._route_strategies(
+            prepared,
+            event_interval=event_interval,
+        )
         scheduled: list[Any] = []
         schedule_skip_results: list[SignalResult] = []
         for strategy in strategies:

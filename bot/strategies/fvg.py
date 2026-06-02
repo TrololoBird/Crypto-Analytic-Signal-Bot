@@ -1,38 +1,416 @@
-"""Fair Value Gap (FVG) setup detector.
-
-Bullish FVG: high[i-2] < low[i]  (gap between candle i-2 top and candle i bottom)
-Bearish FVG: low[i-2] > high[i]
-
-Scans last 50 bars of work_15m; enters when price is currently inside a gap.
-
-# WINDSURF_REVIEW: unified + vectorized + 1H context + graded
-"""
+"""fvg_setup — spec detector + SMC zone extended path."""
 
 from __future__ import annotations
 
 import logging
 import math
 
-from ..setups.base import BaseSetup
+import polars as pl
+
 from ..domain.config import BotSettings
 from ..domain.schemas import PreparedSymbol, Signal
 from ..setups import _build_signal, _compute_dynamic_score, _reject
+from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
 from ..setups.smc import latest_fvg_zone
-from ..setups.utils import (
-    select_structural_target,
-    validate_rr_or_penalty,
-    get_dynamic_params,
-)
-from ..setups.detectors import build_spec_signal, detect_fvg
+from ..setups.utils import select_structural_target, validate_rr_or_penalty
+from ._common import SpecHit, as_float, with_spec_columns
 
 LOG = logging.getLogger("bot.strategies.fvg")
 
 
-class FVGSetup(BaseSetup):
+def detect_fvg(frame: pl.DataFrame, *, timeframe: str = "15m", max_age: int = 20) -> SpecHit | None:
+    work = with_spec_columns(frame)
+    if work.height < 5:
+        return None
+    work = work.with_columns(
+        [
+            pl.col("high").shift(2).alias("spec_h2"),
+            pl.col("low").shift(2).alias("spec_l2"),
+            (pl.col("low") > pl.col("high").shift(2)).alias("spec_bull_fvg"),
+            (pl.col("high") < pl.col("low").shift(2)).alias("spec_bear_fvg"),
+        ]
+    )
+    current_close = as_float(work.item(-1, "close"))
+    current_idx = int(work.item(-1, "_spec_idx"))
+    candidates = work.filter(pl.col("spec_bull_fvg") | pl.col("spec_bear_fvg")).tail(max_age + 1)
+    for row in reversed(candidates.to_dicts()):
+        idx = int(row["_spec_idx"])
+        age = current_idx - idx
+        if age > max_age:
+            continue
+        atr = as_float(row.get("spec_atr14"), as_float(work.item(-1, "spec_atr14")))
+        vol_ratio = as_float(row.get("volume_ratio20"), 1.0)
+        rsi = as_float(work.item(-1, "rsi14"), 50.0)
+        if bool(row.get("spec_bull_fvg")):
+            bottom = as_float(row.get("spec_h2"))
+            top = as_float(row.get("low"))
+            if bottom <= current_close <= top:
+                return SpecHit(
+                    strategy="fvg_setup",
+                    direction="long",
+                    entry=(bottom + top) / 2.0,
+                    stop_basis=bottom,
+                    atr=atr,
+                    timeframe=timeframe,
+                    reasons=(f"bull_fvg zone={bottom:.4f}-{top:.4f}", f"age={age}"),
+                    vol_ratio=vol_ratio,
+                    rsi=rsi,
+                    source_index=idx,
+                )
+        if bool(row.get("spec_bear_fvg")):
+            bottom = as_float(row.get("high"))
+            top = as_float(row.get("spec_l2"))
+            if bottom <= current_close <= top:
+                return SpecHit(
+                    strategy="fvg_setup",
+                    direction="short",
+                    entry=(bottom + top) / 2.0,
+                    stop_basis=top,
+                    atr=atr,
+                    timeframe=timeframe,
+                    reasons=(f"bear_fvg zone={bottom:.4f}-{top:.4f}", f"age={age}"),
+                    vol_ratio=vol_ratio,
+                    rsi=rsi,
+                    source_index=idx,
+                )
+    return None
+
+
+def _spec_detect_kwargs(effective: dict[str, float]) -> dict[str, object]:
+    return {"max_age": int(effective.get("max_fvg_age_bars", 20))}
+
+
+def _detect_fvg_setup_extended(
+    prepared: PreparedSymbol,
+    settings: BotSettings,
+    defaults: dict[str, float],
+    effective: dict[str, float],
+    setup_id: str,
+    family: str,
+) -> Signal | None:
+    dynamic_params = effective
+    min_fvg_size_atr = dynamic_params.get("min_fvg_size_atr", defaults["min_fvg_size_atr"])
+    min_mitigation_pct = dynamic_params.get("min_mitigation_pct", defaults["min_mitigation_pct"])
+    sl_buffer_atr = dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"])
+
+    w = prepared.work_15m
+    # FIX 2026-05-21: spec FVG only accepts an immediate retest; fall through
+    # to the configured SMC zone scanner before rejecting as no setup.
+    if w.height < 5:
+        _reject(prepared, setup_id, "insufficient_15m_bars", bars=w.height)
+        return None
+
+    atr = float(w.item(-1, "atr14") or 0.0)
+    if atr <= 0 or math.isnan(atr):
+        _reject(prepared, setup_id, "atr_invalid", atr=atr)
+        return None
+
+    price = prepared.mark_price or prepared.universe.last_price
+    if not price or price <= 0:
+        _reject(prepared, setup_id, "price_missing")
+        return None
+
+    vol_ratio = float(w.item(-1, "volume_ratio20") or 1.0)
+    rsi = float(w.item(-1, "rsi14") or 50.0)
+
+    min_gap_width_bps = dynamic_params.get("min_gap_width_bps", defaults["min_gap_width_bps"])
+    min_volume_ratio = dynamic_params.get("min_volume_ratio", defaults["min_volume_ratio"])
+    zone = latest_fvg_zone(
+        w,
+        join_consecutive=True,
+        allowed_states=("fresh", "mitigated"),
+        current_price=None,
+        touch_buffer=0.0,
+    )
+    if zone is None:
+        _reject(prepared, setup_id, "no_fvg_detected")
+        return None
+
+    direction = zone.direction
+    fvg_low = zone.bottom
+    fvg_high = zone.top
+    fvg_width = zone.width
+    fvg_mid = zone.midpoint
+    try:
+        zone_values_valid = all(
+            math.isfinite(float(value)) and float(value) > 0.0
+            for value in (fvg_low, fvg_high, fvg_width, fvg_mid)
+        )
+    except (TypeError, ValueError):
+        zone_values_valid = False
+    if (
+        direction not in {"long", "short"}
+        or zone.created_index is None
+        or not (0 <= int(zone.created_index) < w.height)
+        or not zone_values_valid
+    ):
+        _reject(
+            prepared,
+            setup_id,
+            "invalid_fvg_zone",
+            direction=direction,
+            top=fvg_high,
+            bottom=fvg_low,
+            width=fvg_width,
+            created_index=zone.created_index,
+        )
+        return None
+    price_inside_gap = fvg_low <= price <= fvg_high
+    if direction == "long":
+        if price < fvg_low:
+            _reject(prepared, setup_id, "fvg_already_lost", price=price, bottom=fvg_low)
+            return None
+        entry_distance = max(0.0, price - fvg_high)
+    else:
+        if price > fvg_high:
+            _reject(prepared, setup_id, "fvg_already_lost", price=price, top=fvg_high)
+            return None
+        entry_distance = max(0.0, fvg_low - price)
+    max_entry_distance = atr * float(
+        dynamic_params.get("max_entry_distance_atr", defaults["max_entry_distance_atr"])
+    )
+    if entry_distance > max_entry_distance:
+        _reject(
+            prepared,
+            setup_id,
+            "fvg_retest_too_far",
+            entry_distance_atr=entry_distance / atr if atr > 0 else None,
+            max_entry_distance_atr=dynamic_params.get(
+                "max_entry_distance_atr", defaults["max_entry_distance_atr"]
+            ),
+        )
+        return None
+    if price_inside_gap and fvg_width > 0:
+        mitigation_pct = (
+            (fvg_high - price) / fvg_width if direction == "long" else (price - fvg_low) / fvg_width
+        )
+        mitigation_pct = max(0.0, min(1.0, mitigation_pct))
+    else:
+        mitigation_pct = 0.0
+    if (
+        fvg_width / price < (min_gap_width_bps / 10000)
+        or fvg_width < atr * float(min_fvg_size_atr)
+        or (price_inside_gap and not (float(min_mitigation_pct) <= mitigation_pct <= 1.0))
+    ):
+        _reject(
+            prepared,
+            setup_id,
+            "fvg_constraints_failed",
+            width=fvg_width,
+            mitigation_pct=mitigation_pct,
+            price_inside_gap=price_inside_gap,
+        )
+        return None
+
+    impulse_vol_ratio = 1.0
+    if "volume_ratio20" in w.columns:
+        try:
+            raw_vol_ratio = w.item(zone.created_index, "volume_ratio20")
+            impulse_vol_ratio = float(raw_vol_ratio) if raw_vol_ratio is not None else 1.0
+        except (IndexError, TypeError, ValueError):
+            impulse_vol_ratio = 1.0
+    if impulse_vol_ratio < min_volume_ratio:
+        _reject(
+            prepared,
+            setup_id,
+            "impulse_volume_below_threshold",
+            impulse_vol_ratio=impulse_vol_ratio,
+            min_volume_ratio=min_volume_ratio,
+        )
+        return None
+
+    # Use 1H context for 15M signals (not 4H - too lagging for <4h trades)
+    bias_1h = getattr(prepared, "bias_1h", prepared.bias_4h)
+    regime_1h = getattr(prepared, "regime_1h_confirmed", prepared.regime_4h_confirmed)
+
+    # Graded scoring instead of hard reject for bias mismatch
+    base_score = dynamic_params.get("base_score", defaults["base_score"])
+    score = _compute_dynamic_score(
+        direction=direction,
+        base_score=base_score,
+        vol_ratio=vol_ratio,
+        rsi=rsi,
+    )
+
+    if direction == "long" and bias_1h == "downtrend":
+        score *= dynamic_params.get("bias_mismatch_penalty", defaults["bias_mismatch_penalty"])
+    if direction == "short" and bias_1h == "uptrend":
+        score *= dynamic_params.get("bias_mismatch_penalty", defaults["bias_mismatch_penalty"])
+
+    # RSI extremes filter with graded penalty
+    rsi_overbought = dynamic_params.get("rsi_overbought", defaults["rsi_overbought"])
+    rsi_oversold = dynamic_params.get("rsi_oversold", defaults["rsi_oversold"])
+    if direction == "long" and rsi > rsi_overbought:
+        score *= 0.85  # Light penalty for overbought
+    if direction == "short" and rsi < rsi_oversold:
+        score *= 0.85  # Light penalty for oversold
+
+    # 1h structure alignment with graded penalty
+    structure_1h = prepared.structure_1h
+    if direction == "long" and structure_1h == "downtrend":
+        score *= dynamic_params.get("bias_mismatch_penalty", defaults["bias_mismatch_penalty"])
+    if direction == "short" and structure_1h == "uptrend":
+        score *= dynamic_params.get("bias_mismatch_penalty", defaults["bias_mismatch_penalty"])
+    # --- Compute continuation SL/TP.
+    # A mitigated FVG is the entry zone; its midpoint/opposite boundary is
+    # not a meaningful profit target. Target the next structure level, then
+    # fall back to a deterministic RR projection.
+    from ..features import _swing_points as _sp
+
+    sh_mask = sl_mask = None
+    if prepared.work_1h.height >= 8:
+        sh_mask, sl_mask = _sp(prepared.work_1h, n=3, include_unconfirmed_tail=True)
+    min_rr = float(dynamic_params.get("min_rr", defaults["min_rr"]))
+    if direction == "long":
+        entry_price = fvg_mid if fvg_mid <= price else fvg_low
+        if entry_price > price:
+            entry_price = price
+    else:
+        entry_price = fvg_mid if fvg_mid >= price else fvg_high
+        if entry_price < price:
+            entry_price = price
+    if direction == "long":
+        stop = fvg_low - atr * float(sl_buffer_atr)
+        risk = entry_price - stop
+        if risk <= 0.0:
+            _reject(prepared, setup_id, "invalid_stop", stop=stop, price=entry_price)
+            return None
+        tp1 = select_structural_target(
+            prepared.work_1h,
+            mask=sh_mask,
+            column="high",
+            price_anchor=entry_price,
+            direction="long",
+        )
+        tp2 = select_structural_target(
+            prepared.work_4h,
+            mask=None,
+            column="high",
+            price_anchor=entry_price,
+            direction="long",
+        )
+        if tp1 is None or abs(tp1 - entry_price) < risk * min_rr:
+            tp1 = entry_price + risk * min_rr
+            reasons_note = "tp1_rr_fallback"
+        else:
+            reasons_note = "tp1_structural"
+        if tp2 is None or tp2 <= tp1:
+            tp2 = entry_price + risk * max(2.0, min_rr + 0.35)
+    else:
+        stop = fvg_high + atr * float(sl_buffer_atr)
+        risk = stop - entry_price
+        if risk <= 0.0:
+            _reject(prepared, setup_id, "invalid_stop", stop=stop, price=entry_price)
+            return None
+        tp1 = select_structural_target(
+            prepared.work_1h,
+            mask=sl_mask,
+            column="low",
+            price_anchor=entry_price,
+            direction="short",
+        )
+        tp2 = select_structural_target(
+            prepared.work_4h,
+            mask=None,
+            column="low",
+            price_anchor=entry_price,
+            direction="short",
+        )
+        if tp1 is None or abs(tp1 - entry_price) < risk * min_rr:
+            tp1 = entry_price - risk * min_rr
+            reasons_note = "tp1_rr_fallback"
+        else:
+            reasons_note = "tp1_structural"
+        if tp2 is None or tp2 >= tp1:
+            tp2 = entry_price - risk * max(2.0, min_rr + 0.35)
+
+    # Graded RR validation instead of hard reject
+    is_valid_rr, _ = validate_rr_or_penalty(entry_price, stop, tp1, min_rr)
+
+    if not is_valid_rr and tp1 is not None:
+        score *= dynamic_params.get("tp_too_close_penalty", defaults["tp_too_close_penalty"])
+
+    if tp2 is None or abs(tp2 - entry_price) <= abs(tp1 - entry_price):
+        tp2 = (
+            entry_price + risk * max(2.0, min_rr + 0.35)
+            if direction == "long"
+            else entry_price - risk * max(2.0, min_rr + 0.35)
+        )
+
+    reasons = [
+        f"FVG {direction}: gap [{fvg_low:.4f}-{fvg_high:.4f}] state={zone.state}",
+        (
+            f"price={price:.4f} limit_entry={entry_price:.4f} inside gap "
+            f"| entry_distance_atr={entry_distance / atr:.2f} "
+            f"| 1h_bias={bias_1h} 1h_struct={structure_1h} 1h_regime={regime_1h}"
+        ),
+        f"vol_ratio={vol_ratio:.2f} impulse_vol={impulse_vol_ratio:.2f} rsi={rsi:.1f}",
+        reasons_note,
+    ]
+
+    return _build_signal(
+        prepared=prepared,
+        setup_id=setup_id,
+        direction=direction,
+        score=score,
+        timeframe="15m",
+        reasons=reasons,
+        strategy_family=family,
+        stop=stop,
+        tp1=tp1,
+        tp2=tp2,
+        price_anchor=entry_price,
+        atr=atr,
+    )
+
+
+def detect_fvg_setup(
+    prepared: PreparedSymbol,
+    settings: BotSettings,
+    defaults: dict[str, float],
+    effective: dict[str, float],
+    setup_id: str,
+    family: str,
+) -> Signal | None:
+    spec_kwargs = _spec_detect_kwargs(effective)
+    return run_setup_detection(
+        prepared=prepared,
+        settings=settings,
+        setup_id=setup_id,
+        family=family,
+        defaults=defaults,
+        effective=effective,
+        spec_detect=detect_fvg,
+        extended_detect=_detect_fvg_setup_extended,
+        spec_kwargs=spec_kwargs,
+    )
+
+
+__all__ = ["detect_fvg", "detect_fvg_setup", "_detect_fvg_setup_extended"]
+
+
+class FVGSetup(SpecDetectorSetup):
     setup_id = "fvg_setup"
     family = "continuation"
     confirmation_profile = "trend_follow"
     required_context = ("futures_flow",)
+
+    DEFAULTS = {
+        "base_score": 0.55,
+        "min_gap_width_bps": 15.0,
+        "min_volume_ratio": 1.1,
+        "bias_mismatch_penalty": 0.75,
+        "rsi_overbought": 70.0,
+        "rsi_oversold": 30.0,
+        "min_rr": 1.9,
+        "tp_too_close_penalty": 0.8,
+        "min_fvg_size_atr": 0.25,
+        "min_mitigation_pct": 0.2,
+        "sl_buffer_atr": 0.5,
+        "max_entry_distance_atr": 1.5,
+    }
+
+    detect_setup = detect_fvg_setup
 
     def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
         """Tunable parameters for self-learner optimization."""
@@ -62,7 +440,7 @@ class FVGSetup(BaseSetup):
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         try:
-            return self._detect(prepared, settings)
+            return super().detect(prepared, settings)
         except Exception as exc:
             LOG.exception("%s fvg_setup: unexpected error", prepared.symbol)
             _reject(
@@ -74,306 +452,5 @@ class FVGSetup(BaseSetup):
             )
             return None
 
-    def _detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
-        setup_id = self.setup_id
-        dynamic_params = get_dynamic_params(prepared, setup_id)
-        defaults = self.get_optimizable_params(settings)
 
-        min_fvg_size_atr = dynamic_params.get("min_fvg_size_atr", defaults["min_fvg_size_atr"])
-        min_mitigation_pct = dynamic_params.get(
-            "min_mitigation_pct", defaults["min_mitigation_pct"]
-        )
-        sl_buffer_atr = dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"])
-
-        w = prepared.work_15m
-        hit = detect_fvg(
-            w,
-            timeframe="15m",
-            max_age=int(dynamic_params.get("max_fvg_age_bars", 20)),
-        )
-        if hit is not None:
-            return build_spec_signal(
-                prepared=prepared,
-                settings=settings,
-                setup_id=setup_id,
-                family=self.family,
-                hit=hit,
-                defaults=defaults,
-                params={**defaults, **dynamic_params, "sl_buffer_atr": sl_buffer_atr},
-            )
-
-        # FIX 2026-05-21: spec FVG only accepts an immediate retest; fall through
-        # to the configured SMC zone scanner before rejecting as no setup.
-        if w.height < 5:
-            _reject(prepared, setup_id, "insufficient_15m_bars", bars=w.height)
-            return None
-
-        atr = float(w.item(-1, "atr14") or 0.0)
-        if atr <= 0 or math.isnan(atr):
-            _reject(prepared, setup_id, "atr_invalid", atr=atr)
-            return None
-
-        price = prepared.mark_price or prepared.universe.last_price
-        if not price or price <= 0:
-            _reject(prepared, setup_id, "price_missing")
-            return None
-
-        vol_ratio = float(w.item(-1, "volume_ratio20") or 1.0)
-        rsi = float(w.item(-1, "rsi14") or 50.0)
-
-        min_gap_width_bps = dynamic_params.get("min_gap_width_bps", defaults["min_gap_width_bps"])
-        min_volume_ratio = dynamic_params.get("min_volume_ratio", defaults["min_volume_ratio"])
-        zone = latest_fvg_zone(
-            w,
-            join_consecutive=True,
-            allowed_states=("fresh", "mitigated"),
-            current_price=None,
-            touch_buffer=0.0,
-        )
-        if zone is None:
-            _reject(prepared, setup_id, "no_fvg_detected")
-            return None
-
-        direction = zone.direction
-        fvg_low = zone.bottom
-        fvg_high = zone.top
-        fvg_width = zone.width
-        fvg_mid = zone.midpoint
-        try:
-            zone_values_valid = all(
-                math.isfinite(float(value)) and float(value) > 0.0
-                for value in (fvg_low, fvg_high, fvg_width, fvg_mid)
-            )
-        except (TypeError, ValueError):
-            zone_values_valid = False
-        if (
-            direction not in {"long", "short"}
-            or zone.created_index is None
-            or not (0 <= int(zone.created_index) < w.height)
-            or not zone_values_valid
-        ):
-            _reject(
-                prepared,
-                setup_id,
-                "invalid_fvg_zone",
-                direction=direction,
-                top=fvg_high,
-                bottom=fvg_low,
-                width=fvg_width,
-                created_index=zone.created_index,
-            )
-            return None
-        price_inside_gap = fvg_low <= price <= fvg_high
-        if direction == "long":
-            if price < fvg_low:
-                _reject(prepared, setup_id, "fvg_already_lost", price=price, bottom=fvg_low)
-                return None
-            entry_distance = max(0.0, price - fvg_high)
-        else:
-            if price > fvg_high:
-                _reject(prepared, setup_id, "fvg_already_lost", price=price, top=fvg_high)
-                return None
-            entry_distance = max(0.0, fvg_low - price)
-        max_entry_distance = atr * float(
-            dynamic_params.get("max_entry_distance_atr", defaults["max_entry_distance_atr"])
-        )
-        if entry_distance > max_entry_distance:
-            _reject(
-                prepared,
-                setup_id,
-                "fvg_retest_too_far",
-                entry_distance_atr=entry_distance / atr if atr > 0 else None,
-                max_entry_distance_atr=dynamic_params.get(
-                    "max_entry_distance_atr", defaults["max_entry_distance_atr"]
-                ),
-            )
-            return None
-        if price_inside_gap and fvg_width > 0:
-            mitigation_pct = (
-                (fvg_high - price) / fvg_width
-                if direction == "long"
-                else (price - fvg_low) / fvg_width
-            )
-            mitigation_pct = max(0.0, min(1.0, mitigation_pct))
-        else:
-            mitigation_pct = 0.0
-        if (
-            fvg_width / price < (min_gap_width_bps / 10000)
-            or fvg_width < atr * float(min_fvg_size_atr)
-            or (
-                price_inside_gap
-                and not (float(min_mitigation_pct) <= mitigation_pct <= 1.0)
-            )
-        ):
-            _reject(
-                prepared,
-                setup_id,
-                "fvg_constraints_failed",
-                width=fvg_width,
-                mitigation_pct=mitigation_pct,
-                price_inside_gap=price_inside_gap,
-            )
-            return None
-
-        impulse_vol_ratio = 1.0
-        if "volume_ratio20" in w.columns:
-            try:
-                raw_vol_ratio = w.item(zone.created_index, "volume_ratio20")
-                impulse_vol_ratio = float(raw_vol_ratio) if raw_vol_ratio is not None else 1.0
-            except (IndexError, TypeError, ValueError):
-                impulse_vol_ratio = 1.0
-        if impulse_vol_ratio < min_volume_ratio:
-            _reject(
-                prepared,
-                setup_id,
-                "impulse_volume_below_threshold",
-                impulse_vol_ratio=impulse_vol_ratio,
-                min_volume_ratio=min_volume_ratio,
-            )
-            return None
-
-        # Use 1H context for 15M signals (not 4H - too lagging for <4h trades)
-        bias_1h = getattr(prepared, "bias_1h", prepared.bias_4h)
-        regime_1h = getattr(prepared, "regime_1h_confirmed", prepared.regime_4h_confirmed)
-
-        # Graded scoring instead of hard reject for bias mismatch
-        base_score = dynamic_params.get("base_score", defaults["base_score"])
-        score = _compute_dynamic_score(
-            direction=direction,
-            base_score=base_score,
-            vol_ratio=vol_ratio,
-            rsi=rsi,
-        )
-
-        if direction == "long" and bias_1h == "downtrend":
-            score *= dynamic_params.get("bias_mismatch_penalty", defaults["bias_mismatch_penalty"])
-        if direction == "short" and bias_1h == "uptrend":
-            score *= dynamic_params.get("bias_mismatch_penalty", defaults["bias_mismatch_penalty"])
-
-        # RSI extremes filter with graded penalty
-        rsi_overbought = dynamic_params.get("rsi_overbought", defaults["rsi_overbought"])
-        rsi_oversold = dynamic_params.get("rsi_oversold", defaults["rsi_oversold"])
-        if direction == "long" and rsi > rsi_overbought:
-            score *= 0.85  # Light penalty for overbought
-        if direction == "short" and rsi < rsi_oversold:
-            score *= 0.85  # Light penalty for oversold
-
-        # 1h structure alignment with graded penalty
-        structure_1h = prepared.structure_1h
-        if direction == "long" and structure_1h == "downtrend":
-            score *= dynamic_params.get("bias_mismatch_penalty", defaults["bias_mismatch_penalty"])
-        if direction == "short" and structure_1h == "uptrend":
-            score *= dynamic_params.get(
-                "bias_mismatch_penalty", defaults["bias_mismatch_penalty"]
-            )
-        # --- Compute continuation SL/TP.
-        # A mitigated FVG is the entry zone; its midpoint/opposite boundary is
-        # not a meaningful profit target. Target the next structure level, then
-        # fall back to a deterministic RR projection.
-        from ..features import _swing_points as _sp
-
-        sh_mask = sl_mask = None
-        if prepared.work_1h.height >= 8:
-            sh_mask, sl_mask = _sp(prepared.work_1h, n=3, include_unconfirmed_tail=True)
-        min_rr = float(dynamic_params.get("min_rr", defaults["min_rr"]))
-        if direction == "long":
-            entry_price = fvg_mid if fvg_mid <= price else fvg_low
-            if entry_price > price:
-                entry_price = price
-        else:
-            entry_price = fvg_mid if fvg_mid >= price else fvg_high
-            if entry_price < price:
-                entry_price = price
-        if direction == "long":
-            stop = fvg_low - atr * float(sl_buffer_atr)
-            risk = entry_price - stop
-            if risk <= 0.0:
-                _reject(prepared, setup_id, "invalid_stop", stop=stop, price=entry_price)
-                return None
-            tp1 = select_structural_target(
-                prepared.work_1h,
-                mask=sh_mask,
-                column="high",
-                price_anchor=entry_price,
-                direction="long",
-            )
-            tp2 = select_structural_target(
-                prepared.work_4h,
-                mask=None,
-                column="high",
-                price_anchor=entry_price,
-                direction="long",
-            )
-            if tp1 is None or abs(tp1 - entry_price) < risk * min_rr:
-                tp1 = entry_price + risk * min_rr
-                reasons_note = "tp1_rr_fallback"
-            else:
-                reasons_note = "tp1_structural"
-            if tp2 is None or tp2 <= tp1:
-                tp2 = entry_price + risk * max(2.0, min_rr + 0.35)
-        else:
-            stop = fvg_high + atr * float(sl_buffer_atr)
-            risk = stop - entry_price
-            if risk <= 0.0:
-                _reject(prepared, setup_id, "invalid_stop", stop=stop, price=entry_price)
-                return None
-            tp1 = select_structural_target(
-                prepared.work_1h,
-                mask=sl_mask,
-                column="low",
-                price_anchor=entry_price,
-                direction="short",
-            )
-            tp2 = select_structural_target(
-                prepared.work_4h,
-                mask=None,
-                column="low",
-                price_anchor=entry_price,
-                direction="short",
-            )
-            if tp1 is None or abs(tp1 - entry_price) < risk * min_rr:
-                tp1 = entry_price - risk * min_rr
-                reasons_note = "tp1_rr_fallback"
-            else:
-                reasons_note = "tp1_structural"
-            if tp2 is None or tp2 >= tp1:
-                tp2 = entry_price - risk * max(2.0, min_rr + 0.35)
-
-        # Graded RR validation instead of hard reject
-        is_valid_rr, _ = validate_rr_or_penalty(entry_price, stop, tp1, min_rr)
-
-        if not is_valid_rr and tp1 is not None:
-            score *= dynamic_params.get("tp_too_close_penalty", defaults["tp_too_close_penalty"])
-
-        if tp2 is None or abs(tp2 - entry_price) <= abs(tp1 - entry_price):
-            tp2 = (
-                entry_price + risk * max(2.0, min_rr + 0.35)
-                if direction == "long"
-                else entry_price - risk * max(2.0, min_rr + 0.35)
-            )
-
-        reasons = [
-            f"FVG {direction}: gap [{fvg_low:.4f}-{fvg_high:.4f}] state={zone.state}",
-            (
-                f"price={price:.4f} limit_entry={entry_price:.4f} inside gap "
-                f"| entry_distance_atr={entry_distance / atr:.2f} "
-                f"| 1h_bias={bias_1h} 1h_struct={structure_1h} 1h_regime={regime_1h}"
-            ),
-            f"vol_ratio={vol_ratio:.2f} impulse_vol={impulse_vol_ratio:.2f} rsi={rsi:.1f}",
-            reasons_note,
-        ]
-
-        return _build_signal(
-            prepared=prepared,
-            setup_id=self.setup_id,
-            direction=direction,
-            score=score,
-            timeframe="15m",
-            reasons=reasons,
-            strategy_family=self.family,
-            stop=stop,
-            tp1=tp1,
-            tp2=tp2,
-            price_anchor=entry_price,
-            atr=atr,
-        )
+__all__ = ["FVGSetup"]

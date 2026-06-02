@@ -664,6 +664,81 @@ class SignalTracker:
             )
         await self._persist_tracking_state()
 
+    async def update_signal_message_ids(
+        self,
+        message_ids: dict[str, int | None],
+        *,
+        dry_run: bool,
+    ) -> None:
+        """Attach Telegram message ids after delivery (journal row already armed)."""
+        if dry_run or not self.settings.tracking.enabled or not message_ids:
+            return
+        now = datetime.now(UTC)
+        active_rows = await self.memory_repo.get_active_signals()
+        by_tracking_id = {
+            str(row.get("tracking_id") or ""): row for row in active_rows if row.get("tracking_id")
+        }
+        for tracking_id, message_id in message_ids.items():
+            if message_id is None:
+                continue
+            row = by_tracking_id.get(str(tracking_id))
+            if row is None:
+                continue
+            try:
+                tracked = self._tracked_from_payload(row)
+            except (TypeError, ValueError) as exc:
+                LOG.debug("message_id patch skipped %s: %s", tracking_id, exc)
+                continue
+            if tracked.signal_message_id == message_id:
+                continue
+            tracked.signal_message_id = message_id
+            await self.memory_repo.save_active_signal(self._tracked_to_payload(tracked))
+            self.telemetry.append_jsonl(
+                "tracking_events.jsonl",
+                {
+                    "ts": now.isoformat(),
+                    "event_type": "message_linked",
+                    "tracking_id": tracked.tracking_id,
+                    "signal_message_id": message_id,
+                    "symbol": tracked.symbol,
+                    "setup_id": tracked.setup_id,
+                },
+            )
+        await self._persist_tracking_state()
+
+    async def cancel_pending_delivery(
+        self,
+        signal: Signal,
+        *,
+        reason: str = "delivery_not_sent",
+        dry_run: bool = False,
+    ) -> None:
+        """Close a pending journal row when Telegram delivery did not complete."""
+        if dry_run or not self.settings.tracking.enabled:
+            return
+        active_rows = await self.memory_repo.get_active_signals(symbol=signal.symbol)
+        row = next(
+            (item for item in active_rows if item.get("tracking_id") == signal.tracking_id),
+            None,
+        )
+        if row is None:
+            return
+        try:
+            tracked = self._tracked_from_payload(row)
+        except (TypeError, ValueError):
+            return
+        if tracked.status != "pending" or tracked.signal_message_id is not None:
+            return
+        now = datetime.now(UTC)
+        await self._close_signal(
+            tracked,
+            reason=reason,
+            occurred_at=now,
+            price=tracked.entry_mid,
+            precision_mode="delivery_cancel",
+        )
+        await self._persist_tracking_state()
+
     async def review_open_signals(self, *, dry_run: bool) -> list[SignalTrackingEvent]:
         if dry_run or not self.settings.tracking.enabled:
             return []
@@ -776,7 +851,9 @@ class SignalTracker:
             trades = []
             complete = False
         except (ValueError, TypeError) as exc:
-            LOG.debug("agg trades response invalid for %s; falling back to candles: %s", symbol, exc)
+            LOG.debug(
+                "agg trades response invalid for %s; falling back to candles: %s", symbol, exc
+            )
             trades = []
             complete = False
         except Exception:
@@ -1503,8 +1580,7 @@ class SignalTracker:
             now=datetime.now(UTC),
             fallback_precision_mode="time_fallback",
             persist_error_context=(
-                f"tracking state persist failed for {symbol} "
-                "(continuing without persistence)"
+                f"tracking state persist failed for {symbol} (continuing without persistence)"
             ),
         )
 

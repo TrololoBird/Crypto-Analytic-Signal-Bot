@@ -27,6 +27,9 @@ class StrategyMetadata:
     requires_funding: bool = False  # Requires funding rate data
     min_history_bars: int = 50  # Minimum bars needed for calculation
     trigger_tf: str = "15m"
+    trigger_intervals: tuple[str, ...] = ()  # Alternate trigger closes (compound catalog triggers)
+    pattern_tf: str = "15m"  # TF where pattern is measured (TTL, trade-plan context)
+    required_tfs: tuple[str, ...] = ()  # Frames that must be in cache / WS union
     evidence_level: str = "A"
     asset_fit: dict[str, object] = field(default_factory=dict)
     score_calibration: str = "heuristic"
@@ -51,6 +54,9 @@ class StrategyMetadata:
             "requires_funding": self.requires_funding,
             "min_history_bars": self.min_history_bars,
             "trigger_tf": self.trigger_tf,
+            "trigger_intervals": list(self.trigger_intervals),
+            "pattern_tf": self.pattern_tf,
+            "required_tfs": list(self.required_tfs),
             "evidence_level": self.evidence_level,
             "asset_fit": self.asset_fit,
             "score_calibration": self.score_calibration,

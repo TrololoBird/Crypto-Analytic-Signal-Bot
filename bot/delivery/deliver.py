@@ -7,7 +7,7 @@ import html
 import logging
 import math
 from datetime import datetime, timedelta, timezone
-from typing import Protocol
+from typing import Any, Protocol
 from collections import OrderedDict
 
 from .telegram import DeliveryResult
@@ -352,7 +352,9 @@ def format_signal_text(
         score = float(getattr(signal, "score", 0.0) or 0.0)
         tp2 = getattr(signal, "tp2", None) or getattr(signal, "take_profit_2", "") or ""
         tp3 = getattr(signal, "tp3", None) or getattr(signal, "take_profit_3", "") or ""
-        targets = [str(value) for value in (getattr(signal, "take_profit_1", ""), tp2, tp3) if value]
+        targets = [
+            str(value) for value in (getattr(signal, "take_profit_1", ""), tp2, tp3) if value
+        ]
         return "\n".join(
             [
                 f"<b>LIMIT {direction} {symbol}</b>",
@@ -535,6 +537,7 @@ class SignalDelivery:
         *,
         dry_run: bool,
         btc_bias: str | None = None,
+        tier_by_tracking_id: dict[str, str] | None = None,
     ) -> list[DeliveredSignal]:
         delivered: list[DeliveredSignal] = []
         for signal in signals:
@@ -584,9 +587,7 @@ class SignalDelivery:
                     DeliveredSignal(signal=signal, status="sent", message_id=None, reason="dry_run")
                 )
                 continue
-            audit = self._public_audit
-            if audit is not None:
-                audit.append_delivered(signal, tier="action", message_id=None)
+            delivery_tier = str((tier_by_tracking_id or {}).get(signal.tracking_id) or "action")
             try:
                 result = await self.broadcaster.send_html(text)
             except Exception as exc:
@@ -604,6 +605,13 @@ class SignalDelivery:
                     )
                 )
                 continue
+            audit = self._public_audit
+            if audit is not None and result.status == "sent":
+                audit.append_delivered(
+                    signal,
+                    tier=delivery_tier,
+                    message_id=result.message_id,
+                )
             if result.status == "sent":
                 LOG.info("telegram signal sent\n%s", text)
             elif result.status == "logged":

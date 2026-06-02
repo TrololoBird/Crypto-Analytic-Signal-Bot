@@ -16,7 +16,9 @@ Rules:
 - Rules: `.cursor/rules/*.mdc` (guardrails, strategies, features, delivery)
 - Skills: `.cursor/skills/` (`live-binance-verify`, `refactor-module`, `zero-hit-strategy-triage`, `validate-delivery-path`)
 - Refactor plan: `docs/REFACTOR_PLAN.md`
+- Canonical architecture: `docs/research/ARCHITECTURE_CANONICAL.md` (~180 `.py` in `bot/`, single `strategies/` tree)
 - Target research spec: `docs/research/README.md` (38 strategies, architecture, Binance public matrix, Telegram spec)
+- Structural gate: `python scripts/verify_refactor_gate.py`
 - Live tests only: `tests/live/` with `PYTEST_LIVE=1`
 - Local venv (Python 3.14): `py -3.14 -m venv .venv` then `.\.venv\Scripts\pip install -e ".[live,dev,test]"`
 

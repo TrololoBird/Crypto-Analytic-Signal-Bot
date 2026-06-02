@@ -9,6 +9,7 @@ import polars as pl
 
 try:  # optional dependency
     from hmmlearn.hmm import GaussianHMM
+
     HAS_HMMLEARN = True
 except ImportError:  # pragma: no cover - optional
     GaussianHMM = None

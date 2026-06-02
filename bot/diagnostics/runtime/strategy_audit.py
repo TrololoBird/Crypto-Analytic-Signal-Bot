@@ -482,7 +482,9 @@ def load_config_enabled_flags(path: str | Path = "config.toml") -> dict[str, boo
     return flags
 
 
-def load_outcome_stats(db_path: str | Path, *, last_days: int | None = 90) -> dict[str, OutcomeStats]:
+def load_outcome_stats(
+    db_path: str | Path, *, last_days: int | None = 90
+) -> dict[str, OutcomeStats]:
     path = Path(db_path)
     if not path.exists():
         return {}

@@ -979,17 +979,13 @@ class MemoryRepository:
             try:
                 data["features"] = json.loads(data["features"])
             except json.JSONDecodeError as exc:
-                LOG.error(
-                    "failed to decode features for signal %s: %s", data.get("signal_id"), exc
-                )
+                LOG.error("failed to decode features for signal %s: %s", data.get("signal_id"), exc)
                 data["features"] = {}
         if data.get("metadata"):
             try:
                 data["metadata"] = json.loads(data["metadata"])
             except json.JSONDecodeError as exc:
-                LOG.error(
-                    "failed to decode metadata for signal %s: %s", data.get("signal_id"), exc
-                )
+                LOG.error("failed to decode metadata for signal %s: %s", data.get("signal_id"), exc)
                 data["metadata"] = {}
         return SignalRecord.from_dict(data)
 
@@ -1943,4 +1939,3 @@ class MemoryRepository:
         )
         await self._conn.commit()
         return int(cursor.rowcount or 0)
-

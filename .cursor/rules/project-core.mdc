@@ -11,9 +11,10 @@ Event-driven Binance USDⓈ-M **public** signal bot. Telegram manual signals onl
 
 - NO auto-trading, order placement, or private/auth Binance endpoints
 - Delivery path: `validate_signal_contract` → `hard_confluence_gate` (3-of-5) → `delivery.deliver` — never bypass
-- Strategy logic in `bot/strategies/`; orchestration in `bot/runtime/` (legacy: `bot/application/`)
-- Data plane: `bot/market/` | Features: `bot/features.py` → `bot/features/` in Phase 2
-- Delivery: `bot/delivery.py` + `messaging.py` → `bot/delivery/` in Phase 2
+- Strategy logic in `bot/strategies/` only (no `setups/detectors/` duplicate tree)
+- Orchestration in `bot/runtime/`
+- Data plane: `bot/market/` | Features: `bot/features/`
+- Delivery: `bot/delivery/`
 - Persistence: `bot/persistence/` | Engine: `bot/engine/`
 - Prefer Polars expressions; Wilder ATR/RSI; BB std ddof=1; no `shift(-N)` on live path
 - Rewrite broken modules; do not disable strategies silently
@@ -34,4 +35,4 @@ When `graphify-out/graph.json` exists: `graphify query`, `graphify path`, `graph
 
 ## Refactor target layout
 
-See `docs/REFACTOR_PLAN.md` — v9 packages: `market/`, `runtime/`, `persistence/`, `engine/` (Phase 1 scaffold). `features/` and `delivery/` packages land in Phase 2 after renaming legacy modules.
+See `docs/REFACTOR_PLAN.md` and `docs/research/ARCHITECTURE_CANONICAL.md` — v9 packages: `market/`, `features/`, `runtime/`, `persistence/`, `engine/`, `delivery/`, `strategies/`.

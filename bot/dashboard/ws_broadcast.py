@@ -16,8 +16,31 @@ if TYPE_CHECKING:
     from fastapi import WebSocket
     from ..core.event_bus import EventBus
 
+from .live import funnel_stage_counts_from_cycle
+
 LOG = logging.getLogger("bot.ws_dashboard")
 UTC = timezone.utc
+
+
+def build_ws_health_payload(bot: Any) -> dict[str, Any]:
+    """Build compact WS health payload for dashboard clients."""
+    ws = getattr(bot, "_ws_manager", None)
+    connected = False
+    stale_klines = 0
+    if ws is not None:
+        is_connected = getattr(ws, "is_connected", None)
+        if callable(is_connected):
+            connected = bool(is_connected())
+        snapshot_fn = getattr(ws, "state_snapshot", None)
+        if callable(snapshot_fn):
+            snapshot = snapshot_fn()
+            if isinstance(snapshot, dict):
+                stale_klines = int(snapshot.get("stale_kline_stream_count") or 0)
+    return {
+        "connected": connected,
+        "stale_kline_stream_count": stale_klines,
+        "ts": datetime.now(UTC).isoformat(),
+    }
 
 
 class DashboardWSBroadcaster:
@@ -73,51 +96,83 @@ class DashboardWSBroadcaster:
                 self._clients.discard(ws)
 
     async def _on_kline_close(self, event: Any) -> None:
-        await self.broadcast({
-            "type": "kline_close",
-            "payload": {
-                "symbol": event.symbol,
-                "interval": event.interval,
-                "close_ts": event.close_ts,
-                "trigger": event.trigger,
-                "ts": datetime.now(UTC).isoformat(),
-            },
-        })
+        await self.broadcast(
+            {
+                "type": "kline_close",
+                "payload": {
+                    "symbol": event.symbol,
+                    "interval": event.interval,
+                    "close_ts": event.close_ts,
+                    "trigger": event.trigger,
+                    "ts": datetime.now(UTC).isoformat(),
+                },
+            }
+        )
 
     async def _on_shortlist_updated(self, event: Any) -> None:
-        await self.broadcast({
-            "type": "shortlist_update",
-            "payload": {
-                "symbols": list(event.symbols),
-                "ts": datetime.now(UTC).isoformat(),
-            },
-        })
+        await self.broadcast(
+            {
+                "type": "shortlist_update",
+                "payload": {
+                    "symbols": list(event.symbols),
+                    "ts": datetime.now(UTC).isoformat(),
+                },
+            }
+        )
 
     async def _on_reconnect(self, event: Any) -> None:
-        await self.broadcast({
-            "type": "reconnect",
-            "payload": {"reason": event.reason, "ts": datetime.now(UTC).isoformat()},
-        })
+        await self.broadcast(
+            {
+                "type": "reconnect",
+                "payload": {"reason": event.reason, "ts": datetime.now(UTC).isoformat()},
+            }
+        )
 
     def publish_signal(self, signal: dict[str, Any]) -> None:
         """Push a live signal to all dashboard clients."""
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(self.broadcast({
-                "type": "signal",
-                "payload": signal,
-            }))
-        except RuntimeError:
-            pass
+        self._schedule_broadcast({"type": "signal", "payload": signal})
 
     def publish_regime(self, regime: dict[str, Any]) -> None:
         """Push a market regime update to all dashboard clients."""
+        self._schedule_broadcast({"type": "regime_update", "payload": regime})
+
+    def publish_funnel_update(self, payload: dict[str, Any]) -> None:
+        """Push funnel stage counts to all dashboard clients."""
+        self._schedule_broadcast({"type": "funnel_update", "payload": payload})
+
+    def publish_ws_health(self, payload: dict[str, Any]) -> None:
+        """Push runtime websocket health to all dashboard clients."""
+        self._schedule_broadcast({"type": "ws_health", "payload": payload})
+
+    def notify_cycle_complete(
+        self,
+        bot: Any,
+        *,
+        symbol: str,
+        cycle_row: dict[str, Any],
+        funnel: dict[str, Any] | None = None,
+    ) -> None:
+        """Broadcast funnel + WS health after a signal cycle completes."""
+        stages = funnel_stage_counts_from_cycle(cycle_row=cycle_row, funnel=funnel)
+        run_id = None
+        telemetry = getattr(bot, "telemetry", None)
+        if telemetry is not None:
+            run_id = getattr(telemetry, "run_id", None)
+        self.publish_funnel_update(
+            {
+                "ts": datetime.now(UTC).isoformat(),
+                "symbol": symbol,
+                "run_id": str(run_id) if run_id else None,
+                "trigger": cycle_row.get("trigger"),
+                "stages": stages,
+            }
+        )
+        self.publish_ws_health(build_ws_health_payload(bot))
+
+    def _schedule_broadcast(self, payload: dict[str, Any]) -> None:
         try:
             loop = asyncio.get_running_loop()
-            loop.create_task(self.broadcast({
-                "type": "regime_update",
-                "payload": regime,
-            }))
+            loop.create_task(self.broadcast(payload))
         except RuntimeError:
             pass
 

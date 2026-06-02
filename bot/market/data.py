@@ -28,11 +28,6 @@ UTC = timezone.utc
 LOG = logging.getLogger("bot.market_data")
 
 # Constants imported by infrastructure layer (to avoid circular imports)
-from .rate_limit import (
-    REST_WEIGHT_CRITICAL_LIMIT as _REST_WEIGHT_CRITICAL_LIMIT,
-    REST_WEIGHT_HARD_LIMIT as _REST_WEIGHT_HARD_LIMIT,
-    REST_WEIGHT_SOFT_LIMIT as _REST_WEIGHT_SOFT_LIMIT,
-)
 _FAPI_BASE_URL = "https://fapi.binance.com"
 _API_KEY_PARAM = "api" + "Key"
 FORBIDDEN_PARAMS = frozenset(
@@ -47,7 +42,28 @@ FORBIDDEN_PARAMS = frozenset(
     }
 )
 _FORBIDDEN_PARAMS_LOWER = frozenset({k.lower() for k in FORBIDDEN_PARAMS})
-_REST_GLOBAL_SEMAPHORE = asyncio.Semaphore(100)
+# Default matches runtime.max_concurrent_rest_requests; override via configure_rest_concurrency().
+_REST_GLOBAL_SEMAPHORE = asyncio.Semaphore(3)
+
+from .rate_limit import (  # noqa: E402 — after module constants, before REST client wiring
+    REST_WEIGHT_HARD_LIMIT,
+    REST_WEIGHT_SOFT_LIMIT,
+    REST_WEIGHT_CRITICAL_LIMIT,
+)
+
+_REST_WEIGHT_SOFT_LIMIT = REST_WEIGHT_SOFT_LIMIT
+_REST_WEIGHT_HARD_LIMIT = REST_WEIGHT_HARD_LIMIT
+_REST_WEIGHT_CRITICAL_LIMIT = REST_WEIGHT_CRITICAL_LIMIT
+
+
+def configure_rest_concurrency(max_concurrent: int) -> None:
+    """Align global REST gate with BotSettings (Binance weight budget is separate)."""
+    global _REST_GLOBAL_SEMAPHORE
+    limit = max(1, min(int(max_concurrent), 20))
+    _REST_GLOBAL_SEMAPHORE = asyncio.Semaphore(limit)
+    LOG.info("rest_concurrency_configured | max_concurrent=%d", limit)
+
+
 _FUTURES_DATA_IP_LIMIT_WINDOW_S = 300.0
 _FUTURES_DATA_IP_LIMIT_OFFICIAL_MAX = 1000
 _FUTURES_DATA_IP_LIMIT_DEFAULT = 300
@@ -414,6 +430,18 @@ class BinanceFuturesMarketData:
     async def fetch_klines_cached(self, symbol: str, interval: str, *, limit: int) -> pl.DataFrame:
         return await self._binance_client.fetch_klines_cached(symbol, interval, limit=limit)
 
+    def get_cached_klines(
+        self,
+        symbol: str,
+        interval: str,
+        *,
+        limit: int,
+        max_age_s: float | None = None,
+    ) -> pl.DataFrame | None:
+        return self._binance_client.get_cached_klines(
+            symbol, interval, limit=limit, max_age_s=max_age_s
+        )
+
     async def fetch_continuous_klines(
         self, symbol: str, interval: str, *, limit: int = 500
     ) -> pl.DataFrame:
@@ -457,27 +485,19 @@ class BinanceFuturesMarketData:
     async def fetch_open_interest(self, symbol: str) -> float | None:
         return await self._binance_client.fetch_open_interest(symbol)
 
-    async def fetch_open_interest_change(
-        self, symbol: str, *, period: str = "1h"
-    ) -> float | None:
+    async def fetch_open_interest_change(self, symbol: str, *, period: str = "1h") -> float | None:
         return await self._binance_client.fetch_open_interest_change(symbol, period=period)
 
-    async def fetch_long_short_ratio(
-        self, symbol: str, *, period: str = "1h"
-    ) -> float | None:
+    async def fetch_long_short_ratio(self, symbol: str, *, period: str = "1h") -> float | None:
         return await self._binance_client.fetch_long_short_ratio(symbol, period=period)
 
-    async def fetch_top_position_ls_ratio(
-        self, symbol: str, *, period: str = "1h"
-    ) -> float | None:
+    async def fetch_top_position_ls_ratio(self, symbol: str, *, period: str = "1h") -> float | None:
         return await self._binance_client.fetch_top_position_ls_ratio(symbol, period=period)
 
     async def fetch_taker_ratio(self, symbol: str, *, period: str = "1h") -> float | None:
         return await self._binance_client.fetch_taker_ratio(symbol, period=period)
 
-    async def fetch_global_ls_ratio(
-        self, symbol: str, *, period: str = "1h"
-    ) -> float | None:
+    async def fetch_global_ls_ratio(self, symbol: str, *, period: str = "1h") -> float | None:
         return await self._binance_client.fetch_global_ls_ratio(symbol, period=period)
 
     async def fetch_funding_rate_history(
@@ -485,9 +505,7 @@ class BinanceFuturesMarketData:
     ) -> list[dict[str, Any]]:
         return await self._binance_client.fetch_funding_rate_history(symbol, limit=limit)
 
-    async def fetch_agg_trade_snapshot(
-        self, symbol: str, *, limit: int = 100
-    ) -> AggTradeSnapshot:
+    async def fetch_agg_trade_snapshot(self, symbol: str, *, limit: int = 100) -> AggTradeSnapshot:
         return await self._binance_client.fetch_agg_trade_snapshot(symbol, limit=limit)
 
     async def fetch_agg_trades(
@@ -522,10 +540,12 @@ class BinanceFuturesMarketData:
         if self._ws is not None:
             # Assuming WS manager has a similar state method
             ws_state = getattr(self._ws, "state_snapshot", lambda: {})()
-        
+
         # Merge states (binance state takes precedence for conflicts)
         state = {**ws_state, **binance_state}
-        state["ws_manager_available"] = self._ws is not None and getattr(self._ws, "is_connected", lambda: False)()
+        state["ws_manager_available"] = (
+            self._ws is not None and getattr(self._ws, "is_connected", lambda: False)()
+        )
         return state
 
     async def preflight_check(self) -> None:
@@ -539,9 +559,7 @@ class BinanceFuturesMarketData:
     ) -> float | None:
         return self._binance_client.get_cached_oi_change(symbol, period, max_age_s)
 
-    def get_cached_open_interest(
-        self, symbol: str, max_age_s: float = 1800.0
-    ) -> float | None:
+    def get_cached_open_interest(self, symbol: str, max_age_s: float = 1800.0) -> float | None:
         return self._binance_client.get_cached_open_interest(symbol, max_age_s)
 
     def get_cached_ls_ratio(

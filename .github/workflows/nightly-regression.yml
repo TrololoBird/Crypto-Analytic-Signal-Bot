@@ -34,7 +34,7 @@ jobs:
         run: python -m compileall -q bot
 
       - name: Validate config
-        run: python scripts/validate_config.py --config config.toml
+        run: python scripts/validate_config.py --config config.toml.example
 
       - name: Live Binance public API tests
         run: pytest tests/live/ -v -m live

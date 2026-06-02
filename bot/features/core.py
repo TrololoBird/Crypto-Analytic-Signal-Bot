@@ -295,7 +295,10 @@ def add_core_features(
         (column for column in ("close_time", "time", "open_time") if column in work.columns),
         None,
     )
-    if time_column is not None and getattr(work.schema.get(time_column), "is_temporal", lambda: False)():
+    if (
+        time_column is not None
+        and getattr(work.schema.get(time_column), "is_temporal", lambda: False)()
+    ):
         temp_vwap = work.with_columns(
             [
                 price_dev_sq.alias("_vwap_dev_sq"),

@@ -1,29 +1,28 @@
 ---
-description: v9 package layout — where to put new code during refactor
+description: v9 package layout — canonical imports after Phase 1–2 de-bloat
 alwaysApply: true
 ---
 
-# v9 Architecture (scaffold active)
+# v9 Architecture (canonical)
 
-Import from v9 packages for new code; legacy root modules remain until Phase 2 move.
+Import from v9 packages only. Root legacy shims and duplicate trees are removed.
 
 | Package | Role | Import example |
 |---|---|---|
 | `bot/domain/` | Config, schemas, contracts | `from bot.domain import BotSettings` |
 | `bot/market/` | REST, WS, universe, enrichments | `from bot.market import BinanceFuturesMarketData, FuturesWSManager` |
+| `bot/features/` | Polars pipeline | `from bot.features import prepare_symbol` |
 | `bot/runtime/` | Bot loop, analyzers, handlers | `from bot.runtime import SignalBot, SymbolAnalyzer` |
 | `bot/persistence/` | Tracking, outcomes, diary | `from bot.persistence import SignalTracker` |
 | `bot/engine/` | Strategy registry + executor | `from bot.engine import SignalEngine, StrategyRegistry` |
-| `bot/strategies/` | Setup detectors (38) | `from bot.strategies import ...` |
-| `bot/delivery.py` | Signal delivery (→ `bot/delivery/` Phase 2) | keep existing imports for now |
-| `bot/features.py` | Polars pipeline (→ `bot/features/` Phase 2) | keep existing imports for now |
-| `bot/messaging.py` | Telegram broadcasters | delivery path only |
+| `bot/strategies/` | 38 setup detectors (single tree) | `from bot.strategies import ...` |
+| `bot/setups/` | Shared SMC, `spec_runtime`, utils — **not** duplicate detectors | `from bot.setups.spec_runtime import SpecDetectorSetup` |
+| `bot/delivery/` | Contract, confluence, orchestrator, telegram | `from bot.delivery import deliver` |
 
-## Phase order
+## Phase order (complete for structure)
 
-1. **Phase 1** (now): scaffold + delete duplicates — do NOT split monoliths yet
-2. **Phase 2**: move code into `market/`, rename `features.py` → `features/` package
-3. **Phase 3**: slim `runtime/`, shrink `symbol_analyzer`
-4. **Phase 4**: strategy wave rewrites
+1. **Phase 1–2** ✅ — scaffold + de-bloat + `features/` / `delivery/` packages
+2. **Phase 3** — slim analyzer (partial)
+3. **Phase 4** — strategy calibration waves (ops)
 
-Full matrix: `docs/REFACTOR_PLAN.md`
+Full matrix: `docs/REFACTOR_PLAN.md` · Canon: `docs/research/ARCHITECTURE_CANONICAL.md`

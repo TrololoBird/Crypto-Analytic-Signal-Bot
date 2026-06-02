@@ -20,16 +20,31 @@ UTC = timezone.utc
 LOG = logging.getLogger("bot.diary_store")
 
 TRADE_COLS = [
-    "id", "linked_signal_id", "decision",
-    "entry_price", "entry_time",
-    "size_amount", "leverage", "risk_percent",
-    "sl_price", "sl_source",
-    "tp_prices", "tp_hit_level",
-    "exit_price", "exit_time", "exit_reason",
-    "pnl_percent", "pnl_usd",
-    "mood", "tags", "notes", "screenshot_path",
+    "id",
+    "linked_signal_id",
+    "decision",
+    "entry_price",
+    "entry_time",
+    "size_amount",
+    "leverage",
+    "risk_percent",
+    "sl_price",
+    "sl_source",
+    "tp_prices",
+    "tp_hit_level",
+    "exit_price",
+    "exit_time",
+    "exit_reason",
+    "pnl_percent",
+    "pnl_usd",
+    "mood",
+    "tags",
+    "notes",
+    "screenshot_path",
     "bot_signal_snapshot",
-    "created_at", "closed_at", "updated_at",
+    "created_at",
+    "closed_at",
+    "updated_at",
 ]
 
 
@@ -104,21 +119,14 @@ class DiaryStore:
 
     async def get_trade(self, trade_id: str) -> dict[str, Any] | None:
         conn = self._conn_or_raise()
-        async with conn.execute(
-            "SELECT * FROM trader_diary WHERE id = ?", (trade_id,)
-        ) as cursor:
+        async with conn.execute("SELECT * FROM trader_diary WHERE id = ?", (trade_id,)) as cursor:
             row = await cursor.fetchone()
         return _row_to_dict(row) if row else None
 
-    async def update_trade(
-        self, trade_id: str, updates: dict[str, Any]
-    ) -> dict[str, Any] | None:
+    async def update_trade(self, trade_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
         conn = self._conn_or_raise()
         now = datetime.now(UTC).isoformat()
-        safe_updates = {
-            k: v for k, v in updates.items()
-            if k in TRADE_COLS and k != "id"
-        }
+        safe_updates = {k: v for k, v in updates.items() if k in TRADE_COLS and k != "id"}
         safe_updates["updated_at"] = now
         if "tp_prices" in safe_updates and isinstance(safe_updates["tp_prices"], list):
             safe_updates["tp_prices"] = json.dumps(safe_updates["tp_prices"])
@@ -127,9 +135,7 @@ class DiaryStore:
         if "bot_signal_snapshot" in safe_updates and isinstance(
             safe_updates["bot_signal_snapshot"], dict
         ):
-            safe_updates["bot_signal_snapshot"] = json.dumps(
-                safe_updates["bot_signal_snapshot"]
-            )
+            safe_updates["bot_signal_snapshot"] = json.dumps(safe_updates["bot_signal_snapshot"])
         set_clause = ", ".join(f"{k} = :{k}" for k in safe_updates)
         safe_updates["id"] = trade_id
         await conn.execute(
@@ -151,17 +157,20 @@ class DiaryStore:
         mood: str | None = None,
         notes: str | None = None,
     ) -> dict[str, Any] | None:
-        return await self.update_trade(trade_id, {
-            "exit_price": exit_price,
-            "exit_time": exit_time,
-            "exit_reason": exit_reason,
-            "pnl_percent": pnl_percent,
-            "pnl_usd": pnl_usd,
-            "tp_hit_level": tp_hit_level,
-            "mood": mood,
-            "notes": notes,
-            "closed_at": exit_time,
-        })
+        return await self.update_trade(
+            trade_id,
+            {
+                "exit_price": exit_price,
+                "exit_time": exit_time,
+                "exit_reason": exit_reason,
+                "pnl_percent": pnl_percent,
+                "pnl_usd": pnl_usd,
+                "tp_hit_level": tp_hit_level,
+                "mood": mood,
+                "notes": notes,
+                "closed_at": exit_time,
+            },
+        )
 
     async def list_trades(
         self,
@@ -195,8 +204,7 @@ class DiaryStore:
             params.append(to_date)
         where = " AND ".join(conditions) if conditions else "1"
         query = (
-            f"SELECT * FROM trader_diary WHERE {where} "
-            f"ORDER BY entry_time DESC LIMIT ? OFFSET ?"
+            f"SELECT * FROM trader_diary WHERE {where} ORDER BY entry_time DESC LIMIT ? OFFSET ?"
         )
         params.extend([max(1, int(limit)), max(0, int(offset))])
         async with conn.execute(query, params) as cursor:
@@ -275,15 +283,9 @@ class DiaryStore:
                 "avg_pnl_percent": round(summary_row["avg_pnl_pct"] or 0.0, 2),
                 "avg_pnl_usd": round(summary_row["avg_pnl_usd"] or 0.0, 2),
             },
-            "by_decision": [
-                dict(r) for r in decision_rows
-            ],
-            "by_outcome": [
-                dict(r) for r in outcome_rows
-            ],
-            "by_mood": [
-                dict(r) for r in mood_rows
-            ],
+            "by_decision": [dict(r) for r in decision_rows],
+            "by_outcome": [dict(r) for r in outcome_rows],
+            "by_mood": [dict(r) for r in mood_rows],
             "calendar": [
                 {
                     "day": r["day"],

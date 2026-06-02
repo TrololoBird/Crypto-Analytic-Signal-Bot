@@ -14,6 +14,7 @@ from typing import Any, TYPE_CHECKING, cast
 
 from .live import DashboardLiveData
 from .live_audit import audit_snapshot, build_dashboard_audit_snapshot
+from .operator_alerts import build_live_operator_alerts
 from .ws_broadcast import DashboardWSBroadcaster
 from ..persistence.diary_store import DiaryStore
 
@@ -28,6 +29,7 @@ try:
     from fastapi import FastAPI, WebSocket, WebSocketDisconnect
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import HTMLResponse
+
     HAS_FASTAPI = True
 except ImportError:
     FastAPI = None
@@ -50,9 +52,7 @@ class BotDashboard:
         self._enabled = HAS_FASTAPI
         self.app: FastAPI | None = None
         self._strategies_cache: list[dict[str, Any]] | None = None
-        self._analytics_cache: dict[
-            tuple[str, int, str | None], tuple[float, dict[str, Any]]
-        ] = {}
+        self._analytics_cache: dict[tuple[str, int, str | None], tuple[float, dict[str, Any]]] = {}
         self._decision_cache: dict[
             tuple[int, int], tuple[float, tuple[tuple[str, float], ...], dict[str, Any]]
         ] = {}
@@ -103,9 +103,12 @@ class BotDashboard:
             return
         try:
             from fastapi.staticfiles import StaticFiles
+
             static_dir = _STATIC_DIR
             if static_dir.exists():
-                self.app.mount("/static", StaticFiles(directory=str(static_dir)), name="dashboard_static")
+                self.app.mount(
+                    "/static", StaticFiles(directory=str(static_dir)), name="dashboard_static"
+                )
         except Exception:
             LOG.debug("failed to mount static files directory")
 
@@ -209,6 +212,13 @@ class BotDashboard:
 
             self._analytics_cache[cache_key] = (now, merged)
             return merged
+
+        @self.app.get("/api/strategy/decisions")
+        async def strategy_decisions_spec(
+            limit_files: int = 1,
+            max_rows: int = 1_000,
+        ) -> dict[str, Any]:
+            return await strategy_decisions(limit_files=limit_files, max_rows=max_rows)
 
         @self.app.get("/api/analytics/strategy-decisions")
         async def strategy_decisions(
@@ -366,9 +376,8 @@ class BotDashboard:
                 LOG.exception("dashboard live telegram preview error")
                 return {"error": "live_telegram_preview_unavailable", "detail": str(exc)}
 
-        # ── WebSocket endpoint ──────────────────────────────────────────
-        @self.app.websocket("/api/v1/ws")
-        async def dashboard_ws(ws: WebSocket) -> None:
+        # ── WebSocket endpoints (spec: /ws/dashboard; canonical: /api/v1/ws) ──
+        async def _handle_dashboard_ws(ws: WebSocket) -> None:
             broadcaster = self._ws_broadcaster
             if broadcaster is None:
                 await ws.close(code=1011, reason="ws_broadcaster_unavailable")
@@ -382,6 +391,14 @@ class BotDashboard:
             finally:
                 await broadcaster.disconnect(ws)
 
+        @self.app.websocket("/api/v1/ws")
+        async def dashboard_ws(ws: WebSocket) -> None:
+            await _handle_dashboard_ws(ws)
+
+        @self.app.websocket("/ws/dashboard")
+        async def dashboard_ws_legacy(ws: WebSocket) -> None:
+            await _handle_dashboard_ws(ws)
+
         # ── API v1 endpoints ─────────────────────────────────────────────
         @self.app.get("/api/v1/status")
         async def v1_status() -> dict[str, Any]:
@@ -393,7 +410,9 @@ class BotDashboard:
 
         @self.app.get("/api/v1/signals/history")
         async def v1_signals_history(
-            limit: int = 20, symbol: str = "", setup_id: str = "",
+            limit: int = 20,
+            symbol: str = "",
+            setup_id: str = "",
         ) -> list[dict[str, Any]]:
             signals = self._get_recent_signals(limit=max(1, min(int(limit), 100)))
             if symbol:
@@ -420,9 +439,28 @@ class BotDashboard:
 
         @self.app.get("/api/v1/strategies/health")
         async def v1_strategies_health() -> list[dict[str, Any]]:
-            cached = self._strategies_cache or []
+            cached = [dict(item) for item in (self._strategies_cache or [])]
+            decisions = await asyncio.to_thread(
+                self._live_data.decisions,
+                limit=41,
+                max_rows=50_000,
+            )
+            zero_ids = {
+                str(row.get("setup_id") or "")
+                for row in (decisions.get("zero_signal_setups") or [])
+            }
+            setup_rates = {
+                str(row.get("setup_id") or ""): row
+                for row in (decisions.get("setup_reports") or [])
+            }
             for item in cached:
+                setup_id = str(item.get("id") or "")
                 item["status"] = item.get("status", "beta")
+                decision_row = setup_rates.get(setup_id) or {}
+                item["zero_hit"] = setup_id in zero_ids
+                item["detector_rows"] = int(decision_row.get("total") or 0)
+                item["detector_signals"] = int(decision_row.get("signals") or 0)
+                item["detector_signal_rate"] = float(decision_row.get("signal_rate") or 0.0)
             return cached
 
         @self.app.get("/api/v1/market/regime")
@@ -508,7 +546,7 @@ class BotDashboard:
         @self.app.get("/api/v1/strategies/correlation")
         async def v1_strategies_correlation(limit: int = 41) -> dict[str, Any]:
             catalog = self._strategies_cache or []
-            setup_ids = [s["id"] for s in catalog[:max(10, min(limit, 41))]]
+            setup_ids = [s["id"] for s in catalog[: max(10, min(limit, 41))]]
             return {"strategies": setup_ids, "matrix": []}
 
         @self.app.get("/api/v1/analytics/confluence-heatmap")
@@ -582,27 +620,49 @@ class BotDashboard:
         # ── Alerts ──────────────────────────────────────────────────────
         @self.app.get("/api/v1/alerts")
         async def v1_alerts(limit: int = 50, since: str = "") -> list[dict[str, Any]]:
+            cap = max(1, min(int(limit), 200))
+            rows: list[dict[str, Any]] = []
             try:
                 settings = getattr(self.bot, "settings", None)
-                if settings is None:
-                    return []
-                telemetry_dir = getattr(settings, "telemetry_dir", None)
-                if telemetry_dir is None:
-                    return []
-                runs_dir = Path(telemetry_dir) / "runs"
-                if not runs_dir.exists():
-                    return []
-                candidates = sorted(
-                    runs_dir.glob("*/analysis/alerts*.jsonl"),
-                    key=lambda p: p.stat().st_mtime, reverse=True,
-                )
-                if not candidates:
-                    return []
-                rows = self._read_recent_jsonl(candidates[0], limit=max(1, min(limit, 200)))
-                return rows
+                telemetry_dir = getattr(settings, "telemetry_dir", None) if settings else None
+                if telemetry_dir is not None:
+                    runs_dir = Path(telemetry_dir) / "runs"
+                    if runs_dir.exists():
+                        candidates = sorted(
+                            runs_dir.glob("*/analysis/alerts*.jsonl"),
+                            key=lambda p: p.stat().st_mtime,
+                            reverse=True,
+                        )
+                        if candidates:
+                            rows = self._read_recent_jsonl(candidates[0], limit=cap)
             except Exception as exc:
-                LOG.debug("alerts fetch error: %s", exc)
-                return []
+                LOG.debug("alerts telemetry fetch error: %s", exc)
+            try:
+                live_rows = await asyncio.to_thread(
+                    build_live_operator_alerts,
+                    self.bot,
+                    self._live_data,
+                )
+            except Exception as exc:
+                LOG.debug("alerts live synthesis error: %s", exc)
+                live_rows = []
+            merged = live_rows + [
+                row
+                for row in rows
+                if not any(
+                    row.get("type") == live.get("type")
+                    and row.get("setup_id") == live.get("setup_id")
+                    for live in live_rows
+                )
+            ]
+            if since:
+                since_key = str(since).strip()
+                merged = [
+                    row
+                    for row in merged
+                    if str(row.get("ts") or row.get("timestamp") or "") >= since_key
+                ]
+            return merged[:cap]
 
         # ── Sandbox ─────────────────────────────────────────────────────
         @self.app.post("/api/v1/sandbox/replay")
@@ -621,12 +681,32 @@ class BotDashboard:
         async def v1_sandbox_result(job_id: str) -> dict[str, Any]:
             return {"job_id": job_id, "status": "pending", "progress": 0}
 
+        @self.app.get("/api/live/ws-health")
+        async def live_ws_health() -> dict[str, Any]:
+            try:
+                runtime = await asyncio.to_thread(self._live_data.runtime)
+                ws_snapshot = runtime.get("ws_snapshot") if isinstance(runtime, dict) else {}
+                health = await self.bot.health_check()
+                return {
+                    "generated_at": datetime.now(UTC).isoformat(),
+                    "ws_connected": bool(health.get("ws_connected")),
+                    "health_status": health.get("status"),
+                    "ws_snapshot": ws_snapshot if isinstance(ws_snapshot, dict) else {},
+                    "latest_runtime": runtime.get("latest_runtime")
+                    if isinstance(runtime, dict)
+                    else {},
+                }
+            except Exception as exc:
+                LOG.exception("dashboard live ws-health error")
+                return {"error": "ws_health_unavailable", "detail": str(exc)}
+
         @self.app.get("/api/live/public-audit")
         async def live_public_audit() -> dict[str, Any]:
-            ledger = getattr(self.bot, "public_audit", None)
-            if ledger is None:
-                return {"enabled": False, "files": []}
-            return await asyncio.to_thread(ledger.latest_manifest)
+            return await self._public_audit_manifest()
+
+        @self.app.get("/api/v1/public-audit")
+        async def v1_public_audit() -> dict[str, Any]:
+            return await self._public_audit_manifest()
 
         @self.app.get("/api/live/audit")
         async def live_audit(max_rows: int = 20_000) -> dict[str, Any]:
@@ -655,6 +735,12 @@ class BotDashboard:
             except Exception as exc:
                 LOG.exception("dashboard live audit error")
                 return {"error": "live_audit_unavailable", "detail": str(exc)}
+
+    async def _public_audit_manifest(self) -> dict[str, Any]:
+        ledger = getattr(self.bot, "public_audit", None)
+        if ledger is None:
+            return {"enabled": False, "files": []}
+        return await asyncio.to_thread(ledger.latest_manifest)
 
     def _cache_strategies(self) -> None:
         """Pre-load and cache strategies at startup."""
@@ -837,7 +923,9 @@ class BotDashboard:
         signals = self._get_recent_signals(limit=limit * 2)
         killzone = self._compute_killzone()
         regime_data = self._get_market_regime()
-        regime_label = regime_data.get("regime", "unknown") if isinstance(regime_data, dict) else "unknown"
+        regime_label = (
+            regime_data.get("regime", "unknown") if isinstance(regime_data, dict) else "unknown"
+        )
         out = []
         for sig in signals[:limit]:
             score = float(sig.get("score") or sig.get("confluence_score") or 0.0)
@@ -1151,9 +1239,7 @@ class BotDashboard:
             return []
         stem = filename.removesuffix(".jsonl")
         current_run_id = self._current_run_id()
-        current_file = (
-            runs_dir / current_run_id / "analysis" / filename if current_run_id else None
-        )
+        current_file = runs_dir / current_run_id / "analysis" / filename if current_run_id else None
         files = sorted(
             runs_dir.glob(f"*/analysis/{stem}*.jsonl"),
             key=lambda path: path.stat().st_mtime,

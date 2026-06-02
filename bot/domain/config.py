@@ -57,7 +57,12 @@ class RuntimeConfig(BaseModel):
     strict_data_quality: bool = True
     emit_strategy_routing_skips: bool = True
     route_all_enabled_strategies: bool = False
-    max_setup_families_per_symbol: int = Field(default=15, ge=1, le=38)
+    enable_strategy_lanes: bool = True
+    min_setup_families_per_symbol: int = Field(default=8, ge=8, le=15)
+    target_setup_families_per_symbol: int = Field(default=12, ge=8, le=15)
+    max_setup_families_per_symbol: int = Field(default=15, ge=8, le=15)
+    allow_trigger_interval_fallback: bool = True
+    allow_timeframe_fallback: bool = True
     analysis_kline_intervals: tuple[str, ...] = ("5m", "15m", "1h")
     diagnostic_trace_limit_per_symbol: int = Field(default=20, ge=0, le=500)
     # Startup throttling to prevent REST API flood
@@ -84,6 +89,21 @@ class RuntimeConfig(BaseModel):
         if isinstance(value, str):
             return (value.strip(),)
         return tuple(str(item).strip() for item in value if str(item).strip())
+
+    @model_validator(mode="after")
+    def _validate_setup_family_bounds(self) -> "RuntimeConfig":
+        if not (
+            self.min_setup_families_per_symbol
+            <= self.target_setup_families_per_symbol
+            <= self.max_setup_families_per_symbol
+        ):
+            raise ValueError(
+                "runtime setup family caps must satisfy: "
+                "min_setup_families_per_symbol <= "
+                "target_setup_families_per_symbol <= "
+                "max_setup_families_per_symbol"
+            )
+        return self
 
 
 class UniverseConfig(BaseModel):
@@ -343,8 +363,30 @@ class DeliveryConfig(BaseModel):
 
     action_min_score: float = Field(default=0.72, ge=0.0, le=1.0)
     watch_min_score: float = Field(default=0.55, ge=0.0, le=1.0)
+    anchor_action_score_delta: float = Field(
+        default=0.04,
+        ge=0.0,
+        le=0.15,
+        description="Extra min score for ACTION on benchmark anchor symbols (BENCHMARK_ANCHORS)",
+    )
+    metal_action_score_delta: float = Field(
+        default=0.02,
+        ge=0.0,
+        le=0.10,
+        description="Additional ACTION score bump for XAU/XAG/PAXG on top of anchor delta",
+    )
+    action_cap_per_cycle: int = Field(default=6, ge=1, le=80)
+    watch_cap_per_cycle: int = Field(default=12, ge=1, le=80)
     r_class_watch_only: bool = True
     public_audit_enabled: bool = True
+
+    @model_validator(mode="after")
+    def _validate_tier_caps(self) -> "DeliveryConfig":
+        if self.watch_cap_per_cycle < self.action_cap_per_cycle:
+            raise ValueError(
+                "delivery.watch_cap_per_cycle must be >= delivery.action_cap_per_cycle"
+            )
+        return self
 
 
 class AlertConfig(BaseModel):
@@ -437,13 +479,7 @@ class IntelligenceConfig(BaseModel):
     regime_detector: Literal["legacy", "hmm", "gmm_var", "composite"] = "composite"
     max_consecutive_stop_losses: int = Field(default=3, ge=1, le=20)
     stop_loss_pause_hours: int = Field(default=5, ge=0, le=168)
-    benchmark_symbols: tuple[str, ...] = (
-        "BTCUSDT",
-        "ETHUSDT",
-        "SOLUSDT",
-        "XAUUSDT",
-        "XAGUSDT",
-    )
+    benchmark_symbols: tuple[str, ...] = REQUIRED_PINNED_SYMBOLS
     option_underlyings: tuple[str, ...] = ("BTC", "ETH")
     macro_symbols: tuple[str, ...] = ("^VIX", "DX-Y.NYB", "^TNX", "^GSPC")
 

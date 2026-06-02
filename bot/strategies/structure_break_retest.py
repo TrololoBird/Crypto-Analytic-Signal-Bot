@@ -1,21 +1,85 @@
-"""structure_break_retest — structure break (переприор) + retest.
-
-# WINDSURF_REVIEW: unified + vectorized + 1H context + graded
-"""
+"""structure_break_retest — detector in setups/detectors/."""
 
 from __future__ import annotations
 
 from ..domain.config import BotSettings
-from ..features import _swing_points
+from ..setups.spec_runtime import SpecDetectorSetup
+
+
+import polars as pl
+
+from ._common import SpecHit, as_float, with_spec_columns, _latest_values
+
+__all__ = ["detect_structure_break_retest"]
 from ..domain.schemas import PreparedSymbol, Signal
-from ..setups.base import BaseSetup
 from ..setups import _build_signal, _compute_dynamic_score, _reject
-from ..setups.utils import (
-    build_structural_targets,
-    get_dynamic_params,
-    validate_rr_or_penalty,
-)
-from ..setups.detectors import build_spec_signal, detect_structure_break_retest
+from ..setups.utils import build_structural_targets, validate_rr_or_penalty, coerce_int
+from ..features import _swing_points
+from ..setups.spec_runtime import run_setup_detection
+
+
+def detect_structure_break_retest(
+    frame: pl.DataFrame,
+    *,
+    timeframe: str = "15m",
+    lookback: int = 20,
+    tolerance_pct: float = 0.001,
+) -> SpecHit | None:
+    work = with_spec_columns(frame)
+    if work.height < 25:
+        return None
+    current = _latest_values(work)
+    atr = current.get("spec_atr14", 0.0)
+    if atr <= 0.0:
+        return None
+    close = current["close"]
+    low = current["low"]
+    high = current["high"]
+    current_idx = int(work.item(-1, "_spec_idx"))
+    candidates = work.tail(lookback + 2).head(lookback + 1).to_dicts()
+    for row in reversed(candidates):
+        idx = int(row["_spec_idx"])
+        age = current_idx - idx
+        if age < 1 or age > lookback:
+            continue
+        break_close = as_float(row.get("close"))
+        prev_high = as_float(row.get("spec_prev_high20"))
+        prev_low = as_float(row.get("spec_prev_low20"))
+        if min(break_close, prev_high, prev_low) <= 0.0:
+            continue
+        if (
+            break_close > prev_high
+            and low <= prev_high * (1.0 + tolerance_pct)
+            and close > prev_high
+        ):
+            return SpecHit(
+                strategy="structure_break_retest",
+                direction="long",
+                entry=prev_high,
+                stop_basis=min(low, prev_high - atr * 0.25),
+                atr=atr,
+                timeframe=timeframe,
+                reasons=(f"bos_retest_level={prev_high:.4f}", f"break_age={age}"),
+                structure_clarity=0.72,
+                vol_ratio=current.get("volume_ratio20", 1.0),
+                rsi=current.get("rsi14", 50.0),
+                source_index=idx,
+            )
+        if break_close < prev_low and high >= prev_low * (1.0 - tolerance_pct) and close < prev_low:
+            return SpecHit(
+                strategy="structure_break_retest",
+                direction="short",
+                entry=prev_low,
+                stop_basis=max(high, prev_low + atr * 0.25),
+                atr=atr,
+                timeframe=timeframe,
+                reasons=(f"bos_retest_level={prev_low:.4f}", f"break_age={age}"),
+                structure_clarity=0.72,
+                vol_ratio=current.get("volume_ratio20", 1.0),
+                rsi=current.get("rsi14", 50.0),
+                source_index=idx,
+            )
+    return None
 
 
 def _as_float(value: object, default: float = 0.0) -> float:
@@ -81,11 +145,302 @@ def _detect_15m_range_retest(
     return None
 
 
-class StructureBreakRetestSetup(BaseSetup):
+def _detect_structure_break_retest_extended(
+    prepared: PreparedSymbol,
+    settings: BotSettings,
+    defaults: dict[str, float],
+    effective: dict[str, float],
+    setup_id: str,
+    family: str,
+) -> Signal | None:
+    dynamic_params = effective
+
+    swing_lookback = max(
+        2,
+        coerce_int(dynamic_params.get("swing_lookback"), int(defaults["swing_lookback"])),
+    )
+    retest_atr_mult = float(
+        dynamic_params.get(
+            "retest_atr_mult",
+            dynamic_params.get("retest_atr_tol", defaults["retest_atr_tol"]),
+        )
+    )
+    sl_buffer_atr = float(dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]))
+
+    work_1h = prepared.work_1h
+    work_15m = prepared.work_15m
+
+    if work_1h.height < 10 or work_15m.height < 5:
+        _reject(prepared, setup_id, "insufficient_bars")
+        return None
+
+    atr_1h = _as_float(work_1h.item(-1, "atr14"))
+    if atr_1h <= 0.0:
+        _reject(prepared, setup_id, "atr_non_positive", atr_1h=atr_1h)
+        return None
+
+    # 1H context for 15M signals (not 4H - too lagging for <4h trades)
+    regime_1h = prepared.regime_1h_confirmed
+    bias_1h = prepared.bias_1h
+
+    sh_mask, sl_mask = _swing_points(work_1h, n=swing_lookback, include_unconfirmed_tail=True)
+    if not sh_mask.any() and not sl_mask.any():
+        _reject(prepared, setup_id, "no_swing_points")
+        return None
+
+    trig_close = _as_float(work_15m.item(-1, "close"))
+    atr = _as_float(work_15m.item(-1, "atr14"))
+    if atr <= 0.0:
+        _reject(prepared, setup_id, "atr_non_positive_15m", atr=atr)
+        return None
+
+    direction: str | None = None
+    broken_level: float | None = None
+    breakout_bar_idx: int | None = None
+    used_15m_fallback = False
+    fallback_reason: str | None = None
+
+    min_vol_breakout = dynamic_params.get("min_vol_breakout", defaults["min_vol_breakout"])
+    breakout_threshold = dynamic_params.get("breakout_threshold", defaults["breakout_threshold"])
+
+    if regime_1h != "uptrend" and sh_mask.any():
+        sh_positions = [idx for idx, is_swing in enumerate(sh_mask.to_list()) if is_swing]
+        if len(sh_positions) > 0:
+            last_sh_pos = sh_positions[-1]
+            last_sh_price = float(work_1h["high"][last_sh_pos])
+            lookback_start = max(last_sh_pos + 1, work_1h.height - 24)
+            breakout_detected = False
+            for i in range(lookback_start, work_1h.height):
+                bar_close = float(work_1h.item(i, "close"))
+                vol_ratio_bar = _as_float(work_1h.item(i, "volume_ratio20"), 1.0)
+                if bar_close > last_sh_price * (1 + breakout_threshold):
+                    if vol_ratio_bar >= min_vol_breakout:
+                        breakout_detected = True
+                        broken_level = last_sh_price
+                        breakout_bar_idx = i
+                        break
+            if breakout_detected and broken_level is not None:
+                retest_distance = abs(trig_close - broken_level)
+                if retest_distance < atr * retest_atr_mult and trig_close > broken_level * 1.001:
+                    direction = "long"
+
+    if regime_1h != "downtrend" and sl_mask.any() and direction is None:
+        sl_positions = [idx for idx, is_swing in enumerate(sl_mask.to_list()) if is_swing]
+        if len(sl_positions) > 0:
+            last_sl_pos = sl_positions[-1]
+            last_sl_price = float(work_1h["low"][last_sl_pos])
+            lookback_start = max(last_sl_pos + 1, work_1h.height - 24)
+            breakout_detected = False
+            for i in range(lookback_start, work_1h.height):
+                bar_close = float(work_1h.item(i, "close"))
+                vol_ratio_bar = _as_float(work_1h.item(i, "volume_ratio20"), 1.0)
+                if bar_close < last_sl_price * (1 - breakout_threshold):
+                    if vol_ratio_bar >= min_vol_breakout:
+                        breakout_detected = True
+                        broken_level = last_sl_price
+                        breakout_bar_idx = i
+                        break
+            if breakout_detected and broken_level is not None:
+                retest_distance = abs(trig_close - broken_level)
+                if retest_distance < atr * retest_atr_mult and trig_close < broken_level * 0.999:
+                    direction = "short"
+
+    if direction is None or broken_level is None:
+        if (
+            float(
+                dynamic_params.get(
+                    "enable_15m_range_fallback",
+                    defaults["enable_15m_range_fallback"],
+                )
+            )
+            > 0.0
+        ):
+            fallback = _detect_15m_range_retest(
+                work_15m,
+                min_vol_breakout=float(min_vol_breakout),
+                breakout_threshold=float(breakout_threshold),
+                retest_atr_mult=retest_atr_mult,
+                fallback_lookback_bars=int(
+                    dynamic_params.get(
+                        "fallback_lookback_bars",
+                        defaults["fallback_lookback_bars"],
+                    )
+                ),
+            )
+            if fallback is not None:
+                direction, broken_level, fallback_reason = fallback
+                breakout_bar_idx = work_1h.height - 1
+                used_15m_fallback = True
+        if direction is None or broken_level is None:
+            _reject(prepared, setup_id, "no_breakout_detected", regime=regime_1h)
+            return None
+    broken_level_value = broken_level
+    if not used_15m_fallback and (
+        breakout_bar_idx is None or breakout_bar_idx < work_1h.height - 4
+    ):
+        _reject(
+            prepared,
+            setup_id,
+            "stale_breakout_retest",
+            breakout_bar_idx=breakout_bar_idx,
+        )
+        return None
+
+    vol_ratio = _as_float(
+        work_15m.item(-1, "volume_ratio20")
+        if used_15m_fallback
+        else work_1h.item(-1, "volume_ratio20"),
+        1.0,
+    )
+
+    reasons = [
+        f"1h broken level={broken_level_value:.4f}",
+        f"direction={direction}",
+        f"1h regime={regime_1h}",
+        f"breakout_bar_idx={breakout_bar_idx}",
+        f"retest confirmed vol_ratio={vol_ratio:.2f}",
+    ]
+    if fallback_reason is not None:
+        reasons.append(fallback_reason)
+
+    price_anchor = broken_level_value
+    reasons.append(f"limit_entry={price_anchor:.4f}")
+
+    # --- Compute structural SL/TP via unified utility ---
+    stop, tp1, tp2 = build_structural_targets(
+        direction=direction,
+        price_anchor=price_anchor,
+        stop_basis=broken_level_value,
+        atr=atr,
+        work_1h=work_1h,
+        min_rr=dynamic_params.get("min_rr", defaults["min_rr"]),
+        sl_buffer_atr=sl_buffer_atr,
+        sh_mask=sh_mask,
+        sl_mask=sl_mask,
+        breakout_bar_idx=breakout_bar_idx,
+        broken_level=broken_level_value,
+    )
+    if direction == "long":
+        stop = min(stop, broken_level_value - sl_buffer_atr * atr)
+    else:
+        stop = max(stop, broken_level_value + sl_buffer_atr * atr)
+    risk = abs(price_anchor - stop)
+    if risk <= 0.0:
+        _reject(prepared, setup_id, "invalid_stop", stop=stop)
+        return None
+
+    min_rr = dynamic_params.get("min_rr", defaults["min_rr"])
+    if tp1 is None or abs(tp1 - price_anchor) < risk * float(min_rr):
+        tp1 = (
+            price_anchor + risk * float(min_rr)
+            if direction == "long"
+            else price_anchor - risk * float(min_rr)
+        )
+        reasons.append(f"tp1_rr_fallback_{float(min_rr):.2f}")
+    if tp2 is None or abs(tp2 - price_anchor) <= abs(tp1 - price_anchor):
+        tp2 = (
+            price_anchor + risk * max(2.0, float(min_rr) + 0.35)
+            if direction == "long"
+            else price_anchor - risk * max(2.0, float(min_rr) + 0.35)
+        )
+
+    # Graded RR validation (penalty instead of reject)
+    is_valid_rr, _ = validate_rr_or_penalty(price_anchor, stop, tp1, min_rr)
+
+    base_score = dynamic_params.get("base_score", defaults["base_score"])
+    score = _compute_dynamic_score(
+        direction=direction,
+        base_score=base_score,
+        vol_ratio=vol_ratio,
+        structure_clarity=0.7,
+    )
+
+    # Graded scoring instead of reject for bias mismatch
+    if direction == "long" and bias_1h == "downtrend":
+        score *= dynamic_params.get("bias_mismatch_penalty", defaults["bias_mismatch_penalty"])
+        reasons.append("bias_mismatch_penalty")
+    if direction == "short" and bias_1h == "uptrend":
+        score *= dynamic_params.get("bias_mismatch_penalty", defaults["bias_mismatch_penalty"])
+        reasons.append("bias_mismatch_penalty")
+
+    # TP too close penalty
+    if not is_valid_rr and tp1 is not None:
+        score *= dynamic_params.get("tp_too_close_penalty", defaults["tp_too_close_penalty"])
+        reasons.append("tp_too_close_penalty")
+
+    final_tp1 = tp1 if tp1 is not None else price_anchor
+    final_tp2 = tp2 if tp2 is not None else final_tp1
+    if final_tp1 <= 0.0 or final_tp2 <= 0.0:
+        _reject(prepared, setup_id, "invalid_targets", tp1=tp1, tp2=tp2)
+        return None
+
+    return _build_signal(
+        prepared=prepared,
+        setup_id=setup_id,
+        direction=direction,
+        score=score,
+        timeframe="15m+1h",
+        reasons=reasons,
+        strategy_family=family,
+        stop=stop,
+        tp1=final_tp1,
+        tp2=final_tp2,
+        price_anchor=price_anchor,
+        atr=atr,
+    )
+
+
+def detect_structure_break_retest_setup(
+    prepared: PreparedSymbol,
+    settings: BotSettings,
+    defaults: dict[str, float],
+    effective: dict[str, float],
+    setup_id: str,
+    family: str,
+) -> Signal | None:
+    spec_kwargs = None
+    return run_setup_detection(
+        prepared=prepared,
+        settings=settings,
+        setup_id=setup_id,
+        family=family,
+        defaults=defaults,
+        effective=effective,
+        spec_detect=detect_structure_break_retest,
+        extended_detect=_detect_structure_break_retest_extended,
+        spec_kwargs=spec_kwargs,
+    )
+
+
+__all__ = [
+    "detect_structure_break_retest",
+    "detect_structure_break_retest_setup",
+    "_detect_structure_break_retest_extended",
+]
+
+
+class StructureBreakRetestSetup(SpecDetectorSetup):
     setup_id = "structure_break_retest"
     family = "breakout"
     confirmation_profile = "breakout_acceptance"
     required_context = ("futures_flow",)
+
+    DEFAULTS = {
+        "base_score": 0.62,
+        "swing_lookback": 3,
+        "min_vol_breakout": 1.3,
+        "retest_atr_tol": 0.5,
+        "retest_atr_mult": 0.5,
+        "fallback_lookback_bars": 12,
+        "sl_buffer_atr": 0.5,
+        "breakout_threshold": 0.002,
+        "bias_mismatch_penalty": 0.75,
+        "tp_too_close_penalty": 0.75,
+        "min_rr": 1.9,
+        "enable_15m_range_fallback": 1.0,
+    }
+
+    detect_setup = detect_structure_break_retest_setup
 
     def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
         """Tunable parameters for self-learner optimization."""
@@ -111,259 +466,5 @@ class StructureBreakRetestSetup(BaseSetup):
                     return {**defaults, **setups_config.get(self.setup_id, {})}
         return defaults
 
-    def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
-        setup_id = self.setup_id
-        dynamic_params = get_dynamic_params(prepared, setup_id)
-        defaults = self.get_optimizable_params(settings)
 
-        hit = detect_structure_break_retest(prepared.work_15m, timeframe="15m")
-        if hit is not None:
-            return build_spec_signal(
-                prepared=prepared,
-                settings=settings,
-                setup_id=setup_id,
-                family=self.family,
-                hit=hit,
-                defaults=defaults,
-                params=dynamic_params,
-            )
-
-        from ..setups.utils import coerce_int
-
-        swing_lookback = max(
-            2,
-            coerce_int(dynamic_params.get("swing_lookback"), int(defaults["swing_lookback"])),
-        )
-        retest_atr_mult = float(
-            dynamic_params.get(
-                "retest_atr_mult",
-                dynamic_params.get("retest_atr_tol", defaults["retest_atr_tol"]),
-            )
-        )
-        sl_buffer_atr = float(dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]))
-
-        work_1h = prepared.work_1h
-        work_15m = prepared.work_15m
-
-        if work_1h.height < 10 or work_15m.height < 5:
-            _reject(prepared, setup_id, "insufficient_bars")
-            return None
-
-        atr_1h = _as_float(work_1h.item(-1, "atr14"))
-        if atr_1h <= 0.0:
-            _reject(prepared, setup_id, "atr_non_positive", atr_1h=atr_1h)
-            return None
-
-        # 1H context for 15M signals (not 4H - too lagging for <4h trades)
-        regime_1h = prepared.regime_1h_confirmed
-        bias_1h = prepared.bias_1h
-
-        sh_mask, sl_mask = _swing_points(work_1h, n=swing_lookback, include_unconfirmed_tail=True)
-        if not sh_mask.any() and not sl_mask.any():
-            _reject(prepared, setup_id, "no_swing_points")
-            return None
-
-        trig_close = _as_float(work_15m.item(-1, "close"))
-        atr = _as_float(work_15m.item(-1, "atr14"))
-        if atr <= 0.0:
-            _reject(prepared, setup_id, "atr_non_positive_15m", atr=atr)
-            return None
-
-        direction: str | None = None
-        broken_level: float | None = None
-        breakout_bar_idx: int | None = None
-        used_15m_fallback = False
-        fallback_reason: str | None = None
-
-        min_vol_breakout = dynamic_params.get("min_vol_breakout", defaults["min_vol_breakout"])
-        breakout_threshold = dynamic_params.get(
-            "breakout_threshold", defaults["breakout_threshold"]
-        )
-
-        if regime_1h != "uptrend" and sh_mask.any():
-            sh_positions = [idx for idx, is_swing in enumerate(sh_mask.to_list()) if is_swing]
-            if len(sh_positions) > 0:
-                last_sh_pos = sh_positions[-1]
-                last_sh_price = float(work_1h["high"][last_sh_pos])
-                lookback_start = max(last_sh_pos + 1, work_1h.height - 24)
-                breakout_detected = False
-                for i in range(lookback_start, work_1h.height):
-                    bar_close = float(work_1h.item(i, "close"))
-                    vol_ratio_bar = _as_float(work_1h.item(i, "volume_ratio20"), 1.0)
-                    if bar_close > last_sh_price * (1 + breakout_threshold):
-                        if vol_ratio_bar >= min_vol_breakout:
-                            breakout_detected = True
-                            broken_level = last_sh_price
-                            breakout_bar_idx = i
-                            break
-                if breakout_detected and broken_level is not None:
-                    retest_distance = abs(trig_close - broken_level)
-                    if (
-                        retest_distance < atr * retest_atr_mult
-                        and trig_close > broken_level * 1.001
-                    ):
-                        direction = "long"
-
-        if regime_1h != "downtrend" and sl_mask.any() and direction is None:
-            sl_positions = [idx for idx, is_swing in enumerate(sl_mask.to_list()) if is_swing]
-            if len(sl_positions) > 0:
-                last_sl_pos = sl_positions[-1]
-                last_sl_price = float(work_1h["low"][last_sl_pos])
-                lookback_start = max(last_sl_pos + 1, work_1h.height - 24)
-                breakout_detected = False
-                for i in range(lookback_start, work_1h.height):
-                    bar_close = float(work_1h.item(i, "close"))
-                    vol_ratio_bar = _as_float(work_1h.item(i, "volume_ratio20"), 1.0)
-                    if bar_close < last_sl_price * (1 - breakout_threshold):
-                        if vol_ratio_bar >= min_vol_breakout:
-                            breakout_detected = True
-                            broken_level = last_sl_price
-                            breakout_bar_idx = i
-                            break
-                if breakout_detected and broken_level is not None:
-                    retest_distance = abs(trig_close - broken_level)
-                    if (
-                        retest_distance < atr * retest_atr_mult
-                        and trig_close < broken_level * 0.999
-                    ):
-                        direction = "short"
-
-        if direction is None or broken_level is None:
-            if float(
-                dynamic_params.get(
-                    "enable_15m_range_fallback",
-                    defaults["enable_15m_range_fallback"],
-                )
-            ) > 0.0:
-                fallback = _detect_15m_range_retest(
-                    work_15m,
-                    min_vol_breakout=float(min_vol_breakout),
-                    breakout_threshold=float(breakout_threshold),
-                    retest_atr_mult=retest_atr_mult,
-                    fallback_lookback_bars=int(
-                        dynamic_params.get(
-                            "fallback_lookback_bars",
-                            defaults["fallback_lookback_bars"],
-                        )
-                    ),
-                )
-                if fallback is not None:
-                    direction, broken_level, fallback_reason = fallback
-                    breakout_bar_idx = work_1h.height - 1
-                    used_15m_fallback = True
-            if direction is None or broken_level is None:
-                _reject(prepared, setup_id, "no_breakout_detected", regime=regime_1h)
-                return None
-        broken_level_value = broken_level
-        if (
-            not used_15m_fallback
-            and (breakout_bar_idx is None or breakout_bar_idx < work_1h.height - 4)
-        ):
-            _reject(
-                prepared,
-                setup_id,
-                "stale_breakout_retest",
-                breakout_bar_idx=breakout_bar_idx,
-            )
-            return None
-
-        vol_ratio = _as_float(
-            work_15m.item(-1, "volume_ratio20") if used_15m_fallback else work_1h.item(-1, "volume_ratio20"),
-            1.0,
-        )
-
-        reasons = [
-            f"1h broken level={broken_level_value:.4f}",
-            f"direction={direction}",
-            f"1h regime={regime_1h}",
-            f"breakout_bar_idx={breakout_bar_idx}",
-            f"retest confirmed vol_ratio={vol_ratio:.2f}",
-        ]
-        if fallback_reason is not None:
-            reasons.append(fallback_reason)
-
-        price_anchor = broken_level_value
-        reasons.append(f"limit_entry={price_anchor:.4f}")
-
-        # --- Compute structural SL/TP via unified utility ---
-        stop, tp1, tp2 = build_structural_targets(
-            direction=direction,
-            price_anchor=price_anchor,
-            stop_basis=broken_level_value,
-            atr=atr,
-            work_1h=work_1h,
-            min_rr=dynamic_params.get("min_rr", defaults["min_rr"]),
-            sl_buffer_atr=sl_buffer_atr,
-            sh_mask=sh_mask,
-            sl_mask=sl_mask,
-            breakout_bar_idx=breakout_bar_idx,
-            broken_level=broken_level_value,
-        )
-        if direction == "long":
-            stop = min(stop, broken_level_value - sl_buffer_atr * atr)
-        else:
-            stop = max(stop, broken_level_value + sl_buffer_atr * atr)
-        risk = abs(price_anchor - stop)
-        if risk <= 0.0:
-            _reject(prepared, setup_id, "invalid_stop", stop=stop)
-            return None
-
-        min_rr = dynamic_params.get("min_rr", defaults["min_rr"])
-        if tp1 is None or abs(tp1 - price_anchor) < risk * float(min_rr):
-            tp1 = (
-                price_anchor + risk * float(min_rr)
-                if direction == "long"
-                else price_anchor - risk * float(min_rr)
-            )
-            reasons.append(f"tp1_rr_fallback_{float(min_rr):.2f}")
-        if tp2 is None or abs(tp2 - price_anchor) <= abs(tp1 - price_anchor):
-            tp2 = (
-                price_anchor + risk * max(2.0, float(min_rr) + 0.35)
-                if direction == "long"
-                else price_anchor - risk * max(2.0, float(min_rr) + 0.35)
-            )
-
-        # Graded RR validation (penalty instead of reject)
-        is_valid_rr, _ = validate_rr_or_penalty(price_anchor, stop, tp1, min_rr)
-
-        base_score = dynamic_params.get("base_score", defaults["base_score"])
-        score = _compute_dynamic_score(
-            direction=direction,
-            base_score=base_score,
-            vol_ratio=vol_ratio,
-            structure_clarity=0.7,
-        )
-
-        # Graded scoring instead of reject for bias mismatch
-        if direction == "long" and bias_1h == "downtrend":
-            score *= dynamic_params.get("bias_mismatch_penalty", defaults["bias_mismatch_penalty"])
-            reasons.append("bias_mismatch_penalty")
-        if direction == "short" and bias_1h == "uptrend":
-            score *= dynamic_params.get("bias_mismatch_penalty", defaults["bias_mismatch_penalty"])
-            reasons.append("bias_mismatch_penalty")
-
-        # TP too close penalty
-        if not is_valid_rr and tp1 is not None:
-            score *= dynamic_params.get("tp_too_close_penalty", defaults["tp_too_close_penalty"])
-            reasons.append("tp_too_close_penalty")
-
-        final_tp1 = tp1 if tp1 is not None else price_anchor
-        final_tp2 = tp2 if tp2 is not None else final_tp1
-        if final_tp1 <= 0.0 or final_tp2 <= 0.0:
-            _reject(prepared, setup_id, "invalid_targets", tp1=tp1, tp2=tp2)
-            return None
-
-        return _build_signal(
-            prepared=prepared,
-            setup_id=setup_id,
-            direction=direction,
-            score=score,
-            timeframe="15m+1h",
-            reasons=reasons,
-            strategy_family=self.family,
-            stop=stop,
-            tp1=final_tp1,
-            tp2=final_tp2,
-            price_anchor=price_anchor,
-            atr=atr,
-        )
+__all__ = ["StructureBreakRetestSetup"]

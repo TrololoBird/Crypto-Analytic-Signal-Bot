@@ -88,9 +88,7 @@ class HealthManager:
                     str(symbol).strip().upper()
                     for symbol in self._bot.settings.universe.pinned_symbols
                 }
-                pinned_count = sum(
-                    1 for item in shortlist if item.symbol.upper() in pinned_symbols
-                )
+                pinned_count = sum(1 for item in shortlist if item.symbol.upper() in pinned_symbols)
                 dynamic_count = len(shortlist) - pinned_count
                 LOG.info(
                     "shortlist health | total=%d pinned=%d dynamic=%d "

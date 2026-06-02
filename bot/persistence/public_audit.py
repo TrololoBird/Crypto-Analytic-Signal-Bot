@@ -5,8 +5,9 @@ from __future__ import annotations
 import csv
 import hashlib
 import logging
-from dataclasses import dataclass
-from datetime import UTC, datetime
+from collections import deque
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Lock
 from typing import Any
@@ -70,8 +71,20 @@ class PublicAuditLedger:
         self._root = root_dir
         self._enabled = enabled
         self._lock = Lock()
+        self._action_history: deque[tuple[Signal, datetime]] = deque(maxlen=256)
         if enabled:
             self._root.mkdir(parents=True, exist_ok=True)
+
+    def recent_action_signals(
+        self,
+        *,
+        within_hours: float = 4.0,
+        now: datetime | None = None,
+    ) -> list[Signal]:
+        """Delivered ACTION signals within the merge conflict window."""
+        resolved = (now or datetime.now(UTC)).astimezone(UTC)
+        cutoff = resolved - timedelta(hours=max(0.0, within_hours))
+        return [signal for signal, delivered_at in self._action_history if delivered_at >= cutoff]
 
     def _paths_for_day(self, day: datetime) -> tuple[Path, Path]:
         stamp = day.strftime("%Y%m%d")
@@ -103,6 +116,9 @@ class PublicAuditLedger:
             message_id=message_id,
         )
         self._append_row(row)
+        if str(tier).lower() == "action":
+            delivered_at = datetime.now(UTC)
+            self._action_history.append((replace(signal, created_at=delivered_at), delivered_at))
 
     def _append_row(self, row: AuditRow) -> None:
         with self._lock:

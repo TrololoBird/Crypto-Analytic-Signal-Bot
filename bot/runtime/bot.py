@@ -333,6 +333,7 @@ class SignalBot:
         trigger: str = "modern_engine",
         event_ts: datetime | None = None,
         ws_enrichments: dict[str, Any] | None = None,
+        kline_interval: str | None = None,
     ) -> PipelineResult:
         return await self._symbol_analyzer.run_modern_analysis(
             item,
@@ -340,6 +341,7 @@ class SignalBot:
             trigger=trigger,
             event_ts=event_ts,
             ws_enrichments=ws_enrichments,
+            kline_interval=kline_interval,
         )
 
     def _select_and_rank(
@@ -419,7 +421,9 @@ class SignalBot:
             await self._modern_repo.initialize()
             LOG.info("modern repository initialized | SQLite ready")
         except Exception as exc:
-            raise RuntimeError("modern repository init failed; runtime cannot track signals") from exc
+            raise RuntimeError(
+                "modern repository init failed; runtime cannot track signals"
+            ) from exc
         from ..diagnostics.config_audit import run_startup_audit
 
         run_startup_audit(self.settings)
@@ -454,7 +458,9 @@ class SignalBot:
         try:
             reconciled_outcomes = await self.tracker.reconcile_closed_outcomes()
             if reconciled_outcomes:
-                LOG.info("startup reconciled closed signal outcomes | count=%d", reconciled_outcomes)
+                LOG.info(
+                    "startup reconciled closed signal outcomes | count=%d", reconciled_outcomes
+                )
         except Exception:
             LOG.exception("startup outcome reconciliation failed")
 

@@ -151,7 +151,9 @@ class MicrostructureSnapshot:
         return cls(
             symbol=str(symbol or row.get("symbol") or "").upper(),
             direction=str(direction or row.get("direction") or "long").lower(),
-            price_change_pct=_finite_float(row.get("price_change_pct", row.get("price_change_percent"))),
+            price_change_pct=_finite_float(
+                row.get("price_change_pct", row.get("price_change_percent"))
+            ),
             funding_rate=_finite_float(row.get("funding_rate")),
             open_interest_change_pct=_pct_points(
                 row.get("open_interest_change_pct", row.get("oi_change_pct"))
@@ -169,7 +171,9 @@ class MicrostructureSnapshot:
                 )
             ),
             taker_ratio=_finite_float(row.get("taker_ratio")),
-            taker_buy_base=_finite_float(row.get("taker_buy_base", row.get("taker_buy_base_volume"))),
+            taker_buy_base=_finite_float(
+                row.get("taker_buy_base", row.get("taker_buy_base_volume"))
+            ),
             volume=_finite_float(row.get("volume")),
             bid_qty=_finite_float(row.get("bid_qty")),
             ask_qty=_finite_float(row.get("ask_qty")),
@@ -181,7 +185,9 @@ class MicrostructureSnapshot:
             liquidation_score=_finite_float(row.get("liquidation_score")),
             liquidation_long_notional=_finite_float(row.get("liquidation_long_notional")),
             liquidation_short_notional=_finite_float(row.get("liquidation_short_notional")),
-            observed_at=row.get("observed_at") if isinstance(row.get("observed_at"), datetime) else None,
+            observed_at=row.get("observed_at")
+            if isinstance(row.get("observed_at"), datetime)
+            else None,
         )
 
 
@@ -296,7 +302,9 @@ def _score_funding(snapshot: MicrostructureSnapshot) -> MicrostructureScore:
 def _score_long_short(snapshot: MicrostructureSnapshot) -> MicrostructureScore:
     ratio = snapshot.global_long_short_ratio or snapshot.top_trader_long_short_ratio
     if ratio is None or ratio <= 0.0:
-        return MicrostructureScore("long_short_ratio", 0.0, 0.15, False, "missing", None, "ls_ratio_missing")
+        return MicrostructureScore(
+            "long_short_ratio", 0.0, 0.15, False, "missing", None, "ls_ratio_missing"
+        )
     direction = _direction_sign(snapshot.direction)
     label = "neutral"
     raw = 0.0
@@ -330,7 +338,9 @@ def _score_taker(snapshot: MicrostructureSnapshot) -> MicrostructureScore:
         if buy_fraction is not None:
             ratio = buy_fraction / max(1e-9, 1.0 - buy_fraction)
     if ratio is None or ratio <= 0.0:
-        return MicrostructureScore("taker_pressure", 0.0, 0.18, False, "missing", None, "taker_missing")
+        return MicrostructureScore(
+            "taker_pressure", 0.0, 0.18, False, "missing", None, "taker_missing"
+        )
     direction = _direction_sign(snapshot.direction)
     if ratio >= 1.25:
         raw = 0.45 if direction > 0 else -0.35
@@ -390,7 +400,9 @@ def _score_book(snapshot: MicrostructureSnapshot) -> MicrostructureScore:
     ask = snapshot.ask_qty
     if bid is None or ask is None or bid + ask <= 0.0:
         if snapshot.depth_imbalance is None:
-            return MicrostructureScore("book_imbalance", 0.0, 0.12, False, "missing", None, "book_missing")
+            return MicrostructureScore(
+                "book_imbalance", 0.0, 0.12, False, "missing", None, "book_missing"
+            )
         imbalance = _clamp(snapshot.depth_imbalance, -1.0, 1.0)
     else:
         imbalance = (bid - ask) / (bid + ask)
@@ -415,9 +427,17 @@ def _score_book(snapshot: MicrostructureSnapshot) -> MicrostructureScore:
 def _score_microprice(snapshot: MicrostructureSnapshot) -> MicrostructureScore:
     bias = snapshot.microprice_bias
     if bias is None:
-        return MicrostructureScore("microprice", 0.0, 0.07, False, "missing", None, "microprice_missing")
+        return MicrostructureScore(
+            "microprice", 0.0, 0.07, False, "missing", None, "microprice_missing"
+        )
     signed = _clamp(bias, -1.0, 1.0) * _direction_sign(snapshot.direction)
-    label = "microprice_supportive" if signed >= 0.12 else "microprice_against" if signed <= -0.12 else "neutral"
+    label = (
+        "microprice_supportive"
+        if signed >= 0.12
+        else "microprice_against"
+        if signed <= -0.12
+        else "neutral"
+    )
     return MicrostructureScore(
         "microprice",
         round(_clamp(signed, -1.0, 1.0), 6),
@@ -470,7 +490,9 @@ def _score_basis(snapshot: MicrostructureSnapshot) -> MicrostructureScore:
     else:
         raw = 0.0
         label = "neutral"
-    return MicrostructureScore("basis", round(raw, 6), 0.07, True, label, basis, f"basis={basis:.4f}%:{label}")
+    return MicrostructureScore(
+        "basis", round(raw, 6), 0.07, True, label, basis, f"basis={basis:.4f}%:{label}"
+    )
 
 
 def _score_liquidations(snapshot: MicrostructureSnapshot) -> MicrostructureScore:
@@ -490,7 +512,9 @@ def _score_liquidations(snapshot: MicrostructureSnapshot) -> MicrostructureScore
     short_value = max(0.0, snapshot.liquidation_short_notional or 0.0)
     total = long_value + short_value
     if total <= 0.0:
-        return MicrostructureScore("liquidations", 0.0, 0.08, False, "missing", None, "liquidations_missing")
+        return MicrostructureScore(
+            "liquidations", 0.0, 0.08, False, "missing", None, "liquidations_missing"
+        )
     bias = (short_value - long_value) / total
     signed = bias * _direction_sign(snapshot.direction)
     label = "shorts_liquidated" if bias > 0.2 else "longs_liquidated" if bias < -0.2 else "balanced"
@@ -505,8 +529,14 @@ def _score_liquidations(snapshot: MicrostructureSnapshot) -> MicrostructureScore
     )
 
 
-def build_microstructure_context(snapshot: MicrostructureSnapshot | Mapping[str, Any]) -> MicrostructureContext:
-    item = snapshot if isinstance(snapshot, MicrostructureSnapshot) else MicrostructureSnapshot.from_mapping(snapshot)
+def build_microstructure_context(
+    snapshot: MicrostructureSnapshot | Mapping[str, Any],
+) -> MicrostructureContext:
+    item = (
+        snapshot
+        if isinstance(snapshot, MicrostructureSnapshot)
+        else MicrostructureSnapshot.from_mapping(snapshot)
+    )
     data_fields = (
         "price_change_pct",
         "funding_rate",
@@ -597,7 +627,9 @@ def add_microstructure_context_columns(
     return df.join(context_frame, on=symbol_column, how="left")
 
 
-def aggregate_microstructure_contexts(contexts: Iterable[MicrostructureContext]) -> dict[str, object]:
+def aggregate_microstructure_contexts(
+    contexts: Iterable[MicrostructureContext],
+) -> dict[str, object]:
     items = list(contexts)
     if not items:
         return {

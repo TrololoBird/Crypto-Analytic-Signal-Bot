@@ -5,6 +5,7 @@ from __future__ import annotations
 from bot.persistence.diary_store import DiaryStore
 from bot.persistence.journal import JournalReport, build_journal_report
 from bot.persistence.outcomes import SignalFeatures, SignalOutcome
+from bot.persistence.public_audit import PublicAuditLedger
 from bot.persistence.repository import (
     MemoryRepository,
     OutcomeRecord,
@@ -20,6 +21,7 @@ __all__ = [
     "JournalReport",
     "MemoryRepository",
     "OutcomeRecord",
+    "PublicAuditLedger",
     "ParquetCache",
     "SignalFeatures",
     "SignalOutcome",

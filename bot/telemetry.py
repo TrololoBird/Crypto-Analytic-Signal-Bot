@@ -192,9 +192,13 @@ class TelemetryStore:
             appended_avg_bytes = 0.0
             if last_time is None or first_new_time <= last_time:
                 existing = self._read_csv_tail(path, max(max_rows * 3, 512))
-                merged = frame if existing is None or existing.is_empty() else pl.concat(
-                    [existing, frame],
-                    how="diagonal_relaxed",
+                merged = (
+                    frame
+                    if existing is None or existing.is_empty()
+                    else pl.concat(
+                        [existing, frame],
+                        how="diagonal_relaxed",
+                    )
                 )
                 merged = merged.unique(subset=["time"], keep="last").sort("time")
                 if max_rows > 0:

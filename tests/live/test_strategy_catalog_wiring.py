@@ -6,7 +6,12 @@ import pytest
 
 from bot.domain.config import BotSettings, DeliveryConfig
 from bot.domain.delivery_policy import R_CLASS_SETUP_IDS, r_class_blocks_action
-from bot.domain.strategy_catalog import CATALOG_SETUP_IDS, PR10_WAVES, verify_strategy_wiring, wave_status
+from bot.domain.strategy_catalog import (
+    CATALOG_SETUP_IDS,
+    PR10_WAVES,
+    verify_strategy_wiring,
+    wave_status,
+)
 from bot.delivery.tiers import classify_tier
 from bot.domain.schemas import Signal
 from bot.strategies import STRATEGY_CLASSES

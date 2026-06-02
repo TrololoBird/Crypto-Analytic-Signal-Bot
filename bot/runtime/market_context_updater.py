@@ -194,7 +194,9 @@ class MarketContextUpdater:
                     ]
                 )
             )
-            benchmark_biases: dict[str, str] = {symbol: "neutral" for symbol in configured_benchmarks}
+            benchmark_biases: dict[str, str] = {
+                symbol: "neutral" for symbol in configured_benchmarks
+            }
             if self._bot._ws_manager is not None:
                 for sym in configured_benchmarks:
                     benchmark_biases[sym] = self.compute_price_bias(sym)
@@ -429,7 +431,9 @@ class MarketContextUpdater:
             label = "Extreme Greed"
         return value, label
 
-    def _liquid_ticker_rows(self, ticker_rows: list[dict[str, Any]], *, limit: int = 80) -> list[dict[str, Any]]:
+    def _liquid_ticker_rows(
+        self, ticker_rows: list[dict[str, Any]], *, limit: int = 80
+    ) -> list[dict[str, Any]]:
         min_volume = float(getattr(self._bot.settings.universe, "min_quote_volume_usd", 0.0) or 0.0)
         rows = [
             row
@@ -604,10 +608,7 @@ class MarketContextUpdater:
             pairs.append(("ETH", proxy))
             narrative.append("corr: используется 24h co-direction proxy до прогрева 1h klines")
 
-        rendered = [
-            f"{label} {corr:+.2f} {self._corr_strength(corr)}"
-            for label, corr in pairs
-        ]
+        rendered = [f"{label} {corr:+.2f} {self._corr_strength(corr)}" for label, corr in pairs]
         for label, corr in pairs:
             if label == "ETH":
                 if corr >= 0.65:
@@ -659,9 +660,13 @@ class MarketContextUpdater:
             funding_sentiment=regime.funding_sentiment,
         )
         if risk_label == "risk-off":
-            practical = "рынок больше поддерживает short или осторожный режим; long фильтровать строже"
+            practical = (
+                "рынок больше поддерживает short или осторожный режим; long фильтровать строже"
+            )
         elif risk_label == "risk-on":
-            practical = "рынок поддерживает continuation/breakout long; short требует сильного свипа"
+            practical = (
+                "рынок поддерживает continuation/breakout long; short требует сильного свипа"
+            )
         else:
             practical = "рынок смешанный; приоритет сетапам с подтвержденной ликвидностью и объемом"
 
@@ -822,9 +827,10 @@ class MarketContextUpdater:
             ]
         )
         now = time.monotonic()
-        if key == self._last_market_state_alert_key and (
-            now - self._last_market_state_alert_at
-        ) < 900.0:
+        if (
+            key == self._last_market_state_alert_key
+            and (now - self._last_market_state_alert_at) < 900.0
+        ):
             return
 
         stats: dict[str, Any] = {}

@@ -174,10 +174,7 @@ def supertrend_series(
         else:
             direction[idx] = direction[idx - 1]
 
-    line = [
-        final_lower[idx] if direction[idx] == 1 else final_upper[idx]
-        for idx in range(size)
-    ]
+    line = [final_lower[idx] if direction[idx] == 1 else final_upper[idx] for idx in range(size)]
     return (
         pl.Series("supertrend", line, dtype=pl.Float64),
         pl.Series("supertrend_dir", direction, dtype=pl.Int8),
