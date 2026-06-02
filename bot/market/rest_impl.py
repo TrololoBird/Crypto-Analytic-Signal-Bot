@@ -56,6 +56,7 @@ from bot.market.rest_frames import (
 LOG = logging.getLogger("bot.market.rest")
 
 
+from bot.market.network_proxy import apply_proxy_env, resolve_proxy_url
 from bot.market.rest_abc import BinanceClient
 from bot.market.rest_http import RestHttpMixin
 
@@ -69,7 +70,13 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         ws_manager: Any = None,  # FuturesWSManager | None
         rest_timeout_seconds: float = 20.0,
         futures_data_request_limit_per_5m: int = _FUTURES_DATA_IP_LIMIT_DEFAULT,
+        proxy_url: str | None = None,
+        trust_env: bool = True,
     ) -> None:
+        self._proxy_url = resolve_proxy_url(config_url=proxy_url, trust_env=trust_env)
+        self._trust_env = trust_env
+        if self._proxy_url:
+            apply_proxy_env(self._proxy_url)
         self._rest_timeout = rest_timeout_seconds
         self._futures_data_limit_per_5m = max(
             30,

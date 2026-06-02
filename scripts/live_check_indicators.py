@@ -69,6 +69,8 @@ async def _run(symbols: list[str], concurrency: int) -> None:
             LIVE_CHECK_HTTP_TIMEOUT_SECONDS,
         ),
         futures_data_request_limit_per_5m=settings.runtime.futures_data_request_limit_per_5m,
+        proxy_url=settings.network.proxy_url,
+        trust_env=settings.network.trust_env,
     )
     client = BinanceFuturesMarketData(binance_client=binance_client)
     try:

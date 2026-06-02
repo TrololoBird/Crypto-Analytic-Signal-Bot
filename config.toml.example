@@ -48,6 +48,13 @@ auto_open_dashboard = false
 metrics_host = "127.0.0.1"
 metrics_port = 9090
 
+# Binance is geo-blocked in some regions (e.g. Russia). Route via a local proxy client.
+# Examples: socks5h://127.0.0.1:7890 (Clash/Mihomo), socks5h://127.0.0.1:9050 (Tor)
+# Or set BINANCE_PROXY_URL / HTTPS_PROXY in .env (see docs/BINANCE_PROXY_RU.md).
+[bot.network]
+proxy_url = ""
+trust_env = true
+
 [bot.universe]
 quote_asset = "USDT"
 dynamic_limit = 120

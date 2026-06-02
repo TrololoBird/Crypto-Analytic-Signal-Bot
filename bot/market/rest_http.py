@@ -27,6 +27,10 @@ from bot.market.data import (
     _PublicEndpointSpec,
     _PUBLIC_ENDPOINT_REGISTRY,
 )
+from bot.market.network_proxy import (
+    aiohttp_request_proxy,
+    create_aiohttp_session,
+)
 from bot.market.rest_validators import (
     validate_order_book_depth_limit,
     validate_runtime_public_rest_url,
@@ -62,7 +66,8 @@ class RestHttpMixin:
         try:
             async with _REST_GLOBAL_SEMAPHORE:
                 session = await self._get_http_session()
-                async with session.get(url, params=params) as response:
+                request_proxy = aiohttp_request_proxy(session, getattr(self, "_proxy_url", None))
+                async with session.get(url, params=params, proxy=request_proxy) as response:
                     headers = response.headers
                     status = int(response.status)
                     if status == 418:
@@ -399,13 +404,11 @@ class RestHttpMixin:
         session = self._http_session
         if session is None or session.closed:
             timeout = aiohttp.ClientTimeout(total=self._rest_timeout)
-            connector = aiohttp.TCPConnector(
-                limit=_HTTP_CONNECTOR_LIMIT,
-                resolver=aiohttp.ThreadedResolver(),
-            )
-            self._http_session = aiohttp.ClientSession(
+            self._http_session = create_aiohttp_session(
+                proxy_url=getattr(self, "_proxy_url", None),
+                trust_env=bool(getattr(self, "_trust_env", True)),
                 timeout=timeout,
-                connector=connector,
+                connector_limit=_HTTP_CONNECTOR_LIMIT,
             )
         return cast(aiohttp.ClientSession, self._http_session)
 

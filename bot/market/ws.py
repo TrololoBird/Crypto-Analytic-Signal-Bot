@@ -300,9 +300,15 @@ class FuturesWSManager:
         self,
         rest_client: BinanceFuturesMarketData,
         config: WSConfig,
+        *,
+        proxy_url: str | None = None,
+        trust_env: bool = True,
     ) -> None:
         self._rest = rest_client
         self._cfg = config
+        inner = getattr(rest_client, "_binance_client", None)
+        self._proxy_url = proxy_url or getattr(inner, "_proxy_url", None)
+        self._trust_env = trust_env if proxy_url else getattr(inner, "_trust_env", trust_env)
         self._symbols: list[str] = []
         self._tracked_symbols: list[str] = []
         self._lock = asyncio.Lock()

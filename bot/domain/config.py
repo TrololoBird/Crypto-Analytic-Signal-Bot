@@ -508,6 +508,23 @@ class IntelligenceConfig(BaseModel):
         return tuple(str(item).strip() for item in (value or ()) if str(item).strip())
 
 
+class NetworkConfig(BaseModel):
+    """Egress proxy for Binance public REST/WebSocket (Russia/geo-blocked regions).
+
+    Prefer a local client (Clash/Mihomo/V2Ray) exposing SOCKS5 on 127.0.0.1 without
+    embedding third-party proxy lists in the bot.
+    """
+
+    proxy_url: str | None = None
+    trust_env: bool = True
+
+    @field_validator("proxy_url")
+    @classmethod
+    def _normalize_proxy_url(cls, value: str | None) -> str | None:
+        raw = str(value or "").strip()
+        return raw or None
+
+
 class WSConfig(BaseModel):
     """WebSocket configuration.
 
@@ -636,6 +653,7 @@ class BotSettings(BaseModel):
     filters: FilterConfig = Field(default_factory=FilterConfig)
     tracking: TrackingConfig = Field(default_factory=TrackingConfig)
     setups: SetupConfig = Field(default_factory=SetupConfig)
+    network: NetworkConfig = Field(default_factory=NetworkConfig)
     ws: WSConfig = Field(default_factory=WSConfig)
     scoring: ScoringConfig = Field(default_factory=ScoringConfig)
     delivery: DeliveryConfig = Field(default_factory=DeliveryConfig)
@@ -884,6 +902,11 @@ def load_settings(config_path: str | Path = "config.toml") -> BotSettings:
     if not isinstance(setup_overrides, dict):
         setup_overrides = {}
         filters_payload["setups"] = setup_overrides
+    network_payload = payload.setdefault("network", {})
+    if isinstance(network_payload, dict):
+        env_proxy = str(os.getenv("BINANCE_PROXY_URL", "") or "").strip()
+        if env_proxy:
+            network_payload["proxy_url"] = env_proxy
     legacy_overrides = _load_legacy_strategy_overrides(config_file.parent)
     for setup_id, legacy_params in legacy_overrides.items():
         existing = setup_overrides.get(setup_id)

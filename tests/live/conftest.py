@@ -20,11 +20,15 @@ def _restricted_location_reason(exc: MarketDataUnavailable) -> str | None:
 
 
 async def _probe_binance_access() -> str | None:
+    from bot.domain.config import load_settings
     from bot.market.rest import BinanceClientImpl
 
+    settings = load_settings()
     binance_client = BinanceClientImpl(
         rest_timeout_seconds=30.0,
         futures_data_request_limit_per_5m=1200,
+        proxy_url=settings.network.proxy_url,
+        trust_env=settings.network.trust_env,
     )
     market = BinanceFuturesMarketData(binance_client=binance_client)
     try:

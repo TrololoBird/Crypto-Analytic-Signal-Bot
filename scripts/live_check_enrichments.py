@@ -260,9 +260,16 @@ async def _run(
                 LIVE_CHECK_HTTP_TIMEOUT_SECONDS,
             ),
             futures_data_request_limit_per_5m=settings.runtime.futures_data_request_limit_per_5m,
+            proxy_url=settings.network.proxy_url,
+            trust_env=settings.network.trust_env,
         ),
     )
-    ws_manager = FuturesWSManager(client, settings.ws)
+    ws_manager = FuturesWSManager(
+        client,
+        settings.ws,
+        proxy_url=settings.network.proxy_url,
+        trust_env=settings.network.trust_env,
+    )
 
     try:
         # Start WebSocket to get live data

@@ -94,9 +94,16 @@ async def _run(
             LIVE_CHECK_HTTP_TIMEOUT_SECONDS,
         ),
         futures_data_request_limit_per_5m=settings.runtime.futures_data_request_limit_per_5m,
+        proxy_url=settings.network.proxy_url,
+        trust_env=settings.network.trust_env,
     )
     client = BinanceFuturesMarketData(binance_client=binance_client)
-    ws_manager = FuturesWSManager(client, settings.ws)
+    ws_manager = FuturesWSManager(
+        client,
+        settings.ws,
+        proxy_url=settings.network.proxy_url,
+        trust_env=settings.network.trust_env,
+    )
     try:
         _assert_public_endpoint("/fapi/v1/exchangeInfo")
         exchange_symbols = await client.fetch_exchange_symbols()

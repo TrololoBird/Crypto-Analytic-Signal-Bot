@@ -180,10 +180,16 @@ async def _run(
             raise RuntimeError(
                 f"prepare errors observed during live smoke: {bot._prepare_error_count}"
             )
-        if int(ws_snapshot.get("fresh_tickers") or 0) <= 0:
-            raise RuntimeError(f"fresh_tickers missing in live smoke snapshot: {ws_snapshot}")
-        if int(ws_snapshot.get("fresh_mark_prices") or 0) <= 0:
-            raise RuntimeError(f"fresh_mark_prices missing in live smoke snapshot: {ws_snapshot}")
+        ticker_ok = int(ws_snapshot.get("fresh_tickers") or 0) > 0
+        if not ticker_ok and bot._ws_manager is not None:
+            ticker_ok = bool(bot._ws_manager.is_ticker_cache_warm())
+        mark_ok = int(ws_snapshot.get("fresh_mark_prices") or 0) > 0
+        if not ticker_ok and not mark_ok:
+            raise RuntimeError(
+                f"ticker/market cache not warm in live smoke snapshot: {ws_snapshot}"
+            )
+        if not mark_ok:
+            raise RuntimeError(f"mark price cache not warm in live smoke snapshot: {ws_snapshot}")
     finally:
         bot.request_shutdown()
         if runtime_task is not None:

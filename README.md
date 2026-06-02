@@ -25,6 +25,15 @@ python main.py
 
 Dashboard (when `[live]` installed): http://127.0.0.1:8080 — metrics: http://127.0.0.1:9090/metrics
 
+### Binance from Russia / geo-blocked networks
+
+Binance public API may be unreachable without a proxy. Configure a **local** SOCKS5/HTTP client (Clash, Mihomo, Tor) — see [docs/BINANCE_PROXY_RU.md](docs/BINANCE_PROXY_RU.md).
+
+```powershell
+$env:BINANCE_PROXY_URL = "socks5h://127.0.0.1:7890"
+python scripts/probe_binance_access.py
+```
+
 ## Architecture (v9)
 
 ```
@@ -96,6 +105,7 @@ On geo-restricted networks (including some GitHub Actions regions), live tests *
 - [docs/CURSOR_SETUP.md](docs/CURSOR_SETUP.md) — editor, venv, skills
 - [docs/MARKET_DATA_PRINCIPLES.md](docs/MARKET_DATA_PRINCIPLES.md) — public data only
 - [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) — package usage map
+- [docs/BINANCE_PROXY_RU.md](docs/BINANCE_PROXY_RU.md) — proxy/VPN for geo-blocked regions
 - [docs/research/README.md](docs/research/README.md) — strategy research spec
 - [AGENTS.md](AGENTS.md) — agent / graphify rules
 

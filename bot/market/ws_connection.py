@@ -11,6 +11,8 @@ from typing import Any
 
 import websockets
 
+from bot.market.network_proxy import websockets_connect_kwargs
+
 LOG = logging.getLogger("bot.ws_manager")
 _WS_PING_INTERVAL_SECONDS = 20.0
 _WS_PING_TIMEOUT_SECONDS = 60.0
@@ -119,12 +121,16 @@ async def run_stream_session(
     Returns:
         Tuple (backoff_reset, proactive_reconnect_triggered).
     """
+    proxy_url = getattr(manager, "_proxy_url", None)
+    trust_env = bool(getattr(manager, "_trust_env", True))
+    connect_kwargs = websockets_connect_kwargs(proxy_url=proxy_url, trust_env=trust_env)
     ws = await asyncio.wait_for(
         websockets.connect(
             url,
             ping_interval=_WS_PING_INTERVAL_SECONDS,
             ping_timeout=_WS_PING_TIMEOUT_SECONDS,
             close_timeout=_WS_CLOSE_TIMEOUT_SECONDS,
+            **connect_kwargs,
         ),
         timeout=_WS_CONNECT_TIMEOUT_SECONDS,
     )

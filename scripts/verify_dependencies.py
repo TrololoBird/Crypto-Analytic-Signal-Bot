@@ -12,6 +12,8 @@ CORE_MODULES = (
     "dotenv",
     "polars",
     "aiohttp",
+    "aiohttp_socks",
+    "python_socks",
     "numpy",
     "aiogram",
     "websockets",

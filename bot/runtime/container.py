@@ -65,6 +65,8 @@ def build_application_container(
         binance_client=BinanceClientImpl(
             rest_timeout_seconds=settings.ws.rest_timeout_seconds,
             futures_data_request_limit_per_5m=settings.runtime.futures_data_request_limit_per_5m,
+            proxy_url=settings.network.proxy_url,
+            trust_env=settings.network.trust_env,
         )
     )
 
@@ -75,7 +77,12 @@ def build_application_container(
     )
     ws_manager: FuturesWSManager | None = None
     if settings.ws.enabled and isinstance(client, BinanceFuturesMarketData):
-        ws_manager = FuturesWSManager(client, settings.ws)
+        ws_manager = FuturesWSManager(
+            client,
+            settings.ws,
+            proxy_url=settings.network.proxy_url,
+            trust_env=settings.network.trust_env,
+        )
         ws_manager.set_event_bus(bus)
         if hasattr(client, "_ws"):
             client._ws = ws_manager
