@@ -350,7 +350,9 @@ def _contract_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "failure_rate": round(failed / checked, 4) if checked else 0.0,
         "issues": failed_rows[:20],
         "issue_counts": _counter_map(issue_counter),
-        "fields": {field: int(field_counter.get(field, 0)) for field in _empty_contract_summary()["fields"]},
+        "fields": {
+            field: int(field_counter.get(field, 0)) for field in _empty_contract_summary()["fields"]
+        },
     }
 
 

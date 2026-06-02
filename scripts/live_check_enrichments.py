@@ -231,9 +231,7 @@ def _collect_ws_enrichments(
             and short_flow.delta_ratio is not None
             and long_flow.delta_ratio is not None
         ):
-            enrichments["aggression_shift"] = float(
-                short_flow.delta_ratio - long_flow.delta_ratio
-            )
+            enrichments["aggression_shift"] = float(short_flow.delta_ratio - long_flow.delta_ratio)
             enrichments["orderflow_source"] = "agg_trade"
 
     if context_ages:

@@ -1,4 +1,5 @@
 """Run the bot until a target Moscow time, then stop gracefully."""
+
 from __future__ import annotations
 
 import argparse
@@ -25,9 +26,7 @@ def _parse_target(value: str) -> datetime:
         raise argparse.ArgumentTypeError(f"invalid time: {value!r}")
     now_msk = datetime.now(MSK)
     if fmt == "%H:%M":
-        target = now_msk.replace(
-            hour=parsed.hour, minute=parsed.minute, second=0, microsecond=0
-        )
+        target = now_msk.replace(hour=parsed.hour, minute=parsed.minute, second=0, microsecond=0)
         if target <= now_msk:
             target = target.replace(day=target.day + 1)
     else:

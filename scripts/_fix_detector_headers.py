@@ -32,8 +32,7 @@ for path in sorted(d.glob("*.py")):
         "from __future__ import annotations\n\n"
         "import polars as pl\n\n"
         f"from ._common import {imp}\n\n"
-        f'__all__ = ["{pub_name}"]\n\n'
-        + body
+        f'__all__ = ["{pub_name}"]\n\n' + body
     )
     path.write_text(new, encoding="utf-8")
     print("fixed", path.name)

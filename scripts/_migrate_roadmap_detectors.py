@@ -1,4 +1,5 @@
 """Migrate roadmap strategy detect() bodies into bot/setups/detectors/."""
+
 from __future__ import annotations
 
 import ast
@@ -57,8 +58,7 @@ def _body_to_function(detect_src: str, func_name: str) -> str:
         "    *,\n"
         "    setup_id: str,\n"
         "    family: str,\n"
-        ") -> Signal | None:\n"
-        + body
+        ") -> Signal | None:\n" + body
     )
 
 
@@ -71,10 +71,10 @@ def main() -> None:
         '"""Roadmap strategy detectors',
         '"""Roadmap detector helpers',
     )
-    roadmap_helpers = roadmap_helpers.replace("from .common import", "from ...strategies.common import")
     roadmap_helpers = roadmap_helpers.replace(
-        "from ..setups.base import BaseSetup\n", ""
+        "from .common import", "from ...strategies.common import"
     )
+    roadmap_helpers = roadmap_helpers.replace("from ..setups.base import BaseSetup\n", "")
     (DET / "_roadmap.py").write_text(roadmap_helpers, encoding="utf-8")
 
     imports = """\"\"\"{title}\"\"\"
@@ -135,7 +135,7 @@ from ._roadmap import (
             f"from ...domain.schemas import PreparedSymbol, Signal\n"
             f"from ._roadmap import (\n    {imp_names},\n)\n\n"
         )
-        out = header + f"__all__ = [\"detect_{mod}\"]\n\n\n" + func + "\n"
+        out = header + f'__all__ = ["detect_{mod}"]\n\n\n' + func + "\n"
         (DET / f"{mod}.py").write_text(out, encoding="utf-8")
         thin = f'''from __future__ import annotations
 

@@ -4,6 +4,7 @@ Usage:
     python -m scripts.live_supervised_session --minutes 16 --snapshot-interval 60
     python -m scripts.live_supervised_session --minutes 16 --hours 4 --snapshot-interval 60
 """
+
 from __future__ import annotations
 
 import argparse
@@ -154,7 +155,9 @@ def _fetch_tracking_summary(conn: sqlite3.Connection, since_iso: str) -> dict[st
     }
     try:
         summary["active_count"] = int(
-            conn.execute("SELECT COUNT(*) FROM active_signals WHERE closed_at IS NULL").fetchone()[0]
+            conn.execute("SELECT COUNT(*) FROM active_signals WHERE closed_at IS NULL").fetchone()[
+                0
+            ]
         )
         summary["closed_since"] = int(
             conn.execute(
@@ -262,7 +265,10 @@ async def _snapshot_loop(
         totals["rejected_total"] += parsed["rejected_total"]
         totals["detector_runs_total"] += parsed["detector_runs_total"]
         totals["symbols_processed"].update(parsed["symbols_processed"])
-        tracking: dict[str, Any] = {"db": str(_tracking_db_path()), "exists": _tracking_db_path().exists()}
+        tracking: dict[str, Any] = {
+            "db": str(_tracking_db_path()),
+            "exists": _tracking_db_path().exists(),
+        }
         if tracking["exists"]:
             with sqlite3.connect(_tracking_db_path()) as conn:
                 tracking["summary"] = _fetch_tracking_summary(conn, since_iso)
@@ -359,11 +365,7 @@ async def _run_bot(
         deadline = time.time() + 15.0
         while time.time() < deadline:
             clear_stale_pid_file(_pid_file())
-            orphans = [
-                p
-                for p in find_bot_main_pids(ROOT)
-                if p != os.getpid() and _pid_is_alive(p)
-            ]
+            orphans = [p for p in find_bot_main_pids(ROOT) if p != os.getpid() and _pid_is_alive(p)]
             holder = _read_pid_value(_pid_file())
             if not orphans and (holder <= 0 or not _pid_is_alive(holder)):
                 break
@@ -504,7 +506,12 @@ async def _main_async(args: argparse.Namespace) -> int:
         LOG.info("session_gap", sleep_seconds=args.gap_seconds)
         await asyncio.sleep(float(args.gap_seconds))
 
-    rollup = ROOT / "data" / "live_watch" / f"rollup_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.json"
+    rollup = (
+        ROOT
+        / "data"
+        / "live_watch"
+        / f"rollup_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.json"
+    )
     rollup.parent.mkdir(parents=True, exist_ok=True)
     rollup.write_text(json.dumps({"sessions": summaries}, indent=2, default=str), encoding="utf-8")
     LOG.info("supervisor_finished", sessions=len(summaries), rollup=str(rollup))
@@ -514,7 +521,9 @@ async def _main_async(args: argparse.Namespace) -> int:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Supervised live bot with minute snapshots")
     parser.add_argument("--minutes", type=float, default=16.0, help="Bot run length per session")
-    parser.add_argument("--hours", type=float, default=0.0, help="Repeat sessions until elapsed (0=once)")
+    parser.add_argument(
+        "--hours", type=float, default=0.0, help="Repeat sessions until elapsed (0=once)"
+    )
     parser.add_argument("--snapshot-interval", type=float, default=60.0)
     parser.add_argument("--restart-delay", type=float, default=15.0)
     parser.add_argument("--gap-seconds", type=float, default=30.0, help="Pause between sessions")

@@ -1,4 +1,5 @@
 """One-shot: emit config/strategies/<setup_id>.toml from catalog defaults."""
+
 from __future__ import annotations
 
 from pathlib import Path

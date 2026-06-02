@@ -59,16 +59,16 @@ def _configure_logging(*, debug: bool = False) -> None:
         os.environ["DEBUG_BOT"] = "1"
     from bot.cli import configure_logging
 
-    configure_logging(settings, debug_mode=debug or os.getenv("DEBUG_BOT", "0") in ("1", "true", "yes"))
+    configure_logging(
+        settings, debug_mode=debug or os.getenv("DEBUG_BOT", "0") in ("1", "true", "yes")
+    )
     logging.captureWarnings(True)
 
 
 def _install_asyncio_exception_logging() -> None:
     loop = asyncio.get_running_loop()
 
-    def _log_exception(
-        loop: asyncio.AbstractEventLoop, context: dict[str, Any]
-    ) -> None:
+    def _log_exception(loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
         msg = context.get("exception", context.get("message"))
         logging.getLogger("asyncio").exception(
             "Unhandled asyncio exception: %s",
@@ -264,9 +264,7 @@ def main() -> None:
             args.warmup_seconds,
             runtime_seconds=max(0.0, float(args.runtime_seconds)),
             shutdown_timeout_seconds=max(1.0, float(args.shutdown_timeout_seconds)),
-            final_emergency_timeout_seconds=max(
-                1.0, float(args.final_emergency_timeout_seconds)
-            ),
+            final_emergency_timeout_seconds=max(1.0, float(args.final_emergency_timeout_seconds)),
             force_exit_on_close_timeout=bool(args.force_exit_on_close_timeout),
             run_final_emergency_cycle=not bool(args.skip_final_emergency_cycle),
         )

@@ -312,7 +312,9 @@ def _anchor_indices(
     return sorted(set(sampled))
 
 
-def _attach_current_microstructure(prepared: Any, client: BinanceFuturesMarketData, symbol: str) -> None:
+def _attach_current_microstructure(
+    prepared: Any, client: BinanceFuturesMarketData, symbol: str
+) -> None:
     prepared.oi_current = client.get_cached_open_interest(symbol)
     prepared.oi_change_pct = client.get_cached_oi_change(symbol)
     prepared.ls_ratio = client.get_cached_ls_ratio(symbol)
@@ -654,8 +656,7 @@ async def run_audit(args: argparse.Namespace) -> dict[str, Any]:
             "pass_counts": dict(gate_passed),
             "reject_counts": dict(gate_rejected),
             "outcomes": {
-                setup_id: dict(counter)
-                for setup_id, counter in sorted(gate_outcomes.items())
+                setup_id: dict(counter) for setup_id, counter in sorted(gate_outcomes.items())
             },
             "summary": _summarize_strategy_counts(
                 strategy_ids,
@@ -684,7 +685,9 @@ async def run_audit(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Replay all registered strategies over historical Binance futures klines.")
+    parser = argparse.ArgumentParser(
+        description="Replay all registered strategies over historical Binance futures klines."
+    )
     parser.add_argument(
         "--symbols",
         nargs="+",
@@ -718,11 +721,15 @@ async def main_async() -> int:
 
     failures: list[str] = []
     if int(summary["registered_count"]) != int(args.require_registered):
-        failures.append(f"registered_count={summary['registered_count']} expected={args.require_registered}")
+        failures.append(
+            f"registered_count={summary['registered_count']} expected={args.require_registered}"
+        )
     if args.require_no_zero_signals and summary["zero_signal_strategies"]:
         failures.append("zero_signal_strategies=" + ",".join(summary["zero_signal_strategies"]))
     if args.require_contract_clean and summary["contract_failures"]:
-        failures.append("contract_failures=" + json.dumps(summary["contract_failures"], sort_keys=True))
+        failures.append(
+            "contract_failures=" + json.dumps(summary["contract_failures"], sort_keys=True)
+        )
     if failures:
         for failure in failures:
             LOG.error("historical_strategy_audit_gate_failed", failure=failure)

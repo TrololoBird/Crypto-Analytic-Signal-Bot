@@ -1,7 +1,8 @@
-# Dependency manifest for crypto-signal-bot (Python 3.14).
+# Dependency manifest for crypto-signal-bot (Python 3.14.5).
 #
 # Canonical source of truth: pyproject.toml
-# Do NOT treat this file as "install everything listed below".
+# Reproducible pins:        requirements-lock.txt
+# Import smoke test:        python scripts/verify_dependencies.py
 #
 # Recommended installs:
 #   Minimal runtime (bot without dashboard/regime ML):
@@ -10,13 +11,10 @@
 #   Production live bot (dashboard, faster JSON, polars_ta):
 #     pip install -e ".[live]"
 #
-#   Regime analytics (optional HMM/GMM; bot falls back to rules without these):
-#     pip install -e ".[regime]"
-#
 #   Development (lint, typecheck, hooks, tests):
 #     pip install -e ".[dev,test]"
 #
-#   Full local workstation (everything except unused ML stack):
+#   Full local workstation:
 #     pip install -e ".[live,regime,dev,test]"
 #
 # ---------------------------------------------------------------------------
@@ -24,54 +22,33 @@
 # ---------------------------------------------------------------------------
 # python-dotenv   -> bot/secrets.py
 # polars          -> features, strategies, market data, tracking
-# aiohttp         -> binance_client, messaging, public_intelligence
+# aiohttp         -> bot/market/rest_*, delivery/messaging
 # numpy           -> features*, regime helpers, setups/smc
-# aiogram         -> bot/messaging.py Telegram delivery (live path)
-# websockets      -> bot/websocket/connection.py, ws_manager
-# aiosqlite       -> repository, migrations, diary_store, cli db helpers
+# aiogram         -> bot/delivery/telegram.py
+# websockets      -> bot/market/ws_*
+# aiosqlite       -> repository, migrations, diary_store
 # msgspec         -> domain/events, tracked_signals
-# structlog       -> logging_config, features, messaging, scripts
-# pydantic        -> domain/config.py
-# tenacity        -> bot/messaging.py retries (has stdlib fallback if missing)
+# structlog       -> logging_config, features, messaging
+# pydantic        -> domain/config.py (2.13.x; <2.14 until validated)
+# tenacity        -> bot/delivery/telegram.py retries
 #
 # ---------------------------------------------------------------------------
-# LIVE EXTRA  [live]  — dashboard + performance helpers
+# LIVE EXTRA  [live]
 # ---------------------------------------------------------------------------
-# fastapi, uvicorn          -> bot/dashboard.py (optional; dashboard disabled if missing)
-# prometheus-client         -> bot/metrics.py (optional; no-op stubs if missing)
-# orjson                    -> bot/ws_manager.py (optional; stdlib json fallback)
-# polars_ta                 -> bot/features.py (optional; pure-Polars fallback)
-# polars-ols                -> bot/features.py OLS slopes (optional; skipped if missing)
-#
-# NOT USED anywhere in repo (removed from extras):
-#   psutil — was listed but never imported
+# fastapi, uvicorn, prometheus-client, orjson, polars_ta, polars-ols
 #
 # ---------------------------------------------------------------------------
-# REGIME EXTRA  [regime]  — optional; hmm_regime/gmm_var use try/except ImportError
+# REGIME EXTRA  [regime]  — optional; ImportError fallback in bot/regime/
 # ---------------------------------------------------------------------------
-# hmmlearn, scikit-learn, statsmodels -> bot/regime/*
+# hmmlearn, scikit-learn, statsmodels
 #
 # ---------------------------------------------------------------------------
-# DEV EXTRA  [dev]
+# DEV / TEST
 # ---------------------------------------------------------------------------
-# ruff, mypy, pre-commit
+# ruff==0.15.15, mypy>=2.1.0, pre-commit, pytest, pytest-asyncio, pytest-cov
 #
 # ---------------------------------------------------------------------------
-# TEST EXTRA  [test]
+# Editable install (default for developers)
 # ---------------------------------------------------------------------------
-# pytest, pytest-cov
-#
-# ---------------------------------------------------------------------------
-# ML EXTRA  [ml]  — NOT on live path; no bot/ml/ package in tree; CI reference stale
-# ---------------------------------------------------------------------------
-# joblib, lightgbm, xgboost, optuna, pandas, pyarrow — do not install unless ML work resumes
-#
-# ---------------------------------------------------------------------------
-# ORPHAN-ONLY IMPORTS (not in core deps; modules outside main.py runtime)
-# ---------------------------------------------------------------------------
-# aiogram (again) -> bot/telegram/* polling bot (duplicate stack; live uses messaging.py)
-#
-# Pin file for tools that require requirements.txt syntax (pip freeze helpers, etc.):
-# Uncomment ONE line matching the target environment.
 
 -e .[live,dev,test]

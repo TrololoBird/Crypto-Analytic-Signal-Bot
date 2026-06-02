@@ -87,6 +87,7 @@ async def _run(
     settings = load_settings()
     # Create BinanceClient implementation
     from bot.market.rest import BinanceClientImpl
+
     binance_client = BinanceClientImpl(
         rest_timeout_seconds=min(
             float(settings.ws.rest_timeout_seconds),

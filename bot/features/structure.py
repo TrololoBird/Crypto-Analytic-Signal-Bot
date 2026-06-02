@@ -1,3 +1,9 @@
+"""Structure indicators (Ichimoku, HMA/WMA) for the Polars feature pipeline.
+
+Audited: 2026-06-02 (v9 refactor). Leading windows stay null — never coerced to 0.0.
+Positive `.shift(N)` on Ichimoku spans is historical displacement only (not live lookahead).
+"""
+
 from __future__ import annotations
 
 import math
@@ -26,16 +32,20 @@ def ichimoku_lines(
 
 def weighted_moving_average(series: pl.Series, period: int, *, name: str) -> pl.Series:
     n = max(1, int(period))
-    values = series.fill_null(strategy="forward").fill_null(0.0).to_numpy()
-    out = np.full(values.shape[0], np.nan, dtype=float)
+    values = series.to_numpy()
+    out: list[float | None] = [None] * int(values.size)
     weights = np.arange(1, n + 1, dtype=float)
     denom = float(weights.sum()) if weights.size else 1.0
 
     if values.size >= n:
         for i in range(n - 1, values.size):
             window = values[i - n + 1 : i + 1]
-            out[i] = float((window * weights).sum() / denom)
-    return pl.Series(name, out).fill_nan(0.0)
+            if np.isnan(window).any():
+                continue
+            weighted = float((window * weights).sum() / denom)
+            if math.isfinite(weighted):
+                out[i] = weighted
+    return pl.Series(name, out, dtype=pl.Float64)
 
 
 def hull_moving_average(close: pl.Series, period: int = 21, *, name: str = "hma21") -> pl.Series:

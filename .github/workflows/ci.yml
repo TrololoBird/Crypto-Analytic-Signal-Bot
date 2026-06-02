@@ -74,11 +74,17 @@ jobs:
       - name: Install package
         run: pip install -e ".[dev,test]"
 
+      - name: Verify dependency imports
+        run: python scripts/verify_dependencies.py
+
       - name: Validate config
         run: python scripts/validate_config.py --config ${{ env.CONFIG_PATH }}
 
       - name: v9 refactor gate
         run: python scripts/verify_refactor_gate.py
+
+      - name: Project health audit
+        run: python scripts/project_health_audit.py --stale-days 2
 
       - name: Pytest (offline)
         run: pytest tests/ -q --ignore=tests/live

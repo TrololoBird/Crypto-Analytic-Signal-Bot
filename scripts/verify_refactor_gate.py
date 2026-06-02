@@ -100,7 +100,9 @@ def main() -> int:
             print(f"  [FAIL] {err}")
         return 1
 
-    print("[OK] v9 refactor gate passed (paths, imports, 38-strategy catalog wiring, PR10 waves 1-5)")
+    print(
+        "[OK] v9 refactor gate passed (paths, imports, 38-strategy catalog wiring, PR10 waves 1-5)"
+    )
     return 0
 
 

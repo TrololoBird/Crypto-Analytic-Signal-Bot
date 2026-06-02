@@ -7,6 +7,7 @@ The script reads `raw/signals.jsonl` and `analysis/outcomes.jsonl` (if present),
 aggregates simple metrics and writes `report.json` and `report.md` into the
 run's `analysis/` folder (or the provided `--out-dir`).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -52,7 +53,9 @@ def _aggregate(signals: List[Dict[str, Any]], outcomes: List[Dict[str, Any]]) ->
     per_setup: Dict[str, Dict[str, Any]] = {}
     for s in signals:
         setup = s.get("setup_id") or s.get("strategy") or "<unknown>"
-        rec = per_setup.setdefault(setup, {"signals": 0, "outcomes": 0, "stop_loss": 0, "tp": 0, "pnls": []})
+        rec = per_setup.setdefault(
+            setup, {"signals": 0, "outcomes": 0, "stop_loss": 0, "tp": 0, "pnls": []}
+        )
         rec["signals"] += 1
         key = s.get("tracking_ref") or s.get("signal_id")
         outs = outcomes_by_signal.get(key, [])
@@ -117,7 +120,9 @@ def analyze_run(run_dir: str | Path, out_dir: Optional[str | Path] = None) -> Tu
         raise FileNotFoundError(f"run_dir not found: {run_dir}")
 
     signals_path = _find_file(run_dir, ["signals.jsonl"]) or run_dir / "raw" / "signals.jsonl"
-    outcomes_path = _find_file(run_dir, ["outcomes.jsonl"]) or run_dir / "analysis" / "outcomes.jsonl"
+    outcomes_path = (
+        _find_file(run_dir, ["outcomes.jsonl"]) or run_dir / "analysis" / "outcomes.jsonl"
+    )
 
     signals = _read_jsonl(signals_path) if signals_path and signals_path.exists() else []
     outcomes = _read_jsonl(outcomes_path) if outcomes_path and outcomes_path.exists() else []

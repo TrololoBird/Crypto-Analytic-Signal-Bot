@@ -487,9 +487,7 @@ def main() -> None:
     )
     args = parser.parse_args()
     fallback_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
-    run_symbols = load_symbols_from_run(
-        args.symbols_from_run, Path("data") / "bot" / "telemetry"
-    )
+    run_symbols = load_symbols_from_run(args.symbols_from_run, Path("data") / "bot" / "telemetry")
     symbols = resolve_symbols(
         args_symbols=args.symbols,
         symbols_from_run=run_symbols,

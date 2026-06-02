@@ -49,6 +49,8 @@ for fname, frame_fn, prep_fn in PAIRS:
             "from ._roadmap import _build_atr_signal, _flow_delta_with_source, _last, _reject, _as_float\n",
             "from ._roadmap import _build_atr_signal, _last, _reject, _as_float\n",
         )
-    prepared = prepared.replace("defaults=self.DEFAULTS", "defaults=catalog_default_params(setup_id)")
+    prepared = prepared.replace(
+        "defaults=self.DEFAULTS", "defaults=catalog_default_params(setup_id)"
+    )
     path.write_text(header + frame + "\n\n\n" + prepared, encoding="utf-8")
     print("ok", fname)

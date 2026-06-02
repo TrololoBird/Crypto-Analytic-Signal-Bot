@@ -1,4 +1,5 @@
 """Merge bot/setups/detectors/* into bot/strategies/* and remove duplicate tree."""
+
 from __future__ import annotations
 
 import re
@@ -19,9 +20,7 @@ MERGE_MAP: dict[str, list[str]] = {
     "vwap_trend.py": ["vwap.py", "vwap_trend.py"],
 }
 
-DETECTOR_IMPORT_RE = re.compile(
-    r"^from \.\.setups\.detectors(?:\.[\w]+)? import .+$", re.M
-)
+DETECTOR_IMPORT_RE = re.compile(r"^from \.\.setups\.detectors(?:\.[\w]+)? import .+$", re.M)
 
 
 def fix_detector_imports(text: str) -> str:
@@ -92,7 +91,7 @@ def consolidate_strategy(strategy_file: str) -> bool:
     detector_body = merge_detector_bodies(modules)
     header, setup_class = split_wrapper(wrapper)
     detector_body = re.sub(
-        r'^from __future__ import annotations\s*\n',
+        r"^from __future__ import annotations\s*\n",
         "",
         detector_body,
         flags=re.M,

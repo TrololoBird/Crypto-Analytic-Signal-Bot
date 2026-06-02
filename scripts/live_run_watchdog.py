@@ -3,6 +3,7 @@
 Usage:
     python -m scripts.live_run_watchdog --hours 10
 """
+
 from __future__ import annotations
 
 import argparse
@@ -174,7 +175,9 @@ async def _main_async(args: argparse.Namespace) -> int:
     )
 
     await asyncio.gather(
-        _run_bot_subprocess(end_at=end_at, restart_delay=float(args.restart_delay), bot_log=bot_log),
+        _run_bot_subprocess(
+            end_at=end_at, restart_delay=float(args.restart_delay), bot_log=bot_log
+        ),
         _monitor_sl_loop(
             sl_log=sl_log,
             poll_seconds=float(args.sl_poll_seconds),

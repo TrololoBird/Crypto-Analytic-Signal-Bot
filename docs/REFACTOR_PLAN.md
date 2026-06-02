@@ -1,6 +1,7 @@
 # Refactor Plan — Crypto Signal Bot v9
 
 > Target: **Python 3.14.5**, lean architecture, live Binance validation only.  
+> User docs: [README.md](../README.md) · Deps: [DEPENDENCIES.md](DEPENDENCIES.md) · Lock: [requirements-lock.txt](../requirements-lock.txt)  
 > Status: **Structural refactor complete** (2026-05-31). Phase 0–3 done; Phase 4 = strategy calibration waves (ops).
 
 ## Context

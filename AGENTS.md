@@ -43,6 +43,7 @@ uv pip install -e ".[live,dev,test]"
 ```bash
 cp config.toml.example config.toml
 python scripts/validate_config.py --config config.toml
+python scripts/project_health_audit.py --stale-days 2 --full
 ```
 
 For smoke runs without Telegram: `provider = "none"` in config (see `config.toml.example`) or `BOT_NOTIFIER_PROVIDER=none`.
