@@ -24,11 +24,15 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
       - name: Install ruff
-        run: pip install "ruff>=0.9"
+        run: pip install "ruff==0.15.15"
       - name: Ruff check
         run: ruff check bot/ tests/ scripts/validate_config.py scripts/verify_refactor_gate.py
-      - name: Ruff format (check only)
-        run: ruff format --check bot/ tests/
+      - name: Ruff format
+        run: ruff format bot/ tests/
+      - name: Python 3.14 except syntax
+        run: python scripts/fix_py314_except.py bot/ tests/
+      - name: Compile (format + except fix)
+        run: python -m compileall -q bot tests
 
   unit:
     runs-on: ubuntu-latest
