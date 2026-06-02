@@ -265,7 +265,10 @@ def _normalize_targets(
             target_values[idx] = _target_from_risk(
                 direction, entry_mid, risk, DEFAULT_TARGET_RR[idx]
             )
-    targets = tuple(float(value) for value in target_values)
+    resolved: list[float] = [float(value) for value in target_values if value is not None]
+    if len(resolved) != 3:
+        return None
+    targets: tuple[float, float, float] = (resolved[0], resolved[1], resolved[2])
     if direction == "long":
         candidates = sorted(targets)
         candidates[0] = max(candidates[0], _target_from_risk(direction, entry_mid, risk, 1.5))
@@ -286,18 +289,28 @@ def _normalize_targets(
             min(candidates[2], _target_from_risk(direction, entry_mid, risk, 5.0)),
         )
         candidates = sorted(candidates, reverse=True)
-    normalized = tuple(float(value) for value in candidates)
+    normalized_list = [float(value) for value in candidates]
+    if len(normalized_list) != 3:
+        return None
+    normalized: tuple[float, float, float] = (
+        normalized_list[0],
+        normalized_list[1],
+        normalized_list[2],
+    )
     if not _target_is_ordered(direction, entry_mid, normalized):
         if direction == "long":
-            normalized = tuple(
-                _target_from_risk(direction, entry_mid, risk, rr) for rr in DEFAULT_TARGET_RR
+            normalized = (
+                _target_from_risk(direction, entry_mid, risk, DEFAULT_TARGET_RR[0]),
+                _target_from_risk(direction, entry_mid, risk, DEFAULT_TARGET_RR[1]),
+                _target_from_risk(direction, entry_mid, risk, DEFAULT_TARGET_RR[2]),
             )
         else:
-            normalized = tuple(
+            short_targets = [
                 max(price_floor, _target_from_risk(direction, entry_mid, risk, rr))
                 for rr in DEFAULT_TARGET_RR
-            )
-            normalized = tuple(sorted(normalized, reverse=True))
+            ]
+            short_targets.sort(reverse=True)
+            normalized = (short_targets[0], short_targets[1], short_targets[2])
     scale = max(abs(entry_mid), *(abs(value) for value in normalized), 1.0)
     tolerance = scale * 1e-8
     single_target_mode = (

@@ -20,7 +20,7 @@ Rules:
 - Target research spec: `docs/research/README.md` (38 strategies, architecture, Binance public matrix, Telegram spec)
 - Structural gate: `python scripts/verify_refactor_gate.py`
 - Live tests only: `tests/live/` with `PYTEST_LIVE=1`
-- Local venv (Python 3.14): `py -3.14 -m venv .venv` then `.\.venv\Scripts\pip install -e ".[live,dev,test]"`
+- Local venv (**Python 3.14.5**): `py -3.14 -m venv .venv` then `.\.venv\Scripts\pip install -e ".[live,dev,test]"` — use `.venv` only (do not run `graphify`/pytest with system Python 3.13).
 
 ## Cursor Cloud specific instructions
 

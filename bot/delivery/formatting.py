@@ -497,7 +497,7 @@ def extract_signal_facts(
         valid_until=valid_until,
         reasons=tuple(str(item) for item in getattr(signal, "reasons", ()) or ()),
         passed_filters=tuple(str(item) for item in getattr(signal, "passed_filters", ()) or ()),
-        scale_weights=scale_tuple,  # type: ignore[arg-type]
+        scale_weights=scale_tuple,
         atr_pct=_optional_float(getattr(signal, "atr_pct", None)),
         spread_bps=_optional_float(getattr(signal, "spread_bps", None)),
         adx_1h=_optional_float(getattr(signal, "adx_1h", None)),

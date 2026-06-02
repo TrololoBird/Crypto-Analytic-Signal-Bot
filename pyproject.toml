@@ -7,6 +7,7 @@ name = "crypto-signal-bot"
 version = "9.0.0"
 description = "Event-driven cryptocurrency signal bot using Binance USD-M public market data."
 readme = "README.md"
+# Standard build: Python 3.14.5 (not 3.14t). CI pins 3.14.5 explicitly.
 requires-python = ">=3.14,<3.15"
 license = { text = "MIT" }
 authors = [{ name = "Crypto Signal Bot" }]
@@ -26,7 +27,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "ruff>=0.15.15",
+    "ruff==0.15.15",
     "mypy>=2.1.0",
     "pre-commit>=4.6.0",
 ]
@@ -77,11 +78,16 @@ select = ["E9", "F63", "F7", "F82", "F821", "F822", "F823"]
 
 [tool.mypy]
 python_version = "3.14"
-files = ["bot"]
+plugins = ["pydantic.mypy"]
 strict = true
 ignore_missing_imports = true
 show_error_codes = true
 pretty = false
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

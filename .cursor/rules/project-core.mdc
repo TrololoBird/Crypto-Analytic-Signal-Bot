@@ -5,7 +5,7 @@ alwaysApply: true
 
 # Crypto Signal Bot v9
 
-Event-driven Binance USDⓈ-M **public** signal bot. Telegram manual signals only. Python **3.14**, Polars pipeline, async runtime.
+Event-driven Binance USDⓈ-M **public** signal bot. Telegram manual signals only. Python **3.14.5**, Polars pipeline, async runtime.
 
 ## Non-negotiable guardrails
 

@@ -47,7 +47,7 @@ class MetaSignalMerger:
 
     def _within_action_window(self, signal: Signal, *, now: datetime) -> bool:
         created_at = signal.created_at.astimezone(UTC)
-        return now - created_at <= timedelta(hours=self._action_window_hours)
+        return bool(now - created_at <= timedelta(hours=self._action_window_hours))
 
     def _merge_per_direction(self, candidates: list[Signal]) -> list[MetaSignal]:
         by_key: dict[tuple[str, str], list[Signal]] = {}

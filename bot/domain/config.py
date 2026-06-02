@@ -88,6 +88,11 @@ class RuntimeConfig(BaseModel):
             return ("5m", "15m", "1h")
         if isinstance(value, str):
             return (value.strip(),)
+        if not isinstance(value, (list, tuple, set)):
+            raise TypeError(
+                "analysis_kline_intervals must be a string or sequence of strings, "
+                f"got {type(value).__name__}"
+            )
         return tuple(str(item).strip() for item in value if str(item).strip())
 
     @model_validator(mode="after")
@@ -703,8 +708,8 @@ class BotSettings(BaseModel):
             )
         return self
 
-    @model_validator(mode="after")
-    def _validate_kline_intervals(self) -> "BotSettings":
+    @staticmethod
+    def _assert_supported_kline_intervals(intervals: list[str]) -> None:
         """Validate kline intervals are supported by Binance."""
         valid_intervals = {
             "1m",
@@ -723,10 +728,13 @@ class BotSettings(BaseModel):
             "1w",
             "1M",
         }
-        intervals = cast(list[str], self.ws.kline_intervals)
         for interval in intervals:
             if interval not in valid_intervals:
                 raise ValueError(f"Invalid kline interval: {interval}. Valid: {valid_intervals}")
+
+    @model_validator(mode="after")
+    def _validate_kline_intervals(self) -> "BotSettings":
+        self._assert_supported_kline_intervals(cast(list[str], self.ws.kline_intervals))
         return self
 
     @model_validator(mode="after")
@@ -738,7 +746,7 @@ class BotSettings(BaseModel):
 
     def validate_for_runtime(self, *, require_telegram: bool) -> None:
         """Validate settings for runtime execution."""
-        self._validate_kline_intervals()
+        self._assert_supported_kline_intervals(cast(list[str], self.ws.kline_intervals))
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.logs_dir.mkdir(parents=True, exist_ok=True)
 
@@ -883,5 +891,4 @@ def load_settings(config_path: str | Path = "config.toml") -> BotSettings:
             setup_overrides[setup_id] = {**legacy_params, **existing}
         else:
             setup_overrides[setup_id] = dict(legacy_params)
-    settings = BotSettings.model_validate(payload)
-    return settings
+    return BotSettings.model_validate(payload)

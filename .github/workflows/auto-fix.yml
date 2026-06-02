@@ -16,40 +16,45 @@ concurrency:
   group: autofix-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  PYTHON_VERSION: "3.14.5"
+
 jobs:
   auto-format:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      - uses: actions/setup-python@v5
         with:
-          python-version: "3.14"
-          cache: "pip"
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
 
-      - name: Install ruff
+      - name: Install tooling
         run: |
           python -m pip install --upgrade pip
-          pip install ruff
+          pip install -e ".[dev]"
 
-      - name: Fix with ruff
+      - name: Fix with ruff + Python 3.14 except syntax
         run: |
           ruff check --fix bot/ tests/
           ruff format bot/ tests/
+          python scripts/fix_py314_except.py bot/ tests/
+          python -m compileall -q bot tests
 
       - name: Create Pull Request
-        uses: peter-evans/create-pull-request@c5a7806660adbe173f04e3e038b0ccdcd758773c # v6
+        uses: peter-evans/create-pull-request@v6
         with:
-          commit-message: "chore: auto-format with ruff"
-          title: "🤖 Auto: format with ruff"
+          commit-message: "chore: auto-format with ruff (py3.14 except fix)"
+          title: "Auto: format with ruff"
           body: |
             Automatic formatting and linting fixes:
-            - Fixed import sorting
-            - Fixed style issues
-            - Applied formatting rules
+            - Ruff check --fix + format
+            - `scripts/fix_py314_except.py` after format (Python 3.14 requirement)
           branch: chore/auto-format
           delete-branch: true
           labels: automated,formatting

@@ -409,7 +409,7 @@ PR10_WAVES: dict[int, frozenset[str]] = {
 }
 
 
-def catalog_default_params(setup_id: str) -> dict[str, float]:
+def catalog_default_params(setup_id: str) -> dict[str, float | str]:
     entry = CATALOG_BY_ID.get(setup_id)
     if entry is None:
         return {}
