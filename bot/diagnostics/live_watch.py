@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from bot.diagnostics.runtime_analysis import file_has_rows, find_latest_run_dir
+from bot.diagnostics.runtime_analysis import file_has_rows, find_latest_run_dir, read_jsonl
 
 
 def find_live_watch_session(
@@ -63,23 +64,66 @@ def resolve_telemetry_analysis_dir(
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
-    if not path.is_file():
-        return []
-    rows: list[dict[str, Any]] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
+    return read_jsonl(path)
+
+
+def _parse_session_started_epoch(session_meta: dict[str, Any], session_dir: Path) -> float | None:
+    started = session_meta.get("started_at")
+    if isinstance(started, str) and started:
+        try:
+            normalized = started.replace("Z", "+00:00")
+            return datetime.fromisoformat(normalized).timestamp()
+        except ValueError:
+            pass
+    try:
+        return session_dir.stat().st_mtime
+    except OSError:
+        return None
+
+
+def find_telemetry_run_for_session(
+    telemetry_dir: Path,
+    *,
+    session_started_epoch: float | None,
+    max_skew_seconds: float = 900.0,
+) -> Path | None:
+    """Pick the telemetry run whose directory mtime best matches a supervised session."""
+    runs_dir = telemetry_dir / "runs"
+    if not runs_dir.is_dir():
+        return None
+    candidates: list[tuple[float, Path]] = []
+    for run_dir in runs_dir.iterdir():
+        if not run_dir.is_dir():
+            continue
+        analysis = run_dir / "analysis"
+        if not analysis.is_dir():
             continue
         try:
-            row = json.loads(line)
-        except json.JSONDecodeError:
+            mtime = run_dir.stat().st_mtime
+        except OSError:
             continue
-        if isinstance(row, dict):
-            rows.append(row)
-    return rows
+        candidates.append((mtime, run_dir))
+    if not candidates:
+        return None
+    if session_started_epoch is None:
+        return max(candidates, key=lambda item: item[0])[1]
+    best: tuple[float, Path] | None = None
+    for mtime, run_dir in candidates:
+        skew = abs(mtime - session_started_epoch)
+        if skew > max_skew_seconds:
+            continue
+        if best is None or skew < best[0]:
+            best = (skew, run_dir)
+    if best is not None:
+        return best[1]
+    return max(candidates, key=lambda item: item[0])[1]
 
 
-def summarize_live_watch_session(session_dir: Path) -> dict[str, Any]:
+def summarize_live_watch_session(
+    session_dir: Path,
+    *,
+    telemetry_dir: Path | None = None,
+) -> dict[str, Any]:
     """Aggregate totals from ``session_summary.json`` and last snapshot."""
     summary_path = session_dir / "session_summary.json"
     session_meta: dict[str, Any] = {}
@@ -93,6 +137,34 @@ def summarize_live_watch_session(session_dir: Path) -> dict[str, Any]:
     last_snap = snapshots[-1] if snapshots else {}
     runtime = dict(last_snap.get("runtime") or {})
     tracking = dict(last_snap.get("tracking") or {})
+
+    decision_rows = 0
+    strategies_ran = 0
+    telemetry_run: str | None = None
+    telemetry_source = "none"
+    note = "Per-strategy JSONL not stored under live_watch; use telemetry/runs when available."
+
+    if telemetry_dir is not None:
+        started_epoch = _parse_session_started_epoch(session_meta, session_dir)
+        run_dir = find_telemetry_run_for_session(
+            telemetry_dir,
+            session_started_epoch=started_epoch,
+        )
+        if run_dir is not None:
+            decisions_path = run_dir / "analysis" / "strategy_decisions.jsonl"
+            decisions = _read_jsonl(decisions_path)
+            decision_rows = len(decisions)
+            strategies_ran = len(
+                {
+                    str(row.get("setup_id"))
+                    for row in decisions
+                    if row.get("setup_id") and str(row.get("status")) == "signal"
+                }
+            )
+            telemetry_run = run_dir.name
+            telemetry_source = "telemetry"
+            if decision_rows:
+                note = "Linked telemetry run for strategy_decisions counts."
 
     return {
         "source": "live_watch",
@@ -112,9 +184,11 @@ def summarize_live_watch_session(session_dir: Path) -> dict[str, Any]:
         "detector_runs_total": runtime.get("detector_runs_total"),
         "symbols_processed_count": len(runtime.get("symbols") or []),
         "tracking_db": tracking.get("db"),
-        "decision_rows": 0,
-        "strategies_ran": 0,
-        "note": "Per-strategy JSONL not stored under live_watch; use telemetry/runs when available.",
+        "telemetry_run": telemetry_run,
+        "telemetry_source": telemetry_source,
+        "decision_rows": decision_rows,
+        "strategies_ran": strategies_ran,
+        "note": note,
     }
 
 

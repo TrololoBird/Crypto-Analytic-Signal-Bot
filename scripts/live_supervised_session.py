@@ -29,6 +29,7 @@ from bot.diagnostics.runtime_analysis import (
     parse_cycle_log_lines,
     read_jsonl,
 )
+from bot.domain.config import load_settings
 from bot.ops.pid_utils import (
     clear_stale_pid_file,
     find_bot_main_pids,
@@ -38,6 +39,14 @@ from bot.ops.pid_utils import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_CONFIG = ROOT / "config.toml"
+
+
+def _telemetry_dir(config_path: Path) -> Path:
+    """Resolve telemetry root from config (default ``data/bot/telemetry``)."""
+    if config_path.is_file():
+        return load_settings(config_path).telemetry_dir
+    return ROOT / "data" / "bot" / "telemetry"
 
 
 def _launch_bot_subprocess(
@@ -257,10 +266,10 @@ async def _snapshot_loop(
     session_start: datetime,
     stdout_offset: list[int],
     log_offsets: dict[str, int],
+    telemetry_dir: Path,
 ) -> None:
     tick = 0
     since_iso = session_start.isoformat()
-    telemetry_dir = ROOT / "data" / "telemetry"
     totals = {
         "cycles": 0,
         "candidates_total": 0,
@@ -482,6 +491,7 @@ async def _run_one_session(args: argparse.Namespace, session_index: int) -> dict
             session_start=session_start,
             stdout_offset=[0],
             log_offsets={},
+            telemetry_dir=_telemetry_dir(Path(args.config)),
         ),
     )
     bot_exit = results[0] if results else 0
@@ -550,6 +560,12 @@ def main() -> None:
         action=argparse.BooleanOptionalAction,
         default=True,
         help="Stop existing bot processes only before the first session",
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=DEFAULT_CONFIG,
+        help="config.toml for telemetry_dir and bot launch context",
     )
     args = parser.parse_args()
     raise SystemExit(asyncio.run(_main_async(args)))

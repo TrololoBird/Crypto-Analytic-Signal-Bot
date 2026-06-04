@@ -9,10 +9,65 @@ import pytest
 
 from bot.diagnostics.live_watch import (
     find_live_watch_session,
+    find_telemetry_run_for_session,
     summarize_live_watch_session,
     summarize_rollup,
 )
 from bot.domain.config import load_settings
+
+
+def test_find_telemetry_run_for_session(tmp_path: Path) -> None:
+    telemetry = tmp_path / "telemetry"
+    runs = telemetry / "runs"
+    early = runs / "run_early"
+    late = runs / "run_late"
+    for run_dir in (early, late):
+        (run_dir / "analysis").mkdir(parents=True)
+        (run_dir / "analysis" / "strategy_decisions.jsonl").write_text(
+            '{"setup_id":"bos","status":"reject"}\n',
+            encoding="utf-8",
+        )
+    session_epoch = 1_700_000_000.0
+    early_epoch = session_epoch + 30.0
+    late_epoch = session_epoch + 600.0
+    import os
+
+    os.utime(early, (early_epoch, early_epoch))
+    os.utime(late, (late_epoch, late_epoch))
+    matched = find_telemetry_run_for_session(
+        telemetry,
+        session_started_epoch=session_epoch,
+        max_skew_seconds=120.0,
+    )
+    assert matched == early
+
+
+def test_summarize_live_watch_session_links_telemetry(tmp_path: Path) -> None:
+    telemetry = tmp_path / "telemetry"
+    run_dir = telemetry / "runs" / "20260604_120000_1"
+    (run_dir / "analysis").mkdir(parents=True)
+    (run_dir / "analysis" / "strategy_decisions.jsonl").write_text(
+        '{"setup_id":"bos","status":"signal"}\n'
+        '{"setup_id":"fvg","status":"reject"}\n',
+        encoding="utf-8",
+    )
+    session = tmp_path / "session"
+    session.mkdir()
+    session.joinpath("session_summary.json").write_text(
+        json.dumps({"started_at": "2026-06-04T12:00:00+00:00"}),
+        encoding="utf-8",
+    )
+    session.joinpath("snapshots.jsonl").write_text(
+        json.dumps({"runtime": {"delivered_total": 1}}) + "\n",
+        encoding="utf-8",
+    )
+    import os
+
+    os.utime(run_dir, (1_748_995_200.0, 1_748_995_200.0))
+    summary = summarize_live_watch_session(session, telemetry_dir=telemetry)
+    assert summary["decision_rows"] == 2
+    assert summary["strategies_ran"] == 1
+    assert summary["telemetry_run"] == "20260604_120000_1"
 
 
 def test_summarize_live_watch_session_from_fixture(tmp_path: Path) -> None:
