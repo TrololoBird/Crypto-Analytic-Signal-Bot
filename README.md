@@ -103,6 +103,8 @@ On geo-restricted networks (including some GitHub Actions regions), live tests *
 
 ## Documentation
 
+- **[Project roadmap & status](docs/PROJECT_ROADMAP_AND_STATUS.md)** — completed waves (E1–F11), remaining work, live ops commands
+
 - [docs/CURSOR_SETUP.md](docs/CURSOR_SETUP.md) — editor, venv, skills
 - [docs/MARKET_DATA_PRINCIPLES.md](docs/MARKET_DATA_PRINCIPLES.md) — public data only
 - [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) — package usage map
