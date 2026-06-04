@@ -1,6 +1,6 @@
 ---
-description: graphify knowledge graph context
-alwaysApply: true
+description: graphify knowledge graph — use for architecture questions, cross-module flows, or before broad grep when graphify-out/graph.json exists
+alwaysApply: false
 ---
 
 This project has a graphify knowledge graph at graphify-out/.

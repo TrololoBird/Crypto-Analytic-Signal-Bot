@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": ".cursor/hooks/session-context.sh"
+      }
+    ],
+    "beforeReadFile": [
+      {
+        "command": ".cursor/hooks/before-read-file.py",
+        "failClosed": false
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": ".cursor/hooks/guard-shell.sh"
+      }
+    ],
+    "preToolUse": [
+      {
+        "command": ".cursor/hooks/guard-shell.sh",
+        "matcher": "Shell"
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": ".cursor/hooks/post-tool-hint.py",
+        "matcher": "Shell|Write|Edit"
+      }
+    ],
+    "afterFileEdit": [
+      {
+        "command": ".cursor/hooks/ruff-after-edit.py"
+      }
+    ],
+    "subagentStop": [
+      {
+        "command": ".cursor/hooks/subagent-stop-followup.sh",
+        "matcher": "de-bloat|de_bloat"
+      }
+    ],
+    "stop": [
+      {
+        "command": ".cursor/hooks/stop-quick-verify.sh",
+        "loop_limit": 2
+      }
+    ]
+  }
+}

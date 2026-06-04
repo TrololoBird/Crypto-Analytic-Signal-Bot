@@ -1,0 +1,68 @@
+---
+description: Cursor slash commands, hooks, and skills index for this repo
+globs:
+  - ".cursor/**"
+  - "docs/CURSOR_CLAUDE_DEV_SETUP.md"
+  - "CLAUDE.md"
+  - ".claude/**"
+---
+
+# AI dev workflow (Cursor + Claude Code)
+
+Full plan: `docs/CURSOR_CLAUDE_DEV_SETUP.md` · Solo: `docs/SOLO_OPERATOR_PLAYBOOK.md`
+
+## Solo workflow commands
+
+| Command | Purpose |
+|---------|---------|
+| `plan-task` | Explore + plan only (no edits) |
+| `implement-plan` | Execute approved plan + verify |
+| `handoff` | End-of-session summary for next agent |
+| `fix-and-verify` | Debug loop with evidence |
+
+## Cursor slash commands (type `/` in Agent)
+
+| Command | Purpose |
+|---------|---------|
+| `prime-context` | Load v9 context at session start |
+| `verify` | Post-change verification suite |
+| `live-smoke` | Short live smoke |
+| `supervised-6h` | Long live_watch session |
+| `calibrate-run` | Post-session calibration |
+| `zero-hit` | Strategy zero-hit triage |
+| `delivery-audit` | Delivery path integrity |
+| `graphify` | Knowledge graph query |
+| `de-bloat` | F12 module split |
+| `wave-tests` | F9–F11 pytest offline |
+| `health-audit` | project_health_audit.py |
+| `lint-fix` | Ruff check + format |
+
+## Cursor subagents (`.cursor/agents/`)
+
+`orchestrator`, `live-ops`, `de-bloat`, `strategy-calibration`, `delivery-guardian` (readonly), `verifier` (fast)
+
+Delegate via Task tool; descriptions drive auto-routing.
+
+## Project skills (`.cursor/skills/`)
+
+`live-binance-verify`, `validate-delivery-path`, `zero-hit-strategy-triage`, `refactor-module`, `supervised-live-session`, `calibration-wave`, `graphify-navigate`
+
+## Hooks (`.cursor/hooks.json`)
+
+- `sessionStart` — v9 context (IDE only; not cloud agents)
+- `beforeReadFile` — deny `.env`, `config.toml`, `data/`
+- `beforeShellExecution` + `preToolUse` Shell — guard-shell
+- `postToolUse` — verify hints
+- `afterFileEdit` — ruff format
+- `subagentStop` (de-bloat) — follow-up → verifier
+- `stop` — quick offline verify (loop_limit 2)
+
+## Always-on rules (keep lean)
+
+`project-core`, `agent-sole-executor`, `solo-operator` only. Architecture/graphify are agent-decided.
+
+## Claude Code
+
+- Memory: `CLAUDE.md` (<80 lines) · Rules: `.claude/rules/` · Skills: `.claude/skills/` (auto)
+- Settings: `.claude/settings.json` (+ Stop → agent_quick_verify.sh)
+- Subagents: `.claude/agents/` (mirror of `.cursor/agents/`)

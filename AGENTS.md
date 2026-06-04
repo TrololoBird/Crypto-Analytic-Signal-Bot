@@ -21,10 +21,23 @@ Rules:
 
 Hard rule file: `.cursor/rules/agent-sole-executor.mdc` (`alwaysApply: true`).
 
+## Solo operator (1 person — agents execute everything)
+
+- **Playbook:** [docs/SOLO_OPERATOR_PLAYBOOK.md](docs/SOLO_OPERATOR_PLAYBOOK.md)
+- **Workflow commands:** `/plan-task` → `/implement-plan` → `/verify` → `/handoff`
+
+## Cursor + Claude Code dev setup
+
+- **Master plan:** [docs/CURSOR_CLAUDE_DEV_SETUP.md](docs/CURSOR_CLAUDE_DEV_SETUP.md)
+- **Claude Code memory:** [CLAUDE.md](CLAUDE.md)
+- **Slash commands:** `.cursor/commands/` — `/prime-context`, `/verify`, `/wave-tests`, `/live-smoke`, `/supervised-6h`, `/calibrate-run`, `/zero-hit`, `/delivery-audit`, `/graphify`, `/de-bloat`, `/health-audit`, `/lint-fix`
+- **Hooks:** `.cursor/hooks.json` (Cursor) · `.claude/settings.json` (Claude Code)
+- **Subagents:** `.cursor/agents/` + `.claude/agents/` (`orchestrator`, `live-ops`, `de-bloat`, `strategy-calibration`, `delivery-guardian`, `verifier`)
+
 ## Cursor project config
 
-- Rules: `.cursor/rules/*.mdc` (guardrails, strategies, features, delivery)
-- Skills: `.cursor/skills/` (`live-binance-verify`, `refactor-module`, `zero-hit-strategy-triage`, `validate-delivery-path`)
+- Rules: `.cursor/rules/*.mdc` (guardrails, strategies, features, delivery, `cursor-dev-workflow`)
+- Skills: `.cursor/skills/` (`live-binance-verify`, `refactor-module`, `zero-hit-strategy-triage`, `validate-delivery-path`, `supervised-live-session`, `calibration-wave`, `graphify-navigate`)
 - Refactor plan: `docs/REFACTOR_PLAN.md`
 - Canonical architecture: `docs/research/ARCHITECTURE_CANONICAL.md` (~180 `.py` in `bot/`, single `strategies/` tree)
 - Target research spec: `docs/research/README.md` (38 strategies, architecture, Binance public matrix, Telegram spec)

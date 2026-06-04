@@ -3,7 +3,8 @@
 > **Last updated:** 2026-06-04  
 > Canonical architecture: [research/ARCHITECTURE_CANONICAL.md](research/ARCHITECTURE_CANONICAL.md)  
 > Refactor matrix: [REFACTOR_PLAN.md](REFACTOR_PLAN.md)  
-> Short improvement backlog: [IMPROVEMENT_PLAN.md](IMPROVEMENT_PLAN.md)
+> Short improvement backlog: [IMPROVEMENT_PLAN.md](IMPROVEMENT_PLAN.md)  
+> Cursor + Claude Code setup: [CURSOR_CLAUDE_DEV_SETUP.md](CURSOR_CLAUDE_DEV_SETUP.md)
 
 ---
 

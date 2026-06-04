@@ -1,0 +1,14 @@
+{
+  "recommendations": [
+    "ms-python.python",
+    "ms-python.vscode-pylance",
+    "charliermarsh.ruff",
+    "tamasfe.even-better-toml",
+    "usernamehw.errorlens",
+    "gruntfuggly.todo-tree",
+    "yzhang.markdown-all-in-one"
+  ],
+  "unwantedRecommendations": [
+    "eamodio.gitlens"
+  ]
+}

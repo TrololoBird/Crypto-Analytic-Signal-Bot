@@ -1,67 +1,83 @@
 # Cursor setup — crypto-signal-bot v9
 
-Project-specific AI and editor configuration (created 2026-05-31).
+> **Solo playbook:** [SOLO_OPERATOR_PLAYBOOK.md](SOLO_OPERATOR_PLAYBOOK.md)  
+> **Extended plan:** [CURSOR_CLAUDE_DEV_SETUP.md](CURSOR_CLAUDE_DEV_SETUP.md)
 
 ## Rules (`.cursor/rules/`)
 
 | File | Scope |
 |------|--------|
 | `project-core.mdc` | Always — identity, guardrails, graphify, live tests |
+| `agent-sole-executor.mdc` | Always — agent runs all commands |
 | `python-core.mdc` | `bot/`, `scripts/`, `tests/` |
 | `strategies.mdc` | Strategy detectors |
 | `features.mdc` | Polars feature pipeline |
 | `delivery.mdc` | Contract → confluence → deliver |
+| `cursor-dev-workflow.mdc` | `.cursor/`, Claude config |
+
+## Slash commands (`.cursor/commands/`)
+
+**Workflow:** `plan-task` → `implement-plan` → `verify` → `handoff`  
+**Ops:** `prime-context`, `live-smoke`, `supervised-6h`, `calibrate-run`, `fix-and-verify`  
+**Quality:** `wave-tests`, `lint-fix`, `delivery-audit`, `zero-hit`, `de-bloat`, `health-audit`, `graphify`
+
+## Subagents (`.cursor/agents/`)
+
+| Agent | Mode | Use |
+|-------|------|-----|
+| `orchestrator` | write | Route vague multi-area tasks |
+| `live-ops` | write | Supervised sessions, proxy, rollup |
+| `de-bloat` | write | F12 module splits |
+| `strategy-calibration` | write | Thresholds, zero-hit |
+| `delivery-guardian` | **readonly** | Delivery path audit |
+| `verifier` | fast | Post-change tests |
+
+Also mirrored in `.claude/agents/` for Claude Code CLI.
+
+## Hooks (`.cursor/hooks.json`)
+
+| Event | Effect |
+|-------|--------|
+| `sessionStart` | v9 context injection |
+| `beforeReadFile` | Block `.env`, `config.toml`, `data/` reads |
+| `beforeShellExecution` / `preToolUse` Shell | Guard dangerous git/rm |
+| `postToolUse` | Verify hints after bot/ edits |
+| `afterFileEdit` | `ruff format` on edited `.py` |
+
+Cloud agents: `sessionStart` does not run on cursor.com/agents — use `/prime-context` instead.
 
 ## Skills (`.cursor/skills/`)
 
-Invoke by name in chat or when task matches description:
+`live-binance-verify`, `refactor-module`, `zero-hit-strategy-triage`, `validate-delivery-path`, `supervised-live-session`, `calibration-wave`, `graphify-navigate`
 
-| Skill | Use when |
-|-------|----------|
-| `live-binance-verify` | After changes; validate against real Binance |
-| `refactor-module` | Deleting/rewriting bloated modules |
-| `zero-hit-strategy-triage` | Strategy produces no signals |
-| `validate-delivery-path` | Auditing signal delivery gates |
+## Workspace (`.vscode/`)
 
-## Extensions (`.vscode/extensions.json`)
+Committed team settings: Ruff format on save, pytest, `.venv` interpreter.
 
-Recommended: Python, Pylance, Ruff, Even Better TOML, Error Lens, Todo Tree, Markdown All in One.
+Install extensions: **Command Palette → Extensions: Show Recommended Extensions**
 
-**Git:** use built-in Source Control (Cursor/VS Code) — no GitLens Pro needed. GitLens is listed as *unwanted* in `extensions.json`.
+## Indexing (`.cursorignore`)
 
-Install all: **Command Palette → "Extensions: Show Recommended Extensions"**
+Excludes `data/`, `telemetry/`, `graphify-out/`, `*.jsonl`, `.venv/` from AI index.
 
-Or CLI:
-```powershell
-cursor --install-extension charliermarsh.ruff
+## Python 3.14 (macOS)
+
+```bash
+uv python install 3.14 && uv venv .venv --python 3.14
+source .venv/bin/activate
+uv pip install -e ".[live,dev,test]"
 ```
 
-## Workspace settings (`.vscode/settings.json`)
+## Claude Code
 
-- Ruff format on save
-- Pytest → `tests/live/` with `-m live`
-- Interpreter: `.venv/Scripts/python.exe` (Python 3.14)
+- `CLAUDE.md`, `.claude/settings.json`, `.claude/rules/delivery-invariant.md`
+- `/hooks` in CLI to inspect hooks
 
-## User settings updated
+## Git hooks (local)
 
-`%APPDATA%\Cursor\User\settings.json` — Ruff formatter, Python analysis, format on save.
+Tracked copies: `scripts/git-hooks/pre-push` (auto-trading guard). Not the same as Cursor hooks.
 
-## Ignored from indexing
+## Not configured (intentional)
 
-`.cursorignore` — data/, graphify-out/, caches, telemetry JSONL.
-
-## Not configured (intentionally)
-
-- MCP filesystem/git/python — redundant with agent tools
-- Cursor Automations — create via Automations UI when needed
-
-## Python 3.14
-
-```powershell
-winget install Python.Python.3.14
-py -3.14 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -e ".[live,dev,test]"
-```
-
-Reload Cursor window after venv + extensions: **Ctrl+Shift+P → Developer: Reload Window**
+- MCP servers — agent tools sufficient for this repo
+- Cursor Automations — optional via UI

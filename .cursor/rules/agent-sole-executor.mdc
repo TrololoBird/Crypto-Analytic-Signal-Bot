@@ -15,7 +15,7 @@ The agent **owns all execution**:
 
 - Edit config, `.env`, code, docs; run probes, tests, discovery, commits (when asked).
 - Start and **finish** shell work: prefer foreground + adequate timeout; if background — **`Await` until `exit_code`** in the terminal file.
-- **Reap zombie terminals** the agent left behind: kill stale PIDs (`Stop-Process`), append terminal `exit_code` footers via `scripts/reap_agent_terminals.ps1` — never tell the user to “close tab” or “run this yourself”.
+- **Reap zombie terminals** the agent left behind: kill stale PIDs, append `exit_code` footers — macOS/Linux: `bash scripts/reap_agent_terminals.sh`; Windows: `powershell -File scripts/reap_agent_terminals.ps1`. Never tell the user to close tabs.
 - Report **outcomes** (pass/fail, paths, numbers), not homework for the user.
 - **Before each live bot run or smoke test:** `python scripts/clean_session_data.py --mode smoke --config config.toml` so telemetry/logs are not mixed across sessions.
 

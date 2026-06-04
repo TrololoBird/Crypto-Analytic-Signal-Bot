@@ -1,0 +1,33 @@
+---
+description: Solo dev workflow — one human directs, agents execute plan→implement→verify
+alwaysApply: true
+---
+
+# Solo operator (1 person + agents)
+
+Human: priorities, acceptance, "OK to merge". **Never** assign runbooks or terminal steps to the human.
+
+## Default loop
+
+1. **Explore/Plan** — Plan mode or `/plan-task` for multi-file / delivery / de-bloat
+2. **Implement** — Agent executes; read files before edit
+3. **Verify** — `/verify` or delegate `verifier` subagent; show pass/fail evidence
+4. **Handoff** — `/handoff` at session end (roadmap + blockers)
+
+## Delegate (Task tool)
+
+| Task type | Subagent |
+|-----------|----------|
+| 6h live, proxy, rollup | `live-ops` |
+| LOC split F12 | `de-bloat` → then `verifier` |
+| Zero hits / thresholds | `strategy-calibration` |
+| Delivery changes audit | `delivery-guardian` (readonly) |
+| Vague multi-area request | `orchestrator` |
+
+## Verification gates (agent runs, not human)
+
+After `bot/` edits: `compileall` + wave pytest; if market/features: live skill; if delivery: delivery-audit.
+
+## Context discipline
+
+Do not paste entire research docs. Use `graphify query` or @-mention one file. Full playbook: `docs/SOLO_OPERATOR_PLAYBOOK.md`.

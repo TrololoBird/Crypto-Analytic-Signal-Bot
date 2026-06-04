@@ -7,6 +7,10 @@ alwaysApply: true
 
 Event-driven Binance USDⓈ-M **public** signal bot. Telegram manual signals only. Python **3.14.5**, Polars pipeline, async runtime.
 
+## Solo operator
+
+One human + agents only: **`solo-operator.mdc`**, playbook **`docs/SOLO_OPERATOR_PLAYBOOK.md`**.
+
 ## Agent execution policy
 
 See **`.cursor/rules/agent-sole-executor.mdc`** (always on). Summary:

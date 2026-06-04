@@ -1,6 +1,6 @@
 ---
-description: v9 package layout — canonical imports after Phase 1–2 de-bloat
-alwaysApply: true
+description: v9 package layout and import paths — use when adding imports, new modules, or refactoring package structure
+alwaysApply: false
 ---
 
 # v9 Architecture (canonical)

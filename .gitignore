@@ -37,8 +37,8 @@ htmlcov/
 *.pid
 
 # IDE / OS
-.vscode/
 .idea/
+# .vscode/ is committed (team settings) — do not ignore
 .DS_Store
 Thumbs.db
 .serena/
@@ -48,6 +48,7 @@ Thumbs.db
 # Local config / secrets
 .env
 config.toml
+.claude/settings.local.json
 config.local.toml
 ourtg.json
 
