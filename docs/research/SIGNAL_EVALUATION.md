@@ -95,7 +95,7 @@ Fail → **не идёт** в Telegram, reason в journal.
 
 ## 6. Стадия 4 — hard confluence gate (3-of-5)
 
-[`DeliveryOrchestrator._hard_confluence_gate`](../../bot/application/delivery_orchestrator.py) — **независимые** подтверждения (ADR-003):
+[`DeliveryOrchestrator._hard_confluence_gate`](../../bot/runtime/delivery_orchestrator.py) — **независимые** подтверждения (ADR-003):
 
 | Key | Условие (упрощённо) |
 |-----|---------------------|

@@ -27,7 +27,7 @@ from typing import Any
 
 import aiosqlite
 
-from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.runtime.errors import DEFENSIVE_EXC
 
 from . import BotSettings, SignalBot, load_settings
 from .logging_config import configure_structlog
@@ -35,7 +35,7 @@ from .migrations import migrate_db
 from .ops.pid_utils import pid_is_alive as _pid_is_alive
 from .ops.startup_report import generate_and_send_startup_report, run_daily_summary_loop
 from .persistence.repository import MemoryRepository
-from .telemetry import TelemetryStore
+from .telemetry import TelemetryStore, run_dir_started_at
 
 _LOGGER_STDERR_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?:,\d{3})?\s+\|")
 
@@ -109,6 +109,36 @@ def _bootstrap_env_if_missing() -> None:
     print("[INFO] .env not found - created with empty TG_TOKEN and TARGET_CHAT_ID")
 
 
+def prune_run_dirs(
+    runs_dir: Path,
+    *,
+    keep: int,
+    retention_days: int,
+    now: datetime | None = None,
+) -> int:
+    """Remove old telemetry run directories using ``run_metadata.started_at`` ordering."""
+    anchor = now or datetime.now(UTC)
+    if not runs_dir.exists():
+        return 0
+    entries = sorted(
+        (path for path in runs_dir.iterdir() if path.is_dir()),
+        key=run_dir_started_at,
+        reverse=True,
+    )
+    removed = 0
+    retention_delta = timedelta(days=max(1, int(retention_days)))
+    for idx, path in enumerate(entries):
+        age = anchor - run_dir_started_at(path)
+        if idx < keep and age <= retention_delta:
+            continue
+        try:
+            shutil.rmtree(path, ignore_errors=False)
+            removed += 1
+        except OSError:
+            continue
+    return removed
+
+
 def _cleanup_runtime_artifacts(settings: BotSettings) -> None:
     logger = logging.getLogger("bot.cli")
     now = datetime.now(UTC)
@@ -146,42 +176,17 @@ def _cleanup_runtime_artifacts(settings: BotSettings) -> None:
                 continue
         return removed
 
-    def _prune_run_dirs(
-        runs_dir: Path,
-        *,
-        keep: int,
-        retention_days: int,
-    ) -> int:
-        if not runs_dir.exists():
-            return 0
-        entries = sorted(
-            (path for path in runs_dir.iterdir() if path.is_dir()),
-            key=_safe_mtime,
-            reverse=True,
-        )
-        removed = 0
-        retention_delta = timedelta(days=max(1, int(retention_days)))
-        for idx, path in enumerate(entries):
-            age = now - _safe_mtime(path)
-            if idx < keep and age <= retention_delta:
-                continue
-            try:
-                shutil.rmtree(path, ignore_errors=False)
-                removed += 1
-            except OSError:
-                continue
-        return removed
-
     logs_removed = _prune_files(
         settings.logs_dir,
         pattern="bot_*.log",
         keep=max(10, int(settings.runtime.logs_max_files)),
         retention_days=max(1, int(settings.runtime.logs_retention_days)),
     )
-    runs_removed = _prune_run_dirs(
+    runs_removed = prune_run_dirs(
         settings.telemetry_dir / "runs",
         keep=max(10, int(settings.runtime.telemetry_max_runs)),
         retention_days=max(1, int(settings.runtime.telemetry_retention_days)),
+        now=now,
     )
     if logs_removed or runs_removed:
         logger.info(
@@ -352,9 +357,9 @@ def _setup_signal_handlers(bot: SignalBot) -> None:
             logging.getLogger("bot.cli").exception("signal handler setup failed")
 
 
-async def _main() -> None:
+async def _main(*, config_path: str | Path = "config.toml") -> None:
     _bootstrap_env_if_missing()
-    settings = load_settings("config.toml")
+    settings = load_settings(config_path)
     if settings.config_path.name != "config.toml":
         sys.stderr.write(f"[INFO] config.toml not found; using {settings.config_path}\n")
     use_telegram = settings.notifiers.provider == "telegram"
@@ -368,10 +373,10 @@ async def _main() -> None:
         await generate_and_send_startup_report(
             Path.cwd(),
             send_telegram=use_telegram,
-            config_path="config.toml",
+            config_path=str(settings.config_path),
         )
-    except DEFENSIVE_EXC as exc:
-        sys.stderr.write(f"[ERROR] startup report failed: {exc}\n")
+    except Exception as exc:
+        sys.stderr.write(f"[ERROR] startup report failed (non-fatal): {exc}\n")
 
     debug_mode = os.getenv("DEBUG_BOT", "0") in ("1", "true", "yes")
     configure_logging(settings, debug_mode=debug_mode)
@@ -451,43 +456,83 @@ async def _main() -> None:
             _release_pid_lock(settings.pid_file)
 
 
-def run() -> None:
+_CONFIG_DEFAULT = Path("config.toml")
+
+
+def _config_parent_parser() -> argparse.ArgumentParser:
+    parent = argparse.ArgumentParser(add_help=False)
+    parent.add_argument(
+        "--config",
+        type=Path,
+        default=_CONFIG_DEFAULT,
+        help="Path to config.toml (default: config.toml)",
+    )
+    return parent
+
+
+def _resolve_config_path(args: argparse.Namespace) -> Path:
+    return Path(getattr(args, "config", _CONFIG_DEFAULT))
+
+
+def build_parser() -> argparse.ArgumentParser:
+    config_parent = _config_parent_parser()
     parser = argparse.ArgumentParser(prog="crypto-signal-bot")
     parser.add_argument(
         "--debug",
         action="store_true",
         help="Full DEBUG logs, asyncio loop debug, tracemalloc (or set DEBUG_BOT=1)",
     )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=_CONFIG_DEFAULT,
+        help="Path to config.toml (default: config.toml)",
+    )
     sub = parser.add_subparsers(dest="command")
-    sub.add_parser("run", help="Run live bot runtime (default)")
-    sub.add_parser("status", help="Show runtime/db status")
-    sub.add_parser("stop", help="Stop running bot by pid-file")
-    backtest = sub.add_parser("backtest", help="Compute outcome stats from SQLite history")
+    sub.add_parser("run", parents=[config_parent], help="Run live bot runtime (default)")
+    sub.add_parser("status", parents=[config_parent], help="Show runtime/db status")
+    sub.add_parser("stop", parents=[config_parent], help="Stop running bot by pid-file")
+    outcomes = sub.add_parser(
+        "outcomes",
+        help="Compute signal outcome stats from SQLite history (primary)",
+    )
+    outcomes.add_argument("--days", type=int, default=30)
+    outcomes.add_argument("--setup", type=str, default="")
+    backtest = sub.add_parser(
+        "backtest",
+        help="Alias for outcomes — compute signal outcome stats from SQLite",
+    )
     backtest.add_argument("--days", type=int, default=30)
     backtest.add_argument("--setup", type=str, default="")
     replay = sub.add_parser("replay", help="Show latest replay telemetry rows")
     replay.add_argument("--tail", type=int, default=20)
     db = sub.add_parser("db", help="DB maintenance")
     db_sub = db.add_subparsers(dest="db_command")
-    db_sub.add_parser("migrate", help="Apply forward migrations")
+    db_sub.add_parser("migrate", parents=[config_parent], help="Apply forward migrations")
     db_clean = db_sub.add_parser("clean", help="Cleanup old outcomes by retention window")
     db_clean.add_argument("--days", type=int, default=30)
+    return parser
+
+
+def run() -> None:
+    parser = build_parser()
     args = parser.parse_args()
+    config_path = _resolve_config_path(args)
 
     if getattr(args, "debug", False):
         os.environ["DEBUG_BOT"] = "1"
 
     if args.command in (None, "run"):
-        _run_runtime()
+        _run_runtime(config_path)
         return
     if args.command == "status":
-        _run_status_command()
+        _run_status_command(config_path)
         return
     if args.command == "stop":
-        _run_stop_command()
+        _run_stop_command(config_path)
         return
-    if args.command == "backtest":
-        _run_backtest_command(days=max(1, int(args.days)), setup_id=str(args.setup or "").strip())
+    if args.command in ("outcomes", "backtest"):
+        _run_outcomes_command(days=max(1, int(args.days)), setup_id=str(args.setup or "").strip())
         return
     if args.command == "replay":
         _run_replay_command(tail=max(1, int(args.tail)))
@@ -495,7 +540,7 @@ def run() -> None:
     if args.command == "db":
         db_command = getattr(args, "db_command", None)
         if db_command == "migrate":
-            asyncio.run(_db_migrate_command())
+            asyncio.run(_db_migrate_command(config_path))
             return
         if db_command == "clean":
             asyncio.run(_db_clean_command(days=max(1, int(args.days))))
@@ -503,7 +548,7 @@ def run() -> None:
         parser.error("db command is required: migrate|clean")
 
 
-def _run_runtime() -> None:
+def _run_runtime(config_path: str | Path = _CONFIG_DEFAULT) -> None:
     _configure_stdio_for_unicode()
     debug_mode = os.getenv("DEBUG_BOT", "0") in ("1", "true", "yes")
 
@@ -517,7 +562,7 @@ def _run_runtime() -> None:
         if policy_factory is not None:
             asyncio.set_event_loop_policy(policy_factory())
     try:
-        asyncio.run(_main())
+        asyncio.run(_main(config_path=config_path))
     except KeyboardInterrupt:
         logging.getLogger("bot.cli").info("bot stopped by user")
     finally:
@@ -530,8 +575,8 @@ def _run_runtime() -> None:
             )
 
 
-def _run_status_command() -> None:
-    settings = load_settings("config.toml")
+def _run_status_command(config_path: str | Path = _CONFIG_DEFAULT) -> None:
+    settings = load_settings(config_path)
     pid = _read_pid_value(settings.pid_file)
     running = bool(pid and _pid_is_alive(pid))
     totals = {"outcomes": 0, "active_signals": 0}
@@ -558,8 +603,8 @@ def _run_status_command() -> None:
     )
 
 
-def _run_stop_command() -> None:
-    settings = load_settings("config.toml")
+def _run_stop_command(config_path: str | Path = _CONFIG_DEFAULT) -> None:
+    settings = load_settings(config_path)
     pid = _read_pid_value(settings.pid_file)
     if not pid:
         print("No pid found.")
@@ -586,7 +631,7 @@ def _run_stop_command() -> None:
     print(f"Sent SIGTERM to pid {pid}.")
 
 
-def _run_backtest_command(*, days: int, setup_id: str = "") -> None:
+def _run_outcomes_command(*, days: int, setup_id: str = "") -> None:
     settings = load_settings("config.toml")
     if not settings.db_path.exists():
         msg = f"db not found: {settings.db_path}"
@@ -646,8 +691,8 @@ def _run_replay_command(*, tail: int) -> None:
         print(row)
 
 
-async def _db_migrate_command() -> None:
-    settings = load_settings("config.toml")
+async def _db_migrate_command(config_path: str | Path = _CONFIG_DEFAULT) -> None:
+    settings = load_settings(config_path)
     settings.db_path.parent.mkdir(parents=True, exist_ok=True)
     async with aiosqlite.connect(settings.db_path) as conn:
         applied = await migrate_db(conn)

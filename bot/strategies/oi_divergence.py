@@ -17,6 +17,13 @@ if TYPE_CHECKING:
 __all__ = ["detect_oi_divergence"]
 
 
+def _oi_divergence_price_change(prepared: PreparedSymbol, *, fallback_bars: int = 8) -> float:
+    frame_4h = prepared.work_4h
+    if frame_4h.height >= 2 and "close" in frame_4h.columns:
+        return _price_change_pct(frame_4h, bars=1)
+    return _price_change_pct(prepared.work_15m, fallback_bars)
+
+
 def detect_oi_divergence(
     prepared: PreparedSymbol,
     _settings: BotSettings,
@@ -30,7 +37,7 @@ def detect_oi_divergence(
     if oi_change is None:
         _reject(prepared, setup_id, "asset_fit.oi_missing")
         return None
-    price_change = _price_change_pct(prepared.work_15m, 8)
+    price_change = _oi_divergence_price_change(prepared)
     if abs(oi_change) < float(params["min_abs_oi_change_pct"]) or abs(price_change) < float(
         params["min_price_change_pct"]
     ):

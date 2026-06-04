@@ -145,6 +145,7 @@ def _infer_reason_category(slug: str) -> str:
         or "bias" in slug
         or "confirmation" in slug
         or "killzone" in slug
+        or "schedule" in slug
         or "opposes" in slug
         or "momentum" in slug
     ):

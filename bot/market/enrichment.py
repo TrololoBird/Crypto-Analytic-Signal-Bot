@@ -11,7 +11,9 @@ import aiohttp
 import polars as pl
 import structlog
 
-from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.runtime.errors import DEFENSIVE_EXC
+
+from .rate_limit import REST_WEIGHT_SOFT_LIMIT
 
 from ..features.prepare import _cached_prepare_frame, _swing_points, _to_polars
 
@@ -112,37 +114,58 @@ class PublicIntelligenceService:
             ],
         }
 
+    def _empty_snapshot(self, *, reason: str) -> dict[str, Any]:
+        policy = self._policy_snapshot()
+        return {
+            "ts": datetime.now(UTC).isoformat(),
+            "runtime_mode": policy["runtime_mode"],
+            "source_policy": policy["source_policy"],
+            "status": reason,
+            "derivatives": {"by_symbol": {}, "confirmed_facts": []},
+            "options": {"enabled": False, "by_underlying": {}},
+            "macro": self._macro_disabled_snapshot(),
+            "barrier": {},
+            "harmonic": {"by_symbol": {}},
+            "aggregates": {},
+            "confirmed_facts": [],
+            "inferences": [],
+            "assumptions": [reason],
+            "uncertainty": [reason],
+        }
+
     async def collect(self, shortlist_symbols: Iterable[str]) -> dict[str, Any]:
         try:
             return await asyncio.wait_for(
                 self._collect_unbounded(shortlist_symbols),
-                timeout=30.0,  # seconds: keep one slow public source from blocking the cycle.
+                timeout=90.0,
             )
         except TimeoutError:
             LOG.warning("intelligence_collect_timeout")
-            return {}
+            return self._empty_snapshot(reason="collect_timeout")
 
     async def _collect_unbounded(self, shortlist_symbols: Iterable[str]) -> dict[str, Any]:
         symbols = [str(item).strip().upper() for item in shortlist_symbols if str(item).strip()]
         symbols = list(dict.fromkeys(symbols))
         pinned_symbols = set(self._settings.universe.pinned_symbols)
+        policy = self._policy_snapshot()
         benchmark_symbols = list(
             dict.fromkeys(
                 list(self._settings.intelligence.benchmark_symbols)
                 + [symbol for symbol in symbols if symbol in pinned_symbols]
             )
         )
-
-        policy = self._policy_snapshot()
-        derivatives = await self._build_derivatives_snapshot(symbols)
+        harmonic_symbols = benchmark_symbols[:2] or ["BTCUSDT"]
+        derivatives, barrier, harmonic = await asyncio.gather(
+            self._build_derivatives_snapshot(symbols),
+            self._build_barrier_snapshot(benchmark_symbols),
+            self._build_harmonic_snapshot(harmonic_symbols),
+        )
         options = await self._build_options_snapshot()
         macro = (
             self._macro_disabled_snapshot()
             if policy["source_policy"] == "binance_only"
             else await self._build_macro_snapshot()
         )
-        barrier = await self._build_barrier_snapshot(benchmark_symbols)
-        harmonic = await self._build_harmonic_snapshot(benchmark_symbols[:2] or ["BTCUSDT"])
         aggregates = self._build_aggregates(
             derivatives=derivatives,
             options=options,
@@ -332,9 +355,26 @@ class PublicIntelligenceService:
             "feature_grid": feature_grid,
             "uncertainty": [
                 "smart_exit_is_rule_based_not_neural_model",
-                "placeholder_indicator_columns_exist_when_optional_talib_stack_is_missing",
             ],
         }
+
+    async def _pace_enrichment_batch(self, *, label: str, batch_size: int) -> None:
+        """Pause batched REST work when client-side weight budget is near the soft cap."""
+        budget = getattr(self._client, "_weight_budget", None)
+        if budget is None:
+            return
+        used = budget.used_weight
+        if used + batch_size <= REST_WEIGHT_SOFT_LIMIT:
+            return
+        sleep_s = min(3.0, max(0.5, (used + batch_size - REST_WEIGHT_SOFT_LIMIT) / 200.0))
+        LOG.debug(
+            "enrichment batch weight pace | label=%s used=%d batch=%d sleep=%.2fs",
+            label,
+            used,
+            batch_size,
+            sleep_s,
+        )
+        await asyncio.sleep(sleep_s)
 
     async def _fetch_batch(
         self,
@@ -363,14 +403,18 @@ class PublicIntelligenceService:
 
         for index in range(0, len(symbols), 10):
             batch = symbols[index : index + 10]
+            await self._pace_enrichment_batch(label=endpoint, batch_size=len(batch))
             batch_results = await asyncio.gather(*[_fetch_one(symbol) for symbol in batch])
             results.update(dict(zip(batch, batch_results, strict=False)))
             if index + 10 < len(symbols):
-                await asyncio.sleep(0.2)
+                budget = getattr(self._client, "_weight_budget", None)
+                pause_s = 1.0 if budget is not None and budget.used_weight >= REST_WEIGHT_SOFT_LIMIT else 0.2
+                await asyncio.sleep(pause_s)
         return results
 
     async def _fetch_value_batch(self, symbols: list[str], fetcher: Any) -> dict[str, Any]:
         results: dict[str, Any] = {}
+        label = getattr(fetcher, "__name__", "value_fetch")
 
         async def _fetch_one(symbol: str) -> Any:
             try:
@@ -381,60 +425,56 @@ class PublicIntelligenceService:
 
         for index in range(0, len(symbols), 10):
             batch = symbols[index : index + 10]
+            await self._pace_enrichment_batch(label=str(label), batch_size=len(batch))
             batch_results = await asyncio.gather(*[_fetch_one(symbol) for symbol in batch])
             results.update(dict(zip(batch, batch_results, strict=False)))
             if index + 10 < len(symbols):
-                await asyncio.sleep(0.2)
+                budget = getattr(self._client, "_weight_budget", None)
+                pause_s = 1.0 if budget is not None and budget.used_weight >= REST_WEIGHT_SOFT_LIMIT else 0.2
+                await asyncio.sleep(pause_s)
         return results
 
     async def _build_derivatives_snapshot(self, shortlist_symbols: list[str]) -> dict[str, Any]:
+        """Build derivatives context from OI/WS caches; avoid REST storms on the shortlist."""
         by_symbol: dict[str, Any] = {}
         confirmed_facts: list[str] = []
-        funding_rates = await self._fetch_value_batch(
-            shortlist_symbols,
-            self._client.fetch_funding_rate,
-        )
-        open_interest = await self._fetch_value_batch(
-            shortlist_symbols,
-            self._client.fetch_open_interest,
-        )
-        oi_changes = await self._fetch_value_batch(
-            shortlist_symbols,
-            lambda symbol: self._client.fetch_open_interest_change(symbol, period="1h"),
-        )
-        top_ls_ratios = await self._fetch_value_batch(
-            shortlist_symbols,
-            lambda symbol: self._client.fetch_long_short_ratio(symbol, period="1h"),
-        )
-        global_ls_ratios = await self._fetch_value_batch(
-            shortlist_symbols,
-            lambda symbol: self._client.fetch_global_ls_ratio(symbol, period="1h"),
-        )
-        taker_ratios = await self._fetch_value_batch(
-            shortlist_symbols,
-            lambda symbol: self._client.fetch_taker_ratio(symbol, period="1h"),
-        )
-        # /futures/data/basis is public but tightly IP-rate-limited. Runtime
-        # intelligence uses cached basis from mark/index streams or explicit
-        # operator checks instead of bursting this endpoint across the shortlist.
-        basis_values = {
-            symbol: self._client.get_cached_basis(symbol, period="1h")
+        pinned = set(self._settings.universe.pinned_symbols)
+        benchmarks = set(self._settings.intelligence.benchmark_symbols)
+        refresh_targets = [
+            symbol
             for symbol in shortlist_symbols
-        }
-        funding_histories = await self._fetch_value_batch(
-            shortlist_symbols,
-            lambda symbol: self._client.fetch_funding_rate_history(symbol, limit=4),
-        )
+            if symbol in pinned or symbol in benchmarks
+        ][:12]
+
+        missing_oi = [
+            symbol
+            for symbol in refresh_targets
+            if self._client.get_cached_oi_change(symbol) is None
+        ]
+        if missing_oi:
+            await self._fetch_value_batch(
+                missing_oi,
+                lambda symbol: self._client.fetch_open_interest_change(symbol, period="1h"),
+            )
+        missing_ls = [
+            symbol
+            for symbol in refresh_targets
+            if self._client.get_cached_ls_ratio(symbol) is None
+        ]
+        if missing_ls:
+            await self._fetch_value_batch(
+                missing_ls,
+                lambda symbol: self._client.fetch_long_short_ratio(symbol, period="1h"),
+            )
 
         for symbol in shortlist_symbols:
-            funding_rate = funding_rates.get(symbol)
-            oi_current = open_interest.get(symbol)
-            oi_change_pct = oi_changes.get(symbol)
-            top_ls_ratio = top_ls_ratios.get(symbol)
-            global_ls_ratio = global_ls_ratios.get(symbol)
-            taker_ratio = taker_ratios.get(symbol)
-            basis_pct = basis_values.get(symbol)
-            funding_history = funding_histories.get(symbol) or []
+            funding_rate = self._client.get_cached_funding_rate(symbol)
+            oi_current = self._client.get_cached_open_interest(symbol)
+            oi_change_pct = self._client.get_cached_oi_change(symbol)
+            top_ls_ratio = self._client.get_cached_ls_ratio(symbol)
+            global_ls_ratio = self._client.get_cached_global_ls_ratio(symbol)
+            taker_ratio = self._client.get_cached_taker_ratio(symbol)
+            basis_pct = self._client.get_cached_basis(symbol, period="1h")
             funding_trend = self._client.get_cached_funding_trend(symbol)
 
             flow_bias = "neutral"
@@ -456,7 +496,7 @@ class PublicIntelligenceService:
                 "basis_pct": basis_pct,
                 "funding_trend": funding_trend,
                 "flow_bias": flow_bias,
-                "funding_history_points": len(funding_history),
+                "funding_history_points": 0,
             }
             if funding_rate is not None or oi_current is not None or taker_ratio is not None:
                 confirmed_facts.append(f"{symbol}_public_futures_context_available")

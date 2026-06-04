@@ -289,12 +289,19 @@ def _detect_structure_pullback_extended(
 
     level = selected_level
     vol_ratio = _as_float(work_15m.item(-1, "volume_ratio20"), 1.0)
-    if vol_ratio < 0.8:
+    min_volume_ratio = float(
+        dynamic_params.get("min_volume_ratio", defaults.get("min_volume_ratio", 0.8))
+    )
+    if vol_ratio < min_volume_ratio:
         _reject(prepared, "structure_pullback", "volume_too_low", vol_ratio=vol_ratio)
         return None
 
     rsi = _as_float(work_15m.item(-1, "rsi14"), 50.0)
-    if direction == "long" and not (25.0 <= rsi <= 80.0):
+    rsi_long_min = float(dynamic_params.get("rsi_long_min", defaults.get("rsi_long_min", 25.0)))
+    rsi_long_max = float(dynamic_params.get("rsi_long_max", defaults.get("rsi_long_max", 80.0)))
+    rsi_short_min = float(dynamic_params.get("rsi_short_min", defaults.get("rsi_short_min", 20.0)))
+    rsi_short_max = float(dynamic_params.get("rsi_short_max", defaults.get("rsi_short_max", 75.0)))
+    if direction == "long" and not (rsi_long_min <= rsi <= rsi_long_max):
         _reject(
             prepared,
             "structure_pullback",
@@ -303,7 +310,7 @@ def _detect_structure_pullback_extended(
             rsi=rsi,
         )
         return None
-    if direction == "short" and not (20.0 <= rsi <= 75.0):
+    if direction == "short" and not (rsi_short_min <= rsi <= rsi_short_max):
         _reject(
             prepared,
             "structure_pullback",
@@ -504,6 +511,11 @@ class StructurePullbackSetup(SpecDetectorSetup):
         "pullback_lookback": 12.0,
         "sl_buffer_atr": 0.5,
         "min_adx_1h": 15.0,
+        "min_volume_ratio": 0.8,
+        "rsi_long_min": 25.0,
+        "rsi_long_max": 80.0,
+        "rsi_short_min": 20.0,
+        "rsi_short_max": 75.0,
     }
 
     detect_setup = detect_structure_pullback_setup

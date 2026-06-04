@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 from bot.persistence.diary_store import DiaryStore
-from bot.persistence.journal import JournalReport, build_journal_report
+from bot.persistence.journal import (
+    JournalReport,
+    build_journal_report,
+    build_journal_report_from_repo,
+    build_journal_report_primary,
+)
 from bot.persistence.outcomes import SignalFeatures, SignalOutcome
 from bot.persistence.public_audit import PublicAuditLedger
 from bot.persistence.repository import (
@@ -31,5 +36,7 @@ __all__ = [
     "TimeSeriesCache",
     "TrackedSignalState",
     "build_journal_report",
+    "build_journal_report_from_repo",
+    "build_journal_report_primary",
     "parse_state_dt",
 ]

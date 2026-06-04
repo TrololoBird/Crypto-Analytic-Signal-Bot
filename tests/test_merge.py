@@ -49,6 +49,7 @@ def _signal(
     }
     if created_at is not None:
         kwargs["created_at"] = created_at
+        kwargs["valid_until"] = created_at + timedelta(days=30)
     return Signal(**kwargs)
 
 

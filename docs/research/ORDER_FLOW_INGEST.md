@@ -38,7 +38,7 @@ flowchart LR
 | **Liquidations** | `!forceOrder@arr` global | ring buffer | `liquidation_score` — **max 1 event/symbol/1000ms, largest order** (Binance docs); proxy, не full tape |
 | **Positioning** | REST `/futures/data/*` | batch 5–15 min | funding, OI, L/S, taker ratio |
 
-Код: [`ws_manager.py`](../../bot/ws_manager.py), [`websocket/cache.py`](../../bot/websocket/cache.py), [`features_microstructure.py`](../../bot/features_microstructure.py).
+Код: [`bot/market/ws.py`](../../bot/market/ws.py), [`bot/market/ws_cache.py`](../../bot/market/ws_cache.py), [`bot/features_microstructure.py`](../../bot/features_microstructure.py).
 
 ## 2. Order flow (aggTrade + depth)
 
@@ -50,7 +50,7 @@ flowchart LR
 4. `_enrich_with_ws_data` пишет `signed_order_flow` в `work_15m` ([`features.py`](../../bot/features.py)).
 5. Strategies: `cvd_divergence`, `absorption`, `aggression_shift`, `indicator_divergence`.
 
-**Приоритет в очереди WS:** kline close (100) > forceOrder (90) > aggTrade (40) — при backpressure aggTrade может дропаться ([`MessageBuffer`](../../bot/ws_manager.py)).
+**Приоритет в очереди WS:** kline close (100) > forceOrder (90) > aggTrade (40) — при backpressure aggTrade может дропаться ([`MessageBuffer`](../../bot/market/ws.py)).
 
 ### 2.2 Depth / microprice
 

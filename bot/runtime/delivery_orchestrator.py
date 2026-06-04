@@ -18,14 +18,22 @@ from collections import Counter
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.runtime.errors import DEFENSIVE_EXC
 from bot.delivery.contract import validate_signal_contract
 from bot.delivery.tiers import decide_with_caps
 from bot.delivery.tiers import rank_key as tier_rank_key
-from bot.domain.delivery_policy import r_class_blocks_action
+from bot.domain.delivery_policy import r_class_blocks_action, resolve_bear_regime
+from bot.delivery.trade_plan import evaluate_publish_readiness
+from bot.domain.limit_entry import resolve_late_entry_chase_pct
+from bot.domain.mtf import (
+    BREAKOUT_PROFILE,
+    REVERSAL_PROFILES,
+    evaluate_mtf_gate,
+    normalize_mtf_reject_reason,
+)
 from bot.persistence.outcomes import build_prepared_feature_snapshot, extract_features_from_signal
 
-from .merge import DEFAULT_ACTION_WINDOW_HOURS, MetaSignalMerger
+from .merge import MetaSignalMerger
 
 if TYPE_CHECKING:
     from bot.domain.schemas import PreparedSymbol, Signal
@@ -35,6 +43,7 @@ if TYPE_CHECKING:
 
 LOG = logging.getLogger("bot.runtime.bot")
 MIN_CONFIRMATIONS = 3  # confirmations: ADR-003 hard confluence gate
+DELIVERY_SUCCESS_STATUSES = frozenset({"sent", "logged"})
 
 
 class DeliveryOrchestrator:
@@ -59,8 +68,24 @@ class DeliveryOrchestrator:
             return
         diagnostics.record_delivered(setup_id)
 
+    def _record_metrics_delivered(self, signal: Signal) -> None:
+        metrics = getattr(self._bot, "metrics", None)
+        if metrics is None:
+            return
+        record = getattr(metrics, "record_signal_delivered", None)
+        if callable(record):
+            record(signal.setup_id, signal.direction)
+
+    def _record_metrics_rejected(self, signal: Signal, reason: str) -> None:
+        metrics = getattr(self._bot, "metrics", None)
+        if metrics is None:
+            return
+        record = getattr(metrics, "record_signal_rejected", None)
+        if callable(record):
+            record(signal.setup_id, signal.direction, reason)
+
     @staticmethod
-    def _rank_key(signal: Signal) -> tuple[float, float]:
+    def _rank_key(signal: Signal) -> tuple[float, float, float]:
         return tier_rank_key(signal)
 
     @staticmethod
@@ -70,6 +95,99 @@ class DeliveryOrchestrator:
     @staticmethod
     def _contract_issue_rows(signal: Signal) -> list[dict[str, object]]:
         return [issue.to_dict() for issue in validate_signal_contract(signal)]
+
+    def _limit_entry_gate(
+        self,
+        signal: Signal,
+        prepared: PreparedSymbol | None,
+    ) -> tuple[bool, str | None, dict[str, object]]:
+        """Reject when the limit plan is invalidated or price already chased away."""
+        mark_price = getattr(signal, "mark_price", None)
+        if prepared is not None:
+            mark_price = mark_price if mark_price is not None else getattr(prepared, "mark_price", None)
+        chase_pct = resolve_late_entry_chase_pct(self._bot.settings)
+        ready, reason, details = evaluate_publish_readiness(
+            direction=str(signal.direction or ""),
+            mark_price=float(mark_price) if mark_price is not None else None,
+            entry_low=float(signal.entry_low),
+            entry_high=float(signal.entry_high),
+            stop=float(signal.stop),
+            chase_pct=chase_pct,
+        )
+        return ready, reason, dict(details)
+
+    def _new_portfolio_cap_state(self) -> dict[str, Any]:
+        pinned_symbols = {
+            str(item).strip().upper()
+            for item in getattr(self._bot.settings.universe, "pinned_symbols", ())
+        }
+        return {
+            "pinned": pinned_symbols,
+            "counts": {},
+            "long_btc_downtrend": 0,
+            "family_direction": {},
+        }
+
+    def _passes_portfolio_cap(
+        self,
+        signal: Signal,
+        state: dict[str, Any],
+    ) -> tuple[bool, str | None]:
+        if signal.symbol.upper() in state["pinned"]:
+            return True, None
+        direction = str(signal.direction or "").lower()
+        regime = str(signal.btc_bias or "neutral").lower()
+        key = (direction, regime)
+        delivery = self._bot.settings.delivery
+        max_correlated_direction = int(
+            getattr(delivery, "portfolio_max_same_direction_regime", 4)
+        )
+        max_family_direction = int(getattr(delivery, "portfolio_max_family_direction", 2))
+        max_bear_longs = int(getattr(delivery, "portfolio_max_bear_longs", 2))
+        if state["counts"].get(key, 0) >= max_correlated_direction:
+            return False, "portfolio_direction_regime_cap"
+        family = str(signal.strategy_family or "continuation")
+        fam_key = (family, direction)
+        if state["family_direction"].get(fam_key, 0) >= max_family_direction:
+            return False, "portfolio_family_direction_cap"
+        if direction == "long" and regime in {"downtrend", "bear"}:
+            if state["long_btc_downtrend"] >= max_bear_longs:
+                return False, "portfolio_long_btc_bear_cap"
+            state["long_btc_downtrend"] += 1
+        state["counts"][key] = int(state["counts"].get(key, 0)) + 1
+        state["family_direction"][fam_key] = int(state["family_direction"].get(fam_key, 0)) + 1
+        return True, None
+
+    def _queue_ready_signal(
+        self,
+        signal: Signal,
+        *,
+        portfolio_state: dict[str, Any],
+        ready_to_send: list[Signal],
+        queued_setup_ids: set[str],
+        queued_symbol_direction: set[str],
+        rejected_rows: list[dict[str, Any]],
+        symbol_direction_key: str | None = None,
+    ) -> bool:
+        cap_ok, cap_reason = self._passes_portfolio_cap(signal, portfolio_state)
+        if not cap_ok:
+            rejected_rows.append(
+                {
+                    "ts": datetime.now(UTC).isoformat(),
+                    "symbol": signal.symbol,
+                    "setup_id": signal.setup_id,
+                    "direction": signal.direction,
+                    "stage": "portfolio",
+                    "reason": cap_reason or "portfolio_cap_rejected",
+                }
+            )
+            return False
+        ready_to_send.append(signal)
+        queued_setup_ids.add(signal.setup_id)
+        queued_symbol_direction.add(
+            symbol_direction_key or self._symbol_direction_cooldown_key(signal)
+        )
+        return True
 
     @staticmethod
     def _latest_float(frame: Any, column: str) -> float | None:
@@ -103,74 +221,130 @@ class DeliveryOrchestrator:
         return str(signal.direction or "").strip().lower()
 
     @classmethod
-    def _hard_confluence_gate(
+    def _trend_confirmation(
         cls,
-        signal: Signal,
-        prepared: PreparedSymbol | None,
-    ) -> tuple[bool, dict[str, bool], dict[str, object]]:
-        """Require at least 3 independent confirmations before delivery."""
-        if prepared is None:
-            return (
-                False,
-                {
-                    "trend": False,
-                    "momentum": False,
-                    "volume": False,
-                    "htf": False,
-                    "microstructure": False,
-                },
-                {"reason": "prepared_context_missing"},
-            )
-
-        primary = getattr(prepared, "work_primary", None)
-        if primary is None:
-            primary = prepared.work_15m
-        direction = cls._direction(signal)
-        close = cls._latest_float(primary, "close")
-        ema20 = cls._latest_float(primary, "ema20")
-        ema50 = cls._latest_float(primary, "ema50")
-        rsi = cls._latest_float(primary, "rsi14")
-        volume = cls._latest_float(primary, "volume")
-        volume_avg = cls._tail_mean(primary, "volume", 20)
-
-        trend = False
-        if close is not None and ema20 is not None and ema50 is not None:
+        *,
+        direction: str,
+        profile: str,
+        close: float | None,
+        ema20: float | None,
+        ema50: float | None,
+    ) -> bool:
+        if close is None or ema20 is None:
+            return False
+        if profile in REVERSAL_PROFILES:
             if direction == "long":
-                trend = bool(close > ema20 > ema50)
-            elif direction == "short":
-                trend = bool(close < ema20 < ema50)
-
-        momentum = False
-        if rsi is not None:
+                return close < ema20 or (
+                    ema50 is not None and close < ema20 < ema50
+                )
+            if direction == "short":
+                return close > ema20 or (
+                    ema50 is not None and close > ema20 > ema50
+                )
+            return False
+        if profile == BREAKOUT_PROFILE:
             if direction == "long":
-                momentum = 30.0 < rsi < 65.0
-            elif direction == "short":
-                momentum = 35.0 < rsi < 70.0
-
-        volume_ok = bool(
-            volume is not None
-            and volume_avg is not None
-            and volume_avg > 0.0
-            and volume > volume_avg * 1.2
-        )
-
-        regime_1h = str(
-            getattr(prepared, "regime_1h_confirmed", None)
-            or getattr(prepared, "bias_1h", None)
-            or "neutral"
-        ).lower()
-        regime_4h = str(
-            getattr(prepared, "regime_4h_confirmed", None)
-            or getattr(prepared, "bias_4h", None)
-            or "neutral"
-        ).lower()
-        htf = True
+                return close > ema20
+            if direction == "short":
+                return close < ema20
+            return False
+        if ema50 is None:
+            return False
         if direction == "long":
-            htf = regime_1h != "downtrend" and regime_4h != "downtrend"
-        elif direction == "short":
-            htf = regime_1h != "uptrend" and regime_4h != "uptrend"
+            return bool(close > ema20 > ema50)
+        if direction == "short":
+            return bool(close < ema20 < ema50)
+        return False
+
+    @classmethod
+    def _momentum_confirmation(
+        cls,
+        *,
+        direction: str,
+        profile: str,
+        rsi: float | None,
+    ) -> bool:
+        if rsi is None:
+            return False
+        if profile in REVERSAL_PROFILES:
+            if direction == "long":
+                return rsi < 50.0
+            if direction == "short":
+                return rsi > 50.0
+            return False
+        if profile == BREAKOUT_PROFILE:
+            if direction == "long":
+                return 40.0 < rsi < 75.0
+            if direction == "short":
+                return 25.0 < rsi < 60.0
+            return False
+        if direction == "long":
+            return 30.0 < rsi < 65.0
+        if direction == "short":
+            return 35.0 < rsi < 70.0
+        return False
+
+    @classmethod
+    def _volume_confirmation(
+        cls,
+        *,
+        profile: str,
+        volume: float | None,
+        volume_avg: float | None,
+    ) -> bool:
+        if volume is None or volume_avg is None or volume_avg <= 0.0:
+            return False
+        if profile == BREAKOUT_PROFILE:
+            multiplier = 1.1
+        elif profile in REVERSAL_PROFILES:
+            multiplier = 1.0
         else:
-            htf = False
+            multiplier = 1.2
+        return bool(volume > volume_avg * multiplier)
+
+    @classmethod
+    def _microstructure_confirmation(
+        cls,
+        *,
+        direction: str,
+        prepared: PreparedSymbol,
+        setup_id: str = "",
+    ) -> tuple[bool, dict[str, object]]:
+        from bot.domain.delivery_policy import is_positioning_setup
+
+        details: dict[str, object] = {}
+        micro = getattr(prepared, "microprice_bias", None)
+        agg = getattr(prepared, "agg_trade_delta_30s", None)
+
+        micro_ok = False
+        if micro is not None:
+            try:
+                micro_val = float(micro)
+            except (TypeError, ValueError):
+                micro_val = math.nan
+            if math.isfinite(micro_val):
+                details["microprice_bias"] = micro_val
+                if direction == "long":
+                    micro_ok = micro_val >= 0.05
+                elif direction == "short":
+                    micro_ok = micro_val <= -0.05
+
+        agg_ok = False
+        if agg is not None:
+            try:
+                agg_val = float(agg)
+            except (TypeError, ValueError):
+                agg_val = math.nan
+            if math.isfinite(agg_val):
+                details["agg_trade_delta_30s"] = agg_val
+                if direction == "long":
+                    agg_ok = agg_val >= 0.0
+                elif direction == "short":
+                    agg_ok = agg_val <= 0.0
+
+        if micro_ok or agg_ok:
+            details["microstructure_source"] = "live_micro"
+            return True, details
 
         funding = getattr(prepared, "funding_rate", None)
         oi_change = getattr(prepared, "oi_change_pct", None)
@@ -186,7 +360,158 @@ class DeliveryOrchestrator:
             funding_value = 0.0
         if not math.isfinite(oi_value):
             oi_value = 0.0
-        microstructure = abs(funding_value) < 0.001 and abs(oi_value) < 12.0
+        details["funding_rate"] = funding_value
+        details["oi_change_pct"] = oi_value
+        details["microstructure_source"] = "funding_oi_proxy"
+        if is_positioning_setup(setup_id):
+            # Positioning setups need elevated funding/OI — not a calm-market proxy.
+            funding_extreme = abs(funding_value) >= 0.0003
+            oi_extreme = abs(oi_value) >= 0.5
+            return funding_extreme or oi_extreme, details
+        return abs(funding_value) < 0.001 and abs(oi_value) < 12.0, details
+
+    def _confluence_gate_options(self) -> dict[str, bool | int]:
+        delivery = self._bot.settings.delivery
+        return {
+            "enforce_mtf_gate": bool(getattr(delivery, "enforce_mtf_gate", True)),
+            "reversal_min_confirmations": int(
+                getattr(delivery, "reversal_min_confirmations", 2)
+            ),
+            "use_weighted_confluence": bool(
+                getattr(delivery, "use_weighted_confluence", False)
+            ),
+        }
+
+    def _confluence_gate_kwargs(self) -> dict[str, Any]:
+        opts: dict[str, Any] = dict(self._confluence_gate_options())
+        opts["settings"] = self._bot.settings
+        opts["confluence_engine"] = getattr(self._bot, "confluence", None)
+        return opts
+
+    @classmethod
+    def _hard_confluence_gate(
+        cls,
+        signal: Signal,
+        prepared: PreparedSymbol | None,
+        *,
+        enforce_mtf_gate: bool = True,
+        reversal_min_confirmations: int = 2,
+        use_weighted_confluence: bool = False,
+        settings: Any | None = None,
+        confluence_engine: Any | None = None,
+    ) -> tuple[bool, dict[str, bool], dict[str, object]]:
+        """Require at least 3 independent confirmations before delivery."""
+        empty_confirmations = {
+            "trend": False,
+            "momentum": False,
+            "volume": False,
+            "htf": False,
+            "microstructure": False,
+        }
+        if prepared is None:
+            return (
+                False,
+                empty_confirmations,
+                {
+                    "reason": "prepared_context_missing",
+                    "bear_regime": False,
+                    "bear_regime_source": "none",
+                    "btc_phase": "unknown",
+                    "btc_phase_rule": "none",
+                    "required": MIN_CONFIRMATIONS,
+                    "confirmed": 0,
+                    "mtf_reason": "",
+                },
+            )
+
+        primary = getattr(prepared, "work_primary", None)
+        if primary is None:
+            primary = prepared.work_15m
+        direction = cls._direction(signal)
+        close = cls._latest_float(primary, "close")
+        ema20 = cls._latest_float(primary, "ema20")
+        ema50 = cls._latest_float(primary, "ema50")
+        rsi = cls._latest_float(primary, "rsi14")
+        volume = cls._latest_float(primary, "volume")
+        volume_avg = cls._tail_mean(primary, "volume", 20)
+
+        profile = str(getattr(signal, "confirmation_profile", "trend_follow") or "trend_follow")
+        trend = cls._trend_confirmation(
+            direction=direction,
+            profile=profile,
+            close=close,
+            ema20=ema20,
+            ema50=ema50,
+        )
+        momentum = cls._momentum_confirmation(direction=direction, profile=profile, rsi=rsi)
+        volume_ok = cls._volume_confirmation(
+            profile=profile,
+            volume=volume,
+            volume_avg=volume_avg,
+        )
+
+        prepared_settings = getattr(prepared, "settings", None)
+        strict_data_quality = bool(
+            getattr(getattr(prepared_settings, "runtime", None), "strict_data_quality", True)
+        )
+        mtf_ok, mtf_reason, mtf_details = evaluate_mtf_gate(
+            prepared,
+            direction,
+            confirmation_profile=profile,
+            strict_data_quality=strict_data_quality,
+        )
+
+        regime_1h = str(
+            getattr(prepared, "regime_1h_confirmed", None)
+            or getattr(prepared, "bias_1h", None)
+            or "neutral"
+        ).lower()
+        regime_4h = str(
+            getattr(prepared, "regime_4h_confirmed", None)
+            or getattr(prepared, "bias_4h", None)
+            or "neutral"
+        ).lower()
+
+        market_ctx = getattr(prepared, "market_ctx", None)
+        bear_regime, bear_regime_source = resolve_bear_regime(
+            market_ctx=market_ctx if isinstance(market_ctx, dict) else None,
+            prepared_btc_bias=getattr(prepared, "btc_bias", None),
+            signal_btc_bias=getattr(signal, "btc_bias", None),
+        )
+
+        btc_phase = str(getattr(prepared, "btc_phase", "") or "").strip().lower()
+        if not btc_phase and isinstance(market_ctx, dict):
+            btc_phase = str(market_ctx.get("btc_phase") or "").strip().lower()
+        if profile in REVERSAL_PROFILES and direction == "long" and btc_phase in {
+            "decline",
+            "distribution",
+        }:
+            btc_phase_rule = "countertrend_decline_penalty_eligible"
+        elif profile in REVERSAL_PROFILES and direction == "short" and btc_phase in {
+            "markup",
+            "accumulation",
+        }:
+            btc_phase_rule = "countertrend_markup_penalty_eligible"
+        else:
+            btc_phase_rule = "none"
+
+        # N1: dual HTF bearish is expected for reversal longs in global bear — pass HTF leg.
+        htf_conflict = str(mtf_reason or "").startswith("htf_reversal_conflict")
+        if (
+            profile in REVERSAL_PROFILES
+            and bear_regime
+            and direction == "long"
+            and htf_conflict
+        ):
+            mtf_ok = True
+            mtf_reason = "htf_reversal_expected_bear:" + str(mtf_reason).split(":", 1)[-1]
+
+        htf = mtf_ok if enforce_mtf_gate else True
+        microstructure, micro_details = cls._microstructure_confirmation(
+            direction=direction,
+            prepared=prepared,
+            setup_id=str(getattr(signal, "setup_id", "") or ""),
+        )
 
         confirmations = {
             "trend": trend,
@@ -196,9 +521,17 @@ class DeliveryOrchestrator:
             "microstructure": microstructure,
         }
         confirmation_count = sum(confirmations.values())
+        if profile in REVERSAL_PROFILES and bear_regime:
+            required = max(1, min(int(reversal_min_confirmations), 5))
+        else:
+            required = MIN_CONFIRMATIONS
         details: dict[str, object] = {
             "confirmed": confirmation_count,
-            "required": MIN_CONFIRMATIONS,
+            "required": required,
+            "bear_regime": bear_regime,
+            "bear_regime_source": bear_regime_source,
+            "btc_phase": btc_phase or "unknown",
+            "btc_phase_rule": btc_phase_rule,
             "close": close,
             "ema20": ema20,
             "ema50": ema50,
@@ -207,10 +540,78 @@ class DeliveryOrchestrator:
             "volume_mean20": volume_avg,
             "regime_1h": regime_1h,
             "regime_4h": regime_4h,
-            "funding_rate": funding_value,
-            "oi_change_pct": oi_value,
+            "mtf_reason": mtf_reason,
+            "mtf_details": mtf_details,
+            "mtf_enforced": enforce_mtf_gate,
+            "confirmation_profile": profile,
+            **micro_details,
         }
-        return confirmation_count >= MIN_CONFIRMATIONS, confirmations, details
+        boolean_pass = confirmation_count >= required
+        if use_weighted_confluence and settings is not None and prepared is not None:
+            from bot.delivery.confluence import ConfluenceEngine
+
+            engine = confluence_engine or ConfluenceEngine(settings)
+            conf_result = engine.score(signal, prepared)
+            details["weighted_confluence_bridge"] = True
+            details["confluence_engine"] = conf_result.to_dict()
+            weighted_min = float(settings.delivery.action_min_score)
+            weighted_pass = conf_result.final_score >= weighted_min
+            details["weighted_confluence_pass"] = weighted_pass
+            if not boolean_pass and weighted_pass and confirmation_count >= max(1, required - 1):
+                boolean_pass = True
+                details["weighted_confluence_bridge_pass"] = True
+        elif use_weighted_confluence:
+            details["weighted_confluence_bridge"] = True
+        if enforce_mtf_gate and not mtf_ok:
+            details["reason"] = normalize_mtf_reject_reason(mtf_reason)
+            return False, confirmations, details
+        return boolean_pass, confirmations, details
+
+    def _record_watch_screener(
+        self,
+        signal: Signal,
+        *,
+        tier: str,
+        tier_reason: str,
+    ) -> None:
+        if tier != "watch":
+            return
+        if not bool(getattr(self._bot.settings.delivery, "watch_screener_enabled", True)):
+            return
+        telemetry = getattr(self._bot, "telemetry", None)
+        append_jsonl = getattr(telemetry, "append_jsonl", None)
+        if not callable(append_jsonl):
+            return
+        append_jsonl(
+            "watch_screener.jsonl",
+            {
+                "ts": datetime.now(UTC).isoformat(),
+                **signal.to_log_row(),
+                "tier": tier,
+                "tier_reason": tier_reason,
+            },
+        )
+
+    async def _send_sl_postmortem_to_operators(self, events: list[SignalTrackingEvent]) -> None:
+        if not bool(getattr(self._bot.settings.delivery, "sl_postmortem_enabled", True)):
+            return
+        from bot.delivery.telegram_routing import operator_dm_enabled
+        from .telegram_operator import TelegramOperatorConsole, operator_console_enabled
+
+        if not operator_console_enabled(self._bot):
+            return
+        if not operator_dm_enabled(self._bot, "send_sl_postmortem"):
+            return
+        from .sl_postmortem import build_sl_postmortem_html
+
+        console = getattr(self._bot, "_operator_console", None)
+        if console is None:
+            console = TelegramOperatorConsole(self._bot)
+        for event in events:
+            try:
+                await console.send_html_to_operators(build_sl_postmortem_html(event))
+            except DEFENSIVE_EXC:
+                LOG.debug("sl postmortem operator notify skipped", exc_info=True)
 
     def _record_delivery_attempt(
         self,
@@ -250,6 +651,7 @@ class DeliveryOrchestrator:
 
         selected: list[Signal] = []
         selected_keys: set[str] = set()
+        portfolio_state = self._new_portfolio_cap_state()
 
         setup_lanes = sorted(
             by_setup.values(),
@@ -263,6 +665,9 @@ class DeliveryOrchestrator:
                 key = signal.signal_key
                 if key in selected_keys:
                     continue
+                cap_ok, _ = self._passes_portfolio_cap(signal, portfolio_state)
+                if not cap_ok:
+                    continue
                 selected.append(signal)
                 selected_keys.add(key)
                 break
@@ -272,6 +677,9 @@ class DeliveryOrchestrator:
                 break
             key = signal.signal_key
             if key in selected_keys:
+                continue
+            cap_ok, _ = self._passes_portfolio_cap(signal, portfolio_state)
+            if not cap_ok:
                 continue
             selected.append(signal)
             selected_keys.add(key)
@@ -366,6 +774,12 @@ class DeliveryOrchestrator:
             max_wait_s=self._bot._delivery_timeout_seconds,
             operation=self._bot.delivery.deliver_tracking_updates(events, dry_run=False),
         )
+        sl_events = [event for event in events if event.event_type == "stop_loss"]
+        if sl_events and bool(getattr(self._bot.settings.delivery, "sl_postmortem_to_operators", True)):
+            await self._send_sl_postmortem_to_operators(sl_events)
+        dashboard = getattr(self._bot, "dashboard", None)
+        if dashboard is not None and events:
+            dashboard.notify_tracking_changed(event_count=len(events))
 
     async def _deliver_direction_conflict_watch(
         self,
@@ -385,7 +799,12 @@ class DeliveryOrchestrator:
             prepared = (
                 prepared_by_tracking_id.get(signal.tracking_id) if prepared_by_tracking_id else None
             )
-            gate_passed, confirmations, gate_details = self._hard_confluence_gate(signal, prepared)
+            gate_opts = self._confluence_gate_kwargs()
+            gate_passed, confirmations, gate_details = self._hard_confluence_gate(
+                signal,
+                prepared,
+                **gate_opts,
+            )
             if not gate_passed:
                 rejected_rows.append(
                     {
@@ -424,11 +843,15 @@ class DeliveryOrchestrator:
                 continue
             for item in results:
                 delivery_status_counts[item.status] += 1
-                if item.status != "sent":
+                if item.status not in DELIVERY_SUCCESS_STATUSES:
                     await self._bot.tracker.cancel_pending_delivery(item.signal)
                     continue
                 delivered.append(item.signal)
                 self._record_delivery_diag_delivered(item.signal.setup_id)
+                self._record_metrics_delivered(item.signal)
+                dashboard = getattr(self._bot, "dashboard", None)
+                if dashboard is not None:
+                    dashboard.notify_signal_delivered(item.signal)
                 if item.message_id is not None:
                     await self._bot._wait_noncritical(
                         label=f"link conflict {item.signal.symbol}/{item.signal.setup_id}",
@@ -445,21 +868,23 @@ class DeliveryOrchestrator:
         signals: list[Signal],
         *,
         prepared_by_tracking_id: dict[str, PreparedSymbol] | None = None,
-    ) -> tuple[list[Signal], list[dict[str, Any]], Counter[str]]:
+    ) -> tuple[list[Signal], list[dict[str, Any]], Counter[str], int]:
         if not signals:
-            return [], [], Counter()
+            return [], [], Counter(), 0
 
         ledger = getattr(self._bot, "public_audit", None)
         recent_actions: list[Signal] = []
+        action_window_hours = float(self._bot.settings.tracking.action_window_hours)
         if ledger is not None and hasattr(ledger, "recent_action_signals"):
-            recent_actions = ledger.recent_action_signals(within_hours=DEFAULT_ACTION_WINDOW_HOURS)
+            recent_actions = ledger.recent_action_signals(within_hours=action_window_hours)
 
-        merge_result = MetaSignalMerger().merge(
+        merge_result = MetaSignalMerger(action_window_hours=action_window_hours).merge(
             signals,
             recent_actions=recent_actions,
         )
         merged_meta = merge_result.merged
         direction_conflict_signals = [meta.primary for meta in merge_result.direction_conflicts]
+        merge_conflict_count = len(merge_result.direction_conflicts)
         merge_meta_by_tracking_id = {meta.primary.tracking_id: meta for meta in merged_meta}
         signals = [meta.primary for meta in merged_meta]
 
@@ -479,6 +904,7 @@ class DeliveryOrchestrator:
                 strict=True,
             )
         )
+        portfolio_state = self._new_portfolio_cap_state()
 
         for signal in signals:
             contract_issues = self._contract_issue_rows(signal)
@@ -512,10 +938,42 @@ class DeliveryOrchestrator:
             prepared = (
                 prepared_by_tracking_id.get(signal.tracking_id) if prepared_by_tracking_id else None
             )
-            gate_passed, confirmations, gate_details = self._hard_confluence_gate(signal, prepared)
-            if not gate_passed:
+            limit_ready, limit_reason, limit_details = self._limit_entry_gate(signal, prepared)
+            if not limit_ready:
                 self._record_delivery_diag_reject(
-                    "confluence", "hard_confluence_gate_failed", setup_id=signal.setup_id
+                    "limit_entry",
+                    limit_reason or "limit_entry_rejected",
+                    setup_id=signal.setup_id,
+                )
+                rejected_rows.append(
+                    {
+                        "ts": datetime.now(UTC).isoformat(),
+                        "symbol": signal.symbol,
+                        "setup_id": signal.setup_id,
+                        "direction": signal.direction,
+                        "stage": "limit_entry",
+                        "reason": limit_reason or "limit_entry_rejected",
+                        "details": limit_details,
+                    }
+                )
+                LOG.info(
+                    "Signal rejected by limit entry gate | symbol=%s setup=%s direction=%s reason=%s",
+                    signal.symbol,
+                    signal.setup_id,
+                    signal.direction,
+                    limit_reason,
+                )
+                continue
+            gate_opts = self._confluence_gate_kwargs()
+            gate_passed, confirmations, gate_details = self._hard_confluence_gate(
+                signal,
+                prepared,
+                **gate_opts,
+            )
+            if not gate_passed:
+                confluence_reason = str(gate_details.get("reason") or "hard_confluence_gate")
+                self._record_delivery_diag_reject(
+                    "confluence", confluence_reason, setup_id=signal.setup_id
                 )
                 rejected_rows.append(
                     {
@@ -524,7 +982,7 @@ class DeliveryOrchestrator:
                         "setup_id": signal.setup_id,
                         "direction": signal.direction,
                         "stage": "confluence",
-                        "reason": "hard_confluence_gate_failed",
+                        "reason": confluence_reason,
                         "confirmations": confirmations,
                         "details": gate_details,
                     }
@@ -578,6 +1036,18 @@ class DeliveryOrchestrator:
                         "score_boost": merge_meta.score_boost if merge_meta is not None else 0.0,
                     }
                 )
+                drop_reason = tier_decision.drop_reason or "tier_cap_rejected"
+                if drop_reason in {"action_cap_reached", "watch_cap_reached"}:
+                    from bot.delivery.ops_webhook import notify_ops_tier_cap_starvation
+
+                    await notify_ops_tier_cap_starvation(
+                        self._bot,
+                        symbol=signal.symbol,
+                        setup_id=signal.setup_id,
+                        direction=str(signal.direction or ""),
+                        tier=tier_decision.tier,
+                        drop_reason=drop_reason,
+                    )
                 continue
             tier_allowed_tracking_ids.add(signal.tracking_id)
             if tier_decision.tier == "action" and r_class_blocks_action(
@@ -673,9 +1143,14 @@ class DeliveryOrchestrator:
                     if signal.tracking_id not in tier_allowed_tracking_ids:
                         msg = f"tier cap policy was bypassed for {signal.tracking_id}"
                         raise ValueError(msg)
-                    ready_to_send.append(signal)
-                    queued_setup_ids.add(signal.setup_id)
-                    queued_symbol_direction.add(self._symbol_direction_cooldown_key(signal))
+                    self._queue_ready_signal(
+                        signal,
+                        portfolio_state=portfolio_state,
+                        ready_to_send=ready_to_send,
+                        queued_setup_ids=queued_setup_ids,
+                        queued_symbol_direction=queued_symbol_direction,
+                        rejected_rows=rejected_rows,
+                    )
                 else:
                     rejected_rows.append(
                         {
@@ -764,9 +1239,15 @@ class DeliveryOrchestrator:
                 if signal.tracking_id not in tier_allowed_tracking_ids:
                     msg = f"tier cap policy was bypassed for {signal.tracking_id}"
                     raise ValueError(msg)
-                ready_to_send.append(signal)
-                queued_setup_ids.add(signal.setup_id)
-                queued_symbol_direction.add(symbol_direction_key)
+                self._queue_ready_signal(
+                    signal,
+                    portfolio_state=portfolio_state,
+                    ready_to_send=ready_to_send,
+                    queued_setup_ids=queued_setup_ids,
+                    queued_symbol_direction=queued_symbol_direction,
+                    rejected_rows=rejected_rows,
+                    symbol_direction_key=symbol_direction_key,
+                )
                 continue
 
             if self._quality_monitor_rejects(signal, rejected_rows):
@@ -783,9 +1264,15 @@ class DeliveryOrchestrator:
                 if signal.tracking_id not in tier_allowed_tracking_ids:
                     msg = f"tier cap policy was bypassed for {signal.tracking_id}"
                     raise ValueError(msg)
-                ready_to_send.append(signal)
-                queued_setup_ids.add(signal.setup_id)
-                queued_symbol_direction.add(symbol_direction_key)
+                self._queue_ready_signal(
+                    signal,
+                    portfolio_state=portfolio_state,
+                    ready_to_send=ready_to_send,
+                    queued_setup_ids=queued_setup_ids,
+                    queued_symbol_direction=queued_symbol_direction,
+                    rejected_rows=rejected_rows,
+                    symbol_direction_key=symbol_direction_key,
+                )
             else:
                 rejected_rows.append(
                     {
@@ -799,7 +1286,7 @@ class DeliveryOrchestrator:
                 )
 
         if not ready_to_send:
-            return [], rejected_rows, Counter()
+            return [], rejected_rows, Counter(), merge_conflict_count
 
         delivered: list[Signal] = []
         delivery_status_counts: Counter[str] = Counter()
@@ -820,6 +1307,42 @@ class DeliveryOrchestrator:
                 raise ValueError(msg)
             tier_decision = tier_by_tracking_id.get(signal.tracking_id)
             delivery_tier = tier_decision.tier if tier_decision is not None else "action"
+            tier_reason = tier_decision.reason if tier_decision is not None else "score_action"
+            session_cap = int(
+                getattr(self._bot.settings.delivery, "action_cap_per_session", 0) or 0
+            )
+            session_used = int(getattr(self._bot, "_session_action_delivered", 0) or 0)
+            if delivery_tier == "action" and session_cap > 0 and session_used >= session_cap:
+                if float(signal.score or 0.0) >= float(
+                    self._bot.settings.delivery.watch_min_score
+                ):
+                    delivery_tier = "watch"
+                    tier_reason = "action_session_cap_downgrade"
+                else:
+                    await self._bot.tracker.cancel_pending_delivery(signal)
+                    self._record_delivery_diag_reject(
+                        "tier",
+                        "action_session_cap_reached",
+                        setup_id=signal.setup_id,
+                    )
+                    rejected_rows.append(
+                        {
+                            "ts": datetime.now(UTC).isoformat(),
+                            "symbol": signal.symbol,
+                            "setup_id": signal.setup_id,
+                            "direction": signal.direction,
+                            "stage": "tier",
+                            "reason": "action_session_cap_reached",
+                            "session_action_delivered": session_used,
+                            "session_action_cap": session_cap,
+                        }
+                    )
+                    continue
+            self._record_watch_screener(
+                signal,
+                tier=delivery_tier,
+                tier_reason=tier_reason,
+            )
             tier_map = {signal.tracking_id: delivery_tier}
             armed_ok, _ = await self._bot._wait_noncritical(
                 label=f"journal {signal.symbol}/{signal.setup_id}",
@@ -863,13 +1386,14 @@ class DeliveryOrchestrator:
                     reason=item.reason,
                     message_id=item.message_id,
                 )
-                if item.status != "sent":
+                if item.status not in DELIVERY_SUCCESS_STATUSES:
                     await self._bot.tracker.cancel_pending_delivery(item.signal)
                     self._record_delivery_diag_reject(
                         "delivery",
                         f"delivery_{item.status}",
                         setup_id=item.signal.setup_id,
                     )
+                    self._record_metrics_rejected(item.signal, f"delivery_{item.status}")
                     rejected_rows.append(
                         {
                             "ts": datetime.now(UTC).isoformat(),
@@ -880,6 +1404,16 @@ class DeliveryOrchestrator:
                             "reason": f"delivery_{item.status}",
                             "delivery_reason": item.reason,
                         }
+                    )
+                    from bot.delivery.ops_webhook import notify_ops_delivery_failed
+
+                    await notify_ops_delivery_failed(
+                        self._bot,
+                        symbol=item.signal.symbol,
+                        setup_id=item.signal.setup_id,
+                        direction=str(item.signal.direction or ""),
+                        reason=f"delivery_{item.status}",
+                        delivery_reason=item.reason,
                     )
                     LOG.info(
                         (
@@ -895,6 +1429,14 @@ class DeliveryOrchestrator:
                     continue
                 delivered.append(item.signal)
                 self._record_delivery_diag_delivered(item.signal.setup_id)
+                self._record_metrics_delivered(item.signal)
+                if delivery_tier == "action":
+                    self._bot._session_action_delivered = (
+                        int(getattr(self._bot, "_session_action_delivered", 0) or 0) + 1
+                    )
+                dashboard = getattr(self._bot, "dashboard", None)
+                if dashboard is not None:
+                    dashboard.notify_signal_delivered(item.signal)
                 prepared = (
                     prepared_by_tracking_id.get(item.signal.tracking_id)
                     if prepared_by_tracking_id
@@ -932,16 +1474,41 @@ class DeliveryOrchestrator:
                             dry_run=False,
                         ),
                     )
+                if delivery_tier == "watch":
+                    from .watch_escalation import maybe_notify_watch_escalation
+
+                    await maybe_notify_watch_escalation(self._bot, item.signal, prepared)
                 notifier_settings = getattr(self._bot.settings, "notifiers", None)
-                if bool(getattr(notifier_settings, "send_analytics_companion", False)):
-                    task = asyncio.create_task(
-                        self._bot.delivery.send_analytics_companion(
-                            item.signal, btc_bias=btc_bias, eth_bias=eth_bias
-                        ),
-                        name=f"analytics:{item.signal.symbol}",
+                if notifier_settings is not None:
+                    from bot.delivery.telegram_routing import (
+                        send_operator_analytics_companion,
+                        should_send_channel_analytics_companion,
                     )
-                    self._bot._background_tasks.add(task)
-                    task.add_done_callback(self._bot._background_tasks.discard)
+
+                    if should_send_channel_analytics_companion(
+                        notifier_settings,
+                        tier=delivery_tier,
+                    ):
+                        task = asyncio.create_task(
+                            self._bot.delivery.send_analytics_companion(
+                                item.signal, btc_bias=btc_bias, eth_bias=eth_bias
+                            ),
+                            name=f"analytics:{item.signal.symbol}",
+                        )
+                        self._bot._background_tasks.add(task)
+                        task.add_done_callback(self._bot._background_tasks.discard)
+                    if delivery_tier == "watch":
+                        task = asyncio.create_task(
+                            send_operator_analytics_companion(
+                                self._bot,
+                                item.signal,
+                                btc_bias=btc_bias,
+                                eth_bias=eth_bias,
+                            ),
+                            name=f"watch_companion:{item.signal.symbol}",
+                        )
+                        self._bot._background_tasks.add(task)
+                        task.add_done_callback(self._bot._background_tasks.discard)
 
         try:
             await self._bot.alerts.on_confirmed_signals(delivered, observed_at=datetime.now(UTC))
@@ -961,4 +1528,4 @@ class DeliveryOrchestrator:
             )
             delivered.extend(conflict_delivered)
 
-        return delivered, rejected_rows, delivery_status_counts
+        return delivered, rejected_rows, delivery_status_counts, merge_conflict_count

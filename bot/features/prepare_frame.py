@@ -11,11 +11,8 @@ import numpy as np
 import polars as pl
 import structlog
 
-from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.runtime.errors import DEFENSIVE_EXC
 
-from . import advanced as _features_advanced_module
-from . import core as _features_core_module
-from . import oscillators as _features_oscillators_module
 from .microstructure import add_microstructure_features
 from .shared import supertrend_series, wilder_mean
 from .structure import (
@@ -33,9 +30,8 @@ if TYPE_CHECKING:
 
     from ..domain.schemas import SymbolFrames
 
-# Optional polars_ta import. TA-Lib itself is deliberately not imported:
-# Windows/Python 3.13 deployments are brittle with that native dependency,
-# while the pure-Polars fallbacks below are stable and deterministic.
+# Optional polars_ta backend for a few indicators (EMA/ROC/OBV).
+# Pure-Polars fallbacks are canonical; no TA-Lib / pandas on the live path.
 try:
     _plta_module = importlib_util.find_spec("polars_ta.ta")
 except (ImportError, ModuleNotFoundError):
@@ -64,36 +60,29 @@ else:
     _HAS_POLARS_OLS = False
 
 # Compatibility name for the decomposed feature modules/tests. This tracks the
-# native TA-Lib path, which the project deliberately disables on Windows/Python
-# 3.13; optional `polars_ta` availability is tracked separately above.
-_HAS_TALIB = False
-
-CORE_API = {
-    "add_core_features": _features_core_module.add_core_features,
-    "adx": _features_core_module.adx,
-    "atr": _features_core_module.atr,
-    "ema": _features_core_module.ema,
-    "realized_volatility": _features_core_module.realized_volatility,
-    "roc": _features_core_module.roc,
-    "rsi": _features_core_module.rsi,
-    "safe_close_position": _features_core_module.safe_close_position,
-    "vwap": _features_core_module.vwap,
-}
-ADVANCED_API = {
-    "add_advanced_indicators": _features_advanced_module.add_advanced_indicators,
-    "supertrend": _features_advanced_module.supertrend,
-}
-OSCILLATORS_API = {
-    "add_oscillator_features": _features_oscillators_module.add_oscillator_features,
-    "cci": _features_oscillators_module.cci,
-    "cmf": _features_oscillators_module.cmf,
-    "mfi": _features_oscillators_module.mfi,
-    "stochastic": _features_oscillators_module.stochastic,
-    "ultimate_oscillator": _features_oscillators_module.ultimate_oscillator,
-}
-
 LOG = structlog.get_logger("bot.features.prepare_frame")
 _ADVANCED_FALLBACKS_LOGGED: set[str] = set()
+_FRAME_PREP_FALLBACKS: list[str] = []
+
+
+def reset_frame_indicator_fallbacks() -> None:
+    _FRAME_PREP_FALLBACKS.clear()
+
+
+def take_frame_indicator_fallbacks() -> list[str]:
+    flags = [f"indicator_fallback:{name}" for name in _FRAME_PREP_FALLBACKS]
+    _FRAME_PREP_FALLBACKS.clear()
+    return flags
+
+
+def _log_indicator_fallback(indicator: str, exc: Exception) -> None:
+    if indicator not in _FRAME_PREP_FALLBACKS:
+        _FRAME_PREP_FALLBACKS.append(indicator)
+    if indicator in _ADVANCED_FALLBACKS_LOGGED:
+        LOG.debug("advanced indicator fallback reused", indicator=indicator, error=str(exc))
+        return
+    _ADVANCED_FALLBACKS_LOGGED.add(indicator)
+    LOG.info("advanced indicator fallback activated", indicator=indicator, error=str(exc))
 
 _FrameCacheValue = float | None
 _FRAME_CACHE_TAIL_COLUMNS = (
@@ -137,14 +126,6 @@ def _tail_value_signature(row: dict[str, object]) -> tuple[_FrameCacheValue, ...
             continue
         values.append(None if value != value else value)
     return tuple(values)
-
-
-def _log_indicator_fallback(indicator: str, exc: Exception) -> None:
-    if indicator in _ADVANCED_FALLBACKS_LOGGED:
-        LOG.debug("advanced indicator fallback reused", indicator=indicator, error=str(exc))
-        return
-    _ADVANCED_FALLBACKS_LOGGED.add(indicator)
-    LOG.info("advanced indicator fallback activated", indicator=indicator, error=str(exc))
 
 
 def _materialize_series(
@@ -452,6 +433,44 @@ def _vwap(df: pl.DataFrame) -> pl.Series:
 
     vwap = (cpv / cv).forward_fill()
     return _materialize_series(vwap, df=df, name="vwap")
+
+
+def _session_time_column(df: pl.DataFrame) -> str | None:
+    return next(
+        (
+            column
+            for column in ("close_time", "time", "open_time")
+            if column in df.columns and _is_temporal_dtype(df.schema.get(column))
+        ),
+        None,
+    )
+
+
+def add_session_cvd(df: pl.DataFrame) -> pl.DataFrame:
+    """Cumulative volume delta reset at each UTC calendar date (session CVD)."""
+    if df.is_empty():
+        return df
+    if {"taker_buy_base_volume", "volume"}.issubset(df.columns):
+        bar_delta = 2.0 * pl.col("taker_buy_base_volume") - pl.col("volume")
+    elif {"delta_ratio", "volume"}.issubset(df.columns):
+        bar_delta = (pl.col("delta_ratio") - 0.5) * 2.0 * pl.col("volume")
+    else:
+        return df.with_columns(pl.lit(0.0).alias("session_cvd"))
+
+    filled_delta = bar_delta.fill_null(0.0).fill_nan(0.0)
+    time_column = _session_time_column(df)
+    if time_column is not None:
+        temp = df.with_columns(
+            [
+                filled_delta.alias("_cvd_bar_delta"),
+                pl.col(time_column).dt.date().alias("_cvd_session"),
+            ]
+        )
+        return temp.with_columns(
+            pl.col("_cvd_bar_delta").cum_sum().over("_cvd_session").alias("session_cvd")
+        ).drop("_cvd_bar_delta", "_cvd_session")
+
+    return df.with_columns(filled_delta.cum_sum().alias("session_cvd"))
 
 
 def _roc(df: pl.DataFrame, period: int = 10) -> pl.Series:
@@ -1336,6 +1355,8 @@ def _prepare_frame(df: pl.DataFrame) -> pl.DataFrame:
     else:
         work = work.with_columns([pl.lit(0.5).alias("delta_ratio")])
 
+    work = add_session_cvd(work)
+
     # ATR %
     work = work.with_columns(
         [
@@ -1390,6 +1411,7 @@ __all__ = [
     "_finite_float",
     "_numeric_item",
     "_prepare_frame",
+    "add_session_cvd",
     "has_minimum_bars",
     "min_required_bars",
 ]

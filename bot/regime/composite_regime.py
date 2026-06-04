@@ -11,6 +11,50 @@ from .hmm_regime import HAS_HMMLEARN, RuleBasedRegimeDetector
 ML_COMPONENTS_AVAILABLE = HAS_HMMLEARN and HAS_SKLEARN and HAS_STATSMODELS
 
 
+def benchmark_funding_median(funding_rates: dict[str, float] | None) -> float:
+    """Median BTC+ETH funding for composite/centroid features (N5-lite)."""
+    if not funding_rates:
+        return 0.0
+    samples: list[float] = []
+    for symbol in ("BTCUSDT", "ETHUSDT"):
+        raw = funding_rates.get(symbol)
+        if raw is None:
+            continue
+        try:
+            samples.append(float(raw))
+        except (TypeError, ValueError):
+            continue
+    if not samples:
+        return 0.0
+    samples.sort()
+    mid = len(samples) // 2
+    if len(samples) % 2:
+        return samples[mid]
+    return (samples[mid - 1] + samples[mid]) / 2.0
+
+
+def build_minimal_regime_frame_4h(
+    closes: list[float],
+    *,
+    window: int = 20,
+) -> pl.DataFrame | None:
+    """Build rule/HMM features from benchmark 4h closes (N4-lite)."""
+    clean = [float(value) for value in closes if float(value) > 0.0]
+    if len(clean) < 3:
+        return None
+    frame = pl.DataFrame({"close": clean})
+    log_returns = frame["close"].log() - frame["close"].shift(1).log()
+    roll_window = max(2, min(window, len(clean) - 1))
+    return frame.with_columns(
+        log_returns.fill_null(0.0).alias("log_returns"),
+        log_returns.abs()
+        .rolling_std(window_size=roll_window)
+        .fill_null(0.0)
+        .alias("realized_vol"),
+        (log_returns.abs() * 100.0).fill_null(0.0).alias("atr_pct"),
+    ).select("log_returns", "realized_vol", "atr_pct")
+
+
 @dataclass(frozen=True)
 class RegimeResult:
     regime: str
@@ -33,9 +77,7 @@ class CompositeRegimeAnalyzer:
         btc = benchmark_context.get("BTCUSDT", {})
         returns = float(btc.get("basis_pct") or 0.0)
         vol = abs(float(btc.get("premium_slope_5m") or 0.0))
-        funding = (
-            float(next(iter((funding_rates or {"x": 0.0}).values()))) if funding_rates else 0.0
-        )
+        funding = benchmark_funding_median(funding_rates)
 
         if not ML_COMPONENTS_AVAILABLE:
             return self._rule_based_fallback(

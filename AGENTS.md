@@ -80,7 +80,15 @@ Many cloud/datacenter IPs are **blocked by Binance public REST** (`Service unava
 
 Full live verification requires a network path Binance allows (local machine, allowed region, or proxy). Configure `[bot.network]` / `BINANCE_PROXY_URL` — see [docs/BINANCE_PROXY_RU.md](docs/BINANCE_PROXY_RU.md). This is an external constraint, not a broken venv.
 
-Hot path uses **Polars only**; `pandas` is optional in `[ml]` extra (offline experiments), not installed by default.
+Hot path uses **Polars only** via `bot/features/prepare_frame.py`; optional `polars_ta` in `[live]` extra.
+
+**Before live smoke or a new diagnostic run:** wipe stale artifacts so telemetry is not mixed across sessions:
+
+```bash
+python scripts/clean_session_data.py --mode smoke --config config.toml
+```
+
+Modes: `telemetry` (JSONL only) · `smoke` (+ live_watch, logs, session caches) · `full` (+ reset `bot.db`). `live_smoke_bot.py` runs `smoke` cleanup by default (`--keep-session-data` to skip).
 
 ### Verify in Cloud
 

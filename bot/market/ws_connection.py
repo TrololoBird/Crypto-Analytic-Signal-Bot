@@ -11,7 +11,7 @@ from typing import Any
 
 import websockets
 
-from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.runtime.errors import DEFENSIVE_EXC
 from bot.market.network_proxy import websockets_connect_kwargs
 
 LOG = logging.getLogger("bot.ws_manager")

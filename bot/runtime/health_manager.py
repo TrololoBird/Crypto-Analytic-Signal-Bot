@@ -5,7 +5,8 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.runtime.errors import DEFENSIVE_EXC
+from bot.market.proxy_bootstrap import network_probe_status
 
 from ..features import cache_stats as frame_cache_stats
 
@@ -23,7 +24,13 @@ class HealthManager:
         self._bot = bot
 
     async def health_check(self) -> dict[str, Any]:
-        ws_connected = bool(getattr(self._bot._ws_manager, "is_connected", lambda: False)())
+        ws_manager = self._bot._ws_manager
+        ws_connected = bool(getattr(ws_manager, "is_connected", lambda: False)())
+        ws_snapshot: dict[str, Any] = {}
+        if ws_manager is not None and hasattr(ws_manager, "state_snapshot"):
+            raw = ws_manager.state_snapshot()
+            if isinstance(raw, dict):
+                ws_snapshot = raw
         pending_outcomes = len(getattr(self._bot.tracker, "_pending_outcomes", []))
         try:
             active_rows = await self._bot._modern_repo.get_active_signals(include_closed=False)
@@ -33,9 +40,19 @@ class HealthManager:
         except DEFENSIVE_EXC:
             LOG.debug("health check active signal count failed", exc_info=True)
             active_signals = 0
+        probe_flags = network_probe_status()
         return {
             "status": "healthy" if self._bot._running else "degraded",
+            "rest_probe_ok": probe_flags.get("rest_probe_ok"),
+            "ws_probe_ok": probe_flags.get("ws_probe_ok"),
             "ws_connected": ws_connected,
+            "fresh_tickers": int(ws_snapshot.get("fresh_tickers") or 0),
+            "fresh_mark_prices": int(ws_snapshot.get("fresh_mark_prices") or 0),
+            "order_flow_tracked_count": int(ws_snapshot.get("order_flow_tracked_count") or 0),
+            "anchor_symbols_in_agg_trade": int(
+                ws_snapshot.get("anchor_symbols_in_agg_trade") or 0
+            ),
+            "stale_kline_streams": int(ws_snapshot.get("stale_kline_streams") or 0),
             "active_signals": active_signals,
             "pending_outcomes": pending_outcomes,
             "shortlist_size": len(self._bot._shortlist),
@@ -149,14 +166,31 @@ class HealthManager:
                 row["prepare_error_exception_type"] = self._bot._last_prepare_error.get(
                     "exception_type"
                 )
+            ws_snapshot: dict[str, Any] = {}
             if self._bot._ws_manager is not None:
-                ws_snapshot = self._bot._ws_manager.state_snapshot()
-                row.update(ws_snapshot if isinstance(ws_snapshot, dict) else {})
+                raw_ws = self._bot._ws_manager.state_snapshot()
+                if isinstance(raw_ws, dict):
+                    ws_snapshot = raw_ws
+                    row.update(ws_snapshot)
+            from .delivery_alerts import check_message_buffer_drop_alert
+
+            await check_message_buffer_drop_alert(
+                self._bot,
+                ws_snapshot=ws_snapshot,
+            )
             rest_snapshot_func = getattr(self._bot.client, "state_snapshot", None)
             if callable(rest_snapshot_func):
                 rest_snapshot = rest_snapshot_func()
                 row.update(rest_snapshot if isinstance(rest_snapshot, dict) else {})
             self._bot.telemetry.append_jsonl("health.jsonl", row)
+            digest_runner = getattr(self._bot, "_operator_digest_runner", None)
+            if digest_runner is None:
+                from .operator_digest import OperatorDigestRunner
+
+                digest_runner = OperatorDigestRunner(self._bot)
+                self._bot._operator_digest_runner = digest_runner
+            if int(datetime.now(UTC).timestamp()) % 1800 < 60:
+                await digest_runner.maybe_send_digest(interval_seconds=1800.0)
 
 
 class HealthMonitor:

@@ -7,11 +7,12 @@ import math
 from typing import TYPE_CHECKING, ClassVar
 
 from ..features import _swing_points as _sp
+from ..delivery.trade_plan import TradePlanBuilder
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.smc import latest_order_block
 from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
 from ..setups.utils import build_structural_targets, validate_rr_or_penalty
-from ._common import SpecHit, _latest_values, _valid_order_block_rows, as_float, with_spec_columns
+from ._common import SpecHit, _latest_values, as_float, with_spec_columns
 
 if TYPE_CHECKING:
     import polars as pl
@@ -24,7 +25,13 @@ LOG = logging.getLogger("bot.strategies.order_block")
 __all__ = ["detect_order_block"]
 
 
-def detect_order_block(frame: pl.DataFrame, *, timeframe: str = "1h") -> SpecHit | None:
+def detect_order_block(
+    frame: pl.DataFrame,
+    *,
+    timeframe: str = "15m",
+    ob_max_age: int = 72,
+    touch_buffer_atr: float = 0.25,
+) -> SpecHit | None:
     work = with_spec_columns(frame)
     if work.height < 30:
         return None
@@ -33,28 +40,41 @@ def detect_order_block(frame: pl.DataFrame, *, timeframe: str = "1h") -> SpecHit
     close = current.get("close", 0.0)
     if atr <= 0.0 or close <= 0.0:
         return None
-    for zone in reversed(_valid_order_block_rows(work)):
-        bottom = as_float(zone.get("bottom"))
-        top = as_float(zone.get("top"))
-        if bottom <= close <= top:
-            direction = str(zone["direction"])
-            return SpecHit(
-                strategy="order_block",
-                direction=direction,
-                entry=(bottom + top) / 2.0,
-                stop_basis=bottom if direction == "long" else top,
-                atr=atr,
-                timeframe=timeframe,
-                reasons=(f"ob_zone={bottom:.4f}-{top:.4f}", f"age={int(zone['age'])}"),
-                structure_clarity=0.76,
-                vol_ratio=current.get("volume_ratio20", 1.0),
-                rsi=current.get("rsi14", 50.0),
-                source_index=int(zone["_spec_idx"]),
-            )
-    return None
+    zone = latest_order_block(
+        work,
+        swing_length=3,
+        include_unconfirmed_tail=True,
+        current_price=close,
+        touch_buffer=touch_buffer_atr * atr,
+    )
+    if zone is None:
+        return None
+    age = work.height - 1 - zone.created_index
+    if age > ob_max_age:
+        return None
+    bottom = as_float(zone.bottom)
+    top = as_float(zone.top)
+    direction = zone.direction
+    return SpecHit(
+        strategy="order_block",
+        direction=direction,
+        entry=(bottom + top) / 2.0,
+        stop_basis=bottom if direction == "long" else top,
+        atr=atr,
+        timeframe=timeframe,
+        reasons=(f"ob_zone={bottom:.4f}-{top:.4f}", f"age={age}"),
+        structure_clarity=0.76,
+        vol_ratio=current.get("volume_ratio20", 1.0),
+        rsi=current.get("rsi14", 50.0),
+        source_index=int(zone.created_index),
+    )
 
 
-_MAX_OB_AGE = 30  # 1h bars
+def _spec_detect_kwargs(effective: dict[str, float]) -> dict[str, object]:
+    return {
+        "ob_max_age": int(effective.get("ob_max_age", 72)),
+        "touch_buffer_atr": float(effective.get("touch_buffer_atr", 0.25)),
+    }
 
 
 def _detect_order_block_extended(
@@ -68,12 +88,13 @@ def _detect_order_block_extended(
     dynamic_params = effective
     sl_buffer_atr = float(dynamic_params.get("sl_buffer_atr", defaults.get("sl_buffer_atr", 1.5)))
 
+    w15m = prepared.work_15m
     w1h = prepared.work_1h
-    if w1h.height < 10:
-        _reject(prepared, setup_id, "insufficient_1h_bars", bars=w1h.height)
+    if w15m.height < 10:
+        _reject(prepared, setup_id, "insufficient_15m_bars", bars=w15m.height)
         return None
 
-    atr = float(w1h.item(-1, "atr14") or 0.0)
+    atr = float(w15m.item(-1, "atr14") or 0.0)
     if atr <= 0 or math.isnan(atr):
         _reject(prepared, setup_id, "atr_invalid", atr=atr)
         return None
@@ -83,9 +104,9 @@ def _detect_order_block_extended(
         _reject(prepared, setup_id, "price_missing")
         return None
 
-    closes = w1h["close"].to_numpy()
-    opens = w1h["open"].to_numpy()
-    n_bars = w1h.height
+    closes = w15m["close"].to_numpy()
+    opens = w15m["open"].to_numpy()
+    n_bars = w15m.height
 
     min_ob_impulse_atr = dynamic_params.get("min_ob_impulse_atr", defaults["min_ob_impulse_atr"])
     impulse_lookback = max(
@@ -95,7 +116,7 @@ def _detect_order_block_extended(
     ob_max_age = dynamic_params.get("ob_max_age", defaults["ob_max_age"])
     touch_buffer_atr = float(dynamic_params.get("touch_buffer_atr", defaults["touch_buffer_atr"]))
     zone = latest_order_block(
-        w1h,
+        w15m,
         swing_length=3,
         include_unconfirmed_tail=True,
         current_price=price,
@@ -163,7 +184,7 @@ def _detect_order_block_extended(
     # Use 1H context for 15M signals (not 4H - too lagging for <4h trades)
     bias_1h = getattr(prepared, "bias_1h", prepared.bias_4h)
     structure_1h = prepared.structure_1h
-    rsi_check = float(w1h.item(-1, "rsi14") or 50.0)
+    rsi_check = float(w15m.item(-1, "rsi14") or 50.0)
 
     # --- Compute structural SL/TP via unified utility ---
     sh_mask, sl_mask = _sp(w1h, n=3, include_unconfirmed_tail=True)
@@ -172,8 +193,8 @@ def _detect_order_block_extended(
 
     min_rr = dynamic_params.get("min_rr", defaults["min_rr"])
 
-    vol_ratio = float(w1h.item(-1, "volume_ratio20") or 1.0)
-    rsi = float(w1h.item(-1, "rsi14") or 50.0)
+    vol_ratio = float(w15m.item(-1, "volume_ratio20") or 1.0)
+    rsi = float(w15m.item(-1, "rsi14") or 50.0)
 
     base_score = dynamic_params.get("base_score", defaults["base_score"])
     score = _compute_dynamic_score(
@@ -239,6 +260,33 @@ def _detect_order_block_extended(
             else entry_price - risk * max(2.0, float(min_rr) + 0.35)
         )
 
+    trade_plan = TradePlanBuilder.build(
+        direction=direction,
+        setup_id=setup_id,
+        strategy_family=family,
+        timeframe="15m",
+        price_anchor=entry_price,
+        atr=atr,
+        stop_loss=stop,
+        tp1=tp1,
+        tp2=tp2,
+    )
+    if trade_plan is None:
+        _reject(
+            prepared,
+            setup_id,
+            "targets.target_integrity_failed",
+            direction=direction,
+            price_anchor=entry_price,
+            stop=stop,
+            tp1=tp1,
+            tp2=tp2,
+        )
+        return None
+    stop = trade_plan.stop_loss
+    tp1 = trade_plan.tp1
+    tp2 = trade_plan.tp2
+
     reasons = [
         f"OB {direction}: zone [{ob_low:.4f}-{ob_high:.4f}] state={zone.state}",
         (
@@ -254,7 +302,7 @@ def _detect_order_block_extended(
         setup_id=setup_id,
         direction=direction,
         score=score,
-        timeframe="1h",
+        timeframe="15m",
         reasons=reasons,
         strategy_family=family,
         stop=stop,
@@ -273,7 +321,9 @@ def detect_order_block_setup(
     setup_id: str,
     family: str,
 ) -> Signal | None:
-    spec_kwargs = None
+    # Two-tier path: fast spec hit via latest_order_block retest; otherwise
+    # extended_detect applies impulse validation on the same 15m SMC scan.
+    spec_kwargs = _spec_detect_kwargs(effective)
     return run_setup_detection(
         prepared=prepared,
         settings=settings,
@@ -338,6 +388,17 @@ class OrderBlockSetup(SpecDetectorSetup):
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         try:
             return super().detect(prepared, settings)
+        except ValueError as exc:
+            if "Signal contract violations" in str(exc):
+                _reject(
+                    prepared,
+                    self.setup_id,
+                    "targets.contract_violation",
+                    stage="runtime",
+                    detail=str(exc),
+                )
+                return None
+            raise
         except Exception as exc:
             LOG.exception("%s order_block: unexpected error", prepared.symbol)
             _reject(

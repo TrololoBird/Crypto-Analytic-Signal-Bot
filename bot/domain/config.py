@@ -7,11 +7,22 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal, cast
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.runtime.errors import DEFENSIVE_EXC
+from bot.domain.limit_entry import DEFAULT_LATE_ENTRY_CHASE_PCT
+from bot.domain.strategy_catalog import (
+    CATALOG_SETUP_IDS_ORDERED,
+    CATALOG_SETUP_PARAM_KEYS,
+    verify_config_setup_references,
+    verify_setup_config_model,
+)
 
 from ..secrets import load_secrets
+
+
+class _StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
 REQUIRED_PINNED_SYMBOLS: tuple[str, ...] = (
     "BTCUSDT",
@@ -24,7 +35,7 @@ REQUIRED_PINNED_SYMBOLS: tuple[str, ...] = (
 )
 
 
-class RuntimeConfig(BaseModel):
+class RuntimeConfig(_StrictModel):
     analysis_concurrency: int = Field(default=6, ge=1, le=20)
     strategy_concurrency: int = Field(default=10, ge=1, le=20)
     strategy_timeout_seconds: float = Field(default=12.0, ge=0.5, le=120.0)
@@ -57,15 +68,18 @@ class RuntimeConfig(BaseModel):
     shortlist_refresh_interval_seconds: int = Field(default=7200, ge=300, le=86400)
     emergency_fallback_seconds: int = Field(default=1800, ge=300, le=7200)
     strict_data_quality: bool = True
-    emit_strategy_routing_skips: bool = True
+    emit_strategy_routing_skips: bool = False
     route_all_enabled_strategies: bool = False
+    # When false, shortlist/pinned symbols respect strategy_fits at runtime.
+    shortlist_unified_routing: bool = False
     enable_strategy_lanes: bool = True
     min_setup_families_per_symbol: int = Field(default=8, ge=8, le=15)
     target_setup_families_per_symbol: int = Field(default=12, ge=8, le=15)
     max_setup_families_per_symbol: int = Field(default=15, ge=8, le=15)
+    max_setups_per_family: int = Field(default=2, ge=1, le=5)
     allow_trigger_interval_fallback: bool = True
     allow_timeframe_fallback: bool = True
-    analysis_kline_intervals: tuple[str, ...] = ("5m", "15m", "1h")
+    analysis_kline_intervals: tuple[str, ...] = ("5m", "15m", "1h", "4h", "1d")
     diagnostic_trace_limit_per_symbol: int = Field(default=20, ge=0, le=500)
     # Startup throttling to prevent REST API flood
     startup_batch_size: int = Field(default=3, ge=1, le=10)
@@ -75,8 +89,10 @@ class RuntimeConfig(BaseModel):
     emergency_context_warmup_symbol_limit: int = Field(default=45, ge=1, le=100)
     emergency_context_fetch_timeout_seconds: float = Field(default=20.0, ge=0.5, le=30.0)
     futures_data_request_limit_per_5m: int = Field(default=900, ge=30, le=1000)
+    oi_refresh_interval_minutes: int = Field(default=30, ge=5, le=1440)
     heartbeat_seconds: float = Field(default=60.0, ge=5.0, le=3600.0)
     cycle_timeout_seconds: float = Field(default=120.0, ge=30.0, le=600.0)
+    min_restart_interval_seconds: int = Field(default=120, ge=0, le=3600)
 
     @field_validator("log_level")
     @classmethod
@@ -87,7 +103,7 @@ class RuntimeConfig(BaseModel):
     @classmethod
     def _normalize_analysis_intervals(cls, value: object) -> tuple[str, ...]:
         if value is None:
-            return ("5m", "15m", "1h")
+            return ("5m", "15m", "1h", "4h", "1d")
         if isinstance(value, str):
             return (value.strip(),)
         if not isinstance(value, (list, tuple, set)):
@@ -115,8 +131,10 @@ class RuntimeConfig(BaseModel):
         return self
 
 
-class UniverseConfig(BaseModel):
+class UniverseConfig(_StrictModel):
     quote_asset: str = "USDT"
+    # Stage-1 funnel: top-N by 24h quote volume after hard gates (before composite scoring).
+    light_pool_limit: int = Field(default=180, ge=50, le=300)
     dynamic_limit: int = Field(default=60, ge=10, le=200)
     shortlist_limit: int = Field(default=45, ge=5, le=100)  # Reduced from 60 to prevent WS overload
     min_quote_volume_usd: float = Field(default=50_000_000.0, ge=0.0)
@@ -124,6 +142,8 @@ class UniverseConfig(BaseModel):
     min_trade_count_24h: int = Field(default=10_000, ge=0, le=10_000_000_000)
     min_listing_age_days: int = Field(default=90, ge=0, le=3650)
     light_refresh_interval_seconds: int = Field(default=75, ge=15, le=900)
+    # REST ticker refresh without exchangeInfo (Phase 4 union refresh).
+    medium_refresh_interval_seconds: int = Field(default=900, ge=60, le=7200)
     full_refresh_interval_seconds: int = Field(default=7200, ge=60, le=86_400)
     shortlist_spread_max_bps: float = Field(default=8.0, ge=0.5, le=100.0)
     shortlist_book_stale_seconds: float = Field(default=90.0, ge=5.0, le=3600.0)
@@ -140,7 +160,7 @@ class UniverseConfig(BaseModel):
         return tuple(str(item).strip().upper() for item in (value or ()) if str(item).strip())
 
     @model_validator(mode="after")
-    def _require_core_pinned_symbols(self) -> UniverseConfig:
+    def _validate_universe_limits(self) -> UniverseConfig:
         pinned = set(self.pinned_symbols)
         missing = [symbol for symbol in REQUIRED_PINNED_SYMBOLS if symbol not in pinned]
         if missing:
@@ -149,26 +169,37 @@ class UniverseConfig(BaseModel):
                 + ", ".join(REQUIRED_PINNED_SYMBOLS)
             )
         assert "PAXGUSDT" in pinned
+        if self.light_pool_limit < self.shortlist_limit:
+            raise ValueError(
+                "universe.light_pool_limit must be >= universe.shortlist_limit "
+                f"({self.light_pool_limit} < {self.shortlist_limit})"
+            )
+        if self.light_pool_limit < self.dynamic_limit:
+            raise ValueError(
+                "universe.light_pool_limit must be >= universe.dynamic_limit "
+                f"({self.light_pool_limit} < {self.dynamic_limit})"
+            )
         return self
 
 
-class AssetConfig(BaseModel):
+class AssetConfig(_StrictModel):
     """Per-symbol calibration overrides for priority asset routing."""
 
     primary_timeframe: Literal["5m", "15m", "1h", "4h"] = "15m"
     context_timeframes: tuple[Literal["5m", "15m", "1h", "4h"], ...] = ("1h", "4h")
     excluded_strategies: tuple[str, ...] = ()
+    allowed_strategies: tuple[str, ...] = ()
     deep_analysis: bool = False
 
-    @field_validator("excluded_strategies")
+    @field_validator("excluded_strategies", "allowed_strategies")
     @classmethod
-    def _normalize_excluded_strategies(
+    def _normalize_strategy_lists(
         cls, value: tuple[str, ...] | list[str] | None
     ) -> tuple[str, ...]:
         return tuple(str(item).strip() for item in (value or ()) if str(item).strip())
 
 
-class FilterConfig(BaseModel):
+class FilterConfig(_StrictModel):
     """Runtime trading filters and stop placement heuristics.
 
     Stop distance is derived from the setup anchor plus/minus ATR multiplied by
@@ -188,6 +219,7 @@ class FilterConfig(BaseModel):
     min_score: float = Field(default=0.66, ge=0.0, le=1.0)
     # Data freshness gates (avoid hidden "magic numbers" in filters.py).
     freshness_15m_minutes: int = Field(default=30, ge=5, le=240)
+    freshness_5m_minutes: int = Field(default=8, ge=5, le=120)
     freshness_1h_hours: int = Field(default=3, ge=1, le=48)
     freshness_4h_hours: int = Field(default=10, ge=1, le=240)
     min_bars_15m: int = Field(default=210, ge=30, le=5000)
@@ -196,6 +228,17 @@ class FilterConfig(BaseModel):
     min_bars_4h: int = Field(default=210, ge=30, le=5000)
     # Mark price sanity guard: reject if mark and last diverge beyond this pct.
     max_mark_price_deviation_pct: float = Field(default=0.005, ge=0.0, le=0.10)
+    # Composable filter stages (Phase 6). Empty tuple = all defaults enabled.
+    enabled_stages: tuple[str, ...] = (
+        "freshness",
+        "mark_deviation",
+        "spread",
+        "atr",
+        "stop",
+        "rr",
+        "scoring",
+        "min_score",
+    )
     setups: dict[str, dict[str, float]] = Field(default_factory=dict)
 
     @field_validator("setups")
@@ -208,7 +251,14 @@ class FilterConfig(BaseModel):
             normalized_setup: dict[str, float] = {}
             for param_name, param_value in params.items():
                 key = str(param_name)
-                coerced = float(param_value)
+                if key == "min_adx":
+                    key = "min_adx_1h"
+                if key not in CATALOG_SETUP_PARAM_KEYS:
+                    continue
+                if isinstance(param_value, bool):
+                    coerced = 1.0 if param_value else 0.0
+                else:
+                    coerced = float(param_value)
                 if not math.isfinite(coerced):
                     msg = f"filters.setups.{setup_id}.{key} must be finite"
                     raise ValueError(msg)
@@ -223,65 +273,28 @@ class FilterConfig(BaseModel):
         return normalized
 
 
-class TrackingConfig(BaseModel):
+class TrackingConfig(_StrictModel):
     enabled: bool = True
     pending_expiry_minutes: int = Field(default=180, ge=15, le=1440)
     active_expiry_minutes: int = Field(default=240, ge=30, le=240)
+    # Max mark-price chase past entry zone before delivery reject (manual limit entry window).
+    late_entry_chase_pct: float = Field(
+        default=DEFAULT_LATE_ENTRY_CHASE_PCT, ge=0.002, le=0.05
+    )
     outcome_retention_days: int = Field(default=90, ge=7, le=3650)
     move_stop_to_break_even_on_tp1: bool = True
     min_stop_distance_pct: float = Field(default=0.5, ge=0.0, le=100.0)
     max_stop_distance_pct: float = Field(default=15.0, ge=0.5, le=100.0)
     agg_trade_page_limit: int = Field(default=6, ge=1, le=20)
     agg_trade_page_size: int = Field(default=1000, ge=100, le=1000)
+    # Hours for MetaSignalMerger direction-conflict window vs recent ACTION signals.
+    action_window_hours: float = Field(default=4.0, ge=0.5, le=168.0)
 
 
-_ALL_SETUP_IDS: tuple[str, ...] = (
-    # Original 5
-    "structure_pullback",
-    "structure_break_retest",
-    "wick_trap_reversal",
-    "squeeze_setup",
-    "ema_bounce",
-    # New 10
-    "fvg_setup",
-    "order_block",
-    "liquidity_sweep",
-    "bos_choch",
-    "hidden_divergence",
-    "indicator_divergence",
-    "funding_reversal",
-    "cvd_divergence",
-    "session_killzone",
-    "breaker_block",
-    "turtle_soup",
-    # Phase 5.3 expansion
-    "vwap_trend",
-    "supertrend_follow",
-    "price_velocity",
-    "volume_anomaly",
-    "volume_climax_reversal",
-    "keltner_breakout",
-    # Roadmap expansion
-    "whale_walls",
-    "spread_strategy",
-    "depth_imbalance",
-    "absorption",
-    "aggression_shift",
-    "liquidation_heatmap",
-    "stop_hunt_detection",
-    "multi_tf_trend",
-    "rsi_divergence_bottom",
-    "wyckoff_spring",
-    "bb_squeeze",
-    "atr_expansion",
-    "ls_ratio_extreme",
-    "oi_divergence",
-    "btc_correlation",
-    "altcoin_season_index",
-)
+_ALL_SETUP_IDS: tuple[str, ...] = CATALOG_SETUP_IDS_ORDERED
 
 
-class SetupConfig(BaseModel):
+class SetupConfig(_StrictModel):
     # Original 5 setups
     structure_pullback: bool = True
     structure_break_retest: bool = True
@@ -331,7 +344,7 @@ class SetupConfig(BaseModel):
         )
 
 
-class ScoringConfig(BaseModel):
+class ScoringConfig(_StrictModel):
     """Weights for the simplified structure-based scoring engine."""
 
     enabled: bool = True
@@ -367,7 +380,7 @@ class ScoringConfig(BaseModel):
         return self
 
 
-class DeliveryConfig(BaseModel):
+class DeliveryConfig(_StrictModel):
     """Telegram tier thresholds and delivery policy gates."""
 
     action_min_score: float = Field(default=0.72, ge=0.0, le=1.0)
@@ -386,8 +399,42 @@ class DeliveryConfig(BaseModel):
     )
     action_cap_per_cycle: int = Field(default=6, ge=1, le=80)
     watch_cap_per_cycle: int = Field(default=12, ge=1, le=80)
+    action_cap_per_session: int = Field(
+        default=24,
+        ge=0,
+        le=500,
+        description="Max ACTION deliveries per bot session (0 = unlimited)",
+    )
+    zero_delivery_alert_cycles: int = Field(
+        default=24,
+        ge=0,
+        le=500,
+        description="Alert operators after N consecutive cycles with zero delivery (0 = off)",
+    )
+    watch_escalation_enabled: bool = True
+    enforce_mtf_gate: bool = Field(
+        default=True,
+        description="Hard-reject delivery when shared MTF gate fails (trend + reversal profiles)",
+    )
     r_class_watch_only: bool = True
     public_audit_enabled: bool = True
+    # Log WATCH-tier signals to watch_screener.jsonl (Phase 7).
+    watch_screener_enabled: bool = True
+    sl_postmortem_enabled: bool = True
+    sl_postmortem_to_operators: bool = True
+    reversal_min_confirmations: int = Field(
+        default=2,
+        ge=1,
+        le=5,
+        description="Hard gate min confirmations for reversal profiles in bear BTC regime",
+    )
+    use_weighted_confluence: bool = Field(
+        default=False,
+        description="When true, future bridge to ConfluenceEngine weighted scoring (boolean gate until merged)",
+    )
+    portfolio_max_same_direction_regime: int = Field(default=4, ge=1, le=40)
+    portfolio_max_family_direction: int = Field(default=2, ge=1, le=20)
+    portfolio_max_bear_longs: int = Field(default=2, ge=0, le=20)
 
     @model_validator(mode="after")
     def _validate_tier_caps(self) -> DeliveryConfig:
@@ -397,7 +444,7 @@ class DeliveryConfig(BaseModel):
         return self
 
 
-class AlertConfig(BaseModel):
+class AlertConfig(_StrictModel):
     """Pre-alert funnel configuration.
 
     Designed for a signal-only bot (no auto-trading):
@@ -428,12 +475,16 @@ class AlertConfig(BaseModel):
     watch_expiry_minutes: int = Field(default=60, ge=5, le=1440)
 
 
-class NotifierWebhookConfig(BaseModel):
+class NotifierWebhookConfig(_StrictModel):
     enabled: bool = False
     webhook_url: str | None = None
     username: str | None = None
     bearer_token: str | None = None
     include_html: bool = True
+    ops_alerts_enabled: bool = Field(
+        default=False,
+        description="Send operator/critical alerts to webhook_url (not signal channel)",
+    )
 
     @field_validator("webhook_url", "username", "bearer_token")
     @classmethod
@@ -443,10 +494,40 @@ class NotifierWebhookConfig(BaseModel):
         normalized = str(value).strip()
         return normalized or None
 
+    @model_validator(mode="after")
+    def _auto_enable_ops_alerts_when_url_set(self) -> NotifierWebhookConfig:
+        if str(self.webhook_url or "").strip() and not self.ops_alerts_enabled:
+            self.ops_alerts_enabled = True
+        return self
 
-class NotifierConfig(BaseModel):
+
+class TelegramOperatorConfig(_StrictModel):
+    """Private DM console for remote monitoring (works across networks).
+
+    Operator DMs are separate from ``TARGET_CHAT_ID`` (subscriber channel).
+    """
+
+    enabled: bool = True
+    digest_interval_seconds: int = Field(default=1800, ge=300, le=86400)
+    poll_timeout_seconds: int = Field(default=25, ge=5, le=50)
+    send_market_context: bool = True
+    send_startup_report: bool = True
+    send_digest: bool = True
+    send_sl_postmortem: bool = True
+    send_critical_alerts: bool = True
+    send_watch_escalation: bool = True
+    send_watch_companion: bool = True
+    notify_on_console_start: bool = True
+
+
+class NotifierConfig(_StrictModel):
     provider: Literal["none", "telegram", "slack", "discord", "webhook"] = "telegram"
     send_analytics_companion: bool = False
+    analytics_companion_action_only: bool = Field(
+        default=False,
+        description="Channel analytics companion only for ACTION tier (WATCH → operator DM)",
+    )
+    telegram_operator: TelegramOperatorConfig = Field(default_factory=TelegramOperatorConfig)
     slack: NotifierWebhookConfig = Field(default_factory=NotifierWebhookConfig)
     discord: NotifierWebhookConfig = Field(default_factory=NotifierWebhookConfig)
     webhook: NotifierWebhookConfig = Field(default_factory=NotifierWebhookConfig)
@@ -457,8 +538,9 @@ class NotifierConfig(BaseModel):
         return str(value or "telegram").strip().lower()
 
 
-class SpotCompanionConfig(BaseModel):
+class SpotCompanionConfig(_StrictModel):
     enabled: bool = False
+    base_url: str = "https://data-api.binance.vision"
     lead_symbols: tuple[str, ...] = ()
     refresh_interval_seconds: int = Field(default=60, ge=5, le=3600)
 
@@ -468,7 +550,7 @@ class SpotCompanionConfig(BaseModel):
         return tuple(str(item).strip().upper() for item in (value or ()) if str(item).strip())
 
 
-class IntelligenceConfig(BaseModel):
+class IntelligenceConfig(_StrictModel):
     """Public-only analytics, guardrails, and AI-agent telemetry."""
 
     enabled: bool = True
@@ -511,7 +593,7 @@ class IntelligenceConfig(BaseModel):
         return tuple(str(item).strip() for item in (value or ()) if str(item).strip())
 
 
-class NetworkConfig(BaseModel):
+class NetworkConfig(_StrictModel):
     """Egress proxy for Binance public REST/WebSocket (Russia/geo-blocked regions).
 
     Supply **your own** endpoints (local Clash ports, Tor, VPS SOCKS you control).
@@ -549,7 +631,7 @@ class NetworkConfig(BaseModel):
         return out
 
 
-class WSConfig(BaseModel):
+class WSConfig(_StrictModel):
     """WebSocket configuration.
 
     Runtime policy:
@@ -566,11 +648,16 @@ class WSConfig(BaseModel):
     kline_intervals: tuple[str, ...] = ("5m", "15m", "1h")
     subscription_scope: str = "shortlist"
     subscribe_book_ticker: bool = True
+    book_ticker_stream_mode: str = "all"
+    book_ticker_publish_interval_seconds: float = Field(default=5.0, ge=0.0, le=60.0)
+    book_ticker_publish_min_move_bps: float = Field(default=1.0, ge=0.0, le=1000.0)
     subscribe_agg_trade: bool = True
     subscribe_depth: bool = True
     depth_levels: int = Field(default=20, ge=5, le=20)
     depth_speed: str = "500ms"
     depth_symbol_limit: int = Field(default=20, ge=0, le=100)
+    # Cap total market WS streams (klines + globals + aggTrade); depth trimmed first.
+    max_market_stream_budget: int = Field(default=280, ge=50, le=500)
     depth_band_bps: float = Field(default=8.0, ge=0.5, le=100.0)
     depth_wall_min_notional: float = Field(default=250_000.0, ge=0.0, le=100_000_000.0)
     depth_wall_persistence_seconds: float = Field(default=10.0, ge=0.0, le=600.0)
@@ -581,10 +668,22 @@ class WSConfig(BaseModel):
     health_check_silence_seconds: float = Field(default=60.0, ge=10.0, le=300.0)
     market_reconnect_grace_seconds: float = Field(default=90.0, ge=60.0, le=120.0)
     agg_trade_window_seconds: int = Field(default=300, ge=10, le=3600)
+    agg_trade_freshness_seconds: float = Field(default=300.0, ge=10.0, le=3600.0)
     kline_cache_size: int = Field(default=500, ge=50, le=1000)
     warmup_timeout_seconds: float = Field(default=60.0, ge=5.0, le=300.0)
     reconnect_max_delay_seconds: float = Field(default=300.0, ge=1.0, le=3600.0)
     max_agg_trade_buffer: int = Field(default=10000, ge=100, le=100000)
+    # 0 = auto-scale from shortlist size (≈1200 msgs/symbol at 15m candle close).
+    message_buffer_maxsize: int = Field(default=0, ge=0, le=200_000)
+    message_buffer_drop_alert_threshold: int = Field(
+        default=500,
+        ge=0,
+        le=1_000_000,
+        description=(
+            "Alert when message_buffer.dropped increases by more than this per health "
+            "telemetry interval (0 = off)"
+        ),
+    )
     agg_trade_flush_interval_ms: int = Field(default=250, ge=50, le=5000)
     rest_timeout_seconds: float = Field(default=20.0, ge=1.0, le=120.0)
     backfill_failure_cooldown_seconds: int = Field(default=900, ge=0, le=86400)
@@ -598,6 +697,24 @@ class WSConfig(BaseModel):
     # Optional noise gate: minimum mid-price move (in bps) required to trigger
     # another intra-candle scan for the same symbol.
     intra_candle_min_move_bps: float = Field(default=0.0, ge=0.0, le=100.0)
+    # Intra-candle fast lane: cap detector count (0 = lane default only).
+    intra_candle_max_setups: int = Field(default=8, ge=0, le=38)
+    # Optional explicit setup subset for intra-candle scans (empty = all lane-routed setups).
+    intra_candle_setup_subset: tuple[str, ...] = ()
+
+    @field_validator("intra_candle_setup_subset", mode="before")
+    @classmethod
+    def _normalize_intra_candle_setup_subset(cls, value: object) -> tuple[str, ...]:
+        if value is None:
+            return ()
+        if isinstance(value, str):
+            items = [value.strip()] if value.strip() else []
+        elif isinstance(value, (list, tuple)):
+            items = [str(item).strip() for item in value if str(item).strip()]
+        else:
+            msg = "intra_candle_setup_subset must be a list of setup ids"
+            raise ValueError(msg)
+        return tuple(dict.fromkeys(items))
 
     @field_validator("base_url", "public_base_url", "market_base_url")
     @classmethod
@@ -670,9 +787,10 @@ class WSConfig(BaseModel):
         raise ValueError(msg)
 
 
-class BotSettings(BaseModel):
+class BotSettings(_StrictModel):
     tg_token: str
     target_chat_id: str
+    operator_user_ids: tuple[int, ...] = ()
     data_dir: Path = Path("data") / "bot"
     config_path: Path = Path("config.toml")
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
@@ -746,6 +864,27 @@ class BotSettings(BaseModel):
                 raise ValueError(msg)
         return chat_id
 
+    @field_validator("operator_user_ids", mode="before")
+    @classmethod
+    def _normalize_operator_user_ids(cls, value: object) -> tuple[int, ...]:
+        if value is None:
+            return ()
+        if isinstance(value, int):
+            return (value,)
+        if isinstance(value, str):
+            from bot.secrets import parse_operator_user_ids
+
+            return parse_operator_user_ids(value)
+        if isinstance(value, (list, tuple, set)):
+            ids: list[int] = []
+            for item in value:
+                try:
+                    ids.append(int(item))
+                except (TypeError, ValueError):
+                    continue
+            return tuple(sorted(set(ids)))
+        return ()
+
     @model_validator(mode="after")
     def _validate_timing_coherence(self) -> BotSettings:
         cooldown = self.filters.cooldown_minutes
@@ -795,6 +934,13 @@ class BotSettings(BaseModel):
     def validate_for_runtime(self, *, require_telegram: bool) -> None:
         """Validate settings for runtime execution."""
         self._assert_supported_kline_intervals(cast("list[str]", self.ws.kline_intervals))
+        for error in verify_setup_config_model(SetupConfig):
+            raise ValueError(error)
+        for error in verify_config_setup_references(self):
+            raise ValueError(error)
+        from bot.domain.contracts import assert_runtime_call_path_is_clean
+
+        assert_runtime_call_path_is_clean()
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.logs_dir.mkdir(parents=True, exist_ok=True)
 
@@ -919,6 +1065,7 @@ def load_settings(config_path: str | Path = "config.toml") -> BotSettings:
     secrets = load_secrets()
     payload["tg_token"] = secrets.tg_token
     payload["target_chat_id"] = secrets.target_chat_id
+    payload["operator_user_ids"] = list(secrets.operator_user_ids)
     payload["config_path"] = resolved_config
     notifiers_payload = payload.setdefault("notifiers", {})
     if isinstance(notifiers_payload, dict):
@@ -926,7 +1073,11 @@ def load_settings(config_path: str | Path = "config.toml") -> BotSettings:
         provider = str(notifiers_payload.get("provider", "telegram") or "telegram").strip().lower()
         if provider_override:
             notifiers_payload["provider"] = provider_override
-        elif provider == "none" and secrets.tg_token and secrets.target_chat_id:
+        if (
+            str(notifiers_payload.get("provider", "") or "").strip().lower() == "none"
+            and secrets.tg_token
+            and secrets.target_chat_id
+        ):
             notifiers_payload["provider"] = "telegram"
     payload.setdefault("data_dir", Path("data") / "bot")
     filters_payload = payload.setdefault("filters", {})

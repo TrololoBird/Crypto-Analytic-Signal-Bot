@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import logging
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
+
+import polars as pl
 
 from ..features import _swing_points
 
@@ -26,6 +28,7 @@ class ScoringResult:
     final_score: float
     setup_id: str = ""
     ml_multiplier: float | None = None
+    notes: dict[str, Any] = field(default_factory=dict)
 
     @property
     def total_adjustment(self) -> float:
@@ -33,13 +36,16 @@ class ScoringResult:
         return max(-0.5, min(0.5, raw_adjustment))  # clamp: adjustment cannot flip signal direction
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "base_score": self.base_score,
             "adjustments": self.adjustments,
             "final_score": self.final_score,
             "setup_id": self.setup_id,
             "ml_multiplier": self.ml_multiplier,
         }
+        if self.notes:
+            payload["notes"] = self.notes
+        return payload
 
 
 def _directional_alignment(value: str, direction: str) -> float:
@@ -52,35 +58,79 @@ def _directional_alignment(value: str, direction: str) -> float:
     return 0.5
 
 
+def _regime_confirmed(work: pl.DataFrame, min_bars: int = 3) -> str:
+    """EMA-aligned regime from any prepared frame."""
+    if len(work) < min_bars:
+        return "ranging"
+    if not all(column in work.columns for column in ("ema20", "ema50", "ema200")):
+        return "ranging"
+    tail = work.tail(min_bars)
+    uptrend_count = tail.filter(
+        (pl.col("ema20") > pl.col("ema50")) & (pl.col("ema50") > pl.col("ema200"))
+    ).height
+    downtrend_count = tail.filter(
+        (pl.col("ema20") < pl.col("ema50")) & (pl.col("ema50") < pl.col("ema200"))
+    ).height
+    if uptrend_count == min_bars:
+        return "uptrend"
+    if downtrend_count == min_bars:
+        return "downtrend"
+    return "ranging"
+
+
+def _structure_frame(prepared: PreparedSymbol) -> pl.DataFrame:
+    if prepared.primary_timeframe != "15m":
+        primary = getattr(prepared, "work_primary", None)
+        if primary is not None and not primary.is_empty():
+            return primary
+    return prepared.work_1h
+
+
+def _structure_poc(prepared: PreparedSymbol) -> float | None:
+    if prepared.primary_timeframe == "15m":
+        return prepared.poc_1h
+    if prepared.primary_timeframe == "1h":
+        return prepared.poc_1h
+    return prepared.poc_1h
+
+
 def _mtf_alignment(prepared: PreparedSymbol, signal: Signal) -> float:
     score_4h = _directional_alignment(prepared.regime_4h_confirmed, signal.direction)
-    score_1h = _directional_alignment(prepared.structure_1h, signal.direction)
-    # Weighted average: 1h structure is primary confirmation (70%), 4h bias is context (30%).
-    # For 15m-triggered signals the 1h trend is the direct context — it should dominate.
-    # 4h is useful but should reduce confidence, not veto.
-    return max(0.0, min(score_1h * 0.70 + score_4h * 0.30, 1.0))
+    if prepared.primary_timeframe != "15m":
+        primary = _structure_frame(prepared)
+        score_primary = _directional_alignment(_regime_confirmed(primary), signal.direction)
+    else:
+        score_primary = _directional_alignment(prepared.structure_1h, signal.direction)
+    # Weighted average: primary structure/regime is direct context (70%), 4h bias is context (30%).
+    return max(0.0, min(score_primary * 0.70 + score_4h * 0.30, 1.0))
 
 
 def _volume_quality(prepared: PreparedSymbol) -> float:
-    if prepared.work_15m.is_empty():
+    primary = getattr(prepared, "work_primary", None)
+    frame = primary if primary is not None and not primary.is_empty() else prepared.work_15m
+    if frame.is_empty() or "volume_ratio20" not in frame.columns:
         return 0.0
-    ratio = float(prepared.work_15m.item(-1, "volume_ratio20") or 0.0)
+    ratio = float(frame.item(-1, "volume_ratio20") or 0.0)
     return max(0.0, min(max(ratio, 0.5) / 1.5, 1.0))
 
 
 def _nearest_structure_level(prepared: PreparedSymbol, signal: Signal) -> float | None:
+    frame = _structure_frame(prepared)
+    if frame.is_empty():
+        return None
     levels: list[float] = []
-    if not prepared.work_1h.is_empty():
-        ema20 = float(prepared.work_1h.item(-1, "ema20") or 0.0)
+    if "ema20" in frame.columns:
+        ema20 = float(frame.item(-1, "ema20") or 0.0)
         if ema20 > 0.0:
             levels.append(ema20)
-    if prepared.poc_1h and prepared.poc_1h > 0.0:
-        levels.append(prepared.poc_1h)
-    sh_mask, sl_mask = _swing_points(prepared.work_1h, n=3)
+    poc = _structure_poc(prepared)
+    if poc and poc > 0.0:
+        levels.append(poc)
+    sh_mask, sl_mask = _swing_points(frame, n=3)
     if signal.direction == "long":
-        swing_levels = prepared.work_1h.filter(sl_mask)["low"].tail(3).to_list()
+        swing_levels = frame.filter(sl_mask)["low"].tail(3).to_list()
     else:
-        swing_levels = prepared.work_1h.filter(sh_mask)["high"].tail(3).to_list()
+        swing_levels = frame.filter(sh_mask)["high"].tail(3).to_list()
     levels.extend(float(level) for level in swing_levels if float(level) > 0.0)
     if not levels:
         return None
@@ -89,17 +139,18 @@ def _nearest_structure_level(prepared: PreparedSymbol, signal: Signal) -> float 
 
 
 def _structure_clarity(prepared: PreparedSymbol, signal: Signal) -> float:
-    if prepared.work_1h.is_empty():
+    frame = _structure_frame(prepared)
+    if frame.is_empty():
         return 0.0
     level = _nearest_structure_level(prepared, signal)
     if level is None or level <= 0.0:
         return 0.0
-    atr = float(prepared.work_1h.item(-1, "atr14") or 0.0)
+    atr = float(frame.item(-1, "atr14") or 0.0) if "atr14" in frame.columns else 0.0
     zone_width = max(atr * 0.35, level * 0.0015)
     if zone_width <= 0.0:
         return 0.0
     touches = 0
-    tail_df = prepared.work_1h.tail(24)
+    tail_df = frame.tail(24)
     for low, high in zip(tail_df["low"], tail_df["high"], strict=False):
         low_f = float(low or 0.0)
         high_f = float(high or 0.0)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from ..features.microstructure import build_microstructure_context
@@ -46,6 +46,7 @@ class ConfluenceResult:
     setup_prior: float
     components: tuple[ComponentScore, ...]
     final_score: float
+    notes: dict[str, Any] = field(default_factory=dict)
 
     @property
     def weighted_model_score(self) -> float:
@@ -62,10 +63,11 @@ class ConfluenceResult:
             adjustments=adjustments,
             final_score=self.final_score,
             setup_id=self.setup_id,
+            notes=dict(self.notes),
         )
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "setup_prior": self.setup_prior,
             "setup_id": self.setup_id,
             "components": [
@@ -82,6 +84,9 @@ class ConfluenceResult:
             "weight_sum_actual": self.weight_sum_actual,
             "final_score": self.final_score,
         }
+        if self.notes:
+            payload["notes"] = dict(self.notes)
+        return payload
 
 
 class ConfluenceEngine:
@@ -93,23 +98,18 @@ class ConfluenceEngine:
         result = engine.score(signal, prepared)
     """
 
-    def __init__(self, settings: BotSettings) -> None:
+    def __init__(self, settings: BotSettings, *, repository: Any | None = None) -> None:
         self.settings = settings
+        self.repository = repository
 
     def score(self, signal: Signal, prepared: PreparedSymbol) -> ConfluenceResult:
         cfg = self.settings.scoring
         components = self._compute_components(signal, prepared, cfg)
         model_score = sum(c.contribution for c in components)
+        notes = self._scoring_notes(prepared, components)
 
         prior_w = max(0.0, min(cfg.setup_prior_weight, 1.0))
-        history_count = int(
-            getattr(
-                signal,
-                "setup_history_count",
-                getattr(signal, "history_count", 0),
-            )
-            or 0
-        )
+        history_count = self._resolve_history_count(signal)
         calibrated_prior = self._calibrate_setup_prior(signal.score, history_count=history_count)
         calibrated_model = self._calibrate_component_model(model_score)
         blended = (calibrated_prior * prior_w) + (calibrated_model * (1.0 - prior_w))
@@ -123,7 +123,66 @@ class ConfluenceEngine:
             setup_prior=signal.score,
             components=tuple(components),
             final_score=final,
+            notes=notes,
         )
+
+    def _resolve_history_count(self, signal: Signal) -> int:
+        history_count = int(
+            getattr(
+                signal,
+                "setup_history_count",
+                getattr(signal, "history_count", 0),
+            )
+            or 0
+        )
+        if history_count >= MIN_HISTORY_SAMPLES:
+            return history_count
+        tracking_ref = getattr(signal, "tracking_ref", None)
+        if not tracking_ref:
+            return history_count
+        repo = self.repository
+        if repo is None:
+            return history_count
+        getter = getattr(repo, "setup_history_count", None)
+        if not callable(getter):
+            return history_count
+        try:
+            loaded = int(getter(signal.setup_id))
+        except (TypeError, ValueError):
+            LOG.debug("setup_history_count lookup failed | setup_id=%s", signal.setup_id)
+            return history_count
+        except Exception:
+            LOG.debug(
+                "setup_history_count lookup error | setup_id=%s",
+                signal.setup_id,
+                exc_info=True,
+            )
+            return history_count
+        return max(history_count, loaded)
+
+    @staticmethod
+    def _scoring_notes(
+        prepared: PreparedSymbol,
+        components: list[ComponentScore],
+    ) -> dict[str, Any]:
+        flags = getattr(prepared, "data_freshness_flags", ()) or ()
+        if "crowding_context_missing" not in flags:
+            return {}
+        crowd = next((item for item in components if item.name == "crowd_position"), None)
+        if crowd is None or crowd.available:
+            return {}
+        redistributed = [
+            item.name
+            for item in components
+            if item.available and item.weight > 0.0 and item.name != "crowd_position"
+        ]
+        return {
+            "weight_redistribution": {
+                "reason": "crowding_context_missing",
+                "excluded_components": ["crowd_position"],
+                "redistributed_to": redistributed,
+            }
+        }
 
     def _compute_components(
         self,

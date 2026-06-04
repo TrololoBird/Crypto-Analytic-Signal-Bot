@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 import polars as pl
 from websockets import exceptions as ws_exceptions
 
-from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.runtime.errors import DEFENSIVE_EXC
 from bot.market.network_proxy import apply_proxy_env, mask_proxy_url, normalize_proxy_url
 
 from ..domain.events import KlineCloseEvent
@@ -93,6 +93,17 @@ _STALE_DROP_EVENTS = {
 _WS_PUBLIC = "public"
 _WS_MARKET = "market"
 _WS_ENDPOINTS = (_WS_PUBLIC, _WS_MARKET)
+# Global Binance arrays must not sit behind the kline backlog — stale E timestamps get dropped.
+_GLOBAL_MARKET_STREAM_PREFIXES = (
+    "!ticker@arr",
+    "!markprice@arr",
+    "!miniticker@arr",
+)
+
+
+def _is_global_market_stream(stream: str) -> bool:
+    normalized = str(stream or "").strip().lower()
+    return any(normalized.startswith(prefix) for prefix in _GLOBAL_MARKET_STREAM_PREFIXES)
 
 
 class RateLimiter:
@@ -142,6 +153,9 @@ class MessageBuffer:
     @staticmethod
     def _message_priority(msg: JsonDict) -> int:
         data = msg.get("data")
+        stream = str(msg.get("stream") or "").lower()
+        if isinstance(data, list) and _is_global_market_stream(stream):
+            return 95
         if isinstance(data, dict):
             event_type = data.get("e")
             if event_type == "kline":
@@ -150,6 +164,10 @@ class MessageBuffer:
                     return 100
             if event_type == "forceOrder":
                 return 90
+            if event_type == "bookTicker":
+                return 85
+            if event_type == "markPriceUpdate":
+                return 95
             if event_type == "aggTrade":
                 return 40
         return 10
@@ -187,22 +205,21 @@ class MessageBuffer:
         closed_kline_indexes = [
             idx for idx, msg in enumerate(batch) if self._message_priority(msg) == 100
         ]
-        if closed_kline_indexes:
-            self._protected_kline_drop_count += len(closed_kline_indexes)
-            LOG.warning(
-                (
-                    "message buffer backpressure touched closed klines | protected=%d "
-                    "total_protection_events=%d"
-                ),
-                len(closed_kline_indexes),
-                self._protected_kline_drop_count,
-            )
-
-        # Keep closed klines ahead of all other message types. Under mixed
-        # pressure, only non-closed messages can be selected for eviction.
         non_closed_indexes = [
             idx for idx, msg in enumerate(batch) if self._message_priority(msg) < 100
         ]
+        if closed_kline_indexes and non_closed_indexes:
+            LOG.debug(
+                "message buffer backpressure with protected closed klines | protected=%d "
+                "queued=%d",
+                len(closed_kline_indexes),
+                len(batch),
+            )
+        elif closed_kline_indexes:
+            self._protected_kline_drop_count += len(closed_kline_indexes)
+
+        # Keep closed klines ahead of all other message types. Under mixed
+        # pressure, only non-closed messages can be selected for eviction.
         if non_closed_indexes:
             lowest_priority = min(self._message_priority(batch[idx]) for idx in non_closed_indexes)
             drop_indexes = {
@@ -310,6 +327,13 @@ def _ws_kline_to_row(k: JsonDict) -> JsonDict:
     }
 
 
+def _resolve_message_buffer_maxsize(cfg: WSConfig, *, symbol_count: int = 50) -> int:
+    configured = int(getattr(cfg, "message_buffer_maxsize", 0) or 0)
+    if configured > 0:
+        return configured
+    return max(10_000, min(200_000, symbol_count * 1200))
+
+
 class FuturesWSManager:
     """Manages WebSocket connections to Binance Futures for real-time market data."""
 
@@ -402,7 +426,7 @@ class FuturesWSManager:
         self._reconnect_cb: ReconnectCallback | None = None  # fired on reconnect
 
         # Message buffering with background draining.
-        self._message_buffer = MessageBuffer(maxsize=10000)
+        self._message_buffer = MessageBuffer(maxsize=_resolve_message_buffer_maxsize(config))
         self._rate_limiter = RateLimiter(
             _MAX_INCOMING_MSG_PER_SECOND
         )  # msg/sec: Binance WS inbound processing ceiling.
@@ -720,6 +744,15 @@ class FuturesWSManager:
         connected_endpoints = [
             endpoint for endpoint in _WS_ENDPOINTS if self._connected_endpoints[endpoint].is_set()
         ]
+        budget = getattr(self, "_subscription_budget", None)
+        agg_symbols: set[str] = set()
+        if budget is not None:
+            agg_symbols = {str(sym).strip().lower() for sym in budget.agg_trade_symbols if sym}
+        from .subscription_planner import ORDER_FLOW_ANCHOR_SYMBOLS
+
+        anchor_symbols_in_agg_trade = sum(
+            1 for anchor in ORDER_FLOW_ANCHOR_SYMBOLS if anchor in agg_symbols
+        )
         return {
             "active_stream_count": len(self._intended_streams),
             "intended_stream_count": len(self._intended_streams),
@@ -733,6 +766,7 @@ class FuturesWSManager:
             "market_last_message_age_seconds": self._last_message_age_seconds(_WS_MARKET),
             "ticker_cache_age_seconds": ticker_age,
             "buffer_message_count": self._message_buffer.get_stats()["size"],
+            "message_buffer": self._message_buffer.get_stats(),
             "stale_event_drop_count": self._stale_event_drop_count,
             "fresh_tickers": fresh_tickers,
             "fresh_mark_prices": fresh_mark_prices,
@@ -750,6 +784,8 @@ class FuturesWSManager:
             "market_subscription_ack_count": self._subscription_ack_count[_WS_MARKET],
             "public_subscription_error": self._subscription_errors[_WS_PUBLIC],
             "market_subscription_error": self._subscription_errors[_WS_MARKET],
+            "order_flow_tracked_count": len(self._tracked_symbols),
+            "anchor_symbols_in_agg_trade": anchor_symbols_in_agg_trade,
             # Shortlist rebuild state
             "last_shortlist_rebuild_age_s": round(now - self._last_shortlist_rebuild_ts, 1)
             if self._last_shortlist_rebuild_ts > 0
@@ -1323,6 +1359,16 @@ class FuturesWSManager:
             self, symbol=symbol, window_seconds=window_seconds
         )
 
+    def get_liquidation_rollups(
+        self,
+        symbol: str | None = None,
+        window_seconds: int = 900,
+    ) -> dict[str, float] | None:
+        """Notional rollups for liquidation heatmap / positioning context."""
+        return ws_cache.get_liquidation_rollups(
+            self, symbol=symbol, window_seconds=window_seconds
+        )
+
     def get_liquidation_age_seconds(
         self,
         symbol: str | None = None,
@@ -1447,10 +1493,17 @@ class FuturesWSManager:
     async def _backfill_book_ticker(self, symbol: str) -> None:
         try:
             async with self._backfill_sem:
-                bid, ask = await self._rest.fetch_book_ticker(symbol)
+                detail = await self._rest._fetch_book_ticker_rest_detail(symbol)
+            bid = detail.get("bid_price")
+            ask = detail.get("ask_price")
+            bid_qty = detail.get("bid_qty")
+            ask_qty = detail.get("ask_qty")
             async with self._data_lock:
                 self._book[symbol] = (bid, ask)
-                self._book_qty.pop(symbol, None)
+                if bid_qty is not None and ask_qty is not None:
+                    self._book_qty[symbol] = (float(bid_qty), float(ask_qty))
+                else:
+                    self._book_qty.pop(symbol, None)
             self._backfill_cooldowns.pop(symbol, None)
         except (
             ConnectionError,
@@ -1637,10 +1690,15 @@ class FuturesWSManager:
             return
 
         data = msg.get("data")
+        stream = str(msg.get("stream") or "")
         if isinstance(data, dict) and data.get("e") == "kline":
             kline = data.get("k", {})
             if isinstance(kline, dict) and not kline.get("x"):
                 return
+
+        if _is_global_market_stream(stream):
+            await self._process_message_internal(msg)
+            return
 
         buffered = await self._message_buffer.put(msg)
         if not buffered:
@@ -1759,7 +1817,10 @@ class FuturesWSManager:
             return False
         if event_ms <= 0:
             return False
-        max_age_seconds = float(getattr(self._cfg, "market_ticker_freshness_seconds", 30.0))
+        if event_type == "aggTrade":
+            max_age_seconds = float(getattr(self._cfg, "agg_trade_freshness_seconds", 300.0))
+        else:
+            max_age_seconds = float(getattr(self._cfg, "market_ticker_freshness_seconds", 30.0))
         age_ms = self._now_epoch_ms() - event_ms
         return age_ms > (max_age_seconds * 1000.0)
 

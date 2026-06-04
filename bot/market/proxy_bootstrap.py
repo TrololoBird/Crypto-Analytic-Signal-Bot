@@ -6,48 +6,141 @@ import asyncio
 import logging
 import subprocess
 import sys
+import time
+from dataclasses import dataclass
 from pathlib import Path
+
+import websockets
 
 from bot.domain.config import BotSettings, NetworkConfig, load_settings
 from bot.market.data import BinanceFuturesMarketData, MarketDataUnavailable
+from bot.market.network_proxy import websockets_connect_kwargs
 from bot.market.rest import BinanceClientImpl
 
 LOG = logging.getLogger("bot.market.proxy_bootstrap")
 
 _DISCOVER_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "discover_binance_proxies.py"
+_BINANCE_WS_HANDSHAKE_URL = "wss://fstream.binance.com/ws"
+_WS_PROBE_TIMEOUT_SECONDS = 15.0
+_REST_SYMBOL_THRESHOLD = 100
 
 
-async def _probe_direct() -> bool:
-    net = NetworkConfig(trust_env=False, failover_enabled=False)
+@dataclass(slots=True, frozen=True)
+class NetworkProbeResult:
+    rest_ok: bool
+    ws_ok: bool
+
+    @property
+    def any_ok(self) -> bool:
+        return self.rest_ok or self.ws_ok
+
+
+_PROBE_CACHE: dict[str, NetworkProbeResult] = {}
+_PROBE_CACHE_MONOTONIC: float = 0.0
+
+
+def record_network_probe(scope: str, result: NetworkProbeResult) -> None:
+    """Store the latest REST/WS probe for health and operator surfaces."""
+    global _PROBE_CACHE_MONOTONIC
+    normalized = str(scope or "").strip().lower()
+    if not normalized:
+        return
+    _PROBE_CACHE[normalized] = result
+    _PROBE_CACHE_MONOTONIC = time.monotonic()
+
+
+def network_probe_status() -> dict[str, bool | None]:
+    """Return aggregated probe flags from the last bootstrap or retry probes."""
+    direct = _PROBE_CACHE.get("direct")
+    configured = _PROBE_CACHE.get("configured")
+    if direct is None and configured is None:
+        return {"rest_probe_ok": None, "ws_probe_ok": None}
+    rest_ok = bool((direct and direct.rest_ok) or (configured and configured.rest_ok))
+    ws_ok = bool((direct and direct.ws_ok) or (configured and configured.ws_ok))
+    return {"rest_probe_ok": rest_ok, "ws_probe_ok": ws_ok}
+
+
+def clear_network_probe_cache() -> None:
+    """Reset probe cache (tests only)."""
+    global _PROBE_CACHE_MONOTONIC
+    _PROBE_CACHE.clear()
+    _PROBE_CACHE_MONOTONIC = 0.0
+
+
+async def probe_ws_handshake(
+    *,
+    proxy_url: str | None = None,
+    trust_env: bool = True,
+    timeout_seconds: float = _WS_PROBE_TIMEOUT_SECONDS,
+) -> bool:
+    """Open and close a Binance futures public websocket (handshake only)."""
+    connect_kwargs = websockets_connect_kwargs(proxy_url=proxy_url, trust_env=trust_env)
+    try:
+        async with asyncio.timeout(timeout_seconds):
+            async with websockets.connect(
+                _BINANCE_WS_HANDSHAKE_URL,
+                ping_interval=None,
+                close_timeout=5.0,
+                open_timeout=timeout_seconds,
+                **connect_kwargs,
+            ):
+                return True
+    except Exception as exc:
+        LOG.debug(
+            "ws handshake probe failed | proxy=%s trust_env=%s err=%s",
+            proxy_url,
+            trust_env,
+            exc,
+        )
+        return False
+
+
+async def _probe_rest(net: NetworkConfig) -> bool:
     client = BinanceClientImpl(rest_timeout_seconds=12.0, network=net)
     market = BinanceFuturesMarketData(binance_client=client)
     try:
         symbols = await market.fetch_exchange_symbols()
-        return len(symbols) > 100
+        return len(symbols) > _REST_SYMBOL_THRESHOLD
     except MarketDataUnavailable:
         return False
     finally:
         await market.close()
 
 
-async def _probe_configured(urls: list[str]) -> bool:
+async def probe_network(net: NetworkConfig) -> NetworkProbeResult:
+    """Probe REST exchangeInfo and WS handshake for the given network config."""
+    rest_ok, ws_ok = await asyncio.gather(
+        _probe_rest(net),
+        probe_ws_handshake(proxy_url=net.proxy_url, trust_env=net.trust_env),
+    )
+    return NetworkProbeResult(rest_ok=rest_ok, ws_ok=ws_ok)
+
+
+async def _probe_direct() -> NetworkProbeResult:
+    net = NetworkConfig(trust_env=False, failover_enabled=False)
+    return await probe_network(net)
+
+
+async def _probe_configured(urls: list[str]) -> NetworkProbeResult:
     if not urls:
-        return False
+        return NetworkProbeResult(rest_ok=False, ws_ok=False)
     net = NetworkConfig(
         proxy_url=urls[0],
         proxy_urls=urls[1:],
         trust_env=False,
         failover_enabled=True,
     )
-    client = BinanceClientImpl(rest_timeout_seconds=12.0, network=net)
-    market = BinanceFuturesMarketData(binance_client=client)
-    try:
-        symbols = await market.fetch_exchange_symbols()
-        return len(symbols) > 100
-    except MarketDataUnavailable:
-        return False
-    finally:
-        await market.close()
+    return await probe_network(net)
+
+
+def _log_probe_result(label: str, result: NetworkProbeResult) -> None:
+    record_network_probe(label, result)
+    LOG.info(
+        "network probe | scope=%s rest_ok=%s ws_ok=%s",
+        label,
+        result.rest_ok,
+        result.ws_ok,
+    )
 
 
 def _run_discovery(config_path: Path) -> None:
@@ -79,10 +172,19 @@ async def ensure_network_ready(
 ) -> BotSettings:
     """Reload settings after optional proxy discovery when egress is missing or dead."""
     urls = settings.network.effective_proxy_urls()
-    direct_ok = await _probe_direct()
-    configured_ok = await _probe_configured(urls) if urls else False
+    direct = await _probe_direct()
+    configured = await _probe_configured(urls) if urls else NetworkProbeResult(False, False)
+    _log_probe_result("direct", direct)
+    if urls:
+        _log_probe_result("configured", configured)
 
-    if direct_ok or configured_ok:
+    if direct.rest_ok or configured.rest_ok:
+        return settings
+
+    if direct.any_ok or configured.any_ok:
+        LOG.warning(
+            "binance REST blocked but WS reachable — continuing without proxy refresh"
+        )
         return settings
 
     if not auto_discover:
@@ -96,3 +198,24 @@ async def ensure_network_ready(
 
     LOG.error("binance unreachable | config missing for discovery")
     return settings
+
+
+async def retry_network_after_failure(
+    settings: BotSettings,
+    *,
+    config_path: Path | None = None,
+) -> BotSettings:
+    """Re-run proxy discovery when REST paths fail mid-runtime."""
+    urls = settings.network.effective_proxy_urls()
+    configured = await _probe_configured(urls)
+    direct = await _probe_direct()
+    _log_probe_result("retry_configured", configured)
+    _log_probe_result("retry_direct", direct)
+    if configured.rest_ok or direct.rest_ok:
+        return settings
+    path = config_path or Path("config.toml")
+    if not path.is_file():
+        return settings
+    LOG.warning("binance REST unreachable — re-running proxy discovery")
+    await asyncio.to_thread(_run_discovery, path)
+    return load_settings(path)

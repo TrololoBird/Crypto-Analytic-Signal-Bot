@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import ast
+import logging
+import math
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-if TYPE_CHECKING:
-    from collections.abc import Mapping
+from bot.runtime.errors import DEFENSIVE_EXC
+
+from collections.abc import Mapping
+
+LOG = logging.getLogger("bot.contracts")
 
 # --- Feature Contract ---
 
@@ -80,13 +85,132 @@ def normalize_public_feature_payload(payload: Mapping[str, Any]) -> dict[str, An
     return {name: payload.get(name) for name in PUBLIC_FEATURE_FIELDS}
 
 
+def _normalized_float(value: Any, default: float | None = None) -> float | None:
+    if value is None:
+        return default
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    if math.isnan(parsed) or math.isinf(parsed):
+        return default
+    return parsed
+
+
+def _normalized_bool(value: Any, *, default: bool | None = None) -> bool | None:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return bool(value)
+
+
+def build_public_feature_snapshot(prepared: Any) -> dict[str, Any]:
+    """Build a normalized public feature snapshot from PreparedSymbol-like data."""
+    if prepared is None:
+        return normalize_public_feature_payload(dict.fromkeys(PUBLIC_FEATURE_FIELDS))
+
+    features: dict[str, Any] = {}
+
+    def _frame_value(frame: Any, column: str) -> float | None:
+        if frame is None or getattr(frame, "is_empty", lambda: True)():
+            return None
+        if column not in getattr(frame, "columns", []):
+            return None
+        try:
+            return _normalized_float(frame.item(-1, column))
+        except DEFENSIVE_EXC as exc:
+            LOG.debug("public feature snapshot read failed | column=%s error=%s", column, exc)
+            return None
+
+    def _ema_stack(frame: Any, fast: str, slow: str) -> bool | None:
+        fast_value = _frame_value(frame, fast)
+        slow_value = _frame_value(frame, slow)
+        if fast_value is None or slow_value is None or slow_value <= 0.0:
+            return None
+        return fast_value > slow_value
+
+    work_15m = getattr(prepared, "work_15m", None)
+    work_1h = getattr(prepared, "work_1h", None)
+    work_4h = getattr(prepared, "work_4h", None)
+
+    features["rsi_15m"] = _frame_value(work_15m, "rsi14")
+    features["rsi_1h"] = _frame_value(work_1h, "rsi14")
+    features["rsi_4h"] = _frame_value(work_4h, "rsi14")
+    features["adx_1h"] = _frame_value(work_1h, "adx14")
+    features["adx_4h"] = _frame_value(work_4h, "adx14")
+    features["atr_pct_15m"] = _frame_value(work_15m, "atr_pct")
+    features["volume_ratio_15m"] = _frame_value(work_15m, "volume_ratio20")
+    features["macd_histogram_15m"] = _frame_value(work_15m, "macd_hist")
+
+    features["ema20_above_ema50_15m"] = _normalized_bool(_ema_stack(work_15m, "ema20", "ema50"))
+    features["ema50_above_ema200_15m"] = _normalized_bool(_ema_stack(work_15m, "ema50", "ema200"))
+    features["ema20_above_ema50_1h"] = _normalized_bool(_ema_stack(work_1h, "ema20", "ema50"))
+    features["ema50_above_ema200_1h"] = _normalized_bool(_ema_stack(work_1h, "ema50", "ema200"))
+
+    features["supertrend_dir_1h"] = _frame_value(work_1h, "supertrend_dir")
+    features["supertrend_dir_15m"] = _frame_value(work_15m, "supertrend_dir")
+    features["obv_above_ema_15m"] = _frame_value(work_15m, "obv_above_ema")
+    features["bb_pct_b_15m"] = _frame_value(work_15m, "bb_pct_b")
+    features["bb_width_15m"] = _frame_value(work_15m, "bb_width")
+
+    features["funding_rate"] = _normalized_float(getattr(prepared, "funding_rate", None))
+    features["oi_current"] = _normalized_float(getattr(prepared, "oi_current", None))
+    features["oi_change_pct"] = _normalized_float(getattr(prepared, "oi_change_pct", None))
+    features["oi_slope_5m"] = _normalized_float(getattr(prepared, "oi_slope_5m", None))
+    features["ls_ratio"] = _normalized_float(getattr(prepared, "ls_ratio", None))
+    features["global_ls_ratio"] = _normalized_float(getattr(prepared, "global_ls_ratio", None))
+    features["top_trader_position_ratio"] = _normalized_float(
+        getattr(prepared, "top_trader_position_ratio", None)
+    )
+    features["top_vs_global_ls_gap"] = _normalized_float(
+        getattr(prepared, "top_vs_global_ls_gap", None)
+    )
+    features["liquidation_score"] = _normalized_float(getattr(prepared, "liquidation_score", None))
+    features["mark_index_spread_bps"] = _normalized_float(
+        getattr(prepared, "mark_index_spread_bps", None)
+    )
+    features["premium_zscore_5m"] = _normalized_float(getattr(prepared, "premium_zscore_5m", None))
+    features["premium_slope_5m"] = _normalized_float(getattr(prepared, "premium_slope_5m", None))
+    features["context_snapshot_age_seconds"] = _normalized_float(
+        getattr(prepared, "context_snapshot_age_seconds", None)
+    )
+    features["depth_imbalance"] = _normalized_float(getattr(prepared, "depth_imbalance", None))
+    features["microprice_bias"] = _normalized_float(getattr(prepared, "microprice_bias", None))
+    features["agg_trade_delta_30s"] = _normalized_float(
+        getattr(prepared, "agg_trade_delta_30s", None)
+    )
+    features["aggression_shift"] = _normalized_float(getattr(prepared, "aggression_shift", None))
+    features["spot_lead_return_1m"] = _normalized_float(
+        getattr(prepared, "spot_lead_return_1m", None)
+    )
+    features["spot_futures_spread_bps"] = _normalized_float(
+        getattr(prepared, "spot_futures_spread_bps", None)
+    )
+    features["mark_price_age_seconds"] = _normalized_float(
+        getattr(prepared, "mark_price_age_seconds", None)
+    )
+    features["ticker_price_age_seconds"] = _normalized_float(
+        getattr(prepared, "ticker_price_age_seconds", None)
+    )
+    features["book_ticker_age_seconds"] = _normalized_float(
+        getattr(prepared, "book_ticker_age_seconds", None)
+    )
+    features["data_source_mix"] = (
+        getattr(prepared, "data_source_mix", "futures_only") or "futures_only"
+    )
+    features["market_regime"] = getattr(prepared, "market_regime", "neutral") or "neutral"
+
+    return normalize_public_feature_payload(features)
+
+
 # --- Runtime Contract ---
 
 RUNTIME_CALL_PATH_FILES: tuple[Path, ...] = (
     Path("main.py"),
     Path("bot/cli.py"),
     Path("bot/__init__.py"),
-    Path("bot/application/bot.py"),
+    Path("bot/runtime/bot.py"),
 )
 
 RUNTIME_PUBLIC_IMPORT_CONTRACT: tuple[str, ...] = (

@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, ParamSpec, Protocol, TypeVar, cast
 import aiohttp
 import structlog
 
-from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.runtime.errors import DEFENSIVE_EXC
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -213,7 +213,7 @@ class TelegramBroadcaster:
 
             chat = await self.bot.get_chat(self.target_chat_id)
             LOG.info("telegram chat access confirmed", chat_id=chat.id, type=chat.type)
-        except DEFENSIVE_EXC as exc:
+        except Exception as exc:
             msg = f"telegram preflight failed: {exc}"
             raise RuntimeError(msg) from exc
 

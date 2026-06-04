@@ -28,3 +28,7 @@
 ```powershell
 .\.venv\Scripts\python.exe scripts\probe_binance_access.py --all-configured
 ```
+
+## Spot companion и лимит weight
+
+Опциональный ``[bot.spot_companion]`` ходит на публичный spot REST (``data-api.binance.vision``) через отдельную aiohttp-сессию и **не** участвует в общем futures weight-budget бота (``bot.market.rate_limit``, ``REST_WEIGHT_PACE_LIMIT``). Запросы spot не «делят» счётчик с ``/fapi`` и ``/futures/data``; при включении companion увеличивайте ``refresh_interval_seconds`` и держите короткий список ``lead_symbols``, иначе spot-IP может упереться в собственные лимиты Binance независимо от прокси для futures.

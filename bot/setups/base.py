@@ -6,9 +6,11 @@ from abc import abstractmethod
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from bot.core.runtime_errors import DEFENSIVE_EXC
+import logging
 
-from ..core.runtime_errors import classify_runtime_error
+from bot.runtime.errors import DEFENSIVE_EXC, classify_runtime_error
+
+LOG = logging.getLogger(__name__)
 from ..domain.strategies import RISK_PROFILE_BY_ID, STRATEGY_STATUS_BY_ID, StrategyDecision
 from ..domain.strategy_catalog import CATALOG_BY_ID
 from ..engine.base import (
@@ -24,6 +26,7 @@ from ..market.fit import (
     market_context_from_prepared,
 )
 from . import (
+    _reject,
     begin_strategy_decision_capture,
     finalize_strategy_decision,
     reset_strategy_decision_capture,
@@ -124,6 +127,22 @@ class BaseSetup(AbstractStrategy):
         """Return tunable parameters. Override in subclass to enable autotuning."""
         return {}
 
+    def _schedule_active(self, prepared: PreparedSymbol) -> bool:
+        checker = getattr(self, "is_active_now", None)
+        if not callable(checker):
+            return True
+        try:
+            return bool(checker(prepared, self._settings))
+        except TypeError:
+            return bool(checker(prepared))
+        except Exception:
+            LOG.exception(
+                "%s: strategy schedule check failed | strategy=%s",
+                prepared.symbol,
+                self.setup_id,
+            )
+            return True
+
     def calculate(self, prepared: PreparedSymbol) -> SignalResult:
         if self._settings is None:
             decision = StrategyDecision.error_result(
@@ -147,27 +166,41 @@ class BaseSetup(AbstractStrategy):
             strict_data_quality=strict_data_quality,
         )
         try:
-            try:
-                outcome = self.detect(prepared, self._settings)
-            except DEFENSIVE_EXC as exc:
-                error_class = classify_runtime_error(exc)
-                decision = StrategyDecision.error_result(
-                    setup_id=self.setup_id,
-                    reason_code=f"{error_class}.error",
-                    error=str(exc),
-                    stage="engine",
-                    details={
-                        "symbol": prepared.symbol,
-                        "error_class": error_class,
-                        "exception_type": type(exc).__name__,
-                    },
+            if not self._schedule_active(prepared):
+                _reject(
+                    prepared,
+                    self.setup_id,
+                    "schedule_inactive",
+                    stage="context",
+                    symbol=prepared.symbol,
                 )
-            else:
                 decision = finalize_strategy_decision(
                     prepared=prepared,
                     setup_id=self.setup_id,
-                    outcome=outcome,
+                    outcome=None,
                 )
+            else:
+                try:
+                    outcome = self.detect(prepared, self._settings)
+                except DEFENSIVE_EXC as exc:
+                    error_class = classify_runtime_error(exc)
+                    decision = StrategyDecision.error_result(
+                        setup_id=self.setup_id,
+                        reason_code=f"{error_class}.error",
+                        error=str(exc),
+                        stage="engine",
+                        details={
+                            "symbol": prepared.symbol,
+                            "error_class": error_class,
+                            "exception_type": type(exc).__name__,
+                        },
+                    )
+                else:
+                    decision = finalize_strategy_decision(
+                        prepared=prepared,
+                        setup_id=self.setup_id,
+                        outcome=outcome,
+                    )
         finally:
             reset_strategy_decision_capture(token)
         return SignalResult(

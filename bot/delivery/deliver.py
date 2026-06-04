@@ -10,15 +10,17 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Protocol
 
-from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.runtime.errors import DEFENSIVE_EXC
 
 from ..persistence.tracking import SignalTrackingEvent
 from .contract import validate_signal_contract
 from .formatting import (
     format_analytics_companion_message,
+    format_safe_signal_fallback,
     format_signal_message,
     format_tracked_signal_message,
     format_tracking_event_message,
+    validate_telegram_html,
 )
 from .telegram import DeliveryResult
 
@@ -26,7 +28,6 @@ if TYPE_CHECKING:
     from ..domain.schemas import Signal
 
 LOG = logging.getLogger("bot.delivery.deliver")
-LOCAL_TZ = datetime.now().astimezone().tzinfo or UTC
 _AUDIT_BATCH_LABELS = {"RAW", "CANDIDATE"}
 _AUDIT_BATCH_INTERVAL_SECONDS = 5.0
 _AUDIT_BATCH_MAX_LINES = 20
@@ -50,67 +51,8 @@ class DeliveredSignal:
     reason: str | None = None
 
 
-def _fmt_price(value: float | None) -> str:
-    if value is None:
-        return "data_missing"
-    try:
-        numeric = float(value)
-    except (TypeError, ValueError):
-        return "data_invalid"
-    if not math.isfinite(numeric):
-        return "data_invalid"
-    if numeric >= 1_000.0:
-        return f"{numeric:,.2f}"
-    if numeric >= 1.0:
-        return f"{numeric:,.4f}"
-    return f"{numeric:.6f}"
-
-
-def _tz_label(value: datetime) -> str:
-    offset = value.utcoffset() or timedelta(0)
-    sign = "+" if offset >= timedelta(0) else "-"
-    total_minutes = abs(int(offset.total_seconds() // 60))
-    hours, minutes = divmod(total_minutes, 60)
-    return f"UTC{sign}{hours:02d}:{minutes:02d}"
-
-
-def _fmt_dt(raw: str | datetime | None) -> str:
-    if raw is None:
-        return "time_missing"
-    try:
-        value = raw if isinstance(raw, datetime) else datetime.fromisoformat(str(raw))
-    except (TypeError, ValueError):
-        return "time_invalid"
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=UTC)
-    value = value.astimezone(LOCAL_TZ)
-    return f"{value.strftime('%Y-%m-%d %H:%M')} {_tz_label(value)}"
-
-
 def _direction_label(direction: str) -> str:
     return "LONG" if direction == "long" else "SHORT"
-
-
-def _confluence_summary(reasons: tuple[str, ...] | list[str]) -> str | None:
-    setup_count = 0
-    setups: list[str] = []
-    for reason in reasons:
-        raw = str(reason or "").strip()
-        if raw.startswith("confluence_") and raw.endswith("_setups"):
-            count = raw.removeprefix("confluence_").removesuffix("_setups")
-            if count.isdigit():
-                setup_count = max(setup_count, int(count))
-        elif raw.startswith("confluence_setups="):
-            payload = raw.split("=", 1)[1]
-            setups = [item.strip() for item in payload.split(",") if item.strip()]
-    if not setup_count and len(setups) > 1:
-        setup_count = len(setups)
-    if setup_count <= 1:
-        return None
-    summary = f"{setup_count} setups"
-    if setups:
-        summary = f"{summary}: {', '.join(setups)}"
-    return html.escape(summary)
 
 
 def _fmt_audit_metric(name: str, value: float | None, suffix: str = "") -> str | None:
@@ -177,177 +119,19 @@ def tradingview_chart_url(symbol: str, timeframe: str) -> str:
     return f"https://www.tradingview.com/chart/?symbol={tv_symbol}&interval={interval}"
 
 
-def _status_line_for_tracked(tracked: SignalTrackingEvent | object) -> str:
-    state = tracked.tracked if isinstance(tracked, SignalTrackingEvent) else tracked
-    pending_expires_at = getattr(state, "pending_expires_at", None)
-    activated_at = getattr(state, "activated_at", None)
-    activation_price = getattr(state, "activation_price", None)
-    tp1_hit_at = getattr(state, "tp1_hit_at", None)
-    moved_to_break_even_at = getattr(state, "moved_to_break_even_at", None)
-    close_reason = getattr(state, "close_reason", None)
-    closed_at = getattr(state, "closed_at", None)
-    close_price = getattr(state, "close_price", None)
-    single_target_mode = bool(getattr(state, "single_target_mode", False))
-    entry_mid = getattr(state, "entry_mid", None)
-    activation_price = getattr(state, "activation_price", None)
-    if close_reason == "tp1_hit" and single_target_mode:
-        tp_px = _fmt_price(close_price or state.take_profit_1)
-        return f"closed at TP on <code>{_fmt_dt(closed_at)}</code> at <code>{tp_px}</code>"
-    if close_reason == "tp2_hit":
-        tp_px = _fmt_price(close_price or state.take_profit_2)
-        return f"closed at TP2 on <code>{_fmt_dt(closed_at)}</code> at <code>{tp_px}</code>"
-    if close_reason == "stop_loss":
-        # If stop was moved to break-even (TP1) and then hit, show it explicitly.
-        break_even = activation_price or entry_mid
-        stop_px = close_price or state.stop
-        is_break_even = False
-        if moved_to_break_even_at and break_even and stop_px:
-            try:
-                is_break_even = abs(float(stop_px) - float(break_even)) <= (
-                    float(break_even) * 1e-6
-                )
-            except (TypeError, ValueError):
-                is_break_even = False
-        label = "stopped (break-even)" if is_break_even else "stopped"
-        return f"{label} on <code>{_fmt_dt(closed_at)}</code> at <code>{_fmt_price(stop_px)}</code>"
-    if close_reason == "smart_exit":
-        exit_px = close_price or state.last_price or entry_mid
-        return (
-            "analytical smart-exit on "
-            f"<code>{_fmt_dt(closed_at)}</code> at <code>{_fmt_price(exit_px)}</code>"
-        )
-    if close_reason == "emergency_exit":
-        exit_px = close_price or state.last_price or entry_mid
-        return (
-            "analytical hard-barrier exit on "
-            f"<code>{_fmt_dt(closed_at)}</code> at <code>{_fmt_price(exit_px)}</code>"
-        )
-    if close_reason == "expired":
-        return f"expired on <code>{_fmt_dt(closed_at)}</code>"
-    if close_reason == "ambiguous_exit":
-        return f"ambiguous exit on <code>{_fmt_dt(closed_at)}</code>"
-    if tp1_hit_at:
-        if single_target_mode:
-            return f"TP hit on <code>{_fmt_dt(tp1_hit_at)}</code>"
-        if moved_to_break_even_at:
-            return f"TP1 hit on <code>{_fmt_dt(tp1_hit_at)}</code>; stop moved to break-even"
-        return f"TP1 hit on <code>{_fmt_dt(tp1_hit_at)}</code>; TP2 still open"
-    if activated_at:
-        entry_px = _fmt_price(activation_price or state.entry_mid)
-        return f"active since <code>{_fmt_dt(activated_at)}</code> at <code>{entry_px}</code>"
-    return f"waiting entry until <code>{_fmt_dt(pending_expires_at)}</code>"
-
-
-def _confidence_label(score: float) -> str:
-    if score > 0.75:
-        return "strong"
-    if score >= 0.68:
-        return "medium"
-    return "moderate"
-
-
-def _render_signal_card(
-    *,
-    symbol: str,
-    direction: str,
-    tracking_ref: str,
-    timeframe: str,
-    setup_id: str,
-    entry_low: float,
-    entry_high: float,
-    stop: float,
-    take_profit_1: float,
-    take_profit_2: float,
-    take_profit_3: float | None = None,
-    risk_reward: float,
-    stop_distance_pct: float,
-    reasons: tuple[str, ...] | list[str],
-    status_line: str,
-    score: float = 0.0,
-    scale_weights: tuple[float, float, float] | list[float] | None = None,
-    oi_change_pct: float | None = None,
-    funding_rate: float | None = None,
-    btc_bias: str | None = None,
-    expiry_dt: datetime | None = None,
-) -> str:
-    entry_mid = (entry_low + entry_high) / 2.0
-    tp3 = float(take_profit_3 or take_profit_2)
-    scale = max(abs(entry_mid), abs(take_profit_1), abs(take_profit_2), abs(tp3), 1.0)
-    single_target_mode = abs(take_profit_2 - take_profit_1) <= (scale * 1e-6)
-    weights = tuple(scale_weights or (0.5, 0.3, 0.2))
-    if len(weights) != 3:
-        weights = (0.5, 0.3, 0.2)
-    weight_labels = tuple(round(float(weight) * 100.0) for weight in weights)
-
-    lines: list[str] = []
-
-    if btc_bias == "downtrend" and direction == "long":
-        lines.append("<b>BTC risk</b> <code>downtrend vs LONG</code>")
-    elif btc_bias == "uptrend" and direction == "short":
-        lines.append("<b>BTC risk</b> <code>uptrend vs SHORT</code>")
-
-    direction_label = _direction_label(direction)
-    symbol_html = html.escape(symbol)
-    lines += [
-        (f"<b>LIMIT {direction_label} {symbol_html}</b> <code>#{tracking_ref}</code>"),
-        (
-            f"<b>Setup</b> <code>{html.escape(setup_id)} {html.escape(timeframe)}</code> | "
-            f"<b>Score</b> <code>{score * 100:.0f}% {_confidence_label(score)}</code>"
-        ),
-        f"<b>Entry</b> <code>{_fmt_price(entry_low)} - {_fmt_price(entry_high)}</code>",
-        f"<b>SL</b> <code>{_fmt_price(stop)}</code>",
-        (
-            f"<b>TP</b> <code>{_fmt_price(take_profit_1)}</code>"
-            if single_target_mode
-            else (
-                f"<b>TP</b> TP1 <code>{_fmt_price(take_profit_1)}</code> | "
-                f"TP2 <code>{_fmt_price(take_profit_2)}</code> | "
-                f"TP3 <code>{_fmt_price(tp3)}</code>"
-            )
-        ),
-        (
-            f"<b>Scale</b> <code>{weight_labels[0]}% / {weight_labels[1]}% / "
-            f"{weight_labels[2]}%</code>"
-        ),
-        (
-            f"<b>RR</b> <code>{risk_reward:.2f}</code> | "
-            f"<b>Risk</b> <code>{stop_distance_pct:.2f}%</code>"
-        ),
-    ]
-    ctx = _market_context_line(oi_change_pct, funding_rate)
-    if ctx:
-        lines.append(f"<b>Market</b> <code>{html.escape(ctx)}</code>")
-    confluence = _confluence_summary(reasons)
-    if confluence:
-        lines.append(f"<b>Confluence</b> <code>{confluence}</code>")
-    chart_url = html.escape(tradingview_chart_url(symbol, timeframe), quote=True)
-    lines.append(f'<b>Chart</b> <a href="{chart_url}">TradingView</a>')
-    if expiry_dt:
-        lines.append(f"<b>Wait entry until</b> <code>{_fmt_dt(expiry_dt)}</code>")
-    else:
-        lines.append(f"<b>Status</b> {status_line}")
-    return "\n".join(lines)
-
-
-def _market_context_line(oi_change_pct: float | None, funding_rate: float | None) -> str | None:
-    parts = []
-    if oi_change_pct is not None:
-        sign = "+" if oi_change_pct >= 0 else ""
-        parts.append(f"OI {sign}{oi_change_pct * 100:.1f}%")
-    if funding_rate is not None:
-        sign = "+" if funding_rate >= 0 else ""
-        parts.append(f"FR {sign}{funding_rate * 100:.4f}%")
-    return " | ".join(parts) if parts else None
-
-
 def format_signal_text(
-    signal: Signal, *, pending_expiry_minutes: int, btc_bias: str | None = None
+    signal: Signal,
+    *,
+    pending_expiry_minutes: int,
+    btc_bias: str | None = None,
+    tier: str | None = None,
 ) -> str:
     try:
         return format_signal_message(
             signal,
             pending_expiry_minutes=pending_expiry_minutes,
             btc_bias=btc_bias,
+            tier=tier,
         )
     except (AttributeError, TypeError, ValueError) as exc:
         LOG.warning("signal_format_fallback", extra={"exc": str(exc)})
@@ -388,6 +172,7 @@ def format_tracked_signal_text(tracked: SignalTrackingEvent | object) -> str:
 
 
 def format_tracking_event_text(event: SignalTrackingEvent) -> str:
+    """Subscriber-facing tracking follow-up for the signal channel."""
     return format_tracking_event_message(event)
 
 
@@ -570,11 +355,13 @@ class SignalDelivery:
                     )
                 )
                 continue
+            delivery_tier = str((tier_by_tracking_id or {}).get(signal.tracking_id) or "action")
             try:
                 text = format_signal_text(
                     signal,
                     pending_expiry_minutes=self.pending_expiry_minutes,
                     btc_bias=btc_bias,
+                    tier=delivery_tier,
                 )
             except DEFENSIVE_EXC as exc:
                 LOG.exception(
@@ -592,13 +379,29 @@ class SignalDelivery:
                 )
                 continue
 
+            validation = validate_telegram_html(text)
+            if not validation.ok:
+                LOG.warning(
+                    (
+                        "telegram html validation failed, using safe fallback | "
+                        "symbol=%s setup=%s issues=%s"
+                    ),
+                    signal.symbol,
+                    signal.setup_id,
+                    [issue.code for issue in validation.issues if issue.severity == "error"],
+                )
+                text = format_safe_signal_fallback(
+                    signal,
+                    pending_expiry_minutes=self.pending_expiry_minutes,
+                    tier=delivery_tier,
+                )
+
             if dry_run:
                 LOG.info("dry-run signal\n%s", text)
                 delivered.append(
                     DeliveredSignal(signal=signal, status="sent", message_id=None, reason="dry_run")
                 )
                 continue
-            delivery_tier = str((tier_by_tracking_id or {}).get(signal.tracking_id) or "action")
             try:
                 result = await self.broadcaster.send_html(text)
             except DEFENSIVE_EXC as exc:
@@ -700,8 +503,6 @@ class SignalDelivery:
                 edited = True
             if not self._should_send_tracking_follow_up(final_event):
                 continue
-            if final_event.event_type == "activated" and edited:
-                continue
             text = format_tracking_event_text(final_event)
             if dry_run:
                 LOG.info("dry-run tracking update\n%s", text)
@@ -731,12 +532,22 @@ class SignalDelivery:
             grouped.setdefault(event.tracked.tracking_id, []).append(event)
         return list(grouped.values())
 
+    _CHANNEL_LIFECYCLE_EVENTS = frozenset(
+        {
+            "activated",
+            "tp1_hit",
+            "tp2_hit",
+            "stop_loss",
+            "expired",
+        }
+    )
+    # Channel policy: always edit the original card first; lifecycle replies are supplemental.
+    _EDIT_CARD_BEFORE_REPLY_EVENTS = _CHANNEL_LIFECYCLE_EVENTS
+
     def _should_send_tracking_follow_up(self, event: SignalTrackingEvent) -> bool:
-        if event.event_type == "activated":
-            return False
         if event.event_type == "superseded":
             return False
-        if event.event_type == "expired" and not getattr(event.tracked, "activated_at", None):
+        if event.event_type not in self._CHANNEL_LIFECYCLE_EVENTS:
             return False
         occurred_at = event.occurred_at.astimezone(UTC)
         max_age = timedelta(minutes=self.tracking_reply_freshness_minutes)

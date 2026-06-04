@@ -7,7 +7,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.runtime.errors import DEFENSIVE_EXC
 from bot.domain.strategy_catalog import PR10_WAVES, verify_strategy_wiring, wave_status
 from bot.runtime.bot import SignalBot  # noqa: F401
 from bot.strategies import STRATEGY_CLASSES

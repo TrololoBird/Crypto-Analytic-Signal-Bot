@@ -5,7 +5,6 @@ import math
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
-from ..domain.strategies import StrategyDecision
 from ..features import _swing_points
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.utils import get_dynamic_params
@@ -203,11 +202,14 @@ def detect_session_killzone(
     now_utc = _latest_bar_time_utc(prepared)
     session_name = _active_killzone_name(now_utc.hour, cast("dict[str, object]", effective_params))
     if session_name is None:
-        return StrategyDecision.skip(
-            setup_id=setup_id,
-            reason_code="schedule.outside_killzone",
-            details={"hour": now_utc.hour},
+        _reject(
+            prepared,
+            setup_id,
+            "schedule_inactive",
+            stage="context",
+            hour=now_utc.hour,
         )
+        return None
 
     atr = _as_float(w.item(-1, "atr14"))
     if atr <= 0 or math.isnan(atr):

@@ -35,6 +35,17 @@ class SMCZone:
     metadata: dict[str, float | int | str | None] = field(default_factory=dict)
 
 
+@dataclass(slots=True)
+class SwingSeries:
+    """Consistent pivot masks/levels for SMC consumers."""
+
+    high_mask: pl.Series
+    low_mask: pl.Series
+    high_levels: pl.Series
+    low_levels: pl.Series
+    swings: pl.DataFrame
+
+
 def _normalize_ohlcv(frame: pl.DataFrame, *, require_volume: bool = False) -> pl.DataFrame:
     rename_map = {column: column.lower() for column in frame.columns if column.lower() != column}
     normalized = frame.rename(rename_map) if rename_map else frame
@@ -145,6 +156,124 @@ def fvg(
             "Bottom": bottom,
             "MitigatedIndex": mitigated_index,
         }
+    )
+
+
+def fvg_candidates(
+    frame: pl.DataFrame,
+    *,
+    join_consecutive: bool = False,
+    max_age: int | None = None,
+) -> list[tuple[int, str, float, float]]:
+    """Return FVG zones as (created_index, direction, bottom, top), newest first."""
+    zones = fvg(frame, join_consecutive=join_consecutive)
+    height = zones.height
+    candidates: list[tuple[int, str, float, float]] = []
+    for idx in range(height - 1, -1, -1):
+        raw_direction = zones.item(idx, "FVG")
+        if _is_missing(raw_direction):
+            continue
+        age = height - 1 - idx
+        if max_age is not None and age > max_age:
+            continue
+        top = float(zones.item(idx, "Top"))
+        bottom = float(zones.item(idx, "Bottom"))
+        low = min(top, bottom)
+        high = max(top, bottom)
+        direction = "long" if float(raw_direction) > 0 else "short"
+        candidates.append((idx, direction, low, high))
+    return candidates
+
+
+def is_clean_fvg(
+    frame: pl.DataFrame,
+    *,
+    created_index: int,
+    direction: str,
+) -> bool:
+    """True when the 3-candle gap has no c1/c3 wick overlap in the imbalance."""
+    ohlc = _normalize_ohlcv(frame)
+    idx = int(created_index)
+    if idx < 1 or idx >= ohlc.height - 1:
+        return False
+    open_ = _series_to_float_array(ohlc["open"])
+    high = _series_to_float_array(ohlc["high"])
+    low = _series_to_float_array(ohlc["low"])
+    close = _series_to_float_array(ohlc["close"])
+    if direction == "long":
+        if not (high[idx - 1] < low[idx + 1] and close[idx] > open_[idx]):
+            return False
+        bridged = low[idx] <= high[idx - 1] and high[idx] >= low[idx + 1]
+        return not bridged
+    if direction == "short":
+        if not (low[idx - 1] > high[idx + 1] and close[idx] < open_[idx]):
+            return False
+        bridged = high[idx] >= low[idx - 1] and low[idx] <= high[idx + 1]
+        return not bridged
+    return False
+
+
+def fvg_ce_entry(
+    *,
+    bottom: float,
+    top: float,
+    direction: str,
+    price: float | None = None,
+) -> float:
+    """Consequent encroachment (50%) entry with optional live-price clamp."""
+    gap_low = min(float(bottom), float(top))
+    gap_high = max(float(bottom), float(top))
+    ce = (gap_low + gap_high) / 2.0
+    if price is None or price <= 0.0:
+        return ce
+    if direction == "long":
+        return ce if ce <= price else gap_low
+    return ce if ce >= price else gap_high
+
+
+def sweep_tolerance(
+    *,
+    level: float,
+    atr: float,
+    sweep_atr_mult: float = 0.2,
+    tolerance_pct: float | None = None,
+) -> float:
+    """Unified pierce tolerance in price units (max of ATR and optional % of level)."""
+    level_value = max(float(level), 0.0)
+    atr_value = max(float(atr), 0.0)
+    by_atr = atr_value * max(float(sweep_atr_mult), 0.0)
+    by_pct = level_value * max(float(tolerance_pct), 0.0) if tolerance_pct is not None else 0.0
+    return max(by_atr, by_pct)
+
+
+def swing_series(
+    frame: pl.DataFrame,
+    *,
+    swing_length: int = 5,
+    mode: SMCMode = "live_safe",
+    include_unconfirmed_tail: bool = False,
+) -> SwingSeries:
+    """Export swing pivots as masks, price levels, and legacy HighLow frame."""
+    ohlc = _normalize_ohlcv(frame)
+    n = max(1, int(swing_length))
+    high_mask, low_mask = _swing_points(
+        ohlc,
+        n=n,
+        include_unconfirmed_tail=include_unconfirmed_tail,
+    )
+    highs = ohlc["high"]
+    lows = ohlc["low"]
+    return SwingSeries(
+        high_mask=high_mask,
+        low_mask=low_mask,
+        high_levels=pl.when(high_mask).then(highs).otherwise(None),
+        low_levels=pl.when(low_mask).then(lows).otherwise(None),
+        swings=swing_highs_lows(
+            frame,
+            swing_length=n,
+            mode=mode,
+            include_unconfirmed_tail=include_unconfirmed_tail,
+        ),
     )
 
 
@@ -951,9 +1080,13 @@ def latest_breaker_block(
 __all__ = [
     "SMCMode",
     "SMCZone",
+    "SwingSeries",
     "ZoneState",
     "bos_choch",
     "fvg",
+    "fvg_candidates",
+    "fvg_ce_entry",
+    "is_clean_fvg",
     "latest_breaker_block",
     "latest_fvg_zone",
     "latest_liquidity_sweep",
@@ -961,5 +1094,7 @@ __all__ = [
     "latest_structure_break",
     "liquidity_pools",
     "order_blocks",
+    "sweep_tolerance",
     "swing_highs_lows",
+    "swing_series",
 ]

@@ -146,13 +146,17 @@ class PreparedSymbol:
     pax_bias: str | None = None
     altcoin_season_index: float | None = None
     btc_phase: str | None = None
+    global_market_regime: str | None = None
     macro_risk_mode: str | None = None
     benchmark_context: dict[str, Any] = field(default_factory=dict)
+    market_ctx: dict[str, Any] = field(default_factory=dict)
+    market_context_age_seconds: float | None = None
     mark_price_age_seconds: float | None = None
     ticker_price_age_seconds: float | None = None
     book_ticker_age_seconds: float | None = None
     context_snapshot_age_seconds: float | None = None
     data_freshness_flags: tuple[str, ...] = ()
+    data_quality_flags: list[str] = field(default_factory=list)
     data_source_mix: str = "futures_only"
     degraded: bool = False
     degrade_reason: str | None = None
@@ -260,6 +264,7 @@ class Signal:
     funding_rate: float | None = None
     strategy_family: str = "continuation"
     confirmation_profile: str = "trend_follow"
+    entry_order_type: str = "limit"
     target_integrity_status: str | None = None
     single_target_mode: bool = False
     passed_filters: tuple[str, ...] = ()
@@ -279,6 +284,7 @@ class Signal:
     microstructure_warnings: tuple[str, ...] = ()
     btc_bias: str | None = None
     eth_bias: str | None = None
+    confirmation_count: int | None = None
     sol_bias: str | None = None
     xau_bias: str | None = None
     xag_bias: str | None = None
@@ -445,6 +451,8 @@ class Signal:
             "timeframe": self.timeframe,
             "strategy_family": self.strategy_family,
             "confirmation_profile": self.confirmation_profile,
+            "confirmation_count": self.confirmation_count,
+            "entry_order_type": self.entry_order_type,
             "target_integrity_status": self.target_integrity_status,
             "single_target_mode": self.single_target_mode,
             "entry_plan_status": self.entry_plan_status,
@@ -480,10 +488,14 @@ class Signal:
             "entry_mid_raw": round(self.entry_mid_raw, 8),
             "entry_reference_price": round(self.entry_reference_price, 8),
             "stop": round(self.stop, 8),
+            "stop_price": round(self.stop, 8),
             "stop_loss": round(self.stop_loss, 8),
             "take_profit_1": round(self.take_profit_1, 8),
             "take_profit_2": round(self.take_profit_2, 8),
             "take_profit_3": round(self.tp3, 8),
+            "tp1_price": round(self.take_profit_1, 8),
+            "tp2_price": round(self.take_profit_2, 8),
+            "tp3_price": round(self.tp3, 8),
             "tp1": round(self.tp1, 8),
             "tp2": round(self.tp2, 8),
             "tp3": round(self.tp3, 8),
@@ -518,6 +530,7 @@ class Signal:
             "pax_bias": self.pax_bias,
             "strategy_family": self.strategy_family,
             "confirmation_profile": self.confirmation_profile,
+            "entry_order_type": self.entry_order_type,
             "target_integrity_status": self.target_integrity_status,
             "single_target_mode": self.single_target_mode,
             "passed_filters": list(self.passed_filters),

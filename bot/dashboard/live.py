@@ -14,9 +14,21 @@ from collections import Counter, defaultdict, deque
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
-from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.runtime.errors import DEFENSIVE_EXC
+from bot.domain.labels import (
+    CONFLUENCE_LEG_KEYS,
+    CONFIRMATION_PROFILE_KEYS,
+    confluence_leg_label_ru,
+    confluence_profile_recommendation_ru,
+    confirmation_profile_label_ru,
+    normalize_reject_reason,
+    reject_reason_ru,
+)
+from bot.domain.limit_entry import normalize_confirmation_profile
+from bot.runtime.delivery_orchestrator import DELIVERY_SUCCESS_STATUSES
+from bot.telemetry import slim_message_buffer_fields
 
 from ..delivery.formatting import message_preview, sample_message_from_row
 
@@ -83,8 +95,132 @@ def _counter_rows(counter: Counter[str], *, limit: int = 20) -> list[JsonDict]:
     ]
 
 
+def _rejected_row_confirmations(row: Mapping[str, Any]) -> dict[str, bool] | None:
+    confirmations = row.get("confirmations")
+    if not isinstance(confirmations, dict):
+        details = row.get("details")
+        if isinstance(details, dict):
+            nested = details.get("confirmations")
+            confirmations = nested if isinstance(nested, dict) else None
+    if not isinstance(confirmations, dict):
+        return None
+    return {str(key): bool(value) for key, value in confirmations.items()}
+
+
+def _rejected_row_confirmation_profile(row: Mapping[str, Any]) -> str:
+    profile = row.get("confirmation_profile")
+    if not profile:
+        details = row.get("details")
+        if isinstance(details, dict):
+            profile = details.get("confirmation_profile")
+    return normalize_confirmation_profile(str(profile) if profile else None)
+
+
+def _labeled_counter_rows(counter: Counter[str], *, limit: int = 20) -> list[JsonDict]:
+    return [
+        {
+            "key": str(key),
+            "count": int(count),
+            "label_ru": reject_reason_ru(str(key)),
+        }
+        for key, count in counter.most_common(max(1, int(limit)))
+    ]
+
+
 def _percent(value: float, digits: int = 2) -> float:
     return round(float(value) * 100.0, digits)
+
+
+def _delivery_row_status(row: Mapping[str, Any]) -> str:
+    return str(row.get("delivery_status") or row.get("status") or "unknown").strip().lower()
+
+
+def _delivery_success_rows(rows: Iterable[Mapping[str, Any]]) -> list[JsonDict]:
+    return [dict(row) for row in rows if _delivery_row_status(row) in DELIVERY_SUCCESS_STATUSES]
+
+
+def _cycle_delivered_count(row: Mapping[str, Any]) -> int:
+    success = row.get("delivery_success_count")
+    if success is not None:
+        return _safe_int(success)
+    return _safe_int(row.get("delivered_count") or row.get("delivered_signals"))
+
+
+def _is_routing_excluded_decision_reason(reason: str) -> bool:
+    """True when a strategy_decision row reflects routing/asset_fit, not detector evaluation."""
+    code = str(reason or "").strip().lower()
+    if code == "runtime.strategy_lane_excluded":
+        return True
+    return code.startswith("asset_fit.")
+
+
+def _compute_cycle_totals(cycles: list[JsonDict]) -> JsonDict:
+    return {
+        "cycles": len(cycles),
+        "detector_runs": sum(_safe_int(row.get("detector_runs")) for row in cycles),
+        "candidates": sum(_safe_int(row.get("candidate_count")) for row in cycles),
+        "selected": sum(
+            _safe_int(row.get("selected_count") or row.get("selected_signals")) for row in cycles
+        ),
+        "delivered": sum(_cycle_delivered_count(row) for row in cycles),
+    }
+
+
+def _compute_session_delta(cycles: list[JsonDict]) -> JsonDict:
+    latest = cycles[0] if cycles else {}
+    return {
+        "candidates": _safe_int(latest.get("candidate_count")),
+        "selected": _safe_int(latest.get("selected_count") or latest.get("selected_signals")),
+        "delivered": _cycle_delivered_count(latest),
+    }
+
+
+def _build_funnel_widget(cycle_totals: Mapping[str, Any], session_delta: Mapping[str, Any]) -> JsonDict:
+    stages = []
+    for key, label_ru in (
+        ("candidates", "кандидаты"),
+        ("selected", "отобрано"),
+        ("delivered", "отправлено"),
+    ):
+        count = _safe_int(cycle_totals.get(key))
+        delta = _safe_int(session_delta.get(key))
+        stages.append(
+            {
+                "key": key,
+                "label_ru": label_ru,
+                "count": count,
+                "session_delta": delta,
+            }
+        )
+    return {"stages": stages}
+
+
+def _unified_top_blocker(
+    *,
+    rejected_counter: Counter[str],
+    decision_counter: Counter[str],
+) -> JsonDict | None:
+    merged: Counter[str] = Counter()
+    merged.update(rejected_counter)
+    merged.update(decision_counter)
+    if not merged:
+        return None
+    key, total = merged.most_common(1)[0]
+    rejected_count = int(rejected_counter.get(key, 0))
+    decision_count = int(decision_counter.get(key, 0))
+    sources: list[str] = []
+    if rejected_count:
+        sources.append("rejected")
+    if decision_count:
+        sources.append("strategy_decisions")
+    return {
+        "key": key,
+        "count": int(total),
+        "label_ru": reject_reason_ru(key),
+        "rejected_count": rejected_count,
+        "decision_count": decision_count,
+        "sources": sources,
+    }
 
 
 class DashboardLiveData:
@@ -117,6 +253,14 @@ class DashboardLiveData:
         """Return cycle, rejection, decision, and delivery funnel summary."""
         return self._cached("funnel", (max_rows,), lambda: self._funnel_uncached(max_rows=max_rows))
 
+    def funnel_reconcile(self, *, max_rows: int = 100_000) -> JsonDict:
+        """Compare cycle delivery_success totals vs delivery.jsonl success rows."""
+        return self._cached(
+            "funnel_reconcile",
+            (max_rows,),
+            lambda: self._funnel_reconcile_uncached(max_rows=max_rows),
+        )
+
     def shortlist(self, *, limit: int = 80) -> JsonDict:
         """Return shortlist composition and last telemetry rows."""
         return self._cached("shortlist", (limit,), lambda: self._shortlist_uncached(limit=limit))
@@ -127,6 +271,22 @@ class DashboardLiveData:
             "rejections",
             (limit, max_rows),
             lambda: self._rejections_uncached(limit=limit, max_rows=max_rows),
+        )
+
+    def confluence_legs(self, *, max_rows: int = 100_000) -> JsonDict:
+        """Return hard confluence leg failure counts from rejected telemetry."""
+        return self._cached(
+            "confluence_legs",
+            (max_rows,),
+            lambda: self._confluence_legs_uncached(max_rows=max_rows),
+        )
+
+    def confluence_legs_by_profile(self, *, max_rows: int = 100_000) -> JsonDict:
+        """Return confluence leg failures grouped by confirmation_profile."""
+        return self._cached(
+            "confluence_legs_by_profile",
+            (max_rows,),
+            lambda: self._confluence_legs_by_profile_uncached(max_rows=max_rows),
         )
 
     def decisions(self, *, limit: int = 40, max_rows: int = 100_000) -> JsonDict:
@@ -308,7 +468,7 @@ class DashboardLiveData:
                 "last_cycle": latest_cycle,
                 "last_cycle_detector_runs": _safe_int(latest_cycle.get("detector_runs")),
                 "last_cycle_candidates": _safe_int(latest_cycle.get("candidate_count")),
-                "last_cycle_delivered": _safe_int(latest_cycle.get("delivered_count")),
+                "last_cycle_delivered": _cycle_delivered_count(latest_cycle),
                 "last_cycle_shortlist": _safe_int(latest_cycle.get("shortlist_size")),
             }
         )
@@ -316,35 +476,120 @@ class DashboardLiveData:
         rejections = self._rejections_uncached(limit=10, max_rows=30_000)
         status["decision_signal_rate"] = decisions.get("signal_rate", 0.0)
         status["decision_rows"] = decisions.get("total_rows", 0)
+        cycles = list(self._iter_recent("cycles", max_rows=500, limit_files=1))
+        cycle_totals = _compute_cycle_totals(cycles)
+        session_delta = _compute_session_delta(cycles)
+        cycle_totals["session_delta"] = session_delta
+        status["funnel_widget"] = _build_funnel_widget(cycle_totals, session_delta)
+        status["cycle_totals"] = cycle_totals
+        delivery = self._delivery_uncached(limit=10)
+        status["session_delivered"] = _safe_int(
+            delivery.get("delivery_success_count", delivery.get("delivery_count"))
+        )
+        rejected_counter: Counter[str] = Counter()
+        for row in rejections.get("reasons", []):
+            if isinstance(row, dict) and row.get("key"):
+                rejected_counter[str(row["key"])] += _safe_int(row.get("count"))
+        decision_counter: Counter[str] = Counter()
+        for row in self._iter_recent("strategy_decisions", max_rows=30_000, limit_files=2):
+            if str(row.get("status") or "").strip().lower() == "signal":
+                continue
+            reason_code = str(row.get("reason_code") or row.get("reason") or "unknown")
+            decision_counter[normalize_reject_reason(reason_code)] += 1
+        top_blocker = _unified_top_blocker(
+            rejected_counter=rejected_counter,
+            decision_counter=decision_counter,
+        )
+        status["top_blocker"] = top_blocker
         status["top_rejection"] = (
-            rejections.get("reasons", [{}])[0] if rejections.get("reasons") else {}
+            top_blocker
+            or (rejections.get("reasons", [{}])[0] if rejections.get("reasons") else {})
         )
         runtime_rows = list(self._iter_recent("health_runtime", max_rows=5, limit_files=1))
         status["runtime_health"] = runtime_rows[0] if runtime_rows else {}
+        status.update(self._market_state_fields())
         return status
+
+    def _market_state_fields(self) -> JsonDict:
+        bot = self._bot()
+        regime = getattr(getattr(bot, "market_regime", None), "_last_result", None)
+        if regime is None:
+            return {
+                "market_state": {"available": False},
+                "btc_bias": "neutral",
+                "eth_bias": "neutral",
+                "market_regime": "unknown",
+                "market_strength": 0.0,
+                "btc_phase": "unknown",
+                "volatility_regime": "unknown",
+                "risk_on_off": "neutral",
+            }
+        payload = cast("dict[str, Any]", regime.to_dict())
+        payload["available"] = True
+        updater = getattr(bot, "_market_context_updater", None)
+        display = getattr(updater, "_last_display_snapshot", None) if updater else None
+        if isinstance(display, dict) and display:
+            payload["display"] = display
+        return {
+            "market_state": payload,
+            "btc_bias": payload.get("btc_bias", "neutral"),
+            "eth_bias": payload.get("eth_bias", "neutral"),
+            "market_regime": payload.get("regime", "unknown"),
+            "market_strength": payload.get("strength", 0.0),
+            "btc_phase": payload.get("btc_phase", "unknown"),
+            "volatility_regime": payload.get("volatility_regime", "unknown"),
+            "risk_on_off": payload.get("risk_on_off", "neutral"),
+            "funding_sentiment": payload.get("funding_sentiment", "neutral"),
+            "oi_momentum": payload.get("oi_momentum", "stable"),
+            "altcoin_season_index": payload.get("altcoin_season_index"),
+        }
 
     def _funnel_uncached(self, *, max_rows: int) -> JsonDict:
         cycles = list(self._iter_recent("cycles", max_rows=500, limit_files=1))
-        cycle_totals = {
-            "cycles": len(cycles),
-            "detector_runs": sum(_safe_int(row.get("detector_runs")) for row in cycles),
-            "candidates": sum(_safe_int(row.get("candidate_count")) for row in cycles),
-            "selected": sum(
-                _safe_int(row.get("selected_count") or row.get("selected_signals"))
-                for row in cycles
-            ),
-            "delivered": sum(_safe_int(row.get("delivered_count")) for row in cycles),
-        }
+        cycle_totals = _compute_cycle_totals(cycles)
+        session_delta = _compute_session_delta(cycles)
+        cycle_totals["session_delta"] = session_delta
+        funnel_widget = _build_funnel_widget(cycle_totals, session_delta)
         decisions = self._decisions_uncached(limit=50, max_rows=max_rows)
         rejects = self._rejections_uncached(limit=25, max_rows=max_rows)
         delivery = self._delivery_uncached(limit=10)
+        rejected_counter: Counter[str] = Counter()
+        for row in rejects.get("reasons", []):
+            if isinstance(row, dict) and row.get("key"):
+                rejected_counter[str(row["key"])] += _safe_int(row.get("count"))
+        decision_reject_counter: Counter[str] = Counter()
+        for row in self._iter_recent("strategy_decisions", max_rows=max_rows, limit_files=2):
+            if str(row.get("status") or "").strip().lower() == "signal":
+                continue
+            reason_code = str(row.get("reason_code") or row.get("reason") or "unknown")
+            decision_reject_counter[normalize_reject_reason(reason_code)] += 1
+        decision_rejects = _labeled_counter_rows(decision_reject_counter, limit=10)
+        top_blocker = _unified_top_blocker(
+            rejected_counter=rejected_counter,
+            decision_counter=decision_reject_counter,
+        )
+        combined_hint: JsonDict | None = None
+        if top_blocker:
+            combined_hint = {
+                "source": "+".join(top_blocker.get("sources") or ["merged"]),
+                "key": top_blocker.get("key"),
+                "count": top_blocker.get("count"),
+                "label_ru": top_blocker.get("label_ru"),
+            }
         return {
             "run_id": self._preferred_run_id(),
             "generated_at": _utc_now().isoformat(),
             "cycle_totals": cycle_totals,
+            "funnel_widget": funnel_widget,
+            "top_blocker": top_blocker,
             "latest_cycles": cycles[:12],
             "decisions": decisions,
             "rejections": rejects,
+            "decision_rejects": {
+                "total_rows": sum(decision_reject_counter.values()),
+                "reasons": decision_rejects,
+            },
+            "combined_reject_hint": combined_hint,
             "delivery": delivery,
             "efficiency": {
                 "raw_signal_rate": decisions.get("signal_rate", 0.0),
@@ -429,6 +674,9 @@ class DashboardLiveData:
             "dynamic": sum(1 for item in items if not item["pinned"]),
             "zero_fit": sum(1 for count in fit_counts if count == 0),
             "avg_fit": round(sum(fit_counts) / max(len(fit_counts), 1), 2),
+            "gate_passed": latest.get("gate_passed"),
+            "light_pool": latest.get("light_pool"),
+            "light_pool_limit": latest.get("light_pool_limit"),
             "latest_telemetry": latest,
             "telemetry_tail": telemetry_rows[:10],
             "priority_assets": priority_rows,
@@ -463,12 +711,16 @@ class DashboardLiveData:
                     continue
                 activity[symbol][key] = int(activity[symbol].get(key, 0) or 0) + 1
                 if stem == "rejected":
-                    reason = str(row.get("reason") or "unknown")
+                    reason = normalize_reject_reason(str(row.get("reason") or "unknown"))
                     rejection_reasons[symbol][reason] += 1
         for symbol, counter in rejection_reasons.items():
             if counter:
                 reason, count = counter.most_common(1)[0]
-                activity[symbol]["top_rejection"] = {"reason": reason, "count": count}
+                activity[symbol]["top_rejection"] = {
+                    "reason": reason,
+                    "count": count,
+                    "label_ru": reject_reason_ru(reason),
+                }
         return activity
 
     def _rejections_uncached(self, *, limit: int, max_rows: int) -> JsonDict:
@@ -480,18 +732,21 @@ class DashboardLiveData:
         total = 0
         for row in self._iter_recent("rejected", max_rows=max_rows, limit_files=2):
             total += 1
-            reason = str(row.get("reason") or "unknown")
+            raw_reason = str(row.get("reason") or "unknown")
+            reason = normalize_reject_reason(raw_reason)
             reasons[reason] += 1
             stages[str(row.get("stage") or "unknown")] += 1
             setups[str(row.get("setup_id") or "unknown")] += 1
             symbols[str(row.get("symbol") or "unknown")] += 1
-            examples.setdefault(reason, row)
+            if reason not in examples:
+                examples[reason] = {**row, "raw_reason": raw_reason}
         return {
             "run_id": self._preferred_run_id(),
             "total_rows": total,
             "reasons": [
                 {
                     **item,
+                    "label_ru": reject_reason_ru(str(item["key"])),
                     "example": examples.get(str(item["key"]), {}),
                     "pct": round(int(item["count"]) / max(total, 1) * 100.0, 2),
                 }
@@ -502,6 +757,94 @@ class DashboardLiveData:
             "symbols": _counter_rows(symbols, limit=limit),
         }
 
+    def _confluence_legs_uncached(self, *, max_rows: int) -> JsonDict:
+        leg_failures: Counter[str] = Counter()
+        gate_rejects = 0
+        for row in self._iter_recent("rejected", max_rows=max_rows, limit_files=2):
+            confirmations = _rejected_row_confirmations(row)
+            if confirmations is None:
+                continue
+            gate_rejects += 1
+            for leg in CONFLUENCE_LEG_KEYS:
+                if leg in confirmations and not confirmations[leg]:
+                    leg_failures[leg] += 1
+        legs = [
+            {
+                "key": leg,
+                "count": int(leg_failures.get(leg, 0)),
+                "label_ru": confluence_leg_label_ru(leg),
+            }
+            for leg in CONFLUENCE_LEG_KEYS
+        ]
+        return {
+            "run_id": self._preferred_run_id(),
+            "generated_at": _utc_now().isoformat(),
+            "gate_rejects": gate_rejects,
+            "leg_failures": legs,
+            "total_leg_failures": sum(leg_failures.values()),
+        }
+
+    def _confluence_legs_by_profile_uncached(self, *, max_rows: int) -> JsonDict:
+        profile_gate_rejects: Counter[str] = Counter()
+        profile_leg_failures: dict[str, Counter[str]] = defaultdict(Counter)
+        for row in self._iter_recent("rejected", max_rows=max_rows, limit_files=2):
+            confirmations = _rejected_row_confirmations(row)
+            if confirmations is None:
+                continue
+            profile = _rejected_row_confirmation_profile(row)
+            profile_gate_rejects[profile] += 1
+            for leg in CONFLUENCE_LEG_KEYS:
+                if leg in confirmations and not confirmations[leg]:
+                    profile_leg_failures[profile][leg] += 1
+
+        active_profiles = sorted(
+            profile_gate_rejects.keys(),
+            key=lambda key: (-profile_gate_rejects[key], key),
+        )
+        profile_rows = []
+        for profile in active_profiles:
+            leg_failures = profile_leg_failures[profile]
+            top_leg = ""
+            top_leg_count = 0
+            if leg_failures:
+                top_leg, top_leg_count = leg_failures.most_common(1)[0]
+            profile_rows.append(
+                {
+                    "key": profile,
+                    "label_ru": confirmation_profile_label_ru(profile),
+                    "gate_rejects": int(profile_gate_rejects[profile]),
+                    "leg_failures": [
+                        {
+                            "key": leg,
+                            "count": int(leg_failures.get(leg, 0)),
+                            "label_ru": confluence_leg_label_ru(leg),
+                        }
+                        for leg in CONFLUENCE_LEG_KEYS
+                    ],
+                    "total_leg_failures": sum(leg_failures.values()),
+                    "top_failing_leg": top_leg or None,
+                    "recommendation": confluence_profile_recommendation_ru(
+                        profile,
+                        top_leg=top_leg,
+                        leg_count=top_leg_count,
+                    ),
+                }
+            )
+
+        return {
+            "run_id": self._preferred_run_id(),
+            "generated_at": _utc_now().isoformat(),
+            "gate_rejects": sum(profile_gate_rejects.values()),
+            "profiles": profile_rows,
+            "known_profiles": [
+                {
+                    "key": profile,
+                    "label_ru": confirmation_profile_label_ru(profile),
+                }
+                for profile in CONFIRMATION_PROFILE_KEYS
+            ],
+        }
+
     def _decisions_uncached(self, *, limit: int, max_rows: int) -> JsonDict:
         status: Counter[str] = Counter()
         reasons: Counter[str] = Counter()
@@ -509,6 +852,7 @@ class DashboardLiveData:
         setup_status: dict[str, Counter[str]] = defaultdict(Counter)
         setup_reasons: dict[str, Counter[str]] = defaultdict(Counter)
         total = 0
+        routed_total = 0
         for row in self._iter_recent("strategy_decisions", max_rows=max_rows, limit_files=2):
             total += 1
             setup = str(row.get("setup_id") or row.get("strategy_id") or "unknown")
@@ -519,6 +863,8 @@ class DashboardLiveData:
             reasons[reason] += 1
             families[family] += 1
             setup_status[setup][state] += 1
+            if not _is_routing_excluded_decision_reason(reason):
+                routed_total += 1
             if state != "signal":
                 setup_reasons[setup][reason] += 1
         setup_rows = []
@@ -549,6 +895,8 @@ class DashboardLiveData:
                 row for row in setup_rows if row["total"] > 0 and row["signals"] == 0
             ],
             "signal_rate": round(signals_total / max(total, 1), 6),
+            "routed_signal_rate": round(signals_total / max(routed_total, 1), 6),
+            "routed_total_rows": routed_total,
         }
 
     def _runtime_uncached(self) -> JsonDict:
@@ -568,23 +916,83 @@ class DashboardLiveData:
                 ws_snapshot = {}
         diagnostics = getattr(bot, "_signal_diagnostics", None)
         diag_summary = diagnostics.get_summary() if diagnostics is not None else {}
+        runtime_cfg = getattr(getattr(bot, "settings", None), "runtime", None)
+        shortlist_total = len(getattr(bot, "_shortlist", ()) or ())
+        from bot.runtime_policy import effective_shortlist_unified_routing
+
+        effective_unified = effective_shortlist_unified_routing(
+            runtime_cfg,
+            shortlist_total=shortlist_total,
+        )
+        quality_monitor = getattr(bot, "quality_monitor", None)
+        quality_payload = (
+            quality_monitor.telemetry_snapshot()
+            if quality_monitor is not None and hasattr(quality_monitor, "telemetry_snapshot")
+            else {}
+        )
+        telemetry_mismatch = self._telemetry_mismatch_uncached()
+        buffer_fields = slim_message_buffer_fields(
+            ws_snapshot if isinstance(ws_snapshot, dict) else {}
+        )
         return {
             "run_id": self._preferred_run_id(),
+            "shortlist_unified_routing": bool(
+                getattr(runtime_cfg, "shortlist_unified_routing", False)
+            ),
+            "effective_shortlist_unified_routing": effective_unified,
+            "shortlist_total": shortlist_total,
+            "enable_strategy_lanes": bool(getattr(runtime_cfg, "enable_strategy_lanes", True)),
+            "quality_monitor": quality_payload.get("quality_monitor", {}),
             "latest_health": health[0] if health else {},
             "latest_runtime": health_runtime[0] if health_runtime else {},
             "latest_data_quality": data_quality[0] if data_quality else {},
             "latest_fallback": fallback[0] if fallback else {},
             "latest_public_intelligence": public_intel[0] if public_intel else {},
             "ws_snapshot": ws_snapshot,
+            **buffer_fields,
             "signal_diagnostics": diag_summary,
+            "telemetry_mismatch": telemetry_mismatch,
             "health_tail": health[:8],
             "data_quality_tail": data_quality[:8],
+        }
+
+    def _funnel_reconcile_uncached(self, *, max_rows: int) -> JsonDict:
+        cycles = list(self._iter_recent("cycles", max_rows=max_rows, limit_files=3))
+        delivery = list(self._iter_recent("delivery", max_rows=max_rows, limit_files=3))
+        cycles_delivered = sum(_cycle_delivered_count(row) for row in cycles)
+        delivery_success = len(_delivery_success_rows(delivery))
+        delta = cycles_delivered - delivery_success
+        return {
+            "run_id": self._preferred_run_id(),
+            "cycles_rows": len(cycles),
+            "delivery_rows": len(delivery),
+            "cycles_delivery_success_total": cycles_delivered,
+            "delivery_jsonl_success_total": delivery_success,
+            "delta": delta,
+            "match": delta == 0,
+        }
+
+    def _telemetry_mismatch_uncached(self, *, max_rows: int = 10_000) -> JsonDict:
+        refs = self._jsonl_refs("telemetry_mismatch", limit_files=2)
+        counts: Counter[str] = Counter()
+        total = 0
+        for row in self._iter_recent("telemetry_mismatch", max_rows=max_rows, limit_files=2):
+            total += 1
+            counts[str(row.get("mismatch_type") or "unknown")] += 1
+        return {
+            "available": bool(refs) or total > 0,
+            "total_rows": total,
+            "counts": [
+                {"key": key, "count": int(count)}
+                for key, count in counts.most_common(20)
+            ],
         }
 
     def _delivery_uncached(self, *, limit: int) -> JsonDict:
         selected = list(self._iter_recent("selected", max_rows=max(50, limit * 4), limit_files=2))
         delivery = list(self._iter_recent("delivery", max_rows=max(50, limit * 4), limit_files=2))
-        rows = [{**row, "source": "delivery"} for row in delivery[:limit]]
+        delivery_success = _delivery_success_rows(delivery)
+        rows = [{**row, "source": "delivery"} for row in delivery_success[:limit]]
         if not rows:
             rows = [
                 {**row, "source": "selected", "delivery_status": "selected"}
@@ -594,6 +1002,7 @@ class DashboardLiveData:
             "run_id": self._preferred_run_id(),
             "selected_count": len(selected),
             "delivery_count": len(delivery),
+            "delivery_success_count": len(delivery_success),
             "delivery_status_counts": dict(
                 Counter(
                     str(row.get("delivery_status") or row.get("status") or "unknown")
@@ -672,6 +1081,7 @@ class DashboardLiveData:
             "strategy_decisions",
             "selected",
             "delivery",
+            "telemetry_mismatch",
             "health",
             "health_runtime",
             "data_quality",
@@ -729,9 +1139,7 @@ def funnel_stage_counts_from_cycle(
         ),
         "confluence": selected,
         "tier": selected,
-        "delivered": _safe_int(
-            cycle_row.get("delivered_count", cycle_row.get("delivered_signals")),
-        ),
+        "delivered": _cycle_delivered_count(cycle_row),
     }
 
 

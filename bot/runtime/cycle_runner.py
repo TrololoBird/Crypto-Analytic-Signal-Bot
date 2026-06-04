@@ -5,14 +5,23 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import Counter
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.runtime.errors import DEFENSIVE_EXC
+from bot.runtime.data_readiness import missing_derivatives_context
+from bot.runtime.delivery_orchestrator import DELIVERY_SUCCESS_STATUSES
 
-from ..domain.schemas import PipelineResult, PreparedSymbol, Signal, UniverseSymbol
+from ..domain.schemas import PipelineResult, PreparedSymbol, Signal, SymbolFrames, UniverseSymbol
 
 LOG = logging.getLogger("bot.runtime.cycle_runner")
+
+
+@dataclass(slots=True)
+class CycleContext:
+    frames: SymbolFrames
+    ws_enrichments: dict[str, Any]
 
 
 class CycleRunner:
@@ -20,6 +29,68 @@ class CycleRunner:
 
     def __init__(self, bot: Any) -> None:
         self._bot = bot
+
+    @staticmethod
+    def _intra_candle_detector_limits(bot: Any) -> tuple[int | None, frozenset[str] | None]:
+        ws = bot.settings.ws
+        subset = frozenset(ws.intra_candle_setup_subset) if ws.intra_candle_setup_subset else None
+        max_setups = ws.intra_candle_max_setups if ws.intra_candle_max_setups > 0 else None
+        return max_setups, subset
+
+    async def _prepare_cycle_context(
+        self,
+        *,
+        item: UniverseSymbol,
+        symbol: str,
+        ws_enrichments_override: dict[str, Any] | None = None,
+        include_spot_enrichments: bool = True,
+        require_derivatives: bool = True,
+    ) -> CycleContext | None:
+        bot = self._bot
+        frames = await bot._fetch_frames(item)
+        if frames is None:
+            return None
+
+        ws_enrichments = dict(bot._ws_cache_enrichments(symbol))
+        if ws_enrichments_override:
+            ws_enrichments.update(ws_enrichments_override)
+        if include_spot_enrichments:
+            ws_enrichments.update(bot._spot_enrichments(symbol))
+
+        if require_derivatives and missing_derivatives_context(ws_enrichments):
+            try:
+                warmed = await bot._get_oi_refresh_runner().refresh_symbol_if_missing(
+                    symbol,
+                    max_age_seconds=900.0,
+                    include_funding_history=True,
+                    timeout_seconds=bot.settings.runtime.emergency_context_fetch_timeout_seconds,
+                )
+                if warmed:
+                    ws_enrichments.update(bot._ws_cache_enrichments(symbol))
+            except DEFENSIVE_EXC as exc:
+                LOG.info(
+                    "symbol derivatives context warmup skipped | symbol=%s error=%s",
+                    symbol,
+                    exc,
+                )
+
+        if require_derivatives and missing_derivatives_context(ws_enrichments):
+            still_missing = missing_derivatives_context(ws_enrichments)
+            bot.telemetry.append_jsonl(
+                "rejected.jsonl",
+                {
+                    "ts": datetime.now(UTC).isoformat(),
+                    "symbol": symbol,
+                    "setup_id": "data",
+                    "direction": "none",
+                    "stage": "data",
+                    "reason": "derivatives_context_missing",
+                    "missing_fields": still_missing,
+                },
+            )
+            return None
+
+        return CycleContext(frames=frames, ws_enrichments=ws_enrichments)
 
     async def execute_symbol_cycle(
         self,
@@ -63,6 +134,45 @@ class CycleRunner:
                 timeout,
                 trigger,
             )
+            reject_row = {
+                "ts": datetime.now(UTC).isoformat(),
+                "symbol": symbol,
+                "setup_id": "runtime",
+                "direction": "none",
+                "stage": "runtime",
+                "reason": "runtime.cycle_timeout",
+                "reason_code": "runtime.cycle_timeout",
+                "timeout_seconds": timeout,
+                "trigger": trigger,
+                "event_interval": interval,
+            }
+            bot.telemetry.append_jsonl("rejected.jsonl", reject_row)
+            timeout_result = PipelineResult(
+                symbol=symbol,
+                trigger=trigger,
+                event_ts=event_ts,
+                raw_setups=0,
+                candidates=[],
+                rejected=[reject_row],
+                error=f"cycle_timeout after {timeout:.1f}s",
+                status="cycle_timeout",
+                funnel={
+                    "cycle_timeout": True,
+                    "timeout_seconds": timeout,
+                    "kline_interval": interval,
+                },
+            )
+            bot._emit_cycle_log(
+                symbol=symbol,
+                interval=interval,
+                event_ts=event_ts,
+                shortlist_size=shortlist_size,
+                tracking_events=tracking_events,
+                result=timeout_result,
+                candidates=[],
+                rejected=[reject_row],
+                delivered=[],
+            )
 
     async def _execute_symbol_cycle_unbounded(
         self,
@@ -77,50 +187,37 @@ class CycleRunner:
         ws_enrichments_override: dict[str, Any] | None = None,
     ) -> None:
         bot = self._bot
-        async with bot._analysis_semaphore:
-            frames = await bot._fetch_frames(item)
-            if frames is None:
-                return
+        max_setups: int | None = None
+        setup_subset: frozenset[str] | None = None
+        if trigger == "intra_candle":
+            max_setups, setup_subset = self._intra_candle_detector_limits(bot)
 
-            ws_enrichments = dict(bot._ws_cache_enrichments(symbol))
-            if ws_enrichments_override:
-                ws_enrichments.update(ws_enrichments_override)
-            required_derivatives_context = (
-                "oi_change_pct",
-                "ls_ratio",
-                "top_position_ls_ratio",
-                "global_ls_ratio",
-                "taker_ratio",
-                "funding_rate",
-                "funding_trend",
+        async with bot._analysis_semaphore:
+            context = await self._prepare_cycle_context(
+                item=item,
+                symbol=symbol,
+                ws_enrichments_override=ws_enrichments_override,
+                include_spot_enrichments=True,
+                require_derivatives=True,
             )
-            if any(key not in ws_enrichments for key in required_derivatives_context):
-                try:
-                    warmed = await bot._get_oi_refresh_runner().refresh_symbol_if_missing(
-                        symbol,
-                        max_age_seconds=900.0,
-                        include_funding_history=True,
-                        timeout_seconds=bot.settings.runtime.emergency_context_fetch_timeout_seconds,
-                    )
-                    if warmed:
-                        ws_enrichments.update(bot._ws_cache_enrichments(symbol))
-                except DEFENSIVE_EXC as exc:
-                    LOG.info(
-                        "symbol derivatives context warmup skipped | symbol=%s error=%s",
-                        symbol,
-                        exc,
-                    )
+            if context is None:
+                return
 
             result = await bot._run_modern_analysis(
                 item,
-                frames,
+                context.frames,
                 trigger=trigger,
                 event_ts=event_ts,
-                ws_enrichments=ws_enrichments,
+                ws_enrichments=context.ws_enrichments,
                 kline_interval=interval,
+                max_setups=max_setups,
+                setup_subset=setup_subset,
             )
 
-        candidates, rejected, delivered = await bot._select_and_deliver_for_symbol(symbol, result)
+            candidates, rejected, delivered = await bot._select_and_deliver_for_symbol(
+                symbol,
+                result,
+            )
 
         for row in rejected:
             bot.telemetry.append_jsonl("rejected.jsonl", row)
@@ -183,15 +280,19 @@ class CycleRunner:
 
         async def _analyze_one(item: UniverseSymbol) -> PipelineResult | None:
             async with bot._analysis_semaphore:
-                frames = await bot._fetch_frames(item)
-                if frames is None:
+                context = await self._prepare_cycle_context(
+                    item=item,
+                    symbol=item.symbol,
+                    include_spot_enrichments=False,
+                    require_derivatives=False,
+                )
+                if context is None:
                     return None
-                ws_enrichments = bot._ws_cache_enrichments(item.symbol)
                 result = await bot._run_modern_analysis(
                     item,
-                    frames,
+                    context.frames,
                     trigger="emergency_fallback",
-                    ws_enrichments=ws_enrichments,
+                    ws_enrichments=context.ws_enrichments,
                     kline_interval="emergency_fallback",
                 )
                 return cast("PipelineResult | None", result)
@@ -235,6 +336,7 @@ class CycleRunner:
             delivered,
             cooldown_rejected,
             delivery_status_counts,
+            merge_conflict_count,
         ) = await bot._select_and_deliver(
             selected,
             prepared_by_tracking_id=prepared_by_tracking_id,
@@ -253,11 +355,30 @@ class CycleRunner:
             delivered_by_symbol.setdefault(signal.symbol, []).append(signal)
 
         delivery_status_counts_by_symbol: dict[str, Counter[str]] = {}
+        for row in cooldown_rejected:
+            symbol = str(row.get("symbol") or "unknown")
+            stage = str(row.get("stage") or "")
+            reason = str(row.get("reason") or "")
+            if stage == "delivery" and reason.startswith("delivery_"):
+                counter = delivery_status_counts_by_symbol.setdefault(symbol, Counter())
+                counter[reason.removeprefix("delivery_")] += 1
+        success_pool = Counter(
+            {
+                status: int(delivery_status_counts.get(status, 0) or 0)
+                for status in DELIVERY_SUCCESS_STATUSES
+            }
+        )
         for signal in delivered:
             counter = delivery_status_counts_by_symbol.setdefault(signal.symbol, Counter())
-            counter["sent"] += 1
+            status = next(
+                (item for item in ("sent", "logged") if success_pool.get(item, 0) > 0),
+                "sent",
+            )
+            if success_pool.get(status, 0) > 0:
+                success_pool[status] -= 1
+            counter[status] += 1
         for res in pipeline_results:
-            if res.funnel:
+            if isinstance(res.funnel, dict):
                 res.funnel["selected"] = len(selected_by_symbol.get(res.symbol, []))
                 res.funnel["delivered"] = len(delivered_by_symbol.get(res.symbol, []))
                 res.funnel["delivery_status_counts"] = dict(

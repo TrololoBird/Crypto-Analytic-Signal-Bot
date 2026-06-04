@@ -6,7 +6,7 @@ import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.runtime.errors import DEFENSIVE_EXC
 
 if TYPE_CHECKING:
     from ..domain.events import BookTickerEvent
@@ -105,6 +105,16 @@ class IntraCandleScanner:
                         "ask_price": event.ask,
                         "spread_bps": spread_bps,
                     }
+                max_setups, setup_subset = self._bot._get_cycle_runner()._intra_candle_detector_limits(
+                    self._bot
+                )
+                if max_setups is not None or setup_subset is not None:
+                    LOG.debug(
+                        "intra_candle fast lane | symbol=%s max_setups=%s subset_size=%s",
+                        symbol,
+                        max_setups,
+                        len(setup_subset) if setup_subset else 0,
+                    )
                 await self._bot._get_cycle_runner().execute_symbol_cycle(
                     symbol=symbol,
                     item=item,

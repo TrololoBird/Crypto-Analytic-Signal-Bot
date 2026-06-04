@@ -8,13 +8,19 @@ import math
 from datetime import UTC, datetime
 from typing import Any
 
-from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.runtime.errors import DEFENSIVE_EXC
 
 from ..domain.config import _ALL_SETUP_IDS
 from ..domain.events import ShortlistUpdatedEvent
 from ..domain.schemas import UniverseSymbol
 from ..market.data import BinanceFuturesMarketData
-from ..market.universe import build_shortlist, rerank_shortlist
+from ..market.outcome_derank import penalties_from_sl_counts
+from ..market.universe import (
+    DEFAULT_PRESCORE_BASIS_WARM_LIMIT,
+    build_shortlist,
+    rerank_shortlist,
+    warm_prescore_basis_rest,
+)
 
 LOG = logging.getLogger("bot.runtime.shortlist_service")
 _LOG_MISSING_VALUE = "not_available"
@@ -26,6 +32,35 @@ FALLBACK_REASON_LIVE_EMPTY = "live_empty"
 FALLBACK_REASON_USING_CACHED = "using_cached"
 FALLBACK_REASON_USING_PINNED = "using_pinned"
 FALLBACK_REASON_UNKNOWN = "unknown"
+
+
+def _market_regime_hint(bot: Any) -> str | None:
+    analyzer = getattr(bot, "market_regime", None)
+    last = getattr(analyzer, "_last_result", None) if analyzer is not None else None
+    if last is None:
+        updater = getattr(bot, "_market_context_updater", None)
+        last_regime = getattr(updater, "_last_regime", None) if updater is not None else None
+        return str(last_regime).strip() if last_regime else None
+    regime = str(getattr(last, "regime", "") or "").strip()
+    return regime or None
+
+
+async def _outcome_derank_penalties(bot: Any) -> dict[str, float]:
+    repo = getattr(bot, "_modern_repo", None)
+    if repo is None or not hasattr(repo, "get_symbol_sl_counts"):
+        return {}
+    try:
+        sl_counts = await repo.get_symbol_sl_counts(last_days=7)
+        sl_ages: dict[str, list[float]] = {}
+        if hasattr(repo, "get_symbol_sl_event_ages"):
+            sl_ages = await repo.get_symbol_sl_event_ages(last_days=7)
+    except DEFENSIVE_EXC:
+        LOG.debug("outcome_derank skipped: repository unavailable")
+        return {}
+    return penalties_from_sl_counts(
+        sl_counts,
+        sl_event_ages_days=sl_ages or None,
+    )
 
 
 def normalize_shortlist_fallback_reason(value: object) -> str | None:
@@ -174,12 +209,52 @@ class ShortlistService:
                         exc,
                     )
                 try:
-                    liquidation = ws.get_liquidation_sentiment(symbol)
+                    liquidation = ws.get_liquidation_sentiment(symbol, window_seconds=900)
                     if liquidation is not None:
                         row["liquidation_score"] = float(liquidation)
+                    rollups = ws.get_liquidation_rollups(symbol, window_seconds=900)
+                    if rollups is not None:
+                        if rollups.get("liquidation_long_notional") is not None:
+                            row["liquidation_long_notional"] = float(
+                                rollups["liquidation_long_notional"]
+                            )
+                        if rollups.get("liquidation_short_notional") is not None:
+                            row["liquidation_short_notional"] = float(
+                                rollups["liquidation_short_notional"]
+                            )
                 except DEFENSIVE_EXC as exc:
                     LOG.debug(
                         "shortlist liquidation sentiment unavailable | symbol=%s error=%s",
+                        symbol,
+                        exc,
+                    )
+                try:
+                    agg_snapshot = ws.get_agg_trade_snapshot(symbol, window_seconds=30)
+                    if agg_snapshot is not None and agg_snapshot.delta_ratio is not None:
+                        row["agg_trade_delta_30s"] = float(agg_snapshot.delta_ratio)
+                except DEFENSIVE_EXC as exc:
+                    LOG.debug(
+                        "shortlist agg trade delta unavailable | symbol=%s error=%s",
+                        symbol,
+                        exc,
+                    )
+                try:
+                    depth_imbalance = ws.get_depth_imbalance(symbol)
+                    if depth_imbalance is not None:
+                        row["depth_imbalance"] = float(depth_imbalance)
+                except DEFENSIVE_EXC as exc:
+                    LOG.debug(
+                        "shortlist depth imbalance unavailable | symbol=%s error=%s",
+                        symbol,
+                        exc,
+                    )
+                try:
+                    microprice_bias = ws.get_microprice_bias(symbol)
+                    if microprice_bias is not None:
+                        row["microprice_bias"] = float(microprice_bias)
+                except DEFENSIVE_EXC as exc:
+                    LOG.debug(
+                        "shortlist microprice bias unavailable | symbol=%s error=%s",
                         symbol,
                         exc,
                     )
@@ -222,6 +297,11 @@ class ShortlistService:
                 if cached_oi is not None:
                     _ts, oi_value = cached_oi
                     row["oi_current"] = float(oi_value)
+                stale_flags_fn = getattr(client, "get_rest_enrichment_stale_flags", None)
+                if callable(stale_flags_fn):
+                    stale_fields = stale_flags_fn(symbol)
+                    if stale_fields:
+                        row["enrichment_stale_fields"] = list(stale_fields)
             enriched.append(row)
         return enriched
 
@@ -244,6 +324,67 @@ class ShortlistService:
                     row["basis_pct"] = premium.get("basis_pct")
             merged.append(row)
         return merged
+
+    def _basis_warm_kwargs(self) -> dict[str, Any]:
+        bot = self._bot
+        ws = getattr(bot, "_ws_manager", None)
+        client = bot.client
+
+        def get_mark_basis(symbol: str) -> float | None:
+            if ws is None:
+                return None
+            try:
+                mark = ws.get_mark_price_snapshot(symbol)
+            except DEFENSIVE_EXC:
+                return None
+            if not mark:
+                return None
+            try:
+                mark_price = float(mark.get("mark_price") or 0.0)
+                index_price = float(mark.get("index_price") or 0.0)
+            except (TypeError, ValueError):
+                return None
+            if mark_price <= 0.0 or index_price <= 0.0:
+                return None
+            return ((mark_price - index_price) / index_price) * 100.0
+
+        def get_cached_basis(symbol: str) -> float | None:
+            if not isinstance(client, BinanceFuturesMarketData):
+                return None
+            return client.get_cached_basis(symbol, period="1h")
+
+        return {
+            "get_cached_basis": get_cached_basis,
+            "get_mark_basis": get_mark_basis,
+        }
+
+    async def _warm_prescore_basis_for_rows(self, rows: list[dict[str, Any]]) -> dict[str, int]:
+        bot = self._bot
+        client = bot.client
+        if not isinstance(client, BinanceFuturesMarketData):
+            return {
+                "basis_warm_attempted": 0,
+                "basis_warm_ok": 0,
+                "basis_warm_failed": 0,
+            }
+        warm_limit = int(
+            getattr(
+                bot.settings.universe,
+                "prescore_basis_warm_limit",
+                DEFAULT_PRESCORE_BASIS_WARM_LIMIT,
+            )
+            or DEFAULT_PRESCORE_BASIS_WARM_LIMIT
+        )
+
+        async def _fetch(symbol: str) -> float | None:
+            return await client.fetch_basis(symbol, period="1h", limit=5)
+
+        return await warm_prescore_basis_rest(
+            rows,
+            _fetch,
+            settings=bot.settings,
+            limit=warm_limit,
+        )
 
     async def fetch_symbols_with_retry(self, *, max_retries: int = 1) -> list[Any]:
         for attempt in range(max_retries + 1):
@@ -367,6 +508,22 @@ class ShortlistService:
         else:
             symbol_meta_list = list(symbol_meta_result)
         if isinstance(tickers_result, Exception):
+            from bot.market.data import MarketDataUnavailable
+            from bot.market.proxy_bootstrap import retry_network_after_failure
+
+            if isinstance(tickers_result, MarketDataUnavailable):
+                try:
+                    refreshed = await retry_network_after_failure(bot.settings)
+                    if (
+                        refreshed.network.effective_proxy_urls()
+                        != bot.settings.network.effective_proxy_urls()
+                    ):
+                        bot.settings = refreshed
+                        LOG.warning(
+                            "proxy pool refreshed after REST failure — restart bot to apply new egress"
+                        )
+                except DEFENSIVE_EXC:
+                    LOG.debug("network rediscovery after ticker failure skipped", exc_info=True)
             raise tickers_result
         tickers_24h = list(tickers_result)
         if isinstance(premium_result, Exception):
@@ -390,18 +547,26 @@ class ShortlistService:
             for t in tickers_24h
             if t.get("symbol")
         }
+        outcome_penalties = await _outcome_derank_penalties(bot)
+        enriched_tickers = self._enrich_shortlist_rows(
+            self._merge_premium_index_rows(list(tickers_24h), premium_by_symbol)
+        )
+        await self._warm_prescore_basis_for_rows(enriched_tickers)
         shortlist, summary = build_shortlist(
             symbol_meta_list,
-            self._enrich_shortlist_rows(
-                self._merge_premium_index_rows(list(tickers_24h), premium_by_symbol)
-            ),
+            enriched_tickers,
             bot.settings,
             seed_source="rest_full",
+            market_regime=_market_regime_hint(bot),
+            outcome_penalties=outcome_penalties,
+            **self._basis_warm_kwargs(),
         )
         LOG.info(
-            "universe filter result | raw_tickers=%d eligible=%d passed_volume=%d "
-            "passed_change=%d min_volume=%.0f min_change=%.2f",
+            "universe filter result | raw_tickers=%d gate_passed=%d light_pool=%d eligible=%d "
+            "passed_volume=%d passed_change=%d min_volume=%.0f min_change=%.2f",
             len(tickers_24h),
+            summary.get("gate_passed", summary.get("eligible", 0)),
+            summary.get("light_pool", summary.get("eligible", 0)),
             summary.get("eligible", 0),
             sum(
                 1
@@ -465,11 +630,16 @@ class ShortlistService:
             }
 
         tickers = self._enrich_shortlist_rows(raw_tickers)
+        await self._warm_prescore_basis_for_rows(tickers)
+        outcome_penalties = await _outcome_derank_penalties(bot)
         shortlist, summary = build_shortlist(
             list(bot._symbol_meta_by_symbol.values()),
             tickers,
             bot.settings,
             seed_source="ws_light",
+            market_regime=_market_regime_hint(bot),
+            outcome_penalties=outcome_penalties,
+            **self._basis_warm_kwargs(),
         )
         if (
             cached_shortlist
@@ -494,11 +664,89 @@ class ShortlistService:
             }
         return shortlist, summary
 
+    @staticmethod
+    def _union_shortlist_rows(
+        primary: list[UniverseSymbol],
+        secondary: list[UniverseSymbol],
+    ) -> list[UniverseSymbol]:
+        """Merge shortlist snapshots, keeping the higher-scored row per symbol."""
+        merged: dict[str, UniverseSymbol] = {}
+        for row in (*secondary, *primary):
+            existing = merged.get(row.symbol)
+            if existing is None or (row.shortlist_score or 0.0) >= (
+                existing.shortlist_score or 0.0
+            ):
+                merged[row.symbol] = row
+        return sorted(
+            merged.values(),
+            key=lambda item: (-(item.shortlist_score or 0.0), item.symbol),
+        )
+
+    async def build_medium_shortlist(
+        self,
+    ) -> tuple[list[UniverseSymbol], dict[str, Any]]:
+        """REST ticker refresh using cached symbol meta (Phase 4 medium refresh)."""
+        bot = self._bot
+        if not bot._symbol_meta_by_symbol:
+            return [], {
+                "mode": "rest_medium_skipped",
+                "eligible": 0,
+                "dynamic_pool": 0,
+                "pinned": 0,
+            }
+        timeout_s = max(10.0, float(bot.settings.ws.rest_timeout_seconds) * 2.0)
+        try:
+            tickers_result = await asyncio.wait_for(
+                bot.client.fetch_ticker_24h(),
+                timeout=timeout_s,
+            )
+        except DEFENSIVE_EXC as exc:
+            LOG.info("medium shortlist ticker refresh failed | error=%s", exc)
+            return [], {
+                "mode": "rest_medium_failed",
+                "eligible": 0,
+                "dynamic_pool": 0,
+                "pinned": 0,
+            }
+        tickers_24h = list(tickers_result)
+        bot._rest_ticker_aux_by_symbol = {
+            str(t.get("symbol", "")).strip().upper(): {
+                "trade_count": int(float(t.get("trade_count") or 0)),
+            }
+            for t in tickers_24h
+            if t.get("symbol")
+        }
+        outcome_penalties = await _outcome_derank_penalties(bot)
+        enriched_tickers = self._enrich_shortlist_rows(list(tickers_24h))
+        await self._warm_prescore_basis_for_rows(enriched_tickers)
+        shortlist, summary = build_shortlist(
+            list(bot._symbol_meta_by_symbol.values()),
+            enriched_tickers,
+            bot.settings,
+            seed_source="rest_medium",
+            market_regime=_market_regime_hint(bot),
+            outcome_penalties=outcome_penalties,
+            **self._basis_warm_kwargs(),
+        )
+        cached_shortlist = list(getattr(bot, "_last_live_shortlist", []) or [])
+        if cached_shortlist:
+            shortlist = self._union_shortlist_rows(shortlist, cached_shortlist)
+            summary = {
+                **summary,
+                "mode": "rest_medium_union",
+                "union_with_cached": len(cached_shortlist),
+            }
+        else:
+            summary = {**summary, "mode": "rest_medium"}
+        return shortlist, summary
+
     async def do_refresh_shortlist(self) -> list[UniverseSymbol]:
         bot = self._bot
         LOG.info("refreshing shortlist...")
         if not hasattr(bot, "_last_shortlist_full_refresh_at"):
             bot._last_shortlist_full_refresh_at = None
+        if not hasattr(bot, "_last_shortlist_medium_refresh_at"):
+            bot._last_shortlist_medium_refresh_at = None
 
         source_before = str(getattr(bot, "_shortlist_source", "") or "")
         source = "pinned_fallback"
@@ -512,8 +760,15 @@ class ShortlistService:
                 bot.settings.runtime.shortlist_refresh_interval_seconds,
             )
         )
+        medium_interval = int(
+            getattr(bot.settings.universe, "medium_refresh_interval_seconds", 900)
+        )
         last_full = getattr(bot, "_last_shortlist_full_refresh_at", None)
+        last_medium = getattr(bot, "_last_shortlist_medium_refresh_at", None)
         full_refresh_due = last_full is None or (now - last_full).total_seconds() >= full_interval
+        medium_refresh_due = (
+            last_medium is None or (now - last_medium).total_seconds() >= medium_interval
+        )
         ws = getattr(bot, "_ws_manager", None)
         try:
             ws_cache_warm = bool(ws is not None and ws.is_ticker_cache_warm())
@@ -535,6 +790,13 @@ class ShortlistService:
                 live_shortlist, live_summary = await self.build_light_shortlist()
                 if live_shortlist:
                     source = "ws_light"
+                elif medium_refresh_due:
+                    medium_shortlist, medium_summary = await self.build_medium_shortlist()
+                    if medium_shortlist:
+                        live_shortlist = medium_shortlist
+                        live_summary = medium_summary
+                        source = str(medium_summary.get("mode") or "rest_medium")
+                        bot._last_shortlist_medium_refresh_at = now
                 elif cached_shortlist:
                     live_shortlist = list(cached_shortlist)
                     live_summary = {"mode": "cached"}
@@ -547,9 +809,11 @@ class ShortlistService:
                     fallback_reason = FALLBACK_REASON_FULL_REFRESH_DUE
                 live_shortlist, live_summary = await self.build_live_shortlist()
                 LOG.info(
-                    "shortlist build result | source=%s eligible=%s dynamic_pool=%s "
-                    "pinned=%s total=%d strategy_fits_total=%d",
+                    "shortlist build result | source=%s gate_passed=%s light_pool=%s eligible=%s "
+                    "dynamic_pool=%s pinned=%s total=%d strategy_fits_total=%d",
                     "rest_full",
+                    live_summary.get("gate_passed"),
+                    live_summary.get("light_pool"),
                     live_summary.get("eligible"),
                     live_summary.get("dynamic_pool"),
                     live_summary.get("pinned"),
@@ -600,6 +864,11 @@ class ShortlistService:
                 )
             except DEFENSIVE_EXC:
                 LOG.exception("ws resubscribe failed after shortlist refresh")
+        if bot._ws_manager is not None:
+            try:
+                await bot._sync_ws_tracked_symbols()
+            except DEFENSIVE_EXC:
+                LOG.debug("tracked-symbol sync after shortlist refresh failed", exc_info=True)
         if source == "pinned_fallback" and fallback_reason is None:
             fallback_reason = FALLBACK_REASON_USING_PINNED
         if (
@@ -629,6 +898,9 @@ class ShortlistService:
                 "cached_shortlist_size": len(cached_shortlist),
                 "size": len(shortlist),
                 "symbols": [item.symbol for item in shortlist[:20]],
+                "gate_passed": summary.get("gate_passed"),
+                "light_pool": summary.get("light_pool"),
+                "light_pool_limit": summary.get("light_pool_limit"),
                 "eligible": summary.get("eligible"),
                 "dynamic_pool": summary.get("dynamic_pool"),
                 "pinned": summary.get("pinned"),
@@ -653,16 +925,42 @@ class ShortlistService:
                 ],
             },
         )
+        bot.telemetry.append_jsonl(
+            "shortlist_build.jsonl",
+            {
+                "ts": datetime.now(UTC).isoformat(),
+                "stage": "refresh_complete",
+                "source": source,
+                "seed_source": summary.get("mode", source),
+                "fallback_reason": normalize_shortlist_fallback_reason(fallback_reason),
+                "gate_passed": summary.get("gate_passed"),
+                "light_pool": summary.get("light_pool"),
+                "light_pool_limit": summary.get("light_pool_limit"),
+                "eligible": summary.get("eligible"),
+                "dynamic_pool": summary.get("dynamic_pool"),
+                "shortlist_size": len(shortlist),
+                "pinned": summary.get("pinned"),
+                "trend": summary.get("trend"),
+                "breakout": summary.get("breakout"),
+                "reversal": summary.get("reversal"),
+                "strategy_seed": summary.get("strategy_seed"),
+                "fill": summary.get("fill"),
+                "avg_score": summary.get("avg_score"),
+                "strategy_fit_density": summary.get("strategy_fit_density"),
+            },
+        )
 
         LOG.info(
             (
-                "shortlist refresh complete | source=%s mode=%s size=%d eligible=%s "
-                "dynamic_pool=%s pinned=%s avg_score=%s p25=%s p50=%s p75=%s p90=%s "
-                "fit_density=%s"
+                "shortlist refresh complete | source=%s mode=%s size=%d gate_passed=%s "
+                "light_pool=%s eligible=%s dynamic_pool=%s pinned=%s avg_score=%s p25=%s "
+                "p50=%s p75=%s p90=%s fit_density=%s"
             ),
             source,
             summary.get("mode", source),
             len(shortlist),
+            _log_value(summary.get("gate_passed")),
+            _log_value(summary.get("light_pool")),
             _log_value(summary.get("eligible")),
             _log_value(summary.get("dynamic_pool")),
             _log_value(summary.get("pinned")),
@@ -731,10 +1029,12 @@ class ShortlistService:
 
         tickers = self._enrich_shortlist_rows(raw_tickers)
         original_top = [s.symbol for s in current_shortlist[:5]]
+        outcome_penalties = await _outcome_derank_penalties(bot)
         reranked = rerank_shortlist(
             current_shortlist,
             tickers,
             bot.settings,
+            outcome_penalties=outcome_penalties,
         )
         new_top = [s.symbol for s in reranked[:5]]
 
@@ -747,6 +1047,7 @@ class ShortlistService:
                     list(bot._shortlist),
                     tickers,
                     bot.settings,
+                    outcome_penalties=outcome_penalties,
                 )
 
         if original_top != new_top:

@@ -25,7 +25,12 @@ def detect_rsi_divergence_bottom(
 ) -> Signal | None:
     params = effective_params
     work = prepared.work_15m
-    hit = detect_regular_divergence(work, timeframe="15m", require_oversold=True)
+    hit = detect_regular_divergence(
+        work,
+        timeframe="15m",
+        setup_id=setup_id,
+        require_oversold=True,
+    )
     if hit is not None:
         return build_spec_signal(
             prepared=prepared,

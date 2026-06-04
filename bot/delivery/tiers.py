@@ -29,9 +29,15 @@ class TierCapDecision:
     drop_reason: str | None = None
 
 
-def rank_key(signal: Signal) -> tuple[float, float]:
+def rank_key(signal: Signal) -> tuple[float, float, float]:
     """Match DeliveryOrchestrator ranking for deterministic cap ordering."""
-    return (float(signal.score or 0.0), float(signal.risk_reward or 0.0))
+    meta = signal.metadata
+    confirmation = float(meta.get("confirmation_count") or 0)
+    return (
+        float(signal.score or 0.0),
+        confirmation,
+        float(signal.risk_reward or 0.0),
+    )
 
 
 def _resolve_caps(settings: BotSettings) -> tuple[int, int]:
@@ -92,10 +98,19 @@ def decide_with_caps(signals: list[Signal], settings: BotSettings) -> list[TierC
 
         allow = True
         drop_reason: str | None = None
+        resolved_tier = tier.tier
+        resolved_reason = tier.reason
         if tier.tier == "action":
             if action_used >= action_cap:
-                allow = False
-                drop_reason = "action_cap_reached"
+                watch_min = float(settings.delivery.watch_min_score)
+                score = float(signal.score or 0.0)
+                if watch_used < watch_cap and score >= watch_min:
+                    resolved_tier = "watch"
+                    resolved_reason = "action_cap_demoted_watch"
+                    watch_used += 1
+                else:
+                    allow = False
+                    drop_reason = "action_cap_reached"
             else:
                 action_used += 1
         else:
@@ -109,9 +124,9 @@ def decide_with_caps(signals: list[Signal], settings: BotSettings) -> list[TierC
                 symbol=signal.symbol,
                 setup_id=signal.setup_id,
                 direction=signal.direction,
-                tier=tier.tier,
+                tier=resolved_tier,
                 allow=allow,
-                reason=tier.reason,
+                reason=resolved_reason,
                 drop_reason=drop_reason,
             )
         )

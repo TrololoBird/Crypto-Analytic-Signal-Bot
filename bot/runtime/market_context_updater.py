@@ -9,8 +9,9 @@ import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
-from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.runtime.errors import DEFENSIVE_EXC
 from bot.market.data import BinanceFuturesMarketData
+from bot.regime.composite_regime import build_minimal_regime_frame_4h
 
 if TYPE_CHECKING:
     from bot.domain.schemas import UniverseSymbol
@@ -27,6 +28,8 @@ class MarketContextUpdater:
         self._last_regime: str | None = None
         self._last_market_state_alert_key: str | None = None
         self._last_market_state_alert_at: float = 0.0
+        self._last_market_state_html: str | None = None
+        self._last_display_snapshot: dict[str, Any] | None = None
 
     async def market_regime_periodic(self) -> None:
         await asyncio.sleep(10)
@@ -217,6 +220,8 @@ class MarketContextUpdater:
                     payload["premium_zscore_5m"] = basis_stats.get("premium_zscore_5m")
                 benchmark_context[sym] = payload
 
+            await self._attach_regime_frame_4h(benchmark_context)
+
             ticker_data: list[dict[str, Any]] = []
             all_tickers = await self._bot.client.fetch_ticker_24h()
             ticker_dict = {t.get("symbol"): t for t in all_tickers if isinstance(t, dict)}
@@ -271,6 +276,22 @@ class MarketContextUpdater:
                 snapshot_mode = str(macro_snapshot.get("risk_mode") or "").strip()
                 if snapshot_mode and not snapshot_mode.startswith("disabled_"):
                     macro_risk_mode = snapshot_mode
+            stats: dict[str, Any] = {}
+            try:
+                stats = await asyncio.wait_for(
+                    self._bot._modern_repo.get_tracking_stats(),
+                    timeout=1.0,
+                )
+            except DEFENSIVE_EXC as exc:
+                LOG.debug("market-state tracking stats unavailable: %s", exc)
+            html_text, display_snapshot = await self._build_market_state_text(
+                regime=regime_result,
+                macro_risk_mode=macro_risk_mode,
+                ticker_rows=all_tickers,
+                stats=stats,
+            )
+            self._last_market_state_html = html_text
+            self._last_display_snapshot = display_snapshot
             await self._bot._modern_repo.update_market_context(
                 btc_bias,
                 eth_bias,
@@ -283,8 +304,18 @@ class MarketContextUpdater:
                     getattr(regime_result, "altcoin_season_index", 50.0) or 50.0
                 ),
                 btc_phase=str(getattr(regime_result, "btc_phase", "sideways") or "sideways"),
-                benchmark_context=benchmark_context,
+                benchmark_context={
+                    **benchmark_context,
+                    "_meta": {
+                        "regime_cache_age_seconds": round(
+                            self._bot.market_regime.cache_age_seconds,
+                            3,
+                        ),
+                    },
+                },
                 intelligence_snapshot=intelligence_snapshot,
+                telegram_html=html_text,
+                display_snapshot=display_snapshot,
             )
             LOG.info(
                 "market regime updated | regime=%s strength=%.2f btc=%s eth=%s",
@@ -304,6 +335,41 @@ class MarketContextUpdater:
 
         except DEFENSIVE_EXC:
             LOG.exception("memory market context update failed")
+
+    def _cached_kline_closes(self, symbol: str, interval: str) -> list[float]:
+        client = self._bot.client
+        cache = getattr(client, "_klines_cache", None)
+        if not isinstance(cache, dict):
+            return []
+        best_height = 0
+        best_closes: list[float] = []
+        for key, cached in cache.items():
+            if not isinstance(key, tuple) or len(key) < 2:
+                continue
+            if key[0] != symbol or key[1] != interval:
+                continue
+            try:
+                _, frame = cached
+                if frame is None or frame.is_empty() or "close" not in frame.columns:
+                    continue
+                if frame.height >= best_height:
+                    best_height = int(frame.height)
+                    best_closes = [
+                        self._safe_float(value)
+                        for value in frame["close"].to_list()
+                        if self._safe_float(value) > 0.0
+                    ]
+            except (TypeError, ValueError, AttributeError):
+                continue
+        return best_closes
+
+    async def _attach_regime_frame_4h(self, benchmark_context: dict[str, dict[str, Any]]) -> None:
+        closes = self._cached_kline_closes("BTCUSDT", "4h")
+        if len(closes) < 3:
+            closes = await self._fetch_close_values("BTCUSDT", "4h", limit=120)
+        frame = build_minimal_regime_frame_4h(closes)
+        if frame is not None and not frame.is_empty():
+            benchmark_context.setdefault("BTCUSDT", {})["regime_frame_4h"] = frame
 
     def _cached_kline_change_pct(self, symbol: str, interval: str) -> float | None:
         client = self._bot.client
@@ -354,7 +420,12 @@ class MarketContextUpdater:
 
     @classmethod
     def _ticker_change_pct(cls, row: dict[str, Any] | None) -> float:
+        """Binance ``price_change_percent`` as a display percent (e.g. -5.8 for -5.8%)."""
         return cls._safe_float((row or {}).get("price_change_percent"), 0.0)
+
+    @classmethod
+    def _ticker_change_fraction(cls, row: dict[str, Any] | None) -> float:
+        return cls._ticker_change_pct(row) / 100.0
 
     @classmethod
     def _ticker_quote_volume(cls, row: dict[str, Any] | None) -> float:
@@ -362,6 +433,7 @@ class MarketContextUpdater:
 
     @staticmethod
     def _fmt_signed_pct_value(value: float, *, digits: int = 1) -> str:
+        """Format a display percent (Binance ticker scale, not a 0–1 fraction)."""
         return f"{value:+.{digits}f}%"
 
     @staticmethod
@@ -406,8 +478,11 @@ class MarketContextUpdater:
         regime: MarketRegimeResult,
         funding_sentiment: str,
     ) -> tuple[int, str]:
+        btc_frac = (
+            btc_24h_pct / 100.0 if abs(btc_24h_pct) > 1.0 else float(btc_24h_pct)
+        )
         score = 50.0
-        score += max(-30.0, min(30.0, btc_24h_pct * 5.0))
+        score += max(-30.0, min(30.0, btc_frac * 500.0))
         score += max(-25.0, min(25.0, (breadth_share - 0.50) * 80.0))
         score += max(-15.0, min(15.0, (float(regime.altcoin_season_index) - 50.0) * 0.35))
         if regime.regime == "bear":
@@ -430,6 +505,28 @@ class MarketContextUpdater:
         else:
             label = "Extreme Greed"
         return value, label
+
+    @classmethod
+    def _intraday_vs_24h_note(
+        cls,
+        *,
+        btc_24h_pct: float,
+        tf_1h: str,
+        tf_15m: str,
+    ) -> str | None:
+        """Clarify short-TF bounce inside a weak 24h down day (common operator confusion)."""
+        if btc_24h_pct > -1.5:
+            return None
+        up_markers = ("восходящий уклон", "импульс вверх")
+        short_term_up = any(marker in tf_15m for marker in up_markers) or any(
+            marker in tf_1h for marker in up_markers
+        )
+        if not short_term_up:
+            return None
+        return (
+            "Краткосрок (1h/15m) отскакивает внутри слабого 24h/4h снижения; "
+            "суточный risk-off не снимается — long только после подтверждения на старших ТФ."
+        )
 
     def _liquid_ticker_rows(
         self, ticker_rows: list[dict[str, Any]], *, limit: int = 80
@@ -643,7 +740,7 @@ class MarketContextUpdater:
         macro_risk_mode: str,
         ticker_rows: list[dict[str, Any]],
         stats: dict[str, Any],
-    ) -> str:
+    ) -> tuple[str, dict[str, Any]]:
         ticker_by_symbol = {self._ticker_symbol(row): row for row in ticker_rows}
         liquid_rows = self._liquid_ticker_rows(ticker_rows)
         positive_count = sum(1 for row in liquid_rows if self._ticker_change_pct(row) > 0.0)
@@ -716,6 +813,11 @@ class MarketContextUpdater:
             else:
                 timeframe_lines.append(result)
         tf_4h, tf_1h, tf_15m = timeframe_lines
+        intraday_note = self._intraday_vs_24h_note(
+            btc_24h_pct=btc_24h_pct,
+            tf_1h=tf_1h,
+            tf_15m=tf_15m,
+        )
         corr_line, corr_narrative = await self._build_correlation_line(
             ticker_by_symbol,
             liquid_rows,
@@ -746,6 +848,11 @@ class MarketContextUpdater:
             html.escape(tf_4h),
             html.escape(tf_1h),
             html.escape(tf_15m),
+            *(
+                [html.escape(intraday_note)]
+                if intraday_note
+                else []
+            ),
             (
                 "Крипто-драйверы: "
                 f"BTC <code>{self._fmt_signed_pct_value(btc_24h_pct)}</code> | "
@@ -773,7 +880,82 @@ class MarketContextUpdater:
             ),
             html.escape(tracked_line),
         ]
-        return "\n".join(lines)
+        display_snapshot = {
+            "risk_label": risk_label,
+            "fear_greed_value": fear_value,
+            "fear_greed_label": fear_label,
+            "practical": practical,
+            "breadth_positive": positive_count,
+            "breadth_total": liquid_count,
+            "breadth_pct": round(breadth_share * 100.0, 1),
+            "regime": regime.regime,
+            "tf_4h": tf_4h,
+            "tf_1h": tf_1h,
+            "tf_15m": tf_15m,
+            "intraday_note": intraday_note,
+            "btc_24h_pct": btc_24h_pct,
+            "eth_24h_pct": eth_24h_pct,
+            "sol_24h_pct": sol_24h_pct,
+            "volume_btc_pct": btc_volume_share,
+            "volume_eth_pct": eth_volume_share,
+            "volume_sol_pct": sol_volume_share,
+            "volume_alts_pct": alt_volume_share,
+            "volume_stables_pct": stable_volume_share,
+            "macro_line": macro_line,
+            "corr_line": corr_line,
+            "corr_narrative": corr_narrative,
+            "leaders": self._format_leaders(liquid_rows, reverse=True),
+            "laggards": self._format_leaders(liquid_rows, reverse=False),
+            "tracking_active": int(stats.get("active", 0) or 0),
+            "tracking_pending": int(stats.get("pending", 0) or 0),
+            "updated_at": datetime.now(UTC).isoformat(),
+        }
+        return "\n".join(lines), display_snapshot
+
+    async def build_market_state_html(self, *, force: bool = False) -> str:
+        """Rebuild rich market HTML for operator console (uses live tickers when possible)."""
+        if not force and self._last_market_state_html:
+            return self._last_market_state_html
+        async with self._bot._shortlist_lock:
+            shortlist = list(self._bot._shortlist)
+        if not shortlist or not isinstance(self._bot.client, BinanceFuturesMarketData):
+            return self._last_market_state_html or ""
+        try:
+            all_tickers = await self._bot.client.fetch_ticker_24h()
+            regime = self._bot.market_regime._last_result
+            if regime is None:
+                return self._last_market_state_html or ""
+            macro_risk_mode = self._macro_proxy_mode(regime)
+            intelligence_snapshot = (
+                self._bot.intelligence.latest_snapshot
+                if self._bot.intelligence is not None
+                else None
+            )
+            if intelligence_snapshot:
+                macro_snapshot = cast("dict[str, Any]", intelligence_snapshot.get("macro") or {})
+                snapshot_mode = str(macro_snapshot.get("risk_mode") or "").strip()
+                if snapshot_mode and not snapshot_mode.startswith("disabled_"):
+                    macro_risk_mode = snapshot_mode
+            stats: dict[str, Any] = {}
+            try:
+                stats = await asyncio.wait_for(
+                    self._bot._modern_repo.get_tracking_stats(),
+                    timeout=1.0,
+                )
+            except DEFENSIVE_EXC:
+                pass
+            html_text, display_snapshot = await self._build_market_state_text(
+                regime=regime,
+                macro_risk_mode=macro_risk_mode,
+                ticker_rows=all_tickers,
+                stats=stats,
+            )
+            self._last_market_state_html = html_text
+            self._last_display_snapshot = display_snapshot
+            return html_text
+        except DEFENSIVE_EXC:
+            LOG.debug("operator market html rebuild failed", exc_info=True)
+            return self._last_market_state_html or ""
 
     async def _maybe_send_market_state_update(
         self,
@@ -785,11 +967,9 @@ class MarketContextUpdater:
         ticker_rows: list[dict[str, Any]],
         shortlist: list[UniverseSymbol],
     ) -> None:
-        notifiers = getattr(self._bot.settings, "notifiers", None)
-        if str(getattr(notifiers, "provider", "telegram")) != "telegram":
-            return
-        sender = getattr(self._bot.telegram, "send_html", None)
-        if not callable(sender):
+        from bot.delivery.telegram_routing import operator_dm_enabled, send_operator_html
+
+        if not operator_dm_enabled(self._bot, "send_market_context"):
             return
 
         btc = benchmark_context.get("BTCUSDT", {})
@@ -841,18 +1021,19 @@ class MarketContextUpdater:
         except DEFENSIVE_EXC as exc:
             LOG.debug("market-state tracking stats unavailable: %s", exc)
 
-        text = await self._build_market_state_text(
+        text, _display = await self._build_market_state_text(
             regime=regime,
             macro_risk_mode=macro_risk_mode,
             ticker_rows=ticker_rows,
             stats=stats,
         )
         try:
-            await sender(text)
-            self._last_market_state_alert_key = key
-            self._last_market_state_alert_at = now
+            sent = await send_operator_html(self._bot, text)
+            if sent:
+                self._last_market_state_alert_key = key
+                self._last_market_state_alert_at = now
         except DEFENSIVE_EXC as exc:
-            LOG.debug("market-state telegram update failed: %s", exc)
+            LOG.debug("market-state operator DM failed: %s", exc)
 
     def compute_price_bias(self, symbol: str) -> str:
         if self._bot._ws_manager is None:
@@ -864,6 +1045,34 @@ class MarketContextUpdater:
             if pct < -threshold:
                 return "downtrend"
             return "neutral"
+
+        ticker = self._bot._ws_manager.get_ticker_snapshot(symbol)
+        if ticker:
+            try:
+                pct_24h = float(ticker.get("price_change_percent") or 0.0) / 100.0
+                bias_24h = bias_from_change(pct_24h, 0.015)
+                if bias_24h != "neutral":
+                    return bias_24h
+            except (TypeError, ValueError) as exc:
+                LOG.debug("ticker price_change_percent invalid for %s: %s", symbol, exc)
+
+        for interval, lookback, threshold in (
+            ("4h", 6, 0.012),
+            ("1h", 12, 0.008),
+            ("15m", 16, 0.006),
+        ):
+            klines = self._bot._ws_manager.get_kline_cache(symbol, interval)
+            if not klines or len(klines) < lookback + 1:
+                continue
+            try:
+                c_old = float(klines[-(lookback + 1)]["close"])
+                c_new = float(klines[-1]["close"])
+                if c_old > 0 and c_new > 0:
+                    bias = bias_from_change((c_new - c_old) / c_old, threshold)
+                    if bias != "neutral":
+                        return bias
+            except (KeyError, TypeError, ValueError):
+                continue
 
         for interval, threshold in (
             ("4h", 0.008),
@@ -883,11 +1092,4 @@ class MarketContextUpdater:
                         return bias
             except (KeyError, TypeError, ValueError):
                 continue
-        ticker = self._bot._ws_manager.get_ticker_snapshot(symbol)
-        if ticker:
-            try:
-                pct_24h = float(ticker.get("price_change_percent") or 0.0) / 100.0
-                return bias_from_change(pct_24h, 0.02)
-            except (TypeError, ValueError) as exc:
-                LOG.debug("ticker price_change_percent invalid for %s: %s", symbol, exc)
         return "neutral"

@@ -6,7 +6,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
-from bot.core.runtime_errors import (
+from bot.runtime.errors import (
     DEFENSIVE_EXC,
     build_runtime_error_payload,
     classify_runtime_error,
@@ -24,6 +24,7 @@ from bot.features.prepare import prepare_symbol
 from bot.features.prepare_frame import min_required_bars
 from bot.market.data import BinanceFuturesMarketData, MarketDataUnavailable
 from bot.runtime.analyzer._base import AnalyzerMixinBase
+from bot.runtime.analyzer.family_gates import AnalyzerFamilyGatesMixin
 from bot.runtime.analyzer.common import (
     _DEGRADATION_ERRORS,
     LOG,
@@ -31,7 +32,7 @@ from bot.runtime.analyzer.common import (
     _attach_rejection_rollups,
     _history_fetch_limit,
 )
-from bot.runtime_policy import is_deep_analysis_symbol
+from bot.runtime.data_readiness import assess_symbol_data_readiness
 
 if TYPE_CHECKING:
     from bot.runtime.bot import SignalBot
@@ -341,202 +342,7 @@ class AnalyzerContextMixin(AnalyzerMixinBase):
             "exhaustion_count": sum(1 for value in exhaustion_hits.values() if value),
         }
 
-    def check_family_precheck(
-        self,
-        signal: Signal,
-        prepared: PreparedSymbol,
-        metadata: Any | None,
-    ) -> tuple[bool, str | None, dict[str, Any]]:
-        details = self.directional_context(signal, prepared)
-        family = getattr(metadata, "family", signal.strategy_family)
-        profile = getattr(metadata, "confirmation_profile", signal.confirmation_profile)
-        details["family"] = family
-        details["confirmation_profile"] = profile
-        adx_1h = self._frame_float(prepared.work_1h, "adx14")
-        adx_15m = self._frame_float(prepared.work_15m, "adx14")
-        regime_adx = adx_1h if adx_1h is not None else adx_15m
-        details["adx_1h"] = adx_1h
-        details["adx_15m"] = adx_15m
-        trend_regime_setups = {
-            "bos_choch",
-            "structure_pullback",
-            "ema_bounce",
-            "supertrend_follow",
-            "keltner_breakout",
-            "multi_tf_trend",
-            "hidden_divergence",
-        }
-        range_regime_setups = {
-            "absorption",
-            "bb_squeeze",
-            "liquidity_sweep",
-            "squeeze_setup",
-            "stop_hunt_detection",
-            "turtle_soup",
-            "volume_climax_reversal",
-            "wick_trap_reversal",
-            "wyckoff_spring",
-        }
-        if regime_adx is not None:
-            if signal.setup_id in trend_regime_setups and regime_adx < 20.0:
-                details["regime_filter"] = "trend_required_adx_lt_20"
-                details["soft_penalty_applied"] = True
-                details["penalty_factor"] = 0.90
-                details["penalty_reason"] = "context.low_adx_trend_setup_penalty"
-                return True, None, details
-            if signal.setup_id in range_regime_setups and regime_adx > 40.0:
-                details["soft_penalty_applied"] = True
-                details["penalty_factor"] = 0.88
-                details["penalty_reason"] = "context.range_setup_in_strong_trend"
-                return True, None, details
-        strong_opposition = details["regime_opposes"] and details["flow_opposes"]
-        if (
-            family in {"continuation", "breakout"}
-            and strong_opposition
-            and details["exhaustion_count"] == 0
-        ):
-            details["soft_penalty_applied"] = True
-            details["penalty_factor"] = 0.80
-            details["penalty_reason"] = f"family_precheck_opposes_{signal.direction}"
-            return True, None, details
-        if profile == "trend_follow" and details["flow_opposes"] and not details["trend_confirms"]:
-            return False, f"flow_precheck_opposes_{signal.direction}", details
-        return True, None, details
-
-    def apply_alignment_penalty(
-        self,
-        signal: Signal,
-        prepared: PreparedSymbol,
-        metadata: Any | None,
-    ) -> tuple[Signal, dict[str, Any]]:
-        family = getattr(metadata, "family", signal.strategy_family)
-        profile = getattr(metadata, "confirmation_profile", signal.confirmation_profile)
-        if signal.direction == "long":
-            opposing_votes = int(prepared.regime_1h_confirmed == "downtrend") + int(
-                prepared.bias_1h == "downtrend"
-            )
-        else:
-            opposing_votes = int(prepared.regime_1h_confirmed == "uptrend") + int(
-                prepared.bias_1h == "uptrend"
-            )
-        details = {
-            "regime_1h": prepared.regime_1h_confirmed,
-            "bias_1h": prepared.bias_1h,
-            "opposing_votes": opposing_votes,
-            "applied": False,
-            "family": family,
-            "confirmation_profile": profile,
-        }
-        if opposing_votes == 0 or family == "reversal" or profile == "countertrend_exhaustion":
-            return signal, details
-        if signal.score <= 0.0:
-            details["skipped_reason"] = "non_positive_score"
-            return signal, details
-        penalty_factor = 0.98 if opposing_votes == 1 else 0.95
-        reasons = (
-            signal.reasons
-            if "alignment_penalty" in signal.reasons
-            else (*signal.reasons, "alignment_penalty")
-        )
-        details["applied"] = True
-        details["penalty_factor"] = penalty_factor
-        return replace(
-            signal,
-            score=round(max(signal.score * penalty_factor, 0.0), 4),
-            reasons=reasons,
-        ), details
-
-    def check_family_confirmation(
-        self,
-        signal: Signal,
-        prepared: PreparedSymbol,
-        metadata: Any | None,
-    ) -> tuple[bool, str | None, dict[str, Any]]:
-        details = self.directional_context(signal, prepared)
-        family = getattr(metadata, "family", signal.strategy_family)
-        profile = getattr(metadata, "confirmation_profile", signal.confirmation_profile)
-        deep_analysis_asset = is_deep_analysis_symbol(prepared, self._bot.settings)
-        primary_timeframe = str(getattr(prepared, "primary_timeframe", "15m") or "15m")
-        details["family"] = family
-        details["confirmation_profile"] = profile
-        details["primary_timeframe"] = primary_timeframe
-        if deep_analysis_asset:
-            details["deep_analysis_policy"] = "soft_fast_context"
-        if (
-            not details["used"]
-            and details["flow_proxy"] is None
-            and prepared.mark_index_spread_bps is None
-            and prepared.depth_imbalance is None
-            and prepared.microprice_bias is None
-        ):
-            details["fallback"] = "context_missing"
-            strict_data_quality = bool(
-                getattr(self._bot.settings.runtime, "strict_data_quality", True)
-            )
-            if strict_data_quality and family in {"continuation", "breakout"}:
-                if deep_analysis_asset and primary_timeframe in {"1h", "4h"}:
-                    details["fallback"] = "deep_primary_without_fast_context"
-                    return True, None, details
-                details["fast_context_weak"] = True
-                return True, None, details
-            return True, None, details
-        details["confirmation_votes"] = {
-            "trend_5m": details["trend_confirms"],
-            "flow_5m": details["flow_confirms"],
-            "premium_slope": details["premium_confirms"],
-            "depth_focus": details["depth_confirms"],
-        }
-        if details["crowding"]["available"]:
-            details["confirmation_votes"]["crowding_support"] = details["crowd_trend_support"]
-        details["confirmation_count"] = sum(
-            1 for value in details["confirmation_votes"].values() if value
-        )
-        if family == "reversal" or profile == "countertrend_exhaustion":
-            if details["exhaustion_count"] > 0:
-                return True, None, details
-            if details["regime_opposes"] and details["flow_opposes"]:
-                return False, f"reversal_unconfirmed_{signal.direction}", details
-            return True, None, details
-        if (
-            details["crowd_headwind"]
-            and not details["crowd_trend_support"]
-            and details["confirmation_count"] < 3
-        ):
-            if deep_analysis_asset and (
-                primary_timeframe in {"1h", "4h"} or details["confirmation_count"] >= 1
-            ):
-                details["relaxed_reject"] = f"crowding_headwind_{signal.direction}"
-                return True, None, details
-            return False, f"crowding_headwind_{signal.direction}", details
-        if (
-            family == "breakout"
-            and details["crowding"]["available"]
-            and not details["crowd_trend_support"]
-            and details["confirmation_count"] < 3
-        ):
-            if deep_analysis_asset and (
-                primary_timeframe in {"1h", "4h"} or details["confirmation_count"] >= 1
-            ):
-                details["relaxed_reject"] = f"breakout_crowding_unconfirmed_{signal.direction}"
-                return True, None, details
-            return False, f"breakout_crowding_unconfirmed_{signal.direction}", details
-        if details["confirmation_count"] >= 2:
-            return True, None, details
-        if (
-            details["regime_opposes"]
-            and details["flow_opposes"]
-            and details["exhaustion_count"] == 0
-        ):
-            return False, f"hard_context_opposes_{signal.direction}", details
-        if deep_analysis_asset and (
-            primary_timeframe in {"1h", "4h"} or details["confirmation_count"] >= 1
-        ):
-            details["relaxed_reject"] = f"5m_opposes_{signal.direction}"
-            return True, None, details
-        return False, f"5m_opposes_{signal.direction}", details
-
-
-class AnalyzerFramesMixin(AnalyzerContextMixin):
+class AnalyzerFramesMixin(AnalyzerContextMixin, AnalyzerFamilyGatesMixin):
     async def fetch_frames(self, item: UniverseSymbol) -> SymbolFrames | None:
         symbol = item.symbol
         minimums = self._minimums()
@@ -800,6 +606,18 @@ class AnalyzerFramesMixin(AnalyzerContextMixin):
             if liquidation is not None:
                 enrichments["liquidation_score"] = float(liquidation)
                 enrichments["liquidation_score_source"] = "force_order"
+                rollups = self._safe_ws_get(
+                    symbol,
+                    "get_liquidation_rollups",
+                    window_seconds=900,
+                )
+                if isinstance(rollups, dict):
+                    long_notional = rollups.get("liquidation_long_notional")
+                    short_notional = rollups.get("liquidation_short_notional")
+                    if long_notional is not None:
+                        enrichments["liquidation_long_notional"] = float(long_notional)
+                    if short_notional is not None:
+                        enrichments["liquidation_short_notional"] = float(short_notional)
                 liq_age = self._safe_ws_get(
                     symbol,
                     "get_liquidation_age_seconds",
@@ -932,6 +750,8 @@ class AnalyzerPipelineMixin(AnalyzerFramesMixin):
         event_ts: datetime | None = None,
         ws_enrichments: dict[str, Any] | None = None,
         kline_interval: str | None = None,
+        max_setups: int | None = None,
+        setup_subset: frozenset[str] | None = None,
     ) -> PipelineResult:
         """Run modern SignalEngine analysis for a symbol.
 
@@ -1116,7 +936,6 @@ class AnalyzerPipelineMixin(AnalyzerFramesMixin):
                 for key, value in ws_enrichments.items():
                     if hasattr(prepared, key):
                         setattr(prepared, key, value)
-                # Debug: log enrichment status
                 if ws_enrichments.get("mark_index_spread_bps") is not None:
                     LOG.debug(
                         "%s: enrichment mark_index_spread_bps=%.4f",
@@ -1149,6 +968,37 @@ class AnalyzerPipelineMixin(AnalyzerFramesMixin):
                     exception_type=type(exc).__name__,
                 )
 
+        readiness = (
+            assess_symbol_data_readiness(prepared, self._bot.settings)
+            if prepared is not None
+            else None
+        )
+        if readiness is not None and not readiness.ready:
+            rejected.append(
+                {
+                    "ts": datetime.now(UTC).isoformat(),
+                    "symbol": item.symbol,
+                    "setup_id": "data",
+                    "direction": "none",
+                    "stage": "data",
+                    "reason": readiness.reason or "data.not_ready",
+                    "details": readiness.details,
+                }
+            )
+            funnel["data_readiness"] = readiness.details
+            _attach_rejection_rollups(funnel, rejected)
+            return PipelineResult(
+                symbol=item.symbol,
+                trigger=trigger,
+                event_ts=event_ts,
+                raw_setups=0,
+                candidates=candidates,
+                rejected=rejected,
+                status=readiness.reason or "data_not_ready",
+                prepared=prepared,
+                funnel=funnel,
+            )
+
         if prepared is not None:
             try:
                 market_ctx = await self._bot._modern_repo.get_market_context()
@@ -1163,10 +1013,26 @@ class AnalyzerPipelineMixin(AnalyzerFramesMixin):
                     "btc_phase",
                     "macro_risk_mode",
                     "benchmark_context",
+                    "market_context_age_seconds",
                 ):
                     value = market_ctx.get(key)
                     if value is not None and hasattr(prepared, key):
                         setattr(prepared, key, value)
+                market_regime = market_ctx.get("market_regime")
+                if market_regime is not None:
+                    prepared.global_market_regime = str(market_regime)
+                prepared.market_ctx = {
+                    key: market_ctx[key]
+                    for key in (
+                        "btc_bias",
+                        "eth_bias",
+                        "market_regime",
+                        "macro_risk_mode",
+                        "btc_phase",
+                        "market_context_age_seconds",
+                    )
+                    if key in market_ctx
+                }
                 benchmark_context = market_ctx.get("benchmark_context")
                 if isinstance(benchmark_context, dict):
                     for symbol, attr in (
@@ -1228,7 +1094,13 @@ class AnalyzerPipelineMixin(AnalyzerFramesMixin):
         self._bot._diagnostic_trace_counts[item.symbol] = 0
 
         try:
-            signal_results = await self._bot._modern_engine.calculate_all(prepared)
+            event_interval = funnel_kline_interval or "15m"
+            signal_results = await self._bot._modern_engine.calculate_all(
+                prepared,
+                event_interval=event_interval,
+                max_setups=max_setups,
+                setup_subset=setup_subset,
+            )
             funnel["detector_runs"] = len(signal_results)
             LOG.debug(
                 "%s: engine calculated | results_count=%d",

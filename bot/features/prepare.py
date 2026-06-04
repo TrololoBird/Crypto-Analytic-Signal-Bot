@@ -1,15 +1,7 @@
 """Technical analysis feature preparation (Polars-native runtime path).
 
-Indicators stay Polars-native and prefer the installed `polars_ta` expression
-backend where its semantics match the runtime contract. Pure-Polars formulas are
-kept as deterministic fallbacks and for indicators that need project-specific
-normalization.
-
-Key indicators (actually used by strategies):
-  - Core: ema20/50/200, rsi14, adx14, atr14, macd_*, donchian_*, vwap
-  - Advanced: supertrend_dir, bb_pct_b, bb_width, kc_upper/lower/width
-
-Other columns exist for backward compatibility but return neutral values.
+Indicators stay Polars-native with optional `polars_ta` for EMA/ROC/OBV.
+Pure-Polars formulas are canonical for Wilder RSI/ATR/ADX, MACD, BB (ddof=1), and structure.
 """
 
 from __future__ import annotations
@@ -23,7 +15,7 @@ from typing import Any, cast
 import polars as pl
 import structlog
 
-from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.runtime.errors import DEFENSIVE_EXC
 
 from ..domain.schemas import PreparedSymbol, SymbolFrames, UniverseSymbol
 from ..market.ws_enrichment import depth_imbalance_from_book, microprice_bias_from_book
@@ -39,8 +31,10 @@ from .prepare_frame import (
     _prepare_frame,
     _tail_value_signature,
     _timestamp_ns,
+    add_session_cvd,
     has_minimum_bars,
     min_required_bars,
+    take_frame_indicator_fallbacks,
 )
 
 LOG = structlog.get_logger("bot.features.prepare")
@@ -535,6 +529,7 @@ def _cached_prepare_frame(
     interval: str = "",
     cache: _FrameCache | None = None,
     ws_manager: Any | None = None,
+    fallback_book: tuple[float | None, float | None, float | None, float | None] | None = None,
 ) -> pl.DataFrame:
     """_prepare_frame with LRU cache keyed on (symbol, interval, close_time)."""
     if frame.is_empty() or "close_time" not in frame.columns or "close" not in frame.columns:
@@ -542,9 +537,10 @@ def _cached_prepare_frame(
             _prepare_frame(frame),
             symbol,
             ws_manager if interval == "15m" else None,
+            fallback_book=fallback_book if interval == "15m" else None,
         )
         for warning in _sanity_check_prepared_frame(result, symbol, interval):
-            LOG.info("prepared frame sanity warning | %s", warning)
+            LOG.debug("prepared frame sanity warning | %s", warning)
         return result
 
     last = frame.row(-1, named=True)
@@ -555,7 +551,7 @@ def _cached_prepare_frame(
     except (KeyError, TypeError, ValueError, OverflowError):
         result = _prepare_frame(frame)
         for warning in _sanity_check_prepared_frame(result, symbol, interval):
-            LOG.info("prepared frame sanity warning | %s", warning)
+            LOG.debug("prepared frame sanity warning | %s", warning)
         return result
 
     tail_signature = _tail_value_signature(last)
@@ -577,9 +573,10 @@ def _cached_prepare_frame(
         _prepare_frame(frame),
         symbol,
         ws_manager if interval == "15m" else None,
+        fallback_book=fallback_book if interval == "15m" else None,
     )
     for warning in _sanity_check_prepared_frame(result, symbol, interval):
-        LOG.info("prepared frame sanity warning | %s", warning)
+        LOG.debug("prepared frame sanity warning | %s", warning)
     target_cache.put(key, result)
     return result
 
@@ -625,6 +622,24 @@ def _ws_enrichment_signature(
         )
     else:
         signature.extend((0, None, None, None))
+    rollups_fn = getattr(ws_manager, "get_liquidation_rollups", None) if ws_manager else None
+    if callable(rollups_fn):
+        try:
+            rollups = rollups_fn(symbol, window_seconds=900)
+        except DEFENSIVE_EXC:
+            rollups = None
+        if isinstance(rollups, dict):
+            signature.extend(
+                (
+                    _rounded(rollups.get("liquidation_long_notional")),
+                    _rounded(rollups.get("liquidation_short_notional")),
+                    _rounded(rollups.get("liquidation_score")),
+                )
+            )
+        else:
+            signature.extend((None, None, None))
+    else:
+        signature.extend((None, None, None))
     return tuple(signature)
 
 
@@ -646,6 +661,16 @@ def _enrich_with_ws_data(
         qty = fallback_book[2:4]
     bid_price, ask_price = book if isinstance(book, tuple) else (None, None)
     bid_qty, ask_qty = qty if isinstance(qty, tuple) else (None, None)
+    if fallback_book is not None:
+        fb_bid, fb_ask, fb_bid_qty, fb_ask_qty = fallback_book
+        if bid_price is None:
+            bid_price = fb_bid
+        if ask_price is None:
+            ask_price = fb_ask
+        if bid_qty is None:
+            bid_qty = fb_bid_qty
+        if ask_qty is None:
+            ask_qty = fb_ask_qty
     work = work.with_columns(
         [
             pl.lit(_as_optional_float(bid_price)).cast(pl.Float64).alias("bid_price"),
@@ -688,10 +713,39 @@ def _enrich_with_ws_data(
                 ]
             ).drop(row_index)
 
+    if ws_manager is not None:
+        rollups_fn = getattr(ws_manager, "get_liquidation_rollups", None)
+        if callable(rollups_fn):
+            try:
+                rollups = rollups_fn(symbol, window_seconds=900)
+            except DEFENSIVE_EXC:
+                rollups = None
+            if isinstance(rollups, dict):
+                liq_columns: list[pl.Expr] = []
+                long_notional = _as_optional_float(rollups.get("liquidation_long_notional"))
+                short_notional = _as_optional_float(rollups.get("liquidation_short_notional"))
+                liq_score = _as_optional_float(rollups.get("liquidation_score"))
+                if long_notional is not None:
+                    liq_columns.append(
+                        pl.lit(long_notional).cast(pl.Float64).alias("liquidation_long_notional")
+                    )
+                if short_notional is not None:
+                    liq_columns.append(
+                        pl.lit(short_notional).cast(pl.Float64).alias("liquidation_short_notional")
+                    )
+                if liq_score is not None:
+                    liq_columns.append(
+                        pl.lit(liq_score).cast(pl.Float64).alias("liquidation_score")
+                    )
+                if liq_columns:
+                    work = work.with_columns(liq_columns)
+
     work = add_microstructure_features(work)
+    work = add_session_cvd(work)
     return work.with_columns(
         [
             pl.col("signed_order_flow").fill_null(0.0).fill_nan(0.0),
+            pl.col("session_cvd").fill_null(0.0).fill_nan(0.0),
             pl.col("tob_imbalance").fill_null(0.0).fill_nan(0.0),
             pl.col("microprice_deviation_pct").fill_null(0.0).fill_nan(0.0),
         ]
@@ -751,13 +805,16 @@ def prepare_symbol(
         return None
 
     work_1h = _cached_prepare_frame(_to_polars(frames.df_1h), symbol=sym, interval="1h")
+    data_quality_flags = take_frame_indicator_fallbacks()
+    fallback_book = (frames.bid_price, frames.ask_price, frames.bid_qty, frames.ask_qty)
     work_15m = _cached_prepare_frame(
         _to_polars(frames.df_15m),
         symbol=sym,
         interval="15m",
         ws_manager=ws_manager,
+        fallback_book=fallback_book,
     )
-    fallback_book = (frames.bid_price, frames.ask_price, frames.bid_qty, frames.ask_qty)
+    data_quality_flags.extend(take_frame_indicator_fallbacks())
     if ws_manager is None and (frames.bid_qty is not None or frames.ask_qty is not None):
         work_15m = _enrich_with_ws_data(
             work_15m,
@@ -768,9 +825,11 @@ def prepare_symbol(
     work_5m = None
     if frames.df_5m is not None and not frames.df_5m.is_empty():
         work_5m = _cached_prepare_frame(_to_polars(frames.df_5m), symbol=sym, interval="5m")
+        data_quality_flags.extend(take_frame_indicator_fallbacks())
     work_4h = None
     if frames.df_4h is not None and not frames.df_4h.is_empty():
         work_4h = _cached_prepare_frame(_to_polars(frames.df_4h), symbol=sym, interval="4h")
+        data_quality_flags.extend(take_frame_indicator_fallbacks())
 
     work_len_1h = len(work_1h) if work_1h is not None else 0
     work_len_15m = len(work_15m) if work_15m is not None else 0
@@ -825,29 +884,45 @@ def prepare_symbol(
         work_len_4h,
     )
 
-    # Calculate spread
+    # Calculate spread and orderbook metrics (prefer REST frames, fall back to enriched 15m)
+    def _frame_last(col: str) -> float | None:
+        if work_15m is None or work_15m.is_empty() or col not in work_15m.columns:
+            return None
+        try:
+            value = float(work_15m[col][-1])
+        except (TypeError, ValueError):
+            return None
+        return value if math.isfinite(value) else None
+
+    bid_price = frames.bid_price if frames.bid_price is not None else _frame_last("bid_price")
+    ask_price = frames.ask_price if frames.ask_price is not None else _frame_last("ask_price")
+    bid_qty = frames.bid_qty if frames.bid_qty is not None else _frame_last("bid_qty")
+    ask_qty = frames.ask_qty if frames.ask_qty is not None else _frame_last("ask_qty")
+
     spread_bps = None
     if (
-        frames.bid_price is not None
-        and frames.ask_price is not None
-        and frames.bid_price > 0
-        and frames.ask_price > 0
+        bid_price is not None
+        and ask_price is not None
+        and bid_price > 0
+        and ask_price > 0
     ):
-        midpoint = (frames.bid_price + frames.ask_price) / 2.0
+        midpoint = (bid_price + ask_price) / 2.0
         if midpoint > 0:
-            spread_bps = ((frames.ask_price - frames.bid_price) / midpoint) * 10_000.0
+            spread_bps = ((ask_price - bid_price) / midpoint) * 10_000.0
     book_depth_imbalance = depth_imbalance_from_book(
-        bid_qty=frames.bid_qty,
-        ask_qty=frames.ask_qty,
+        bid_qty=bid_qty,
+        ask_qty=ask_qty,
         delta_ratio=None,
     )
     book_microprice_bias = microprice_bias_from_book(
-        bid=frames.bid_price,
-        ask=frames.ask_price,
-        bid_qty=frames.bid_qty,
-        ask_qty=frames.ask_qty,
+        bid=bid_price,
+        ask=ask_price,
+        bid_qty=bid_qty,
+        ask_qty=ask_qty,
         delta_ratio=None,
     )
+
+    liquidation_score = _frame_last("liquidation_score")
 
     work_4h_frame = work_4h if work_4h is not None else pl.DataFrame()
     regime = _market_regime(work_4h_frame, work_1h=work_1h, work_15m=work_15m)
@@ -856,8 +931,8 @@ def prepare_symbol(
         universe=universe_symbol,
         work_1h=work_1h,
         work_15m=work_15m,
-        bid_price=frames.bid_price,
-        ask_price=frames.ask_price,
+        bid_price=bid_price,
+        ask_price=ask_price,
         spread_bps=spread_bps,
         work_5m=work_5m,
         work_4h=work_4h,
@@ -874,9 +949,12 @@ def prepare_symbol(
         microprice_bias=book_microprice_bias,
         depth_imbalance_source="rest_book_l1" if book_depth_imbalance is not None else None,
         microprice_bias_source="rest_book_l1" if book_microprice_bias is not None else None,
+        liquidation_score=liquidation_score,
+        liquidation_score_source="force_order" if liquidation_score is not None else None,
         primary_timeframe=primary_timeframe,
         context_timeframes=context_timeframes,
         settings=settings,
+        data_quality_flags=sorted(set(data_quality_flags)),
     )
 
 

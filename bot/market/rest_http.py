@@ -191,7 +191,7 @@ class RestHttpMixin:
                         if is_ip_limited:
                             effective_pause = max(60.0, float(retry_after_header or 60))
                             self._set_futures_data_pause(effective_pause)
-                            LOG.warning(
+                            LOG.info(
                                 "futures-data IP rate limit 429 | operation=%s pause=%.0fs",
                                 operation,
                                 self._futures_data_pause_until - time.monotonic(),

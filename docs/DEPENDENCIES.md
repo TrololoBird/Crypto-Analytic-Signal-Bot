@@ -29,7 +29,7 @@
 | fastapi, uvicorn | yes | `bot/dashboard/` |
 | prometheus-client | yes | metrics endpoint |
 | orjson | yes | WS JSON fast path |
-| polars_ta, polars-ols | yes | `bot/features/advanced.py`, prepare_frame |
+| polars_ta, polars-ols | yes | `bot/features/prepare_frame.py` |
 
 ## Dev / test
 
@@ -42,9 +42,8 @@
 ## Not on live path
 
 - `[regime]` — hmmlearn, sklearn, statsmodels (`bot/regime/`, ImportError fallback)
-- `[ml]` — lightgbm, xgboost, **pandas**, optuna (offline experiments only; **no** `import pandas` in `bot/`)
 
-Hot path is **Polars-only**; `prepare.py` rejects pandas DataFrames explicitly.
+Hot path is **Polars-only** (`prepare_frame.py`); no TA-Lib, no pandas. `prepare.py` rejects pandas DataFrames explicitly.
 
 ## Verification commands
 

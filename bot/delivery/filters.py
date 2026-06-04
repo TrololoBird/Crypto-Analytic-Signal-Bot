@@ -8,12 +8,13 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.runtime.errors import DEFENSIVE_EXC
 
 from ..diagnostics.signals import get_global_diagnostics
 from ..features.microstructure import MicrostructureContext, build_microstructure_context
 from ..runtime_policy import is_deep_analysis_symbol
 from .contract import DEFAULT_TARGET_RR
+from .filter_stages import filter_stage_enabled
 from .scoring import ScoringResult
 from .trade_plan import TradePlanBuilder
 
@@ -185,6 +186,61 @@ def _benchmark_context_guard(
     return True, None, details
 
 
+def _regime_long_gate(
+    signal: Signal,
+    prepared: PreparedSymbol,
+) -> tuple[bool, str | None, dict[str, Any]]:
+    """Block trend/breakout longs in confirmed bear context unless reversal setup."""
+    direction = str(signal.direction or "").lower()
+    if direction != "long":
+        return True, None, {"regime_gate": "not_long"}
+
+    profile = str(signal.confirmation_profile or "trend_follow")
+    family = str(signal.strategy_family or "continuation")
+    reversal_profiles = {"countertrend_exhaustion", "divergence_reversal"}
+    reversal_setups = {
+        "funding_reversal",
+        "ls_ratio_extreme",
+        "liquidation_heatmap",
+        "turtle_soup",
+        "wick_trap_reversal",
+        "wyckoff_spring",
+        "stop_hunt_detection",
+        "liquidity_sweep",
+        "volume_climax_reversal",
+        "absorption",
+        "rsi_divergence_bottom",
+        "indicator_divergence",
+        "cvd_divergence",
+        "oi_divergence",
+    }
+    if profile in reversal_profiles or signal.setup_id in reversal_setups or family == "reversal":
+        return True, None, {"regime_gate": "reversal_exempt"}
+
+    regime = str(getattr(prepared, "market_regime", "") or "").lower()
+    btc_bias = str(getattr(prepared, "btc_bias", None) or signal.btc_bias or "neutral").lower()
+    bias_4h = str(getattr(prepared, "bias_4h", "") or "neutral").lower()
+    bear_regime = regime in {"bear", "decline", "risk_off"}
+    bear_bias = btc_bias in {"downtrend", "bear"} or bias_4h == "downtrend"
+    trend_family = family in {"continuation", "breakout", "trend_follow"} or profile in {
+        "trend_follow",
+        "breakout_acceptance",
+    }
+    details = {
+        "regime_gate": "checked",
+        "market_regime": regime,
+        "btc_bias": btc_bias,
+        "bias_4h": bias_4h,
+        "strategy_family": family,
+        "confirmation_profile": profile,
+    }
+    if bear_regime and bear_bias and trend_family:
+        return False, "regime_bear_long_blocked", details
+    if bear_bias and trend_family:
+        return False, "btc_downtrend_long_blocked", details
+    return True, None, details
+
+
 def _latest_frame_float(frame: pl.DataFrame | None, column: str) -> float | None:
     if frame is None or frame.is_empty() or column not in frame.columns:
         return None
@@ -336,7 +392,7 @@ def _primary_freshness_window(
     if timeframe == "4h":
         return timeframe, timedelta(hours=settings.filters.freshness_4h_hours)
     if timeframe == "5m":
-        return timeframe, timedelta(minutes=settings.filters.freshness_15m_minutes)
+        return timeframe, timedelta(minutes=settings.filters.freshness_5m_minutes)
     return "15m", timedelta(minutes=settings.filters.freshness_15m_minutes)
 
 
@@ -515,6 +571,14 @@ def _run_filter_pipeline(
       9. Minimum score gate
     """
     passed = list(signal.passed_filters)
+    deep_analysis_asset = is_deep_analysis_symbol(prepared, settings)
+
+    from bot.runtime_policy import configured_primary_timeframe
+
+    configured_primary = configured_primary_timeframe(settings, signal.symbol)
+    actual_primary = str(getattr(prepared, "primary_timeframe", "15m") or "15m")
+    if actual_primary != configured_primary:
+        passed.append(f"primary_timeframe_fallback:{configured_primary}")
 
     base = replace(
         signal,
@@ -538,56 +602,94 @@ def _run_filter_pipeline(
             details,
         )
 
-    # --- 1. Data freshness ---
-    deep_analysis_asset = is_deep_analysis_symbol(prepared, settings)
-    primary_timeframe, primary_freshness = _primary_freshness_window(prepared, settings)
-    if deep_analysis_asset:
-        passed.append("deep_analysis_policy")
-    primary_frame = _frame_for_timeframe(prepared, primary_timeframe)
-    if primary_frame is None or not _frame_is_fresh(
-        primary_frame,
-        primary_freshness,
-        timeframe=primary_timeframe,
-    ):
+    regime_ok, regime_reason, regime_details = _regime_long_gate(base, prepared)
+    if not regime_ok:
         LOGGER.info(
-            "%s/%s: freshness fail | timeframe=%s freshness_limit=%s",
+            "%s/%s: regime long gate reject | reason=%s details=%s",
             signal.symbol,
             signal.setup_id,
-            primary_timeframe,
-            str(primary_freshness),
+            regime_reason,
+            regime_details,
         )
-        return _reject(f"stale_{primary_timeframe}", base)
-    passed.append(
-        "fresh_15m" if primary_timeframe == "15m" else f"fresh_primary_{primary_timeframe}"
+        return _reject(regime_reason or "regime_long_blocked", base, details=regime_details)
+
+    from bot.domain.mtf import evaluate_mtf_gate, normalize_mtf_reject_reason
+
+    profile = str(getattr(base, "confirmation_profile", "trend_follow"))
+    mtf_ok, mtf_reason, mtf_details = evaluate_mtf_gate(
+        prepared,
+        base.direction,
+        confirmation_profile=profile,
+        strict_data_quality=bool(
+            getattr(settings.runtime, "strict_data_quality", True)
+        ),
     )
-    if not _frame_is_fresh(
-        prepared.work_1h,
-        timedelta(hours=settings.filters.freshness_1h_hours),
-        timeframe="1h",
-    ):
+    passed.append("mtf_precheck")
+    if mtf_ok:
+        passed.append("mtf_gate")
+    else:
         LOGGER.info(
-            "%s/%s: freshness fail | timeframe=1h freshness_limit=%s",
+            "%s/%s: mtf precheck failed (orchestrator confluence gate) | reason=%s details=%s",
             signal.symbol,
             signal.setup_id,
-            str(timedelta(hours=settings.filters.freshness_1h_hours)),
+            normalize_mtf_reject_reason(mtf_reason),
+            mtf_details,
         )
-        return _reject("stale_1h", base)
-    passed.append("fresh_1h")
-    if prepared.work_4h is None or not _frame_is_fresh(
-        prepared.work_4h,
-        timedelta(hours=settings.filters.freshness_4h_hours),
-        timeframe="4h",
-    ):
-        LOGGER.info(
-            "%s/%s: freshness fail | timeframe=4h freshness_limit=%s",
-            signal.symbol,
-            signal.setup_id,
-            str(timedelta(hours=settings.filters.freshness_4h_hours)),
+
+    # --- 1. Data freshness ---
+    if filter_stage_enabled(settings, "freshness"):
+        primary_timeframe, primary_freshness = _primary_freshness_window(prepared, settings)
+        if deep_analysis_asset:
+            passed.append("deep_analysis_policy")
+        primary_frame = _frame_for_timeframe(prepared, primary_timeframe)
+        if primary_frame is None or not _frame_is_fresh(
+            primary_frame,
+            primary_freshness,
+            timeframe=primary_timeframe,
+        ):
+            LOGGER.info(
+                "%s/%s: freshness fail | timeframe=%s freshness_limit=%s",
+                signal.symbol,
+                signal.setup_id,
+                primary_timeframe,
+                str(primary_freshness),
+            )
+            return _reject(f"stale_{primary_timeframe}", base)
+        passed.append(
+            "fresh_15m" if primary_timeframe == "15m" else f"fresh_primary_{primary_timeframe}"
         )
-        return _reject("stale_4h", base)
-    passed.append("fresh_4h")
+        if not _frame_is_fresh(
+            prepared.work_1h,
+            timedelta(hours=settings.filters.freshness_1h_hours),
+            timeframe="1h",
+        ):
+            LOGGER.info(
+                "%s/%s: freshness fail | timeframe=1h freshness_limit=%s",
+                signal.symbol,
+                signal.setup_id,
+                str(timedelta(hours=settings.filters.freshness_1h_hours)),
+            )
+            return _reject("stale_1h", base)
+        passed.append("fresh_1h")
+        if prepared.work_4h is None or not _frame_is_fresh(
+            prepared.work_4h,
+            timedelta(hours=settings.filters.freshness_4h_hours),
+            timeframe="4h",
+        ):
+            LOGGER.info(
+                "%s/%s: freshness fail | timeframe=4h freshness_limit=%s",
+                signal.symbol,
+                signal.setup_id,
+                str(timedelta(hours=settings.filters.freshness_4h_hours)),
+            )
+            return _reject("stale_4h", base)
+        passed.append("fresh_4h")
+    else:
+        primary_timeframe, _ = _primary_freshness_window(prepared, settings)
+        primary_frame = _frame_for_timeframe(prepared, primary_timeframe)
+        passed.append("freshness_stage_disabled")
     # --- 2. Mark price sanity ---
-    if (
+    if filter_stage_enabled(settings, "mark_deviation") and (
         prepared.mark_price is not None
         and prepared.mark_price > 0
         and prepared.ticker_price is not None
@@ -607,48 +709,56 @@ def _run_filter_pipeline(
     passed.append("mark_price_ok")
 
     # --- 3. Spread ---
-    if prepared.spread_bps is None:
-        return _reject("spread_unavailable", base)
-    if prepared.spread_bps > settings.filters.max_spread_bps:
-        return _reject("spread_too_wide", base)
-    passed.append("spread_ok")
+    if filter_stage_enabled(settings, "spread"):
+        if prepared.spread_bps is None:
+            return _reject("spread_unavailable", base)
+        if prepared.spread_bps > settings.filters.max_spread_bps:
+            return _reject("spread_too_wide", base)
+        passed.append("spread_ok")
+    else:
+        passed.append("spread_stage_disabled")
 
     # --- 4. ATR ---
-    atr_frame = primary_frame if primary_frame is not None else prepared.work_15m
-    if atr_frame.is_empty() or "atr_pct" not in atr_frame.columns:
-        return _reject("atr_unavailable", replace(base, atr_pct=0.0))
-    atr_pct_raw = atr_frame.item(-1, "atr_pct")
-    if atr_pct_raw is None or (isinstance(atr_pct_raw, float) and math.isnan(atr_pct_raw)):
-        return _reject("atr_nan", replace(base, atr_pct=0.0))
-    atr_pct = float(atr_pct_raw)
-    effective_min_atr = _market_atr_floor(prepared, settings)
-    atr_gate_passed = atr_pct >= effective_min_atr
-    _record_atr_sample(signal.setup_id, atr_pct, passed=atr_gate_passed)
-    if effective_min_atr < float(settings.filters.min_atr_pct):
-        passed.append(f"atr_floor_relaxed_to_{effective_min_atr:.3f}")
-    if not atr_gate_passed:
-        LOGGER.info(
-            "%s/%s: atr_too_low | atr_pct=%.4f effective_min_atr=%.4f min_atr_pct=%.4f "
-            "(config: filters.min_atr_pct=%.4f)",
-            signal.symbol,
-            signal.setup_id,
-            atr_pct,
-            effective_min_atr,
-            settings.filters.min_atr_pct,
-            settings.filters.min_atr_pct,
-        )
-        return _reject(
-            "atr_too_low",
-            replace(base, atr_pct=atr_pct),
-            details={
-                "atr_pct": atr_pct,
-                "effective_min_atr": effective_min_atr,
-                "config_min_atr": settings.filters.min_atr_pct,
-            },
-        )
-    if atr_pct > settings.filters.max_atr_pct:
-        return _reject("atr_too_high", replace(base, atr_pct=atr_pct))
-    passed.append("atr_ok")
+    if filter_stage_enabled(settings, "atr"):
+        atr_frame = primary_frame if primary_frame is not None else prepared.work_15m
+        if atr_frame.is_empty() or "atr_pct" not in atr_frame.columns:
+            return _reject("atr_unavailable", replace(base, atr_pct=0.0))
+        atr_pct_raw = atr_frame.item(-1, "atr_pct")
+        if atr_pct_raw is None or (isinstance(atr_pct_raw, float) and math.isnan(atr_pct_raw)):
+            return _reject("atr_nan", replace(base, atr_pct=0.0))
+        atr_pct = float(atr_pct_raw)
+        effective_min_atr = _market_atr_floor(prepared, settings)
+        atr_gate_passed = atr_pct >= effective_min_atr
+        _record_atr_sample(signal.setup_id, atr_pct, passed=atr_gate_passed)
+        if effective_min_atr < float(settings.filters.min_atr_pct):
+            passed.append(f"atr_floor_relaxed_to_{effective_min_atr:.3f}")
+        if not atr_gate_passed:
+            LOGGER.info(
+                "%s/%s: atr_too_low | atr_pct=%.4f effective_min_atr=%.4f min_atr_pct=%.4f "
+                "(config: filters.min_atr_pct=%.4f)",
+                signal.symbol,
+                signal.setup_id,
+                atr_pct,
+                effective_min_atr,
+                settings.filters.min_atr_pct,
+                settings.filters.min_atr_pct,
+            )
+            return _reject(
+                "atr_too_low",
+                replace(base, atr_pct=atr_pct),
+                details={
+                    "atr_pct": atr_pct,
+                    "effective_min_atr": effective_min_atr,
+                    "config_min_atr": settings.filters.min_atr_pct,
+                },
+            )
+        if atr_pct > settings.filters.max_atr_pct:
+            return _reject("atr_too_high", replace(base, atr_pct=atr_pct))
+        passed.append("atr_ok")
+    else:
+        passed.append("atr_stage_disabled")
+        atr_frame = primary_frame if primary_frame is not None else prepared.work_15m
+        atr_pct = float(atr_frame.item(-1, "atr_pct") or 0.0) if not atr_frame.is_empty() else 0.0
 
     # --- 4b. ADX policy (setup/family aware) ---
     adx_1h = 0.0
@@ -724,6 +834,9 @@ def _run_filter_pipeline(
     trend_conflict_penalty_factor = float(
         setup_overrides.get("trend_conflict_penalty_factor", 0.88)
     )
+    btc_phase = str(getattr(prepared, "btc_phase", "") or "").lower()
+    btc_decline_penalty_applied = False
+    btc_decline_penalty_factor = float(setup_overrides.get("btc_decline_penalty_factor", 0.90))
     if trend_conflict:
         trend_details = {
             "signal_direction": signal.direction,
@@ -738,6 +851,16 @@ def _run_filter_pipeline(
         passed.append("trend_conflict_1h_penalized")
     else:
         passed.append("trend_context_ok")
+
+    if (
+        _uses_soft_trend_conflict(signal)
+        and signal.direction == "long"
+        and btc_phase in {"decline", "distribution"}
+    ):
+        btc_decline_penalty_applied = True
+        passed.append("btc_decline_penalty_eligible")
+    elif btc_phase:
+        passed.append("btc_phase_ok")
 
     benchmark_ok, benchmark_reason, benchmark_details = _benchmark_context_guard(signal, prepared)
     if not benchmark_ok and not deep_analysis_asset:
@@ -794,63 +917,72 @@ def _run_filter_pipeline(
     )
 
     # --- 5. Stop distance ---
-    min_stop_distance_pct = float(settings.tracking.min_stop_distance_pct)
-    effective_min_rr = float(setup_overrides.get("min_rr", settings.filters.min_risk_reward))
-    updated, stop_expanded = _expand_signal_to_min_stop(
-        updated,
-        min_stop_distance_pct=min_stop_distance_pct,
-        min_rr=effective_min_rr,
-    )
-    if stop_expanded:
-        passed.append("stop_expanded_to_min")
-    stop_epsilon = 1e-6
-    if updated.stop_distance_pct + stop_epsilon < min_stop_distance_pct:
-        return _reject(
-            "stop_too_tight",
+    if filter_stage_enabled(settings, "stop"):
+        min_stop_distance_pct = float(settings.tracking.min_stop_distance_pct)
+        effective_min_rr = float(setup_overrides.get("min_rr", settings.filters.min_risk_reward))
+        updated, stop_expanded = _expand_signal_to_min_stop(
             updated,
-            details={
-                "stop_distance_pct": updated.stop_distance_pct,
-                "min_stop_distance_pct": min_stop_distance_pct,
-                "global_min_stop_distance_pct": settings.tracking.min_stop_distance_pct,
-                "deep_analysis_policy": deep_analysis_asset,
-                "primary_timeframe": primary_timeframe,
-            },
+            min_stop_distance_pct=min_stop_distance_pct,
+            min_rr=effective_min_rr,
         )
-    if updated.stop_distance_pct > settings.tracking.max_stop_distance_pct:
-        return _reject("stop_too_wide", updated)
-    updated = replace(updated, passed_filters=(*updated.passed_filters, "stop_ok"))
+        if stop_expanded:
+            passed.append("stop_expanded_to_min")
+        stop_epsilon = 1e-6
+        if updated.stop_distance_pct + stop_epsilon < min_stop_distance_pct:
+            return _reject(
+                "stop_too_tight",
+                updated,
+                details={
+                    "stop_distance_pct": updated.stop_distance_pct,
+                    "min_stop_distance_pct": min_stop_distance_pct,
+                    "global_min_stop_distance_pct": settings.tracking.min_stop_distance_pct,
+                    "deep_analysis_policy": deep_analysis_asset,
+                    "primary_timeframe": primary_timeframe,
+                },
+            )
+        if updated.stop_distance_pct > settings.tracking.max_stop_distance_pct:
+            return _reject("stop_too_wide", updated)
+        updated = replace(updated, passed_filters=(*updated.passed_filters, "stop_ok"))
+    else:
+        passed.append("stop_stage_disabled")
 
     # --- 6. Risk / Reward (runtime gate uses TP1; TP2 RR remains analytical) ---
-    risk = abs(updated.entry_mid - updated.stop)
-    reward_tp1 = abs(updated.take_profit_1 - updated.entry_mid)
-    rr_tp1 = (reward_tp1 / risk) if risk > 0 else 0.0
-    rr_epsilon = 1e-9
-    if rr_tp1 + rr_epsilon < effective_min_rr:
-        return _reject(
-            "risk_reward_too_low",
-            updated,
-            details={
-                "gate_rr_target": "tp1",
-                "rr_tp1": rr_tp1,
-                "rr_tp2": updated.risk_reward,
-                "min_rr_required": effective_min_rr,
-                "global_min_rr": settings.filters.min_risk_reward,
-                "setup_id": signal.setup_id,
-                "deep_analysis_policy": deep_analysis_asset,
-                "primary_timeframe": primary_timeframe,
-            },
-        )
-    updated = replace(updated, passed_filters=(*updated.passed_filters, "rr_ok"))
+    if filter_stage_enabled(settings, "rr"):
+        risk = abs(updated.entry_mid - updated.stop)
+        reward_tp1 = abs(updated.take_profit_1 - updated.entry_mid)
+        rr_tp1 = (reward_tp1 / risk) if risk > 0 else 0.0
+        rr_epsilon = 1e-9
+        effective_min_rr = float(setup_overrides.get("min_rr", settings.filters.min_risk_reward))
+        if rr_tp1 + rr_epsilon < effective_min_rr:
+            return _reject(
+                "risk_reward_too_low",
+                updated,
+                details={
+                    "gate_rr_target": "tp1",
+                    "rr_tp1": rr_tp1,
+                    "rr_tp2": updated.risk_reward,
+                    "min_rr_required": effective_min_rr,
+                    "global_min_rr": settings.filters.min_risk_reward,
+                    "setup_id": signal.setup_id,
+                    "deep_analysis_policy": deep_analysis_asset,
+                    "primary_timeframe": primary_timeframe,
+                },
+            )
+        updated = replace(updated, passed_filters=(*updated.passed_filters, "rr_ok"))
+    else:
+        passed.append("rr_stage_disabled")
 
     # --- 7. Scoring (ConfluenceEngine — unified path) ---
     scoring_result: ScoringResult | None = None
-    if settings.scoring.enabled:
+    if filter_stage_enabled(settings, "scoring") and settings.scoring.enabled:
         confluence_result = confluence_engine.score(updated, prepared)
         updated = replace(updated, score=confluence_result.final_score)
         scoring_result = confluence_result.to_scoring_result()
         passed = list(updated.passed_filters)
         passed.append("scoring_applied")
         updated = replace(updated, passed_filters=tuple(passed))
+    elif not filter_stage_enabled(settings, "scoring"):
+        passed.append("scoring_stage_disabled")
 
     if adx_penalty_applied:
         # Apply the ADX penalty before the min-score gate so weak-trend
@@ -899,36 +1031,69 @@ def _run_filter_pipeline(
             passed_filters=(*updated.passed_filters, "trend_conflict_1h_penalty_applied"),
         )
 
-    # --- 9. Minimum score gate (final gate after ALL adjustments) ---
-    effective_min_score = float(settings.filters.min_score)
-    if deep_analysis_asset:
-        deep_score_floor = 0.48 if primary_timeframe in {"1h", "4h"} else 0.50
-        if signal.setup_id in {"bos_choch", "liquidation_heatmap"}:
-            deep_score_floor = 0.40
-        effective_min_score = min(effective_min_score, deep_score_floor)
-    if effective_min_score > 0.0 and updated.score < effective_min_score:
-        score_reason = "adx_penalty_score_too_low" if adx_penalty_applied else "score_too_low"
-        score_details = {
-            "score": updated.score,
-            "min_score_required": effective_min_score,
-            "global_min_score": settings.filters.min_score,
-            "deep_analysis_policy": deep_analysis_asset,
-            "primary_timeframe": primary_timeframe,
-        }
-        if adx_penalty_applied:
-            score_details.update(
-                {
-                    "adx_policy": adx_policy,
-                    "adx_1h": adx_1h,
-                    "min_adx_1h": min_adx_1h,
-                    "adx_penalty_factor": adx_penalty_factor,
-                }
+    if btc_decline_penalty_applied:
+        pre_penalty_score = updated.score
+        adjusted_score = pre_penalty_score * btc_decline_penalty_factor
+        updated = replace(updated, score=adjusted_score)
+        penalty_delta = round(adjusted_score - pre_penalty_score, 6)
+        if scoring_result is not None:
+            scoring_result = replace(
+                scoring_result,
+                final_score=adjusted_score,
+                adjustments={
+                    **scoring_result.adjustments,
+                    "btc_decline_countertrend_penalty": penalty_delta,
+                },
             )
-        return _reject(
-            score_reason,
+        else:
+            scoring_result = ScoringResult(
+                base_score=pre_penalty_score,
+                adjustments={"btc_decline_countertrend_penalty": penalty_delta},
+                final_score=adjusted_score,
+                setup_id=updated.setup_id,
+            )
+        updated = replace(
             updated,
-            scoring_result,
-            details=score_details,
+            passed_filters=(*updated.passed_filters, "btc_decline_penalty_applied"),
+        )
+
+    # --- 9. Minimum score gate (final gate after ALL adjustments) ---
+    if filter_stage_enabled(settings, "min_score"):
+        effective_min_score = float(settings.filters.min_score)
+        if deep_analysis_asset:
+            deep_score_floor = 0.48 if primary_timeframe in {"1h", "4h"} else 0.50
+            if signal.setup_id in {"bos_choch", "liquidation_heatmap"}:
+                deep_score_floor = 0.40
+            effective_min_score = min(effective_min_score, deep_score_floor)
+        if effective_min_score > 0.0 and updated.score < effective_min_score:
+            score_reason = "adx_penalty_score_too_low" if adx_penalty_applied else "score_too_low"
+            score_details = {
+                "score": updated.score,
+                "min_score_required": effective_min_score,
+                "global_min_score": settings.filters.min_score,
+                "deep_analysis_policy": deep_analysis_asset,
+                "primary_timeframe": primary_timeframe,
+            }
+            if adx_penalty_applied:
+                score_details.update(
+                    {
+                        "adx_policy": adx_policy,
+                        "adx_1h": adx_1h,
+                        "min_adx_1h": min_adx_1h,
+                        "adx_penalty_factor": adx_penalty_factor,
+                    }
+                )
+            return _reject(
+                score_reason,
+                updated,
+                scoring_result,
+                details=score_details,
+            )
+        updated = replace(updated, passed_filters=(*updated.passed_filters, "min_score_ok"))
+    else:
+        updated = replace(
+            updated,
+            passed_filters=(*updated.passed_filters, "min_score_stage_disabled"),
         )
 
     return True, updated, None, scoring_result, None

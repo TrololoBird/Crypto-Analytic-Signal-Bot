@@ -11,17 +11,146 @@ import logging
 import math
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
-from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.runtime.errors import DEFENSIVE_EXC
 
-from ..domain.contracts import PUBLIC_FEATURE_FIELDS, normalize_public_feature_payload
+from ..domain.contracts import (
+    build_public_feature_snapshot,
+    validate_public_feature_payload,
+)
 from ..persistence.tracked import TrackedSignalState, parse_state_dt
+from .sl_diagnostics import classify_stop_loss_root_cause
 
 if TYPE_CHECKING:
     from ..domain.schemas import Signal
 
 LOG = logging.getLogger("bot.outcomes")
+
+OutcomeClass = Literal["win", "loss", "neutral"]
+
+MONITORING_OUTCOME_RESULTS = frozenset(
+    {
+        "expired_pending",
+        "expired",
+        "expired_active",
+        "risk_monitor_exit",
+        "smart_exit",
+        "unactivated_close",
+        "superseded",
+    }
+)
+EXECUTED_OUTCOME_RESULTS = frozenset(
+    {
+        "tp1_hit",
+        "tp2_hit",
+        "stop_loss",
+        "breakeven_stop",
+        "trailing_stop",
+        "emergency_exit",
+        "ambiguous_exit",
+    }
+)
+
+
+def classify_outcome_result(
+    result: str,
+    *,
+    was_profitable: bool | None = None,
+    pnl_r_multiple: float | None = None,
+    activated_at: str | None = None,
+) -> OutcomeClass:
+    """Classify a persisted signal outcome as win, loss, or neutral."""
+    outcome = str(result or "").strip().lower()
+    if outcome in MONITORING_OUTCOME_RESULTS:
+        return "neutral"
+    if outcome == "stop_loss":
+        return "loss"
+    if was_profitable is True and outcome not in MONITORING_OUTCOME_RESULTS:
+        return "win"
+    if outcome in {"tp1_hit", "tp2_hit"}:
+        return "win"
+    if outcome in {"breakeven_stop", "trailing_stop", "emergency_exit", "ambiguous_exit"}:
+        if was_profitable is True or (pnl_r_multiple is not None and pnl_r_multiple > 0.0):
+            return "win"
+        if was_profitable is False or (pnl_r_multiple is not None and pnl_r_multiple < 0.0):
+            return "loss"
+        return "neutral"
+    if activated_at is not None:
+        if was_profitable is True:
+            return "win"
+        if was_profitable is False:
+            return "loss"
+        return "neutral"
+    if outcome in EXECUTED_OUTCOME_RESULTS:
+        if pnl_r_multiple is not None and pnl_r_multiple > 0.0:
+            return "win"
+        if pnl_r_multiple is not None and pnl_r_multiple < 0.0:
+            return "loss"
+    return "neutral"
+
+
+def aggregate_setup_stats(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Aggregate signal_outcomes rows into per-setup win/loss stats."""
+    buckets: dict[str, dict[str, float | int]] = {}
+
+    for row in rows:
+        setup_id = str(row.get("setup_id") or "unknown")
+        bucket = buckets.setdefault(
+            setup_id,
+            {
+                "wins": 0,
+                "losses": 0,
+                "r_sum": 0.0,
+                "r_count": 0,
+                "pnl_sum": 0.0,
+                "pnl_count": 0,
+            },
+        )
+        was_raw = row.get("was_profitable")
+        was_profitable = None if was_raw is None else bool(was_raw)
+        kind = classify_outcome_result(
+            str(row.get("result") or ""),
+            was_profitable=was_profitable,
+            pnl_r_multiple=_normalized_float(row.get("pnl_r_multiple")),
+            activated_at=row.get("activated_at"),
+        )
+        if kind == "win":
+            bucket["wins"] = int(bucket["wins"]) + 1
+        elif kind == "loss":
+            bucket["losses"] = int(bucket["losses"]) + 1
+        else:
+            continue
+
+        r_mult = _normalized_float(row.get("pnl_r_multiple"))
+        if r_mult is not None:
+            bucket["r_sum"] = float(bucket["r_sum"]) + r_mult
+            bucket["r_count"] = int(bucket["r_count"]) + 1
+        pnl_pct = _normalized_float(row.get("pnl_pct"))
+        if pnl_pct is not None:
+            bucket["pnl_sum"] = float(bucket["pnl_sum"]) + pnl_pct
+            bucket["pnl_count"] = int(bucket["pnl_count"]) + 1
+
+    result: list[dict[str, Any]] = []
+    for setup_id, bucket in buckets.items():
+        wins = int(bucket["wins"])
+        losses = int(bucket["losses"])
+        closed = wins + losses
+        r_count = int(bucket["r_count"])
+        pnl_count = int(bucket["pnl_count"])
+        result.append(
+            {
+                "setup_id": setup_id,
+                "wins": wins,
+                "losses": losses,
+                "total": closed,
+                "win_rate": (wins / closed) if closed > 0 else 0.0,
+                "avg_r_multiple": (float(bucket["r_sum"]) / r_count) if r_count > 0 else 0.0,
+                "avg_pnl_pct": (float(bucket["pnl_sum"]) / pnl_count) if pnl_count > 0 else 0.0,
+            }
+        )
+    result.sort(key=lambda item: (-int(item["total"]), str(item["setup_id"])))
+    return result
 
 
 def _normalized_float(value: Any, default: float | None = None) -> float | None:
@@ -54,102 +183,8 @@ def _round_metric(value: Any, digits: int = 4) -> float:
 
 
 def build_prepared_feature_snapshot(prepared: Any) -> dict[str, Any]:
-    """Build a normalized feature snapshot from PreparedSymbol-like data."""
-    if prepared is None:
-        return normalize_public_feature_payload(dict.fromkeys(PUBLIC_FEATURE_FIELDS))
-
-    features: dict[str, Any] = {}
-
-    def _frame_value(frame: Any, column: str) -> float | None:
-        if frame is None or getattr(frame, "is_empty", lambda: True)():
-            return None
-        if column not in getattr(frame, "columns", []):
-            return None
-        try:
-            return _normalized_float(frame.item(-1, column))
-        except DEFENSIVE_EXC as exc:
-            LOG.debug("prepared feature snapshot read failed | column=%s error=%s", column, exc)
-            return None
-
-    def _ema_stack(frame: Any, fast: str, slow: str) -> bool | None:
-        fast_value = _frame_value(frame, fast)
-        slow_value = _frame_value(frame, slow)
-        if fast_value is None or slow_value is None or slow_value <= 0.0:
-            return None
-        return fast_value > slow_value
-
-    work_15m = getattr(prepared, "work_15m", None)
-    work_1h = getattr(prepared, "work_1h", None)
-    work_4h = getattr(prepared, "work_4h", None)
-
-    features["rsi_15m"] = _frame_value(work_15m, "rsi14")
-    features["rsi_1h"] = _frame_value(work_1h, "rsi14")
-    features["rsi_4h"] = _frame_value(work_4h, "rsi14")
-    features["adx_1h"] = _frame_value(work_1h, "adx14")
-    features["adx_4h"] = _frame_value(work_4h, "adx14")
-    features["atr_pct_15m"] = _frame_value(work_15m, "atr_pct")
-    features["volume_ratio_15m"] = _frame_value(work_15m, "volume_ratio20")
-    features["macd_histogram_15m"] = _frame_value(work_15m, "macd_hist")
-
-    features["ema20_above_ema50_15m"] = _normalized_bool(_ema_stack(work_15m, "ema20", "ema50"))
-    features["ema50_above_ema200_15m"] = _normalized_bool(_ema_stack(work_15m, "ema50", "ema200"))
-    features["ema20_above_ema50_1h"] = _normalized_bool(_ema_stack(work_1h, "ema20", "ema50"))
-    features["ema50_above_ema200_1h"] = _normalized_bool(_ema_stack(work_1h, "ema50", "ema200"))
-
-    features["supertrend_dir_1h"] = _frame_value(work_1h, "supertrend_dir")
-    features["supertrend_dir_15m"] = _frame_value(work_15m, "supertrend_dir")
-    features["obv_above_ema_15m"] = _frame_value(work_15m, "obv_above_ema")
-    features["bb_pct_b_15m"] = _frame_value(work_15m, "bb_pct_b")
-    features["bb_width_15m"] = _frame_value(work_15m, "bb_width")
-
-    features["funding_rate"] = _normalized_float(getattr(prepared, "funding_rate", None))
-    features["oi_current"] = _normalized_float(getattr(prepared, "oi_current", None))
-    features["oi_change_pct"] = _normalized_float(getattr(prepared, "oi_change_pct", None))
-    features["oi_slope_5m"] = _normalized_float(getattr(prepared, "oi_slope_5m", None))
-    features["ls_ratio"] = _normalized_float(getattr(prepared, "ls_ratio", None))
-    features["global_ls_ratio"] = _normalized_float(getattr(prepared, "global_ls_ratio", None))
-    features["top_trader_position_ratio"] = _normalized_float(
-        getattr(prepared, "top_trader_position_ratio", None)
-    )
-    features["top_vs_global_ls_gap"] = _normalized_float(
-        getattr(prepared, "top_vs_global_ls_gap", None)
-    )
-    features["liquidation_score"] = _normalized_float(getattr(prepared, "liquidation_score", None))
-    features["mark_index_spread_bps"] = _normalized_float(
-        getattr(prepared, "mark_index_spread_bps", None)
-    )
-    features["premium_zscore_5m"] = _normalized_float(getattr(prepared, "premium_zscore_5m", None))
-    features["premium_slope_5m"] = _normalized_float(getattr(prepared, "premium_slope_5m", None))
-    features["context_snapshot_age_seconds"] = _normalized_float(
-        getattr(prepared, "context_snapshot_age_seconds", None)
-    )
-    features["depth_imbalance"] = _normalized_float(getattr(prepared, "depth_imbalance", None))
-    features["microprice_bias"] = _normalized_float(getattr(prepared, "microprice_bias", None))
-    features["agg_trade_delta_30s"] = _normalized_float(
-        getattr(prepared, "agg_trade_delta_30s", None)
-    )
-    features["aggression_shift"] = _normalized_float(getattr(prepared, "aggression_shift", None))
-    features["spot_lead_return_1m"] = _normalized_float(
-        getattr(prepared, "spot_lead_return_1m", None)
-    )
-    features["spot_futures_spread_bps"] = _normalized_float(
-        getattr(prepared, "spot_futures_spread_bps", None)
-    )
-    features["mark_price_age_seconds"] = _normalized_float(
-        getattr(prepared, "mark_price_age_seconds", None)
-    )
-    features["ticker_price_age_seconds"] = _normalized_float(
-        getattr(prepared, "ticker_price_age_seconds", None)
-    )
-    features["book_ticker_age_seconds"] = _normalized_float(
-        getattr(prepared, "book_ticker_age_seconds", None)
-    )
-    features["data_source_mix"] = (
-        getattr(prepared, "data_source_mix", "futures_only") or "futures_only"
-    )
-    features["market_regime"] = getattr(prepared, "market_regime", "neutral") or "neutral"
-
-    return normalize_public_feature_payload(features)
+    """Backward-compatible alias for ``build_public_feature_snapshot``."""
+    return build_public_feature_snapshot(prepared)
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,7 +232,7 @@ class SignalFeatures:
     direction: str = ""
     timeframe: str = ""
 
-    # Advanced indicators from prepared Polars/polars_ta feature layers.
+    # Advanced indicators from prepared Polars feature frame (`prepare_frame.py`).
     supertrend_dir_1h: float | None = None
     supertrend_dir_15m: float | None = None
     obv_above_ema_15m: float | None = None
@@ -374,6 +409,8 @@ def extract_features_from_signal(
     llm_reason: str | None = None,
 ) -> SignalFeatures:
     """Извлекает признаки из сигнала для последующего сохранения."""
+    if prepared_data is not None:
+        validate_public_feature_payload(prepared_data)
     return SignalFeatures(
         base_score=_metric(signal.score),
         llm_verdict=llm_verdict,
@@ -529,6 +566,21 @@ def create_outcome_from_tracked(
     elif features.llm_verdict == "NO":
         llm_was_correct = not was_profitable
 
+    feature_payload = features.to_dict()
+    if str(outcome_result or "") in {"stop_loss", "breakeven_stop", "trailing_stop"}:
+        feature_payload["score"] = feature_payload.get("score") or getattr(tracked, "score", None)
+        sl_diag = classify_stop_loss_root_cause(
+            direction=tracked.direction,
+            mfe=max_profit_pct,
+            mae=max_loss_pct,
+            time_to_entry_min=time_to_entry_min,
+            time_to_exit_min=time_to_exit_min,
+            features=feature_payload,
+        )
+        feature_payload["sl_root_cause"] = sl_diag["code"]
+        feature_payload["sl_root_cause_label"] = sl_diag["label"]
+        feature_payload["sl_diagnostics"] = sl_diag
+
     res = getattr(tracked, "result", "")
     return SignalOutcome(
         signal_id=tracked.tracking_id,
@@ -552,7 +604,7 @@ def create_outcome_from_tracked(
         mfe=max_profit_pct,  # Упрощенно
         time_to_entry_min=time_to_entry_min,
         time_to_exit_min=time_to_exit_min,
-        features=features.to_dict(),
+        features=feature_payload,
         was_profitable=was_profitable,
         llm_was_correct=llm_was_correct,
         setup_quality=setup_quality,

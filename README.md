@@ -65,7 +65,8 @@ Extras:
 | `dev` | `pip install -e ".[dev]"` | ruff, mypy, pre-commit |
 | `test` | `pip install -e ".[test]"` | pytest |
 | `regime` | `pip install -e ".[regime]"` | Optional HMM/GMM regime |
-| `ml` | `pip install -e ".[ml]"` | Offline experiments only |
+
+Improvement backlog (agent hours, not weeks): [docs/IMPROVEMENT_PLAN.md](docs/IMPROVEMENT_PLAN.md)
 
 Verify imports: `python scripts/verify_dependencies.py`
 

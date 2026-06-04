@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, ClassVar
 from ..features import _swing_points
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.spec_runtime import run_setup_detection
+from ._roadmap import _confirmed_context_conflict
 
 if TYPE_CHECKING:
     import polars as pl
@@ -24,6 +25,7 @@ def detect_regular_divergence(
     frame: pl.DataFrame,
     *,
     timeframe: str = "15m",
+    setup_id: str = "indicator_divergence",
     require_oversold: bool = False,
 ) -> SpecHit | None:
     work = with_spec_columns(frame)
@@ -40,7 +42,7 @@ def detect_regular_divergence(
             and new["indicator"] > old["indicator"]
             and (not require_oversold or min(old["indicator"], new["indicator"]) < 35.0)
         ):
-            strategy = "rsi_divergence_bottom" if require_oversold else "indicator_divergence"
+            strategy = setup_id
             return SpecHit(
                 strategy=strategy,
                 direction="long",
@@ -59,7 +61,7 @@ def detect_regular_divergence(
         old, new = highs[-2], highs[-1]
         if new["price"] > old["price"] and new["indicator"] < old["indicator"]:
             return SpecHit(
-                strategy="indicator_divergence",
+                strategy=setup_id,
                 direction="short",
                 entry=as_float(work.item(-1, "close")),
                 stop_basis=new["price"],
@@ -217,6 +219,11 @@ def _detect_indicator_divergence_extended(
             bearish_votes=len(bearish_votes),
             min_indicator_votes=min_votes,
         )
+        return None
+
+    # Divergence is counter-trend capable — only penalize strong 1h conflict (2+ votes).
+    if _confirmed_context_conflict(prepared, direction):
+        _reject(prepared, setup_id, "htf_context_conflict", direction=direction)
         return None
 
     sl_buffer = float(params["sl_buffer_atr"])

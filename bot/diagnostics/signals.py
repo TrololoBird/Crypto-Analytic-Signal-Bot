@@ -54,6 +54,8 @@ class _SignalDiagnosticWindow:
     candidates_by_setup: Counter[str] = field(default_factory=Counter)
     delivered_by_setup: Counter[str] = field(default_factory=Counter)
     stage_rejects: Counter[str] = field(default_factory=Counter)
+    routing_skips_by_reason: Counter[str] = field(default_factory=Counter)
+    routing_skips_by_setup: Counter[str] = field(default_factory=Counter)
     atr_samples_by_setup: dict[str, dict[str, list[float]]] = field(default_factory=dict)
 
     def total_detector_runs(self) -> int:
@@ -141,6 +143,16 @@ class SignalDiagnostics:
             window.confirmation_rejects_by_setup[setup] += 1
             window.confirmation_rejects_by_reason[reject_reason] += 1
             window.stage_rejects["confirmation"] += 1
+
+    def record_routing_skip(self, setup_id: str, reason: str) -> None:
+        """Record an engine routing skip (lane exclusion, fit filter, schedule)."""
+        setup = _clean_key(setup_id)
+        reject_reason = _clean_key(reason)
+        with self._lock:
+            window = self._current_window_unlocked()
+            window.routing_skips_by_setup[setup] += 1
+            window.routing_skips_by_reason[reject_reason] += 1
+            window.stage_rejects["routing_skip"] += 1
 
     def record_stale_symbol(self, symbol: str) -> None:
         """Record a symbol with stale required market data."""
@@ -491,6 +503,9 @@ class SignalDiagnostics:
             ),
             "confirmation_rejects_by_setup": _counter_to_dict(window.confirmation_rejects_by_setup),
             "stage_rejects": _counter_to_dict(window.stage_rejects),
+            "routing_skips_by_reason": _counter_to_dict(window.routing_skips_by_reason),
+            "routing_skips_by_setup": _counter_to_dict(window.routing_skips_by_setup),
+            "routing_skips_total": int(sum(window.routing_skips_by_reason.values())),
             "candidates_by_setup": _counter_to_dict(window.candidates_by_setup),
             "delivered_by_setup": _counter_to_dict(window.delivered_by_setup),
             "symbols_with_zero_detectors": _sorted_set(window.symbols_with_zero_detectors),

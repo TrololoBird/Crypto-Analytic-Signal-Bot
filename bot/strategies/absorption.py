@@ -32,25 +32,8 @@ def detect_absorption(frame: pl.DataFrame, *, timeframe: str = "15m") -> SpecHit
     delta = finite_or_none(prev.get("spec_delta"))
     delta_mean = finite_or_none(prev.get("spec_abs_delta_mean20"))
     threshold_mult = 2.0
-    delta_source = "spec_delta"
     if delta is None:
-        proxy_window = work.tail(22).head(20)
-        volume = proxy_window["volume"].cast(pl.Float64, strict=False)
-        valid_volume = volume.replace(0.0, None)
-        open_ = proxy_window["open"].cast(pl.Float64, strict=False)
-        close = proxy_window["close"].cast(pl.Float64, strict=False)
-        # proxy: normalized price-move per unit volume when real public delta is unavailable
-        proxy = (close - open_) / valid_volume
-        delta_proxy = finite_or_none(proxy.tail(1).mean())
-        delta_mean = finite_or_none(proxy.abs().mean())
-        if delta_proxy is None or delta_mean is None:
-            return None
-        # relax threshold by 0.5x for proxy vs. real delta
-        if abs(delta_proxy) < delta_mean * 0.5:
-            return None
-        delta = delta_proxy
-        threshold_mult = 1.5
-        delta_source = "ohlcv_body_volume_proxy"
+        return None
     if delta_mean is None:
         return None
     atr = as_float(prev.get("spec_atr14"), latest.get("spec_atr14", 0.0))
@@ -71,7 +54,7 @@ def detect_absorption(frame: pl.DataFrame, *, timeframe: str = "15m") -> SpecHit
             timeframe=timeframe,
             reasons=(
                 f"sell_delta_absorbed delta_x={abs(delta) / delta_mean:.2f}",
-                f"delta_source={delta_source}",
+                "delta_source=spec_delta",
             ),
             structure_clarity=min(1.0, abs(delta) / max(delta_mean * 4.0, 1e-8)),
             vol_ratio=latest.get("volume_ratio20", 1.0),
@@ -87,7 +70,7 @@ def detect_absorption(frame: pl.DataFrame, *, timeframe: str = "15m") -> SpecHit
             timeframe=timeframe,
             reasons=(
                 f"buy_delta_absorbed delta_x={abs(delta) / delta_mean:.2f}",
-                f"delta_source={delta_source}",
+                "delta_source=spec_delta",
             ),
             structure_clarity=min(1.0, abs(delta) / max(delta_mean * 4.0, 1e-8)),
             vol_ratio=latest.get("volume_ratio20", 1.0),
@@ -119,6 +102,9 @@ def detect_absorption_prepared(
 
     # FIX 2026-05-21: a strict spec miss must not bypass the configured
     # orderflow/candle absorption fallback below.
+    if prepared.agg_trade_delta_30s is None:
+        _reject(prepared, setup_id, "orderflow_missing")
+        return None
     flow, flow_source = _flow_delta_with_source(prepared)
     if flow is None:
         _reject(prepared, setup_id, "orderflow_delta_missing")

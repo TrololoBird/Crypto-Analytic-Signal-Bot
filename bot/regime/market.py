@@ -18,6 +18,11 @@ if TYPE_CHECKING:
 
 LOG = logging.getLogger("bot.market_regime")
 
+# Shared bear labels for delivery confluence (BTC/global — not alt HTF regime).
+BEAR_BIAS_VALUES: frozenset[str] = frozenset({"downtrend", "bear"})
+BEAR_MARKET_REGIMES: frozenset[str] = frozenset({"bear", "decline", "risk_off"})
+BEAR_MACRO_RISK_MODES: frozenset[str] = frozenset({"risk_off", "risk-off"})
+
 
 @dataclass(frozen=True)
 class MarketRegimeResult:
@@ -77,8 +82,17 @@ class MarketRegimeAnalyzer:
         self.settings = settings
         self._last_result: MarketRegimeResult | None = None
         self._last_update_ts: float = 0.0
-        self._cache_ttl_seconds = 60.0  # Recalculate every minute
+        intelligence = getattr(settings, "intelligence", None)
+        refresh_seconds = int(getattr(intelligence, "refresh_interval_seconds", 60) or 60)
+        self._cache_ttl_seconds = float(max(30, min(refresh_seconds, 3600)))
         self._composite = CompositeRegimeAnalyzer()
+
+    @property
+    def cache_age_seconds(self) -> float:
+        """Monotonic age of the cached regime result (0 when never analyzed)."""
+        if self._last_update_ts <= 0.0:
+            return 0.0
+        return max(0.0, time.monotonic() - self._last_update_ts)
 
     def analyze(
         self,

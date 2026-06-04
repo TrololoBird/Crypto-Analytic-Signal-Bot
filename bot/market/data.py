@@ -13,6 +13,7 @@ import polars as pl
 from .rate_limit import (
     REST_WEIGHT_CRITICAL_LIMIT,
     REST_WEIGHT_HARD_LIMIT,
+    REST_WEIGHT_PACE_LIMIT,
     REST_WEIGHT_SOFT_LIMIT,
 )
 
@@ -57,6 +58,7 @@ def rest_global_semaphore() -> asyncio.Semaphore:
 
 
 _REST_WEIGHT_SOFT_LIMIT = REST_WEIGHT_SOFT_LIMIT
+_REST_WEIGHT_PACE_LIMIT = REST_WEIGHT_PACE_LIMIT
 _REST_WEIGHT_HARD_LIMIT = REST_WEIGHT_HARD_LIMIT
 _REST_WEIGHT_CRITICAL_LIMIT = REST_WEIGHT_CRITICAL_LIMIT
 
@@ -659,6 +661,21 @@ class BinanceFuturesMarketData:
         self, symbol: str, period: str = "1h", max_age_s: float = 1800.0
     ) -> float | None:
         return self._binance_client.get_cached_basis(symbol, period, max_age_s)
+
+    def get_rest_enrichment_stale_flags(
+        self,
+        symbol: str,
+        *,
+        ls_period: str = "1h",
+        basis_period: str = "1h",
+        basis_stats_period: str = "5m",
+    ) -> tuple[str, ...]:
+        return self._binance_client.get_rest_enrichment_stale_flags(
+            symbol,
+            ls_period=ls_period,
+            basis_period=basis_period,
+            basis_stats_period=basis_stats_period,
+        )
 
     async def fetch_symbol_frames(self, symbol: str) -> SymbolFrames:
         return await self._binance_client.fetch_symbol_frames(symbol)

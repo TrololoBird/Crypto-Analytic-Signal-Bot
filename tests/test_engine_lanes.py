@@ -72,7 +72,7 @@ def _twenty_family_registry() -> _MockRegistry:
     return _MockRegistry(metadata)
 
 
-def test_family_cap_limits_unique_families() -> None:
+def test_family_cap_limits_lane_count() -> None:
     registry = _twenty_family_registry()
     settings = _settings(
         min_setup_families_per_symbol=8,
@@ -87,12 +87,55 @@ def test_family_cap_limits_unique_families() -> None:
         strategy_fits=[m.strategy_id for m in registry.list_enabled()],
     )
     assert len(result) == 12
-    families = [m.family for m in result]
-    assert len(families) == len(set(families))
-    assert "continuation" in families
-    assert all(m.strategy_id != "strategy_dup_continuation" for m in result)
-    continuation = next(m for m in result if m.family == "continuation")
-    assert continuation.strategy_id == "strategy_00"
+    continuation_ids = {m.strategy_id for m in result if m.family == "continuation"}
+    assert continuation_ids == {"strategy_00", "strategy_dup_continuation"}
+
+
+def test_two_setups_per_family_when_limit_allows() -> None:
+    registry = _MockRegistry(
+        [
+            _meta("continuation_a", family="continuation", trigger_tf="15m"),
+            _meta("continuation_b", family="continuation", trigger_tf="15m"),
+            _meta("reversal_a", family="reversal", trigger_tf="15m"),
+        ]
+    )
+    settings = _settings(
+        min_setup_families_per_symbol=8,
+        target_setup_families_per_symbol=8,
+        max_setup_families_per_symbol=15,
+    )
+    result = select_lane_setups(
+        registry,
+        symbol="BTCUSDT",
+        interval="15m",
+        settings=settings,
+        strategy_fits=["continuation_a", "continuation_b", "reversal_a"],
+    )
+    assert [m.strategy_id for m in result] == ["continuation_a", "continuation_b", "reversal_a"]
+
+
+def test_bb_squeeze_dropped_when_squeeze_setup_selected() -> None:
+    registry = _MockRegistry(
+        [
+            _meta("squeeze_setup", family="breakout", trigger_tf="15m"),
+            _meta("bb_squeeze", family="volatility", trigger_tf="15m"),
+            _meta("reversal_a", family="reversal", trigger_tf="15m"),
+        ]
+    )
+    settings = _settings(
+        min_setup_families_per_symbol=8,
+        target_setup_families_per_symbol=8,
+        max_setup_families_per_symbol=15,
+    )
+    result = select_lane_setups(
+        registry,
+        symbol="BTCUSDT",
+        interval="15m",
+        settings=settings,
+        strategy_fits=["squeeze_setup", "bb_squeeze", "reversal_a"],
+    )
+    ids = {m.strategy_id for m in result}
+    assert ids == {"squeeze_setup", "reversal_a"}
 
 
 def test_primary_matches_require_trigger_tf_equals_interval() -> None:
@@ -149,7 +192,7 @@ def test_apply_interval_filter_false_skips_interval_on_empty() -> None:
         apply_interval_filter=False,
     )
     assert len(result) == 10
-    assert len({m.family for m in result}) == 10
+    assert len(result) == len({m.strategy_id for m in result})
 
 
 def test_apply_interval_filter_true_empty_interval_returns_empty() -> None:
@@ -192,7 +235,7 @@ def test_non_standard_interval_without_filter_still_caps_families() -> None:
         apply_interval_filter=False,
     )
     assert len(result) == 8
-    assert len({m.family for m in result}) == 8
+    assert len(result) == len({m.strategy_id for m in result})
 
 
 @pytest.mark.parametrize(

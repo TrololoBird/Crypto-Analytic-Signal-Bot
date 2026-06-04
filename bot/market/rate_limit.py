@@ -10,6 +10,7 @@ from collections import deque
 LOG = logging.getLogger("bot.market.rate_limit")
 
 REST_WEIGHT_SOFT_LIMIT = 1800
+REST_WEIGHT_PACE_LIMIT = 1500  # proactive cap — stay below Binance 2400/min with headroom
 REST_WEIGHT_HARD_LIMIT = 2200
 REST_WEIGHT_CRITICAL_LIMIT = 2350
 
@@ -35,9 +36,10 @@ class SlidingWindowRateLimiter:
                     self._times.append(now)
                     return waited_s
                 sleep_s = max(0.0, (self._times[0] + self._window_seconds) - now) + 0.05
-                LOG.info(
+                log_fn = LOG.debug if sleep_s < 2.0 else LOG.info
+                log_fn(
                     (
-                        "futures-data request budget exhausted | sleeping=%.2fs label=%s "
+                        "futures-data request pacing | sleeping=%.2fs label=%s "
                         "used=%d limit=%d window=%.0fs"
                     ),
                     sleep_s,
@@ -82,10 +84,11 @@ class WeightBudgetManager:
                     return waited_s
                 oldest_ts = self._events[0][0] if self._events else now
                 sleep_s = max(0.0, (oldest_ts + self._window_seconds) - now) + 0.05
-                LOG.info(
+                log_fn = LOG.debug if sleep_s < 2.0 else LOG.info
+                log_fn(
                     (
-                        "REST weight budget exhausted | sleeping=%.2fs label=%s used=%d "
-                        "requested=%d limit=%d window=%.0fs"
+                        "REST weight pacing | sleeping=%.2fs label=%s used=%d "
+                        "requested=%d pace_limit=%d window=%.0fs"
                     ),
                     sleep_s,
                     label,
@@ -102,5 +105,6 @@ class WeightBudgetManager:
 _SlidingWindowRateLimiter = SlidingWindowRateLimiter
 _WeightBudgetManager = WeightBudgetManager
 _REST_WEIGHT_SOFT_LIMIT = REST_WEIGHT_SOFT_LIMIT
+_REST_WEIGHT_PACE_LIMIT = REST_WEIGHT_PACE_LIMIT
 _REST_WEIGHT_HARD_LIMIT = REST_WEIGHT_HARD_LIMIT
 _REST_WEIGHT_CRITICAL_LIMIT = REST_WEIGHT_CRITICAL_LIMIT

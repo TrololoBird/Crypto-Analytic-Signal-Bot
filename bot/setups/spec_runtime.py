@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, ClassVar
 
@@ -20,6 +21,8 @@ SetupSignalFn = Callable[
     [PreparedSymbol, BotSettings, dict[str, float], dict[str, float], str, str],
     Signal | None,
 ]
+
+LOG = logging.getLogger("bot.setups.spec_runtime")
 
 _FRAME_ATTR: dict[str, str] = {
     "15m": "work_15m",
@@ -116,7 +119,17 @@ def run_setup_detection(
     if signal is not None:
         return signal
     if extended_detect is None:
+        LOG.debug(
+            "%s: %s spec-only detection (extended_detect not wired)",
+            prepared.symbol,
+            setup_id,
+        )
         return None
+    LOG.debug(
+        "%s: %s spec miss — invoking extended_detect",
+        prepared.symbol,
+        setup_id,
+    )
     return extended_detect(prepared, settings, defaults, effective, setup_id, family)
 
 

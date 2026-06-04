@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Crypto Signal Bot Dashboard</title>
+  <title>Crypto Signal Bot — дашборд</title>
   <style>
     :root {
       color-scheme: dark;
@@ -159,8 +159,8 @@
       margin: 0 auto;
       padding: 22px;
     }
-    .section { display: none; }
-    .section.active { display: block; }
+    .main-section { display: none; }
+    .main-section.active { display: block; }
     .grid {
       display: grid;
       gap: 14px;
@@ -224,6 +224,43 @@
       font-size: 12px;
       min-height: 16px;
       overflow-wrap: anywhere;
+    }
+    .funnel-widget {
+      display: flex;
+      align-items: stretch;
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .funnel-stage {
+      flex: 1;
+      border: 1px solid var(--line-soft);
+      border-radius: 8px;
+      background: var(--panel-2);
+      padding: 12px 14px;
+      min-width: 0;
+    }
+    .funnel-stage-label {
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 8px;
+    }
+    .funnel-stage-value {
+      font-family: var(--mono);
+      font-size: 22px;
+      font-weight: 700;
+    }
+    .funnel-stage-delta {
+      margin-top: 6px;
+      color: var(--soft);
+      font-size: 11px;
+      font-family: var(--mono);
+    }
+    .funnel-arrow {
+      display: flex;
+      align-items: center;
+      color: var(--soft);
+      font-size: 18px;
+      padding-top: 18px;
     }
     .table {
       width: 100%;
@@ -403,6 +440,42 @@
       gap: 12px;
       flex-wrap: wrap;
     }
+    .panel-hint {
+      border: 1px solid var(--line-soft);
+      border-left: 4px solid var(--blue);
+      border-radius: 8px;
+      background: #0c1118;
+      padding: 12px 14px;
+      margin-bottom: 14px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+    .header-stats {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .diag-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-bottom: 14px;
+    }
+    .diag-tab {
+      border: 1px solid var(--line-soft);
+      background: var(--panel);
+      color: var(--muted);
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .diag-tab.active {
+      background: var(--panel-2);
+      color: var(--text);
+    }
+    .diag-section { display: none; }
+    .diag-section.active { display: block; }
 
     /* River / signal cards */
     .river-grid {
@@ -555,11 +628,83 @@
       .topbar { align-items: flex-start; flex-direction: column; }
       .brand { min-width: 0; }
       .toolbar { width: 100%; justify-content: space-between; }
-      .tabs { width: 100%; }
-      .main { padding: 14px; }
+      .toolbar .tabs { display: none; }
+      .main { padding: 14px 14px 72px; }
       .grid.kpi { grid-template-columns: 1fr 1fr; }
       .kpi-value { font-size: 21px; }
       .bar-row { grid-template-columns: 1fr; }
+      .mobile-nav {
+        display: flex;
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 30;
+        border-top: 1px solid var(--line-soft);
+        background: rgba(9, 11, 15, 0.98);
+        padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
+        justify-content: space-around;
+        gap: 2px;
+      }
+      .mobile-nav button {
+        flex: 1;
+        border: 0;
+        background: transparent;
+        color: var(--muted);
+        font-size: 11px;
+        padding: 6px 2px;
+        cursor: pointer;
+      }
+      .mobile-nav button.active { color: var(--text); }
+    }
+    .mobile-nav { display: none; }
+    .help-grid {
+      display: grid;
+      gap: 10px;
+      margin: 8px 0 12px;
+    }
+    .help-block {
+      border: 1px solid var(--line-soft);
+      border-radius: 8px;
+      padding: 10px 12px;
+      background: #0c1118;
+    }
+    .help-title {
+      font-size: 12px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 4px;
+    }
+    .help-body { font-size: 13px; line-height: 1.45; }
+    .detail-modal { max-width: 560px; width: 94%; }
+    .onboarding-card { max-width: 420px; }
+    .onboarding-dots {
+      display: flex;
+      gap: 6px;
+      justify-content: center;
+      margin: 14px 0;
+    }
+    .onboarding-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--line);
+    }
+    .onboarding-dot.active { background: var(--blue); }
+    .today-panel {
+      border: 1px solid var(--line-soft);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 14px;
+      margin-bottom: 14px;
+    }
+    .today-panel h2 {
+      margin: 0 0 10px;
+      font-size: 14px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
     }
   </style>
 </head>
@@ -569,34 +714,127 @@
       <div class="brand">
         <div>
           <h1>Crypto Signal Bot</h1>
-          <small>Signal-only analytics. No auto-trading.</small>
+          <small>Аналитика сигналов · без автоторговли</small>
         </div>
-        <span class="status-pill"><span id="status-dot" class="dot"></span><span id="status-text">connecting</span></span>
+        <span class="status-pill"><span id="status-dot" class="dot"></span><span id="status-text">подключение…</span></span>
+        <span class="header-stats">
+          <span class="badge" id="header-market-regime">рынок —</span>
+          <span class="badge" id="header-btc-bias">BTC —</span>
+          <span class="badge" id="header-shortlist">— пар</span>
+        </span>
       </div>
       <div class="toolbar">
-        <nav class="tabs" aria-label="Dashboard sections">
-          <button class="tab active" data-tab="overview" type="button">Overview</button>
-          <button class="tab" data-tab="funnel" type="button">Funnel</button>
-          <button class="tab" data-tab="audit" type="button">Audit</button>
-          <button class="tab" data-tab="shortlist" type="button">Shortlist</button>
-          <button class="tab" data-tab="strategies" type="button">Arena</button>
-          <button class="tab" data-tab="delivery" type="button">Delivery</button>
-          <button class="tab" data-tab="runtime" type="button">Engine</button>
-          <button class="tab" data-tab="river" type="button">River</button>
-          <button class="tab" data-tab="diary" type="button">Diary <span id="diary-badge" class="tab-badge" style="display:none">0</span></button>
-          <button class="tab" data-tab="lab" type="button">Confluence</button>
-          <button class="tab" data-tab="alerts" type="button">Alerts</button>
-          <button class="tab" data-tab="settings" type="button">Settings</button>
-          <button class="tab" data-tab="sandbox" type="button">Sandbox</button>
+        <nav class="tabs" aria-label="Разделы">
+          <button class="tab active" data-tab="signals" type="button">Сигналы</button>
+          <button class="tab" data-tab="tracking" type="button">Отслеживание<span id="tracking-badge" class="tab-badge" style="display:none"></span></button>
+          <button class="tab" data-tab="diary" type="button">Дневник<span id="diary-badge" class="tab-badge" style="display:none"></span></button>
+          <button class="tab" data-tab="market" type="button">Рынок</button>
+          <button class="tab" data-tab="diagnostics" type="button">Диагностика</button>
         </nav>
-        <button class="icon-button" id="refresh-button" type="button" title="Refresh (Ctrl+R)">↻</button>
+        <button class="icon-button" id="refresh-button" type="button" title="Обновить (Ctrl+R)">↻</button>
       </div>
     </header>
 
     <main class="main">
-      <!-- Overview -->
-      <section id="overview" class="section active">
+      <!-- Сигналы -->
+      <section id="signals" class="section main-section active">
+        <div class="today-panel">
+          <h2>Сегодня</h2>
+          <div class="grid four" id="today-kpis"></div>
+          <div id="funnel-hint-text" class="panel-hint" style="margin:12px 0 0;display:block"></div>
+          <div id="today-sl-hint" class="panel-hint" style="margin:8px 0 0;display:block;color:var(--muted)"></div>
+        </div>
+        <div class="panel" style="margin-bottom:14px">
+          <div class="panel-header">
+            <h2 class="panel-title">Состояние рынка</h2>
+            <span class="panel-subtitle">breadth · fear/greed · TF · leaders</span>
+          </div>
+          <div class="panel-body">
+            <div class="grid four" id="market-state-panel"></div>
+            <div id="market-context-detail" class="market-context-detail" style="margin-top:14px"></div>
+          </div>
+        </div>
+        <div class="panel" style="margin-bottom:14px">
+          <div class="panel-header">
+            <h2 class="panel-title">История (7 дней)</h2>
+            <span class="panel-subtitle">закрытые сигналы</span>
+          </div>
+          <div class="panel-body"><div id="signal-history" class="row-list"></div></div>
+        </div>
+        <div id="signals-hint" style="display:none"></div>
+        <div class="grid kpi" id="river-kpis"></div>
+        <div id="river-cards" class="river-grid" style="margin-top:14px"></div>
+      </section>
+
+      <!-- Отслеживание -->
+      <section id="tracking" class="section main-section">
+        <p class="muted" style="margin:0 0 14px">Сигналы, которые бот сейчас отслеживает: вход, стоп и цели.</p>
+        <div class="grid four" id="tracking-kpis"></div>
+        <div id="tracking-cards" class="river-grid" style="margin-top:14px"></div>
+      </section>
+
+      <!-- Дневник -->
+      <section id="diary" class="section main-section">
+        <p class="muted" style="margin:0 0 14px">Записывайте, взяли ли вы сигнал и чем закончилась сделка — для личной статистики.</p>
+        <div id="diary-analytics"></div>
+        <div class="grid two" style="margin-top:14px">
+          <div class="panel">
+            <div class="panel-header"><h2 class="panel-title">Календарь</h2><span class="panel-subtitle">результат по дням</span></div>
+            <div class="panel-body"><div id="diary-calendar" class="diary-calendar"></div></div>
+          </div>
+          <div class="panel">
+            <div class="panel-header"><h2 class="panel-title">Мои записи</h2><span class="panel-subtitle">последние сделки</span></div>
+            <div class="panel-body"><div id="diary-trades" class="row-list"></div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Рынок -->
+      <section id="market" class="section main-section">
+        <p class="muted" style="margin:0 0 14px">Общий контекст: когда сигналам можно больше доверять.</p>
+        <div class="grid four" id="weather-gauges"></div>
+        <div class="grid two" style="margin-top:14px">
+          <div class="panel">
+            <div class="panel-header"><h2 class="panel-title">Режим рынка</h2></div>
+            <div class="panel-body"><div id="weather-regime" class="row-list"></div></div>
+          </div>
+          <div class="panel">
+            <div class="panel-header"><h2 class="panel-title">Funding и OI</h2></div>
+            <div class="panel-body"><div id="weather-funding" class="row-list"></div></div>
+          </div>
+        </div>
+        <div class="grid two" style="margin-top:14px">
+          <div class="panel">
+            <div class="panel-header"><h2 class="panel-title">Торговые сессии (UTC)</h2></div>
+            <div class="panel-body"><div id="weather-sessions" class="row-list"></div></div>
+          </div>
+          <div class="panel">
+            <div class="panel-header"><h2 class="panel-title">Shortlist</h2><span class="panel-subtitle">топ монет бота</span></div>
+            <div class="panel-body"><div id="market-shortlist" class="row-list"></div></div>
+          </div>
+        </div>
+        <div class="panel" style="margin-top:14px;display:none">
+          <div class="panel-body"><canvas id="weather-sparkline" width="300" height="60"></canvas></div>
+        </div>
+      </section>
+
+      <!-- Диагностика (оператор) -->
+      <section id="diagnostics" class="section main-section">
+        <p class="muted" style="margin:0 0 10px">Технические метрики для отладки бота. Обычному пользователю не нужны.</p>
+        <nav class="diag-tabs" aria-label="Диагностика">
+          <button class="diag-tab active" data-diag="overview" type="button">Обзор</button>
+          <button class="diag-tab" data-diag="funnel" type="button">Воронка</button>
+          <button class="diag-tab" data-diag="audit" type="button">Аудит</button>
+          <button class="diag-tab" data-diag="shortlist" type="button">Shortlist</button>
+          <button class="diag-tab" data-diag="strategies" type="button">Стратегии</button>
+          <button class="diag-tab" data-diag="outcomes" type="button">Outcomes / SL</button>
+          <button class="diag-tab" data-diag="delivery" type="button">Доставка</button>
+          <button class="diag-tab" data-diag="runtime" type="button">Engine</button>
+        </nav>
+
+        <div id="diag-overview" class="diag-section active">
         <div class="grid kpi" id="overview-kpis"></div>
+        <div id="overview-funnel-widget" class="funnel-widget"></div>
         <div class="grid two" style="margin-top:14px">
           <div class="panel">
             <div class="panel-header"><h2 class="panel-title">Latest Cycles</h2><span id="cycle-run" class="panel-subtitle"></span></div>
@@ -607,10 +845,9 @@
             <div class="panel-body"><div id="overview-rejections" class="bar-list"></div></div>
           </div>
         </div>
-      </section>
+        </div>
 
-      <!-- Funnel -->
-      <section id="funnel" class="section">
+        <div id="diag-funnel" class="diag-section">
         <div class="grid kpi" id="funnel-kpis"></div>
         <div class="grid two" style="margin-top:14px">
           <div class="panel">
@@ -623,13 +860,20 @@
           </div>
         </div>
         <div class="panel" style="margin-top:14px">
+          <div class="panel-header"><h2 class="panel-title">Confluence Leg Failures</h2><span class="panel-subtitle">hard gate 3-of-5 · rejected.jsonl</span></div>
+          <div class="panel-body"><div id="confluence-legs" class="bar-list"></div></div>
+        </div>
+        <div class="panel" style="margin-top:14px">
+          <div class="panel-header"><h2 class="panel-title">Confluence by Profile</h2><span class="panel-subtitle">confirmation_profile × leg failures</span></div>
+          <div class="panel-body"><div id="confluence-legs-by-profile"></div></div>
+        </div>
+        <div class="panel" style="margin-top:14px">
           <div class="panel-header"><h2 class="panel-title">Latest Cycle Rows</h2></div>
           <div class="panel-body"><div id="cycle-table"></div></div>
         </div>
-      </section>
+        </div>
 
-      <!-- Audit -->
-      <section id="audit" class="section">
+        <div id="diag-audit" class="diag-section">
         <div class="grid kpi" id="audit-kpis"></div>
         <div class="grid two" style="margin-top:14px">
           <div class="panel">
@@ -644,10 +888,9 @@
             <div class="panel-body"><div id="audit-findings" class="finding-list"></div></div>
           </div>
         </div>
-      </section>
+        </div>
 
-      <!-- Shortlist -->
-      <section id="shortlist" class="section">
+        <div id="diag-shortlist" class="diag-section">
         <div class="grid kpi" id="shortlist-kpis"></div>
         <div class="panel" style="margin-top:14px">
           <div class="panel-header"><h2 class="panel-title">Priority Assets</h2><span class="panel-subtitle">BTC ETH SOL XAU XAG PAXG</span></div>
@@ -657,10 +900,9 @@
           <div class="panel-header"><h2 class="panel-title">Current Shortlist</h2><span id="shortlist-source" class="panel-subtitle"></span></div>
           <div class="panel-body"><div id="shortlist-table"></div></div>
         </div>
-      </section>
+        </div>
 
-      <!-- Strategies / Arena -->
-      <section id="strategies" class="section">
+        <div id="diag-strategies" class="diag-section">
         <div class="grid kpi" id="strategy-kpis"></div>
         <div class="grid two" style="margin-top:14px">
           <div class="panel">
@@ -672,10 +914,39 @@
             <div class="panel-body"><div id="zero-signal-list" class="row-list"></div></div>
           </div>
         </div>
-      </section>
+        </div>
 
-      <!-- Delivery -->
-      <section id="delivery" class="section">
+        <div id="diag-outcomes" class="diag-section">
+        <div class="grid kpi" id="outcomes-kpis"></div>
+        <div class="grid two" style="margin-top:14px">
+          <div class="panel">
+            <div class="panel-header"><h2 class="panel-title">Паттерны стопов</h2><span class="panel-subtitle">SQLite outcomes + tracking</span></div>
+            <div class="panel-body"><div id="outcomes-patterns" class="row-list"></div></div>
+          </div>
+          <div class="panel">
+            <div class="panel-header"><h2 class="panel-title">Win/Loss по стратегиям</h2></div>
+            <div class="panel-body"><div id="outcomes-setup-matrix"></div></div>
+          </div>
+        </div>
+        <div class="panel" style="margin-top:14px">
+          <div class="panel-header"><h2 class="panel-title">Рекомендации</h2></div>
+          <div class="panel-body"><div id="outcomes-recommendations" class="row-list"></div></div>
+        </div>
+        <div class="panel" style="margin-top:14px">
+          <div class="panel-header"><h2 class="panel-title">Причины stop loss</h2><span class="panel-subtitle">классификация при закрытии</span></div>
+          <div class="panel-body"><div id="outcomes-sl-causes" class="row-list"></div></div>
+        </div>
+        <div class="panel" style="margin-top:14px">
+          <div class="panel-header"><h2 class="panel-title">Mobile / iPhone</h2><span class="panel-subtitle">тот же Wi‑Fi · Safari</span></div>
+          <div class="panel-body"><div id="outcomes-mobile" class="row-list"></div></div>
+        </div>
+        <div class="panel" style="margin-top:14px">
+          <div class="panel-header"><h2 class="panel-title">Последние stop loss</h2></div>
+          <div class="panel-body"><div id="outcomes-recent-sl"></div></div>
+        </div>
+        </div>
+
+        <div id="diag-delivery" class="diag-section">
         <div class="grid two">
           <div class="panel">
             <div class="panel-header"><h2 class="panel-title">Telegram Preview</h2><span class="panel-subtitle">safe HTML contract</span></div>
@@ -689,10 +960,9 @@
             <div class="panel-body"><div id="delivery-list" class="row-list"></div></div>
           </div>
         </div>
-      </section>
+        </div>
 
-      <!-- Runtime / Engine Room -->
-      <section id="runtime" class="section">
+        <div id="diag-runtime" class="diag-section">
         <div class="grid three">
           <div class="panel">
             <div class="panel-header"><h2 class="panel-title">WebSocket</h2></div>
@@ -707,182 +977,52 @@
             <div class="panel-body"><pre id="diagnostics-json" class="json-box"></pre></div>
           </div>
         </div>
-      </section>
-
-      <!-- River (Module 1) -->
-      <section id="river" class="section">
-        <div class="grid kpi" id="river-kpis"></div>
-        <div class="panel" style="margin-top:14px">
-          <div class="panel-header"><h2 class="panel-title">Live Signal Feed</h2><span class="panel-subtitle">real-time via WebSocket</span></div>
-          <div class="panel-body"><div id="river-cards" class="river-grid"></div></div>
+        <div class="panel" id="telemetry-mismatch-panel" style="margin-top:14px;display:none">
+          <div class="panel-header">
+            <h2 class="panel-title">Telemetry Mismatch</h2>
+            <span class="panel-subtitle">telemetry_mismatch.jsonl</span>
+          </div>
+          <div class="panel-body"><div id="telemetry-mismatch-counts" class="bar-list"></div></div>
         </div>
-      </section>
-
-      <!-- Diary (Module 6) -->
-      <section id="diary" class="section">
-        <div class="grid two">
-          <div class="panel">
-            <div class="panel-header"><h2 class="panel-title">Calendar</h2><span class="panel-subtitle">trade history</span></div>
-            <div class="panel-body"><div id="diary-calendar"></div></div>
-          </div>
-          <div class="panel">
-            <div class="panel-header"><h2 class="panel-title">Recent Trades</h2><span class="panel-subtitle">last 20 entries</span></div>
-            <div class="panel-body"><div id="diary-trades" class="row-list"></div></div>
-          </div>
-        </div>
-        <div class="panel" style="margin-top:14px">
-          <div class="panel-header"><h2 class="panel-title">Analytics</h2><span class="panel-subtitle">performance summary</span></div>
-          <div class="panel-body" id="diary-analytics"></div>
-        </div>
-      </section>
-
-      <!-- Confluence Lab (Module 4) -->
-      <section id="lab" class="section">
-        <div class="grid kpi" style="margin-bottom:14px">
-          <div class="panel" style="grid-column:1/-1">
-            <div class="panel-header"><h2 class="panel-title">What-If Simulator</h2><span class="panel-subtitle">adjust confluence weights</span></div>
-            <div class="panel-body">
-              <div class="grid two">
-                <div>
-                  <div id="sim-sliders"></div>
-                  <div class="modal-buttons" style="margin-top:12px">
-                    <button class="primary" onclick="_onConfluenceSimulate()" style="padding:8px 16px;border:1px solid var(--blue);border-radius:6px;background:var(--blue);color:#fff;cursor:pointer">Simulate</button>
-                  </div>
-                  <div id="sim-status" style="margin-top:8px;font-size:12px"></div>
-                </div>
-                <div>
-                  <pre id="sim-result" class="json-box" style="max-height:200px">Click Simulate to run what-if analysis</pre>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="grid two">
-          <div class="panel">
-            <div class="panel-header"><h2 class="panel-title">Strategy Overview</h2><span class="panel-subtitle">41 strategies</span></div>
-            <div class="panel-body"><div id="confluence-strategies" class="grid four" style="gap:8px"></div></div>
-          </div>
-          <div class="panel">
-            <div class="panel-header"><h2 class="panel-title">Veto Log</h2><span class="panel-subtitle">top rejection reasons</span></div>
-            <div class="panel-body"><div id="confluence-vetos" class="row-list"></div></div>
-          </div>
-        </div>
-      </section>
-
-      <!-- Alerts (Module 9) -->
-      <section id="alerts" class="section">
-        <div class="grid kpi" id="alerts-kpis"></div>
-        <div class="panel" style="margin-top:14px">
-          <div class="panel-header"><h2 class="panel-title">Alert History</h2><span class="panel-subtitle">all events</span></div>
-          <div class="panel-body"><div id="alerts-list" class="finding-list"></div></div>
-        </div>
-      </section>
-
-      <!-- Settings (Module 10) -->
-      <section id="settings" class="section">
-        <div class="grid two">
-          <div class="panel">
-            <div class="panel-header"><h2 class="panel-title">Strategy Manager</h2><span class="panel-subtitle">toggle ON/OFF</span></div>
-            <div class="panel-body"><div id="settings-strategies" class="grid three" style="gap:6px"></div></div>
-          </div>
-          <div class="panel">
-            <div class="panel-header"><h2 class="panel-title">Confluence Weights</h2><span class="panel-subtitle">must sum to 100%</span></div>
-            <div class="panel-body">
-              <div id="settings-scoring" class="bar-list"></div>
-              <div id="scoring-status" style="margin-top:8px;font-size:12px;color:var(--soft)"></div>
-            </div>
-          </div>
-        </div>
-        <div class="grid two" style="margin-top:14px">
-          <div class="panel">
-            <div class="panel-header"><h2 class="panel-title">Killzone Editor</h2><span class="panel-subtitle">session boundaries UTC</span></div>
-            <div class="panel-body"><div id="settings-killzone" class="row-list"></div></div>
-          </div>
-          <div class="panel">
-            <div class="panel-header"><h2 class="panel-title">Diary Export</h2></div>
-            <div class="panel-body">
-              <button class="tab" onclick="window.open('/api/v1/diary/trades?limit=5000','_blank')" style="width:100%;padding:10px;border:1px solid var(--line);border-radius:6px">Export Trades JSON</button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- Sandbox (Module 7) -->
-      <section id="sandbox" class="section">
-        <div class="panel">
-          <div class="panel-header"><h2 class="panel-title">Historical Replay</h2><span class="panel-subtitle">sandbox simulation</span></div>
-          <div class="panel-body">
-            <div class="grid two">
-              <div>
-                <label style="display:block;margin-bottom:6px;color:var(--muted);font-size:12px">Hours to replay</label>
-                <input id="sandbox-hours" type="number" value="24" min="1" max="168" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--panel-2);color:var(--text)">
-                <div class="modal-buttons" style="margin-top:12px">
-                  <button class="primary" onclick="_onSandboxRun()" style="padding:8px 16px;border:1px solid var(--blue);border-radius:6px;background:var(--blue);color:#fff;cursor:pointer">Run Replay</button>
-                  <button onclick="_onSandboxPoll()" style="padding:8px 16px;border:1px solid var(--line);border-radius:6px;background:var(--panel-2);cursor:pointer">Poll Status</button>
-                </div>
-              </div>
-              <div>
-                <div id="sandbox-status" style="font-size:13px;color:var(--soft);margin-bottom:8px">Ready</div>
-                <pre id="sandbox-result" class="json-box" style="max-height:260px">Results appear here</pre>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- Weather (Module 5) -->
-      <section id="weather" class="section">
-        <div class="grid four" id="weather-gauges"></div>
-        <div class="grid two" style="margin-top:14px">
-          <div class="panel">
-            <div class="panel-header"><h2 class="panel-title">Market Regime</h2></div>
-            <div class="panel-body"><div id="weather-regime" class="row-list"></div></div>
-          </div>
-          <div class="panel">
-            <div class="panel-header"><h2 class="panel-title">Funding & Correlation</h2></div>
-            <div class="panel-body"><div id="weather-funding" class="row-list"></div></div>
-          </div>
-        </div>
-        <div class="grid two" style="margin-top:14px">
-          <div class="panel">
-            <div class="panel-header"><h2 class="panel-title">Session Quality</h2></div>
-            <div class="panel-body"><div id="weather-sessions" class="row-list"></div></div>
-          </div>
-          <div class="panel">
-            <div class="panel-header"><h2 class="panel-title">Volatility (ATR 24h)</h2></div>
-            <div class="panel-body"><canvas id="weather-sparkline" width="300" height="60"></canvas></div>
-          </div>
         </div>
       </section>
 
       <div class="footer">
-        <span id="last-update">Last update: never</span>
+        <span id="last-update">Обновлено: —</span>
         <span id="run-id" class="mono"></span>
       </div>
     </main>
+
+    <nav class="mobile-nav" aria-label="Мобильная навигация">
+      <button type="button" data-tab="signals" class="active">Сигналы</button>
+      <button type="button" data-tab="tracking">Отслеж.</button>
+      <button type="button" data-tab="diary">Дневник</button>
+      <button type="button" data-tab="market">Рынок</button>
+    </nav>
   </div>
 
-  <!-- Modal container (hidden by default) -->
-  <div id="modal-container" style="display:none"></div>
+  <div id="modal-container"></div>
 
-  <!-- JS modules -->
   <script src="/static/js/lib/chart.js"></script>
+  <script src="/static/js/signal_chart.js"></script>
+  <script src="/static/js/detail.js"></script>
+  <script src="/static/js/onboarding.js"></script>
   <script src="/static/js/app.js"></script>
+  <script src="/static/js/tabs/today.js"></script>
+  <script src="/static/js/tabs/market_state.js"></script>
+  <script src="/static/js/tabs/river.js"></script>
+  <script src="/static/js/tabs/tracking.js"></script>
+  <script src="/static/js/tabs/diary.js"></script>
+  <script src="/static/js/tabs/weather.js"></script>
+  <script src="/static/js/tabs/diagnostics.js"></script>
   <script src="/static/js/tabs/overview.js"></script>
   <script src="/static/js/tabs/funnel.js"></script>
   <script src="/static/js/tabs/audit.js"></script>
   <script src="/static/js/tabs/shortlist.js"></script>
   <script src="/static/js/tabs/strategies.js"></script>
+  <script src="/static/js/tabs/outcomes.js"></script>
   <script src="/static/js/tabs/delivery.js"></script>
   <script src="/static/js/tabs/runtime.js"></script>
-  <script src="/static/js/tabs/diary.js"></script>
-  <script src="/static/js/tabs/river.js"></script>
-  <script src="/static/js/tabs/weather.js"></script>
-  <script src="/static/js/tabs/confluence_lab.js"></script>
-  <script src="/static/js/tabs/settings.js"></script>
-  <script src="/static/js/tabs/alerts.js"></script>
-  <script src="/static/js/tabs/sandbox.js"></script>
-  <script src="/static/js/tabs/engine_room.js"></script>
   <script>
     document.addEventListener("DOMContentLoaded", () => App.init());
   </script>

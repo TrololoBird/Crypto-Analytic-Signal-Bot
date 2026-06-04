@@ -1,27 +1,116 @@
 from __future__ import annotations
 
-import csv
 import hashlib
 import json
 import logging
 import re
 import shutil
-import threading
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Mapping
 
 import polars as pl
 
-from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.runtime.errors import DEFENSIVE_EXC
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 LOG = logging.getLogger("bot.telemetry")
-_CSV_LOCKS_GUARD = threading.Lock()
-_CSV_LOCKS: dict[str, threading.Lock] = {}
-_CSV_COMPACT_CALLS: dict[str, int] = {}
-_CSV_LAST_TIME: dict[str, str] = {}
+
+
+def _parse_iso_datetime(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=UTC)
+    try:
+        parsed = datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def run_dir_started_at(run_dir: Path) -> datetime:
+    """Return run start time from ``run_metadata.json``, else directory mtime."""
+    metadata_path = run_dir / "run_metadata.json"
+    if metadata_path.exists():
+        try:
+            payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+            started = _parse_iso_datetime(payload.get("started_at"))
+            if started is not None:
+                return started
+        except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            LOG.debug("run_metadata started_at read failed | path=%s error=%s", metadata_path, exc)
+    try:
+        return datetime.fromtimestamp(run_dir.stat().st_mtime, tz=UTC)
+    except OSError:
+        return datetime.now(UTC)
+
+
+def slim_message_buffer_fields(snapshot: Mapping[str, Any] | None) -> dict[str, int]:
+    """Extract compact WS buffer counters for cycles.jsonl and live runtime."""
+    if not isinstance(snapshot, Mapping):
+        return {}
+    buf = snapshot.get("message_buffer")
+    if isinstance(buf, Mapping):
+        return {
+            "message_buffer_size": int(buf.get("size") or 0),
+            "message_buffer_dropped": int(buf.get("dropped") or 0),
+        }
+    size = snapshot.get("message_buffer_size")
+    dropped = snapshot.get("message_buffer_dropped")
+    if size is None and dropped is None:
+        buffer_count = snapshot.get("buffer_message_count")
+        if buffer_count is not None:
+            size = buffer_count
+    if size is None and dropped is None:
+        return {}
+    return {
+        "message_buffer_size": int(size or 0),
+        "message_buffer_dropped": int(dropped or 0),
+    }
+
+
+def apply_slim_message_buffer(row: dict[str, Any]) -> None:
+    """Promote buffer counters to top-level keys and drop nested ``message_buffer``."""
+    slim = slim_message_buffer_fields(row)
+    if slim:
+        row.update(slim)
+    row.pop("message_buffer", None)
+
+
+def _iter_jsonl(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    rows: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            rows.append(payload)
+    return rows
+
+
+def _cycle_delivery_success_count(row: Mapping[str, Any]) -> int:
+    success = row.get("delivery_success_count")
+    if success is not None:
+        try:
+            return int(success)
+        except (TypeError, ValueError):
+            pass
+    for key in ("delivered_count", "delivered_signals"):
+        value = row.get(key)
+        if value is not None:
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                continue
+    return 0
 
 
 def symbol_storage_dirname(symbol: str) -> str:
@@ -66,14 +155,10 @@ class TelemetryStore:
         self.raw_dir = self.base_dir / "raw"
         self.features_dir = self.base_dir / "features"
         self.replay_dir = self.base_dir / "replay"
-        self.market_dir = self.base_dir / "market_history"
-        self.market_dir.mkdir(parents=True, exist_ok=True)
         self.analysis_dir.mkdir(parents=True, exist_ok=True)
         self.raw_dir.mkdir(parents=True, exist_ok=True)
         self.features_dir.mkdir(parents=True, exist_ok=True)
         self.replay_dir.mkdir(parents=True, exist_ok=True)
-        self._candle_append_counts: dict[str, int] = {}
-        self._candle_last_time: dict[str, str] = {}
         if run_id:
             metadata_path = self.base_dir / "run_metadata.json"
             if not metadata_path.exists():
@@ -127,6 +212,8 @@ class TelemetryStore:
         return self._read_csv_tail(path, max_rows)
 
     def _append_jsonl_path(self, path: Path, row: dict[str, Any]) -> None:
+        if self.run_id and "run_id" not in row:
+            row = {**row, "run_id": self.run_id}
         path.parent.mkdir(parents=True, exist_ok=True)
         rotate_file_if_needed(path, self.rotation_max_mb)
         with path.open("a", encoding="utf-8") as handle:
@@ -167,140 +254,63 @@ class TelemetryStore:
             )
         ):
             return
-        self._append_jsonl_path(self.root_dir / "calibration_snapshots.jsonl", row)
+        calibration_path = (
+            self.base_dir / "calibration_snapshots.jsonl"
+            if self.run_id
+            else self.root_dir / "calibration_snapshots.jsonl"
+        )
+        self._append_jsonl_path(calibration_path, row)
 
-    def persist_candles(self, symbol: str, timeframe: str, df: pl.DataFrame, max_rows: int) -> None:
-        out_dir = self.market_dir / symbol_storage_dirname(symbol)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        path = out_dir / f"{timeframe}.csv"
-        frame = df.clone()
-        if frame.is_empty():
+    def collect_session_totals(self, *, extras: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        """Aggregate session counters from analysis JSONL for run metadata."""
+        cycles = _iter_jsonl(self.analysis_dir / "cycles.jsonl")
+        delivery_rows = _iter_jsonl(self.analysis_dir / "delivery.jsonl")
+        delivery_success_statuses = frozenset({"sent", "logged"})
+        delivery_success = sum(
+            1
+            for row in delivery_rows
+            if str(row.get("delivery_status") or row.get("status") or "").lower()
+            in delivery_success_statuses
+        )
+        totals: dict[str, Any] = {
+            "cycles": len(cycles),
+            "candidates": sum(int(row.get("candidate_count") or 0) for row in cycles),
+            "selected": sum(
+                int(row.get("selected_count") or row.get("selected_signals") or 0) for row in cycles
+            ),
+            "delivered_cycles": sum(_cycle_delivery_success_count(row) for row in cycles),
+            "delivery_success": delivery_success,
+            "delivery_attempts": len(delivery_rows),
+            "rejected": sum(int(row.get("rejected_count") or 0) for row in cycles),
+        }
+        if extras:
+            totals.update(dict(extras))
+        return totals
+
+    def finalize_run_metadata(self, *, session_totals: Mapping[str, Any]) -> None:
+        """Persist ``ended_at`` and session totals when a run-scoped store shuts down."""
+        if not self.run_id:
             return
-        # Convert time columns to string for consistent CSV storage
-        for column in ("time", "close_time"):
-            if column in frame.columns:
-                frame = frame.with_columns(pl.col(column).cast(pl.Utf8).alias(column))
-        frame = frame.unique(subset=["time"], keep="last").sort("time")
-        with self._csv_lock(path):
-            if not path.exists() or path.stat().st_size == 0:
-                initial = frame.tail(max_rows) if max_rows > 0 else frame
-                initial.write_csv(path)
-                self._remember_last_csv_time(path, initial)
-                self._candle_last_time[str(path)] = str(initial.item(-1, "time"))
-                return
-
-            path_key = str(path)
-            last_time = self._candle_last_time.get(path_key) or self._read_last_csv_time(path)
-            first_new_time = str(frame.item(0, "time"))
-            appended_avg_bytes = 0.0
-            if last_time is None or first_new_time <= last_time:
-                existing = self._read_csv_tail(path, max(max_rows * 3, 512))
-                merged = (
-                    frame
-                    if existing is None or existing.is_empty()
-                    else pl.concat(
-                        [existing, frame],
-                        how="diagonal_relaxed",
-                    )
-                )
-                merged = merged.unique(subset=["time"], keep="last").sort("time")
-                if max_rows > 0:
-                    merged = merged.tail(max_rows)
-                merged.write_csv(path)
-                self._remember_last_csv_time(path, merged)
-                if not merged.is_empty() and "time" in merged.columns:
-                    self._candle_last_time[path_key] = str(merged.item(-1, "time"))
-                self._candle_append_counts[path_key] = 0
-                return
-
-            # Fast path: the whole incoming frame is newer than the last stored
-            # candle, so append without reading and rewriting the full CSV.
-            if not frame.is_empty():
-                csv_payload = frame.write_csv(include_header=False)
-                appended_avg_bytes = len(csv_payload.encode("utf-8")) / max(frame.height, 1)
-                with path.open("a", encoding="utf-8", newline="") as handle:
-                    handle.write(csv_payload)
-                self._remember_last_csv_time(path, frame)
-                self._candle_last_time[path_key] = str(frame.item(-1, "time"))
-                self._candle_append_counts[path_key] = (
-                    self._candle_append_counts.get(path_key, 0) + 1
-                )
-            if max_rows > 0 and self._should_compact_csv(
-                path,
-                max_rows=max_rows,
-                appended_avg_bytes=appended_avg_bytes,
-            ):
-                self._compact_csv(path, max_rows)
-                tail = self._read_csv_tail(path, 1)
-                self._remember_last_csv_time(path, tail)
-                if tail is not None and not tail.is_empty() and "time" in tail.columns:
-                    self._candle_last_time[path_key] = str(tail.item(-1, "time"))
-
-    @staticmethod
-    def _csv_lock(path: Path) -> threading.Lock:
-        key = str(path)
-        with _CSV_LOCKS_GUARD:
-            lock = _CSV_LOCKS.get(key)
-            if lock is None:
-                lock = threading.Lock()
-                _CSV_LOCKS[key] = lock
-            return lock
-
-    @staticmethod
-    def _remember_last_csv_time(path: Path, frame: pl.DataFrame | None) -> None:
-        if frame is None or frame.is_empty() or "time" not in frame.columns:
-            return
-        value = frame["time"].cast(pl.Utf8).tail(1).item()
-        if value is not None:
-            _CSV_LAST_TIME[str(path)] = str(value)
-
-    @staticmethod
-    def _read_last_csv_time(path: Path) -> str | None:
-        if not path.exists() or path.stat().st_size == 0:
-            return None
-        try:
-            with path.open("r", encoding="utf-8", newline="") as handle:
-                reader = csv.DictReader(handle)
-                last: str | None = None
-                for row in reader:
-                    raw = row.get("time")
-                    if raw:
-                        last = str(raw)
-                if last:
-                    _CSV_LAST_TIME[str(path)] = last
-                return last
-        except (OSError, csv.Error):
-            return None
-
-    @staticmethod
-    def _should_compact_csv(
-        path: Path,
-        *,
-        max_rows: int,
-        appended_avg_bytes: float,
-    ) -> bool:
-        key = str(path)
-        calls = _CSV_COMPACT_CALLS.get(key, 0) + 1
-        _CSV_COMPACT_CALLS[key] = calls
-        if calls % 10 == 0:
-            return True
-        if max_rows <= 0 or appended_avg_bytes <= 0.0:
-            return False
-        try:
-            size = path.stat().st_size
-        except OSError:
-            return False
-        expected_size = max_rows * max(appended_avg_bytes, 128.0)
-        return size > expected_size * 2.0
-
-    def _compact_csv(self, path: Path, max_rows: int) -> None:
-        existing = self._read_csv_tail(path, max(max_rows * 3, 512))
-        if existing is None or existing.is_empty():
-            return
-        existing = existing.unique(subset=["time"], keep="last").sort("time")
-        if max_rows > 0:
-            existing = existing.tail(max_rows)
-        existing.write_csv(path)
+        metadata_path = self.base_dir / "run_metadata.json"
+        payload: dict[str, Any] = {
+            "run_id": self.run_id,
+            "started_at": self.started_at.isoformat(),
+            "schema_version": 2,
+        }
+        if metadata_path.exists():
+            try:
+                existing = json.loads(metadata_path.read_text(encoding="utf-8"))
+                if isinstance(existing, dict):
+                    payload.update(existing)
+            except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+                LOG.debug("run_metadata merge read failed | path=%s error=%s", metadata_path, exc)
+        payload["ended_at"] = datetime.now(UTC).isoformat()
+        payload["session_totals"] = dict(session_totals)
+        metadata_path.parent.mkdir(parents=True, exist_ok=True)
+        metadata_path.write_text(
+            json.dumps(payload, indent=2, ensure_ascii=True),
+            encoding="utf-8",
+        )
 
     def _read_csv_tail(self, path: Path, max_rows: int) -> pl.DataFrame | None:
         if not path.exists():

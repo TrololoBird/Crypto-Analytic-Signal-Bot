@@ -12,9 +12,23 @@ from typing import TYPE_CHECKING, Any
 import structlog
 
 try:
+    from scripts.clean_session_data import clean_session_artifacts
     from scripts.common import bootstrap_repo_path
+    from scripts.smoke_fail_fast import (
+        SmokeFailFastError,
+        SmokeFailFastGuard,
+        install_asyncio_exception_logging,
+        wait_for_runtime_or_abort,
+    )
 except ModuleNotFoundError:  # pragma: no cover
+    from clean_session_data import clean_session_artifacts
     from common import bootstrap_repo_path
+    from smoke_fail_fast import (
+        SmokeFailFastError,
+        SmokeFailFastGuard,
+        install_asyncio_exception_logging,
+        wait_for_runtime_or_abort,
+    )
 
 from bot.cli import configure_logging
 from bot.delivery.telegram import DeliveryResult
@@ -65,22 +79,13 @@ def _configure_logging(*, debug: bool = False) -> None:
     logging.captureWarnings(capture=True)
 
 
-def _install_asyncio_exception_logging() -> None:
-    loop = asyncio.get_running_loop()
-
-    def _log_exception(loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
-        del loop
-        msg = context.get("exception", context.get("message"))
-        logging.getLogger("asyncio").exception(
-            "Unhandled asyncio exception: %s",
-            msg,
-            exc_info=msg if isinstance(msg, BaseException) else None,
-        )
-
-    loop.set_exception_handler(_log_exception)
+def _install_asyncio_exception_logging(guard: SmokeFailFastGuard | None = None) -> None:
+    install_asyncio_exception_logging(guard=guard)
 
 
 def _fetch_active_signal_row(db_path: Path, tracking_id: str) -> dict[str, Any] | None:
+    if not db_path.exists():
+        return None
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     try:
@@ -91,6 +96,8 @@ def _fetch_active_signal_row(db_path: Path, tracking_id: str) -> dict[str, Any] 
             (tracking_id,),
         ).fetchone()
         return dict(row) if row is not None else None
+    except sqlite3.OperationalError:
+        return None
     finally:
         conn.close()
 
@@ -116,8 +123,13 @@ async def _run(
     final_emergency_timeout_seconds: float = 180.0,
     force_exit_on_close_timeout: bool = False,
     run_final_emergency_cycle: bool = True,
+    fail_fast: bool = True,
+    disable_http: bool = False,
 ) -> None:
-    os.environ.setdefault("BOT_DISABLE_HTTP_SERVERS", "1")
+    if disable_http:
+        os.environ["BOT_DISABLE_HTTP_SERVERS"] = "1"
+    else:
+        os.environ.pop("BOT_DISABLE_HTTP_SERVERS", None)
     settings = load_settings()
     before = _fetch_active_signal_row(settings.db_path, tracking_id)
     LOG.info(
@@ -126,16 +138,45 @@ async def _run(
         row=_sanitize_log_value(before) if before is not None else {},
     )
 
+    loop = asyncio.get_running_loop()
+    abort_event = asyncio.Event()
+    fail_fast_guard = SmokeFailFastGuard(loop=loop, abort_event=abort_event, enabled=fail_fast)
+    fail_fast_guard.install()
+
     bot = SignalBot(settings, broadcaster=FakeBroadcaster())
     runtime_task: asyncio.Task[None] | None = None
     try:
-        _install_asyncio_exception_logging()
+        _install_asyncio_exception_logging(fail_fast_guard if fail_fast else None)
         await bot.start()
+        if not disable_http:
+            host = settings.runtime.dashboard_host or "127.0.0.1"
+            port = settings.runtime.dashboard_port
+            LOG.info(
+                "live_smoke_dashboard",
+                url=f"http://{host}:{port}/",
+                metrics_port=9090,
+            )
+        fail_fast_guard.mark_startup_complete()
+        fail_fast_guard.raise_if_aborted()
         if runtime_seconds > 0.0:
             runtime_task = asyncio.create_task(bot.run_forever(), name="live_smoke_runtime")
-            await asyncio.sleep(runtime_seconds)
+            if await wait_for_runtime_or_abort(runtime_seconds, abort_event):
+                LOG.error(
+                    "live_smoke_fail_fast_abort",
+                    reason="runtime_window_interrupted",
+                    runtime_seconds=float(runtime_seconds),
+                )
+                fail_fast_guard.raise_if_aborted()
         else:
-            await asyncio.sleep(warmup_seconds)
+            if await wait_for_runtime_or_abort(warmup_seconds, abort_event):
+                LOG.error(
+                    "live_smoke_fail_fast_abort",
+                    reason="warmup_window_interrupted",
+                    warmup_seconds=float(warmup_seconds),
+                )
+                fail_fast_guard.raise_if_aborted()
+        if abort_event.is_set():
+            fail_fast_guard.raise_if_aborted()
         if run_final_emergency_cycle:
             try:
                 summary = await asyncio.wait_for(
@@ -197,6 +238,7 @@ async def _run(
             msg = f"mark price cache not warm in live smoke snapshot: {ws_snapshot}"
             raise RuntimeError(msg)
     finally:
+        fail_fast_guard.uninstall()
         bot.request_shutdown()
         if runtime_task is not None:
             try:
@@ -269,22 +311,55 @@ def main() -> None:
         action="store_true",
         help="DEBUG logs with func:line, asyncio loop debug, file log under data/bot/logs/",
     )
+    parser.add_argument(
+        "--keep-session-data",
+        action="store_true",
+        help="Do not wipe telemetry/live_watch/logs before the smoke run.",
+    )
+    parser.add_argument(
+        "--clean-mode",
+        choices=("telemetry", "smoke", "full"),
+        default="full",
+        help="Session cleanup mode before smoke (ignored with --keep-session-data).",
+    )
+    parser.add_argument(
+        "--no-fail-fast",
+        action="store_true",
+        help="Keep running the full runtime window even after WARNING/ERROR logs appear.",
+    )
+    parser.add_argument(
+        "--no-http",
+        action="store_true",
+        help="Disable embedded dashboard (:8080) and metrics (:9090) for this smoke run.",
+    )
     args = parser.parse_args()
 
+    bootstrap_repo_path()
+    settings = load_settings()
+    if not args.keep_session_data:
+        clean_session_artifacts(settings, mode=args.clean_mode)
     _configure_logging(debug=bool(args.debug))
     if args.debug:
         tracemalloc.start(25)
-    asyncio.run(
-        _run(
-            args.tracking_id,
-            args.warmup_seconds,
-            runtime_seconds=max(0.0, float(args.runtime_seconds)),
-            shutdown_timeout_seconds=max(1.0, float(args.shutdown_timeout_seconds)),
-            final_emergency_timeout_seconds=max(1.0, float(args.final_emergency_timeout_seconds)),
-            force_exit_on_close_timeout=bool(args.force_exit_on_close_timeout),
-            run_final_emergency_cycle=not bool(args.skip_final_emergency_cycle),
+    try:
+        asyncio.run(
+            _run(
+                args.tracking_id,
+                args.warmup_seconds,
+                runtime_seconds=max(0.0, float(args.runtime_seconds)),
+                shutdown_timeout_seconds=max(1.0, float(args.shutdown_timeout_seconds)),
+                final_emergency_timeout_seconds=max(
+                    1.0, float(args.final_emergency_timeout_seconds)
+                ),
+                force_exit_on_close_timeout=bool(args.force_exit_on_close_timeout),
+                run_final_emergency_cycle=not bool(args.skip_final_emergency_cycle),
+                fail_fast=not bool(args.no_fail_fast),
+                disable_http=bool(args.no_http),
+            )
         )
-    )
+    except SmokeFailFastError:
+        LOG.exception("live_smoke_fail_fast_exit")
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":

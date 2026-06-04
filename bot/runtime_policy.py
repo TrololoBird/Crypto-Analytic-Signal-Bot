@@ -54,3 +54,37 @@ def is_deep_analysis_symbol(prepared_or_symbol: Any, settings: Any | None = None
     resolved_settings = settings or getattr(prepared_or_symbol, "settings", None)
     asset_config = asset_config_for_symbol(resolved_settings, str(symbol or ""))
     return bool(getattr(asset_config, "deep_analysis", False))
+
+
+def effective_engine_score_floor(
+    settings: Any,
+    *,
+    prepared_or_symbol: Any | None = None,
+) -> float:
+    """Minimum score for engine best-signal selection (delivery-aligned)."""
+    delivery = getattr(settings, "delivery", None)
+    filters = getattr(settings, "filters", None)
+    watch_min = float(getattr(delivery, "watch_min_score", 0.0) or 0.0)
+    filter_min = float(getattr(filters, "min_score", 0.0) or 0.0)
+    positives = [value for value in (watch_min, filter_min) if value > 0.0]
+    floor = min(positives) if positives else 0.0
+
+    if prepared_or_symbol is not None and is_deep_analysis_symbol(prepared_or_symbol, settings):
+        symbol = getattr(prepared_or_symbol, "symbol", prepared_or_symbol)
+        primary_timeframe = configured_primary_timeframe(settings, str(symbol or ""))
+        deep_score_floor = 0.48 if primary_timeframe in {"1h", "4h"} else 0.50
+        floor = min(floor, deep_score_floor) if floor > 0.0 else deep_score_floor
+    return floor
+
+
+def effective_shortlist_unified_routing(
+    runtime: Any | None,
+    *,
+    shortlist_total: int = 0,
+) -> bool:
+    """True when unified shortlist routing is configured and the shortlist is non-empty."""
+    if runtime is None:
+        return False
+    if not bool(getattr(runtime, "shortlist_unified_routing", False)):
+        return False
+    return int(shortlist_total) > 0

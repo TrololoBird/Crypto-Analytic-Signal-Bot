@@ -11,11 +11,19 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from bot.domain.labels import normalize_reject_reason
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
 JsonDict = dict[str, Any]
 _SEV_RANK = {"critical": 0, "warning": 1, "info": 2}
+_LANE_EXPECTED_REJECTIONS = frozenset(
+    {
+        "shortlist_not_routed",
+        "runtime.strategy_lane_excluded",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,15 +66,24 @@ def _collect_findings(snap: Mapping[str, Any]) -> list[AuditFinding]:
     deliv = snap.get("delivery") or {}
     tg = snap.get("telegram") or {}
     rt = snap.get("runtime") or {}
+    unified_routing = bool(
+        rt.get("effective_shortlist_unified_routing", rt.get("shortlist_unified_routing"))
+    )
     totals = fn.get("cycle_totals") or {}
     cycles, detectors = _int(totals.get("cycles")), _int(totals.get("detector_runs"))
     candidates, delivered = _int(totals.get("candidates")), _int(totals.get("delivered"))
-    signal_rate = _float((fn.get("decisions") or {}).get("signal_rate"))
+    funnel_decisions = fn.get("decisions") or {}
+    signal_rate = _float(funnel_decisions.get("signal_rate"))
+    routed_signal_rate = _float(
+        funnel_decisions.get("routed_signal_rate", funnel_decisions.get("signal_rate"))
+    )
     total_sl, dynamic_sl = _int(sl.get("total")), _int(sl.get("dynamic"))
     zero_fit = _int(sl.get("zero_fit"))
     source = str(sl.get("source") or "unknown")
     last_c, last_d = _int(ov.get("last_cycle_candidates")), _int(ov.get("last_cycle_delivered"))
     dec_rows, dec_rate = _int(ov.get("decision_rows")), _float(ov.get("decision_signal_rate"))
+    delivery_provider = str(ov.get("delivery_provider") or "").strip().lower()
+    notifier_disabled = delivery_provider in {"", "none", "unknown"}
 
     _maybe(
         out,
@@ -98,19 +115,27 @@ def _collect_findings(snap: Mapping[str, Any]) -> list[AuditFinding]:
             "Inspect rejection stages before changing detectors.",
         ),
     )
-    _maybe(
-        out,
-        ok=not (last_c > 0 and last_d <= 0),
-        finding=AuditFinding(
-            "warning",
-            "overview",
-            "selection_delivery_gap",
-            "Last cycle selected candidates but delivered none.",
-            "Delivery gates, cooldown, or notifier may be blocking sends.",
-            {"last_cycle_candidates": last_c, "last_cycle_delivered": last_d},
-            "Inspect Delivery panel and notifier configuration.",
-        ),
-    )
+    if last_c > 0 and last_d <= 0:
+        delivery_sev = "info" if notifier_disabled else "warning"
+        out.append(
+            AuditFinding(
+                delivery_sev,
+                "overview",
+                "selection_delivery_gap",
+                "Last cycle selected candidates but delivered none.",
+                "Expected in local/log-only mode when notifier provider is none."
+                if notifier_disabled
+                else "Delivery gates, cooldown, or notifier may be blocking sends.",
+                {
+                    "last_cycle_candidates": last_c,
+                    "last_cycle_delivered": last_d,
+                    "delivery_provider": delivery_provider or "unknown",
+                },
+                "Set Telegram secrets and provider=telegram for live sends."
+                if notifier_disabled
+                else "Inspect Delivery panel and notifier configuration.",
+            )
+        )
     top_reason = str((ov.get("top_rejection") or {}).get("key") or "")
     if top_reason:
         out.append(
@@ -152,15 +177,21 @@ def _collect_findings(snap: Mapping[str, Any]) -> list[AuditFinding]:
     )
     _maybe(
         out,
-        ok=not (total_sl and zero_fit > total_sl * 0.25),
+        ok=not (total_sl and zero_fit > total_sl * 0.25) or unified_routing,
         finding=AuditFinding(
-            "critical",
+            "info" if unified_routing else "critical",
             "shortlist",
             "strategy_routing_empty",
-            "Many symbols lack strategy_fits.",
-            "Empty routing skips detectors.",
-            {"zero_fit": zero_fit, "total": total_sl},
-            "Inspect universe routing and enabled setup ids.",
+            "Many symbols lack strategy_fits."
+            if not unified_routing
+            else "strategy_fits sparse — expected with unified shortlist routing.",
+            "Empty routing skips detectors."
+            if not unified_routing
+            else "Lanes still apply; unified routing runs all lane setups on shortlist symbols.",
+            {"zero_fit": zero_fit, "total": total_sl, "shortlist_unified_routing": unified_routing},
+            "Enable shortlist_unified_routing or expand strategy_fits pools."
+            if not unified_routing
+            else "Inspect lane coverage if detector runs look low.",
         ),
     )
     if source == "cached":
@@ -190,14 +221,18 @@ def _collect_findings(snap: Mapping[str, Any]) -> list[AuditFinding]:
     )
     _maybe(
         out,
-        ok=not (detectors > 0 and signal_rate <= 0.0),
+        ok=not (detectors > 0 and routed_signal_rate <= 0.0),
         finding=AuditFinding(
             "critical",
             "funnel",
             "zero_raw_signal_rate",
             "Zero raw signal rate.",
             "Strategy/data gates may block before filters.",
-            {"detector_runs": detectors, "signal_rate": signal_rate},
+            {
+                "detector_runs": detectors,
+                "signal_rate": signal_rate,
+                "routed_signal_rate": routed_signal_rate,
+            },
             "Use strategy_decisions blockers by setup.",
         ),
     )
@@ -214,33 +249,52 @@ def _collect_findings(snap: Mapping[str, Any]) -> list[AuditFinding]:
             "Review rejected.jsonl and filter reasons.",
         ),
     )
-    _maybe(
-        out,
-        ok=not (candidates > 0 and delivered <= 0),
-        finding=AuditFinding(
-            "warning",
-            "funnel",
-            "candidate_delivery_gap",
-            "Candidates without delivery.",
-            "Selection or notifier policy may suppress sends.",
-            {"candidates": candidates, "delivered": delivered},
-            "Inspect delivery telemetry.",
-        ),
-    )
+    if candidates > 0 and delivered <= 0:
+        funnel_delivery_sev = "info" if notifier_disabled else "warning"
+        out.append(
+            AuditFinding(
+                funnel_delivery_sev,
+                "funnel",
+                "candidate_delivery_gap",
+                "Candidates without delivery.",
+                "Expected when notifier provider is none (local smoke mode)."
+                if notifier_disabled
+                else "Selection or notifier policy may suppress sends.",
+                {
+                    "candidates": candidates,
+                    "delivered": delivered,
+                    "delivery_provider": delivery_provider or "unknown",
+                },
+                "Configure Telegram delivery for production sends."
+                if notifier_disabled
+                else "Inspect delivery telemetry.",
+            )
+        )
     reasons = list(rej.get("reasons") or [])
     if reasons:
         total_rej = _int(rej.get("total_rows"))
         reason = str(reasons[0].get("key") or "")
         count = _int(reasons[0].get("count"))
         pct = count / max(total_rej, 1)
-        sev = "critical" if pct >= 0.35 else "warning" if pct >= 0.15 else "info"
+        if normalize_reject_reason(reason) in _LANE_EXPECTED_REJECTIONS:
+            sev = "info"
+            detail = "Expected when strategy lanes route a subset per symbol."
+        elif pct >= 0.35:
+            sev = "critical"
+            detail = "High share of rejections from one reason."
+        elif pct >= 0.15:
+            sev = "warning"
+            detail = "Elevated share of rejections from one reason."
+        else:
+            sev = "info"
+            detail = "Top rejection reason for the current window."
         out.append(
             AuditFinding(
                 sev,
                 "rejections",
                 "dominant_rejection",
                 f"Dominant rejection: {reason}.",
-                "High share of rejections from one reason.",
+                detail,
                 {"reason": reason, "count": count, "pct": round(pct * 100, 2)},
                 "Inspect rejection telemetry before loosening gates.",
             )
@@ -376,6 +430,29 @@ def _collect_findings(snap: Mapping[str, Any]) -> list[AuditFinding]:
                 "Compare with decision telemetry.",
             )
         )
+    qm = rt.get("quality_monitor") or {}
+    pause_count = _int((qm.get("recommendations") or {}).get("pause"))
+    paused_setups = [
+        str(setup_id)
+        for setup_id in (qm.get("unhealthy_setups") or [])
+        if str(setup_id).strip()
+    ]
+    if pause_count > 0 or paused_setups:
+        out.append(
+            AuditFinding(
+                "warning",
+                "runtime",
+                "quality_monitor_pause",
+                "Quality monitor paused one or more setups.",
+                "Delivery may reject candidates for paused setups.",
+                {
+                    "pause_count": pause_count,
+                    "paused_setups": paused_setups[:10],
+                    "recommendations": qm.get("recommendations") or {},
+                },
+                "Review quality_monitor delivery table before re-enabling setups.",
+            )
+        )
     return out
 
 
@@ -386,7 +463,7 @@ def _sort(findings: list[AuditFinding]) -> list[AuditFinding]:
 def _health_score(findings: list[AuditFinding]) -> int:
     score = 100
     for item in findings:
-        score -= {"critical": 25, "warning": 10, "info": 2}.get(item.severity, 0)
+        score -= {"critical": 25, "warning": 10}.get(item.severity, 0)
     return max(0, min(100, score))
 
 

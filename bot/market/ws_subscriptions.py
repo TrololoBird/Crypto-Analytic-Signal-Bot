@@ -9,6 +9,8 @@ from typing import Any
 
 from websockets import exceptions as ws_exceptions
 
+from bot.market.subscription_planner import plan_subscription_budget
+
 LOG = logging.getLogger("bot.ws_manager")
 DEFAULT_MAX_STREAMS_PER_CONNECTION = 300
 FORBIDDEN_STREAM_SUFFIXES = ("@userData", "@account", "@balanceUpdate")
@@ -98,17 +100,31 @@ def global_streams(manager: Any) -> list[str]:
 
 
 def recompute_intended_streams(manager: Any) -> None:
+    symbols = list(manager._symbols)
+    tracked = list(manager._tracked_symbols or manager._symbols)
+    budget_plan = plan_subscription_budget(symbols, tracked, ws=manager._cfg)
+    depth_symbols = list(budget_plan.depth_symbols) or tracked
+    agg_symbols = list(budget_plan.agg_trade_symbols) or tracked
+    manager._subscription_budget = budget_plan
+
     public_streams = set(public_streams_for_symbols(manager, manager._symbols))
-    depth_symbols = manager._tracked_symbols or manager._symbols
     public_streams.update(tracked_depth_streams(manager, depth_symbols))
     market_streams = set(base_streams_for_symbols(manager, manager._symbols))
-    market_streams.update(tracked_agg_trade_streams(manager, manager._tracked_symbols))
+    market_streams.update(tracked_agg_trade_streams(manager, agg_symbols))
     if manager._symbols or manager._cfg.subscribe_market_streams:
         market_streams.update(global_streams(manager))
     manager._intended_streams_by_endpoint["public"] = public_streams
     manager._intended_streams_by_endpoint["market"] = market_streams
     manager._intended_streams = set().union(public_streams, market_streams)
     validate_endpoint_stream_limits(manager)
+    LOG.debug(
+        "subscription budget | market=%d public=%d depth=%d agg=%d limit=%d",
+        budget_plan.total_market,
+        budget_plan.total_public,
+        budget_plan.depth_streams,
+        budget_plan.agg_trade_streams,
+        budget_plan.budget_limit,
+    )
 
 
 def validate_endpoint_stream_limits(manager: Any) -> None:

@@ -45,7 +45,7 @@ function _renderDiaryCalendar(calendarDays) {
   for (const d of calendarDays) {
     dayMap[d.day] = d;
   }
-  const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const dayNames = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
   const children = dayNames.map((n) =>
     el("div", { class: "diary-day empty", text: n })
   );
@@ -104,7 +104,7 @@ function _renderDiaryTrades(trades) {
     }
     return rowEl;
   });
-  setChildren("diary-trades", rowsOrEmpty(items, (i) => i, "No diary entries yet."));
+  setChildren("diary-trades", rowsOrEmpty(items, (i) => i, "Записей пока нет. Нажмите «Записать в дневник» на карточке сигнала."));
 }
 
 function _renderDiaryAnalytics(analytics) {
@@ -116,10 +116,10 @@ function _renderDiaryAnalytics(analytics) {
   const summary = analytics.summary || {};
   const children = [
     el("div", { class: "grid kpi" }, [
-      kpi("Total Trades", summary.total_trades || 0, "", "blue"),
-      kpi("Win Rate", pct(summary.win_rate || 0), "last 30 days", clsByValue(summary.win_rate)),
-      kpi("Avg PnL %", summary.avg_pnl_percent + "%", "", Number(summary.avg_pnl_percent || 0) >= 0 ? "green" : "red"),
-      kpi("Avg PnL $", "$" + number(summary.avg_pnl_usd || 0, 2), "", Number(summary.avg_pnl_usd || 0) >= 0 ? "green" : "red"),
+      kpi("Сделок", summary.total_trades || 0, "", "blue"),
+      kpi("Win rate", pct(summary.win_rate || 0), "30 дней", clsByValue(summary.win_rate)),
+      kpi("Сред. PnL %", summary.avg_pnl_percent + "%", "", Number(summary.avg_pnl_percent || 0) >= 0 ? "green" : "red"),
+      kpi("Сред. PnL $", "$" + number(summary.avg_pnl_usd || 0, 2), "", Number(summary.avg_pnl_usd || 0) >= 0 ? "green" : "red"),
     ]),
   ];
   if (analytics.by_mood && analytics.by_mood.length) {
@@ -146,43 +146,43 @@ function showDiaryEntryModal(signalData) {
   modal.className = "modal-overlay";
   modal.innerHTML = `
     <div class="modal">
-      <h2>Log Decision</h2>
-      <label>Decision</label>
+      <h2>Запись в дневник</h2>
+      <label>Решение</label>
       <select id="diary-decision">
-        <option value="took_signal">Took Signal</option>
-        <option value="ignored">Ignored</option>
-        <option value="counter_traded">Counter-Traded</option>
+        <option value="took_signal">Взял сигнал</option>
+        <option value="ignored">Пропустил</option>
+        <option value="counter_traded">Пошёл против</option>
       </select>
-      <label>Entry Price</label>
+      <label>Цена входа</label>
       <input id="diary-entry-price" type="number" step="0.01" value="${signalData?.entry_price || ""}">
-      <label>Position Size</label>
-      <input id="diary-size" type="number" step="0.001" placeholder="BTC amount">
-      <label>Leverage</label>
+      <label>Размер позиции</label>
+      <input id="diary-size" type="number" step="0.001" placeholder="кол-во монет">
+      <label>Плечо</label>
       <input id="diary-leverage" type="number" step="0.5" value="1" min="1" max="125">
-      <label>Risk % of Account</label>
+      <label>Риск % от депозита</label>
       <input id="diary-risk" type="number" step="0.1" value="1" min="0.1" max="100">
-      <label>Stop Loss</label>
+      <label>Стоп-лосс</label>
       <input id="diary-sl" type="number" step="0.01" value="${signalData?.stop_price || ""}">
-      <label>Take Profit 1</label>
+      <label>Цель (TP1)</label>
       <input id="diary-tp1" type="number" step="0.01" value="${signalData?.tp1_price || ""}">
-      <label>Mood</label>
+      <label>Настроение</label>
       <select id="diary-mood">
-        <option value="">--</option>
-        <option value="confident">Confident</option>
-        <option value="cautious">Cautious</option>
+        <option value="">—</option>
+        <option value="confident">Уверенность</option>
+        <option value="cautious">Осторожность</option>
         <option value="fomo">FOMO</option>
-        <option value="fear">Fear</option>
-        <option value="impatient">Impatient</option>
-        <option value="patient">Patient</option>
+        <option value="fear">Страх</option>
+        <option value="impatient">Нетерпение</option>
+        <option value="patient">Терпение</option>
       </select>
-      <label>Notes</label>
+      <label>Заметки</label>
       <textarea id="diary-notes"></textarea>
       <div class="modal-buttons">
-        <button onclick="this.closest('.modal-overlay').remove()">Cancel</button>
-        <button class="primary" onclick="window._saveDiaryEntry(this)">Save</button>
+        <button type="button" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
+        <button type="button" class="primary" onclick="window._saveDiaryEntry(this)">Сохранить</button>
       </div>
     </div>`;
-  document.getElementById("modal-container").replaceChildren(modal);
+  document.body.appendChild(modal);
   modal.dataset.signalData = JSON.stringify(signalData || {});
 }
 
@@ -226,7 +226,7 @@ function showDiaryCloseModal(trade) {
   const entryText = entryPrice ? "$" + Number(entryPrice).toFixed(2) : "-";
   modal.innerHTML = `
     <div class="modal">
-      <h2>Close Trade</h2>
+      <h2>Закрыть сделку</h2>
       <div class="row-list">
         <div class="row"><div class="row-title">Entry</div><div class="row-value mono">${entryText}</div></div>
         <div class="row"><div class="row-title">SL</div><div class="row-value mono">${trade.sl_price ? "$" + Number(trade.sl_price).toFixed(2) : "-"}</div></div>
@@ -257,11 +257,11 @@ function showDiaryCloseModal(trade) {
       <label>Notes</label>
       <textarea id="diary-close-notes"></textarea>
       <div class="modal-buttons">
-        <button onclick="this.closest('.modal-overlay').remove()">Cancel</button>
-        <button class="primary" onclick="window._saveDiaryClose(this, '${trade.id}')">Close Trade</button>
+        <button type="button" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
+        <button type="button" class="primary" onclick="window._saveDiaryClose(this, '${trade.id}')">Закрыть</button>
       </div>
     </div>`;
-  document.getElementById("modal-container").replaceChildren(modal);
+  document.body.appendChild(modal);
 }
 
 window._saveDiaryClose = async function (btn, tradeId) {

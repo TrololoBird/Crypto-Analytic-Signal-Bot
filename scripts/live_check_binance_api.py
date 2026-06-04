@@ -27,6 +27,12 @@ PUBLIC_FAPI_PATHS = {
     "/fapi/v1/ticker/bookTicker",
     "/fapi/v1/klines",
 }
+PUBLIC_FDATA_PATHS = {
+    "/futures/data/openInterestHist",
+    "/futures/data/globalLongShortAccountRatio",
+    "/futures/data/takerlongshortRatio",
+}
+PUBLIC_REST_PATHS = PUBLIC_FAPI_PATHS | PUBLIC_FDATA_PATHS
 
 
 async def _wait_for_ws_warmup(ws_manager: FuturesWSManager, timeout_seconds: float) -> dict:
@@ -79,7 +85,7 @@ async def _wait_for_market_reconnect(
 
 
 def _assert_public_endpoint(endpoint: str) -> None:
-    if endpoint not in PUBLIC_FAPI_PATHS:
+    if endpoint not in PUBLIC_REST_PATHS:
         msg = f"Non-public Binance endpoint in live check: {endpoint}"
         raise RuntimeError(msg)
 
@@ -113,6 +119,12 @@ async def _run(
         book_bid, book_ask = await client.fetch_book_ticker(symbols[0])
         _assert_public_endpoint("/fapi/v1/klines")
         klines_15m = await client.fetch_klines_cached(symbols[0], "15m", limit=64)
+        _assert_public_endpoint("/futures/data/openInterestHist")
+        oi_change = await client.fetch_open_interest_change(symbols[0], period="1h")
+        _assert_public_endpoint("/futures/data/globalLongShortAccountRatio")
+        ls_ratio = await client.fetch_long_short_ratio(symbols[0], period="1h")
+        _assert_public_endpoint("/futures/data/takerlongshortRatio")
+        taker_ratio = await client.fetch_taker_ratio(symbols[0], period="1h")
         LOG.info(
             "rest_checks_ok",
             exchange_symbols=len(exchange_symbols),
@@ -121,6 +133,9 @@ async def _run(
             bid=book_bid,
             ask=book_ask,
             kline_rows=klines_15m.height,
+            oi_change=oi_change,
+            ls_ratio=ls_ratio,
+            taker_ratio=taker_ratio,
         )
 
         await ws_manager.start(list(symbols))

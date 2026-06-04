@@ -5,6 +5,7 @@ from __future__ import annotations
 import ctypes
 import os
 import subprocess
+import time
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
@@ -51,6 +52,55 @@ def clear_stale_pid_file(pid_file: Path) -> bool:
     except OSError:
         return False
     return True
+
+
+def acquire_pid_lock(pid_file: Path, *, owner_pid: int | None = None) -> None:
+    """Acquire an exclusive PID lock file or raise ``SystemExit`` if held."""
+    owner = owner_pid if owner_pid is not None else os.getpid()
+    pid_file.parent.mkdir(parents=True, exist_ok=True)
+    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+    if hasattr(os, "O_BINARY"):
+        flags |= os.O_BINARY
+    retries = 0
+    while True:
+        try:
+            fd = os.open(str(pid_file), flags)
+            try:
+                os.write(fd, str(owner).encode("ascii", errors="strict"))
+            finally:
+                os.close(fd)
+            return
+        except FileExistsError:
+            existing_pid = read_pid_file(pid_file)
+            if existing_pid and existing_pid != owner and pid_is_alive(existing_pid):
+                msg = f"another process is already running with pid {existing_pid} (lock={pid_file})"
+                raise SystemExit(msg) from None
+            if existing_pid == 0:
+                retries += 1
+                try:
+                    age_s = max(0.0, time.time() - pid_file.stat().st_mtime)
+                except OSError:
+                    age_s = 0.0
+                if retries <= 50 or age_s < 10.0:
+                    time.sleep(0.1)
+                    continue
+            try:
+                pid_file.unlink()
+            except FileNotFoundError:
+                continue
+            except OSError as exc:
+                msg = f"failed to remove stale pid lock {pid_file}: {exc}"
+                raise SystemExit(msg) from exc
+
+
+def release_pid_lock(pid_file: Path, *, owner_pid: int | None = None) -> None:
+    """Release PID lock when owned by ``owner_pid`` (default: current process)."""
+    owner = owner_pid if owner_pid is not None else os.getpid()
+    try:
+        if pid_file.exists() and read_pid_file(pid_file) == owner:
+            pid_file.unlink()
+    except OSError:
+        return
 
 
 def find_bot_main_pids(repo_root: Path) -> list[int]:

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, ClassVar
 from ..features import _swing_points as _sp
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
+from ._roadmap import _confirmed_context_conflict
 from .bb_squeeze import detect_bb_squeeze_release
 
 if TYPE_CHECKING:
@@ -274,6 +275,14 @@ def _detect_squeeze_setup_extended(
             crowd_reason = f"liq_score={liq_score:.3f} (long liquidations bearish)"
 
     direction = squeeze_dir
+    if _confirmed_context_conflict(prepared, direction):
+        _reject(
+            prepared,
+            "squeeze_setup",
+            "htf_context_conflict",
+            direction=direction,
+        )
+        return None
 
     oi_chg = prepared.oi_change_pct
     oi_drop_limit = -8.0 if oi_chg is not None and abs(oi_chg) > 1.0 else -0.08
@@ -383,7 +392,7 @@ def _detect_squeeze_setup_extended(
         setup_id="squeeze_setup",
         direction=direction,
         score=score,
-        timeframe="15m",
+        timeframe="15m+1h",
         reasons=reasons,
         strategy_family=family,
         stop=stop,

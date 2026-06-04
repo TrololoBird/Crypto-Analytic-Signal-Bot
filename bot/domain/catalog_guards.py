@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ..setups import _reject
+from .mtf import evaluate_mtf_gate, normalize_mtf_reject_reason
 
 if TYPE_CHECKING:
     from .schemas import PreparedSymbol
@@ -22,7 +23,12 @@ def catalog_allows_signal(
     """Apply catalog gates before emitting a spec-built signal."""
     min_volume = float(params.get("min_volume_ratio", 0.0) or 0.0)
     if min_volume > 0.0:
+        primary = getattr(prepared, "work_primary", None)
+        frame = primary if primary is not None and not primary.is_empty() else prepared.work_15m
         vol = prepared.volume_ratio
+        if frame is not None and not frame.is_empty() and "volume_ratio20" in frame.columns:
+            raw = frame.item(-1, "volume_ratio20")
+            vol = None if raw is None else float(raw)
         if vol is None or float(vol) < min_volume:
             _reject(
                 prepared,
@@ -41,12 +47,24 @@ def catalog_allows_signal(
             return False
 
     if confirmation_profile == "trend_follow" or family in {"continuation", "trend_follow"}:
-        bias = str(prepared.bias_4h or prepared.bias_1h or "neutral")
-        if direction == "long" and bias == "downtrend":
-            _reject(prepared, setup_id, "catalog_htf_bias_conflict", bias=bias, direction=direction)
-            return False
-        if direction == "short" and bias == "uptrend":
-            _reject(prepared, setup_id, "catalog_htf_bias_conflict", bias=bias, direction=direction)
+        settings = getattr(prepared, "settings", None)
+        strict_dq = bool(getattr(getattr(settings, "runtime", None), "strict_data_quality", True))
+        mtf_ok, mtf_reason, mtf_details = evaluate_mtf_gate(
+            prepared,
+            direction,
+            confirmation_profile=confirmation_profile,
+            strict_data_quality=strict_dq,
+        )
+        if not mtf_ok:
+            reason = normalize_mtf_reject_reason(mtf_reason)
+            _reject(
+                prepared,
+                setup_id,
+                reason,
+                direction=direction,
+                mtf_reason=mtf_reason,
+                **mtf_details,
+            )
             return False
 
     return True

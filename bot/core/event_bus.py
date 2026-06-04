@@ -17,7 +17,7 @@ from ..domain.events import (
     OIRefreshDueEvent,
     ShortlistUpdatedEvent,
 )
-from .runtime_errors import classify_runtime_error
+from bot.runtime.errors import classify_runtime_error
 
 LOG = logging.getLogger("bot.core.event_bus")
 

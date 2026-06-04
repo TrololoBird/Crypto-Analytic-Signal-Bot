@@ -10,9 +10,14 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
-from ..core.runtime_errors import classify_runtime_error
+from bot.runtime.errors import classify_runtime_error
+
+from ..diagnostics.signals import get_global_diagnostics
 from ..domain.strategies import StrategyDecision
+from ..market.data_capability import assess_strategy_data_capability
 from ..market.fit import asset_fit_reject_reason, market_context_from_prepared
+from ..market.strategy_pools import DATA_POOL_SETUPS
+from ..runtime_policy import effective_engine_score_floor
 from .base import SignalResult
 from .lanes import is_standard_kline_interval, select_lane_setups
 
@@ -111,6 +116,12 @@ class SignalEngine:
         self._executor_warmed = False
         self._executor_warm_lock = asyncio.Lock()
 
+    @staticmethod
+    def _record_routing_skip(setup_id: str, reason: str) -> None:
+        diagnostics = get_global_diagnostics()
+        if diagnostics is not None:
+            diagnostics.record_routing_skip(setup_id, reason)
+
     def _route_strategies(
         self,
         prepared: PreparedSymbol,
@@ -134,6 +145,10 @@ class SignalEngine:
         route_all = bool(runtime.route_all_enabled_strategies)
         enable_lanes = bool(runtime.enable_strategy_lanes)
         emit_routing_skips = bool(runtime.emit_strategy_routing_skips)
+        shortlist_unified_routing = bool(getattr(runtime, "shortlist_unified_routing", True))
+        use_unified_shortlist_routing = shortlist_unified_routing and (
+            is_shortlist_asset or is_pinned_symbol
+        )
 
         if not strategy_fits and not is_pinned_symbol:
             LOG.warning(
@@ -144,7 +159,14 @@ class SignalEngine:
 
         if enable_lanes and event_interval and not route_all:
             apply_interval = is_standard_kline_interval(event_interval)
-            fits_arg = tuple(strategy_fits) if strategy_fits else None
+            use_fits_filter = not use_unified_shortlist_routing
+            fits_arg = tuple(strategy_fits) if strategy_fits and use_fits_filter else None
+            priority_setup_ids: tuple[str, ...] | None = None
+            if use_unified_shortlist_routing:
+                pool_priority = DATA_POOL_SETUPS.get("orderflow", frozenset()) | DATA_POOL_SETUPS.get(
+                    "positioning", frozenset()
+                )
+                priority_setup_ids = tuple(sorted(pool_priority))
             lane_metas = select_lane_setups(
                 self._registry,
                 symbol=symbol,
@@ -152,6 +174,7 @@ class SignalEngine:
                 settings=self._settings,
                 strategy_fits=fits_arg,
                 apply_interval_filter=apply_interval,
+                priority_setup_ids=priority_setup_ids,
             )
             lane_ids = {meta.strategy_id for meta in lane_metas}
             strategies = [strategy for strategy in all_enabled if strategy.strategy_id in lane_ids]
@@ -182,6 +205,7 @@ class SignalEngine:
                             calculation_time_ms=0.0,
                         )
                     )
+                    self._record_routing_skip(strategy.strategy_id, decision.reason_code)
             LOG.info(
                 "%s: lane routing | interval=%s families=%d setups=%d",
                 symbol,
@@ -198,7 +222,7 @@ class SignalEngine:
                 symbol,
                 len(strategy_fits),
             )
-        elif strategy_fits and not route_all:
+        elif strategy_fits and not route_all and not use_unified_shortlist_routing:
             routed: list[Any] = []
             for strategy in strategies:
                 if strategy.strategy_id in strategy_fits:
@@ -225,14 +249,31 @@ class SignalEngine:
                             calculation_time_ms=0.0,
                         )
                     )
+                    self._record_routing_skip(strategy.strategy_id, decision.reason_code)
             strategies = routed
         return strategies, routing_skips
+
+    def _apply_detector_limits(
+        self,
+        strategies: list[Any],
+        *,
+        max_setups: int | None,
+        setup_subset: frozenset[str] | None,
+    ) -> list[Any]:
+        limited = strategies
+        if setup_subset:
+            limited = [strategy for strategy in limited if strategy.strategy_id in setup_subset]
+        if max_setups is not None and max_setups > 0:
+            limited = limited[:max_setups]
+        return limited
 
     async def calculate_all(
         self,
         prepared: PreparedSymbol,
         *,
         event_interval: str | None = None,
+        max_setups: int | None = None,
+        setup_subset: frozenset[str] | None = None,
     ) -> list[SignalResult]:
         """Calculate signals for strategies routed to this symbol/event.
 
@@ -260,6 +301,7 @@ class SignalEngine:
                     details={
                         "symbol": symbol,
                         "strategy_id": strategy.strategy_id,
+                        "schedule_checker": getattr(strategy, "setup_id", strategy.strategy_id),
                     },
                 )
                 schedule_skip_results.append(
@@ -277,13 +319,51 @@ class SignalEngine:
                     )
                 )
         if schedule_skip_results:
-            LOG.debug(
-                "%s: strategy schedule skipped without detector telemetry | skipped=%d",
+            LOG.info(
+                "%s: strategy schedule skipped | skipped=%d setups=%s",
                 symbol,
                 len(schedule_skip_results),
+                [item.setup_id for item in schedule_skip_results[:5]],
             )
             routing_skips.extend(schedule_skip_results)
-        strategies = scheduled
+            for item in schedule_skip_results:
+                reason = item.decision.reason_code if item.decision else "unknown"
+                self._record_routing_skip(item.setup_id, reason)
+        data_capable: list[Any] = []
+        for strategy in scheduled:
+            cap = assess_strategy_data_capability(strategy.strategy_id, prepared)
+            if cap.ready:
+                data_capable.append(strategy)
+                continue
+            decision = StrategyDecision.skip(
+                setup_id=strategy.strategy_id,
+                reason_code=cap.reason or "data.capability_not_ready",
+                details={
+                    "symbol": symbol,
+                    "pool": cap.pool,
+                    "strategy_id": strategy.strategy_id,
+                },
+            )
+            routing_skips.append(
+                SignalResult(
+                    setup_id=strategy.strategy_id,
+                    signal=None,
+                    decision=decision,
+                    metadata={
+                        "setup_id": strategy.strategy_id,
+                        "reason": decision.reason_code,
+                        "data_pool": cap.pool,
+                    },
+                    calculation_time_ms=0.0,
+                )
+            )
+            self._record_routing_skip(strategy.strategy_id, decision.reason_code)
+        strategies = data_capable
+        strategies = self._apply_detector_limits(
+            strategies,
+            max_setups=max_setups,
+            setup_subset=setup_subset,
+        )
         LOG.info("%s: calculate_all called | strategies=%d", symbol, len(strategies))
 
         if not strategies:
@@ -461,6 +541,7 @@ class SignalEngine:
                     strategy_id,
                     elapsed_ms,
                     error=bool(result.decision and result.decision.is_error),
+                    hit=result.signal is not None,
                 )
 
                 # Update result with accurate timing
@@ -683,7 +764,16 @@ class SignalEngine:
     def close(self) -> None:
         return None
 
-    def get_best_signal(self, results: list[SignalResult]) -> Signal | None:
+    def _engine_score_floor(self, prepared: PreparedSymbol | None = None) -> float:
+        """Minimum score for get_best_signal — config-driven, not hardcoded."""
+        return effective_engine_score_floor(self._settings, prepared_or_symbol=prepared)
+
+    def get_best_signal(
+        self,
+        results: list[SignalResult],
+        *,
+        prepared: PreparedSymbol | None = None,
+    ) -> Signal | None:
         """Select best signal from multiple results based on score.
 
         Args:
@@ -692,12 +782,13 @@ class SignalEngine:
         Returns:
             Best Signal or None if no valid signals
         """
+        score_floor = self._engine_score_floor(prepared)
         valid_signals = [
             r.signal
             for r in results
             if r.is_valid
             and r.signal is not None
-            and r.signal.score >= 0.38  # score floor: 0..1 confidence delivery minimum.
+            and r.signal.score >= score_floor
         ]
 
         if not valid_signals:

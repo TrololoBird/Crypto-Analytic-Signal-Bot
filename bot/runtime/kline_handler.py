@@ -156,6 +156,7 @@ class KlineHandler:
                 delivered,
                 cooldown_rejected,
                 delivery_status_counts,
+                merge_conflict_count,
             ) = await self._bot._select_and_deliver(
                 selected,
                 prepared_by_tracking_id=prepared_by_tracking_id,
@@ -163,6 +164,7 @@ class KlineHandler:
             if result.funnel:
                 result.funnel["delivered"] = len(delivered)
                 result.funnel["delivery_status_counts"] = dict(delivery_status_counts)
+                result.funnel["merge_conflicts"] = merge_conflict_count
             rejected.extend(cooldown_rejected)
 
         return candidates, rejected, delivered

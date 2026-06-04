@@ -24,10 +24,12 @@ telemetry_max_runs = 120
 shortlist_refresh_interval_seconds = 7200
 emergency_fallback_seconds = 1800
 strict_data_quality = true
-emit_strategy_routing_skips = true
+emit_strategy_routing_skips = false
 route_all_enabled_strategies = false
+shortlist_unified_routing = true
 enable_strategy_lanes = true
 max_setup_families_per_symbol = 15
+max_setups_per_family = 2
 analysis_kline_intervals = ["5m", "15m", "1h"]
 diagnostic_trace_limit_per_symbol = 20
 # Startup throttling to prevent REST API flood on startup
@@ -38,10 +40,13 @@ emergency_context_warmup_timeout_seconds = 120.0
 emergency_context_warmup_symbol_limit = 45
 emergency_context_fetch_timeout_seconds = 20.0
 futures_data_request_limit_per_5m = 900
+# OI/L-S derivatives context refresh loop (minutes between full shortlist passes).
+oi_refresh_interval_minutes = 30
 cycle_timeout_seconds = 120.0
 min_restart_interval_seconds = 120
 # Dashboard settings
-dashboard_host = "127.0.0.1"
+# Dashboard — bind 0.0.0.0 for LAN/mobile Safari; use 127.0.0.1 if local-only
+dashboard_host = "0.0.0.0"
 dashboard_port = 8080
 auto_open_dashboard = false
 # Metrics settings
@@ -65,6 +70,8 @@ failover_cooldown_seconds = 300
 
 [bot.universe]
 quote_asset = "USDT"
+# Stage-1 funnel: rank by 24h quote volume, apply gates, keep top-N before scoring.
+light_pool_limit = 180
 dynamic_limit = 120
 shortlist_limit = 50
 min_quote_volume_usd = 50_000_000
@@ -72,6 +79,7 @@ min_price_change_pct = 0.5
 min_trade_count_24h = 10_000
 min_listing_age_days = 90
 light_refresh_interval_seconds = 75
+medium_refresh_interval_seconds = 900
 full_refresh_interval_seconds = 7200
 shortlist_spread_max_bps = 8.0
 shortlist_book_stale_seconds = 90.0
@@ -126,6 +134,7 @@ min_risk_reward = 1.9
 # while preserving RR/spread/stop hard-gates.
 min_score = 0.53
 freshness_15m_minutes = 16
+freshness_5m_minutes = 8
 freshness_1h_hours = 2
 freshness_4h_hours = 10
 min_bars_15m = 210
@@ -133,6 +142,9 @@ min_bars_1h = 210
 min_bars_5m = 100
 min_bars_4h = 210
 max_mark_price_deviation_pct = 0.005
+# Composable filter stages — see bot/delivery/filter_stages.py (DEFAULT_FILTER_STAGES).
+# Empty list disables all stages; omit key for module defaults.
+enabled_stages = ["freshness", "mark_deviation", "spread", "atr", "stop", "rr", "scoring", "min_score"]
 
 [bot.filters.setups]
 ema_bounce = { base_score = 0.55, min_adx_1h = 15.0, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.85, min_rr = 1.9, ema_touch_tolerance_pct = 0.005, bounce_threshold_atr = 0.12 }
@@ -178,12 +190,16 @@ altcoin_season_index = { base_score = 0.52, altseason_long_threshold = 55.0, btc
 enabled = true
 pending_expiry_minutes = 180
 active_expiry_minutes = 240
+# Reject new signals when mark already chased beyond entry zone (manual limit window).
+late_entry_chase_pct = 0.008
 outcome_retention_days = 90
 move_stop_to_break_even_on_tp1 = true
 min_stop_distance_pct = 0.75
 max_stop_distance_pct = 15.0
 agg_trade_page_limit = 6
 agg_trade_page_size = 1000
+# MetaSignalMerger direction-conflict window vs recent ACTION signals (hours).
+action_window_hours = 4.0
 
 [bot.setups]
 # Strategy status metadata is descriptive only; enabled flags control runtime.
@@ -261,8 +277,8 @@ enabled = true
 base_url = "wss://fstream.binance.com"
 public_base_url = "wss://fstream.binance.com/public"
 market_base_url = "wss://fstream.binance.com/market"
-# Keep only the execution interval on WS to prevent sustained stream overload.
-# 5m/1h context is fetched through the bounded REST cache path when needed.
+# WS kline streams: 15m execution interval only. 5m (and 1h context) load via bounded REST
+# when listed in bot.runtime.analysis_kline_intervals — do not add 5m here.
 kline_intervals = ["15m"]
 subscription_scope = "shortlist"
 subscribe_book_ticker = true
@@ -283,6 +299,7 @@ subscribe_depth = true
 depth_levels = 20
 depth_speed = "500ms"
 depth_symbol_limit = 20
+max_market_stream_budget = 280
 depth_band_bps = 8.0
 depth_wall_min_notional = 250000.0
 depth_wall_persistence_seconds = 10.0
@@ -291,6 +308,8 @@ subscribe_chunk_delay_ms = 500
 health_check_silence_seconds = 60.0
 market_reconnect_grace_seconds = 90.0
 agg_trade_window_seconds = 300
+# Stale aggTrade events older than this are dropped (separate from market_ticker_freshness).
+agg_trade_freshness_seconds = 300
 kline_cache_size = 500
 warmup_timeout_seconds = 60.0
 reconnect_max_delay_seconds = 300.0
@@ -304,13 +323,63 @@ force_order_window_seconds = 60
 intra_candle_throttle_seconds = 60.0
 # Optional noise gate for intra-candle scans. 0 disables gating.
 intra_candle_min_move_bps = 15.0
+# Intra-candle fast lane: cap detectors per bookTicker scan (0 = lane default only).
+intra_candle_max_setups = 8
+# Optional explicit setup subset for intra-candle (empty = lane-routed setups).
+# intra_candle_setup_subset = ["price_velocity", "absorption", "liquidity_sweep"]
 
 [bot.notifiers]
 # "none" keeps local/log-only delivery until TG_TOKEN and TARGET_CHAT_ID are set.
 # With both Telegram secrets present, load_settings() auto-promotes this to "telegram".
 # Set BOT_NOTIFIER_PROVIDER=none to force local/log-only mode for checks.
 provider = "none"
-send_analytics_companion = false
+send_analytics_companion = true
+# When true, channel companion is ACTION-only; WATCH companion goes to operator DM.
+analytics_companion_action_only = false
+
+# Remote operator console (private DM commands — works when MacBook and phone are on
+# different networks). Requires TELEGRAM_OPERATOR_USER_IDS in .env (your Telegram user id).
+# Ops messages go to operator DMs only — NOT to TARGET_CHAT_ID (signal channel).
+[bot.notifiers.telegram_operator]
+enabled = true
+digest_interval_seconds = 1800
+poll_timeout_seconds = 25
+send_market_context = true
+send_startup_report = true
+send_digest = true
+send_sl_postmortem = true
+send_critical_alerts = true
+send_watch_escalation = true
+send_watch_companion = true
+notify_on_console_start = true
+
+[bot.notifiers.webhook]
+enabled = false
+webhook_url = ""
+include_html = true
+# Parallel ops alerts (zero-delivery, critical) — does not replace Telegram channel provider
+ops_alerts_enabled = false
+
+[bot.delivery]
+# Channel gets concise tracking updates; detailed SL post-mortem goes to operator DM.
+# Tier score floors (0–1): ACTION vs WATCH classification in delivery tiers.
+action_min_score = 0.72
+watch_min_score = 0.55
+action_cap_per_cycle = 6
+watch_cap_per_cycle = 12
+action_cap_per_session = 24
+zero_delivery_alert_cycles = 24
+watch_escalation_enabled = true
+enforce_mtf_gate = true
+# Reversal profiles in bear BTC regime: min hard-gate confirmations (default 2-of-5).
+reversal_min_confirmations = 2
+# Future bridge to ConfluenceEngine weighted scoring; false keeps boolean 3-of-5 gate.
+use_weighted_confluence = false
+portfolio_max_same_direction_regime = 4
+portfolio_max_family_direction = 2
+portfolio_max_bear_longs = 2
+sl_postmortem_enabled = true
+sl_postmortem_to_operators = true
 
 [bot.notifiers.slack]
 enabled = false
@@ -321,13 +390,9 @@ enabled = false
 webhook_url = ""
 username = "crypto-signal-bot"
 
-[bot.notifiers.webhook]
-enabled = false
-webhook_url = ""
-include_html = true
-
 [bot.spot_companion]
-enabled = false
+enabled = true
+base_url = "https://data-api.binance.vision"
 lead_symbols = []
 refresh_interval_seconds = 60
 

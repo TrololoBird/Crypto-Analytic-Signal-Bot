@@ -13,6 +13,8 @@ import aiosqlite
 import polars as pl
 
 from ...migrations import migrate_db
+from ..outcomes import aggregate_setup_stats
+from .queries.outcomes import fetch_setup_stats_rows, fetch_signal_outcome_rows
 from .schema import (
     SIGNAL_ANALYSIS_SCHEMA,
     OutcomeRecord,
@@ -21,6 +23,25 @@ from .schema import (
 
 LOG = logging.getLogger("bot.persistence.repository")
 _REPOSITORY_SCHEMA_VERSION = 2
+_ACTIVE_SIGNALS_OPTIONAL_COLUMNS: dict[str, str] = {
+    "tp1_hit_at": "TEXT",
+    "tp2_hit_at": "TEXT",
+    "stop_price": "REAL",
+    "tp1_price": "REAL",
+    "tp2_price": "REAL",
+    "take_profit_3": "REAL",
+    "tp3_price": "REAL",
+    "valid_until": "TEXT",
+    "scale_weights": "TEXT",
+    "ttl_bars": "INTEGER",
+    "last_checked_at": "TEXT",
+    "last_price": "REAL",
+    "single_target_mode": "INTEGER DEFAULT 0",
+    "target_integrity_status": "TEXT DEFAULT 'unchecked'",
+    "entry_zone_touched_at": "TEXT",
+    "entry_confirm_pending_at": "TEXT",
+    "last_lifecycle_note": "TEXT",
+}
 
 
 class MemoryRepository:
@@ -205,6 +226,7 @@ class MemoryRepository:
                 stop_price REAL,
                 tp1_price REAL,
                 tp2_price REAL,
+                tp3_price REAL,
                 last_checked_at TEXT,
                 last_price REAL,
                 closed_at TEXT,
@@ -214,6 +236,8 @@ class MemoryRepository:
 
             CREATE INDEX IF NOT EXISTS idx_active_signals_symbol ON active_signals(symbol);
             CREATE INDEX IF NOT EXISTS idx_active_signals_status ON active_signals(status);
+            CREATE INDEX IF NOT EXISTS idx_active_signals_status_symbol
+                ON active_signals(status, symbol);
             CREATE INDEX IF NOT EXISTS idx_active_signals_setup ON active_signals(setup_id);
             CREATE INDEX IF NOT EXISTS idx_active_signals_created ON active_signals(created_at);
 
@@ -267,22 +291,7 @@ class MemoryRepository:
         if schema_version < _REPOSITORY_SCHEMA_VERSION:
             await self._ensure_table_columns(
                 "active_signals",
-                {
-                    "tp1_hit_at": "TEXT",
-                    "tp2_hit_at": "TEXT",
-                    "stop_price": "REAL",
-                    "tp1_price": "REAL",
-                    "tp2_price": "REAL",
-                    "take_profit_3": "REAL",
-                    "tp3_price": "REAL",
-                    "valid_until": "TEXT",
-                    "scale_weights": "TEXT",
-                    "ttl_bars": "INTEGER",
-                    "last_checked_at": "TEXT",
-                    "last_price": "REAL",
-                    "single_target_mode": "INTEGER DEFAULT 0",
-                    "target_integrity_status": "TEXT DEFAULT 'unchecked'",
-                },
+                _ACTIVE_SIGNALS_OPTIONAL_COLUMNS,
             )
             await self._ensure_extended_tables(run_column_migrations=True)
             await self._set_repository_schema_version(
@@ -291,6 +300,8 @@ class MemoryRepository:
             )
         else:
             await self._ensure_extended_tables()
+        # Idempotent drift repair — shared schema_version with bot.migrations can skip v2 block.
+        await self._ensure_table_columns("active_signals", _ACTIVE_SIGNALS_OPTIONAL_COLUMNS)
         await migrate_db(self._conn)
         await self._conn.commit()
         LOG.info("Memory repository initialized at %s", self._db_path)
@@ -333,9 +344,18 @@ class MemoryRepository:
                 market_regime_confirmed INTEGER DEFAULT 0,
                 macro_risk_mode TEXT DEFAULT 'normal',
                 benchmark_context_json TEXT DEFAULT '{}',
-                intelligence_json TEXT DEFAULT '{}'
+                intelligence_json TEXT DEFAULT '{}',
+                telegram_html TEXT DEFAULT '',
+                display_snapshot_json TEXT DEFAULT '{}'
             )
         """)
+        await self._ensure_table_columns(
+            "market_context",
+            {
+                "telegram_html": "TEXT DEFAULT ''",
+                "display_snapshot_json": "TEXT DEFAULT '{}'",
+            },
+        )
         if run_column_migrations:
             async with conn.execute("PRAGMA table_info(market_context)") as cursor:
                 existing_columns = {str(row["name"]) for row in await cursor.fetchall()}
@@ -420,10 +440,22 @@ class MemoryRepository:
         btc_phase: str | None = None,
         benchmark_context: dict[str, Any] | None = None,
         intelligence_snapshot: dict[str, Any] | None = None,
+        telegram_html: str | None = None,
+        display_snapshot: dict[str, Any] | None = None,
     ) -> None:
         """Update market context in SQLite."""
         conn = self._require_conn()
         await self._ensure_extended_tables()
+
+        existing_html = ""
+        existing_display = "{}"
+        async with conn.execute(
+            "SELECT telegram_html, display_snapshot_json FROM market_context WHERE id = 1"
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row is not None:
+                existing_html = str(row["telegram_html"] or "")
+                existing_display = str(row["display_snapshot_json"] or "{}")
 
         await conn.execute(
             """
@@ -441,9 +473,11 @@ class MemoryRepository:
                 market_regime_confirmed,
                 macro_risk_mode,
                 benchmark_context_json,
-                intelligence_json
+                intelligence_json,
+                telegram_html,
+                display_snapshot_json
             )
-            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             (
                 btc_bias,
@@ -458,9 +492,25 @@ class MemoryRepository:
                 macro_risk_mode,
                 json.dumps(benchmark_context or {}, ensure_ascii=True),
                 json.dumps(intelligence_snapshot or {}, ensure_ascii=True),
+                telegram_html if telegram_html is not None else existing_html,
+                json.dumps(display_snapshot or {}, ensure_ascii=True)
+                if display_snapshot is not None
+                else existing_display,
             ),
         )
         await conn.commit()
+
+    @staticmethod
+    def _market_context_age_seconds(updated_at: object | None) -> float | None:
+        if not updated_at:
+            return None
+        try:
+            ts = datetime.fromisoformat(str(updated_at).replace("Z", "+00:00"))
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=UTC)
+            return max(0.0, (datetime.now(UTC) - ts).total_seconds())
+        except (TypeError, ValueError):
+            return None
 
     async def get_market_context(self) -> dict[str, Any]:
         """Get current market context."""
@@ -470,6 +520,7 @@ class MemoryRepository:
         async with conn.execute("SELECT * FROM market_context WHERE id = 1") as cursor:
             row = await cursor.fetchone()
             if row:
+                row = dict(row)
                 intelligence_snapshot: dict[str, Any] = {}
                 raw_intelligence = row.get("intelligence_json", None)
                 benchmark_context: dict[str, Any] = {}
@@ -486,6 +537,15 @@ class MemoryRepository:
                         intelligence_snapshot = json.loads(raw_intelligence)
                     except json.JSONDecodeError:
                         intelligence_snapshot = {}
+                display_snapshot: dict[str, Any] = {}
+                raw_display = row.get("display_snapshot_json", None)
+                if raw_display:
+                    try:
+                        parsed_display = json.loads(raw_display)
+                    except json.JSONDecodeError:
+                        parsed_display = {}
+                    if isinstance(parsed_display, dict):
+                        display_snapshot = parsed_display
                 return {
                     "btc_bias": row["btc_bias"],
                     "eth_bias": row["eth_bias"],
@@ -515,6 +575,11 @@ class MemoryRepository:
                     "macro_risk_mode": row.get("macro_risk_mode", "normal"),
                     "benchmark_context": benchmark_context,
                     "intelligence_snapshot": intelligence_snapshot,
+                    "telegram_html": str(row.get("telegram_html") or ""),
+                    "display_snapshot": display_snapshot,
+                    "market_context_age_seconds": self._market_context_age_seconds(
+                        row.get("updated_at")
+                    ),
                 }
             return {
                 "btc_bias": "neutral",
@@ -532,6 +597,8 @@ class MemoryRepository:
                 "macro_risk_mode": "normal",
                 "benchmark_context": {},
                 "intelligence_snapshot": {},
+                "telegram_html": "",
+                "display_snapshot": {},
             }
 
     async def record_symbol_outcome(
@@ -1095,6 +1162,27 @@ class MemoryRepository:
     # Setup adaptive scoring (replaces setup_score_adjustments)
     # ------------------------------------------------------------------
 
+    def setup_history_count(self, setup_id: str) -> int:
+        """Sync outcome-window length for confluence prior calibration."""
+        import sqlite3
+
+        try:
+            with sqlite3.connect(self._db_path) as conn:
+                row = conn.execute(
+                    "SELECT outcome_window FROM setup_scores WHERE setup_id = ?",
+                    (setup_id,),
+                ).fetchone()
+        except Exception:
+            LOG.debug("setup_history_count read failed | setup_id=%s", setup_id, exc_info=True)
+            return 0
+        if row is None or not row[0]:
+            return 0
+        try:
+            window = json.loads(row[0])
+        except json.JSONDecodeError:
+            return 0
+        return len(window) if isinstance(window, list) else 0
+
     async def get_setup_score_adjustment(self, setup_id: str) -> float:
         """Get current score adjustment for a setup.
 
@@ -1392,6 +1480,9 @@ class MemoryRepository:
             "closed_at",
             "close_reason",
             "close_price",
+            "entry_zone_touched_at",
+            "entry_confirm_pending_at",
+            "last_lifecycle_note",
         ]
 
         values = []
@@ -1758,134 +1849,13 @@ class MemoryRepository:
             msg = "Repository not initialized"
             raise RuntimeError(msg)
 
-        query = """
-            SELECT
-                setup_id,
-                SUM(
-                    CASE
-                        WHEN was_profitable = 1
-                             AND result NOT IN (
-                                 'expired_pending',
-                                 'expired',
-                                 'expired_active',
-                                 'risk_monitor_exit',
-                                 'smart_exit',
-                                 'unactivated_close',
-                                 'superseded'
-                             )
-                        THEN 1 ELSE 0
-                    END
-                ) AS wins,
-                SUM(CASE WHEN result = 'stop_loss' THEN 1 ELSE 0 END) AS losses,
-                SUM(
-                    CASE
-                        WHEN result IN (
-                            'expired_pending',
-                            'expired',
-                            'expired_active',
-                            'risk_monitor_exit',
-                            'smart_exit',
-                            'unactivated_close',
-                            'superseded'
-                        ) THEN 0
-                        WHEN activated_at IS NOT NULL THEN 1
-                        WHEN result IN (
-                            'tp1_hit',
-                            'tp2_hit',
-                            'stop_loss',
-                            'breakeven_stop',
-                            'trailing_stop',
-                            'emergency_exit',
-                            'ambiguous_exit'
-                        ) THEN 1
-                        ELSE 0
-                    END
-                ) AS total,
-                AVG(
-                    CASE
-                        WHEN result IN (
-                            'expired_pending',
-                            'expired',
-                            'expired_active',
-                            'risk_monitor_exit',
-                            'smart_exit',
-                            'unactivated_close',
-                            'superseded'
-                        ) THEN NULL
-                        WHEN activated_at IS NOT NULL THEN pnl_r_multiple
-                        WHEN result IN (
-                            'tp1_hit',
-                            'tp2_hit',
-                            'stop_loss',
-                            'breakeven_stop',
-                            'trailing_stop',
-                            'emergency_exit',
-                            'ambiguous_exit'
-                        ) THEN pnl_r_multiple
-                        ELSE NULL
-                    END
-                ) AS avg_r_multiple,
-                AVG(
-                    CASE
-                        WHEN result IN (
-                            'expired_pending',
-                            'expired',
-                            'expired_active',
-                            'risk_monitor_exit',
-                            'smart_exit',
-                            'unactivated_close',
-                            'superseded'
-                        ) THEN NULL
-                        WHEN activated_at IS NOT NULL THEN pnl_pct
-                        WHEN result IN (
-                            'tp1_hit',
-                            'tp2_hit',
-                            'stop_loss',
-                            'breakeven_stop',
-                            'trailing_stop',
-                            'emergency_exit',
-                            'ambiguous_exit'
-                        ) THEN pnl_pct
-                        ELSE NULL
-                    END
-                ) AS avg_pnl_pct
-            FROM signal_outcomes
-            WHERE 1 = 1
-        """
-        params: list[Any] = []
-        if setup_id:
-            query += " AND setup_id = ?"
-            params.append(setup_id)
-        if since is not None:
-            since_iso = since.isoformat() if isinstance(since, datetime) else str(since)
-            query += " AND COALESCE(closed_at, created_at) >= ?"
-            params.append(since_iso)
-        elif last_days is not None:
-            since = datetime.now(UTC) - timedelta(days=last_days)
-            query += " AND COALESCE(closed_at, created_at) >= ?"
-            params.append(since.isoformat())
-        query += " GROUP BY setup_id ORDER BY total DESC, setup_id ASC"
-
-        async with self._conn.execute(query, params) as cursor:
-            rows = await cursor.fetchall()
-
-        result: list[dict[str, Any]] = []
-        for row in rows:
-            total = int(row["total"] or 0)
-            wins = int(row["wins"] or 0)
-            losses = int(row["losses"] or 0)
-            result.append(
-                {
-                    "setup_id": row["setup_id"],
-                    "wins": wins,
-                    "losses": losses,
-                    "total": total,
-                    "win_rate": (wins / total) if total > 0 else 0.0,
-                    "avg_r_multiple": float(row["avg_r_multiple"] or 0.0),
-                    "avg_pnl_pct": float(row["avg_pnl_pct"] or 0.0),
-                }
-            )
-        return result
+        payload = await fetch_setup_stats_rows(
+            self._conn,
+            setup_id=setup_id,
+            last_days=last_days,
+            since=since,
+        )
+        return aggregate_setup_stats(payload)
 
     async def get_signal_outcomes(
         self,
@@ -1902,50 +1872,93 @@ class MemoryRepository:
             msg = "Repository not initialized"
             raise RuntimeError(msg)
 
-        query = "SELECT * FROM signal_outcomes WHERE 1 = 1"
-        params: list[Any] = []
-        if setup_id:
-            query += " AND setup_id = ?"
-            params.append(setup_id)
-        if symbol:
-            query += " AND symbol = ?"
-            params.append(symbol)
-        if result:
-            query += " AND result = ?"
-            params.append(result)
-        if since is not None:
-            since_iso = since.isoformat() if isinstance(since, datetime) else str(since)
-            query += " AND COALESCE(closed_at, created_at) >= ?"
-            params.append(since_iso)
-        elif last_days is not None:
-            since = datetime.now(UTC) - timedelta(days=last_days)
-            query += " AND COALESCE(closed_at, created_at) >= ?"
-            params.append(since.isoformat())
+        return await fetch_signal_outcome_rows(
+            self._conn,
+            setup_id=setup_id,
+            symbol=symbol,
+            result=result,
+            last_days=last_days,
+            since=since,
+            limit=limit,
+        )
 
-        query += " ORDER BY COALESCE(closed_at, created_at) DESC"
-        if limit is not None:
-            query += " LIMIT ?"
-            params.append(limit)
-
-        async with self._conn.execute(query, params) as cursor:
+    async def get_symbol_sl_counts(self, *, last_days: int = 7) -> dict[str, int]:
+        """Count stop_loss outcomes per symbol over a recent window."""
+        if not self._conn:
+            msg = "Repository not initialized"
+            raise RuntimeError(msg)
+        since = datetime.now(UTC) - timedelta(days=max(1, int(last_days)))
+        query = """
+            SELECT symbol, COUNT(*) AS sl_count
+            FROM signal_outcomes
+            WHERE result = 'stop_loss'
+              AND COALESCE(closed_at, created_at) >= ?
+            GROUP BY symbol
+        """
+        async with self._conn.execute(query, (since.isoformat(),)) as cursor:
             rows = await cursor.fetchall()
+        return {str(row["symbol"]).upper(): int(row["sl_count"] or 0) for row in rows}
 
-        result_rows: list[dict[str, Any]] = []
+    async def get_symbol_sl_event_ages(self, *, last_days: int = 7) -> dict[str, list[float]]:
+        """Return SL event ages in days per symbol for outcome derank decay."""
+        if not self._conn:
+            msg = "Repository not initialized"
+            raise RuntimeError(msg)
+        since = datetime.now(UTC) - timedelta(days=max(1, int(last_days)))
+        query = """
+            SELECT symbol, COALESCE(closed_at, created_at) AS closed_at
+            FROM signal_outcomes
+            WHERE result = 'stop_loss'
+              AND COALESCE(closed_at, created_at) >= ?
+        """
+        async with self._conn.execute(query, (since.isoformat(),)) as cursor:
+            rows = await cursor.fetchall()
+        now = datetime.now(UTC)
+        ages: dict[str, list[float]] = {}
         for row in rows:
-            item = dict(row)
-            raw_features = item.get("features")
-            if raw_features:
-                try:
-                    item["features"] = json.loads(raw_features)
-                except json.JSONDecodeError:
-                    item["features"] = {}
-            else:
-                item["features"] = {}
-            item["was_profitable"] = bool(item.get("was_profitable", 0))
-            llm_was_correct = item.get("llm_was_correct")
-            item["llm_was_correct"] = None if llm_was_correct is None else bool(llm_was_correct)
-            result_rows.append(item)
-        return result_rows
+            symbol = str(row["symbol"]).upper()
+            closed_raw = row["closed_at"]
+            try:
+                closed_at = datetime.fromisoformat(str(closed_raw))
+            except (TypeError, ValueError):
+                continue
+            if closed_at.tzinfo is None:
+                closed_at = closed_at.replace(tzinfo=UTC)
+            age_days = max(0.0, (now - closed_at).total_seconds() / 86_400.0)
+            ages.setdefault(symbol, []).append(age_days)
+        return ages
+
+    async def merge_outcome_features(
+        self,
+        tracking_id: str,
+        patch: dict[str, Any],
+    ) -> None:
+        """Merge keys into the JSON features blob for a persisted outcome."""
+        if not self._conn or not patch:
+            msg = "Repository not initialized" if not self._conn else ""
+            if not self._conn:
+                raise RuntimeError(msg)
+            return
+        async with self._conn.execute(
+            "SELECT features FROM signal_outcomes WHERE tracking_id = ?",
+            (str(tracking_id),),
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row is None:
+            return
+        raw = row["features"]
+        try:
+            features = json.loads(raw) if raw else {}
+        except json.JSONDecodeError:
+            features = {}
+        if not isinstance(features, dict):
+            features = {}
+        features.update(patch)
+        await self._conn.execute(
+            "UPDATE signal_outcomes SET features = ? WHERE tracking_id = ?",
+            (json.dumps(features, separators=(",", ":"), default=str), str(tracking_id)),
+        )
+        await self._conn.commit()
 
     async def get_cooldown_count(self) -> int:
         """Return number of persisted cooldown entries."""

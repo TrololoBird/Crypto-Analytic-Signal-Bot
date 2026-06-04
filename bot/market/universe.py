@@ -5,6 +5,7 @@ import math
 import re
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from collections.abc import Awaitable, Callable
 from typing import Any, cast
 
 from bot.coercion import row_float
@@ -12,8 +13,10 @@ from bot.coercion import row_float
 from ..domain.config import _ALL_SETUP_IDS, BotSettings
 from ..domain.schemas import SymbolMeta, UniverseSymbol
 from ..market.fit import calculate_strategy_fit_score
+from ..market.strategy_pools import asset_strategy_allowlist, fill_shortlist_from_pools
 
 LOG = logging.getLogger("bot.universe")
+DEFAULT_PRESCORE_BASIS_WARM_LIMIT = 25
 STABLE_BASE_ASSETS = {"USDC", "BUSD", "FDUSD", "TUSD", "USDP", "USDS", "DAI"}
 SUPPORTED_USDM_CONTRACT_TYPES = {"PERPETUAL", "TRADIFI_PERPETUAL"}
 _ASCII_CONTRACT_RE = re.compile(r"^[A-Z0-9]{4,24}$")
@@ -69,7 +72,7 @@ def _priority_symbols(settings: BotSettings) -> set[str]:
         for symbol in getattr(settings.universe, "pinned_symbols", ())
         if str(symbol).strip()
     }
-    return set(_DEEP_ANALYSIS_PRIORITY_SYMBOLS) | configured | pinned
+    return configured | pinned
 
 
 def _is_priority_asset(row: dict[str, Any], settings: BotSettings) -> bool:
@@ -87,8 +90,17 @@ def _bucket_for_price_change(price_change_pct: float) -> str:
     return "trend"
 
 
-def _scaled_bucket_targets(total_slots: int) -> dict[str, int]:
+def _scaled_bucket_targets(
+    total_slots: int,
+    *,
+    market_regime: str | None = None,
+) -> dict[str, int]:
     base = {"trend": 12, "breakout": 10, "reversal": 8}
+    regime = str(market_regime or "").strip().lower()
+    if regime in {"bear", "decline", "risk_off"}:
+        base = {"trend": 6, "breakout": 8, "reversal": 14}
+    elif regime in {"bull", "expansion", "uptrend"}:
+        base = {"trend": 14, "breakout": 12, "reversal": 6}
     if total_slots <= 0:
         return dict.fromkeys(base, 0)
     base_total = sum(base.values())
@@ -244,6 +256,18 @@ def _funding_basis_sanity_score(row: dict[str, Any], settings: BotSettings) -> f
     return round(score, 6)
 
 
+def _wash_volume_score(row: dict[str, Any]) -> float:
+    """Score average quote trade size; very small prints suggest wash volume."""
+    quote_volume = float(row.get("quote_volume") or 0.0)
+    trade_count = int(float(row.get("trade_count") or 0.0))
+    if quote_volume <= 0.0 or trade_count <= 0:
+        return 0.55
+    avg_trade_quote = quote_volume / float(trade_count)
+    # ~$100/trade is weak; ~$10k+ is strong organic flow.
+    score = _clamp((math.log10(max(avg_trade_quote, 1.0)) - 2.0) / 2.5 + 0.35)
+    return round(score, 6)
+
+
 def _microstructure_opportunity_score(row: dict[str, Any]) -> float:
     """Score whether the row has actionable public microstructure context."""
     components: list[float] = []
@@ -276,7 +300,9 @@ def _strategy_fits_for_row(
     basis_pct = _safe_float(row.get("basis_pct"))
     oi_change_pct = _oi_change_percent(row.get("oi_change_pct"))
     quote_volume = float(row.get("quote_volume") or 0.0)
-    price_change_pct = abs(float(row.get("price_change_percent") or 0.0))
+    price_change_pct = abs(
+        float(row.get("price_change_percent") or row.get("price_change_pct") or 0.0)
+    )
     spread_bps = _safe_float(row.get("spread_bps"))
     crowding = _crowding_score(row)
     symbol = str(row.get("symbol") or "").strip().upper()
@@ -310,6 +336,9 @@ def _strategy_fits_for_row(
                 "multi_tf_trend",
                 "fvg_setup",
                 "cvd_divergence",
+                "indicator_divergence",
+                "stop_hunt_detection",
+                "wyckoff_spring",
                 "btc_correlation",
                 "altcoin_season_index",
             )
@@ -412,9 +441,27 @@ def _strategy_fits_for_row(
         enabled = set(_ALL_SETUP_IDS)
     if not enabled:
         enabled = set(_ALL_SETUP_IDS)
+
+    heuristic = tuple(
+        setup_id
+        for setup_id in dict.fromkeys(fits)
+        if setup_id in enabled
+        and calculate_strategy_fit_score(
+            symbol,
+            setup_id,
+            market_context,
+            settings=settings,
+        )
+        > 0.0
+    )
     if symbol in pinned_set or priority_asset:
-        return tuple(setup_id for setup_id in _ALL_SETUP_IDS if setup_id in enabled)
-    return tuple(
+        return asset_strategy_allowlist(
+            symbol,
+            settings=settings,
+            enabled=enabled,
+            heuristic_fits=heuristic or tuple(fits),
+        )
+    return heuristic or tuple(
         setup_id
         for setup_id in dict.fromkeys(fits)
         if setup_id in enabled
@@ -476,6 +523,7 @@ def _composite_score(
     liquidity_rank: int,
     eligible_count: int,
     min_onboard_ms: int,
+    outcome_penalty: float = 0.0,
 ) -> tuple[float, tuple[str, ...]]:
     shortlist_bucket = _bucket_for_price_change(float(row.get("price_change_percent") or 0.0))
     priority_asset = _is_priority_asset(row, settings)
@@ -570,7 +618,231 @@ def _composite_score(
         reasons.append("microstructure_active")
     if age_score >= 0.8:
         reasons.append("seasoned_listing")
-    return round(min(score, 1.0), 6), tuple(reasons[:5])
+    penalty = max(0.0, float(outcome_penalty))
+    if penalty > 0.0:
+        score = max(0.0, score - penalty)
+        reasons.append(f"outcome_derank:-{penalty:.3f}")
+    return round(min(score, 1.0), 6), tuple(reasons[:6])
+
+
+def _prescore_row(
+    row: dict[str, Any],
+    settings: BotSettings,
+    *,
+    outcome_penalty: float = 0.0,
+) -> float:
+    """Lightweight score for stage-1 funnel before liquidity_rank is known."""
+    volume_floor = max(float(getattr(settings.universe, "min_quote_volume_usd", 0.0)), 1.0)
+    volume = float(row.get("quote_volume") or 0.0)
+    liquidity_depth = _clamp(
+        (math.log10(max(volume, 1.0)) - math.log10(volume_floor)) / 2.0 + 0.5
+    )
+    freshness = _spread_freshness_score(row, settings)
+    oi_score = _oi_participation_score(row)
+    micro_score = _microstructure_opportunity_score(row)
+    sanity_score = _funding_basis_sanity_score(row, settings)
+    wash_score = _wash_volume_score(row)
+    score = (
+        liquidity_depth * 0.32
+        + freshness * 0.20
+        + oi_score * 0.16
+        + sanity_score * 0.11
+        + micro_score * 0.12
+        + wash_score * 0.09
+    )
+    if _is_priority_asset(row, settings):
+        score = max(score + 0.06, 0.72)
+    penalty = max(0.0, float(outcome_penalty))
+    if penalty > 0.0:
+        score = max(0.0, score - penalty)
+    return round(min(score, 1.0), 6)
+
+
+def _prescore_basis_candidates(
+    rows: list[dict[str, Any]],
+    *,
+    settings: BotSettings,
+    limit: int,
+) -> list[dict[str, Any]]:
+    missing = [row for row in rows if _safe_float(row.get("basis_pct")) is None]
+    missing.sort(
+        key=lambda item: (
+            _prescore_row(item, settings),
+            float(item.get("quote_volume") or 0.0),
+        ),
+        reverse=True,
+    )
+    return missing[: max(0, int(limit))]
+
+
+def warm_prescore_basis_rows(
+    rows: list[dict[str, Any]],
+    *,
+    settings: BotSettings,
+    limit: int = DEFAULT_PRESCORE_BASIS_WARM_LIMIT,
+    get_cached_basis: Callable[[str], float | None] | None = None,
+    get_mark_basis: Callable[[str], float | None] | None = None,
+) -> dict[str, int]:
+    """Fill basis_pct for top prescore rows from WS mark/index or REST cache."""
+    candidates = _prescore_basis_candidates(rows, settings=settings, limit=limit)
+    ws_filled = 0
+    cache_filled = 0
+    for row in candidates:
+        if _safe_float(row.get("basis_pct")) is not None:
+            continue
+        symbol = str(row.get("symbol") or "").strip().upper()
+        if not symbol:
+            continue
+        basis: float | None = None
+        source: str | None = None
+        if get_mark_basis is not None:
+            basis = get_mark_basis(symbol)
+            if basis is not None:
+                source = "ws"
+        if basis is None and get_cached_basis is not None:
+            basis = get_cached_basis(symbol)
+            if basis is not None:
+                source = "cache"
+        if basis is None:
+            continue
+        row["basis_pct"] = float(basis)
+        if source == "ws":
+            ws_filled += 1
+        else:
+            cache_filled += 1
+    still_missing = sum(1 for row in candidates if _safe_float(row.get("basis_pct")) is None)
+    return {
+        "basis_warm_candidates": len(candidates),
+        "basis_warm_ws_filled": ws_filled,
+        "basis_warm_cache_filled": cache_filled,
+        "basis_warm_still_missing": still_missing,
+    }
+
+
+async def warm_prescore_basis_rest(
+    rows: list[dict[str, Any]],
+    fetch_basis: Callable[[str], Awaitable[float | None]],
+    *,
+    settings: BotSettings,
+    limit: int = DEFAULT_PRESCORE_BASIS_WARM_LIMIT,
+) -> dict[str, int]:
+    """Bounded REST basis warmup for prescore candidates still missing basis_pct."""
+    candidates = _prescore_basis_candidates(rows, settings=settings, limit=limit)
+    attempted = 0
+    ok = 0
+    failed = 0
+    for row in candidates:
+        if _safe_float(row.get("basis_pct")) is not None:
+            continue
+        symbol = str(row.get("symbol") or "").strip().upper()
+        if not symbol:
+            continue
+        attempted += 1
+        try:
+            basis = await fetch_basis(symbol)
+        except Exception:
+            failed += 1
+            continue
+        if basis is None:
+            failed += 1
+            continue
+        row["basis_pct"] = float(basis)
+        ok += 1
+    return {
+        "basis_warm_attempted": attempted,
+        "basis_warm_ok": ok,
+        "basis_warm_failed": failed,
+    }
+
+
+def select_light_pool_rows(
+    gate_passed_rows: list[dict[str, Any]],
+    *,
+    settings: BotSettings,
+    pinned: set[str],
+    priority_symbols: set[str],
+    outcome_penalties: dict[str, float] | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """Keep top ``light_pool_limit`` by composite prescore plus protected pins/priority."""
+    light_pool_limit = int(getattr(settings.universe, "light_pool_limit", 180) or 180)
+    gate_passed = len(gate_passed_rows)
+    if not gate_passed_rows:
+        return [], {
+            "gate_passed": 0,
+            "light_pool": 0,
+            "light_pool_limit": light_pool_limit,
+        }
+
+    protected = pinned | priority_symbols
+    penalties = outcome_penalties or {}
+    max_spread = float(getattr(settings.universe, "shortlist_spread_max_bps", 8.0))
+    spread_rejected = 0
+    eligible_rows: list[dict[str, Any]] = []
+    for row in gate_passed_rows:
+        symbol = str(row.get("symbol") or "").strip().upper()
+        spread_bps = _safe_float(row.get("spread_bps"))
+        if (
+            spread_bps is not None
+            and spread_bps > max_spread
+            and symbol not in protected
+        ):
+            spread_rejected += 1
+            continue
+        eligible_rows.append(row)
+
+    def _row_prescore(item: dict[str, Any]) -> float:
+        symbol = str(item.get("symbol") or "").strip().upper()
+        penalty = float(penalties.get(symbol, 0.0))
+        return _prescore_row(item, settings, outcome_penalty=penalty)
+
+    scored_rows = sorted(
+        eligible_rows,
+        key=lambda item: (
+            _row_prescore(item),
+            float(item.get("quote_volume") or 0.0),
+        ),
+        reverse=True,
+    )
+    selected: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for row in scored_rows:
+        symbol = str(row.get("symbol") or "").strip().upper()
+        if not symbol or symbol not in protected or symbol in seen:
+            continue
+        selected.append(row)
+        seen.add(symbol)
+
+    for row in scored_rows:
+        if len(selected) >= light_pool_limit:
+            break
+        symbol = str(row.get("symbol") or "").strip().upper()
+        if not symbol or symbol in seen:
+            continue
+        selected.append(row)
+        seen.add(symbol)
+
+    selected.sort(
+        key=lambda item: (
+            _row_prescore(item),
+            float(item.get("quote_volume") or 0.0),
+        ),
+        reverse=True,
+    )
+    stats = {
+        "gate_passed": gate_passed,
+        "light_pool": len(selected),
+        "light_pool_limit": light_pool_limit,
+        "spread_gate_rejected": spread_rejected,
+    }
+    if gate_passed > light_pool_limit:
+        LOG.debug(
+            "light_pool_funnel | gate_passed=%d light_pool=%d limit=%d",
+            gate_passed,
+            len(selected),
+            light_pool_limit,
+        )
+    return selected, stats
 
 
 def build_shortlist(
@@ -579,6 +851,11 @@ def build_shortlist(
     settings: BotSettings,
     *,
     seed_source: str = "rest_full",
+    market_regime: str | None = None,
+    outcome_penalties: dict[str, float] | None = None,
+    get_cached_basis: Callable[[str], float | None] | None = None,
+    get_mark_basis: Callable[[str], float | None] | None = None,
+    prescore_basis_warm_limit: int | None = None,
 ) -> tuple[list[UniverseSymbol], dict[str, Any]]:
     shortlist_limit = int(getattr(settings.universe, "shortlist_limit", 50))
     if not symbol_meta or not tickers_24h:
@@ -665,23 +942,59 @@ def build_shortlist(
             }
         )
 
-    eligible_rows.sort(key=lambda item: float(item["quote_volume"]), reverse=True)
+    penalties = outcome_penalties or {}
+    light_pool_rows, funnel_stats = select_light_pool_rows(
+        eligible_rows,
+        settings=settings,
+        pinned=pinned,
+        priority_symbols=priority_symbols,
+        outcome_penalties=penalties,
+    )
+    light_pool_rows.sort(
+        key=lambda item: (
+            _prescore_row(
+                item,
+                settings,
+                outcome_penalty=float(penalties.get(str(item["symbol"]).upper(), 0.0)),
+            ),
+            float(item["quote_volume"]),
+        ),
+        reverse=True,
+    )
+    warm_limit = int(
+        prescore_basis_warm_limit
+        or getattr(settings.universe, "prescore_basis_warm_limit", DEFAULT_PRESCORE_BASIS_WARM_LIMIT)
+        or DEFAULT_PRESCORE_BASIS_WARM_LIMIT
+    )
+    basis_warm = warm_prescore_basis_rows(
+        light_pool_rows,
+        settings=settings,
+        limit=warm_limit,
+        get_cached_basis=get_cached_basis,
+        get_mark_basis=get_mark_basis,
+    )
     eligible: list[UniverseSymbol] = []
     liquidity_rank = 0
     previous_volume: float | None = None
-    for index, el_row in enumerate(eligible_rows, start=1):
+    derank_applied = 0
+    for index, el_row in enumerate(light_pool_rows, start=1):
         row_volume = float(el_row["quote_volume"])
         if previous_volume is None or not math.isclose(
             row_volume, previous_volume, rel_tol=0.0, abs_tol=1e-9
         ):
             liquidity_rank = index
             previous_volume = row_volume
+        symbol_key = str(el_row["symbol"]).upper()
+        penalty = float(penalties.get(symbol_key, 0.0))
+        if penalty > 0.0:
+            derank_applied += 1
         shortlist_score, reasons = _composite_score(
             row=el_row,
             settings=settings,
             liquidity_rank=liquidity_rank,
-            eligible_count=len(eligible_rows),
+            eligible_count=len(light_pool_rows),
             min_onboard_ms=min_onboard_ms,
+            outcome_penalty=penalty,
         )
         eligible.append(
             UniverseSymbol(
@@ -723,9 +1036,17 @@ def build_shortlist(
         for p_row in eligible
         if p_row.symbol in priority_symbols and p_row.symbol not in pinned
     ]
-    dynamic_pool = [d_row for d_row in eligible if d_row.symbol not in pinned][
-        : settings.universe.dynamic_limit
-    ]
+    dynamic_candidates = [d_row for d_row in eligible if d_row.symbol not in pinned]
+    dynamic_candidates.sort(
+        key=lambda item: (
+            item.shortlist_score or 0.0,
+            _bucket_priority(item)[0],
+            item.quote_volume,
+            item.symbol,
+        ),
+        reverse=True,
+    )
+    dynamic_pool = dynamic_candidates[: settings.universe.dynamic_limit]
     bucket_pool: dict[str, list[UniverseSymbol]] = {
         "trend": [],
         "breakout": [],
@@ -757,9 +1078,16 @@ def build_shortlist(
         shortlist.append(pr_row)
         seen.add(pr_row.symbol)
 
-    targets = _scaled_bucket_targets(max(shortlist_limit - len(shortlist), 0))
+    targets = _scaled_bucket_targets(
+        max(shortlist_limit - len(shortlist), 0),
+        market_regime=market_regime,
+    )
     summary: dict[str, Any] = {
         "mode": seed_source,
+        "market_regime": market_regime,
+        "gate_passed": funnel_stats["gate_passed"],
+        "light_pool": funnel_stats["light_pool"],
+        "light_pool_limit": funnel_stats["light_pool_limit"],
         "eligible": len(eligible),
         "dynamic_pool": len(dynamic_pool),
         "pinned": len(pinned_rows),
@@ -769,6 +1097,8 @@ def build_shortlist(
         "reversal": 0,
         "fill": 0,
         "strategy_seed": 0,
+        "outcome_derank_applied": derank_applied,
+        "basis_warm": basis_warm,
         "avg_score": round(
             sum((summ_row.shortlist_score or 0.0) for summ_row in shortlist)
             / max(len(shortlist), 1),
@@ -788,40 +1118,19 @@ def build_shortlist(
             seen.add(b_row.symbol)
             summary[b_name] = cast("int", summary[b_name]) + 1
 
-    for setup_id in _ALL_SETUP_IDS:
-        if len(shortlist) >= shortlist_limit:
-            break
-        candidates = [
-            candidate
-            for candidate in dynamic_pool
-            if candidate.symbol not in seen and setup_id in candidate.strategy_fits
-        ]
-        candidates.sort(
-            key=lambda item: (
-                item.shortlist_score or 0.0,
-                _bucket_priority(item)[0],
-                item.quote_volume,
-                item.symbol,
-            ),
-            reverse=True,
-        )
-        for cand_row in candidates[:_RESERVED_PER_STRATEGY]:
-            shortlist.append(cand_row)
-            seen.add(cand_row.symbol)
-            summary["strategy_seed"] = cast("int", summary["strategy_seed"]) + 1
-            if len(shortlist) >= shortlist_limit:
-                break
-
-    for dy_row in dynamic_pool:
-        if len(shortlist) >= shortlist_limit:
-            break
-        if dy_row.symbol in seen:
-            continue
-        if not dy_row.strategy_fits:
-            continue
-        shortlist.append(dy_row)
-        seen.add(dy_row.symbol)
-        summary["fill"] = cast("int", summary["fill"]) + 1
+    pool_summary = fill_shortlist_from_pools(
+        shortlist=shortlist,
+        seen=seen,
+        dynamic_pool=dynamic_pool,
+        shortlist_limit=shortlist_limit,
+        setup_ids=_ALL_SETUP_IDS,
+        market_regime=market_regime,
+    )
+    for key, value in pool_summary.items():
+        if key in summary:
+            summary[key] = cast("int", summary[key]) + int(value)
+        else:
+            summary[key] = value
 
     shortlist.sort(
         key=lambda item: (
@@ -883,6 +1192,8 @@ def rerank_shortlist(
     current_shortlist: list[UniverseSymbol],
     latest_tickers: list[dict[str, Any]],
     settings: BotSettings,
+    *,
+    outcome_penalties: dict[str, float] | None = None,
 ) -> list[UniverseSymbol]:
     """Fast WebSocket-based reranking of an existing shortlist.
 
@@ -966,15 +1277,18 @@ def rerank_shortlist(
         (datetime.now(UTC) - timedelta(days=settings.universe.min_listing_age_days)).timestamp()
         * 1000
     )
+    penalties = outcome_penalties or {}
     updated: list[UniverseSymbol] = []
     for item, row in updated_rows:
         liquidity_rank = rank_by_symbol.get(item.symbol) or item.liquidity_rank or 1
+        penalty = float(penalties.get(item.symbol.upper(), 0.0))
         shortlist_score, reasons = _composite_score(
             row=row,
             settings=settings,
             liquidity_rank=liquidity_rank,
             eligible_count=max(len(updated_rows), 1),
             min_onboard_ms=min_onboard_ms,
+            outcome_penalty=penalty,
         )
         updated.append(
             replace(

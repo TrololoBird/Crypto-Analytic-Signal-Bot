@@ -77,3 +77,26 @@ def test_route_all_bypasses_lanes() -> None:
     prepared.universe = SimpleNamespace(strategy_fits=("a",), shortlist_score=1.0)
     routed, _ = engine._route_strategies(prepared, event_interval="15m")
     assert len(routed) == 2
+
+
+def test_shortlist_unified_routing_ignores_strategy_fits() -> None:
+    metadata = [
+        _meta("routed_setup", family="f1"),
+        _meta("other_setup", family="f2"),
+    ]
+    settings = _settings(
+        enable_strategy_lanes=True,
+        route_all_enabled_strategies=False,
+        shortlist_unified_routing=True,
+    )
+    engine = _engine_with_strategies(metadata, settings)
+    prepared = MagicMock()
+    prepared.symbol = "ETHUSDT"
+    prepared.universe = SimpleNamespace(strategy_fits=("routed_setup",), shortlist_score=0.8)
+    routed, skips = engine._route_strategies(prepared, event_interval="15m")
+    routed_ids = {strategy.strategy_id for strategy in routed}
+    assert "other_setup" in routed_ids
+    assert "routed_setup" in routed_ids
+    assert not any(
+        result.decision.reason_code == "asset_fit.shortlist_not_routed" for result in skips
+    )

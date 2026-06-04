@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from bot.domain.limit_entry import limit_delivery_ready
+
 from .contract import (
     DEFAULT_SCALE_WEIGHTS,
     DEFAULT_TARGET_RR,
@@ -24,6 +26,7 @@ __all__ = [
     "TradePlanBuilder",
     "build_trade_plan",
     "default_ttl_bars",
+    "evaluate_publish_readiness",
     "normalize_scale_weights",
     "valid_until_from",
 ]
@@ -81,3 +84,24 @@ class TradePlanBuilder:
             tp1=float(getattr(signal, "take_profit_1", 0.0) or 0.0),
             tp2=float(getattr(signal, "take_profit_2", 0.0) or 0.0),
         )
+
+
+def evaluate_publish_readiness(
+    *,
+    direction: str,
+    mark_price: float | None,
+    entry_low: float,
+    entry_high: float,
+    stop: float,
+    chase_pct: float,
+) -> tuple[bool, str | None, dict[str, object]]:
+    """Publish-time limit gate — delegates to domain limit_entry semantics."""
+    ready, reason, details = limit_delivery_ready(
+        direction=direction,
+        mark_price=mark_price,
+        entry_low=entry_low,
+        entry_high=entry_high,
+        stop=stop,
+        chase_pct=chase_pct,
+    )
+    return ready, reason, dict(details)

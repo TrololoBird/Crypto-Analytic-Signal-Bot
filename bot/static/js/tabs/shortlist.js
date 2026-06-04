@@ -7,6 +7,8 @@ function renderShortlist() {
     kpi("Priority", (s.priority_in_telemetry || 0) + "/" + (s.priority_total || 0),
       (s.priority_missing || []).join(", ") || "covered", Number(s.priority_missing?.length || 0) ? "red" : "green"),
     kpi("Avg fits", number(s.avg_fit || 0, 1), "setups per symbol", "green"),
+    kpi("Light pool", (s.light_pool || "-") + "/" + (s.light_pool_limit || "-"), "stage-1 funnel", "cyan"),
+    kpi("Gate passed", s.gate_passed || "-", "after hard filters", "blue"),
     kpi("Source", s.source || "-", "refresh path", "orange"),
   ]);
   document.getElementById("shortlist-source").textContent = "source " + text(s.source);

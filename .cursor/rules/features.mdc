@@ -10,4 +10,4 @@ alwaysApply: false
 - Lazy/streaming for large work: `.set_streaming(True)` in backtests
 - Wilder smoothing ATR/RSI; BB std ddof=1
 - New columns: add to `PUBLIC_FEATURE_FIELDS` in `bot/domain/contracts.py`
-- Refactor goal: split monolith into `bot/features/` package (see REFACTOR_PLAN.md)
+- Canonical hot path: `prepare_frame.py` + `prepare.py`; Wilder ATR/RSI; BB std ddof=1

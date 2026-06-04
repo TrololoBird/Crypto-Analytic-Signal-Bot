@@ -29,57 +29,81 @@ def detect_bos_choch(
     *,
     timeframe: str = "15m",
     max_age: int = 28,
+    swing_length: int = 5,
 ) -> SpecHit | None:
     work = with_spec_columns(frame)
     if work.height < 25:
         return None
     current = _latest_values(work)
     current_idx = int(work.item(-1, "_spec_idx"))
-    current_close = current.get("close", 0.0)
-    current_atr = current.get("spec_atr14", 0.0)
+    current_close = as_float(current.get("close"))
+    current_atr = as_float(current.get("spec_atr14"))
     if current_close <= 0.0 or current_atr <= 0.0:
         return None
-    candidates = work.tail(max_age + 1).to_dicts()
-    for row in reversed(candidates):
-        idx = int(row["_spec_idx"])
-        age = current_idx - idx
-        if age > max_age:
-            continue
-        close = as_float(row.get("close"))
-        prev_high = as_float(row.get("spec_prev_high20"))
-        prev_low = as_float(row.get("spec_prev_low20"))
-        atr = as_float(row.get("spec_atr14"), current_atr)
-        if min(close, prev_high, prev_low, atr) <= 0.0:
-            continue
-        if close > prev_high and current_close > prev_high:
-            return SpecHit(
-                strategy="bos_choch",
-                direction="long",
-                entry=current_close if age == 0 else prev_high,
-                stop_basis=prev_high - atr,
-                atr=atr,
-                timeframe=timeframe,
-                reasons=(f"body_break_above_swing={prev_high:.4f}", f"break_age={age}"),
-                structure_clarity=min(1.0, (close - prev_high) / max(atr, 1e-8)),
-                vol_ratio=_row_volume_ratio(row),
-                rsi=as_float(row.get("rsi14"), 50.0),
-                source_index=idx,
-            )
-        if close < prev_low and current_close < prev_low:
-            return SpecHit(
-                strategy="bos_choch",
-                direction="short",
-                entry=current_close if age == 0 else prev_low,
-                stop_basis=prev_low + atr,
-                atr=atr,
-                timeframe=timeframe,
-                reasons=(f"body_break_below_swing={prev_low:.4f}", f"break_age={age}"),
-                structure_clarity=min(1.0, (prev_low - close) / max(atr, 1e-8)),
-                vol_ratio=_row_volume_ratio(row),
-                rsi=as_float(row.get("rsi14"), 50.0),
-                source_index=idx,
-            )
-    return None
+
+    structure_zone = latest_structure_break(
+        work,
+        swing_length=max(2, int(swing_length)),
+        prefer_kind="choch",
+    )
+    if structure_zone is None or structure_zone.kind not in {"bos", "choch"}:
+        return None
+    if structure_zone.level is None or structure_zone.broken_index is None:
+        return None
+
+    broken_index = max(0, min(int(structure_zone.broken_index), work.height - 1))
+    age = current_idx - broken_index
+    if age > max_age:
+        return None
+
+    break_level = float(structure_zone.level)
+    direction = structure_zone.direction
+    row = work.row(broken_index, named=True)
+    atr = as_float(row.get("spec_atr14"), current_atr)
+    close = as_float(row.get("close"))
+    if min(close, break_level, atr) <= 0.0:
+        return None
+
+    if direction == "long":
+        if current_close <= break_level:
+            return None
+        clarity = min(1.0, (close - break_level) / max(atr, 1e-8))
+        return SpecHit(
+            strategy="bos_choch",
+            direction="long",
+            entry=current_close if age == 0 else break_level,
+            stop_basis=break_level - atr,
+            atr=atr,
+            timeframe=timeframe,
+            reasons=(
+                f"{structure_zone.kind}_break_above={break_level:.4f}",
+                f"break_age={age}",
+            ),
+            structure_clarity=clarity,
+            vol_ratio=_row_volume_ratio(row),
+            rsi=as_float(row.get("rsi14"), 50.0),
+            source_index=broken_index,
+        )
+
+    if current_close >= break_level:
+        return None
+    clarity = min(1.0, (break_level - close) / max(atr, 1e-8))
+    return SpecHit(
+        strategy="bos_choch",
+        direction="short",
+        entry=current_close if age == 0 else break_level,
+        stop_basis=break_level + atr,
+        atr=atr,
+        timeframe=timeframe,
+        reasons=(
+            f"{structure_zone.kind}_break_below={break_level:.4f}",
+            f"break_age={age}",
+        ),
+        structure_clarity=clarity,
+        vol_ratio=_row_volume_ratio(row),
+        rsi=as_float(row.get("rsi14"), 50.0),
+        source_index=broken_index,
+    )
 
 
 _MIN_SWINGS = 6  # Need 3+ of each type for trend context
@@ -241,8 +265,15 @@ def _select_stop_level_with_fallback(
     return None, None, details
 
 
-def _spec_detect_kwargs(_effective: dict[str, float]) -> dict[str, object]:
-    return {"max_age": 20}
+def _spec_detect_kwargs(effective: dict[str, float]) -> dict[str, object]:
+    swing_lookback = coerce_int(
+        effective.get("swing_lookback", effective.get("bos_lookback", 6)),
+        6,
+    )
+    return {
+        "max_age": coerce_int(effective.get("max_break_age_bars", 20), 20),
+        "swing_length": max(2, swing_lookback),
+    }
 
 
 def _detect_bos_choch_extended(
@@ -636,7 +667,7 @@ class BOSCHOCHSetup(SpecDetectorSetup):
     required_context = ("futures_flow",)
 
     DEFAULTS: ClassVar[dict[str, float]] = {
-        "base_score": 0.55,
+        "base_score": 0.53,
         "swing_lookback": 6,
         "external_swing_lookback": 20,
         "bos_lookback": 6,
@@ -656,22 +687,7 @@ class BOSCHOCHSetup(SpecDetectorSetup):
 
     def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
         """Tunable parameters for self-learner optimization."""
-        defaults = {
-            "base_score": 0.55,
-            "swing_lookback": 6,
-            "external_swing_lookback": 20,
-            "bos_lookback": 6,  # Backward-compatible alias.
-            "choch_lookback": 6,  # Backward-compatible alias.
-            "sl_buffer_atr": 0.5,
-            "breakout_threshold_atr": 0.4,
-            "max_break_age_bars": 6,
-            "max_retest_age_bars": 16,
-            "retest_atr_mult": 1.25,
-            "min_volume_ratio": 1.05,
-            "bias_mismatch_penalty": 0.75,
-            "min_rr": 1.9,
-            "min_swings": 3,
-        }
+        defaults = dict(self.DEFAULTS)
         if settings is not None:
             filters = getattr(settings, "filters", None)
             if filters:

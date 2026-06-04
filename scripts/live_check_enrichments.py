@@ -28,7 +28,7 @@ from typing import Any
 
 import structlog
 
-from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.runtime.errors import DEFENSIVE_EXC
 from bot.domain.config import load_settings
 from bot.domain.schemas import SymbolFrames, UniverseSymbol
 from bot.features import min_required_bars, prepare_symbol

@@ -3,6 +3,9 @@
 Reads data/bot/telemetry/analysis/{selected,rejected,tracking_events}.jsonl
 and returns a structured JournalReport. No writes, no network calls.
 
+When a MemoryRepository is available, ``build_journal_report_from_repo`` is the
+primary source; JSONL remains as a fallback with parity warnings on mismatch.
+
 Also provides build_config_suggestions() which joins selected signals with their
 outcomes (tp/sl/expired) and bins by key parameters to suggest config thresholds.
 """
@@ -18,6 +21,8 @@ from typing import TYPE_CHECKING, Any, cast
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
+
+    from bot.persistence.repository.memory import MemoryRepository
 
 LOG = logging.getLogger("bot.journal")
 
@@ -35,6 +40,27 @@ class JournalReport:
 JsonRow = dict[str, Any]
 OutcomeItem = tuple[JsonRow, str]
 
+# Canonical terminal tracking codes used in journal analytics (tp1/tp2/sl/expired).
+_TRACKING_EVENT_ALIASES: dict[str, str] = {
+    "tp1": "tp1",
+    "tp1_hit": "tp1",
+    "tp2": "tp2",
+    "tp2_hit": "tp2",
+    "sl": "sl",
+    "stop_loss": "sl",
+    "expired": "expired",
+    "expired_pending": "expired",
+    "expired_active": "expired",
+}
+
+
+def normalize_tracking_event(event: str | None) -> str | None:
+    """Map telemetry event_type variants to canonical journal outcome codes."""
+    key = str(event or "").strip().lower()
+    if not key:
+        return None
+    return _TRACKING_EVENT_ALIASES.get(key)
+
 
 def _iter_jsonl(path: Path) -> Iterator[JsonRow]:
     if not path.exists():
@@ -51,27 +77,41 @@ def _iter_jsonl(path: Path) -> Iterator[JsonRow]:
             yield cast("JsonRow", row)
 
 
-def build_journal_report(telemetry_root: Path) -> JournalReport:
-    """Build a JournalReport from JSONL files under telemetry_root.
+def _collect_analysis_dirs(telemetry_root: Path) -> list[Path]:
+    dirs: list[Path] = []
+    legacy = telemetry_root / "analysis"
+    if legacy.exists():
+        dirs.append(legacy)
+    runs = telemetry_root / "runs"
+    if runs.exists():
+        for run_path in sorted(runs.iterdir()):
+            ap = run_path / "analysis"
+            if ap.exists():
+                dirs.append(ap)
+    return dirs
 
-    Supports both legacy layout:
-      telemetry_root/analysis/*.jsonl
-    and per-run layout:
-      telemetry_root/runs/<run_id>/analysis/*.jsonl
-    """
-    analysis_dirs: list[Path] = []
-    legacy_analysis = telemetry_root / "analysis"
-    if legacy_analysis.exists():
-        analysis_dirs.append(legacy_analysis)
-    runs_dir = telemetry_root / "runs"
-    if runs_dir.exists():
-        for run_path in sorted(runs_dir.iterdir()):
-            analysis_path = run_path / "analysis"
-            if analysis_path.exists():
-                analysis_dirs.append(analysis_path)
+
+def _record_terminal_outcome(
+    outcomes: dict[str, Counter[str]],
+    seen_refs: set[str],
+    *,
+    tracking_ref: str,
+    setup_id: str,
+    canonical: str,
+) -> None:
+    """Count one terminal outcome per tracking_ref (R3 dedup)."""
+    ref = str(tracking_ref or "").strip()
+    if not ref or ref in seen_refs:
+        return
+    seen_refs.add(ref)
+    outcomes[str(setup_id or "unknown")][canonical] += 1
+
+
+def _build_journal_report_from_jsonl(telemetry_root: Path) -> JournalReport:
+    """Build a JournalReport from JSONL files under telemetry_root."""
+    analysis_dirs = _collect_analysis_dirs(telemetry_root)
     report = JournalReport()
 
-    # Signals sent
     hourly: Counter[int] = Counter()
     signals_count = 0
     for analysis in analysis_dirs:
@@ -86,7 +126,6 @@ def build_journal_report(telemetry_root: Path) -> JournalReport:
     report.signals_sent = signals_count
     report.hourly_signal_counts = dict(sorted(hourly.items()))
 
-    # Rejection reasons
     rejection_counter: Counter[str] = Counter()
     for analysis in analysis_dirs:
         for row in _iter_jsonl(analysis / "rejected.jsonl"):
@@ -94,31 +133,112 @@ def build_journal_report(telemetry_root: Path) -> JournalReport:
             rejection_counter[reason] += 1
     report.top_rejection_reasons = rejection_counter.most_common(10)
 
-    # Tracking outcomes by setup_id
     outcomes: dict[str, Counter[str]] = defaultdict(Counter)
+    seen_refs: set[str] = set()
     for analysis in analysis_dirs:
         for row in _iter_jsonl(analysis / "tracking_events.jsonl"):
-            event = row.get("event") or row.get("type") or ""
-            setup_id = row.get("setup_id") or "unknown"
-            if event in ("tp1", "tp2", "sl", "expired"):
-                outcomes[setup_id][event] += 1
+            raw_event = row.get("event") or row.get("type") or row.get("event_type") or ""
+            canonical = normalize_tracking_event(str(raw_event))
+            if not canonical:
+                continue
+            _record_terminal_outcome(
+                outcomes,
+                seen_refs,
+                tracking_ref=str(row.get("tracking_ref") or ""),
+                setup_id=str(row.get("setup_id") or "unknown"),
+                canonical=canonical,
+            )
     report.setup_outcomes = {k: dict(v) for k, v in outcomes.items()}
-
     return report
 
 
-def _collect_analysis_dirs(telemetry_root: Path) -> list[Path]:
-    dirs: list[Path] = []
-    legacy = telemetry_root / "analysis"
-    if legacy.exists():
-        dirs.append(legacy)
-    runs = telemetry_root / "runs"
-    if runs.exists():
-        for run_path in sorted(runs.iterdir()):
-            ap = run_path / "analysis"
-            if ap.exists():
-                dirs.append(ap)
-    return dirs
+def build_journal_report(telemetry_root: Path) -> JournalReport:
+    """Build a JournalReport from JSONL telemetry (sync fallback path)."""
+    return _build_journal_report_from_jsonl(telemetry_root)
+
+
+def _journal_outcome_total(report: JournalReport) -> int:
+    return sum(sum(events.values()) for events in report.setup_outcomes.values())
+
+
+def _journal_parity_mismatch(
+    repo_report: JournalReport,
+    jsonl_report: JournalReport,
+) -> dict[str, tuple[int, int]]:
+    mismatches: dict[str, tuple[int, int]] = {}
+    if repo_report.signals_sent != jsonl_report.signals_sent:
+        mismatches["signals_sent"] = (repo_report.signals_sent, jsonl_report.signals_sent)
+    repo_total = _journal_outcome_total(repo_report)
+    jsonl_total = _journal_outcome_total(jsonl_report)
+    if repo_total != jsonl_total:
+        mismatches["terminal_outcomes"] = (repo_total, jsonl_total)
+    return mismatches
+
+
+def _warn_journal_parity_mismatch(
+    repo_report: JournalReport,
+    jsonl_report: JournalReport,
+) -> None:
+    mismatches = _journal_parity_mismatch(repo_report, jsonl_report)
+    if mismatches:
+        LOG.warning(
+            "journal repo/jsonl parity mismatch | fields=%s",
+            mismatches,
+        )
+
+
+async def build_journal_report_from_repo(repo: MemoryRepository) -> JournalReport:
+    """Build a JournalReport from persisted repository data (primary path)."""
+    report = JournalReport()
+    stats = await repo.get_tracking_stats()
+    report.signals_sent = int(stats.get("signals_sent") or 0)
+
+    conn = repo._require_conn()
+    async with conn.execute(
+        """
+        SELECT created_at
+        FROM active_signals
+        WHERE signal_message_id IS NOT NULL
+        """
+    ) as cursor:
+        delivered_rows = await cursor.fetchall()
+
+    hourly: Counter[int] = Counter()
+    for row in delivered_rows:
+        ts = str(row["created_at"] or "")
+        try:
+            hourly[int(ts[11:13])] += 1
+        except (IndexError, ValueError):
+            pass
+    report.hourly_signal_counts = dict(sorted(hourly.items()))
+
+    outcome_rows = await repo.get_signal_outcomes(last_days=None)
+    outcomes: dict[str, Counter[str]] = defaultdict(Counter)
+    seen_refs: set[str] = set()
+    for row in outcome_rows:
+        canonical = normalize_tracking_event(str(row.get("result") or ""))
+        if not canonical:
+            continue
+        _record_terminal_outcome(
+            outcomes,
+            seen_refs,
+            tracking_ref=str(row.get("tracking_ref") or row.get("tracking_id") or ""),
+            setup_id=str(row.get("setup_id") or "unknown"),
+            canonical=canonical,
+        )
+    report.setup_outcomes = {k: dict(v) for k, v in outcomes.items()}
+    return report
+
+
+async def build_journal_report_primary(
+    telemetry_root: Path,
+    repo: MemoryRepository,
+) -> JournalReport:
+    """Build journal from repository; warn when JSONL telemetry differs."""
+    repo_report = await build_journal_report_from_repo(repo)
+    jsonl_report = _build_journal_report_from_jsonl(telemetry_root)
+    _warn_journal_parity_mismatch(repo_report, jsonl_report)
+    return repo_report
 
 
 def build_config_suggestions(telemetry_root: Path) -> list[str]:
@@ -143,19 +263,18 @@ def build_config_suggestions(telemetry_root: Path) -> list[str]:
             signals[ref] = sig
 
     # 2. Collect terminal outcomes keyed by tracking_ref
-    WIN_EVENTS = {"tp1", "tp2"}
-    LOSS_EVENTS = {"sl"}
     outcomes: dict[str, str] = {}  # ref -> "win" | "loss" | "expired"
     for ad in analysis_dirs:
         for row in _iter_jsonl(ad / "tracking_events.jsonl"):
-            event = row.get("event") or row.get("type") or ""
+            raw_event = row.get("event") or row.get("type") or row.get("event_type") or ""
+            canonical = normalize_tracking_event(str(raw_event))
             ref = row.get("tracking_ref")
-            if not ref or event not in WIN_EVENTS | LOSS_EVENTS | {"expired"}:
+            if not ref or canonical is None:
                 continue
             if ref not in outcomes:
-                if event in WIN_EVENTS:
+                if canonical in {"tp1", "tp2"}:
                     outcomes[ref] = "win"
-                elif event in LOSS_EVENTS:
+                elif canonical == "sl":
                     outcomes[ref] = "loss"
                 else:
                     outcomes[ref] = "expired"

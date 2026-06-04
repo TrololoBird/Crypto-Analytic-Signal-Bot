@@ -12,7 +12,7 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.runtime.errors import DEFENSIVE_EXC
 
 from ..domain.events import KlineCloseEvent, ReconnectEvent, ShortlistUpdatedEvent
 
@@ -126,6 +126,12 @@ class DashboardWSBroadcaster:
                 "payload": {"reason": event.reason, "ts": datetime.now(UTC).isoformat()},
             }
         )
+
+    def publish_tracking_update(self, payload: dict[str, Any]) -> None:
+        """Notify dashboard clients that tracked signals changed."""
+        body = dict(payload)
+        body.setdefault("ts", datetime.now(UTC).isoformat())
+        self._schedule_broadcast({"type": "tracking_update", "payload": body})
 
     def publish_signal(self, signal: dict[str, Any]) -> None:
         """Push a live signal to all dashboard clients."""

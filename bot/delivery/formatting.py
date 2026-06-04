@@ -15,6 +15,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from bot.coercion import as_float as _float
+from bot.domain.labels import INTERNAL_TRACKING_EVENT_RU, TRACKING_EVENT_RU
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -166,16 +167,21 @@ INVALIDATION_BY_SETUP: dict[str, str] = {
 }
 
 
-TRACKING_TITLES: dict[str, str] = {
-    "activated": "ENTRY ACTIVATED",
-    "tp1_hit": "TP1 HIT",
-    "tp2_hit": "TP2 HIT",
-    "stop_loss": "STOP HIT",
-    "smart_exit": "ANALYTICAL EXIT",
-    "emergency_exit": "HARD INVALIDATION",
-    "expired": "PLAN EXPIRED",
-    "ambiguous_exit": "AMBIGUOUS EXIT",
-    "superseded": "SUPERSEDED",
+TRACKING_TITLES: dict[str, str] = dict(TRACKING_EVENT_RU)
+
+# Legacy / internal — not sent to channel subscribers
+_INTERNAL_TRACKING_TITLES: dict[str, str] = dict(INTERNAL_TRACKING_EVENT_RU)
+
+LIFECYCLE_NOTE_RU: dict[str, str] = {
+    "limit_zone_touched": "цена коснулась лимит-зоны — ждите закрытие 15m внутри зоны",
+    "zone_not_touched": "зона не затронута",
+    "trend_bar_confirm": "трендовое подтверждение свечи",
+    "trend_bar_reject": "свеча не подтвердила тренд — ждём следующий 15m close",
+    "breakout_accept": "принятие пробоя в зоне",
+    "breakout_reject": "пробой не принят — ждём close",
+    "reversal_confirm": "разворот подтверждён",
+    "reversal_reject": "разворот не подтверждён",
+    "close_outside_zone": "close вне зоны — вход не активирован",
 }
 
 
@@ -184,12 +190,15 @@ class TelegramFormatPolicy:
     """Formatting knobs for Telegram signal messages."""
 
     text_limit: int = TELEGRAM_SAFE_TEXT_LIMIT
-    include_disclaimer: bool = True
+    include_disclaimer: bool = False
     include_chart_link: bool = True
-    include_reason_limit: int = 5
-    include_filter_limit: int = 7
-    language: str = "en"
+    include_reason_limit: int = 0
+    include_filter_limit: int = 0
+    language: str = "ru"
     compact: bool = True
+
+
+CHANNEL_SIGNAL_POLICY = TelegramFormatPolicy()
 
 
 @dataclass(frozen=True, slots=True)
@@ -238,6 +247,10 @@ class SignalMessageFacts:
     risk_reward: float
     stop_distance_pct: float
     valid_until: datetime | None
+    risk_reward_tp1: float | None = None
+    risk_reward_tp2: float | None = None
+    risk_reward_tp3: float | None = None
+    weighted_risk_reward: float | None = None
     reasons: tuple[str, ...] = ()
     passed_filters: tuple[str, ...] = ()
     scale_weights: tuple[float, float, float] = (0.5, 0.3, 0.2)
@@ -441,6 +454,18 @@ def reason_label(reason: str) -> str:
     return raw.replace("_", " ").replace(".", ": ")
 
 
+def _primary_timeframe_fallback_badge(passed_filters: tuple[str, ...], *, actual_timeframe: str) -> str | None:
+    """Return a compact badge when prepared primary differs from configured."""
+    for item in passed_filters:
+        if item == "primary_timeframe_fallback":
+            return "TF fallback"
+        if item.startswith("primary_timeframe_fallback:"):
+            configured = item.split(":", 1)[1].strip()
+            if configured and configured != actual_timeframe:
+                return f"{configured}→{actual_timeframe}"
+    return None
+
+
 def compact_reason_list(reasons: Iterable[str], *, limit: int) -> list[str]:
     """Return unique human-readable reasons."""
     seen: set[str] = set()
@@ -475,6 +500,32 @@ def extract_signal_facts(
         scale_tuple = (0.5, 0.3, 0.2)
     if len(scale_tuple) != 3:
         scale_tuple = (0.5, 0.3, 0.2)
+    entry_low = _float(getattr(signal, "entry_low", getattr(signal, "entry_price", 0.0)))
+    entry_high = _float(getattr(signal, "entry_high", getattr(signal, "entry_price", 0.0)))
+    stop = _float(getattr(signal, "stop", getattr(signal, "stop_price", 0.0)))
+    take_profit_1 = _float(getattr(signal, "take_profit_1", getattr(signal, "tp1_price", 0.0)))
+    take_profit_2 = _float(getattr(signal, "take_profit_2", getattr(signal, "tp2_price", 0.0)))
+    take_profit_3 = _optional_float(
+        getattr(signal, "take_profit_3", getattr(signal, "tp3", None))
+    )
+    entry_mid = (entry_low + entry_high) / 2.0
+    risk = abs(entry_mid - stop)
+    rr1 = _optional_float(getattr(signal, "risk_reward_tp1", None))
+    rr2 = _optional_float(getattr(signal, "risk_reward_tp2", None))
+    rr3 = _optional_float(getattr(signal, "risk_reward_tp3", None))
+    tp3 = take_profit_3 if take_profit_3 is not None else take_profit_2
+    if risk > 0.0:
+        if rr1 is None:
+            rr1 = abs(take_profit_1 - entry_mid) / risk
+        if rr2 is None:
+            rr2 = abs(take_profit_2 - entry_mid) / risk
+        if rr3 is None:
+            rr3 = abs(tp3 - entry_mid) / risk
+    weighted_rr = _optional_float(getattr(signal, "weighted_risk_reward", None))
+    if weighted_rr is None and rr1 is not None and rr2 is not None and rr3 is not None:
+        weighted_rr = (
+            scale_tuple[0] * rr1 + scale_tuple[1] * rr2 + scale_tuple[2] * rr3
+        )
     return SignalMessageFacts(
         symbol=str(getattr(signal, "symbol", "")),
         direction=str(getattr(signal, "direction", "long")),
@@ -482,15 +533,17 @@ def extract_signal_facts(
         timeframe=str(getattr(signal, "timeframe", "15m")),
         tracking_ref=str(getattr(signal, "tracking_ref", "") or getattr(signal, "tracking_id", "")),
         score=_float(getattr(signal, "score", 0.0)),
-        entry_low=_float(getattr(signal, "entry_low", getattr(signal, "entry_price", 0.0))),
-        entry_high=_float(getattr(signal, "entry_high", getattr(signal, "entry_price", 0.0))),
-        stop=_float(getattr(signal, "stop", getattr(signal, "stop_price", 0.0))),
-        take_profit_1=_float(getattr(signal, "take_profit_1", getattr(signal, "tp1_price", 0.0))),
-        take_profit_2=_float(getattr(signal, "take_profit_2", getattr(signal, "tp2_price", 0.0))),
-        take_profit_3=_optional_float(
-            getattr(signal, "take_profit_3", getattr(signal, "tp3", None))
-        ),
+        entry_low=entry_low,
+        entry_high=entry_high,
+        stop=stop,
+        take_profit_1=take_profit_1,
+        take_profit_2=take_profit_2,
+        take_profit_3=take_profit_3,
         risk_reward=_float(getattr(signal, "risk_reward", 0.0)),
+        risk_reward_tp1=rr1,
+        risk_reward_tp2=rr2,
+        risk_reward_tp3=rr3,
+        weighted_risk_reward=weighted_rr,
         stop_distance_pct=_float(getattr(signal, "stop_distance_pct", 0.0)),
         valid_until=valid_until,
         reasons=tuple(str(item) for item in getattr(signal, "reasons", ()) or ()),
@@ -575,13 +628,92 @@ def invalidation_text(facts: SignalMessageFacts) -> str:
 
 
 def status_line_for_signal(facts: SignalMessageFacts) -> str:
-    """Return the entry waiting status line."""
+    """Return the limit-order waiting status line."""
     remaining = minutes_until(facts.valid_until)
     if remaining is None:
-        return "wait for entry while setup remains valid"
+        return "лимит в зоне · SL/TP после исполнения"
     if remaining <= 0:
-        return "entry plan expired"
-    return f"wait for entry up to {remaining:.0f} min"
+        return "срок лимита истёк"
+    return f"лимит в зоне · ждём до {remaining:.0f} мин"
+
+
+def _channel_header(facts: SignalMessageFacts, *, tier: str | None = None) -> str:
+    is_long = direction_label(facts.direction) == "LONG"
+    badge = "🟢" if is_long else "🔴"
+    ref = code("#" + facts.tracking_ref)
+    tier_badge = _tier_badge(tier)
+    return f"{tier_badge} {badge} <b>{direction_label(facts.direction)} {code(facts.symbol)}</b> {ref}"
+
+
+def _tier_badge(tier: str | None) -> str:
+    normalized = str(tier or "action").strip().lower()
+    label = "WATCH" if normalized == "watch" else "ACTION"
+    return code(f"[{label}]")
+
+
+def _channel_rr_line(facts: SignalMessageFacts) -> str:
+    tp3 = facts.take_profit_3 if facts.take_profit_3 is not None else facts.take_profit_2
+    same_tp = abs(facts.take_profit_2 - facts.take_profit_1) <= max(abs(facts.take_profit_1), 1.0) * 1e-8
+    same_tp = same_tp and abs(tp3 - facts.take_profit_2) <= max(abs(facts.take_profit_2), 1.0) * 1e-8
+    risk_pct = code(f"{facts.stop_distance_pct:.1f}%")
+    if same_tp:
+        rr_value = facts.weighted_risk_reward or facts.risk_reward_tp1 or facts.risk_reward
+        return f"RR {code(f'{rr_value:.1f}')} · риск {risk_pct}"
+    rr1 = facts.risk_reward_tp1 if facts.risk_reward_tp1 is not None else facts.risk_reward
+    rr2 = facts.risk_reward_tp2 if facts.risk_reward_tp2 is not None else rr1
+    rr3 = facts.risk_reward_tp3 if facts.risk_reward_tp3 is not None else rr2
+    return (
+        f"RR1 {code(f'{rr1:.1f}')} · RR2 {code(f'{rr2:.1f}')} · "
+        f"RR3 {code(f'{rr3:.1f}')} · риск {risk_pct}"
+    )
+
+
+def _channel_legs_line(facts: SignalMessageFacts) -> str:
+    entry = f"{format_price(facts.entry_low)}–{format_price(facts.entry_high)}"
+    tp3 = facts.take_profit_3 if facts.take_profit_3 is not None else facts.take_profit_2
+    same_tp = abs(facts.take_profit_2 - facts.take_profit_1) <= max(abs(facts.take_profit_1), 1.0) * 1e-8
+    if same_tp:
+        targets = f"TP {code(format_price(facts.take_profit_1))}"
+    else:
+        targets = (
+            f"TP1 {code(format_price(facts.take_profit_1))} · "
+            f"TP2 {code(format_price(facts.take_profit_2))} · "
+            f"TP3 {code(format_price(tp3))}"
+        )
+    return (
+        f"Вход {code(entry)} · SL {code(format_price(facts.stop))} · {targets}"
+    )
+
+
+def format_channel_trade_card(
+    facts: SignalMessageFacts,
+    *,
+    status_line: str | None = None,
+    include_chart: bool = True,
+    tier: str | None = None,
+) -> str:
+    """Unified compact card for Telegram channel (new + edited)."""
+    setup_line = (
+        f"{escape_text(setup_label(facts.setup_id))} · {code(facts.timeframe)}"
+    )
+    fallback_badge = _primary_timeframe_fallback_badge(
+        facts.passed_filters,
+        actual_timeframe=facts.timeframe,
+    )
+    if fallback_badge:
+        setup_line += f" · {code(fallback_badge)}"
+    setup_line += f" · {code(format_score(facts.score))}"
+    lines = [
+        _channel_header(facts, tier=tier),
+        setup_line,
+        _channel_legs_line(facts),
+        _channel_rr_line(facts),
+    ]
+    lines.append(escape_text(status_line or status_line_for_signal(facts)))
+    if include_chart:
+        chart = html.escape(tradingview_chart_url(facts.symbol, facts.timeframe), quote=True)
+        lines.append(f'<a href="{chart}">TradingView</a>')
+    return "\n".join(lines)
 
 
 def target_line(facts: SignalMessageFacts) -> str:
@@ -666,6 +798,32 @@ def truncate_preserving_footer(text: str, *, limit: int = TELEGRAM_SAFE_TEXT_LIM
     return text[:room].rstrip() + "\n...\n" + footer
 
 
+def format_safe_signal_fallback(
+    signal: Any,
+    *,
+    pending_expiry_minutes: int,
+    tier: str | None = None,
+) -> str:
+    """Minimal valid Telegram HTML when primary render fails validation."""
+    facts = extract_signal_facts(signal, pending_expiry_minutes=pending_expiry_minutes)
+    tier_badge = _tier_badge(tier)
+    direction = direction_label(facts.direction)
+    ref = code("#" + facts.tracking_ref) if facts.tracking_ref else ""
+    lines = [
+        f"{tier_badge} <b>{direction} {code(facts.symbol)}</b> {ref}".strip(),
+        (
+            f"{escape_text(setup_label(facts.setup_id))} · "
+            f"{code(facts.timeframe)} · {code(format_score(facts.score))}"
+        ),
+        (
+            f"SL {code(format_price(facts.stop))} · "
+            f"TP {code(format_price(facts.take_profit_1))}"
+        ),
+        escape_text("Signal-only analytics. Manual entry."),
+    ]
+    return "\n".join(lines)
+
+
 def format_signal_message(
     signal: Any,
     *,
@@ -673,133 +831,98 @@ def format_signal_message(
     btc_bias: str | None = None,
     eth_bias: str | None = None,
     policy: TelegramFormatPolicy | None = None,
+    tier: str | None = None,
 ) -> str:
-    """Render the main Telegram signal message."""
-    policy = policy or TelegramFormatPolicy()
+    """Render the main Telegram signal message (compact channel card)."""
+    policy = policy or CHANNEL_SIGNAL_POLICY
     facts = extract_signal_facts(
         signal,
         pending_expiry_minutes=pending_expiry_minutes,
         btc_bias=btc_bias,
         eth_bias=eth_bias,
     )
-    direction = direction_label(facts.direction)
-    reasons = compact_reason_list(facts.reasons, limit=policy.include_reason_limit)
-    filters = compact_reason_list(facts.passed_filters, limit=policy.include_filter_limit)
-    context = market_context_lines(facts)
+    if not policy.compact:
+        reasons = compact_reason_list(facts.reasons, limit=policy.include_reason_limit)
+        context = market_context_lines(facts)
+        lines = [
+            (f"{bold('SIGNAL-ONLY PLAN')} {code(facts.symbol)} {code(direction_label(facts.direction))}"),
+            f"{bold(setup_label(facts.setup_id))} {code(facts.timeframe)} | score {code(format_score(facts.score))}",
+            f"{bold('Entries')} {entry_levels_line(facts)}",
+            f"{bold('Stop')} {code(format_price(facts.stop))}",
+            f"{bold('Targets')} {target_line(facts)}",
+        ]
+        if reasons:
+            lines.append(f"{bold('Why')} " + "; ".join(escape_text(item) for item in reasons))
+        if context:
+            lines.append(f"{bold('Context')} {code(' | '.join(context))}")
+        if policy.include_disclaimer:
+            lines.append("<i>Signal-only analytics. No auto-trading.</i>")
+        rendered = "\n".join(lines)
+        return truncate_preserving_footer(rendered, limit=policy.text_limit)
 
-    tracking_ref = code("#" + facts.tracking_ref)
-    lines = [
-        (f"{bold('SIGNAL-ONLY PLAN')} {code(facts.symbol)} {code(direction)} {tracking_ref}"),
-        (
-            f"{bold(setup_label(facts.setup_id))} {code(facts.timeframe)} | "
-            f"score {code(format_score(facts.score))} {escape_text(confidence_label(facts.score))}"
-        ),
-        f"{bold('Type')} limit scale order (DCA-compatible)",
-        f"{bold('Entries')} {entry_levels_line(facts)}",
-        f"{bold('Stop')} {code(format_price(facts.stop))}",
-        f"{bold('Targets')} {target_line(facts)}",
-        (
-            f"{bold('Risk')} RR {code(f'{facts.risk_reward:.2f}')} | "
-            f"stop {code(f'{facts.stop_distance_pct:.2f}%')}"
-        ),
-        (
-            f"{bold('TTL')} {code(format_datetime(facts.valid_until))} - "
-            f"{escape_text(status_line_for_signal(facts))}"
-        ),
-    ]
-    if reasons:
-        lines.append(f"{bold('Why')} " + "; ".join(escape_text(item) for item in reasons))
-    if context:
-        lines.append(f"{bold('Context')} {code(' | '.join(context))}")
-    if facts.microstructure_reason and not policy.compact:
-        lines.append(f"{bold('Microstructure')} {escape_text(facts.microstructure_reason)}")
-    if facts.microstructure_warnings and not policy.compact:
-        lines.append(
-            f"{bold('Warnings')} "
-            + ", ".join(
-                escape_text(item.replace("_", " ")) for item in facts.microstructure_warnings
-            )
-        )
-    if filters and not policy.compact:
-        lines.append(f"{bold('Filters')} " + "; ".join(escape_text(item) for item in filters))
-    lines.append(f"{bold('Invalidation')} {escape_text(invalidation_text(facts))}")
-    if policy.include_chart_link:
-        chart = html.escape(tradingview_chart_url(facts.symbol, facts.timeframe), quote=True)
-        lines.append(f'{bold("Chart")} <a href="{chart}">TradingView</a>')
-    if policy.include_disclaimer:
-        lines.append("<i>Signal-only analytics. No auto-trading.</i>")
-    rendered = "\n".join(lines)
+    rendered = format_channel_trade_card(
+        facts,
+        include_chart=policy.include_chart_link,
+        tier=tier,
+    )
     return truncate_preserving_footer(rendered, limit=policy.text_limit)
 
 
 def tracking_status_text(state: Any) -> str:
     """Render the state line for tracked signal cards."""
     close_reason = getattr(state, "close_reason", None)
-    closed_at = getattr(state, "closed_at", None)
     close_price = getattr(state, "close_price", None)
     activated_at = getattr(state, "activated_at", None)
     activation_price = getattr(state, "activation_price", None)
     pending_expires_at = getattr(state, "pending_expires_at", None)
+    tp1_hit_at = getattr(state, "tp1_hit_at", None)
+    if close_reason == "stop_loss":
+        return f"🛑 стоп @ {format_price(_optional_float(close_price))}"
+    if close_reason in {"tp1_hit", "tp2_hit"}:
+        return f"🎯 цель @ {format_price(_optional_float(close_price))}"
+    if close_reason == "expired":
+        return "⌛ лимит не исполнен · срок истёк"
     if close_reason:
-        return (
-            f"{str(close_reason).replace('_', ' ')} at "
-            f"{format_price(_optional_float(close_price))} on {format_datetime(closed_at)}"
-        )
+        return str(close_reason).replace("_", " ")
     if activated_at:
         act_px = format_price(_optional_float(activation_price))
-        return f"active from {format_datetime(activated_at)} at {act_px}"
-    return f"pending until {format_datetime(pending_expires_at)}"
+        return f"✅ в сделке @ {act_px}"
+    if tp1_hit_at:
+        return f"🎯 TP1 · TP2 открыт"
+    return f"⏳ лимит · до {format_datetime(pending_expires_at)}"
 
 
 def format_tracked_signal_message(tracked: Any) -> str:
-    """Render an editable tracked signal card."""
+    """Render an editable tracked signal card (same layout as new signals)."""
     state = getattr(tracked, "tracked", tracked)
     facts = extract_signal_facts(state, pending_expiry_minutes=None)
-    tracking_ref = code("#" + facts.tracking_ref)
-    entry_span = format_price(facts.entry_low) + " - " + format_price(facts.entry_high)
-    lines = [
-        (
-            f"{bold('SIGNAL STATUS')} {code(facts.symbol)} "
-            f"{code(direction_label(facts.direction))} {tracking_ref}"
-        ),
-        (
-            f"{bold(setup_label(facts.setup_id))} {code(facts.timeframe)} | "
-            f"score {code(format_score(facts.score))}"
-        ),
-        f"{bold('Entry')} {code(entry_span)}",
-        f"{bold('Stop')} {code(format_price(facts.stop))}",
-        f"{bold('Targets')} {target_line(facts)}",
-        f"{bold('Status')} {escape_text(tracking_status_text(state))}",
-        "<i>Signal-only analytics. No auto-trading.</i>",
-    ]
-    return truncate_preserving_footer("\n".join(lines))
+    status = tracking_status_text(state)
+    return truncate_preserving_footer(
+        format_channel_trade_card(facts, status_line=status, include_chart=True)
+    )
 
 
 def format_tracking_event_message(event: Any) -> str:
-    """Render a tracking follow-up message."""
+    """Short channel reply on TP/SL (card edit carries full state)."""
     tracked = getattr(event, "tracked", None)
     if tracked is None:
-        return "<b>Signal tracking update</b>\n<i>Signal-only analytics. No auto-trading.</i>"
+        return "<b>Обновление</b>"
     event_type = str(getattr(event, "event_type", "update"))
+    price = format_price(_optional_float(getattr(event, "event_price", None)))
+    ref = code("#" + str(getattr(tracked, "tracking_ref", "")))
+    sym = code(getattr(tracked, "symbol", ""))
     title = TRACKING_TITLES.get(event_type, event_type.replace("_", " ").upper())
-    price = _optional_float(getattr(event, "event_price", None))
-    note = str(getattr(event, "note", "") or "").strip()
-    symbol = code(getattr(tracked, "symbol", ""))
-    direction = code(direction_label(getattr(tracked, "direction", "long")))
-    tracking_ref = code("#" + str(getattr(tracked, "tracking_ref", "")))
-    entry_low = format_price(_optional_float(getattr(tracked, "entry_low", None)))
-    entry_high = format_price(_optional_float(getattr(tracked, "entry_high", None)))
-    stop_px = format_price(_optional_float(getattr(tracked, "stop", None)))
-    lines = [
-        f"{bold(title)} {symbol} {direction} {tracking_ref}",
-        f"{bold('Time')} {code(format_datetime(getattr(event, 'occurred_at', None)))}",
-        f"{bold('Price')} {code(format_price(price))}",
-        (f"{bold('Plan')} entry {code(entry_low + ' - ' + entry_high)} | stop {code(stop_px)}"),
-    ]
-    if note:
-        lines.append(f"{bold('Note')} {escape_text(note)}")
-    lines.append("<i>Signal-only analytics. No auto-trading.</i>")
-    return truncate_preserving_footer("\n".join(lines))
+    if event_type == "activated":
+        return f"✅ <b>{title}</b> {sym} {ref} @ {code(price)}"
+    if event_type == "tp1_hit":
+        return f"🎯 <b>{title}</b> {sym} {ref} @ {code(price)}"
+    if event_type == "tp2_hit":
+        return f"🎯 <b>{title}</b> {sym} {ref} @ {code(price)}"
+    if event_type == "stop_loss":
+        return f"🛑 <b>{title}</b> {sym} {ref} @ {code(price)}"
+    if event_type == "expired":
+        return f"⌛ <b>{title}</b> {sym} {ref}"
+    return f"<b>{escape_text(title)}</b> {sym} {ref} @ {code(price)}"
 
 
 def format_analytics_companion_message(

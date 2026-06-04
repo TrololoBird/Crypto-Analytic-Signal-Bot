@@ -16,6 +16,7 @@ TYPICAL_VOLUME_USD = 10_000_000
 _AUDIT_SECTIONS = (
     "filter_warnings",
     "lane_warnings",
+    "runtime_warnings",
     "delivery_warnings",
     "universe_warnings",
     "strategy_warnings",
@@ -136,6 +137,50 @@ def audit_lanes_config(settings: Any) -> list[str]:
     return warnings
 
 
+def audit_runtime_config(settings: Any) -> list[str]:
+    """Check runtime routing telemetry and unified shortlist routing."""
+    warnings: list[str] = []
+    runtime = getattr(settings, "runtime", None)
+    if runtime is None:
+        return warnings
+
+    unified = _safe_bool(getattr(runtime, "shortlist_unified_routing", False))
+    emit_skips = _safe_bool(getattr(runtime, "emit_strategy_routing_skips", False))
+    lanes_enabled = _safe_bool(getattr(runtime, "enable_strategy_lanes", True), default=True)
+
+    if unified:
+        warnings.append(
+            "runtime.shortlist_unified_routing=true - per-symbol strategy_fits may be empty; "
+            "lane routing still caps families per kline event"
+        )
+    if lanes_enabled and not emit_skips:
+        warnings.append(
+            "runtime.emit_strategy_routing_skips=false - lane/fit routing skips are not "
+            "emitted as strategy_decisions rows"
+        )
+    return warnings
+
+
+def audit_shortlist_zero_fit(
+    *,
+    zero_fit: int,
+    shortlist_total: int,
+    unified_routing: bool,
+) -> list[str]:
+    """Warn when many shortlist symbols lack strategy_fits under unified routing."""
+    warnings: list[str] = []
+    total = max(0, int(shortlist_total))
+    zeros = max(0, int(zero_fit))
+    if not unified_routing or total <= 0:
+        return warnings
+    if zeros > total * 0.25:
+        warnings.append(
+            f"shortlist zero_strategy_fit={zeros}/{total} with shortlist_unified_routing=true - "
+            "expected; verify lane coverage if detector runs look low"
+        )
+    return warnings
+
+
 def audit_delivery_config(settings: Any) -> list[str]:
     """Check delivery tier thresholds and coherence with filter gates."""
     warnings: list[str] = []
@@ -239,6 +284,7 @@ def run_full_audit(settings: Any) -> dict[str, Any]:
     sections = {
         "filter_warnings": audit_filter_config(settings),
         "lane_warnings": audit_lanes_config(settings),
+        "runtime_warnings": audit_runtime_config(settings),
         "delivery_warnings": audit_delivery_config(settings),
         "universe_warnings": audit_universe_config(settings),
         "strategy_warnings": audit_strategy_config(settings),
@@ -257,10 +303,10 @@ def run_startup_audit(settings: Any) -> None:
         LOG.info("config audit: no threshold issues detected")
         return
 
-    LOG.warning(
+    LOG.info(
         "config audit found %d potential threshold issues - review config.toml "
         "if signal rate is unexpectedly low:",
         len(issues),
     )
     for issue in issues:
-        LOG.warning("  CONFIG AUDIT: %s", issue)
+        LOG.info("  CONFIG AUDIT: %s", issue)

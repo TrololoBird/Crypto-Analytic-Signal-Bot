@@ -20,7 +20,7 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - direct script execution
     from common import bootstrap_repo_path
 
-from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.runtime.errors import DEFENSIVE_EXC
 from bot.diagnostics.runtime_analysis import (
     aggregate_cycle_stats,
     aggregate_rejection_funnel,

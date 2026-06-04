@@ -13,6 +13,11 @@ if TYPE_CHECKING:
     from bot.domain.strategies import StrategyMetadata
     from bot.engine.registry import StrategyRegistry
 
+# When a canonical setup subsumes a spec-only sibling, drop the sibling from lanes.
+_SPEC_DELEGATE_CANONICAL: dict[str, str] = {
+    "bb_squeeze": "squeeze_setup",
+}
+
 _STANDARD_KLINE_INTERVALS = frozenset(
     {
         "1m",
@@ -43,6 +48,7 @@ def select_lane_setups(
     strategy_fits: Iterable[str] | None = None,
     market_row: dict[str, object] | None = None,
     apply_interval_filter: bool = True,
+    priority_setup_ids: Iterable[str] | None = None,
 ) -> list[StrategyMetadata]:
     """Return metadata for setups to run on this symbol+interval."""
     _ = symbol  # reserved for per-symbol lane policy
@@ -51,9 +57,11 @@ def select_lane_setups(
     min_families = int(runtime.min_setup_families_per_symbol)
     target_families = int(runtime.target_setup_families_per_symbol)
     lane_limit = min(max(target_families, min_families), max_families)
+    max_per_family = int(runtime.max_setups_per_family)
     route_all = bool(runtime.route_all_enabled_strategies)
     allow_trigger_interval_fallback = bool(runtime.allow_trigger_interval_fallback)
     allow_timeframe_fallback = bool(runtime.allow_timeframe_fallback)
+    priority_ids = frozenset(str(item).strip() for item in (priority_setup_ids or ()) if str(item).strip())
 
     enabled = registry.list_enabled()
     if strategy_fits is not None:
@@ -74,39 +82,62 @@ def select_lane_setups(
             interval=interval_key,
             allow_trigger_interval_fallback=allow_trigger_interval_fallback,
             allow_timeframe_fallback=allow_timeframe_fallback,
+            priority_ids=priority_ids,
         )
         if not ordered:
             return []
     else:
-        ordered = _dedupe_sorted(enabled)
+        ordered = _dedupe_sorted(enabled, priority_ids=priority_ids)
 
-    return _cap_unique_families(ordered, lane_limit)
+    ordered = _exclude_duplicate_spec_delegates(ordered)
+    return _cap_unique_families(ordered, lane_limit, max_per_family=max_per_family)
+
+
+def _exclude_duplicate_spec_delegates(
+    ordered: list[StrategyMetadata],
+) -> list[StrategyMetadata]:
+    """Drop spec-only siblings when a canonical setup already routes the same detector."""
+    selected_ids = {meta.strategy_id for meta in ordered}
+    drop: set[str] = set()
+    for sibling_id, canonical_id in _SPEC_DELEGATE_CANONICAL.items():
+        if canonical_id in selected_ids and sibling_id in selected_ids:
+            drop.add(sibling_id)
+    if not drop:
+        return ordered
+    return [meta for meta in ordered if meta.strategy_id not in drop]
 
 
 def _cap_unique_families(
     ordered: list[StrategyMetadata],
     limit: int,
+    *,
+    max_per_family: int,
 ) -> list[StrategyMetadata]:
-    """Keep first strategy per family in sort order, up to *limit* families."""
+    """Keep up to *max_per_family* distinct setups per family in sort order."""
     if limit <= 0:
         return []
     result: list[StrategyMetadata] = []
-    seen_families: set[str] = set()
+    family_counts: dict[str, int] = {}
     for meta in ordered:
         family = str(meta.family or "")
-        if family in seen_families:
+        count = family_counts.get(family, 0)
+        if count >= max_per_family:
             continue
-        seen_families.add(family)
+        family_counts[family] = count + 1
         result.append(meta)
         if len(result) >= limit:
             break
     return result
 
 
-def _dedupe_sorted(enabled: list[StrategyMetadata]) -> list[StrategyMetadata]:
+def _dedupe_sorted(
+    enabled: list[StrategyMetadata],
+    *,
+    priority_ids: frozenset[str] = frozenset(),
+) -> list[StrategyMetadata]:
     ordered: list[StrategyMetadata] = []
     seen_ids: set[str] = set()
-    for meta in sorted(enabled, key=_sort_key):
+    for meta in sorted(enabled, key=lambda item: _sort_key(item, priority_ids)):
         if meta.strategy_id in seen_ids:
             continue
         ordered.append(meta)
@@ -114,9 +145,10 @@ def _dedupe_sorted(enabled: list[StrategyMetadata]) -> list[StrategyMetadata]:
     return ordered
 
 
-def _sort_key(meta: StrategyMetadata) -> tuple[str, str]:
+def _sort_key(meta: StrategyMetadata, priority_ids: frozenset[str] = frozenset()) -> tuple[int, str, str]:
+    priority = 0 if meta.strategy_id in priority_ids else 1
     family = str(meta.family or "")
-    return family, meta.strategy_id
+    return priority, family, meta.strategy_id
 
 
 def _interval_matches(
@@ -125,6 +157,7 @@ def _interval_matches(
     interval: str,
     allow_trigger_interval_fallback: bool,
     allow_timeframe_fallback: bool,
+    priority_ids: frozenset[str] = frozenset(),
 ) -> list[StrategyMetadata]:
     primary_matches: list[StrategyMetadata] = []
     trigger_interval_matches: list[StrategyMetadata] = []
@@ -143,9 +176,9 @@ def _interval_matches(
     ordered: list[StrategyMetadata] = []
     seen_ids: set[str] = set()
     for group in (
-        sorted(primary_matches, key=_sort_key),
-        sorted(trigger_interval_matches, key=_sort_key),
-        sorted(timeframe_matches, key=_sort_key),
+        sorted(primary_matches, key=lambda item: _sort_key(item, priority_ids)),
+        sorted(trigger_interval_matches, key=lambda item: _sort_key(item, priority_ids)),
+        sorted(timeframe_matches, key=lambda item: _sort_key(item, priority_ids)),
     ):
         for meta in group:
             if meta.strategy_id in seen_ids:

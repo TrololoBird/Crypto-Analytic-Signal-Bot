@@ -6,10 +6,10 @@ import logging
 import math
 from typing import TYPE_CHECKING, ClassVar
 
-from ..features import _swing_points as _sp
 from ..setups import _build_signal, _compute_dynamic_score, _reject
-from ..setups.smc import latest_liquidity_sweep
+from ..setups.smc import latest_liquidity_sweep, sweep_tolerance, swing_series
 from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
+from ..setups.utils import build_smc_trade_plan
 from ._common import SpecHit, _latest_values, with_spec_columns
 
 if TYPE_CHECKING:
@@ -23,7 +23,12 @@ LOG = logging.getLogger("bot.strategies.liquidity_sweep")
 __all__ = ["detect_liquidity_sweep"]
 
 
-def detect_liquidity_sweep(frame: pl.DataFrame, *, timeframe: str = "15m") -> SpecHit | None:
+def detect_liquidity_sweep(
+    frame: pl.DataFrame,
+    *,
+    timeframe: str = "15m",
+    sweep_atr_mult: float = 0.2,
+) -> SpecHit | None:
     work = with_spec_columns(frame)
     if work.height < 25:
         return None
@@ -38,7 +43,9 @@ def detect_liquidity_sweep(frame: pl.DataFrame, *, timeframe: str = "15m") -> Sp
     rsi = row.get("rsi14", 50.0)
     if atr <= 0.0:
         return None
-    if high > prev_high and close < prev_high and (high - close) > atr * 0.3:
+    high_tol = sweep_tolerance(level=prev_high, atr=atr, sweep_atr_mult=sweep_atr_mult)
+    low_tol = sweep_tolerance(level=prev_low, atr=atr, sweep_atr_mult=sweep_atr_mult)
+    if high > prev_high + high_tol and close < prev_high and (high - close) > high_tol:
         return SpecHit(
             strategy="liquidity_sweep",
             direction="short",
@@ -50,7 +57,7 @@ def detect_liquidity_sweep(frame: pl.DataFrame, *, timeframe: str = "15m") -> Sp
             vol_ratio=vol_ratio,
             rsi=rsi,
         )
-    if low < prev_low and close > prev_low and (close - low) > atr * 0.3:
+    if low < prev_low - low_tol and close > prev_low and (close - low) > low_tol:
         return SpecHit(
             strategy="liquidity_sweep",
             direction="long",
@@ -151,13 +158,25 @@ def _detect_liquidity_sweep_extended(
                 bar_close = _as_float(scan.item(idx, "close"))
                 if min(prev_low, prev_high, bar_high, bar_low, bar_close) <= 0.0:
                     continue
-                if bar_high > prev_high + atr * sweep_atr_mult and bar_close < prev_high:
+                pierce = sweep_tolerance(
+                    level=prev_high,
+                    atr=atr,
+                    sweep_atr_mult=sweep_atr_mult,
+                    tolerance_pct=equal_level_tol,
+                )
+                if bar_high > prev_high + pierce and bar_close < prev_high:
                     fallback_direction = "short"
                     fallback_level = prev_high
                     fallback_sweep_index = idx
                     fallback_state = "donchian_fallback"
                     break
-                if bar_low < prev_low - atr * sweep_atr_mult and bar_close > prev_low:
+                pierce = sweep_tolerance(
+                    level=prev_low,
+                    atr=atr,
+                    sweep_atr_mult=sweep_atr_mult,
+                    tolerance_pct=equal_level_tol,
+                )
+                if bar_low < prev_low - pierce and bar_close > prev_low:
                     fallback_direction = "long"
                     fallback_level = prev_low
                     fallback_sweep_index = idx
@@ -246,29 +265,32 @@ def _detect_liquidity_sweep_extended(
             )
             return None
 
-        stop = sweep_bar_h + sl_buffer_atr * atr
-        risk = stop - entry_price
-        if risk <= 0:
+        pivots = swing_series(w, swing_length=3, include_unconfirmed_tail=True)
+        trade_plan = build_smc_trade_plan(
+            direction="short",
+            price_anchor=entry_price,
+            stop_basis=sweep_bar_h,
+            atr=atr,
+            work_1h=w,
+            work_4h=prepared.work_4h,
+            min_rr=min_rr,
+            sl_buffer_atr=sl_buffer_atr,
+            sh_mask=None,
+            sl_mask=pivots.low_mask,
+        )
+        if trade_plan is None:
             _reject(
                 prepared,
                 setup_id,
                 "risk_non_positive_short",
-                stop=stop,
+                stop_basis=sweep_bar_h,
                 price=entry_price,
             )
             return None
-
-        rr_tp1 = entry_price - risk * min_rr
-
-        _, sl_mask = _sp(w, n=3, include_unconfirmed_tail=True)
-        sl_prices = w.filter(sl_mask)["low"]
-        tp2_candidates = sl_prices.filter(sl_prices < entry_price)
-        structural_tp1 = _as_float(tp2_candidates[-1]) if tp2_candidates.len() > 0 else None
-        tp1 = (
-            structural_tp1
-            if structural_tp1 is not None and abs(structural_tp1 - entry_price) >= risk * min_rr
-            else rr_tp1
-        )
+        stop = trade_plan.stop
+        tp1 = trade_plan.tp1
+        tp2 = trade_plan.tp2
+        risk = trade_plan.risk
         if tp1 >= entry_price or abs(tp1 - entry_price) + 1e-9 < risk * min_rr:
             _reject(
                 prepared,
@@ -279,9 +301,6 @@ def _detect_liquidity_sweep_extended(
                 price=entry_price,
             )
             return None
-        tp2 = _as_float(tp2_candidates.min()) if tp2_candidates.len() > 0 else None
-        if tp2 is None or abs(tp2 - entry_price) <= abs(tp1 - entry_price):
-            tp2 = entry_price - risk * max(2.0, min_rr + 0.35)
 
         vol_ratio = _as_float(w.item(-1, "volume_ratio20"), 1.0)
         rsi = _as_float(w.item(-1, "rsi14"), 50.0)
@@ -335,23 +354,26 @@ def _detect_liquidity_sweep_extended(
         )
         return None
 
-    stop = sweep_bar_l - sl_buffer_atr * atr
-    risk = entry_price - stop
-    if risk <= 0:
-        _reject(prepared, setup_id, "risk_non_positive_long", stop=stop, price=entry_price)
-        return None
-
-    rr_tp1 = entry_price + risk * min_rr
-
-    sh_mask, _ = _sp(w, n=3, include_unconfirmed_tail=True)
-    sh_prices = w.filter(sh_mask)["high"]
-    tp2_candidates = sh_prices.filter(sh_prices > entry_price)
-    structural_tp1 = _as_float(tp2_candidates[-1]) if tp2_candidates.len() > 0 else None
-    tp1 = (
-        structural_tp1
-        if structural_tp1 is not None and abs(structural_tp1 - entry_price) >= risk * min_rr
-        else rr_tp1
+    pivots = swing_series(w, swing_length=3, include_unconfirmed_tail=True)
+    trade_plan = build_smc_trade_plan(
+        direction="long",
+        price_anchor=entry_price,
+        stop_basis=sweep_bar_l,
+        atr=atr,
+        work_1h=w,
+        work_4h=prepared.work_4h,
+        min_rr=min_rr,
+        sl_buffer_atr=sl_buffer_atr,
+        sh_mask=pivots.high_mask,
+        sl_mask=None,
     )
+    if trade_plan is None:
+        _reject(prepared, setup_id, "risk_non_positive_long", stop_basis=sweep_bar_l, price=entry_price)
+        return None
+    stop = trade_plan.stop
+    tp1 = trade_plan.tp1
+    tp2 = trade_plan.tp2
+    risk = trade_plan.risk
     if tp1 <= entry_price or abs(tp1 - entry_price) + 1e-9 < risk * min_rr:
         _reject(
             prepared,
@@ -362,9 +384,6 @@ def _detect_liquidity_sweep_extended(
             price=entry_price,
         )
         return None
-    tp2 = _as_float(tp2_candidates.max()) if tp2_candidates.len() > 0 else None
-    if tp2 is None or abs(tp2 - entry_price) <= abs(tp1 - entry_price):
-        tp2 = entry_price + risk * max(2.0, min_rr + 0.35)
 
     vol_ratio = _as_float(w.item(-1, "volume_ratio20"), 1.0)
     rsi = _as_float(w.item(-1, "rsi14"), 50.0)
@@ -405,7 +424,9 @@ def detect_liquidity_sweep_setup(
     setup_id: str,
     family: str,
 ) -> Signal | None:
-    spec_kwargs = None
+    spec_kwargs = {
+        "sweep_atr_mult": float(effective.get("sweep_atr_mult", defaults["sweep_atr_mult"])),
+    }
     return run_setup_detection(
         prepared=prepared,
         settings=settings,
@@ -433,11 +454,11 @@ class LiquiditySweepSetup(SpecDetectorSetup):
     required_context = ("futures_flow",)
 
     DEFAULTS: ClassVar[dict[str, float]] = {
-        "base_score": 0.50,
+        "base_score": 0.54,
         "equal_level_tol": 0.0015,
         "threshold_tol": 0.0015,
         "min_level_hits": 2,
-        "sweep_atr_mult": 0.30,
+        "sweep_atr_mult": 0.20,
         "reclaim_threshold": 0.30,
         "max_sweep_age_bars": 4,
         "max_entry_distance_atr": 1.25,

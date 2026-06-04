@@ -20,9 +20,10 @@ import inspect
 import logging
 import os
 from dataclasses import replace
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.runtime.errors import DEFENSIVE_EXC
 from bot.dashboard import BotDashboard
 from bot.regime.market import MarketRegimeAnalyzer
 from bot.runtime.metrics import BotMetricsCollector
@@ -44,6 +45,7 @@ from ..domain import (
 )
 from ..feature_flags import FeatureFlags
 from ..market.data import BinanceFuturesMarketData
+from ..market.subscription_planner import merge_order_flow_tracked_symbols
 from ..setups.base import SetupParams
 from ..strategies import STRATEGY_CLASSES
 from .container import build_application_container
@@ -55,6 +57,7 @@ from .intra_candle_scanner import IntraCandleScanner
 from .kline_handler import KlineHandler
 from .market_context_updater import MarketContextUpdater
 from .oi_refresh_runner import OIRefreshRunner
+from .spot_refresh_runner import SpotRefreshRunner
 from .shortlist_service import ShortlistService
 from .symbol_analyzer import SymbolAnalyzer
 from .telemetry_manager import TelemetryManager
@@ -120,19 +123,19 @@ class SignalBot:
         # Note: All persistence now uses MemoryRepository (SQLite)
         # Legacy JSON stores (memory.json, state.json, tracking.json) removed in modern architecture
 
-        self.confluence = ConfluenceEngine(settings)
+        self.confluence = ConfluenceEngine(settings, repository=self._modern_repo)
 
         self.market_regime = MarketRegimeAnalyzer(settings)
 
         self.metrics = BotMetricsCollector(
             settings.runtime.metrics_port, host=settings.runtime.metrics_host
         )
-        disable_http_servers = os.getenv("BOT_DISABLE_HTTP_SERVERS", "0").strip().lower() in (
+        self._http_servers_enabled = os.getenv("BOT_DISABLE_HTTP_SERVERS", "0").strip().lower() not in (
             "1",
             "true",
             "yes",
         )
-        if disable_http_servers:
+        if not self._http_servers_enabled:
             LOG.info(
                 "http servers disabled via BOT_DISABLE_HTTP_SERVERS=1 "
                 "(metrics/dashboard not started)"
@@ -143,8 +146,6 @@ class SignalBot:
         self.dashboard = BotDashboard(
             self, settings.runtime.dashboard_port, host=settings.runtime.dashboard_host
         )
-        if not disable_http_servers:
-            self.dashboard.start_server(auto_open=settings.runtime.auto_open_dashboard)
 
         # Tracking uses Modern MemoryRepository.
         # Legacy stores removed - all data in SQLite
@@ -172,6 +173,12 @@ class SignalBot:
         self._cycle_failure_streak = 0
         self._circuit_open_until: float = 0.0
         self.last_cycle_summary: dict[str, Any] = {}
+        self._session_action_delivered: int = 0
+        self._zero_delivery_streak: int = 0
+        self._last_zero_delivery_alert_mono: float = 0.0
+        self._last_message_buffer_dropped: int = 0
+        self._message_buffer_drop_baseline_set: bool = False
+        self._last_message_buffer_drop_alert_mono: float = 0.0
         self._prepare_error_count: int = 0
         self._last_prepare_error: dict[str, Any] = {}
         self._diagnostic_trace_counts: dict[str, int] = {}
@@ -191,6 +198,7 @@ class SignalBot:
         self._telemetry_manager = TelemetryManager(self)
         self._fallback_runner = FallbackRunner(self)
         self._oi_refresh_runner = OIRefreshRunner(self)
+        self._spot_refresh_runner = SpotRefreshRunner(self)
         self._health_monitor = HealthMonitor(
             interval_seconds=float(self.settings.runtime.heartbeat_seconds),
             check=self.health_check,
@@ -206,6 +214,9 @@ class SignalBot:
         LOG.info(
             "EventBus subscriptions registered | handlers=3 (kline_close, reconnect, book_ticker)"
         )
+        if self._ws_manager is not None:
+            self._ws_manager.register_agg_trade(self._on_ws_agg_trade)
+            LOG.info("ws aggTrade callback registered for active-signal TP/SL fast-path")
 
     # ------------------------------------------------------------------
     # Properties
@@ -282,6 +293,16 @@ class SignalBot:
             self._oi_refresh_runner = runner
         return runner
 
+    def _get_spot_refresh_runner(self) -> SpotRefreshRunner:
+        runner = getattr(self, "_spot_refresh_runner", None)
+        if runner is None:
+            runner = SpotRefreshRunner(self)
+            self._spot_refresh_runner = runner
+        return runner
+
+    def _spot_enrichments(self, symbol: str) -> dict[str, float]:
+        return self._get_spot_refresh_runner().enrichments_for(symbol)
+
     def _decision_to_reject_row(self, *, symbol: str, decision: StrategyDecision) -> dict[str, Any]:
         return self._get_telemetry_manager().decision_to_reject_row(
             symbol=symbol, decision=decision
@@ -333,6 +354,8 @@ class SignalBot:
         event_ts: datetime | None = None,
         ws_enrichments: dict[str, Any] | None = None,
         kline_interval: str | None = None,
+        max_setups: int | None = None,
+        setup_subset: frozenset[str] | None = None,
     ) -> PipelineResult:
         return await self._symbol_analyzer.run_modern_analysis(
             item,
@@ -341,6 +364,8 @@ class SignalBot:
             event_ts=event_ts,
             ws_enrichments=ws_enrichments,
             kline_interval=kline_interval,
+            max_setups=max_setups,
+            setup_subset=setup_subset,
         )
 
     def _select_and_rank(
@@ -349,8 +374,8 @@ class SignalBot:
         max_signals: int,
     ) -> list[Signal]:
         signals = self._delivery_orchestrator.select_and_rank(all_candidates, max_signals)
-        # score floor: 0..1 confidence, final guard matches runtime delivery minimum.
-        return [signal for signal in signals if signal.score >= 0.38]
+        min_score = float(self.settings.filters.min_score)
+        return [signal for signal in signals if signal.score >= min_score]
 
     def _strategy_metadata(self, setup_id: str) -> Any | None:
         strategy = self._modern_registry.get(setup_id)
@@ -412,6 +437,15 @@ class SignalBot:
 
     async def start(self) -> None:
         """Initial storage checks and WS bootstrap."""
+        from pathlib import Path
+
+        from ..market.proxy_bootstrap import ensure_network_ready
+
+        updated = await ensure_network_ready(self.settings, config_path=Path("config.toml"))
+        if updated is not self.settings:
+            self.settings = updated
+            LOG.info("network settings refreshed after bootstrap probe")
+
         self._preflight_storage_check()
         await self._preflight_delivery_check()
 
@@ -437,9 +471,34 @@ class SignalBot:
                     expired_count,
                     purged_cooldowns,
                 )
+            self._startup_stale_expired = expired_count
         except DEFENSIVE_EXC:
             LOG.exception("startup stale state cleanup failed")
 
+        repair_events: list[Any] = []
+        try:
+            repair_events = await self.tracker.repair_stuck_pending_activations(dry_run=False)
+            repair_deliverable = [
+                event
+                for event in repair_events
+                if getattr(event.tracked, "signal_message_id", None)
+            ]
+            if repair_deliverable:
+                LOG.info(
+                    "startup repaired stuck pending activations | events=%d deliverable=%d",
+                    len(repair_events),
+                    len(repair_deliverable),
+                )
+                await self._deliver_tracking(repair_deliverable)
+            elif repair_events:
+                LOG.info(
+                    "startup repaired stuck pending activations | events=%d (no message_id edits)",
+                    len(repair_events),
+                )
+        except DEFENSIVE_EXC:
+            LOG.exception("startup stuck pending repair failed")
+
+        startup_tracking_events: list[Any] = []
         try:
             startup_tracking_events = await self.tracker.review_open_signals(dry_run=False)
             if startup_tracking_events:
@@ -450,6 +509,21 @@ class SignalBot:
                 await self._deliver_tracking(startup_tracking_events)
         except DEFENSIVE_EXC:
             LOG.exception("startup tracking sweep failed")
+
+        try:
+            rows = await self._modern_repo.get_active_signals()
+            pending_n = sum(1 for row in rows if str(row.get("status") or "") == "pending")
+            active_n = sum(1 for row in rows if str(row.get("status") or "") == "active")
+            self._startup_tracking_summary = {
+                "pending": pending_n,
+                "active": active_n,
+                "repaired": len(repair_events),
+                "review_closed": len(startup_tracking_events),
+                "stale_expired": int(getattr(self, "_startup_stale_expired", 0) or 0),
+            }
+        except DEFENSIVE_EXC:
+            LOG.debug("startup tracking summary skipped", exc_info=True)
+            self._startup_tracking_summary = None
 
         try:
             reconciled_outcomes = await self.tracker.reconcile_closed_outcomes()
@@ -503,6 +577,11 @@ class SignalBot:
             except DEFENSIVE_EXC:
                 LOG.exception("ws_manager start failed; continuing with REST fallback")
 
+        if self._http_servers_enabled:
+            await self.dashboard.start_server_async(
+                auto_open=self.settings.runtime.auto_open_dashboard
+            )
+
         # Preload historical frames in the background so `prepare_symbol` can
         # meet its required 15m/1h history and optional 5m/4h context. This is deliberately
         # lightweight (batch + delay) to avoid REST storms.
@@ -531,6 +610,7 @@ class SignalBot:
             ),
             asyncio.create_task(self._emergency_fallback_scan(), name="emergency_fallback"),
             asyncio.create_task(self._oi_refresh_periodic(), name="oi_refresh"),
+            asyncio.create_task(self._spot_refresh_periodic(), name="spot_companion"),
             asyncio.create_task(self._tracking_review_periodic(), name="tracking_review"),
             asyncio.create_task(self._market_regime_periodic(), name="market_regime"),
         ]
@@ -540,6 +620,18 @@ class SignalBot:
                     self._public_intelligence_periodic(), name="public_intelligence"
                 )
             )
+        from .telegram_operator import TelegramOperatorConsole, operator_console_enabled
+
+        if operator_console_enabled(self):
+            console = TelegramOperatorConsole(self)
+            self._operator_console = console
+            background_tasks.append(
+                asyncio.create_task(
+                    console.run_forever(stop_event=self._shutdown),
+                    name="telegram_operator",
+                )
+            )
+            LOG.info("telegram operator console scheduled | operators=%s", list(self.settings.operator_user_ids))
 
         LOG.info(
             "event-driven mode active | emergency_fallback=%ss",
@@ -582,6 +674,8 @@ class SignalBot:
 
         if self._ws_manager is not None:
             await self._ws_manager.stop()
+        if getattr(self, "_http_servers_enabled", False):
+            await self.dashboard.stop_server_async()
         try:
             delivery_close = getattr(self.delivery, "close", None)
             if callable(delivery_close):
@@ -595,12 +689,23 @@ class SignalBot:
             await self.alerts.close()
         except DEFENSIVE_EXC as exc:
             LOG.debug("alerts.close() failed (non-fatal): %s", exc)
+        console = getattr(self, "_operator_console", None)
+        if console is not None:
+            try:
+                await console.close()
+            except DEFENSIVE_EXC as exc:
+                LOG.debug("operator console close failed (non-fatal): %s", exc)
 
         # Close external resources (best-effort).
         try:
             await self._modern_repo.close()
         except DEFENSIVE_EXC as exc:
             LOG.debug("modern repo close failed (non-fatal): %s", exc)
+
+        try:
+            await self._get_spot_refresh_runner().close()
+        except DEFENSIVE_EXC as exc:
+            LOG.debug("spot companion close failed (non-fatal): %s", exc)
 
         try:
             close_md = getattr(self.client, "close", None)
@@ -619,6 +724,34 @@ class SignalBot:
                     await result
         except DEFENSIVE_EXC as exc:
             LOG.debug("telegram close failed (non-fatal): %s", exc)
+
+        try:
+            telemetry = getattr(self, "telemetry", None)
+            run_id = getattr(telemetry, "run_id", None)
+            finalize = getattr(telemetry, "finalize_run_metadata", None)
+            if run_id and callable(finalize):
+                collect = getattr(telemetry, "collect_session_totals", None)
+                extras = {
+                    "session_action_delivered": int(
+                        getattr(self, "_session_action_delivered", 0) or 0
+                    ),
+                }
+                diagnostics = getattr(self, "_signal_diagnostics", None)
+                diag_summary = (
+                    diagnostics.get_summary()
+                    if diagnostics is not None and hasattr(diagnostics, "get_summary")
+                    else {}
+                )
+                if isinstance(diag_summary, dict) and diag_summary:
+                    extras["signal_diagnostics"] = diag_summary
+                session_totals = (
+                    collect(extras=extras)
+                    if callable(collect)
+                    else dict(extras)
+                )
+                finalize(session_totals=session_totals)
+        except DEFENSIVE_EXC as exc:
+            LOG.debug("telemetry run_metadata finalize failed (non-fatal): %s", exc)
 
     async def health_check(self) -> dict[str, Any]:
         return await self._health_manager.health_check()
@@ -693,6 +826,9 @@ class SignalBot:
         """Delegate OI/L-S refresh loop to OIRefreshRunner."""
         await self._get_oi_refresh_runner().run()
 
+    async def _spot_refresh_periodic(self) -> None:
+        await self._get_spot_refresh_runner().run()
+
     async def _market_regime_periodic(self) -> None:
         await self._market_context_updater.market_regime_periodic()
 
@@ -732,12 +868,31 @@ class SignalBot:
             return
         try:
             rows = await self._modern_repo.get_active_signals()
-            tracked_symbols = sorted(
+            pending_syms = sorted(
                 {
                     str(row.get("symbol", "")).strip().upper()
                     for row in rows
-                    if str(row.get("symbol", "")).strip()
+                    if str(row.get("status") or "") == "pending"
+                    and str(row.get("symbol", "")).strip()
                 }
+            )
+            active_syms = sorted(
+                {
+                    str(row.get("symbol", "")).strip().upper()
+                    for row in rows
+                    if str(row.get("status") or "") == "active"
+                    and str(row.get("symbol", "")).strip()
+                }
+            )
+            shortlist_syms = [
+                str(getattr(item, "symbol", "")).strip().upper()
+                for item in self._shortlist
+                if str(getattr(item, "symbol", "")).strip()
+            ]
+            tracked_symbols = merge_order_flow_tracked_symbols(
+                shortlist_syms,
+                pending_symbols=pending_syms,
+                active_symbols=active_syms,
             )
             await self._ws_manager.set_tracked_symbols(tracked_symbols)
         except DEFENSIVE_EXC as exc:
@@ -773,7 +928,7 @@ class SignalBot:
         signals: list[Signal],
         *,
         prepared_by_tracking_id: dict[str, PreparedSymbol] | None = None,
-    ) -> tuple[list[Signal], list[dict[str, Any]], Counter[str]]:
+    ) -> tuple[list[Signal], list[dict[str, Any]], Counter[str], int]:
         return await self._get_delivery_orchestrator().select_and_deliver(
             signals,
             prepared_by_tracking_id=prepared_by_tracking_id,
@@ -783,6 +938,21 @@ class SignalBot:
         self, new_signal: Signal
     ) -> list[SignalTrackingEvent] | None:
         return await self._delivery_orchestrator.close_superseded_signal(new_signal)
+
+    async def _on_ws_agg_trade(
+        self,
+        symbol: str,
+        price: float,
+        trade_dt: datetime,
+    ) -> None:
+        """Realtime limit fill + TP/SL on aggTrade ticks."""
+        try:
+            events = await self.tracker.on_agg_trade(symbol, price, trade_dt)
+        except DEFENSIVE_EXC:
+            LOG.exception("agg_trade tracking failed | symbol=%s", symbol)
+            return
+        if events:
+            await self._deliver_tracking(events)
 
     async def _deliver_tracking(self, events: list[SignalTrackingEvent]) -> None:
         await self._delivery_orchestrator.deliver_tracking(events)
@@ -811,7 +981,7 @@ class SignalBot:
         try:
             await self.delivery.preflight_check()
             LOG.info("delivery preflight completed")
-        except DEFENSIVE_EXC as exc:
+        except Exception as exc:
             LOG.warning(
                 "delivery preflight failed; continuing in signal-only/local mode: %s",
                 exc,
@@ -834,17 +1004,28 @@ class SignalBot:
         return True, result
 
     async def _alert_critical(self, exc: Exception, context: dict[str, Any]) -> None:
-        sender = getattr(self.telegram, "send_html", None)
-        if not callable(sender):
+        from bot.delivery.telegram_routing import operator_dm_enabled, send_operator_html
+
+        if not operator_dm_enabled(self, "send_critical_alerts"):
             return
+        text = (
+            "<b>🚨 CRITICAL ERROR</b>\n"
+            f"<code>{html.escape(type(exc).__name__)}: {html.escape(str(exc))}</code>\n"
+            f"<code>context={html.escape(str(context))}</code>\n"
+            "<i>Operator alert · not sent to signal channel</i>"
+        )
         try:
-            await sender(
-                "<b>🚨 CRITICAL ERROR</b>\n"
-                f"<code>{html.escape(type(exc).__name__)}: {html.escape(str(exc))}</code>\n"
-                f"<code>context={html.escape(str(context))}</code>"
-            )
+            await send_operator_html(self, text)
         except DEFENSIVE_EXC:
-            LOG.debug("critical alert dispatch failed", exc_info=True)
+            LOG.debug("critical alert operator dispatch failed", exc_info=True)
+        from bot.delivery.ops_webhook import send_ops_webhook_alert
+
+        await send_ops_webhook_alert(
+            self,
+            event="critical_error",
+            text=text,
+            extra={"context": context, "exc": type(exc).__name__},
+        )
 
     def _emit_telemetry_mismatch(
         self,

@@ -1,10 +1,13 @@
 "use strict";
 const App = {
   state: {
-    activeTab: "overview",
+    activeTab: "signals",
+    diagnosticsSubTab: "overview",
     overview: null,
     analytics: null,
     funnel: null,
+    confluenceLegs: null,
+    confluenceLegsByProfile: null,
     shortlist: null,
     decisions: null,
     rejections: null,
@@ -17,15 +20,31 @@ const App = {
     signals: [],
     diary: [],
     alerts: [],
+    summary: null,
+    outcomes: null,
+    labelMaps: null,
   },
 
   init() {
     this._bindTabs();
     this._bindRefresh();
     this._bindKeys();
+    if (typeof bindDiagnosticsTabs === "function") bindDiagnosticsTabs();
+    this._loadLabelMaps();
     this._initWS();
     this.refreshAll();
     setInterval(() => this.refreshAll(), 10000);
+  },
+
+  async _loadLabelMaps() {
+    try {
+      const resp = await fetch("/api/meta/labels");
+      if (resp.ok) {
+        this.state.labelMaps = await resp.json();
+      }
+    } catch (e) {
+      console.warn("label maps load failed", e);
+    }
   },
 
   _initWS() {
@@ -38,7 +57,7 @@ const App = {
         const dot = document.getElementById("status-dot");
         const text = document.getElementById("status-text");
         if (dot) dot.className = "dot ok";
-        if (text) text.textContent = "online";
+        if (text) text.textContent = "онлайн";
         reconnectDelay = 1000;
       };
       ws.onmessage = (msg) => {
@@ -53,7 +72,7 @@ const App = {
         const dot = document.getElementById("status-dot");
         const text = document.getElementById("status-text");
         if (dot) dot.className = "dot";
-        if (text) text.textContent = "reconnecting";
+        if (text) text.textContent = "переподключение…";
         setTimeout(connect, reconnectDelay);
         reconnectDelay = Math.min(reconnectDelay * 2, 30000);
       };
@@ -65,33 +84,34 @@ const App = {
 
   _onWSMessage(data) {
     switch (data.type) {
+      case "tracking_update":
+        if (this.state.activeTab === "tracking") renderTracking();
+        else this._refreshTrackingBadge();
+        break;
       case "signal":
         if (!this.state.signals.find((s) => s.signal_id === data.payload.signal_id)) {
           this.state.signals.unshift(data.payload);
           if (this.state.signals.length > 200) this.state.signals.length = 200;
         }
-        if (this.state.activeTab === "river" && typeof renderRiver === "function") {
-          _fetchRiverSignals();
-        }
+        if (this.state.activeTab === "signals") _fetchRiverSignals();
         break;
       case "regime_update":
         this.state.regime = data.payload;
-        if (this.state.activeTab === "weather" && typeof renderWeather === "function") {
-          fetch("/api/v1/market/regime").then(r => r.ok && r.json()).then(d => { App.state.regime = d; renderWeather(); });
-        }
-        break;
-      case "shortlist_update":
-        break;
-      case "telemetry_update":
+        if (this.state.activeTab === "market") renderWeather();
         break;
       case "cycle_complete":
         this.refreshAll();
+        break;
+      default:
         break;
     }
   },
 
   _bindTabs() {
-    document.querySelectorAll(".tab").forEach((btn) => {
+    document.querySelectorAll(".tab[data-tab]").forEach((btn) => {
+      btn.addEventListener("click", () => this.switchTab(btn.dataset.tab));
+    });
+    document.querySelectorAll(".mobile-nav button[data-tab]").forEach((btn) => {
       btn.addEventListener("click", () => this.switchTab(btn.dataset.tab));
     });
   },
@@ -102,15 +122,16 @@ const App = {
 
   _bindKeys() {
     document.addEventListener("keydown", (e) => {
-      if ((e.key === "r" && (e.ctrlKey || e.metaKey))) {
+      if (e.key === "r" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         this.refreshAll();
       }
       const map = {
-        1: "overview", 2: "funnel", 3: "audit", 4: "shortlist",
-        5: "strategies", 6: "delivery", 7: "runtime", 8: "river",
-        9: "diary", 0: "weather", l: "lab", a: "alerts",
-        s: "settings", b: "sandbox",
+        1: "signals",
+        2: "tracking",
+        3: "diary",
+        4: "market",
+        5: "diagnostics",
       };
       if (map[e.key] && !e.ctrlKey && !e.metaKey && !e.altKey) {
         this.switchTab(map[e.key]);
@@ -120,20 +141,30 @@ const App = {
 
   switchTab(name) {
     this.state.activeTab = name;
-    document.querySelectorAll(".tab").forEach((btn) => {
+    document.querySelectorAll(".tab[data-tab]").forEach((btn) => {
       btn.classList.toggle("active", btn.dataset.tab === name);
     });
-    document.querySelectorAll(".section").forEach((sec) => {
+    document.querySelectorAll(".mobile-nav button[data-tab]").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.tab === name);
+    });
+    document.querySelectorAll(".section.main-section").forEach((sec) => {
       sec.classList.toggle("active", sec.id === name);
     });
-    if (name === "river" && typeof renderRiver === "function") renderRiver();
-    if (name === "diary" && typeof renderDiary === "function") renderDiary();
-    if (name === "weather" && typeof renderWeather === "function") renderWeather();
-    if (name === "lab" && typeof renderConfluenceLab === "function") renderConfluenceLab();
-    if (name === "settings" && typeof renderSettings === "function") renderSettings();
-    if (name === "alerts" && typeof renderAlerts === "function") renderAlerts();
-    if (name === "sandbox" && typeof renderSandbox === "function") renderSandbox();
-    if (name === "runtime" && typeof renderEngineRoom === "function") renderEngineRoom();
+    this._renderActiveTab();
+  },
+
+  _renderActiveTab() {
+    const tab = this.state.activeTab;
+    if (tab === "signals") {
+      if (typeof renderTodayPanel === "function") renderTodayPanel();
+      if (typeof renderMarketStatePanel === "function") renderMarketStatePanel();
+      if (typeof renderRiver === "function") renderRiver();
+      else if (typeof _fetchRiverSignals === "function") _fetchRiverSignals();
+    }
+    if (tab === "tracking" && typeof renderTracking === "function") renderTracking();
+    if (tab === "diary" && typeof renderDiary === "function") renderDiary();
+    if (tab === "market" && typeof renderWeather === "function") renderWeather();
+    if (tab === "diagnostics" && typeof renderDiagnostics === "function") renderDiagnostics();
   },
 
   async refreshAll() {
@@ -148,7 +179,10 @@ const App = {
         ["runtime", "/api/live/runtime"],
         ["telegram", "/api/live/telegram-preview"],
         ["analytics", "/api/analytics/report?days=30&scope=rolling"],
-        ["publicAudit", "/api/v1/public-audit"],
+        ["confluenceLegs", "/api/analytics/confluence_legs"],
+        ["confluenceLegsByProfile", "/api/analytics/confluence_legs_by_profile"],
+        ["summary", "/api/v1/summary"],
+        ["outcomes", "/api/v1/analytics/outcomes?days=30"],
       ];
       const results = await Promise.allSettled(
         endpoints.map(([key, url]) =>
@@ -167,49 +201,70 @@ const App = {
       const dot = document.getElementById("status-dot");
       const text = document.getElementById("status-text");
       if (dot) dot.className = "dot ok";
-      if (text) text.textContent = "online";
-      this._refreshAudit();
+      if (text) text.textContent = "онлайн";
+      await this._refreshAudit();
+      this._updateHeaderStats();
+      this._refreshTrackingBadge();
     } catch (err) {
       console.error("refreshAll error", err);
+    }
+  },
+
+  async _refreshTrackingBadge() {
+    try {
+      const res = await fetch("/api/v1/signals/active", { cache: "no-store" });
+      if (!res.ok) return;
+      const rows = await res.json();
+      if (typeof _updateTrackingBadge === "function") _updateTrackingBadge(rows);
+    } catch (_err) {
+      /* ignore */
     }
   },
 
   async _refreshAudit() {
     try {
       const res = await fetch("/api/live/audit?max_rows=20000", { cache: "no-store" });
-      if (res.ok) {
-        this.state.audit = await res.json();
-      }
+      if (res.ok) this.state.audit = await res.json();
     } catch (err) {
       console.warn("audit refresh failed", err);
-      this.state.audit = {
-        status: "unavailable", score: 0,
-        summary: { total: 1, by_severity: { warning: 1 } },
-        operator_brief: "Audit temporarily unavailable.",
-        action_plan: ["Retry refresh or inspect server logs for /api/live/audit."],
-        findings: [{ severity: "warning", area: "dashboard", code: "audit_unavailable",
-          title: "Audit endpoint unavailable.", detail: String(err), recommendation: "Keep using other panels." }],
-      };
     }
-    if (typeof renderAudit === "function") renderAudit();
+    if (this.state.activeTab === "diagnostics" && typeof renderAudit === "function") {
+      renderAudit();
+    }
+  },
+
+  _updateHeaderStats() {
+    const o = this.state.overview || {};
+    const shortlistEl = document.getElementById("header-shortlist");
+    if (shortlistEl) {
+      shortlistEl.textContent = o.shortlist_size != null ? o.shortlist_size + " пар" : "—";
+    }
+    const regimeEl = document.getElementById("header-market-regime");
+    if (regimeEl) {
+      const regime = String(o.market_regime || "unknown").toLowerCase();
+      const map = { bull: "бычий", bear: "медвежий", ranging: "боковик", volatile: "vol" };
+      regimeEl.textContent = map[regime] || regime;
+    }
+    const biasEl = document.getElementById("header-btc-bias");
+    if (biasEl) {
+      const bias = String(o.btc_bias || "neutral").toLowerCase();
+      const map = { uptrend: "BTC ↑", downtrend: "BTC ↓", neutral: "BTC ↔" };
+      biasEl.textContent = map[bias] || o.btc_bias || "BTC —";
+    }
   },
 
   _renderAll() {
-    if (typeof renderOverview === "function") renderOverview();
-    if (typeof renderFunnel === "function") renderFunnel();
-    if (typeof renderShortlist === "function") renderShortlist();
-    if (typeof renderStrategies === "function") renderStrategies();
-    if (typeof renderDelivery === "function") renderDelivery();
-    if (typeof renderRuntime === "function") renderRuntime();
+    if (typeof renderMarketStatePanel === "function") renderMarketStatePanel();
+    this._renderActiveTab();
     const lastUpdate = document.getElementById("last-update");
     const runId = document.getElementById("run-id");
-    if (lastUpdate) lastUpdate.textContent = "Last update: " + new Date().toLocaleTimeString();
-    if (runId) runId.textContent = "run " + (this.state.overview?.run_id || "-");
+    if (lastUpdate) lastUpdate.textContent = "Обновлено: " + new Date().toLocaleTimeString();
+    if (runId) runId.textContent = "сессия " + (this.state.overview?.run_id || "—");
   },
 };
 
 function text(value) {
-  if (value === null || value === undefined || value === "") return "-";
+  if (value === null || value === undefined || value === "") return "—";
   return String(value);
 }
 
@@ -236,6 +291,8 @@ function el(tag, attrs = {}, children = []) {
     else if (key === "text") node.textContent = value;
     else if (key === "title") node.title = value;
     else if (key === "html") node.innerHTML = value;
+    else if (key === "style") node.setAttribute("style", value);
+    else if (key === "onclick") node.onclick = value;
     else node.setAttribute(key, value);
   }
   for (const child of children) {
@@ -275,14 +332,14 @@ function barList(rows, opts = {}) {
       const width = Math.max(2, (value / max) * 100);
       const fillClass = opts.fillClass || "";
       return el("div", { class: "bar-row" }, [
-        el("div", { class: "bar-label", title: row.key || row.label || "-", text: row.key || row.label || "-" }),
+        el("div", { class: "bar-label", title: row.key || row.label || "—", text: row.key || row.label || "—" }),
         el("div", {}, [
           el("div", { class: "bar-track" }, [el("div", { class: "bar-fill " + fillClass, style: "width:" + width + "%" })]),
           el("div", { class: "mono muted", text: number(value, 0) }),
         ]),
       ]);
     },
-    "No telemetry rows"
+    "Нет данных"
   );
 }
 
@@ -297,7 +354,7 @@ function simpleRow(title, meta, value, valueClass = "") {
 }
 
 function table(columns, rows) {
-  if (!rows || rows.length === 0) return el("div", { class: "empty", text: "No rows" });
+  if (!rows || rows.length === 0) return el("div", { class: "empty", text: "Нет строк" });
   const thead = el("thead", {}, [
     el("tr", {}, columns.map((c) => el("th", { text: c.label, style: c.width ? "width:" + c.width : "" }))),
   ]);
@@ -308,12 +365,3 @@ function table(columns, rows) {
 function badge(textContent, cls = "") {
   return el("span", { class: "badge" + (cls ? " " + cls : ""), text: textContent });
 }
-
-function smallBtn(label, onClick) {
-  const btn = el("button", { class: "tab", text: label });
-  btn.addEventListener("click", onClick);
-  return btn;
-}
-
-function renderRiver() {}  /* placeholder — implemented in Phase 2 */
-function renderWeather() {} /* placeholder — implemented in Phase 3 */

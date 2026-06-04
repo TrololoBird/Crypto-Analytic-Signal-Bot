@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from ..domain.strategy_catalog import catalog_default_params
@@ -311,6 +311,116 @@ def build_structural_targets(
             tp1, tp2, _, _ = normalized_targets
 
     return stop, tp1, tp2
+
+
+@dataclass(frozen=True, slots=True)
+class SMCTradePlan:
+    entry: float
+    stop: float
+    tp1: float
+    tp2: float
+    risk: float
+    reasons_note: str
+
+
+def build_smc_trade_plan(
+    *,
+    direction: str,
+    price_anchor: float,
+    stop_basis: float,
+    atr: float,
+    work_1h: pl.DataFrame,
+    work_4h: pl.DataFrame | None = None,
+    min_rr: float = 1.9,
+    sl_buffer_atr: float = 0.8,
+    sh_mask: pl.Series | None = None,
+    sl_mask: pl.Series | None = None,
+    tp2_extension_rr: float = 0.35,
+) -> SMCTradePlan | None:
+    """SMC continuation/reversal SL/TP plan with structural targets and RR fallback."""
+    if not _is_finite_positive(price_anchor) or not _is_finite_positive(stop_basis):
+        return None
+    if not math.isfinite(float(atr)) or float(atr) <= 0.0:
+        return None
+
+    buffer = max(0.05, float(sl_buffer_atr))
+    min_rr_value = max(1.0, float(min_rr))
+    extension = max(2.0, min_rr_value + float(tp2_extension_rr))
+
+    if direction == "long":
+        stop = float(stop_basis) - float(atr) * buffer
+        risk = price_anchor - stop
+        if risk <= 0.0:
+            return None
+        tp1 = select_structural_target(
+            work_1h,
+            mask=sh_mask,
+            column="high",
+            price_anchor=price_anchor,
+            direction="long",
+        )
+        tp2 = None
+        if work_4h is not None and not work_4h.is_empty() and "high" in work_4h.columns:
+            tp2 = select_structural_target(
+                work_4h,
+                mask=None,
+                column="high",
+                price_anchor=price_anchor,
+                direction="long",
+            )
+        if tp1 is None or abs(tp1 - price_anchor) < risk * min_rr_value:
+            tp1 = price_anchor + risk * min_rr_value
+            reasons_note = "tp1_rr_fallback"
+        else:
+            reasons_note = "tp1_structural"
+        if tp2 is None or tp2 <= tp1:
+            tp2 = price_anchor + risk * extension
+    elif direction == "short":
+        stop = float(stop_basis) + float(atr) * buffer
+        risk = stop - price_anchor
+        if risk <= 0.0:
+            return None
+        tp1 = select_structural_target(
+            work_1h,
+            mask=sl_mask,
+            column="low",
+            price_anchor=price_anchor,
+            direction="short",
+        )
+        tp2 = None
+        if work_4h is not None and not work_4h.is_empty() and "low" in work_4h.columns:
+            tp2 = select_structural_target(
+                work_4h,
+                mask=None,
+                column="low",
+                price_anchor=price_anchor,
+                direction="short",
+            )
+        if tp1 is None or abs(tp1 - price_anchor) < risk * min_rr_value:
+            tp1 = price_anchor - risk * min_rr_value
+            reasons_note = "tp1_rr_fallback"
+        else:
+            reasons_note = "tp1_structural"
+        if tp2 is None or tp2 >= tp1:
+            tp2 = price_anchor - risk * extension
+    else:
+        return None
+
+    if abs(tp2 - price_anchor) <= abs(tp1 - price_anchor):
+        tp2 = (
+            price_anchor + risk * extension
+            if direction == "long"
+            else price_anchor - risk * extension
+        )
+
+    return SMCTradePlan(
+        entry=price_anchor,
+        stop=stop,
+        tp1=tp1,
+        tp2=tp2,
+        risk=risk,
+        reasons_note=reasons_note,
+    )
 
 
 def validate_rr_or_penalty(

@@ -36,6 +36,8 @@ def _minimal_settings(**overrides: object) -> SimpleNamespace:
             min_setup_families_per_symbol=8,
             target_setup_families_per_symbol=12,
             max_setup_families_per_symbol=15,
+            shortlist_unified_routing=False,
+            emit_strategy_routing_skips=True,
         ),
         "delivery": SimpleNamespace(
             action_min_score=0.72,
@@ -71,6 +73,7 @@ def test_run_full_audit_clean_defaults() -> None:
     for key in (
         "filter_warnings",
         "lane_warnings",
+        "runtime_warnings",
         "delivery_warnings",
         "universe_warnings",
         "strategy_warnings",
@@ -140,7 +143,7 @@ def test_run_startup_audit_logs_warnings(caplog: pytest.LogCaptureFixture) -> No
             cooldown_minutes=60,
         )
     )
-    with caplog.at_level(logging.WARNING, logger="bot.config_audit"):
+    with caplog.at_level(logging.INFO, logger="bot.config_audit"):
         run_startup_audit(settings)
     assert any("CONFIG AUDIT" in record.message for record in caplog.records)
     assert any("min_atr_pct=2.50" in record.message for record in caplog.records)

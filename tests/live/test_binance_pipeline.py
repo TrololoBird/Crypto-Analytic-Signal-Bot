@@ -14,6 +14,6 @@ async def test_binance_pipeline_smoke() -> None:
         symbols=["BTCUSDT"],
         limit=1,
         concurrency=1,
-        warm_context=False,
+        warm_context=True,
         include_basis=False,
     )

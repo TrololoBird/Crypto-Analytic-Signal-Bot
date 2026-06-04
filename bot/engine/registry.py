@@ -50,6 +50,7 @@ class StrategyRegistry:
                 self._enabled.add(strategy_id)
 
             self._performance[strategy_id] = {
+                "calculations": 0,
                 "signals_generated": 0,
                 "calculation_errors": 0,
                 "avg_calculation_ms": 0.0,
@@ -127,7 +128,12 @@ class StrategyRegistry:
         return True
 
     def record_performance(
-        self, strategy_id: str, calculation_ms: float, *, error: bool = False
+        self,
+        strategy_id: str,
+        calculation_ms: float,
+        *,
+        error: bool = False,
+        hit: bool = True,
     ) -> None:
         """Record performance metrics for a strategy."""
         with self._lock:
@@ -138,9 +144,11 @@ class StrategyRegistry:
             if error:
                 perf["calculation_errors"] += 1
             else:
-                perf["signals_generated"] += 1
+                perf["calculations"] += 1
+                if hit:
+                    perf["signals_generated"] += 1
                 old_avg = perf["avg_calculation_ms"]
-                n = perf["signals_generated"]
+                n = perf["calculations"]
                 perf["avg_calculation_ms"] = (old_avg * (n - 1) + calculation_ms) / n
 
     def get_performance(self, strategy_id: str) -> dict[str, Any] | None:

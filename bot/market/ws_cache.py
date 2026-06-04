@@ -231,26 +231,52 @@ def get_funding_sentiment(manager: Any) -> float | None:
     return sum(rates) / len(rates)
 
 
+def get_liquidation_rollups(
+    manager: Any,
+    symbol: str | None = None,
+    window_seconds: int = 900,
+) -> dict[str, float] | None:
+    """Return notional-weighted liquidation rollups for *symbol* (ORDER_FLOW_INGEST §3)."""
+    cutoff_ms = int(time.time() * 1000) - window_seconds * 1000
+    long_notional = 0.0
+    short_notional = 0.0
+    for ts_ms, sym, side, qty, price in manager._force_order_buffer:
+        if ts_ms < cutoff_ms:
+            continue
+        if symbol is not None and sym != symbol:
+            continue
+        try:
+            qty_val = float(qty)
+            price_val = float(price)
+        except (TypeError, ValueError):
+            continue
+        if qty_val <= 0.0:
+            continue
+        notional = qty_val * price_val if price_val > 0.0 else qty_val
+        if side == "BUY":
+            short_notional += notional
+        else:
+            long_notional += notional
+    total = long_notional + short_notional
+    if total <= 0.0:
+        return None
+    return {
+        "liquidation_long_notional": long_notional,
+        "liquidation_short_notional": short_notional,
+        "liquidation_total_notional": total,
+        "liquidation_score": (short_notional - long_notional) / total,
+    }
+
+
 def get_liquidation_sentiment(
     manager: Any,
     symbol: str | None = None,
     window_seconds: int = 60,
 ) -> float | None:
-    cutoff_ms = int(time.time() * 1000) - window_seconds * 1000
-    long_liq = short_liq = 0.0
-    for ts_ms, sym, side, qty, _price in manager._force_order_buffer:
-        if ts_ms < cutoff_ms:
-            continue
-        if symbol is not None and sym != symbol:
-            continue
-        if side == "BUY":
-            short_liq += qty
-        else:
-            long_liq += qty
-    total = long_liq + short_liq
-    if total == 0.0:
+    rollups = get_liquidation_rollups(manager, symbol=symbol, window_seconds=window_seconds)
+    if rollups is None:
         return None
-    return (short_liq - long_liq) / total
+    return float(rollups["liquidation_score"])
 
 
 def get_liquidation_age_seconds(

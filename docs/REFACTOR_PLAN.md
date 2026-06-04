@@ -2,7 +2,48 @@
 
 > Target: **Python 3.14.5**, lean architecture, live Binance validation only.  
 > User docs: [README.md](../README.md) · Deps: [DEPENDENCIES.md](DEPENDENCIES.md) · Lock: [requirements-lock.txt](../requirements-lock.txt)  
-> Status: **Structural refactor complete** (2026-05-31). Phase 0–3 done; Phase 4 = strategy calibration waves (ops).
+> Status: **Structural refactor complete** (2026-05-31). Phase 0–2 done; **Phase 3 partial** (symbol_analyzer slim deferred); Phase 4 = strategy calibration waves (ops).  
+> **Roadmap & F9–F11 status:** [PROJECT_ROADMAP_AND_STATUS.md](PROJECT_ROADMAP_AND_STATUS.md) (2026-06-04).
+
+## Phase 3 checkpoint (2026-06-03)
+
+**Decision:** Skip full `symbol_analyzer` slim in this wave — mark Phase 3 **partial** and track oversized modules via health audit instead of further splits.
+
+| Item | Status |
+|---|---|
+| `bot/runtime/` package (ex `application/`) | ✅ |
+| Slim `symbol_analyzer` (<400 LOC) | ⏸ **Deferred** — entry 7 LOC; mixins split; `pipeline.py` ~1554 LOC remains |
+| Engine bounded concurrency | Ongoing |
+| Strategy lanes on kline hot path | ✅ wired |
+| `live_smoke_bot` | Manual / nightly |
+
+**Python files >500 LOC** (run `python scripts/project_health_audit.py` — section `Large Python files`):
+
+| Lines | Path |
+|---:|---|
+| 2073 | `bot/persistence/repository/memory.py` |
+| 1937 | `bot/market/ws.py` |
+| 1935 | `bot/persistence/tracking.py` |
+| 1736 | `bot/dashboard/app.py` |
+| 1666 | `bot/market/rest_impl.py` |
+| 1554 | `bot/runtime/analyzer/pipeline.py` |
+| 1446 | `bot/ops/startup_report.py` |
+| 1404 | `bot/features/prepare_frame.py` |
+| 1373 | `bot/diagnostics/quality.py` |
+| 1362 | `bot/runtime/delivery_orchestrator.py` |
+| 1201 | `bot/market/enrichment.py` |
+| 1152 | `bot/market/universe.py` |
+| 1062 | `bot/domain/config.py` |
+| 1050 | `bot/delivery/filters.py` |
+| 1049 | `bot/runtime/market_context_updater.py` |
+| 1015 | `bot/runtime/bot.py` |
+| 1003 | `bot/dashboard/live.py` |
+| 970 | `bot/runtime/shortlist_service.py` |
+| 966 | `bot/diagnostics/runtime/strategy_audit.py` |
+| 965 | `bot/setups/smc.py` |
+| *(+21 more in scripts/tests — see audit output)* |
+
+**Next consolidation targets (when de-bloat resumes):** `memory.py`, `ws.py`, `tracking.py`, `pipeline.py`.
 
 ## Context
 
@@ -44,7 +85,7 @@ Research: [python-binance](https://github.com/sammchardy/python-binance), [open-
 | Package | Why not |
 |---|---|
 | **python-binance** / **ccxt** | Private endpoints temptation; multi-exchange scope creep |
-| **pandas** on live path | Polars-only; pandas only in `[ml]` extra if ever |
+| **pandas** on live path | Polars-only; no pandas dependency in repo |
 | **TA-Lib** | Windows/native brittle; polars_ta + pure Polars fallbacks |
 | **Redis/Postgres** | Premature; aiosqlite enough until proven scale |
 
@@ -193,10 +234,10 @@ Structural packages: `market/`, `runtime/`, `persistence/`, `engine/`, `features
 3. Lazy Polars streaming on live path — **ongoing tuning**
 4. Live checks: `tests/live/` + `scripts/live_check_*`
 
-### Phase 3 — Runtime rewrite ✅ (structure, 2026-05-31)
+### Phase 3 — Runtime rewrite ⏸ **partial** (checkpoint 2026-06-03)
 
-1. ~~`bot/runtime/` (ex `application/`)~~
-2. Slim `symbol_analyzer` (<400 LOC) — **partial** (entry 7 LOC; mixins split into `family_gates`, `ws_enrichments`, `context` ~106, `frames` ~180; `pipeline` ~558 remains)
+1. ~~`bot/runtime/` (ex `application/`)~~ ✅
+2. Slim `symbol_analyzer` (<400 LOC) — **deferred** (see Phase 3 checkpoint above; `pipeline.py` ~1554 LOC)
 3. Engine bounded concurrency — **ongoing**
 4. Strategy lanes on kline hot path — **wired** (`enable_strategy_lanes`, `event_interval` from `cycle_runner` → `calculate_all`)
 5. `live_smoke_bot` — manual / nightly

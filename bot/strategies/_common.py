@@ -283,16 +283,34 @@ def with_spec_columns(frame: pl.DataFrame) -> pl.DataFrame:
             ).alias("spec_lower_wick_ratio"),
             pl.col("spec_delta").abs().rolling_mean(20).alias("spec_abs_delta_mean20"),
             pl.col("spec_delta").rolling_std(20).alias("spec_delta_std20"),
-            pl.col("spec_delta").fill_null(0.0).cum_sum().alias("spec_cvd"),
+            _spec_cvd_expr(work).alias("spec_cvd"),
         ]
     )
     return work
 
 
+def _spec_cvd_expr(frame: pl.DataFrame) -> pl.Expr:
+    if "session_cvd" in frame.columns:
+        return pl.col("session_cvd").cast(pl.Float64, strict=False)
+    time_column = next(
+        (
+            column
+            for column in ("close_time", "time", "open_time")
+            if column in frame.columns
+            and getattr(frame.schema.get(column), "is_temporal", lambda: False)()
+        ),
+        None,
+    )
+    delta = pl.col("spec_delta").fill_null(0.0)
+    if time_column is not None:
+        return delta.cum_sum().over(pl.col(time_column).dt.date())
+    return delta.cum_sum()
+
+
 def build_spec_signal(
     *,
     prepared: PreparedSymbol,
-    _settings: BotSettings,
+    settings: BotSettings,
     setup_id: str,
     family: str,
     hit: SpecHit,

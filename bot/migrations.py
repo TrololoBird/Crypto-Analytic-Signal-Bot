@@ -68,6 +68,34 @@ MIGRATIONS: Sequence[tuple[int, str, str]] = (
         CREATE INDEX IF NOT EXISTS idx_diary_closed ON trader_diary(closed_at);
         """,
     ),
+    (
+        4,
+        "relabel_legacy_setup_invalidated",
+        """
+        UPDATE active_signals
+        SET close_reason = 'legacy_setup_invalidated'
+        WHERE close_reason = 'setup_invalidated';
+        UPDATE signal_outcomes
+        SET result = 'legacy_setup_invalidated'
+        WHERE result = 'setup_invalidated';
+        """,
+    ),
+    (
+        5,
+        "active_signals_status_symbol_index",
+        """
+        CREATE INDEX IF NOT EXISTS idx_active_signals_status_symbol
+            ON active_signals(status, symbol);
+        """,
+    ),
+    (
+        6,
+        "trader_diary_symbol_column",
+        """
+        ALTER TABLE trader_diary ADD COLUMN symbol TEXT;
+        CREATE INDEX IF NOT EXISTS idx_diary_symbol ON trader_diary(symbol);
+        """,
+    ),
 )
 
 
@@ -78,6 +106,35 @@ async def _assert_integrity(conn: aiosqlite.Connection) -> None:
     if status != "ok":
         msg = f"DB integrity check failed after migration: {status}"
         raise RuntimeError(msg)
+
+
+async def fetch_schema_version(conn: aiosqlite.Connection) -> int:
+    """Return highest applied migration version (0 if registry empty)."""
+    await conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS schema_version (
+            version INTEGER PRIMARY KEY,
+            applied_at TEXT DEFAULT (datetime('now')),
+            description TEXT DEFAULT ''
+        )
+        """
+    )
+    async with conn.execute(
+        "SELECT COALESCE(MAX(version), 0) AS version FROM schema_version"
+    ) as cursor:
+        row = await cursor.fetchone()
+    return int(row[0]) if row and row[0] is not None else 0
+
+
+async def fetch_schema_version_rows(
+    conn: aiosqlite.Connection,
+) -> list[tuple[int, str, str]]:
+    """Return all rows from schema_version ordered by version."""
+    async with conn.execute(
+        "SELECT version, description, applied_at FROM schema_version ORDER BY version"
+    ) as cursor:
+        rows = await cursor.fetchall()
+    return [(int(v), str(d or ""), str(a or "")) for v, d, a in rows]
 
 
 async def migrate_db(conn: aiosqlite.Connection) -> int:

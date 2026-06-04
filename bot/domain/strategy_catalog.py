@@ -8,6 +8,10 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from pydantic import BaseModel
+
+    from bot.domain.config import BotSettings
+
 
 @dataclass(frozen=True, slots=True)
 class CatalogEntry:
@@ -404,7 +408,224 @@ CATALOG_ENTRIES: tuple[CatalogEntry, ...] = (
 )
 
 CATALOG_SETUP_IDS: frozenset[str] = frozenset(entry.setup_id for entry in CATALOG_ENTRIES)
+CATALOG_SETUP_IDS_ORDERED: tuple[str, ...] = tuple(entry.setup_id for entry in CATALOG_ENTRIES)
 CATALOG_BY_ID: dict[str, CatalogEntry] = {entry.setup_id: entry for entry in CATALOG_ENTRIES}
+
+# Whitelist for [bot.filters.setups] param keys (config.toml.example + delivery overrides).
+CATALOG_SETUP_PARAM_KEYS: frozenset[str] = frozenset(
+    {
+        "adaptive_min_volume_ratio",
+        "adx_penalty",
+        "adx_penalty_factor",
+        "altseason_long_threshold",
+        "asia_end_hour_utc",
+        "asia_start_hour_utc",
+        "atr_mean_window",
+        "base_score",
+        "bb_pct_b_threshold",
+        "bb_squeeze_threshold",
+        "bias_mismatch_penalty",
+        "body_reversal_close_position_long",
+        "body_reversal_close_position_short",
+        "bounce_threshold_atr",
+        "breakout_atr_mult",
+        "breakout_lookback_bars",
+        "breakout_threshold",
+        "breakout_threshold_atr",
+        "btc_dominance_threshold",
+        "closed_back_atr_mult",
+        "confirmation_lookback_15m",
+        "confirmation_lookback_bars",
+        "delta_spike_mult",
+        "divergence_window",
+        "ema_acceptance_atr",
+        "ema_deep_pullback_pct",
+        "ema_proximity_pct",
+        "ema_pullback_atr",
+        "ema_pullback_score_penalty",
+        "ema_reclaim_lookback_bars",
+        "ema_touch_tolerance_pct",
+        "enable_15m_range_fallback",
+        "external_swing_lookback",
+        "fallback_lookback_bars",
+        "false_breakout_lookback_1h",
+        "funding_extreme_threshold",
+        "funding_recent_extreme_lookback_hours",
+        "funding_soft_threshold",
+        "funding_threshold",
+        "historical_funding_score_penalty",
+        "liquidation_extreme_threshold",
+        "london_end_hour_utc",
+        "london_start_hour_utc",
+        "long_account_threshold",
+        "max_acceptance_close_position_short",
+        "max_adverse_depth_imbalance",
+        "max_adverse_microprice_bias",
+        "max_bb_width",
+        "max_break_age_bars",
+        "max_close_position_short",
+        "max_confirmation_bars",
+        "max_ema_extension_atr",
+        "max_entry_distance_atr",
+        "max_entry_drift_atr",
+        "max_recovery_delta_short",
+        "max_retest_age_bars",
+        "max_retest_distance_atr",
+        "max_rsi_long",
+        "max_spread_bps",
+        "max_sweep_age_bars",
+        "max_swing_pair_gap",
+        "max_vwap_distance_atr",
+        "min_abs_flow_delta",
+        "min_abs_oi_change_pct",
+        "min_acceptance_close_position_long",
+        "min_adx_1h",
+        "min_atr_expansion_ratio",
+        "min_bb_compression_width",
+        "min_body_atr",
+        "min_close_position_long",
+        "min_confirmation_score",
+        "min_delta_threshold",
+        "min_depth_imbalance",
+        "min_indicator_votes",
+        "min_liquidation_score",
+        "min_microprice_bias",
+        "min_ob_impulse_atr",
+        "min_price_change_pct",
+        "min_price_delta_pct",
+        "min_proxy_shift",
+        "min_proxy_volume_ratio",
+        "min_proxy_wick_atr",
+        "min_recovery_delta_long",
+        "min_release_roc10_abs_pct",
+        "min_release_width_expansion",
+        "min_roc10_abs_pct",
+        "min_rr",
+        "min_rsi_delta",
+        "min_rsi_short",
+        "min_shift",
+        "min_swings",
+        "min_trend_votes",
+        "min_vol_breakout",
+        "min_volume_ratio",
+        "min_wick_atr",
+        "mitigation_threshold",
+        "near_level_atr",
+        "near_range_atr",
+        "no_crowd_confirmation_penalty",
+        "ny_end_hour_utc",
+        "ny_start_hour_utc",
+        "ob_max_age",
+        "orderflow_conflict_penalty",
+        "overlap_end_hour_utc",
+        "overlap_start_hour_utc",
+        "proxy_lookback_bars",
+        "pullback_rsi_long_max",
+        "pullback_rsi_short_min",
+        "reclaim_lookback_bars",
+        "relative_funding_score_penalty",
+        "release_lookback",
+        "retest_atr_mult",
+        "rsi_divergence_threshold",
+        "scan_bars",
+        "shift_std_mult",
+        "short_account_threshold",
+        "signal_lookback_bars",
+        "sl_atr_mult",
+        "sl_buffer_atr",
+        "soft_long_account_threshold",
+        "soft_short_account_threshold",
+        "squeeze_memory_bars",
+        "squeeze_release_lookback",
+        "strict_1h_structure",
+        "strong_wick_multiplier",
+        "structure_conflict_penalty",
+        "supertrend_opposes_penalty",
+        "sweep_tolerance_pct",
+        "swing_lookback",
+        "threshold_adx",
+        "threshold_gap",
+        "threshold_tol",
+        "touch_buffer_atr",
+        "tp_too_close_penalty",
+        "trend_conflict_penalty_factor",
+        "volume_penalty",
+        "volume_threshold",
+        "vwap_reclaim_tolerance_pct",
+        "wick_atr_threshold",
+        "wick_through_atr_mult",
+    }
+)
+
+
+def catalog_required_timeframes_for_enabled(settings: BotSettings) -> frozenset[str]:
+    """Union of catalog required_tfs for currently enabled setups."""
+    required: set[str] = set()
+    for setup_id in settings.setups.enabled_setup_ids():
+        entry = CATALOG_BY_ID.get(setup_id)
+        if entry is not None:
+            required.update(entry.required_tfs)
+    return frozenset(required)
+
+
+def verify_setup_config_model(setup_config_model: type[BaseModel]) -> list[str]:
+    """Ensure SetupConfig bool fields stay aligned with the strategy catalog."""
+    field_names = frozenset(setup_config_model.model_fields)
+    missing = sorted(CATALOG_SETUP_IDS - field_names)
+    extra = sorted(field_names - CATALOG_SETUP_IDS)
+    errors: list[str] = []
+    if missing:
+        errors.append(f"SetupConfig missing catalog setup fields: {', '.join(missing)}")
+    if extra:
+        errors.append(f"SetupConfig has fields not in catalog: {', '.join(extra)}")
+    return errors
+
+
+def verify_config_setup_references(settings: BotSettings) -> list[str]:
+    """Validate config setup overrides and enabled flags against the catalog."""
+    errors: list[str] = []
+    unknown_overrides = sorted(set(settings.filters.setups) - CATALOG_SETUP_IDS)
+    if unknown_overrides:
+        errors.append(
+            "filters.setups contains unknown setup ids: " + ", ".join(unknown_overrides)
+        )
+    for setup_id, params in settings.filters.setups.items():
+        unknown_keys = sorted(set(params) - CATALOG_SETUP_PARAM_KEYS)
+        if unknown_keys:
+            errors.append(
+                f"filters.setups.{setup_id} unknown param keys: {', '.join(unknown_keys)}"
+            )
+    unknown_enabled = sorted(set(settings.setups.enabled_setup_ids()) - CATALOG_SETUP_IDS)
+    if unknown_enabled:
+        errors.append(
+            "enabled setups not in catalog: " + ", ".join(unknown_enabled)
+        )
+    for symbol, asset in settings.assets.items():
+        unknown_excluded = sorted(set(asset.excluded_strategies) - CATALOG_SETUP_IDS)
+        if unknown_excluded:
+            errors.append(
+                f"assets.{symbol}.excluded_strategies unknown setup ids: "
+                + ", ".join(unknown_excluded)
+            )
+        unknown_allowed = sorted(set(asset.allowed_strategies) - CATALOG_SETUP_IDS)
+        if unknown_allowed:
+            errors.append(
+                f"assets.{symbol}.allowed_strategies unknown setup ids: "
+                + ", ".join(unknown_allowed)
+            )
+    available = frozenset(settings.ws.kline_intervals) | frozenset(
+        settings.runtime.analysis_kline_intervals
+    )
+    rest_only_tfs = frozenset({"4h", "1d"})
+    missing_tfs = sorted(
+        catalog_required_timeframes_for_enabled(settings) - available - rest_only_tfs
+    )
+    if missing_tfs:
+        errors.append(
+            "catalog required timeframes not covered by ws.kline_intervals ∪ "
+            f"runtime.analysis_kline_intervals: {', '.join(missing_tfs)}"
+        )
+    return errors
 
 PR10_WAVES: dict[int, frozenset[str]] = {
     wave: frozenset(entry.setup_id for entry in CATALOG_ENTRIES if entry.wave == wave)

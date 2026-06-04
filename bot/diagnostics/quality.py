@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from bot.coercion import as_int
-from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.runtime.errors import DEFENSIVE_EXC
 
 Recommendation = Literal["keep", "reduce_score", "pause"]
 

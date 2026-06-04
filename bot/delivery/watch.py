@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import html
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -646,21 +647,20 @@ class AlertCoordinator:
         self, cand: WatchCandidate, *, current_price: float, now: datetime, ref_id: str
     ) -> str:
         direction = "LONG" if cand.direction == "long" else "SHORT"
+        badge = "🟢" if cand.direction == "long" else "🔴"
         return "\n".join(
             [
-                f"🔍 <b>SETUP WATCH</b>: <b>{cand.symbol}</b> <b>{direction}</b>",
-                "",
-                f"REF: <code>{ref_id}</code>",
-                f"Level: <b>{cand.level_name}</b> @ <b>{_fmt_price(cand.level_price)}</b>",
+                f"{badge} <b>WATCH {direction} {html.escape(cand.symbol)}</b> "
+                f"<code>#{html.escape(ref_id)}</code>",
                 (
-                    f"Interest zone ({_fmt_pct(self._cfg.watch_interest_pct)}): "
-                    f"<b>{_fmt_price(cand.interest_low)}</b> - "
-                    f"<b>{_fmt_price(cand.interest_high)}</b>"
+                    f"Уровень {html.escape(cand.level_name)} · "
+                    f"<code>{_fmt_price(cand.level_price)}</code> · "
+                    f"сейчас <code>{_fmt_price(current_price)}</code>"
                 ),
-                f"Now: <b>{_fmt_price(current_price)}</b>",
-                "",
-                "Подтверждение (Level 3) — на close 15m, если паттерн сохранится.",
-                f"Время: {now.isoformat()}",
+                (
+                    f"Интерес {_fmt_pct(self._cfg.watch_interest_pct)}: "
+                    f"<code>{_fmt_price(cand.interest_low)}–{_fmt_price(cand.interest_high)}</code>"
+                ),
             ]
         )
 
@@ -668,20 +668,16 @@ class AlertCoordinator:
         self, cand: WatchCandidate, *, current_price: float, now: datetime, ref_id: str
     ) -> str:
         direction = "LONG" if cand.direction == "long" else "SHORT"
+        badge = "🟢" if cand.direction == "long" else "🔴"
         return "\n".join(
             [
-                f"🟦 <b>ENTRY ZONE</b>: <b>{cand.symbol}</b> <b>{direction}</b>",
-                "",
-                f"REF: <code>{ref_id}</code>",
+                f"{badge} <b>ЗОНА {direction} {html.escape(cand.symbol)}</b> "
+                f"<code>#{html.escape(ref_id)}</code>",
                 (
-                    f"Zone ({_fmt_pct(self._cfg.entry_zone_pct)}): "
-                    f"<b>{_fmt_price(cand.entry_low)}</b> - "
-                    f"<b>{_fmt_price(cand.entry_high)}</b>"
+                    f"Вход {_fmt_pct(self._cfg.entry_zone_pct)}: "
+                    f"<code>{_fmt_price(cand.entry_low)}–{_fmt_price(cand.entry_high)}</code> · "
+                    f"сейчас <code>{_fmt_price(current_price)}</code>"
                 ),
-                f"Now: <b>{_fmt_price(current_price)}</b>",
-                "",
-                "Важно: свеча 15m ещё может не закрыться — это раннее предупреждение.",
-                f"Время: {now.isoformat()}",
             ]
         )
 
@@ -697,11 +693,8 @@ class AlertCoordinator:
         direction = "LONG" if cand.direction == "long" else "SHORT"
         return "\n".join(
             [
-                f"⛔ <b>SETUP INVALIDATED</b>: <b>{cand.symbol}</b> <b>{direction}</b>",
-                "",
-                f"REF: <code>{ref_id}</code>",
-                f"Reason: <code>{reason}</code>",
-                f"Now: <b>{_fmt_price(current_price)}</b>",
-                f"Время: {now.isoformat()}",
+                f"⌛ <b>WATCH снят {direction} {html.escape(cand.symbol)}</b> "
+                f"<code>#{html.escape(ref_id)}</code>",
+                f"<code>{html.escape(reason)}</code> · сейчас <code>{_fmt_price(current_price)}</code>",
             ]
         )

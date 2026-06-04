@@ -6,15 +6,21 @@ from __future__ import annotations
 import argparse
 import math
 import sys
+import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import polars as pl
 
-from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.runtime.errors import DEFENSIVE_EXC
 from bot.diagnostics.config_audit import run_startup_audit
-from bot.domain.config import load_settings
-from bot.domain.strategy_catalog import verify_strategy_wiring
+from bot.domain.config import SetupConfig, load_settings
+from bot.domain.contracts import assert_runtime_call_path_is_clean
+from bot.domain.strategy_catalog import (
+    verify_config_setup_references,
+    verify_setup_config_model,
+    verify_strategy_wiring,
+)
 from bot.features import _add_advanced_indicators
 from bot.strategies import STRATEGY_CLASSES
 
@@ -121,18 +127,54 @@ def _validate_intervals(intervals: list[str], errors: list[str]) -> list[str]:
     return normalized
 
 
+def _ops_webhook_auto_enable_warning(config_path: Path) -> str | None:
+    """Warn when webhook_url is set but ops_alerts_enabled=false in raw config."""
+    if not config_path.is_file():
+        return None
+    try:
+        with config_path.open("rb") as handle:
+            raw = tomllib.load(handle)
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
+    webhook = raw.get("bot", {}).get("notifiers", {}).get("webhook", {})
+    if not isinstance(webhook, dict):
+        return None
+    url = str(webhook.get("webhook_url") or "").strip()
+    ops_enabled = bool(webhook.get("ops_alerts_enabled", False))
+    if url and not ops_enabled:
+        return (
+            "webhook_url is set but ops_alerts_enabled=false; "
+            "auto-enabling ops_alerts_enabled at load time"
+        )
+    return None
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     errors: list[str] = []
+    warnings: list[str] = []
+
+    config_path = Path(args.config)
+    ops_warn = _ops_webhook_auto_enable_warning(config_path)
+    if ops_warn:
+        warnings.append(ops_warn)
 
     try:
-        config_path = Path(args.config)
         if not config_path.exists() and config_path.name != "config.toml":
             errors.append(f"Config file not found: {config_path}")
         settings = load_settings(config_path)
         settings.validate_for_runtime(require_telegram=settings.notifiers.provider == "telegram")
+        if ops_warn and not settings.notifiers.webhook.ops_alerts_enabled:
+            errors.append("ops_alerts_enabled should be true after auto-enable when webhook_url is set")
+        errors.extend(verify_setup_config_model(SetupConfig))
+        errors.extend(verify_config_setup_references(settings))
     except DEFENSIVE_EXC as exc:  # pragma: no cover - defensive CLI script
         errors.append(f"Config validation failed: {exc}")
+
+    try:
+        assert_runtime_call_path_is_clean()
+    except ValueError as exc:
+        errors.append(f"Runtime call path contract failed: {exc}")
 
     symbols = _validate_symbols(_split_values(args.symbol), errors)
     intervals = _validate_intervals(_split_values(args.interval), errors)
@@ -205,6 +247,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         for error in errors:
             print(f"  [FAIL] {error}")
         return 1
+
+    for warning in warnings:
+        print(f"  [WARN] {warning}")
 
     print(
         "[OK] All checks passed | "

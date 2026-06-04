@@ -95,6 +95,7 @@ def build_application_container(
                 feature_flags=feature_flags,
             )
         )
+    LOG.info("network bootstrap deferred to SignalBot.start() (async event loop active)")
     return _build_application_container_impl(
         settings,
         register_strategies=register_strategies,

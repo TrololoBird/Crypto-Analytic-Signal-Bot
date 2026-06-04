@@ -6,7 +6,9 @@ from collections import Counter
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.runtime.errors import DEFENSIVE_EXC
+from bot.runtime.delivery_orchestrator import DELIVERY_SUCCESS_STATUSES
+from bot.telemetry import apply_slim_message_buffer
 
 if TYPE_CHECKING:
     from ..domain.schemas import PipelineResult, Signal
@@ -14,6 +16,7 @@ if TYPE_CHECKING:
     from ..persistence.tracking import SignalTrackingEvent
 
 LOG = logging.getLogger("bot.runtime.telemetry_manager")
+_LANE_SKIP_REASON = "runtime.strategy_lane_excluded"
 _INDICATOR_COLUMNS = (
     "rsi14",
     "stoch_k14",
@@ -33,6 +36,7 @@ class TelemetryManager:
     def __init__(self, bot: Any) -> None:
         self._bot = bot
         self._rejection_counts: Counter[str] = Counter()
+        self._lane_skip_count: int = 0
         self._last_rejection_summary_ts = 0.0
 
     @staticmethod
@@ -197,6 +201,9 @@ class TelemetryManager:
             key = f"{decision.setup_id}:{decision.reason_code}"
             self._rejection_counts[key] += 1
             self._maybe_emit_rejection_stats()
+        elif decision.status == "skip" and decision.reason_code == _LANE_SKIP_REASON:
+            self._lane_skip_count += 1
+            self._maybe_emit_rejection_stats()
         if decision.missing_fields or decision.invalid_fields:
             self._bot.telemetry.append_jsonl("data_quality.jsonl", row)
         if decision.status in {"signal", "reject", "error"}:
@@ -208,6 +215,15 @@ class TelemetryManager:
             return
         self._last_rejection_summary_ts = now
         rows = []
+        if self._lane_skip_count:
+            rows.append(
+                {
+                    "setup_id": "*",
+                    "reason_code": _LANE_SKIP_REASON,
+                    "count": int(self._lane_skip_count),
+                    "aggregated": True,
+                }
+            )
         for key, count in self._rejection_counts.most_common(200):
             setup_id, _, reason_code = key.partition(":")
             rows.append(
@@ -260,6 +276,9 @@ class TelemetryManager:
                 "cached_shortlist_size": cached_shortlist_size,
                 "size": shortlist_size,
                 "symbols": shortlist_symbols,
+                "gate_passed": summary.get("gate_passed"),
+                "light_pool": summary.get("light_pool"),
+                "light_pool_limit": summary.get("light_pool_limit"),
                 "eligible": summary.get("eligible"),
                 "dynamic_pool": summary.get("dynamic_pool"),
                 "pinned": summary.get("pinned"),
@@ -302,6 +321,28 @@ class TelemetryManager:
             },
         )
 
+    @staticmethod
+    def _lane_skip_count_from_rejected(rejected: list[dict[str, Any]]) -> int:
+        return sum(
+            1
+            for row in rejected
+            if str(row.get("reason") or row.get("reason_code") or "") == _LANE_SKIP_REASON
+        )
+
+    @staticmethod
+    def _attach_lane_skip_aggregation(
+        funnel: dict[str, Any] | None,
+        *,
+        lane_skip_count: int,
+    ) -> dict[str, Any]:
+        merged = dict(funnel or {})
+        if lane_skip_count > 0:
+            merged["lane_skips_aggregated"] = {
+                "count": lane_skip_count,
+                "reason_code": _LANE_SKIP_REASON,
+            }
+        return merged
+
     def emit_cycle_log(
         self,
         *,
@@ -332,7 +373,17 @@ class TelemetryManager:
             for value in delivery_status_counts.values()
             if isinstance(value, (int, float))
         )
-        delivery_sent_count = int(delivery_status_counts.get("sent", delivered_count))
+        delivery_success_count = sum(
+            int(delivery_status_counts.get(status, 0) or 0) for status in DELIVERY_SUCCESS_STATUSES
+        )
+        if not delivery_status_counts and delivered_count:
+            delivery_success_count = delivered_count
+        lane_skip_count = self._lane_skip_count_from_rejected(rejected)
+        funnel_payload = self._attach_lane_skip_aggregation(
+            result.funnel if isinstance(result.funnel, dict) else None,
+            lane_skip_count=lane_skip_count,
+        )
+        non_lane_rejected_count = max(len(rejected) - lane_skip_count, 0)
         cycle_row: dict[str, Any] = {
             "ts": datetime.now(UTC).isoformat(),
             "mode": {
@@ -354,7 +405,9 @@ class TelemetryManager:
             "selected_count": selected_count,
             "delivered_count": delivered_count,
             "delivery_attempt_count": delivery_attempt_count,
-            "rejected_count": len(rejected),
+            "delivery_success_count": delivery_success_count,
+            "rejected_count": non_lane_rejected_count,
+            "lane_skip_count": lane_skip_count,
             "shortlist_source": self._bot._shortlist_source,
             "setup_counts": dict(Counter(s.setup_id for s in candidates)),
             "selected_setup_counts": dict(Counter(s.setup_id for s in (delivered or []))),
@@ -364,7 +417,17 @@ class TelemetryManager:
             "status": result.status or ("ok" if not result.error else "error"),
             "prepare_error_count": self._bot._prepare_error_count,
         }
-        if result.funnel:
+        if funnel_payload:
+            cycle_row["funnel"] = funnel_payload
+            if funnel_payload.get("prepare_error_stage") is not None:
+                cycle_row["prepare_error_stage"] = funnel_payload.get("prepare_error_stage")
+            if funnel_payload.get("prepare_error_exception_type") is not None:
+                cycle_row["prepare_error_exception_type"] = funnel_payload.get(
+                    "prepare_error_exception_type"
+                )
+            if funnel_payload.get("merge_conflicts") is not None:
+                cycle_row["merge_conflicts"] = funnel_payload.get("merge_conflicts")
+        elif result.funnel:
             cycle_row["funnel"] = result.funnel
             if result.funnel.get("prepare_error_stage") is not None:
                 cycle_row["prepare_error_stage"] = result.funnel.get("prepare_error_stage")
@@ -372,6 +435,8 @@ class TelemetryManager:
                 cycle_row["prepare_error_exception_type"] = result.funnel.get(
                     "prepare_error_exception_type"
                 )
+            if result.funnel.get("merge_conflicts") is not None:
+                cycle_row["merge_conflicts"] = result.funnel.get("merge_conflicts")
         if result.error:
             cycle_row["error"] = result.error
         if self._bot._ws_manager is not None:
@@ -385,6 +450,7 @@ class TelemetryManager:
             rest_snapshot = rest_snapshot_func()
             cycle_row.update(rest_snapshot if isinstance(rest_snapshot, dict) else {})
 
+        apply_slim_message_buffer(cycle_row)
         self._bot.telemetry.append_jsonl("cycles.jsonl", cycle_row)
         self._bot.last_cycle_summary = dict(cycle_row)
         symbol_row: dict[str, Any] = {
@@ -402,7 +468,8 @@ class TelemetryManager:
             "selected": selected_count,
             "delivered": delivered_count,
             "delivery_attempt_count": delivery_attempt_count,
-            "rejected": len(rejected),
+            "rejected": non_lane_rejected_count,
+            "lane_skip_count": lane_skip_count,
             "shortlist_source": self._bot._shortlist_source,
             "delivery_status_counts": delivery_status_counts,
         }
@@ -450,7 +517,15 @@ class TelemetryManager:
                         "indicators": indicators,
                     },
                 )
-        if result.funnel:
+        if funnel_payload:
+            symbol_row["funnel"] = funnel_payload
+            if funnel_payload.get("prepare_error_stage") is not None:
+                symbol_row["prepare_error_stage"] = funnel_payload.get("prepare_error_stage")
+            if funnel_payload.get("prepare_error_exception_type") is not None:
+                symbol_row["prepare_error_exception_type"] = funnel_payload.get(
+                    "prepare_error_exception_type"
+                )
+        elif result.funnel:
             symbol_row["funnel"] = result.funnel
             if result.funnel.get("prepare_error_stage") is not None:
                 symbol_row["prepare_error_stage"] = result.funnel.get("prepare_error_stage")
@@ -459,28 +534,32 @@ class TelemetryManager:
                     "prepare_error_exception_type"
                 )
         self._bot.telemetry.append_jsonl("symbol_analysis.jsonl", symbol_row)
-        if delivery_sent_count != delivered_count:
+        if delivery_success_count != delivered_count:
             self.emit_telemetry_mismatch(
                 symbol=symbol,
                 trigger=result.trigger,
-                mismatch_type="delivery_sent_vs_symbol_analysis",
-                expected={"sent_delivery_rows": delivery_sent_count},
+                mismatch_type="delivery_success_vs_symbol_analysis",
+                expected={"success_delivery_rows": delivery_success_count},
                 actual={"symbol_analysis_delivered": delivered_count},
             )
         LOG.info(
-            "cycle | symbol=%s detector_runs=%d candidates=%d delivered=%d rejected=%d status=%s",
+            "cycle | symbol=%s detector_runs=%d candidates=%d delivered=%d rejected=%d lane_skips=%d status=%s",
             symbol,
             result.raw_setups,
             len(candidates),
             delivered_count,
-            len(rejected),
+            non_lane_rejected_count,
+            lane_skip_count,
             result.status or "ok",
         )
         self._notify_dashboard_cycle(
             symbol=symbol,
             cycle_row=cycle_row,
-            funnel=result.funnel if isinstance(result.funnel, dict) else None,
+            funnel=funnel_payload if funnel_payload else (result.funnel if isinstance(result.funnel, dict) else None),
         )
+        from .delivery_alerts import record_cycle_delivery_outcome
+
+        record_cycle_delivery_outcome(self._bot, delivered_count=delivered_count)
 
     def _notify_dashboard_cycle(
         self,

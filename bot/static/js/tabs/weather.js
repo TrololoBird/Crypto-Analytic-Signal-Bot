@@ -29,10 +29,10 @@ function _renderGauges(data) {
   if (!container) return;
 
   const items = [
-    { label: "Alt Season Index", value: altIdx, hint: altIdx > 60 ? "Alt season" : "BTC dominance" },
-    { label: "Market Strength", value: strength, hint: data.regime || "unknown" },
-    { label: "BTC Phase", value: confidence, hint: data.btc_phase || "-" },
-    { label: "Confidence", value: confidence, hint: (data.risk_on_off || "neutral").replace("_", " ") },
+    { label: "Сезон альтов", value: altIdx, hint: altIdx > 60 ? "альты сильнее BTC" : "доминирует BTC" },
+    { label: "Сила рынка", value: strength, hint: _regimeRu(data.regime) },
+    { label: "Фаза BTC", value: confidence, hint: data.btc_phase || "—" },
+    { label: "Уверенность", value: confidence, hint: _riskRu(data.risk_on_off) },
   ];
 
   const children = items.map((item) => {
@@ -54,12 +54,12 @@ function _renderRegime(data) {
   const container = document.getElementById("weather-regime");
   if (!container) return;
   const rows = [
-    simpleRow("Regime", data.volatility_regime || "-", data.regime || "unknown", "blue"),
-    simpleRow("BTC Bias", data.btc_bias || "-", "", "cyan"),
-    simpleRow("ETH Bias", data.eth_bias || "-", "", "cyan"),
-    simpleRow("BTC Phase", data.btc_phase || "-", "", "orange"),
-    simpleRow("Risk", data.risk_on_off || "neutral", "", data.risk_on_off === "risk_on" ? "green" : "yellow"),
-    simpleRow("Dominance 24h", "BTC change", (data.dominance_24h || 0).toFixed(2) + "%", Number(data.dominance_24h || 0) >= 0 ? "green" : "red"),
+    simpleRow("Режим", data.volatility_regime || "—", _regimeRu(data.regime), "blue"),
+    simpleRow("BTC", _biasRu(data.btc_bias), "", "cyan"),
+    simpleRow("ETH", _biasRu(data.eth_bias), "", "cyan"),
+    simpleRow("Фаза BTC", data.btc_phase || "—", "", "orange"),
+    simpleRow("Риск", _riskRu(data.risk_on_off), "", data.risk_on_off === "risk_on" ? "green" : "yellow"),
+    simpleRow("Доминация 24ч", "изменение BTC", (data.dominance_24h || 0).toFixed(2) + "%", Number(data.dominance_24h || 0) >= 0 ? "green" : "red"),
   ];
   container.replaceChildren(...rows);
 }
@@ -70,14 +70,14 @@ function _renderFunding(data) {
   const fundSent = data.funding_sentiment || "neutral";
   const oiMom = data.oi_momentum || "stable";
   const rows = [
-    simpleRow("Funding Sentiment", "aggregate", fundSent.replace("_", " "),
+    simpleRow("Funding", "настроение", _fundRu(fundSent),
       fundSent === "long_heavy" ? "red" : fundSent === "short_heavy" ? "green" : "muted"),
-    simpleRow("OI Momentum", "", oiMom,
+    simpleRow("Open Interest", "динамика", _oiRu(oiMom),
       oiMom === "rising" ? "green" : oiMom === "falling" ? "red" : "muted"),
-    simpleRow("Alt Season", "0-100 index", text(data.altcoin_season_index ?? "-"),
+    simpleRow("Сезон альтов", "0–100", text(data.altcoin_season_index ?? "—"),
       (data.altcoin_season_index || 0) > 60 ? "green" : "yellow"),
-    simpleRow("Top Gainer", "24h", (data.top_gainer_pct || 0).toFixed(2) + "%", "green"),
-    simpleRow("Top Loser", "24h", (data.top_loser_pct || 0).toFixed(2) + "%", "red"),
+    simpleRow("Лидер роста", "24ч", (data.top_gainer_pct || 0).toFixed(2) + "%", "green"),
+    simpleRow("Лидер падения", "24ч", (data.top_loser_pct || 0).toFixed(2) + "%", "red"),
   ];
   container.replaceChildren(...rows);
 }
@@ -88,15 +88,15 @@ function _renderSessions(data) {
   const now = new Date();
   const hour = now.getUTCHours() + now.getUTCMinutes() / 60;
   const sessions = [
-    { name: "Asia", active: hour >= 0 && hour < 9, quality: "medium", color: "yellow" },
-    { name: "London", active: hour >= 8 && hour < 17, quality: "high", color: "blue" },
-    { name: "NY", active: hour >= 13 && hour < 22, quality: "high", color: "green" },
+    { name: "Азия", active: hour >= 0 && hour < 9, quality: "средняя", color: "yellow" },
+    { name: "Лондон", active: hour >= 8 && hour < 17, quality: "высокая", color: "blue" },
+    { name: "Нью-Йорк", active: hour >= 13 && hour < 22, quality: "высокая", color: "green" },
   ];
   const rows = sessions.map((s) =>
     simpleRow(
       s.name + (s.active ? " ●" : ""),
-      (s.active ? "active" : "closed") + " / " + s.quality,
-      s.active ? "trading" : "waiting",
+      (s.active ? "активна" : "закрыта") + " · " + s.quality,
+      s.active ? "можно торговать" : "ожидание",
       s.color
     )
   );
@@ -114,4 +114,61 @@ function _renderSparkline(data) {
     { bucket: "now", value: (data.strength || 0.5) * 100 },
   ];
   window.chart.sparkline(canvas, mockData, { width: 300, height: 60, color: "#63a5ff" });
+  _renderMarketShortlist();
+}
+
+function _regimeRu(regime) {
+  const map = {
+    bull: "бычий",
+    bear: "медвежий",
+    trending: "тренд",
+    ranging: "боковик",
+    volatile: "волатильность",
+    breakout: "пробой",
+    unknown: "неизвестно",
+  };
+  return map[String(regime || "unknown").toLowerCase()] || regime || "—";
+}
+
+function _biasRu(bias) {
+  if (!bias) return "—";
+  const map = { uptrend: "рост ↑", downtrend: "падение ↓", neutral: "боковик" };
+  return map[String(bias).toLowerCase()] || bias;
+}
+
+function _riskRu(v) {
+  const map = { risk_on: "риск вкл", risk_off: "осторожно", neutral: "нейтрально" };
+  return map[String(v || "neutral")] || String(v || "neutral").replace(/_/g, " ");
+}
+
+function _fundRu(v) {
+  const map = { long_heavy: "перегруз лонгов", short_heavy: "перегруз шортов", neutral: "нейтрально" };
+  return map[String(v)] || String(v).replace(/_/g, " ");
+}
+
+function _oiRu(v) {
+  const map = { rising: "растёт", falling: "падает", stable: "стабильно" };
+  return map[String(v)] || v;
+}
+
+function _renderMarketShortlist() {
+  const container = document.getElementById("market-shortlist");
+  if (!container) return;
+  const sl = App.state.shortlist || {};
+  const rows = (sl.symbols || sl.items || []).slice(0, 8);
+  if (!rows.length) {
+    container.replaceChildren(el("div", { class: "empty", text: "Shortlist загружается вместе с ботом" }));
+    return;
+  }
+  const tableRows = rows.map((row) => {
+    const sym = row.symbol || row;
+    const score = row.score ?? row.fit_score ?? row.priority_score;
+    return simpleRow(
+      typeof sym === "string" ? sym : sym.symbol || "?",
+      row.setup_fits != null ? "стратегий: " + row.setup_fits : "в shortlist",
+      score != null ? Number(score).toFixed(2) : "—",
+      "blue"
+    );
+  });
+  container.replaceChildren(el("div", { class: "row-list" }, tableRows));
 }

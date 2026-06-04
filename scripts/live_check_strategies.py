@@ -23,7 +23,7 @@ except ModuleNotFoundError:  # pragma: no cover - direct script execution
         resolve_symbols,
     )
 
-from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.runtime.errors import DEFENSIVE_EXC
 from bot.delivery.confluence import ConfluenceEngine
 from bot.delivery.contract import signal_contract_row, validate_signal_contract
 from bot.domain.config import load_settings

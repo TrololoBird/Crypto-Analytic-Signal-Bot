@@ -30,6 +30,7 @@ from bot.market.data import (
     _FUTURES_DATA_IP_LIMIT_WINDOW_S,
     _PERIOD_WINDOW_SECONDS,
     _PUBLIC_ENDPOINT_REGISTRY,
+    _REST_WEIGHT_PACE_LIMIT,
     _REST_WEIGHT_SOFT_LIMIT,
     MarketDataUnavailable,
     _PublicEndpointSpec,
@@ -136,7 +137,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         self._weight_window_weight: int = 0
         self._weight_window_start: float = 0.0
         self._weight_budget = _WeightBudgetManager(
-            max_weight=_REST_WEIGHT_SOFT_LIMIT,
+            max_weight=_REST_WEIGHT_PACE_LIMIT,
             window_seconds=60.0,
         )
         self._futures_data_limiter = _SlidingWindowRateLimiter(
@@ -1449,6 +1450,84 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         if downs >= steps * 0.75:
             return "falling"
         return "flat"
+
+    def _rest_cache_field_stale(
+        self,
+        field: str,
+        entry: tuple[float, Any] | None,
+        ttl_key: str,
+        stale: list[str],
+    ) -> None:
+        if entry is None:
+            return
+        ttl = int(_CACHE_TTL.get(ttl_key, 900))
+        if (time.monotonic() - entry[0]) >= ttl:
+            stale.append(field)
+
+    def get_rest_enrichment_stale_flags(
+        self,
+        symbol: str,
+        *,
+        ls_period: str = "1h",
+        basis_period: str = "1h",
+        basis_stats_period: str = "5m",
+    ) -> tuple[str, ...]:
+        """Return enrichment field names whose REST cache age exceeds ``_CACHE_TTL``."""
+        stale: list[str] = []
+        self._rest_cache_field_stale(
+            "oi_change_pct",
+            self._open_interest_change_cache.get((symbol, ls_period)),
+            "open_interest_change",
+            stale,
+        )
+        self._rest_cache_field_stale(
+            "oi_current",
+            self._open_interest_cache.get(symbol),
+            "open_interest",
+            stale,
+        )
+        self._rest_cache_field_stale(
+            "top_account_ls_ratio",
+            self._long_short_ratio_cache.get((symbol, ls_period)),
+            "long_short_ratio",
+            stale,
+        )
+        self._rest_cache_field_stale(
+            "top_position_ls_ratio",
+            self._top_position_ls_ratio_cache.get((symbol, ls_period)),
+            "long_short_ratio",
+            stale,
+        )
+        self._rest_cache_field_stale(
+            "global_account_ls_ratio",
+            self._global_ls_ratio_cache.get((symbol, ls_period)),
+            "global_ls_ratio",
+            stale,
+        )
+        self._rest_cache_field_stale(
+            "taker_ratio",
+            self._taker_ratio_cache.get((symbol, ls_period)),
+            "taker_ratio",
+            stale,
+        )
+        self._rest_cache_field_stale(
+            "funding_trend",
+            self._funding_history_cache.get(symbol),
+            "funding_history",
+            stale,
+        )
+        self._rest_cache_field_stale(
+            "basis_pct",
+            self._basis_cache.get((symbol, basis_period)),
+            "basis",
+            stale,
+        )
+        stats_entry = self._basis_stats_cache.get((symbol, basis_stats_period))
+        if stats_entry is not None:
+            ttl = int(_CACHE_TTL.get("basis", 600))
+            if (time.monotonic() - stats_entry[0]) >= ttl:
+                stale.extend(("premium_slope_5m", "premium_zscore_5m"))
+        return tuple(sorted(set(stale)))
 
     def get_cached_funding_recent_extreme(
         self,

@@ -19,9 +19,15 @@ from typing import Any
 
 import polars as pl
 
-from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.runtime.errors import DEFENSIVE_EXC
 
 from ..market.data import MarketDataUnavailable
+from ..domain.limit_entry import (
+    DEFAULT_ENTRY_ORDER_TYPE,
+    should_activate_limit_entry,
+    should_activate_limit_fill_price,
+)
+from ..persistence.sl_diagnostics import classify_stop_loss_root_cause
 from ..persistence.tracked import TrackedSignalState, parse_state_dt
 from .outcomes import SignalFeatures, create_outcome_from_tracked
 
@@ -119,6 +125,11 @@ class SignalTracker:
         self._symbol_review_durations: dict[str, deque[float]] = {}
         # In-memory trailing stops: tracking_id -> current stop level
         self._trailing_stops: dict[str, float] = {}
+        # Pace REST aggTrade backfill to avoid weight spikes at review/startup time
+        self._agg_trade_semaphore = asyncio.Semaphore(2)
+        self._agg_trade_min_gap_s = 0.12
+        self._agg_trade_startup_gap_s = 0.35
+        self._last_agg_trade_fetch_mono = 0.0
 
     def _symbol_review_lock(self, symbol: str) -> asyncio.Lock:
         key = str(symbol or "").upper()
@@ -161,8 +172,8 @@ class SignalTracker:
             durations = deque(maxlen=100)
             self._symbol_review_durations[key] = durations
         durations.append(elapsed)
-        if elapsed > 5.0:
-            LOG.warning(
+        if elapsed > 15.0:
+            LOG.info(
                 (
                     "slow symbol tracking review | symbol=%s elapsed=%.3fs tracked_rows=%d "
                     "avg_100=%.3fs"
@@ -288,6 +299,11 @@ class SignalTracker:
         row.setdefault("ttl_bars", None)
         row.setdefault("single_target_mode", False)
         row.setdefault("target_integrity_status", "unchecked")
+        row.setdefault("entry_order_type", DEFAULT_ENTRY_ORDER_TYPE)
+        row.setdefault("confirmation_profile", "trend_follow")
+        row.setdefault("entry_zone_touched_at", None)
+        row.setdefault("entry_confirm_pending_at", None)
+        row.setdefault("last_lifecycle_note", None)
         row["single_target_mode"] = bool(row.get("single_target_mode"))
         return TrackedSignalState(**row)
 
@@ -370,6 +386,105 @@ class SignalTracker:
         tracked.max_favorable_pct = max(tracked.max_favorable_pct, move_pct)
         if move_pct < 0.0 and abs(move_pct) > tracked.max_adverse_pct:
             tracked.max_adverse_pct = abs(move_pct)
+
+    @staticmethod
+    def _update_bar_excursion(
+        tracked: TrackedSignalState,
+        *,
+        high: float,
+        low: float,
+    ) -> None:
+        """Update MAE/MFE using full bar extremes while a signal is active."""
+        if tracked.activated_at is None:
+            return
+        if tracked.direction == "long":
+            SignalTracker._update_price_excursion(tracked, high)
+            entry = tracked.activation_price or tracked.entry_mid
+            if entry and entry > 0.0 and low < entry:
+                adverse = (float(entry) - float(low)) / float(entry) * 100.0
+                tracked.max_adverse_pct = max(tracked.max_adverse_pct, adverse)
+            return
+        SignalTracker._update_price_excursion(tracked, low)
+        entry = tracked.activation_price or tracked.entry_mid
+        if entry and entry > 0.0 and high > entry:
+            adverse = (float(high) - float(entry)) / float(entry) * 100.0
+            tracked.max_adverse_pct = max(tracked.max_adverse_pct, adverse)
+
+    async def _capture_post_sl_recovery(self, tracked: TrackedSignalState) -> None:
+        """Record 4h post-stop favorable move into outcome features."""
+        if tracked.close_reason != "stop_loss" or tracked.activated_at is None:
+            return
+        closed_at = parse_state_dt(tracked.closed_at)
+        if closed_at is None:
+            return
+        exit_price = tracked.close_price or tracked.stop
+        if exit_price is None or float(exit_price) <= 0.0:
+            return
+        try:
+            candles = await self.market_data.fetch_klines(tracked.symbol, "15m", limit=20)
+        except DEFENSIVE_EXC:
+            return
+        if candles.is_empty():
+            return
+        direction_sign = 1.0 if tracked.direction == "long" else -1.0
+        exit_px = float(exit_price)
+        tp1 = float(tracked.take_profit_1)
+        max_favorable = 0.0
+        for row in candles.select(["close_time", "high", "low"]).to_dicts():
+            bar_time = row["close_time"]
+            if isinstance(bar_time, str):
+                bar_time = datetime.fromisoformat(bar_time)
+            if bar_time <= closed_at:
+                continue
+            if (bar_time - closed_at).total_seconds() > 4 * 3600:
+                break
+            bar_high = float(row["high"])
+            bar_low = float(row["low"])
+            probe = bar_high if tracked.direction == "long" else bar_low
+            move = direction_sign * (probe - exit_px) / exit_px * 100.0
+            if move > max_favorable:
+                max_favorable = move
+        tp1_room = (
+            direction_sign * (tp1 - exit_px) / exit_px * 100.0 if tp1 > 0.0 else 0.0
+        )
+        await self.memory_repo.merge_outcome_features(
+            tracked.tracking_id,
+            {
+                "post_sl_favorable_pct": round(max_favorable, 4),
+                "post_sl_tp1_room_pct": round(tp1_room, 4),
+                "post_sl_window_hours": 4,
+            },
+        )
+        features = self.features_store.get(tracked.tracking_id)
+        feat_dict = features.to_dict() if features else {}
+        feat_dict.update(
+            {
+                "post_sl_favorable_pct": round(max_favorable, 4),
+                "post_sl_tp1_room_pct": round(tp1_room, 4),
+            }
+        )
+        created_at = parse_state_dt(tracked.created_at) or closed_at
+        activated_at = parse_state_dt(tracked.activated_at)
+        time_to_entry_min = (
+            int((activated_at - created_at).total_seconds() / 60) if activated_at else 0
+        )
+        time_to_exit_min = int((closed_at - created_at).total_seconds() / 60)
+        sl_diag = classify_stop_loss_root_cause(
+            direction=tracked.direction,
+            mfe=float(tracked.max_favorable_pct or 0.0),
+            mae=float(tracked.max_adverse_pct or 0.0),
+            time_to_entry_min=time_to_entry_min,
+            time_to_exit_min=time_to_exit_min,
+            features=feat_dict,
+        )
+        await self.memory_repo.merge_outcome_features(
+            tracked.tracking_id,
+            {
+                "sl_root_cause": sl_diag["code"],
+                "sl_root_cause_label": sl_diag["label"],
+                "sl_diagnostics": sl_diag,
+            },
+        )
 
     def _build_outcome_payload(self, tracked: TrackedSignalState) -> dict[str, Any]:
         features = self.features_store.get(tracked.tracking_id)
@@ -478,6 +593,9 @@ class SignalTracker:
             take_profit_1=signal.take_profit_1,
             take_profit_2=signal.take_profit_2,
             take_profit_3=signal.tp3,
+            tp1_price=signal.take_profit_1,
+            tp2_price=signal.take_profit_2,
+            tp3_price=signal.tp3,
             valid_until=signal.valid_until_iso,
             scale_weights=signal.scale_weights,
             ttl_bars=signal.ttl_bars,
@@ -492,6 +610,10 @@ class SignalTracker:
             spread_bps=signal.spread_bps,
             atr_pct=signal.atr_pct,
             orderflow_delta_ratio=signal.orderflow_delta_ratio,
+            entry_order_type=str(getattr(signal, "entry_order_type", None) or DEFAULT_ENTRY_ORDER_TYPE),
+            confirmation_profile=str(
+                getattr(signal, "confirmation_profile", None) or "trend_follow"
+            ),
             status="pending",
         )
         await self.memory_repo.save_active_signal(self._tracked_to_payload(tracked))
@@ -504,7 +626,7 @@ class SignalTracker:
         *,
         activated_at: datetime,
         price: float,
-        _precision_mode: str,
+        precision_mode: str,
     ) -> None:
         tracked.status = "active"
         tracked.activated_at = activated_at.astimezone(UTC).isoformat()
@@ -521,7 +643,7 @@ class SignalTracker:
         *,
         occurred_at: datetime,
         price: float,
-        _precision_mode: str,
+        precision_mode: str,
         move_stop_to_break_even: bool,
     ) -> None:
         if tracked.tp1_hit_at is not None:
@@ -541,7 +663,7 @@ class SignalTracker:
         *,
         checked_at: datetime,
         last_price: float | None,
-        _precision_mode: str,
+        precision_mode: str,
     ) -> None:
         tracked.last_checked_at = checked_at.astimezone(UTC).isoformat()
         tracked.last_price = last_price
@@ -555,7 +677,7 @@ class SignalTracker:
         reason: str,
         occurred_at: datetime,
         price: float | None,
-        _precision_mode: str,
+        precision_mode: str,
     ) -> None:
         tracked.status = "closed"
         tracked.closed_at = occurred_at.astimezone(UTC).isoformat()
@@ -578,6 +700,7 @@ class SignalTracker:
             "stop_loss": {"stop_loss": 1},
             "expired": {"expired": 1},
             "ambiguous_exit": {"ambiguous_exit": 1},
+            "setup_invalidated": {"setup_invalidated": 1},
         }.get(reason)
         if deltas:
             await self.memory_repo.increment_tracking_stats(**deltas)
@@ -619,6 +742,68 @@ class SignalTracker:
             return None
         pnl = exit_px - entry if tracked.direction == "long" else entry - exit_px
         return pnl / risk
+
+    async def repair_stuck_pending_activations(
+        self,
+        *,
+        dry_run: bool = False,
+    ) -> list[SignalTrackingEvent]:
+        """Promote legacy pending rows that logged zone touch but never activated."""
+        if dry_run or not self.settings.tracking.enabled:
+            return []
+        rows = await self.memory_repo.get_active_signals(status="pending")
+        events: list[SignalTrackingEvent] = []
+        repaired = 0
+        now = datetime.now(UTC)
+        for row in rows:
+            zone_at = row.get("entry_zone_touched_at")
+            if not zone_at or row.get("activated_at"):
+                continue
+            pending_expires_at = parse_state_dt(row.get("pending_expires_at"))
+            if pending_expires_at is not None and now > pending_expires_at:
+                continue
+            try:
+                tracked = self._tracked_from_payload(row)
+            except (TypeError, ValueError):
+                LOG.debug(
+                    "skip stuck pending repair | tracking_id=%s parse_failed",
+                    row.get("tracking_id"),
+                )
+                continue
+            touched_dt = parse_state_dt(zone_at) or datetime.now(UTC)
+            fill_price = tracked.entry_mid or (tracked.entry_low + tracked.entry_high) / 2.0
+            last_price = row.get("last_price")
+            if last_price is not None:
+                try:
+                    lp = float(last_price)
+                    if _price_in_entry_zone(tracked, lp):
+                        fill_price = lp
+                except (TypeError, ValueError):
+                    pass
+            await self._mark_activated(
+                tracked,
+                activated_at=touched_dt,
+                price=fill_price,
+                precision_mode="repair",
+            )
+            event = SignalTrackingEvent(
+                event_type="activated",
+                tracked=tracked,
+                occurred_at=touched_dt,
+                event_price=fill_price,
+                precision_mode="repair",
+                note="legacy_zone_touch_repair",
+            )
+            events.append(event)
+            self.telemetry.append_jsonl(
+                "tracking_events.jsonl",
+                event.to_log_row(stats=await self._stats_snapshot()),
+            )
+            repaired += 1
+        if repaired:
+            LOG.info("repaired stuck pending activations | count=%d", repaired)
+            await self._persist_tracking_state()
+        return events
 
     async def arm_signals(self, signals: list[Signal], *, dry_run: bool) -> None:
         await self.arm_signals_with_messages(signals, dry_run=dry_run, message_ids={})
@@ -749,12 +934,51 @@ class SignalTracker:
             return []
 
         now = datetime.now(UTC)
-        by_symbol: dict[str, list[TrackedSignalState]] = {}
+        events: list[SignalTrackingEvent] = []
+        review_rows: list[TrackedSignalState] = []
         for tracked in tracked_rows:
+            pending_expires_at = parse_state_dt(tracked.pending_expires_at)
+            if (
+                tracked.activated_at is None
+                and pending_expires_at is not None
+                and now > pending_expires_at
+            ):
+                events.extend(
+                    await self._apply_time_fallback(
+                        tracked,
+                        now=now,
+                        precision_mode="time_fallback",
+                        note="pending_expired_channel_notify",
+                    )
+                )
+            else:
+                review_rows.append(tracked)
+
+        if events:
+            try:
+                await self._persist_tracking_state()
+            except OSError:
+                LOG.exception(
+                    "tracking state persist failed for expired pending fast-path (continuing)"
+                )
+            stats = await self._stats_snapshot()
+            for event in events:
+                self.telemetry.append_jsonl(
+                    "tracking_events.jsonl",
+                    event.to_log_row(stats=stats),
+                )
+
+        if not review_rows:
+            return events
+
+        by_symbol: dict[str, list[TrackedSignalState]] = {}
+        for tracked in review_rows:
             by_symbol.setdefault(tracked.symbol, []).append(tracked)
 
-        events: list[SignalTrackingEvent] = []
-        for symbol in by_symbol:
+        symbols = sorted(by_symbol.keys())
+        for idx, symbol in enumerate(symbols):
+            if idx > 0:
+                await asyncio.sleep(self._agg_trade_startup_gap_s)
             events.extend(
                 await self._review_symbol_open_signals_locked(
                     symbol,
@@ -830,16 +1054,23 @@ class SignalTracker:
         end_time_ms = int(now.timestamp() * 1000)
 
         try:
-            trades, complete = await asyncio.wait_for(
-                self.market_data.fetch_agg_trades(
-                    symbol,
-                    start_time_ms=start_time_ms,
-                    end_time_ms=end_time_ms,
-                    page_limit=self.settings.tracking.agg_trade_page_limit,
-                    page_size=self.settings.tracking.agg_trade_page_size,
-                ),
-                timeout=self.settings.ws.rest_timeout_seconds,
-            )
+            async with self._agg_trade_semaphore:
+                gap = self._agg_trade_min_gap_s - (
+                    time.monotonic() - self._last_agg_trade_fetch_mono
+                )
+                if gap > 0.0:
+                    await asyncio.sleep(gap)
+                self._last_agg_trade_fetch_mono = time.monotonic()
+                trades, complete = await asyncio.wait_for(
+                    self.market_data.fetch_agg_trades(
+                        symbol,
+                        start_time_ms=start_time_ms,
+                        end_time_ms=end_time_ms,
+                        page_limit=self.settings.tracking.agg_trade_page_limit,
+                        page_size=self.settings.tracking.agg_trade_page_size,
+                    ),
+                    timeout=self.settings.ws.rest_timeout_seconds,
+                )
         except TimeoutError:
             LOG.debug("agg trades timed out for %s; falling back to candles", symbol)
             trades = []
@@ -948,7 +1179,14 @@ class SignalTracker:
                         )
                     )
                     return events
-                if _price_in_entry_zone(tracked, trade.price):
+                fill_ok, fill_note = should_activate_limit_fill_price(
+                    entry_low=tracked.entry_low,
+                    entry_high=tracked.entry_high,
+                    price=trade.price,
+                )
+                if fill_ok:
+                    if tracked.entry_zone_touched_at is None:
+                        tracked.entry_zone_touched_at = trade.trade_time.astimezone(UTC).isoformat()
                     await self._mark_activated(
                         tracked,
                         activated_at=trade.trade_time,
@@ -961,11 +1199,18 @@ class SignalTracker:
                             tracked=tracked,
                             occurred_at=trade.trade_time,
                             event_price=trade.price,
-                            precision_mode="trade",
+                            precision_mode="trade_realtime",
+                            note=fill_note,
                         )
                     )
-            if tracked.activated_at is None:
-                continue
+                else:
+                    await self._mark_checked(
+                        tracked,
+                        checked_at=trade.trade_time,
+                        last_price=last_price,
+                        precision_mode="trade",
+                    )
+                    continue
             tick_events, closed = await self._apply_price_tick(
                 tracked,
                 price=trade.price,
@@ -1012,11 +1257,12 @@ class SignalTracker:
         relevant = candles.filter(pl.col("close_time") > last_checked)
         relevant = relevant.sort("close_time")
         last_processed_at: datetime | None = None
-        candle_rows = relevant.select(["close_time", "high", "low", "close"]).to_dicts()
+        candle_rows = relevant.select(["close_time", "open", "high", "low", "close"]).to_dicts()
         for row in candle_rows:
             bar_close_time = row["close_time"]
             if isinstance(bar_close_time, str):
                 bar_close_time = datetime.fromisoformat(bar_close_time)
+            bar_open = float(row["open"])
             bar_high = float(row["high"])
             bar_low = float(row["low"])
             bar_close = float(row["close"])
@@ -1041,23 +1287,27 @@ class SignalTracker:
                         )
                     )
                     return events
-                if entry_touched and (tp1_touched or tp2_touched or stop_touched):
-                    events.append(
-                        await self._close_event(
-                            tracked,
-                            event_type="ambiguous_exit",
-                            occurred_at=bar_close_time,
-                            price=bar_close,
-                            precision_mode="candle",
-                            note="entry_and_exit_same_bar",
-                        )
+                activate_ok, activate_note = should_activate_limit_entry(
+                    direction=tracked.direction,
+                    confirmation_profile=tracked.confirmation_profile,
+                    entry_low=tracked.entry_low,
+                    entry_high=tracked.entry_high,
+                    open_=bar_open,
+                    close=bar_close,
+                    high=bar_high,
+                    low=bar_low,
+                )
+                if activate_ok:
+                    fill_price = (
+                        bar_close
+                        if _price_in_entry_zone(tracked, bar_close)
+                        else (tracked.entry_low + tracked.entry_high) / 2.0
                     )
-                    return events
-                if entry_touched:
+                    tracked.entry_zone_touched_at = bar_close_time.astimezone(UTC).isoformat()
                     await self._mark_activated(
                         tracked,
                         activated_at=bar_close_time,
-                        price=bar_close,
+                        price=fill_price,
                         precision_mode="candle",
                     )
                     events.append(
@@ -1065,12 +1315,14 @@ class SignalTracker:
                             event_type="activated",
                             tracked=tracked,
                             occurred_at=bar_close_time,
-                            event_price=bar_close,
+                            event_price=fill_price,
                             precision_mode="candle",
+                            note=activate_note,
                         )
                     )
-            if tracked.activated_at is None:
-                continue
+                if tracked.activated_at is None:
+                    continue
+            self._update_bar_excursion(tracked, high=bar_high, low=bar_low)
             if (tp2_touched and stop_touched) or (
                 tracked.tp1_hit_at is None and tp1_touched and stop_touched
             ):
@@ -1180,6 +1432,7 @@ class SignalTracker:
         *,
         now: datetime,
         precision_mode: str,
+        note: str | None = None,
     ) -> list[SignalTrackingEvent]:
         pending_expires_at = parse_state_dt(tracked.pending_expires_at) or now
         last_price = (
@@ -1197,7 +1450,7 @@ class SignalTracker:
                     occurred_at=pending_expires_at,
                     price=last_price,
                     precision_mode=precision_mode,
-                    note="time_fallback_pending_expiry",
+                    note=note or "time_fallback_pending_expiry",
                 )
             ]
         await self._mark_checked(
@@ -1451,6 +1704,12 @@ class SignalTracker:
                 exc,
             )
 
+        if event_type == "stop_loss" and tracked.activated_at is not None:
+            try:
+                asyncio.get_running_loop().create_task(self._capture_post_sl_recovery(tracked))
+            except RuntimeError:
+                pass
+
         return SignalTrackingEvent(
             event_type=event_type,
             tracked=tracked,
@@ -1638,33 +1897,34 @@ class SignalTracker:
         price: float,
         trade_dt: datetime,
     ) -> list[SignalTrackingEvent]:
-        """Real-time TP/SL fast-path — called on every aggTrade tick.
-
-        Only processes ACTIVE signals (already entered).  No REST I/O —
-        pure in-memory price comparison via the existing _apply_price_tick().
-        PENDING signals are still handled by review_open_signals_for_symbol()
-        at each 15m candle close.
-        """
+        """Real-time tracking on aggTrade ticks (pending zone touch + active TP/SL)."""
         if not self.settings.tracking.enabled:
             return []
+        from ..domain.schemas import AggTrade
+
         async with self._symbol_review_lock(symbol):
-            active_rows = [
-                r for r in await self._active_signals(symbol=symbol) if r.activated_at is not None
-            ]
-            if not active_rows:
+            tracked_rows = await self._active_signals(symbol=symbol)
+            if not tracked_rows:
                 return []
 
+            trade = AggTrade(
+                symbol=symbol.upper(),
+                trade_id=0,
+                price=price,
+                quantity=0.0,
+                trade_time_ms=int(trade_dt.timestamp() * 1000),
+                is_buyer_maker=False,
+            )
             events: list[SignalTrackingEvent] = []
-            for tracked in active_rows:
-                tick_events, closed = await self._apply_price_tick(
+            for tracked in tracked_rows:
+                row_events = await self._apply_trade_rows(
                     tracked,
-                    price=price,
-                    occurred_at=trade_dt,
-                    precision_mode="trade_realtime",
+                    [trade],
+                    now=trade_dt,
                 )
-                events.extend(tick_events)
-                if closed:
-                    break  # signal closed — stop processing for this symbol
+                events.extend(row_events)
+                if tracked.status == "closed":
+                    break
 
             if events:
                 try:

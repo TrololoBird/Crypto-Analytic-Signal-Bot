@@ -7,7 +7,7 @@ import os
 
 import pytest
 
-from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.runtime.errors import DEFENSIVE_EXC
 from bot.domain.config import load_settings
 from bot.market.data import BinanceFuturesMarketData, MarketDataUnavailable
 from bot.market.rest import BinanceClientImpl
@@ -58,7 +58,8 @@ def pytest_sessionstart(session: pytest.Session) -> None:
         _GEO_SKIP_REASON[0] = None
 
 
-def pytest_collection_modifyitems(_config: pytest.Config, items: list[pytest.Item]) -> None:
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    del config
     if _GEO_SKIP_REASON[0] is None:
         return
     skip = pytest.mark.skip(reason=_GEO_SKIP_REASON[0])

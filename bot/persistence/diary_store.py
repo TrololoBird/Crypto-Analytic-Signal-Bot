@@ -21,6 +21,7 @@ LOG = logging.getLogger("bot.diary_store")
 TRADE_COLS = [
     "id",
     "linked_signal_id",
+    "symbol",
     "decision",
     "entry_price",
     "entry_time",
@@ -71,6 +72,11 @@ class DiaryStore:
         await migrate_db(self._conn)
         LOG.info("diary store initialized at %s", self._db_path)
 
+    async def close(self) -> None:
+        if self._conn is not None:
+            await self._conn.close()
+            self._conn = None
+
     def _conn_or_raise(self) -> aiosqlite.Connection:
         if self._conn is None:
             msg = "DiaryStore not initialized"
@@ -84,6 +90,7 @@ class DiaryStore:
         row = {
             "id": trade_id,
             "linked_signal_id": trade.get("linked_signal_id"),
+            "symbol": trade.get("symbol"),
             "decision": trade.get("decision", "took_signal"),
             "entry_price": trade.get("entry_price"),
             "entry_time": trade.get("entry_time") or now,
@@ -217,8 +224,8 @@ class DiaryStore:
 
         async with conn.execute(
             "SELECT COUNT(*) as total, "
-            "SUM(CASE WHEN exit_reason IN ('tp1','tp2','tp3') THEN 1 ELSE 0 END) as wins, "
-            "SUM(CASE WHEN exit_reason = 'sl' THEN 1 ELSE 0 END) as losses, "
+            "COALESCE(SUM(CASE WHEN exit_reason IN ('tp1','tp2','tp3') THEN 1 ELSE 0 END), 0) as wins, "
+            "COALESCE(SUM(CASE WHEN exit_reason = 'sl' THEN 1 ELSE 0 END), 0) as losses, "
             "AVG(pnl_percent) as avg_pnl_pct, "
             "AVG(pnl_usd) as avg_pnl_usd "
             "FROM trader_diary "
@@ -259,9 +266,9 @@ class DiaryStore:
 
         async with conn.execute(
             "SELECT DATE(entry_time) as day, "
-            "SUM(CASE WHEN exit_reason IN ('tp1','tp2','tp3') THEN 1 ELSE 0 END) as wins, "
-            "SUM(CASE WHEN exit_reason = 'sl' THEN 1 ELSE 0 END) as losses, "
-            "SUM(pnl_usd) as day_pnl "
+            "COALESCE(SUM(CASE WHEN exit_reason IN ('tp1','tp2','tp3') THEN 1 ELSE 0 END), 0) as wins, "
+            "COALESCE(SUM(CASE WHEN exit_reason = 'sl' THEN 1 ELSE 0 END), 0) as losses, "
+            "COALESCE(SUM(pnl_usd), 0) as day_pnl "
             "FROM trader_diary "
             "WHERE exit_price IS NOT NULL "
             "AND entry_time >= datetime('now', '-' || ? || ' days') "
@@ -270,18 +277,25 @@ class DiaryStore:
         ) as cursor:
             calendar_rows = await cursor.fetchall()
 
-        total = summary_row["total"] if summary_row else 0
-        wins = summary_row["wins"] if summary_row else 0
-        losses = summary_row["losses"] if summary_row else 0
+        summary = dict(summary_row) if summary_row else {}
+        total = int(summary.get("total") or 0)
+        wins = int(summary.get("wins") or 0)
+        losses = int(summary.get("losses") or 0)
         closed = wins + losses
+        avg_pnl_pct = summary.get("avg_pnl_pct")
+        avg_pnl_usd = summary.get("avg_pnl_usd")
         return {
             "days": days,
             "summary": {
                 "total_trades": total,
                 "closed_trades": closed,
-                "win_rate": round(wins / max(closed, 1), 4),
-                "avg_pnl_percent": round(summary_row["avg_pnl_pct"] or 0.0, 2),
-                "avg_pnl_usd": round(summary_row["avg_pnl_usd"] or 0.0, 2),
+                "win_rate": round(wins / closed, 4) if closed > 0 else None,
+                "avg_pnl_percent": round(float(avg_pnl_pct), 2)
+                if closed > 0 and avg_pnl_pct is not None
+                else None,
+                "avg_pnl_usd": round(float(avg_pnl_usd), 2)
+                if closed > 0 and avg_pnl_usd is not None
+                else None,
             },
             "by_decision": [dict(r) for r in decision_rows],
             "by_outcome": [dict(r) for r in outcome_rows],
@@ -289,9 +303,9 @@ class DiaryStore:
             "calendar": [
                 {
                     "day": r["day"],
-                    "wins": r["wins"],
-                    "losses": r["losses"],
-                    "pnl_usd": r["day_pnl"],
+                    "wins": int(r["wins"] or 0),
+                    "losses": int(r["losses"] or 0),
+                    "pnl_usd": float(r["day_pnl"] or 0.0),
                 }
                 for r in calendar_rows
             ],

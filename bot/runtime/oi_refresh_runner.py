@@ -87,10 +87,11 @@ class OIRefreshRunner:
 
             await self.refresh_once(shortlist, max_age_seconds=0.0)
 
-            # Increased interval from 15min to 30min to reduce API load.
-            # 45 symbols x 6 public requests = 270 requests every 30min.
+            runtime = getattr(getattr(self._bot, "settings", None), "runtime", None)
+            interval_minutes = int(getattr(runtime, "oi_refresh_interval_minutes", 30) or 30)
+            sleep_seconds = max(300.0, float(interval_minutes) * 60.0)
             try:
-                await asyncio.wait_for(self._bot._shutdown.wait(), timeout=1800)
+                await asyncio.wait_for(self._bot._shutdown.wait(), timeout=sleep_seconds)
             except TimeoutError:
                 continue
 

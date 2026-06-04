@@ -11,11 +11,19 @@ from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from bot.engine.registry import StrategyRegistry
+    from bot.runtime.bot import SignalBot
 
     from ..analyzer.metrics import PerformanceMetrics, WinRateCalculator
 
 LOG = logging.getLogger("bot.core.diagnostics.health")
 HEALTH_CHECK_TIMEOUT_SECONDS = 5.0  # seconds: cap each component health probe
+
+
+async def bot_runtime_health_check(bot: SignalBot) -> dict[str, Any]:
+    """Adapter for live diagnostics: delegate to :class:`HealthManager`."""
+    from bot.runtime.health_manager import HealthManager
+
+    return await HealthManager(bot).health_check()
 
 
 def _utcnow_naive() -> datetime:
@@ -54,9 +62,12 @@ class HealthChecker:
         self,
         registry: StrategyRegistry,
         calculator: WinRateCalculator,
+        *,
+        ws_manager: Any | None = None,
     ):
         self._registry = registry
         self._calc = calculator
+        self._ws_manager = ws_manager
         self._baseline_metrics: dict[str, PerformanceMetrics] = {}
         self._last_check: datetime | None = None
 
@@ -188,13 +199,52 @@ class HealthChecker:
         )
 
     async def _check_ws_health(self) -> ComponentHealth:
-        """Check WebSocket health (placeholder - needs integration with WS manager)."""
-        # This would need access to WS manager stats
-        # For now, return healthy
+        """Check WebSocket health via ``FuturesWSManager.state_snapshot`` when wired."""
+        manager = self._ws_manager
+        if manager is None:
+            return ComponentHealth(
+                name="websocket",
+                status=HealthStatus.DEGRADED,
+                message="WebSocket manager not attached to health checker",
+            )
+        snapshot = manager.state_snapshot()
+        connected = bool(snapshot.get("connected"))
+        fresh_tickers = int(snapshot.get("fresh_tickers") or 0)
+        fresh_mark = int(snapshot.get("fresh_mark_prices") or 0)
+        stale_klines = int(snapshot.get("stale_kline_streams") or 0)
+        if not connected:
+            return ComponentHealth(
+                name="websocket",
+                status=HealthStatus.UNHEALTHY,
+                message="WebSocket disconnected",
+                details=snapshot,
+            )
+        if fresh_tickers == 0 or fresh_mark == 0:
+            return ComponentHealth(
+                name="websocket",
+                status=HealthStatus.DEGRADED,
+                message="WebSocket connected but market cache is empty/stale",
+                details={
+                    "fresh_tickers": fresh_tickers,
+                    "fresh_mark_prices": fresh_mark,
+                    "stale_kline_streams": stale_klines,
+                },
+            )
+        if stale_klines > 0:
+            return ComponentHealth(
+                name="websocket",
+                status=HealthStatus.DEGRADED,
+                message=f"WebSocket connected with {stale_klines} stale kline streams",
+                details={"stale_kline_streams": stale_klines},
+            )
         return ComponentHealth(
             name="websocket",
             status=HealthStatus.HEALTHY,
             message="WebSocket connections active",
+            details={
+                "fresh_tickers": fresh_tickers,
+                "fresh_mark_prices": fresh_mark,
+            },
         )
 
     def get_overall_status(self, checks: list[ComponentHealth]) -> HealthStatus:

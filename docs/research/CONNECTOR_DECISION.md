@@ -1,4 +1,4 @@
-# Binance connector: своя оболочка vs готовые SDK
+> **Production stack (2026-06):** `aiohttp` + `websockets` in `bot/market/` — **not** CCXT, python-binance, or TA-Lib on the live path.
 
 Решение для **public-only** USD-M signal bot (без ключей, без торговли).
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import html
 import json
+import logging
 import os
 import re
 from collections import Counter
@@ -10,9 +11,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
-from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.runtime.errors import DEFENSIVE_EXC
 
-from ..delivery.telegram import TelegramBroadcaster
+from ..dashboard.operator_context import (
+    format_market_from_display_snapshot,
+    format_runtime_ops_block,
+)
 from ..domain.config import BotSettings, load_settings
 from ..persistence.journal import build_config_suggestions
 from ..persistence.repository import MemoryRepository
@@ -21,6 +25,7 @@ from ..persistence.tracked import parse_state_dt
 if TYPE_CHECKING:
     from pathlib import Path
 
+LOG = logging.getLogger("bot.startup_report")
 MSK = timezone(timedelta(hours=3))
 _SESSION_MARKER_RE = re.compile(
     r"BOT SESSION STARTED \| (?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC)"
@@ -1081,6 +1086,7 @@ def _build_structured_summary(
         "suspicious_modules": suspicious_modules,
         "recommended_fixes": recommended_fixes,
         "project_state_notes": project_state_notes,
+        "persisted_market_context": snapshot.get("market_context", {}),
     }
 
 
@@ -1238,90 +1244,85 @@ def _render_markdown(
 
 def _build_telegram_message(summary: dict[str, Any]) -> str:
     latest_cycle = summary["latest_cycle_summary"]
-    market_state = summary["current_market_state"]
     readiness = summary["current_runtime_readiness"]
     runtime_policy = summary.get("runtime_policy", {})
     ws_health = readiness["ws_health"]
     frame_readiness = readiness["required_frame_readiness"]
+    metrics = summary.get("metrics") or {}
+    persisted_context = summary.get("persisted_market_context") or {}
 
-    def clean(value: object, fallback: str) -> str:
-        raw = str(value or "").strip()
-        if not raw or raw.lower() in {"unknown", "n/a", "none"} or raw.startswith("disabled_"):
-            return fallback
-        return raw
+    telegram_html = str(persisted_context.get("telegram_html") or "").strip()
+    if not telegram_html:
+        display = persisted_context.get("display_snapshot")
+        if isinstance(display, dict) and display:
+            telegram_html = format_market_from_display_snapshot(display)
 
-    regime = clean(market_state.get("market_regime"), "ожидает live-контекст")
-    btc_bias = clean(market_state.get("btc_bias"), "neutral")
-    eth_bias = clean(market_state.get("eth_bias"), "neutral")
-    macro_mode = clean(market_state.get("macro_risk_mode"), "binance_proxy_warmup")
-    alt_index = clean(market_state.get("altcoin_season_index"), "50.0")
-    btc_phase = clean(market_state.get("btc_phase"), "sideways")
-    latest_ts = clean(latest_cycle.get("ts"), "первый цикл ещё не записан")
-    risk_label = (
-        "risk-off"
-        if "risk_off" in macro_mode or regime == "bear"
-        else "risk-on"
-        if "risk_on" in macro_mode or regime == "bull"
-        else "neutral"
-    )
-    practical = (
-        "short/осторожный режим до подтверждения breadth"
-        if risk_label == "risk-off"
-        else "continuation long допускается только после прогрева фильтров"
-        if risk_label == "risk-on"
-        else "приоритет только сетапам \u0441 сильным confluence"
-    )
-    runtime_mode = html.escape(clean(runtime_policy.get("runtime_mode"), "signal_only"))
-    source_policy = html.escape(clean(runtime_policy.get("source_policy"), "binance_only"))
-    pause_losses = html.escape(clean(runtime_policy.get("max_consecutive_stop_losses"), "3"))
-    pause_hours = html.escape(clean(runtime_policy.get("stop_loss_pause_hours"), "5"))
-    shortlist_source = html.escape(clean(readiness.get("shortlist_source"), "rest_full"))
-    shortlist_size = html.escape(clean(readiness.get("shortlist_size"), "0"))
-    return "\n".join(
-        [
+    if telegram_html:
+        market_block = telegram_html.replace(
+            "🧭 <b>Контекст рынка</b>",
             "🧭 <b>Контекст рынка</b> <code>startup</code>",
-            (
-                f"Итог: <code>{html.escape(risk_label)}</code>; "
-                f"режим <code>{html.escape(regime)}</code>"
-            ),
-            f"Практически: {html.escape(practical)}.",
-            (
-                f"BTC <code>{html.escape(btc_bias)}</code> | "
-                f"ETH <code>{html.escape(eth_bias)}</code> | "
-                f"BTC phase <code>{html.escape(btc_phase)}</code>"
-            ),
-            (
-                f"Alt index proxy: <code>{html.escape(alt_index)}/100</code> | "
-                f"macro <code>{html.escape(macro_mode)}</code>"
-            ),
-            (
-                f"Tracked: open <code>{summary['metrics']['open_tracked_total']}</code> | "
-                f"outcomes <code>{summary['metrics']['outcomes_total']}</code>"
-            ),
-            f"Latest cycle: <code>{html.escape(latest_ts)}</code>",
-            (
-                f"Policy: runtime=<code>{runtime_mode}</code> "
-                f"source=<code>{source_policy}</code> "
-                f"pause=<code>{pause_losses}/{pause_hours}h</code>"
-            ),
-            (
-                f"Shortlist: source=<code>{shortlist_source}</code> "
-                f"size=<code>{shortlist_size}</code>"
-            ),
-            (
-                "WS: streams="
-                f"<code>{html.escape(clean(ws_health.get('active_stream_count'), '0'))}</code> "
-                "reconnect="
-                f"<code>{html.escape(clean(ws_health.get('reconnect_reason'), 'steady'))}</code>"
-            ),
-            (
-                "Frames ready: 15m="
-                f"<code>{frame_readiness.get('15m_ready_symbols', 0)}</code> "
-                f"1h=<code>{frame_readiness.get('1h_ready_symbols', 0)}</code> "
-                f"4h=<code>{frame_readiness.get('4h_ready_symbols', 0)}</code>"
-            ),
-        ]
+            1,
+        )
+    else:
+        market_state = summary["current_market_state"]
+
+        def clean(value: object, fallback: str) -> str:
+            raw = str(value or "").strip()
+            if not raw or raw.lower() in {"unknown", "n/a", "none"} or raw.startswith("disabled_"):
+                return fallback
+            return raw
+
+        regime = clean(market_state.get("market_regime"), "ожидает live-контекст")
+        btc_bias = clean(market_state.get("btc_bias"), "neutral")
+        eth_bias = clean(market_state.get("eth_bias"), "neutral")
+        macro_mode = clean(market_state.get("macro_risk_mode"), "binance_proxy_warmup")
+        alt_index = clean(market_state.get("altcoin_season_index"), "50.0")
+        btc_phase = clean(market_state.get("btc_phase"), "sideways")
+        risk_label = (
+            "risk-off"
+            if "risk_off" in macro_mode or regime == "bear"
+            else "risk-on"
+            if "risk_on" in macro_mode or regime == "bull"
+            else "neutral"
+        )
+        practical = (
+            "short/осторожный режим до подтверждения breadth"
+            if risk_label == "risk-off"
+            else "continuation long допускается только после прогрева фильтров"
+            if risk_label == "risk-on"
+            else "приоритет только сетапам с сильным confluence"
+        )
+        market_block = "\n".join(
+            [
+                "🧭 <b>Контекст рынка</b> <code>startup</code>",
+                (
+                    f"Итог: <code>{html.escape(risk_label)}</code>; "
+                    f"режим <code>{html.escape(regime)}</code>"
+                ),
+                f"Практически: {html.escape(practical)}.",
+                (
+                    f"BTC <code>{html.escape(btc_bias)}</code> | "
+                    f"ETH <code>{html.escape(eth_bias)}</code> | "
+                    f"BTC phase <code>{html.escape(btc_phase)}</code>"
+                ),
+                (
+                    f"Alt index proxy: <code>{html.escape(alt_index)}/100</code> | "
+                    f"macro <code>{html.escape(macro_mode)}</code>"
+                ),
+                "<i>Полный breadth/leaders/corr — после прогрева live-цикла</i>",
+            ]
+        )
+
+    runtime_block = format_runtime_ops_block(
+        tag="startup",
+        runtime_policy=runtime_policy,
+        readiness=readiness,
+        ws_health=ws_health,
+        frame_readiness=frame_readiness,
+        latest_cycle=latest_cycle,
+        metrics=metrics,
     )
+    return f"{market_block}\n\n{runtime_block}"
 
 
 def _resolve_report_chat_id(settings: BotSettings) -> str:
@@ -1333,15 +1334,23 @@ def _resolve_report_chat_id(settings: BotSettings) -> str:
 
 
 async def _send_telegram_message(settings: BotSettings, text: str) -> bool:
-    chat_id = _resolve_report_chat_id(settings)
-    if not settings.tg_token.strip() or not chat_id:
+    """Send startup/daily report to operator DMs only (never the signal channel)."""
+    if not settings.tg_token.strip():
         return False
-    broadcaster = TelegramBroadcaster(settings.tg_token, chat_id)
-    try:
-        await broadcaster.send_html(text)
-        return True
-    finally:
-        await broadcaster.close()
+    from bot.delivery.telegram_routing import send_operator_html
+    from bot.runtime.telegram_operator import operator_console_enabled
+
+    class _OperatorBot:
+        def __init__(self) -> None:
+            self.settings = settings
+            self._operator_console = None
+
+    bot = _OperatorBot()
+    if not operator_console_enabled(bot):  # type: ignore[arg-type]
+        LOG.info("startup report skipped | configure TELEGRAM_OPERATOR_USER_IDS for operator DM")
+        return False
+    sent = await send_operator_html(bot, text)  # type: ignore[arg-type]
+    return sent > 0
 
 
 def generate_startup_report(
@@ -1399,7 +1408,11 @@ async def generate_and_send_startup_report(
     result = await asyncio.to_thread(generate_startup_report, repo_root, event=event)
     if send_telegram:
         settings = load_settings(config_path)
-        await _send_telegram_message(settings, result.telegram_message)
+        op_cfg = getattr(settings.notifiers, "telegram_operator", None)
+        if bool(getattr(op_cfg, "send_startup_report", True)):
+            await _send_telegram_message(settings, result.telegram_message)
+        else:
+            LOG.info("startup report telegram skipped | send_startup_report=false")
     return result
 
 

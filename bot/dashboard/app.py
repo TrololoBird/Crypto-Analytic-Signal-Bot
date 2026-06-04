@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import threading
@@ -14,15 +15,20 @@ from pathlib import Path
 from threading import Thread
 from typing import TYPE_CHECKING, Any, cast
 
-from bot.core.runtime_errors import DEFENSIVE_EXC
+from bot.runtime.errors import DEFENSIVE_EXC
 from bot.strategies import STRATEGY_CLASSES
 
 from ..domain.strategies import RISK_PROFILE_BY_ID, STRATEGY_STATUS_BY_ID
+from bot.domain.labels import labels_payload
 from ..persistence.diary_store import DiaryStore
 from .analytics import StrategyAnalytics
 from .live import DashboardLiveData
 from .live_audit import audit_snapshot, build_dashboard_audit_snapshot
 from .operator_alerts import build_live_operator_alerts
+from .mobile_summary import build_mobile_summary, dashboard_urls, format_mobile_digest_text
+from .outcomes_insights import build_outcomes_insights
+from .tracking_view import serialize_tracking_signal
+from .user_summary import build_user_summary
 from .ws_broadcast import DashboardWSBroadcaster
 
 _STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
@@ -73,6 +79,8 @@ class BotDashboard:
         self._diary_store: DiaryStore | None = None
         self._diary_init_lock = asyncio.Lock()
         self._ws_broadcaster: DashboardWSBroadcaster | None = None
+        self._uvicorn_server: Any = None
+        self._server_task: asyncio.Task[None] | None = None
 
         bus = getattr(self.bot, "_bus", None)
         if bus is not None:
@@ -245,6 +253,40 @@ class BotDashboard:
                 LOG.exception("dashboard api strategy decisions error")
                 return {"error": "strategy_decisions_unavailable", "detail": str(exc)}
 
+        @self.app.get("/api/analytics/confluence_legs")
+        async def confluence_legs(max_rows: int = 100_000) -> dict[str, Any]:
+            try:
+                max_rows = max(1_000, min(int(max_rows), 250_000))
+                return await asyncio.to_thread(
+                    self._live_data.confluence_legs,
+                    max_rows=max_rows,
+                )
+            except RuntimeError as exc:
+                if "shutdown" in str(exc).lower():
+                    LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
+                    return {"error": "Server is shutting down"}
+                raise
+            except DEFENSIVE_EXC as exc:
+                LOG.exception("dashboard api confluence legs error")
+                return {"error": "confluence_legs_unavailable", "detail": str(exc)}
+
+        @self.app.get("/api/analytics/confluence_legs_by_profile")
+        async def confluence_legs_by_profile(max_rows: int = 100_000) -> dict[str, Any]:
+            try:
+                max_rows = max(1_000, min(int(max_rows), 250_000))
+                return await asyncio.to_thread(
+                    self._live_data.confluence_legs_by_profile,
+                    max_rows=max_rows,
+                )
+            except RuntimeError as exc:
+                if "shutdown" in str(exc).lower():
+                    LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
+                    return {"error": "Server is shutting down"}
+                raise
+            except DEFENSIVE_EXC as exc:
+                LOG.exception("dashboard api confluence legs by profile error")
+                return {"error": "confluence_legs_by_profile_unavailable", "detail": str(exc)}
+
         @self.app.get("/api/strategies")
         async def strategies() -> list[dict[str, Any]]:
             """Return cached list of strategies with their enabled status."""
@@ -256,6 +298,10 @@ class BotDashboard:
                 return []
             else:
                 return []
+
+        @self.app.get("/api/meta/labels")
+        async def meta_labels() -> dict[str, dict[str, str]]:
+            return labels_payload()
 
         @self.app.get("/api/live/overview")
         async def live_overview() -> dict[str, Any]:
@@ -283,6 +329,23 @@ class BotDashboard:
             except DEFENSIVE_EXC as exc:
                 LOG.exception("dashboard live funnel error")
                 return {"error": "live_funnel_unavailable", "detail": str(exc)}
+
+        @self.app.get("/api/live/funnel/reconcile")
+        async def live_funnel_reconcile(max_rows: int = 100_000) -> dict[str, Any]:
+            try:
+                max_rows = max(1_000, min(int(max_rows), 250_000))
+                return await asyncio.to_thread(
+                    self._live_data.funnel_reconcile,
+                    max_rows=max_rows,
+                )
+            except RuntimeError as exc:
+                if "shutdown" in str(exc).lower():
+                    LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
+                    return {"error": "Server is shutting down"}
+                raise
+            except DEFENSIVE_EXC as exc:
+                LOG.exception("dashboard live funnel reconcile error")
+                return {"error": "live_funnel_reconcile_unavailable", "detail": str(exc)}
 
         @self.app.get("/api/live/shortlist")
         async def live_shortlist(limit: int = 80) -> dict[str, Any]:
@@ -443,6 +506,30 @@ class BotDashboard:
                 LOG.exception("v1 live signals error")
                 return []
 
+        @self.app.get("/api/v1/chart/klines")
+        async def v1_chart_klines(
+            symbol: str,
+            interval: str = "15m",
+            limit: int = 80,
+        ) -> dict[str, Any]:
+            try:
+                return await self._get_chart_klines(
+                    symbol=symbol,
+                    interval=interval,
+                    limit=max(10, min(int(limit), 200)),
+                )
+            except DEFENSIVE_EXC as exc:
+                LOG.exception("v1 chart klines error")
+                return {"error": "klines_unavailable", "detail": str(exc)}
+
+        @self.app.get("/api/v1/summary")
+        async def v1_user_summary() -> dict[str, Any]:
+            try:
+                return await build_user_summary(self.bot, self._live_data)
+            except DEFENSIVE_EXC as exc:
+                LOG.exception("v1 summary error")
+                return {"error": "summary_unavailable", "detail": str(exc)}
+
         @self.app.get("/api/v1/strategies/health")
         async def v1_strategies_health() -> list[dict[str, Any]]:
             cached = [dict(item) for item in (self._strategies_cache or [])]
@@ -559,6 +646,29 @@ class BotDashboard:
         async def v1_confluence_heatmap() -> list[dict[str, Any]]:
             decisions = self._live_data.decisions(limit=50, max_rows=50000)
             return decisions.get("setup_reports", [])
+
+        @self.app.get("/api/v1/analytics/outcomes")
+        async def v1_analytics_outcomes(days: int = 30) -> dict[str, Any]:
+            bot = self.bot
+            repo = getattr(bot, "_modern_repo", None)
+            if repo is None:
+                return {"error": "repository_unavailable"}
+            try:
+                return await build_outcomes_insights(
+                    repo,
+                    days=max(1, min(int(days), 365)),
+                )
+            except DEFENSIVE_EXC as exc:
+                LOG.exception("v1 outcomes analytics error")
+                return {"error": "outcomes_unavailable", "detail": str(exc)}
+
+        @self.app.get("/api/v1/mobile/summary")
+        async def v1_mobile_summary() -> dict[str, Any]:
+            try:
+                return await build_mobile_summary(self.bot, self._live_data)
+            except DEFENSIVE_EXC as exc:
+                LOG.exception("v1 mobile summary error")
+                return {"error": "mobile_summary_unavailable", "detail": str(exc)}
 
         @self.app.post("/api/v1/confluence/simulate")
         async def v1_confluence_simulate(body: dict[str, Any]) -> dict[str, Any]:
@@ -945,6 +1055,144 @@ class BotDashboard:
             out.append(enriched)
         return out
 
+    def notify_signal_delivered(self, signal: Any) -> None:
+        """Push a delivered signal to dashboard WebSocket clients."""
+        if self._ws_broadcaster is None:
+            return
+        payload = self._signal_to_ws_payload(signal)
+        if payload:
+            self._ws_broadcaster.publish_signal(payload)
+
+    def notify_tracking_changed(self, *, event_count: int = 1) -> None:
+        if self._ws_broadcaster is None:
+            return
+        self._ws_broadcaster.publish_tracking_update({"event_count": event_count})
+
+    @staticmethod
+    def _signal_to_ws_payload(signal: Any) -> dict[str, Any] | None:
+        tracking_id = getattr(signal, "tracking_id", None)
+        if not tracking_id:
+            return None
+        score = float(getattr(signal, "score", 0.0) or 0.0)
+        return {
+            "signal_id": tracking_id,
+            "tracking_id": tracking_id,
+            "symbol": getattr(signal, "symbol", ""),
+            "setup_id": getattr(signal, "setup_id", ""),
+            "direction": getattr(signal, "direction", "long"),
+            "timeframe": getattr(signal, "timeframe", "15m"),
+            "entry_price": getattr(signal, "entry_mid", None),
+            "stop_price": getattr(signal, "stop_price", None),
+            "tp1_price": getattr(signal, "take_profit_1", None),
+            "tp2_price": getattr(signal, "take_profit_2", None),
+            "score": score,
+            "confluence_score": score,
+            "delivery_status": "sent",
+            "ts": datetime.now(UTC).isoformat(),
+        }
+
+    async def _get_chart_klines(
+        self,
+        *,
+        symbol: str,
+        interval: str,
+        limit: int,
+    ) -> dict[str, Any]:
+        bot = self.bot
+        sym = str(symbol or "").strip().upper()
+        if not sym:
+            return {"error": "symbol_required"}
+
+        ws = getattr(bot, "_ws_manager", None) if bot is not None else None
+        rows: list[dict[str, Any]] | None = None
+        source = "none"
+        if ws is not None:
+            cache_fn = getattr(ws, "get_kline_cache", None)
+            if callable(cache_fn):
+                cached = cache_fn(sym, interval)
+                if cached:
+                    rows = cached[-limit:]
+                    source = "ws_cache"
+
+        if rows is None and bot is not None:
+            client = getattr(bot, "client", None)
+            fetch_fn = getattr(client, "fetch_klines_cached", None) if client is not None else None
+            if callable(fetch_fn):
+                try:
+                    df = await asyncio.wait_for(fetch_fn(sym, interval, limit=limit), timeout=8.0)
+                    rows = self._dataframe_to_kline_rows(df)
+                    source = "rest"
+                except (TimeoutError, *DEFENSIVE_EXC):
+                    rows = None
+
+        mark_price = None
+        if ws is not None:
+            snap = ws.get_mark_price_snapshot(sym)
+            if isinstance(snap, dict):
+                try:
+                    mark_price = float(snap.get("mark_price") or 0.0) or None
+                except (TypeError, ValueError):
+                    mark_price = None
+
+        normalized = [self._normalize_kline_row(row) for row in (rows or [])]
+        normalized = [row for row in normalized if row is not None]
+        return {
+            "symbol": sym,
+            "interval": interval,
+            "source": source,
+            "mark_price": mark_price,
+            "klines": normalized,
+        }
+
+    @staticmethod
+    def _normalize_kline_row(row: dict[str, Any]) -> dict[str, Any] | None:
+        try:
+            open_px = float(row.get("open") or row.get("o") or 0.0)
+            high_px = float(row.get("high") or row.get("h") or 0.0)
+            low_px = float(row.get("low") or row.get("l") or 0.0)
+            close_px = float(row.get("close") or row.get("c") or 0.0)
+        except (TypeError, ValueError):
+            return None
+        if close_px <= 0.0:
+            return None
+        ts = row.get("time") or row.get("close_time") or row.get("t")
+        ts_text = ts.isoformat() if hasattr(ts, "isoformat") else str(ts or "")
+        return {
+            "time": ts_text,
+            "open": open_px,
+            "high": high_px,
+            "low": low_px,
+            "close": close_px,
+        }
+
+    @staticmethod
+    def _dataframe_to_kline_rows(df: Any) -> list[dict[str, Any]]:
+        if df is None:
+            return []
+        try:
+            import polars as pl
+
+            if isinstance(df, pl.DataFrame) and not df.is_empty():
+                cols = set(df.columns)
+                time_col = "time" if "time" in cols else ("close_time" if "close_time" in cols else None)
+                if time_col is None:
+                    return []
+                out: list[dict[str, Any]] = []
+                for row in df.tail(200).iter_rows(named=True):
+                    out.append(
+                        {
+                            "time": row.get(time_col),
+                            "open": row.get("open"),
+                            "high": row.get("high"),
+                            "low": row.get("low"),
+                            "close": row.get("close"),
+                        }
+                    )
+                return out
+        except DEFENSIVE_EXC:
+            return []
+        return []
+
     def _get_html_dashboard(self) -> str:
         return _DASHBOARD_HTML
 
@@ -1062,28 +1310,8 @@ class BotDashboard:
             return []
 
         try:
-            # Use timeout to prevent blocking dashboard
             signals = await asyncio.wait_for(repo.get_active_signals(), timeout=2.0)
-            return [
-                {
-                    "symbol": sig.get("symbol"),
-                    "setup_id": sig.get("setup_id"),
-                    "direction": sig.get("direction"),
-                    "entry_price": sig.get("activation_price")
-                    or sig.get("entry_price")
-                    or sig.get("entry_mid"),
-                    "stop_price": sig.get("stop_price") or sig.get("stop"),
-                    "tp1_price": sig.get("tp1_price") or sig.get("take_profit_1"),
-                    "tp2_price": sig.get("tp2_price") or sig.get("take_profit_2"),
-                    "score": sig.get("score"),
-                    "risk_reward": sig.get("risk_reward"),
-                    "status": sig.get("status"),
-                    "tracking_id": sig.get("tracking_id"),
-                    "tracking_ref": sig.get("tracking_ref"),
-                    "timestamp": sig.get("activated_at") or sig.get("created_at"),
-                }
-                for sig in signals
-            ]
+            return [serialize_tracking_signal(sig, bot) for sig in signals]
         except TimeoutError:
             LOG.debug("timeout fetching active signals for dashboard")
             return []
@@ -1098,26 +1326,33 @@ class BotDashboard:
 
         telemetry_dir = bot.settings.telemetry_dir
         selected_file = self._latest_analysis_file(telemetry_dir, "selected.jsonl")
-        selected_rows = self._read_recent_jsonl(selected_file, limit=limit * 4)
-        if selected_rows:
-            out: list[dict[str, Any]] = []
-            for row in selected_rows[:limit]:
-                enriched = dict(row)
-                enriched["source"] = "selected"
-                enriched["delivery_status"] = "sent"
-                out.append(enriched)
-            return out
-
         delivery_file = self._latest_analysis_file(telemetry_dir, "delivery.jsonl")
         delivery_rows = self._read_recent_jsonl(delivery_file, limit=limit * 4)
-        if delivery_rows:
-            out = []
-            for row in delivery_rows[:limit]:
+        success_statuses = frozenset({"sent", "logged"})
+        success_rows = [
+            row
+            for row in delivery_rows
+            if str(row.get("delivery_status") or row.get("status") or "").strip().lower()
+            in success_statuses
+        ]
+        if success_rows:
+            out: list[dict[str, Any]] = []
+            for row in success_rows[:limit]:
                 enriched = dict(row)
                 enriched["source"] = "delivery"
                 enriched["delivery_status"] = enriched.get("delivery_status") or enriched.get(
                     "status", "unknown"
                 )
+                out.append(enriched)
+            return out
+
+        selected_rows = self._read_recent_jsonl(selected_file, limit=limit * 4)
+        if selected_rows:
+            out = []
+            for row in selected_rows[:limit]:
+                enriched = dict(row)
+                enriched["source"] = "selected"
+                enriched["delivery_status"] = "selected"
                 out.append(enriched)
             return out
 
@@ -1438,7 +1673,40 @@ class BotDashboard:
         )
         return candidates[0] if candidates else None
 
+    async def start_server_async(
+        self, *, auto_open: bool = True, delay_seconds: float = 1.5
+    ) -> None:
+        """Start dashboard on the bot's asyncio loop (shared REST/WS client access)."""
+        if not self._enabled or not self.app:
+            LOG.debug("dashboard server disabled (fastapi not installed)")
+            return
+        if self._server_task is not None and not self._server_task.done():
+            return
+        if not HAS_UVICORN or uvicorn is None:
+            LOG.exception("dashboard server failed to import uvicorn")
+            return
+        try:
+            config = uvicorn.Config(
+                self.app,
+                host=self.host,
+                port=self.port,
+                log_level="warning",
+                loop="asyncio",
+            )
+            self._uvicorn_server = uvicorn.Server(config)
+            self._server_task = asyncio.create_task(
+                self._uvicorn_server.serve(),
+                name="dashboard_server",
+            )
+        except DEFENSIVE_EXC:
+            LOG.exception("dashboard server failed to start")
+            return
+        LOG.info("dashboard server started on port %d", self.port)
+        if auto_open:
+            self._schedule_browser_open(delay_seconds)
+
     def start_server(self, *, auto_open: bool = True, delay_seconds: float = 1.5) -> None:
+        """Legacy thread-based start; prefer ``start_server_async`` from the bot loop."""
         if not self._enabled or not self.app:
             LOG.debug("dashboard server disabled (fastapi not installed)")
             return
@@ -1456,10 +1724,25 @@ class BotDashboard:
 
         thread = Thread(target=run_server, daemon=True)
         thread.start()
-        LOG.info("dashboard server started on port %d", self.port)
+        LOG.info("dashboard server started on port %d (legacy thread)", self.port)
 
         if auto_open:
             self._schedule_browser_open(delay_seconds)
+
+    async def stop_server_async(self) -> None:
+        server = self._uvicorn_server
+        task = self._server_task
+        if server is not None:
+            server.should_exit = True
+        if task is not None and not task.done():
+            try:
+                await asyncio.wait_for(task, timeout=10.0)
+            except TimeoutError:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+        self._uvicorn_server = None
+        self._server_task = None
 
     def _schedule_browser_open(self, delay_seconds: float) -> None:
         """Open browser after server is ready."""

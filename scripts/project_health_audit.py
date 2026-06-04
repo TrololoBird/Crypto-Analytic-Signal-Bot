@@ -67,10 +67,7 @@ HOT_FEATURE_FILES = (
     "bot/features/prepare_frame.py",
     "bot/features/prepare.py",
     "bot/features/shared.py",
-    "bot/features/core.py",
-    "bot/features/oscillators.py",
     "bot/features/structure.py",
-    "bot/features/advanced.py",
     "bot/features/microstructure.py",
 )
 
@@ -81,6 +78,7 @@ class AuditReport:
     stale_days: int
     stale_bot_py: list[dict[str, object]] = field(default_factory=list)
     stale_other_notable: list[dict[str, object]] = field(default_factory=list)
+    large_py_files: list[dict[str, object]] = field(default_factory=list)
     forbidden_paths: list[str] = field(default_factory=list)
     forbidden_imports: list[str] = field(default_factory=list)
     live_path_violations: list[dict[str, str]] = field(default_factory=list)
@@ -157,6 +155,30 @@ def _scan_live_path_patterns(files: tuple[str, ...]) -> list[dict[str, str]]:
     return violations
 
 
+def _collect_large_py_files(*, min_lines: int = 500) -> list[dict[str, object]]:
+    """List tracked Python files exceeding ``min_lines`` (bot/, scripts/, tests/)."""
+    large: list[dict[str, object]] = []
+    for root_name in ("bot", "scripts", "tests"):
+        root = REPO_ROOT / root_name
+        if not root.exists():
+            continue
+        for py in root.rglob("*.py"):
+            if _should_skip(py):
+                continue
+            try:
+                line_count = sum(1 for _ in py.open(encoding="utf-8", errors="replace"))
+            except OSError:
+                continue
+            if line_count > min_lines:
+                large.append(
+                    {
+                        "path": str(py.relative_to(REPO_ROOT)),
+                        "lines": line_count,
+                    }
+                )
+    return sorted(large, key=lambda item: int(item["lines"]), reverse=True)
+
+
 def _run_cmd(name: str, cmd: list[str]) -> dict[str, object]:
     proc = subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True, text=True, check=False)
     return {
@@ -214,6 +236,8 @@ def main() -> int:
     if report.forbidden_imports:
         report.ok = False
 
+    report.large_py_files = _collect_large_py_files(min_lines=500)
+
     report.live_path_violations = _scan_live_path_patterns(HOT_FEATURE_FILES)
     if report.live_path_violations:
         report.ok = False
@@ -247,6 +271,10 @@ def main() -> int:
     print(f"Stale bot/*.py: {len(report.stale_bot_py)}")
     for item in report.stale_bot_py:
         print(f"  - [{item['age_days']}d] {item['path']}")
+    if report.large_py_files:
+        print(f"Large Python files (>500 LOC): {len(report.large_py_files)}")
+        for item in report.large_py_files[:25]:
+            print(f"  - [{item['lines']}] {item['path']}")
     if report.forbidden_paths:
         print("FORBIDDEN PATHS:")
         for path in report.forbidden_paths:
