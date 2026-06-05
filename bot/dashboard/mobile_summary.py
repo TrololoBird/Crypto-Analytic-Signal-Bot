@@ -183,7 +183,7 @@ def format_operator_help_text() -> str:
     return (
         "<b>Operator console</b> (личка с ботом)\n"
         "Отдельно от канала с сигналами — ops только здесь.\n\n"
-        "<b>📢 Канал (TARGET_CHAT_ID)</b>\n"
+        "<b>📢 Канал (TELEGRAM_CHAT_ID)</b>\n"
         "Только ACTION/WATCH сигналы и статусы сделок для подписчиков.\n"
         "Контекст рынка, audit, digest, startup — <u>не</u> в канал.\n\n"
         "<b>🧭 Рынок (личка)</b>\n"

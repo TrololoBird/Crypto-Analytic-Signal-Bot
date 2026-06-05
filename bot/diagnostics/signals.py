@@ -8,6 +8,8 @@ question "why are signals not being generated right now?"
 
 from __future__ import annotations
 
+import asyncio
+
 import json
 import threading
 from collections import Counter
@@ -440,9 +442,19 @@ class SignalDiagnostics:
             File to append to. The parent directory is created when missing.
         """
         output_path = Path(path)
+        line = json.dumps(self.get_summary(), ensure_ascii=True, default=str) + "\n"
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._export_jsonl_sync(output_path, line)
+        else:
+            loop.create_task(asyncio.to_thread(self._export_jsonl_sync, output_path, line))
+
+    @staticmethod
+    def _export_jsonl_sync(output_path: Path, line: str) -> None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with output_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(self.get_summary(), ensure_ascii=True, default=str) + "\n")
+            handle.write(line)
 
     def reset_window(self) -> dict[str, Any]:
         """Reset all counters and return the cleared window snapshot.

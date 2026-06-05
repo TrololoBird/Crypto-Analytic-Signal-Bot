@@ -1,6 +1,6 @@
 """Telegram routing: channel (subscribers) vs operator private DM (ops).
 
-Channel ``TARGET_CHAT_ID`` — trading signals only:
+Channel ``TELEGRAM_CHAT_ID`` — trading signals only:
   - ACTION/WATCH signal cards
   - In-place signal card status edits
   - Subscriber tracking updates (TP/SL/activation — concise)

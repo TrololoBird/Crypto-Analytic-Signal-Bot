@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -127,6 +128,14 @@ def symbol_storage_dirname(symbol: str) -> str:
     return f"{safe}__{digest}"
 
 
+def _jsonl_append_line(path: Path, line: str, *, max_size_mb: int) -> None:
+    """Sync JSONL append (safe to run via ``asyncio.to_thread``)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rotate_file_if_needed(path, max_size_mb)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(line)
+
+
 def rotate_file_if_needed(path: Path, max_size_mb: int) -> None:
     if max_size_mb <= 0 or not path.exists():
         return
@@ -215,10 +224,20 @@ class TelemetryStore:
     def _append_jsonl_path(self, path: Path, row: dict[str, Any]) -> None:
         if self.run_id and "run_id" not in row:
             row = {**row, "run_id": self.run_id}
-        path.parent.mkdir(parents=True, exist_ok=True)
-        rotate_file_if_needed(path, self.rotation_max_mb)
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(row, ensure_ascii=True, default=str) + "\n")
+        line = json.dumps(row, ensure_ascii=True, default=str) + "\n"
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            _jsonl_append_line(path, line, max_size_mb=self.rotation_max_mb)
+        else:
+            loop.create_task(
+                asyncio.to_thread(
+                    _jsonl_append_line,
+                    path,
+                    line,
+                    max_size_mb=self.rotation_max_mb,
+                )
+            )
 
     def write_rejection_summary(self, cycle_id: str, rejections: dict[str, int]) -> None:
         self.append_jsonl(

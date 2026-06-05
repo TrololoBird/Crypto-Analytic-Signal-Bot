@@ -40,9 +40,11 @@ def _first_configured_env(*names: str) -> str:
 
 
 def load_secrets() -> Secrets:
+    # Canonical env keys: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+    # Legacy aliases TG_TOKEN / TARGET_CHAT_ID are deprecated — do not introduce new references.
     load_dotenv()
-    tg_token = _first_configured_env("TG_TOKEN", "TELEGRAM_BOT_TOKEN")
-    target_chat_id = _first_configured_env("TARGET_CHAT_ID", "TELEGRAM_CHAT_ID")
+    tg_token = _first_configured_env("TELEGRAM_BOT_TOKEN", "TG_TOKEN")
+    target_chat_id = _first_configured_env("TELEGRAM_CHAT_ID", "TARGET_CHAT_ID")
     operator_raw = _first_configured_env("TELEGRAM_OPERATOR_USER_IDS", "OPERATOR_USER_IDS")
     return Secrets(
         tg_token=tg_token,

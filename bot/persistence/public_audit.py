@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import hashlib
 import logging
@@ -123,6 +124,14 @@ class PublicAuditLedger:
             self._action_history.append((replace(signal, created_at=delivered_at), delivered_at))
 
     def _append_row(self, row: AuditRow) -> None:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._append_row_sync(row)
+        else:
+            loop.create_task(asyncio.to_thread(self._append_row_sync, row))
+
+    def _append_row_sync(self, row: AuditRow) -> None:
         with self._lock:
             try:
                 csv_path, sha_path = self._paths_for_day(datetime.now(UTC))

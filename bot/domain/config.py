@@ -538,7 +538,7 @@ class NotifierWebhookConfig(_StrictModel):
 class TelegramOperatorConfig(_StrictModel):
     """Private DM console for remote monitoring (works across networks).
 
-    Operator DMs are separate from ``TARGET_CHAT_ID`` (subscriber channel).
+    Operator DMs are separate from ``TELEGRAM_CHAT_ID`` (subscriber channel).
     """
 
     enabled: bool = True
@@ -1044,13 +1044,13 @@ class BotSettings(_StrictModel):
 
         if require_telegram:
             if not self.tg_token.strip():
-                msg = "TG_TOKEN is required for runtime (set in .env)"
+                msg = "TELEGRAM_BOT_TOKEN is required for runtime (set in .env)"
                 raise ValueError(msg)
             if not self.target_chat_id.strip():
-                msg = "TARGET_CHAT_ID is required for runtime (set in .env)"
+                msg = "TELEGRAM_CHAT_ID is required for runtime (set in .env)"
                 raise ValueError(msg)
             if len(self.tg_token) < 20:
-                msg = "TG_TOKEN looks too short (expected ~46 chars)"
+                msg = "TELEGRAM_BOT_TOKEN looks too short (expected ~46 chars)"
                 raise ValueError(msg)
 
 

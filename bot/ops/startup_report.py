@@ -1348,7 +1348,12 @@ def _build_telegram_message(summary: dict[str, Any]) -> str:
 
 
 def _resolve_report_chat_id(settings: BotSettings) -> str:
-    for env_name in ("STARTUP_REPORT_CHAT_ID", "WATCHDOG_CHAT_ID", "TARGET_CHAT_ID"):
+    for env_name in (
+        "STARTUP_REPORT_CHAT_ID",
+        "WATCHDOG_CHAT_ID",
+        "TELEGRAM_CHAT_ID",
+        "TARGET_CHAT_ID",
+    ):
         value = os.getenv(env_name, "").strip()
         if value:
             return value

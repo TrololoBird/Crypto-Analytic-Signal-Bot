@@ -103,10 +103,10 @@ def _bootstrap_env_if_missing() -> None:
     if env_path.exists():
         return
     env_path.write_text(
-        "# Required Telegram runtime values\nTG_TOKEN=\nTARGET_CHAT_ID=\n",
+        "# Required Telegram runtime values\nTELEGRAM_BOT_TOKEN=\nTELEGRAM_CHAT_ID=\n",
         encoding="utf-8",
     )
-    print("[INFO] .env not found - created with empty TG_TOKEN and TARGET_CHAT_ID")
+    print("[INFO] .env not found - created with empty TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID")
 
 
 def prune_run_dirs(
