@@ -118,8 +118,7 @@ def _spec_cache_key(frame: pl.DataFrame) -> tuple[object, ...] | None:
     if frame.is_empty() or "close" not in frame.columns:
         return None
     tail_closes = tuple(
-        round(as_float(value), 8)
-        for value in frame.select("close").tail(5).to_series().to_list()
+        round(as_float(value), 8) for value in frame.select("close").tail(5).to_series().to_list()
     )
     tail_time = frame.item(-1, "close_time") if "close_time" in frame.columns else None
     return (frame.height, tail_closes, str(tail_time), tuple(frame.columns))

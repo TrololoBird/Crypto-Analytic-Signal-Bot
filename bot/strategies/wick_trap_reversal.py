@@ -418,5 +418,4 @@ class WickTrapReversalSetup(SpecDetectorSetup):
     detect_setup = detect_wick_trap_reversal_setup
 
 
-
 __all__ = ["WickTrapReversalSetup"]

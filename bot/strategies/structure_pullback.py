@@ -521,5 +521,4 @@ class StructurePullbackSetup(SpecDetectorSetup):
     detect_setup = detect_structure_pullback_setup
 
 
-
 __all__ = ["StructurePullbackSetup"]

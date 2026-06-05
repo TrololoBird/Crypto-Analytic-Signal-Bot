@@ -116,19 +116,17 @@ class BotDashboard:
                     # Check query param or Authorization header
                     provided = (
                         request.query_params.get("token", "")
-                        or request.headers.get("Authorization", "")
-                        .removeprefix("Bearer ")
-                        .strip()
+                        or request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
                     )
                     if (
                         not secrets.compare_digest(provided, self._dashboard_token)
                         and JSONResponse is not None
                     ):
                         return JSONResponse(
-                                {"detail": "unauthorized"},
-                                status_code=401,
-                                headers={"WWW-Authenticate": "Bearer"},
-                            )
+                            {"detail": "unauthorized"},
+                            status_code=401,
+                            headers={"WWW-Authenticate": "Bearer"},
+                        )
             return await call_next(request)
 
         @app.middleware("http")

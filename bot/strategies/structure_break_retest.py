@@ -448,5 +448,4 @@ class StructureBreakRetestSetup(SpecDetectorSetup):
     detect_setup = detect_structure_break_retest_setup
 
 
-
 __all__ = ["StructureBreakRetestSetup"]

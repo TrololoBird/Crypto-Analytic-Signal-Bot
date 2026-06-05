@@ -685,7 +685,6 @@ class BOSCHOCHSetup(SpecDetectorSetup):
 
     detect_setup = detect_bos_choch_setup
 
-
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         """Detect BOS/CHoCH signal for given symbol."""
         try:

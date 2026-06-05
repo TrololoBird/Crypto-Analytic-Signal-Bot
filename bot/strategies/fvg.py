@@ -367,7 +367,6 @@ class FVGSetup(SpecDetectorSetup):
 
     detect_setup = detect_fvg_setup
 
-
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         return super().detect(prepared, settings)
 

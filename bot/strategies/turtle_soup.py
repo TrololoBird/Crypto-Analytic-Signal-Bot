@@ -479,7 +479,6 @@ class TurtleSoupSetup(SpecDetectorSetup):
 
     detect_setup = detect_turtle_soup_setup
 
-
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         return super().detect(prepared, settings)
 

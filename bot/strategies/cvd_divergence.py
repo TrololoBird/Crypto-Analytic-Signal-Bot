@@ -358,7 +358,6 @@ class CVDDivergenceSetup(SpecDetectorSetup):
 
     detect_setup = detect_cvd_divergence_setup
 
-
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         return super().detect(prepared, settings)
 

@@ -446,9 +446,7 @@ class RestHttpMixin(RestCircuitMixin):
                     self._auto_discover_and_apply_proxy(),
                     name="auto_proxy_discovery",
                 )
-                _disc_task.add_done_callback(
-                    lambda t: t.exception() if not t.cancelled() else None
-                )
+                _disc_task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
             raise
         except aiohttp.ClientError as exc:
             if is_proxy_transport_error(exc):

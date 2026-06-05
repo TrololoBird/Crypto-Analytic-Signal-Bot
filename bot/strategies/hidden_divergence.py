@@ -413,7 +413,6 @@ class HiddenDivergenceSetup(SpecDetectorSetup):
 
     detect_setup = detect_hidden_divergence_setup
 
-
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         return super().detect(prepared, settings)
 
