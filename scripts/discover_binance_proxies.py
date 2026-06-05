@@ -105,14 +105,10 @@ async def _probe_url(url: str | None, *, trust_env: bool) -> bool:
             exc.detail,
         )
         return False
-    except DEFENSIVE_EXC as exc:
-        if isinstance(exc, (KeyboardInterrupt, SystemExit, asyncio.CancelledError)):
-            raise
-        LOG.debug(
-            "proxy transport fail | url=%s err=%s",
-            mask_proxy_url(url or "direct"),
-            exc,
-        )
+    except (KeyboardInterrupt, SystemExit, asyncio.CancelledError):
+        raise
+    except Exception as exc:  # noqa: BLE001 — proxy libs raise non-aiohttp exceptions
+        LOG.debug("proxy transport fail | url=%s err=%s", mask_proxy_url(url or "direct"), exc)
         return False
     else:
         return ok
@@ -132,7 +128,9 @@ async def _quick_http_probe(session: aiohttp.ClientSession, proxy_url: str) -> b
                 return False
             payload = await resp.json(content_type=None)
             return isinstance(payload, dict) and bool(payload.get("symbols"))
-    except DEFENSIVE_EXC:
+    except (KeyboardInterrupt, SystemExit, asyncio.CancelledError):
+        raise
+    except Exception:  # noqa: BLE001
         return False
 
 
