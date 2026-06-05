@@ -1,104 +1,104 @@
-# Crypto Signal Bot v9 — Claude Code Reference
+# CLAUDE.md — Project context for Claude Code agent
 
-## What this is
+## What this project is
 
-Event-driven Binance USDⓈ-M public signal bot: WS/REST → Polars features → 38 strategies → contract + confluence gates → Telegram trade plans.
-No auto-trading, no private Binance APIs, no user registration.
+Crypto futures **signal-analytics** bot (no auto-trading, no authenticated Binance endpoints).
+Signals only. Telegram delivery. Public Binance USDⓈ-M endpoints only.
 
-## Entry points
+## Runtime topology (read before editing anything)
 
-```bash
-python main.py run
-python main.py harvest --minutes 120
-python main.py status | stop | doctor
-make check
-make smoke
-make live-smoke
-make validate-config
-python scripts/clean_session_data.py --mode smoke --config config.toml
-python scripts/validate_config.py --config config.toml
-```
+**Entry:** `main.py` → `bot/cli.py` → `asyncio.run(_main())` → `SignalBot.start()` + `await bot.run_forever()`
 
-## Architecture
-
-- `bot/domain/` — `BotSettings`, schemas, strategy catalog, contracts
-- `bot/market/` — REST `rest_impl.py`, WS `ws.py`, universe, enrichment, proxy
-- `bot/features/` — `prepare.py`, `prepare_frame.py`, Wilder ATR/RSI indicators
-- `bot/engine/` — `SignalEngine`, `StrategyRegistry`, lanes
-- `bot/strategies/` — 38 `*Setup` classes, `_common.py`, `_roadmap.py`
-- `bot/setups/` — `base`, `spec_runtime`, `smc` (no `detectors/`)
-- `bot/runtime/` — `bot.py`, `cycle_runner.py`, `symbol_analyzer.py`, `delivery_orchestrator.py`
-- `bot/delivery/` — contract, confluence, filters, deliver, telegram, tiers
-- `bot/persistence/` — SQLite tracking, outcomes, `memory.py`
-- `bot/diagnostics/` — telemetry, session ops
-- `bot/dashboard/` — optional FastAPI UI (not hot path)
-
-## Signal pipeline
+**Hot path (latency-critical — do not add blocking sync I/O):**
 
 ```text
-bot/market/ws.py
-bot/runtime/cycle_runner.py
-bot/runtime/symbol_analyzer.py
-bot/engine/engine.py
-bot/delivery/filters.py
-bot/delivery/confluence.py
-bot/runtime/delivery_orchestrator.py
-bot/delivery/telegram_routing.py
+WS kline close → EventBus → SymbolAnalyzer → SignalEngine → DeliveryOrchestrator
+  → validate_signal_contract() → hard confluence gate → deliver()
 ```
 
-Delivery invariant: `validate_signal_contract` → `_hard_confluence_gate` (3-of-5) → `delivery.deliver`.
+**Background tasks** (`SignalBot.run_forever()` in `bot/runtime/bot.py`):
 
-## Key types
+- `event_bus`
+- `shortlist_refresh`
+- `heartbeat`
+- `health_telemetry`
+- `health_monitor`
+- `emergency_fallback`
+- `oi_refresh`
+- `spot_companion`
+- `tracking_review`
+- `market_regime`
+- `public_intelligence` (if intelligence enabled)
+- `telegram_operator` (if operator console enabled)
 
-From `bot/domain/schemas.py`:
+**Also at startup** (`bot/cli.py` / `SignalBot.start()`): `daily_summary`, `preload_frames` (REST warmup), optional FastAPI dashboard.
 
-- `UniverseSymbol` — shortlist row, liquidity, `strategy_fits`
-- `SymbolFrames` — raw OHLCV 5m/15m/1h/4h + bid/ask
-- `PreparedSymbol` — post-`prepare_symbol` work frames + enrichments
-- `Signal` — immutable trade plan: entries, SL, TPs, score, `setup_id`
-- `PipelineResult` — per-cycle funnel: candidates, rejects, status
+## Frozen / immutable
 
-## Constraints
+- `bot/delivery/contract.py::validate_signal_contract()` — **DO NOT MODIFY**
+- Strategy IDs in `bot/strategies/__init__.py::STRATEGY_CLASSES` — add ok; remove only with `CATALOG_ENTRIES` + config sync
+- DB schema changes — **new steps in `bot/migrations.py` only**; never raw `ALTER` outside migrations
 
-1. Never place orders, use trading APIs, or add account authentication.
-2. Never bypass `validate_signal_contract` → hard confluence gate → `delivery.deliver`.
-3. Never import forbidden legacy paths (`bot/application/`, `bot/setups/detectors/`, ccxt).
-4. Never use `shift(-N)` or pandas on live signal paths.
-5. Never put LLM inference on the hot path.
-6. Never create ABC/Protocol/factory layers without architect approval.
-7. Never split modules under 500 LOC or frozen monoliths without explicit request.
-8. Never generate test files unless explicitly requested.
-9. Never modify `bot/static/`.
-10. Never disable strategies silently — fix detectors or document config reason.
-11. Wilder ATR/RSI; Bollinger std `ddof=1`.
-12. Agent executes all commands and probes — no runbooks for the human.
-13. Before live/smoke: `clean_session_data.py --mode smoke`.
-14. Backlog: only `docs/DEFINITION_OF_DONE.md` IDs (OPS-*, OPT-*).
+## Module ownership map
 
-## Known debt
+| Concern | Primary module | Notes |
+|---------|----------------|-------|
+| WS market data | `bot/market/ws.py` + `_ws_connection.py` + `_ws_parsers.py` | Public interface unchanged on `ws.py` |
+| REST market data | `bot/market/rest_impl.py` + `_rest_circuit.py` + `_rest_frames.py` | `RestCircuitMixin` on `RestHttpMixin` |
+| Feature pipeline | `bot/features/prepare.py` → `prepare_frame.py` | Polars hot path |
+| Strategy execution | `bot/engine/engine.py` + `registry.py` | 38 strategies |
+| Signal delivery | `bot/delivery/` (contract → filters → confluence → deliver) | Invariant order enforced |
+| Persistence CRUD | `bot/persistence/repository/memory.py` | SQLite + parquet |
+| Signal lifecycle | `bot/persistence/tracking.py` | `active_signals` / `signal_outcomes` |
+| DB schema migrations | `bot/migrations.py` **only** — sole writer of `schema_version` | |
+| Config | `bot/domain/config.py` + `config.toml` | `BotSettings` |
+| Secrets | `bot/secrets.py` | Canonical: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
+| CLI | `bot/cli.py` | Subcommands below |
+| Dashboard | `bot/dashboard/app.py` (FastAPI, optional) | Not hot path |
+| Diagnostics | `bot/diagnostics/facade.py` | Re-export hub |
 
-| Severity | file:line | description |
-|----------|-----------|-------------|
-| OPS | `config.toml` | `action_min_score=0.72` vs live max confluence ~0.68 — weighted bridge armed, inactive until scores rise |
+**CLI subcommands:** `run` (default), `harvest`, `status`, `stop`, `outcomes`, `backtest`, `replay`, `db migrate`, `db clean`. Doctor runs inside `run` startup (not a separate subcommand).
 
-## How to add a strategy
+## Hard constraints (enforce on every edit)
 
-1. Catalog entry in `bot/domain/strategy_catalog.py`.
-2. Defaults in `config.toml`; run `make validate-config`.
-3. Detector in `bot/strategies/<name>.py`; helpers from `_common.py` / `_roadmap.py`.
-4. Subclass `RoadmapSetup` or `SpecDetectorSetup`; implement `detect()` or `spec_detect`.
-5. Export in `STRATEGY_CLASSES` in `bot/strategies/__init__.py`; run `make check`.
+1. No auto-trading logic
+2. No authenticated Binance endpoints
+3. No new test files or mock harnesses
+4. `validate_signal_contract()` is frozen
+5. All edits must pass: `python -m py_compile $(find bot -name "*.py")`
+6. One commit per logical phase; message: `phase-<X>: <description>`
 
-## Test commands
+## Known architectural debt (do not silently work around — report and ask)
 
-```bash
-make check
-make smoke
-make live-smoke
-make validate-config
-python scripts/check_circular_imports.py
-pytest tests/test_wave_f9_agent_*.py tests/test_wave_f10_agent_*.py tests/test_wave_i_calibration.py -q
-PYTEST_LIVE=1 pytest tests/live/ -v
-```
+- **Dual persistence:** `signals` / `outcomes` (legacy, read-only after Phase E) vs `active_signals` / `signal_outcomes` (primary). Do not add new dual-writes.
+- **22 files still >1,000 LOC** (e.g. `memory.py`, `symbol_analyzer.py`, `delivery_orchestrator.py`). Further decomposition = Phase F.
+- **`bot/market/scheduler.py`** — kept; `bot/runtime/kline_handler.py` imports `analysis_intervals`. Do not delete.
 
-Session start: read `HANDOFF_REPORT.md`. Agents: `.claude/agents/`. Rules: `.claude/rules/`.
+## Strategy catalog
+
+38 strategies via `STRATEGY_CLASSES` → `StrategyRegistry.register()`.
+Enabled per strategy: `config.toml` `[setups.<id>]`.
+Metadata: `bot/domain/strategy_catalog.py` (`CATALOG_ENTRIES`, 38 entries).
+New strategy: detector file + `STRATEGY_CLASSES` + `CATALOG_ENTRIES` + config key + optional `config/strategies/<id>.toml`.
+
+## Testing
+
+- Offline waves: `pytest tests/test_wave_f*.py tests/test_wave_i_calibration.py -q`
+- Live: `tests/live/` (`PYTEST_LIVE=1`) — needs network
+- Do **not** add new test files; fix existing tests if a refactor breaks them
+
+## Environment
+
+- Python **3.14** (`requires-python >=3.14,<3.15` in `pyproject.toml`)
+- Install: `pip install -e ".[live,dev,test]"` or uv equivalent
+- Run bot: `python main.py run` (or `python main.py`)
+- Lint: `ruff check bot/`
+- Typecheck: `mypy bot/` (strict with per-module overrides)
+- Before live/smoke: `python scripts/clean_session_data.py --mode smoke --config config.toml`
+
+## Related docs
+
+- Human architecture: `ARCHITECTURE.md`
+- Audit baseline: `AUDIT_REPORT.md`
+- Operator playbook: `docs/SOLO_OPERATOR_PLAYBOOK.md`
+- Backlog IDs only: `docs/DEFINITION_OF_DONE.md`
