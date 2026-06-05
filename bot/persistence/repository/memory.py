@@ -1,5 +1,10 @@
 """SQLite + parquet persistence for signals and outcomes."""
 
+# TABLE NARRATIVE NOTE (added phase-C):
+# active_signals / signal_outcomes = primary tracking model (written by tracking.py lifecycle).
+# signals / outcomes = legacy analytics tables retained for dashboard and outcome queries.
+# Migration to unified model is deferred to a dedicated schema migration phase.
+
 from __future__ import annotations
 
 import json
@@ -123,7 +128,6 @@ async def fetch_signal_outcome_rows(
     return result_rows
 
 
-_REPOSITORY_SCHEMA_VERSION = 2
 _ACTIVE_SIGNALS_OPTIONAL_COLUMNS: dict[str, str] = {
     "tp1_hit_at": "TEXT",
     "tp2_hit_at": "TEXT",
@@ -166,38 +170,12 @@ class MemoryRepository:
             raise RuntimeError(msg)
         return conn
 
-    async def _repository_schema_version(self) -> int:
-        conn = self._require_conn()
-        await conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS schema_version (
-                version INTEGER PRIMARY KEY,
-                applied_at TEXT DEFAULT (datetime('now')),
-                description TEXT DEFAULT ''
-            )
-            """
-        )
-        async with conn.execute(
-            "SELECT COALESCE(MAX(version), 0) AS version FROM schema_version"
-        ) as cursor:
-            row = await cursor.fetchone()
-        return int(row["version"] if row and row["version"] is not None else 0)
-
-    async def _set_repository_schema_version(self, version: int, description: str) -> None:
-        conn = self._require_conn()
-        await conn.execute(
-            "INSERT OR REPLACE INTO schema_version (version, description) VALUES (?, ?)",
-            (int(version), description),
-        )
-
     async def initialize(self) -> None:
         """Initialize database tables."""
         self._conn = await aiosqlite.connect(self._db_path, timeout=30.0)
         self._conn.row_factory = aiosqlite.Row
         await self._conn.execute("PRAGMA busy_timeout=30000")
         await self._conn.execute("PRAGMA journal_mode=WAL")
-        schema_version = await self._repository_schema_version()
-
         # Create tables
         await self._conn.executescript("""
             CREATE TABLE IF NOT EXISTS signals (
@@ -389,19 +367,11 @@ class MemoryRepository:
             CREATE INDEX IF NOT EXISTS idx_signal_outcomes_closed_at ON signal_outcomes(closed_at);
         """)
 
-        if schema_version < _REPOSITORY_SCHEMA_VERSION:
-            await self._ensure_table_columns(
-                "active_signals",
-                _ACTIVE_SIGNALS_OPTIONAL_COLUMNS,
-            )
-            await self._ensure_extended_tables(run_column_migrations=True)
-            await self._set_repository_schema_version(
-                _REPOSITORY_SCHEMA_VERSION,
-                "repository_schema_consolidated",
-            )
-        else:
-            await self._ensure_extended_tables()
-        # Idempotent drift repair — shared schema_version with bot.migrations can skip v2 block.
+        await self._ensure_table_columns(
+            "active_signals",
+            _ACTIVE_SIGNALS_OPTIONAL_COLUMNS,
+        )
+        await self._ensure_extended_tables(run_column_migrations=True)
         await self._ensure_table_columns("active_signals", _ACTIVE_SIGNALS_OPTIONAL_COLUMNS)
         await migrate_db(self._conn)
         await self._conn.commit()
@@ -884,6 +854,7 @@ class MemoryRepository:
 
         record.validate()
         try:
+            # dual-write: legacy signals table + primary active_signals table (see module note).
             await self._conn.execute(
                 """
                 INSERT OR REPLACE INTO signals (

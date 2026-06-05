@@ -1,4 +1,8 @@
-"""Signal tracking module for monitoring signal lifecycle and outcomes."""
+"""Signal tracking module for monitoring signal lifecycle and outcomes.
+
+Domain lifecycle service: orchestrates pending/active/closed state and Telegram edits.
+SQL CRUD for ``active_signals`` / ``signal_outcomes`` lives in ``MemoryRepository``.
+"""
 
 from __future__ import annotations
 
