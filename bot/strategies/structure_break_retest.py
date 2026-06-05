@@ -447,29 +447,6 @@ class StructureBreakRetestSetup(SpecDetectorSetup):
 
     detect_setup = detect_structure_break_retest_setup
 
-    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
-        """Tunable parameters for self-learner optimization."""
-        defaults = {
-            "base_score": 0.62,
-            "swing_lookback": 3,
-            "min_vol_breakout": 1.3,
-            "retest_atr_tol": 0.5,
-            "retest_atr_mult": 0.5,  # Backward-compatible alias.
-            "fallback_lookback_bars": 12,
-            "sl_buffer_atr": 0.5,
-            "breakout_threshold": 0.002,
-            "bias_mismatch_penalty": 0.75,
-            "tp_too_close_penalty": 0.75,
-            "min_rr": 1.9,
-            "enable_15m_range_fallback": 1.0,
-        }
-        if settings is not None:
-            filters = getattr(settings, "filters", None)
-            if filters:
-                setups_config = getattr(filters, "setups", {})
-                if isinstance(setups_config, dict) and self.setup_id in setups_config:
-                    return {**defaults, **setups_config.get(self.setup_id, {})}
-        return defaults
 
 
 __all__ = ["StructureBreakRetestSetup"]

@@ -367,18 +367,6 @@ class FVGSetup(SpecDetectorSetup):
 
     detect_setup = detect_fvg_setup
 
-    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
-        """Tunable parameters for self-learner optimization."""
-        defaults = dict(self.DEFAULTS)
-        if settings is not None:
-            filters = getattr(settings, "filters", None)
-            if filters:
-                setups_config = getattr(filters, "setups", {})
-                if isinstance(setups_config, dict):
-                    override = setups_config.get(self.setup_id) or setups_config.get("fvg")
-                    if isinstance(override, dict):
-                        return {**defaults, **override}
-        return defaults
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         return super().detect(prepared, settings)

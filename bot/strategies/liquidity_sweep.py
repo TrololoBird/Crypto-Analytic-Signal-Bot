@@ -471,15 +471,6 @@ class LiquiditySweepSetup(SpecDetectorSetup):
 
     detect_setup = detect_liquidity_sweep_setup
 
-    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
-        defaults = dict(self.DEFAULTS)
-        if settings is not None:
-            filters = getattr(settings, "filters", None)
-            if filters:
-                setups_config = getattr(filters, "setups", {})
-                if isinstance(setups_config, dict) and self.setup_id in setups_config:
-                    return {**defaults, **setups_config.get(self.setup_id, {})}
-        return defaults
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         return super().detect(prepared, settings)

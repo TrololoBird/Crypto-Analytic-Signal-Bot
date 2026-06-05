@@ -453,31 +453,6 @@ class SqueezeSetup(SpecDetectorSetup):
 
     detect_setup = detect_squeeze_setup
 
-    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
-        """Tunable parameters for self-learner optimization."""
-        defaults = {
-            "base_score": 0.55,
-            "bb_squeeze_threshold": 4.5,
-            "min_bb_compression_width": 4.5,
-            "bb_pct_b_threshold": 0.80,
-            "volume_threshold": 1.2,
-            "sl_buffer_atr": 0.4,
-            "bias_mismatch_penalty": 0.75,
-            "min_rr": 1.9,
-            "funding_extreme_threshold": 0.00015,
-            "liquidation_extreme_threshold": 0.20,
-            "release_lookback": 12,
-            "min_release_width_expansion": 1.50,
-            "min_release_roc10_abs_pct": 0.35,
-            "no_crowd_confirmation_penalty": 0.92,
-        }
-        if settings is not None:
-            filters = getattr(settings, "filters", None)
-            if filters:
-                setups_config = getattr(filters, "setups", {})
-                if isinstance(setups_config, dict) and self.setup_id in setups_config:
-                    return {**defaults, **setups_config.get(self.setup_id, {})}
-        return defaults
 
 
 __all__ = ["SqueezeSetup"]

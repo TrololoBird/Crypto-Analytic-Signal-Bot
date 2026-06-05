@@ -520,27 +520,6 @@ class StructurePullbackSetup(SpecDetectorSetup):
 
     detect_setup = detect_structure_pullback_setup
 
-    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
-        """Tunable parameters for self-learner optimization."""
-        defaults = {
-            "base_score": 0.55,
-            "bias_mismatch_penalty": 0.75,
-            "tp_too_close_penalty": 0.75,
-            "min_rr": 1.9,
-            "min_trend_score": 0.40,
-            "ema_proximity_pct": 0.990,
-            "ema_deep_pullback_pct": 0.965,
-            "pullback_lookback": 12.0,
-            "sl_buffer_atr": 0.5,
-            "min_adx_1h": 15.0,
-        }
-        if settings is not None:
-            filters = getattr(settings, "filters", None)
-            if filters:
-                setups_config = getattr(filters, "setups", {})
-                if isinstance(setups_config, dict) and self.setup_id in setups_config:
-                    return {**defaults, **setups_config.get(self.setup_id, {})}
-        return defaults
 
 
 __all__ = ["StructurePullbackSetup"]

@@ -743,7 +743,9 @@ class RestHttpMixin(RestCircuitMixin):
         response_time_raw = self._header_value(headers, "x-response-time")
         try:
             if weight_raw is not None:
-                self._last_rest_weight_1m = int(weight_raw)
+                server_weight = int(weight_raw)
+                self._last_rest_weight_1m = server_weight
+                self._weight_budget.force_floor(server_weight)
         except (TypeError, ValueError):
             self._last_rest_weight_1m = None
         try:

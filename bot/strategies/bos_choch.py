@@ -685,16 +685,6 @@ class BOSCHOCHSetup(SpecDetectorSetup):
 
     detect_setup = detect_bos_choch_setup
 
-    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
-        """Tunable parameters for self-learner optimization."""
-        defaults = dict(self.DEFAULTS)
-        if settings is not None:
-            filters = getattr(settings, "filters", None)
-            if filters:
-                setups_config = getattr(filters, "setups", {})
-                if isinstance(setups_config, dict) and self.setup_id in setups_config:
-                    return {**defaults, **setups_config.get(self.setup_id, {})}
-        return defaults
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         """Detect BOS/CHoCH signal for given symbol."""

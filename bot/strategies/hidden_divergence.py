@@ -413,28 +413,6 @@ class HiddenDivergenceSetup(SpecDetectorSetup):
 
     detect_setup = detect_hidden_divergence_setup
 
-    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
-        """Tunable parameters for self-learner optimization."""
-        defaults = {
-            "base_score": 0.50,
-            "min_swings": 2.0,
-            "bias_mismatch_penalty": 0.75,
-            "tp_too_close_penalty": 0.75,
-            "min_rr": 1.9,
-            "rsi_divergence_lookback": 3.0,
-            "rsi_divergence_threshold": 2.0,
-            "max_swing_pair_gap": 6.0,
-            "min_delta_threshold": 0.0,
-            "min_volume_ratio": 0.55,
-            "sl_buffer_atr": 0.5,
-        }
-        if settings is not None:
-            filters = getattr(settings, "filters", None)
-            if filters:
-                setups_config = getattr(filters, "setups", {})
-                if isinstance(setups_config, dict) and self.setup_id in setups_config:
-                    return {**defaults, **setups_config.get(self.setup_id, {})}
-        return defaults
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         return super().detect(prepared, settings)

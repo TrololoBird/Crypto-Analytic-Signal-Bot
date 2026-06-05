@@ -357,28 +357,6 @@ class OrderBlockSetup(SpecDetectorSetup):
 
     detect_setup = detect_order_block_setup
 
-    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
-        """Tunable parameters for self-learner optimization."""
-        defaults = {
-            "base_score": 0.52,
-            "min_ob_impulse_atr": 1.5,
-            "impulse_lookback_bars": 5,
-            "ob_max_age": 72.0,
-            "touch_buffer_atr": 0.25,
-            "bias_mismatch_penalty": 0.75,
-            "tp_too_close_penalty": 0.75,
-            "min_rr": 1.9,
-            "sl_buffer_atr": 0.5,
-            "rsi_overbought": 76.0,
-            "rsi_oversold": 24.0,
-        }
-        if settings is not None:
-            filters = getattr(settings, "filters", None)
-            if filters:
-                setups_config = getattr(filters, "setups", {})
-                if isinstance(setups_config, dict) and self.setup_id in setups_config:
-                    return {**defaults, **setups_config.get(self.setup_id, {})}
-        return defaults
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         try:

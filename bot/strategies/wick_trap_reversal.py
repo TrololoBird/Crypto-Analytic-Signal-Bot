@@ -417,36 +417,6 @@ class WickTrapReversalSetup(SpecDetectorSetup):
 
     detect_setup = detect_wick_trap_reversal_setup
 
-    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
-        """Tunable parameters for self-learner optimization."""
-        defaults = {
-            "base_score": 0.55,
-            "bias_mismatch_penalty": 0.75,
-            "tp_too_close_penalty": 0.75,
-            "sl_buffer_atr": 0.8,
-            "min_rr": 1.9,
-            "wick_atr_threshold": 0.3,
-            "wick_through_atr_mult": 0.3,
-            "closed_back_atr_mult": 0.10,
-            "min_volume_ratio": 1.20,
-            "max_confirmation_bars": 8,
-        }
-        if settings is not None:
-            filters = getattr(settings, "filters", None)
-            if filters:
-                setups_config = getattr(filters, "setups", {})
-                if isinstance(setups_config, dict) and self.setup_id in setups_config:
-                    overrides = setups_config.get(self.setup_id, {})
-                    if not isinstance(overrides, dict):
-                        return defaults
-                    params = {**defaults, **overrides}
-                    if (
-                        "wick_atr_threshold" in overrides
-                        and "wick_through_atr_mult" not in overrides
-                    ):
-                        params["wick_through_atr_mult"] = params["wick_atr_threshold"]
-                    return params
-        return defaults
 
 
 __all__ = ["WickTrapReversalSetup"]

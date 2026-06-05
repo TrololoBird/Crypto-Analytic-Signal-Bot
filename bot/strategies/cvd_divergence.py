@@ -358,24 +358,6 @@ class CVDDivergenceSetup(SpecDetectorSetup):
 
     detect_setup = detect_cvd_divergence_setup
 
-    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
-        """Tunable parameters for self-learner optimization."""
-        defaults = {
-            "base_score": 0.50,
-            "divergence_lookback": 5,
-            "delta_lookback": 3,
-            "bias_mismatch_penalty": 0.75,
-            "min_rr": 1.9,
-            "min_delta_threshold": 0.06,
-            "sl_buffer_atr": 0.5,
-        }
-        if settings is not None:
-            filters = getattr(settings, "filters", None)
-            if filters:
-                setups_config = getattr(filters, "setups", {})
-                if isinstance(setups_config, dict) and self.setup_id in setups_config:
-                    return {**defaults, **setups_config.get(self.setup_id, {})}
-        return defaults
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         return super().detect(prepared, settings)

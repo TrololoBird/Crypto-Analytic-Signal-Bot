@@ -479,31 +479,6 @@ class TurtleSoupSetup(SpecDetectorSetup):
 
     detect_setup = detect_turtle_soup_setup
 
-    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
-        """Tunable parameters for self-learner optimization."""
-        defaults = {
-            "base_score": 0.52,
-            "roll_bars": 20.0,
-            "break_atr_mult": 0.1,
-            "sl_buffer_atr": 0.5,
-            "volume_threshold": 1.0,
-            "bias_mismatch_penalty": 0.75,
-            "min_rr": 1.9,
-            "min_recovery_delta_long": 0.49,
-            "max_recovery_delta_short": 0.51,
-            "max_adverse_depth_imbalance": 0.05,
-            "max_adverse_microprice_bias": 0.05,
-            "false_breakout_lookback_1h": 3,
-            "confirmation_lookback_15m": 4,
-            "orderflow_conflict_penalty": 0.88,
-        }
-        if settings is not None:
-            filters = getattr(settings, "filters", None)
-            if filters:
-                setups_config = getattr(filters, "setups", {})
-                if isinstance(setups_config, dict) and self.setup_id in setups_config:
-                    return {**defaults, **setups_config.get(self.setup_id, {})}
-        return defaults
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         return super().detect(prepared, settings)

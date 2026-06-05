@@ -67,6 +67,34 @@ class WeightBudgetManager:
         cutoff = now - self._window_seconds
         return sum(weight for ts, weight in self._events if ts >= cutoff)
 
+    def force_floor(self, server_weight: int) -> None:
+        """Sync client-side weight to at least the server-reported value.
+
+        Binance returns ``x-mbx-used-weight-1m`` in every response. If the
+        server reports more usage than our local estimate (e.g. because a
+        cached endpoint consumed weight we didn't track), inject the gap so
+        the next ``acquire`` call paces correctly and we avoid 429s.
+        Called from sync context (event-loop thread), so no lock needed.
+        """
+        normalized = max(0, int(server_weight))
+        if normalized <= 0:
+            return
+        now = time.monotonic()
+        cutoff = now - self._window_seconds
+        while self._events and self._events[0][0] < cutoff:
+            self._events.popleft()
+        current = sum(w for _, w in self._events)
+        gap = normalized - current
+        if gap > 0:
+            self._events.append((now, gap))
+            if gap > 50:
+                LOG.info(
+                    "weight floor sync | server=%d local=%d gap=+%d",
+                    normalized,
+                    current,
+                    gap,
+                )
+
     async def acquire(self, *, weight: int, label: str) -> float:
         normalized_weight = max(0, int(weight))
         if normalized_weight <= 0:

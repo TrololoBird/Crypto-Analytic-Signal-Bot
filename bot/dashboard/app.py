@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import threading
 import time
 import webbrowser
@@ -107,6 +108,32 @@ class BotDashboard:
             allow_methods=["GET", "POST", "PATCH", "DELETE"],
             allow_headers=["Content-Type", "Authorization"],
         )
+
+        _dashboard_token: str = os.environ.get("DASHBOARD_TOKEN", "").strip()
+        _open_paths = {"/api/health", "/api/status"}
+
+        @app.middleware("http")
+        async def token_auth(request: Any, call_next: Any) -> Any:
+            if _dashboard_token:
+                path: str = request.url.path
+                # Always allow health/status + static assets
+                if not (path in _open_paths or path.startswith("/static/")):
+                    # Check query param or Authorization header
+                    provided = (
+                        request.query_params.get("token", "")
+                        or (request.headers.get("Authorization", "").removeprefix("Bearer ").strip())
+                    )
+                    if provided != _dashboard_token:
+                        try:
+                            from fastapi.responses import JSONResponse
+                            return JSONResponse(
+                                {"detail": "unauthorized"},
+                                status_code=401,
+                                headers={"WWW-Authenticate": "Bearer"},
+                            )
+                        except ImportError:
+                            pass
+            return await call_next(request)
 
         @app.middleware("http")
         async def add_security_headers(request: Any, call_next: Any) -> Any:

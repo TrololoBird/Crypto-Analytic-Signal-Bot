@@ -343,27 +343,6 @@ class BreakerBlockSetup(SpecDetectorSetup):
 
     detect_setup = detect_breaker_block_setup
 
-    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
-        """Tunable parameters for self-learner optimization."""
-        defaults = {
-            "base_score": 0.52,
-            "scan_bars": 72,
-            "mitigation_threshold": 0.30,
-            "sl_buffer_atr": 0.50,
-            "min_atr": 0.0001,
-            "min_volume_ratio": 0.75,
-            "min_acceptance_close_position_long": 0.45,
-            "max_acceptance_close_position_short": 0.55,
-            "bias_mismatch_penalty": 0.75,
-            "min_rr": 1.9,
-        }
-        if settings is not None:
-            filters = getattr(settings, "filters", None)
-            if filters:
-                setups_config = getattr(filters, "setups", {})
-                if isinstance(setups_config, dict) and self.setup_id in setups_config:
-                    return {**defaults, **setups_config.get(self.setup_id, {})}
-        return defaults
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         return super().detect(prepared, settings)

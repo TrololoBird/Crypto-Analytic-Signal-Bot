@@ -419,26 +419,6 @@ class VolumeClimaxReversalSetup(SpecDetectorSetup):
 
     detect_setup = detect_volume_climax_reversal_setup
 
-    def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
-        defaults = {
-            "base_score": 0.52,
-            "min_volume_ratio": 1.8,
-            "adaptive_min_volume_ratio": 1.30,
-            "min_wick_atr": 0.45,
-            "strong_wick_multiplier": 1.35,
-            "signal_lookback_bars": 10,
-            "body_reversal_close_position_long": 0.62,
-            "body_reversal_close_position_short": 0.38,
-            "max_rsi_long": 42.0,
-            "min_rsi_short": 58.0,
-            "sl_buffer_atr": 0.45,
-            "min_rr": 1.9,
-        }
-        if settings is not None:
-            setups = getattr(getattr(settings, "filters", None), "setups", {})
-            if isinstance(setups, dict) and self.setup_id in setups:
-                return {**defaults, **setups.get(self.setup_id, {})}
-        return defaults
 
 
 __all__ = ["VolumeClimaxReversalSetup"]
