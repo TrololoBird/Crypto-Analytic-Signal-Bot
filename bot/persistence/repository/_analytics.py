@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -10,6 +11,9 @@ from typing import Any
 import aiosqlite
 
 from ..outcomes import aggregate_setup_stats
+
+# fix-20260604: LOG for outcome_window decode failures (Phase F extraction)
+LOG = logging.getLogger("bot.persistence.repository.analytics")
 
 
 class AnalyticsMixin:

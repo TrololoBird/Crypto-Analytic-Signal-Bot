@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
@@ -29,14 +30,23 @@ class TierCapDecision:
     drop_reason: str | None = None
 
 
+def _finite_score(value: object) -> float:
+    # fix-20260604: NaN is truthy — `score or 0.0` still sorts as NaN
+    try:
+        numeric = float(value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+    return numeric if math.isfinite(numeric) else 0.0
+
+
 def rank_key(signal: Signal) -> tuple[float, float, float]:
     """Match DeliveryOrchestrator ranking for deterministic cap ordering."""
     meta = signal.metadata
     confirmation = float(meta.get("confirmation_count") or 0)
     return (
-        float(signal.score or 0.0),
+        _finite_score(signal.score),
         confirmation,
-        float(signal.risk_reward or 0.0),
+        _finite_score(signal.risk_reward),
     )
 
 
@@ -62,7 +72,7 @@ def classify_tier(signal: Signal, settings: BotSettings) -> TierDecision:
     delivery = settings.delivery
     action_min = effective_action_min_score(settings, signal.symbol)
     watch_min = float(delivery.watch_min_score)
-    score = float(signal.score or 0.0)
+    score = _finite_score(signal.score)
     if score >= action_min:
         reason = "score_action"
         if action_min > float(delivery.action_min_score):

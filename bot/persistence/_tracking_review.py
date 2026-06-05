@@ -19,6 +19,7 @@ from ..domain.limit_entry import (
     should_activate_limit_fill_price,
 )
 from ..market.data import MarketDataUnavailable
+from ..persistence.sl_diagnostics import classify_stop_loss_root_cause
 from ..persistence.tracked import TrackedSignalState, parse_state_dt
 
 if TYPE_CHECKING:
