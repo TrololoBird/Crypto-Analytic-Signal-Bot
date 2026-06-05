@@ -23,7 +23,7 @@ from .rate_limit import (
 # `BinanceClient` without importing `bot.infrastructure.binance_client` early.
 if TYPE_CHECKING:
     from ..domain.schemas import AggTrade, AggTradeSnapshot, SymbolFrames, SymbolMeta
-    from .rest import BinanceClient
+    from .rest_impl import BinanceClient
     from .rest_impl import BinanceClientImpl
     from .ws import FuturesWSManager
 else:
@@ -127,6 +127,8 @@ _KLINE_FRAME_SCHEMA = {
     "open_time": pl.Datetime("us", "UTC"),
 }
 _ENDPOINT_WEIGHTS = {
+    "test_connectivity": 1,
+    "check_server_time": 1,
     "exchange_information": 1,
     "ticker24hr_price_change_statistics": 40,
     "symbol_order_book_ticker": 2,
@@ -141,6 +143,7 @@ _ENDPOINT_WEIGHTS = {
     "basis": 0,
     "premium_index": 1,
     "funding_rate_history": 1,
+    "funding_info": 1,
     "continuous_kline_candlestick_data": 1,
     "mark_price_kline_data": 1,
     "index_price_kline_data": 1,
@@ -180,6 +183,8 @@ def _build_endpoint_registry() -> dict[str, _PublicEndpointSpec]:
     # Map operation names to API paths
     # Based on Binance USD-M Futures API
     op_paths: dict[str, str] = {
+        "test_connectivity": f"{fapi1}/ping",
+        "check_server_time": f"{fapi1}/time",
         "exchange_information": f"{fapi1}/exchangeInfo",
         "ticker24hr_price_change_statistics": f"{fapi1}/ticker/24hr",
         "kline_candlestick_data": f"{fapi1}/klines",
@@ -192,6 +197,7 @@ def _build_endpoint_registry() -> dict[str, _PublicEndpointSpec]:
         "index_price_kline_data": f"{fapi1}/indexPriceKlines",
         "open_interest": f"{fapi1}/openInterest",
         "funding_rate_history": f"{fapi1}/fundingRate",
+        "funding_info": f"{fapi1}/fundingInfo",
         "open_interest_statistics": f"{fdata}/openInterestHist",
         "top_trader_long_short_ratio_accounts": f"{fdata}/topLongShortAccountRatio",
         "top_trader_long_short_ratio_positions": f"{fdata}/topLongShortPositionRatio",

@@ -245,10 +245,20 @@ def asset_strategy_allowlist(
     asset_cfg = assets.get(symbol.upper()) if isinstance(assets, dict) else None
     excluded = set(getattr(asset_cfg, "excluded_strategies", ()) or ())
     allowed_raw = getattr(asset_cfg, "allowed_strategies", ()) or ()
-    allowed = {str(item).strip() for item in allowed_raw if str(item).strip()}
+    allowed_ordered = list(
+        dict.fromkeys(
+            str(item).strip()
+            for item in allowed_raw
+            if str(item).strip()
+        )
+    )
 
-    if allowed:
-        return tuple(setup for setup in allowed if setup in enabled and setup not in excluded)
+    if allowed_ordered:
+        return tuple(
+            setup
+            for setup in allowed_ordered
+            if setup in enabled and setup not in excluded
+        )
 
     return tuple(
         setup

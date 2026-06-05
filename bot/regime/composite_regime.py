@@ -159,6 +159,8 @@ class CompositeRegimeAnalyzer:
     ) -> pl.DataFrame:
         btc = benchmark_context.get("BTCUSDT", {})
         history = btc.get("regime_frame_4h")
+        if isinstance(history, dict) and history:
+            history = pl.DataFrame(history)
         if isinstance(history, pl.DataFrame) and not history.is_empty():
             required = {"log_returns", "realized_vol", "atr_pct"}
             if required.issubset(set(history.columns)):

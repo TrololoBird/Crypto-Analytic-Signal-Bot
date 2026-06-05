@@ -8,7 +8,7 @@ from collections import deque
 import polars as pl
 
 from bot.domain.labels import normalize_reject_reason, reject_reason_ru
-from bot.market.ws_cache import get_liquidation_rollups, get_liquidation_sentiment
+from bot.market.ws import get_liquidation_rollups, get_liquidation_sentiment
 from bot.strategies.indicator_divergence import detect_regular_divergence
 
 

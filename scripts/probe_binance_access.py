@@ -14,7 +14,7 @@ from bot.domain.config import NetworkConfig, load_settings
 from bot.market.data import BinanceFuturesMarketData, MarketDataUnavailable
 from bot.market.network_proxy import mask_proxy_url, resolve_proxy_url
 from bot.market.proxy_bootstrap import probe_ws_handshake
-from bot.market.rest import BinanceClientImpl
+from bot.market.rest_impl import BinanceClientImpl
 
 LOG = configure_script_logging("scripts.probe_binance_access")
 

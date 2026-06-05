@@ -95,6 +95,16 @@ def detect_liquidation_heatmap(
             volume_ratio=vol_ratio,
         )
         return None
+    allow_proxy = float(params.get("allow_proxy_liquidation", 0.0)) >= 0.5
+    if not allow_proxy and source != "force_order":
+        _reject(
+            prepared,
+            setup_id,
+            "data.liquidation_proxy_disabled",
+            liquidation_source=source,
+            liquidation_score=score,
+        )
+        return None
 
     if score >= threshold and close_position >= float(params["min_close_position_long"]):
         direction = "long"
@@ -109,12 +119,12 @@ def detect_liquidation_heatmap(
             oi_change_pct=oi_change,
         )
         return None
-    context_penalty = _confirmed_context_conflict(prepared, direction)
+    context_penalty = source != "force_order" and _confirmed_context_conflict(prepared, direction)
     clarity = min(abs(score), 1.0)
     if source == "oi_drop_proxy":
-        clarity *= 0.82
+        clarity *= 0.75
     if source == "volume_wick_proxy":
-        clarity *= 0.62
+        clarity *= 0.50
     if volume_penalty:
         clarity *= 0.90
     if context_penalty:
@@ -150,6 +160,7 @@ class LiquidationHeatmapSetup(RoadmapSetup):
         "min_close_position_long": 0.55,
         "max_close_position_short": 0.45,
         "min_volume_ratio": 0.90,
+        "allow_proxy_liquidation": 1.0,
     }
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:

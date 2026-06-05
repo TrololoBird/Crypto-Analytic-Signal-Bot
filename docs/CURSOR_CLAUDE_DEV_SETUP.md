@@ -1,9 +1,23 @@
 # План развития проекта и настройка Cursor + Claude Code
 
 > **Дата:** 2026-06-04  
-> **Solo (1 человек + агенты):** [SOLO_OPERATOR_PLAYBOOK.md](SOLO_OPERATOR_PLAYBOOK.md)  
-> Статус проекта: [PROJECT_ROADMAP_AND_STATUS.md](PROJECT_ROADMAP_AND_STATUS.md)  
-> Рефактор: [REFACTOR_PLAN.md](REFACTOR_PLAN.md)
+> **v1 готов:** [DEFINITION_OF_DONE.md](DEFINITION_OF_DONE.md)  
+> **Экономия токенов:** [AGENT_TOKEN_POLICY.md](AGENT_TOKEN_POLICY.md) — агенты не читают весь research pack  
+> **Solo:** [SOLO_OPERATOR_PLAYBOOK.md](SOLO_OPERATOR_PLAYBOOK.md)  
+> **Roadmap:** [PROJECT_ROADMAP_AND_STATUS.md](PROJECT_ROADMAP_AND_STATUS.md)
+
+---
+
+## Token economy (обязательно для агентов)
+
+| Действие | Вместо |
+|----------|--------|
+| Старт сессии | Hook + `DEFINITION_OF_DONE.md` |
+| «50 улучшений» | Таблица backlog в DoD (7 строк) |
+| Архитектура | `graphify query` |
+| Код | grep / 1 файл |
+
+Команда: `/prime-context` (2 файла max).
 
 ---
 
@@ -227,7 +241,7 @@ python scripts/clean_session_data.py --mode smoke --config config.toml
 python -m compileall -q bot
 python scripts/validate_config.py --config config.toml
 python scripts/verify_refactor_gate.py
-pytest tests/test_wave_f9_agent_*.py tests/test_wave_f10_agent_*.py tests/test_wave_f11_*.py -q
+pytest tests/test_wave_f9_agent_*.py tests/test_wave_f10_agent_*.py tests/test_wave_i_calibration.py -q
 # При доступном Binance REST:
 PYTEST_LIVE=1 pytest tests/live/ -v
 python scripts/live_check_pipeline.py --symbols BTCUSDT --limit 1

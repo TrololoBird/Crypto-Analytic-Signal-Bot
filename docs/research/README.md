@@ -6,6 +6,8 @@
 
 **Ревью spec:** [PLAN_CRITICAL_REVIEW.md](PLAN_CRITICAL_REVIEW.md).
 
+**Агентам:** не читать весь каталог — [../AGENT_TOKEN_POLICY.md](../AGENT_TOKEN_POLICY.md). Статус v1: [../DEFINITION_OF_DONE.md](../DEFINITION_OF_DONE.md). LLM APIs: [LLM_API_INTEGRATION.md](LLM_API_INTEGRATION.md).
+
 ## Documents
 
 | File | Contents |
@@ -22,6 +24,7 @@
 | [SIGNAL_COLLISION_AND_DEDUP.md](SIGNAL_COLLISION_AND_DEDUP.md) | 5–38 hits на одну монету: что в TG, merge, gaps |
 | [ORDER_FLOW_INGEST.md](ORDER_FLOW_INGEST.md) | aggTrade, depth, `!forceOrder@arr`, OSS comparison |
 | [SIGNAL_BOT_LANDSCAPE.md](SIGNAL_BOT_LANDSCAPE.md) | OSS categories, anti-patterns, reference projects |
+| [LLM_API_INTEGRATION.md](LLM_API_INTEGRATION.md) | Claude/Gemini/Cursor — где в боте (не hot path) |
 | [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md) | Short layer diagram + pipeline A–H (details in PROJECT_ARCHITECTURE) |
 | [BINANCE_PUBLIC_DATA_MATRIX.md](BINANCE_PUBLIC_DATA_MATRIX.md) | REST/WS public endpoints, weights, scheduling |
 | [TELEGRAM_CHANNEL_SPEC.md](TELEGRAM_CHANNEL_SPEC.md) | Tiered channel, message templates, trust, cadence |

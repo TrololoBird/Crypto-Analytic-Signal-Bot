@@ -7,7 +7,7 @@ from typing import Any
 
 # Eager: no dependency on features
 from bot.market.data import BinanceFuturesMarketData, MarketDataUnavailable
-from bot.market.rest import BinanceClient, BinanceClientImpl
+from bot.market.rest_impl import BinanceClient, BinanceClientImpl
 from bot.market.universe import build_shortlist, rerank_shortlist, select_light_pool_rows, strategy_fits_for_market_row
 
 _LAZY: dict[str, tuple[str, str]] = {

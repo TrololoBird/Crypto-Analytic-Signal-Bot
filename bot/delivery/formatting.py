@@ -685,6 +685,20 @@ def _channel_legs_line(facts: SignalMessageFacts) -> str:
     )
 
 
+def manual_entry_skip_hint(symbol: str, *, chase_pct: float = 0.003) -> str:
+    """Late-entry guidance for manual channel subscribers (signal-only)."""
+    majors = frozenset({"BTCUSDT", "ETHUSDT", "XRPUSDT", "BNBUSDT"})
+    metals = frozenset({"XAUUSDT", "XAGUSDT", "PAXGUSDT"})
+    sym = str(symbol or "").strip().upper()
+    if sym in metals:
+        pct = max(chase_pct, 0.005)
+    elif sym in majors:
+        pct = chase_pct
+    else:
+        pct = max(chase_pct, 0.004)
+    return f"Пропустить, если цена ушла >{pct * 100:.2f}% от зоны входа"
+
+
 def format_channel_trade_card(
     facts: SignalMessageFacts,
     *,
@@ -710,6 +724,7 @@ def format_channel_trade_card(
         _channel_rr_line(facts),
     ]
     lines.append(escape_text(status_line or status_line_for_signal(facts)))
+    lines.append(f"<i>{escape_text(manual_entry_skip_hint(facts.symbol))}</i>")
     if include_chart:
         chart = html.escape(tradingview_chart_url(facts.symbol, facts.timeframe), quote=True)
         lines.append(f'<a href="{chart}">TradingView</a>')

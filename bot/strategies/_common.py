@@ -13,7 +13,7 @@ import polars as pl
 
 from ..domain.catalog_guards import catalog_allows_signal
 from ..domain.strategy_catalog import catalog_default_params
-from ..features import _swing_points
+from ..features.prepare import _swing_points
 from ..features.shared import wilder_mean
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 
@@ -185,10 +185,28 @@ def with_spec_columns(frame: pl.DataFrame) -> pl.DataFrame:
                 (typical_price * pl.col("volume")).cum_sum() / pl.col("volume").cum_sum()
             ).alias("vwap")
 
+    tr_series: pl.Series | None = None
+    if "atr14" not in work.columns or "atr20" not in work.columns:
+        tr_series = work.select(tr_expr.alias("_tr")).to_series()
+
+    if "atr14" in work.columns:
+        spec_atr14_value: pl.Expr | pl.Series = (
+            pl.col("atr14").cast(pl.Float64, strict=False).alias("spec_atr14")
+        )
+    else:
+        spec_atr14_value = wilder_mean(tr_series, period=14, name="spec_atr14")  # type: ignore[arg-type]
+
+    if "atr20" in work.columns:
+        spec_atr20_value: pl.Expr | pl.Series = (
+            pl.col("atr20").cast(pl.Float64, strict=False).alias("spec_atr20")
+        )
+    else:
+        spec_atr20_value = wilder_mean(tr_series, period=20, name="spec_atr20")  # type: ignore[arg-type]
+
     pass1: list[pl.Expr | pl.Series] = [
         tr_expr.alias("spec_tr"),
-        _feature_or_expr(work, "atr14", tr_expr.rolling_mean(14), "spec_atr14"),
-        _feature_or_expr(work, "atr20", tr_expr.rolling_mean(20), "spec_atr20"),
+        spec_atr14_value,
+        spec_atr20_value,
         _feature_or_expr(
             work,
             "volume_mean20",
@@ -282,7 +300,7 @@ def with_spec_columns(frame: pl.DataFrame) -> pl.DataFrame:
                 / pl.when(pl.col("spec_body") > 0.0).then(pl.col("spec_body")).otherwise(1e-8)
             ).alias("spec_lower_wick_ratio"),
             pl.col("spec_delta").abs().rolling_mean(20).alias("spec_abs_delta_mean20"),
-            pl.col("spec_delta").rolling_std(20).alias("spec_delta_std20"),
+            pl.col("spec_delta").rolling_std(20, ddof=1).alias("spec_delta_std20"),
             _spec_cvd_expr(work).alias("spec_cvd"),
         ]
     )
@@ -497,3 +515,50 @@ def current_utc_hour(frame: pl.DataFrame) -> int:
             dt = value.astimezone(UTC) if value.tzinfo else value.replace(tzinfo=UTC)
             return dt.hour
     return datetime.now(UTC).hour
+
+
+# --- merged from common.py ---
+def orderflow_supports_reversal(
+    prepared: object,
+    direction: str,
+    *,
+    min_delta_long: float = 0.49,
+    max_delta_short: float = 0.51,
+    max_adverse_depth: float = 0.08,
+    max_adverse_micro: float = 0.08,
+) -> tuple[bool, dict[str, float]]:
+    """Confirm reversal direction with delta / book microstructure (ICT-style recovery)."""
+    depth = finite_or_none(getattr(prepared, "depth_imbalance", None))
+    micro = finite_or_none(getattr(prepared, "microprice_bias", None))
+    delta_ratio: float | None = None
+    work = getattr(prepared, "work_15m", None)
+    if work is not None and not work.is_empty() and "delta_ratio" in work.columns:
+        delta_ratio = finite_or_none(work.item(-1, "delta_ratio"))
+    if delta_ratio is None:
+        agg = finite_or_none(getattr(prepared, "agg_trade_delta_30s", None))
+        if agg is not None:
+            delta_ratio = 0.5 + max(-0.5, min(0.5, agg / 2.0))
+
+    details: dict[str, float] = {}
+    if delta_ratio is not None:
+        details["delta_ratio"] = delta_ratio
+    if depth is not None:
+        details["depth_imbalance"] = depth
+    if micro is not None:
+        details["microprice_bias"] = micro
+
+    if direction == "long":
+        if delta_ratio is not None and delta_ratio < min_delta_long:
+            return False, details
+        if depth is not None and depth <= -max_adverse_depth:
+            return False, details
+        if micro is not None and micro <= -max_adverse_micro:
+            return False, details
+    else:
+        if delta_ratio is not None and delta_ratio > max_delta_short:
+            return False, details
+        if depth is not None and depth >= max_adverse_depth:
+            return False, details
+        if micro is not None and micro >= max_adverse_micro:
+            return False, details
+    return True, details

@@ -235,16 +235,3 @@ def true_range(df: pl.DataFrame, *, name: str = "true_range") -> pl.Series:
         name=name,
     )
 
-
-def atr_from_true_range(
-    tr: pl.Series,
-    *,
-    period: int,
-    df: pl.DataFrame,
-    name: str,
-) -> pl.Series:
-    return materialize_series(
-        tr.ewm_mean(alpha=1.0 / period, adjust=False),
-        df=df,
-        name=name,
-    )

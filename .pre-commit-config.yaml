@@ -23,3 +23,12 @@ repos:
         args: [--ignore-missing-imports]
         additional_dependencies: [types-all]
         stages: [commit]
+
+  - repo: local
+    hooks:
+      - id: check-circular-imports
+        name: Circular import check (bot/)
+        entry: .venv/bin/python scripts/check_circular_imports.py
+        language: system
+        pass_filenames: false
+        stages: [pre-push]

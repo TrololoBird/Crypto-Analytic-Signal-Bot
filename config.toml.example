@@ -29,7 +29,7 @@ route_all_enabled_strategies = false
 shortlist_unified_routing = true
 enable_strategy_lanes = true
 max_setup_families_per_symbol = 15
-max_setups_per_family = 2
+max_setups_per_family = 3
 analysis_kline_intervals = ["5m", "15m", "1h"]
 diagnostic_trace_limit_per_symbol = 20
 # Startup throttling to prevent REST API flood on startup
@@ -84,6 +84,24 @@ full_refresh_interval_seconds = 7200
 shortlist_spread_max_bps = 8.0
 shortlist_book_stale_seconds = 90.0
 pinned_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "XAUUSDT", "XAGUSDT", "PAXGUSDT"]
+
+[bot.universe.radar]
+enabled = true
+warm_pool_limit = 200
+hot_pool_limit = 60
+promotion_slots_reserve = 12
+impulse_5m_pct = 1.0
+vol_spike_zscore = 2.0
+change_24h_hot_pct = 4.0
+funding_extreme_pct = 0.0008  # fraction (0.0008 = 0.08%)
+prescore_boost_hot = 0.12
+prescore_boost_warm = 0.05
+promotion_cooldown_seconds = 1200
+demotion_idle_seconds = 10800
+min_quote_volume_usd = 5_000_000
+light_rsi_overbought = 72.0
+light_rsi_oversold = 28.0
+emit_watch_candidates = false
 
 [bot.assets.BTCUSDT]
 primary_timeframe = "15m"
@@ -158,8 +176,8 @@ liquidity_sweep = { base_score = 0.50, threshold_tol = 0.0015, sl_buffer_atr = 0
 bos_choch = { base_score = 0.55, bias_mismatch_penalty = 0.75, sl_buffer_atr = 1.15, min_rr = 1.9, swing_lookback = 5, external_swing_lookback = 18, min_swings = 3, breakout_threshold_atr = 0.20, max_break_age_bars = 10, max_retest_age_bars = 36, retest_atr_mult = 1.50, min_volume_ratio = 0.80 }
 hidden_divergence = { base_score = 0.50, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.85, min_rr = 1.9, rsi_divergence_threshold = 2.0, max_swing_pair_gap = 6.0, min_volume_ratio = 0.55, volume_penalty = 0.90 }
 indicator_divergence = { base_score = 0.53, swing_lookback = 4.0, min_price_delta_pct = 0.12, min_indicator_votes = 2.0, min_volume_ratio = 0.75, max_rsi_long = 55.0, min_rsi_short = 45.0, sl_buffer_atr = 0.90, min_rr = 1.9 }
-funding_reversal = { base_score = 0.50, funding_threshold = 0.0010, funding_soft_threshold = 0.00010, funding_recent_extreme_lookback_hours = 48.0, historical_funding_score_penalty = 0.92, relative_funding_score_penalty = 0.82, confirmation_lookback_bars = 4, min_confirmation_score = 1.0, min_volume_ratio = 0.85, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.90, min_rr = 1.9 }
-cvd_divergence = { base_score = 0.50, bias_mismatch_penalty = 0.75, sl_buffer_atr = 1.00, min_rr = 1.9, min_delta_threshold = 0.06 }
+funding_reversal = { base_score = 0.52, funding_threshold = 0.0008, funding_soft_threshold = 0.0003, funding_recent_extreme_lookback_hours = 48.0, historical_funding_score_penalty = 0.92, relative_funding_score_penalty = 0.82, confirmation_lookback_bars = 6, min_confirmation_score = 0.75, min_volume_ratio = 0.85, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.90, min_rr = 1.75, min_adx_1h = 14.0 }
+cvd_divergence = { base_score = 0.54, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.95, min_rr = 1.75, min_delta_threshold = 0.06, divergence_lookback = 16 }
 session_killzone = { base_score = 0.55, min_volume_ratio = 1.0, min_adx_1h = 14.0, bias_mismatch_penalty = 0.75, sl_buffer_atr = 1.00, min_rr = 1.9, breakout_lookback_bars = 20, breakout_atr_mult = 0.05, min_close_position_long = 0.58, max_close_position_short = 0.42, max_adverse_depth_imbalance = 0.10, max_adverse_microprice_bias = 0.10, strict_1h_structure = 0.0, orderflow_conflict_penalty = 0.88, structure_conflict_penalty = 0.82, asia_start_hour_utc = 0, asia_end_hour_utc = 6, london_start_hour_utc = 7, london_end_hour_utc = 9, ny_start_hour_utc = 12, ny_end_hour_utc = 14, overlap_start_hour_utc = 12, overlap_end_hour_utc = 14 }
 breaker_block = { base_score = 0.50, bias_mismatch_penalty = 0.75, scan_bars = 120, mitigation_threshold = 0.60, sl_buffer_atr = 1.00, min_rr = 1.9, min_volume_ratio = 0.70, min_acceptance_close_position_long = 0.42, max_acceptance_close_position_short = 0.58 }
 turtle_soup = { base_score = 0.50, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.80, min_rr = 1.9, min_recovery_delta_long = 0.49, max_recovery_delta_short = 0.51, max_adverse_depth_imbalance = 0.05, max_adverse_microprice_bias = 0.05, false_breakout_lookback_1h = 3, confirmation_lookback_15m = 4, orderflow_conflict_penalty = 0.88 }
@@ -174,7 +192,7 @@ spread_strategy = { base_score = 0.52, max_spread_bps = 6.0, min_volume_ratio = 
 depth_imbalance = { base_score = 0.52, min_depth_imbalance = 0.3334, min_microprice_bias = 0.05, min_close_position_long = 0.52, max_close_position_short = 0.48, min_volume_ratio = 0.80, min_roc10_abs_pct = 0.00, sl_buffer_atr = 1.00, min_rr = 1.9 }
 absorption = { base_score = 0.52, min_abs_flow_delta = 0.05, min_close_position_long = 0.55, max_close_position_short = 0.45, min_wick_atr = 0.12, min_volume_ratio = 0.90, sl_buffer_atr = 0.85, min_rr = 1.9 }
 aggression_shift = { base_score = 0.52, min_shift = 0.05, min_proxy_shift = 0.025, shift_std_mult = 0.75, delta_spike_mult = 2.0, min_volume_ratio = 0.90, signal_lookback_bars = 6, max_entry_drift_atr = 0.75, sl_buffer_atr = 0.85, min_rr = 1.9 }
-liquidation_heatmap = { base_score = 0.52, min_liquidation_score = 0.30, min_proxy_volume_ratio = 1.20, min_proxy_wick_atr = 0.25, proxy_lookback_bars = 12, min_close_position_long = 0.55, max_close_position_short = 0.45, min_volume_ratio = 0.90, sl_buffer_atr = 1.15, min_rr = 1.9 }
+liquidation_heatmap = { base_score = 0.52, min_liquidation_score = 0.28, min_proxy_volume_ratio = 1.10, min_proxy_wick_atr = 0.20, proxy_lookback_bars = 12, min_close_position_long = 0.55, max_close_position_short = 0.45, min_volume_ratio = 0.90, sl_buffer_atr = 1.05, min_rr = 1.75, allow_proxy_liquidation = 1.0 }
 stop_hunt_detection = { base_score = 0.52, sweep_tolerance_pct = 0.0010, min_volume_ratio = 0.80, min_close_position_long = 0.45, max_close_position_short = 0.55, signal_lookback_bars = 20, near_level_atr = 0.35, min_wick_atr = 0.35, max_entry_drift_atr = 1.25, sl_buffer_atr = 0.85, min_rr = 1.9 }
 multi_tf_trend = { base_score = 0.54, min_adx_1h = 15.0, min_volume_ratio = 0.90, pullback_rsi_long_max = 58.0, pullback_rsi_short_min = 42.0, max_adverse_depth_imbalance = 1.00, min_trend_votes = 2, sl_buffer_atr = 1.00, min_rr = 1.9 }
 rsi_divergence_bottom = { base_score = 0.52, divergence_window = 12, min_rsi_delta = 1.5, min_price_delta_pct = 0.05, sl_buffer_atr = 0.85, min_rr = 1.9 }
@@ -194,7 +212,7 @@ active_expiry_minutes = 240
 late_entry_chase_pct = 0.008
 outcome_retention_days = 90
 move_stop_to_break_even_on_tp1 = true
-min_stop_distance_pct = 0.75
+min_stop_distance_pct = 1.10
 max_stop_distance_pct = 15.0
 agg_trade_page_limit = 6
 agg_trade_page_size = 1000
@@ -350,6 +368,8 @@ send_digest = true
 send_sl_postmortem = true
 send_critical_alerts = true
 send_watch_escalation = true
+# Radar funnel WATCH hints (operator DM only; requires universe.radar.emit_watch_candidates = true)
+send_radar_watch_candidate = false
 send_watch_companion = true
 notify_on_console_start = true
 
@@ -373,8 +393,8 @@ watch_escalation_enabled = true
 enforce_mtf_gate = true
 # Reversal profiles in bear BTC regime: min hard-gate confirmations (default 2-of-5).
 reversal_min_confirmations = 2
-# Future bridge to ConfluenceEngine weighted scoring; false keeps boolean 3-of-5 gate.
-use_weighted_confluence = false
+# Enabled 2026-06-04 after live_check confluence review (OPS-2): bridge armed at action_min_score.
+use_weighted_confluence = true
 portfolio_max_same_direction_regime = 4
 portfolio_max_family_direction = 2
 portfolio_max_bear_longs = 2
@@ -389,6 +409,22 @@ webhook_url = ""
 enabled = false
 webhook_url = ""
 username = "crypto-signal-bot"
+
+# Research harvest: deep capture on ~10 symbols (CLI: `python main.py harvest`).
+# Keep enabled=false for production; calibration runs after architecture/strategy work.
+[bot.research_harvest]
+enabled = false
+symbols = [
+  "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "BNBUSDT",
+  "DOGEUSDT", "LINKUSDT", "XAUUSDT", "XAGUSDT", "PAXGUSDT",
+]
+output_subdir = "research_harvest"
+skip_telegram_delivery = true
+route_all_enabled_strategies = true
+emit_strategy_routing_skips = true
+enable_spot_companion = true
+snapshot_on_cycle = true
+max_bar_tail = 3
 
 [bot.spot_companion]
 enabled = true
@@ -416,3 +452,10 @@ stop_loss_pause_hours = 5
 benchmark_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XAUUSDT", "XAGUSDT"]
 option_underlyings = ["BTC", "ETH"]
 macro_symbols = ["^VIX", "DX-Y.NYB", "^TNX", "^GSPC"]
+
+# Optional LLM rationales (v1.1 / OPT-2). Keys in .env only. Hot path must stay off.
+# See docs/research/LLM_API_INTEGRATION.md
+# [bot.intelligence.llm]
+# enabled = false
+# provider = "none"   # anthropic | openai | google
+# use_on_hot_path = false

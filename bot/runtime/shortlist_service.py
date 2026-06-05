@@ -15,6 +15,7 @@ from ..domain.events import ShortlistUpdatedEvent
 from ..domain.schemas import UniverseSymbol
 from ..market.data import BinanceFuturesMarketData
 from ..market.outcome_derank import penalties_from_sl_counts
+from ..market.promotion_engine import PromotionEngine
 from ..market.universe import (
     DEFAULT_PRESCORE_BASIS_WARM_LIMIT,
     build_shortlist,
@@ -93,11 +94,56 @@ def _log_value(value: object) -> object:
     return _LOG_MISSING_VALUE if value is None else value
 
 
+def _radar_store(bot: Any) -> Any | None:
+    ws = getattr(bot, "_ws_manager", None)
+    if ws is None:
+        return None
+    return getattr(ws, "_radar_store", None)
+
+
 class ShortlistService:
     """Encapsulates shortlist build/refresh lifecycle for ``SignalBot``."""
 
     def __init__(self, bot: Any) -> None:
         self._bot = bot
+
+    def _prepare_tickers_with_radar(
+        self,
+        tickers: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+        bot = self._bot
+        if not bot.settings.universe.radar.enabled:
+            return tickers, None
+        store = _radar_store(bot)
+        if store is None:
+            return tickers, None
+        engine = PromotionEngine(bot.settings)
+        store.ingest_batch(tickers)
+        tier_summary = engine.run_tier_cycle(store)
+        enriched = engine.enrich_ticker_rows(tickers, store)
+        return enriched, tier_summary
+
+    def _merge_shortlist_with_radar(
+        self,
+        shortlist: list[UniverseSymbol],
+        summary: dict[str, Any],
+        *,
+        seed_source: str,
+    ) -> tuple[list[UniverseSymbol], dict[str, Any]]:
+        bot = self._bot
+        if not bot.settings.universe.radar.enabled:
+            return shortlist, summary
+        store = _radar_store(bot)
+        if store is None:
+            return shortlist, summary
+        engine = PromotionEngine(bot.settings)
+        merged, radar_summary = engine.merge_shortlist(
+            shortlist,
+            store,
+            meta_by_symbol=bot._symbol_meta_by_symbol,
+            seed_source=seed_source,
+        )
+        return merged, {**summary, "radar": radar_summary}
 
     def _schedule_context_preload(self) -> None:
         bot = self._bot
@@ -552,6 +598,7 @@ class ShortlistService:
             self._merge_premium_index_rows(list(tickers_24h), premium_by_symbol)
         )
         await self._warm_prescore_basis_for_rows(enriched_tickers)
+        enriched_tickers, radar_pre = self._prepare_tickers_with_radar(enriched_tickers)
         shortlist, summary = build_shortlist(
             symbol_meta_list,
             enriched_tickers,
@@ -560,6 +607,11 @@ class ShortlistService:
             market_regime=_market_regime_hint(bot),
             outcome_penalties=outcome_penalties,
             **self._basis_warm_kwargs(),
+        )
+        if radar_pre is not None:
+            summary = {**summary, "radar_tier_cycle": radar_pre}
+        shortlist, summary = self._merge_shortlist_with_radar(
+            shortlist, summary, seed_source="rest_full"
         )
         LOG.info(
             "universe filter result | raw_tickers=%d gate_passed=%d light_pool=%d eligible=%d "
@@ -631,6 +683,7 @@ class ShortlistService:
 
         tickers = self._enrich_shortlist_rows(raw_tickers)
         await self._warm_prescore_basis_for_rows(tickers)
+        tickers, radar_pre = self._prepare_tickers_with_radar(tickers)
         outcome_penalties = await _outcome_derank_penalties(bot)
         shortlist, summary = build_shortlist(
             list(bot._symbol_meta_by_symbol.values()),
@@ -640,6 +693,11 @@ class ShortlistService:
             market_regime=_market_regime_hint(bot),
             outcome_penalties=outcome_penalties,
             **self._basis_warm_kwargs(),
+        )
+        if radar_pre is not None:
+            summary = {**summary, "radar_tier_cycle": radar_pre}
+        shortlist, summary = self._merge_shortlist_with_radar(
+            shortlist, summary, seed_source="ws_light"
         )
         if (
             cached_shortlist
@@ -719,6 +777,7 @@ class ShortlistService:
         outcome_penalties = await _outcome_derank_penalties(bot)
         enriched_tickers = self._enrich_shortlist_rows(list(tickers_24h))
         await self._warm_prescore_basis_for_rows(enriched_tickers)
+        enriched_tickers, radar_pre = self._prepare_tickers_with_radar(enriched_tickers)
         shortlist, summary = build_shortlist(
             list(bot._symbol_meta_by_symbol.values()),
             enriched_tickers,
@@ -727,6 +786,11 @@ class ShortlistService:
             market_regime=_market_regime_hint(bot),
             outcome_penalties=outcome_penalties,
             **self._basis_warm_kwargs(),
+        )
+        if radar_pre is not None:
+            summary = {**summary, "radar_tier_cycle": radar_pre}
+        shortlist, summary = self._merge_shortlist_with_radar(
+            shortlist, summary, seed_source="rest_medium"
         )
         cached_shortlist = list(getattr(bot, "_last_live_shortlist", []) or [])
         if cached_shortlist:
@@ -947,8 +1011,30 @@ class ShortlistService:
                 "fill": summary.get("fill"),
                 "avg_score": summary.get("avg_score"),
                 "strategy_fit_density": summary.get("strategy_fit_density"),
+                "radar": summary.get("radar"),
+                "radar_tier_cycle": summary.get("radar_tier_cycle"),
             },
         )
+
+        store = _radar_store(bot)
+        if store is not None and bot.settings.universe.radar.enabled:
+            from bot.diagnostics.runtime_ops import assess_radar_store
+            from bot.runtime.watch_escalation import emit_radar_watch_candidates
+
+            radar_health = assess_radar_store(store, config=bot.settings.universe.radar)
+            bot.telemetry.append_jsonl(
+                "radar_health.jsonl",
+                {
+                    "ts": datetime.now(UTC).isoformat(),
+                    "source": source,
+                    **radar_health,
+                },
+            )
+            try:
+                watch_summary = await emit_radar_watch_candidates(bot, store)
+                summary = {**summary, "radar_watch": watch_summary}
+            except DEFENSIVE_EXC:
+                LOG.debug("radar watch emit failed", exc_info=True)
 
         LOG.info(
             (
@@ -1056,3 +1142,8 @@ class ShortlistService:
                 original_top,
                 new_top,
             )
+
+
+async def run_shortlist_refresh_loop(service: ShortlistService) -> None:
+    """Background shortlist rerank/refresh loop (started from SignalBot.run_forever)."""
+    await service.refresh_shortlist_periodic()

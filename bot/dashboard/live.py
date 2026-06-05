@@ -265,6 +265,14 @@ class DashboardLiveData:
         """Return shortlist composition and last telemetry rows."""
         return self._cached("shortlist", (limit,), lambda: self._shortlist_uncached(limit=limit))
 
+    def radar_summary(self, *, hot_limit: int = 25) -> JsonDict:
+        """Return live radar store health and top HOT/DEEP symbols."""
+        return self._cached(
+            "radar_summary",
+            (hot_limit,),
+            lambda: self._radar_summary_uncached(hot_limit=hot_limit),
+        )
+
     def rejections(self, *, limit: int = 30, max_rows: int = 100_000) -> JsonDict:
         """Return rejection reason and stage summaries."""
         return self._cached(
@@ -604,6 +612,45 @@ class DashboardLiveData:
             },
         }
 
+    def _radar_summary_uncached(self, *, hot_limit: int) -> JsonDict:
+        from bot.diagnostics.runtime_ops import assess_radar_store
+        from bot.market.radar_state import SymbolTier
+
+        bot = self._bot()
+        ws_mgr = getattr(bot, "_ws_manager", None)
+        store = getattr(ws_mgr, "_radar_store", None) if ws_mgr is not None else None
+        cfg = getattr(getattr(bot, "settings", None), "universe", None)
+        radar_cfg = getattr(cfg, "radar", None) if cfg is not None else None
+        health = assess_radar_store(store, config=radar_cfg or object())
+        hot_rows: list[JsonDict] = []
+        if store is not None and hasattr(store, "symbols_by_tier"):
+            for tier in (SymbolTier.DEEP, SymbolTier.HOT):
+                for symbol in store.symbols_by_tier(tier)[:hot_limit]:
+                    state = store._states.get(symbol) if hasattr(store, "_states") else None  # noqa: SLF001
+                    hot_rows.append(
+                        {
+                            "symbol": symbol,
+                            "tier": tier.value,
+                            "prescore_boost": getattr(state, "prescore_boost", None),
+                            "flags": list(getattr(state, "flags", ()) or ())[:5],
+                            "promotion_reasons": list(
+                                getattr(state, "promotion_reasons", ()) or ()
+                            )[:4],
+                        }
+                    )
+        shortlist_radar = 0
+        for item in list(getattr(bot, "_shortlist", []) or []):
+            if getattr(item, "shortlist_bucket", "") == "radar" or any(
+                "radar" in str(r) for r in (getattr(item, "shortlist_reasons", ()) or ())
+            ):
+                shortlist_radar += 1
+        return {
+            "generated_at": _utc_now().isoformat(),
+            "health": health,
+            "shortlist_radar_promoted": shortlist_radar,
+            "top_symbols": hot_rows[:hot_limit],
+        }
+
     def _shortlist_uncached(self, *, limit: int) -> JsonDict:
         bot = self._bot()
         pinned = (
@@ -620,6 +667,7 @@ class DashboardLiveData:
         items = []
         for item in list(getattr(bot, "_shortlist", []) or [])[: max(1, int(limit))]:
             symbol = str(getattr(item, "symbol", ""))
+            reasons = list(getattr(item, "shortlist_reasons", ()) or ())[:6]
             items.append(
                 {
                     "symbol": symbol,
@@ -630,12 +678,17 @@ class DashboardLiveData:
                     "price_change_pct": getattr(item, "price_change_pct", None),
                     "strategy_fit_count": len(getattr(item, "strategy_fits", ()) or ()),
                     "strategy_fits": list(getattr(item, "strategy_fits", ()) or ())[:12],
+                    "shortlist_reasons": reasons,
+                    "radar_promoted": getattr(item, "shortlist_bucket", "") == "radar"
+                    or any("radar" in str(r) for r in reasons),
                     "pinned": symbol.upper() in pinned,
                     "priority": symbol.upper() in priority_symbols,
                 }
             )
         telemetry_rows = list(self._iter_recent("shortlist", max_rows=50, limit_files=1))
+        build_rows = list(self._iter_recent("shortlist_build", max_rows=5, limit_files=1))
         latest = telemetry_rows[0] if telemetry_rows else {}
+        latest_build = build_rows[0] if build_rows else {}
         fit_counts = [row["strategy_fit_count"] for row in items]
         item_by_symbol = {str(item["symbol"]).upper(): item for item in items}
         telemetry_symbols = {
@@ -679,6 +732,9 @@ class DashboardLiveData:
             "light_pool_limit": latest.get("light_pool_limit"),
             "latest_telemetry": latest,
             "telemetry_tail": telemetry_rows[:10],
+            "radar_tier_cycle": latest_build.get("radar_tier_cycle"),
+            "radar": latest_build.get("radar"),
+            "radar_promoted_count": sum(1 for row in items if row.get("radar_promoted")),
             "priority_assets": priority_rows,
             "items": items,
         }

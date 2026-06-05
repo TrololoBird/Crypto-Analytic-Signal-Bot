@@ -92,4 +92,5 @@ def test_asset_strategy_allowlist_honors_excluded() -> None:
         enabled={"structure_pullback", "btc_correlation", "order_block"},
         heuristic_fits=("structure_pullback", "order_block"),
     )
-    assert allowed == ("structure_pullback", "btc_correlation")
+    assert set(allowed) == {"structure_pullback", "btc_correlation"}
+    assert "order_block" not in allowed

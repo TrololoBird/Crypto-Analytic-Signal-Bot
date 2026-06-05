@@ -8,7 +8,7 @@ Run the full agent-owned verification sequence. Do not ask the user to run comma
 2. `python -m compileall -q bot`
 3. `python scripts/validate_config.py --config config.toml` (or `config.toml.example` if no local config)
 4. `python scripts/verify_refactor_gate.py`
-5. `pytest tests/test_wave_f9_agent_*.py tests/test_wave_f10_agent_*.py tests/test_wave_f11_*.py -q`
+5. `pytest tests/test_wave_f9_agent_*.py tests/test_wave_f10_agent_*.py tests/test_wave_i_calibration.py -q`
 6. If Binance REST reachable (`python scripts/probe_binance_access.py --all-configured`):
    - `PYTEST_LIVE=1 pytest tests/live/ -v`
    - `python scripts/live_check_pipeline.py --symbols BTCUSDT --limit 1`

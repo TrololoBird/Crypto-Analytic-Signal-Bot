@@ -51,6 +51,14 @@ class IntraCandleScanner:
                 0.0,
             )
         )
+        if throttle_seconds > 0.0:
+            async with self._bot._shortlist_lock:
+                shortlist_peek = list(self._bot._shortlist)
+            from bot.runtime.data_readiness import is_radar_promoted_item
+
+            item_peek = next((row for row in shortlist_peek if row.symbol == symbol), None)
+            if is_radar_promoted_item(item_peek):
+                throttle_seconds *= 0.5
         if now - self._bot._last_intra_scan.get(symbol, 0.0) < throttle_seconds:
             return
 

@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from ..persistence.repository import MemoryRepository
+    from ..persistence.repository.memory import MemoryRepository
 
 
 @dataclass(slots=True)

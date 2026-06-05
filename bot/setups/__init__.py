@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 from ..delivery.trade_plan import TradePlanBuilder
 from ..domain.schemas import PreparedSymbol, Signal
 from ..domain.strategies import StrategyDecision
-from ..features import _swing_points  # shared swing detection helper
+from ..features.prepare import _swing_points  # shared swing detection helper
 from .utils import (
     apply_graded_penalty,
     build_structural_targets,

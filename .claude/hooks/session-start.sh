@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
-# Claude Code SessionStart — print project reminders to stderr (visible in hook log).
-echo "v9 Crypto Signal Bot | Python 3.14 .venv | clean_session_data before live | delivery: contract→confluence→deliver" >&2
+# Claude Code SessionStart — one line; details in docs/DEFINITION_OF_DONE.md
+echo "v9 v1 ready | DoD: docs/DEFINITION_OF_DONE.md | tokens: docs/AGENT_TOKEN_POLICY.md | delivery invariant | no 50-item audits" >&2
 exit 0

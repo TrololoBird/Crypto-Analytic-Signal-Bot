@@ -9,7 +9,7 @@ import polars as pl
 from ..domain.strategy_catalog import catalog_default_params
 from ._common import SpecHit, _latest_values, build_spec_signal, with_spec_columns
 from ._roadmap import _as_float, _build_atr_signal, _last, _missing_columns, _reject
-from .common import orderflow_supports_reversal
+from ._common import orderflow_supports_reversal
 from .roadmap_base import RoadmapSetup
 
 if TYPE_CHECKING:

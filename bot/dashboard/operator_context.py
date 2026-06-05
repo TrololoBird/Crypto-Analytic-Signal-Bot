@@ -308,6 +308,14 @@ async def format_operator_health_text(bot: SignalBot) -> str:
             f"last kline age <code>{round(float(health.get('last_kline_event_age_seconds') or 0), 1)}s</code>"
         ),
     ]
+    radar = health.get("radar") if isinstance(health.get("radar"), dict) else {}
+    if radar.get("enabled"):
+        lines.append(
+            "Radar: "
+            f"status=<code>{html.escape(str(radar.get('status') or 'unknown'))}</code> "
+            f"symbols=<code>{radar.get('symbol_count') or 0}</code> "
+            f"tiers=<code>{html.escape(str(radar.get('tiers') or {}))}</code>"
+        )
     if ws_snap:
         lines.append(
             f"WS lag <code>{ws_snap.get('latency_ms') or ws_snap.get('current_latency_ms') or '—'}ms</code> · "

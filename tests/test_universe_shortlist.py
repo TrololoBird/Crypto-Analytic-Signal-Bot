@@ -67,10 +67,11 @@ def test_select_light_pool_caps_by_volume_and_keeps_pins() -> None:
 def test_build_shortlist_reports_funnel_stages() -> None:
     settings = _settings(
         universe={
-            "light_pool_limit": 50,
+            "light_pool_limit": 80,
             "dynamic_limit": 40,
             "shortlist_limit": 15,
             "min_quote_volume_usd": 10_000_000,
+            "radar": {"hot_pool_limit": 40, "warm_pool_limit": 80},
         }
     )
     symbols = [f"ALT{i}USDT" for i in range(80)] + list(settings.universe.pinned_symbols)

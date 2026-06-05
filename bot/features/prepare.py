@@ -18,7 +18,7 @@ import structlog
 from bot.runtime.errors import DEFENSIVE_EXC
 
 from ..domain.schemas import PreparedSymbol, SymbolFrames, UniverseSymbol
-from ..market.ws_enrichment import depth_imbalance_from_book, microprice_bias_from_book
+from ..market.ws import depth_imbalance_from_book, microprice_bias_from_book
 from ..runtime_policy import (
     configured_context_timeframes,
     configured_primary_timeframe,

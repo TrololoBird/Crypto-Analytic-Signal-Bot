@@ -908,10 +908,6 @@ class DeliveryOrchestrator:
 
         for signal in signals:
             contract_issues = self._contract_issue_rows(signal)
-            contract_validated_tracking_ids.add(signal.tracking_id)
-            if signal.tracking_id not in contract_validated_tracking_ids:
-                msg = f"signal_contract validation was bypassed for {signal.tracking_id}"
-                raise ValueError(msg)
             if contract_issues:
                 self._record_delivery_diag_reject(
                     "contract", "invalid_signal_contract", setup_id=signal.setup_id
@@ -935,6 +931,7 @@ class DeliveryOrchestrator:
                     contract_issues,
                 )
                 continue
+            contract_validated_tracking_ids.add(signal.tracking_id)
             prepared = (
                 prepared_by_tracking_id.get(signal.tracking_id) if prepared_by_tracking_id else None
             )

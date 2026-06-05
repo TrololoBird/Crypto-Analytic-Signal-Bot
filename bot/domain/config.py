@@ -14,8 +14,6 @@ from bot.domain.limit_entry import DEFAULT_LATE_ENTRY_CHASE_PCT
 from bot.domain.strategy_catalog import (
     CATALOG_SETUP_IDS_ORDERED,
     CATALOG_SETUP_PARAM_KEYS,
-    verify_config_setup_references,
-    verify_setup_config_model,
 )
 
 from ..secrets import load_secrets
@@ -131,8 +129,31 @@ class RuntimeConfig(_StrictModel):
         return self
 
 
+class UniverseRadarConfig(_StrictModel):
+    """Tier-0/1 market radar: WS firehose → local state → promotion into deep shortlist."""
+
+    enabled: bool = True
+    warm_pool_limit: int = Field(default=200, ge=50, le=400)
+    hot_pool_limit: int = Field(default=60, ge=10, le=150)
+    # Extra symbols forced into shortlist beyond composite score (pinned always included).
+    promotion_slots_reserve: int = Field(default=12, ge=0, le=40)
+    impulse_5m_pct: float = Field(default=1.0, ge=0.1, le=20.0)
+    vol_spike_zscore: float = Field(default=2.0, ge=0.5, le=10.0)
+    change_24h_hot_pct: float = Field(default=4.0, ge=0.5, le=50.0)
+    funding_extreme_pct: float = Field(default=0.0008, ge=0.0001, le=0.05)
+    prescore_boost_hot: float = Field(default=0.12, ge=0.0, le=0.35)
+    prescore_boost_warm: float = Field(default=0.05, ge=0.0, le=0.2)
+    promotion_cooldown_seconds: int = Field(default=1200, ge=60, le=7200)
+    demotion_idle_seconds: int = Field(default=10_800, ge=600, le=86_400)
+    min_quote_volume_usd: float = Field(default=5_000_000.0, ge=0.0)
+    light_rsi_overbought: float = Field(default=72.0, ge=50.0, le=95.0)
+    light_rsi_oversold: float = Field(default=28.0, ge=5.0, le=50.0)
+    emit_watch_candidates: bool = False
+
+
 class UniverseConfig(_StrictModel):
     quote_asset: str = "USDT"
+    radar: UniverseRadarConfig = Field(default_factory=UniverseRadarConfig)
     # Stage-1 funnel: top-N by 24h quote volume after hard gates (before composite scoring).
     light_pool_limit: int = Field(default=180, ge=50, le=300)
     dynamic_limit: int = Field(default=60, ge=10, le=200)
@@ -178,6 +199,15 @@ class UniverseConfig(_StrictModel):
             raise ValueError(
                 "universe.light_pool_limit must be >= universe.dynamic_limit "
                 f"({self.light_pool_limit} < {self.dynamic_limit})"
+            )
+        if self.radar.hot_pool_limit > self.light_pool_limit:
+            raise ValueError(
+                "universe.radar.hot_pool_limit must be <= universe.light_pool_limit "
+                f"({self.radar.hot_pool_limit} > {self.light_pool_limit})"
+            )
+        if self.shortlist_limit + self.radar.promotion_slots_reserve > self.light_pool_limit:
+            raise ValueError(
+                "shortlist_limit + radar.promotion_slots_reserve must be <= light_pool_limit"
             )
         return self
 
@@ -516,6 +546,7 @@ class TelegramOperatorConfig(_StrictModel):
     send_sl_postmortem: bool = True
     send_critical_alerts: bool = True
     send_watch_escalation: bool = True
+    send_radar_watch_candidate: bool = False
     send_watch_companion: bool = True
     notify_on_console_start: bool = True
 
@@ -536,6 +567,30 @@ class NotifierConfig(_StrictModel):
     @classmethod
     def _normalize_provider(cls, value: str) -> str:
         return str(value or "telegram").strip().lower()
+
+
+class ResearchHarvestConfig(_StrictModel):
+    """Deep capture for strategy research — enable via CLI ``harvest`` (calibration comes later)."""
+
+    enabled: bool = False
+    symbols: tuple[str, ...] = ()
+    output_subdir: str = "research_harvest"
+    skip_telegram_delivery: bool = True
+    route_all_enabled_strategies: bool = True
+    emit_strategy_routing_skips: bool = True
+    enable_spot_companion: bool = True
+    snapshot_on_cycle: bool = True
+    include_indicator_snapshot: bool = True
+    include_ws_enrichments: bool = True
+    include_reject_log: bool = True
+    max_bar_tail: int = Field(default=3, ge=0, le=20)
+
+    @field_validator("symbols")
+    @classmethod
+    def _normalize_harvest_symbols(
+        cls, value: tuple[str, ...] | list[str] | None
+    ) -> tuple[str, ...]:
+        return tuple(str(item).strip().upper() for item in (value or ()) if str(item).strip())
 
 
 class SpotCompanionConfig(_StrictModel):
@@ -805,8 +860,13 @@ class BotSettings(_StrictModel):
     alerts: AlertConfig = Field(default_factory=AlertConfig)
     notifiers: NotifierConfig = Field(default_factory=NotifierConfig)
     spot_companion: SpotCompanionConfig = Field(default_factory=SpotCompanionConfig)
+    research_harvest: ResearchHarvestConfig = Field(default_factory=ResearchHarvestConfig)
     intelligence: IntelligenceConfig = Field(default_factory=IntelligenceConfig)
     assets: dict[str, AssetConfig] = Field(default_factory=dict)
+
+    @property
+    def research_harvest_dir(self) -> Path:
+        return Path(self.data_dir).parent / self.research_harvest.output_subdir
 
     @property
     def telemetry_dir(self) -> Path:
@@ -933,6 +993,11 @@ class BotSettings(_StrictModel):
 
     def validate_for_runtime(self, *, require_telegram: bool) -> None:
         """Validate settings for runtime execution."""
+        from bot.domain.strategy_catalog import (
+            verify_config_setup_references,
+            verify_setup_config_model,
+        )
+
         self._assert_supported_kline_intervals(cast("list[str]", self.ws.kline_intervals))
         for error in verify_setup_config_model(SetupConfig):
             raise ValueError(error)
@@ -1105,4 +1170,9 @@ def load_settings(config_path: str | Path = "config.toml") -> BotSettings:
             setup_overrides[setup_id] = {**legacy_params, **existing}
         else:
             setup_overrides[setup_id] = dict(legacy_params)
-    return BotSettings.model_validate(payload)
+    settings = BotSettings.model_validate(payload)
+    if os.getenv("BOT_RESEARCH_HARVEST", "").strip().lower() in ("1", "true", "yes"):
+        from .research_harvest import activate_research_harvest
+
+        settings = activate_research_harvest(settings)
+    return settings

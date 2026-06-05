@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 from bot.runtime.errors import DEFENSIVE_EXC
-from bot.runtime.data_readiness import missing_derivatives_context
+from bot.runtime.data_readiness import is_radar_promoted_item, missing_derivatives_context
 from bot.runtime.delivery_orchestrator import DELIVERY_SUCCESS_STATUSES
 
 from ..domain.schemas import PipelineResult, PreparedSymbol, Signal, SymbolFrames, UniverseSymbol
@@ -244,6 +244,35 @@ class CycleRunner:
             delivered=delivered,
         )
 
+    def _emergency_shortlist_for_scan(
+        self, shortlist: list[UniverseSymbol]
+    ) -> list[UniverseSymbol]:
+        """Emergency fallback: radar-promoted symbols at half frequency (2× interval)."""
+        bot = self._bot
+        fallback_sec = float(bot.settings.runtime.emergency_fallback_seconds)
+        min_interval = max(fallback_sec * 2.0, 60.0)
+        now = asyncio.get_running_loop().time()
+        last = getattr(bot, "_last_emergency_radar_scan", {})
+        ready: list[UniverseSymbol] = []
+        deferred: list[UniverseSymbol] = []
+        for item in shortlist:
+            if not is_radar_promoted_item(item):
+                ready.append(item)
+                continue
+            if now - float(last.get(item.symbol, 0.0)) >= min_interval:
+                last[item.symbol] = now
+                ready.append(item)
+            else:
+                deferred.append(item)
+        bot._last_emergency_radar_scan = last
+        if deferred:
+            LOG.debug(
+                "emergency fallback deferred radar symbols | count=%d interval_s=%.0f",
+                len(deferred),
+                min_interval,
+            )
+        return ready
+
     async def run_emergency_cycle(self) -> dict[str, Any]:
         bot = self._bot
         tracking_events = await bot.tracker.review_open_signals(dry_run=False)
@@ -254,6 +283,7 @@ class CycleRunner:
             shortlist = list(bot._shortlist)
         if not shortlist:
             shortlist = await bot._do_refresh_shortlist()
+        shortlist = self._emergency_shortlist_for_scan(shortlist)
         if shortlist:
             try:
                 runtime = bot.settings.runtime

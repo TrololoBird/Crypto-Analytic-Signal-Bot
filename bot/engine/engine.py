@@ -163,8 +163,11 @@ class SignalEngine:
             fits_arg = tuple(strategy_fits) if strategy_fits and use_fits_filter else None
             priority_setup_ids: tuple[str, ...] | None = None
             if use_unified_shortlist_routing:
-                pool_priority = DATA_POOL_SETUPS.get("orderflow", frozenset()) | DATA_POOL_SETUPS.get(
-                    "positioning", frozenset()
+                pool_priority = (
+                    DATA_POOL_SETUPS.get("orderflow", frozenset())
+                    | DATA_POOL_SETUPS.get("positioning", frozenset())
+                    | DATA_POOL_SETUPS.get("orderbook", frozenset())
+                    | DATA_POOL_SETUPS.get("multi_asset", frozenset())
                 )
                 priority_setup_ids = tuple(sorted(pool_priority))
             lane_metas = select_lane_setups(

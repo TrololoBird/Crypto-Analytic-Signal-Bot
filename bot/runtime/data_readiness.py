@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, Mapping
 
 if TYPE_CHECKING:
     from bot.domain.config import BotSettings
-    from bot.domain.schemas import PreparedSymbol
+    from bot.domain.schemas import PreparedSymbol, UniverseSymbol
 
 import polars as pl
 
@@ -66,13 +66,32 @@ def _last_column_finite(frame: pl.DataFrame | None, column: str) -> float | None
     return _finite_float(frame[column][-1])
 
 
+def is_radar_promoted_item(item: UniverseSymbol | None) -> bool:
+    """True when symbol entered shortlist via radar promotion funnel."""
+    if item is None:
+        return False
+    reasons = getattr(item, "shortlist_reasons", ()) or ()
+    return getattr(item, "shortlist_bucket", "") == "radar" or any(
+        "radar" in str(reason) for reason in reasons
+    )
+
+
+_is_radar_promoted_item = is_radar_promoted_item
+
+
 def assess_symbol_data_readiness(
     prepared: PreparedSymbol,
     settings: BotSettings,
+    *,
+    universe_item: UniverseSymbol | None = None,
 ) -> DataReadinessResult:
     """Return whether required frames and live enrichments are fresh enough."""
     filters = settings.filters
-    details: dict[str, Any] = {"symbol": prepared.symbol}
+    radar_promoted = is_radar_promoted_item(universe_item)
+    details: dict[str, Any] = {
+        "symbol": prepared.symbol,
+        "radar_promoted": radar_promoted,
+    }
     minimums = {
         "5m": int(filters.min_bars_5m),
         "15m": int(filters.min_bars_15m),
@@ -113,7 +132,8 @@ def assess_symbol_data_readiness(
                 details=details,
             )
 
-    if bool(getattr(settings.runtime, "strict_data_quality", True)):
+    strict = bool(getattr(settings.runtime, "strict_data_quality", True))
+    if strict and not radar_promoted:
         book_missing: list[str] = []
         for column in ("bid_price", "ask_price", "bid_qty", "ask_qty"):
             if _last_column_finite(prepared.work_15m, column) is None:
@@ -136,5 +156,7 @@ def assess_symbol_data_readiness(
                 reason="data.derivatives_context_missing",
                 details={**details, "missing_live_fields": missing_live},
             )
+    elif strict and radar_promoted:
+        details["strict_derivatives_skipped"] = True
 
     return DataReadinessResult(ready=True, details=details)

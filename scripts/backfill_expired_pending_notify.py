@@ -17,7 +17,7 @@ except ModuleNotFoundError:
 bootstrap_repo_path()
 
 from bot.domain.config import load_settings
-from bot.persistence.repository import MemoryRepository
+from bot.persistence.repository.memory import MemoryRepository
 from bot.persistence.tracking import SignalTracker
 from bot.telemetry import TelemetryStore
 

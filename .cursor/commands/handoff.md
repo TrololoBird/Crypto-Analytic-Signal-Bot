@@ -20,7 +20,7 @@ End-of-session summary for the **next agent session**. Execute any quick checks 
 - live: run / skipped (reason)
 
 ## Next session (priority)
-1. ... (map to P0–P4 from PROJECT_ROADMAP)
+1. ... (map to backlog ID from docs/DEFINITION_OF_DONE.md)
 
 ## Blockers
 - proxy / rate limit / ...

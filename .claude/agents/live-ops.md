@@ -12,7 +12,7 @@ You own all terminal work. User does not run commands.
 - `scripts/live_watch_rollup_report.py`
 - `scripts/calibration_pipeline.py`
 - `scripts/discover_binance_proxies.py`, `scripts/probe_binance_access.py`
-- `bot/diagnostics/live_watch.py`
+- `bot/diagnostics/session_ops.py`, `data/live_watch/<run_id>/`
 
 ## Workflow
 

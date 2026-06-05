@@ -154,7 +154,7 @@ def clean_session_artifacts(
                     (
                         "import asyncio; from pathlib import Path; "
                         "from bot.domain.config import load_settings; "
-                        "from bot.persistence.repository import MemoryRepository; "
+                        "from bot.persistence.repository.memory import MemoryRepository; "
                         f"async def _init():\n"
                         f"    s = load_settings(config_path=Path({config_path!r}));\n"
                         "    repo = MemoryRepository(db_path=s.db_path, data_dir=s.data_dir / 'parquet');\n"

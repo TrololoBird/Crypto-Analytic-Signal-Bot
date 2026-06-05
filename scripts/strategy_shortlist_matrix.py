@@ -11,7 +11,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -22,15 +21,16 @@ except ModuleNotFoundError:  # pragma: no cover
 
 bootstrap_repo_path()
 
-from bot.diagnostics.live_watch import (
+from bot.diagnostics.session_ops import (
     find_live_watch_session,
     resolve_telemetry_analysis_dir,
     summarize_live_watch_session,
 )
+from bot.diagnostics.session_ops import analyze_telemetry
 from bot.domain.config import _ALL_SETUP_IDS, load_settings
 from bot.domain.strategy_catalog import CATALOG_BY_ID
 from bot.market.fit import ASSET_FIT_PROFILES
-from bot.market.rest import BinanceClientImpl
+from bot.market.rest_impl import BinanceClientImpl
 from bot.market.universe import build_shortlist
 
 LOG = configure_script_logging("scripts.strategy_shortlist_matrix")
@@ -195,75 +195,6 @@ def build_static_rows() -> list[dict[str, Any]]:
             }
         )
     return rows
-
-
-def _read_jsonl(path: Path) -> list[dict[str, Any]]:
-    if not path.is_file():
-        return []
-    out: list[dict[str, Any]] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line:
-            try:
-                out.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-    return out
-
-
-def analyze_telemetry(analysis_dir: Path) -> dict[str, Any]:
-    decisions = _read_jsonl(analysis_dir / "strategy_decisions.jsonl")
-    shortlist_rows = _read_jsonl(analysis_dir / "shortlist.jsonl")
-    build_rows = _read_jsonl(analysis_dir / "shortlist_build.jsonl")
-    latest_shortlist = shortlist_rows[-1] if shortlist_rows else {}
-    fit_counts = latest_shortlist.get("strategy_fit_counts") or {}
-
-    by_strategy: dict[str, Counter[str]] = defaultdict(Counter)
-    symbols_by_strategy: dict[str, set[str]] = defaultdict(set)
-    for row in decisions:
-        sid = str(row.get("setup_id") or row.get("strategy") or "unknown")
-        decision = str(row.get("status") or row.get("decision") or "unknown").lower()
-        symbol = str(row.get("symbol") or "").upper()
-        by_strategy[sid][decision] += 1
-        if symbol:
-            symbols_by_strategy[sid].add(symbol)
-        reason = str(row.get("reason_code") or "")
-        if reason:
-            by_strategy[sid][f"reason:{reason}"] += 1
-
-    skip_not_routed = sum(
-        1
-        for row in decisions
-        if str(row.get("reason_code") or "") == "asset_fit.shortlist_not_routed"
-    )
-    strategy_rows: list[dict[str, Any]] = []
-    for setup_id in _ALL_SETUP_IDS:
-        counts = by_strategy.get(setup_id, Counter())
-        strategy_rows.append(
-            {
-                "setup_id": setup_id,
-                "symbols_touched": len(symbols_by_strategy.get(setup_id, set())),
-                "signal": counts.get("signal", 0),
-                "reject": counts.get("reject", 0),
-                "skip": counts.get("skip", 0),
-                "not_routed": counts.get("reason:asset_fit.shortlist_not_routed", 0),
-                "shortlist_fit_symbols": int(fit_counts.get(setup_id, 0) or 0),
-                "ran": counts.get("signal", 0)
-                + counts.get("reject", 0)
-                + counts.get("skip", 0)
-                > 0,
-            }
-        )
-
-    return {
-        "decision_rows": len(decisions),
-        "skip_not_routed_total": skip_not_routed,
-        "latest_shortlist": latest_shortlist,
-        "latest_build": build_rows[-1] if build_rows else {},
-        "strategies": strategy_rows,
-        "strategies_ran": sum(1 for r in strategy_rows if r["ran"]),
-        "strategies_zero_runs": [r["setup_id"] for r in strategy_rows if not r["ran"]],
-    }
 
 
 async def _warm_basis_cache(
@@ -463,7 +394,7 @@ def main() -> int:
                 else:
                     print(f"Run not found: {run_id}")
                 return 1
-            live = summarize_live_watch_session(session)
+            live = summarize_live_watch_session(session, telemetry_dir=settings.telemetry_dir)
             report["telemetry_source"] = "live_watch"
         report["live_telemetry"] = live
         report["run_id"] = run_id

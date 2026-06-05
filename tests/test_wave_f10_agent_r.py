@@ -17,7 +17,7 @@ from bot.persistence.journal import (
     build_journal_report_primary,
 )
 from bot.persistence.repository.memory import MemoryRepository
-from bot.persistence.repository.queries.outcomes import (
+from bot.persistence.repository.memory import (
     fetch_setup_stats_rows,
     fetch_signal_outcome_rows,
 )

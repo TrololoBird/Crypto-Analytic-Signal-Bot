@@ -184,6 +184,9 @@ warn_required_dynamic_aliases = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["live: hits Binance public API (requires network)"]
+markers = [
+    "live: hits Binance public API (requires network)",
+    "slow: tests that take >30s or require extended runtime",
+]
 asyncio_mode = "auto"
 filterwarnings = ["ignore::DeprecationWarning"]

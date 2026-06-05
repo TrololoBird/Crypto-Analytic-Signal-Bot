@@ -168,7 +168,7 @@ async def test_signal_bot_start_runs_network_bootstrap() -> None:
 
     with (
         patch("bot.market.proxy_bootstrap.ensure_network_ready", ensure),
-        patch("bot.runtime.bot.run_startup_audit"),
+        patch("bot.diagnostics.config_audit.run_startup_audit"),
     ):
         from bot.runtime.bot import SignalBot
 

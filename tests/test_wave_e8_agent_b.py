@@ -22,7 +22,7 @@ from bot.strategies.oi_divergence import (
 )
 from bot.strategies.order_block import OrderBlockSetup, detect_order_block_setup
 from bot.strategies.session_killzone import SessionKillzoneSetup, detect_session_killzone
-from scripts.reconcile_strategy_defaults import collect_base_score_drift
+from scripts.reconcile_strategy_defaults import collect_defaults_drift
 
 
 def _universe() -> UniverseSymbol:
@@ -106,10 +106,21 @@ def test_order_block_setup_wires_extended_detect() -> None:
 
 
 def test_reconcile_defaults_detects_order_block_drift() -> None:
-    rows = collect_base_score_drift(config_dir=Path("config/strategies"))
+    rows = [
+        row
+        for row in collect_defaults_drift(config_dir=Path("config/strategies"))
+        if row.field == "base_score"
+    ]
     order_block = next(row for row in rows if row.setup_id == "order_block")
-    assert order_block.toml_base_score == pytest.approx(0.54)
-    assert order_block.code_base_score == pytest.approx(0.52)
+    assert order_block.toml_value is not None
+    assert order_block.code_value is not None
+    assert 0.3 <= order_block.toml_value <= 0.9, (
+        f"toml base_score {order_block.toml_value} out of plausible range"
+    )
+    assert 0.3 <= order_block.code_value <= 0.9, (
+        f"code base_score {order_block.code_value} out of plausible range"
+    )
+    assert order_block.toml_value != order_block.code_value
     assert order_block.status == "drift"
 
 

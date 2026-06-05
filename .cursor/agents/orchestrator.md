@@ -15,7 +15,9 @@ You coordinate; you do not dump work on the human.
 | live, 6h, proxy, rollup, calibration | `live-ops` |
 | split, de-bloat, LOC, memory.py, pipeline | `de-bloat` then `verifier` |
 | zero hit, threshold, strategy name | `strategy-calibration` |
-| delivery, confluence, telegram send | `delivery-guardian` (readonly) first if auditing; else implement + verify |
+| delivery reject, missing telegram send | `delivery-debugger` |
+| why signal not sent, trace funnel | `signal-tracer` |
+| delivery, confluence audit | `delivery-guardian` (readonly) first if auditing; else implement + verify |
 | done, status, what's next | produce handoff per `/handoff` |
 
 ## Your process

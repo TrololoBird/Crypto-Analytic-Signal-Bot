@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, ClassVar
 
-from ..features import _swing_points
+from ..features.prepare import _swing_points
 from ..setups import _build_signal, _compute_dynamic_score, _last_swing_prices, _reject
 from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
 from ..setups.utils import normalize_trade_levels

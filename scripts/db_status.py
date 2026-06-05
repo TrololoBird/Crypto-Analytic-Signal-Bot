@@ -18,7 +18,7 @@ bootstrap_repo_path()
 from bot.domain.config import load_settings
 from bot.migrations import migrate_db
 from bot.persistence.db_status import collect_db_status
-from bot.persistence.repository import MemoryRepository
+from bot.persistence.repository.memory import MemoryRepository
 
 
 async def _run(*, config: Path, apply_migrations: bool) -> int:

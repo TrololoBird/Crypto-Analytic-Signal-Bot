@@ -41,7 +41,14 @@ def classify_stop_loss_root_cause(
     """Return structured SL diagnosis stored inside outcome features."""
     feat = features or {}
     dir_norm = str(direction or "").lower()
-    regime = str(feat.get("market_regime") or feat.get("regime_1h") or "").lower()
+    regime = str(
+        feat.get("market_regime")
+        or feat.get("regime_1h")
+        or feat.get("market_regime_at_close")
+        or ""
+    ).lower()
+    regime_at_close = str(feat.get("market_regime_at_close") or "").lower()
+    regime_at_entry = str(feat.get("market_regime") or feat.get("regime_1h") or "").lower()
     btc_bias = str(feat.get("btc_bias") or "").lower()
     bias_4h = str(feat.get("bias_4h") or "").lower()
     atr_pct = _feature_float(feat, "atr_pct", "atr_pct_15m")
@@ -81,6 +88,13 @@ def classify_stop_loss_root_cause(
         reasons.append("stop_within_5m_of_entry")
         if "bear" not in code:
             code = "quick_stop_no_follow_through"
+
+    if (
+        regime_at_entry
+        and regime_at_close
+        and regime_at_entry != regime_at_close
+    ):
+        reasons.append(f"regime_shift_{regime_at_entry}_to_{regime_at_close}")
 
     if post_sl_fav is not None and post_sl_fav >= 1.0:
         reasons.append(f"post_sl_favorable_{post_sl_fav:.1f}pct")

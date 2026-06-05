@@ -6,12 +6,11 @@ import logging
 import math
 from typing import TYPE_CHECKING, ClassVar
 
-from ..features import _swing_points as _sp
 from ..delivery.trade_plan import TradePlanBuilder
 from ..setups import _build_signal, _compute_dynamic_score, _reject
-from ..setups.smc import latest_order_block
+from ..setups.smc import latest_liquidity_sweep, latest_order_block, swing_series
 from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
-from ..setups.utils import build_structural_targets, validate_rr_or_penalty
+from ..setups.utils import build_smc_trade_plan, validate_rr_or_penalty
 from ._common import SpecHit, _latest_values, as_float, with_spec_columns
 
 if TYPE_CHECKING:
@@ -156,6 +155,17 @@ def _detect_order_block_extended(
         _reject(prepared, setup_id, "order_block_too_old", age=age, max_age=ob_max_age)
         return None
 
+    sweep = latest_liquidity_sweep(w15m, swing_length=3)
+    if sweep is not None and sweep.direction != direction:
+        _reject(
+            prepared,
+            setup_id,
+            "order_block_sweep_mismatch",
+            ob_direction=direction,
+            sweep_direction=sweep.direction,
+        )
+        return None
+
     impulse_start = zone.created_index + 1
     impulse_end = min(impulse_start + impulse_lookback, n_bars)
     impulse_dir = 1 if direction == "long" else -1
@@ -186,12 +196,7 @@ def _detect_order_block_extended(
     structure_1h = prepared.structure_1h
     rsi_check = float(w15m.item(-1, "rsi14") or 50.0)
 
-    # --- Compute structural SL/TP via unified utility ---
-    sh_mask, sl_mask = _sp(w1h, n=3, include_unconfirmed_tail=True)
-    stop_basis = ob_low if direction == "long" else ob_high
-    fallback_stop = ob_low - 0.5 * atr if direction == "long" else ob_high + 0.5 * atr
-
-    min_rr = dynamic_params.get("min_rr", defaults["min_rr"])
+    min_rr = float(dynamic_params.get("min_rr", defaults["min_rr"]))
 
     vol_ratio = float(w15m.item(-1, "volume_ratio20") or 1.0)
     rsi = float(w15m.item(-1, "rsi14") or 50.0)
@@ -220,45 +225,36 @@ def _detect_order_block_extended(
         score *= 0.95
 
     entry_price = ob_low if direction == "long" else ob_high
-    stop_calc, tp1, tp2 = build_structural_targets(
+    stop_basis = ob_low if direction == "long" else ob_high
+    pivots = (
+        swing_series(w1h, swing_length=3, include_unconfirmed_tail=True)
+        if w1h.height >= 8
+        else None
+    )
+    trade_plan_smc = build_smc_trade_plan(
         direction=direction,
         price_anchor=entry_price,
         stop_basis=stop_basis,
         atr=atr,
         work_1h=w1h,
-        min_rr=dynamic_params.get("min_rr", defaults["min_rr"]),
+        work_4h=prepared.work_4h,
+        min_rr=min_rr,
         sl_buffer_atr=sl_buffer_atr,
-        sh_mask=sh_mask,
-        sl_mask=sl_mask,
+        sh_mask=pivots.high_mask if pivots is not None else None,
+        sl_mask=pivots.low_mask if pivots is not None else None,
     )
-    stop = (
-        stop_calc
-        if not math.isclose(stop_calc, stop_basis, rel_tol=1e-9, abs_tol=1e-9)
-        else fallback_stop
-    )
-    risk = abs(entry_price - stop)
+    if trade_plan_smc is None:
+        _reject(prepared, setup_id, "invalid_stop", stop_basis=stop_basis, price=entry_price)
+        return None
+    stop = trade_plan_smc.stop
+    tp1 = trade_plan_smc.tp1
+    tp2 = trade_plan_smc.tp2
+    risk = trade_plan_smc.risk
+    reasons_note = trade_plan_smc.reasons_note
+
     is_valid_rr, _ = validate_rr_or_penalty(entry_price, stop, tp1, min_rr)
     if not is_valid_rr and tp1 is not None:
         score *= dynamic_params.get("tp_too_close_penalty", defaults["tp_too_close_penalty"])
-
-    if risk <= 0.0:
-        _reject(prepared, setup_id, "invalid_stop", stop=stop, price=entry_price)
-        return None
-    if tp1 is None or abs(tp1 - entry_price) < risk * float(min_rr):
-        tp1 = (
-            entry_price + risk * float(min_rr)
-            if direction == "long"
-            else entry_price - risk * float(min_rr)
-        )
-        reasons_note = f"tp1_rr_fallback_{float(min_rr):.2f}"
-    else:
-        reasons_note = "tp1_structural"
-    if tp2 is None or abs(tp2 - entry_price) <= abs(tp1 - entry_price):
-        tp2 = (
-            entry_price + risk * max(2.0, float(min_rr) + 0.35)
-            if direction == "long"
-            else entry_price - risk * max(2.0, float(min_rr) + 0.35)
-        )
 
     trade_plan = TradePlanBuilder.build(
         direction=direction,

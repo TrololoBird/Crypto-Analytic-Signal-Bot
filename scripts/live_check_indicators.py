@@ -23,9 +23,9 @@ except ModuleNotFoundError:  # pragma: no cover - direct script execution
 from bot.runtime.errors import DEFENSIVE_EXC
 from bot.domain.config import load_settings
 from bot.domain.schemas import SymbolFrames, UniverseSymbol
-from bot.features import min_required_bars, prepare_symbol
+from bot.features.prepare import min_required_bars, prepare_symbol
 from bot.market.data import BinanceFuturesMarketData, MarketDataUnavailable
-from bot.market.rest import BinanceClientImpl
+from bot.market.rest_impl import BinanceClientImpl
 
 LOG = configure_script_logging("scripts.live_check_indicators")
 

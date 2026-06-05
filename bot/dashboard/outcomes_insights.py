@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from ..persistence.repository import MemoryRepository
+    from ..persistence.repository.memory import MemoryRepository
 
 _WIN_RESULTS = frozenset({"tp1_hit", "tp2_hit", "tp3_hit", "breakeven_stop", "trailing_stop"})
 _LOSS_RESULTS = frozenset({"stop_loss"})

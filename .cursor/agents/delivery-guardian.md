@@ -17,6 +17,6 @@ Audit only — do not edit files unless user explicitly overrides readonly.
 1. No bypass paths in `bot/runtime/delivery_orchestrator.py`
 2. `DELIVERY_SUCCESS_STATUSES` = sent/logged only
 3. Cooldowns, portfolio caps, filter stages wired
-4. Run `pytest tests/test_delivery_*.py tests/test_wave_e2_hard_gate.py -q`
+4. Run `pytest tests/test_delivery_*.py tests/test_delivery_mtf_gate.py -q`
 
 Report PASS/FAIL with file:line for any risk.

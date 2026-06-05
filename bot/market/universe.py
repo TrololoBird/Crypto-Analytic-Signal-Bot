@@ -652,6 +652,9 @@ def _prescore_row(
     )
     if _is_priority_asset(row, settings):
         score = max(score + 0.06, 0.72)
+    radar_boost = _safe_float(row.get("radar_prescore_boost"), 0.0) or 0.0
+    if radar_boost > 0.0:
+        score = min(1.0, score + float(radar_boost))
     penalty = max(0.0, float(outcome_penalty))
     if penalty > 0.0:
         score = max(0.0, score - penalty)

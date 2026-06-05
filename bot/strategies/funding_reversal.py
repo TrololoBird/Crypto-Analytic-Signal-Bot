@@ -4,9 +4,9 @@ import logging
 import math
 from typing import TYPE_CHECKING, ClassVar
 
-from ..features import _swing_points
+from ..features.prepare import _swing_points
 from ..setups import _build_signal, _compute_dynamic_score, _reject
-from .common import as_float as _as_float
+from ._common import as_float as _as_float
 from .roadmap_base import RoadmapSetup
 
 if TYPE_CHECKING:
@@ -35,7 +35,8 @@ def detect_funding_reversal(
         defaults.get("funding_soft_threshold", defaults["funding_soft_threshold"]),
         defaults["funding_soft_threshold"],
     )
-    effective_threshold = max(0.00002, min(funding_threshold, funding_soft_threshold))
+    # Soft threshold is for relative-tier scoring only — not the primary extreme gate.
+    effective_threshold = max(0.00002, funding_threshold)
     funding_trend_bars = int(defaults.get("funding_trend_bars", defaults["funding_trend_bars"]))
     funding_recent_extreme_lookback_hours = _as_float(
         defaults.get(

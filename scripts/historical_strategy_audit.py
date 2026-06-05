@@ -23,7 +23,7 @@ from bot.delivery.contract import validate_signal_contract
 from bot.domain.config import load_settings
 from bot.domain.schemas import Signal, SymbolFrames, SymbolMeta, UniverseSymbol
 from bot.engine import SignalEngine, StrategyRegistry
-from bot.features import min_required_bars, prepare_symbol
+from bot.features.prepare import min_required_bars, prepare_symbol
 from bot.market.data import (
     BinanceFuturesMarketData,
     _drop_incomplete_ohlcv_tail,

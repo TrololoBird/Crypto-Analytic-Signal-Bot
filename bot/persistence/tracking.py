@@ -37,7 +37,7 @@ if typing.TYPE_CHECKING:
     from ..diagnostics.quality import SignalQualityMonitor
     from ..domain.config import BotSettings
     from ..domain.schemas import AggTrade, Signal
-    from ..persistence.repository import MemoryRepository
+    from ..persistence.repository.memory import MemoryRepository
     from ..telemetry import TelemetryStore
 
 
@@ -447,22 +447,26 @@ class SignalTracker:
         tp1_room = (
             direction_sign * (tp1 - exit_px) / exit_px * 100.0 if tp1 > 0.0 else 0.0
         )
-        await self.memory_repo.merge_outcome_features(
-            tracked.tracking_id,
-            {
-                "post_sl_favorable_pct": round(max_favorable, 4),
-                "post_sl_tp1_room_pct": round(tp1_room, 4),
-                "post_sl_window_hours": 4,
-            },
-        )
+        regime_at_close: str | None = None
+        try:
+            market_ctx = await self.memory_repo.get_market_context()
+            if isinstance(market_ctx, dict):
+                raw_regime = market_ctx.get("market_regime")
+                if raw_regime is not None:
+                    regime_at_close = str(raw_regime)
+        except DEFENSIVE_EXC:
+            regime_at_close = None
+        post_sl_features: dict[str, Any] = {
+            "post_sl_favorable_pct": round(max_favorable, 4),
+            "post_sl_tp1_room_pct": round(tp1_room, 4),
+            "post_sl_window_hours": 4,
+        }
+        if regime_at_close:
+            post_sl_features["market_regime_at_close"] = regime_at_close
+        await self.memory_repo.merge_outcome_features(tracked.tracking_id, post_sl_features)
         features = self.features_store.get(tracked.tracking_id)
         feat_dict = features.to_dict() if features else {}
-        feat_dict.update(
-            {
-                "post_sl_favorable_pct": round(max_favorable, 4),
-                "post_sl_tp1_room_pct": round(tp1_room, 4),
-            }
-        )
+        feat_dict.update(post_sl_features)
         created_at = parse_state_dt(tracked.created_at) or closed_at
         activated_at = parse_state_dt(tracked.activated_at)
         time_to_entry_min = (

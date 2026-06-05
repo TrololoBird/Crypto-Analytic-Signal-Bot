@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from importlib import import_module
-from typing import Any, cast
+from typing import Any, Mapping, cast
 
 try:
     prometheus_client = import_module("prometheus_client")
@@ -183,6 +183,19 @@ class BotMetricsCollector:
             "bot_memory_blacklist_size", "Number of blacklisted symbols"
         )
 
+        # Radar funnel (Tier-0 !ticker@arr)
+        self.radar_symbols_total: Any = PromGauge(
+            "bot_radar_symbols_total", "Symbols tracked in market radar store"
+        )
+        self.radar_stale_ingest_ratio: Any = PromGauge(
+            "bot_radar_stale_ingest_ratio",
+            "Fraction of radar symbols with stale ingest (>120s)",
+        )
+        self.radar_promoted_shortlist: Any = PromGauge(
+            "bot_radar_promoted_shortlist",
+            "Shortlist symbols promoted from radar funnel",
+        )
+
         # Scoring metrics
         self.signal_score_histogram: Any = PromHistogram(
             "bot_signal_score",
@@ -328,6 +341,20 @@ class BotMetricsCollector:
         self.shortlist_size.set(shortlist_size)
         self.open_signals.set(open_signals)
         self.memory_blacklist_size.set(blacklist_size)
+
+    def update_radar_metrics(
+        self,
+        *,
+        radar_health: Mapping[str, Any] | None,
+        radar_promoted_count: int = 0,
+    ) -> None:
+        """Update radar funnel gauges from health snapshot."""
+        if not self._enabled:
+            return
+        health = radar_health if isinstance(radar_health, dict) else {}
+        self.radar_symbols_total.set(int(health.get("symbol_count") or 0))
+        self.radar_stale_ingest_ratio.set(float(health.get("stale_ingest_ratio") or 0.0))
+        self.radar_promoted_shortlist.set(max(0, int(radar_promoted_count)))
 
     def record_ml_prediction(self, confidence: float) -> None:
         """Record ML prediction confidence."""

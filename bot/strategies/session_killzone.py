@@ -5,7 +5,7 @@ import math
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
-from ..features import _swing_points
+from ..features.prepare import _swing_points
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.utils import get_dynamic_params
 from .roadmap_base import RoadmapSetup

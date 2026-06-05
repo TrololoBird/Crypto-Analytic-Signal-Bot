@@ -1,0 +1,72 @@
+# Secrets and local config
+.env
+config.toml
+config.local.toml
+ourtg.json
+.claude/settings.local.json
+
+# Runtime data and logs
+data/
+logs/
+telemetry/
+reports/
+graphify-out/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.jsonl
+*.log
+*.pid
+*.parquet
+LIVE_SESSION_STATUS.json
+
+# Virtualenv and caches
+.venv/
+venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+htmlcov/
+*.pyc
+*.egg-info/
+dist/
+build/
+
+# Heavy lock files
+uv.lock
+requirements-lock.txt
+
+# Frontend (out of Claude Code scope)
+bot/static/
+
+# Archive
+scripts/_archive/
+
+# Research docs (too large, rarely needed)
+docs/research/
+
+# Cursor-specific (not needed by Claude Code)
+.cursor/
+
+# graphify incremental cache (regenerate locally)
+graphify-out/cache/
+
+# Large audit / scratch artifacts
+PROJECT_AUDIT.md
+*AUDIT*.md
+audit/
+audit_manifest.csv
+scripts/audit_data/
+_audit_scratch.txt
+*.trace_launch/
+
+# IDE scratch
+.serena/
+.qodo/
+.codex/
+
+# Wave test legacy (comment out if debugging signal pipeline)
+# tests/test_wave_*.py

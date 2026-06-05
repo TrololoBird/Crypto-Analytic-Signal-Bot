@@ -140,6 +140,17 @@ class KlineHandler:
         rejected: list[dict[str, Any]] = list(result.rejected)
         delivered: list[Signal] = []
 
+        harvest_cfg = getattr(self._bot.settings, "research_harvest", None)
+        if (
+            harvest_cfg is not None
+            and harvest_cfg.enabled
+            and harvest_cfg.skip_telegram_delivery
+        ):
+            if isinstance(result.funnel, dict):
+                result.funnel["harvest_skip_delivery"] = True
+                result.funnel["candidates"] = len(candidates)
+            return candidates, rejected, delivered
+
         if candidates:
             selected = self._bot._select_and_rank(
                 {symbol: candidates},

@@ -3,10 +3,10 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING, ClassVar
 
-from ..features import _swing_points
+from ..features.prepare import _swing_points
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.utils import build_structural_targets
-from .common import as_float as _as_float
+from ._common import as_float as _as_float
 from .roadmap_base import RoadmapSetup
 
 if TYPE_CHECKING:

@@ -19,7 +19,7 @@ from ..dashboard.operator_context import (
 )
 from ..domain.config import BotSettings, load_settings
 from ..persistence.journal import build_config_suggestions
-from ..persistence.repository import MemoryRepository
+from ..persistence.repository.memory import MemoryRepository
 from ..persistence.tracked import parse_state_dt
 
 if TYPE_CHECKING:
@@ -54,6 +54,8 @@ class StartupReportContext:
     telemetry_mismatch_file: Path
     tracking_events_file: Path
     health_file: Path
+    radar_health_file: Path
+    radar_watch_file: Path
     db_path: Path
 
 
@@ -220,6 +222,8 @@ def _load_context(repo_root: Path, event: str, report_ts: datetime) -> StartupRe
         telemetry_mismatch_file=analysis_dir / "telemetry_mismatch.jsonl",
         tracking_events_file=analysis_dir / "tracking_events.jsonl",
         health_file=analysis_dir / "health.jsonl",
+        radar_health_file=analysis_dir / "radar_health.jsonl",
+        radar_watch_file=analysis_dir / "radar_watch.jsonl",
         db_path=bot_dir / "bot.db",
     )
 
@@ -326,6 +330,8 @@ def _collect_snapshot(context: StartupReportContext) -> dict[str, Any]:
     )
     tracking_rows = _filter_rows_since(_read_jsonl(context.tracking_events_file), session_start)
     health_rows = _filter_rows_since(_read_jsonl(context.health_file), session_start)
+    radar_health_rows = _filter_rows_since(_read_jsonl(context.radar_health_file), session_start)
+    radar_watch_rows = _filter_rows_since(_read_jsonl(context.radar_watch_file), session_start)
     sqlite_snapshot = _load_sqlite_tracking_snapshot(
         context.db_path, context.bot_dir, session_start
     )
@@ -437,6 +443,8 @@ def _collect_snapshot(context: StartupReportContext) -> dict[str, Any]:
         shortlist_payload["symbols"] if isinstance(shortlist_payload.get("symbols"), list) else []
     )
     latest_health = health_rows[-1] if health_rows else {}
+    latest_radar_health = radar_health_rows[-1] if radar_health_rows else {}
+    latest_radar_watch_count = len(radar_watch_rows)
 
     return {
         "session_start": session_start,
@@ -453,6 +461,9 @@ def _collect_snapshot(context: StartupReportContext) -> dict[str, Any]:
         "tracking_rows": tracking_rows,
         "health_rows": health_rows,
         "latest_health": latest_health,
+        "radar_health": latest_radar_health,
+        "radar_watch_rows": radar_watch_rows,
+        "radar_watch_candidate_count": latest_radar_watch_count,
         "outcomes": outcomes,
         "cycle_count": len(cycles),
         "cycle_age_minutes": cycle_age_minutes,
@@ -520,6 +531,15 @@ def _counter_percentages(counter: Counter[str]) -> list[dict[str, Any]]:
 
 def _derive_suspicious_modules(snapshot: dict[str, Any]) -> list[dict[str, str]]:
     modules: list[dict[str, str]] = []
+    radar_health = snapshot.get("radar_health") if isinstance(snapshot.get("radar_health"), dict) else {}
+    if radar_health.get("status") == "degraded":
+        alerts = radar_health.get("alerts") or []
+        modules.append(
+            {
+                "module": "bot.market.radar_state",
+                "reason": f"radar funnel degraded ({', '.join(alerts) or 'unknown'})",
+            }
+        )
     if snapshot["runtime_errors"]:
         modules.append(
             {

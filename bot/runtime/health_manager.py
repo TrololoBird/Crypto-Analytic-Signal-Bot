@@ -5,10 +5,11 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from bot.runtime.errors import DEFENSIVE_EXC
+from bot.runtime.data_readiness import is_radar_promoted_item
 from bot.market.proxy_bootstrap import network_probe_status
+from bot.runtime.errors import DEFENSIVE_EXC
 
-from ..features import cache_stats as frame_cache_stats
+from ..features.prepare import cache_stats as frame_cache_stats
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -41,8 +42,18 @@ class HealthManager:
             LOG.debug("health check active signal count failed", exc_info=True)
             active_signals = 0
         probe_flags = network_probe_status()
+        radar_store = (
+            getattr(ws_manager, "_radar_store", None) if ws_manager is not None else None
+        )
+        from bot.diagnostics.runtime_ops import assess_radar_store
+
+        radar_health = assess_radar_store(
+            radar_store,
+            config=self._bot.settings.universe.radar,
+        )
         return {
             "status": "healthy" if self._bot._running else "degraded",
+            "radar": radar_health,
             "rest_probe_ok": probe_flags.get("rest_probe_ok"),
             "ws_probe_ok": probe_flags.get("ws_probe_ok"),
             "ws_connected": ws_connected,
@@ -143,6 +154,19 @@ class HealthManager:
                 self._bot.metrics.record_ws_message_age(ws_age)
                 if self._bot._ws_manager is not None:
                     self._bot.metrics.update_ws_streams(len(self._bot._ws_manager._symbols))
+                ws_mgr = self._bot._ws_manager
+                radar_store = (
+                    getattr(ws_mgr, "_radar_store", None) if ws_mgr is not None else None
+                )
+                radar_health = assess_radar_store(
+                    radar_store,
+                    config=self._bot.settings.universe.radar,
+                )
+                radar_promoted = sum(1 for item in shortlist if is_radar_promoted_item(item))
+                self._bot.metrics.update_radar_metrics(
+                    radar_health=radar_health,
+                    radar_promoted_count=radar_promoted,
+                )
                 if self._bot.market_regime._last_result is not None:
                     r = self._bot.market_regime._last_result
                     self._bot.metrics.update_market_regime(
@@ -182,6 +206,12 @@ class HealthManager:
             if callable(rest_snapshot_func):
                 rest_snapshot = rest_snapshot_func()
                 row.update(rest_snapshot if isinstance(rest_snapshot, dict) else {})
+            ws_mgr = self._bot._ws_manager
+            radar_store = getattr(ws_mgr, "_radar_store", None) if ws_mgr is not None else None
+            row["radar"] = assess_radar_store(
+                radar_store,
+                config=self._bot.settings.universe.radar,
+            )
             self._bot.telemetry.append_jsonl("health.jsonl", row)
             digest_runner = getattr(self._bot, "_operator_digest_runner", None)
             if digest_runner is None:
@@ -237,3 +267,13 @@ class HealthMonitor:
                         },
                     )
             await asyncio.sleep(self._interval_seconds)
+
+
+async def run_heartbeat_loop(manager: HealthManager) -> None:
+    """Background heartbeat log loop (started from SignalBot.run_forever)."""
+    await manager.heartbeat_periodic()
+
+
+async def run_health_telemetry_loop(manager: HealthManager) -> None:
+    """Background health telemetry loop (started from SignalBot.run_forever)."""
+    await manager.health_telemetry_periodic()

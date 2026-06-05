@@ -122,3 +122,13 @@ class FallbackRunner:
                 await self._bot._run_emergency_cycle()
             except DEFENSIVE_EXC:
                 LOG.exception("emergency fallback failed")
+
+
+async def run_tracking_review_loop(runner: FallbackRunner) -> None:
+    """Background tracking-review loop (started from SignalBot.run_forever)."""
+    await runner.tracking_review_periodic()
+
+
+async def run_emergency_fallback_loop(runner: FallbackRunner) -> None:
+    """Background emergency-fallback scan loop (started from SignalBot.run_forever)."""
+    await runner.emergency_fallback_scan()

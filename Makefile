@@ -1,21 +1,32 @@
-.PHONY: check lint validate-config live-smoke monitor-runtime run status stop clean-session graphify-update nightly-calibration reconcile-defaults shortlist-matrix calibration-pipeline
+.PHONY: check check-imports check-cycles lint typecheck smoke validate-config live-smoke research-harvest monitor-runtime run status stop clean-session graphify-update nightly-calibration reconcile-defaults shortlist-matrix calibration-pipeline
 
 clean-session:
 	@python scripts/clean_session_data.py --mode smoke --config config.toml
 
 check:
 	@echo "=== Compile check ==="
-	@python -m compileall -q bot
+	@.venv/bin/python -m compileall -q bot
 	@echo "=== v9 refactor gate ==="
-	@python scripts/verify_refactor_gate.py
-	@echo "=== Import check ==="
-	@python -c "from bot.runtime.bot import SignalBot; print('Imports OK')"
+	@.venv/bin/python scripts/verify_refactor_gate.py
+	@$(MAKE) check-imports
+	@$(MAKE) check-cycles
 	@echo "=== Strategy export check ==="
-	@python -c "from bot.strategies import STRATEGY_CLASSES; print(f'Strategies: {len(STRATEGY_CLASSES)}')"
+	@.venv/bin/python -c "from bot.strategies import STRATEGY_CLASSES; print(f'Strategies: {len(STRATEGY_CLASSES)}')"
+
+check-imports:
+	@.venv/bin/python -c "from bot.runtime.bot import SignalBot; from bot.strategies import STRATEGY_CLASSES; print(f'Imports OK ({len(STRATEGY_CLASSES)} strategies)')"
+
+check-cycles:
+	@.venv/bin/python scripts/check_circular_imports.py
 
 lint:
-	@ruff check bot/
-	@mypy
+	@ruff check bot/ tests/ scripts/ --fix
+
+typecheck:
+	@.venv/bin/python scripts/run_mypy_critical.py
+
+smoke:
+	@.venv/bin/pytest -x -q --ignore=tests/live -m "not slow"
 
 validate-config:
 	@python scripts/validate_config.py --config config.toml
@@ -33,6 +44,10 @@ live-smoke:
 	@python scripts/clean_session_data.py --mode smoke --config config.toml
 	@python scripts/live_smoke_bot.py --warmup-seconds 30 --keep-session-data
 
+research-harvest:
+	@python scripts/clean_session_data.py --mode smoke --config config.toml
+	@python scripts/research_harvest_session.py --config config.toml --minutes 60
+
 monitor-runtime:
 	@python -m scripts.live_runtime_monitor --duration 300 --poll-interval 5 --log-dir data/bot/logs
 
@@ -48,8 +63,19 @@ reconcile-defaults:
 calibration-pipeline:
 	@python scripts/calibration_pipeline.py --config config.toml
 
+calibration-wave:
+	@test -n "$(RUN_ID)" || (echo "Usage: make calibration-wave RUN_ID=20260604T155544Z" && exit 1)
+	@python scripts/post_session_calibration.py --config config.toml --run-id $(RUN_ID) --rollup
+
 live-watch-report:
 	@python scripts/live_watch_rollup_report.py --config config.toml
+
+live-detached-6h:
+	@python scripts/clean_session_data.py --mode smoke --config config.toml
+	@mkdir -p logs data/live_watch
+	@python scripts/launch_detached.py --log logs/live_supervised_6h.log --pid-file data/live_watch/supervisor.pid --cwd . -- \
+		caffeinate -i .venv/bin/python -m scripts.live_supervised_session --hours 6 --minutes 360 --snapshot-interval 60 --config config.toml --takeover
+	@echo "Supervisor PID: $$(cat data/live_watch/supervisor.pid 2>/dev/null || echo unknown)"
 
 shortlist-matrix:
 	@python scripts/strategy_shortlist_matrix.py --config config.toml --static --json

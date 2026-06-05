@@ -14,7 +14,7 @@ from bot.diagnostics.config_audit import (
     audit_shortlist_zero_fit,
     run_full_audit,
 )
-from bot.diagnostics.runtime.health import bot_runtime_health_check
+from bot.diagnostics.runtime_ops import bot_runtime_health_check
 from bot.diagnostics.signals import SignalDiagnostics, set_global_diagnostics
 from bot.domain.config import BotSettings, RuntimeConfig
 from bot.engine.engine import SignalEngine

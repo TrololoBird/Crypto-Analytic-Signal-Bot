@@ -34,7 +34,7 @@ from .logging_config import configure_structlog
 from .migrations import migrate_db
 from .ops.pid_utils import pid_is_alive as _pid_is_alive
 from .ops.startup_report import generate_and_send_startup_report, run_daily_summary_loop
-from .persistence.repository import MemoryRepository
+from .persistence.repository.memory import MemoryRepository
 from .telemetry import TelemetryStore, run_dir_started_at
 
 _LOGGER_STDERR_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?:,\d{3})?\s+\|")
@@ -357,13 +357,32 @@ def _setup_signal_handlers(bot: SignalBot) -> None:
             logging.getLogger("bot.cli").exception("signal handler setup failed")
 
 
-async def _main(*, config_path: str | Path = "config.toml") -> None:
+async def _main(
+    *,
+    config_path: str | Path = "config.toml",
+    harvest_minutes: float = 0.0,
+    harvest_symbols: tuple[str, ...] | None = None,
+) -> None:
     _bootstrap_env_if_missing()
     settings = load_settings(config_path)
+    if harvest_minutes > 0 or harvest_symbols is not None:
+        from bot.domain.research_harvest import activate_research_harvest
+
+        settings = activate_research_harvest(settings, symbols=harvest_symbols)
+    elif settings.research_harvest.enabled:
+        from bot.domain.research_harvest import apply_research_harvest_profile
+
+        settings = apply_research_harvest_profile(settings)
     if settings.config_path.name != "config.toml":
         sys.stderr.write(f"[INFO] config.toml not found; using {settings.config_path}\n")
-    use_telegram = settings.notifiers.provider == "telegram"
-    if not use_telegram:
+    use_telegram = (
+        settings.notifiers.provider == "telegram" and not settings.research_harvest.enabled
+    )
+    if settings.research_harvest.enabled:
+        sys.stderr.write(
+            "[INFO] research_harvest mode: Telegram delivery disabled; writing capture JSONL\n"
+        )
+    elif not use_telegram:
         sys.stderr.write(
             "[INFO] notifier provider is not telegram; signal delivery runs in local/log mode\n"
         )
@@ -444,7 +463,20 @@ async def _main(*, config_path: str | Path = "config.toml") -> None:
             name="daily_summary",
         )
         await bot.start()
-        await bot.run_forever()
+        runner = asyncio.create_task(bot.run_forever(), name="bot_run_forever")
+        if harvest_minutes > 0:
+            try:
+                await asyncio.wait_for(asyncio.shield(runner), timeout=harvest_minutes * 60.0)
+            except TimeoutError:
+                logging.getLogger("bot.cli").info(
+                    "research_harvest duration reached | minutes=%.1f",
+                    harvest_minutes,
+                )
+                bot._shutdown.set()
+                with contextlib.suppress(TimeoutError, asyncio.CancelledError):
+                    await asyncio.wait_for(runner, timeout=120.0)
+        else:
+            await runner
     finally:
         if summary_task is not None:
             summary_task.cancel()
@@ -490,6 +522,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command")
     sub.add_parser("run", parents=[config_parent], help="Run live bot runtime (default)")
+    harvest = sub.add_parser(
+        "harvest",
+        parents=[config_parent],
+        help="Research harvest: ~10 symbols, full telemetry, no Telegram (calibration later)",
+    )
+    harvest.add_argument(
+        "--minutes",
+        type=float,
+        default=60.0,
+        help="Run duration in minutes (0 = until Ctrl+C)",
+    )
+    harvest.add_argument(
+        "--symbols",
+        nargs="*",
+        default=(),
+        help="Override harvest symbol list (default: 10 anchors from research_harvest)",
+    )
     sub.add_parser("status", parents=[config_parent], help="Show runtime/db status")
     sub.add_parser("stop", parents=[config_parent], help="Stop running bot by pid-file")
     outcomes = sub.add_parser(
@@ -525,6 +574,14 @@ def run() -> None:
     if args.command in (None, "run"):
         _run_runtime(config_path)
         return
+    if args.command == "harvest":
+        symbols = tuple(str(s).strip().upper() for s in (args.symbols or ()) if str(s).strip())
+        _run_harvest_runtime(
+            config_path,
+            minutes=max(0.0, float(args.minutes)),
+            symbols=symbols or None,
+        )
+        return
     if args.command == "status":
         _run_status_command(config_path)
         return
@@ -549,11 +606,34 @@ def run() -> None:
 
 
 def _run_runtime(config_path: str | Path = _CONFIG_DEFAULT) -> None:
+    _run_bot_async(config_path=config_path, harvest_minutes=0.0, harvest_symbols=None)
+
+
+def _run_harvest_runtime(
+    config_path: str | Path,
+    *,
+    minutes: float,
+    symbols: tuple[str, ...] | None,
+) -> None:
+    os.environ.setdefault("BOT_NOTIFIER_PROVIDER", "none")
+    os.environ.setdefault("BOT_DISABLE_HTTP_SERVERS", "1")
+    _run_bot_async(
+        config_path=config_path,
+        harvest_minutes=minutes,
+        harvest_symbols=symbols,
+    )
+
+
+def _run_bot_async(
+    *,
+    config_path: str | Path,
+    harvest_minutes: float,
+    harvest_symbols: tuple[str, ...] | None,
+) -> None:
     _configure_stdio_for_unicode()
     debug_mode = os.getenv("DEBUG_BOT", "0") in ("1", "true", "yes")
 
     if debug_mode:
-        # Enable tracemalloc to track unawaited coroutines (without asyncio spam)
         tracemalloc.start(25)
         sys.stderr.write("[DEBUG] tracemalloc enabled | logging level=DEBUG\n")
 
@@ -562,7 +642,13 @@ def _run_runtime(config_path: str | Path = _CONFIG_DEFAULT) -> None:
         if policy_factory is not None:
             asyncio.set_event_loop_policy(policy_factory())
     try:
-        asyncio.run(_main(config_path=config_path))
+        asyncio.run(
+            _main(
+                config_path=config_path,
+                harvest_minutes=harvest_minutes,
+                harvest_symbols=harvest_symbols,
+            )
+        )
     except KeyboardInterrupt:
         logging.getLogger("bot.cli").info("bot stopped by user")
     finally:

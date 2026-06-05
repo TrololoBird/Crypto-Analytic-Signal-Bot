@@ -1,11 +1,4 @@
-"""WebSocket manager for Binance Futures market data.
-
-Handles WebSocket connections, kline data streams, order book updates,
-and aggregated trade data with automatic reconnection and backfill logic.
-"""
-
 from __future__ import annotations
-
 import asyncio
 import collections
 import contextlib
@@ -15,18 +8,23 @@ import time
 from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
-
 import polars as pl
 from websockets import exceptions as ws_exceptions
-
 from bot.runtime.errors import DEFENSIVE_EXC
 from bot.market.network_proxy import apply_proxy_env, mask_proxy_url, normalize_proxy_url
-
 from ..domain.events import KlineCloseEvent
 from ..domain.schemas import AggTrade, AggTradeSnapshot, SymbolFrames
-from . import ws_cache, ws_connection, ws_health, ws_reconnect, ws_subscriptions
 from .data import MarketDataUnavailable
 from .universe import build_shortlist
+import random
+from typing import Any
+import json
+from bot.market.subscription_planner import plan_subscription_budget
+import socket
+import websockets
+from bot.market.network_proxy import websockets_connect_kwargs
+from ..domain.events import BookTickerEvent
+from ..domain.schemas import AggTrade
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -334,6 +332,1235 @@ def _resolve_message_buffer_maxsize(cfg: WSConfig, *, symbol_count: int = 50) ->
     return max(10_000, min(200_000, symbol_count * 1200))
 
 
+# --- inlined from ws_enrichment.py ---
+def _clamp(value: float) -> float:
+    return max(-1.0, min(1.0, value))
+
+
+def depth_imbalance_from_book(
+    *,
+    bid_qty: float | None,
+    ask_qty: float | None,
+    delta_ratio: float | None,
+) -> float | None:
+    """Return top-of-book depth imbalance, falling back to signed trade flow."""
+    if bid_qty is not None and ask_qty is not None and bid_qty >= 0 and ask_qty >= 0:
+        total = bid_qty + ask_qty
+        if total > 0.0:
+            return round(_clamp((bid_qty - ask_qty) / total), 4)
+    if delta_ratio is None:
+        return None
+    return round(_clamp(float(delta_ratio)), 4)
+
+
+def microprice_bias_from_book(
+    *,
+    bid: float | None,
+    ask: float | None,
+    bid_qty: float | None = None,
+    ask_qty: float | None = None,
+    delta_ratio: float | None,
+) -> float | None:
+    """Return signed microprice bias from L1 book, falling back to trade flow."""
+    if bid is None or ask is None or bid <= 0 or ask <= 0:
+        return None
+    spread = ask - bid
+    mid = (bid + ask) / 2.0
+    if mid <= 0 or spread <= 0:
+        return None
+    if bid_qty is not None and ask_qty is not None and bid_qty >= 0 and ask_qty >= 0:
+        total_qty = bid_qty + ask_qty
+        if total_qty > 0.0:
+            microprice = ((ask * bid_qty) + (bid * ask_qty)) / total_qty
+            half_spread = spread / 2.0
+            if half_spread > 0.0:
+                return round(_clamp((microprice - mid) / half_spread), 4)
+    if delta_ratio is None:
+        return None
+    return round(_clamp(float(delta_ratio)), 4)
+
+# --- inlined from ws_reconnect.py ---
+_BACKOFF_RESET_AFTER_SECONDS = 90.0
+
+
+def compute_disconnect_delay(
+    manager: Any,
+    *,
+    endpoint: str,
+    url: str,
+    exc: Exception,
+    elapsed: float,
+    delay: float,
+) -> float:
+    """Update streak/reconnect metadata and return next retry delay."""
+    error_text = str(exc).lower()
+    keepalive_timeout = "keepalive ping timeout" in error_text
+    if elapsed < _BACKOFF_RESET_AFTER_SECONDS and not keepalive_timeout:
+        manager._short_lived_streak += 1
+    else:
+        manager._short_lived_streak = 0
+
+    close_detail = ""
+    if isinstance(exc, ws_exceptions.ConnectionClosed):
+        close_code = exc.rcvd.code if exc.rcvd else "not_received"
+        close_reason = repr(exc.rcvd.reason) if exc.rcvd else ""
+        close_detail = f" code={close_code} reason={close_reason}"
+
+    if keepalive_timeout:
+        min_delay = 1.0
+    elif manager._short_lived_streak >= 8:
+        min_delay = 300.0
+    elif manager._short_lived_streak >= 5:
+        min_delay = 30.0
+    elif manager._short_lived_streak >= 3:
+        min_delay = 5.0
+    else:
+        min_delay = 1.0
+
+    next_delay = min(300.0, max(1.0, delay, min_delay))
+    next_delay = min(
+        300.0,
+        next_delay + random.uniform(0.0, min(0.5, next_delay * 0.1)),
+    )  # seconds: reconnect backoff stays between 1s and 5min.
+
+    manager._last_reconnect_reason = f"{endpoint}:{exc}"
+    manager._last_reconnect_reason_by_endpoint[endpoint] = str(exc)
+    level = logging.INFO
+    log_reason = "keepalive_ping_timeout" if keepalive_timeout else str(exc)
+    LOG.log(
+        level,
+        (
+            "ws disconnected | endpoint=%s url=%s reason=%s close_detail=%s "
+            "uptime=%.1fs retry_in=%.1fs streak=%d"
+        ),
+        endpoint,
+        url,
+        log_reason,
+        close_detail,
+        elapsed,
+        next_delay,
+        manager._short_lived_streak,
+    )
+    return next_delay
+
+# --- inlined from ws_health.py ---
+async def evaluate_endpoint_health(manager: Any, ws: Any, endpoint: str) -> bool:
+    """Evaluate endpoint-specific health checks.
+
+    Returns True if a reconnect was triggered (ws.close called), else False.
+    """
+    max_silence = float(
+        getattr(
+            manager._cfg,
+            "silence_timeout_seconds",
+            getattr(manager._cfg, "health_check_silence_seconds", 60.0),
+        )
+    )
+    last_message_ts = manager._last_message_ts_by_endpoint.get(endpoint, 0.0)
+    if last_message_ts > 0.0:
+        last_message_age = time.monotonic() - last_message_ts
+        if last_message_age > max_silence:
+            LOG.info(
+                "ws endpoint silence exceeded | endpoint=%s age=%.1fs max=%.1fs",
+                endpoint,
+                last_message_age,
+                max_silence,
+            )
+            await ws.close()
+            return True
+    grace_seconds = max(
+        60.0,
+        float(getattr(manager._cfg, "market_reconnect_grace_seconds", 60.0)),
+    )
+    if endpoint == "market":
+        connected_at = manager._connected_at_by_endpoint.get(endpoint, 0.0)
+        if connected_at > 0.0:
+            recovery_age = time.monotonic() - connected_at
+            if recovery_age < grace_seconds:
+                return False
+            if recovery_age >= grace_seconds:
+                snapshot = manager.state_snapshot()
+                if (
+                    int(snapshot.get("fresh_tickers") or 0) == 0
+                    or int(snapshot.get("fresh_mark_prices") or 0) == 0
+                ):
+                    LOG.error(
+                        (
+                            "ws market recovery failed | endpoint=%s age=%.1fs "
+                            "fresh_tickers=%s fresh_mark_prices=%s - forcing reconnect"
+                        ),
+                        endpoint,
+                        recovery_age,
+                        snapshot.get("fresh_tickers"),
+                        snapshot.get("fresh_mark_prices"),
+                    )
+                    await ws.close()
+                    return True
+
+        stale_streams = manager._stale_kline_streams()
+        if stale_streams:
+            preview = stale_streams[:3]
+            stale_symbols = list({s.split(":")[0] for s in stale_streams})
+            LOG.info(
+                (
+                    "ws stale kline data | endpoint=%s streams=%d sample=%s - "
+                    "backfilling (not reconnecting)"
+                ),
+                endpoint,
+                len(stale_streams),
+                preview,
+            )
+            task = asyncio.create_task(manager._backfill(stale_symbols))
+            manager._backfill_tasks.add(task)
+            task.add_done_callback(manager._backfill_tasks.discard)
+        return False
+
+    if endpoint == "public":
+        fresh_books = sum(
+            1
+            for sym, ts in manager._book_update_times.items()
+            if sym in manager._symbols
+            and time.monotonic() - ts <= manager._cfg.market_ticker_freshness_seconds
+        )
+        if manager._symbols and manager._cfg.subscribe_book_ticker and fresh_books == 0:
+            connected_at = manager._connected_at_by_endpoint.get(endpoint, 0.0)
+            if connected_at > 0.0 and time.monotonic() - connected_at >= grace_seconds:
+                LOG.error(
+                    (
+                        "ws public recovery failed | endpoint=%s fresh_book_tickers=0 - "
+                        "forcing reconnect"
+                    ),
+                    endpoint,
+                )
+                await ws.close()
+                return True
+    return False
+
+
+async def monitor_connection_silence(manager: Any, ws: Any, endpoint: str) -> bool:
+    """Check generic silence timeout and force reconnect when needed."""
+    streams = manager._intended_streams_by_endpoint.get(endpoint, set())
+    silence_limit = manager._cfg.health_check_silence_seconds
+    if endpoint == "public" and any(
+        "@bookticker" in str(stream).lower() or "@depth" in str(stream).lower()
+        for stream in streams
+    ):
+        silence_limit = min(float(silence_limit), 15.0)
+    last_message_ts = manager._last_message_ts_by_endpoint.get(endpoint, 0.0)
+    if last_message_ts == 0.0:
+        return False
+    connected_map = getattr(manager, "_connected_at_by_endpoint", {})
+    connected_at = connected_map.get(endpoint, 0.0) if isinstance(connected_map, dict) else 0.0
+    grace_seconds = max(
+        60.0,
+        float(getattr(manager._cfg, "market_reconnect_grace_seconds", 60.0)),
+    )
+    if connected_at > 0.0 and time.monotonic() - connected_at < grace_seconds:
+        return False
+    silence = time.monotonic() - last_message_ts
+    if silence > silence_limit and streams:
+        LOG.info(
+            "ws health: no message for %.0fs with %d streams - forcing reconnect | endpoint=%s",
+            silence,
+            len(streams),
+            endpoint,
+        )
+        await ws.close()
+        return True
+    return False
+
+# --- inlined from ws_subscriptions.py ---
+DEFAULT_MAX_STREAMS_PER_CONNECTION = 300
+FORBIDDEN_STREAM_SUFFIXES = ("@userData", "@account", "@balanceUpdate")
+
+
+def _normalized_symbols(symbols: list[str]) -> list[str]:
+    normalized = [str(symbol or "").strip().lower() for symbol in symbols]
+    return list(dict.fromkeys(symbol for symbol in normalized if symbol))
+
+
+def base_streams_for_symbols(manager: Any, symbols: list[str]) -> list[str]:
+    return [
+        f"{sym}@kline_{interval}"
+        for sym in _normalized_symbols(symbols)
+        for interval in manager._cfg.kline_intervals
+    ]
+
+
+def public_streams_for_symbols(manager: Any, symbols: list[str]) -> list[str]:
+    if not manager._cfg.subscribe_book_ticker:
+        return []
+    streams = [f"{symbol}@bookTicker" for symbol in _normalized_symbols(symbols)]
+    return [
+        stream
+        for stream in streams
+        if not any(stream.endswith(forbidden) for forbidden in FORBIDDEN_STREAM_SUFFIXES)
+    ]
+
+
+def tracked_depth_streams(manager: Any, symbols: list[str]) -> list[str]:
+    if not getattr(manager._cfg, "subscribe_depth", False):
+        return []
+    limit = int(getattr(manager._cfg, "depth_symbol_limit", 0) or 0)
+    if limit <= 0:
+        return []
+    levels = int(getattr(manager._cfg, "depth_levels", 20) or 20)
+    if levels not in {5, 10, 20}:
+        levels = 20
+    speed = str(getattr(manager._cfg, "depth_speed", "500ms") or "500ms").lower()
+    suffix = "" if speed == "250ms" else f"@{speed}"
+    return [f"{symbol}@depth{levels}{suffix}" for symbol in _normalized_symbols(symbols)[:limit]]
+
+
+def stream_endpoint_class(stream: str) -> str:
+    normalized = str(stream or "").strip().lower()
+    if any(
+        token in normalized
+        for token in ("listenkey", "/private", "userdatastream", "@account", "@order")
+    ):
+        msg = f"private/auth websocket streams are not allowed: {stream}"
+        raise ValueError(msg)
+    if "@bookticker" in normalized or "@depth" in normalized:
+        return "public"
+    allowed_market = (
+        "@kline_",
+        "@aggtrade",
+        "@markprice",
+        "!markprice@arr@1s",
+        "!markprice@arr",
+        "!ticker@arr",
+        "!miniticker@arr",
+        "!forceorder@arr",
+    )
+    if any(token in normalized for token in allowed_market):
+        return "market"
+    msg = f"unsupported public websocket stream: {stream}"
+    raise ValueError(msg)
+
+
+def tracked_agg_trade_streams(manager: Any, symbols: list[str]) -> list[str]:
+    if not manager._should_subscribe_agg_trade():
+        return []
+    return [f"{symbol}@aggTrade" for symbol in _normalized_symbols(symbols)]
+
+
+def global_streams(manager: Any) -> list[str]:
+    if not manager._cfg.subscribe_market_streams:
+        return []
+    streams = [
+        "!ticker@arr",
+        "!markPrice@arr@1s",
+        "!forceOrder@arr",
+    ]
+    if not manager.is_ticker_cache_warm():
+        streams.append("!miniTicker@arr")
+    return streams
+
+
+def recompute_intended_streams(manager: Any) -> None:
+    symbols = list(manager._symbols)
+    tracked = list(manager._tracked_symbols or manager._symbols)
+    budget_plan = plan_subscription_budget(symbols, tracked, ws=manager._cfg)
+    depth_symbols = list(budget_plan.depth_symbols) or tracked
+    agg_symbols = list(budget_plan.agg_trade_symbols) or tracked
+    manager._subscription_budget = budget_plan
+
+    public_streams = set(public_streams_for_symbols(manager, manager._symbols))
+    public_streams.update(tracked_depth_streams(manager, depth_symbols))
+    market_streams = set(base_streams_for_symbols(manager, manager._symbols))
+    market_streams.update(tracked_agg_trade_streams(manager, agg_symbols))
+    if manager._symbols or manager._cfg.subscribe_market_streams:
+        market_streams.update(global_streams(manager))
+    manager._intended_streams_by_endpoint["public"] = public_streams
+    manager._intended_streams_by_endpoint["market"] = market_streams
+    manager._intended_streams = set().union(public_streams, market_streams)
+    validate_endpoint_stream_limits(manager)
+    LOG.debug(
+        "subscription budget | market=%d public=%d depth=%d agg=%d limit=%d",
+        budget_plan.total_market,
+        budget_plan.total_public,
+        budget_plan.depth_streams,
+        budget_plan.agg_trade_streams,
+        budget_plan.budget_limit,
+    )
+
+
+def validate_endpoint_stream_limits(manager: Any) -> None:
+    max_streams = int(
+        getattr(manager, "_max_streams_per_connection", DEFAULT_MAX_STREAMS_PER_CONNECTION)
+    )
+    for endpoint, streams in manager._intended_streams_by_endpoint.items():
+        if len(streams) > max_streams:
+            msg = (
+                "websocket stream count exceeds configured safety limit "
+                f"| endpoint={endpoint} streams={len(streams)} max={max_streams}"
+            )
+            raise ValueError(msg)
+
+
+async def send_subscription_command(
+    manager: Any,
+    endpoint: str,
+    method: str,
+    streams: list[str],
+) -> None:
+    if not streams:
+        return
+    ws_conn = manager._ws_conns.get(endpoint)
+    if ws_conn is None:
+        return
+    streams = sorted(dict.fromkeys(str(stream or "").strip() for stream in streams if stream))
+    if not streams:
+        return
+    chunk_size = max(1, int(getattr(manager._cfg, "subscribe_chunk_size", 100) or 100))
+    delay_seconds = max(0.0, float(getattr(manager._cfg, "subscribe_chunk_delay_ms", 0)) / 1000.0)
+    for offset in range(0, len(streams), chunk_size):
+        if manager._ws_conns.get(endpoint) is None:
+            break
+        chunk = streams[offset : offset + chunk_size]
+        message = json.dumps({"method": method, "params": chunk, "id": manager._subscribe_id})
+        manager._subscribe_id += 1
+        try:
+            await ws_conn.send(message)
+            LOG.debug(
+                "ws %s chunk | endpoint=%s offset=%d streams=%d",
+                method,
+                endpoint,
+                offset,
+                len(chunk),
+            )
+        except (
+            ws_exceptions.ConnectionClosed,
+            ConnectionError,
+            OSError,
+            AttributeError,
+        ) as exc:
+            LOG.debug("ws %s failed (non-fatal) | endpoint=%s error=%s", method, endpoint, exc)
+            break
+        if offset + chunk_size < len(streams):
+            await asyncio.sleep(delay_seconds)
+
+
+async def resubscribe_all(manager: Any, endpoint: str, ws: Any) -> None:
+    streams = sorted(manager._intended_streams_by_endpoint.get(endpoint, set()))
+    if not streams:
+        return
+    if len(streams) > 200:
+        LOG.info(
+            "ws high stream count | endpoint=%s streams=%d symbols=%d - "
+            "consider reducing shortlist_limit in config",
+            endpoint,
+            len(streams),
+            len(manager._symbols),
+        )
+    previous_conn = manager._ws_conns.get(endpoint)
+    manager._ws_conns[endpoint] = ws
+    if endpoint == "market":
+        manager._ws_conn = ws
+    try:
+        await send_subscription_command(manager, endpoint, "SUBSCRIBE", streams)
+    finally:
+        restored_conn = ws if manager._running else previous_conn
+        manager._ws_conns[endpoint] = restored_conn
+        if endpoint == "market":
+            manager._ws_conn = restored_conn
+    chunk_count = (
+        len(streams) + manager._cfg.subscribe_chunk_size - 1
+    ) // manager._cfg.subscribe_chunk_size
+    LOG.info(
+        "ws resubscribe sent | endpoint=%s streams=%d chunks=%d",
+        endpoint,
+        len(streams),
+        chunk_count,
+    )
+
+# --- inlined from ws_connection.py ---
+_WS_PING_INTERVAL_SECONDS = 20.0
+_WS_PING_TIMEOUT_SECONDS = 60.0
+_WS_CLOSE_TIMEOUT_SECONDS = 10.0
+_WS_CONNECT_TIMEOUT_SECONDS = 60.0
+
+
+def build_stream_url(manager: Any, endpoint: str) -> str:
+    base = manager._cfg.endpoint_base_url(endpoint).rstrip("/")
+    if base.endswith("/ws"):
+        base = base.removesuffix("/ws")
+    if base.endswith("/stream"):
+        base = base.removesuffix("/stream")
+    return f"{base}/stream"
+
+
+def get_ws_fallback_urls(manager: Any, endpoint: str) -> list[str]:
+    """Return endpoint-specific websocket URL candidates."""
+    return [build_stream_url(manager, endpoint)]
+
+
+def get_ws_url_version(manager: Any, endpoint: str) -> str:
+    _ = manager
+    if endpoint in {"public", "market"}:
+        return endpoint
+    return "unknown"
+
+
+def apply_tcp_keepalive(_manager: Any, ws: Any) -> None:
+    try:
+        transport = getattr(ws, "transport", None)
+        sock = transport.get_extra_info("socket") if transport is not None else None
+        if sock is None:
+            return
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        if hasattr(socket, "TCP_KEEPIDLE"):
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 30)
+        if hasattr(socket, "TCP_KEEPINTVL"):
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 10)
+        if hasattr(socket, "TCP_KEEPCNT"):
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 5)
+        LOG.debug("tcp keepalive applied")
+    except (OSError, AttributeError) as exc:
+        LOG.debug("tcp keepalive not applied: %s", exc)
+
+
+def apply_connected_state(manager: Any, *, endpoint: str, ws: Any, url: str) -> None:
+    """Apply connection state updates after a successful websocket connect."""
+    manager._ws_conns[endpoint] = ws
+    manager._connected_urls[endpoint] = url
+    manager._connected_at_by_endpoint[endpoint] = time.monotonic()
+    if endpoint == "market":
+        manager._ws_conn = ws
+
+    apply_tcp_keepalive(manager, ws)
+
+    manager._last_message_ts_by_endpoint[endpoint] = 0.0
+    manager._last_message_ts = 0.0
+    manager._last_event_lag_ms = None
+    manager._connected_endpoints[endpoint].set()
+    manager._refresh_connected_event()
+
+    manager._connect_counts[endpoint] += 1
+    manager._connect_count += 1
+    if manager._connect_counts[endpoint] > 1 and manager._reconnect_cb is not None:
+        task = asyncio.create_task(manager._reconnect_cb(), name=f"ws_reconnect_cb:{endpoint}")
+        track = getattr(manager, "_track_callback_task", None)
+        if callable(track):
+            track(task, label=f"ws_reconnect:{endpoint}")
+
+    LOG.info(
+        "ws connected | endpoint=%s url=%s streams=%d connect_count=%d endpoint_connect_count=%d",
+        endpoint,
+        url,
+        len(manager._intended_streams_by_endpoint.get(endpoint, set())),
+        manager._connect_count,
+        manager._connect_counts[endpoint],
+    )
+    manager._last_reconnect_reason = f"{endpoint}:connected"
+    manager._last_reconnect_reason_by_endpoint[endpoint] = "connected"
+
+
+def clear_endpoint_connection_state(manager: Any, endpoint: str) -> None:
+    """Reset volatile state for a disconnected endpoint."""
+    manager._ws_conns[endpoint] = None
+    manager._connected_urls[endpoint] = None
+    manager._connected_at_by_endpoint[endpoint] = 0.0
+    manager._connected_endpoints[endpoint].clear()
+    manager._refresh_connected_event()
+    if endpoint == "market":
+        manager._ws_conn = None
+
+
+async def run_stream_session(
+    manager: Any,
+    *,
+    endpoint: str,
+    url: str,
+    connect_start: float,
+    backoff_reset_after_seconds: float,
+    proactive_reconnect_after_seconds: float,
+    parse_message: Any,
+) -> tuple[bool, bool]:
+    """Run one websocket session.
+
+    Returns:
+        Tuple (backoff_reset, proactive_reconnect_triggered).
+    """
+    proxy_url = getattr(manager, "_proxy_url", None)
+    trust_env = bool(getattr(manager, "_trust_env", True))
+    connect_kwargs: dict[str, Any] = websockets_connect_kwargs(
+        proxy_url=proxy_url, trust_env=trust_env
+    )
+    ws = await asyncio.wait_for(
+        websockets.connect(
+            url,
+            ping_interval=_WS_PING_INTERVAL_SECONDS,
+            ping_timeout=_WS_PING_TIMEOUT_SECONDS,
+            close_timeout=_WS_CLOSE_TIMEOUT_SECONDS,
+            **connect_kwargs,
+        ),
+        timeout=_WS_CONNECT_TIMEOUT_SECONDS,
+    )
+    LOG.info("ws connection established | endpoint=%s url=%s", endpoint, url)
+    backoff_reset = False
+    reconnect_reason: str | None = None
+    graceful_close = False
+    async with ws:
+        apply_connected_state(manager, endpoint=endpoint, ws=ws, url=url)
+        await manager._resubscribe_all(endpoint, ws)
+        stream_count = len(manager._intended_streams_by_endpoint.get(endpoint, set()))
+        if stream_count > 120:
+            LOG.info(
+                "high stream count | endpoint=%s streams=%d shortlist=%d",
+                endpoint,
+                stream_count,
+                len(manager._symbols),
+            )
+        health_task = asyncio.create_task(
+            manager._health_monitor(ws, endpoint),
+            name=f"ws_manager_health:{endpoint}",
+        )
+        try:
+            async for raw in ws:
+                if not manager._running:
+                    reconnect_reason = "shutdown"
+                    graceful_close = True
+                    with contextlib.suppress(Exception):
+                        await ws.close()
+                    break
+                elapsed = time.monotonic() - connect_start
+                if not backoff_reset and elapsed >= backoff_reset_after_seconds:
+                    backoff_reset = True
+                    manager._short_lived_streak = 0
+                if elapsed >= proactive_reconnect_after_seconds:
+                    reconnect_reason = "24h_proactive"
+                    break
+                try:
+                    msg = parse_message(raw)
+                except DEFENSIVE_EXC as exc:
+                    LOG.debug(
+                        "websocket message parse failed | endpoint=%s error=%s", endpoint, exc
+                    )
+                    continue
+                await manager._handle_message(msg, endpoint)
+            else:
+                close_code = getattr(ws, "close_code", None)
+                if close_code in (1000, 1001):
+                    graceful_close = True
+        finally:
+            health_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await health_task
+
+    clear_endpoint_connection_state(manager, endpoint)
+    if reconnect_reason == "24h_proactive":
+        manager._last_reconnect_reason = f"{endpoint}:{reconnect_reason}"
+        manager._last_reconnect_reason_by_endpoint[endpoint] = reconnect_reason
+        LOG.info(
+            "ws proactive reconnect | endpoint=%s uptime=%.1fh",
+            endpoint,
+            (time.monotonic() - connect_start) / 3600,
+        )
+        return backoff_reset, True
+    if reconnect_reason == "shutdown" or graceful_close:
+        manager._last_reconnect_reason = f"{endpoint}:graceful_close"
+        manager._last_reconnect_reason_by_endpoint[endpoint] = "graceful_close"
+        LOG.info("ws graceful close | endpoint=%s", endpoint)
+        return backoff_reset, False
+    msg_0 = "stream closed without explicit close frame"
+    raise ConnectionError(msg_0)
+
+
+async def run_endpoint_loop(
+    manager: Any,
+    *,
+    endpoint: str,
+    backoff_reset_after_seconds: float,
+    proactive_reconnect_after_seconds: float,
+    parse_message: Any,
+    market_endpoint: str,
+    stale_symbols: Any,
+    maybe_backfill_after_disconnect: Any,
+    compute_disconnect_delay: Any,
+    connection_exceptions: tuple[type[BaseException], ...],
+) -> None:
+    """Run reconnect loop for a websocket endpoint."""
+    delay = 1.0
+    retry_streak = 0
+    max_delay = manager._cfg.reconnect_max_delay_seconds
+    url = build_stream_url(manager, endpoint)
+    while manager._running:
+        connect_start = time.monotonic()
+        backoff_reset = False
+        try:
+            LOG.info(
+                "ws connecting | endpoint=%s url=%s streams=%d",
+                endpoint,
+                url,
+                len(manager._intended_streams_by_endpoint.get(endpoint, set())),
+            )
+            backoff_reset, proactive_reconnect = await run_stream_session(
+                manager,
+                endpoint=endpoint,
+                url=url,
+                connect_start=connect_start,
+                backoff_reset_after_seconds=backoff_reset_after_seconds,
+                proactive_reconnect_after_seconds=proactive_reconnect_after_seconds,
+                parse_message=parse_message,
+            )
+            retry_streak = 0
+            if backoff_reset:
+                delay = 1.0
+            if proactive_reconnect:
+                delay = 1.0
+                manager._short_lived_streak = 0
+                if endpoint == market_endpoint:
+                    stale = stale_symbols()
+                    await maybe_backfill_after_disconnect(
+                        elapsed=time.monotonic() - connect_start,
+                        stale_symbols=stale,
+                    )
+                continue
+        except asyncio.CancelledError:
+            clear_endpoint_connection_state(manager, endpoint)
+            return
+        except connection_exceptions as exc:
+            clear_endpoint_connection_state(manager, endpoint)
+            if not manager._running:
+                return
+
+            elapsed = time.monotonic() - connect_start
+            retry_streak += 1
+            if retry_streak <= 3:
+                LOG.info("ws fast-retry %d/3 | endpoint=%s error=%s", retry_streak, endpoint, exc)
+                delay = 0.5
+            else:
+                delay = compute_disconnect_delay(
+                    manager,
+                    endpoint=endpoint,
+                    url=url,
+                    exc=exc,
+                    elapsed=elapsed,
+                    delay=delay,
+                )
+            try:
+                await asyncio.sleep(delay)
+            except asyncio.CancelledError:
+                return
+            if retry_streak > 3:
+                delay = min(delay * 2.0, max_delay)
+            if endpoint == market_endpoint:
+                stale = stale_symbols()
+                await maybe_backfill_after_disconnect(
+                    elapsed=elapsed,
+                    stale_symbols=stale,
+                )
+        except DEFENSIVE_EXC as exc:
+            LOG.exception(
+                "ws unexpected error during connection | endpoint=%s (%s)",
+                endpoint,
+                type(exc).__name__,
+            )
+            clear_endpoint_connection_state(manager, endpoint)
+            if not manager._running:
+                return
+            retry_streak += 1
+            delay = min(max(delay, 1.0) * 2.0, max_delay) if retry_streak > 3 else 0.5
+            try:
+                await asyncio.sleep(delay)
+            except asyncio.CancelledError:
+                return
+
+# --- inlined from ws_cache.py ---
+def _parse_depth_levels(raw_levels: Any, *, reverse: bool) -> tuple[tuple[float, float], ...]:
+    parsed: list[tuple[float, float]] = []
+    if not isinstance(raw_levels, list):
+        return ()
+    for raw in raw_levels:
+        if not isinstance(raw, (list, tuple)) or len(raw) < 2:
+            continue
+        try:
+            price = float(raw[0])
+            qty = float(raw[1])
+        except (TypeError, ValueError):
+            continue
+        if price <= 0.0 or qty <= 0.0:
+            continue
+        parsed.append((price, qty))
+    parsed.sort(key=lambda item: item[0], reverse=reverse)
+    return tuple(parsed)
+
+
+def _l2_depth_imbalance(manager: Any, symbol: str) -> float | None:
+    book = manager._depth_book.get(symbol)
+    if not book:
+        return None
+    bids = book.get("bids") or ()
+    asks = book.get("asks") or ()
+    if not bids or not asks:
+        return None
+    best_bid = bids[0][0]
+    best_ask = asks[0][0]
+    mid = (best_bid + best_ask) / 2.0
+    if mid <= 0.0:
+        return None
+    band_bps = float(getattr(manager._cfg, "depth_band_bps", 8.0) or 8.0)
+    band = mid * band_bps / 10_000.0
+
+    bid_notional = sum(price * qty for price, qty in bids if (mid - price) <= band)
+    ask_notional = sum(price * qty for price, qty in asks if (price - mid) <= band)
+    if bid_notional <= 0.0 and ask_notional <= 0.0:
+        bid_notional = sum(price * qty for price, qty in bids)
+        ask_notional = sum(price * qty for price, qty in asks)
+    total = bid_notional + ask_notional
+    if total <= 0.0:
+        return None
+    imbalance = (bid_notional - ask_notional) / total
+    wall_pressure = manager._depth_wall_pressure.get(symbol)
+    if wall_pressure is not None:
+        imbalance = (imbalance * 0.65) + (float(wall_pressure) * 0.35)
+    return float(round(max(-1.0, min(1.0, imbalance)), 4))
+
+
+def _update_depth_wall_pressure(
+    manager: Any,
+    symbol: str,
+    bids: tuple[tuple[float, float], ...],
+    asks: tuple[tuple[float, float], ...],
+    now: float,
+) -> None:
+    min_notional = float(getattr(manager._cfg, "depth_wall_min_notional", 250_000.0) or 0.0)
+    if min_notional <= 0.0:
+        manager._depth_wall_pressure.pop(symbol, None)
+        return
+    persistence = float(getattr(manager._cfg, "depth_wall_persistence_seconds", 10.0) or 0.0)
+    stale_after = max(5.0, persistence * 2.0)
+    state = manager._depth_wall_state.setdefault(symbol, {})
+    seen: set[tuple[str, float]] = set()
+    bid_wall = ask_wall = 0.0
+
+    for side, levels in (("bid", bids), ("ask", asks)):
+        for price, qty in levels:
+            notional = price * qty
+            if notional < min_notional:
+                continue
+            key = (side, round(price, 8))
+            seen.add(key)
+            item = state.get(key)
+            if item is None:
+                item = {"first_seen": now, "last_seen": now, "max_notional": notional}
+                state[key] = item
+            else:
+                item["last_seen"] = now
+                item["max_notional"] = max(float(item.get("max_notional", 0.0)), notional)
+            if now - float(item.get("first_seen", now)) >= persistence:
+                if side == "bid":
+                    bid_wall += notional
+                else:
+                    ask_wall += notional
+
+    for key, item in list(state.items()):
+        if key not in seen and now - float(item.get("last_seen", 0.0)) > stale_after:
+            state.pop(key, None)
+
+    total = bid_wall + ask_wall
+    if total > 0.0:
+        manager._depth_wall_pressure[symbol] = round(
+            max(-1.0, min(1.0, (bid_wall - ask_wall) / total)), 4
+        )
+    else:
+        manager._depth_wall_pressure.pop(symbol, None)
+
+
+def is_ticker_cache_warm(manager: Any) -> bool:
+    if not manager._ticker_cache:
+        return False
+    age = time.monotonic() - manager._ticker_cache_ts
+    return bool(age <= manager._cfg.market_ticker_freshness_seconds)
+
+
+def get_stats(manager: Any) -> dict[str, Any]:
+    stats: dict[str, Any] = {
+        "streams_total": len(manager._intended_streams),
+        "streams_active": len(manager._stream_last_message_ts),
+        "slow_streams": list(manager._slow_streams),
+        "slow_streams_count": len(manager._slow_streams),
+        "buffer_stats": manager._message_buffer.get_stats(),
+    }
+    stream_latencies: dict[str, float] = {}
+    for stream, latencies in manager._stream_latency_ms.items():
+        if latencies:
+            stream_latencies[stream] = round(sum(latencies) / len(latencies), 2)
+    if stream_latencies:
+        stats["avg_latency_per_stream"] = stream_latencies
+        all_latencies = [sum(v) / len(v) for v in manager._stream_latency_ms.values() if v]
+        if all_latencies:
+            stats["avg_latency_overall_ms"] = round(sum(all_latencies) / len(all_latencies), 2)
+    return stats
+
+
+def get_global_ticker_data(manager: Any) -> list[JsonDict]:
+    result: list[JsonDict] = []
+    now = time.monotonic()
+    for symbol, ticker in manager._ticker_cache.items():
+        last_update = manager._ticker_update_times.get(symbol, 0.0)
+        if now - last_update > manager._cfg.market_ticker_freshness_seconds:
+            continue
+        result.append(
+            {
+                "symbol": symbol,
+                "quote_volume": ticker.get("quote_volume", 0.0),
+                "price_change_percent": ticker.get("price_change_percent", 0.0),
+                "last_price": ticker.get("last_price", 0.0),
+                "trade_count": int(float(ticker.get("trade_count") or 0)),
+            }
+        )
+    return result
+
+
+def get_depth_imbalance(manager: Any, symbol: str) -> float | None:
+    l2_imbalance = _l2_depth_imbalance(manager, symbol)
+    if l2_imbalance is not None:
+        return l2_imbalance
+    bid_qty, ask_qty = manager._book_qty.get(symbol, (None, None))
+    snapshot = manager.get_agg_trade_snapshot(symbol)
+    return depth_imbalance_from_book(
+        bid_qty=bid_qty,
+        ask_qty=ask_qty,
+        delta_ratio=None if snapshot is None else snapshot.delta_ratio,
+    )
+
+
+def get_depth_imbalance_source(manager: Any, symbol: str) -> str | None:
+    if _l2_depth_imbalance(manager, symbol) is not None:
+        return "l2_depth"
+    bid_qty, ask_qty = manager._book_qty.get(symbol, (None, None))
+    if bid_qty is not None and ask_qty is not None and bid_qty >= 0 and ask_qty >= 0:
+        return "l1_book"
+    if manager.get_agg_trade_snapshot(symbol) is not None:
+        return "agg_trade_proxy"
+    return None
+
+
+def get_microprice_bias(manager: Any, symbol: str) -> float | None:
+    bid, ask = manager.get_book_snapshot(symbol)
+    if bid is None or ask is None or bid <= 0 or ask <= 0:
+        return None
+    bid_qty, ask_qty = manager._book_qty.get(symbol, (None, None))
+    snapshot = manager.get_agg_trade_snapshot(symbol)
+    return microprice_bias_from_book(
+        bid=bid,
+        ask=ask,
+        bid_qty=bid_qty,
+        ask_qty=ask_qty,
+        delta_ratio=None if snapshot is None else snapshot.delta_ratio,
+    )
+
+
+def get_microprice_bias_source(manager: Any, symbol: str) -> str | None:
+    bid, ask = manager.get_book_snapshot(symbol)
+    if bid is None or ask is None or bid <= 0 or ask <= 0:
+        return None
+    if manager._depth_book.get(symbol):
+        return "l2_depth"
+    bid_qty, ask_qty = manager._book_qty.get(symbol, (None, None))
+    if bid_qty is not None and ask_qty is not None and bid_qty >= 0 and ask_qty >= 0:
+        return "l1_book"
+    if manager.get_agg_trade_snapshot(symbol) is not None:
+        return "agg_trade_proxy"
+    return None
+
+
+def get_funding_sentiment(manager: Any) -> float | None:
+    rates: list[float] = []
+    for value in manager._mark_price_cache.values():
+        raw_rate = value.get("funding_rate")
+        if raw_rate is None:
+            continue
+        try:
+            rates.append(float(raw_rate))
+        except (TypeError, ValueError):
+            continue
+    if not rates:
+        return None
+    return sum(rates) / len(rates)
+
+
+def get_liquidation_rollups(
+    manager: Any,
+    symbol: str | None = None,
+    window_seconds: int = 900,
+) -> dict[str, float] | None:
+    """Return notional-weighted liquidation rollups for *symbol* (ORDER_FLOW_INGEST §3)."""
+    cutoff_ms = int(time.time() * 1000) - window_seconds * 1000
+    long_notional = 0.0
+    short_notional = 0.0
+    for ts_ms, sym, side, qty, price in manager._force_order_buffer:
+        if ts_ms < cutoff_ms:
+            continue
+        if symbol is not None and sym != symbol:
+            continue
+        try:
+            qty_val = float(qty)
+            price_val = float(price)
+        except (TypeError, ValueError):
+            continue
+        if qty_val <= 0.0:
+            continue
+        notional = qty_val * price_val if price_val > 0.0 else qty_val
+        if side == "BUY":
+            short_notional += notional
+        else:
+            long_notional += notional
+    total = long_notional + short_notional
+    if total <= 0.0:
+        return None
+    return {
+        "liquidation_long_notional": long_notional,
+        "liquidation_short_notional": short_notional,
+        "liquidation_total_notional": total,
+        "liquidation_score": (short_notional - long_notional) / total,
+    }
+
+
+def get_liquidation_sentiment(
+    manager: Any,
+    symbol: str | None = None,
+    window_seconds: int = 60,
+) -> float | None:
+    rollups = get_liquidation_rollups(manager, symbol=symbol, window_seconds=window_seconds)
+    if rollups is None:
+        return None
+    return float(rollups["liquidation_score"])
+
+
+def get_liquidation_age_seconds(
+    manager: Any,
+    symbol: str | None = None,
+    window_seconds: int = 60,
+) -> float | None:
+    cutoff_ms = int(time.time() * 1000) - window_seconds * 1000
+    latest_ts_ms: int | None = None
+    for ts_ms, sym, _side, qty, _price in manager._force_order_buffer:
+        if ts_ms < cutoff_ms or qty <= 0.0:
+            continue
+        if symbol is not None and sym != symbol:
+            continue
+        if latest_ts_ms is None or ts_ms > latest_ts_ms:
+            latest_ts_ms = ts_ms
+    if latest_ts_ms is None:
+        return None
+    return max(0.0, (int(time.time() * 1000) - latest_ts_ms) / 1000.0)
+
+
+def should_throttle_ticker_update(manager: Any, symbol: str) -> bool:
+    now = time.monotonic()
+    last_update = manager._ticker_update_times.get(symbol, 0.0)
+    elapsed_ms = (now - last_update) * 1000
+    if elapsed_ms < manager._min_ticker_update_interval_ms:
+        last_logged = getattr(manager, "_last_ticker_throttle_log", {}).get(symbol, 0.0)
+        if now - last_logged >= 30.0:
+            if not hasattr(manager, "_last_ticker_throttle_log"):
+                manager._last_ticker_throttle_log = {}
+            manager._last_ticker_throttle_log[symbol] = now
+            LOG.debug(
+                "ticker throttled | symbol=%s elapsed=%.0fms min=%.0fms",
+                symbol,
+                elapsed_ms,
+                manager._min_ticker_update_interval_ms,
+            )
+        return True
+    manager._ticker_update_times[symbol] = now
+    return False
+
+
+def should_throttle_mark_price_update(manager: Any, symbol: str) -> bool:
+    now = time.monotonic()
+    last_update = manager._mark_price_update_times.get(symbol, 0.0)
+    elapsed_ms = (now - last_update) * 1000
+    if elapsed_ms < 50.0:
+        last_logged = getattr(manager, "_last_markprice_throttle_log", {}).get(symbol, 0.0)
+        if now - last_logged >= 30.0:
+            if not hasattr(manager, "_last_markprice_throttle_log"):
+                manager._last_markprice_throttle_log = {}
+            manager._last_markprice_throttle_log[symbol] = now
+            LOG.debug(
+                "mark_price throttled | symbol=%s elapsed=%.0fms min=50ms",
+                symbol,
+                elapsed_ms,
+            )
+        return True
+    manager._mark_price_update_times[symbol] = now
+    return False
+
+
+def handle_ticker(manager: Any, symbol: str, data: JsonDict) -> None:
+    if should_throttle_ticker_update(manager, symbol):
+        return
+    try:
+        manager._ticker_cache[symbol] = {
+            "symbol": symbol,
+            "last_price": float(data.get("c") or 0.0),
+            "quote_volume": float(data.get("q") or 0.0),
+            "price_change_percent": float(data.get("P") or 0.0),
+            "price_change": float(data.get("p") or 0.0),
+            "open_price": float(data.get("o") or 0.0),
+            "high_price": float(data.get("h") or 0.0),
+            "low_price": float(data.get("l") or 0.0),
+            "trade_count": int(float(data.get("n") or 0)),
+        }
+        manager._ticker_cache_ts = time.monotonic()
+    except (TypeError, ValueError):
+        return
+
+
+def handle_mini_ticker(manager: Any, symbol: str, data: JsonDict) -> None:
+    now = time.monotonic()
+    last_full_update = manager._ticker_update_times.get(symbol, 0.0)
+    if now - last_full_update < manager._cfg.market_ticker_freshness_seconds:
+        return
+    if should_throttle_ticker_update(manager, symbol):
+        return
+    try:
+        close_price = float(data.get("c") or 0.0)
+        open_price = float(data.get("o") or 0.0)
+        price_change_pct = (
+            ((close_price - open_price) / open_price * 100.0) if open_price > 0 else 0.0
+        )
+        manager._ticker_cache[symbol] = {
+            "symbol": symbol,
+            "last_price": close_price,
+            "quote_volume": float(data.get("q") or 0.0),
+            "price_change_percent": price_change_pct,
+            "price_change": close_price - open_price,
+            "open_price": open_price,
+            "high_price": float(data.get("h") or 0.0),
+            "low_price": float(data.get("l") or 0.0),
+        }
+        manager._ticker_cache_ts = time.monotonic()
+    except (TypeError, ValueError):
+        return
+
+
+def handle_mark_price(manager: Any, symbol: str, data: JsonDict) -> None:
+    if not symbol:
+        return
+    if should_throttle_mark_price_update(manager, symbol):
+        return
+    try:
+        funding_str = data.get("r")
+        # Ensure funding_str is not None for float() or check specifically
+        funding_rate = (
+            float(funding_str) if funding_str is not None and funding_str not in ("", "0") else 0.0
+        )
+        mark_price = float(data.get("p") or 0.0)
+        if mark_price <= 0.0:
+            return
+        now = time.monotonic()
+        manager._mark_price_cache[symbol] = {
+            "symbol": symbol,
+            "mark_price": mark_price,
+            "index_price": float(data.get("i") or 0.0),
+            "funding_rate": funding_rate,
+            "next_funding_time_ms": int(data.get("T") or 0),
+            "updated_at": now,
+        }
+        manager._mark_price_update_times[symbol] = now
+    except (TypeError, ValueError):
+        return
+
+
+def handle_force_order(manager: Any, data: JsonDict) -> None:
+    try:
+        order = data.get("o", {})
+        symbol = str(order.get("s") or "").upper()
+        side = str(order.get("S") or "").upper()
+        qty = float(order.get("q") or 0.0)
+        try:
+            price = float(order.get("p", 0) or 0)
+        except (TypeError, ValueError):
+            price = 0.0
+        ts_ms = int(order.get("T") or data.get("E") or (time.time() * 1000))
+        if symbol and side in ("BUY", "SELL") and qty > 0:
+            manager._force_order_buffer.append((ts_ms, symbol, side, qty, price))
+    except (TypeError, ValueError, KeyError):
+        return
+
+
+async def handle_book_ticker(manager: Any, symbol: str, data: JsonDict) -> None:
+    if manager._symbols and symbol not in manager._symbols:
+        return
+    try:
+        bid = float(data["b"]) if data.get("b") is not None else None
+        ask = float(data["a"]) if data.get("a") is not None else None
+        bid_qty = float(data["B"]) if data.get("B") is not None else None
+        ask_qty = float(data["A"]) if data.get("A") is not None else None
+        event_ts_ms = int(data["E"]) if data.get("E") is not None else None
+    except (KeyError, TypeError, ValueError):
+        return
+
+    async with manager._data_lock:
+        manager._book[symbol] = (bid, ask)
+        manager._book_qty[symbol] = (bid_qty, ask_qty)
+        manager._book_update_times[symbol] = time.monotonic()
+
+    if manager._event_bus is not None:
+        manager._event_bus.publish_nowait(
+            BookTickerEvent(symbol=symbol, bid=bid, ask=ask, event_ts_ms=event_ts_ms)
+        )
+
+
+async def handle_depth_update(manager: Any, symbol: str, data: JsonDict) -> None:
+    if manager._symbols and symbol not in manager._symbols:
+        return
+    bids = _parse_depth_levels(data.get("b"), reverse=True)
+    asks = _parse_depth_levels(data.get("a"), reverse=False)
+    if not bids or not asks:
+        return
+
+    now = time.monotonic()
+    async with manager._data_lock:
+        manager._depth_book[symbol] = {"bids": bids, "asks": asks}
+        manager._depth_update_times[symbol] = now
+        manager._book[symbol] = (bids[0][0], asks[0][0])
+        manager._book_qty[symbol] = (bids[0][1], asks[0][1])
+        manager._book_update_times[symbol] = now
+        _update_depth_wall_pressure(manager, symbol, bids, asks, now)
+
+
+async def handle_agg_trade(manager: Any, symbol: str, data: JsonDict) -> None:
+    if manager._symbols and symbol not in manager._symbols:
+        return
+    try:
+        trade = AggTrade(
+            symbol=symbol,
+            trade_id=int(data["a"]),
+            price=float(data["p"]),
+            quantity=float(data["q"]),
+            trade_time_ms=int(data["T"]),
+            is_buyer_maker=bool(data["m"]),
+        )
+    except (KeyError, TypeError, ValueError):
+        return
+
+    pending = manager._pending_agg_trades.setdefault(symbol, [])
+    pending.append(trade)
+    now = time.monotonic()
+    last_flush = manager._last_agg_trade_flush_ts.get(symbol, 0.0)
+    flush_interval = float(manager._cfg.agg_trade_flush_interval_ms) / 1000.0
+    if now - last_flush < flush_interval and len(pending) < 500:
+        return
+
+    batch = pending[:]
+    pending.clear()
+    manager._last_agg_trade_flush_ts[symbol] = now
+
+    if symbol not in manager._agg_trades:
+        manager._agg_trades[symbol] = collections.deque(maxlen=manager._cfg.max_agg_trade_buffer)
+    manager._agg_trades[symbol].extend(batch)
+
+    if manager._agg_trade_cbs:
+        trade_dt = datetime.fromtimestamp(batch[-1].trade_time_ms / 1000.0, tz=UTC)
+        for callback in manager._agg_trade_cbs:
+            task = asyncio.create_task(callback(symbol, batch[-1].price, trade_dt))
+            manager._attach_task_logging(task, label=f"agg_trade:{symbol}")
+
 class FuturesWSManager:
     """Manages WebSocket connections to Binance Futures for real-time market data."""
 
@@ -449,6 +1676,7 @@ class FuturesWSManager:
         # EventBus integration (optional — set via set_event_bus())
         self._event_bus: EventBus | None = None
         self._event_bus_missing_logged = False
+        self._radar_store: Any | None = None
 
     @staticmethod
     def _normalize_symbol_list(items: list[Any]) -> list[str]:
@@ -504,6 +1732,10 @@ class FuturesWSManager:
         """
         self._event_bus = bus
         LOG.info("EventBus attached to ws_manager")
+
+    def set_radar_store(self, store: Any) -> None:
+        """Attach radar persistence for subscription rebuild after reconnect."""
+        self._radar_store = store
 
     @staticmethod
     def _attach_task_logging(task: asyncio.Task[Any], *, label: str) -> None:
@@ -897,19 +2129,19 @@ class FuturesWSManager:
             )
 
     def _base_streams_for_symbols(self, symbols: list[str]) -> list[str]:
-        return ws_subscriptions.base_streams_for_symbols(self, symbols)
+        return base_streams_for_symbols(self, symbols)
 
     def _public_streams_for_symbols(self, symbols: list[str]) -> list[str]:
-        return ws_subscriptions.public_streams_for_symbols(self, symbols)
+        return public_streams_for_symbols(self, symbols)
 
     def _stream_endpoint_class(self, stream: str) -> str:
-        return ws_subscriptions.stream_endpoint_class(stream)
+        return stream_endpoint_class(stream)
 
     def _recompute_intended_streams(self) -> None:
-        ws_subscriptions.recompute_intended_streams(self)
+        recompute_intended_streams(self)
 
     def _tracked_agg_trade_streams(self, symbols: list[str]) -> list[str]:
-        return ws_subscriptions.tracked_agg_trade_streams(self, symbols)
+        return tracked_agg_trade_streams(self, symbols)
 
     async def set_tracked_symbols(self, symbols: list[str]) -> None:
         tracked_symbols = self._normalize_symbol_list(list(symbols))
@@ -994,26 +2226,26 @@ class FuturesWSManager:
     async def _send_subscription_command(
         self, endpoint: str, method: str, streams: list[str]
     ) -> None:
-        await ws_subscriptions.send_subscription_command(self, endpoint, method, streams)
+        await send_subscription_command(self, endpoint, method, streams)
 
     def _global_streams(self) -> list[str]:
         """Return the list of market-wide streams to subscribe if enabled."""
-        return ws_subscriptions.global_streams(self)
+        return global_streams(self)
 
     async def _resubscribe_all(self, endpoint: str, ws: Any) -> None:
-        await ws_subscriptions.resubscribe_all(self, endpoint, ws)
+        await resubscribe_all(self, endpoint, ws)
 
     def _apply_tcp_keepalive(self, ws: Any) -> None:
-        ws_connection.apply_tcp_keepalive(self, ws)
+        apply_tcp_keepalive(self, ws)
 
     async def _health_monitor(self, ws: Any, endpoint: str) -> None:
         """Monitor WebSocket health and reconnect on silence/recovery failures."""
         while True:
             try:
                 await asyncio.sleep(_HEALTH_CHECK_INTERVAL_SECONDS)
-                if await ws_health.monitor_connection_silence(self, ws, endpoint):
+                if await monitor_connection_silence(self, ws, endpoint):
                     return
-                if await ws_health.evaluate_endpoint_health(self, ws, endpoint):
+                if await evaluate_endpoint_health(self, ws, endpoint):
                     return
             except asyncio.CancelledError:
                 raise
@@ -1239,7 +2471,7 @@ class FuturesWSManager:
         Falls back to True only if the cache has at least a handful of symbols
         so the shortlist can be meaningful.
         """
-        return ws_cache.is_ticker_cache_warm(self)
+        return is_ticker_cache_warm(self)
 
     def get_stats(self) -> dict[str, Any]:
         """P3: Return WebSocket statistics for monitoring.
@@ -1250,7 +2482,7 @@ class FuturesWSManager:
         - Slow streams (avg latency > 5000ms)
         - Per-stream average latency
         """
-        return ws_cache.get_stats(self)
+        return get_stats(self)
 
     def get_ticker_snapshot(self, symbol: str) -> JsonDict | None:
         """Return the latest 24hr ticker dict for *symbol*, or None."""
@@ -1282,7 +2514,7 @@ class FuturesWSManager:
         This method prefers full 24hr ticker data (!ticker@arr) but falls back
         to miniTicker (!miniTicker@arr) if available and full ticker is stale.
         """
-        return ws_cache.get_global_ticker_data(self)
+        return get_global_ticker_data(self)
 
     def get_mark_price_snapshot(self, symbol: str) -> JsonDict | None:
         """Return the latest mark-price/funding dict for *symbol*, or None.
@@ -1310,11 +2542,11 @@ class FuturesWSManager:
 
     def get_depth_imbalance(self, symbol: str) -> float | None:
         """Return L2 depth imbalance in [-1, 1], falling back to L1/flow proxy."""
-        return ws_cache.get_depth_imbalance(self, symbol)
+        return get_depth_imbalance(self, symbol)
 
     def get_depth_imbalance_source(self, symbol: str) -> str | None:
         """Return the data source backing the latest depth imbalance value."""
-        return ws_cache.get_depth_imbalance_source(self, symbol)
+        return get_depth_imbalance_source(self, symbol)
 
     def get_microprice_bias(self, symbol: str) -> float | None:
         """Calculate microprice bias from order book.
@@ -1325,11 +2557,11 @@ class FuturesWSManager:
         Uses best bid/ask quantities from bookTicker or partial depth; falls
         back to recent aggTrade delta when the book is unavailable.
         """
-        return ws_cache.get_microprice_bias(self, symbol)
+        return get_microprice_bias(self, symbol)
 
     def get_microprice_bias_source(self, symbol: str) -> str | None:
         """Return the data source backing the latest microprice bias value."""
-        return ws_cache.get_microprice_bias_source(self, symbol)
+        return get_microprice_bias_source(self, symbol)
 
     def get_funding_sentiment(self) -> float | None:
         """Return the average funding rate across all tracked symbols.
@@ -1338,7 +2570,7 @@ class FuturesWSManager:
         Negative → market is net-short / bearish crowding.
         Returns None if the mark-price cache is empty.
         """
-        return ws_cache.get_funding_sentiment(self)
+        return get_funding_sentiment(self)
 
     def get_liquidation_sentiment(
         self,
@@ -1355,7 +2587,7 @@ class FuturesWSManager:
             symbol: If given, filter to this symbol only.
             window_seconds: Look-back window in seconds.
         """
-        return ws_cache.get_liquidation_sentiment(
+        return get_liquidation_sentiment(
             self, symbol=symbol, window_seconds=window_seconds
         )
 
@@ -1365,7 +2597,7 @@ class FuturesWSManager:
         window_seconds: int = 900,
     ) -> dict[str, float] | None:
         """Notional rollups for liquidation heatmap / positioning context."""
-        return ws_cache.get_liquidation_rollups(
+        return get_liquidation_rollups(
             self, symbol=symbol, window_seconds=window_seconds
         )
 
@@ -1375,7 +2607,7 @@ class FuturesWSManager:
         window_seconds: int = 60,
     ) -> float | None:
         """Return age of the newest forceOrder event used for liquidation sentiment."""
-        return ws_cache.get_liquidation_age_seconds(
+        return get_liquidation_age_seconds(
             self, symbol=symbol, window_seconds=window_seconds
         )
 
@@ -1430,11 +2662,11 @@ class FuturesWSManager:
 
     def _should_throttle_ticker_update(self, symbol: str) -> bool:
         """Check if ticker update should be throttled (debounce rapid updates)."""
-        return ws_cache.should_throttle_ticker_update(self, symbol)
+        return should_throttle_ticker_update(self, symbol)
 
     def _should_throttle_mark_price_update(self, symbol: str) -> bool:
         """Check if mark price update should be throttled."""
-        return ws_cache.should_throttle_mark_price_update(self, symbol)
+        return should_throttle_mark_price_update(self, symbol)
 
     async def _backfill(self, symbols: list[str]) -> None:
         now = time.monotonic()
@@ -1524,19 +2756,19 @@ class FuturesWSManager:
         Cross-endpoint fallback is intentionally disabled so market streams
         cannot drift onto `public` and public streams cannot drift onto `market`.
         """
-        return ws_connection.get_ws_fallback_urls(self, endpoint)
+        return get_ws_fallback_urls(self, endpoint)
 
     def _build_stream_url(self, endpoint: str) -> str:
-        return ws_connection.build_stream_url(self, endpoint)
+        return build_stream_url(self, endpoint)
 
     def _get_ws_url_version(self, endpoint: str) -> str:
-        return ws_connection.get_ws_url_version(self, endpoint)
+        return get_ws_url_version(self, endpoint)
 
     def _clear_endpoint_connection_state(self, endpoint: str) -> None:
-        ws_connection.clear_endpoint_connection_state(self, endpoint)
+        clear_endpoint_connection_state(self, endpoint)
 
     async def _run_stream(self, endpoint: str) -> None:
-        await ws_connection.run_endpoint_loop(
+        await run_endpoint_loop(
             self,
             endpoint=endpoint,
             backoff_reset_after_seconds=_BACKOFF_RESET_AFTER_SECONDS,
@@ -1545,7 +2777,7 @@ class FuturesWSManager:
             market_endpoint=_WS_MARKET,
             stale_symbols=self._stale_symbols,
             maybe_backfill_after_disconnect=self._maybe_backfill_after_disconnect,
-            compute_disconnect_delay=ws_reconnect.compute_disconnect_delay,
+            compute_disconnect_delay=compute_disconnect_delay,
             connection_exceptions=(
                 ws_exceptions.ConnectionClosed,
                 ws_exceptions.InvalidStatus,
@@ -1899,15 +3131,15 @@ class FuturesWSManager:
 
     async def _handle_book_ticker(self, symbol: str, data: JsonDict) -> None:
         """Handle bookTicker events.  Acquires _data_lock to prevent races."""
-        await ws_cache.handle_book_ticker(self, symbol, data)
+        await handle_book_ticker(self, symbol, data)
 
     async def _handle_depth_update(self, symbol: str, data: JsonDict) -> None:
         """Handle partial depth events for active orderflow symbols."""
-        await ws_cache.handle_depth_update(self, symbol, data)
+        await handle_depth_update(self, symbol, data)
 
     async def _handle_agg_trade(self, symbol: str, data: JsonDict) -> None:
         """Handle aggTrade events.  Acquires _data_lock to prevent races."""
-        await ws_cache.handle_agg_trade(self, symbol, data)
+        await handle_agg_trade(self, symbol, data)
 
     def _handle_ticker(self, symbol: str, data: JsonDict) -> None:
         """Handle 24hrTicker events from !ticker@arr.
@@ -1916,7 +3148,7 @@ class FuturesWSManager:
           c = last price, q = quote volume (24h), P = price change %,
           p = price change abs, o = open price, h = high, l = low.
         """
-        ws_cache.handle_ticker(self, symbol, data)
+        handle_ticker(self, symbol, data)
 
     def _handle_mini_ticker(self, symbol: str, data: JsonDict) -> None:
         """Handle miniTicker events from !miniTicker@arr (lightweight fallback).
@@ -1925,7 +3157,7 @@ class FuturesWSManager:
           c = last price, q = quote volume (24h), v = base volume,
           h = high, l = low, o = open.
         """
-        ws_cache.handle_mini_ticker(self, symbol, data)
+        handle_mini_ticker(self, symbol, data)
 
     def _handle_mark_price(self, symbol: str, data: JsonDict) -> None:
         """Handle markPriceUpdate events from !markPrice@arr@1s.
@@ -1934,7 +3166,7 @@ class FuturesWSManager:
           p = mark price, r = funding rate, T = next funding time ms,
           i = index price.
         """
-        ws_cache.handle_mark_price(self, symbol, data)
+        handle_mark_price(self, symbol, data)
 
     def _handle_force_order(self, data: JsonDict) -> None:
         """Handle forceOrder (liquidation) events from !forceOrder@arr.
@@ -1948,4 +3180,4 @@ class FuturesWSManager:
         as we process individual events as received.
         Side SELL = a long position was liquidated (bearish pressure).
         """
-        ws_cache.handle_force_order(self, data)
+        handle_force_order(self, data)

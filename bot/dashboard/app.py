@@ -361,6 +361,23 @@ class BotDashboard:
                 LOG.exception("dashboard live shortlist error")
                 return {"error": "live_shortlist_unavailable", "detail": str(exc)}
 
+        @self.app.get("/api/radar/summary")
+        async def radar_summary(hot_limit: int = 25) -> dict[str, Any]:
+            try:
+                hot_limit = max(1, min(int(hot_limit), 100))
+                return await asyncio.to_thread(
+                    self._live_data.radar_summary,
+                    hot_limit=hot_limit,
+                )
+            except RuntimeError as exc:
+                if "shutdown" in str(exc).lower():
+                    LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
+                    return {"error": "Server is shutting down"}
+                raise
+            except DEFENSIVE_EXC as exc:
+                LOG.exception("dashboard radar summary error")
+                return {"error": "radar_summary_unavailable", "detail": str(exc)}
+
         @self.app.get("/api/live/rejections")
         async def live_rejections(
             limit: int = 30,
@@ -1178,7 +1195,7 @@ class BotDashboard:
                 if time_col is None:
                     return []
                 out: list[dict[str, Any]] = []
-                for row in df.tail(200).iter_rows(named=True):
+                for row in df.tail(200).to_dicts():
                     out.append(
                         {
                             "time": row.get(time_col),

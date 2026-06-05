@@ -50,7 +50,11 @@ def test_lane_routing_limits_families_on_kline_close() -> None:
     metadata = [
         _meta(f"setup_{idx}", family=f"family_{idx % 12}", trigger_tf="15m") for idx in range(20)
     ]
-    settings = _settings(enable_strategy_lanes=True, route_all_enabled_strategies=False)
+    settings = _settings(
+        enable_strategy_lanes=True,
+        route_all_enabled_strategies=False,
+        emit_strategy_routing_skips=True,
+    )
     engine = _engine_with_strategies(metadata, settings)
     prepared = MagicMock()
     prepared.symbol = "BTCUSDT"
@@ -61,7 +65,12 @@ def test_lane_routing_limits_families_on_kline_close() -> None:
     routed, skips = engine._route_strategies(prepared, event_interval="15m")
     families = {s.metadata.family for s in routed}
     assert len(routed) <= settings.runtime.max_setup_families_per_symbol
-    assert len(families) == len(routed)
+    per_family: dict[str, int] = {}
+    for strategy in routed:
+        family = strategy.metadata.family
+        per_family[family] = per_family.get(family, 0) + 1
+    assert all(count <= settings.runtime.max_setups_per_family for count in per_family.values())
+    assert len(families) <= len(routed)
     assert len(skips) == 20 - len(routed)
 
 

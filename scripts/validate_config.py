@@ -21,7 +21,7 @@ from bot.domain.strategy_catalog import (
     verify_setup_config_model,
     verify_strategy_wiring,
 )
-from bot.features import _add_advanced_indicators
+from bot.features.prepare import _add_advanced_indicators
 from bot.strategies import STRATEGY_CLASSES
 
 if TYPE_CHECKING:

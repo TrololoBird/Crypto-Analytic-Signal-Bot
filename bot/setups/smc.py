@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 import numpy as np
 import polars as pl
 
-from ..features import _swing_points
+from ..features.prepare import _swing_points
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray

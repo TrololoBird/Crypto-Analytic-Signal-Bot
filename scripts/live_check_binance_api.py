@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 from bot.domain.config import load_settings
 from bot.market.data import BinanceFuturesMarketData, MarketDataUnavailable
-from bot.market.rest import BinanceClientImpl
+from bot.market.rest_impl import BinanceClientImpl
 from bot.market.ws import FuturesWSManager
 
 if TYPE_CHECKING:
@@ -22,6 +22,8 @@ LOG = configure_script_logging("scripts.live_check_binance_api")
 
 LIVE_CHECK_HTTP_TIMEOUT_SECONDS = 30.0  # seconds: cap live REST smoke checks
 PUBLIC_FAPI_PATHS = {
+    "/fapi/v1/ping",
+    "/fapi/v1/time",
     "/fapi/v1/exchangeInfo",
     "/fapi/v1/ticker/24hr",
     "/fapi/v1/ticker/bookTicker",
@@ -111,6 +113,10 @@ async def _run(
         trust_env=settings.network.trust_env,
     )
     try:
+        _assert_public_endpoint("/fapi/v1/ping")
+        await binance_client._call_public_http_json("test_connectivity")
+        _assert_public_endpoint("/fapi/v1/time")
+        await binance_client._call_public_http_json("check_server_time")
         _assert_public_endpoint("/fapi/v1/exchangeInfo")
         exchange_symbols = await client.fetch_exchange_symbols()
         _assert_public_endpoint("/fapi/v1/ticker/24hr")

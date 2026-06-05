@@ -25,11 +25,9 @@ from typing import TYPE_CHECKING, Any
 
 from bot.runtime.errors import DEFENSIVE_EXC
 from bot.dashboard import BotDashboard
-from bot.regime.market import MarketRegimeAnalyzer
 from bot.runtime.metrics import BotMetricsCollector
 
 from ..delivery.confluence import ConfluenceEngine
-from ..diagnostics.config_audit import run_startup_audit
 from ..diagnostics.signals import SignalDiagnostics, set_global_diagnostics
 from ..domain import (
     BookTickerEvent,
@@ -45,20 +43,32 @@ from ..domain import (
 )
 from ..feature_flags import FeatureFlags
 from ..market.data import BinanceFuturesMarketData
-from ..market.subscription_planner import merge_order_flow_tracked_symbols
 from ..setups.base import SetupParams
 from ..strategies import STRATEGY_CLASSES
 from .container import build_application_container
 from .cycle_runner import CycleRunner
 from .delivery_orchestrator import DeliveryOrchestrator
-from .fallback_runner import FallbackRunner
-from .health_manager import HealthManager, HealthMonitor
+from .fallback_runner import (
+    FallbackRunner,
+    run_emergency_fallback_loop,
+    run_tracking_review_loop,
+)
+from .health_manager import (
+    HealthManager,
+    HealthMonitor,
+    run_health_telemetry_loop,
+    run_heartbeat_loop,
+)
 from .intra_candle_scanner import IntraCandleScanner
 from .kline_handler import KlineHandler
-from .market_context_updater import MarketContextUpdater
-from .oi_refresh_runner import OIRefreshRunner
-from .spot_refresh_runner import SpotRefreshRunner
-from .shortlist_service import ShortlistService
+from .market_context_updater import (
+    MarketContextUpdater,
+    run_market_regime_loop,
+    run_public_intelligence_loop,
+)
+from .oi_refresh_runner import OIRefreshRunner, run_oi_refresh_loop
+from .spot_refresh_runner import SpotRefreshRunner, run_spot_refresh_loop
+from .shortlist_service import ShortlistService, run_shortlist_refresh_loop
 from .symbol_analyzer import SymbolAnalyzer
 from .telemetry_manager import TelemetryManager
 
@@ -125,6 +135,8 @@ class SignalBot:
 
         self.confluence = ConfluenceEngine(settings, repository=self._modern_repo)
 
+        from bot.regime.market import MarketRegimeAnalyzer
+
         self.market_regime = MarketRegimeAnalyzer(settings)
 
         self.metrics = BotMetricsCollector(
@@ -183,10 +195,21 @@ class SignalBot:
         self._last_prepare_error: dict[str, Any] = {}
         self._diagnostic_trace_counts: dict[str, int] = {}
         self._running: bool = False
+        self._research_harvest_service = None
+        if settings.research_harvest.enabled:
+            from .research_harvest_service import ResearchHarvestService
+
+            self._research_harvest_service = ResearchHarvestService(self)
+            LOG.info(
+                "research_harvest_enabled | session=%s",
+                self._research_harvest_service.recorder.session_dir,
+            )
 
         # Intra-candle scan throttle — monotonic timestamp of last scan per symbol
         self._last_intra_scan: dict[str, float] = {}
         self._last_intra_mid: dict[str, float] = {}
+        self._last_emergency_radar_scan: dict[str, float] = {}
+        self._reconnect_refresh_task: asyncio.Task[None] | None = None
         self._shortlist_service = ShortlistService(self)
         self._cycle_runner = CycleRunner(self)
         self._symbol_analyzer = SymbolAnalyzer(self)
@@ -456,6 +479,8 @@ class SignalBot:
         except DEFENSIVE_EXC as exc:
             msg = "modern repository init failed; runtime cannot track signals"
             raise RuntimeError(msg) from exc
+        from ..diagnostics.config_audit import run_startup_audit
+
         run_startup_audit(self.settings)
 
         try:
@@ -592,6 +617,24 @@ class SignalBot:
             self._background_tasks.add(preload_task)
             preload_task.add_done_callback(self._background_tasks.discard)
         self._running = True
+        self._log_autonomous_pipeline_armed()
+
+    def _log_autonomous_pipeline_armed(self) -> None:
+        """Log background tasks started from run_forever (single entry: python main.py)."""
+        radar_on = bool(getattr(self.settings.universe.radar, "enabled", False))
+        intel_on = bool(
+            self.intelligence is not None and self.settings.intelligence.enabled
+        )
+        LOG.info(
+            "autonomous pipeline armed | entry=main.py event_bus=on "
+            "shortlist_refresh=on heartbeat=on health_telemetry=on health_monitor=on "
+            "emergency_fallback=on oi_refresh=on spot_companion=on tracking_review=on "
+            "market_regime=on radar=%s intelligence=%s dashboard=%s metrics=%s",
+            radar_on,
+            intel_on,
+            self._http_servers_enabled,
+            self.metrics._enabled,
+        )
 
     async def run_forever(self) -> None:
         """Main loop — EventBus-driven with emergency fallback."""
@@ -601,23 +644,36 @@ class SignalBot:
         LOG.info("event bus started and ready")
 
         background_tasks: list[asyncio.Task[None]] = [
-            asyncio.create_task(self._refresh_shortlist_periodic(), name="shortlist_refresh"),
-            asyncio.create_task(self._heartbeat_periodic(), name="heartbeat"),
-            asyncio.create_task(self._health_telemetry_periodic(), name="health_telemetry"),
+            asyncio.create_task(
+                run_shortlist_refresh_loop(self._shortlist_service), name="shortlist_refresh"
+            ),
+            asyncio.create_task(run_heartbeat_loop(self._health_manager), name="heartbeat"),
+            asyncio.create_task(
+                run_health_telemetry_loop(self._health_manager), name="health_telemetry"
+            ),
             asyncio.create_task(
                 self._health_monitor.run(stop_event=self._shutdown),
                 name="health_monitor",
             ),
-            asyncio.create_task(self._emergency_fallback_scan(), name="emergency_fallback"),
-            asyncio.create_task(self._oi_refresh_periodic(), name="oi_refresh"),
-            asyncio.create_task(self._spot_refresh_periodic(), name="spot_companion"),
-            asyncio.create_task(self._tracking_review_periodic(), name="tracking_review"),
-            asyncio.create_task(self._market_regime_periodic(), name="market_regime"),
+            asyncio.create_task(
+                run_emergency_fallback_loop(self._fallback_runner), name="emergency_fallback"
+            ),
+            asyncio.create_task(run_oi_refresh_loop(self._oi_refresh_runner), name="oi_refresh"),
+            asyncio.create_task(
+                run_spot_refresh_loop(self._spot_refresh_runner), name="spot_companion"
+            ),
+            asyncio.create_task(
+                run_tracking_review_loop(self._fallback_runner), name="tracking_review"
+            ),
+            asyncio.create_task(
+                run_market_regime_loop(self._market_context_updater), name="market_regime"
+            ),
         ]
         if self.intelligence is not None and self.settings.intelligence.enabled:
             background_tasks.append(
                 asyncio.create_task(
-                    self._public_intelligence_periodic(), name="public_intelligence"
+                    run_public_intelligence_loop(self._market_context_updater),
+                    name="public_intelligence",
                 )
             )
         from .telegram_operator import TelegramOperatorConsole, operator_console_enabled
@@ -652,6 +708,13 @@ class SignalBot:
         """Graceful shutdown."""
         self._running = False
         self._shutdown.set()
+
+        harvest = getattr(self, "_research_harvest_service", None)
+        if harvest is not None:
+            try:
+                harvest.finalize()
+            except DEFENSIVE_EXC:
+                LOG.debug("research_harvest finalize failed", exc_info=True)
 
         # Cancel and await fire-and-forget tasks. Drain the set until stable so
         # tasks spawned by cancellation callbacks cannot survive shutdown.
@@ -765,7 +828,29 @@ class SignalBot:
         await self._get_kline_handler().on_kline_close(event)
 
     async def _on_reconnect(self, event: ReconnectEvent) -> None:
-        LOG.info("ws reconnected | reason=%s", event.reason)
+        LOG.info("ws reconnected | reason=%s — scheduling shortlist resync", event.reason)
+        self.metrics.record_ws_reconnect()
+        prior = self._reconnect_refresh_task
+        if prior is not None and not prior.done():
+            prior.cancel()
+        self._reconnect_refresh_task = asyncio.create_task(
+            self._reconnect_shortlist_resync(event.reason),
+            name="reconnect_shortlist_resync",
+        )
+
+    async def _reconnect_shortlist_resync(self, reason: str) -> None:
+        """Debounced shortlist + WS tracked-symbol sync after WS reconnect."""
+        try:
+            await asyncio.sleep(2.0)
+            if self._shutdown.is_set():
+                return
+            await self._do_refresh_shortlist()
+            await self._sync_ws_tracked_symbols()
+            LOG.info("ws reconnect shortlist resync complete | reason=%s", reason)
+        except asyncio.CancelledError:
+            raise
+        except DEFENSIVE_EXC:
+            LOG.exception("ws reconnect shortlist resync failed | reason=%s", reason)
 
     async def _on_book_ticker(self, event: BookTickerEvent) -> None:
         """Delegate intra-candle scan trigger handling to IntraCandleScanner."""
@@ -785,14 +870,6 @@ class SignalBot:
     # ------------------------------------------------------------------
     # Emergency fallback — full scan when no kline events
     # ------------------------------------------------------------------
-
-    async def _tracking_review_periodic(self) -> None:
-        """Delegate tracking-review loop to FallbackRunner."""
-        await self._get_fallback_runner().tracking_review_periodic()
-
-    async def _emergency_fallback_scan(self) -> None:
-        """Delegate emergency-fallback loop to FallbackRunner."""
-        await self._get_fallback_runner().emergency_fallback_scan()
 
     async def _run_emergency_cycle(self) -> dict[str, Any]:
         """Full shortlist analysis — used for emergency fallback."""
@@ -821,19 +898,6 @@ class SignalBot:
     # ------------------------------------------------------------------
     # Background OI + L/S refresh
     # ------------------------------------------------------------------
-
-    async def _oi_refresh_periodic(self) -> None:
-        """Delegate OI/L-S refresh loop to OIRefreshRunner."""
-        await self._get_oi_refresh_runner().run()
-
-    async def _spot_refresh_periodic(self) -> None:
-        await self._get_spot_refresh_runner().run()
-
-    async def _market_regime_periodic(self) -> None:
-        await self._market_context_updater.market_regime_periodic()
-
-    async def _public_intelligence_periodic(self) -> None:
-        await self._market_context_updater.public_intelligence_periodic()
 
     async def _apply_public_guardrails(self, snapshot: dict[str, Any]) -> None:
         await self._market_context_updater.apply_public_guardrails(snapshot)
@@ -867,6 +931,8 @@ class SignalBot:
         if self._ws_manager is None:
             return
         try:
+            from ..market.subscription_planner import merge_order_flow_tracked_symbols
+
             rows = await self._modern_repo.get_active_signals()
             pending_syms = sorted(
                 {
@@ -889,10 +955,25 @@ class SignalBot:
                 for item in self._shortlist
                 if str(getattr(item, "symbol", "")).strip()
             ]
+            priority_syms: list[str] = []
+            ws_mgr = self._ws_manager
+            radar_store = getattr(ws_mgr, "_radar_store", None) if ws_mgr is not None else None
+            if (
+                radar_store is not None
+                and getattr(self.settings.universe.radar, "enabled", False)
+            ):
+                from ..market.radar_state import SymbolTier
+
+                priority_syms = [
+                    s.upper()
+                    for tier in (SymbolTier.HOT, SymbolTier.DEEP)
+                    for s in radar_store.symbols_by_tier(tier)
+                ]
             tracked_symbols = merge_order_flow_tracked_symbols(
                 shortlist_syms,
                 pending_symbols=pending_syms,
                 active_symbols=active_syms,
+                priority_symbols=priority_syms,
             )
             await self._ws_manager.set_tracked_symbols(tracked_symbols)
         except DEFENSIVE_EXC as exc:
@@ -915,9 +996,6 @@ class SignalBot:
             # Could update shortlist here if needed, but pinned symbols are sufficient
         except DEFENSIVE_EXC as exc:
             LOG.debug("background fetch: failed to get exchange symbols: %s", exc)
-
-    async def _refresh_shortlist_periodic(self) -> None:
-        await self._get_shortlist_service().refresh_shortlist_periodic()
 
     # ------------------------------------------------------------------
     # Delivery & tracking
@@ -956,16 +1034,6 @@ class SignalBot:
 
     async def _deliver_tracking(self, events: list[SignalTrackingEvent]) -> None:
         await self._delivery_orchestrator.deliver_tracking(events)
-
-    # ------------------------------------------------------------------
-    # Heartbeat & health telemetry
-    # ------------------------------------------------------------------
-
-    async def _heartbeat_periodic(self) -> None:
-        await self._health_manager.heartbeat_periodic()
-
-    async def _health_telemetry_periodic(self) -> None:
-        await self._health_manager.health_telemetry_periodic()
 
     # ------------------------------------------------------------------
     # Misc

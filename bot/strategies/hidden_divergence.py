@@ -6,7 +6,7 @@ import logging
 import math
 from typing import TYPE_CHECKING, ClassVar
 
-from ..features import _swing_points
+from ..features.prepare import _swing_points
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
 from ._common import SpecHit, _latest_values, _pivot_rows, as_float, with_spec_columns

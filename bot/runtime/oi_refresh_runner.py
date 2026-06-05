@@ -438,3 +438,8 @@ class OIRefreshRunner:
                     str(exc),
                     type(exc).__name__,
                 )
+
+
+async def run_oi_refresh_loop(runner: OIRefreshRunner) -> None:
+    """Background OI/L-S refresh loop (started from SignalBot.run_forever)."""
+    await runner.run()

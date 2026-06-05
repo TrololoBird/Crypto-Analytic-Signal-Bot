@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Mapping
 
 from bot.migrations import fetch_schema_version_rows
-from bot.persistence.repository import MemoryRepository
+from bot.persistence.repository.memory import MemoryRepository
 
 if TYPE_CHECKING:
     import aiosqlite

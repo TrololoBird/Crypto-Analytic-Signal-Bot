@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 import polars as pl
 
-from ..features import _swing_points
+from ..features.prepare import _swing_points
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
 from ..setups.utils import build_structural_targets

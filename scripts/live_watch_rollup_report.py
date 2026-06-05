@@ -16,7 +16,7 @@ except ModuleNotFoundError:
 
 bootstrap_repo_path()
 
-from bot.diagnostics.live_watch import find_latest_rollup, summarize_rollup
+from bot.diagnostics.session_ops import find_latest_rollup, summarize_rollup
 from bot.domain.config import load_settings
 from bot.persistence.db_status import collect_db_status
 

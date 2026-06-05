@@ -1,19 +1,23 @@
-# Prime v9 context
+# Prime context (minimal tokens)
 
-Load project context before coding. **You execute everything** — user is architect only.
+**Do not** read `AGENTS.md`, full research pack, or `GRAPH_REPORT.md`.
 
-## Read (in order)
+## Read exactly these
 
-1. @AGENT_QUICK_START.md
-2. @docs/PROJECT_ROADMAP_AND_STATUS.md — current P0–P4 priorities
-3. @docs/research/ARCHITECTURE_CANONICAL.md — package map
-4. If `graphify-out/graph.json` exists: run `graphify query "delivery orchestrator pipeline shortlist"` and use the subgraph.
+1. @docs/DEFINITION_OF_DONE.md — v1 status + open backlog IDs only
+2. @AGENT_QUICK_START.md — if you will edit code
 
-## Confirm
+## Optional (one query)
 
-- Python **3.14.5** via `.venv` (`source .venv/bin/activate`)
-- `config.toml` exists (copy from `config.toml.example` if missing)
-- Delivery invariant: `validate_signal_contract` → `hard_confluence_gate` → `deliver`
-- No auto-trading, no private Binance endpoints
+If `graphify-out/graph.json` exists:
 
-Reply with: current phase (F11/F12/P0), top 3 open tasks from roadmap, and which verification you will run after edits.
+```bash
+graphify query "delivery pipeline shortlist ws"
+```
+
+## Reply format (max 6 lines)
+
+- v1: ready / blocked (why)
+- Open backlog IDs you might touch
+- Verify command you will run after edits
+- Confirm: no auto-trade, no private Binance API

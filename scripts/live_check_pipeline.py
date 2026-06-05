@@ -28,7 +28,7 @@ from bot.delivery.telegram import DeliveryResult
 from bot.domain.config import load_settings
 from bot.domain.schemas import SymbolFrames, UniverseSymbol
 from bot.market.data import BinanceFuturesMarketData, MarketDataUnavailable
-from bot.market.rest import BinanceClientImpl
+from bot.market.rest_impl import BinanceClientImpl
 from bot.market.universe import strategy_fits_for_market_row
 from bot.runtime.bot import SignalBot
 from bot.telemetry import TelemetryStore

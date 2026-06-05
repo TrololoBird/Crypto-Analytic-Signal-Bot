@@ -8,12 +8,12 @@ from typing import Any
 from .signals import SignalDiagnostics, set_global_diagnostics
 
 _LAZY = {
-    "AlertManager": (".runtime", "AlertManager"),
-    "AlertSeverity": (".runtime", "AlertSeverity"),
-    "BotMetrics": (".runtime", "BotMetrics"),
-    "HealthChecker": (".runtime", "HealthChecker"),
-    "HealthStatus": (".runtime", "HealthStatus"),
-    "MetricsExporter": (".runtime", "MetricsExporter"),
+    "AlertManager": (".runtime_ops", "AlertManager"),
+    "AlertSeverity": (".runtime_ops", "AlertSeverity"),
+    "BotMetrics": (".runtime_ops", "BotMetrics"),
+    "HealthChecker": (".runtime_ops", "HealthChecker"),
+    "HealthStatus": (".runtime_ops", "HealthStatus"),
+    "MetricsExporter": (".runtime_ops", "MetricsExporter"),
 }
 
 __all__ = [

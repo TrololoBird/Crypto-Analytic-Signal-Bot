@@ -24,7 +24,7 @@ from typing import Any
 
 import structlog
 
-from bot.diagnostics.runtime_analysis import (
+from bot.diagnostics.session_ops import (
     find_latest_run_dir,
     parse_cycle_log_lines,
     read_jsonl,
@@ -468,6 +468,21 @@ async def _run_one_session(args: argparse.Namespace, session_index: int) -> dict
         log_dir=str(log_dir),
         snapshot_interval=args.snapshot_interval,
     )
+    expected_end = datetime.fromtimestamp(end_at, tz=UTC).isoformat()
+    meta = {
+        "run_id": run_id,
+        "session_index": session_index,
+        "planned_minutes": float(args.minutes),
+        "planned_hours": float(args.hours),
+        "started_at": session_start.isoformat(),
+        "expected_end_at": expected_end,
+        "snapshot_interval_s": float(args.snapshot_interval),
+        "config": str(args.config),
+    }
+    (log_dir / "session_meta.json").write_text(
+        json.dumps(meta, indent=2),
+        encoding="utf-8",
+    )
 
     allow_takeover = bool(args.takeover) and session_index == 0
     if allow_takeover:
@@ -543,7 +558,50 @@ async def _main_async(args: argparse.Namespace) -> int:
     rollup.parent.mkdir(parents=True, exist_ok=True)
     rollup.write_text(json.dumps({"sessions": summaries}, indent=2, default=str), encoding="utf-8")
     LOG.info("supervisor_finished", sessions=len(summaries), rollup=str(rollup))
+
+    if summaries and not getattr(args, "skip_calibration", False):
+        last_run_id = str(summaries[-1].get("run_id") or "").strip()
+        if last_run_id:
+            await _run_post_session_calibration(
+                config_path=Path(args.config),
+                run_id=last_run_id,
+            )
+
     return 0
+
+
+async def _run_post_session_calibration(*, config_path: Path, run_id: str) -> None:
+    """Wave I: matrix + zero-hit triage after supervised session (non-blocking)."""
+    cmd = [
+        sys.executable,
+        "scripts/post_session_calibration.py",
+        "--config",
+        str(config_path),
+        "--run-id",
+        run_id,
+        "--rollup",
+    ]
+    LOG.info("post_session_calibration_start", run_id=run_id)
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        cwd=str(ROOT),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        LOG.warning(
+            "post_session_calibration_failed",
+            run_id=run_id,
+            code=proc.returncode,
+            stderr=(stderr.decode(errors="replace") if stderr else "")[-500:],
+        )
+        return
+    LOG.info(
+        "post_session_calibration_ok",
+        run_id=run_id,
+        stdout_tail=(stdout.decode(errors="replace") if stdout else "")[-300:],
+    )
 
 
 def main() -> None:
@@ -566,6 +624,11 @@ def main() -> None:
         type=Path,
         default=DEFAULT_CONFIG,
         help="config.toml for telemetry_dir and bot launch context",
+    )
+    parser.add_argument(
+        "--skip-calibration",
+        action="store_true",
+        help="Do not run post_session_calibration after supervisor finishes",
     )
     args = parser.parse_args()
     raise SystemExit(asyncio.run(_main_async(args)))

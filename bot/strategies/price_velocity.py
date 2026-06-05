@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from ..setups.spec_runtime import SpecDetectorSetup
-from ._common import SpecHit, as_float, with_spec_columns
-
-__all__ = ["detect_price_velocity"]
 import math
 from typing import TYPE_CHECKING, ClassVar
 
 from ..setups import _build_signal, _compute_dynamic_score, _reject
-from ..setups.spec_runtime import run_setup_detection
+from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
+from ._common import SpecHit, as_float, with_spec_columns
+
+__all__ = ["detect_price_velocity"]
 
 if TYPE_CHECKING:
     import polars as pl

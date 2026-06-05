@@ -1,21 +1,30 @@
 ---
 name: de-bloat
-description: F12 structural splits for oversized modules (memory.py, pipeline.py, ws.py). Use when REFACTOR_PLAN de-bloat resumes.
+description: Remove dead code from a single module — reachability first.
 tools: Bash, Read, Write, Grep, Glob
 ---
 
-## Targets (priority)
+## Before delete
 
-1. `bot/persistence/repository/memory.py` (~2073 LOC)
-2. `bot/runtime/analyzer/pipeline.py` (~1554 LOC)
-3. `bot/market/ws.py` (~1937 LOC)
+1. Trace reachability from `main.py` → `bot.cli` → `bot.runtime.bot`
+2. `grep -r "<symbol>" bot/ tests/ scripts/`
+3. Check test imports for module under edit
+4. `python scripts/project_health_audit.py` — LOC before/after
+
+## Checklist
+
+- [ ] Symbol is DEAD_STUB or COLLAPSE_CANDIDATE in audit
+- [ ] No runtime importer remains
+- [ ] `make smoke` after batch
+- [ ] If fail: revert batch, mark SKIPPED in HANDOFF
 
 ## Rules
 
-- `python scripts/project_health_audit.py` before/after
-- Re-export from package `__init__.py` to avoid breaking imports
+- No split of frozen monoliths without explicit user request
 - No silent strategy disables
-- `compileall` + wave pytest after each split
-- `graphify update .` when done
+- Archive scripts to `scripts/_archive/`, do not hard-delete without git safety
+- `make check` + wave pytest after `bot/` edits
 
-Freeze arbitrary splits without functional gain (REFACTOR_PLAN §7).
+## Targets (when user requests F12)
+
+`memory.py`, `ws.py`, `tracking.py`, `pipeline.py` — user approval required per DEFINITION_OF_DONE.

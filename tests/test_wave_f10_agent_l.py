@@ -12,7 +12,7 @@ import pytest
 from bot.domain.config import BotSettings, TrackingConfig, WSConfig
 from bot.domain.schemas import PipelineResult, Signal
 from bot.engine.engine import SignalEngine
-from bot.runtime.analyzer.family_gates import AnalyzerFamilyGatesMixin
+from bot.runtime.symbol_analyzer import AnalyzerFamilyGatesMixin
 from bot.runtime.cycle_runner import CycleContext, CycleRunner
 from bot.runtime.delivery_orchestrator import DeliveryOrchestrator
 from bot.runtime.merge import MetaSignalMerger

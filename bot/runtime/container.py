@@ -17,10 +17,11 @@ from ..engine import SignalEngine, StrategyRegistry
 from ..market.data import BinanceFuturesMarketData, configure_rest_concurrency
 from ..market.enrichment import PublicIntelligenceService
 from ..market.proxy_bootstrap import ensure_network_ready
-from ..market.rest import BinanceClientImpl
+from ..market.rest_impl import BinanceClientImpl
+from ..market.radar_state import MarketRadarStore
 from ..market.ws import FuturesWSManager
 from ..persistence.public_audit import PublicAuditLedger
-from ..persistence.repository import MemoryRepository
+from ..persistence.repository.memory import MemoryRepository
 from ..persistence.tracking import SignalTracker
 from ..telemetry import TelemetryStore
 
@@ -143,6 +144,12 @@ def _build_application_container_impl(
             trust_env=settings.network.trust_env,
         )
         ws_manager.set_event_bus(bus)
+        if settings.universe.radar.enabled:
+            radar_store = MarketRadarStore(
+                settings.universe.radar,
+                quote_asset=settings.universe.quote_asset,
+            )
+            ws_manager.set_radar_store(radar_store)
         if hasattr(client, "_ws"):
             client._ws = ws_manager
         binance_client._ws = ws_manager

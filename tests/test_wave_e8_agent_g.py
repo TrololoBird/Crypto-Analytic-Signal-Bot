@@ -15,7 +15,7 @@ from bot.domain.config import BotSettings, WSConfig
 from bot.features.prepare import _enrich_with_ws_data
 from bot.features.prepare_frame import add_session_cvd
 from bot.market.subscription_planner import ORDER_FLOW_ANCHOR_SYMBOLS, SubscriptionBudget
-from bot.market.ws_cache import get_liquidation_rollups
+from bot.market.ws import get_liquidation_rollups
 from bot.runtime.delivery_alerts import (
     _message_buffer_dropped_total,
     check_message_buffer_drop_alert,

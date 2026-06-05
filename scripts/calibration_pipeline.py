@@ -10,6 +10,7 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import subprocess
 import sys
 from datetime import UTC, datetime
@@ -23,6 +24,7 @@ except ModuleNotFoundError:
 
 bootstrap_repo_path()
 
+from bot.diagnostics.session_ops import build_zero_hit_triage
 from bot.domain.config import load_settings
 from bot.persistence.db_status import collect_db_status
 from scripts.reconcile_strategy_defaults import collect_defaults_drift, write_drift_report, write_toml_patch
@@ -138,6 +140,15 @@ async def run_calibration_pipeline(
         run_id=run_id,
         live_watch_dir=live_watch_dir,
     )
+    zero_hit_path = reports_dir / "zero_hit_triage.json"
+    if matrix_output.is_file():
+        matrix_payload = json.loads(matrix_output.read_text(encoding="utf-8"))
+        triage = build_zero_hit_triage(matrix_payload.get("live_telemetry"))
+        triage["run_id"] = matrix_payload.get("run_id") or run_id
+        triage["telemetry_source"] = matrix_payload.get("telemetry_source")
+        zero_hit_path.write_text(json.dumps(triage, indent=2, sort_keys=True), encoding="utf-8")
+        matrix_result["zero_hit_triage"] = str(zero_hit_path)
+        matrix_result["zero_run_count"] = len(triage.get("zero_runs") or [])
     reconcile_result = run_reconcile_defaults(
         config_dir=Path("config/strategies"),
         drift_output=drift_output,
@@ -193,8 +204,24 @@ def main() -> int:
         type=Path,
         default=Path("data/live_watch"),
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Run calibration even when BOT_ALLOW_CALIBRATION is unset (post-architecture wave)",
+    )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
+
+    if not args.force and os.getenv("BOT_ALLOW_CALIBRATION", "").strip().lower() not in (
+        "1",
+        "true",
+        "yes",
+    ):
+        LOG.error(
+            "calibration blocked: run after W1–W3 stabilize. "
+            "Set BOT_ALLOW_CALIBRATION=1 or pass --force."
+        )
+        return 2
 
     summary = asyncio.run(
         run_calibration_pipeline(

@@ -41,14 +41,16 @@ def merge_order_flow_tracked_symbols(
     *,
     pending_symbols: list[str] | None = None,
     active_symbols: list[str] | None = None,
+    priority_symbols: list[str] | None = None,
 ) -> list[str]:
-    """Merge shortlist + signal symbols; pending/active first for aggTrade budget."""
+    """Merge shortlist + signal symbols; pending/active/radar-hot first for aggTrade budget."""
     pending = _normalized_symbols(pending_symbols or [])
     active = _normalized_symbols(active_symbols or [])
+    priority = _normalized_symbols(priority_symbols or [])
     shortlist = _normalized_symbols(shortlist_symbols)
     merged: list[str] = []
     seen: set[str] = set()
-    for group in (pending, active, shortlist):
+    for group in (pending, active, priority, shortlist):
         for symbol in group:
             if symbol not in seen:
                 merged.append(symbol)
@@ -97,7 +99,11 @@ def plan_subscription_budget(
     tracked = _normalized_symbols(tracked_symbols) or normalized
     kline_intervals = tuple(str(item).strip() for item in ws.kline_intervals if str(item).strip())
     kline_streams = len(normalized) * len(kline_intervals)
-    book_ticker_streams = len(normalized) if ws.subscribe_book_ticker else 0
+    book_mode = str(getattr(ws, "book_ticker_stream_mode", "per_symbol") or "per_symbol").lower()
+    if ws.subscribe_book_ticker and book_mode == "all":
+        book_ticker_streams = 1
+    else:
+        book_ticker_streams = len(normalized) if ws.subscribe_book_ticker else 0
     global_streams = 0
     if ws.subscribe_market_streams:
         global_streams = 3  # !ticker@arr, !markPrice@arr@1s, !forceOrder@arr

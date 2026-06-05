@@ -369,7 +369,10 @@ class MarketContextUpdater:
             closes = await self._fetch_close_values("BTCUSDT", "4h", limit=120)
         frame = build_minimal_regime_frame_4h(closes)
         if frame is not None and not frame.is_empty():
-            benchmark_context.setdefault("BTCUSDT", {})["regime_frame_4h"] = frame
+            # JSON-safe for SQLite/telemetry; composite_regime accepts dict or DataFrame.
+            benchmark_context.setdefault("BTCUSDT", {})["regime_frame_4h"] = {
+                col: frame[col].to_list() for col in frame.columns
+            }
 
     def _cached_kline_change_pct(self, symbol: str, interval: str) -> float | None:
         client = self._bot.client
@@ -1093,3 +1096,13 @@ class MarketContextUpdater:
             except (KeyError, TypeError, ValueError):
                 continue
         return "neutral"
+
+
+async def run_market_regime_loop(updater: MarketContextUpdater) -> None:
+    """Background market-regime refresh loop (started from SignalBot.run_forever)."""
+    await updater.market_regime_periodic()
+
+
+async def run_public_intelligence_loop(updater: MarketContextUpdater) -> None:
+    """Background public-intelligence loop (started from SignalBot.run_forever)."""
+    await updater.public_intelligence_periodic()

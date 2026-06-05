@@ -15,7 +15,7 @@ import websockets
 from bot.domain.config import BotSettings, NetworkConfig, load_settings
 from bot.market.data import BinanceFuturesMarketData, MarketDataUnavailable
 from bot.market.network_proxy import websockets_connect_kwargs
-from bot.market.rest import BinanceClientImpl
+from bot.market.rest_impl import BinanceClientImpl
 
 LOG = logging.getLogger("bot.market.proxy_bootstrap")
 

@@ -8,5 +8,5 @@ if [ -f .venv/bin/activate ]; then
 fi
 python -m compileall -q bot 2>&1 | tail -5
 python scripts/verify_refactor_gate.py 2>&1 | tail -10
-pytest tests/test_wave_f11_live_watch_bridge.py -q --tb=no 2>&1 | tail -5
+pytest tests/test_wave_i_calibration.py -q --tb=no 2>&1 | tail -5
 echo "agent_quick_verify: OK"

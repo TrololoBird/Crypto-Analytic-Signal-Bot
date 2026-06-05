@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from bot.domain.config import BotSettings, WSConfig
-from bot.market.subscription_planner import plan_subscription_budget
+from bot.market.subscription_planner import (
+    merge_order_flow_tracked_symbols,
+    plan_subscription_budget,
+)
 
 
 def test_subscription_budget_caps_depth_and_agg() -> None:
@@ -26,3 +29,11 @@ def test_subscription_budget_caps_depth_and_agg() -> None:
     assert plan.total_market <= plan.budget_limit + plan.book_ticker_streams
     assert len(plan.depth_symbols) <= 20
     assert len(plan.agg_trade_symbols) <= len(symbols)
+
+
+def test_merge_order_flow_prioritizes_radar_hot_before_shortlist() -> None:
+    merged = merge_order_flow_tracked_symbols(
+        ["zzzusdt", "aaausdt"],
+        priority_symbols=["hotusdt"],
+    )
+    assert merged.index("hotusdt") < merged.index("zzzusdt")

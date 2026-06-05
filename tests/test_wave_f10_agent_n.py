@@ -174,6 +174,20 @@ def test_composite_rule_based_uses_regime_frame_4h() -> None:
     assert result.regime in {"bull", "bear", "ranging", "volatile"}
 
 
+def test_composite_accepts_json_safe_regime_frame_dict() -> None:
+    closes = [100.0 + idx * 0.2 for idx in range(25)]
+    frame = build_minimal_regime_frame_4h(closes)
+    assert frame is not None
+    payload = {col: frame[col].to_list() for col in frame.columns}
+    analyzer = CompositeRegimeAnalyzer()
+    result = analyzer.analyze(
+        [],
+        {"BTCUSDT": 0.0},
+        {"BTCUSDT": {"regime_frame_4h": payload, "basis_pct": 0.001}},
+    )
+    assert result.regime in {"bull", "bear", "ranging", "volatile"}
+
+
 # --- N7: btc_phase in delivery gate details ---
 
 
@@ -294,7 +308,7 @@ def test_btc_decline_applies_countertrend_score_penalty() -> None:
 
 @pytest.mark.asyncio
 async def test_pipeline_injects_global_market_regime_from_db() -> None:
-    from bot.runtime.analyzer.pipeline import AnalyzerContextMixin
+    from bot.runtime.symbol_analyzer import AnalyzerContextMixin
 
     frame = _primary(close=100.0, ema20=100.0, ema50=100.0, rsi=50.0)
     prepared = PreparedSymbol(

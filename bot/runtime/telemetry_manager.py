@@ -169,6 +169,14 @@ class TelemetryManager:
         if decision.error is not None:
             row["error"] = decision.error
         self._bot.telemetry.append_jsonl("strategy_decisions.jsonl", row)
+        LOG.info(
+            "strategy_decision | symbol=%s setup_id=%s status=%s reason_code=%s trigger=%s",
+            symbol,
+            decision.setup_id,
+            decision.status,
+            decision.reason_code,
+            trigger,
+        )
         # Persist raw signal row for session-level analysis when an actual signal is emitted.
         if decision.status == "signal" and decision.signal is not None:
             try:
@@ -557,6 +565,17 @@ class TelemetryManager:
             cycle_row=cycle_row,
             funnel=funnel_payload if funnel_payload else (result.funnel if isinstance(result.funnel, dict) else None),
         )
+        harvest = getattr(self._bot, "_research_harvest_service", None)
+        if harvest is not None:
+            harvest.record_cycle(
+                symbol=symbol,
+                interval=interval,
+                event_ts=event_ts,
+                result=result,
+                candidates=candidates,
+                rejected=rejected,
+            )
+
         from .delivery_alerts import record_cycle_delivery_outcome
 
         record_cycle_delivery_outcome(self._bot, delivered_count=delivered_count)

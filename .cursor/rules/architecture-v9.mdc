@@ -11,8 +11,8 @@ Import from v9 packages only. Root legacy shims and duplicate trees are removed.
 |---|---|---|
 | `bot/domain/` | Config, schemas, contracts | `from bot.domain import BotSettings` |
 | `bot/market/` | REST, WS, universe, enrichments | `from bot.market import BinanceFuturesMarketData, FuturesWSManager` |
-| `bot/features/` | Polars pipeline | `from bot.features import prepare_symbol` |
-| `bot/runtime/` | Bot loop, analyzers, handlers | `from bot.runtime import SignalBot, SymbolAnalyzer` |
+| `bot/features/` | Polars pipeline | `from bot.features.prepare import prepare_symbol` |
+| `bot/runtime/` | Bot loop, analyzers, handlers | `from bot.runtime.bot import SignalBot` |
 | `bot/persistence/` | Tracking, outcomes, diary | `from bot.persistence import SignalTracker` |
 | `bot/engine/` | Strategy registry + executor | `from bot.engine import SignalEngine, StrategyRegistry` |
 | `bot/strategies/` | 38 setup detectors (single tree) | `from bot.strategies import ...` |

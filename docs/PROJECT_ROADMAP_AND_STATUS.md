@@ -1,10 +1,11 @@
 # Project roadmap & status (v9)
 
 > **Last updated:** 2026-06-04  
+> **v1 Definition of Done:** [DEFINITION_OF_DONE.md](DEFINITION_OF_DONE.md) ← единственный backlog  
+> Agent tokens: [AGENT_TOKEN_POLICY.md](AGENT_TOKEN_POLICY.md)  
 > Canonical architecture: [research/ARCHITECTURE_CANONICAL.md](research/ARCHITECTURE_CANONICAL.md)  
 > Refactor matrix: [REFACTOR_PLAN.md](REFACTOR_PLAN.md)  
-> Short improvement backlog: [IMPROVEMENT_PLAN.md](IMPROVEMENT_PLAN.md)  
-> Cursor + Claude Code setup: [CURSOR_CLAUDE_DEV_SETUP.md](CURSOR_CLAUDE_DEV_SETUP.md)
+> Cursor + Claude: [CURSOR_CLAUDE_DEV_SETUP.md](CURSOR_CLAUDE_DEV_SETUP.md)
 
 ---
 
@@ -12,14 +13,15 @@
 
 | Area | State |
 |------|--------|
+| **v1 product (signal factory)** | ✅ Ready for production ops — see [DEFINITION_OF_DONE.md](DEFINITION_OF_DONE.md) |
 | **v9 package layout** | Done — single `bot/strategies/`, `market/`, `features/`, `runtime/`, `delivery/`, `persistence/`, `engine/` |
 | **Waves E1–E8** | Done — delivery gates, WS/order-flow, dashboard, network, persistence v5 |
 | **Wave F9** (agents K–U, 10 modules) | Done — domain strict config, runtime telemetry, SMC/OB, regime bear carve-out, universe, diagnostics, journal, delivery tiers, telemetry KPI, ops CLI |
 | **Wave F10** (5 tasks × 10 modules) | Done — family_gates, weighted confluence bridge, calibration pipeline, global regime, shortlist prescore, migrations v6 |
 | **Wave F11** (ops bridge) | Partial — live_watch ↔ matrix/calibration, rollup report, `config.toml.example` strict sync |
 | **Live validation** | 6h supervised sessions completed; current session tooling: `live_supervised_session`, `live_watch_rollup_report` |
-| **Phase 3 slim analyzer** | Deferred — `pipeline.py` / `memory.py` still large |
-| **Subagent backlog** | Blocked on Cursor usage limits — structural splits pending |
+| **F12 de-bloat** | Partial — pipeline/ws_transport/memory_schema done; memory/tracking/ws → v1.1 |
+| **LLM APIs in bot** | Deferred OPT-2 — [research/LLM_API_INTEGRATION.md](research/LLM_API_INTEGRATION.md) |
 
 ---
 
@@ -68,7 +70,7 @@
 - `scripts/live_watch_rollup_report.py`, `make live-watch-report`
 - `scripts/calibration_pipeline.py` — `--run-id` slice
 - `config.toml.example` — duplicate webhook section removed; validates clean
-- `tests/test_wave_f11_live_watch_bridge.py`
+- `tests/test_wave_i_calibration.py` (replaces removed `test_wave_f11_live_watch_bridge.py`)
 
 ### Live ops
 
@@ -82,10 +84,10 @@
 
 ## Remaining work (prioritized)
 
-### P0 — Production signal quality
+### P0 — Production signal quality (after W1–W3 + harvest)
 
-1. **Enable / calibrate `use_weighted_confluence`** in config after live confluence telemetry review (S8).
-2. **Post-6h calibration loop:** `calibration_pipeline --run-id <id>`, shortlist matrix live mode with `--include-basis` when REST reachable.
+1. **Enable / calibrate `use_weighted_confluence`** — **last wave (W4)** after architecture + strategy changes stabilize.
+2. **Post-6h calibration loop:** `BOT_ALLOW_CALIBRATION=1 calibration_pipeline --run-id <id>` when REST reachable.
 3. **Proxy / network:** keep `[bot.network]` via `discover_binance_proxies.py` — required in RU/geo-blocked regions.
 
 ### P1 — Structural de-bloat (F12)
@@ -124,7 +126,7 @@
 source .venv/bin/activate
 python -m compileall -q bot
 python scripts/validate_config.py --config config.toml
-python -m pytest tests/test_wave_f9_agent_*.py tests/test_wave_f10_agent_*.py tests/test_wave_f11_live_watch_bridge.py -q
+python -m pytest tests/test_wave_f9_agent_*.py tests/test_wave_f10_agent_*.py tests/test_wave_i_calibration.py -q
 # When Binance REST reachable:
 PYTEST_LIVE=1 pytest tests/live/ -v
 python scripts/live_check_pipeline.py --symbols BTCUSDT --limit 1
@@ -148,7 +150,7 @@ make live-watch-report
 | `test_wave_e1` … `e8` | 18+ | Gates, WS, dashboard, network |
 | `test_wave_f9_agent_*` | 10 | Domain, runtime, setups, regime, market, delivery, telemetry, ops |
 | `test_wave_f10_agent_*` | 10 | F10 follow-up per module |
-| `test_wave_f11_*` | 1 | live_watch bridge + config example |
+| `test_wave_i_calibration` | 1 | Session ops / calibration bridge |
 
 ---
 

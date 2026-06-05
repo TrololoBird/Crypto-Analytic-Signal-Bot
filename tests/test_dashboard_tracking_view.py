@@ -36,7 +36,8 @@ def test_compute_progress_short_pending() -> None:
         tp1_hit_at=None,
         tp2_hit_at=None,
     )
-    assert "До входа" in out["progress_label"]
+    assert "Лимит" in out["progress_label"]
+    assert "до зоны" in out["progress_label"]
     assert out["progress_tone"] == "yellow"
 
 

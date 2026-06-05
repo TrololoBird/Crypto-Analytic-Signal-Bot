@@ -48,6 +48,20 @@ FORBIDDEN_IMPORT_SNIPPETS = (
     "from bot.telegram",
 )
 
+# Signal-only: no private Binance / CCXT on the hot path (see CONNECTOR_DECISION.md).
+BOT_PRIVATE_API_IMPORT_SNIPPETS = (
+    "import ccxt",
+    "from ccxt",
+    "import ccxt.pro",
+    "from ccxt.pro",
+    "from binance.client",
+    "from binance.um_futures",
+    "from binance_futures_connector",
+    "import binance",
+    "from python_binance",
+    "import python_binance",
+)
+
 
 def _scan_imports() -> list[str]:
     errors: list[str] = []
@@ -76,6 +90,30 @@ def _scan_imports() -> list[str]:
     return errors
 
 
+def _scan_bot_private_api_imports() -> list[str]:
+    errors: list[str] = []
+    root = REPO_ROOT / "bot"
+    if not root.exists():
+        return errors
+    for py in root.rglob("*.py"):
+        if "__pycache__" in py.parts:
+            continue
+        rel = py.relative_to(REPO_ROOT)
+        try:
+            lines = py.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            stripped = line.strip()
+            if not stripped.startswith(("from ", "import ")):
+                continue
+            for snippet in BOT_PRIVATE_API_IMPORT_SNIPPETS:
+                if snippet in stripped:
+                    errors.append(f"{rel}: private/ccxt import {snippet!r}")
+                    break
+    return errors
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="v9 refactor structural gate")
     parser.parse_args()
@@ -84,6 +122,7 @@ def main() -> int:
     ]
 
     errors.extend(_scan_imports())
+    errors.extend(_scan_bot_private_api_imports())
 
     try:
         errors.extend(verify_strategy_wiring(STRATEGY_CLASSES))

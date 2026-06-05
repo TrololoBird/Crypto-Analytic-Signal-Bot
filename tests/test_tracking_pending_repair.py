@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -12,7 +12,9 @@ from bot.persistence.tracking import SignalTracker
 
 
 def _pending_row(*, zone_at: str | None, activated_at: str | None = None) -> dict:
-    now = datetime.now(UTC).isoformat()
+    now = datetime.now(UTC)
+    expires = (now + timedelta(hours=2)).isoformat()
+    now_iso = now.isoformat()
     return {
         "tracking_id": "tid1",
         "tracking_ref": "REF1",
@@ -21,9 +23,9 @@ def _pending_row(*, zone_at: str | None, activated_at: str | None = None) -> dic
         "setup_id": "ema_bounce",
         "direction": "long",
         "timeframe": "15m",
-        "created_at": now,
-        "pending_expires_at": now,
-        "active_expires_at": now,
+        "created_at": now_iso,
+        "pending_expires_at": expires,
+        "active_expires_at": expires,
         "entry_low": 100.0,
         "entry_high": 101.0,
         "entry_mid": 100.5,

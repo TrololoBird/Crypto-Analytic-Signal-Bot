@@ -107,3 +107,8 @@ class SpotRefreshRunner:
     async def close(self) -> None:
         if self._service is not None:
             await self._service.close()
+
+
+async def run_spot_refresh_loop(runner: SpotRefreshRunner) -> None:
+    """Background spot-companion refresh loop (started from SignalBot.run_forever)."""
+    await runner.run()
