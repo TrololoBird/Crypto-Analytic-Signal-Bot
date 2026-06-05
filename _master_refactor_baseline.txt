@@ -1,7 +1,0 @@
-# MASTER_REFACTOR baseline — 2026-06-04
-# Phase 0 snapshot (before changes)
-
-bot_py_files: 192
-make_check: OK (refactor gate, 38 strategies, imports OK)
-make_smoke: 409 passed, 3 warnings
-check_circular_imports: OK (79 modules scanned)
