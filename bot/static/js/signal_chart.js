@@ -2,7 +2,7 @@
 
 async function paintSignalChart(canvas, row, { width = 340, height = 150 } = {}) {
   if (!canvas || !row?.symbol || !window.chart?.signalChart) return;
-  const interval = row.timeframe || "15m";
+  const interval = (row.timeframe || "15m").split(/[+,\s]/)[0] || "15m";
   const url =
     "/api/v1/chart/klines?symbol=" +
     encodeURIComponent(row.symbol) +
