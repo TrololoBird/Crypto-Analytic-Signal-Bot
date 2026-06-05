@@ -368,3 +368,62 @@ signal_outcomes.features  -- not active_signals.features
 ---
 
 *Generated from live SQLite `data/bot/bot.db`. Re-run after next supervised 6h session for statistically meaningful strategy breakdowns.*
+
+---
+
+## Ongoing SL Monitoring
+
+Post-session delta appended below after each live run. Queries use schema codes `stop_loss` / `breakeven_stop` / `trailing_stop` (not `sl_hit`). Baseline from initial report: **100% SL among executed exits** (10/10), **22.7% SL among all outcomes** (10/44).
+
+**Auto-disable trigger (M3):** any setup with ≥10 of last 30 outcomes and SL > 80% → review `min_score` or disable in `config.toml`.
+
+---
+
+## Session 2026-06-05 10:24 UTC
+
+| Metric | Value |
+|--------|------:|
+| Signals this session (24h window) | 44 outcomes |
+| SL rate this session (all outcomes) | **22.7%** (10/44) |
+| SL rate this session (executed only) | **100.0%** (10/10; 0 TP) |
+| TP rate this session | 0.0% (0/44) |
+| Expired this session | 75.0% (33/44) |
+| Cumulative SL rate (all time) | 22.7% (10/44) |
+| Cumulative SL rate (executed only) | 100.0% (10/10) |
+| Improvement vs baseline | **0.0 pp** (same dataset; fix-sl-A not yet exercised in live session) |
+| New CRASH/SILENT issues | none |
+| M3 auto-disable alert | OK — no setup >80% SL in last 30 signals (n≥10) |
+
+### Session breakdown by setup (24h)
+
+| Setup | Outcomes | SL | SL % |
+|-------|--------:|---:|-----:|
+| whale_walls | 21 | 4 | 19.0% |
+| spread_strategy | 12 | 2 | 16.7% |
+| aggression_shift | 3 | 1 | 33.3% |
+| depth_imbalance | 2 | 1 | 50.0% |
+| btc_correlation | 2 | 2 | 100.0% |
+| *(5 setups, expired only)* | 4 | 0 | 0.0% |
+
+### Executed SL detail (this session)
+
+| Setup | Symbol | Dir | Result | Score | ATR% | Bias | Active min |
+|-------|--------|-----|--------|------:|-----:|------|----------:|
+| depth_imbalance | — | short | stop_loss | 0.545 | 1.311 | downtrend | 1 |
+| btc_correlation | — | short | stop_loss | 0.689 | 1.827 | downtrend | 64 |
+| btc_correlation | — | short | breakeven_stop | 0.638 | 1.883 | downtrend | 102 |
+| whale_walls | — | short | stop_loss | 0.644 | 1.381 | downtrend | 9 |
+| whale_walls | — | short | stop_loss | 0.676 | 1.470 | downtrend | 120 |
+| spread_strategy | — | short | stop_loss | 0.696 | 1.825 | downtrend | 23 |
+| aggression_shift | — | short | stop_loss | 0.607 | 1.705 | downtrend | 8 |
+| whale_walls | — | short | stop_loss | 0.629 | 8.969 | neutral | 13 |
+| spread_strategy | — | short | stop_loss | 0.586 | 1.858 | downtrend | 37 |
+| whale_walls | — | short | stop_loss | 0.663 | 0.693 | neutral | 10 |
+
+**Note:** All rows pre-date `fix-sl-A` commit (`560b030`). Next snapshot should compare post-fix session only (`created_at > fix deploy time`).
+
+### Monitoring actions
+
+- No auto-disable triggered.
+- Pipeline gap persists: 0 `tp1_hit`/`tp2_hit` rows despite 2 TP1 touches in `active_signals`.
+- Re-run M1–M3 after next supervised session; expect fewer `immediate_adverse_entry` SL root causes if fix-sl-A is effective.
