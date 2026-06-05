@@ -437,6 +437,10 @@ async def _main(
     def _log_exception(loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
         del loop
         msg = context.get("exception", context["message"])
+        msg_text = str(msg)
+        if "Unclosed client session" in msg_text or "Unclosed connector" in msg_text:
+            logging.getLogger("asyncio").warning("aiohttp resource cleanup | %s", msg_text)
+            return
         logging.getLogger("asyncio").exception(
             "Unhandled exception: %s",
             msg,

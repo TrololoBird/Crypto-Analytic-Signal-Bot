@@ -59,6 +59,7 @@ from bot.market.data import (
 from bot.market.network_proxy import (
     aiohttp_request_proxy,
     apply_proxy_env,
+    close_aiohttp_session,
     create_aiohttp_session,
     mask_proxy_url,
     resolve_proxy_url,
@@ -760,9 +761,8 @@ class RestHttpMixin(RestCircuitMixin):
 
     async def close(self) -> None:
         """Close aiohttp session."""
-        if self._http_session is not None and (not self._http_session.closed):
-            await self._http_session.close()
-            self._http_session = None
+        await close_aiohttp_session(self._http_session)
+        self._http_session = None
 
     def state_snapshot(self) -> dict[str, float | int | str | None]:
         now = time.monotonic()
@@ -839,8 +839,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         self._proxy_url = url
         if url:
             apply_proxy_env(url)
-        if self._http_session is not None and (not self._http_session.closed):
-            await self._http_session.close()
+        await close_aiohttp_session(self._http_session)
         self._http_session = None
         ws = self._ws
         if ws is not None and hasattr(ws, 'update_proxy_url'):

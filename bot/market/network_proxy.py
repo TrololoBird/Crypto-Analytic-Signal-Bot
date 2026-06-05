@@ -125,6 +125,16 @@ def create_aiohttp_session(
     return session
 
 
+async def close_aiohttp_session(session: aiohttp.ClientSession | None) -> None:
+    """Close aiohttp session and owned connector (avoids Unclosed client session noise)."""
+    if session is None or session.closed:
+        return
+    await session.close()
+    connector = getattr(session, "connector", None)
+    if connector is not None and not connector.closed:
+        await connector.close()
+
+
 def aiohttp_request_proxy(session: aiohttp.ClientSession, proxy_url: str | None) -> str | None:
     """Proxy URL for per-request override when not using SOCKS connector."""
     if proxy_url and not is_socks_proxy(proxy_url):
