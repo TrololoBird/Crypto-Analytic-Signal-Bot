@@ -123,7 +123,7 @@ On geo-restricted networks (including some GitHub Actions regions), live tests *
 | [CI](.github/workflows/ci.yml) | push / PR | ruff, pytest, mypy critical, live Binance |
 | [Dependency Review](.github/workflows/dependency-review.yml) | PR | block critical CVE in dependency diff |
 | [Supply Chain Audit](.github/workflows/supply-chain-audit.yml) | push / PR / weekly | pip-audit lockfile (fail HIGH+) |
-| [CodeQL](.github/workflows/codeql-analysis.yml) | push / PR / weekly | static analysis Python + Actions |
+| CodeQL (GitHub default setup) | push | static analysis — repo Code security |
 | [Nightly Regression](.github/workflows/nightly-regression.yml) | cron 03:00 UTC | live pytest + strategy smoke |
 | [Auto Fix](.github/workflows/auto-fix.yml) | push `bot/` | ruff auto-format PR |
 | [Quality Report](.github/workflows/quality-report.yml) | weekly Mon | ruff/vulture/jscpd artifacts |

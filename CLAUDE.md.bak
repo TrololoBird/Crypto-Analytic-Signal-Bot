@@ -1,0 +1,42 @@
+# Crypto Signal Bot v9
+
+Signal-only Binance → Telegram. No auto-trading. No private Binance APIs.
+
+## Read first (token budget)
+
+1. [docs/DEFINITION_OF_DONE.md](docs/DEFINITION_OF_DONE.md) — v1 done vs open backlog
+2. [docs/AGENT_TOKEN_POLICY.md](docs/AGENT_TOKEN_POLICY.md) — do not re-read whole repo
+3. [AGENT_QUICK_START.md](AGENT_QUICK_START.md) — hot paths only when coding
+
+**Do not** spawn «50 improvements» lists. Update backlog table in DEFINITION_OF_DONE only.
+
+## Solo operator
+
+Human: direction + acceptance. Agent: all execution. [docs/SOLO_OPERATOR_PLAYBOOK.md](docs/SOLO_OPERATOR_PLAYBOOK.md)
+
+## Commands
+
+```bash
+make check
+make validate-config
+python main.py run
+python main.py harvest --minutes 120   # research capture, no Telegram
+```
+
+Calibration last: `BOT_ALLOW_CALIBRATION=1 python scripts/calibration_pipeline.py`
+
+## Delivery invariant
+
+`validate_signal_contract` → `hard_confluence_gate` (3-of-5) → `delivery.deliver`
+
+## graphify
+
+`graphify query "<q>"` before grep if `graphify-out/graph.json` exists.
+
+## Subagents
+
+`orchestrator`, `live-ops`, `de-bloat`, `strategy-calibration`, `delivery-guardian`, `verifier`
+
+## LLM APIs
+
+Not on hot path. See [docs/research/LLM_API_INTEGRATION.md](docs/research/LLM_API_INTEGRATION.md).

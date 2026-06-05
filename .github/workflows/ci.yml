@@ -128,7 +128,10 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Mypy full bot/ (informational)
-        run: mypy bot/
+        run: |
+          mypy bot/ > mypy-full-report.txt 2>&1 || true
+          cat mypy-full-report.txt
+          echo "mypy full report is informational only (critical gate: run_mypy_critical.py)"
 
   live-binance:
     runs-on: ubuntu-latest

@@ -1,0 +1,39 @@
+{
+  "checked_at": "2026-06-04T15:57:24.757871+00:00",
+  "running": true,
+  "processes": [
+    {
+      "pid": "41731",
+      "cmd": "/bin/zsh -c snap=$(command cat <&3); builtin unsetopt aliases 2>/dev/null; builtin unalias -m '*' 2>/dev/null || true; builtin eval \"$snap\" && { builtin unsetopt nounset 2>/dev/null || true; builtin eval \"${__CURSOR_SANDBOX_ENV_RESTORE:-}\" 2>/dev/null; builtin export PWD=\"$(builtin pwd)\"; builtin setopt aliases 2>/dev/null; builtin eval \"$1\" < /dev/null; }; COMMAND_EXIT_CODE=$?; dump_zsh_state >&4; builtin exit $COMMAND_EXIT_CODE -- cd /Users/tonyaleksandrov/Documents/GitHub/Crypto-Analytic-Signal-Bot && source .venv/bin/activate && python main.py stop --config config.toml 2>/dev/null; exec caffeinate -i .venv/bin/python -m scripts.live_supervised_session --hours 6 --minutes 360 --snapshot-interval 60 --config config.toml --takeover 2>&1 | tee logs/live_radar_6h_20260604T155600Z.log",
+      "pattern": "live_supervised_session"
+    },
+    {
+      "pid": "41839",
+      "cmd": ".venv/bin/python -m scripts.live_supervised_session --hours 6 --minutes 360 --snapshot-interval 60 --config config.toml --takeover",
+      "pattern": "live_supervised_session"
+    },
+    {
+      "pid": "41841",
+      "cmd": "caffeinate -i .venv/bin/python -m scripts.live_supervised_session --hours 6 --minutes 360 --snapshot-interval 60 --config config.toml --takeover",
+      "pattern": "live_supervised_session"
+    },
+    {
+      "pid": "41731",
+      "cmd": "/bin/zsh -c snap=$(command cat <&3); builtin unsetopt aliases 2>/dev/null; builtin unalias -m '*' 2>/dev/null || true; builtin eval \"$snap\" && { builtin unsetopt nounset 2>/dev/null || true; builtin eval \"${__CURSOR_SANDBOX_ENV_RESTORE:-}\" 2>/dev/null; builtin export PWD=\"$(builtin pwd)\"; builtin setopt aliases 2>/dev/null; builtin eval \"$1\" < /dev/null; }; COMMAND_EXIT_CODE=$?; dump_zsh_state >&4; builtin exit $COMMAND_EXIT_CODE -- cd /Users/tonyaleksandrov/Documents/GitHub/Crypto-Analytic-Signal-Bot && source .venv/bin/activate && python main.py stop --config config.toml 2>/dev/null; exec caffeinate -i .venv/bin/python -m scripts.live_supervised_session --hours 6 --minutes 360 --snapshot-interval 60 --config config.toml --takeover 2>&1 | tee logs/live_radar_6h_20260604T155600Z.log",
+      "pattern": "main.py"
+    },
+    {
+      "pid": "42061",
+      "cmd": "/Users/tonyaleksandrov/Documents/GitHub/Crypto-Analytic-Signal-Bot/.venv/bin/python /Users/tonyaleksandrov/Documents/GitHub/Crypto-Analytic-Signal-Bot/main.py",
+      "pattern": "main.py"
+    }
+  ],
+  "status_file": "/Users/tonyaleksandrov/Documents/GitHub/Crypto-Analytic-Signal-Bot/LIVE_SESSION_STATUS.json",
+  "latest_live_watch": "/Users/tonyaleksandrov/Documents/GitHub/Crypto-Analytic-Signal-Bot/data/live_watch/20260604T155544Z",
+  "latest_log": "/Users/tonyaleksandrov/Documents/GitHub/Crypto-Analytic-Signal-Bot/logs/live_supervised_mac_20260604T140338Z.log",
+  "log_tail": [
+    "2026-06-04 08:25:57 [info     ] minute_snapshot                cycles_total=1102 delivered_total=1 errors=0 strategy_errors=0 tick=83",
+    "2026-06-04 08:26:57 [info     ] minute_snapshot                cycles_total=1117 delivered_total=1 errors=0 strategy_errors=0 tick=84",
+    "2026-06-04 08:27:57 [info     ] minute_snapshot                cycles_total=1134 delivered_total=1 errors=0 strategy_errors=0 tick=85"
+  ]
+}

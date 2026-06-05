@@ -121,7 +121,7 @@ code --install-extension github.vscode-github-actions
 |----------|---------|------------|
 | `ci.yml` | push, PR | ruff, pytest, mypy, live Binance |
 | `dependency-review.yml` | PR | block critical CVE в diff |
-| `codeql-analysis.yml` | push, PR, weekly | SAST Python + Actions |
+| CodeQL (GitHub default setup) | push | SAST — no duplicate workflow (see SECURITY.md) |
 | `supply-chain-audit.yml` | push, PR, weekly | pip-audit lockfile |
 | `nightly-regression.yml` | cron | live pytest 03:00 UTC |
 | `auto-fix.yml` | push bot/ | ruff PR |

@@ -1,0 +1,125 @@
+# Crypto Signal Bot v9 — Claude Code Reference
+
+## What this is
+
+Event-driven Binance USDⓈ-M **public** signal bot: WebSocket + REST ingest → Polars features → 38 strategy detectors → contract + confluence gates → Telegram trade plans.
+**No** auto-trading, private Binance APIs, or user registration. Python **3.14.5**, package `9.0.0`.
+
+## Entry points
+
+```bash
+python main.py run                    # live bot (clean telemetry first)
+python main.py harvest --minutes 120  # research capture, no Telegram
+python main.py status | stop | doctor
+make check                            # compileall + refactor gate + imports
+make smoke                            # offline pytest
+make live-smoke                       # Binance smoke
+make validate-config
+python scripts/clean_session_data.py --mode smoke --config config.toml  # before live/smoke
+```
+
+Config: `config.toml` (validated by `scripts/validate_config.py`). Secrets: `.env` (never commit).
+
+## Architecture
+
+| Package | Path | Role |
+|---------|------|------|
+| Domain | `bot/domain/` | `BotSettings`, schemas, strategy catalog, contracts |
+| Market | `bot/market/` | REST (`rest_impl.py`), WS (`ws.py`), universe, enrichment, proxy |
+| Features | `bot/features/` | `prepare.py`, `prepare_frame.py`, indicators (Wilder ATR/RSI) |
+| Engine | `bot/engine/` | `SignalEngine`, `StrategyRegistry`, lanes |
+| Strategies | `bot/strategies/` | 38 `*Setup` classes, `_common.py`, `_roadmap.py` |
+| Setups | `bot/setups/` | Shared primitives: `base`, `spec_runtime`, `smc` — **no** `detectors/` |
+| Runtime | `bot/runtime/` | `bot.py`, `cycle_runner.py`, `symbol_analyzer.py`, `delivery_orchestrator.py` |
+| Delivery | `bot/delivery/` | contract, confluence, filters, deliver, telegram, tiers |
+| Persistence | `bot/persistence/` | SQLite tracking, outcomes, `memory.py` repository |
+| Diagnostics | `bot/diagnostics/` | Telemetry, runtime ops, session analysis |
+| Dashboard | `bot/dashboard/` | Optional FastAPI + static (out of hot path) |
+
+Orchestrator: `SignalBot` in `bot/runtime/bot.py`. Periodic loops in runner modules (`shortlist_service`, `health_manager`, `market_context_updater`, `fallback_runner`, `oi_refresh_runner`, `spot_refresh_runner`).
+
+Forbidden imports (gate enforced): `bot/application/`, `bot/setups/detectors/`, root shims, `ccxt`, private API clients.
+
+## Signal pipeline
+
+```text
+bot/market/ws.py
+  → bot/runtime/cycle_runner.py
+  → bot/runtime/symbol_analyzer.py
+  → bot/engine/engine.py
+  → bot/delivery/filters.py
+  → bot/delivery/confluence.py
+  → bot/runtime/delivery_orchestrator.py
+  → bot/delivery/telegram_routing.py
+```
+
+Non-bypassable delivery: `validate_signal_contract` → `_hard_confluence_gate` (3-of-5) → journal arm → `delivery.deliver`.
+
+## Key types
+
+From `bot/domain/schemas.py`:
+
+| Type | Purpose |
+|------|---------|
+| `UniverseSymbol` | Shortlist row: liquidity, `strategy_fits`, bucket/score |
+| `SymbolFrames` | Raw OHLCV frames (5m/15m/1h/4h) + bid/ask |
+| `PreparedSymbol` | Post-`prepare_symbol`: `work_*` DataFrames + enrichments |
+| `Signal` | Immutable trade plan: entry band, stops, TPs, score, `setup_id` |
+| `PipelineResult` | Per-cycle funnel: candidates, rejected rows, status |
+
+Engine wrapper: `StrategyDecision` in `bot/domain/strategies.py`. Confluence: `ConfluenceResult` in `bot/delivery/confluence.py`.
+
+## Constraints
+
+1. **Never** place orders, use trading APIs, or add account authentication.
+2. **Never** bypass `validate_signal_contract` → hard confluence gate → `delivery.deliver`.
+3. **Never** import forbidden legacy paths; strategies only under `bot/strategies/`.
+4. **Never** use `shift(-N)` or future bars on live signal paths.
+5. **Never** use pandas on hot path — Polars / `polars_ta` only.
+6. **Never** put LLM inference on the hot path.
+7. **Never** create ABC/Protocol/factory layers without architect approval.
+8. **Never** split modules under 500 LOC or split frozen monoliths without explicit request (`ws.py`, `memory.py`, `symbol_analyzer.py`, `pipeline.py`, …).
+9. **Never** generate test files unless explicitly requested.
+10. **Never** modify `bot/static/` (frontend out of scope).
+11. **Never** disable strategies silently — fix detectors or document config reason.
+12. Indicators: Wilder ATR/RSI; Bollinger std `ddof=1`.
+13. Agent executes all commands, config, probes — do not delegate runbooks to the human.
+14. Before live/smoke: `python scripts/clean_session_data.py --mode smoke --config config.toml`.
+15. Backlog: only IDs in `docs/DEFINITION_OF_DONE.md` (OPS-*, OPT-*) — no new «50 improvements» lists.
+
+## Known debt
+
+| Severity | Location | Issue |
+|----------|----------|-------|
+| LOW | `bot/dashboard/app.py:1198` | `iter_rows()` in dashboard UI (not signal hot path) |
+| OPS | `config.toml` | `use_weighted_confluence` tuning pending telemetry (OPS-2) |
+
+~189 `.py` in `bot/`. Large modules tracked via `python scripts/project_health_audit.py` — do not split without request.
+
+## How to add a strategy
+
+1. **Catalog** — add entry in `bot/domain/strategy_catalog.py` (`setup_id`, family, pattern_tf).
+2. **Config** — register defaults in `config.toml` / `SetupConfig`; run `make validate-config`.
+3. **Detector** — new file under `bot/strategies/<name>.py`; helpers from `_common.py` or `_roadmap.py` only.
+4. **Setup class** — subclass `RoadmapSetup` or `SpecDetectorSetup`; implement `detect()` or `spec_detect` → `SpecHit` → `build_spec_signal`.
+5. **Export** — append class to `STRATEGY_CLASSES` in `bot/strategies/__init__.py`; verify with `make check`.
+
+## Test commands
+
+```bash
+make check          # compileall + refactor gate + strategy count
+make smoke          # offline pytest (-m "not slow")
+make live-smoke     # Binance live smoke
+make validate-config
+python scripts/check_circular_imports.py
+pytest tests/test_wave_f9_agent_*.py tests/test_wave_f10_agent_*.py tests/test_wave_i_calibration.py -q
+PYTEST_LIVE=1 pytest tests/live/ -v   # truth tests, network required
+```
+
+After `bot/` edits: `make check` + relevant wave tests. Optional: `graphify update .` if graphify installed.
+
+## Subagents & rules
+
+Claude agents: `.claude/agents/` (`orchestrator`, `strategy-auditor`, `signal-tracer`, `de-bloat`, `verifier`, `delivery-guardian`).
+Rules: `.claude/rules/` — `project-core`, `delivery-invariant`, `no-bloat`, `agent-sole-executor`.
+Session handoff: read `HANDOFF_REPORT.md` at repo root.

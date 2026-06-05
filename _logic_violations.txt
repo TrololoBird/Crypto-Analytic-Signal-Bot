@@ -1,0 +1,6 @@
+# Phase 1D logic violation scan — bot/ (2026-06-04 MASTER_REFACTOR)
+
+bot/logging_config.py:12 | api_key in SENSITIVE_FIELDS | VERDICT: security redaction — keep
+bot/market/data.py:45,228 | api_key in forbidden REST params | VERDICT: public-only guard — keep
+
+No place_order/create_order/submit_order in bot/

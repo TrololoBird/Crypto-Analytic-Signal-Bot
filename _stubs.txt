@@ -1,0 +1,8 @@
+# Phase 1A stub scan — bot/ only (2026-06-04 MASTER_REFACTOR)
+
+bot/cli.py:345,352 | ANNOTATION | catches asyncio NotImplementedError for signal handlers
+bot/setups/spec_runtime.py:156 | LIVE_STUB | fail-fast when detect_setup is None on SpecDetectorSetup
+bot/market/rest_impl.py:591,594,606 | ANNOTATION | RestHttpMixin contract; overridden in BinanceClientImpl
+bot/runtime/metrics.py:33-72 | ANNOTATION | prometheus_client optional fallback stubs
+
+No TODO/FIXME in bot/
