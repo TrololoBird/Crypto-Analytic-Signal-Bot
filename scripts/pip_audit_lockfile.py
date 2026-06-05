@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Audit requirements-lock.txt; fail on unknown CVEs (known aiohttp → SECURITY.md)."""
+
 from __future__ import annotations
 
 import json
