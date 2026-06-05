@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from importlib import import_module
 from typing import TYPE_CHECKING, Any, cast
 
+from bot.runtime.errors import DEFENSIVE_EXC
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
@@ -241,7 +243,7 @@ class BotMetricsCollector:
                 self.port,
                 getattr(exc, "errno", None),
             )
-        except Exception:
+        except DEFENSIVE_EXC:
             LOG.exception("failed to start metrics server")
 
     def record_signal_detected(

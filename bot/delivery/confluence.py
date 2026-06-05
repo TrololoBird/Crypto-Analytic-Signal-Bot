@@ -467,3 +467,37 @@ class ConfluenceEngine:
             "liquidation_score": prepared.liquidation_score,
         }
         return build_microstructure_context(row)
+
+
+WEIGHTED_HARD_LEG_KEYS = ("trend", "momentum", "volume")
+
+
+def evaluate_weighted_delivery_gate(
+    *,
+    conf_result: ConfluenceResult,
+    confirmations: dict[str, bool],
+    action_min_score: float,
+    min_hard_legs: int = 2,
+    hard_leg_keys: tuple[str, ...] = WEIGHTED_HARD_LEG_KEYS,
+) -> tuple[bool, dict[str, object]]:
+    """Weighted ConfluenceEngine score is primary; boolean legs are a hard floor."""
+    weighted_min = float(action_min_score)
+    weighted_pass = conf_result.final_score >= weighted_min
+    hard_legs = sum(1 for key in hard_leg_keys if confirmations.get(key))
+    required_hard = max(1, min(int(min_hard_legs), len(hard_leg_keys)))
+    passed = weighted_pass and hard_legs >= required_hard
+    details: dict[str, object] = {
+        "weighted_confluence_primary": True,
+        "confluence_engine": conf_result.to_dict(),
+        "weighted_confluence_pass": weighted_pass,
+        "weighted_hard_legs": hard_legs,
+        "weighted_hard_legs_required": required_hard,
+        "weighted_confluence_primary_pass": passed,
+        "weighted_min_score": weighted_min,
+    }
+    if not passed:
+        if not weighted_pass:
+            details["reason"] = "weighted_confluence_below_min"
+        else:
+            details["reason"] = "weighted_hard_legs_insufficient"
+    return passed, details

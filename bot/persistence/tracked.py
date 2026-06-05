@@ -48,6 +48,7 @@ class TrackedSignalState(msgspec.Struct, kw_only=True):
     entry_zone_touched_at: str | None = None
     entry_confirm_pending_at: str | None = None
     last_lifecycle_note: str | None = None
+    trailing_stop: float | None = None
     activated_at: str | None = None
     activation_price: float | None = None
     closed_at: str | None = None

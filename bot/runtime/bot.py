@@ -398,6 +398,7 @@ class SignalBot:
         kline_interval: str | None = None,
         max_setups: int | None = None,
         setup_subset: frozenset[str] | None = None,
+        setup_exclude: frozenset[str] | None = None,
     ) -> PipelineResult:
         return await self._symbol_analyzer.run_modern_analysis(
             item,
@@ -408,6 +409,7 @@ class SignalBot:
             kline_interval=kline_interval,
             max_setups=max_setups,
             setup_subset=setup_subset,
+            setup_exclude=setup_exclude,
         )
 
     def _select_and_rank(

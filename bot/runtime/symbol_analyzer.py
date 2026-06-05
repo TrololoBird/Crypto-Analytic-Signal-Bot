@@ -858,6 +858,7 @@ class AnalyzerPipelineMixin(AnalyzerFramesMixin):
         kline_interval: str | None = None,
         max_setups: int | None = None,
         setup_subset: frozenset[str] | None = None,
+        setup_exclude: frozenset[str] | None = None,
     ) -> PipelineResult:
         """Run modern SignalEngine analysis for a symbol.
 
@@ -1206,6 +1207,7 @@ class AnalyzerPipelineMixin(AnalyzerFramesMixin):
                 event_interval=event_interval,
                 max_setups=max_setups,
                 setup_subset=setup_subset,
+                setup_exclude=setup_exclude,
             )
             funnel["detector_runs"] = len(signal_results)
             LOG.debug(

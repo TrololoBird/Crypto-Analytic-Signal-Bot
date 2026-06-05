@@ -6,6 +6,7 @@ import asyncio
 import concurrent.futures
 import logging
 import os
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
@@ -36,6 +37,9 @@ def _default_executor_workers() -> int:
     return max(2, min(16, cpus * 2))
 
 
+_EXECUTOR_LOCK = threading.Lock()
+_EXECUTOR_RESET_EVERY_TIMEOUTS = 5
+_STRATEGY_TIMEOUT_CIRCUIT_THRESHOLD = 5
 _STRATEGY_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
     max_workers=_default_executor_workers(),
     thread_name_prefix="signal-strategy",
@@ -47,9 +51,34 @@ class _ExecutorModuleState:
     warmed_workers: int = 0
     timeout_count: int = 0
     timeout_by_strategy: dict[str, int] = field(default_factory=dict)
+    executor_resets: int = 0
 
 
 _EXECUTOR_MODULE_STATE = _ExecutorModuleState()
+
+
+def _strategy_executor() -> concurrent.futures.ThreadPoolExecutor:
+    return _STRATEGY_EXECUTOR
+
+
+def _reset_strategy_executor_after_timeout() -> None:
+    """Recycle thread pool after timeouts so queued work does not starve the pool."""
+    global _STRATEGY_EXECUTOR
+    if _EXECUTOR_MODULE_STATE.timeout_count % _EXECUTOR_RESET_EVERY_TIMEOUTS != 0:
+        return
+    with _EXECUTOR_LOCK:
+        stale = _STRATEGY_EXECUTOR
+        _STRATEGY_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+            max_workers=_default_executor_workers(),
+            thread_name_prefix="signal-strategy",
+        )
+        _EXECUTOR_MODULE_STATE.executor_resets += 1
+    stale.shutdown(wait=False, cancel_futures=True)
+    LOG.warning(
+        "strategy_executor_reset | timeout_count=%d resets=%d",
+        _EXECUTOR_MODULE_STATE.timeout_count,
+        _EXECUTOR_MODULE_STATE.executor_resets,
+    )
 
 
 def _executor_noop() -> None:
@@ -262,10 +291,15 @@ class SignalEngine:
         *,
         max_setups: int | None,
         setup_subset: frozenset[str] | None,
+        setup_exclude: frozenset[str] | None = None,
     ) -> list[Any]:
         limited = strategies
         if setup_subset:
             limited = [strategy for strategy in limited if strategy.strategy_id in setup_subset]
+        if setup_exclude:
+            limited = [
+                strategy for strategy in limited if strategy.strategy_id not in setup_exclude
+            ]
         if max_setups is not None and max_setups > 0:
             limited = limited[:max_setups]
         return limited
@@ -277,6 +311,7 @@ class SignalEngine:
         event_interval: str | None = None,
         max_setups: int | None = None,
         setup_subset: frozenset[str] | None = None,
+        setup_exclude: frozenset[str] | None = None,
     ) -> list[SignalResult]:
         """Calculate signals for strategies routed to this symbol/event.
 
@@ -366,6 +401,7 @@ class SignalEngine:
             strategies,
             max_setups=max_setups,
             setup_subset=setup_subset,
+            setup_exclude=setup_exclude,
         )
         LOG.info("%s: calculate_all called | strategies=%d", symbol, len(strategies))
 
@@ -512,6 +548,31 @@ class SignalEngine:
                     },
                 )
 
+            prior_timeouts = _EXECUTOR_MODULE_STATE.timeout_by_strategy.get(strategy_id, 0)
+            if prior_timeouts >= _STRATEGY_TIMEOUT_CIRCUIT_THRESHOLD:
+                decision = StrategyDecision.skip(
+                    setup_id=strategy_id,
+                    reason_code="engine.timeout_circuit_open",
+                    details={
+                        "symbol": symbol,
+                        "prior_timeouts": prior_timeouts,
+                        "threshold": _STRATEGY_TIMEOUT_CIRCUIT_THRESHOLD,
+                        "queue_wait_ms": queue_wait_ms,
+                    },
+                )
+                return SignalResult(
+                    setup_id=strategy_id,
+                    signal=None,
+                    decision=decision,
+                    calculation_time_ms=0.0,
+                    metadata={
+                        "setup_id": strategy_id,
+                        "reason": decision.reason_code,
+                        "queue_wait_ms": queue_wait_ms,
+                        "compute_ms": 0.0,
+                    },
+                )
+
             try:
                 # Check if strategy can calculate
                 if not strategy.can_calculate(prepared):
@@ -533,7 +594,7 @@ class SignalEngine:
                 # Run calculation with timeout
                 loop = asyncio.get_running_loop()
                 result = await asyncio.wait_for(
-                    loop.run_in_executor(_STRATEGY_EXECUTOR, strategy.calculate, prepared),
+                    loop.run_in_executor(_strategy_executor(), strategy.calculate, prepared),
                     timeout=self._timeout,
                 )
 
@@ -582,6 +643,7 @@ class SignalEngine:
                         strategy_id,
                         _EXECUTOR_MODULE_STATE.timeout_by_strategy[strategy_id],
                     )
+                _reset_strategy_executor_after_timeout()
                 self._registry.record_performance(strategy_id, elapsed_ms, error=True)
                 decision = StrategyDecision.error_result(
                     setup_id=strategy_id,
@@ -755,7 +817,7 @@ class SignalEngine:
             loop = asyncio.get_running_loop()
             await asyncio.gather(
                 *[
-                    loop.run_in_executor(_STRATEGY_EXECUTOR, _executor_noop)
+                    loop.run_in_executor(_strategy_executor(), _executor_noop)
                     for _ in range(worker_count - _EXECUTOR_MODULE_STATE.warmed_workers)
                 ]
             )

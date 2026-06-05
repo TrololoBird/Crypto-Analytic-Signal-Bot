@@ -103,6 +103,11 @@ Crypto Analytic Signal Bot/
 # graphify incremental cache (regenerate locally)
 graphify-out/cache/ast/
 
+# Backup / scratch churn
+*.bak2
+pyproject.toml.bak*
+logs/.latest_prod_run
+
 # Survey / scratch at repo root
 methods.txt
 methods_found.txt

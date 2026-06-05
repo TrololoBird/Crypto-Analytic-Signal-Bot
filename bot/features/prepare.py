@@ -42,7 +42,7 @@ LOG = structlog.get_logger("bot.features.prepare")
 # Frame-level indicator cache - LRU with unique frame-window keys.
 # ---------------------------------------------------------------------------
 
-_MAX_CACHE_ENTRIES = 500
+_MAX_CACHE_ENTRIES = 1200
 _FrameCacheValue = float | None
 _FrameCacheKey = tuple[
     str, str, int, int, int, tuple[_FrameCacheValue, ...], tuple[object, ...] | None

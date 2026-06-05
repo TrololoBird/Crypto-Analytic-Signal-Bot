@@ -45,6 +45,15 @@ class TPSLReviewMixin:
     _last_agg_trade_fetch_mono: float
     _agg_trade_semaphore: asyncio.Semaphore
 
+    def _effective_stop(self, tracked: TrackedSignalState) -> float:
+        trail = getattr(tracked, "trailing_stop", None)
+        if trail is not None and float(trail) > 0.0:
+            return float(trail)
+        cached = getattr(self, "_trailing_stops", {}).get(tracked.tracking_id)
+        if cached is not None and float(cached) > 0.0:
+            return float(cached)
+        return float(tracked.stop)
+
     @staticmethod
     def _update_price_excursion(tracked: TrackedSignalState, price: float | None) -> None:
         if price is None or price <= 0.0:
@@ -462,7 +471,12 @@ class TPSLReviewMixin:
             tp1_touched = _bar_hits_tp1(tracked, high=bar_high, low=bar_low)
             tp2_touched = _bar_hits_tp2(tracked, high=bar_high, low=bar_low)
             # Stop triggers immediately on price touch (as in real Binance futures trading)
-            stop_touched = _bar_hits_stop(tracked, high=bar_high, low=bar_low)
+            stop_touched = _bar_hits_stop(
+                tracked,
+                high=bar_high,
+                low=bar_low,
+                stop=self._effective_stop(tracked),
+            )
 
             if tracked.activated_at is None:
                 if bar_close_time > pending_expires_at:
@@ -677,8 +691,9 @@ class TPSLReviewMixin:
         precision_mode: str,
     ) -> tuple[list[SignalTrackingEvent], bool]:
         events: list[SignalTrackingEvent] = []
+        stop_level = self._effective_stop(tracked)
         if tracked.direction == "long":
-            if price <= tracked.stop:
+            if price <= stop_level:
                 events.append(
                     await self._close_event(
                         tracked,
@@ -750,7 +765,7 @@ class TPSLReviewMixin:
                 return events, False
             return [], False
 
-        if price >= tracked.stop:
+        if price >= stop_level:
             events.append(
                 await self._close_event(
                     tracked,
@@ -963,12 +978,19 @@ def _bar_hits_tp2(tracked: TrackedSignalState, *, high: float, low: float) -> bo
     return low <= tracked.take_profit_2
 
 
-def _bar_hits_stop(tracked: TrackedSignalState, *, high: float, low: float) -> bool:
+def _bar_hits_stop(
+    tracked: TrackedSignalState,
+    *,
+    high: float,
+    low: float,
+    stop: float | None = None,
+) -> bool:
     """Stop hit detection (immediate trigger price hit).
 
     In real Binance futures trading, stop-limit orders trigger when
     price reaches the stop price, not waiting for candle close.
     """
+    stop_level = float(stop if stop is not None else tracked.stop)
     if tracked.direction == "long":
-        return low <= tracked.stop
-    return high >= tracked.stop
+        return low <= stop_level
+    return high >= stop_level

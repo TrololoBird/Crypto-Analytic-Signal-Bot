@@ -188,6 +188,7 @@ def detect_aggression_shift_prepared(
         setup_id=setup_id,
         direction=direction,
         params=params,
+        confirmed_bar=True,
         reasons=[
             f"aggression_shift_{direction}",
             f"shift={shift:.3f}",

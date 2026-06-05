@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from bot.delivery import contract as _delivery_contract_module
-from bot.delivery.confluence import ConfluenceEngine
+from bot.delivery.confluence import ConfluenceEngine, evaluate_weighted_delivery_gate
 from bot.delivery.ops_webhook import notify_ops_delivery_failed, notify_ops_tier_cap_starvation
 from bot.delivery.telegram_routing import (
     operator_dm_enabled,
@@ -95,6 +95,8 @@ else:
 
 LOG = logging.getLogger("bot.runtime.bot")
 MIN_CONFIRMATIONS = 3  # confirmations: ADR-003 hard confluence gate
+WEIGHTED_HARD_LEG_KEYS = ("trend", "momentum", "volume")
+MIN_WEIGHTED_HARD_LEGS = 2
 DELIVERY_SUCCESS_STATUSES = frozenset({"sent", "logged"})
 
 
@@ -320,8 +322,9 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         delivery = self._bot.settings.delivery
         return {
             "enforce_mtf_gate": bool(getattr(delivery, "enforce_mtf_gate", True)),
-            "reversal_min_confirmations": int(getattr(delivery, "reversal_min_confirmations", 2)),
-            "use_weighted_confluence": bool(getattr(delivery, "use_weighted_confluence", False)),
+            "reversal_min_confirmations": int(getattr(delivery, "reversal_min_confirmations", 3)),
+            "use_weighted_confluence": bool(getattr(delivery, "use_weighted_confluence", True)),
+            "weighted_min_hard_legs": int(getattr(delivery, "weighted_min_hard_legs", 2)),
         }
 
     def _confluence_gate_kwargs(self) -> dict[str, Any]:
@@ -337,8 +340,9 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         prepared: PreparedSymbol | None,
         *,
         enforce_mtf_gate: bool = True,
-        reversal_min_confirmations: int = 2,
-        use_weighted_confluence: bool = False,
+        reversal_min_confirmations: int = 3,
+        use_weighted_confluence: bool = True,
+        weighted_min_hard_legs: int = MIN_WEIGHTED_HARD_LEGS,
         settings: Any | None = None,
         confluence_engine: Any | None = None,
     ) -> tuple[bool, dict[str, bool], dict[str, object]]:
@@ -447,11 +451,15 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         else:
             btc_phase_rule = "none"
 
-        # N1: dual HTF bearish is expected for reversal longs in global bear - pass HTF leg.
         htf_conflict = str(mtf_reason or "").startswith("htf_reversal_conflict")
         if profile in REVERSAL_PROFILES and bear_regime and direction == "long" and htf_conflict:
-            mtf_ok = True
-            mtf_reason = "htf_reversal_expected_bear:" + str(mtf_reason).split(":", 1)[-1]
+            details_pre: dict[str, object] = {
+                "htf_reversal_conflict_bear": True,
+                "reason": "htf_reversal_conflict_bear",
+                "bear_regime": bear_regime,
+                "btc_phase": btc_phase or "unknown",
+            }
+            return False, empty_confirmations, details_pre
 
         htf = mtf_ok if enforce_mtf_gate else True
         microstructure, micro_details = cls._microstructure_confirmation(
@@ -468,8 +476,8 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
             "microstructure": microstructure,
         }
         confirmation_count = sum(confirmations.values())
-        if profile in REVERSAL_PROFILES and bear_regime:
-            required = max(1, min(int(reversal_min_confirmations), 5))
+        if profile in REVERSAL_PROFILES and bear_regime and not use_weighted_confluence:
+            required = max(MIN_CONFIRMATIONS, min(int(reversal_min_confirmations), 5))
         else:
             required = MIN_CONFIRMATIONS
         details: dict[str, object] = {
@@ -497,16 +505,22 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         if use_weighted_confluence and settings is not None and prepared is not None:
             engine = confluence_engine or ConfluenceEngine(settings)
             conf_result = engine.score(signal, prepared)
-            details["weighted_confluence_bridge"] = True
-            details["confluence_engine"] = conf_result.to_dict()
-            weighted_min = float(settings.delivery.action_min_score)
-            weighted_pass = conf_result.final_score >= weighted_min
-            details["weighted_confluence_pass"] = weighted_pass
-            if not boolean_pass and weighted_pass and confirmation_count >= max(1, required - 1):
-                boolean_pass = True
-                details["weighted_confluence_bridge_pass"] = True
+            min_hard = int(
+                getattr(getattr(settings, "delivery", None), "weighted_min_hard_legs", weighted_min_hard_legs)
+                or weighted_min_hard_legs
+            )
+            boolean_pass, weighted_details = evaluate_weighted_delivery_gate(
+                conf_result=conf_result,
+                confirmations=confirmations,
+                action_min_score=float(settings.delivery.action_min_score),
+                min_hard_legs=min_hard,
+                hard_leg_keys=WEIGHTED_HARD_LEG_KEYS,
+            )
+            details.update(weighted_details)
+            details["boolean_confirmations"] = confirmation_count
+            details["boolean_required"] = required
         elif use_weighted_confluence:
-            details["weighted_confluence_bridge"] = True
+            details["weighted_confluence_primary"] = True
         if enforce_mtf_gate and not mtf_ok:
             details["reason"] = normalize_mtf_reject_reason(mtf_reason)
             return False, confirmations, details
@@ -799,6 +813,18 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
                 )
                 continue
             confluence_passed_tracking_ids.add(signal.tracking_id)
+            self._bot.telemetry.append_jsonl(
+                "gate_passed.jsonl",
+                {
+                    "ts": datetime.now(UTC).isoformat(),
+                    "symbol": signal.symbol,
+                    "setup_id": signal.setup_id,
+                    "direction": signal.direction,
+                    "tracking_id": signal.tracking_id,
+                    "confirmations": confirmations,
+                    "details": gate_details,
+                },
+            )
             tier_decision = tier_by_tracking_id.get(signal.tracking_id)
             if tier_decision is None:
                 rejected_rows.append(

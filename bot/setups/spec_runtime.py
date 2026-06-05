@@ -140,7 +140,8 @@ class SpecDetectorSetup(BaseSetup):
     detect_setup: ClassVar[SetupSignalFn | None] = None
 
     def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
-        return _configured_params(settings, self.setup_id, dict(self.DEFAULTS))
+        merged = {**catalog_default_params(self.setup_id), **dict(self.DEFAULTS)}
+        return _configured_params(settings, self.setup_id, merged)
 
     def effective_params(
         self, prepared: PreparedSymbol, settings: BotSettings

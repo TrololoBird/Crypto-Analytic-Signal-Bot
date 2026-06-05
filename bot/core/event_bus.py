@@ -255,6 +255,8 @@ class EventBus:
             await handler(event)
         except asyncio.CancelledError:
             raise
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             LOG.exception(
                 "event_bus_handler_error",

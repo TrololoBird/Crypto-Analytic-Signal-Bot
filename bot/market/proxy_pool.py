@@ -19,6 +19,8 @@ class ProxyPool:
     cooldown_seconds: float = 300.0
     _index: int = 0
     _bad_until: dict[str, float] = field(default_factory=dict)
+    _success_count: dict[str, int] = field(default_factory=dict)
+    _failure_count: dict[str, int] = field(default_factory=dict)
 
     @classmethod
     def from_urls(
@@ -52,6 +54,7 @@ class ProxyPool:
     def mark_failed(self, url: str, reason: str) -> str | None:
         """Mark *url* bad and advance to the next available proxy."""
         if url in self.urls:
+            self._failure_count[url] = self._failure_count.get(url, 0) + 1
             self._bad_until[url] = time.monotonic() + self.cooldown_seconds
             LOG.warning(
                 "proxy marked bad | url=%s cooldown_s=%.0f reason=%s",
@@ -68,6 +71,22 @@ class ProxyPool:
         active = self.current()
         LOG.info("proxy failover active | url=%s", mask_proxy_url(active))
         return active
+
+    def mark_success(self, url: str) -> None:
+        """Record a successful request through *url* for health scoring."""
+        if url in self.urls:
+            self._success_count[url] = self._success_count.get(url, 0) + 1
+
+    def _health_score(self, url: str) -> float:
+        success = float(self._success_count.get(url, 0))
+        failure = float(self._failure_count.get(url, 0))
+        total = success + failure
+        if total <= 0.0:
+            return 1.0 if self._is_available(url) else 0.0
+        base = success / total
+        if not self._is_available(url):
+            return base * 0.25
+        return base
 
     def rotate_after_failure(self, failed_url: str | None, reason: str) -> str | None:
         if not self.has_alternatives():
@@ -86,9 +105,16 @@ class ProxyPool:
                     "url": mask_proxy_url(url),
                     "available": self._is_available(url),
                     "cooldown_remaining_s": max(0.0, self._bad_until.get(url, 0.0) - now),
+                    "success_count": self._success_count.get(url, 0),
+                    "failure_count": self._failure_count.get(url, 0),
+                    "health_score": round(self._health_score(url), 4),
                 }
                 for url in self.urls
             ],
+            "health_score_avg": round(
+                sum(self._health_score(url) for url in self.urls) / max(len(self.urls), 1),
+                4,
+            ),
         }
 
 

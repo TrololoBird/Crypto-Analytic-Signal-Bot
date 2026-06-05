@@ -5,6 +5,7 @@ from __future__ import annotations
 import itertools
 import logging
 import math
+import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -22,6 +23,10 @@ if TYPE_CHECKING:
     from ..domain.schemas import PreparedSymbol, Signal
 
 LOGGER = logging.getLogger(__name__)
+
+_SPEC_COLUMN_CACHE: dict[tuple[object, ...], pl.DataFrame] = {}
+_SPEC_COLUMN_CACHE_MAX = 512
+_SPEC_COLUMN_CACHE_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +114,17 @@ def _feature_pair_or_expr(
     return upper_fallback.alias(upper_alias), lower_fallback.alias(lower_alias)
 
 
+def _spec_cache_key(frame: pl.DataFrame) -> tuple[object, ...] | None:
+    if frame.is_empty() or "close" not in frame.columns:
+        return None
+    tail_closes = tuple(
+        round(as_float(value), 8)
+        for value in frame.select("close").tail(5).to_series().to_list()
+    )
+    tail_time = frame.item(-1, "close_time") if "close_time" in frame.columns else None
+    return (frame.height, tail_closes, str(tail_time), tuple(frame.columns))
+
+
 def with_spec_columns(frame: pl.DataFrame) -> pl.DataFrame:
     """Add strict spec columns while reusing prepared feature columns when present."""
     if frame.is_empty():
@@ -118,6 +134,12 @@ def with_spec_columns(frame: pl.DataFrame) -> pl.DataFrame:
         return frame
     if "_spec_idx" in frame.columns:
         return frame
+    cache_key = _spec_cache_key(frame)
+    if cache_key is not None:
+        with _SPEC_COLUMN_CACHE_LOCK:
+            cached = _SPEC_COLUMN_CACHE.get(cache_key)
+            if cached is not None:
+                return cached.clone()
 
     work = frame.with_row_index("_spec_idx")
     prev_close = pl.col("close").shift(1)
@@ -145,24 +167,16 @@ def with_spec_columns(frame: pl.DataFrame) -> pl.DataFrame:
         avg_gain = wilder_mean(gain, period=14, name="spec_avg_gain", seed_offset=1)
         avg_loss = wilder_mean(loss, period=14, name="spec_avg_loss", seed_offset=1)
         raw_rsi = (100.0 - (100.0 / (1.0 + (avg_gain / avg_loss)))).fill_nan(50.0)
-        rsi_values: list[float] = []
-        for gain_value, loss_value, raw_value in zip(
-            avg_gain.to_list(),
-            avg_loss.to_list(),
-            raw_rsi.to_list(),
-            strict=False,
-        ):
-            gain_f = as_float(gain_value, 0.0)
-            loss_f = as_float(loss_value, 0.0)
-            if loss_f == 0.0 and gain_f > 0.0:
-                rsi_values.append(100.0)
-            elif gain_f == 0.0 and loss_f > 0.0:
-                rsi_values.append(0.0)
-            elif gain_f == 0.0 and loss_f == 0.0:
-                rsi_values.append(50.0)
-            else:
-                rsi_values.append(as_float(raw_value, 50.0))
-        rsi_expr = pl.Series("rsi14", rsi_values, dtype=pl.Float64)
+        rsi_expr = (
+            pl.when((avg_loss == 0) & (avg_gain > 0))
+            .then(100.0)
+            .when((avg_gain == 0) & (avg_loss > 0))
+            .then(0.0)
+            .when((avg_gain == 0) & (avg_loss == 0))
+            .then(50.0)
+            .otherwise(raw_rsi)
+            .alias("rsi14")
+        )
 
     if "vwap" in work.columns:
         vwap_expr = pl.col("vwap").cast(pl.Float64, strict=False).alias("vwap")
@@ -304,6 +318,11 @@ def with_spec_columns(frame: pl.DataFrame) -> pl.DataFrame:
             _spec_cvd_expr(work).alias("spec_cvd"),
         ]
     )
+    if cache_key is not None:
+        with _SPEC_COLUMN_CACHE_LOCK:
+            if len(_SPEC_COLUMN_CACHE) >= _SPEC_COLUMN_CACHE_MAX:
+                _SPEC_COLUMN_CACHE.pop(next(iter(_SPEC_COLUMN_CACHE)))
+            _SPEC_COLUMN_CACHE[cache_key] = work
     return work
 
 

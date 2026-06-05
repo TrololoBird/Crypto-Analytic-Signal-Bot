@@ -7,9 +7,9 @@ from ._roadmap import (
     _confirmed_context_conflict,
     _finite_or_none,
     _has_l2_depth,
-    _last,
     _orderbook_source,
-    _price_change_pct,
+    _prev,
+    _price_change_pct_confirmed,
     _reject,
 )
 from .roadmap_base import RoadmapSetup
@@ -55,12 +55,14 @@ def detect_depth_imbalance(
         # partial-depth, but it is an explicit source and should be scored
         # as a proxy instead of hard-rejected as missing data.
         source_penalty = 0.72
-    close_position = _last(prepared.work_15m, "close_position", 0.5)
+    work = prepared.work_15m
+    # fix-sl-A: confirmed bar (df[-2]) for orderbook momentum alignment.
+    close_position = _prev(work, "close_position", 0.5)
     threshold = float(params["min_depth_imbalance"])
     micro_threshold = float(params["min_microprice_bias"])
-    vol_ratio = _last(prepared.work_15m, "volume_ratio20", 1.0)
+    vol_ratio = _prev(work, "volume_ratio20", 1.0)
     volume_penalty = vol_ratio < float(params["min_volume_ratio"])
-    roc10 = _last(prepared.work_15m, "roc10", _price_change_pct(prepared.work_15m, 10))
+    roc10 = _prev(work, "roc10", _price_change_pct_confirmed(work, 10))
     if abs(roc10) < float(params["min_roc10_abs_pct"]):
         _reject(prepared, setup_id, "pattern.depth_not_actionable", roc10=roc10)
         return None
@@ -107,6 +109,7 @@ def detect_depth_imbalance(
         setup_id=setup_id,
         direction=direction,
         params=params,
+        confirmed_bar=True,
         reasons=[
             f"depth_imbalance_{direction}",
             f"depth={depth:.3f}",

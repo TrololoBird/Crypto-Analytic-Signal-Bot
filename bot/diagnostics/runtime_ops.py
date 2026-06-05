@@ -16,6 +16,7 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from bot.runtime.errors import DEFENSIVE_EXC
 from bot.runtime.health_manager import HealthManager
 from bot.strategies import STRATEGY_CLASSES
 
@@ -646,7 +647,7 @@ class AlertManager:
                     task.add_done_callback(self._handler_tasks.discard)
                 else:
                     handler(alert)
-            except Exception:
+            except DEFENSIVE_EXC:
                 LOG.exception("Alert handler failed")
 
         LOG.info("Alert created: [%s] %s - %s", severity.value, component, message)

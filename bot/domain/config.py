@@ -95,6 +95,12 @@ class RuntimeConfig(_StrictModel):
     heartbeat_seconds: float = Field(default=60.0, ge=5.0, le=3600.0)
     cycle_timeout_seconds: float = Field(default=120.0, ge=30.0, le=600.0)
     min_restart_interval_seconds: int = Field(default=120, ge=0, le=3600)
+    dashboard_weight_alert_pct: float = Field(
+        default=80.0,
+        ge=50.0,
+        le=100.0,
+        description="REST weight utilization alert threshold (% of soft limit) for dashboard",
+    )
 
     @field_validator("log_level")
     @classmethod
@@ -264,8 +270,12 @@ class FilterConfig(_StrictModel):
     min_bars_4h: int = Field(default=210, ge=30, le=5000)
     # Mark price sanity guard: reject if mark and last diverge beyond this pct.
     max_mark_price_deviation_pct: float = Field(default=0.005, ge=0.0, le=0.10)
-    # fix-sl-A: max |mark-entry|/entry as multiple of atr_pct (1.5 => 1.5 * atr_pct%).
-    max_entry_deviation_atr_mult: float = Field(default=1.5, ge=0.5, le=5.0)
+    # fix-sl-A: max |mark-entry|/entry as multiple of atr_pct (1.2 => 1.2 * atr_pct%).
+    max_entry_deviation_atr_mult: float = Field(default=1.2, ge=0.5, le=5.0)
+    regime_filter_enabled: bool = Field(
+        default=True,
+        description="Block trend longs/shorts against BTC regime (P2 SL-fix)",
+    )
     # Composable filter stages (Phase 6). Empty tuple = all defaults enabled.
     enabled_stages: tuple[str, ...] = (
         "freshness",
@@ -320,6 +330,10 @@ class TrackingConfig(_StrictModel):
     late_entry_chase_pct: float = Field(default=DEFAULT_LATE_ENTRY_CHASE_PCT, ge=0.002, le=0.05)
     outcome_retention_days: int = Field(default=90, ge=7, le=3650)
     move_stop_to_break_even_on_tp1: bool = True
+    persist_trailing_stop: bool = Field(
+        default=True,
+        description="Persist trailing stop level in active_signals across restarts",
+    )
     min_stop_distance_pct: float = Field(default=0.5, ge=0.0, le=100.0)
     max_stop_distance_pct: float = Field(default=15.0, ge=0.5, le=100.0)
     agg_trade_page_limit: int = Field(default=6, ge=1, le=20)
@@ -460,17 +474,20 @@ class DeliveryConfig(_StrictModel):
     sl_postmortem_enabled: bool = True
     sl_postmortem_to_operators: bool = True
     reversal_min_confirmations: int = Field(
-        default=2,
+        default=3,
         ge=1,
         le=5,
         description="Hard gate min confirmations for reversal profiles in bear BTC regime",
     )
     use_weighted_confluence: bool = Field(
-        default=False,
-        description=(
-            "When true, future bridge to ConfluenceEngine weighted scoring "
-            "(boolean gate until merged)"
-        ),
+        default=True,
+        description="Weighted ConfluenceEngine score is primary delivery gate (boolean legs as floor)",
+    )
+    weighted_min_hard_legs: int = Field(
+        default=2,
+        ge=1,
+        le=3,
+        description="Min trend/momentum/volume legs when weighted confluence is primary",
     )
     portfolio_max_same_direction_regime: int = Field(default=4, ge=1, le=40)
     portfolio_max_family_direction: int = Field(default=2, ge=1, le=20)
@@ -670,6 +687,12 @@ class NetworkConfig(_StrictModel):
     trust_env: bool = True
     failover_enabled: bool = True
     failover_cooldown_seconds: float = 300.0
+    probe_min_symbol_count: int = Field(
+        default=100,
+        ge=10,
+        le=500,
+        description="Minimum exchangeInfo symbols for proxy probe to count as healthy",
+    )
 
     @field_validator("proxy_url")
     @classmethod

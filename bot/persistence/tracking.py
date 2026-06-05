@@ -113,7 +113,7 @@ class SignalTracker(_SignalTrackerBases):
         # Pending outcomes queue for batching I/O operations
         self._pending_outcomes: list[dict[str, Any]] = []
         self._pending_outcomes_lock = asyncio.Lock()
-        self._pending_outcomes_flush_size = 10  # Flush when queue reaches this size
+        self._pending_outcomes_flush_size = 1  # Flush immediately — avoid losing outcomes on crash
         self._last_outcome_cleanup_ts: float = 0.0
         self._features_persist_lock = asyncio.Lock()
         self._symbol_review_locks: dict[str, asyncio.Lock] = {}
@@ -299,6 +299,7 @@ class SignalTracker(_SignalTrackerBases):
         row.setdefault("entry_zone_touched_at", None)
         row.setdefault("entry_confirm_pending_at", None)
         row.setdefault("last_lifecycle_note", None)
+        row.setdefault("trailing_stop", row.get("trailing_stop"))
         row["single_target_mode"] = bool(row.get("single_target_mode"))
         return TrackedSignalState(**row)
 
@@ -308,7 +309,27 @@ class SignalTracker(_SignalTrackerBases):
 
     async def _active_signals(self, *, symbol: str | None = None) -> list[TrackedSignalState]:
         rows = await self.memory_repo.get_active_signals(symbol=symbol)
-        return [self._tracked_from_payload(row) for row in rows]
+        states = [self._tracked_from_payload(row) for row in rows]
+        for tracked in states:
+            if tracked.status != "active":
+                continue
+            stop_px = tracked.stop
+            if stop_px is not None and float(stop_px) > 0.0:
+                self._trailing_stops.setdefault(tracked.tracking_id, float(stop_px))
+            trail_col = getattr(tracked, "trailing_stop", None)
+            if trail_col is not None and float(trail_col) > 0.0:
+                self._trailing_stops[tracked.tracking_id] = float(trail_col)
+        return states
+
+    def _apply_trailing_stop(self, tracked: TrackedSignalState, stop_price: float) -> None:
+        """Sync in-memory and struct trailing stop; caller persists when ready."""
+        if stop_price <= 0.0:
+            return
+        self._trailing_stops[tracked.tracking_id] = float(stop_price)
+        if bool(getattr(self.settings.tracking, "persist_trailing_stop", True)):
+            tracked.trailing_stop = float(stop_price)
+            tracked.stop = float(stop_price)
+            tracked.stop_price = float(stop_price)
 
     async def _persist_tracking_state(self) -> None:
         # Tracking rows are persisted incrementally via MemoryRepository calls.
@@ -539,8 +560,8 @@ class SignalTracker(_SignalTrackerBases):
         tracked.tp1_price = price
         if move_stop_to_break_even:
             be_price = tracked.activation_price or tracked.entry_mid
-            tracked.stop = be_price
-            tracked.stop_price = be_price
+            if be_price is not None and float(be_price) > 0.0:
+                self._apply_trailing_stop(tracked, float(be_price))
         await self.memory_repo.save_active_signal(self._tracked_to_payload(tracked))
         await self.memory_repo.increment_tracking_stats(tp1_hit=1)
 

@@ -61,6 +61,7 @@ _ACTIVE_SIGNALS_OPTIONAL_COLUMNS: dict[str, str] = {
     "entry_zone_touched_at": "TEXT",
     "entry_confirm_pending_at": "TEXT",
     "last_lifecycle_note": "TEXT",
+    "trailing_stop": "REAL",
 }
 
 
@@ -782,6 +783,7 @@ class MemoryRepository(_MemoryRepositoryBases):
             "entry_zone_touched_at",
             "entry_confirm_pending_at",
             "last_lifecycle_note",
+            "trailing_stop",
         ]
 
         values = []
@@ -882,7 +884,7 @@ class MemoryRepository(_MemoryRepositoryBases):
                             data["scale_weights"] = (0.5, 0.3, 0.2)
                     result.append(data)
                 return result
-        except Exception:
+        except (aiosqlite.Error, sqlite3.Error):
             LOG.exception("failed to get active signals")
             return []
 

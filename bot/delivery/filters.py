@@ -215,13 +215,24 @@ def _regime_long_gate(
         "cvd_divergence",
         "oi_divergence",
     }
-    if profile in reversal_profiles or signal.setup_id in reversal_setups or family == "reversal":
-        return True, None, {"regime_gate": "reversal_exempt"}
-
     regime = str(getattr(prepared, "market_regime", "") or "").lower()
     btc_bias = str(getattr(prepared, "btc_bias", None) or signal.btc_bias or "neutral").lower()
     bias_4h = str(getattr(prepared, "bias_4h", "") or "neutral").lower()
+    btc_phase = str(getattr(prepared, "btc_phase", "") or "").lower()
     bear_regime = regime in {"bear", "decline", "risk_off"}
+    if profile in reversal_profiles or signal.setup_id in reversal_setups or family == "reversal":
+        if bear_regime and btc_phase in {"decline", "distribution"}:
+            return (
+                False,
+                "regime_bear_reversal_long_blocked",
+                {
+                    "regime_gate": "reversal_bear_blocked",
+                    "market_regime": regime,
+                    "btc_bias": btc_bias,
+                    "btc_phase": btc_phase,
+                },
+            )
+        return True, None, {"regime_gate": "reversal_exempt"}
     bear_bias = btc_bias in {"downtrend", "bear"} or bias_4h == "downtrend"
     trend_family = family in {"continuation", "breakout", "trend_follow"} or profile in {
         "trend_follow",
@@ -564,7 +575,7 @@ def _entry_staleness_gate(
 
     # fix-sl-A: reject entry if price has already moved > N*ATR from signal entry
     deviation = abs(float(current_price) - entry_price) / entry_price
-    atr_mult = float(getattr(settings.filters, "max_entry_deviation_atr_mult", 1.5))
+    atr_mult = float(getattr(settings.filters, "max_entry_deviation_atr_mult", 1.2))
     threshold = max(0.001, atr_mult * atr_pct / 100.0)
     details: dict[str, Any] = {
         "entry_price": entry_price,
@@ -704,30 +715,33 @@ def _run_filter_pipeline(
         )
 
     regime_ok, regime_reason, regime_details = _regime_long_gate(base, prepared)
-    if not regime_ok:
-        LOGGER.info(
-            "%s/%s: regime long gate reject | reason=%s details=%s",
-            signal.symbol,
-            signal.setup_id,
-            regime_reason,
-            regime_details,
-        )
-        return _reject(regime_reason or "regime_long_blocked", base, details=regime_details)
+    if getattr(settings.filters, "regime_filter_enabled", True):
+        if not regime_ok:
+            LOGGER.info(
+                "%s/%s: regime long gate reject | reason=%s details=%s",
+                signal.symbol,
+                signal.setup_id,
+                regime_reason,
+                regime_details,
+            )
+            return _reject(regime_reason or "regime_long_blocked", base, details=regime_details)
 
-    short_regime_ok, short_regime_reason, short_regime_details = _regime_short_gate(base, prepared)
-    if not short_regime_ok:
-        LOGGER.info(
-            "%s/%s: regime short gate reject | reason=%s details=%s",
-            signal.symbol,
-            signal.setup_id,
-            short_regime_reason,
-            short_regime_details,
+        short_regime_ok, short_regime_reason, short_regime_details = _regime_short_gate(
+            base, prepared
         )
-        return _reject(
-            short_regime_reason or "regime_short_blocked",
-            base,
-            details=short_regime_details,
-        )
+        if not short_regime_ok:
+            LOGGER.info(
+                "%s/%s: regime short gate reject | reason=%s details=%s",
+                signal.symbol,
+                signal.setup_id,
+                short_regime_reason,
+                short_regime_details,
+            )
+            return _reject(
+                short_regime_reason or "regime_short_blocked",
+                base,
+                details=short_regime_details,
+            )
 
     profile = str(getattr(base, "confirmation_profile", "trend_follow"))
     mtf_ok, mtf_reason, mtf_details = evaluate_mtf_gate(

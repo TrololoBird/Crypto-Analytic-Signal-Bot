@@ -33,6 +33,15 @@ R_CLASS_SETUP_IDS: frozenset[str] = frozenset(
     }
 )
 
+# Setups that require a closed 15m bar — skip on bookTicker intra_candle scans (fix-sl-A).
+KLINE_CLOSE_ONLY_SETUP_IDS: frozenset[str] = frozenset(
+    {
+        *R_CLASS_SETUP_IDS,
+        "btc_correlation",
+        "aggression_shift",
+    }
+)
+
 BENCHMARK_ANCHOR_SYMBOLS: frozenset[str] = frozenset(REQUIRED_PINNED_SYMBOLS)
 
 METAL_ANCHOR_SYMBOLS: frozenset[str] = frozenset({"XAUUSDT", "XAGUSDT", "PAXGUSDT"})
@@ -79,6 +88,10 @@ def resolve_bear_regime(
 
 def is_r_class_setup(setup_id: str) -> bool:
     return str(setup_id or "").strip() in R_CLASS_SETUP_IDS
+
+
+def is_kline_close_only_setup(setup_id: str) -> bool:
+    return str(setup_id or "").strip() in KLINE_CLOSE_ONLY_SETUP_IDS
 
 
 def is_positioning_setup(setup_id: str) -> bool:

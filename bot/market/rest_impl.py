@@ -553,6 +553,10 @@ class RestHttpMixin(RestCircuitMixin):
                         ) from exc
                 self._rate_limit_error_streak = 0
                 self._capture_response_metadata(_ResponseStub(headers), operation=operation)
+                pool = getattr(self, "_proxy_pool", None)
+                active_proxy = getattr(self, "_proxy_url", None)
+                if pool is not None and active_proxy:
+                    pool.mark_success(str(active_proxy))
                 self._track_weight(operation, params)
                 self._record_circuit_success(operation)
                 self._record_endpoint_snapshot(

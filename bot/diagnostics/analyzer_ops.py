@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import Enum
@@ -11,6 +12,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 import polars as pl
+import aiosqlite
 
 from bot.persistence.repository.schema import OutcomeRecord, SignalRecord
 
@@ -511,7 +513,7 @@ class OutcomeTracker:
                     if outcome:
                         updated.append(outcome)
             await conn.commit()
-        except Exception:
+        except (aiosqlite.Error, sqlite3.Error):
             await conn.rollback()
             raise
 

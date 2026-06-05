@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 from ..setups.base import BaseSetup
 from ..setups.utils import get_dynamic_params
+from ..domain.strategy_catalog import catalog_default_params
 from ._roadmap import (
     _as_float,
     _build_atr_signal,
@@ -40,7 +41,8 @@ class RoadmapSetup(BaseSetup):
     }
 
     def get_optimizable_params(self, settings: BotSettings | None = None) -> dict[str, float]:
-        return _configured_params(settings, self.setup_id, self.DEFAULTS)
+        merged = {**catalog_default_params(self.setup_id), **dict(self.DEFAULTS)}
+        return _configured_params(settings, self.setup_id, merged)
 
     def _params(self, prepared: PreparedSymbol, settings: BotSettings) -> dict[str, float]:
         return {

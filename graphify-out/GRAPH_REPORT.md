@@ -1,16 +1,16 @@
 # Graph Report - Crypto-Analytic-Signal-Bot  (2026-06-05)
 
 ## Corpus Check
-- 523 files · ~375,780 words
+- 526 files · ~377,887 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 11717 nodes · 32764 edges · 554 communities (446 shown, 108 thin omitted)
-- Extraction: 87% EXTRACTED · 13% INFERRED · 0% AMBIGUOUS · INFERRED: 4252 edges (avg confidence: 0.52)
+- 12017 nodes · 33169 edges · 571 communities (463 shown, 108 thin omitted)
+- Extraction: 87% EXTRACTED · 13% INFERRED · 0% AMBIGUOUS · INFERRED: 4257 edges (avg confidence: 0.52)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `5240acfb`
+- Built from commit: `3ec4581e`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -457,13 +457,29 @@
 - [[_COMMUNITY_Community 444|Community 444]]
 - [[_COMMUNITY_Community 445|Community 445]]
 - [[_COMMUNITY_Community 446|Community 446]]
+- [[_COMMUNITY_Community 455|Community 455]]
+- [[_COMMUNITY_Community 456|Community 456]]
+- [[_COMMUNITY_Community 457|Community 457]]
+- [[_COMMUNITY_Community 458|Community 458]]
+- [[_COMMUNITY_Community 459|Community 459]]
+- [[_COMMUNITY_Community 460|Community 460]]
+- [[_COMMUNITY_Community 461|Community 461]]
+- [[_COMMUNITY_Community 462|Community 462]]
+- [[_COMMUNITY_Community 463|Community 463]]
+- [[_COMMUNITY_Community 464|Community 464]]
+- [[_COMMUNITY_Community 465|Community 465]]
+- [[_COMMUNITY_Community 466|Community 466]]
+- [[_COMMUNITY_Community 467|Community 467]]
 - [[_COMMUNITY_Community 468|Community 468]]
 - [[_COMMUNITY_Community 469|Community 469]]
+- [[_COMMUNITY_Community 470|Community 470]]
 - [[_COMMUNITY_Community 471|Community 471]]
 - [[_COMMUNITY_Community 472|Community 472]]
 - [[_COMMUNITY_Community 473|Community 473]]
 - [[_COMMUNITY_Community 474|Community 474]]
+- [[_COMMUNITY_Community 475|Community 475]]
 - [[_COMMUNITY_Community 476|Community 476]]
+- [[_COMMUNITY_Community 477|Community 477]]
 - [[_COMMUNITY_Community 478|Community 478]]
 - [[_COMMUNITY_Community 479|Community 479]]
 - [[_COMMUNITY_Community 480|Community 480]]
@@ -474,6 +490,17 @@
 - [[_COMMUNITY_Community 485|Community 485]]
 - [[_COMMUNITY_Community 486|Community 486]]
 - [[_COMMUNITY_Community 487|Community 487]]
+- [[_COMMUNITY_Community 488|Community 488]]
+- [[_COMMUNITY_Community 489|Community 489]]
+- [[_COMMUNITY_Community 490|Community 490]]
+- [[_COMMUNITY_Community 491|Community 491]]
+- [[_COMMUNITY_Community 492|Community 492]]
+- [[_COMMUNITY_Community 493|Community 493]]
+- [[_COMMUNITY_Community 494|Community 494]]
+- [[_COMMUNITY_Community 495|Community 495]]
+- [[_COMMUNITY_Community 496|Community 496]]
+- [[_COMMUNITY_Community 497|Community 497]]
+- [[_COMMUNITY_Community 498|Community 498]]
 - [[_COMMUNITY_Community 512|Community 512]]
 - [[_COMMUNITY_Community 513|Community 513]]
 - [[_COMMUNITY_Community 514|Community 514]]
@@ -482,15 +509,12 @@
 - [[_COMMUNITY_Community 517|Community 517]]
 - [[_COMMUNITY_Community 521|Community 521]]
 - [[_COMMUNITY_Community 523|Community 523]]
-- [[_COMMUNITY_Community 524|Community 524]]
 - [[_COMMUNITY_Community 525|Community 525]]
 - [[_COMMUNITY_Community 526|Community 526]]
 - [[_COMMUNITY_Community 529|Community 529]]
 - [[_COMMUNITY_Community 531|Community 531]]
 - [[_COMMUNITY_Community 532|Community 532]]
 - [[_COMMUNITY_Community 533|Community 533]]
-- [[_COMMUNITY_Community 534|Community 534]]
-- [[_COMMUNITY_Community 536|Community 536]]
 - [[_COMMUNITY_Community 537|Community 537]]
 - [[_COMMUNITY_Community 539|Community 539]]
 - [[_COMMUNITY_Community 543|Community 543]]
@@ -502,10 +526,8 @@
 - [[_COMMUNITY_Community 572|Community 572]]
 - [[_COMMUNITY_Community 574|Community 574]]
 - [[_COMMUNITY_Community 575|Community 575]]
-- [[_COMMUNITY_Community 576|Community 576]]
 - [[_COMMUNITY_Community 577|Community 577]]
 - [[_COMMUNITY_Community 578|Community 578]]
-- [[_COMMUNITY_Community 583|Community 583]]
 - [[_COMMUNITY_Community 584|Community 584]]
 - [[_COMMUNITY_Community 586|Community 586]]
 - [[_COMMUNITY_Community 588|Community 588]]
@@ -520,7 +542,6 @@
 - [[_COMMUNITY_Community 624|Community 624]]
 - [[_COMMUNITY_Community 625|Community 625]]
 - [[_COMMUNITY_Community 627|Community 627]]
-- [[_COMMUNITY_Community 629|Community 629]]
 - [[_COMMUNITY_Community 630|Community 630]]
 - [[_COMMUNITY_Community 631|Community 631]]
 - [[_COMMUNITY_Community 633|Community 633]]
@@ -528,12 +549,9 @@
 - [[_COMMUNITY_Community 637|Community 637]]
 - [[_COMMUNITY_Community 638|Community 638]]
 - [[_COMMUNITY_Community 640|Community 640]]
-- [[_COMMUNITY_Community 643|Community 643]]
-- [[_COMMUNITY_Community 645|Community 645]]
 - [[_COMMUNITY_Community 647|Community 647]]
 - [[_COMMUNITY_Community 649|Community 649]]
 - [[_COMMUNITY_Community 654|Community 654]]
-- [[_COMMUNITY_Community 655|Community 655]]
 - [[_COMMUNITY_Community 658|Community 658]]
 - [[_COMMUNITY_Community 659|Community 659]]
 - [[_COMMUNITY_Community 660|Community 660]]
@@ -546,7 +564,6 @@
 - [[_COMMUNITY_Community 685|Community 685]]
 - [[_COMMUNITY_Community 686|Community 686]]
 - [[_COMMUNITY_Community 688|Community 688]]
-- [[_COMMUNITY_Community 696|Community 696]]
 - [[_COMMUNITY_Community 703|Community 703]]
 - [[_COMMUNITY_Community 704|Community 704]]
 - [[_COMMUNITY_Community 705|Community 705]]
@@ -562,7 +579,7 @@
 4. `SpecHit` - 292 edges
 5. `PreparedSymbol` - 273 edges
 6. `BinanceFuturesMarketData` - 229 edges
-7. `BinanceClientImpl` - 210 edges
+7. `BinanceClientImpl` - 213 edges
 8. `UniverseSymbol` - 205 edges
 9. `RoadmapSetup` - 175 edges
 10. `FuturesWSManager` - 167 edges
@@ -601,87 +618,87 @@
 - 1-file cycle: `bot/delivery/watch.py -> bot/delivery/watch.py`
 - 1-file cycle: `bot/diagnostics/analyzer_ops.py -> bot/diagnostics/analyzer_ops.py`
 
-## Communities (554 total, 108 thin omitted)
+## Communities (571 total, 108 thin omitted)
 
 ### Community 0 - "Community 0"
-Cohesion: 0.03
-Nodes (70): str, int, Signal, str, Realtime limit fill + TP/SL on aggTrade ticks., Initial storage checks and WS bootstrap., Initial storage checks and WS bootstrap., Initial storage checks and WS bootstrap. (+62 more)
+Cohesion: 0.06
+Nodes (66): Any, bool, ClientSession, SignalBot, str, Any, bool, int (+58 more)
 
 ### Community 1 - "Community 1"
-Cohesion: 0.05
-Nodes (55): Any, bool, datetime, float, int, MemoryRepository, object, OutcomeRecord (+47 more)
+Cohesion: 0.04
+Nodes (73): Any, bool, datetime, float, int, MemoryRepository, object, OutcomeRecord (+65 more)
 
 ### Community 2 - "Community 2"
-Cohesion: 0.06
-Nodes (71): Any, bool, DashboardLiveData, str, Any, bool, int, SignalBot (+63 more)
+Cohesion: 0.10
+Nodes (47): Any, bool, int, SignalBot, str, UniverseSymbol, Any, float (+39 more)
 
 ### Community 3 - "Community 3"
-Cohesion: 0.05
-Nodes (76): bool, DataFrame, float, int, object, PreparedSymbol, Series, Signal (+68 more)
+Cohesion: 0.08
+Nodes (62): bool, DataFrame, float, int, object, Series, Signal, str (+54 more)
 
 ### Community 4 - "Community 4"
 Cohesion: 0.06
 Nodes (57): Any, BotSettings, float, JsonDict, MarketRadarStore, str, SymbolMeta, UniverseSymbol (+49 more)
 
 ### Community 5 - "Community 5"
-Cohesion: 0.07
-Nodes (65): Any, BaseException, str, build_runtime_error_payload(), classify_runtime_error(), defensive_exc_types(), Flatten DEFENSIVE_EXC with extra types for ``except`` clauses (never nest the tu, Return a coarse runtime error class for live-path telemetry. (+57 more)
+Cohesion: 0.20
+Nodes (21): _apply_sl_calibration(), _fetch_sl_outcomes(), _latest_log_file(), main(), bytes, float, int, object (+13 more)
 
 ### Community 6 - "Community 6"
-Cohesion: 0.06
-Nodes (64): Any, bool, ClientSession, SignalBot, str, Any, bool, int (+56 more)
+Cohesion: 0.03
+Nodes (70): int, Increment one or more tracking counters., Increment one or more tracking counters., Delete persisted cooldown rows older than the cleanup age., Delete persisted cooldown rows older than the cleanup age., Delete persisted cooldown rows older than the cleanup age., Add missing columns for existing databases., Add missing columns for existing databases. (+62 more)
 
 ### Community 7 - "Community 7"
 Cohesion: 0.06
-Nodes (79): Any, bool, BotSettings, DataFrame, datetime, float, int, PreparedSymbol (+71 more)
+Nodes (85): Any, bool, BotSettings, DataFrame, datetime, float, int, PreparedSymbol (+77 more)
 
 ### Community 8 - "Community 8"
 Cohesion: 0.08
 Nodes (37): DeliveryResult, LogRecord, _bootstrap(), _configure_logging(), FakeBroadcaster, _fetch_active_signal_row(), _install_asyncio_exception_logging(), main() (+29 more)
 
 ### Community 9 - "Community 9"
-Cohesion: 0.08
-Nodes (46): Any, datetime, float, int, Path, PipelineResult, PreparedSymbol, str (+38 more)
+Cohesion: 0.11
+Nodes (31): Any, datetime, float, int, Path, PipelineResult, PreparedSymbol, str (+23 more)
 
 ### Community 10 - "Community 10"
 Cohesion: 0.11
-Nodes (32): datetime, str, AggTrade, bool, datetime, float, SignalTrackingEvent, str (+24 more)
+Nodes (37): str, AggTrade, bool, DataFrame, datetime, float, SignalTrackingEvent, str (+29 more)
 
 ### Community 11 - "Community 11"
 Cohesion: 0.06
 Nodes (57): analyze_cycles(), analyze_data_quality(), analyze_database(), analyze_null_fields(), analyze_rejection_funnel(), analyze_strategy_decisions(), analyze_symbol_funnel(), _bootstrap() (+49 more)
 
 ### Community 12 - "Community 12"
-Cohesion: 0.08
-Nodes (96): FeatureFlags, Any, BinanceFuturesMarketData, BookTickerEvent, bool, BotSettings, Counter, datetime (+88 more)
+Cohesion: 0.12
+Nodes (91): BinanceFuturesMarketData, BookTickerEvent, bool, BotSettings, Counter, datetime, Exception, float (+83 more)
 
 ### Community 13 - "Community 13"
-Cohesion: 0.14
-Nodes (23): Any, bool, datetime, float, TrackedSignalState, _bar_hits_stop(), _bar_hits_tp1(), _bar_hits_tp2() (+15 more)
+Cohesion: 0.05
+Nodes (44): Any, bool, int, Signal, str, MemoryRepository, Close existing open signal when a new better one supersedes it.          Args:, Per-symbol tracking review — called on each 15m candle close.          Extracts (+36 more)
 
 ### Community 14 - "Community 14"
-Cohesion: 0.13
-Nodes (30): bool, BotSettings, DataFrame, float, int, object, PreparedSymbol, Signal (+22 more)
+Cohesion: 0.14
+Nodes (27): bool, BotSettings, DataFrame, float, int, object, PreparedSymbol, Signal (+19 more)
 
 ### Community 15 - "Community 15"
-Cohesion: 0.09
-Nodes (68): Any, bool, BotSettings, float, int, str, SymbolMeta, UniverseSymbol (+60 more)
+Cohesion: 0.13
+Nodes (54): Any, bool, BotSettings, float, int, str, SymbolMeta, UniverseSymbol (+46 more)
 
 ### Community 16 - "Community 16"
-Cohesion: 0.08
-Nodes (40): Any, DashboardLiveData, int, JsonDict, int, str, FastAPI dashboard for signal bot monitoring., build_funnel_hint() (+32 more)
+Cohesion: 0.15
+Nodes (24): int, str, confirmation_profile_label_ru(), confluence_leg_label_ru(), confluence_profile_recommendation_ru(), labels_payload(), normalize_reject_reason(), Canonical RU/EN labels for rejects, outcomes, and internal tracking events. (+16 more)
 
 ### Community 17 - "Community 17"
 Cohesion: 0.09
-Nodes (29): Any, bool, Connection, datetime, float, int, str, AnalyticsMixin (+21 more)
+Nodes (28): Any, bool, Connection, datetime, float, int, str, AnalyticsMixin (+20 more)
 
 ### Community 18 - "Community 18"
 Cohesion: 0.08
-Nodes (62): AbstractEventLoop, main(), Main entry point — runs the bot. No CLI commands, no flags, no sub-commands., _acquire_pid_lock(), _bootstrap_env_if_missing(), _cleanup_runtime_artifacts(), configure_logging(), _configure_stdio_for_unicode() (+54 more)
+Nodes (59): AbstractEventLoop, main(), Main entry point — runs the bot. No CLI commands, no flags, no sub-commands., _acquire_pid_lock(), _bootstrap_env_if_missing(), _cleanup_runtime_artifacts(), configure_logging(), _configure_stdio_for_unicode() (+51 more)
 
 ### Community 19 - "Community 19"
-Cohesion: 0.08
-Nodes (41): Any, int, str, DeliveryConfig, Telegram tier thresholds and delivery policy gates., Telegram tier thresholds and delivery policy gates., Telegram tier thresholds and delivery policy gates., Telegram tier thresholds and delivery policy gates. (+33 more)
+Cohesion: 0.18
+Nodes (13): Any, int, str, delivery_session_snapshot(), Delivery session counters (isolated from alert modules to avoid import cycles)., _bot(), int, SimpleNamespace (+5 more)
 
 ### Community 20 - "Community 20"
 Cohesion: 0.12
@@ -692,32 +709,32 @@ Cohesion: 0.14
 Nodes (37): Any, bool, DataFrame, datetime, float, int, str, ForensicCase (+29 more)
 
 ### Community 22 - "Community 22"
-Cohesion: 0.20
-Nodes (31): Any, DataFrame, datetime, float, int, object, str, add_microstructure_context_columns() (+23 more)
+Cohesion: 0.21
+Nodes (30): Any, datetime, float, int, object, str, add_microstructure_context_columns(), aggregate_microstructure_contexts() (+22 more)
 
 ### Community 23 - "Community 23"
 Cohesion: 0.13
 Nodes (37): Any, bool, float, Path, str, Unified diagnostics imports - re-exports only (phase-D facade)., aggregate_cycle_stats(), aggregate_rejection_funnel() (+29 more)
 
 ### Community 24 - "Community 24"
-Cohesion: 0.07
-Nodes (20): float, FuturesWSManager, Get current best bid/ask prices for a symbol.          Acquires _data_lock to, Get current best bid/ask prices for a symbol.          Acquires _data_lock to, Get current best bid/ask prices for a symbol.          Acquires _data_lock to, Get current best bid/ask prices for a symbol.          Acquires _data_lock to, Get current best bid/ask prices for a symbol.          Acquires _data_lock to, Get current best bid/ask prices for a symbol.          Acquires _data_lock to (+12 more)
+Cohesion: 0.05
+Nodes (61): Any, float, str, Task, _attach_task_logging(), base_streams_for_symbols(), FuturesWSManager, get_depth_imbalance() (+53 more)
 
 ### Community 25 - "Community 25"
 Cohesion: 0.10
 Nodes (31): Live smoke: Binance USD-M public REST + WebSocket (no private endpoints)., REST exchangeInfo/ticker/klines + WS warmup + forced reconnect., REST exchangeInfo/ticker/klines + WS warmup + forced reconnect., REST exchangeInfo/ticker/klines + WS warmup + forced reconnect., test_binance_public_rest_and_ws_reconnect(), _assert_public_endpoint(), _bootstrap(), main() (+23 more)
 
 ### Community 26 - "Community 26"
-Cohesion: 0.16
-Nodes (10): Any, bool, ClientSession, Event, float, int, SignalBot, str (+2 more)
+Cohesion: 0.14
+Nodes (9): Any, bool, ClientSession, Event, float, int, str, defensive_exc_types() (+1 more)
 
 ### Community 27 - "Community 27"
-Cohesion: 0.09
-Nodes (31): BotSettings, Connection, int, collect_db_status(), collect_db_status_from_conn(), DbStatusSummary, format_db_status_html(), DB status summary - migration version and active signal counts. (+23 more)
+Cohesion: 0.15
+Nodes (29): BotSettings, _MemoryRepositoryBases, collect_db_status(), Return migration version and per-status signal counts (read-only)., MemoryRepository, Unified repository for signals and outcomes.      Uses SQLite for metadata and P, Unified repository for signals and outcomes.      Uses SQLite for metadata and, Unified repository for signals and outcomes.      Uses SQLite for metadata and P (+21 more)
 
 ### Community 28 - "Community 28"
-Cohesion: 0.11
-Nodes (28): _assert_integrity(), fetch_schema_version(), fetch_schema_version_rows(), migrate_db(), _migration_prerequisites_met(), bool, Connection, int (+20 more)
+Cohesion: 0.09
+Nodes (32): _assert_integrity(), fetch_schema_version(), fetch_schema_version_rows(), migrate_db(), _migration_prerequisites_met(), bool, Connection, int (+24 more)
 
 ### Community 29 - "Community 29"
 Cohesion: 0.06
@@ -737,91 +754,87 @@ Nodes (36): bool, float, int, object, PreparedSymbol, str, asset_fit_for_strateg
 
 ### Community 33 - "Community 33"
 Cohesion: 0.06
-Nodes (37): object, str, _clean_key(), _markdown_table(), Record that a detector was evaluated.          Parameters         ----------, Record that a detector was evaluated.          Parameters         ----------, Record that a detector was evaluated.          Parameters         ----------, Record that a detector produced a signal candidate. (+29 more)
+Nodes (30): object, _clean_key(), Record that a detector was evaluated.          Parameters         ----------, Record that a detector was evaluated.          Parameters         ----------, Record that a detector was evaluated.          Parameters         ----------, Record that a detector produced a signal candidate., Record that a detector produced a signal candidate., Record that a detector produced a signal candidate. (+22 more)
 
 ### Community 34 - "Community 34"
-Cohesion: 0.05
-Nodes (39): AbstractStrategy, Any, bool, float, int, str, Check if strategy is enabled., Check if strategy is enabled. (+31 more)
+Cohesion: 0.04
+Nodes (50): AbstractStrategy, Any, bool, float, int, str, Check if strategy is enabled., Check if strategy is enabled. (+42 more)
 
 ### Community 35 - "Community 35"
-Cohesion: 0.11
-Nodes (16): float, BotMetrics, _finite_metric_value(), Gauge, Histogram, Histogram metric with buckets., Collection of bot metrics., Record signal generation. (+8 more)
+Cohesion: 0.06
+Nodes (30): float, BotMetrics, _finite_metric_value(), Gauge, Histogram, MetricCounter, Simple counter metric (monotonically increasing)., Simple counter metric (monotonically increasing). (+22 more)
 
 ### Community 36 - "Community 36"
-Cohesion: 0.16
-Nodes (19): Any, DataFrame, float, str, BotSettings, CentroidRegimeDetector, benchmark_funding_median(), _build_rule_based_frame() (+11 more)
+Cohesion: 0.28
+Nodes (15): BotSettings, DataFrame, float, int, object, PreparedSymbol, Signal, SpecHit (+7 more)
 
 ### Community 37 - "Community 37"
 Cohesion: 0.07
-Nodes (51): datetime, SignalTrackingEvent, apply_slim_message_buffer(), _csv_lock(), _cycle_delivery_success_count(), _iter_jsonl(), _jsonl_append_line(), _parse_iso_datetime() (+43 more)
+Nodes (52): prune_run_dirs(), datetime, Remove old telemetry run directories using ``run_metadata.started_at`` ordering., apply_slim_message_buffer(), _csv_lock(), _cycle_delivery_success_count(), _iter_jsonl(), _jsonl_append_line() (+44 more)
 
 ### Community 38 - "Community 38"
-Cohesion: 0.05
-Nodes (50): BinanceFuturesMarketData, int, JsonDict, WSConfig, _closed_kline_timestamp(), _message_priority(), MessageBuffer, WebSocket manager for Binance Futures market data.  Handles WebSocket connecti (+42 more)
+Cohesion: 0.04
+Nodes (57): BinanceFuturesMarketData, int, JsonDict, WSConfig, _closed_kline_timestamp(), _message_priority(), MessageBuffer, RateLimiter (+49 more)
 
 ### Community 39 - "Community 39"
 Cohesion: 0.04
 Nodes (44): 1. Executive Summary, 2. Core Module Architecture (10 Modules), 3.1 Backend → Dashboard Data Flow, 3.2 Required API Endpoints, 3.3 Signal JSON Schema (Core), 3.4 Trade Diary JSON Schema, 3. Data Architecture & API Contract, 4.1 Navigation (Left Sidebar, Collapsible) (+36 more)
 
 ### Community 40 - "Community 40"
-Cohesion: 0.10
-Nodes (38): bool, datetime, float, Signal, str, _group_key(), _is_opposite_direction(), _mark_direction_conflict() (+30 more)
+Cohesion: 0.14
+Nodes (22): bool, datetime, float, Signal, str, _group_key(), _is_opposite_direction(), _mark_direction_conflict() (+14 more)
 
 ### Community 41 - "Community 41"
-Cohesion: 0.14
-Nodes (28): int, build_minimal_regime_frame_4h(), Build rule/HMM features from benchmark 4h closes (N4-lite)., _filter_prepared(), _filter_signal(), _htf_frames(), _prepared_gate(), _primary() (+20 more)
+Cohesion: 0.15
+Nodes (27): int, build_minimal_regime_frame_4h(), Build rule/HMM features from benchmark 4h closes (N4-lite)., _filter_prepared(), _filter_signal(), _htf_frames(), _prepared_gate(), _primary() (+19 more)
 
 ### Community 42 - "Community 42"
-Cohesion: 0.09
-Nodes (20): Any, float, object, str, Any, Event, Exception, float (+12 more)
+Cohesion: 0.17
+Nodes (10): Any, bool, datetime, int, str, UniverseSymbol, Bot runtime orchestration — SignalBot loop, handlers, delivery wiring., Emergency fallback: radar-promoted symbols at half frequency (2x interval). (+2 more)
 
 ### Community 43 - "Community 43"
-Cohesion: 0.12
-Nodes (26): Any, float, int, str, classify_stop_loss_root_cause(), _f(), _feature_float(), Stop-loss root-cause classification for outcomes and dashboard analytics. (+18 more)
+Cohesion: 0.19
+Nodes (16): Any, float, int, str, classify_stop_loss_root_cause(), _f(), _feature_float(), Stop-loss root-cause classification for outcomes and dashboard analytics. (+8 more)
 
 ### Community 44 - "Community 44"
 Cohesion: 0.03
-Nodes (106): AbstractStrategy, AssetFit, Any, bool, datetime, float, int, str (+98 more)
+Nodes (81): bool, float, PreparedSymbol, str, Path, Any, bool, datetime (+73 more)
 
 ### Community 45 - "Community 45"
-Cohesion: 0.13
-Nodes (25): Any, BotSettings, DataFrame, float, PreparedSymbol, Signal, SpecHit, str (+17 more)
+Cohesion: 0.07
+Nodes (53): BaseSetup, Signal, BotSettings, float, object, PreparedSymbol, Signal, str (+45 more)
 
 ### Community 46 - "Community 46"
 Cohesion: 0.07
-Nodes (28): 1. Где мы сейчас (кратко), 2. Дорожная карта развития (приоритеты), 3.1 Python 3.14.5, 3.2 Конфиг (один раз на workspace), 3.3 graphify (опционально, сильно рекомендуется), 3.4 Binance / proxy, 3.5 Cursor IDE, 3.6 Claude Code (CLI) (+20 more)
+Nodes (28): 1. Где мы сейчас (кратко), 2. Дорожная карта развития (приоритеты), 3.1 Python 3.14.5, 3.2 Конфиг (один раз на workspace), 3.3 graphify (рекомендуется — установлен в репо), 3.4 Binance / proxy, 3.5 Cursor IDE, 3.6 Claude Code (CLI) (+20 more)
 
 ### Community 47 - "Community 47"
-Cohesion: 0.09
-Nodes (25): Any, bool, PreparedSymbol, str, StrategyMetadata, Strategy engine (v9 scaffold → legacy bot.core.engine)., AbstractStrategy, calculate() (+17 more)
+Cohesion: 0.10
+Nodes (23): Any, bool, PreparedSymbol, str, StrategyMetadata, Strategy engine (v9 scaffold → legacy bot.core.engine)., AbstractStrategy, calculate() (+15 more)
 
 ### Community 48 - "Community 48"
-Cohesion: 0.15
-Nodes (23): BotSettings, DataFrame, float, object, PreparedSymbol, Signal, SpecHit, str (+15 more)
+Cohesion: 0.12
+Nodes (29): BotSettings, DataFrame, float, object, PreparedSymbol, Signal, SpecHit, str (+21 more)
 
 ### Community 49 - "Community 49"
-Cohesion: 0.12
-Nodes (24): float, int, str, decay_weight(), penalties_from_sl_counts(), Shortlist deranking from recent stop-loss clusters (outcome feedback loop)., Exponential half-life decay for an SL event age in days., Map symbol → score penalty from recent SL frequency (optionally time-decayed). (+16 more)
-
-### Community 50 - "Community 50"
-Cohesion: 0.03
-Nodes (104): AggTrade, AggTradeSnapshot, Any, bool, ClientSession, DataFrame, float, int (+96 more)
+Cohesion: 0.11
+Nodes (26): float, int, str, decay_weight(), penalties_from_sl_counts(), Shortlist deranking from recent stop-loss clusters (outcome feedback loop)., Exponential half-life decay for an SL event age in days., Map symbol → score penalty from recent SL frequency (optionally time-decayed). (+18 more)
 
 ### Community 51 - "Community 51"
-Cohesion: 0.13
-Nodes (22): Live smoke: WS + REST enrichments for pinned symbols., test_binance_ws_enrichments_populated(), _check_field(), _collect_ws_enrichments(), _configure_logging(), main(), Any, BinanceFuturesMarketData (+14 more)
+Cohesion: 0.15
+Nodes (22): datetime, float, TrackedSignalState, _bar_hits_stop(), _bar_hits_tp1(), _bar_hits_tp2(), _bar_touches_entry(), _price_in_entry_zone() (+14 more)
 
 ### Community 52 - "Community 52"
 Cohesion: 0.15
 Nodes (23): build_static_rows(), _heuristic_fit_band(), live_shortlist_fit_counts(), main(), _print_live_table(), _print_static_table(), Any, BinanceClientImpl (+15 more)
 
 ### Community 53 - "Community 53"
-Cohesion: 0.09
-Nodes (41): Any, float, int, str, AggTrade, BotSettings, DataFrame, Lock (+33 more)
+Cohesion: 0.08
+Nodes (38): datetime, Any, float, int, str, AggTrade, BotSettings, DataFrame (+30 more)
 
 ### Community 54 - "Community 54"
-Cohesion: 0.22
-Nodes (24): Counter, datetime, int, object, Path, _as_float(), _as_int(), build_audit_report() (+16 more)
+Cohesion: 0.13
+Nodes (35): Any, Counter, datetime, int, object, Path, str, _as_float() (+27 more)
 
 ### Community 55 - "Community 55"
 Cohesion: 0.18
@@ -836,72 +849,72 @@ Cohesion: 0.22
 Nodes (24): Any, bool, float, JsonDict, str, _clamp(), depth_imbalance_from_book(), handle_agg_trade() (+16 more)
 
 ### Community 58 - "Community 58"
-Cohesion: 0.15
-Nodes (21): BotSettings, DataFrame, float, int, object, PreparedSymbol, Signal, SpecHit (+13 more)
+Cohesion: 0.02
+Nodes (143): AggTrade, AggTradeSnapshot, BinanceClientImpl, FuturesWSManager, Semaphore, SymbolFrames, SymbolMeta, Any (+135 more)
 
 ### Community 59 - "Community 59"
-Cohesion: 0.15
-Nodes (22): TrackingConfig, CycleContext, BotSettings, float, WATCH escalation readiness checks., _settings(), _signal(), test_watch_escalation_ready_in_zone() (+14 more)
+Cohesion: 0.18
+Nodes (11): Any, bool, datetime, float, int, PipelineResult, Signal, SignalTrackingEvent (+3 more)
 
 ### Community 60 - "Community 60"
-Cohesion: 0.21
-Nodes (23): _MemoryRepositoryBases, MemoryRepository, Unified repository for signals and outcomes.      Uses SQLite for metadata and P, Unified repository for signals and outcomes.      Uses SQLite for metadata and, Unified repository for signals and outcomes.      Uses SQLite for metadata and P, clean_live_watch(), clean_logs(), clean_session_artifacts() (+15 more)
+Cohesion: 0.18
+Nodes (13): Any, bool, Connection, float, int, Path, Row, str (+5 more)
 
 ### Community 61 - "Community 61"
-Cohesion: 0.03
-Nodes (71): bool, str, SymbolFrames, UniverseSymbol, _bias_1h(), _bias_4h(), cache_stats(), has_minimum_bars() (+63 more)
+Cohesion: 0.04
+Nodes (56): UniverseSymbol, _bias_4h(), _market_regime(), _market_structure_1h(), prepare_symbol(), Determine 4h bias from EMA alignment., Determine 4h bias from EMA alignment., Classify regime from 4h strength plus 1h/15m structure. (+48 more)
 
 ### Community 62 - "Community 62"
-Cohesion: 0.08
-Nodes (35): Any, BaseException, bool, bytes, DeliveryResult, Exception, int, str (+27 more)
+Cohesion: 0.10
+Nodes (24): Any, bytes, DeliveryResult, Exception, int, str, _buffered_input_file_class(), _edit_immediate() (+16 more)
 
 ### Community 63 - "Community 63"
 Cohesion: 0.14
 Nodes (27): bool, BotSettings, datetime, float, int, object, PreparedSymbol, Signal (+19 more)
 
 ### Community 64 - "Community 64"
-Cohesion: 0.07
-Nodes (34): int, JsonDict, Path, DashboardLiveData, Return a high-level live dashboard summary., Return a high-level live dashboard summary., Return cycle, rejection, decision, and delivery funnel summary., Return latest telemetry file metadata for diagnostics. (+26 more)
+Cohesion: 0.04
+Nodes (114): Any, bool, Counter, datetime, float, int, JsonDict, Path (+106 more)
 
 ### Community 65 - "Community 65"
-Cohesion: 0.24
-Nodes (22): bool, BotSettings, datetime, float, int, object, PreparedSymbol, Signal (+14 more)
+Cohesion: 0.05
+Nodes (88): BotSettings, float, int, PreparedSymbol, Signal, str, BotSettings, DataFrame (+80 more)
 
 ### Community 66 - "Community 66"
-Cohesion: 0.04
-Nodes (72): SignalResult, Any, bool, float, int, PreparedSymbol, Semaphore, Signal (+64 more)
+Cohesion: 0.05
+Nodes (61): SignalResult, Any, bool, BotSettings, float, int, PreparedSymbol, Semaphore (+53 more)
 
 ### Community 67 - "Community 67"
-Cohesion: 0.20
-Nodes (10): Convert bot timeframe labels to TradingView interval labels., Convert bot timeframe labels to TradingView interval labels., Convert bot timeframe labels to TradingView interval labels., Convert bot timeframe labels to TradingView interval labels., Return a TradingView chart URL for Binance perpetual futures., Return a TradingView chart URL for Binance perpetual futures., Return a TradingView chart URL for Binance perpetual futures., Return a TradingView chart URL for Binance perpetual futures. (+2 more)
+Cohesion: 0.06
+Nodes (65): int, bool, BotSettings, DataFrame, float, object, PreparedSymbol, Signal (+57 more)
 
 ### Community 68 - "Community 68"
-Cohesion: 0.15
-Nodes (20): BaseSetup, BotSettings, float, object, PreparedSymbol, Signal, str, BotSettings (+12 more)
+Cohesion: 0.09
+Nodes (50): Any, bool, DataFrame, float, object, PreparedSymbol, str, StrategyDecision (+42 more)
 
 ### Community 69 - "Community 69"
 Cohesion: 0.08
 Nodes (23): For /graphify add and --watch, For /graphify query, For the commit hook and native CLAUDE.md integration, For --update and --cluster-only, /graphify, Honesty Rules, Interpreter guard for subcommands, Part A - Structural extraction for code files (+15 more)
 
 ### Community 70 - "Community 70"
-Cohesion: 0.09
-Nodes (17): Queue outcome for batched I/O., Queue outcome for batched I/O., Queue outcome for batched I/O., Queue outcome for batched I/O., Flush pending outcomes to disk in batch., Flush pending outcomes to disk in batch., Flush pending outcomes to disk in batch., Flush pending outcomes to disk in batch. (+9 more)
+Cohesion: 0.06
+Nodes (28): Сохраняет outcome завершенного сигнала., Queue outcome for batched I/O., Сохраняет outcome завершенного сигнала., Сохраняет outcome завершенного сигнала., Сохраняет outcome завершенного сигнала., Queue outcome for batched I/O., Queue outcome for batched I/O., Queue outcome for batched I/O. (+20 more)
 
 ### Community 71 - "Community 71"
 Cohesion: 0.15
 Nodes (13): Any, bool, ClientSession, int, object, Self, str, CandleFetcher (+5 more)
 
 ### Community 72 - "Community 72"
-Cohesion: 0.09
-Nodes (47): SignalTrackingEvent, Any, bool, Counter, float, int, object, PreparedSymbol (+39 more)
+Cohesion: 0.08
+Nodes (57): SignalTrackingEvent, Any, bool, Counter, float, int, object, PreparedSymbol (+49 more)
 
 ### Community 73 - "Community 73"
-Cohesion: 0.09
-Nodes (27): Any, diagnostic_format_matrix(), format_signal_message(), message_preview(), Render a Telegram preview from a telemetry row., Return all delivery renderings for live diagnostics., Render the main Telegram signal message., Render the main Telegram signal message. (+19 more)
+Cohesion: 0.08
+Nodes (27): Any, diagnostic_format_matrix(), message_preview(), Render a Telegram preview from a telemetry row., Return all delivery renderings for live diagnostics., Render the state line for tracked signal cards., Render the state line for tracked signal cards., Render the state line for tracked signal cards. (+19 more)
 
 ### Community 74 - "Community 74"
 Cohesion: 0.16
-Nodes (22): BotSettings, DataFrame, float, object, PreparedSymbol, Signal, SpecHit, str (+14 more)
+Nodes (23): BotSettings, DataFrame, float, object, PreparedSymbol, Signal, SpecHit, str (+15 more)
 
 ### Community 75 - "Community 75"
 Cohesion: 0.08
@@ -920,12 +933,12 @@ Cohesion: 0.17
 Nodes (21): Any, bool, DashboardLiveData, SignalBot, str, format_market_context_warmup(), format_market_from_display_snapshot(), format_operator_audit_text() (+13 more)
 
 ### Community 79 - "Community 79"
-Cohesion: 0.11
-Nodes (18): format_analytics_companion_message(), market_context_lines(), Formatting knobs for Telegram signal messages., Formatting knobs for Telegram signal messages., Formatting knobs for Telegram signal messages., Formatting knobs for Telegram signal messages., Build compact context lines for the signal., Build compact context lines for the signal. (+10 more)
+Cohesion: 0.09
+Nodes (34): AssetConfig, Per-symbol calibration overrides for priority asset routing., Per-symbol calibration overrides for priority asset routing., Per-symbol calibration overrides for priority asset routing., Per-symbol calibration overrides for priority asset routing., Per-symbol calibration overrides for priority asset routing., Per-symbol calibration overrides for priority asset routing., Per-symbol calibration overrides for priority asset routing. (+26 more)
 
 ### Community 80 - "Community 80"
-Cohesion: 0.06
-Nodes (50): Any, datetime, float, int, MemoryRepository, str, Any, bool (+42 more)
+Cohesion: 0.05
+Nodes (57): Any, bool, float, int, str, float, int, str (+49 more)
 
 ### Community 81 - "Community 81"
 Cohesion: 0.14
@@ -936,28 +949,28 @@ Cohesion: 0.24
 Nodes (20): Any, Connection, float, int, Namespace, Row, str, _append_monitoring_hook() (+12 more)
 
 ### Community 83 - "Community 83"
-Cohesion: 0.15
-Nodes (11): Alert, AlertManager, AlertSeverity, Alert severity levels., Manage alerts and notifications.      Features:     - Alert deduplication (same, Add notification handler., Create alert if not in cooldown.          Returns None if alert is suppressed (c, Create alert from health check result. (+3 more)
+Cohesion: 0.11
+Nodes (16): Alert, AlertManager, Manage alerts and notifications.      Features:     - Alert deduplication (same, Manage alerts and notifications.      Features:     - Alert deduplication (same, Add notification handler., Add notification handler., Create alert if not in cooldown.          Returns None if alert is suppressed (c, Create alert if not in cooldown.          Returns None if alert is suppressed (c (+8 more)
 
 ### Community 84 - "Community 84"
-Cohesion: 0.23
-Nodes (18): AbsorptionSetup, OIDivergenceSetup, SessionKillzoneSetup, _prepared(), BotSettings, object, PreparedSymbol, UniverseSymbol (+10 more)
+Cohesion: 0.05
+Nodes (29): Any, Signal, str, int, Signal, str, Realtime limit fill + TP/SL on aggTrade ticks., Realtime limit fill + TP/SL on aggTrade ticks. (+21 more)
 
 ### Community 85 - "Community 85"
 Cohesion: 0.04
-Nodes (71): BinanceClient, BinanceClientImpl, AggTrade, AggTradeSnapshot, Any, BinanceClient, BinanceClientImpl, bool (+63 more)
+Nodes (54): BinanceClient, BinanceClientImpl, Any, BinanceClient, bool, DataFrame, float, int (+46 more)
 
 ### Community 86 - "Community 86"
-Cohesion: 0.19
-Nodes (10): Any, Any, bool, object, Signal, str, Resolve chase pct from tracking config (single source) with domain default fallb, resolve_late_entry_chase_pct() (+2 more)
+Cohesion: 0.31
+Nodes (6): Any, bool, object, Signal, str, Reject when the limit plan is invalidated or price already chased away.
 
 ### Community 87 - "Community 87"
-Cohesion: 0.08
-Nodes (33): Any, bool, datetime, float, int, Path, str, StrategyAnalytics (+25 more)
+Cohesion: 0.05
+Nodes (57): Any, bool, datetime, float, int, Path, str, BotDashboard (+49 more)
 
 ### Community 88 - "Community 88"
-Cohesion: 0.26
-Nodes (15): bool, BotSettings, DataFrame, float, PreparedSymbol, Series, Signal, SpecHit (+7 more)
+Cohesion: 0.25
+Nodes (6): Wave F9 agent L: runtime orchestration bootstrap, funnel noise, score floor, cyc, test_build_application_container_defers_network_bootstrap_in_async_context(), test_cycle_timeout_emits_reject_row_and_cycle_log(), test_emit_cycle_log_aggregates_lane_skips_in_funnel(), test_emit_strategy_routing_skips_defaults_false(), test_lane_skips_aggregate_in_rejection_stats()
 
 ### Community 89 - "Community 89"
 Cohesion: 0.11
@@ -969,79 +982,79 @@ Nodes (46): Dispatch a single market data event dict to the appropriate handler.
 
 ### Community 91 - "Community 91"
 Cohesion: 0.06
-Nodes (50): as_float(), float, object, str, Shared runtime coercion helpers for strict mypy., row_float(), bool, datetime (+42 more)
+Nodes (67): str, bold(), _channel_header(), _channel_legs_line(), _channel_rr_line(), code(), direction_label(), direction_side() (+59 more)
 
 ### Community 92 - "Community 92"
-Cohesion: 0.14
-Nodes (5): bool, classify_strategy(), DetectorStats, OutcomeStats, Acknowledge an alert.
+Cohesion: 0.13
+Nodes (5): bool, OutcomeStats, Acknowledge an alert., Acknowledge an alert., SignalContractStats
 
 ### Community 93 - "Community 93"
-Cohesion: 0.18
-Nodes (11): invalidation_text(), Return setup-specific invalidation text., Return setup-specific invalidation text., Return the entry waiting status line., Return the entry waiting status line., Return the entry waiting status line., Return setup-specific invalidation text., Return the entry waiting status line. (+3 more)
+Cohesion: 0.07
+Nodes (28): Any, _FrameCacheKey, _cached_prepare_frame(), _enrich_with_ws_data(), _FrameCache, Best-effort LRU cache for prepared frames.      Keys include symbol, interval, r, _prepare_frame with LRU cache keyed on (symbol, interval, close_time)., Merge current WebSocket bookTicker and aggTrade context into work_15m. (+20 more)
 
 ### Community 94 - "Community 94"
-Cohesion: 0.16
-Nodes (9): Any, bool, float, int, str, Periodic spot companion refresh for shortlist symbols., Background spot-companion refresh loop (started from SignalBot.run_forever)., run_spot_refresh_loop() (+1 more)
+Cohesion: 0.05
+Nodes (35): int, object, str, IntelligenceConfig, log_level(), _normalize_analysis_intervals(), _normalize_benchmark_symbols(), _normalize_depth_speed() (+27 more)
 
 ### Community 95 - "Community 95"
-Cohesion: 0.09
-Nodes (19): object, str, ParquetCache, Read cached data for symbol/timeframe.          Args:             symbol: Tra, Read cached data for symbol/timeframe.          Args:             symbol: Tradin, Clear cache for symbol or all symbols., Clear cache for symbol or all symbols., Clear cache for symbol or all symbols. (+11 more)
+Cohesion: 0.27
+Nodes (10): bool, DataFrame, _empty_candle_frame(), _HotCandleBuffer, normalize_candle_frame(), Return a canonical OHLCV frame suitable for Parquet storage., Return a canonical OHLCV frame suitable for Parquet storage., Return a canonical OHLCV frame suitable for Parquet storage. (+2 more)
 
 ### Community 96 - "Community 96"
-Cohesion: 0.04
-Nodes (122): bool, DataFrame, date, Exception, Expr, float, _FrameCacheKey, int (+114 more)
+Cohesion: 0.05
+Nodes (99): bool, DataFrame, Exception, float, _FrameCacheKey, int, object, Series (+91 more)
 
 ### Community 97 - "Community 97"
-Cohesion: 0.19
-Nodes (11): ComponentHealth, HealthChecker, Check strategy health., Check overall performance health., Check WebSocket health via ``FuturesWSManager.state_snapshot`` when wired., Determine overall health from component checks., Format health report., Health status of a component. (+3 more)
+Cohesion: 0.11
+Nodes (20): ComponentHealth, HealthChecker, Check strategy health., Check strategy health., Check overall performance health., Check overall performance health., Check WebSocket health via ``FuturesWSManager.state_snapshot`` when wired., Check WebSocket health via ``FuturesWSManager.state_snapshot`` when wired. (+12 more)
 
 ### Community 98 - "Community 98"
-Cohesion: 0.05
-Nodes (56): Any, EventBus, int, str, Optional FastAPI dashboard (v9 package).  Canonical entry: ``bot.dashboard.app.B, funnel_stage_counts_from_cycle(), Per-cycle stage counts derived from telemetry cycle rows., Per-cycle stage counts derived from telemetry cycle rows. (+48 more)
+Cohesion: 0.04
+Nodes (64): Any, EventBus, int, str, funnel_stage_counts(), Compact stage counts for dashboard WS ``funnel_update`` payloads., Compact stage counts for dashboard WS ``funnel_update`` payloads., Compact stage counts for dashboard WS ``funnel_update`` payloads. (+56 more)
 
 ### Community 99 - "Community 99"
 Cohesion: 0.21
 Nodes (16): Any, bool, Connection, int, str, Path, str, _active_fixes() (+8 more)
 
 ### Community 100 - "Community 100"
-Cohesion: 0.29
-Nodes (13): BotSettings, DataFrame, float, object, PreparedSymbol, Signal, SpecHit, str (+5 more)
+Cohesion: 0.07
+Nodes (62): AbstractStrategy, BaseSetup, BotSettings, DataFrame, float, object, PreparedSymbol, Signal (+54 more)
 
 ### Community 101 - "Community 101"
 Cohesion: 0.09
 Nodes (50): bool, BotSettings, int, object, str, StrategyMetadata, StrategyRegistry, _cap_unique_families() (+42 more)
 
 ### Community 102 - "Community 102"
-Cohesion: 0.16
-Nodes (16): format_tracking_event_message(), Render a tracking follow-up message., Render a tracking follow-up message., Render a tracking follow-up message., Render a tracking follow-up message., Render a tracking follow-up message., Short channel reply on TP/SL (card edit carries full state)., _event() (+8 more)
+Cohesion: 0.15
+Nodes (13): format_tracking_event_message(), Trim a Telegram message while preserving the signal-only footer., Trim a Telegram message while preserving the signal-only footer., Trim a Telegram message while preserving the signal-only footer., Trim a Telegram message while preserving the signal-only footer., Render a tracking follow-up message., Render a tracking follow-up message., Render a tracking follow-up message. (+5 more)
 
 ### Community 103 - "Community 103"
 Cohesion: 0.12
 Nodes (16): `bot/core/` + `bot/backtest/`, `bot/dashboard/` — operator UI, `bot/delivery/` — gates (never bypass), `bot/diagnostics/` — telemetry & audit, `bot/domain/` — config & contracts, `bot/engine/` + `bot/strategies/` + `bot/setups/`, `bot/features/` — Polars hot path, `bot/market/` — data plane (+8 more)
 
 ### Community 104 - "Community 104"
-Cohesion: 0.13
-Nodes (32): Any, bool, BotSettings, float, int, PreparedSymbol, Signal, str (+24 more)
+Cohesion: 0.14
+Nodes (31): Any, bool, BotSettings, float, int, PreparedSymbol, Signal, str (+23 more)
 
 ### Community 105 - "Community 105"
-Cohesion: 0.16
-Nodes (11): Any, Prometheus metrics collection for the signal bot.  Provides metrics endpoint f, _prom_start_http_server(), _PromCounterClass, _PromGaugeClass, _PromHistogramClass, _PromInfoClass, Prometheus metrics collection for the signal bot.  Provides metrics endpoint for (+3 more)
+Cohesion: 0.14
+Nodes (12): Any, Prometheus metrics collection for the signal bot.  Provides metrics endpoint f, _prom_start_http_server(), _PromCounterClass, _PromGaugeClass, _PromHistogramClass, _PromInfoClass, Prometheus metrics collection for the signal bot.  Provides metrics endpoint for (+4 more)
 
 ### Community 106 - "Community 106"
 Cohesion: 0.23
 Nodes (11): Any, float, int, ndarray, str, CentroidRegimeDetector, _label_components(), Rule/centroid-based detector used as a lightweight fallback. (+3 more)
 
 ### Community 107 - "Community 107"
-Cohesion: 0.14
-Nodes (10): int, str, Record a delivered signal., Record a delivered signal., Record a signal outcome (tp1, tp2, sl, expired)., Record a signal outcome (tp1, tp2, sl, expired)., Update active WebSocket streams count., Update bot state metrics. (+2 more)
+Cohesion: 0.10
+Nodes (22): SignalBot, StrategyRegistry, PerformanceMetrics, Detect if performance has degraded significantly.          Returns True if degra, Detect if performance has degraded significantly.          Returns True if degra, Performance metrics for strategy or overall system., Performance metrics for strategy or overall system., Calculate win rates and performance metrics. (+14 more)
 
 ### Community 108 - "Community 108"
-Cohesion: 0.34
-Nodes (15): _analyze_live_telemetry(), _build_static_matrix(), _find_telemetry_run(), main(), _merge_rows(), _print_markdown_table(), Any, int (+7 more)
+Cohesion: 0.05
+Nodes (44): Any, bool, float, Record outcome and return new score adjustment.          Replaces SignalCooldo, Record outcome and return new score adjustment.          Replaces SignalCooldown, Record outcome and return new score adjustment.          Replaces SignalCooldown, Record outcome and return new score adjustment.          Replaces SignalCooldo, Record outcome and return new score adjustment.          Replaces SignalCooldo (+36 more)
 
 ### Community 109 - "Community 109"
-Cohesion: 0.15
-Nodes (12): AGENT QUICK START, code:powershell (python -m venv .venv), code:powershell (pytest -q), code:text (strategy Signal), Current Audit Scripts, Delivery Trace To Preserve, Hooks, Read First (+4 more)
+Cohesion: 0.14
+Nodes (17): BaseException, bool, float, int, object, str, _dedupe_urls(), from_urls() (+9 more)
 
 ### Community 110 - "Community 110"
 Cohesion: 0.15
@@ -1056,12 +1069,12 @@ Cohesion: 0.09
 Nodes (21): AssetTimeframeProfile (per symbol), code:mermaid (flowchart TB), code:text (intervals(symbol) = ⋃ { trigger_tf, required_tfs | setup ena), Implementation phases (suggested), Layer diagram, Non-negotiables, Phase A — Continuous ingestion, Phase B — Universe & shortlist (+13 more)
 
 ### Community 113 - "Community 113"
-Cohesion: 0.08
-Nodes (54): Any, bool, Counter, datetime, float, str, _build_funnel_widget(), classify_dashboard_health() (+46 more)
+Cohesion: 0.24
+Nodes (10): _dashboard_bot_stub(), Path, SimpleNamespace, Wave F9 Agent T - canonical delivery KPIs, run_id stamping, recent signals., test_delivery_success_rows_filters_attempts(), test_delivery_uncached_counts_success_not_all_attempts(), test_get_recent_signals_prefers_delivery_success(), test_get_recent_signals_selected_not_labeled_sent() (+2 more)
 
 ### Community 114 - "Community 114"
-Cohesion: 0.21
-Nodes (9): Any, bool, float, int, PipelineResult, Signal, str, StrategyDecision (+1 more)
+Cohesion: 0.05
+Nodes (67): AssetFit, int, Any, BaseException, str, bool, BotSettings, float (+59 more)
 
 ### Community 115 - "Community 115"
 Cohesion: 0.14
@@ -1069,15 +1082,15 @@ Nodes (13): CLAUDE.md — Project context for Claude Code agent, Environment, Fr
 
 ### Community 116 - "Community 116"
 Cohesion: 0.07
-Nodes (87): DataFrame, date, Exception, Expr, float, int, object, Series (+79 more)
+Nodes (87): bool, DataFrame, date, Exception, Expr, float, int, object (+79 more)
 
 ### Community 117 - "Community 117"
 Cohesion: 0.17
 Nodes (11): ADR-001: Signal-only System, ADR-002: Contract Before Delivery, ADR-003: Hard Confluence Gate, ADR-004: Live-safe Swing and Pivot Detection, ADR-005: Union Shortlist, ADR-006: ATR/Volatility-aware Risk, ADR-007: Explicit Skips For Auditability, ADR-008: Local Hooks Plus Tracked Copies (+3 more)
 
 ### Community 118 - "Community 118"
-Cohesion: 0.08
-Nodes (44): Any, bool, datetime, DeliveryResult, float, int, object, Signal (+36 more)
+Cohesion: 0.11
+Nodes (36): Any, bool, datetime, DeliveryResult, float, int, object, Signal (+28 more)
 
 ### Community 119 - "Community 119"
 Cohesion: 0.10
@@ -1088,16 +1101,16 @@ Cohesion: 0.11
 Nodes (17): 1. Что это за проект, 2. Почему «огромное количество сигналов», 3. `alert_frequency: once` vs `always`, 4. Что взять из Crypto-Signal, 5. Чего не брать, 6. Позиционирование для подписчика, 7. Индикаторное пересечение, 8.1 Что на самом деле делает «500 монет» в Crypto-Signal (+9 more)
 
 ### Community 121 - "Community 121"
-Cohesion: 0.06
-Nodes (71): ABC, bool, ClientSession, int, str, Any, bool, DataFrame (+63 more)
+Cohesion: 0.04
+Nodes (97): ABC, bool, ClientSession, int, str, Any, bool, DataFrame (+89 more)
 
 ### Community 122 - "Community 122"
 Cohesion: 0.31
 Nodes (13): Any, bool, DataFrame, int, str, _build_minimal_prepared(), _candles_to_df(), _is_enrichment_reject() (+5 more)
 
 ### Community 123 - "Community 123"
-Cohesion: 0.17
-Nodes (10): Path, Append the current summary as one JSON line.          Parameters         ----, Append the current summary as one JSON line.          Parameters         ----, Append the current summary as one JSON line.          Parameters         ----, Reset all counters and return the cleared window snapshot.          Returns, Append the current summary as one JSON line.          Parameters         ----, Reset all counters and return the cleared window snapshot.          Returns, Append the current summary as one JSON line.          Parameters         ------- (+2 more)
+Cohesion: 0.29
+Nodes (6): Path, Append the current summary as one JSON line.          Parameters         ----, Append the current summary as one JSON line.          Parameters         ----, Append the current summary as one JSON line.          Parameters         ----, Append the current summary as one JSON line.          Parameters         ----, Append the current summary as one JSON line.          Parameters         -------
 
 ### Community 124 - "Community 124"
 Cohesion: 0.11
@@ -1108,24 +1121,24 @@ Cohesion: 0.24
 Nodes (11): PreparedSymbol, str, assess_strategy_data_capability(), data_pool_for_setup(), DataCapabilityResult, Runtime data-capability gate: strategy pool vs PreparedSymbol fields., Return whether public data for this setup's pool is present on the symbol., Data capability routing tests. (+3 more)
 
 ### Community 126 - "Community 126"
-Cohesion: 0.07
-Nodes (69): Any, bool, float, int, JsonDict, str, _action_plan(), _audit_decisions() (+61 more)
+Cohesion: 0.06
+Nodes (76): Any, bool, float, int, JsonDict, str, _action_plan(), _audit_decisions() (+68 more)
 
 ### Community 127 - "Community 127"
-Cohesion: 0.09
-Nodes (20): Claude Code, code:powershell (cursor --install-extension charliermarsh.ruff), code:powershell (winget install Python.Python.3.14), Cursor setup — crypto-signal-bot v9, Extensions (`.vscode/extensions.json`), Git hooks (local), Hooks (`.cursor/hooks.json`), Ignored from indexing (+12 more)
+Cohesion: 0.14
+Nodes (13): Claude Code, Cursor setup — crypto-signal-bot v9, Git hooks (local), graphify, Hooks (`.cursor/hooks.json`), Indexing (`.cursorignore`), Not configured (intentional), Python 3.14 (macOS) (+5 more)
 
 ### Community 128 - "Community 128"
 Cohesion: 0.15
-Nodes (12): Claude Code Quick Reference, Claude layout, Commands, Data flow, Delivery invariant, Entry points, graphify, Guardrails (+4 more)
+Nodes (12): Claude Code Quick Reference, Claude layout, Commands, Data flow, Delivery invariant, Entry points, graphify, graphify (+4 more)
 
 ### Community 129 - "Community 129"
 Cohesion: 0.15
 Nodes (12): Batch 1 — Critical bugs ✅, Batch 2 — Cleanup ✅, Batch 3 — Claude Code Pro ✅, CURSOR_PROMPTS.md — progress tracker, Deleted wave tests (audit 2.3), Explicitly out of scope (per CURSOR_PROMPTS.md), Follow-up sync (this session) ✅, Next work (outside CURSOR_PROMPTS.md) (+4 more)
 
 ### Community 130 - "Community 130"
-Cohesion: 0.04
-Nodes (47): Calculate microprice bias from order book.          Returns a signed bias prox, Return all cached tickers in the format expected by build_shortlist., Calculate microprice bias from order book.          Returns a signed bias prox, Return the average funding rate across all tracked symbols.          Positive, Return the latest (bid_price, ask_price) for *symbol*, or (None, None)., Return the average funding rate across all tracked symbols.          Positive, Return the latest (bid_price, ask_price) for *symbol*, or (None, None)., Calculate microprice bias from order book.          Returns a signed bias prox (+39 more)
+Cohesion: 0.07
+Nodes (28): Return the data source backing the latest microprice bias value., Return age of the newest forceOrder event used for liquidation sentiment., Return a liquidation sentiment score in [-1.0, +1.0].          +1.0 → all rece, Return age of the newest forceOrder event used for liquidation sentiment., Return a liquidation sentiment score in [-1.0, +1.0].          +1.0 → all rece, Rebuild shortlist using WS cache with timer-based throttling.          This me, Return a liquidation sentiment score in [-1.0, +1.0].          +1.0 → all rece, Return a liquidation sentiment score in [-1.0, +1.0].          +1.0 → all rece (+20 more)
 
 ### Community 131 - "Community 131"
 Cohesion: 0.29
@@ -1144,8 +1157,8 @@ Cohesion: 0.25
 Nodes (7): CHANGELOG - Audit 2026-05-26, Critical Signal Safety, Lookahead And Indicator Math, Shortlist And Config, Strategy Auditability, Technical Debt, Verification
 
 ### Community 135 - "Community 135"
-Cohesion: 0.15
-Nodes (8): Record a rejected signal., Record a rejected signal., Record WebSocket reconnection., Record WebSocket message age., Record WebSocket reconnection., Record a symbol being processed., Record ML prediction confidence., Record ML prediction confidence.
+Cohesion: 0.04
+Nodes (47): Return the latest partial L2 book for a symbol, if available., Return the latest partial L2 book for a symbol, if available., Return signed persistent wall pressure from partial depth, if available., Return the latest partial L2 book for a symbol, if available., Return True if the !ticker@arr cache has been populated recently.          Use, Calculate current WebSocket latency in milliseconds., Return signed persistent wall pressure from partial depth, if available., Return True if the !ticker@arr cache has been populated recently.          Use (+39 more)
 
 ### Community 136 - "Community 136"
 Cohesion: 0.10
@@ -1160,8 +1173,8 @@ Cohesion: 0.35
 Nodes (12): Any, float, str, _fix_recommendation(), generate_aggregate_report(), generate_case_card(), Markdown report generation for SL forensic cases., Generate aggregate REPORT_SL_FORENSIC.md content. (+4 more)
 
 ### Community 139 - "Community 139"
-Cohesion: 0.16
-Nodes (31): Any, bool, BotSettings, DataFrame, float, int, PreparedSymbol, Signal (+23 more)
+Cohesion: 0.15
+Nodes (32): Any, bool, BotSettings, DataFrame, float, int, PreparedSymbol, Signal (+24 more)
 
 ### Community 140 - "Community 140"
 Cohesion: 0.11
@@ -1172,32 +1185,32 @@ Cohesion: 0.11
 Nodes (16): 10. Стадия 8 — deliver, 11. Что видит подписчик vs оператор, 12. Signal-only калибровка оценки, 13. Целевые метрики качества оценки, 1. Обзор стадий `[spec]`, 2. Стадия 0 — детектор (`base_score`), 3. Стадия 1 — scoring + ConfluenceEngine `[spec]`, 4. Стадия 2 — `ConfluenceEngine` ([`bot/confluence.py`](../../bot/confluence.py)) (+8 more)
 
 ### Community 142 - "Community 142"
-Cohesion: 0.04
-Nodes (45): int, Add missing columns for existing databases., Create additional tables for market context and stats., Initialize database tables., Add missing columns for existing databases., Add missing columns for existing databases., Add missing columns for existing databases., Create additional tables for market context and stats. (+37 more)
+Cohesion: 0.03
+Nodes (65): str, Check if cooldown is still active., Check if cooldown is still active., Check if cooldown is still active., Check if cooldown is still active., Check if cooldown is still active., Check if cooldown is still active., Check if cooldown is still active. (+57 more)
 
 ### Community 143 - "Community 143"
 Cohesion: 0.23
 Nodes (12): _meta(), BotSettings, float, int, object, str, SymbolMeta, Unit tests for shortlist light-pool funnel (no network). (+4 more)
 
 ### Community 144 - "Community 144"
-Cohesion: 0.21
-Nodes (11): _prepared(), object, PreparedSymbol, Wave E5 follow-up: readiness, positioning micro, registry metrics, volume scorin, test_catalog_volume_guard_uses_primary_bar_ratio(), test_confluence_leg_labels_ru(), test_positioning_microstructure_passes_on_elevated_funding(), test_positioning_setup_ids() (+3 more)
+Cohesion: 0.25
+Nodes (16): bool, BotSettings, DataFrame, float, PreparedSymbol, Series, Signal, SpecHit (+8 more)
 
 ### Community 145 - "Community 145"
 Cohesion: 0.29
 Nodes (6): Anti-patterns, code:block1 (- [ ] graphify query "<module role>" (if graph exists)), Decision tree, Per-step checklist, Refactor Module (v9), Target packages
 
 ### Community 146 - "Community 146"
-Cohesion: 0.08
-Nodes (44): Any, str, Task, _attach_task_logging(), base_streams_for_symbols(), get_depth_imbalance(), get_depth_imbalance_source(), get_funding_sentiment() (+36 more)
+Cohesion: 0.11
+Nodes (44): BotSettings, DataFrame, float, int, PreparedSymbol, Signal, SpecHit, str (+36 more)
 
 ### Community 147 - "Community 147"
 Cohesion: 0.12
 Nodes (15): 1. Архитектура ingest, 2.1 AggTrade, 2.2 Depth / microprice, 2.3 Чего нет (gap vs HFT stacks), 2. Order flow (aggTrade + depth), 3.1 Binance official, 3.2 bot2, 3.3 OSS сравнение (+7 more)
 
 ### Community 149 - "Community 149"
-Cohesion: 0.15
-Nodes (12): Agent execution policy (sole executor), Binance geo-restriction (important), code:bash (export PATH="$HOME/.local/bin:$PATH"), code:bash (cp config.toml.example config.toml), code:bash (source .venv/bin/activate), Config (first run), Cursor Cloud specific instructions, Cursor project config (+4 more)
+Cohesion: 0.05
+Nodes (36): Return list of symbols with stale (non-fresh) kline data., Return list of symbols with stale (non-fresh) kline data., Return list of symbols with stale (non-fresh) kline data., Return list of symbols with stale (non-fresh) kline data., Return list of symbols with stale (non-fresh) kline data., Return list of symbols with stale (non-fresh) kline data., Return a snapshot of the current WebSocket state.          Returns:, Get age of last received message in seconds. (+28 more)
 
 ### Community 150 - "Community 150"
 Cohesion: 0.15
@@ -1212,20 +1225,20 @@ Cohesion: 0.29
 Nodes (6): code:powershell (python -m scripts.live_check_pipeline --symbols BTCUSDT --li), Critical bug, Grep audit, Live verification, Required order in `delivery_orchestrator.py`, Validate Delivery Path
 
 ### Community 153 - "Community 153"
-Cohesion: 0.06
-Nodes (32): Any, _FrameCacheKey, add_microstructure_features(), Add lightweight microstructure features from available L1/flow columns., Add lightweight microstructure features from available L1/flow columns., Add lightweight microstructure features from available L1/flow columns., _cached_prepare_frame(), _enrich_with_ws_data() (+24 more)
+Cohesion: 0.26
+Nodes (15): Any, bool, float, Path, str, assert_runtime_call_path_is_clean(), assert_runtime_import_contract(), build_public_feature_snapshot() (+7 more)
 
 ### Community 154 - "Community 154"
-Cohesion: 0.21
-Nodes (7): float, Record WebSocket latency., Record WebSocket message age., Record WebSocket latency., Update market regime metrics., Record pipeline processing duration., Update market regime metrics.
+Cohesion: 0.08
+Nodes (46): as_float(), bool, datetime, float, object, _float(), confidence_label(), extract_signal_facts() (+38 more)
 
 ### Community 155 - "Community 155"
 Cohesion: 0.17
 Nodes (11): Как пользоваться `PY_FILE_AUDIT_5X.md`, Насколько обоснованы выявленные проблемы, План внедрения улучшений (аудит 2026-06-04), Следующий шаг агента (без участия оператора), Фаза 0 — P0 hotfix (1–2 ч агента) ✅ частично, Фаза 1 — Live ops & telemetry (2–3 ч), Фаза 2 — Radar P2 (4–8 ч), Фаза 3 — F12 structural (multi-PR) (+3 more)
 
 ### Community 156 - "Community 156"
-Cohesion: 0.09
-Nodes (41): bool, int, Path, acquire_pid_lock(), clear_stale_pid_file(), find_bot_main_pids(), pid_is_alive(), Shared PID lock helpers for cli and live supervision scripts. (+33 more)
+Cohesion: 0.07
+Nodes (49): bool, int, Path, acquire_pid_lock(), clear_stale_pid_file(), find_bot_main_pids(), pid_is_alive(), Shared PID lock helpers for cli and live supervision scripts. (+41 more)
 
 ### Community 157 - "Community 157"
 Cohesion: 0.40
@@ -1252,12 +1265,12 @@ Cohesion: 0.32
 Nodes (11): _biasClass(), _breadthClass(), _btcPhaseRu(), _fearClass(), _fundRu(), _marketBiasRu(), _marketRegimeRu(), _pct() (+3 more)
 
 ### Community 165 - "Community 165"
-Cohesion: 0.21
-Nodes (9): BotSettings, object, Wave E8 agent E - freshness_5m, MTF strict HTF, TF fallback badge, filter stages, _settings(), test_mtf_gate_relaxed_passes_missing_htf_frames(), test_mtf_gate_strict_rejects_missing_htf_frames(), test_primary_freshness_window_15m_unchanged(), test_primary_freshness_window_uses_freshness_5m_minutes() (+1 more)
+Cohesion: 0.08
+Nodes (23): Any, float, object, str, Any, Event, Exception, float (+15 more)
 
 ### Community 166 - "Community 166"
-Cohesion: 0.24
-Nodes (10): _dashboard_bot_stub(), Path, SimpleNamespace, Wave F9 Agent T - canonical delivery KPIs, run_id stamping, recent signals., test_delivery_success_rows_filters_attempts(), test_delivery_uncached_counts_success_not_all_attempts(), test_get_recent_signals_prefers_delivery_success(), test_get_recent_signals_selected_not_labeled_sent() (+2 more)
+Cohesion: 0.05
+Nodes (53): int, str, WSConfig, WebSocket configuration.      Runtime policy:     - `public` / `market` are l, WebSocket configuration.      Runtime policy:     - `public` / `market` are l, WebSocket configuration.      Runtime policy:     - `public` / `market` are logi, WebSocket configuration.      Runtime policy:     - `public` / `market` are logi, WebSocket configuration.      Runtime policy:     - `public` / `market` are logi (+45 more)
 
 ### Community 167 - "Community 167"
 Cohesion: 0.18
@@ -1268,8 +1281,8 @@ Cohesion: 0.18
 Nodes (10): hooks, afterFileEdit, beforeReadFile, beforeShellExecution, postToolUse, preToolUse, sessionStart, stop (+2 more)
 
 ### Community 169 - "Community 169"
-Cohesion: 0.18
-Nodes (9): Start a fresh diagnostic window immediately., Return summaries for recently rolled windows., Start a fresh diagnostic window immediately., Start a fresh diagnostic window immediately., Return summaries for recently rolled windows., Return summaries for recently rolled windows., Return summaries for recently rolled windows., Start a fresh diagnostic window immediately. (+1 more)
+Cohesion: 0.13
+Nodes (27): bool, BotSettings, float, object, str, effective_action_min_score(), is_benchmark_anchor(), is_kline_close_only_setup() (+19 more)
 
 ### Community 170 - "Community 170"
 Cohesion: 0.18
@@ -1284,16 +1297,16 @@ Cohesion: 0.38
 Nodes (10): build_report(), _count_rejection_reasons(), _iter_jsonl(), _latest_run_dir(), main(), Counter, int, object (+2 more)
 
 ### Community 174 - "Community 174"
-Cohesion: 0.40
-Nodes (10): _prepared(), DataFrame, Wave E8 agent D - primary-aware scoring, history prior, data quality flags., _signal(), test_calibrated_prior_uses_repository_history_count(), test_mtf_alignment_uses_primary_regime_when_not_15m(), test_resolve_history_count_from_repository_when_tracking_ref_present(), test_structure_clarity_uses_primary_swings_when_not_15m() (+2 more)
+Cohesion: 0.27
+Nodes (15): reset_frame_indicator_fallbacks(), take_frame_indicator_fallbacks(), _prepared(), DataFrame, Wave E8 agent D - primary-aware scoring, history prior, data quality flags., _signal(), test_calibrated_prior_uses_repository_history_count(), test_indicator_fallback_flags_roundtrip() (+7 more)
 
 ### Community 178 - "Community 178"
 Cohesion: 0.20
 Nodes (9): AGENT QUICK START, Canonical docs, Delivery Trace To Preserve, Read First, Rules That Matter, Run, Session hygiene, Verify (+1 more)
 
 ### Community 179 - "Community 179"
-Cohesion: 0.13
-Nodes (19): Any, SignalBot, StrategyRegistry, PerformanceMetrics, Performance metrics for strategy or overall system., Calculate win rates and performance metrics., WinRateCalculator, bot_runtime_health_check() (+11 more)
+Cohesion: 0.09
+Nodes (38): Any, bool, DashboardLiveData, str, Any, datetime, float, int (+30 more)
 
 ### Community 180 - "Community 180"
 Cohesion: 0.16
@@ -1301,7 +1314,7 @@ Nodes (26): DataFrame, Expr, float, int, object, Series, str, Polars feature pip
 
 ### Community 181 - "Community 181"
 Cohesion: 0.07
-Nodes (53): Any, bool, float, Path, str, Any, bool, float (+45 more)
+Nodes (47): Connection, Any, bool, float, int, Signal, str, TrackedSignalState (+39 more)
 
 ### Community 182 - "Community 182"
 Cohesion: 0.23
@@ -1312,48 +1325,48 @@ Cohesion: 0.22
 Nodes (9): Any, bool, float, int, Semaphore, str, Warm derivatives context for one symbol when the cache is incomplete., Warm derivatives context for one symbol when the cache is incomplete. (+1 more)
 
 ### Community 184 - "Community 184"
-Cohesion: 0.12
-Nodes (17): datetime, timedelta, Read recent data for symbol/timeframe., Read recent data for symbol/timeframe., Compact old chunks into monthly files.          This reduces file count for ol, Compact old chunks into monthly files.          This reduces file count for old, In-memory LRU cache for recent time-series data with disk backing.      Optimi, In-memory LRU cache for recent time-series data with disk backing.      Optimize (+9 more)
+Cohesion: 0.10
+Nodes (17): Any, In-memory LRU cache for recent time-series data with disk backing.      Optimi, In-memory LRU cache for recent time-series data with disk backing.      Optimize, In-memory LRU cache for recent time-series data with disk backing.      Optimi, Get data from cache (memory first, then disk)., Get data from cache (memory first, then disk)., Get data from cache (memory first, then disk)., Store in memory with LRU eviction. (+9 more)
 
 ### Community 185 - "Community 185"
-Cohesion: 0.20
-Nodes (9): Pre-load and cache strategies at startup., Pre-load and cache strategies at startup., Pre-load and cache strategies at startup., Pre-load and cache strategies at startup., Pre-load and cache strategies at startup., Pre-load and cache strategies at startup., Pre-load and cache strategies at startup., Pre-load and cache strategies at startup. (+1 more)
+Cohesion: 0.32
+Nodes (8): Any, bool, datetime, int, str, _is_trade_outcome(), _parse_dt(), Strategy performance analytics built on persisted signal outcomes.
 
 ### Community 186 - "Community 186"
-Cohesion: 0.10
-Nodes (16): Return a fuller diagnostic payload for one setup., Return a fuller diagnostic payload for one setup., Return a fuller diagnostic payload for one setup., Return a fuller diagnostic payload for one setup., Return compact string flags suitable for telemetry rows., Return compact string flags suitable for telemetry rows., Return compact string flags suitable for telemetry rows., Return compact string flags suitable for telemetry rows. (+8 more)
+Cohesion: 0.07
+Nodes (26): Signal, Select best signal from multiple results based on score.          Args:, Select best signal from multiple results based on score.          Args:, Get all signals above score threshold.          Args:             results: List, Get all signals above score threshold.          Args:             results: List, Select best signal from multiple results based on score.          Args:, Select best signal from multiple results based on score.          Args:, Select best signal from multiple results based on score.          Args: (+18 more)
 
 ### Community 187 - "Community 187"
-Cohesion: 0.03
-Nodes (89): Any, bool, OutcomeRecord, SignalRecord, str, from_dict(), OutcomeRecord, Convert DB row to OutcomeRecord. (+81 more)
+Cohesion: 0.04
+Nodes (58): OutcomeRecord, SignalRecord, Signal persistence - tracking, outcomes, diary, repository (v9)., Persistence repository. Import from bot.persistence.repository.memory, .cache, o, from_dict(), OutcomeRecord, SQLite + parquet persistence for signals and outcomes., Convert DB row to OutcomeRecord. (+50 more)
 
 ### Community 188 - "Community 188"
 Cohesion: 0.14
 Nodes (48): Any, bool, BotSettings, Counter, datetime, Event, float, int (+40 more)
 
 ### Community 189 - "Community 189"
-Cohesion: 0.20
-Nodes (8): Return state consistency warnings; empty means no obvious drift., Return state consistency warnings; empty means no obvious drift., Return state consistency warnings; empty means no obvious drift., Return state consistency warnings; empty means no obvious drift., Repair aggregate/index drift and return warnings observed before repair., Repair aggregate/index drift and return warnings observed before repair., Repair aggregate/index drift and return warnings observed before repair., Repair aggregate/index drift and return warnings observed before repair.
+Cohesion: 0.09
+Nodes (18): bool, Validate settings for runtime execution., Validate settings for runtime execution., Validate settings for runtime execution., Validate settings for runtime execution., Validate settings for runtime execution., Validate settings for runtime execution., WebSocket configuration.      Runtime policy:     - `public` / `market` are logi (+10 more)
 
 ### Community 190 - "Community 190"
 Cohesion: 0.20
 Nodes (9): bypass_actors, conditions, ref_name, enforcement, name, exclude, include, rules (+1 more)
 
 ### Community 191 - "Community 191"
-Cohesion: 0.20
-Nodes (9): Return cached basis pct if fresh, else None (no REST call)., Return cached basis pct if fresh, else None (no REST call)., Return cached basis pct if fresh, else None (no REST call)., Return cached basis pct if fresh, else None (no REST call)., Return cached basis pct if fresh, else None (no REST call)., Return cached basis pct if fresh, else None (no REST call)., Return cached basis pct if fresh, else None (no REST call)., Return cached basis pct if fresh, else None (no REST call). (+1 more)
+Cohesion: 0.17
+Nodes (11): Open browser after server is ready., Open browser after server is ready., Open browser after server is ready., Open browser after server is ready., Open browser after server is ready., Open browser after server is ready., Open browser after server is ready., Open browser after server is ready. (+3 more)
 
 ### Community 192 - "Community 192"
 Cohesion: 0.12
 Nodes (17): AnyEvent, AsyncHandler, Any, bool, int, object, str, Task (+9 more)
 
 ### Community 193 - "Community 193"
-Cohesion: 0.20
-Nodes (9): Update basis cache from WebSocket mark price data (zero I/O).          If inde, Update basis cache from WebSocket mark price data (zero I/O).          If inde, Update basis cache from WebSocket mark price data (zero I/O).          If inde, Update basis cache from WebSocket mark price data (zero I/O).          If inde, Update basis cache from WebSocket mark price data (zero I/O).          If inde, Update basis cache from WebSocket mark price data (zero I/O).          If inde, Update basis cache from WebSocket mark price data (zero I/O).          If inde, Update basis cache from WebSocket mark price data (zero I/O).          If inde (+1 more)
+Cohesion: 0.17
+Nodes (11): Update basis cache from WebSocket mark price data (zero I/O).          If inde, Update basis cache from WebSocket mark price data (zero I/O).          If inde, Update basis cache from WebSocket mark price data (zero I/O).          If inde, Update basis cache from WebSocket mark price data (zero I/O).          If inde, Update basis cache from WebSocket mark price data (zero I/O).          If inde, Update basis cache from WebSocket mark price data (zero I/O).          If inde, Update basis cache from WebSocket mark price data (zero I/O).          If inde, Update basis cache from WebSocket mark price data (zero I/O).          If inde (+3 more)
 
 ### Community 194 - "Community 194"
-Cohesion: 0.10
-Nodes (26): Any, Diagnostics helpers for offline runtime telemetry analysis., str, datetime, __getattr__(), Diagnostics - signals funnel, runtime health, config audit, quality., get_global_diagnostics(), Runtime signal funnel diagnostics.  This module keeps lightweight, in-process co (+18 more)
+Cohesion: 0.09
+Nodes (27): Any, Diagnostics helpers for offline runtime telemetry analysis., str, datetime, __getattr__(), Diagnostics - signals funnel, runtime health, config audit, quality., Runtime signal funnel diagnostics.  This module keeps lightweight, in-process co, Reset all counters and return the cleared window snapshot.          Returns (+19 more)
 
 ### Community 195 - "Community 195"
 Cohesion: 0.12
@@ -1364,8 +1377,8 @@ Cohesion: 0.23
 Nodes (11): 1. Варианты, 2. Требования нашего data plane, 3. Сравнение, 4. Рекомендация (целевая архитектура), 5. Что улучшить в текущей оболочке (не заменять), 6. Ответ на вопрос «писать оболочку или готовое?», 7. Ссылки, Binance connector: своя оболочка vs готовые SDK (+3 more)
 
 ### Community 197 - "Community 197"
-Cohesion: 0.08
-Nodes (55): Any, str, BoundLogger, Live smoke: feature pipeline against real Binance klines., Fetch live klines and run prepare_symbol for pinned symbols., test_binance_klines_feature_prepare(), Live smoke: end-to-end pipeline (prepare → engine → delivery gates)., test_binance_pipeline_smoke() (+47 more)
+Cohesion: 0.09
+Nodes (44): BoundLogger, Live smoke: feature pipeline against real Binance klines., Fetch live klines and run prepare_symbol for pinned symbols., test_binance_klines_feature_prepare(), Live smoke: end-to-end pipeline (prepare → engine → delivery gates)., test_binance_pipeline_smoke(), bootstrap_repo_path(), configure_script_logging() (+36 more)
 
 ### Community 198 - "Community 198"
 Cohesion: 0.20
@@ -1384,12 +1397,12 @@ Cohesion: 0.22
 Nodes (8): Analysis focus, Live Signal Audit Agent, Output expectations, Primary role, Repo-specific context, Safe run guidance, Tool preferences, When to use
 
 ### Community 202 - "Community 202"
-Cohesion: 0.36
-Nodes (7): float, int, Path, _cache_finite_float(), _cache_finite_int(), _cache_ms_to_datetime(), htf_trend_label()
+Cohesion: 0.07
+Nodes (26): datetime, Set cooldown for a key., Set cooldown for a key., Set cooldown for a key., Set cooldown for a key., Set cooldown for a key., Set cooldown for a key., Set cooldown for a key. (+18 more)
 
 ### Community 203 - "Community 203"
-Cohesion: 0.25
-Nodes (5): Time series data point., Gauge with time-series history., Get history for last N seconds., TimeSeries, TimeSeriesGauge
+Cohesion: 0.21
+Nodes (14): Bounded in-memory EventBus with coalescing for hot-path events., Core runtime primitives (event bus only; memory moved to persistence)., WebSocket broadcaster for live dashboard updates.  Subscribes to the bot's Event, BookTickerEvent, KlineCloseEvent, OIRefreshDueEvent, Typed event dataclasses for the EventBus.  All events are immutable (frozen msgs, Fired by FuturesWSManager when a kline of the configured interval closes. (+6 more)
 
 ### Community 204 - "Community 204"
 Cohesion: 0.22
@@ -1404,8 +1417,8 @@ Cohesion: 0.22
 Nodes (8): aiohttp < 3.14 (Dependabot: moderate), Automated security tooling (GitHub), Known accepted risks, Reporting a vulnerability, Scope, Secure development, Security Policy, Supported versions
 
 ### Community 207 - "Community 207"
-Cohesion: 0.50
-Nodes (5): Any, bool, PreparedSymbol, Signal, str
+Cohesion: 0.12
+Nodes (23): float, str, UniverseSymbol, BookTickerEvent, assess_symbol_data_readiness(), DataReadinessResult, _finite_float(), is_radar_promoted_item() (+15 more)
 
 ### Community 210 - "Community 210"
 Cohesion: 0.25
@@ -1416,20 +1429,20 @@ Cohesion: 0.25
 Nodes (6): Return True when delivery should be paused for setup/symbol quality., Return True when delivery should be paused for setup/symbol quality.          Th, Return True when delivery should be paused for setup/symbol quality., Return a delivery-facing decision payload., Return a delivery-facing decision payload., Return a delivery-facing decision payload.
 
 ### Community 212 - "Community 212"
-Cohesion: 0.25
-Nodes (8): _add_polars_ols_features(), Add shared regression-slope features using polars_ols when available., Add shared regression-slope features using polars_ols when available., Add shared regression-slope features using polars_ols when available., Add shared regression-slope features using polars_ols when available., Add shared regression-slope features using polars_ols when available., Add shared regression-slope features using polars_ols when available., Add shared regression-slope features using polars_ols when available.
+Cohesion: 0.04
+Nodes (49): DataFrame, date, Expr, date, add_microstructure_features(), Add lightweight microstructure features from available L1/flow columns., Add lightweight microstructure features from available L1/flow columns., Add lightweight microstructure features from available L1/flow columns. (+41 more)
 
 ### Community 213 - "Community 213"
-Cohesion: 0.25
-Nodes (8): _aroon(), Aroon indicator - vectorized via rolling_map., Aroon indicator - vectorized via rolling_map., Aroon indicator - vectorized via rolling_map., Aroon indicator - vectorized via rolling_map., Aroon indicator - vectorized via rolling_map., Aroon indicator - vectorized via rolling_map., Aroon indicator - vectorized via rolling_map.
+Cohesion: 0.23
+Nodes (12): DataFrame, float64, int, NDArray, str, HMMRegimePrediction, _infer_state_regimes(), Rule-based market state detector (lightweight fallback path). (+4 more)
 
 ### Community 214 - "Community 214"
-Cohesion: 0.25
-Nodes (8): _normalize_rsi_scale(), Replace NaN/inf/null values with a stable fill value., Normalize RSI to the project contract: 0..100., Normalize RSI to the project contract: 0..100., Normalize RSI to the project contract: 0..100., Normalize RSI to the project contract: 0..100., Normalize RSI to the project contract: 0..100., Normalize RSI to the project contract: 0..100.
+Cohesion: 0.08
+Nodes (25): format_analytics_companion_message(), format_signal_message(), market_context_lines(), Formatting knobs for Telegram signal messages., Formatting knobs for Telegram signal messages., Formatting knobs for Telegram signal messages., Formatting knobs for Telegram signal messages., Build compact context lines for the signal. (+17 more)
 
 ### Community 215 - "Community 215"
-Cohesion: 0.25
-Nodes (8): Wilder's RSI using the project-verified RMA seed semantics., Wilder's RSI using the project-verified RMA seed semantics., Wilder's RSI using the project-verified RMA seed semantics., Wilder's RSI using the project-verified RMA seed semantics., Wilder's RSI using the project-verified RMA seed semantics., Wilder's RSI using the project-verified RMA seed semantics., Wilder's RSI using the project-verified RMA seed semantics., _rsi()
+Cohesion: 0.16
+Nodes (13): Any, bool, Signal, str, error_result(), is_error(), is_reject(), is_signal() (+5 more)
 
 ### Community 216 - "Community 216"
 Cohesion: 0.15
@@ -1440,16 +1453,16 @@ Cohesion: 0.25
 Nodes (7): graphify reference: extra exports and benchmark, Step 6b - Wiki (only if --wiki flag), Step 7 - Neo4j export (only if --neo4j or --neo4j-push flag), Step 7b - SVG export (only if --svg flag), Step 7c - GraphML export (only if --graphml flag), Step 7d - MCP server (only if --mcp flag), Step 8 - Token reduction benchmark (only if total_words > 5000)
 
 ### Community 218 - "Community 218"
-Cohesion: 0.14
-Nodes (20): App, badge(), barList(), clsByValue(), kpi(), number(), pct(), rowsOrEmpty() (+12 more)
+Cohesion: 0.16
+Nodes (19): App, badge(), barList(), clsByValue(), kpi(), number(), pct(), setChildren() (+11 more)
 
 ### Community 219 - "Community 219"
 Cohesion: 0.09
-Nodes (43): bool, BotSettings, DataFrame, float, int, object, PreparedSymbol, Signal (+35 more)
+Nodes (41): bool, BotSettings, DataFrame, float, int, object, PreparedSymbol, Signal (+33 more)
 
 ### Community 220 - "Community 220"
-Cohesion: 0.06
-Nodes (72): bool, float, PreparedSymbol, str, Any, bool, DataFrame, float (+64 more)
+Cohesion: 0.27
+Nodes (13): Any, DataFrame, float, str, BotSettings, benchmark_funding_median(), _build_rule_based_frame(), CompositeRegimeAnalyzer (+5 more)
 
 ### Community 221 - "Community 221"
 Cohesion: 0.25
@@ -1457,7 +1470,7 @@ Nodes (8): BTC correlation, Case: whale_walls SHORT BCHUSDT @ 2026-06-05T07:45:1
 
 ### Community 222 - "Community 222"
 Cohesion: 0.04
-Nodes (45): Return the most recent kline rows for *symbol*/*interval* as a list., Return the most recent kline rows for *symbol*/*interval* as a list., Return the most recent kline rows for *symbol*/*interval* as a list., Return all cached tickers in the format expected by build_shortlist., Return True if the !ticker@arr cache has been populated recently.          Use, Return the most recent kline rows for *symbol*/*interval* as a list., P3: Return WebSocket statistics for monitoring.          Includes:         -, Return the latest mark-price/funding dict for *symbol*, or None.          Retu (+37 more)
+Nodes (59): Return the most recent kline rows for *symbol*/*interval* as a list., Return all cached tickers in the format expected by build_shortlist., Return True if the !ticker@arr cache has been populated recently.          Use, P3: Return WebSocket statistics for monitoring.          Includes:         -, Return the latest mark-price/funding dict for *symbol*, or None.          Retu, Return all cached tickers in the format expected by build_shortlist., Return the latest (bid_price, ask_price) for *symbol*, or (None, None)., Return the most recent kline rows for *symbol*/*interval* as a list. (+51 more)
 
 ### Community 223 - "Community 223"
 Cohesion: 0.47
@@ -1500,32 +1513,32 @@ Cohesion: 0.23
 Nodes (16): _activeKillzone(), _activeKillzoneRu(), _biasRu(), _buildSignalCard(), _directionSplit(), _directionSplitRu(), _fetchRiverSignals(), _rejectRu() (+8 more)
 
 ### Community 233 - "Community 233"
-Cohesion: 0.14
-Nodes (20): Any, float, int, str, UniverseSymbol, _market_regime_hint(), _merge_premium_index_rows(), _outcome_derank_penalties() (+12 more)
+Cohesion: 0.13
+Nodes (22): Any, float, int, object, str, UniverseSymbol, _log_value(), _market_regime_hint() (+14 more)
 
 ### Community 234 - "Community 234"
 Cohesion: 0.30
 Nodes (10): body, diaryState, modal, renderDiary(), _renderDiaryCalendar(), _renderDiaryTrades(), showDiaryCloseModal(), showDiaryEntryModal() (+2 more)
 
 ### Community 235 - "Community 235"
-Cohesion: 0.12
-Nodes (29): Any, bool, float, int, object, str, UniverseSymbol, MarketRegimeResult (+21 more)
+Cohesion: 0.10
+Nodes (38): Any, bool, float, int, object, SignalBot, str, UniverseSymbol (+30 more)
 
 ### Community 236 - "Community 236"
 Cohesion: 0.20
 Nodes (9): Analysis focus, code:powershell (python scripts\live_smoke_bot.py --runtime-seconds 1200), Live Signal Audit Agent, Output expectations, Primary role, Repo-specific context, Safe run guidance, Tool preferences (+1 more)
 
 ### Community 237 - "Community 237"
-Cohesion: 0.10
-Nodes (62): bool, DataFrame, Expr, float, int, object, str, as_float() (+54 more)
+Cohesion: 0.13
+Nodes (25): Any, BotSettings, DataFrame, float, PreparedSymbol, Signal, SpecHit, str (+17 more)
 
 ### Community 238 - "Community 238"
 Cohesion: 0.17
 Nodes (10): 1. Binance USD-M: ликвидации `!forceOrder@arr`, 2. Binance WS лимиты (планирование подключений), 3. TradFi perps XAU / XAG (якоря), 4. Telegram delivery limits, 5. Universe screener (light → shortlist), 6. SMC / FVG (15m ACTION), 7. Trust / public audit ledger, 8. Решения, усиленные этим проходом (+2 more)
 
 ### Community 239 - "Community 239"
-Cohesion: 0.16
-Nodes (14): Any, bool, Connection, float, int, Path, Row, str (+6 more)
+Cohesion: 0.11
+Nodes (17): 1. CLI, 2. Интеграция Cursor (project-scoped), 3. Интеграция Claude Code (project-scoped), 4. Построить / обновить граф, 5. Git hooks (auto-rebuild после commit), Claude Code, Cursor, graphify — knowledge graph для Cursor и Claude Code (+9 more)
 
 ### Community 240 - "Community 240"
 Cohesion: 0.18
@@ -1584,8 +1597,8 @@ Cohesion: 0.12
 Nodes (13): Return setup health for every setup seen in persisted or live state., Return setup health for every setup seen in persisted or live state., Return setup health for every setup seen in persisted or live state., Return setup health rows ranked by expectancy descending., Return setup health rows ranked by expectancy descending., Return setup health rows ranked by expectancy descending., Return setup health rows ranked by current loss pressure., Return setup health rows ranked by current loss pressure. (+5 more)
 
 ### Community 254 - "Community 254"
-Cohesion: 0.16
-Nodes (21): BotSettings, DataFrame, float, object, PreparedSymbol, Signal, SpecHit, str (+13 more)
+Cohesion: 0.15
+Nodes (11): float, Record WebSocket latency., Record WebSocket message age., Record WebSocket latency., Record WebSocket latency., Record WebSocket message age., Update market regime metrics., Record pipeline processing duration. (+3 more)
 
 ### Community 255 - "Community 255"
 Cohesion: 0.60
@@ -1624,8 +1637,8 @@ Cohesion: 0.29
 Nodes (6): Register concrete strategies directly with a provided registry., Register concrete strategies directly with a provided registry., Register concrete strategies directly with a provided registry., Register concrete strategies directly with a provided registry., Register concrete strategies directly with a provided registry., Register concrete strategies directly with a provided registry.
 
 ### Community 264 - "Community 264"
-Cohesion: 0.29
-Nodes (4): Record a detected signal., Record a detected signal., Record ML score adjustment., Record ML score adjustment.
+Cohesion: 0.12
+Nodes (13): Return all counters for the current window.          Returns         -------, Return all counters for the current window.          Returns         -------, Return all counters for the current window.          Returns         -------, Return a Markdown report for the current diagnostic window.          Returns, Return a Markdown report for the current diagnostic window.          Returns, Return a Markdown report for the current diagnostic window.          Returns, Return a Markdown report for the current diagnostic window.          Returns, Return a Markdown report for the current diagnostic window.          Returns (+5 more)
 
 ### Community 265 - "Community 265"
 Cohesion: 0.52
@@ -1692,28 +1705,32 @@ Cohesion: 0.40
 Nodes (4): Grep targets, Rules, Telemetry files, Pipeline (check in order)
 
 ### Community 281 - "Community 281"
-Cohesion: 0.22
-Nodes (14): Bounded in-memory EventBus with coalescing for hot-path events., Core runtime primitives (event bus only; memory moved to persistence)., WebSocket broadcaster for live dashboard updates.  Subscribes to the bot's Event, BookTickerEvent, KlineCloseEvent, OIRefreshDueEvent, Typed event dataclasses for the EventBus.  All events are immutable (frozen msgs, Fired by FuturesWSManager when a kline of the configured interval closes. (+6 more)
+Cohesion: 0.16
+Nodes (9): Any, bool, float, int, str, Periodic spot companion refresh for shortlist symbols., Background spot-companion refresh loop (started from SignalBot.run_forever)., run_spot_refresh_loop() (+1 more)
 
 ### Community 282 - "Community 282"
-Cohesion: 0.20
-Nodes (10): DataFrame, CandleCacheSummary, _empty_candle_frame(), _HotCandleBuffer, HotColdParquetCache, Hot/cold candle cache using the existing memory-cache module., Hot/cold candle cache using the existing memory-cache module., Hot/cold candle cache using the existing memory-cache module. (+2 more)
+Cohesion: 0.18
+Nodes (12): int, object, Path, str, _cache_finite_int(), CandleCacheSummary, HotColdParquetCache, Hot/cold candle cache using the existing memory-cache module. (+4 more)
+
+### Community 283 - "Community 283"
+Cohesion: 0.15
+Nodes (10): int, str, Record a rejected signal., Record a rejected signal., Record a rejected signal., Record a signal outcome (tp1, tp2, sl, expired)., Update active WebSocket streams count., Update active WebSocket streams count. (+2 more)
 
 ### Community 284 - "Community 284"
 Cohesion: 0.20
 Nodes (8): 1. Список якорей (целевой), 2. Максимум данных (что собирать 24/7), 3. Benchmark context для всех alts, 4. «Уверенные сигналы» на якорях (продукт), 5. Таймфреймы по якорю (ось актива), 6. Gap bot2 → target, Benchmark anchor assets (максимум данных, уверенные сигналы), code:text (benchmark_context = prepare_anchors(BTC, ETH, SOL, XRP, XAU,)
 
 ### Community 285 - "Community 285"
-Cohesion: 0.17
-Nodes (9): renderDiagnostics(), renderDiagnosticsSubTab(), fetchOutcomesInsights(), _regimeClass(), _regimeLabel(), renderOverview(), _renderOverviewFunnelWidget(), renderRuntime() (+1 more)
+Cohesion: 0.14
+Nodes (10): rowsOrEmpty(), renderAudit(), renderDelivery(), renderDiagnostics(), renderDiagnosticsSubTab(), fetchOutcomesInsights(), _regimeClass(), _regimeLabel() (+2 more)
 
 ### Community 286 - "Community 286"
-Cohesion: 0.50
-Nodes (4): bytes, generate_latest(), Get current metrics in Prometheus text format., Get current metrics in Prometheus text format.
+Cohesion: 0.33
+Nodes (5): Return summaries for recently rolled windows., Return summaries for recently rolled windows., Return summaries for recently rolled windows., Return summaries for recently rolled windows., Return summaries for recently rolled windows.
 
 ### Community 287 - "Community 287"
-Cohesion: 0.40
-Nodes (4): After code edits, Dirty graph, Graphify Navigate, Order
+Cohesion: 0.33
+Nodes (5): After code edits, Dirty graph, Graphify Navigate, Install (if CLI missing), Order
 
 ### Community 289 - "Community 289"
 Cohesion: 0.40
@@ -1756,16 +1773,16 @@ Cohesion: 0.40
 Nodes (4): Post-session, Prep (agent executes), Run, Supervised 6h live session
 
 ### Community 299 - "Community 299"
-Cohesion: 0.40
-Nodes (4): After code edits, Dirty graph, Graphify Navigate, Order
+Cohesion: 0.33
+Nodes (5): After code edits, Dirty graph, Graphify Navigate, Install (if CLI missing), Order
 
 ### Community 300 - "Community 300"
 Cohesion: 0.40
 Nodes (4): Distinguish, Do not, Steps (in order), Zero-Hit Strategy Triage
 
 ### Community 301 - "Community 301"
-Cohesion: 0.40
-Nodes (3): MetricsExporter, Export metrics in Prometheus format., Export metrics in Prometheus text format.
+Cohesion: 0.20
+Nodes (16): BotSettings, catalog_required_timeframes_for_enabled(), Union of catalog required_tfs for currently enabled setups., Validate config setup overrides and enabled flags against the catalog., verify_config_setup_references(), _minimal_settings(), _prepared(), object (+8 more)
 
 ### Community 302 - "Community 302"
 Cohesion: 0.40
@@ -1820,16 +1837,16 @@ Cohesion: 0.67
 Nodes (3): str, _extract_command(), main()
 
 ### Community 316 - "Community 316"
-Cohesion: 0.07
-Nodes (30): int, str, Close existing open signal when a new better one supersedes it.          Args:, Per-symbol tracking review — called on each 15m candle close.          Extracts, Close existing open signal when a new better one supersedes it.          Args:, Close existing open signal when a new better one supersedes it.          Args:, Close existing open signal when a new better one supersedes it.          Args:, Real-time TP/SL fast-path — called on every aggTrade tick.          Only process (+22 more)
+Cohesion: 0.14
+Nodes (16): Send a short analytics narrative as a follow-up message after a signal., Send a short analytics narrative as a follow-up message after a signal., Send a short analytics narrative as a follow-up message after a signal., Send a short analytics narrative as a follow-up message after a signal., Send a short analytics narrative as a follow-up message after a signal., Send a short analytics narrative as a follow-up message after a signal., Send a short analytics narrative as a follow-up message after a signal., SignalDelivery (+8 more)
 
 ### Community 317 - "Community 317"
-Cohesion: 0.50
-Nodes (4): JsonlFileRef, Reference to a telemetry JSONL file., Reference to a telemetry JSONL file., Reference to a telemetry JSONL file.
+Cohesion: 0.19
+Nodes (17): BotSettings, str, Deep capture for strategy research - enable via CLI ``harvest`` (calibration com, Deep capture for strategy research - enable via CLI ``harvest`` (calibration com, ResearchHarvestConfig, activate_research_harvest(), apply_research_harvest_profile(), Research harvest mode - deep public data capture for strategy design (no Telegra (+9 more)
 
 ### Community 318 - "Community 318"
-Cohesion: 0.05
-Nodes (74): bool, BotSettings, str, Any, bool, float, int, str (+66 more)
+Cohesion: 0.07
+Nodes (59): Any, bool, float, int, str, audit_delivery_config(), audit_filter_config(), audit_intelligence_config() (+51 more)
 
 ### Community 319 - "Community 319"
 Cohesion: 0.20
@@ -1848,8 +1865,8 @@ Cohesion: 0.20
 Nodes (8): 1. Критерии (не пороги score), 2. Матрица 38 setup_id, 3. Почему это не «пороги», 4. Сравнение с Crypto-Signal (почему «много сигналов»), 5. Целевые правила продукта (вместо Crypto-Signal volume), 6. Roadmap стратегий (spec), Классы в каталоге, Пригодность стратегий для signal-only (ручной вход)
 
 ### Community 323 - "Community 323"
-Cohesion: 0.07
-Nodes (55): BotSettings, float, int, object, Signal, bool, BotSettings, float (+47 more)
+Cohesion: 0.12
+Nodes (32): BotSettings, float, int, object, Signal, classify_tier(), decide_with_caps(), _finite_score() (+24 more)
 
 ### Community 324 - "Community 324"
 Cohesion: 0.50
@@ -1863,21 +1880,17 @@ Nodes (16): Checklist, code:powershell (python -m compileall -q bot), Done in re
 Cohesion: 0.22
 Nodes (7): Anti-patterns, Architectural lessons, Categories, Channel model (chosen), Required for trust, Signal Bot OSS Landscape, Subscriber expectations (media)
 
-### Community 327 - "Community 327"
-Cohesion: 0.17
-Nodes (14): BaseException, bool, float, int, object, str, _dedupe_urls(), from_urls() (+6 more)
-
 ### Community 328 - "Community 328"
-Cohesion: 0.15
-Nodes (13): Any, bool, Signal, str, error_result(), is_error(), is_reject(), is_signal() (+5 more)
+Cohesion: 0.14
+Nodes (10): Record a delivered signal., Record a delivered signal., Record a delivered signal., Record WebSocket reconnection., Record a signal outcome (tp1, tp2, sl, expired)., Record WebSocket message age., Record WebSocket reconnection., Record WebSocket reconnection. (+2 more)
 
 ### Community 329 - "Community 329"
 Cohesion: 0.12
 Nodes (16): Any, DashboardLiveData, JsonDict, build_live_operator_alerts(), Synthesize operator alerts from live telemetry (dashboard /api/v1/alerts)., Return zero-hit, WS health, and stale-stream alerts for the operator dashboard., Return zero-hit, WS health, and stale-stream alerts for the operator dashboard., DashboardLiveData (+8 more)
 
 ### Community 330 - "Community 330"
-Cohesion: 0.17
-Nodes (26): Any, BaseException, bool, Exception, float, str, apply_connected_state(), apply_tcp_keepalive() (+18 more)
+Cohesion: 0.12
+Nodes (33): Any, BaseException, bool, Exception, float, str, apply_connected_state(), apply_tcp_keepalive() (+25 more)
 
 ### Community 331 - "Community 331"
 Cohesion: 0.29
@@ -1900,12 +1913,12 @@ Cohesion: 0.50
 Nodes (4): Executed SL detail (this session), Monitoring actions, Session 2026-06-05 10:24 UTC, Session breakdown by setup (24h)
 
 ### Community 336 - "Community 336"
-Cohesion: 0.23
-Nodes (19): _bootstrap(), _discover(), _fetch_public_candidates(), main(), _parse_host_port_lines(), _probe_url(), bool, ClientSession (+11 more)
+Cohesion: 0.29
+Nodes (16): MetaSignalMerger, Collapse candidates to one signal per symbol+direction processing window., Collapse candidates to one signal per symbol+direction processing window., Collapse candidates to one signal per symbol+direction processing window., datetime, float, str, Unit tests for MetaSignalMerger direction conflict rules (no network). (+8 more)
 
 ### Community 337 - "Community 337"
-Cohesion: 0.40
-Nodes (4): Return the last update timestamp globally or for one setup., Return the last update timestamp globally or for one setup., Return the last update timestamp globally or for one setup., Return the last update timestamp globally or for one setup.
+Cohesion: 0.17
+Nodes (11): Return cached basis pct if fresh, else None (no REST call)., Return cached basis pct if fresh, else None (no REST call)., Return cached basis pct if fresh, else None (no REST call)., Return cached basis pct if fresh, else None (no REST call)., Return cached basis pct if fresh, else None (no REST call)., Return cached basis pct if fresh, else None (no REST call)., Return cached basis pct if fresh, else None (no REST call)., Return cached basis pct if fresh, else None (no REST call). (+3 more)
 
 ### Community 338 - "Community 338"
 Cohesion: 0.25
@@ -1930,6 +1943,10 @@ Nodes (6): 11. `ema_bounce`, 12. `vwap_trend`, 13. `supertrend_follow`, 14. `mul
 ### Community 343 - "Community 343"
 Cohesion: 0.33
 Nodes (6): 28. `depth_imbalance`, 29. `whale_walls`, 30. `spread_strategy`, 31. `absorption`, 32. `aggression_shift`, Microstructure
+
+### Community 344 - "Community 344"
+Cohesion: 0.16
+Nodes (15): BaseException, bool, _extract_retry_after_seconds(), Seconds to wait when Telegram returns flood-control (RetryAfter / 429)., Simple retry decorator as fallback when tenacity is not available., Simple retry decorator as fallback when tenacity is not available., Simple retry decorator as fallback when tenacity is not available., Simple retry decorator as fallback when tenacity is not available. (+7 more)
 
 ### Community 345 - "Community 345"
 Cohesion: 0.33
@@ -1956,12 +1973,12 @@ Cohesion: 0.50
 Nodes (4): 8.1 Уровни, 8.2 SMC primitives (общие для многих strategies), 8.3 Условия свечи (типовые), 8. Свечной анализ и SMC
 
 ### Community 351 - "Community 351"
-Cohesion: 0.28
-Nodes (9): Simple retry decorator as fallback when tenacity is not available., Simple retry decorator as fallback when tenacity is not available., Simple retry decorator as fallback when tenacity is not available., Simple retry decorator as fallback when tenacity is not available., Simple retry decorator as fallback when tenacity is not available., _simple_retry(), _telegram_retry(), P (+1 more)
+Cohesion: 0.25
+Nodes (7): Any, str, format_startup_tracking_digest(), Startup tracking summary for operator Telegram digest., Startup digest formatting tests., test_startup_digest_lists_repair_and_counts(), test_startup_digest_includes_repaired_from_summary()
 
 ### Community 353 - "Community 353"
-Cohesion: 0.17
-Nodes (20): BotSettings, str, StrategyMetadata, StrategyRegistry, Metadata for strategy registration., Metadata for strategy registration., StrategyMetadata, analysis_intervals() (+12 more)
+Cohesion: 0.09
+Nodes (36): BotSettings, str, StrategyMetadata, StrategyRegistry, Metadata for strategy registration., Metadata for strategy registration., StrategyMetadata, Core engine for pluggable strategy system. (+28 more)
 
 ### Community 354 - "Community 354"
 Cohesion: 0.67
@@ -1980,20 +1997,24 @@ Cohesion: 0.67
 Nodes (3): 37. `btc_correlation`, 38. `altcoin_season_index`, Cross-asset
 
 ### Community 358 - "Community 358"
-Cohesion: 0.05
-Nodes (52): int, str, WSConfig, WebSocket configuration.      Runtime policy:     - `public` / `market` are l, WebSocket configuration.      Runtime policy:     - `public` / `market` are l, WebSocket configuration.      Runtime policy:     - `public` / `market` are logi, WebSocket configuration.      Runtime policy:     - `public` / `market` are logi, WebSocket configuration.      Runtime policy:     - `public` / `market` are logi (+44 more)
+Cohesion: 0.22
+Nodes (6): CentroidRegimeDetector, gmm(), hmm(), Backward-compatible alias for older tests/callers., Backward-compatible alias for older tests/callers., RuleBasedRegimeDetector
+
+### Community 360 - "Community 360"
+Cohesion: 0.22
+Nodes (9): Normalize supported frame-like values to Polars., Normalize supported frame-like values to Polars., Normalize supported frame-like values to Polars., Normalize supported frame-like values to Polars., Normalize supported frame-like values to Polars., Normalize supported frame-like values to Polars., Normalize supported frame-like values to Polars., Normalize supported frame-like values to Polars. (+1 more)
 
 ### Community 362 - "Community 362"
-Cohesion: 0.04
-Nodes (83): effective_engine_score_floor(), float, Minimum score for engine best-signal selection (delivery-aligned)., AssetConfig, FilterConfig, Per-symbol calibration overrides for priority asset routing., Per-symbol calibration overrides for priority asset routing., Per-symbol calibration overrides for priority asset routing. (+75 more)
+Cohesion: 0.09
+Nodes (43): DeliveryConfig, FilterConfig, Runtime trading filters and stop placement heuristics.      Stop distance is d, Runtime trading filters and stop placement heuristics.      Stop distance is d, Tier-0/1 market radar: WS firehose → local state → promotion into deep shortlist, Runtime trading filters and stop placement heuristics.      Stop distance is der, Runtime trading filters and stop placement heuristics.      Stop distance is der, Runtime trading filters and stop placement heuristics.      Stop distance is d (+35 more)
 
 ### Community 364 - "Community 364"
 Cohesion: 0.07
-Nodes (65): BotSettings, DataFrame, float, int, PreparedSymbol, Signal, SpecHit, str (+57 more)
+Nodes (52): BotSettings, DataFrame, float, int, object, PreparedSymbol, Signal, SpecHit (+44 more)
 
 ### Community 366 - "Community 366"
-Cohesion: 0.13
-Nodes (18): str, gate_failures(), print_report(), Export metrics as JSON., render_table(), StrategyAuditReport, StrategyAuditRow, summarize_actions() (+10 more)
+Cohesion: 0.31
+Nodes (9): _compact_action_summary(), main(), _parse_args(), Any, int, Namespace, str, _python_lines_changed() (+1 more)
 
 ### Community 367 - "Community 367"
 Cohesion: 0.22
@@ -2019,6 +2040,10 @@ Nodes (3): Current filter thresholds (`config.toml`), Score quality, SL rate by 
 Cohesion: 0.67
 Nodes (3): MAE / MFE (SL hits only), R:R band for SL hits, Risk/Reward structure
 
+### Community 386 - "Community 386"
+Cohesion: 0.11
+Nodes (17): Fetch public continuous USD-M klines for backtest-stable history., Fetch public mark-price klines for premium/basis analytics., Fetch public continuous USD-M klines for backtest-stable history., Fetch public continuous USD-M klines for backtest-stable history., Fetch public mark-price klines for premium/basis analytics., Fetch public continuous USD-M klines for backtest-stable history., Fetch public mark-price klines for premium/basis analytics., Fetch public continuous USD-M klines for backtest-stable history. (+9 more)
+
 ### Community 395 - "Community 395"
 Cohesion: 0.09
 Nodes (32): Any, bool, datetime, float, int, object, Path, Signal (+24 more)
@@ -2028,8 +2053,8 @@ Cohesion: 0.17
 Nodes (17): Any, from_dict(), _normalize_setup_id(), _normalize_symbol(), QualityRecord, Single closed signal outcome stored in the rolling quality window., Single closed signal outcome stored in the rolling quality window., Single closed signal outcome stored in the rolling quality window. (+9 more)
 
 ### Community 398 - "Community 398"
-Cohesion: 0.06
-Nodes (30): AggTradeSnapshot, SymbolFrames, Get structured market data frames for a symbol.          Acquires _data_lock t, Get structured market data frames for a symbol.          Acquires _data_lock t, Get structured market data frames for a symbol.          Acquires _data_lock t, Get structured market data frames for a symbol.          Acquires _data_lock t, Get structured market data frames for a symbol.          Acquires _data_lock t, Get structured market data frames for a symbol.          Acquires _data_lock t (+22 more)
+Cohesion: 0.05
+Nodes (40): AggTradeSnapshot, SymbolFrames, Check if all required data is available and fresh for a symbol.          Args:, Check if all required data is available and fresh for a symbol.          Args:, Check if all required data is available and fresh for a symbol.          Args:, Get structured market data frames for a symbol.          Acquires _data_lock t, Check if all required data is available and fresh for a symbol.          Args:, Get structured market data frames for a symbol.          Acquires _data_lock t (+32 more)
 
 ### Community 400 - "Community 400"
 Cohesion: 0.11
@@ -2040,140 +2065,236 @@ Cohesion: 0.17
 Nodes (12): main(), float, Path, str, Live Runtime Monitor for SignalBot  Tracks bot performance in real-time during l, Generate final runtime report., Print human-readable summary., Monitors bot runtime and collects statistics. (+4 more)
 
 ### Community 409 - "Community 409"
-Cohesion: 0.11
-Nodes (37): Counter, int, MemoryRepository, Path, str, JsonRow, build_config_suggestions(), build_journal_report() (+29 more)
+Cohesion: 0.08
+Nodes (48): Counter, int, MemoryRepository, Path, str, JsonRow, build_config_suggestions(), build_journal_report() (+40 more)
 
 ### Community 410 - "Community 410"
 Cohesion: 0.13
 Nodes (15): bool, float, avg_loss_r(), avg_win_r(), expectancy(), _is_loss(), is_trade(), _is_win() (+7 more)
 
 ### Community 415 - "Community 415"
-Cohesion: 0.08
-Nodes (49): BotSettings, DataFrame, float, int, object, PreparedSymbol, Signal, SpecHit (+41 more)
+Cohesion: 0.50
+Nodes (5): Any, bool, PreparedSymbol, Signal, str
 
 ### Community 416 - "Community 416"
 Cohesion: 0.07
-Nodes (25): Path, Track rolling setup outcomes and recommend delivery throttles.      Parameters, Track rolling setup outcomes and recommend delivery throttles.      Parameters, Track rolling setup outcomes and recommend delivery throttles.      Parameters, Clear rolling state for a setup and persist the change., Clear rolling state for a setup and persist the change., Clear rolling state for a setup and persist the change., Clear localized loss streak state for one setup+symbol pair. (+17 more)
+Nodes (26): Path, str, Return state consistency warnings; empty means no obvious drift., Return state consistency warnings; empty means no obvious drift., Return state consistency warnings; empty means no obvious drift., Return state consistency warnings; empty means no obvious drift., Repair aggregate/index drift and return warnings observed before repair., Repair aggregate/index drift and return warnings observed before repair. (+18 more)
 
 ### Community 417 - "Community 417"
-Cohesion: 0.12
-Nodes (24): bool, DataFrame, object, PreparedSymbol, str, evaluate_mtf_gate(), mtf_frames(), normalize_mtf_reject_reason() (+16 more)
+Cohesion: 0.09
+Nodes (33): bool, DataFrame, object, PreparedSymbol, str, evaluate_mtf_gate(), mtf_frames(), normalize_mtf_reject_reason() (+25 more)
 
 ### Community 418 - "Community 418"
-Cohesion: 0.05
-Nodes (39): RateLimiter, Rate limiter for incoming WebSocket messages (Binance limit: 10 msg/sec)., Try to acquire permission to process a message. Returns True if allowed., Try to acquire permission to process a message. Returns True if allowed., Try to acquire permission to process a message. Returns True if allowed., Wait until a slot is available., Wait until a slot is available., Wait until a slot is available. (+31 more)
+Cohesion: 0.07
+Nodes (24): Internal message processing with latency tracking., Internal message processing with latency tracking., Internal message processing with latency tracking., Internal message processing with latency tracking., Internal message processing with latency tracking., Internal message processing with latency tracking., Internal message processing with latency tracking., Background task to drain buffered WS messages quickly. (+16 more)
 
 ### Community 419 - "Community 419"
-Cohesion: 0.32
-Nodes (8): Any, bool, datetime, int, str, _is_trade_outcome(), _parse_dt(), Strategy performance analytics built on persisted signal outcomes.
+Cohesion: 0.24
+Nodes (13): Any, bool, verify_strategy_wiring(), wave_status(), Live gate: 38 strategies match STRATEGY_CATALOG wiring (no Binance call)., test_pr10_all_waves_registered(), test_r_class_watch_only_policy(), test_strategy_catalog_38_registered() (+5 more)
 
 ### Community 421 - "Community 421"
-Cohesion: 0.12
-Nodes (15): Return number of persisted cooldown entries., Return number of persisted cooldown entries., Return number of persisted cooldown entries., Delete old outcomes and return deleted row count., Delete old outcomes and return deleted row count., Delete old outcomes and return deleted row count., Return number of persisted cooldown entries., Return number of persisted cooldown entries. (+7 more)
+Cohesion: 0.21
+Nodes (15): TrackingConfig, CycleContext, datetime, float, str, Wave F10 Agent L: intra-candle fast lane, cycle context, semaphore, merge, famil, _signal(), test_l10_cycle_log_records_merge_conflicts() (+7 more)
 
 ### Community 423 - "Community 423"
 Cohesion: 0.29
 Nodes (14): AuditReport, _collect_large_py_files(), _collect_stale(), main(), bool, int, object, Path (+6 more)
 
 ### Community 426 - "Community 426"
-Cohesion: 0.06
-Nodes (36): int, compact_reason_list(), error_count(), Telegram message formatting for signal-only analytics delivery.  The runtime sen, One validation finding for an outgoing Telegram message., One validation finding for an outgoing Telegram message., One validation finding for an outgoing Telegram message., Validation report for rendered Telegram HTML. (+28 more)
+Cohesion: 0.10
+Nodes (19): int, error_count(), One validation finding for an outgoing Telegram message., One validation finding for an outgoing Telegram message., One validation finding for an outgoing Telegram message., Validation report for rendered Telegram HTML., Validation report for rendered Telegram HTML., One validation finding for an outgoing Telegram message. (+11 more)
 
 ### Community 429 - "Community 429"
 Cohesion: 0.24
 Nodes (14): DataFrame, int, Series, str, hull_moving_average(), ichimoku_lines(), Structure indicators (Ichimoku, HMA/WMA) for the Polars feature pipeline.  Audit, weighted_moving_average() (+6 more)
 
 ### Community 430 - "Community 430"
-Cohesion: 0.18
-Nodes (17): asset_config_for_symbol(), configured_context_timeframes(), configured_primary_timeframe(), effective_shortlist_unified_routing(), is_deep_analysis_symbol(), Any, bool, int (+9 more)
+Cohesion: 0.16
+Nodes (20): asset_config_for_symbol(), configured_context_timeframes(), configured_primary_timeframe(), effective_engine_score_floor(), effective_shortlist_unified_routing(), is_deep_analysis_symbol(), Any, bool (+12 more)
 
 ### Community 431 - "Community 431"
 Cohesion: 0.09
 Nodes (18): as_int(), int, Return global rolling quality summary for recent closed outcomes., Return global rolling quality summary for recent closed outcomes., Return global rolling quality summary for recent closed outcomes., Return all active symbol loss streaks sorted by severity., Return all active symbol loss streaks sorted by severity., Return all active symbol loss streaks sorted by severity. (+10 more)
 
 ### Community 432 - "Community 432"
-Cohesion: 0.29
-Nodes (4): Any, bool, float, str
+Cohesion: 0.04
+Nodes (47): Any, str, Main loop — EventBus-driven with emergency fallback., Main loop — EventBus-driven with emergency fallback., Main loop — EventBus-driven with emergency fallback., Main loop — EventBus-driven with emergency fallback., Main loop — EventBus-driven with emergency fallback., Main loop — EventBus-driven with emergency fallback. (+39 more)
 
 ### Community 435 - "Community 435"
-Cohesion: 0.16
-Nodes (11): bool, SignalBot, is_bearish(), is_bullish(), MarketRegimeResult, Market regime detection and bull/bear index.  Analyzes market-wide conditions to, Market regime analysis result., Market regime analysis result. (+3 more)
+Cohesion: 0.25
+Nodes (6): bool, is_bearish(), is_bullish(), Market regime detection and bull/bear index.  Analyzes market-wide conditions to, Quick check if overall market is bullish., Quick check if overall market is bearish.
+
+### Community 455 - "Community 455"
+Cohesion: 0.25
+Nodes (8): _normalize_rsi_scale(), Replace NaN/inf/null values with a stable fill value., Normalize RSI to the project contract: 0..100., Normalize RSI to the project contract: 0..100., Normalize RSI to the project contract: 0..100., Normalize RSI to the project contract: 0..100., Normalize RSI to the project contract: 0..100., Normalize RSI to the project contract: 0..100.
+
+### Community 456 - "Community 456"
+Cohesion: 0.34
+Nodes (15): _analyze_live_telemetry(), _build_static_matrix(), _find_telemetry_run(), main(), _merge_rows(), _print_markdown_table(), Any, int (+7 more)
+
+### Community 457 - "Community 457"
+Cohesion: 0.33
+Nodes (5): Log the current diagnostic summary.          The method emits ``INFO`` when de, Log the current diagnostic summary.          The method emits ``INFO`` when de, Log the current diagnostic summary.          The method emits ``INFO`` when de, Log the current diagnostic summary.          The method emits ``INFO`` when de, Log the current diagnostic summary.          The method emits ``INFO`` when dete
+
+### Community 458 - "Community 458"
+Cohesion: 0.14
+Nodes (11): Reload monitor state from disk, replacing in-memory records., Reload monitor state from disk, replacing in-memory records., Reload monitor state from disk, replacing in-memory records., Clear all quality state and persist an empty monitor file., Clear all quality state and persist an empty monitor file., Clear all quality state and persist an empty monitor file., Clear all quality state and persist an empty monitor file., Import monitor records from a JSON state document.          Returns the number (+3 more)
+
+### Community 459 - "Community 459"
+Cohesion: 0.18
+Nodes (8): Time series data point., Time series data point., Gauge with time-series history., Gauge with time-series history., Get history for last N seconds., Get history for last N seconds., TimeSeries, TimeSeriesGauge
+
+### Community 460 - "Community 460"
+Cohesion: 0.25
+Nodes (7): bytes, generate_latest(), Update bot state metrics., Update bot state metrics., Update bot state metrics., Get current metrics in Prometheus text format., Get current metrics in Prometheus text format.
+
+### Community 461 - "Community 461"
+Cohesion: 0.31
+Nodes (10): BinanceClientImpl, DataFrame, datetime, int, str, fetch_forensic_candle_pack(), fetch_klines_window(), Historical kline window fetch for forensic replay. (+2 more)
+
+### Community 462 - "Community 462"
+Cohesion: 0.09
+Nodes (19): timedelta, ParquetCache, Read cached data for symbol/timeframe.          Args:             symbol: Tra, Read cached data for symbol/timeframe.          Args:             symbol: Tradin, Read recent data for symbol/timeframe., Read recent data for symbol/timeframe., Compact old chunks into monthly files.          This reduces file count for ol, Compact old chunks into monthly files.          This reduces file count for old (+11 more)
+
+### Community 463 - "Community 463"
+Cohesion: 0.18
+Nodes (11): compact_reason_list(), Humanize a reason token., Humanize a reason token., Humanize a reason token., Humanize a reason token., Return unique human-readable reasons., Return unique human-readable reasons., Return unique human-readable reasons. (+3 more)
+
+### Community 464 - "Community 464"
+Cohesion: 0.17
+Nodes (11): Weights for the simplified structure-based scoring engine., Weights for the simplified structure-based scoring engine., Weights for the simplified structure-based scoring engine., Weights for the simplified structure-based scoring engine., Weights for the simplified structure-based scoring engine., Weights for the simplified structure-based scoring engine., Weights for the simplified structure-based scoring engine., Weights for the simplified structure-based scoring engine. (+3 more)
+
+### Community 465 - "Community 465"
+Cohesion: 0.18
+Nodes (10): Get current best bid/ask prices for a symbol.          Acquires _data_lock to, Get current best bid/ask prices for a symbol.          Acquires _data_lock to, Get current best bid/ask prices for a symbol.          Acquires _data_lock to, Get current best bid/ask prices for a symbol.          Acquires _data_lock to, Get current best bid/ask prices for a symbol.          Acquires _data_lock to, Get current best bid/ask prices for a symbol.          Acquires _data_lock to, Get current best bid/ask prices for a symbol.          Acquires _data_lock to, Get current best bid/ask prices for a symbol.          Acquires _data_lock to (+2 more)
+
+### Community 466 - "Community 466"
+Cohesion: 0.17
+Nodes (11): Get engine statistics., Get engine statistics., Get engine statistics., Get engine statistics., Get engine statistics., Get engine statistics., Get engine statistics., Get engine statistics. (+3 more)
+
+### Community 467 - "Community 467"
+Cohesion: 0.17
+Nodes (11): Fetch exchange symbols with timeout and retry logic., Fetch exchange symbols with timeout and retry logic., Fetch exchange symbols with timeout and retry logic., Fetch exchange symbols with timeout and retry logic., Fetch exchange symbols with timeout and retry logic., Fetch exchange symbols with timeout and retry logic., Fetch exchange symbols with timeout and retry logic., Fetch exchange symbols with timeout and retry logic. (+3 more)
 
 ### Community 469 - "Community 469"
-Cohesion: 0.09
-Nodes (26): float, int, object, str, catalog_timeframe_profile(), _e(), intervals_for_catalog_entry(), _parse_pattern() (+18 more)
+Cohesion: 0.11
+Nodes (28): float, int, object, str, catalog_timeframe_profile(), CatalogEntry, _e(), intervals_for_catalog_entry() (+20 more)
+
+### Community 470 - "Community 470"
+Cohesion: 0.33
+Nodes (5): float, object, str, Shared runtime coercion helpers for strict mypy., row_float()
 
 ### Community 471 - "Community 471"
-Cohesion: 0.08
-Nodes (22): str, Setup+symbol quality detail used for localized throttling decisions., Setup+symbol quality detail used for localized throttling decisions., Setup+symbol quality detail used for localized throttling decisions., Return recent records for diagnostics without exposing mutable state., Return recent records for diagnostics without exposing mutable state., Return recent records for diagnostics without exposing mutable state., Return localized setup+symbol streak health.          A setup can be globally (+14 more)
+Cohesion: 0.50
+Nodes (3): Gracefully shut down the alert coordinator.          Releases any held lock an, Gracefully shut down the alert coordinator.          Releases any held lock an, Gracefully shut down the alert coordinator.          Releases any held lock and
 
 ### Community 472 - "Community 472"
-Cohesion: 0.05
-Nodes (48): BaseModel, AlertConfig, IntelligenceConfig, NotifierConfig, NotifierWebhookConfig, Weights for the simplified structure-based scoring engine., Weights for the simplified structure-based scoring engine., Weights for the simplified structure-based scoring engine. (+40 more)
+Cohesion: 0.08
+Nodes (30): BaseModel, AlertConfig, NotifierConfig, NotifierWebhookConfig, Pre-alert funnel configuration.      Designed for a signal-only bot (no auto-t, Pre-alert funnel configuration.      Designed for a signal-only bot (no auto-t, Telegram tier thresholds and delivery policy gates., Pre-alert funnel configuration.      Designed for a signal-only bot (no auto-tra (+22 more)
 
 ### Community 473 - "Community 473"
-Cohesion: 0.04
-Nodes (47): datetime, float, SQLite + parquet persistence for signals and outcomes., Set cooldown for a key., Set cooldown for a key., Set cooldown for a key., Set cooldown for a key., Set cooldown for a key. (+39 more)
+Cohesion: 0.24
+Nodes (6): FeatureFlags, Any, bool, float, str, Runtime feature flag helpers.  Current implementation is config-backed and async
 
 ### Community 474 - "Community 474"
-Cohesion: 0.13
-Nodes (13): Return health fields for one setup id., Return health fields for one setup id., Return health fields for one setup id., Return a conservative score multiplier derived from setup health.          The, Return a conservative score multiplier derived from setup health.          The d, Return a conservative score multiplier derived from setup health.          The, Return health, recent records, and score multiplier for one setup., Return health, recent records, and score multiplier for one setup. (+5 more)
+Cohesion: 0.10
+Nodes (16): Return health fields for one setup id., Return health fields for one setup id., Return health fields for one setup id., Return recent records for diagnostics without exposing mutable state., Return recent records for diagnostics without exposing mutable state., Return recent records for diagnostics without exposing mutable state., Return a conservative score multiplier derived from setup health.          The, Return a conservative score multiplier derived from setup health.          The d (+8 more)
+
+### Community 475 - "Community 475"
+Cohesion: 0.18
+Nodes (10): Save or update active signal.          signal_data must contain: tracking_id,, Save or update active signal.          signal_data must contain: tracking_id, tr, Save or update active signal.          signal_data must contain: tracking_id, tr, Save or update active signal.          signal_data must contain: tracking_id,, Save or update active signal.          signal_data must contain: tracking_id,, Save or update active signal.          signal_data must contain: tracking_id,, Save or update active signal.          signal_data must contain: tracking_id,, Save or update active signal.          signal_data must contain: tracking_id, tr (+2 more)
 
 ### Community 476 - "Community 476"
-Cohesion: 0.12
-Nodes (13): Return all counters for the current window.          Returns         -------, Return all counters for the current window.          Returns         -------, Return all counters for the current window.          Returns         -------, Log the current diagnostic summary.          The method emits ``INFO`` when de, Log the current diagnostic summary.          The method emits ``INFO`` when de, Log the current diagnostic summary.          The method emits ``INFO`` when de, Log the current diagnostic summary.          The method emits ``INFO`` when de, Log the current diagnostic summary.          The method emits ``INFO`` when dete (+5 more)
+Cohesion: 0.24
+Nodes (8): __getattr__(), Market data plane - REST, WebSocket, universe, enrichments (v9)., Return strategy routing fits using the same logic as production shortlist builds, Return strategy routing fits using the same logic as production shortlist builds, Return strategy routing fits using the same logic as production shortlist builds, Return strategy routing fits using the same logic as production shortlist builds, Return strategy routing fits using the same logic as production shortlist builds, strategy_fits_for_market_row()
+
+### Community 477 - "Community 477"
+Cohesion: 0.20
+Nodes (10): Convert bot timeframe labels to TradingView interval labels., Convert bot timeframe labels to TradingView interval labels., Convert bot timeframe labels to TradingView interval labels., Convert bot timeframe labels to TradingView interval labels., Return a TradingView chart URL for Binance perpetual futures., Return a TradingView chart URL for Binance perpetual futures., Return a TradingView chart URL for Binance perpetual futures., Return a TradingView chart URL for Binance perpetual futures. (+2 more)
 
 ### Community 478 - "Community 478"
-Cohesion: 0.05
-Nodes (38): Return the latest partial L2 book for a symbol, if available., Return the latest partial L2 book for a symbol, if available., Return signed persistent wall pressure from partial depth, if available., Return the latest partial L2 book for a symbol, if available., Return True if the !ticker@arr cache has been populated recently.          Use, Calculate current WebSocket latency in milliseconds., Return signed persistent wall pressure from partial depth, if available., Return True if the !ticker@arr cache has been populated recently.          Use (+30 more)
+Cohesion: 0.18
+Nodes (8): Return all setup ids known to the monitor., Return all setup ids known to the monitor., Return all setup ids known to the monitor., Return all setup ids known to the monitor., Return the last update timestamp globally or for one setup., Return the last update timestamp globally or for one setup., Return the last update timestamp globally or for one setup., Return the last update timestamp globally or for one setup.
 
 ### Community 479 - "Community 479"
 Cohesion: 0.25
 Nodes (6): Canonical architecture (bot2 v9), code:powershell (python -m compileall -q bot), Import rules, Package map, Verification, What was removed
 
 ### Community 483 - "Community 483"
-Cohesion: 0.12
-Nodes (15): Architecture (v9), Binance from Russia / geo-blocked networks, CI, code:powershell (py -3.14 -m venv .venv), code:powershell ($env:BINANCE_PROXY_URL = "socks5h://127.0.0.1:7890"), code:block3 (bot/market/     REST + WebSocket, universe, enrichments), code:powershell (python -m compileall -q bot), code:powershell ($env:PYTEST_LIVE=1) (+7 more)
+Cohesion: 0.20
+Nodes (7): MetricsExporter, Export metrics in Prometheus format., Export metrics in Prometheus format., Export metrics in Prometheus text format., Export metrics in Prometheus text format., Export metrics as JSON., Export metrics as JSON.
 
 ### Community 484 - "Community 484"
-Cohesion: 0.09
-Nodes (41): BaseModel, BotSettings, SetupConfig, catalog_required_timeframes_for_enabled(), Union of catalog required_tfs for currently enabled setups., Ensure SetupConfig bool fields stay aligned with the strategy catalog., Validate config setup overrides and enabled flags against the catalog., verify_config_setup_references() (+33 more)
+Cohesion: 0.12
+Nodes (29): BaseModel, SetupConfig, Ensure SetupConfig bool fields stay aligned with the strategy catalog., verify_setup_config_model(), main(), _ops_webhook_auto_enable_warning(), parse_args(), int (+21 more)
 
 ### Community 485 - "Community 485"
-Cohesion: 0.03
-Nodes (100): Any, bool, float, int, object, Path, str, _assert_supported_kline_intervals() (+92 more)
+Cohesion: 0.04
+Nodes (52): Any, float, _convert_toml_dict(), _flatten_legacy_strategy_config(), _load_legacy_strategy_overrides(), _load_toml(), _normalize_setup_overrides(), Flatten nested legacy strategy config into flat numeric overrides. (+44 more)
 
 ### Community 486 - "Community 486"
 Cohesion: 0.25
 Nodes (6): code:powershell (python scripts/verify_refactor_gate.py), Correct interaction model, Implementation rules (code), Market data principles (post-refactor), Verification, What caused “degradation” in debug runs
 
+### Community 488 - "Community 488"
+Cohesion: 0.25
+Nodes (7): Setup+symbol quality detail used for localized throttling decisions., Setup+symbol quality detail used for localized throttling decisions., Setup+symbol quality detail used for localized throttling decisions., Return localized setup+symbol streak health.          A setup can be globally, Return localized setup+symbol streak health.          A setup can be globally he, Return localized setup+symbol streak health.          A setup can be globally, SymbolHealth
+
+### Community 489 - "Community 489"
+Cohesion: 0.25
+Nodes (8): _bias_1h(), Determine 1h bias from EMA alignment for 15M signal context., Determine 1h bias from EMA alignment for 15M signal context., Determine 1h bias from EMA alignment for 15M signal context., Determine 1h bias from EMA alignment for 15M signal context., Determine 1h bias from EMA alignment for 15M signal context., Determine 1h bias from EMA alignment for 15M signal context., Determine 1h bias from EMA alignment for 15M signal context.
+
+### Community 490 - "Community 490"
+Cohesion: 0.43
+Nodes (6): bool, BotSettings, str, enabled_filter_stages(), filter_stage_enabled(), Composable filter pipeline stages (shortlist Phase 6).
+
+### Community 491 - "Community 491"
+Cohesion: 0.29
+Nodes (5): DisabledBroadcaster, No-op broadcaster for runtime modes with external delivery disabled., No-op broadcaster for runtime modes with external delivery disabled., No-op broadcaster for runtime modes with external delivery disabled., No-op broadcaster for runtime modes with external delivery disabled.
+
+### Community 492 - "Community 492"
+Cohesion: 0.29
+Nodes (7): cache_stats(), Return frame preparation cache hit/miss counters for health telemetry., Return frame preparation cache hit/miss counters for health telemetry., Return frame preparation cache hit/miss counters for health telemetry., Return frame preparation cache hit/miss counters for health telemetry., Return frame preparation cache hit/miss counters for health telemetry., Return frame preparation cache hit/miss counters for health telemetry.
+
+### Community 493 - "Community 493"
+Cohesion: 0.50
+Nodes (3): Record ML score adjustment., Record ML score adjustment., Record ML score adjustment.
+
+### Community 494 - "Community 494"
+Cohesion: 0.50
+Nodes (3): Record ML prediction confidence., Record ML prediction confidence., Record ML prediction confidence.
+
+### Community 496 - "Community 496"
+Cohesion: 0.50
+Nodes (3): Record a detected signal., Record a detected signal., Record a detected signal.
+
+### Community 497 - "Community 497"
+Cohesion: 0.50
+Nodes (3): Start the Prometheus HTTP server., Start the Prometheus HTTP server., Start the Prometheus HTTP server.
+
 ### Community 513 - "Community 513"
-Cohesion: 0.18
-Nodes (10): Background task to fetch exchange symbols without blocking startup., Background task to fetch exchange symbols without blocking startup., Background task to fetch exchange symbols without blocking startup., Background task to fetch exchange symbols without blocking startup., Background task to fetch exchange symbols without blocking startup., Background task to fetch exchange symbols without blocking startup., Background task to fetch exchange symbols without blocking startup., Background task to fetch exchange symbols without blocking startup. (+2 more)
+Cohesion: 0.17
+Nodes (11): Background task to fetch exchange symbols without blocking startup., Background task to fetch exchange symbols without blocking startup., Background task to fetch exchange symbols without blocking startup., Background task to fetch exchange symbols without blocking startup., Background task to fetch exchange symbols without blocking startup., Background task to fetch exchange symbols without blocking startup., Background task to fetch exchange symbols without blocking startup., Background task to fetch exchange symbols without blocking startup. (+3 more)
 
 ### Community 514 - "Community 514"
-Cohesion: 0.21
-Nodes (12): Any, Counter, int, _counter_to_dict(), Compute pipeline efficiency metrics for the current window.          Returns, Compute pipeline efficiency metrics for the current window.          Returns, Compute pipeline efficiency metrics for the current window.          Returns, Mutable state for one diagnostic window. (+4 more)
+Cohesion: 0.19
+Nodes (15): Any, Counter, int, str, _counter_to_dict(), _markdown_table(), Compute pipeline efficiency metrics for the current window.          Returns, Compute pipeline efficiency metrics for the current window.          Returns (+7 more)
 
 ### Community 516 - "Community 516"
-Cohesion: 0.11
-Nodes (25): DataFrame, float64, int, NDArray, str, GMMVARPrediction, GMMVARRegimeDetector, Backward-compatible alias for older config/API names. (+17 more)
+Cohesion: 0.16
+Nodes (14): RegimeResult, GMMVARPrediction, GMMVARRegimeDetector, Backward-compatible alias for older config/API names., Backward-compatible alias for older config/API names., Backward-compatible alias for older config/API names., Backward-compatible alias for older config/API names., Backward-compatible alias for older config/API names. (+6 more)
 
 ### Community 517 - "Community 517"
-Cohesion: 0.04
-Nodes (44): Get last sent time for a cooldown key., Increment one or more tracking counters., Delete persisted cooldown rows older than the cleanup age., Delete persisted cooldown rows older than the cleanup age., Delete persisted cooldown rows older than the cleanup age., Delete persisted cooldown rows older than the cleanup age., Persist a completed tracked-signal outcome., Persist completed tracked-signal outcomes in batch. (+36 more)
+Cohesion: 0.11
+Nodes (18): Persist a completed tracked-signal outcome., Persist a completed tracked-signal outcome., Persist completed tracked-signal outcomes in batch., Persist completed tracked-signal outcomes in batch., Persist a completed tracked-signal outcome., Persist a completed tracked-signal outcome., Increment one or more tracking counters., Persist completed tracked-signal outcomes in batch. (+10 more)
 
 ### Community 521 - "Community 521"
-Cohesion: 0.04
-Nodes (170): BotSettings, DataFrame, float, PreparedSymbol, Signal, SpecHit, str, BotSettings (+162 more)
+Cohesion: 0.03
+Nodes (197): BotSettings, DataFrame, float, PreparedSymbol, Signal, SpecHit, str, BotSettings (+189 more)
 
 ### Community 523 - "Community 523"
 Cohesion: 0.20
 Nodes (8): A. 10 популярных (⭐, фреймворки + Binance futures), B. 10 свежих (push 2026-05/06, futures / Polars / signal), C. 10 обсуждаемых (issues / forks / strategy ecosystem), code:powershell (python scripts/_github_bot_survey.py), GitHub benchmark — 30 репозиториев (июнь 2026), Вывод для de-bloat, Как воспроизвести опрос, Сводка: откуда 233 файла у bot2
-
-### Community 524 - "Community 524"
-Cohesion: 0.07
-Nodes (62): str, bold(), _channel_header(), _channel_legs_line(), _channel_rr_line(), code(), direction_label(), direction_side() (+54 more)
 
 ### Community 525 - "Community 525"
 Cohesion: 0.56
@@ -2188,20 +2309,12 @@ Cohesion: 0.40
 Nodes (4): Deferred (next waves), Done, Lanes hot-path execution (2026-06-01), Override
 
 ### Community 532 - "Community 532"
-Cohesion: 0.06
-Nodes (65): bool, BotSettings, float, NetworkConfig, Path, str, NetworkConfig, Egress proxy for Binance public REST/WebSocket (Russia/geo-blocked regions). (+57 more)
+Cohesion: 0.05
+Nodes (73): bool, BotSettings, float, NetworkConfig, Path, str, NetworkConfig, Egress proxy for Binance public REST/WebSocket (Russia/geo-blocked regions). (+65 more)
 
 ### Community 533 - "Community 533"
 Cohesion: 0.14
-Nodes (51): BotSettings, StrategyRegistry, SymbolFrames, SymbolMeta, Engine for calculating signals from multiple strategies.      Features:     - Pa, Engine for calculating signals from multiple strategies.      Features:     - Pa, Engine for calculating signals from multiple strategies.      Features:     - Pa, Engine for calculating signals from multiple strategies.      Features:     - (+43 more)
-
-### Community 534 - "Community 534"
-Cohesion: 0.18
-Nodes (9): Any, bool, datetime, int, str, UniverseSymbol, Bot runtime orchestration — SignalBot loop, handlers, delivery wiring., Emergency fallback: radar-promoted symbols at half frequency (2x interval). (+1 more)
-
-### Community 536 - "Community 536"
-Cohesion: 0.04
-Nodes (46): Return list of symbols with stale (non-fresh) kline data., Return list of symbols with stale (non-fresh) kline data., Return list of symbols with stale (non-fresh) kline data., Return list of symbols with stale (non-fresh) kline data., Return list of symbols with stale (non-fresh) kline data., Check if all required data is available and fresh for a symbol.          Args:, Return list of symbols with stale (non-fresh) kline data., Check if all required data is available and fresh for a symbol.          Args: (+38 more)
+Nodes (47): StrategyRegistry, SymbolMeta, Engine for calculating signals from multiple strategies.      Features:     - Pa, Engine for calculating signals from multiple strategies.      Features:     - Pa, Engine for calculating signals from multiple strategies.      Features:     - Pa, Engine for calculating signals from multiple strategies.      Features:     - Pa, Engine for calculating signals from multiple strategies.      Features:     -, Engine for calculating signals from multiple strategies.      Features:     - (+39 more)
 
 ### Community 537 - "Community 537"
 Cohesion: 0.53
@@ -2227,10 +2340,6 @@ Nodes (7): StrategyMetadata, List metadata for all registered strategies., List 
 Cohesion: 0.06
 Nodes (26): Stop the WebSocket manager and close all connections., Switch egress proxy and force WS reconnect when already running., Switch egress proxy and force WS reconnect when already running., Switch egress proxy and force WS reconnect when already running., Switch egress proxy and force WS reconnect when already running., Alias for ``stop()`` (market data facade compatibility)., No-op preflight; connectivity is validated on ``start()``., Switch egress proxy and force WS reconnect when already running. (+18 more)
 
-### Community 576 - "Community 576"
-Cohesion: 0.17
-Nodes (24): bool, BotSettings, DataFrame, float, object, PreparedSymbol, Signal, SpecHit (+16 more)
-
 ### Community 577 - "Community 577"
 Cohesion: 0.06
 Nodes (30): AggTradeCallback, EventBus, KlineCloseCallback, Register an async callback fired when a kline of *interval* closes.          C, Register an async callback fired when a kline of *interval* closes.          C, Register an async callback fired when a kline of *interval* closes.          C, Register an async callback fired when a kline of *interval* closes.          C, Register an async callback fired on every aggTrade tick.          Callback sig (+22 more)
@@ -2239,25 +2348,21 @@ Nodes (30): AggTradeCallback, EventBus, KlineCloseCallback, Register an async ca
 Cohesion: 0.12
 Nodes (17): PreparedSymbol, Return non-fatal warnings for impossible or suspicious prepared features.      T, Run prepared-frame sanity checks for every available timeframe., Return non-fatal warnings for impossible or suspicious prepared features.      T, Run prepared-frame sanity checks for every available timeframe., Return non-fatal warnings for impossible or suspicious prepared features., Return non-fatal warnings for impossible or suspicious prepared features., Return non-fatal warnings for impossible or suspicious prepared features. (+9 more)
 
-### Community 583 - "Community 583"
-Cohesion: 0.07
-Nodes (25): Get active signals with optional filtering., Get active signals with optional filtering., Get active signals with optional filtering., Get active signals with optional filtering., Get active signals with optional filtering., Get active signals with optional filtering., Get active signals with optional filtering., Close pending/active signals older than a hard runtime age limit. (+17 more)
-
 ### Community 584 - "Community 584"
-Cohesion: 0.11
-Nodes (13): int, Return total retained samples globally or for one setup., Return total retained samples globally or for one setup., Return total retained samples globally or for one setup., Return total retained samples globally or for one setup., Return retained trade samples globally or for one setup., Return retained trade samples globally or for one setup., Return retained trade samples globally or for one setup. (+5 more)
+Cohesion: 0.07
+Nodes (25): int, Track rolling setup outcomes and recommend delivery throttles.      Parameters, Track rolling setup outcomes and recommend delivery throttles.      Parameters, Track rolling setup outcomes and recommend delivery throttles.      Parameters, Return compact string flags suitable for telemetry rows., Return compact string flags suitable for telemetry rows., Return compact string flags suitable for telemetry rows., Return compact string flags suitable for telemetry rows. (+17 more)
 
 ### Community 586 - "Community 586"
 Cohesion: 0.09
 Nodes (22): Any, float, str, Analyze market regime from ticker and funding data.          Args:             t, Calculate market regime from raw data., Calculate market regime from raw data., Calculate market regime from raw data., Calculate market regime from raw data. (+14 more)
 
 ### Community 592 - "Community 592"
-Cohesion: 0.13
-Nodes (12): Return cumulative R curve for retained trade outcomes., Return max drawdown over retained cumulative R outcomes., Return max drawdown over retained cumulative R outcomes., Return max drawdown over retained cumulative R outcomes., Return max drawdown over retained cumulative R outcomes., Return a 0..1 stability score derived from health and drawdown., Return a 0..1 stability score derived from health and drawdown., Return a 0..1 stability score derived from health and drawdown. (+4 more)
+Cohesion: 0.08
+Nodes (20): Return cumulative R curve for retained trade outcomes., Return max drawdown over retained cumulative R outcomes., Return max drawdown over retained cumulative R outcomes., Return max drawdown over retained cumulative R outcomes., Return max drawdown over retained cumulative R outcomes., Return a 0..1 stability score derived from health and drawdown., Return a 0..1 stability score derived from health and drawdown., Return a 0..1 stability score derived from health and drawdown. (+12 more)
 
 ### Community 617 - "Community 617"
 Cohesion: 0.10
-Nodes (17): Delegate kline-close handling to KlineHandler., Delegate kline-close handling to KlineHandler., Delegate kline-close handling to KlineHandler., Delegate kline-close handling to KlineHandler., Delegate kline-close handling to KlineHandler., Delegate kline-close handling to KlineHandler., Delegate kline-close handling to KlineHandler., Delegate intra-candle scan trigger handling to IntraCandleScanner. (+9 more)
+Nodes (19): Delegate kline-close handling to KlineHandler., Delegate kline-close handling to KlineHandler., Delegate kline-close handling to KlineHandler., Delegate kline-close handling to KlineHandler., Delegate kline-close handling to KlineHandler., Delegate kline-close handling to KlineHandler., Delegate kline-close handling to KlineHandler., Delegate intra-candle scan trigger handling to IntraCandleScanner. (+11 more)
 
 ### Community 618 - "Community 618"
 Cohesion: 0.20
@@ -2265,27 +2370,23 @@ Nodes (6): Any, KlineCloseEvent, PipelineResult, Signal, str, StrategyMetadata
 
 ### Community 623 - "Community 623"
 Cohesion: 0.20
-Nodes (6): object, ScoringResult, ConfluenceResult, Full quality assessment of a signal., Full quality assessment of a signal., Full quality assessment of a signal.
+Nodes (8): object, ScoringResult, ConfluenceResult, evaluate_weighted_delivery_gate(), Full quality assessment of a signal., Full quality assessment of a signal., Full quality assessment of a signal., Weighted ConfluenceEngine score is primary; boolean legs are a hard floor.
 
 ### Community 624 - "Community 624"
-Cohesion: 0.29
+Cohesion: 0.33
 Nodes (5): Close aiogram bot session., Close aiogram bot session., Close aiogram bot session., Close aiogram bot session., Close aiogram bot session.
 
 ### Community 625 - "Community 625"
-Cohesion: 0.23
-Nodes (17): bool, Series, build_mtf_frames(), cache_timeframe_ms(), CandleGap, _coerce_epoch_ms(), detect_candle_gaps(), HotColdCacheConfig (+9 more)
+Cohesion: 0.25
+Nodes (17): datetime, float, Series, build_mtf_frames(), _cache_finite_float(), _cache_ms_to_datetime(), cache_timeframe_ms(), CandleGap (+9 more)
 
 ### Community 627 - "Community 627"
 Cohesion: 0.10
 Nodes (18): Return the list of market-wide streams to subscribe if enabled., Monitor WebSocket health and reconnect on silence/recovery failures., Return the list of market-wide streams to subscribe if enabled., Return the list of market-wide streams to subscribe if enabled., Monitor WebSocket health and reconnect on silence/recovery failures., Return the list of market-wide streams to subscribe if enabled., Monitor WebSocket health and reconnect on silence/recovery failures., Monitor WebSocket health and reconnect on silence/recovery failures. (+10 more)
 
-### Community 629 - "Community 629"
-Cohesion: 0.12
-Nodes (13): Сохраняет outcome завершенного сигнала., Сохраняет outcome завершенного сигнала., Сохраняет outcome завершенного сигнала., Сохраняет outcome завершенного сигнала., Persist features to disk so they survive bot restarts., Persist features to disk so they survive bot restarts., Persist features to disk so they survive bot restarts., Persist features to disk so they survive bot restarts. (+5 more)
-
 ### Community 630 - "Community 630"
-Cohesion: 0.10
-Nodes (39): Any, bool, datetime, float, int, PipelineResult, PreparedSymbol, Signal (+31 more)
+Cohesion: 0.07
+Nodes (76): Any, bool, datetime, float, int, PipelineResult, PreparedSymbol, Signal (+68 more)
 
 ### Community 631 - "Community 631"
 Cohesion: 0.16
@@ -2299,14 +2400,6 @@ Nodes (10): CI alignment, code:powershell (.\.venv\Scripts\ruff.exe check .), Ru
 Cohesion: 0.33
 Nodes (8): bind_log_context(), clear_log_context(), configure_structlog(), int, object, str, Structured logging helpers for runtime correlation IDs and context.  This module, _redact_sensitive_fields()
 
-### Community 643 - "Community 643"
-Cohesion: 0.20
-Nodes (9): Open browser after server is ready., Open browser after server is ready., Open browser after server is ready., Open browser after server is ready., Open browser after server is ready., Open browser after server is ready., Open browser after server is ready., Open browser after server is ready. (+1 more)
-
-### Community 645 - "Community 645"
-Cohesion: 0.22
-Nodes (9): Normalize supported frame-like values to Polars., Normalize supported frame-like values to Polars., Normalize supported frame-like values to Polars., Normalize supported frame-like values to Polars., Normalize supported frame-like values to Polars., Normalize supported frame-like values to Polars., Normalize supported frame-like values to Polars., Normalize supported frame-like values to Polars. (+1 more)
-
 ### Community 647 - "Community 647"
 Cohesion: 0.05
 Nodes (38): bool, is_running(), Wait until the WebSocket connection is established.          Args:             m, Check if the WebSocket manager is currently running., Check if WebSocket is connected and ready., Check if ticker update should be throttled (debounce rapid updates)., Check if ticker update should be throttled (debounce rapid updates)., Check if ticker update should be throttled (debounce rapid updates). (+30 more)
@@ -2315,32 +2408,24 @@ Nodes (38): bool, is_running(), Wait until the WebSocket connection is establish
 Cohesion: 0.18
 Nodes (10): CI note, Cleared rule groups (0 remaining), code:powershell (.\.venv\Scripts\ruff.exe check bot tests scripts main.py --o), Progress, Remaining (258) — top rules, Remaining (~314) — top rules, Ruff inventory (2026-06-02), Ruff inventory & progress (2026-06-02) (+2 more)
 
-### Community 655 - "Community 655"
-Cohesion: 0.40
-Nodes (4): Any, Get cache statistics., Get cache statistics., Get cache statistics.
-
-### Community 696 - "Community 696"
-Cohesion: 0.50
-Nodes (3): Gracefully shut down the alert coordinator.          Releases any held lock an, Gracefully shut down the alert coordinator.          Releases any held lock an, Gracefully shut down the alert coordinator.          Releases any held lock and
-
 ### Community 703 - "Community 703"
-Cohesion: 0.03
-Nodes (111): Runtime feature flag helpers.  Current implementation is config-backed and async, Any, bool, BotSettings, float, int, str, UniverseSymbol (+103 more)
+Cohesion: 0.10
+Nodes (32): Any, bool, BotSettings, float, int, str, UniverseSymbol, asset_strategy_allowlist() (+24 more)
 
 ## Knowledge Gaps
-- **1268 isolated node(s):** `post-edit-hint.sh script`, `protect-files.sh script`, `session-start.sh script`, `model`, `CLAUDE_CODE_MAX_OUTPUT_TOKENS` (+1263 more)
+- **1255 isolated node(s):** `post-edit-hint.sh script`, `protect-files.sh script`, `session-start.sh script`, `model`, `CLAUDE_CODE_MAX_OUTPUT_TOKENS` (+1250 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **108 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `BotSettings` connect `Community 703` to `Community 4`, `Community 516`, `Community 7`, `Community 9`, `Community 521`, `Community 139`, `Community 12`, `Community 13`, `Community 14`, `Community 15`, `Community 400`, `Community 10`, `Community 18`, `Community 19`, `Community 532`, `Community 533`, `Community 143`, `Community 281`, `Community 27`, `Community 28`, `Community 415`, `Community 165`, `Community 41`, `Community 44`, `Community 174`, `Community 48`, `Community 49`, `Community 50`, `Community 435`, `Community 59`, `Community 188`, `Community 318`, `Community 63`, `Community 576`, `Community 65`, `Community 66`, `Community 323`, `Community 194`, `Community 80`, `Community 84`, `Community 469`, `Community 472`, `Community 219`, `Community 220`, `Community 353`, `Community 484`, `Community 485`, `Community 101`, `Community 358`, `Community 104`, `Community 362`, `Community 364`, `Community 237`?**
-  _High betweenness centrality (0.114) - this node is a cross-community bridge._
-- **Why does `load_settings()` connect `Community 18` to `Community 5`, `Community 8`, `Community 265`, `Community 266`, `Community 532`, `Community 533`, `Community 21`, `Community 25`, `Community 281`, `Community 156`, `Community 30`, `Community 163`, `Community 37`, `Community 173`, `Community 51`, `Community 52`, `Community 182`, `Community 60`, `Community 188`, `Community 703`, `Community 197`, `Community 71`, `Community 77`, `Community 82`, `Community 85`, `Community 227`, `Community 484`, `Community 485`, `Community 99`, `Community 108`, `Community 237`, `Community 121`?**
-  _High betweenness centrality (0.092) - this node is a cross-community bridge._
-- **Why does `MemoryRepository` connect `Community 60` to `Community 1`, `Community 517`, `Community 10`, `Community 13`, `Community 142`, `Community 400`, `Community 17`, `Community 18`, `Community 409`, `Community 27`, `Community 28`, `Community 419`, `Community 421`, `Community 37`, `Community 41`, `Community 43`, `Community 179`, `Community 187`, `Community 188`, `Community 703`, `Community 583`, `Community 80`, `Community 473`?**
-  _High betweenness centrality (0.077) - this node is a cross-community bridge._
+- **Why does `BotSettings` connect `Community 44` to `Community 3`, `Community 4`, `Community 516`, `Community 7`, `Community 521`, `Community 9`, `Community 139`, `Community 12`, `Community 15`, `Community 400`, `Community 144`, `Community 18`, `Community 146`, `Community 532`, `Community 533`, `Community 19`, `Community 143`, `Community 27`, `Community 28`, `Community 417`, `Community 419`, `Community 421`, `Community 166`, `Community 169`, `Community 41`, `Community 301`, `Community 45`, `Community 174`, `Community 48`, `Community 49`, `Community 51`, `Community 435`, `Community 181`, `Community 53`, `Community 58`, `Community 188`, `Community 317`, `Community 318`, `Community 63`, `Community 703`, `Community 65`, `Community 66`, `Community 323`, `Community 68`, `Community 67`, `Community 189`, `Community 194`, `Community 72`, `Community 74`, `Community 203`, `Community 207`, `Community 80`, `Community 79`, `Community 469`, `Community 472`, `Community 473`, `Community 88`, `Community 219`, `Community 94`, `Community 353`, `Community 484`, `Community 101`, `Community 100`, `Community 104`, `Community 490`, `Community 362`, `Community 364`, `Community 114`, `Community 630`, `Community 126`?**
+  _High betweenness centrality (0.129) - this node is a cross-community bridge._
+- **Why does `load_settings()` connect `Community 18` to `Community 5`, `Community 8`, `Community 265`, `Community 266`, `Community 532`, `Community 533`, `Community 21`, `Community 25`, `Community 27`, `Community 156`, `Community 30`, `Community 163`, `Community 37`, `Community 44`, `Community 173`, `Community 52`, `Community 182`, `Community 188`, `Community 197`, `Community 71`, `Community 456`, `Community 203`, `Community 77`, `Community 82`, `Community 85`, `Community 94`, `Community 227`, `Community 484`, `Community 485`, `Community 99`, `Community 114`, `Community 630`, `Community 121`?**
+  _High betweenness centrality (0.097) - this node is a cross-community bridge._
+- **Why does `FuturesWSManager` connect `Community 24` to `Community 130`, `Community 135`, `Community 647`, `Community 8`, `Community 398`, `Community 400`, `Community 532`, `Community 149`, `Community 25`, `Community 418`, `Community 38`, `Community 166`, `Community 58`, `Community 575`, `Community 577`, `Community 465`, `Community 85`, `Community 90`, `Community 476`, `Community 222`, `Community 627`, `Community 630`, `Community 121`?**
+  _High betweenness centrality (0.074) - this node is a cross-community bridge._
 - **Are the 207 inferred relationships involving `BotSettings` (e.g. with `bool` and `BotSettings`) actually correct?**
   _`BotSettings` has 207 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 150 inferred relationships involving `Signal` (e.g. with `Any` and `bool`) actually correct?**

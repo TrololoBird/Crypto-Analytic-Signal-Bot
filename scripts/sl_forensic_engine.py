@@ -188,7 +188,7 @@ async def _analyze_rows(
         case = build_forensic_case(
             row,
             candles_15m=tf_frame,
-            candles_1h=packs.get("1h"),
+            _candles_1h=packs.get("1h"),
             btc_candles_15m=btc_frame,
             bars_before=bars_before,
             bars_after=bars_after,

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
 
+from bot.domain.delivery_policy import KLINE_CLOSE_ONLY_SETUP_IDS
 from bot.runtime.data_readiness import is_radar_promoted_item, missing_derivatives_context
 from bot.runtime.delivery_orchestrator import DELIVERY_SUCCESS_STATUSES
 from bot.runtime.errors import DEFENSIVE_EXC
@@ -189,8 +190,10 @@ class CycleRunner:
         bot = self._bot
         max_setups: int | None = None
         setup_subset: frozenset[str] | None = None
+        setup_exclude: frozenset[str] | None = None
         if trigger == "intra_candle":
             max_setups, setup_subset = self._intra_candle_detector_limits(bot)
+            setup_exclude = KLINE_CLOSE_ONLY_SETUP_IDS
 
         async with bot._analysis_semaphore:
             context = await self._prepare_cycle_context(
@@ -212,6 +215,7 @@ class CycleRunner:
                 kline_interval=interval,
                 max_setups=max_setups,
                 setup_subset=setup_subset,
+                setup_exclude=setup_exclude,
             )
 
             candidates, rejected, delivered = await bot._select_and_deliver_for_symbol(

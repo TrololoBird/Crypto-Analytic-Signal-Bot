@@ -7,6 +7,7 @@ telemetry JSONL files and returns bounded, JSON-serializable summaries.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import sqlite3
@@ -1044,6 +1045,29 @@ class DashboardLiveData:
         buffer_fields = slim_message_buffer_fields(
             ws_snapshot if isinstance(ws_snapshot, dict) else {}
         )
+        rest_weight: dict[str, Any] = {}
+        proxy_pool: dict[str, Any] = {}
+        client = getattr(bot, "client", None) or getattr(bot, "_market_data", None)
+        if client is not None:
+            snap_fn = getattr(client, "state_snapshot", None)
+            if callable(snap_fn):
+                with contextlib.suppress(DEFENSIVE_EXC):
+                    snap = dict(snap_fn())
+                    used = float(snap.get("rest_weight_1m") or 0.0)
+                    alert_pct = float(getattr(runtime_cfg, "dashboard_weight_alert_pct", 80.0))
+                    soft = 1800.0
+                    rest_weight = {
+                        "used_weight_1m": used,
+                        "utilization_pct": round(used / soft * 100.0, 2) if used else 0.0,
+                        "alert": used >= soft * alert_pct / 100.0,
+                        **snap,
+                    }
+            pool_fn = getattr(client, "proxy_pool_snapshot", None)
+            if callable(pool_fn):
+                with contextlib.suppress(DEFENSIVE_EXC):
+                    proxy_pool = dict(pool_fn())
+        ws_broadcaster = getattr(getattr(bot, "dashboard", None), "_ws_broadcaster", None)
+        ws_dropped = int(getattr(ws_broadcaster, "dropped_count", 0) or 0)
         return {
             "run_id": self._preferred_run_id(),
             "shortlist_unified_routing": bool(
@@ -1064,6 +1088,9 @@ class DashboardLiveData:
             "telemetry_mismatch": telemetry_mismatch,
             "health_tail": health[:8],
             "data_quality_tail": data_quality[:8],
+            "rest_weight": rest_weight,
+            "proxy_pool": proxy_pool,
+            "dashboard_ws_dropped": ws_dropped,
         }
 
     def _funnel_reconcile_uncached(self, *, max_rows: int) -> JsonDict:
