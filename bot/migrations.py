@@ -96,6 +96,115 @@ MIGRATIONS: Sequence[tuple[int, str, str]] = (
         CREATE INDEX IF NOT EXISTS idx_diary_symbol ON trader_diary(symbol);
         """,
     ),
+    (
+        7,
+        "sl_forensics_table",
+        """
+        CREATE TABLE IF NOT EXISTS sl_forensics (
+            tracking_id TEXT PRIMARY KEY,
+            symbol TEXT NOT NULL,
+            setup_id TEXT NOT NULL,
+            direction TEXT NOT NULL,
+            timeframe TEXT NOT NULL,
+            forensic_type TEXT NOT NULL,
+            forensic_subtype TEXT,
+            label TEXT,
+            sl_root_cause_legacy TEXT,
+            mfe REAL DEFAULT 0.0,
+            mae REAL DEFAULT 0.0,
+            post_sl_favorable_pct REAL DEFAULT 0.0,
+            post_sl_tp1_reached INTEGER DEFAULT 0,
+            closed_candle_valid INTEGER,
+            entry_deviation_pct REAL DEFAULT 0.0,
+            btc_correlation_at_sl REAL,
+            active_minutes INTEGER DEFAULT 0,
+            score REAL,
+            atr_pct REAL,
+            recommendations TEXT,
+            metrics TEXT,
+            card_markdown TEXT,
+            analyzed_at TEXT NOT NULL DEFAULT (datetime('now')),
+            signal_created_at TEXT,
+            sl_closed_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_sl_forensics_setup ON sl_forensics(setup_id);
+        CREATE INDEX IF NOT EXISTS idx_sl_forensics_type ON sl_forensics(forensic_type);
+        CREATE INDEX IF NOT EXISTS idx_sl_forensics_analyzed ON sl_forensics(analyzed_at);
+        """,
+    ),
+    (
+        8,
+        "sl_forensics_v2_full_schema",
+        """
+        DROP TABLE IF EXISTS sl_forensics;
+        CREATE TABLE IF NOT EXISTS sl_forensics (
+            forensic_id     TEXT PRIMARY KEY,
+            signal_id       TEXT NOT NULL,
+            tracking_id     TEXT NOT NULL,
+            setup_id        TEXT NOT NULL,
+            symbol          TEXT NOT NULL,
+            direction       TEXT NOT NULL,
+            timeframe       TEXT NOT NULL,
+
+            signal_created_at   TEXT,
+            entry_activated_at  TEXT,
+            sl_hit_at           TEXT,
+            time_to_entry_min   INTEGER,
+            time_to_sl_min      INTEGER,
+
+            entry_price     REAL,
+            sl_price        REAL,
+            tp1_price       REAL,
+            tp2_price       REAL,
+            sl_distance_pct REAL,
+            rr_ratio        REAL,
+
+            post_sl_candles_analyzed    INTEGER,
+            post_sl_max_adverse_pct     REAL,
+            post_sl_max_recovery_pct    REAL,
+            post_sl_tp1_reached         INTEGER,
+            post_sl_tp1_candles         INTEGER,
+            post_sl_price_at_close      REAL,
+
+            btc_move_in_sl_candle_pct   REAL,
+            btc_direction_match         TEXT,
+            btc_caused_sl               INTEGER,
+
+            score                       REAL,
+            atr_pct                     REAL,
+            spread_bps                  REAL,
+            funding_rate                REAL,
+            entry_deviation_atr_mult    REAL,
+            entry_candle_was_confirmed  INTEGER,
+
+            market_regime               TEXT,
+            btc_bias                    TEXT,
+            direction_vs_bias           TEXT,
+
+            sl_type     TEXT,
+            sl_subtype  TEXT,
+            sl_verdict  TEXT,
+
+            candles_signal_tf   TEXT,
+            candles_1h          TEXT,
+            candles_4h          TEXT,
+            candles_btc_signal  TEXT,
+
+            strategy_recheck_valid  INTEGER,
+            indicator_snapshot      TEXT,
+
+            analyzed_at     TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_sl_forensics_setup
+            ON sl_forensics(setup_id);
+        CREATE INDEX IF NOT EXISTS idx_sl_forensics_type
+            ON sl_forensics(sl_type);
+        CREATE INDEX IF NOT EXISTS idx_sl_forensics_symbol
+            ON sl_forensics(symbol);
+        CREATE INDEX IF NOT EXISTS idx_sl_forensics_tracking
+            ON sl_forensics(tracking_id);
+        """,
+    ),
 )
 
 # Migrations that assume repository DDL already created these tables (see memory.initialize).
