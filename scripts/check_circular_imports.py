@@ -31,7 +31,7 @@ def _module_name(path: Path) -> str:
     return ".".join(rel.parts)
 
 
-def _resolve_import(from_mod: str, node: ast.Import | ast.ImportFrom) -> set[str]:
+def _resolve_import(_from_mod: str, node: ast.Import | ast.ImportFrom) -> set[str]:
     targets: set[str] = set()
     if isinstance(node, ast.Import):
         for alias in node.names:

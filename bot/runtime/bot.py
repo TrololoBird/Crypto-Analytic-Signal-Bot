@@ -21,9 +21,17 @@ import logging
 import os
 from dataclasses import replace
 from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from bot.dashboard import BotDashboard
+from bot.delivery.ops_webhook import close_ops_webhook_session, send_ops_webhook_alert
+from bot.delivery.telegram_routing import operator_dm_enabled, send_operator_html
+from bot.diagnostics.config_audit import run_startup_audit
+from bot.market.proxy_bootstrap import ensure_network_ready
+from bot.market.radar_state import SymbolTier
+from bot.market.subscription_planner import merge_order_flow_tracked_symbols
+from bot.regime.market import MarketRegimeAnalyzer
 from bot.runtime.errors import DEFENSIVE_EXC
 from bot.runtime.metrics import BotMetricsCollector
 
@@ -67,9 +75,11 @@ from .market_context_updater import (
     run_public_intelligence_loop,
 )
 from .oi_refresh_runner import OIRefreshRunner, run_oi_refresh_loop
+from .research_harvest_service import ResearchHarvestService
 from .shortlist_service import ShortlistService, run_shortlist_refresh_loop
 from .spot_refresh_runner import SpotRefreshRunner, run_spot_refresh_loop
 from .symbol_analyzer import SymbolAnalyzer
+from .telegram_operator import TelegramOperatorConsole, operator_console_enabled
 from .telemetry_manager import TelemetryManager
 
 if TYPE_CHECKING:
@@ -134,8 +144,6 @@ class SignalBot:
         # Legacy JSON stores (memory.json, state.json, tracking.json) removed in modern architecture
 
         self.confluence = ConfluenceEngine(settings, repository=self._modern_repo)
-
-        from bot.regime.market import MarketRegimeAnalyzer
 
         self.market_regime = MarketRegimeAnalyzer(settings)
 
@@ -210,8 +218,6 @@ class SignalBot:
         self._running: bool = False
         self._research_harvest_service = None
         if settings.research_harvest.enabled:
-            from .research_harvest_service import ResearchHarvestService
-
             self._research_harvest_service = ResearchHarvestService(self)
             LOG.info(
                 "research_harvest_enabled | session=%s",
@@ -479,10 +485,6 @@ class SignalBot:
 
     async def start(self) -> None:
         """Initial storage checks and WS bootstrap."""
-        from pathlib import Path
-
-        from ..market.proxy_bootstrap import ensure_network_ready
-
         updated = await ensure_network_ready(self.settings, config_path=Path("config.toml"))
         if updated is not self.settings:
             self.settings = updated
@@ -498,8 +500,6 @@ class SignalBot:
         except DEFENSIVE_EXC as exc:
             msg = "modern repository init failed; runtime cannot track signals"
             raise RuntimeError(msg) from exc
-        from ..diagnostics.config_audit import run_startup_audit
-
         run_startup_audit(self.settings)
         await self._ensure_dashboard_started()
 
@@ -705,8 +705,6 @@ class SignalBot:
                     name="public_intelligence",
                 )
             )
-        from .telegram_operator import TelegramOperatorConsole, operator_console_enabled
-
         if operator_console_enabled(self):
             console = TelegramOperatorConsole(self)
             self._operator_console = console
@@ -821,8 +819,6 @@ class SignalBot:
             LOG.debug("telegram close failed (non-fatal): %s", exc)
 
         try:
-            from bot.delivery.ops_webhook import close_ops_webhook_session
-
             await close_ops_webhook_session(self)
         except DEFENSIVE_EXC as exc:
             LOG.debug("ops webhook session close failed (non-fatal): %s", exc)
@@ -966,8 +962,6 @@ class SignalBot:
         if self._ws_manager is None:
             return
         try:
-            from ..market.subscription_planner import merge_order_flow_tracked_symbols
-
             rows = await self._modern_repo.get_active_signals()
             pending_syms = sorted(
                 {
@@ -994,8 +988,6 @@ class SignalBot:
             ws_mgr = self._ws_manager
             radar_store = getattr(ws_mgr, "_radar_store", None) if ws_mgr is not None else None
             if radar_store is not None and getattr(self.settings.universe.radar, "enabled", False):
-                from ..market.radar_state import SymbolTier
-
                 priority_syms = [
                     s.upper()
                     for tier in (SymbolTier.HOT, SymbolTier.DEEP)
@@ -1104,8 +1096,6 @@ class SignalBot:
         return True, result
 
     async def _alert_critical(self, exc: Exception, context: dict[str, Any]) -> None:
-        from bot.delivery.telegram_routing import operator_dm_enabled, send_operator_html
-
         if not operator_dm_enabled(self, "send_critical_alerts"):
             return
         text = (
@@ -1118,8 +1108,6 @@ class SignalBot:
             await send_operator_html(self, text)
         except DEFENSIVE_EXC:
             LOG.debug("critical alert operator dispatch failed", exc_info=True)
-        from bot.delivery.ops_webhook import send_ops_webhook_alert
-
         await send_ops_webhook_alert(
             self,
             event="critical_error",

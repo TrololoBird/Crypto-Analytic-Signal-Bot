@@ -79,8 +79,8 @@ async def test_oi_refresh_runner_uses_configured_sleep_interval() -> None:
     runner = OIRefreshRunner(bot)
     sleep_calls: list[float] = []
 
-    async def _fake_wait_for(_awaitable: object, *, timeout: float) -> None:
-        sleep_calls.append(timeout)
+    async def _fake_wait_for(_awaitable: object, **kwargs: float) -> None:
+        sleep_calls.append(float(kwargs["timeout"]))
         bot._shutdown.set()
 
     with (

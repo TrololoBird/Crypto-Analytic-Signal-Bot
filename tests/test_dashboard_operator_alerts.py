@@ -16,6 +16,7 @@ class _FakeLiveData:
         self._overview = overview
 
     def decisions(self, *, limit: int = 41, max_rows: int = 50_000) -> dict:
+        del limit, max_rows
         return self._decisions
 
     def runtime(self) -> dict:

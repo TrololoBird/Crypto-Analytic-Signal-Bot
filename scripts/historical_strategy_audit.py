@@ -14,9 +14,9 @@ import aiohttp
 import polars as pl
 
 try:
-    from scripts.common import bootstrap_repo_path, configure_script_logging
-except ModuleNotFoundError:  # pragma: no cover - direct script execution
-    from common import bootstrap_repo_path, configure_script_logging
+    from scripts.common import configure_script_logging
+except ModuleNotFoundError:  # pragma: no cover
+    from common import configure_script_logging
 
 from bot.delivery.contract import validate_signal_contract
 from bot.domain.config import load_settings
@@ -745,7 +745,6 @@ async def main_async() -> int:
 
 
 def main() -> int:
-    bootstrap_repo_path()
     return asyncio.run(main_async())
 
 

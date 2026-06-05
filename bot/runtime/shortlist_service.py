@@ -8,7 +8,11 @@ import math
 from datetime import UTC, datetime
 from typing import Any
 
+from bot.diagnostics.facade import assess_radar_store
+from bot.market.data import MarketDataUnavailable
+from bot.market.proxy_bootstrap import retry_network_after_failure
 from bot.runtime.errors import DEFENSIVE_EXC
+from bot.runtime.watch_escalation import emit_radar_watch_candidates
 
 from ..domain.config import _ALL_SETUP_IDS
 from ..domain.events import ShortlistUpdatedEvent
@@ -554,9 +558,6 @@ class ShortlistService:
         else:
             symbol_meta_list = list(symbol_meta_result)
         if isinstance(tickers_result, Exception):
-            from bot.market.data import MarketDataUnavailable
-            from bot.market.proxy_bootstrap import retry_network_after_failure
-
             if isinstance(tickers_result, MarketDataUnavailable):
                 try:
                     refreshed = await retry_network_after_failure(bot.settings)
@@ -1019,9 +1020,6 @@ class ShortlistService:
 
         store = _radar_store(bot)
         if store is not None and bot.settings.universe.radar.enabled:
-            from bot.diagnostics.facade import assess_radar_store
-            from bot.runtime.watch_escalation import emit_radar_watch_candidates
-
             radar_health = assess_radar_store(store, config=bot.settings.universe.radar)
             bot.telemetry.append_jsonl(
                 "radar_health.jsonl",

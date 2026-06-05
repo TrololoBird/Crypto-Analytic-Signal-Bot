@@ -1,4 +1,4 @@
-"""Wave F10 / Agent K: catalog config schema, MTF guards, kline coverage, assets, feature snapshot."""
+"""Wave F10 / Agent K: catalog schema, MTF guards, kline coverage, assets."""
 
 from __future__ import annotations
 

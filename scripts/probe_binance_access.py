@@ -6,9 +6,9 @@ import argparse
 import asyncio
 
 try:
-    from scripts.common import bootstrap_repo_path, configure_script_logging
+    from scripts.common import configure_script_logging
 except ModuleNotFoundError:  # pragma: no cover
-    from common import bootstrap_repo_path, configure_script_logging
+    from common import configure_script_logging
 
 from bot.domain.config import NetworkConfig, load_settings
 from bot.market.data import BinanceFuturesMarketData, MarketDataUnavailable
@@ -78,7 +78,6 @@ async def _probe_network(net: NetworkConfig, *, mode: str) -> int:
 
 
 def main() -> None:
-    bootstrap_repo_path()
     parser = argparse.ArgumentParser(description="Probe Binance futures public REST/WS")
     parser.add_argument(
         "--proxy",

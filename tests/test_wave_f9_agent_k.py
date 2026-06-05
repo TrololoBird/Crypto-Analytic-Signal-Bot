@@ -98,7 +98,7 @@ def test_k4_reject_reason_ru_expanded(code: str, expected_substring: str) -> Non
 
 
 def test_k7_runtime_call_path_is_clean() -> None:
-    assert_runtime_call_path_is_clean() is None
+    assert assert_runtime_call_path_is_clean() is None
 
 
 def test_k7_validate_for_runtime_invokes_catalog_and_call_path(tmp_path: Path) -> None:

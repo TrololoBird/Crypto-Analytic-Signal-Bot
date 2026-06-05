@@ -256,7 +256,7 @@ async def test_get_signal_outcomes_delegates_to_query_module(tmp_path: Path) -> 
     repo = MemoryRepository(tmp_path / "bot.db", tmp_path / "data")
     await repo.initialize()
     with patch(
-        "bot.persistence.repository.memory.fetch_signal_outcome_rows",
+        "bot.persistence.repository._analytics.fetch_signal_outcome_rows",
         wraps=fetch_signal_outcome_rows,
     ) as fetch_mock:
         await repo.get_signal_outcomes(last_days=7, limit=5)

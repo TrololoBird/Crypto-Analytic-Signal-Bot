@@ -10,11 +10,9 @@ import logging
 from pathlib import Path
 
 try:
-    from scripts.common import bootstrap_repo_path
-except ModuleNotFoundError:
-    from common import bootstrap_repo_path
-
-bootstrap_repo_path()
+    import scripts.common  # noqa: F401
+except ModuleNotFoundError:  # pragma: no cover
+    import common  # noqa: F401
 
 from bot.diagnostics.facade import find_latest_rollup, summarize_rollup
 from bot.domain.config import load_settings

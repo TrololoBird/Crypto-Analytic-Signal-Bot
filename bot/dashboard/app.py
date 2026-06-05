@@ -15,6 +15,8 @@ from pathlib import Path
 from threading import Thread
 from typing import TYPE_CHECKING, Any, cast
 
+import polars as pl
+
 from bot.domain.labels import labels_payload
 from bot.runtime.errors import DEFENSIVE_EXC
 from bot.strategies import STRATEGY_CLASSES
@@ -1189,8 +1191,6 @@ class BotDashboard:
         if df is None:
             return []
         try:
-            import polars as pl
-
             if isinstance(df, pl.DataFrame) and not df.is_empty():
                 cols = set(df.columns)
                 time_col = (
@@ -1198,18 +1198,16 @@ class BotDashboard:
                 )
                 if time_col is None:
                     return []
-                out: list[dict[str, Any]] = []
-                for row in df.tail(200).to_dicts():
-                    out.append(
-                        {
-                            "time": row.get(time_col),
-                            "open": row.get("open"),
-                            "high": row.get("high"),
-                            "low": row.get("low"),
-                            "close": row.get("close"),
-                        }
-                    )
-                return out
+                return [
+                    {
+                        "time": row.get(time_col),
+                        "open": row.get("open"),
+                        "high": row.get("high"),
+                        "low": row.get("low"),
+                        "close": row.get("close"),
+                    }
+                    for row in df.tail(200).to_dicts()
+                ]
         except DEFENSIVE_EXC:
             return []
         return []

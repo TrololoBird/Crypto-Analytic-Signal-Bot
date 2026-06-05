@@ -8,6 +8,11 @@ from typing import Any
 
 import polars as pl
 
+from bot.domain.schemas import PreparedSymbol, UniverseSymbol
+from bot.features.prepare_frame import _prepare_frame
+from bot.runtime.errors import DEFENSIVE_EXC
+from bot.strategies import STRATEGY_CLASSES
+
 LOG = logging.getLogger("sl_forensic.strategy_recheck")
 
 # Setups that can be rechecked from OHLCV + stored context alone.
@@ -62,8 +67,6 @@ def _build_minimal_prepared(
     work_primary: pl.DataFrame,
     context: dict[str, Any],
 ) -> Any:
-    from bot.domain.schemas import PreparedSymbol, UniverseSymbol
-
     last_close = float(work_primary["close"][-1]) if work_primary.height else 0.0
     universe = UniverseSymbol(
         symbol=symbol,
@@ -110,7 +113,7 @@ def _is_enrichment_reject(reason: str) -> bool:
 async def recheck_strategy(
     setup_id: str,
     symbol: str,
-    timeframe: str,
+    _timeframe: str,
     candles: list[dict[str, Any]],
     signal_ts_ms: int,
     settings: Any,
@@ -118,8 +121,6 @@ async def recheck_strategy(
     context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Re-run detector on historical closed-candle slice."""
-    from bot.strategies import STRATEGY_CLASSES
-
     context = context or {}
     cls = next((c for c in STRATEGY_CLASSES if getattr(c, "setup_id", None) == setup_id), None)
     if cls is None:
@@ -152,8 +153,6 @@ async def recheck_strategy(
                 "reason": "insufficient history at confirmed signal bar",
             }
 
-        from bot.features.prepare_frame import _prepare_frame
-
         prepared_frame = _prepare_frame(slice_df)
         prepared = _build_minimal_prepared(
             symbol=symbol,
@@ -163,25 +162,24 @@ async def recheck_strategy(
 
         strategy = cls(settings=settings)
         result = strategy.detect(prepared, settings)
-
+    except DEFENSIVE_EXC as exc:
+        msg = str(exc)
+        if _is_enrichment_reject(msg):
+            return {"valid": None, "signal_count": 0, "reason": f"recheck_skipped: {msg}"}
+        LOG.info("recheck failed for %s/%s: %s", setup_id, symbol, exc)
+        return {"valid": None, "signal_count": 0, "reason": f"recheck_failed: {exc}"}
+    else:
         if result is None:
             return {
                 "valid": False,
                 "signal_count": 0,
                 "reason": "detector did not fire on confirmed historical slice",
             }
-
         return {
             "valid": True,
             "signal_count": 1,
             "reason": "detector fired on confirmed historical data",
         }
-    except Exception as exc:
-        msg = str(exc)
-        if _is_enrichment_reject(msg):
-            return {"valid": None, "signal_count": 0, "reason": f"recheck_skipped: {msg}"}
-        LOG.info("recheck failed for %s/%s: %s", setup_id, symbol, exc)
-        return {"valid": None, "signal_count": 0, "reason": f"recheck_failed: {exc}"}
 
 
 def ts_ms_from_iso(value: str | None) -> int | None:

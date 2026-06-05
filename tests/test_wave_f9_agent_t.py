@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
@@ -17,6 +19,7 @@ from bot.dashboard.live import (
     _cycle_delivered_count,
     _delivery_success_rows,
 )
+from bot.domain.schemas import PipelineResult
 from bot.runtime.cycle_runner import CycleRunner
 from bot.telemetry import TelemetryStore
 
@@ -63,6 +66,7 @@ def test_delivery_uncached_counts_success_not_all_attempts() -> None:
     live = DashboardLiveData(lambda: None)
 
     def _fake_iter(stem: str, *, max_rows: int, limit_files: int):
+        del max_rows, limit_files
         if stem == "delivery":
             yield {"symbol": "BTCUSDT", "setup_id": "ema_bounce", "delivery_status": "sent"}
             yield {"symbol": "ETHUSDT", "setup_id": "rsi_div", "delivery_status": "failed"}
@@ -82,6 +86,7 @@ def test_overview_session_delivered_uses_delivery_success_count() -> None:
     live = DashboardLiveData(lambda: None)
 
     def _fake_iter(stem: str, *, max_rows: int, limit_files: int):
+        del max_rows, limit_files
         if stem == "cycles":
             yield {
                 "candidate_count": 5,
@@ -100,7 +105,7 @@ def test_overview_session_delivered_uses_delivery_success_count() -> None:
         "Bot",
         (),
         {
-            "_shutdown": type("S", (), {"is_set": lambda self: False})(),
+            "_shutdown": type("S", (), {"is_set": lambda _self: False})(),
             "_shortlist": [],
             "_shortlist_source": "test",
             "settings": type(
@@ -195,10 +200,6 @@ def test_get_recent_signals_selected_not_labeled_sent(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_emergency_cycle_per_symbol_delivery_status_from_rejects() -> None:
-    from collections import Counter
-    from datetime import UTC, datetime
-
-    from bot.domain.schemas import PipelineResult
 
     bot = MagicMock()
     bot.settings.runtime.max_signals_per_cycle = 3

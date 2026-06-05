@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     import aiosqlite
 
+from bot.runtime.errors import DEFENSIVE_EXC
 from scripts.sl_forensic._classifier import (
     assess_closed_candle_validity,
     classify_sl,
@@ -217,7 +218,7 @@ async def enrich_sl_case(
                     case["strategy_recheck_valid"] = None
                     case["false_signal_recheck"] = None
                 case["strategy_recheck_reason"] = recheck.get("reason")
-        except Exception:
+        except DEFENSIVE_EXC:
             case.setdefault("entry_deviation_atr", 0.0)
             case.setdefault("entry_deviation_atr_mult", 0.0)
 

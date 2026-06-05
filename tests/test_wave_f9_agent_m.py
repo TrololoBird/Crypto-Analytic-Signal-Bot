@@ -189,7 +189,7 @@ def test_extended_order_block_scans_work_15m(mock_lob) -> None:
 
 @patch("bot.strategies.order_block._detect_order_block_extended")
 @patch("bot.strategies.order_block.detect_order_block", return_value=None)
-def test_order_block_setup_passes_spec_kwargs(_mock_spec, mock_extended) -> None:
+def test_order_block_setup_passes_spec_kwargs(mock_spec, mock_extended) -> None:
     prepared = _prepared()
     settings = BotSettings(tg_token="test", target_chat_id="1")
     defaults = OrderBlockSetup.DEFAULTS
@@ -203,6 +203,6 @@ def test_order_block_setup_passes_spec_kwargs(_mock_spec, mock_extended) -> None
         "order_block",
         "continuation",
     )
-    _mock_spec.assert_called_once()
-    assert _mock_spec.call_args.kwargs["ob_max_age"] == 55
-    assert _mock_spec.call_args.kwargs["touch_buffer_atr"] == pytest.approx(0.4)
+    mock_spec.assert_called_once()
+    assert mock_spec.call_args.kwargs["ob_max_age"] == 55
+    assert mock_spec.call_args.kwargs["touch_buffer_atr"] == pytest.approx(0.4)

@@ -17,6 +17,7 @@ from bot.market.proxy_bootstrap import (
     probe_ws_handshake,
     retry_network_after_failure,
 )
+from scripts import probe_binance_access
 from scripts.live_check_binance_api import PUBLIC_FDATA_PATHS, PUBLIC_REST_PATHS
 
 
@@ -144,7 +145,6 @@ def test_live_check_public_paths_include_futures_data() -> None:
 
 @pytest.mark.asyncio
 async def test_probe_binance_access_ws_mode(monkeypatch: pytest.MonkeyPatch) -> None:
-    from scripts import probe_binance_access
 
     ws_probe = AsyncMock(return_value=True)
     monkeypatch.setattr(probe_binance_access, "probe_ws_handshake", ws_probe)
@@ -155,7 +155,6 @@ async def test_probe_binance_access_ws_mode(monkeypatch: pytest.MonkeyPatch) -> 
 
 @pytest.mark.asyncio
 async def test_probe_binance_access_both_mode(monkeypatch: pytest.MonkeyPatch) -> None:
-    from scripts import probe_binance_access
 
     monkeypatch.setattr(probe_binance_access, "_probe_rest_network", AsyncMock(return_value=0))
     monkeypatch.setattr(probe_binance_access, "_probe_ws_network", AsyncMock(return_value=0))
@@ -167,7 +166,6 @@ async def test_probe_binance_access_both_mode(monkeypatch: pytest.MonkeyPatch) -
 async def test_probe_binance_access_both_mode_fails_when_ws_down(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from scripts import probe_binance_access
 
     monkeypatch.setattr(probe_binance_access, "_probe_rest_network", AsyncMock(return_value=0))
     monkeypatch.setattr(probe_binance_access, "_probe_ws_network", AsyncMock(return_value=2))

@@ -10,14 +10,12 @@ from typing import TYPE_CHECKING, Any
 
 try:
     from scripts.common import (
-        bootstrap_repo_path,
         configure_script_logging,
         load_symbols_from_run,
         resolve_symbols,
     )
 except ModuleNotFoundError:  # pragma: no cover - direct script execution
     from common import (
-        bootstrap_repo_path,
         configure_script_logging,
         load_symbols_from_run,
         resolve_symbols,
@@ -479,7 +477,6 @@ async def _run(
 
 
 def main() -> None:
-    bootstrap_repo_path()
     parser = argparse.ArgumentParser(
         description="Live prepare->strategy->confirmation->filters check without Telegram delivery"
     )

@@ -16,11 +16,9 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from scripts.common import bootstrap_repo_path
-except ModuleNotFoundError:
-    from common import bootstrap_repo_path
-
-bootstrap_repo_path()
+    import scripts.common  # noqa: F401
+except ModuleNotFoundError:  # pragma: no cover
+    import common  # noqa: F401
 
 import tomllib
 

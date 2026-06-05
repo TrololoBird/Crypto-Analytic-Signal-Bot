@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING, Any
 import aiohttp
 
 from bot.domain.labels import tracking_event_ru
+from bot.domain.limit_entry import resolve_late_entry_chase_pct
+from bot.runtime.delivery_session import delivery_session_snapshot
 from bot.runtime.errors import DEFENSIVE_EXC, defensive_exc_types
 
 from ..dashboard.mobile_summary import (
@@ -49,6 +51,7 @@ from ..persistence.db_status import (
     collect_db_status_from_conn,
     format_db_status_html,
 )
+from .startup_digest import format_startup_tracking_digest
 
 if TYPE_CHECKING:
     from ..runtime.bot import SignalBot
@@ -556,11 +559,7 @@ class TelegramOperatorConsole:
         await self.send_html(chat_id, "\n".join(lines))
 
     async def _reply_delivery(self, chat_id: int, payload: dict[str, Any]) -> None:
-        from .delivery_alerts import delivery_session_snapshot
-
         today = payload.get("today") or {}
-        from bot.domain.limit_entry import resolve_late_entry_chase_pct
-
         chase = resolve_late_entry_chase_pct(self._bot.settings)
         snap = delivery_session_snapshot(self._bot)
         lines = [
@@ -651,8 +650,6 @@ class TelegramOperatorConsole:
             )
         summary = getattr(self._bot, "_startup_tracking_summary", None)
         if summary and bool(getattr(op_cfg, "send_startup_report", True)):
-            from .startup_digest import format_startup_tracking_digest
-
             await self.send_html_to_operators(format_startup_tracking_digest(summary))
 
         while not stop_event.is_set():

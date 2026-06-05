@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import TYPE_CHECKING
 
+from bot.delivery.telegram_routing import operator_dm_enabled
 from bot.runtime.errors import DEFENSIVE_EXC
 
 from ..dashboard.mobile_summary import build_mobile_summary, format_mobile_digest_text
@@ -30,10 +32,6 @@ class OperatorDigestRunner:
         return self._console
 
     async def maybe_send_digest(self, *, interval_seconds: float = 1800.0) -> None:
-        import time
-
-        from bot.delivery.telegram_routing import operator_dm_enabled
-
         if not operator_dm_enabled(self._bot, "send_digest"):
             return
         op_cfg = getattr(self._bot.settings.notifiers, "telegram_operator", None)

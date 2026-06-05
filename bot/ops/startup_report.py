@@ -11,7 +11,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
+from bot.delivery.telegram_routing import send_operator_html
 from bot.runtime.errors import DEFENSIVE_EXC
+from bot.runtime.telegram_operator import operator_console_enabled
 
 from ..dashboard.operator_context import (
     format_market_from_display_snapshot,
@@ -1364,8 +1366,6 @@ async def _send_telegram_message(settings: BotSettings, text: str) -> bool:
     """Send startup/daily report to operator DMs only (never the signal channel)."""
     if not settings.tg_token.strip():
         return False
-    from bot.delivery.telegram_routing import send_operator_html
-    from bot.runtime.telegram_operator import operator_console_enabled
 
     class _OperatorBot:
         def __init__(self) -> None:

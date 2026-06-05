@@ -14,6 +14,7 @@ if str(_ROOT) not in sys.path:
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    del config
     if os.environ.get("PYTEST_LIVE") == "1":
         return
     skip = pytest.mark.skip(reason="Set PYTEST_LIVE=1 to run live Binance public API tests")

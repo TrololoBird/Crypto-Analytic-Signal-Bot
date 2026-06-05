@@ -10,9 +10,9 @@ from collections import Counter
 from pathlib import Path
 
 try:
-    from scripts.common import bootstrap_repo_path, configure_script_logging
+    from scripts.common import configure_script_logging
 except ModuleNotFoundError:  # pragma: no cover
-    from common import bootstrap_repo_path, configure_script_logging
+    from common import configure_script_logging
 
 from bot.domain.config import load_settings
 
@@ -22,8 +22,8 @@ LOG = configure_script_logging("scripts.funnel_report")
 def _iter_jsonl(path: Path):
     if not path.exists():
         return
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
         if not line:
             continue
         try:
@@ -119,7 +119,6 @@ def build_report(*, analysis_dir: Path, run_id: str) -> dict[str, object]:
 
 
 def main() -> int:
-    bootstrap_repo_path()
     parser = argparse.ArgumentParser(description="Funnel report for latest telemetry run")
     parser.add_argument("--config", default="config.toml")
     parser.add_argument("--run-id", default="", help="Explicit run id under telemetry/runs/")

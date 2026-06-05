@@ -8,6 +8,9 @@ from typing import Any, Self
 
 import aiohttp
 
+from bot.domain.config import load_settings
+from bot.runtime.errors import DEFENSIVE_EXC
+
 LOG = logging.getLogger("sl_forensic.fetcher")
 
 # Interval duration in milliseconds for window sizing.
@@ -39,12 +42,10 @@ def _resolve_proxy(explicit: str | None) -> str | None:
     if explicit:
         return explicit
     try:
-        from bot.domain.config import load_settings
-
         settings = load_settings()
         urls = settings.network.effective_proxy_urls()
         return urls[0] if urls else None
-    except Exception:
+    except DEFENSIVE_EXC:
         return None
 
 

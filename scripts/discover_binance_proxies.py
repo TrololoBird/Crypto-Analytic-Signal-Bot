@@ -11,9 +11,9 @@ from pathlib import Path
 import aiohttp
 
 try:
-    from scripts.common import bootstrap_repo_path, configure_script_logging
+    from scripts.common import configure_script_logging
 except ModuleNotFoundError:  # pragma: no cover
-    from common import bootstrap_repo_path, configure_script_logging
+    from common import configure_script_logging
 
 from bot.domain.config import NetworkConfig
 from bot.market.data import BinanceFuturesMarketData, MarketDataUnavailable
@@ -239,7 +239,6 @@ failover_cooldown_seconds = 300"""
 
 
 def main() -> None:
-    bootstrap_repo_path()
     parser = argparse.ArgumentParser(description="Discover Binance proxies and update config.toml")
     parser.add_argument("--config", default="config.toml", help="Path to config.toml")
     parser.add_argument(

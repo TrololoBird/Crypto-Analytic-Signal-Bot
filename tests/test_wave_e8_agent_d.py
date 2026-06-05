@@ -11,7 +11,8 @@ import pytest
 from bot.delivery.confluence import MIN_HISTORY_SAMPLES, ConfluenceEngine
 from bot.delivery.scoring import _mtf_alignment, _structure_clarity
 from bot.domain.config import BotSettings
-from bot.domain.schemas import PreparedSymbol, Signal, UniverseSymbol
+from bot.domain.schemas import PreparedSymbol, Signal, SymbolFrames, UniverseSymbol
+from bot.features.prepare import prepare_symbol
 from bot.features.prepare_frame import (
     _log_indicator_fallback,
     reset_frame_indicator_fallbacks,
@@ -190,8 +191,6 @@ def test_indicator_fallback_flags_roundtrip() -> None:
 
 
 def test_prepare_symbol_sets_data_quality_flags() -> None:
-    from bot.domain.schemas import SymbolFrames
-    from bot.features.prepare import prepare_symbol
 
     rows = 240
     frame = pl.DataFrame(

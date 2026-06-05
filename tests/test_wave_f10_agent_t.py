@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,6 +14,8 @@ import pytest
 from bot.cli import prune_run_dirs
 from bot.dashboard.app import BotDashboard
 from bot.dashboard.live import DashboardLiveData
+from bot.domain.schemas import PipelineResult
+from bot.runtime.bot import SignalBot
 from bot.runtime.delivery_orchestrator import DeliveryOrchestrator
 from bot.runtime.telemetry_manager import TelemetryManager
 from bot.telemetry import (
@@ -47,7 +50,6 @@ def test_finalize_run_metadata_writes_ended_at_and_totals(tmp_path: Path) -> Non
 
 @pytest.mark.asyncio
 async def test_bot_close_finalizes_run_metadata(tmp_path: Path) -> None:
-    from bot.runtime.bot import SignalBot
 
     run_id = "run_bot_close"
     telemetry = TelemetryStore(tmp_path / "telemetry", run_id=run_id)
@@ -102,7 +104,6 @@ def test_prune_run_dirs_uses_metadata_started_at_not_mtime(tmp_path: Path) -> No
     )
     # Fresh mtime on old_run would normally protect it from mtime-based pruning.
     old_touch = (now + timedelta(days=1)).timestamp()
-    import os
 
     os.utime(old_run, (old_touch, old_touch))
 
@@ -146,8 +147,6 @@ def test_telemetry_manager_cycles_row_has_slim_buffer_fields() -> None:
     bot.client.state_snapshot.return_value = {}
     bot.telemetry = MagicMock()
 
-    from bot.domain.schemas import PipelineResult
-
     manager = TelemetryManager(bot)
     result = PipelineResult(
         symbol="BTCUSDT",
@@ -190,7 +189,7 @@ def test_runtime_endpoint_exposes_slim_buffer_fields() -> None:
         _signal_diagnostics=None,
     )
     live._bot_getter = lambda: bot
-    live._iter_recent = lambda *args, **kwargs: []  # type: ignore[method-assign]
+    live._iter_recent = lambda *_args, **_kwargs: []  # type: ignore[method-assign]
 
     payload = live._runtime_uncached()
     assert payload["message_buffer_size"] == 11

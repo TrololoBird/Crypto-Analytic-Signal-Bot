@@ -13,11 +13,9 @@ import time
 from pathlib import Path
 
 try:
-    from scripts.common import bootstrap_repo_path
-except ModuleNotFoundError:
-    from common import bootstrap_repo_path
-
-bootstrap_repo_path()
+    import scripts.common  # noqa: F401
+except ModuleNotFoundError:  # pragma: no cover
+    import common  # noqa: F401
 
 from bot.domain.config import load_settings
 from bot.ops.pid_utils import pid_is_alive
@@ -40,11 +38,13 @@ def _runtime_env() -> dict[str, str]:
 
 
 def _start_bot(*, config_path: Path) -> subprocess.Popen[bytes]:
+    log_path = Path("logs/agent_live_run.log")
+    log_path.parent.mkdir(parents=True, exist_ok=True)
     return subprocess.Popen(
         [sys.executable, "main.py", "run", "--config", str(config_path)],
         cwd=Path.cwd(),
         env=_runtime_env(),
-        stdout=open("logs/agent_live_run.log", "a", encoding="utf-8"),
+        stdout=log_path.open("a", encoding="utf-8"),
         stderr=subprocess.STDOUT,
     )
 

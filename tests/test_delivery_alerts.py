@@ -7,9 +7,9 @@ from types import SimpleNamespace
 from bot.domain.config import BotSettings, DeliveryConfig
 from bot.runtime.delivery_alerts import (
     _update_zero_delivery_streak,
-    delivery_session_snapshot,
     record_cycle_delivery_outcome,
 )
+from bot.runtime.delivery_session import delivery_session_snapshot
 
 
 def _bot(*, threshold: int = 3) -> SimpleNamespace:

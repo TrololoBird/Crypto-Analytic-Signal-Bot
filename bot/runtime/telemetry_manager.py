@@ -10,6 +10,8 @@ from bot.runtime.delivery_orchestrator import DELIVERY_SUCCESS_STATUSES
 from bot.runtime.errors import DEFENSIVE_EXC
 from bot.telemetry import apply_slim_message_buffer
 
+from .delivery_alerts import record_cycle_delivery_outcome
+
 if TYPE_CHECKING:
     from ..domain.schemas import PipelineResult, Signal
     from ..engine import StrategyDecision
@@ -576,8 +578,6 @@ class TelemetryManager:
                 candidates=candidates,
                 rejected=rejected,
             )
-
-        from .delivery_alerts import record_cycle_delivery_outcome
 
         record_cycle_delivery_outcome(self._bot, delivered_count=delivered_count)
 

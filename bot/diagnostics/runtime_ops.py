@@ -16,14 +16,9 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from bot.runtime.health_manager import HealthManager
 from bot.strategies import STRATEGY_CLASSES
 
-if TYPE_CHECKING:
-    from bot.diagnostics.analyzer_ops import PerformanceMetrics, WinRateCalculator
-    from bot.engine.registry import StrategyRegistry
-    from bot.runtime.bot import SignalBot
-
-# --- from runtime/health.py ---
 if TYPE_CHECKING:
     from bot.diagnostics.analyzer_ops import PerformanceMetrics, WinRateCalculator
     from bot.engine.registry import StrategyRegistry
@@ -35,8 +30,6 @@ HEALTH_CHECK_TIMEOUT_SECONDS = 5.0  # seconds: cap each component health probe
 
 async def bot_runtime_health_check(bot: SignalBot) -> dict[str, Any]:
     """Adapter for live diagnostics: delegate to :class:`HealthManager`."""
-    from bot.runtime.health_manager import HealthManager
-
     return await HealthManager(bot).health_check()
 
 
@@ -296,72 +289,7 @@ class HealthChecker:
 
 
 # --- Market radar funnel (Tier-0 !ticker@arr ingest) ---
-
-_STALE_INGEST_SECONDS = 120.0
-_STALE_SYMBOL_RATIO_ALERT = 0.35
-_MIN_SYMBOLS_FOR_ALERT = 50
-
-
-def assess_radar_store(
-    store: object | None,
-    *,
-    config: object,
-    now: float | None = None,
-) -> dict[str, Any]:
-    """JSON-safe radar health for HealthManager, telemetry, startup_report."""
-    import time as _time
-
-    enabled = bool(getattr(config, "enabled", False))
-    if store is None:
-        return {"enabled": enabled, "attached": False, "status": "unavailable"}
-    if not enabled:
-        return {"enabled": False, "attached": True, "status": "disabled"}
-
-    ts = float(now if now is not None else _time.monotonic())
-    total = int(getattr(store, "symbol_count", 0) or 0)
-    tiers = store.snapshot_summary() if hasattr(store, "snapshot_summary") else {}
-    stale = recent = flagged = 0
-    iter_states = getattr(store, "iter_states", None)
-    states = list(iter_states()) if callable(iter_states) else []
-    for state in states:
-        if getattr(state, "flags", ()):
-            flagged += 1
-        age = ts - float(getattr(state, "last_update_ts", 0.0) or 0.0)
-        if age > _STALE_INGEST_SECONDS:
-            stale += 1
-        else:
-            recent += 1
-
-    stale_ratio = (stale / total) if total else 0.0
-    status = "healthy"
-    alerts: list[str] = []
-    if total < _MIN_SYMBOLS_FOR_ALERT:
-        status = "degraded"
-        alerts.append("low_symbol_count")
-    if total >= _MIN_SYMBOLS_FOR_ALERT and stale_ratio >= _STALE_SYMBOL_RATIO_ALERT:
-        status = "degraded"
-        alerts.append("stale_ingest_ratio_high")
-    if flagged == 0 and total >= _MIN_SYMBOLS_FOR_ALERT:
-        status = "degraded"
-        alerts.append("zero_screener_flags")
-
-    return {
-        "enabled": True,
-        "attached": True,
-        "status": status,
-        "alerts": alerts,
-        "symbol_count": total,
-        "tiers": tiers,
-        "flagged_count": flagged,
-        "recent_ingest_count": recent,
-        "stale_ingest_count": stale,
-        "stale_ingest_ratio": round(stale_ratio, 4),
-        "last_tier_cycle_age_s": round(
-            max(0.0, ts - float(getattr(store, "_last_tier_cycle_ts", 0.0) or 0.0)),
-            2,
-        ),
-    }
-
+# assess_radar_store imported from bot.diagnostics.radar_health (see top of module).
 
 # --- from runtime/metrics.py ---
 LOG = logging.getLogger("bot.core.diagnostics.metrics")

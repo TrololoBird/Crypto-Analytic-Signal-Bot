@@ -10,7 +10,11 @@ import pytest
 
 from bot.domain.config import NotifierWebhookConfig
 from bot.ops.pid_utils import acquire_pid_lock, read_pid_file, release_pid_lock
-from bot.persistence.db_status import DbStatusSummary, format_db_status_html
+from bot.persistence.db_status import (
+    DbStatusSummary,
+    collect_db_status_from_conn,
+    format_db_status_html,
+)
 from scripts.validate_config import _ops_webhook_auto_enable_warning
 
 
@@ -100,7 +104,6 @@ def test_run_monitored_bot_uses_monitor_lock_path() -> None:
 
 @pytest.mark.asyncio
 async def test_collect_db_status_from_conn() -> None:
-    from bot.persistence.db_status import collect_db_status_from_conn
 
     class _Cursor:
         async def fetchall(self) -> list[tuple[str, int]]:

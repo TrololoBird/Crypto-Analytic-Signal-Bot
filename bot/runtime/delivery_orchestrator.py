@@ -19,9 +19,20 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from bot.delivery import contract as _delivery_contract_module
+from bot.delivery.confluence import ConfluenceEngine
+from bot.delivery.ops_webhook import notify_ops_delivery_failed, notify_ops_tier_cap_starvation
+from bot.delivery.telegram_routing import (
+    operator_dm_enabled,
+    send_operator_analytics_companion,
+    should_send_channel_analytics_companion,
+)
 from bot.delivery.tiers import _finite_score, decide_with_caps
 from bot.delivery.tiers import rank_key as tier_rank_key
-from bot.domain.delivery_policy import r_class_blocks_action, resolve_bear_regime
+from bot.domain.delivery_policy import (
+    is_positioning_setup,
+    r_class_blocks_action,
+    resolve_bear_regime,
+)
 from bot.domain.mtf import (
     BREAKOUT_PROFILE,
     REVERSAL_PROFILES,
@@ -32,6 +43,9 @@ from bot.persistence.outcomes import build_prepared_feature_snapshot, extract_fe
 from bot.runtime.errors import DEFENSIVE_EXC
 
 from .merge import MetaSignalMerger
+from .sl_postmortem import build_sl_postmortem_html
+from .telegram_operator import TelegramOperatorConsole, operator_console_enabled
+from .watch_escalation import maybe_notify_watch_escalation
 
 if TYPE_CHECKING:
     from bot.delivery.contract import SignalContractIssue
@@ -244,8 +258,6 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         prepared: PreparedSymbol,
         setup_id: str = "",
     ) -> tuple[bool, dict[str, object]]:
-        from bot.domain.delivery_policy import is_positioning_setup
-
         details: dict[str, object] = {}
         micro = getattr(prepared, "microprice_bias", None)
         agg = getattr(prepared, "agg_trade_delta_30s", None)
@@ -483,8 +495,6 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         }
         boolean_pass = confirmation_count >= required
         if use_weighted_confluence and settings is not None and prepared is not None:
-            from bot.delivery.confluence import ConfluenceEngine
-
             engine = confluence_engine or ConfluenceEngine(settings)
             conf_result = engine.score(signal, prepared)
             details["weighted_confluence_bridge"] = True
@@ -505,16 +515,10 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
     async def _send_sl_postmortem_to_operators(self, events: list[SignalTrackingEvent]) -> None:
         if not bool(getattr(self._bot.settings.delivery, "sl_postmortem_enabled", True)):
             return
-        from bot.delivery.telegram_routing import operator_dm_enabled
-
-        from .telegram_operator import TelegramOperatorConsole, operator_console_enabled
-
         if not operator_console_enabled(self._bot):
             return
         if not operator_dm_enabled(self._bot, "send_sl_postmortem"):
             return
-        from .sl_postmortem import build_sl_postmortem_html
-
         console = getattr(self._bot, "_operator_console", None)
         if console is None:
             console = TelegramOperatorConsole(self._bot)
@@ -833,8 +837,6 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
                 )
                 drop_reason = tier_decision.drop_reason or "tier_cap_rejected"
                 if drop_reason in {"action_cap_reached", "watch_cap_reached"}:
-                    from bot.delivery.ops_webhook import notify_ops_tier_cap_starvation
-
                     await notify_ops_tier_cap_starvation(
                         self._bot,
                         symbol=signal.symbol,
@@ -1200,8 +1202,6 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
                             "delivery_reason": item.reason,
                         }
                     )
-                    from bot.delivery.ops_webhook import notify_ops_delivery_failed
-
                     await notify_ops_delivery_failed(
                         self._bot,
                         symbol=item.signal.symbol,
@@ -1270,16 +1270,9 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
                         ),
                     )
                 if delivery_tier == "watch":
-                    from .watch_escalation import maybe_notify_watch_escalation
-
                     await maybe_notify_watch_escalation(self._bot, item.signal, prepared)
                 notifier_settings = getattr(self._bot.settings, "notifiers", None)
                 if notifier_settings is not None:
-                    from bot.delivery.telegram_routing import (
-                        send_operator_analytics_companion,
-                        should_send_channel_analytics_companion,
-                    )
-
                     if should_send_channel_analytics_companion(
                         notifier_settings,
                         tier=delivery_tier,

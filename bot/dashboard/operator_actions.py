@@ -265,7 +265,12 @@ async def action_refresh_shortlist(bot: SignalBot) -> dict[str, Any]:
     try:
         shortlist = await bot._do_refresh_shortlist()
         await bot._sync_ws_tracked_symbols()
-        asyncio.create_task(bot._preload_shortlist_frames(), name="operator_preload_frames")
+        preload_task = asyncio.create_task(
+            bot._preload_shortlist_frames(),
+            name="operator_preload_frames",
+        )
+        bot._background_tasks.add(preload_task)
+        preload_task.add_done_callback(bot._background_tasks.discard)
     except DEFENSIVE_EXC as exc:
         return {"error": str(exc)}
     elapsed = (datetime.now(UTC) - started).total_seconds()

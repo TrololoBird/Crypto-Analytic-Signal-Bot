@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import UTC, datetime
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import polars as pl
@@ -11,6 +12,7 @@ import pytest
 
 from bot.features.prepare_frame import add_session_cvd
 from bot.strategies._common import with_spec_columns
+from scripts.strategy_shortlist_matrix import live_shortlist_fit_counts
 
 
 def _two_day_flow_frame() -> pl.DataFrame:
@@ -48,7 +50,6 @@ def test_spec_cvd_uses_session_cvd_column() -> None:
 
 @pytest.mark.asyncio
 async def test_live_shortlist_fit_counts_warms_basis_when_requested() -> None:
-    from scripts.strategy_shortlist_matrix import live_shortlist_fit_counts
 
     fake_shortlist = [MagicMock(symbol="BTCUSDT"), MagicMock(symbol="ETHUSDT")]
     fake_summary = {"strategy_fit_counts": {"cvd_divergence": 2}, "gate_passed": 2}
@@ -84,7 +85,6 @@ async def test_live_shortlist_fit_counts_warms_basis_when_requested() -> None:
 
 
 def test_nightly_calibration_includes_basis_by_default() -> None:
-    from pathlib import Path
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, default=Path("config.toml"))

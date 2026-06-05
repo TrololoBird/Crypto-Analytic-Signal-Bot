@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from bot.domain.labels import reject_reason_ru, result_label_ru
+from bot.runtime.errors import DEFENSIVE_EXC
 
 from .tracking_view import serialize_tracking_signal
 
@@ -97,13 +98,13 @@ async def build_today_summary(bot: Any, live_data: DashboardLiveData | None) -> 
         try:
             raw = await repo.get_tracking_stats()
             stats.update({k: int(raw.get(k) or 0) for k in stats})
-        except Exception:
+        except DEFENSIVE_EXC:
             pass
         try:
             rows = await repo.get_active_signals(include_closed=False)
             stats["pending"] = sum(1 for r in rows if r.get("status") == "pending")
             stats["active"] = sum(1 for r in rows if r.get("status") == "active")
-        except Exception:
+        except DEFENSIVE_EXC:
             pass
 
     overview = live_data.overview() if live_data is not None else {}
@@ -136,21 +137,21 @@ async def build_signal_history(bot: Any, *, days: int = 7, limit: int = 30) -> l
 
     try:
         outcomes = await repo.get_signal_outcomes(since=since, limit=limit)
-        for row in outcomes:
-            history.append(
-                {
-                    "symbol": row.get("symbol"),
-                    "setup_id": row.get("setup_id"),
-                    "direction": row.get("direction"),
-                    "result": row.get("result"),
-                    "result_ru": result_label_ru(str(row.get("result") or "")),
-                    "pnl_pct": row.get("pnl_pct"),
-                    "closed_at": row.get("closed_at") or row.get("created_at"),
-                    "tracking_id": row.get("tracking_id"),
-                    "source": "outcome",
-                }
-            )
-    except Exception:
+        history.extend(
+            {
+                "symbol": row.get("symbol"),
+                "setup_id": row.get("setup_id"),
+                "direction": row.get("direction"),
+                "result": row.get("result"),
+                "result_ru": result_label_ru(str(row.get("result") or "")),
+                "pnl_pct": row.get("pnl_pct"),
+                "closed_at": row.get("closed_at") or row.get("created_at"),
+                "tracking_id": row.get("tracking_id"),
+                "source": "outcome",
+            }
+            for row in outcomes
+        )
+    except DEFENSIVE_EXC:
         pass
 
     if len(history) < limit:
@@ -187,7 +188,7 @@ async def build_signal_history(bot: Any, *, days: int = 7, limit: int = 30) -> l
                 )
                 if len(history) >= limit:
                     break
-        except Exception:
+        except DEFENSIVE_EXC:
             pass
 
     history.sort(key=lambda item: str(item.get("closed_at") or ""), reverse=True)
@@ -203,7 +204,7 @@ async def build_user_summary(bot: Any, live_data: DashboardLiveData | None) -> J
         try:
             active = await repo.get_active_signals(include_closed=False)
             open_rows = [serialize_tracking_signal(row, bot) for row in active[:10]]
-        except Exception:
+        except DEFENSIVE_EXC:
             pass
     return {
         "today": today,

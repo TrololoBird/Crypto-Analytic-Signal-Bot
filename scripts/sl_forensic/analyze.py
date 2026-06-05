@@ -15,17 +15,18 @@ import argparse
 import asyncio
 import json
 import logging
-import sys
 import uuid
+from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import aiosqlite
 
-ROOT = Path(__file__).resolve().parents[2]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+try:
+    import _bootstrap
+except ModuleNotFoundError:  # pragma: no cover
+    from scripts.sl_forensic import _bootstrap  # noqa: F401
 
 from bot.domain.config import load_settings
 from bot.migrations import migrate_db
@@ -40,6 +41,7 @@ from scripts.sl_forensic._classifier import (
 )
 from scripts.sl_forensic._confirmed_candle import infer_confirmed_candle
 from scripts.sl_forensic._fetcher import CandleFetcher
+from scripts.sl_forensic._paths import ROOT
 from scripts.sl_forensic._reporter import generate_aggregate_report
 from scripts.sl_forensic._strategy_recheck import recheck_strategy, ts_ms_from_iso
 
@@ -380,8 +382,6 @@ def _print_summary(cases: list[dict[str, Any]]) -> None:
         if c.get("sl_type") in {"STOP_HUNT", "IMMEDIATE_ADVERSE"}
     ]
     if fixable:
-        from collections import Counter
-
         common_type, count = Counter(fixable).most_common(1)[0]
         print(f"\nMost common fixable type: {common_type[0]}/{common_type[1]} ({count} cases)")
 
@@ -429,7 +429,8 @@ async def main() -> int:
                     anchor_ts = signal_ts or sl_ts
                     if anchor_ts is None:
                         LOG.warning(
-                            "skip candle fetch | tracking_id=%s symbol=%s reason=missing_timestamps",
+                            "skip candle fetch | tracking_id=%s symbol=%s "
+                            "reason=missing_timestamps",
                             tracking_id,
                             symbol,
                         )
@@ -575,8 +576,6 @@ async def main() -> int:
     print(f"\nReport written: {report_path}")
 
     summary_lines = []
-    from collections import Counter
-
     type_counts = Counter(str(c.get("sl_type") or "UNKNOWN") for c in cases)
     for sl_type, count in type_counts.most_common():
         summary_lines.append(f"- {sl_type}: {count}")

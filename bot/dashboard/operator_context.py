@@ -308,7 +308,8 @@ async def format_operator_health_text(bot: SignalBot) -> str:
         (
             f"Fresh tickers <code>{health.get('fresh_tickers') or 0}</code> · "
             f"stale klines <code>{health.get('stale_kline_streams') or 0}</code> · "
-            f"last kline age <code>{round(float(health.get('last_kline_event_age_seconds') or 0), 1)}s</code>"
+            "last kline age "
+            f"<code>{round(float(health.get('last_kline_event_age_seconds') or 0), 1)}s</code>"
         ),
     ]
     radar = health.get("radar") if isinstance(health.get("radar"), dict) else {}
@@ -320,17 +321,16 @@ async def format_operator_health_text(bot: SignalBot) -> str:
             f"tiers=<code>{html.escape(str(radar.get('tiers') or {}))}</code>"
         )
     if ws_snap:
-        lines.append(
-            f"WS lag <code>{ws_snap.get('latency_ms') or ws_snap.get('current_latency_ms') or '—'}ms</code> · "
-            f"streams <code>{ws_snap.get('active_streams') or ws_snap.get('stream_count') or '—'}</code>"
-        )
+        ws_lag = ws_snap.get("latency_ms") or ws_snap.get("current_latency_ms") or "—"
+        ws_streams = ws_snap.get("active_streams") or ws_snap.get("stream_count") or "—"
+        lines.append(f"WS lag <code>{ws_lag}ms</code> · streams <code>{ws_streams}</code>")
     if rest_pause:
         lines.append(html.escape(rest_pause))
     lines.append(f"<i>{datetime.now(UTC).strftime('%H:%M:%S UTC')}</i>")
     return "\n".join(lines)
 
 
-async def format_operator_audit_text(bot: SignalBot, live_data: DashboardLiveData | None) -> str:
+async def format_operator_audit_text(_bot: SignalBot, live_data: DashboardLiveData | None) -> str:
     if live_data is None:
         return "<b>Audit</b>\nLive data недоступна."
 
@@ -367,8 +367,7 @@ async def format_operator_audit_text(bot: SignalBot, live_data: DashboardLiveDat
     plan = audit.get("action_plan") or []
     if plan:
         lines.append("<b>Action</b>")
-        for item in plan[:3]:
-            lines.append(f"• {html.escape(str(item))}")
+        lines.extend(f"• {html.escape(str(item))}" for item in plan[:3])
     return "\n".join(lines)
 
 
@@ -389,13 +388,15 @@ def format_operator_policy_text(bot: SignalBot) -> str:
             f"SL pause: <code>{getattr(intel, 'max_consecutive_stop_losses', 3)}</code> losses / "
             f"<code>{getattr(intel, 'stop_loss_pause_hours', 5)}h</code>"
         ),
-        f"Shortlist unified: <code>{getattr(universe, 'shortlist_unified_routing', False)}</code> · "
+        "Shortlist unified: "
+        f"<code>{getattr(universe, 'shortlist_unified_routing', False)}</code> · "
         f"size target <code>{getattr(universe, 'shortlist_size', '—')}</code>",
         f"Notifier channel: <code>{getattr(notifiers, 'provider', 'telegram')}</code>",
         f"Operator DMs: market=<code>{getattr(op, 'send_market_context', True)}</code> "
         f"digest=<code>{getattr(op, 'send_digest', True)}</code> "
         f"SL=<code>{getattr(op, 'send_sl_postmortem', True)}</code>",
-        f"Operator IDs: <code>{len(getattr(settings, 'operator_user_ids', ()) or ())}</code> configured",
+        "Operator IDs: "
+        f"<code>{len(getattr(settings, 'operator_user_ids', ()) or ())}</code> configured",
         "<i>Read-only · правки через config.toml</i>",
     ]
     return "\n".join(lines)
@@ -407,12 +408,13 @@ def format_operator_cycles_text(
     overview = overview or {}
     today = payload.get("today") or {}
     last_cycle = overview.get("last_cycle") if isinstance(overview.get("last_cycle"), dict) else {}
+    selected_count = last_cycle.get("selected_count") or last_cycle.get("selected_signals") or 0
     lines = [
         "<b>Pipeline cycles</b>",
         f"Last cycle: <code>{html.escape(str(last_cycle.get('ts') or '—'))}</code>",
         (
             f"Candidates <code>{last_cycle.get('candidate_count') or 0}</code> · "
-            f"selected <code>{last_cycle.get('selected_count') or last_cycle.get('selected_signals') or 0}</code> · "
+            f"selected <code>{selected_count}</code> · "
             f"delivered <code>{last_cycle.get('delivered_count') or 0}</code>"
         ),
         (

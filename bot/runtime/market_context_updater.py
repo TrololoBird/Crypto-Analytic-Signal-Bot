@@ -10,6 +10,7 @@ import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
+from bot.delivery.telegram_routing import operator_dm_enabled, send_operator_html
 from bot.market.data import BinanceFuturesMarketData
 from bot.regime.composite_regime import build_minimal_regime_frame_4h
 from bot.runtime.errors import DEFENSIVE_EXC
@@ -964,8 +965,6 @@ class MarketContextUpdater:
         ticker_rows: list[dict[str, Any]],
         shortlist: list[UniverseSymbol],
     ) -> None:
-        from bot.delivery.telegram_routing import operator_dm_enabled, send_operator_html
-
         if not operator_dm_enabled(self._bot, "send_market_context"):
             return
 

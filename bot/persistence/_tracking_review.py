@@ -7,7 +7,7 @@ import logging
 import time
 from bisect import bisect_right
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import polars as pl
 
@@ -18,13 +18,10 @@ from ..domain.limit_entry import (
     should_activate_limit_entry,
     should_activate_limit_fill_price,
 )
+from ..domain.schemas import AggTrade
 from ..market.data import MarketDataUnavailable
 from ..persistence.sl_diagnostics import classify_stop_loss_root_cause
 from ..persistence.tracked import TrackedSignalState, parse_state_dt
-
-if TYPE_CHECKING:
-    from ..domain.schemas import AggTrade
-
 
 LOG = logging.getLogger("bot.tracking")
 
@@ -903,8 +900,6 @@ class TPSLReviewMixin:
         """Real-time tracking on aggTrade ticks (pending zone touch + active TP/SL)."""
         if not self.settings.tracking.enabled:
             return []
-        from ..domain.schemas import AggTrade
-
         async with self._symbol_review_lock(symbol):
             tracked_rows = await self._active_signals(symbol=symbol)
             if not tracked_rows:

@@ -18,11 +18,9 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from scripts.common import bootstrap_repo_path
-except ModuleNotFoundError:
-    from common import bootstrap_repo_path
-
-bootstrap_repo_path()
+    import scripts.common  # noqa: F401
+except ModuleNotFoundError:  # pragma: no cover
+    import common  # noqa: F401
 
 from bot.diagnostics.facade import build_zero_hit_triage
 from bot.domain.config import load_settings
@@ -97,8 +95,12 @@ async def collect_db_status_report(*, config: Path, output: Path) -> dict[str, A
         "outcome_counts": dict(summary.outcome_counts),
         "outcomes_total": summary.outcomes_total,
     }
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    await asyncio.to_thread(output.parent.mkdir, parents=True, exist_ok=True)
+    await asyncio.to_thread(
+        output.write_text,
+        json.dumps(payload, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
     return payload
 
 
@@ -131,7 +133,7 @@ async def run_calibration_pipeline(
     run_id: str = "",
     live_watch_dir: Path | None = None,
 ) -> dict[str, Any]:
-    reports_dir.mkdir(parents=True, exist_ok=True)
+    await asyncio.to_thread(reports_dir.mkdir, parents=True, exist_ok=True)
     matrix_output = reports_dir / "shortlist_matrix.json"
     drift_output = reports_dir / "strategy_defaults_drift.json"
     patch_output = reports_dir / "config_strategies.toml.patch"

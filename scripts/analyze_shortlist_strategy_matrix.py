@@ -17,11 +17,9 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from scripts.common import bootstrap_repo_path, configure_script_logging
-except ModuleNotFoundError:
-    from common import bootstrap_repo_path, configure_script_logging
-
-bootstrap_repo_path()
+    from scripts.common import configure_script_logging
+except ModuleNotFoundError:  # pragma: no cover
+    from common import configure_script_logging
 
 from bot.domain.config import _ALL_SETUP_IDS, load_settings
 from bot.market.fit import ASSET_FIT_PROFILES, asset_fit_for_strategy
@@ -93,8 +91,8 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     if not path.is_file():
         return []
     rows: list[dict[str, Any]] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
         if not line:
             continue
         try:
@@ -309,13 +307,15 @@ def _print_markdown_table(merged: list[dict[str, Any]], meta: dict[str, Any]) ->
     print("# Shortlist ↔ Strategy Fit Matrix\n")
     print(f"- Shortlist size: **{meta.get('shortlist_size', '?')}**")
     print(
-        f"- Gate passed / light pool: **{meta.get('gate_passed', '?')}** / **{meta.get('light_pool', '?')}**"
+        f"- Gate passed / light pool: **{meta.get('gate_passed', '?')}** / "
+        f"**{meta.get('light_pool', '?')}**"
     )
     print(f"- Live decision rows: **{meta.get('decision_rows', 0)}**")
     print(f"- Telemetry run: `{meta.get('run_id', 'static-only')}`")
     print()
     print(
-        "| # | setup_id | data | static | heur.syms | live runs | syms | signal | skip | top skip | verdict |"
+        "| # | setup_id | data | static | heur.syms | live runs | syms | "
+        "signal | skip | top skip | verdict |"
     )
     print("|---:|---|---|---:|---:|---:|---:|---:|---:|---|---|")
     for idx, row in enumerate(merged, start=1):

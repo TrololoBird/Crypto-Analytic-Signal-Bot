@@ -4,16 +4,19 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import shutil
 import sys
 from pathlib import Path
 
 try:
-    from scripts.common import bootstrap_repo_path, configure_script_logging
-except ModuleNotFoundError:  # pragma: no cover - direct script execution
-    from common import bootstrap_repo_path, configure_script_logging
+    from scripts.common import configure_script_logging
+except ModuleNotFoundError:  # pragma: no cover
+    from common import configure_script_logging
 
 from bot.domain.config import load_settings
+from bot.persistence.repository.memory import MemoryRepository
+from bot.runtime.errors import DEFENSIVE_EXC
 
 LOG = configure_script_logging("scripts.clean_session_data")
 
@@ -35,10 +38,11 @@ def _remove_path(path: Path) -> bool:
             shutil.rmtree(path)
         else:
             path.unlink()
-        return True
     except OSError as exc:
         LOG.warning("remove_failed", path=str(path), error=str(exc))
         return False
+    else:
+        return True
 
 
 def _clear_directory_contents(directory: Path) -> int:
@@ -140,10 +144,6 @@ def clean_session_artifacts(
     if mode == "full":
         _apply("sqlite", reset_sqlite(db_path))
         if not dry_run:
-            import asyncio
-
-            from bot.persistence.repository.memory import MemoryRepository
-
             config_path = Path(getattr(settings, "config_path", Path("config.toml")))
 
             async def _init_repository() -> None:
@@ -157,14 +157,13 @@ def clean_session_artifacts(
 
             try:
                 asyncio.run(_init_repository())
-            except Exception as exc:
+            except DEFENSIVE_EXC as exc:
                 LOG.warning("repository schema init after full clean failed", error=str(exc))
 
     return stats
 
 
 def main() -> int:
-    bootstrap_repo_path()
     parser = argparse.ArgumentParser(
         description="Clean persisted bot session data (telemetry runs, live_watch, optional DB)."
     )

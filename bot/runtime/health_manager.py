@@ -5,12 +5,14 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from bot.diagnostics.facade import assess_radar_store
+from bot.diagnostics.radar_health import assess_radar_store
 from bot.market.proxy_bootstrap import network_probe_status
 from bot.runtime.data_readiness import is_radar_promoted_item
 from bot.runtime.errors import DEFENSIVE_EXC
 
 from ..features.prepare import cache_stats as frame_cache_stats
+from .delivery_alerts import check_message_buffer_drop_alert
+from .operator_digest import OperatorDigestRunner
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -189,8 +191,6 @@ class HealthManager:
                 if isinstance(raw_ws, dict):
                     ws_snapshot = raw_ws
                     row.update(ws_snapshot)
-            from .delivery_alerts import check_message_buffer_drop_alert
-
             await check_message_buffer_drop_alert(
                 self._bot,
                 ws_snapshot=ws_snapshot,
@@ -208,8 +208,6 @@ class HealthManager:
             self._bot.telemetry.append_jsonl("health.jsonl", row)
             digest_runner = getattr(self._bot, "_operator_digest_runner", None)
             if digest_runner is None:
-                from .operator_digest import OperatorDigestRunner
-
                 digest_runner = OperatorDigestRunner(self._bot)
                 self._bot._operator_digest_runner = digest_runner
             if int(datetime.now(UTC).timestamp()) % 1800 < 60:

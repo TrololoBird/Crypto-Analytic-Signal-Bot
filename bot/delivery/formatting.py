@@ -860,9 +860,13 @@ def format_signal_message(
         context = market_context_lines(facts)
         lines = [
             (
-                f"{bold('SIGNAL-ONLY PLAN')} {code(facts.symbol)} {code(direction_label(facts.direction))}"
+                f"{bold('SIGNAL-ONLY PLAN')} {code(facts.symbol)} "
+                f"{code(direction_label(facts.direction))}"
             ),
-            f"{bold(setup_label(facts.setup_id))} {code(facts.timeframe)} | score {code(format_score(facts.score))}",
+            (
+                f"{bold(setup_label(facts.setup_id))} {code(facts.timeframe)} | "
+                f"score {code(format_score(facts.score))}"
+            ),
             f"{bold('Entries')} {entry_levels_line(facts)}",
             f"{bold('Stop')} {code(format_price(facts.stop))}",
             f"{bold('Targets')} {target_line(facts)}",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -456,8 +457,6 @@ def render_aggregate_report(
     *,
     analyzed_at: str,
 ) -> str:
-    from collections import Counter
-
     type_counts = Counter(c.forensic_type for c in cases)
     setup_counts = Counter(c.setup_id for c in cases)
     lines = [

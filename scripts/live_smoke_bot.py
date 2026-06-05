@@ -13,7 +13,6 @@ import structlog
 
 try:
     from scripts.clean_session_data import clean_session_artifacts
-    from scripts.common import bootstrap_repo_path
     from scripts.smoke_fail_fast import (
         SmokeFailFastError,
         SmokeFailFastGuard,
@@ -22,13 +21,17 @@ try:
     )
 except ModuleNotFoundError:  # pragma: no cover
     from clean_session_data import clean_session_artifacts
-    from common import bootstrap_repo_path
     from smoke_fail_fast import (
         SmokeFailFastError,
         SmokeFailFastGuard,
         install_asyncio_exception_logging,
         wait_for_runtime_or_abort,
     )
+
+try:
+    import scripts.common  # noqa: F401
+except ModuleNotFoundError:  # pragma: no cover
+    import common  # noqa: F401
 
 from bot.cli import configure_logging
 from bot.delivery.telegram import DeliveryResult
@@ -38,10 +41,7 @@ from bot.runtime.bot import SignalBot
 if TYPE_CHECKING:
     from pathlib import Path
 
-try:
-    from scripts.live_check_binance_api import _wait_for_mark_prices
-except ModuleNotFoundError:  # pragma: no cover - direct script execution
-    from live_check_binance_api import _wait_for_mark_prices
+    from bot.market.ws import FuturesWSManager
 
 LOG = structlog.get_logger("scripts.live_smoke_bot")
 _MISSING_LOG_VALUE = "not_available"
@@ -112,6 +112,20 @@ def _sanitize_log_value(value: Any) -> Any:
     if isinstance(value, tuple):
         return tuple(_sanitize_log_value(item) for item in value)
     return value
+
+
+async def _wait_for_mark_prices(
+    ws_manager: FuturesWSManager, timeout_seconds: float
+) -> dict[str, object]:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_seconds
+    last: dict[str, object] = {}
+    while loop.time() < deadline:
+        last = ws_manager.state_snapshot()
+        if int(last.get("fresh_mark_prices") or 0) > 0:
+            return last
+        await asyncio.sleep(1.0)
+    return last
 
 
 async def _run(
@@ -266,7 +280,6 @@ async def _run(
 
 
 def main() -> None:
-    bootstrap_repo_path()
     parser = argparse.ArgumentParser(
         description="End-to-end live smoke test without Telegram sends"
     )
@@ -336,7 +349,6 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    bootstrap_repo_path()
     settings = load_settings()
     if not args.keep_session_data:
         clean_session_artifacts(settings, mode=args.clean_mode)

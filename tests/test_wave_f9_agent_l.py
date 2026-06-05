@@ -12,6 +12,7 @@ import pytest
 from bot.domain.config import BotSettings, FilterConfig, RuntimeConfig
 from bot.domain.schemas import PipelineResult, Signal
 from bot.domain.strategies import StrategyDecision
+from bot.runtime.bot import SignalBot
 from bot.runtime.container import build_application_container
 from bot.runtime.cycle_runner import CycleRunner
 from bot.runtime.telemetry_manager import TelemetryManager
@@ -55,8 +56,6 @@ def test_select_and_rank_uses_filters_min_score() -> None:
         take_profit_2=105.0,
     )
     bot._delivery_orchestrator.select_and_rank.return_value = [low, high]
-
-    from bot.runtime.bot import SignalBot
 
     ranked = SignalBot._select_and_rank(bot, {"BTCUSDT": [low, high]}, max_signals=2)
     assert [signal.score for signal in ranked] == [0.62]
@@ -169,11 +168,9 @@ async def test_signal_bot_start_runs_network_bootstrap() -> None:
     bot._running = False
 
     with (
-        patch("bot.market.proxy_bootstrap.ensure_network_ready", ensure),
+        patch("bot.runtime.bot.ensure_network_ready", ensure),
         patch("bot.diagnostics.config_audit.run_startup_audit"),
     ):
-        from bot.runtime.bot import SignalBot
-
         await SignalBot.start(bot)
 
     ensure.assert_awaited_once()

@@ -109,43 +109,14 @@ select = [
     "PGH",
     "RSE",
 ]
-# No blanket ignores — fix violations in source (see reports/ruff_inventory_summary.md).
+# RUF001/RUF002: operator/Telegram copy is Russian Cyrillic — homoglyph rule is not applicable.
+ignore = ["RUF001", "RUF002"]
+# No per-file ignores for code quality — fix violations in source.
 
 [tool.ruff.lint.per-file-ignores]
-# Late imports after module constants (circular-import guard in ws/rest_impl)
+# E402 only: late imports after module constants (circular-import guard in ws/rest_impl)
 "bot/market/ws.py" = ["E402"]
 "bot/market/rest_impl.py" = ["E402"]
-"bot/dashboard/**/*.py" = ["RUF001", "RUF002", "E501", "BLE001", "PERF401", "ARG001", "RUF006"]
-"bot/delivery/formatting.py" = ["RUF001", "E501"]
-"bot/domain/labels.py" = ["RUF001"]
-"bot/**/*.py" = ["RUF001", "RUF002", "PLC0415"]
-"tests/**/*.py" = [
-    "PLC0415",
-    "ARG001",
-    "ARG002",
-    "ARG005",
-    "PT019",
-    "ASYNC109",
-    "ASYNC240",
-    "B015",
-    "RUF001",
-    "E501",
-]
-"scripts/**/*.py" = [
-    "EXE001",
-    "E402",
-    "PLC0415",
-    "PLW2901",
-    "PTH123",
-    "ASYNC240",
-    "SIM115",
-    "TRY401",
-    "BLE001",
-    "TRY300",
-    "ARG001",
-    "RUF001",
-    "E501",
-]
 
 [tool.mypy]
 python_version = "3.14"

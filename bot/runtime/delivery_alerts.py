@@ -7,6 +7,8 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
+from bot.delivery.ops_webhook import send_ops_webhook_alert
+from bot.delivery.telegram_routing import operator_dm_enabled, send_operator_html
 from bot.runtime.errors import DEFENSIVE_EXC
 
 if TYPE_CHECKING:
@@ -34,9 +36,6 @@ async def _send_zero_delivery_alert(bot: SignalBot, *, streak: int) -> None:
     now = time.monotonic()
     if last_alert and (now - last_alert) < 3600.0:
         return
-
-    from bot.delivery.ops_webhook import send_ops_webhook_alert
-    from bot.delivery.telegram_routing import operator_dm_enabled, send_operator_html
 
     summary = getattr(bot, "last_cycle_summary", {}) or {}
     text = (
@@ -118,9 +117,6 @@ async def check_message_buffer_drop_alert(
     if last_alert and (now - last_alert) < 3600.0:
         return
 
-    from bot.delivery.ops_webhook import send_ops_webhook_alert
-    from bot.delivery.telegram_routing import operator_dm_enabled, send_operator_html
-
     buf = ws_snapshot.get("message_buffer")
     buf_size = int(buf.get("size") or 0) if isinstance(buf, dict) else 0
     text = (
@@ -153,13 +149,3 @@ async def check_message_buffer_drop_alert(
             dropped,
             threshold,
         )
-
-
-def delivery_session_snapshot(bot: Any) -> dict[str, int]:
-    cap = int(getattr(bot.settings.delivery, "action_cap_per_session", 0) or 0)
-    used = int(getattr(bot, "_session_action_delivered", 0) or 0)
-    return {
-        "session_action_delivered": used,
-        "session_action_cap": cap,
-        "session_action_remaining": max(0, cap - used) if cap > 0 else -1,
-    }

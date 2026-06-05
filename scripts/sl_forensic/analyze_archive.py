@@ -10,15 +10,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import sys
-from pathlib import Path
 from typing import Any
 
 import aiosqlite
 
-ROOT = Path(__file__).resolve().parents[2]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+try:
+    import _bootstrap
+except ModuleNotFoundError:  # pragma: no cover
+    from scripts.sl_forensic import _bootstrap  # noqa: F401
 
 from scripts.sl_forensic._archive_migrations import migrate_forensic_archive
 from scripts.sl_forensic._paths import (

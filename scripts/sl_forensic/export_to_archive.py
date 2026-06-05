@@ -13,7 +13,6 @@ import argparse
 import asyncio
 import json
 import logging
-import sys
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,16 +20,20 @@ from typing import Any
 
 import aiosqlite
 
-ROOT = Path(__file__).resolve().parents[2]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+try:
+    import _bootstrap
+except ModuleNotFoundError:  # pragma: no cover
+    from scripts.sl_forensic import _bootstrap  # noqa: F401
 
 from bot.domain.config import load_settings
+from bot.runtime.errors import DEFENSIVE_EXC
 from scripts.sl_forensic._archive_migrations import migrate_forensic_archive
 from scripts.sl_forensic._case_builder import EXPORT_QUERY, enrich_sl_case, row_to_base_case
+from scripts.sl_forensic._confirmed_candle import infer_confirmed_candle
 from scripts.sl_forensic._fetcher import CandleFetcher
 from scripts.sl_forensic._paths import (
     FORENSIC_ARCHIVE_PATH,
+    ROOT,
     SL_RESULTS,
     ensure_forensics_dir,
     git_short_hash,
@@ -189,7 +192,7 @@ async def export_to_archive(*, notes: str = "", dry_run: bool = False) -> dict[s
     run_date = datetime.now(UTC).isoformat()
     fix_ids: list[str] = []
 
-    if not bot_db.exists():
+    if not await asyncio.to_thread(bot_db.exists):
         print(f"bot.db not found: {bot_db}")
         return {"exported": 0, "skipped": 0, "run_id": run_id}
 
@@ -245,7 +248,7 @@ async def export_to_archive(*, notes: str = "", dry_run: bool = False) -> dict[s
                             fetcher=fetcher,
                             do_recheck=True,
                         )
-                    except Exception:
+                    except DEFENSIVE_EXC:
                         LOG.warning(
                             "SL enrich failed | tracking_id=%s — storing DB fields only",
                             tracking_id,
@@ -255,8 +258,6 @@ async def export_to_archive(*, notes: str = "", dry_run: bool = False) -> dict[s
                     tp_count += 1
                 elif "expired" in result:
                     expired_count += 1
-
-                from scripts.sl_forensic._confirmed_candle import infer_confirmed_candle
 
                 if case.get("confirmed_candle") is None:
                     case["confirmed_candle"] = infer_confirmed_candle(

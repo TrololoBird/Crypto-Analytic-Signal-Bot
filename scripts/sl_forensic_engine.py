@@ -13,13 +13,14 @@ import argparse
 import asyncio
 import json
 import sqlite3
+from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 
 try:
-    from scripts.common import bootstrap_repo_path, configure_script_logging
+    from scripts.common import configure_script_logging
 except ModuleNotFoundError:  # pragma: no cover
-    from common import bootstrap_repo_path, configure_script_logging
+    from common import configure_script_logging
 
 import aiosqlite
 
@@ -34,6 +35,7 @@ from bot.persistence.sl_forensics import (
     render_aggregate_report,
     render_case_card,
 )
+from bot.runtime.errors import DEFENSIVE_EXC
 
 LOG = configure_script_logging("scripts.sl_forensic_engine")
 
@@ -175,7 +177,7 @@ async def _analyze_rows(
                 bars_before=bars_before,
                 bars_after=bars_after,
             )
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.warning("candle fetch failed %s: %s", symbol, exc)
             packs = {}
 
@@ -200,7 +202,6 @@ async def _analyze_rows(
 
 
 async def _async_main(args: argparse.Namespace) -> int:
-    bootstrap_repo_path()
     settings = load_settings()
     db_path = Path(settings.db_path)
     await _migrate(db_path)
@@ -244,8 +245,6 @@ async def _async_main(args: argparse.Namespace) -> int:
         "report": str(report_path),
         "cards_dir": str(out_dir / "cards"),
     }
-    from collections import Counter
-
     for ftype, n in Counter(c.forensic_type for c in cases).items():
         summary["types"][ftype] = n
     print(json.dumps(summary, indent=2, ensure_ascii=False))

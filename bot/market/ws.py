@@ -19,7 +19,7 @@ from bot.market.network_proxy import (
     mask_proxy_url,
     normalize_proxy_url,
 )
-from bot.market.subscription_planner import plan_subscription_budget
+from bot.market.subscription_planner import ORDER_FLOW_ANCHOR_SYMBOLS, plan_subscription_budget
 from bot.runtime.errors import DEFENSIVE_EXC
 
 from ..domain.events import KlineCloseEvent
@@ -128,6 +128,8 @@ from bot.market._ws_parsers import (
     handle_mini_ticker,
     handle_ticker,
     microprice_bias_from_book,
+    should_throttle_mark_price_update,
+    should_throttle_ticker_update,
 )
 
 # fix-20260604: explicit exports for mypy attr-defined on features/prepare imports
@@ -713,45 +715,6 @@ def get_liquidation_age_seconds(
     return max(0.0, (int(time.time() * 1000) - latest_ts_ms) / 1000.0)
 
 
-def should_throttle_ticker_update(manager: Any, symbol: str) -> bool:
-    now = time.monotonic()
-    last_update = manager._ticker_update_times.get(symbol, 0.0)
-    elapsed_ms = (now - last_update) * 1000
-    if elapsed_ms < manager._min_ticker_update_interval_ms:
-        last_logged = getattr(manager, "_last_ticker_throttle_log", {}).get(symbol, 0.0)
-        if now - last_logged >= 30.0:
-            if not hasattr(manager, "_last_ticker_throttle_log"):
-                manager._last_ticker_throttle_log = {}
-            manager._last_ticker_throttle_log[symbol] = now
-            LOG.debug(
-                "ticker throttled | symbol=%s elapsed=%.0fms min=%.0fms",
-                symbol,
-                elapsed_ms,
-                manager._min_ticker_update_interval_ms,
-            )
-        return True
-    manager._ticker_update_times[symbol] = now
-    return False
-
-
-def should_throttle_mark_price_update(manager: Any, symbol: str) -> bool:
-    now = time.monotonic()
-    last_update = manager._mark_price_update_times.get(symbol, 0.0)
-    elapsed_ms = (now - last_update) * 1000
-    if elapsed_ms < 50.0:
-        last_logged = getattr(manager, "_last_markprice_throttle_log", {}).get(symbol, 0.0)
-        if now - last_logged >= 30.0:
-            if not hasattr(manager, "_last_markprice_throttle_log"):
-                manager._last_markprice_throttle_log = {}
-            manager._last_markprice_throttle_log[symbol] = now
-            LOG.debug(
-                "mark_price throttled | symbol=%s elapsed=%.0fms min=50ms", symbol, elapsed_ms
-            )
-        return True
-    manager._mark_price_update_times[symbol] = now
-    return False
-
-
 class FuturesWSManager:
     """Manages WebSocket connections to Binance Futures for real-time market data."""
 
@@ -1142,8 +1105,6 @@ class FuturesWSManager:
         agg_symbols: set[str] = set()
         if budget is not None:
             agg_symbols = {str(sym).strip().lower() for sym in budget.agg_trade_symbols if sym}
-        from .subscription_planner import ORDER_FLOW_ANCHOR_SYMBOLS
-
         anchor_symbols_in_agg_trade = sum(
             1 for anchor in ORDER_FLOW_ANCHOR_SYMBOLS if anchor in agg_symbols
         )

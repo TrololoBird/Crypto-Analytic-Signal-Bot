@@ -9,16 +9,15 @@ import sys
 from pathlib import Path
 
 try:
-    from scripts.common import bootstrap_repo_path, configure_script_logging
+    from scripts.common import configure_script_logging
 except ModuleNotFoundError:  # pragma: no cover
-    from common import bootstrap_repo_path, configure_script_logging
+    from common import configure_script_logging
 
 ROOT = Path(__file__).resolve().parents[1]
 LOG = configure_script_logging("scripts.research_harvest_session")
 
 
 def main() -> int:
-    bootstrap_repo_path()
     parser = argparse.ArgumentParser(description="Run research harvest capture session")
     parser.add_argument("--config", type=Path, default=ROOT / "config.toml")
     parser.add_argument("--minutes", type=float, default=60.0)

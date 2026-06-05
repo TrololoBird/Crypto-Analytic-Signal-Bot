@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from bot.diagnostics.quality import SignalQualityMonitor
+from bot.diagnostics.radar_health import assess_radar_store
 from bot.diagnostics.runtime_ops import (
     SCHEDULED_SETUP_IDS,
-    assess_radar_store,
     bot_runtime_health_check,
     build_audit_report,
     gate_failures,

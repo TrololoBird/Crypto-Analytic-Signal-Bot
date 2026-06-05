@@ -16,6 +16,45 @@ LOG = logging.getLogger("bot.ws_manager")
 JsonDict = dict[str, Any]
 
 
+def should_throttle_ticker_update(manager: Any, symbol: str) -> bool:
+    now = time.monotonic()
+    last_update = manager._ticker_update_times.get(symbol, 0.0)
+    elapsed_ms = (now - last_update) * 1000
+    if elapsed_ms < manager._min_ticker_update_interval_ms:
+        last_logged = getattr(manager, "_last_ticker_throttle_log", {}).get(symbol, 0.0)
+        if now - last_logged >= 30.0:
+            if not hasattr(manager, "_last_ticker_throttle_log"):
+                manager._last_ticker_throttle_log = {}
+            manager._last_ticker_throttle_log[symbol] = now
+            LOG.debug(
+                "ticker throttled | symbol=%s elapsed=%.0fms min=%.0fms",
+                symbol,
+                elapsed_ms,
+                manager._min_ticker_update_interval_ms,
+            )
+        return True
+    manager._ticker_update_times[symbol] = now
+    return False
+
+
+def should_throttle_mark_price_update(manager: Any, symbol: str) -> bool:
+    now = time.monotonic()
+    last_update = manager._mark_price_update_times.get(symbol, 0.0)
+    elapsed_ms = (now - last_update) * 1000
+    if elapsed_ms < 50.0:
+        last_logged = getattr(manager, "_last_markprice_throttle_log", {}).get(symbol, 0.0)
+        if now - last_logged >= 30.0:
+            if not hasattr(manager, "_last_markprice_throttle_log"):
+                manager._last_markprice_throttle_log = {}
+            manager._last_markprice_throttle_log[symbol] = now
+            LOG.debug(
+                "mark_price throttled | symbol=%s elapsed=%.0fms min=50ms", symbol, elapsed_ms
+            )
+        return True
+    manager._mark_price_update_times[symbol] = now
+    return False
+
+
 def _ws_kline_to_row(k: JsonDict) -> JsonDict:
     return {
         "time": datetime.fromtimestamp(int(k["t"]) / 1000.0, tz=UTC),
@@ -173,9 +212,6 @@ def _update_depth_wall_pressure(
 
 
 def handle_ticker(manager: Any, symbol: str, data: JsonDict) -> None:
-    # fix-20260604: lazy import avoids ws ↔ _ws_parsers circular import at load time
-    from bot.market.ws import should_throttle_ticker_update
-
     if should_throttle_ticker_update(manager, symbol):
         return
     try:
@@ -200,8 +236,6 @@ def handle_mini_ticker(manager: Any, symbol: str, data: JsonDict) -> None:
     last_full_update = manager._ticker_update_times.get(symbol, 0.0)
     if now - last_full_update < manager._cfg.market_ticker_freshness_seconds:
         return
-    from bot.market.ws import should_throttle_ticker_update
-
     if should_throttle_ticker_update(manager, symbol):
         return
     try:
@@ -228,8 +262,6 @@ def handle_mini_ticker(manager: Any, symbol: str, data: JsonDict) -> None:
 def handle_mark_price(manager: Any, symbol: str, data: JsonDict) -> None:
     if not symbol:
         return
-    from bot.market.ws import should_throttle_mark_price_update
-
     if should_throttle_mark_price_update(manager, symbol):
         return
     try:

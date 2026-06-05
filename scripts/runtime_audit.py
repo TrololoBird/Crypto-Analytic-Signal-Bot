@@ -16,9 +16,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 try:
-    from scripts.common import bootstrap_repo_path
+    import scripts.common  # noqa: F401
 except ModuleNotFoundError:  # pragma: no cover - direct script execution
-    from common import bootstrap_repo_path
+    import common  # noqa: F401
 
 from bot.diagnostics.facade import (
     aggregate_cycle_stats,
@@ -520,7 +520,6 @@ def print_audit_report(
 
 
 def main() -> None:
-    bootstrap_repo_path()
     parser = argparse.ArgumentParser(description="Audit persisted bot runtime telemetry")
     parser.add_argument(
         "--run",

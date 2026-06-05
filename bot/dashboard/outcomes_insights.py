@@ -146,7 +146,9 @@ async def build_outcomes_insights(
             patterns.append(
                 {
                     "key": "high_atr",
-                    "label": f"Стопы при более высоком ATR% ({avg_sl_atr:.2f} vs {avg_win_atr:.2f})",
+                    "label": (
+                        f"Стопы при более высоком ATR% ({avg_sl_atr:.2f} vs {avg_win_atr:.2f})"
+                    ),
                     "count": high_atr_sl,
                     "share": round(high_atr_sl / len(loss_atr), 4) if loss_atr else 0.0,
                 }

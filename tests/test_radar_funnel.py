@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import time
 
-from bot.domain.config import BotSettings, UniverseRadarConfig
+from bot.domain.config import _ALL_SETUP_IDS, BotSettings, UniverseRadarConfig
+from bot.domain.schemas import UniverseSymbol
 from bot.market.promotion_engine import PromotionEngine
 from bot.market.radar_state import MarketRadarStore, SymbolTier
+from bot.market.universe import _prescore_row
 from bot.market.universe_screener import screen_symbol
 
 
@@ -81,8 +83,6 @@ def test_enrich_ticker_rows_adds_boost() -> None:
 
 
 def test_merge_shortlist_tags_existing_frozen_symbol() -> None:
-    from bot.domain.config import _ALL_SETUP_IDS
-    from bot.domain.schemas import UniverseSymbol
 
     settings = _settings()
     store = MarketRadarStore(settings.universe.radar)
@@ -115,7 +115,6 @@ def test_merge_shortlist_tags_existing_frozen_symbol() -> None:
 
 
 def test_prescore_row_uses_radar_boost() -> None:
-    from bot.market.universe import _prescore_row
 
     settings = _settings()
     row = {

@@ -11,8 +11,9 @@ from typing import TYPE_CHECKING, Any
 from bot.runtime.errors import DEFENSIVE_EXC
 
 from ..diagnostics.signals import get_global_diagnostics
+from ..domain.mtf import evaluate_mtf_gate, normalize_mtf_reject_reason
 from ..features.microstructure import MicrostructureContext, build_microstructure_context
-from ..runtime_policy import is_deep_analysis_symbol
+from ..runtime_policy import configured_primary_timeframe, is_deep_analysis_symbol
 from .contract import DEFAULT_TARGET_RR
 from .filter_stages import filter_stage_enabled
 from .scoring import ScoringResult
@@ -675,8 +676,6 @@ def _run_filter_pipeline(
     passed = list(signal.passed_filters)
     deep_analysis_asset = is_deep_analysis_symbol(prepared, settings)
 
-    from bot.runtime_policy import configured_primary_timeframe
-
     configured_primary = configured_primary_timeframe(settings, signal.symbol)
     actual_primary = str(getattr(prepared, "primary_timeframe", "15m") or "15m")
     if actual_primary != configured_primary:
@@ -729,8 +728,6 @@ def _run_filter_pipeline(
             base,
             details=short_regime_details,
         )
-
-    from bot.domain.mtf import evaluate_mtf_gate, normalize_mtf_reject_reason
 
     profile = str(getattr(base, "confirmation_profile", "trend_follow"))
     mtf_ok, mtf_reason, mtf_details = evaluate_mtf_gate(

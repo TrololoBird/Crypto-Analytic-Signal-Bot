@@ -6,7 +6,7 @@ import logging
 from typing import Any
 
 from bot.delivery.filter_stages import DEFAULT_FILTER_STAGES, enabled_filter_stages
-from bot.domain.config import REQUIRED_PINNED_SYMBOLS
+from bot.domain.config import REQUIRED_PINNED_SYMBOLS, BotSettings
 from bot.runtime.errors import DEFENSIVE_EXC
 
 LOG = logging.getLogger("bot.config_audit")
@@ -100,8 +100,6 @@ def audit_filter_config(settings: Any) -> list[str]:
         )
 
     try:
-        from bot.domain.config import BotSettings
-
         if isinstance(settings, BotSettings):
             active = enabled_filter_stages(settings)
             unknown = sorted(active - frozenset(DEFAULT_FILTER_STAGES))

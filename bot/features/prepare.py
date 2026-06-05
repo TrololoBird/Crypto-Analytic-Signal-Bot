@@ -59,6 +59,21 @@ _FRAME_CACHE_TAIL_COLUMNS = (
     "taker_buy_quote_volume",
 )
 REQUIRED_COLS = {"open", "high", "low", "close", "volume"}
+_CRITICAL_SIGNAL_COLS = frozenset(
+    {
+        "close",
+        "open",
+        "high",
+        "low",
+        "volume",
+        "atr14",
+        "rsi14",
+        "adx14",
+        "ema20",
+        "ema50",
+        "ema200",
+    }
+)
 
 
 class _FrameCache:
@@ -428,61 +443,75 @@ def _series_numeric_bounds(series: pl.Series) -> tuple[float | None, float | Non
 
 
 def _sanity_check_prepared_frame(work: pl.DataFrame, symbol: str, interval: str) -> list[str]:
-    """Return non-fatal warnings for impossible or suspicious prepared features.
+    """Return frame quality defects that must block signal preparation.
 
-    The function is deliberately observational: it never raises, never mutates
-    the frame, and never blocks signal generation. It catches contract drift
-    early in telemetry when indicator ranges become impossible after changes to
-    Polars, optional feature backends, or exchange payload shape.
+    Any non-empty list means the symbol cannot be analyzed safely: missing OHLCV,
+    empty frame, null/NaN/inf on the signal bar, or impossible indicator ranges.
     """
-    warnings: list[str] = []
+    defects: list[str] = []
     missing = REQUIRED_COLS - set(work.columns)
     if missing:
-        warnings.append(f"Missing required columns: {missing}")
+        defects.append(f"Missing required columns: {missing}")
     if work.is_empty():
-        warnings.append(f"{symbol}/{interval}: prepared frame is empty")
-        return warnings
+        defects.append(f"{symbol}/{interval}: prepared frame is empty")
+        return defects
 
-    def _range_warning(column: str, low: float, high: float) -> None:
+    signal_bar_cols = ("close", "atr14", "rsi14", "adx14")
+    for column in signal_bar_cols:
+        if column not in work.columns:
+            continue
+        raw = work[column][-1]
+        if raw is None:
+            defects.append(f"{column}: last bar is null")
+            continue
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            defects.append(f"{column}: last bar non-numeric ({raw!r})")
+            continue
+        if not math.isfinite(value):
+            defects.append(f"{column}: last bar non-finite ({value})")
+
+    def _range_defect(column: str, low: float, high: float) -> None:
         if column not in work.columns:
             return
         min_value, max_value = _series_numeric_bounds(work[column])
         if min_value is None or max_value is None:
-            warnings.append(f"{column}: all values null or non-numeric")
+            defects.append(f"{column}: all values null or non-numeric")
             return
         if min_value < low or max_value > high:
-            warnings.append(
+            defects.append(
                 f"{column}: out of range [{low}, {high}] min={min_value:.6f} max={max_value:.6f}"
             )
 
-    def _positive_warning(column: str, *, allow_zero: bool) -> None:
+    def _positive_defect(column: str, *, allow_zero: bool) -> None:
         if column not in work.columns:
             return
         min_value, _ = _series_numeric_bounds(work[column])
         if min_value is None:
-            warnings.append(f"{column}: all values null or non-numeric")
+            defects.append(f"{column}: all values null or non-numeric")
             return
         if allow_zero:
             if min_value < 0.0:
-                warnings.append(f"{column}: negative value detected min={min_value:.6f}")
+                defects.append(f"{column}: negative value detected min={min_value:.6f}")
         elif min_value <= 0.0:
-            warnings.append(f"{column}: non-positive value detected min={min_value:.6f}")
+            defects.append(f"{column}: non-positive value detected min={min_value:.6f}")
 
-    _range_warning("rsi14", 0.0, 100.0)
-    _range_warning("adx14", 0.0, 100.0)
-    _positive_warning("atr14", allow_zero=False)
-    _positive_warning("ema20", allow_zero=False)
-    _positive_warning("ema50", allow_zero=False)
-    _positive_warning("ema200", allow_zero=False)
-    _positive_warning("volume_ratio20", allow_zero=True)
-    _positive_warning("close", allow_zero=False)
+    _range_defect("rsi14", 0.0, 100.0)
+    _range_defect("adx14", 0.0, 100.0)
+    _positive_defect("atr14", allow_zero=False)
+    _positive_defect("ema20", allow_zero=False)
+    _positive_defect("ema50", allow_zero=False)
+    _positive_defect("ema200", allow_zero=False)
+    _positive_defect("volume_ratio20", allow_zero=True)
+    _positive_defect("close", allow_zero=False)
 
     for column in work.columns:
-        if column.startswith("_"):
+        if column.startswith("_") or column not in _CRITICAL_SIGNAL_COLS:
             continue
         series = work[column]
         if series.null_count() == work.height:
-            warnings.append(f"{column}: column is entirely null")
+            defects.append(f"{column}: column is entirely null")
             continue
         if column in _EXPECTED_ZERO_COLUMNS:
             continue
@@ -491,17 +520,7 @@ def _sanity_check_prepared_frame(work: pl.DataFrame, symbol: str, interval: str)
             getattr(dtype, "is_numeric", lambda: False)() or dtype == pl.Boolean
         ):
             continue
-        numeric = series.cast(pl.Float64, strict=False).drop_nulls()
-        if numeric.is_empty():
-            continue
-        try:
-            min_value = float(numeric.min())
-            max_value = float(numeric.max())
-        except (TypeError, ValueError):
-            continue
-        if min_value == 0.0 and max_value == 0.0:
-            warnings.append(f"{column}: column is entirely 0.0")
-    return warnings
+    return defects
 
 
 def _sanity_check_all_frames(prepared: PreparedSymbol) -> dict[str, list[str]]:
@@ -540,7 +559,12 @@ def _cached_prepare_frame(
             fallback_book=fallback_book if interval == "15m" else None,
         )
         for warning in _sanity_check_prepared_frame(result, symbol, interval):
-            LOG.debug("prepared frame sanity warning | %s", warning)
+            LOG.warning(
+                "prepared frame quality defect | symbol=%s interval=%s defect=%s",
+                symbol,
+                interval,
+                warning,
+            )
         return result
 
     last = frame.row(-1, named=True)
@@ -551,7 +575,12 @@ def _cached_prepare_frame(
     except (KeyError, TypeError, ValueError, OverflowError):
         result = _prepare_frame(frame)
         for warning in _sanity_check_prepared_frame(result, symbol, interval):
-            LOG.debug("prepared frame sanity warning | %s", warning)
+            LOG.warning(
+                "prepared frame quality defect | symbol=%s interval=%s defect=%s",
+                symbol,
+                interval,
+                warning,
+            )
         return result
 
     tail_signature = _tail_value_signature(last)
@@ -576,7 +605,12 @@ def _cached_prepare_frame(
         fallback_book=fallback_book if interval == "15m" else None,
     )
     for warning in _sanity_check_prepared_frame(result, symbol, interval):
-        LOG.debug("prepared frame sanity warning | %s", warning)
+        LOG.warning(
+            "prepared frame quality defect | symbol=%s interval=%s defect=%s",
+            symbol,
+            interval,
+            warning,
+        )
     target_cache.put(key, result)
     return result
 
@@ -830,6 +864,28 @@ def prepare_symbol(
     if frames.df_4h is not None and not frames.df_4h.is_empty():
         work_4h = _cached_prepare_frame(_to_polars(frames.df_4h), symbol=sym, interval="4h")
         data_quality_flags.extend(take_frame_indicator_fallbacks())
+
+    prepared_frames: list[tuple[str, pl.DataFrame | None]] = [
+        ("1h", work_1h),
+        ("15m", work_15m),
+    ]
+    if work_5m is not None:
+        prepared_frames.append(("5m", work_5m))
+    if work_4h is not None:
+        prepared_frames.append(("4h", work_4h))
+    for interval, frame in prepared_frames:
+        if frame is None:
+            _log.warning("%s: prepare rejected | interval=%s frame=None", sym, interval)
+            return None
+        defects = _sanity_check_prepared_frame(frame, sym, interval)
+        if defects:
+            _log.warning(
+                "%s: prepare rejected — frame quality defects | interval=%s defects=%s",
+                sym,
+                interval,
+                defects,
+            )
+            return None
 
     work_len_1h = len(work_1h) if work_1h is not None else 0
     work_len_15m = len(work_15m) if work_15m is not None else 0

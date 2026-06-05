@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
 from pathlib import Path
@@ -10,6 +11,12 @@ from unittest.mock import patch
 import pytest
 
 from bot.cli import build_parser
+from bot.persistence.db_status import DbStatusSummary
+from bot.runtime.errors import (
+    DEFENSIVE_EXC,
+    build_runtime_error_payload,
+    classify_runtime_error,
+)
 from scripts.calibration_pipeline import run_calibration_pipeline, run_reconcile_defaults
 from scripts.reconcile_strategy_defaults import (
     collect_defaults_drift,
@@ -21,12 +28,6 @@ from scripts.reconcile_strategy_defaults import (
 
 
 def test_runtime_errors_live_under_bot_runtime() -> None:
-    from bot.runtime.errors import (
-        DEFENSIVE_EXC,
-        build_runtime_error_payload,
-        classify_runtime_error,
-    )
-
     assert classify_runtime_error(KeyError("x")) == "schema"
     assert ValueError in DEFENSIVE_EXC
     payload = build_runtime_error_payload(component="test", exc=RuntimeError("boom"))
@@ -149,7 +150,6 @@ async def test_calibration_pipeline_writes_reports(
         "scripts.calibration_pipeline.run_shortlist_matrix",
         fake_matrix,
     )
-    from bot.persistence.db_status import DbStatusSummary
 
     db_summary = DbStatusSummary(
         migration_version=3,
@@ -159,6 +159,7 @@ async def test_calibration_pipeline_writes_reports(
     )
 
     async def fake_db_report(*, config: Path, output: Path) -> dict[str, object]:
+        del config
         payload = {
             "generated_at": "2026-01-01T00:00:00+00:00",
             "db_path": "data/bot/bot.db",
@@ -168,7 +169,7 @@ async def test_calibration_pipeline_writes_reports(
             "outcome_counts": dict(db_summary.outcome_counts),
             "outcomes_total": db_summary.outcomes_total,
         }
-        output.write_text(json.dumps(payload), encoding="utf-8")
+        await asyncio.to_thread(output.write_text, json.dumps(payload), encoding="utf-8")
         return payload
 
     with patch(

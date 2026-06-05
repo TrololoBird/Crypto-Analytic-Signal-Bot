@@ -38,7 +38,8 @@ def dashboard_urls(bot: Any) -> dict[str, str | None]:
         "bind": bind_url,
         "mobile_hint": (
             "MacBook и iPhone в разных сетях: LAN недоступен. "
-            "Удалённый мониторинг — Telegram operator console: /market /status /health в личке с ботом. "
+            "Удалённый мониторинг — Telegram operator console: "
+            "/market /status /health в личке с ботом. "
             f"Локально на MacBook: http://127.0.0.1:{port}/"
         ),
         "remote_access": {
@@ -145,13 +146,23 @@ def format_mobile_digest_text(payload: dict[str, Any]) -> str:
         lines.append(
             f"Market: <code>{market.get('risk_label')}</code> · "
             f"FG <code>{market.get('fear_greed_value') or '—'}</code> · "
-            f"breadth <code>{market.get('breadth_positive') or 0}/{market.get('breadth_total') or 0}</code>"
+            "breadth "
+            f"<code>{market.get('breadth_positive') or 0}/{market.get('breadth_total') or 0}</code>"
         )
     lines.extend(
         [
-            f"Regime: <code>{runtime.get('regime') or '—'}</code> · BTC: <code>{runtime.get('btc_bias') or '—'}</code>",
-            f"Shortlist: <code>{runtime.get('shortlist_size') or 0}</code> · WS: <code>{'ok' if runtime.get('ws_connected') else 'down'}</code>",
-            f"Today signals: <code>{today.get('signals_sent') or 0}</code> · delivered: <code>{today.get('session_delivered') or 0}</code>",
+            (
+                f"Regime: <code>{runtime.get('regime') or '—'}</code> · "
+                f"BTC: <code>{runtime.get('btc_bias') or '—'}</code>"
+            ),
+            (
+                f"Shortlist: <code>{runtime.get('shortlist_size') or 0}</code> · "
+                f"WS: <code>{'ok' if runtime.get('ws_connected') else 'down'}</code>"
+            ),
+            (
+                f"Today signals: <code>{today.get('signals_sent') or 0}</code> · "
+                f"delivered: <code>{today.get('session_delivered') or 0}</code>"
+            ),
             (
                 f"7d outcomes: <code>{outcomes.get('wins') or 0}W</code> / "
                 f"<code>{outcomes.get('stop_losses') or 0}SL</code> · "
@@ -229,10 +240,22 @@ def format_operator_status_text(payload: dict[str, Any], *, detail_outcomes: boo
     outcomes = payload.get("outcomes_7d") or {}
     lines = [
         "<b>Bot status</b>",
-        f"Regime: <code>{runtime.get('regime') or '—'}</code> · BTC: <code>{runtime.get('btc_bias') or '—'}</code>",
-        f"Shortlist: <code>{runtime.get('shortlist_size') or 0}</code> · WS: <code>{'ok' if runtime.get('ws_connected') else 'down'}</code>",
-        f"Today: sent <code>{today.get('signals_sent') or 0}</code> · session delivered <code>{today.get('session_delivered') or 0}</code>",
-        f"Tracking pending/active: <code>{today.get('pending') or 0}</code>/<code>{today.get('active') or 0}</code>",
+        (
+            f"Regime: <code>{runtime.get('regime') or '—'}</code> · "
+            f"BTC: <code>{runtime.get('btc_bias') or '—'}</code>"
+        ),
+        (
+            f"Shortlist: <code>{runtime.get('shortlist_size') or 0}</code> · "
+            f"WS: <code>{'ok' if runtime.get('ws_connected') else 'down'}</code>"
+        ),
+        (
+            f"Today: sent <code>{today.get('signals_sent') or 0}</code> · "
+            f"session delivered <code>{today.get('session_delivered') or 0}</code>"
+        ),
+        (
+            f"Tracking pending/active: <code>{today.get('pending') or 0}</code>/"
+            f"<code>{today.get('active') or 0}</code>"
+        ),
         (
             f"7d: <code>{outcomes.get('wins') or 0}W</code> / "
             f"<code>{outcomes.get('stop_losses') or 0}SL</code> · "
@@ -241,11 +264,11 @@ def format_operator_status_text(payload: dict[str, Any], *, detail_outcomes: boo
     ]
     if detail_outcomes:
         patterns = payload.get("top_sl_patterns") or []
-        for row in patterns[:3]:
-            if isinstance(row, dict):
-                lines.append(
-                    f"• {row.get('label') or row.get('pattern')}: <code>{row.get('count') or 0}</code>"
-                )
+        lines.extend(
+            f"• {row.get('label') or row.get('pattern')}: <code>{row.get('count') or 0}</code>"
+            for row in patterns[:3]
+            if isinstance(row, dict)
+        )
     return "\n".join(lines)
 
 
@@ -255,7 +278,10 @@ def format_operator_sl_text(payload: dict[str, Any]) -> str:
     causes = payload.get("sl_root_causes") or {}
     lines = [
         "<b>Stop-loss analytics</b>",
-        f"7d SL: <code>{outcomes.get('stop_losses') or 0}</code> · WR <code>{round(float(outcomes.get('win_rate') or 0) * 100, 1)}%</code>",
+        (
+            f"7d SL: <code>{outcomes.get('stop_losses') or 0}</code> · "
+            f"WR <code>{round(float(outcomes.get('win_rate') or 0) * 100, 1)}%</code>"
+        ),
     ]
     if causes:
         lines.append("<b>Root causes</b>")

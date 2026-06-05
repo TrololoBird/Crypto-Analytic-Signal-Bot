@@ -17,7 +17,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from bot.delivery.deliver import format_analytics_companion
 from bot.runtime.errors import DEFENSIVE_EXC
+from bot.runtime.telegram_operator import TelegramOperatorConsole, operator_console_enabled
 
 if TYPE_CHECKING:
     from bot.domain.schemas import Signal
@@ -36,8 +38,6 @@ OPERATOR_PURPOSE = (
 
 async def send_operator_html(bot: SignalBot, text: str) -> int:
     """Send HTML to all authorized operator user ids (private DM)."""
-    from bot.runtime.telegram_operator import TelegramOperatorConsole, operator_console_enabled
-
     if not operator_console_enabled(bot):
         LOG.debug("operator send skipped | no token or TELEGRAM_OPERATOR_USER_IDS")
         return 0
@@ -85,7 +85,5 @@ async def send_operator_analytics_companion(
     """Send analytics companion narrative to operator DMs (WATCH tier companion)."""
     if not operator_dm_enabled(bot, "send_watch_companion"):
         return 0
-    from bot.delivery.deliver import format_analytics_companion
-
     text = format_analytics_companion(signal, btc_bias=btc_bias, eth_bias=eth_bias)
     return await send_operator_html(bot, text)

@@ -15,11 +15,9 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from scripts.common import bootstrap_repo_path, configure_script_logging
+    from scripts.common import configure_script_logging
 except ModuleNotFoundError:  # pragma: no cover
-    from common import bootstrap_repo_path, configure_script_logging
-
-bootstrap_repo_path()
+    from common import configure_script_logging
 
 from bot.diagnostics.facade import (
     analyze_telemetry,
@@ -32,6 +30,7 @@ from bot.domain.strategy_catalog import CATALOG_BY_ID
 from bot.market.fit import ASSET_FIT_PROFILES
 from bot.market.rest_impl import BinanceClientImpl
 from bot.market.universe import build_shortlist
+from bot.runtime.errors import DEFENSIVE_EXC
 
 LOG = configure_script_logging("scripts.strategy_shortlist_matrix")
 
@@ -151,7 +150,7 @@ def _heuristic_fit_band(setup_id: str) -> str:
     return "fallback/pinned"
 
 
-def _theoretical_score(setup_id: str, data_need: str) -> tuple[int, str]:
+def _theoretical_score(_setup_id: str, data_need: str) -> tuple[int, str]:
     """1=poor .. 5=excellent shortlist alignment for signal-only bot."""
     if data_need == "klines":
         return 5, "full shortlist klines"
@@ -210,7 +209,7 @@ async def _warm_basis_cache(
             await client.fetch_basis(symbol, period="1h", limit=5)
             await client.fetch_basis(symbol, period="5m", limit=5)
             warmed += 1
-        except Exception:
+        except DEFENSIVE_EXC:
             failed += 1
     return {
         "basis_warm_attempted": min(len(symbols), limit),
@@ -278,7 +277,8 @@ def _print_live_table(live: dict[str, Any], static: list[dict[str, Any]]) -> Non
     static_map = {r["setup_id"]: r for r in static}
     print("\n## Live: strategy runs (15m telemetry)\n")
     print(
-        "| setup_id | theory | shortlist symbols w/ fit | symbols ran | signal | reject | skip | not_routed |"
+        "| setup_id | theory | shortlist symbols w/ fit | symbols ran | "
+        "signal | reject | skip | not_routed |"
     )
     print(
         "|----------|--------|--------------------------|-------------|--------|--------|------|------------|"

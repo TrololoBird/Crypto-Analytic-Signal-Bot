@@ -17,6 +17,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from bot.diagnostics.facade import assess_radar_store
 from bot.domain.labels import (
     CONFIRMATION_PROFILE_KEYS,
     CONFLUENCE_LEG_KEYS,
@@ -27,8 +28,10 @@ from bot.domain.labels import (
     reject_reason_ru,
 )
 from bot.domain.limit_entry import normalize_confirmation_profile
+from bot.market.radar_state import SymbolTier
 from bot.runtime.delivery_orchestrator import DELIVERY_SUCCESS_STATUSES
 from bot.runtime.errors import DEFENSIVE_EXC
+from bot.runtime_policy import effective_shortlist_unified_routing
 from bot.telemetry import slim_message_buffer_fields
 
 from ..delivery.formatting import message_preview, sample_message_from_row
@@ -669,9 +672,6 @@ class DashboardLiveData:
         }
 
     def _radar_summary_uncached(self, *, hot_limit: int) -> JsonDict:
-        from bot.diagnostics.facade import assess_radar_store
-        from bot.market.radar_state import SymbolTier
-
         bot = self._bot()
         ws_mgr = getattr(bot, "_ws_manager", None)
         store = getattr(ws_mgr, "_radar_store", None) if ws_mgr is not None else None
@@ -1030,8 +1030,6 @@ class DashboardLiveData:
         diag_summary = diagnostics.get_summary() if diagnostics is not None else {}
         runtime_cfg = getattr(getattr(bot, "settings", None), "runtime", None)
         shortlist_total = len(getattr(bot, "_shortlist", ()) or ())
-        from bot.runtime_policy import effective_shortlist_unified_routing
-
         effective_unified = effective_shortlist_unified_routing(
             runtime_cfg,
             shortlist_total=shortlist_total,

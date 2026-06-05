@@ -8,6 +8,8 @@ import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from bot.delivery.ops_webhook import send_ops_webhook_alert
+from bot.delivery.telegram_routing import operator_dm_enabled, send_operator_html
 from bot.domain.delivery_policy import effective_action_min_score
 from bot.domain.limit_entry import limit_delivery_ready, resolve_late_entry_chase_pct
 from bot.market.radar_state import SymbolTier
@@ -79,8 +81,6 @@ async def maybe_notify_watch_escalation(
     if not ok or note != "zone_ready" or previous == "zone_ready":
         return
 
-    from bot.delivery.telegram_routing import operator_dm_enabled, send_operator_html
-
     if not operator_dm_enabled(bot, "send_watch_escalation"):
         return
 
@@ -106,8 +106,6 @@ async def maybe_notify_watch_escalation(
             )
     except DEFENSIVE_EXC:
         LOG.debug("watch escalation notify failed", exc_info=True)
-
-    from bot.delivery.ops_webhook import send_ops_webhook_alert
 
     if await send_ops_webhook_alert(
         bot,
@@ -205,8 +203,6 @@ async def emit_radar_watch_candidates(
 
     if not cfg.emit_watch_candidates:
         return summary
-
-    from bot.delivery.telegram_routing import operator_dm_enabled, send_operator_html
 
     if not operator_dm_enabled(bot, "send_radar_watch_candidate"):
         return summary

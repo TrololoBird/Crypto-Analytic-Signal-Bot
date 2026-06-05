@@ -9,14 +9,17 @@ from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from bot.domain.contracts import assert_runtime_call_path_is_clean
 from bot.domain.limit_entry import DEFAULT_LATE_ENTRY_CHASE_PCT
 from bot.domain.strategy_catalog import (
     CATALOG_SETUP_IDS_ORDERED,
     CATALOG_SETUP_PARAM_KEYS,
+    verify_config_setup_references,
+    verify_setup_config_model,
 )
 from bot.runtime.errors import DEFENSIVE_EXC
 
-from ..secrets import load_secrets
+from ..secrets import load_secrets, parse_operator_user_ids
 
 
 class _StrictModel(BaseModel):
@@ -939,8 +942,6 @@ class BotSettings(_StrictModel):
         if isinstance(value, int):
             return (value,)
         if isinstance(value, str):
-            from bot.secrets import parse_operator_user_ids
-
             return parse_operator_user_ids(value)
         if isinstance(value, (list, tuple, set)):
             ids: list[int] = []
@@ -1000,18 +1001,11 @@ class BotSettings(_StrictModel):
 
     def validate_for_runtime(self, *, require_telegram: bool) -> None:
         """Validate settings for runtime execution."""
-        from bot.domain.strategy_catalog import (
-            verify_config_setup_references,
-            verify_setup_config_model,
-        )
-
         self._assert_supported_kline_intervals(cast("list[str]", self.ws.kline_intervals))
         for error in verify_setup_config_model(SetupConfig):
             raise ValueError(error)
         for error in verify_config_setup_references(self):
             raise ValueError(error)
-        from bot.domain.contracts import assert_runtime_call_path_is_clean
-
         assert_runtime_call_path_is_clean()
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.logs_dir.mkdir(parents=True, exist_ok=True)
@@ -1177,9 +1171,4 @@ def load_settings(config_path: str | Path = "config.toml") -> BotSettings:
             setup_overrides[setup_id] = {**legacy_params, **existing}
         else:
             setup_overrides[setup_id] = dict(legacy_params)
-    settings = BotSettings.model_validate(payload)
-    if os.getenv("BOT_RESEARCH_HARVEST", "").strip().lower() in ("1", "true", "yes"):
-        from .research_harvest import activate_research_harvest
-
-        settings = activate_research_harvest(settings)
-    return settings
+    return BotSettings.model_validate(payload)

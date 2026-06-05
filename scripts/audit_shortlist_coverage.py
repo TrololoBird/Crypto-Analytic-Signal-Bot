@@ -17,11 +17,9 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from scripts.common import bootstrap_repo_path, configure_script_logging
-except ModuleNotFoundError:  # pragma: no cover - direct script execution
-    from common import bootstrap_repo_path, configure_script_logging
-
-bootstrap_repo_path()
+    from scripts.common import configure_script_logging
+except ModuleNotFoundError:  # pragma: no cover
+    from common import configure_script_logging
 
 from bot.domain.config import _ALL_SETUP_IDS, load_settings
 from bot.market.rest_impl import BinanceClientImpl
@@ -34,8 +32,8 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     if not path.is_file():
         return []
     rows: list[dict[str, Any]] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
         if not line:
             continue
         try:

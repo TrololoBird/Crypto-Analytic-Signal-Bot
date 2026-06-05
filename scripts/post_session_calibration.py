@@ -11,11 +11,9 @@ import sys
 from pathlib import Path
 
 try:
-    from scripts.common import bootstrap_repo_path
-except ModuleNotFoundError:
-    from common import bootstrap_repo_path
-
-bootstrap_repo_path()
+    import scripts.common  # noqa: F401
+except ModuleNotFoundError:  # pragma: no cover
+    import common  # noqa: F401
 
 from scripts.calibration_pipeline import run_calibration_pipeline
 

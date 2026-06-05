@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import math
-import sys
 import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -28,9 +27,6 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
 
 VALID_INTERVALS = {
     "1m",

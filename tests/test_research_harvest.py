@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 from bot.diagnostics.research_harvest import ResearchHarvestRecorder
@@ -13,6 +14,7 @@ from bot.domain.research_harvest import (
     activate_research_harvest,
     apply_research_harvest_profile,
 )
+from bot.domain.schemas import PipelineResult
 
 
 def _minimal_settings() -> BotSettings:
@@ -55,9 +57,6 @@ def test_recorder_writes_manifest_and_cycles(tmp_path: Path) -> None:
         symbols=("BTCUSDT",),
         config_path=Path("config.toml"),
     )
-    from datetime import UTC, datetime
-
-    from bot.domain.schemas import PipelineResult
 
     recorder.record_cycle(
         symbol="BTCUSDT",

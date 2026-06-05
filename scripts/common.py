@@ -75,3 +75,7 @@ def resolve_symbols(
         return run_symbols
 
     return _normalize_symbols(fallback_symbols)
+
+
+# Side effect on import: repo root on sys.path for direct script execution.
+bootstrap_repo_path()

@@ -1,4 +1,4 @@
-"""Wave F10 Agent N — regime cache TTL, btc_phase gate, global_market_regime, funding median, regime_frame_4h."""
+"""Wave F10 Agent N — regime cache, btc_phase gate, global_market_regime, funding."""
 
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ from bot.regime.composite_regime import (
 )
 from bot.regime.market import MarketRegimeAnalyzer
 from bot.runtime.delivery_orchestrator import DeliveryOrchestrator
+from bot.runtime.symbol_analyzer import AnalyzerContextMixin
 
 
 def _settings(**overrides: object) -> BotSettings:
@@ -308,7 +309,6 @@ def test_btc_decline_applies_countertrend_score_penalty() -> None:
 
 @pytest.mark.asyncio
 async def test_pipeline_injects_global_market_regime_from_db() -> None:
-    from bot.runtime.symbol_analyzer import AnalyzerContextMixin
 
     frame = _primary(close=100.0, ema20=100.0, ema50=100.0, rsi=50.0)
     prepared = PreparedSymbol(

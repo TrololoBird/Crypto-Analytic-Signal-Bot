@@ -27,6 +27,7 @@ from typing import Any
 
 import aiosqlite
 
+from bot.domain.research_harvest import activate_research_harvest, apply_research_harvest_profile
 from bot.runtime.errors import DEFENSIVE_EXC
 
 from . import BotSettings, SignalBot, load_settings
@@ -366,12 +367,10 @@ async def _main(
     _bootstrap_env_if_missing()
     settings = load_settings(config_path)
     if harvest_minutes > 0 or harvest_symbols is not None:
-        from bot.domain.research_harvest import activate_research_harvest
-
         settings = activate_research_harvest(settings, symbols=harvest_symbols)
+    elif os.getenv("BOT_RESEARCH_HARVEST", "").strip().lower() in ("1", "true", "yes"):
+        settings = activate_research_harvest(settings)
     elif settings.research_harvest.enabled:
-        from bot.domain.research_harvest import apply_research_harvest_profile
-
         settings = apply_research_harvest_profile(settings)
     if settings.config_path.name != "config.toml":
         sys.stderr.write(f"[INFO] config.toml not found; using {settings.config_path}\n")

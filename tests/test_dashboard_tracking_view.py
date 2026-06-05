@@ -1,11 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from bot.dashboard.tracking_view import compute_progress, serialize_tracking_signal
-
-if TYPE_CHECKING:
-    import pytest
 
 
 def test_compute_progress_long_active_halfway_to_tp1() -> None:
@@ -44,9 +39,9 @@ def test_compute_progress_short_pending() -> None:
     assert out["progress_tone"] == "yellow"
 
 
-def test_serialize_tracking_signal_uses_mark_price(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_serialize_tracking_signal_uses_mark_price() -> None:
     class _WS:
-        def get_mark_price_snapshot(self, symbol: str):
+        def get_mark_price_snapshot(self, _symbol: str):
             return {"mark_price": 105.5}
 
     class _Bot:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from unittest.mock import MagicMock
 
@@ -85,7 +86,6 @@ def test_data_readiness_radar_promoted_skips_derivatives() -> None:
 
 
 def test_collect_radar_watch_rows_excludes_shortlist() -> None:
-    from bot.domain.config import UniverseRadarConfig
 
     cfg = UniverseRadarConfig(enabled=True)
     store = MarketRadarStore(cfg)
@@ -142,7 +142,6 @@ def test_is_radar_promoted_item_by_bucket() -> None:
 
 @pytest.mark.asyncio
 async def test_emergency_shortlist_defers_recent_radar() -> None:
-    import asyncio
 
     settings = _settings()
     settings.runtime.emergency_fallback_seconds = 30

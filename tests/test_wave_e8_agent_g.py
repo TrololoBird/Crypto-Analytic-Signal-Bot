@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections import deque
 from datetime import UTC, datetime
@@ -15,7 +16,7 @@ from bot.domain.config import BotSettings, WSConfig
 from bot.features.prepare import _enrich_with_ws_data
 from bot.features.prepare_frame import add_session_cvd
 from bot.market.subscription_planner import ORDER_FLOW_ANCHOR_SYMBOLS, SubscriptionBudget
-from bot.market.ws import get_liquidation_rollups
+from bot.market.ws import FuturesWSManager, get_liquidation_rollups
 from bot.runtime.delivery_alerts import (
     _message_buffer_dropped_total,
     check_message_buffer_drop_alert,
@@ -85,7 +86,7 @@ def test_message_buffer_dropped_total_reads_nested_stats() -> None:
 async def test_message_buffer_drop_alert_sets_baseline_first() -> None:
     bot = _bot(drop_threshold=10)
     with patch(
-        "bot.delivery.ops_webhook.send_ops_webhook_alert",
+        "bot.runtime.delivery_alerts.send_ops_webhook_alert",
         new=AsyncMock(return_value=False),
     ):
         await check_message_buffer_drop_alert(
@@ -102,7 +103,7 @@ async def test_message_buffer_drop_alert_fires_on_delta() -> None:
     bot._message_buffer_drop_baseline_set = True
     bot._last_message_buffer_dropped = 100
     webhook = AsyncMock(return_value=True)
-    with patch("bot.delivery.ops_webhook.send_ops_webhook_alert", new=webhook):
+    with patch("bot.runtime.delivery_alerts.send_ops_webhook_alert", new=webhook):
         await check_message_buffer_drop_alert(
             bot,  # type: ignore[arg-type]
             ws_snapshot={"message_buffer": {"dropped": 200, "size": 12}},
@@ -138,9 +139,6 @@ def test_telemetry_store_has_no_persist_candles() -> None:
 
 
 def test_ws_state_snapshot_order_flow_fields() -> None:
-    import asyncio
-
-    from bot.market.ws import FuturesWSManager
 
     manager = FuturesWSManager.__new__(FuturesWSManager)
     manager._symbols = ["btcusdt", "ethusdt"]

@@ -4,9 +4,9 @@ import argparse
 import asyncio
 
 try:
-    from scripts.common import bootstrap_repo_path, configure_script_logging
-except ModuleNotFoundError:  # pragma: no cover - direct script execution
-    from common import bootstrap_repo_path, configure_script_logging
+    from scripts.common import configure_script_logging
+except ModuleNotFoundError:  # pragma: no cover
+    from common import configure_script_logging
 
 from typing import TYPE_CHECKING
 
@@ -186,7 +186,6 @@ async def _run(
 
 
 def main() -> None:
-    bootstrap_repo_path()
     parser = argparse.ArgumentParser(description="Live REST/WS Binance API smoke check")
     parser.add_argument("--symbols", nargs="+", default=["BTCUSDT", "ETHUSDT", "SOLUSDT"])
     parser.add_argument("--warmup-seconds", type=float, default=20.0)

@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from .config import BotSettings, ResearchHarvestConfig
+from .config import REQUIRED_PINNED_SYMBOLS, AssetConfig, BotSettings, ResearchHarvestConfig
 
 # Ten liquid USD-M symbols: seven benchmark pins + three high-beta alts.
 DEFAULT_RESEARCH_HARVEST_SYMBOLS: tuple[str, ...] = (
@@ -23,8 +20,6 @@ DEFAULT_RESEARCH_HARVEST_SYMBOLS: tuple[str, ...] = (
 
 
 def _resolved_symbols(rh: ResearchHarvestConfig) -> tuple[str, ...]:
-    from .config import REQUIRED_PINNED_SYMBOLS
-
     base = rh.symbols or DEFAULT_RESEARCH_HARVEST_SYMBOLS
     return tuple(dict.fromkeys((*base, *REQUIRED_PINNED_SYMBOLS)))
 
@@ -54,8 +49,6 @@ def apply_research_harvest_profile(settings: BotSettings) -> BotSettings:
     if not rh.enabled:
         return settings
 
-    from .config import REQUIRED_PINNED_SYMBOLS
-
     symbols = _resolved_symbols(rh)
     symbol_count = len(symbols)
     light_pool = max(symbol_count, 20)
@@ -64,8 +57,6 @@ def apply_research_harvest_profile(settings: BotSettings) -> BotSettings:
     for symbol in symbols:
         existing = assets.get(symbol)
         if existing is None:
-            from .config import AssetConfig
-
             assets[symbol] = AssetConfig(
                 deep_analysis=True,
                 primary_timeframe="15m",

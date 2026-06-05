@@ -12,11 +12,9 @@ import time
 from pathlib import Path
 
 try:
-    from scripts.common import bootstrap_repo_path
-except ModuleNotFoundError:
-    from common import bootstrap_repo_path
-
-bootstrap_repo_path()
+    import scripts.common  # noqa: F401
+except ModuleNotFoundError:  # pragma: no cover
+    import common  # noqa: F401
 
 from bot.domain.config import load_settings
 from bot.ops.pid_utils import acquire_pid_lock, pid_is_alive, release_pid_lock
@@ -61,12 +59,13 @@ def _stop(settings: object) -> None:
 
 
 def _start() -> subprocess.Popen[bytes]:
-    log = open("logs/agent_live_run.log", "a", encoding="utf-8")
+    log_path = Path("logs/agent_live_run.log")
+    log_path.parent.mkdir(parents=True, exist_ok=True)
     return subprocess.Popen(
         [sys.executable, "main.py", "run"],
         cwd=Path.cwd(),
         env=_env(),
-        stdout=log,
+        stdout=log_path.open("a", encoding="utf-8"),
         stderr=subprocess.STDOUT,
     )
 
@@ -82,8 +81,8 @@ def main() -> int:
     )
     try:
         acquire_pid_lock(MONITOR_LOCK)
-    except SystemExit as exc:
-        LOG.exception("%s", exc)
+    except SystemExit:
+        LOG.exception("monitor lock unavailable")
         return 1
 
     settings = load_settings("config.toml")
