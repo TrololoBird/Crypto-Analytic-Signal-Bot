@@ -195,9 +195,10 @@ async def _discover(
 def _update_config_toml(path: Path, urls: list[str], *, direct_ok: bool = False) -> None:
     text = path.read_text(encoding="utf-8")
     block = _render_network_block(urls, direct_ok=direct_ok)
-    pattern = re.compile(r"\[bot\.network\][^\[]*", re.DOTALL)
+    # Match optional leading comments + [bot.network] section up to next top-level [section]
+    pattern = re.compile(r"(?:#[^\n]*\n)*\[bot\.network\].*?(?=\n\[|\Z)", re.DOTALL)
     if pattern.search(text):
-        text = pattern.sub(block + "\n", text, count=1)
+        text = pattern.sub(block, text, count=1)
     else:
         text = text.rstrip() + "\n\n" + block + "\n"
     path.write_text(text, encoding="utf-8")

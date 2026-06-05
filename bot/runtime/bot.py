@@ -622,6 +622,24 @@ class SignalBot:
             except DEFENSIVE_EXC:
                 LOG.exception("ws_manager start failed; continuing with REST fallback")
 
+        # Warm derivatives cache synchronously before the EventBus starts dispatching
+        # kline events. This prevents derivatives_context_missing on first signals.
+        if isinstance(self.client, BinanceFuturesMarketData):
+            try:
+                async with self._shortlist_lock:
+                    _warmup_symbols = list(self._shortlist)
+                if _warmup_symbols:
+                    warmed = await self._oi_refresh_runner.refresh_once(
+                        _warmup_symbols,
+                        max_age_seconds=0.0,
+                        time_budget_seconds=45.0,
+                        per_symbol_timeout_seconds=8.0,
+                        include_funding_history=False,
+                    )
+                    LOG.info("startup derivatives warmup complete | symbols_warmed=%d", warmed)
+            except DEFENSIVE_EXC:
+                LOG.warning("startup derivatives warmup failed — signals may degrade briefly")
+
         # Preload historical frames in the background so `prepare_symbol` can
         # meet its required 15m/1h history and optional 5m/4h context. This is deliberately
         # lightweight (batch + delay) to avoid REST storms.
