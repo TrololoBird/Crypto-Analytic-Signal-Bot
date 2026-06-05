@@ -54,7 +54,16 @@ config.toml
 config.local.toml
 ourtg.json
 
-# Project data artifacts
+# Local scratch / agent artifacts (never commit)
+_audit_scratch.txt
+_logic_violations.txt
+_master_refactor_baseline.txt
+_stubs.txt
+CLAUDE.md.bak
+CLAUDE.md.prev
+LIVE_SESSION_STATUS.json
+reports/
+
 data/
 telemetry/
 *.db
