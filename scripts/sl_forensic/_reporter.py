@@ -71,7 +71,7 @@ def _fix_recommendation(case: dict[str, Any]) -> str:
         return (
             f"Strategy detector fires on real-time data but NOT on confirmed historical data.\n"
             f"   This is a closed-candle confirmation bug in {setup_id}.\n"
-            f"   The df[-2] fix should be applied to this strategy."
+            f"   Fix: apply confirmed-bar fix to {setup_id}.py"
         )
     if sl_type == "THESIS_FAILED" and subtype == "WRONG_DIRECTION":
         return (
@@ -94,14 +94,14 @@ def generate_case_card(case: dict[str, Any]) -> str:
     rr = case.get("rr_ratio")
     deviation = case.get("entry_deviation_atr_mult")
     confirmed = case.get("entry_candle_was_confirmed")
-    tp1_reached = bool(case.get("post_sl_tp1_reached"))
+    tp1_reached = bool(case.get("post_sl_tp1_reached")) or case.get("post_sl_tp1_reached") == 1
     tp1_candles = case.get("post_sl_tp1_candles")
-    recheck = case.get("strategy_recheck_valid")
+    recheck_raw = case.get("strategy_recheck_valid")
     recheck_reason = case.get("strategy_recheck_reason") or ""
 
-    if recheck is True:
+    if recheck_raw is True or recheck_raw == 1:
         recheck_label = "YES"
-    elif recheck is False:
+    elif recheck_raw is False or recheck_raw == 0:
         recheck_label = "NO"
     else:
         recheck_label = "N/A"
@@ -109,12 +109,13 @@ def generate_case_card(case: dict[str, Any]) -> str:
     tp1_label = (
         f"YES in {tp1_candles} candles"
         if tp1_reached and tp1_candles is not None
-        else "NO"
+        else "YES (in-trade)" if case.get("tp1_hit_at") else "NO"
     )
 
+    direction = str(case.get("direction") or "").upper()
     lines = [
-        f"## Case: {case.get('setup_id')} {case.get('direction')} "
-        f"{case.get('symbol')} @ {case.get('signal_created_at')}",
+        f"## Case: {case.get('setup_id')} {direction} {case.get('symbol')} "
+        f"@ {case.get('signal_created_at')}",
         "",
         f"**Verdict:** {case.get('sl_type')} / {case.get('sl_subtype')}",
         f"> {case.get('sl_verdict')}",
@@ -182,13 +183,14 @@ def generate_aggregate_report(cases: list[dict[str, Any]]) -> str:
         return "# SL Forensic Report\n\nNo SL cases analyzed.\n"
 
     type_counts = Counter(str(c.get("sl_type") or "UNKNOWN") for c in cases)
-    subtype_counts = Counter(
-        f"{c.get('sl_type')}/{c.get('sl_subtype')}" for c in cases
-    )
-    setup_counts: dict[str, Counter[str]] = {}
+    subtype_by_type: dict[str, Counter[str]] = {}
+    setup_subtype: dict[str, Counter[str]] = {}
     for case in cases:
+        sl_type = str(case.get("sl_type") or "UNKNOWN")
+        subtype = str(case.get("sl_subtype") or sl_type)
         setup = str(case.get("setup_id") or "unknown")
-        setup_counts.setdefault(setup, Counter())[str(case.get("sl_type") or "UNKNOWN")] += 1
+        subtype_by_type.setdefault(sl_type, Counter())[subtype] += 1
+        setup_subtype.setdefault(setup, Counter())[f"{subtype}"] += 1
 
     total = len(cases)
     lines = [
@@ -198,22 +200,35 @@ def generate_aggregate_report(cases: list[dict[str, Any]]) -> str:
         "",
         "## Executive summary",
         "",
-        "| SL Type | Count | % |",
-        "|---------|------:|--:|",
     ]
+
+    exec_notes = {
+        "STOP_HUNT": "← widening stops will help",
+        "IMMEDIATE_ADVERSE": "",
+        "THESIS_FAILED": "← genuine bad calls",
+        "TIMING_OFF": "← SL/TTL too tight for move pace",
+    }
     for sl_type in ("STOP_HUNT", "IMMEDIATE_ADVERSE", "THESIS_FAILED", "TIMING_OFF"):
         count = type_counts.get(sl_type, 0)
         pct = count / total * 100.0 if total else 0.0
-        lines.append(f"| {sl_type} | {count} | {pct:.1f}% |")
-
-    lines.extend(["", "### Subtypes", ""])
-    for key, count in subtype_counts.most_common():
-        lines.append(f"- {key}: {count}")
+        note = exec_notes.get(sl_type, "")
+        lines.append(f"- **{sl_type}:** {count} ({pct:.0f}%){f' {note}' if note else ''}")
+        if sl_type == "IMMEDIATE_ADVERSE":
+            for sub, sub_count in subtype_by_type.get(sl_type, Counter()).most_common():
+                sub_note = {
+                    "BTC_DRAG": "← BTC filter needed",
+                    "ENTRY_CHASE": "← fix-sl-A should catch",
+                    "FALSE_SIGNAL": "← df[-2] fix needed",
+                    "REGIME_FADE": "← fix-sl-C regime filter",
+                }.get(sub, "")
+                lines.append(f"  - {sub}: {sub_count}{f' {sub_note}' if sub_note else ''}")
 
     lines.extend(["", "## Per-strategy breakdown", ""])
-    for setup, counter in sorted(setup_counts.items()):
-        parts = ", ".join(f"{k}={v}" for k, v in counter.items())
-        lines.append(f"- **{setup}**: {parts}")
+    setup_totals = Counter(str(c.get("setup_id") or "unknown") for c in cases)
+    for setup in setup_totals:
+        n = setup_totals[setup]
+        parts = ", ".join(f"{cnt}×{sub}" for sub, cnt in setup_subtype[setup].most_common())
+        lines.append(f"- **{setup}:** {n} SL → {parts}")
 
     lines.extend(["", "## Actionable recommendations by type", ""])
     rec_by_type: dict[str, list[str]] = {}
@@ -232,7 +247,16 @@ def generate_aggregate_report(cases: list[dict[str, Any]]) -> str:
         c
         for c in cases
         if c.get("sl_type") in {"STOP_HUNT", "IMMEDIATE_ADVERSE"}
-        and c.get("sl_subtype") in {"ENTRY_CHASE", "FAST_RECOVERY", "SLOW_RECOVERY", "BTC_DRAG"}
+        and c.get("sl_subtype")
+        in {
+            "ENTRY_CHASE",
+            "FAST_RECOVERY",
+            "SLOW_RECOVERY",
+            "BTC_DRAG",
+            "FALSE_SIGNAL",
+            "POST_SL_RECOVERY",
+            "IN_TRADE_TP1_THEN_STOP",
+        }
     ]
     lines.extend(["", "## Cases requiring immediate fix", ""])
     if urgent:

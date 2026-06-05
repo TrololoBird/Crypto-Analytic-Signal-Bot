@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from typing import Any
+
+import polars as pl
 
 
 def _find_candle_index(candles: list[dict[str, Any]], ts_ms: int) -> int | None:
@@ -52,7 +55,8 @@ def compute_post_sl_action(
             "post_sl_price_at_close": None,
         }
 
-    post = candles[sl_idx + 1 : sl_idx + 1 + analyze_candles]
+    # Include SL candle — wick sweeps often recover within the same bar.
+    post = candles[sl_idx : sl_idx + analyze_candles]
     if not post:
         return {
             "post_sl_candles_analyzed": 0,
@@ -152,16 +156,102 @@ def compute_entry_deviation(
     entry_price: float,
     signal_created_ts_ms: int,
     atr_pct: float,
+    *,
+    activation_ts_ms: int | None = None,
 ) -> float:
-    """Return entry deviation as multiples of ATR."""
+    """Return entry deviation as multiples of ATR at activation (or signal) time."""
     if entry_price <= 0 or atr_pct <= 0:
         return 0.0
-    candle = _find_candle_at_or_before(candles, signal_created_ts_ms)
+    anchor_ts = activation_ts_ms or signal_created_ts_ms
+    candle = _find_candle_at_or_before(candles, anchor_ts)
     if candle is None:
         return 0.0
     close = float(candle["close"])
     pct_move = abs(close - entry_price) / entry_price * 100.0
     return pct_move / atr_pct
+
+
+def _parse_dt(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    return parsed.astimezone(UTC) if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def _roc10_at_index(work: pl.DataFrame, end_idx: int, lookback: int = 10) -> float | None:
+    if work.height < 2 or "close" not in work.columns:
+        return None
+    end_idx = max(0, min(end_idx, work.height - 1))
+    start_idx = max(0, end_idx - lookback)
+    try:
+        start = float(work.item(start_idx, "close"))
+        end = float(work.item(end_idx, "close"))
+    except (TypeError, ValueError):
+        return None
+    if start <= 0.0 or end <= 0.0:
+        return None
+    return (end / start - 1.0) * 100.0
+
+
+def assess_closed_candle_validity(
+    candles: list[dict[str, Any]],
+    *,
+    event_ts_ms: int,
+    direction: str,
+) -> bool | None:
+    """True when momentum on last closed bar agrees with signal direction."""
+    if len(candles) < 3:
+        return None
+    df = pl.DataFrame(
+        {
+            "ts": [int(c["ts"]) for c in candles],
+            "close": [float(c["close"]) for c in candles],
+        }
+    ).sort("ts")
+    idx = _find_candle_index(candles, event_ts_ms)
+    if idx is None or idx < 2:
+        return None
+    roc_prev = _roc10_at_index(df, idx - 1)
+    if roc_prev is None:
+        return None
+    dir_norm = direction.lower()
+    if roc_prev > 0.05:
+        prev_dir = "long"
+    elif roc_prev < -0.05:
+        prev_dir = "short"
+    else:
+        return None
+    return prev_dir == dir_norm
+
+
+def _as_bool(value: Any) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        if value == 1:
+            return True
+        if value == 0:
+            return False
+        return None
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "yes"}:
+            return True
+        if lowered in {"0", "false", "no"}:
+            return False
+    return None
+
+
+def _tp1_room_pct(entry: float, tp1: float, direction: str) -> float:
+    if entry <= 0 or tp1 <= 0:
+        return 0.0
+    sign = 1.0 if direction.lower() == "long" else -1.0
+    return sign * (tp1 - entry) / entry * 100.0
 
 
 def extract_indicator_snapshot(features_json: str | None) -> dict[str, Any]:
@@ -203,16 +293,18 @@ def direction_vs_bias(direction: str, btc_bias: str | None) -> str:
     """Classify signal direction against BTC bias."""
     d = direction.lower()
     bias = (btc_bias or "neutral").lower()
-    if bias in {"bullish", "bull", "up"}:
+    bearish = {"bearish", "bear", "down", "downtrend", "decline", "distribution"}
+    bullish = {"bullish", "bull", "up", "uptrend", "markup", "accumulation"}
+    if bias in bullish:
         return "ALIGNED" if d == "long" else "AGAINST" if d == "short" else "NEUTRAL"
-    if bias in {"bearish", "bear", "down"}:
+    if bias in bearish:
         return "ALIGNED" if d == "short" else "AGAINST" if d == "long" else "NEUTRAL"
     return "NEUTRAL"
 
 
 def classify_sl(case: dict[str, Any]) -> tuple[str, str, str]:
     """Apply SL taxonomy; returns (sl_type, sl_subtype, sl_verdict)."""
-    tp1_reached = bool(case.get("post_sl_tp1_reached"))
+    tp1_reached = bool(case.get("post_sl_tp1_reached")) or _as_bool(case.get("post_sl_tp1_reached"))
     tp1_candles = case.get("post_sl_tp1_candles")
     sl_dist = float(case.get("sl_distance_pct") or 0.0)
     recovery = float(case.get("post_sl_max_recovery_pct") or 0.0)
@@ -221,15 +313,23 @@ def classify_sl(case: dict[str, Any]) -> tuple[str, str, str]:
     tp1_price = float(case.get("tp1_price") or 0.0)
     score = float(case.get("score") or 0.0)
     deviation = float(case.get("entry_deviation_atr_mult") or 0.0)
-    recheck = case.get("strategy_recheck_valid")
-    btc_caused = bool(case.get("btc_caused_sl"))
+    recheck = _as_bool(case.get("strategy_recheck_valid"))
+    closed_valid = _as_bool(case.get("closed_candle_valid"))
+    btc_caused = bool(case.get("btc_caused_sl")) or _as_bool(case.get("btc_caused_sl"))
     btc_match = str(case.get("btc_direction_match") or "NEUTRAL")
     vs_bias = str(case.get("direction_vs_bias") or "NEUTRAL")
     direction = str(case.get("direction") or "")
     symbol = str(case.get("symbol") or "")
     setup_id = str(case.get("setup_id") or "")
+    mfe = float(case.get("mfe") or 0.0)
+    mae = float(case.get("mae") or 0.0)
+    in_trade_tp1 = bool(case.get("tp1_hit_at"))
+    tp1_room = _tp1_room_pct(entry_price, tp1_price, direction)
+    atr_pct = float(case.get("atr_pct") or 0.0)
+    stale_threshold = max(0.15, 1.5 * atr_pct) if atr_pct > 0 else 1.0
+    entry_deviation_pct = float(case.get("entry_deviation_pct") or 0.0)
 
-    # TYPE 1: STOP_HUNT
+    # TYPE 1: STOP_HUNT — post-SL recovery, in-trade TP1 touch, or partial thesis
     if tp1_reached and tp1_candles is not None and int(tp1_candles) <= 8:
         subtype = "FAST_RECOVERY" if int(tp1_candles) <= 4 else "SLOW_RECOVERY"
         verdict = (
@@ -238,40 +338,27 @@ def classify_sl(case: dict[str, Any]) -> tuple[str, str, str]:
         )
         return "STOP_HUNT", subtype, verdict
 
-    # TYPE 2: IMMEDIATE_ADVERSE
-    recovery_threshold = 0.15 * sl_dist if sl_dist > 0 else 0.0
-    if recovery < recovery_threshold and time_to_sl < 30:
-        if btc_caused and btc_match == "SAME":
-            subtype = "BTC_DRAG"
-            btc_move = float(case.get("btc_move_in_sl_candle_pct") or 0.0)
-            verdict = (
-                f"BTC moved {btc_move:.2f}% in SL candle, dragging {symbol} "
-                "against the position immediately after entry."
-            )
-        elif deviation > 1.0:
-            subtype = "ENTRY_CHASE"
-            verdict = (
-                f"Entry was {deviation:.2f}×ATR from mark at activation — "
-                "chased move, never moved favorably."
-            )
-        elif recheck is False:
-            subtype = "FALSE_SIGNAL"
-            verdict = (
-                f"Detector does not fire on confirmed historical data for {setup_id} — "
-                "likely unclosed-candle false positive."
-            )
-        elif vs_bias == "AGAINST":
-            subtype = "REGIME_FADE"
-            verdict = (
-                f"{direction} signal traded against confirmed BTC bias "
-                f"({case.get('btc_bias', 'unknown')})."
-            )
-        else:
-            subtype = "IMMEDIATE_ADVERSE"
-            verdict = "Price never moved favorably; entry timing or direction was wrong."
+    if in_trade_tp1:
+        subtype = "IN_TRADE_TP1_THEN_STOP"
+        verdict = (
+            "TP1 was touched in-trade before stop closed — thesis held, "
+            "stop placement or BE trail too tight."
+        )
+        return "STOP_HUNT", subtype, verdict
+
+    # Candle-only setups that fail confirmed-bar recheck are false signals regardless of hold time.
+    if recheck is False and setup_id in {
+        "btc_correlation",
+        "spread_strategy",
+    }:
+        subtype = "FALSE_SIGNAL"
+        verdict = (
+            f"Detector fires on real-time unclosed candle but NOT on "
+            f"confirmed historical data — df[-2] fix required for {setup_id}."
+        )
         return "IMMEDIATE_ADVERSE", subtype, verdict
 
-    # TYPE 4: TIMING_OFF (before THESIS_FAILED per spec order)
+    # TYPE 4: TIMING_OFF — thesis right, SL too tight for pace (check before broad STOP_HUNT)
     if tp1_reached and tp1_candles is not None and int(tp1_candles) > 8:
         if time_to_sl < 15 and int(tp1_candles) > 20:
             subtype = "PREMATURE_SL"
@@ -289,6 +376,67 @@ def classify_sl(case: dict[str, Any]) -> tuple[str, str, str]:
             subtype = "SLOW_RECOVERY"
             verdict = f"TP1 reached after {tp1_candles} candles — timing/TTL mismatch."
         return "TIMING_OFF", subtype, verdict
+
+    if recovery >= 1.0 and abs(tp1_room) > 1.5:
+        subtype = "POST_SL_RECOVERY"
+        verdict = (
+            f"Price recovered {recovery:.2f}% toward TP1 after SL exit — "
+            "likely stop hunt / liquidity sweep."
+        )
+        return "STOP_HUNT", subtype, verdict
+
+    if mfe > 0.4 and mae > 0.0 and (mfe / mae) >= 0.4:
+        subtype = "PARTIAL_THESIS_THEN_STOP"
+        verdict = (
+            f"MFE {mfe:.2f}% before SL — partial thesis played out, "
+            "stop was too tight for volatility."
+        )
+        return "STOP_HUNT", subtype, verdict
+
+    # TYPE 2: IMMEDIATE_ADVERSE — strict time gate per taxonomy
+    recovery_threshold = 0.15 * sl_dist if sl_dist > 0 else 0.0
+    immediate = recovery < recovery_threshold and time_to_sl < 30
+    if immediate:
+        if btc_caused and btc_match == "SAME":
+            subtype = "BTC_DRAG"
+            btc_move = float(case.get("btc_move_in_sl_candle_pct") or 0.0)
+            verdict = (
+                f"BTC moved {btc_move:.2f}% in the SL candle, dragging {symbol} "
+                "against the position immediately after entry."
+            )
+        elif deviation > 1.0 or entry_deviation_pct > stale_threshold:
+            subtype = "ENTRY_CHASE"
+            verdict = (
+                f"Entry was {deviation:.2f}×ATR from mark at activation — "
+                "chased move, never moved favorably."
+            )
+        elif recheck is False:
+            subtype = "FALSE_SIGNAL"
+            verdict = (
+                f"Detector fires on real-time unclosed candle but NOT on "
+                f"confirmed historical data — df[-2] fix required for {setup_id}."
+            )
+        elif closed_valid is False and setup_id in {
+            "btc_correlation",
+            "spread_strategy",
+            "ema_bounce",
+            "funding_reversal",
+        }:
+            subtype = "FALSE_SIGNAL"
+            verdict = (
+                f"Confirmed-bar momentum disagrees with {direction} on {setup_id} — "
+                "df[-2] fix required."
+            )
+        elif vs_bias == "AGAINST":
+            subtype = "REGIME_FADE"
+            verdict = (
+                f"{direction} signal traded against confirmed BTC bias "
+                f"({case.get('btc_bias', 'unknown')})."
+            )
+        else:
+            subtype = "IMMEDIATE_ADVERSE"
+            verdict = "Price never moved favorably; entry timing or direction was wrong."
+        return "IMMEDIATE_ADVERSE", subtype, verdict
 
     # TYPE 3: THESIS_FAILED (default)
     tp1_dist_pct = 0.0

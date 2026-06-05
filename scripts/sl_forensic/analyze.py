@@ -32,6 +32,7 @@ from bot.domain.config import load_settings
 from bot.migrations import migrate_db
 
 from scripts.sl_forensic._classifier import (
+    assess_closed_candle_validity,
     classify_sl,
     compute_btc_correlation,
     compute_entry_deviation,
@@ -53,6 +54,7 @@ SL_QUERY = """
         so.symbol,
         so.direction,
         so.timeframe,
+        so.result,
         so.created_at AS signal_created_at,
         so.activated_at AS entry_activated_at,
         so.closed_at AS sl_hit_at,
@@ -60,15 +62,20 @@ SL_QUERY = """
         so.time_to_exit_min,
         so.entry_price,
         so.exit_price AS sl_price,
+        so.mfe,
+        so.mae,
         so.pnl_pct,
         so.features,
         as2.score,
         as2.take_profit_1 AS tp1_price,
         as2.take_profit_2 AS tp2_price,
         as2.initial_stop,
+        as2.entry_mid,
+        as2.activation_price,
         as2.atr_pct,
         as2.spread_bps,
         as2.bias_4h,
+        as2.tp1_hit_at,
         mc.market_regime,
         mc.btc_bias
     FROM signal_outcomes so
@@ -168,9 +175,14 @@ async def _load_cached_cases(conn: aiosqlite.Connection, days: int) -> list[dict
     conn.row_factory = aiosqlite.Row
     async with conn.execute(
         """
-        SELECT * FROM sl_forensics
-        WHERE sl_hit_at > datetime('now', ?)
-        ORDER BY sl_hit_at DESC
+        SELECT sf.* FROM sl_forensics sf
+        INNER JOIN (
+            SELECT tracking_id, MAX(analyzed_at) AS latest
+            FROM sl_forensics
+            GROUP BY tracking_id
+        ) dedup ON sf.tracking_id = dedup.tracking_id AND sf.analyzed_at = dedup.latest
+        WHERE sf.sl_hit_at > datetime('now', ?)
+        ORDER BY sf.sl_hit_at DESC
         """,
         (f"-{days} days",),
     ) as cursor:
@@ -182,7 +194,14 @@ def _row_to_base_case(row: aiosqlite.Row) -> dict[str, Any]:
     time_to_exit = int(row["time_to_exit_min"] or 0)
     time_to_entry = int(row["time_to_entry_min"] or 0)
     entry = float(row["entry_price"] or 0)
-    sl = float(row["sl_price"] or row["initial_stop"] or 0)
+    initial_stop = float(row["initial_stop"] or 0)
+    exit_price = float(row["sl_price"] or 0)
+    result = str(row["result"] or "")
+    # Breakeven/trailing exits report exit=entry; use planned stop for forensic distance.
+    if result in {"breakeven_stop", "trailing_stop"} and initial_stop > 0:
+        sl = initial_stop
+    else:
+        sl = exit_price or initial_stop
     tp1 = float(row["tp1_price"] or 0)
     tp2 = float(row["tp2_price"] or 0)
     features = row["features"]
@@ -191,6 +210,11 @@ def _row_to_base_case(row: aiosqlite.Row) -> dict[str, Any]:
     confirmed = snapshot.get("confirmed_bar") or snapshot.get("entry_candle_was_confirmed")
     if confirmed is None:
         confirmed = 0
+    entry_mid = float(row["entry_mid"] or entry)
+    activation = float(row["activation_price"] or entry)
+    entry_deviation_pct = (
+        abs(activation - entry_mid) / entry_mid * 100.0 if entry_mid > 0 else 0.0
+    )
     return {
         "tracking_id": row["tracking_id"],
         "signal_id": row["signal_id"],
@@ -198,9 +222,11 @@ def _row_to_base_case(row: aiosqlite.Row) -> dict[str, Any]:
         "symbol": row["symbol"],
         "direction": row["direction"],
         "timeframe": row["timeframe"] or "15m",
+        "result": result,
         "signal_created_at": row["signal_created_at"],
         "entry_activated_at": row["entry_activated_at"],
         "sl_hit_at": row["sl_hit_at"],
+        "tp1_hit_at": row["tp1_hit_at"],
         "time_to_entry_min": time_to_entry,
         "time_to_sl_min": max(0, time_to_exit - time_to_entry),
         "entry_price": entry,
@@ -209,10 +235,13 @@ def _row_to_base_case(row: aiosqlite.Row) -> dict[str, Any]:
         "tp2_price": tp2,
         "sl_distance_pct": _sl_distance_pct(entry, sl),
         "rr_ratio": _rr_ratio(entry, sl, tp1),
+        "mfe": float(row["mfe"] or 0),
+        "mae": float(row["mae"] or 0),
         "score": float(row["score"] or 0),
         "atr_pct": float(row["atr_pct"] or snapshot.get("atr_pct") or 0),
         "spread_bps": float(row["spread_bps"] or snapshot.get("spread_bps") or 0),
         "funding_rate": float(funding) if funding is not None else None,
+        "bias_4h": row["bias_4h"] or snapshot.get("bias_4h"),
         "market_regime": row["market_regime"] or "unknown",
         "btc_bias": row["btc_bias"] or row["bias_4h"] or "neutral",
         "direction_vs_bias": direction_vs_bias(
@@ -220,12 +249,17 @@ def _row_to_base_case(row: aiosqlite.Row) -> dict[str, Any]:
             row["btc_bias"] or row["bias_4h"],
         ),
         "entry_candle_was_confirmed": 1 if confirmed else 0,
+        "entry_deviation_pct": entry_deviation_pct,
         "features": features,
         "indicator_snapshot": snapshot,
     }
 
 
 async def _insert_forensic(conn: aiosqlite.Connection, case: dict[str, Any]) -> None:
+    await conn.execute(
+        "DELETE FROM sl_forensics WHERE tracking_id = ?",
+        (case["tracking_id"],),
+    )
     await conn.execute(
         """
         INSERT OR REPLACE INTO sl_forensics (
@@ -387,7 +421,7 @@ async def main() -> int:
                     print(f"Analyzing [{idx}/{len(rows)}] {symbol} {setup_id}...")
 
                     existing = await _existing_forensic(conn, tracking_id)
-                    if existing and not args.recheck:
+                    if existing and args.report_only:
                         cases.append(existing)
                         continue
 
@@ -434,14 +468,34 @@ async def main() -> int:
                             float(case["entry_price"] or 0),
                             signal_ts or anchor_ts,
                             float(case["atr_pct"] or 0),
+                            activation_ts_ms=ts_ms_from_iso(case.get("entry_activated_at")),
                         )
+
+                        act_ts = ts_ms_from_iso(case.get("entry_activated_at")) or signal_ts
+                        if act_ts is not None:
+                            closed_valid = assess_closed_candle_validity(
+                                signal_candles,
+                                event_ts_ms=act_ts,
+                                direction=str(case["direction"]),
+                            )
+                            case["closed_candle_valid"] = (
+                                1 if closed_valid else 0 if closed_valid is False else None
+                            )
+                            if closed_valid is False:
+                                case["entry_candle_was_confirmed"] = 0
+                            snap = case.get("indicator_snapshot") or {}
+                            if isinstance(snap, dict):
+                                snap["closed_candle_valid"] = case["closed_candle_valid"]
+                                snap["mfe"] = case.get("mfe")
+                                snap["mae"] = case.get("mae")
+                                case["indicator_snapshot"] = snap
 
                         case["candles_signal_tf"] = _candles_json(signal_candles)
                         case["candles_1h"] = _candles_json(windows.get("1h"))
                         case["candles_4h"] = _candles_json(windows.get("4h"))
                         case["candles_btc_signal"] = _candles_json(btc_candles)
 
-                        if args.recheck:
+                        if args.recheck or not existing:
                             recheck = await recheck_strategy(
                                 setup_id,
                                 symbol,
@@ -449,6 +503,7 @@ async def main() -> int:
                                 signal_candles,
                                 signal_ts or anchor_ts,
                                 settings,
+                                context=case,
                             )
                             valid = recheck.get("valid")
                             if valid is True:
@@ -483,6 +538,14 @@ async def main() -> int:
                 await fetcher.close()
 
     report_path = ROOT / "REPORT_SL_FORENSIC.md"
+    # Deduplicate by tracking_id (latest analysis wins).
+    deduped: dict[str, dict[str, Any]] = {}
+    for case in cases:
+        tid = str(case.get("tracking_id") or "")
+        if tid:
+            deduped[tid] = case
+    cases = list(deduped.values())
+    cases.sort(key=lambda c: str(c.get("sl_hit_at") or ""), reverse=True)
     report_md = generate_aggregate_report(cases)
     report_path.write_text(report_md, encoding="utf-8")
     print(f"\nReport written: {report_path}")

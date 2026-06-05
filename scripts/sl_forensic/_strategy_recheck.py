@@ -10,6 +10,28 @@ import polars as pl
 
 LOG = logging.getLogger("sl_forensic.strategy_recheck")
 
+# Setups that can be rechecked from OHLCV + stored context alone.
+_CANDLE_ONLY_SETUPS = frozenset(
+    {
+        "btc_correlation",
+        "spread_strategy",
+        "ema_bounce",
+        "funding_reversal",
+        "multi_tf_trend",
+        "price_velocity",
+        "rsi_divergence_bottom",
+        "supertrend_follow",
+        "vwap_trend",
+    }
+)
+
+_ENRICHMENT_REJECT_PREFIXES = (
+    "data.",
+    "pattern.wall_proxy",
+    "pattern.depth",
+    "pattern.orderbook",
+)
+
 
 def _candles_to_df(candles: list[dict[str, Any]]) -> pl.DataFrame:
     return pl.DataFrame(
@@ -38,10 +60,8 @@ def _signal_index(candles: list[dict[str, Any]], signal_ts_ms: int) -> int:
 def _build_minimal_prepared(
     *,
     symbol: str,
-    timeframe: str,
     work_primary: pl.DataFrame,
-    work_1h: pl.DataFrame | None,
-    work_15m: pl.DataFrame | None,
+    context: dict[str, Any],
 ) -> Any:
     from bot.domain.schemas import PreparedSymbol, UniverseSymbol
 
@@ -57,15 +77,35 @@ def _build_minimal_prepared(
         price_change_pct=0.0,
         last_price=last_close,
     )
+    snapshot = context.get("indicator_snapshot") or {}
+    if not isinstance(snapshot, dict):
+        snapshot = {}
+
+    bias_4h = str(context.get("bias_4h") or snapshot.get("bias_4h") or "neutral")
+    bias_1h = str(context.get("bias_1h") or snapshot.get("bias_1h") or bias_4h)
+    btc_bias = context.get("btc_bias") or snapshot.get("btc_bias") or bias_4h
+
     return PreparedSymbol(
         universe=universe,
-        work_1h=work_1h if work_1h is not None else work_primary,
-        work_15m=work_15m if work_15m is not None else work_primary,
+        work_1h=work_primary,
+        work_15m=work_primary,
         bid_price=last_close,
         ask_price=last_close,
-        spread_bps=0.0,
+        spread_bps=float(context.get("spread_bps") or snapshot.get("spread_bps") or 0.0),
         work_primary=work_primary,
+        bias_4h=bias_4h,
+        bias_1h=bias_1h,
+        btc_bias=str(btc_bias) if btc_bias else None,
+        funding_rate=context.get("funding_rate") or snapshot.get("funding_rate"),
+        depth_imbalance=snapshot.get("depth_imbalance"),
+        microprice_bias=snapshot.get("microprice_bias"),
+        depth_wall_pressure=snapshot.get("depth_wall_pressure"),
     )
+
+
+def _is_enrichment_reject(reason: str) -> bool:
+    lowered = reason.lower()
+    return any(lowered.startswith(prefix) for prefix in _ENRICHMENT_REJECT_PREFIXES)
 
 
 async def recheck_strategy(
@@ -75,10 +115,13 @@ async def recheck_strategy(
     candles: list[dict[str, Any]],
     signal_ts_ms: int,
     settings: Any,
+    *,
+    context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Re-run detector on historical closed-candle slice."""
     from bot.strategies import STRATEGY_CLASSES
 
+    context = context or {}
     cls = next((c for c in STRATEGY_CLASSES if getattr(c, "setup_id", None) == setup_id), None)
     if cls is None:
         return {"valid": None, "signal_count": 0, "reason": f"strategy {setup_id} not found"}
@@ -90,32 +133,33 @@ async def recheck_strategy(
             "reason": f"insufficient candles ({len(candles)}) for recheck",
         }
 
+    if setup_id not in _CANDLE_ONLY_SETUPS:
+        return {
+            "valid": None,
+            "signal_count": 0,
+            "reason": f"recheck_skipped: {setup_id} requires live enrichment (orderbook/OI)",
+        }
+
     try:
         df = _candles_to_df(candles)
         sig_idx = _signal_index(candles, signal_ts_ms)
-        # Only data available at signal time (inclusive).
-        slice_df = df.head(sig_idx + 1)
+        # Confirmed data only: exclude the forming bar that triggered the live signal.
+        confirmed_end = max(1, sig_idx)
+        slice_df = df.head(confirmed_end)
         if slice_df.height < 50:
             return {
                 "valid": None,
                 "signal_count": 0,
-                "reason": "insufficient history at signal bar",
+                "reason": "insufficient history at confirmed signal bar",
             }
 
         from bot.features.prepare_frame import _prepare_frame
 
         prepared_frame = _prepare_frame(slice_df)
-
-        tf = timeframe.split("+")[0].strip() or "15m"
-        work_1h = prepared_frame if tf == "1h" else prepared_frame
-        work_15m = prepared_frame if tf in {"15m", "5m"} else prepared_frame
-
         prepared = _build_minimal_prepared(
             symbol=symbol,
-            timeframe=tf,
             work_primary=prepared_frame,
-            work_1h=work_1h,
-            work_15m=work_15m,
+            context=context,
         )
 
         strategy = cls(settings=settings)
@@ -128,15 +172,15 @@ async def recheck_strategy(
                 "reason": "detector did not fire on confirmed historical slice",
             }
 
-        signals = result if isinstance(result, list) else [result]
         return {
-            "valid": len(signals) > 0,
-            "signal_count": len(signals),
-            "reason": "detector fired on confirmed historical data"
-            if signals
-            else "no signal",
+            "valid": True,
+            "signal_count": 1,
+            "reason": "detector fired on confirmed historical data",
         }
     except Exception as exc:
+        msg = str(exc)
+        if _is_enrichment_reject(msg):
+            return {"valid": None, "signal_count": 0, "reason": f"recheck_skipped: {msg}"}
         LOG.info("recheck failed for %s/%s: %s", setup_id, symbol, exc)
         return {"valid": None, "signal_count": 0, "reason": f"recheck_failed: {exc}"}
 
