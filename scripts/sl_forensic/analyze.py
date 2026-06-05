@@ -40,6 +40,7 @@ from scripts.sl_forensic._classifier import (
     direction_vs_bias,
     extract_indicator_snapshot,
 )
+from scripts.sl_forensic._confirmed_candle import infer_confirmed_candle
 from scripts.sl_forensic._fetcher import CandleFetcher
 from scripts.sl_forensic._reporter import generate_aggregate_report
 from scripts.sl_forensic._strategy_recheck import recheck_strategy, ts_ms_from_iso
@@ -207,9 +208,6 @@ def _row_to_base_case(row: aiosqlite.Row) -> dict[str, Any]:
     features = row["features"]
     snapshot = extract_indicator_snapshot(features)
     funding = snapshot.get("funding_rate")
-    confirmed = snapshot.get("confirmed_bar") or snapshot.get("entry_candle_was_confirmed")
-    if confirmed is None:
-        confirmed = 0
     entry_mid = float(row["entry_mid"] or entry)
     activation = float(row["activation_price"] or entry)
     entry_deviation_pct = (
@@ -248,7 +246,6 @@ def _row_to_base_case(row: aiosqlite.Row) -> dict[str, Any]:
             str(row["direction"]),
             row["btc_bias"] or row["bias_4h"],
         ),
-        "entry_candle_was_confirmed": 1 if confirmed else 0,
         "entry_deviation_pct": entry_deviation_pct,
         "features": features,
         "indicator_snapshot": snapshot,
@@ -481,11 +478,20 @@ async def main() -> int:
                             case["closed_candle_valid"] = (
                                 1 if closed_valid else 0 if closed_valid is False else None
                             )
-                            if closed_valid is False:
-                                case["entry_candle_was_confirmed"] = 0
+                            confirmed = infer_confirmed_candle(
+                                setup_id=str(case["setup_id"]),
+                                signal_created_at=case.get("signal_created_at"),
+                                features_snapshot=case.get("indicator_snapshot"),
+                                assess_closed_valid=closed_valid,
+                            )
+                            case["confirmed_candle"] = confirmed
+                            case["entry_candle_was_confirmed"] = (
+                                confirmed if confirmed is not None else 0
+                            )
                             snap = case.get("indicator_snapshot") or {}
                             if isinstance(snap, dict):
                                 snap["closed_candle_valid"] = case["closed_candle_valid"]
+                                snap["confirmed_candle"] = confirmed
                                 snap["mfe"] = case.get("mfe")
                                 snap["mae"] = case.get("mae")
                                 case["indicator_snapshot"] = snap
@@ -517,6 +523,22 @@ async def main() -> int:
                             case["strategy_recheck_valid"] = existing.get("strategy_recheck_valid")
                         else:
                             case["strategy_recheck_valid"] = None
+
+                        if case.get("confirmed_candle") is None:
+                            confirmed = infer_confirmed_candle(
+                                setup_id=str(case["setup_id"]),
+                                signal_created_at=case.get("signal_created_at"),
+                                features_snapshot=case.get("indicator_snapshot"),
+                                assess_closed_valid=(
+                                    None
+                                    if case.get("closed_candle_valid") is None
+                                    else case.get("closed_candle_valid") == 1
+                                ),
+                            )
+                            case["confirmed_candle"] = confirmed
+                            case["entry_candle_was_confirmed"] = (
+                                confirmed if confirmed is not None else 0
+                            )
 
                         sl_type, sl_subtype, sl_verdict = classify_sl(case)
                         case["sl_type"] = sl_type

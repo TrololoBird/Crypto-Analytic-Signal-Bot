@@ -37,7 +37,7 @@ def detect_spread_strategy(
         _reject(prepared, setup_id, "spread_too_wide", spread_bps=spread)
         return None
     work = prepared.work_15m
-    # fix-sl-A: confirm momentum on last closed bar (df[-2]), not forming tail.
+    # fix-sl-A-spread: confirmed bar (df[-2]) — forensic audit 2026-06-05 verified complete.
     vol_ratio = _prev(work, "volume_ratio20", 1.0)
     roc10 = _prev(work, "roc10", _price_change_pct_confirmed(work, 10))
     volume_penalty = vol_ratio < float(params["min_volume_ratio"])

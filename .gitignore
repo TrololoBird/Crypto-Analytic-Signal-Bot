@@ -65,6 +65,7 @@ LIVE_SESSION_STATUS.json
 reports/
 
 data/
+# Persistent forensic archive survives bot.db wipes (under data/forensics/)
 telemetry/
 *.db
 *.db-journal
