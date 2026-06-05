@@ -349,7 +349,6 @@ def classify_sl(case: dict[str, Any]) -> tuple[str, str, str]:
     # Candle-only setups that fail confirmed-bar recheck are false signals regardless of hold time.
     if recheck is False and setup_id in {
         "btc_correlation",
-        "spread_strategy",
     }:
         subtype = "FALSE_SIGNAL"
         verdict = (
@@ -418,7 +417,6 @@ def classify_sl(case: dict[str, Any]) -> tuple[str, str, str]:
             )
         elif closed_valid is False and setup_id in {
             "btc_correlation",
-            "spread_strategy",
             "ema_bounce",
             "funding_reversal",
         }:

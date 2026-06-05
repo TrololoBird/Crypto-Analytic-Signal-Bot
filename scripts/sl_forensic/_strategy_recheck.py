@@ -14,7 +14,6 @@ LOG = logging.getLogger("sl_forensic.strategy_recheck")
 _CANDLE_ONLY_SETUPS = frozenset(
     {
         "btc_correlation",
-        "spread_strategy",
         "ema_bounce",
         "funding_reversal",
         "multi_tf_trend",
