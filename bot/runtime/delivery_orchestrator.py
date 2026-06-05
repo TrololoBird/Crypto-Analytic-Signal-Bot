@@ -1328,11 +1328,12 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         return delivered, rejected_rows, delivery_status_counts, merge_conflict_count
 
     async def deliver_tracking(self, events: list[SignalTrackingEvent]) -> None:
-        """TP/SL tracking Telegram updates (after select_and_deliver contract path in module order)."""
+        """TP/SL tracking Telegram updates (post select_and_deliver contract path)."""
         outcome_map = {
             "tp1_hit": "tp1",
             "tp2_hit": "tp2",
             "stop_loss": "loss",
+            "breakeven_stop": "breakeven_stop",
             "expired": "expired",
             "smart_exit": "smart_exit",
             "emergency_exit": "emergency_exit",
@@ -1343,7 +1344,9 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
             outcome = outcome_map.get(event.event_type)
             if outcome:
                 tracked = event.tracked
-                if event.event_type == "stop_loss" and tracked.tp1_hit_at is not None:
+                if event.event_type == "breakeven_stop":
+                    outcome = "breakeven_stop"
+                elif event.event_type == "stop_loss" and tracked.tp1_hit_at is not None:
                     outcome = "breakeven_stop"
                 regime = getattr(tracked, "regime_4h_confirmed", None) or "neutral"
                 await self._bot._modern_repo.record_symbol_outcome(
@@ -1359,7 +1362,11 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
             max_wait_s=self._bot._delivery_timeout_seconds,
             operation=self._bot.delivery.deliver_tracking_updates(events, dry_run=False),
         )
-        sl_events = [event for event in events if event.event_type == "stop_loss"]
+        sl_events = [
+            event
+            for event in events
+            if event.event_type in {"stop_loss", "breakeven_stop"}
+        ]
         if sl_events and bool(
             getattr(self._bot.settings.delivery, "sl_postmortem_to_operators", True)
         ):

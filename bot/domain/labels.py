@@ -123,6 +123,7 @@ TRACKING_EVENT_RU: dict[str, str] = {
     "tp1_hit": "TP1",
     "tp2_hit": "TP2",
     "stop_loss": "СТОП",
+    "breakeven_stop": "БЕЗУБЫТОК",
     "expired": "ЛИМИТ ИСТЁК",
     "ambiguous_exit": "НЕОДНОЗНАЧНО",
     "smart_exit": "ВЫХОД",

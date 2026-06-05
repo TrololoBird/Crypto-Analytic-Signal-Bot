@@ -30,6 +30,19 @@ if TYPE_CHECKING:
 LOG = logging.getLogger("bot.tracking")
 
 
+def _stop_close_event_type(tracked: TrackedSignalState) -> str:
+    """Classify stop hit as loss vs break-even after TP1 stop migration."""
+    if tracked.tp1_hit_at is None:
+        return "stop_loss"
+    be_price = tracked.activation_price or tracked.entry_mid
+    if be_price is None or float(be_price) <= 0.0:
+        return "stop_loss"
+    tol = max(abs(float(be_price)) * 1e-4, 1e-8)
+    if abs(float(tracked.stop) - float(be_price)) <= tol:
+        return "breakeven_stop"
+    return "stop_loss"
+
+
 class TPSLReviewMixin:
     """Applies aggTrade/candle/tick review to open tracked signals."""
 
@@ -72,7 +85,8 @@ class TPSLReviewMixin:
             tracked.max_adverse_pct = max(tracked.max_adverse_pct, adverse)
     async def _capture_post_sl_recovery(self, tracked: TrackedSignalState) -> None:
         """Record 4h post-stop favorable move into outcome features."""
-        if tracked.close_reason != "stop_loss" or tracked.activated_at is None:
+        sl_close = tracked.close_reason in {"stop_loss", "breakeven_stop"}
+        if not sl_close or tracked.activated_at is None:
             return
         closed_at = parse_state_dt(tracked.closed_at)
         if closed_at is None:
@@ -555,7 +569,7 @@ class TPSLReviewMixin:
                 events.append(
                     await self._close_event(
                         tracked,
-                        event_type="stop_loss",
+                        event_type=_stop_close_event_type(tracked),
                         occurred_at=bar_close_time,
                         price=tracked.stop,
                         precision_mode="candle",
@@ -663,7 +677,7 @@ class TPSLReviewMixin:
                 events.append(
                     await self._close_event(
                         tracked,
-                        event_type="stop_loss",
+                        event_type=_stop_close_event_type(tracked),
                         occurred_at=occurred_at,
                         price=price,
                         precision_mode=precision_mode,
@@ -735,7 +749,7 @@ class TPSLReviewMixin:
             events.append(
                 await self._close_event(
                     tracked,
-                    event_type="stop_loss",
+                    event_type=_stop_close_event_type(tracked),
                     occurred_at=occurred_at,
                     price=price,
                     precision_mode=precision_mode,

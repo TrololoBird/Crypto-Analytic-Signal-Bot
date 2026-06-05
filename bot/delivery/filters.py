@@ -241,6 +241,67 @@ def _regime_long_gate(
     return True, None, details
 
 
+def _regime_short_gate(
+    signal: Signal,
+    prepared: PreparedSymbol,
+) -> tuple[bool, str | None, dict[str, Any]]:
+    """Block trend/orderbook shorts in confirmed bull context unless reversal setup."""
+    direction = str(signal.direction or "").lower()
+    if direction != "short":
+        return True, None, {"regime_gate": "not_short"}
+
+    profile = str(signal.confirmation_profile or "trend_follow")
+    family = str(signal.strategy_family or "continuation")
+    reversal_profiles = {"countertrend_exhaustion", "divergence_reversal"}
+    reversal_setups = {
+        "funding_reversal",
+        "ls_ratio_extreme",
+        "liquidation_heatmap",
+        "turtle_soup",
+        "wick_trap_reversal",
+        "wyckoff_spring",
+        "stop_hunt_detection",
+        "liquidity_sweep",
+        "volume_climax_reversal",
+        "absorption",
+        "rsi_divergence_bottom",
+        "indicator_divergence",
+        "cvd_divergence",
+        "oi_divergence",
+    }
+    if profile in reversal_profiles or signal.setup_id in reversal_setups or family == "reversal":
+        return True, None, {"regime_gate": "reversal_exempt"}
+
+    regime = str(getattr(prepared, "market_regime", "") or "").lower()
+    btc_bias = str(getattr(prepared, "btc_bias", None) or signal.btc_bias or "neutral").lower()
+    bias_4h = str(getattr(prepared, "bias_4h", "") or "neutral").lower()
+    bull_regime = regime in {"bull", "markup", "risk_on"}
+    bull_bias = btc_bias in {"uptrend", "bull"} or bias_4h == "uptrend"
+    trend_family = family in {
+        "continuation",
+        "breakout",
+        "trend_follow",
+        "orderbook",
+        "multi_asset",
+    } or profile in {
+        "trend_follow",
+        "breakout_acceptance",
+    }
+    details = {
+        "regime_gate": "checked",
+        "market_regime": regime,
+        "btc_bias": btc_bias,
+        "bias_4h": bias_4h,
+        "strategy_family": family,
+        "confirmation_profile": profile,
+    }
+    if bull_regime and bull_bias and trend_family:
+        return False, "regime_bull_short_blocked", details
+    if bull_bias and trend_family:
+        return False, "btc_uptrend_short_blocked", details
+    return True, None, details
+
+
 def _latest_frame_float(frame: pl.DataFrame | None, column: str) -> float | None:
     if frame is None or frame.is_empty() or column not in frame.columns:
         return None
@@ -612,6 +673,23 @@ def _run_filter_pipeline(
             regime_details,
         )
         return _reject(regime_reason or "regime_long_blocked", base, details=regime_details)
+
+    short_regime_ok, short_regime_reason, short_regime_details = _regime_short_gate(
+        base, prepared
+    )
+    if not short_regime_ok:
+        LOGGER.info(
+            "%s/%s: regime short gate reject | reason=%s details=%s",
+            signal.symbol,
+            signal.setup_id,
+            short_regime_reason,
+            short_regime_details,
+        )
+        return _reject(
+            short_regime_reason or "regime_short_blocked",
+            base,
+            details=short_regime_details,
+        )
 
     from bot.domain.mtf import evaluate_mtf_gate, normalize_mtf_reject_reason
 

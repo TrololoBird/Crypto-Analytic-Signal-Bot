@@ -574,7 +574,7 @@ class SignalTracker(_SignalTrackerBases):
         elif reason == "tp2_hit":
             tracked.tp2_hit_at = occurred_at.astimezone(UTC).isoformat()
             tracked.tp2_price = price
-        elif reason == "stop_loss" and price is not None:
+        elif reason in {"stop_loss", "breakeven_stop"} and price is not None:
             tracked.stop_price = price
         await self.memory_repo.save_active_signal(self._tracked_to_payload(tracked))
 
@@ -582,6 +582,7 @@ class SignalTracker(_SignalTrackerBases):
             "tp1_hit": {"tp1_hit": 1},
             "tp2_hit": {"tp2_hit": 1},
             "stop_loss": {"stop_loss": 1},
+            "breakeven_stop": {"stop_loss": 1},
             "expired": {"expired": 1},
             "ambiguous_exit": {"ambiguous_exit": 1},
             "setup_invalidated": {"setup_invalidated": 1},
@@ -808,6 +809,7 @@ class SignalTracker(_SignalTrackerBases):
                 "tp1_hit",
                 "tp2_hit",
                 "stop_loss",
+                "breakeven_stop",
                 "ambiguous_exit",
                 "emergency_exit",
                 "superseded",
@@ -851,7 +853,7 @@ class SignalTracker(_SignalTrackerBases):
                 exc,
             )
 
-        if event_type == "stop_loss" and tracked.activated_at is not None:
+        if event_type in {"stop_loss", "breakeven_stop"} and tracked.activated_at is not None:
             with contextlib.suppress(RuntimeError):
                 asyncio.get_running_loop().create_task(self._capture_post_sl_recovery(tracked))
 

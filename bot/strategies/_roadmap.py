@@ -173,16 +173,25 @@ def _build_atr_signal(
         price_anchor = min(candle_mid, close)
     else:
         price_anchor = max(candle_mid, close)
+    max_risk_atr = float(params.get("max_risk_atr", 2.0))
+    max_risk_pct = float(params.get("max_risk_pct", 3.5))
+    max_risk = min(atr * max_risk_atr, price_anchor * max_risk_pct / 100.0)
     if direction == "long":
         sweep_stop = stop_anchor if stop_anchor is not None and stop_anchor > 0.0 else low
         stop = min(sweep_stop, close - atr * sl_buffer) - atr * 0.05
         risk = price_anchor - stop
+        if risk > max_risk:
+            stop = price_anchor - max_risk
+            risk = max_risk
         tp1 = price_anchor + risk * min_rr
         tp2 = price_anchor + risk * max(min_rr + 0.4, 2.0)
     else:
         sweep_stop = stop_anchor if stop_anchor is not None and stop_anchor > 0.0 else high
         stop = max(sweep_stop, close + atr * sl_buffer) + atr * 0.05
         risk = stop - price_anchor
+        if risk > max_risk:
+            stop = price_anchor + max_risk
+            risk = max_risk
         tp1 = price_anchor - risk * min_rr
         tp2 = price_anchor - risk * max(min_rr + 0.4, 2.0)
     if risk <= 0.0:

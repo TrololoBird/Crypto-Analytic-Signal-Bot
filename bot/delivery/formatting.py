@@ -892,6 +892,8 @@ def tracking_status_text(state: Any) -> str:
     activation_price = getattr(state, "activation_price", None)
     pending_expires_at = getattr(state, "pending_expires_at", None)
     tp1_hit_at = getattr(state, "tp1_hit_at", None)
+    if close_reason == "breakeven_stop":
+        return f"⚖️ безубыток @ {format_price(_optional_float(close_price))}"
     if close_reason == "stop_loss":
         return f"🛑 стоп @ {format_price(_optional_float(close_price))}"
     if close_reason in {"tp1_hit", "tp2_hit"}:
@@ -934,8 +936,9 @@ def format_tracking_event_message(event: Any) -> str:
         return f"🎯 <b>{title}</b> {sym} {ref} @ {code(price)}"
     if event_type == "tp2_hit":
         return f"🎯 <b>{title}</b> {sym} {ref} @ {code(price)}"
-    if event_type == "stop_loss":
-        return f"🛑 <b>{title}</b> {sym} {ref} @ {code(price)}"
+    if event_type in {"stop_loss", "breakeven_stop"}:
+        icon = "⚖️" if event_type == "breakeven_stop" else "🛑"
+        return f"{icon} <b>{title}</b> {sym} {ref} @ {code(price)}"
     if event_type == "expired":
         return f"⌛ <b>{title}</b> {sym} {ref}"
     return f"<b>{escape_text(title)}</b> {sym} {ref} @ {code(price)}"
