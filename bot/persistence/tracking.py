@@ -15,7 +15,6 @@ import tempfile
 import time
 import typing
 from collections import deque
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -33,8 +32,6 @@ from bot.persistence._tracking_telegram import TelegramTrackingMixin
 from bot.persistence.tracking_events import SignalTrackingEvent
 
 if typing.TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from ..diagnostics.facade import SignalQualityMonitor
     from ..domain.config import BotSettings
     from ..domain.schemas import Signal
