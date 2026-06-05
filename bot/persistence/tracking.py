@@ -31,6 +31,8 @@ from bot.persistence._tracking_review import TPSLReviewMixin, _price_in_entry_zo
 from bot.persistence._tracking_telegram import TelegramTrackingMixin
 from bot.persistence.tracking_events import SignalTrackingEvent
 
+__all__ = ["SignalTracker", "SignalTrackingEvent"]
+
 if typing.TYPE_CHECKING:
     from ..diagnostics.facade import SignalQualityMonitor
     from ..domain.config import BotSettings

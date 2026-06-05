@@ -31,6 +31,7 @@ from bot.persistence.outcomes import build_prepared_feature_snapshot, extract_fe
 from bot.runtime.errors import DEFENSIVE_EXC
 
 from bot.delivery import contract as _delivery_contract_module
+from bot.delivery.contract import SignalContractIssue
 from bot.domain.schemas import Signal
 from bot.runtime._delivery_watch import DeliveryWatchMixin
 from bot.runtime._delivery_ranking import DeliveryRankingMixin
@@ -47,7 +48,7 @@ MIN_CONFIRMATIONS = 3  # confirmations: ADR-003 hard confluence gate
 DELIVERY_SUCCESS_STATUSES = frozenset({"sent", "logged"})
 
 
-def _delivery_contract_gate_order_anchor(signal: Signal) -> list[object]:
+def _delivery_contract_gate_order_anchor(signal: Signal) -> list[SignalContractIssue]:
     """Static audit anchor; runtime path uses ``_contract_issue_rows`` in select_and_deliver."""
     return _delivery_contract_module.validate_signal_contract(signal)
 
