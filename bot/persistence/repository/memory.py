@@ -178,6 +178,8 @@ class MemoryRepository:
         await self._conn.execute("PRAGMA journal_mode=WAL")
         # Create tables
         await self._conn.executescript("""
+            -- LEGACY TABLE — read-only. Writes removed in Phase E.
+            -- Retained for dashboard backward-compatibility. Drop in a future migration.
             CREATE TABLE IF NOT EXISTS signals (
                 signal_id TEXT PRIMARY KEY,
                 symbol TEXT NOT NULL,
@@ -206,6 +208,7 @@ class MemoryRepository:
             CREATE INDEX IF NOT EXISTS idx_signals_strategy ON signals(strategy_id);
             CREATE INDEX IF NOT EXISTS idx_signals_created ON signals(created_at);
 
+            -- LEGACY TABLE — read-only. Writes removed in Phase E.
             CREATE TABLE IF NOT EXISTS outcomes (
                 outcome_id TEXT PRIMARY KEY,
                 signal_id TEXT NOT NULL,
@@ -847,115 +850,13 @@ class MemoryRepository:
             self._conn = None
 
     async def save_signal(self, record: SignalRecord) -> None:
-        """Save signal record."""
-        if not self._conn:
-            msg = "Repository not initialized"
-            raise RuntimeError(msg)
-
+        """Legacy API — no longer writes to ``signals`` (Phase E). Use ``save_active_signal``."""
         record.validate()
-        try:
-            # dual-write: legacy signals table + primary active_signals table (see module note).
-            await self._conn.execute(
-                """
-                INSERT OR REPLACE INTO signals (
-                    signal_id, symbol, strategy_id, direction, entry_price,
-                    stop_loss, take_profit_1, take_profit_2, score, created_at,
-                    timeframe, atr_pct, spread_bps, rsi_1h, adx_1h, volume_ratio,
-                    funding_rate, oi_change_pct, features, metadata
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-                (
-                    record.signal_id,
-                    record.symbol,
-                    record.strategy_id,
-                    record.direction,
-                    record.entry_price,
-                    record.stop_loss,
-                    record.take_profit_1,
-                    record.take_profit_2,
-                    record.score,
-                    record.created_at.isoformat(),
-                    record.timeframe,
-                    record.atr_pct,
-                    record.spread_bps,
-                    record.rsi_1h,
-                    record.adx_1h,
-                    record.volume_ratio,
-                    record.funding_rate,
-                    record.oi_change_pct,
-                    json.dumps(record.features) if record.features else None,
-                    json.dumps(record.metadata) if record.metadata else None,
-                ),
-            )
-            await self._conn.commit()
-        except Exception:
-            LOG.exception("failed to save signal %s", record.signal_id)
-            raise
 
     async def save_outcome(self, record: OutcomeRecord, *, commit: bool = True) -> None:
-        """Save outcome record."""
-        if not self._conn:
-            msg = "Repository not initialized"
-            raise RuntimeError(msg)
-
+        """Legacy API — no longer writes to ``outcomes`` (Phase E). Use ``signal_outcomes`` path."""
         record.validate()
-        try:
-            await self._conn.execute(
-                """
-                INSERT INTO outcomes (
-                    outcome_id, signal_id, symbol, price_1h, price_4h, price_24h,
-                    pnl_1h, pnl_4h, pnl_24h, max_profit_pct, max_loss_pct, mae, mfe,
-                    hit_tp1, hit_tp2, hit_sl, result, updated_at, closed_at,
-                    time_to_tp1_min, time_to_tp2_min, time_to_sl_min
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(outcome_id) DO UPDATE SET
-                    price_1h = excluded.price_1h,
-                    price_4h = excluded.price_4h,
-                    price_24h = excluded.price_24h,
-                    pnl_1h = excluded.pnl_1h,
-                    pnl_4h = excluded.pnl_4h,
-                    pnl_24h = excluded.pnl_24h,
-                    max_profit_pct = excluded.max_profit_pct,
-                    max_loss_pct = excluded.max_loss_pct,
-                    mae = excluded.mae,
-                    mfe = excluded.mfe,
-                    hit_tp1 = excluded.hit_tp1,
-                    hit_tp2 = excluded.hit_tp2,
-                    hit_sl = excluded.hit_sl,
-                    result = excluded.result,
-                    updated_at = excluded.updated_at,
-                    closed_at = excluded.closed_at
-            """,
-                (
-                    record.outcome_id,
-                    record.signal_id,
-                    record.symbol,
-                    record.price_1h,
-                    record.price_4h,
-                    record.price_24h,
-                    record.pnl_1h,
-                    record.pnl_4h,
-                    record.pnl_24h,
-                    record.max_profit_pct,
-                    record.max_loss_pct,
-                    record.mae,
-                    record.mfe,
-                    int(record.hit_tp1),
-                    int(record.hit_tp2),
-                    int(record.hit_sl),
-                    record.result,
-                    record.updated_at.isoformat(),
-                    record.closed_at.isoformat() if record.closed_at else None,
-                    record.time_to_tp1_min,
-                    record.time_to_tp2_min,
-                    record.time_to_sl_min,
-                ),
-            )
-            if commit:
-                await self._conn.commit()
-        except Exception:
-            LOG.exception("failed to save outcome %s", record.outcome_id)
-            raise
+        del commit
 
     async def get_signal(self, signal_id: str) -> SignalRecord | None:
         """Get signal by ID."""
