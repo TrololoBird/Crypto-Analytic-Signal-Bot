@@ -13,10 +13,9 @@ from pathlib import Path
 import websockets
 
 from bot.domain.config import BotSettings, NetworkConfig, load_settings
-from bot.market.data import BinanceFuturesMarketData, MarketDataUnavailable
+from bot.market.data import BinanceFuturesMarketData
 from bot.market.network_proxy import websockets_connect_kwargs
 from bot.market.rest_impl import BinanceClientImpl
-from bot.runtime.errors import DEFENSIVE_EXC
 
 LOG = logging.getLogger("bot.market.proxy_bootstrap")
 
@@ -86,7 +85,9 @@ async def probe_ws_handshake(
                 **connect_kwargs,
             ):
                 return True
-    except DEFENSIVE_EXC as exc:
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception as exc:  # noqa: BLE001 — proxy libs raise non-standard exceptions
         LOG.debug(
             "ws handshake probe failed | proxy=%s trust_env=%s err=%s",
             proxy_url,
@@ -102,7 +103,9 @@ async def _probe_rest(net: NetworkConfig) -> bool:
     try:
         symbols = await market.fetch_exchange_symbols()
         return len(symbols) > _REST_SYMBOL_THRESHOLD
-    except MarketDataUnavailable:
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception:  # noqa: BLE001
         return False
     finally:
         await market.close()

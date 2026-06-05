@@ -766,10 +766,12 @@ class RestHttpMixin(RestCircuitMixin):
     async def _get_http_session(self) -> aiohttp.ClientSession:
         session = self._http_session
         if session is None or session.closed:
+            _using_proxy = bool(getattr(self, "_proxy_url", None))
             timeout = aiohttp.ClientTimeout(
                 total=self._rest_timeout,
                 connect=min(8.0, self._rest_timeout),
-                sock_connect=5.0,
+                # Fast-fail TCP connect only on direct — proxy SOCKS5 handshake needs more time.
+                sock_connect=None if _using_proxy else 5.0,
             )
             self._http_session = create_aiohttp_session(
                 proxy_url=getattr(self, "_proxy_url", None),
