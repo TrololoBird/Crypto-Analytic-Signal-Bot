@@ -36,6 +36,7 @@ Full plan: `docs/CURSOR_CLAUDE_DEV_SETUP.md` · Solo: `docs/SOLO_OPERATOR_PLAYBO
 | `wave-tests` | F9–F11 pytest offline |
 | `health-audit` | project_health_audit.py |
 | `lint-fix` | Ruff check + format |
+| `github-setup` | GitHub token, MCP, CI push — `docs/GITHUB_CURSOR_SETUP.md` |
 
 ## Cursor subagents (`.cursor/agents/`)
 

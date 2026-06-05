@@ -121,13 +121,16 @@ On geo-restricted networks (including some GitHub Actions regions), live tests *
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
 | [CI](.github/workflows/ci.yml) | push / PR | ruff, pytest, mypy critical, live Binance |
-| [Dependency Review](.github/workflows/dependency-review.yml) | PR | block critical CVEs in dependency diffs |
-| [CodeQL](.github/workflows/codeql-analysis.yml) | push / PR / weekly | static analysis (Python, Actions) |
+| [Dependency Review](.github/workflows/dependency-review.yml) | PR | block critical CVE in dependency diff |
+| [Supply Chain Audit](.github/workflows/supply-chain-audit.yml) | push / PR / weekly | pip-audit lockfile (fail HIGH+) |
+| CodeQL (GitHub default setup) | push | static analysis — repo Code security |
 | [Nightly Regression](.github/workflows/nightly-regression.yml) | cron 03:00 UTC | live pytest + strategy smoke |
 | [Auto Fix](.github/workflows/auto-fix.yml) | push `bot/` | ruff auto-format PR |
+| [Quality Report](.github/workflows/quality-report.yml) | weekly Mon | ruff/vulture/jscpd artifacts |
 
-- **Dependabot**: weekly pip + GitHub Actions updates (`.github/dependabot.yml`)
+- **Dependabot**: weekly pip + GitHub Actions (`.github/dependabot.yml`)
 - **Security**: [SECURITY.md](SECURITY.md) — reporting, known `aiohttp` constraint
+- **GitHub + Cursor token/MCP**: [docs/GITHUB_CURSOR_SETUP.md](docs/GITHUB_CURSOR_SETUP.md)
 - **CODEOWNERS**: delivery / market / CI paths
 
 Python **3.14.5** on `ubuntu-latest`. Offline tests always; live Binance advisory on PRs, required on `main` pushes where network allows.

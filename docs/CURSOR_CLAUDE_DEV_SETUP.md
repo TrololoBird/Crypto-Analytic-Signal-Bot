@@ -4,6 +4,7 @@
 > **v1 готов:** [DEFINITION_OF_DONE.md](DEFINITION_OF_DONE.md)  
 > **Экономия токенов:** [AGENT_TOKEN_POLICY.md](AGENT_TOKEN_POLICY.md) — агенты не читают весь research pack  
 > **Solo:** [SOLO_OPERATOR_PLAYBOOK.md](SOLO_OPERATOR_PLAYBOOK.md)  
+> **GitHub token / CI / MCP:** [GITHUB_CURSOR_SETUP.md](GITHUB_CURSOR_SETUP.md)  
 > **Roadmap:** [PROJECT_ROADMAP_AND_STATUS.md](PROJECT_ROADMAP_AND_STATUS.md)
 
 ---

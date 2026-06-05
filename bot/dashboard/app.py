@@ -143,9 +143,9 @@ class BotDashboard:
         async def status() -> dict[str, Any]:
             try:
                 return await self._get_status()
-            except DEFENSIVE_EXC as exc:
+            except DEFENSIVE_EXC:
                 LOG.exception("dashboard api status error")
-                return {"error": "status_unavailable", "detail": str(exc)}
+                return {"error": "status_unavailable"}
 
         @self.app.get("/api/signals/active")
         async def active_signals() -> list[dict[str, Any]]:
@@ -168,25 +168,25 @@ class BotDashboard:
         async def market_regime() -> dict[str, Any]:
             try:
                 return self._get_market_regime()
-            except DEFENSIVE_EXC as exc:
+            except DEFENSIVE_EXC:
                 LOG.exception("dashboard api market regime error")
-                return {"error": "regime_unavailable", "detail": str(exc)}
+                return {"error": "regime_unavailable"}
 
         @self.app.get("/api/metrics")
         async def metrics() -> dict[str, Any]:
             try:
                 return await self._get_metrics()
-            except DEFENSIVE_EXC as exc:
+            except DEFENSIVE_EXC:
                 LOG.exception("dashboard api metrics error")
-                return {"error": "metrics_unavailable", "detail": str(exc)}
+                return {"error": "metrics_unavailable"}
 
         @self.app.get("/api/health")
         async def health() -> dict[str, Any]:
             try:
                 return cast("dict[str, Any]", await self.bot.health_check())
-            except DEFENSIVE_EXC as exc:
+            except DEFENSIVE_EXC:
                 LOG.exception("dashboard api health error")
-                return {"status": "error", "detail": str(exc)}
+                return {"status": "error"}
 
         @self.app.get("/api/analytics/report")
         async def analytics_report(days: int = 30, scope: str = "current_run") -> dict[str, Any]:
@@ -249,9 +249,9 @@ class BotDashboard:
                     LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
                     return {"error": "Server is shutting down"}
                 raise
-            except DEFENSIVE_EXC as exc:
+            except DEFENSIVE_EXC:
                 LOG.exception("dashboard api strategy decisions error")
-                return {"error": "strategy_decisions_unavailable", "detail": str(exc)}
+                return {"error": "strategy_decisions_unavailable"}
 
         @self.app.get("/api/analytics/confluence_legs")
         async def confluence_legs(max_rows: int = 100_000) -> dict[str, Any]:
@@ -266,9 +266,9 @@ class BotDashboard:
                     LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
                     return {"error": "Server is shutting down"}
                 raise
-            except DEFENSIVE_EXC as exc:
+            except DEFENSIVE_EXC:
                 LOG.exception("dashboard api confluence legs error")
-                return {"error": "confluence_legs_unavailable", "detail": str(exc)}
+                return {"error": "confluence_legs_unavailable"}
 
         @self.app.get("/api/analytics/confluence_legs_by_profile")
         async def confluence_legs_by_profile(max_rows: int = 100_000) -> dict[str, Any]:
@@ -283,9 +283,9 @@ class BotDashboard:
                     LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
                     return {"error": "Server is shutting down"}
                 raise
-            except DEFENSIVE_EXC as exc:
+            except DEFENSIVE_EXC:
                 LOG.exception("dashboard api confluence legs by profile error")
-                return {"error": "confluence_legs_by_profile_unavailable", "detail": str(exc)}
+                return {"error": "confluence_legs_by_profile_unavailable"}
 
         @self.app.get("/api/strategies")
         async def strategies() -> list[dict[str, Any]]:
@@ -312,9 +312,9 @@ class BotDashboard:
                     LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
                     return {"error": "Server is shutting down"}
                 raise
-            except DEFENSIVE_EXC as exc:
+            except DEFENSIVE_EXC:
                 LOG.exception("dashboard live overview error")
-                return {"error": "live_overview_unavailable", "detail": str(exc)}
+                return {"error": "live_overview_unavailable"}
 
         @self.app.get("/api/live/funnel")
         async def live_funnel(max_rows: int = 100_000) -> dict[str, Any]:
@@ -326,9 +326,9 @@ class BotDashboard:
                     LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
                     return {"error": "Server is shutting down"}
                 raise
-            except DEFENSIVE_EXC as exc:
+            except DEFENSIVE_EXC:
                 LOG.exception("dashboard live funnel error")
-                return {"error": "live_funnel_unavailable", "detail": str(exc)}
+                return {"error": "live_funnel_unavailable"}
 
         @self.app.get("/api/live/funnel/reconcile")
         async def live_funnel_reconcile(max_rows: int = 100_000) -> dict[str, Any]:
@@ -343,9 +343,9 @@ class BotDashboard:
                     LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
                     return {"error": "Server is shutting down"}
                 raise
-            except DEFENSIVE_EXC as exc:
+            except DEFENSIVE_EXC:
                 LOG.exception("dashboard live funnel reconcile error")
-                return {"error": "live_funnel_reconcile_unavailable", "detail": str(exc)}
+                return {"error": "live_funnel_reconcile_unavailable"}
 
         @self.app.get("/api/live/shortlist")
         async def live_shortlist(limit: int = 80) -> dict[str, Any]:
@@ -357,9 +357,9 @@ class BotDashboard:
                     LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
                     return {"error": "Server is shutting down"}
                 raise
-            except DEFENSIVE_EXC as exc:
+            except DEFENSIVE_EXC:
                 LOG.exception("dashboard live shortlist error")
-                return {"error": "live_shortlist_unavailable", "detail": str(exc)}
+                return {"error": "live_shortlist_unavailable"}
 
         @self.app.get("/api/radar/summary")
         async def radar_summary(hot_limit: int = 25) -> dict[str, Any]:
@@ -374,9 +374,9 @@ class BotDashboard:
                     LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
                     return {"error": "Server is shutting down"}
                 raise
-            except DEFENSIVE_EXC as exc:
+            except DEFENSIVE_EXC:
                 LOG.exception("dashboard radar summary error")
-                return {"error": "radar_summary_unavailable", "detail": str(exc)}
+                return {"error": "radar_summary_unavailable"}
 
         @self.app.get("/api/live/rejections")
         async def live_rejections(
@@ -396,9 +396,9 @@ class BotDashboard:
                     LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
                     return {"error": "Server is shutting down"}
                 raise
-            except DEFENSIVE_EXC as exc:
+            except DEFENSIVE_EXC:
                 LOG.exception("dashboard live rejections error")
-                return {"error": "live_rejections_unavailable", "detail": str(exc)}
+                return {"error": "live_rejections_unavailable"}
 
         @self.app.get("/api/live/decisions")
         async def live_decisions(
@@ -418,9 +418,9 @@ class BotDashboard:
                     LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
                     return {"error": "Server is shutting down"}
                 raise
-            except DEFENSIVE_EXC as exc:
+            except DEFENSIVE_EXC:
                 LOG.exception("dashboard live decisions error")
-                return {"error": "live_decisions_unavailable", "detail": str(exc)}
+                return {"error": "live_decisions_unavailable"}
 
         @self.app.get("/api/live/runtime")
         async def live_runtime() -> dict[str, Any]:
@@ -431,9 +431,9 @@ class BotDashboard:
                     LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
                     return {"error": "Server is shutting down"}
                 raise
-            except DEFENSIVE_EXC as exc:
+            except DEFENSIVE_EXC:
                 LOG.exception("dashboard live runtime error")
-                return {"error": "live_runtime_unavailable", "detail": str(exc)}
+                return {"error": "live_runtime_unavailable"}
 
         @self.app.get("/api/live/delivery")
         async def live_delivery(limit: int = 25) -> dict[str, Any]:
@@ -445,9 +445,9 @@ class BotDashboard:
                     LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
                     return {"error": "Server is shutting down"}
                 raise
-            except DEFENSIVE_EXC as exc:
+            except DEFENSIVE_EXC:
                 LOG.exception("dashboard live delivery error")
-                return {"error": "live_delivery_unavailable", "detail": str(exc)}
+                return {"error": "live_delivery_unavailable"}
 
         @self.app.get("/api/live/telegram-preview")
         async def live_telegram_preview() -> dict[str, Any]:
@@ -458,9 +458,9 @@ class BotDashboard:
                     LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
                     return {"error": "Server is shutting down"}
                 raise
-            except DEFENSIVE_EXC as exc:
+            except DEFENSIVE_EXC:
                 LOG.exception("dashboard live telegram preview error")
-                return {"error": "live_telegram_preview_unavailable", "detail": str(exc)}
+                return {"error": "live_telegram_preview_unavailable"}
 
         # ── WebSocket endpoints (spec: /ws/dashboard; canonical: /api/v1/ws) ──
         async def _handle_dashboard_ws(ws: WebSocket) -> None:
@@ -535,17 +535,17 @@ class BotDashboard:
                     interval=interval,
                     limit=max(10, min(int(limit), 200)),
                 )
-            except DEFENSIVE_EXC as exc:
+            except DEFENSIVE_EXC:
                 LOG.exception("v1 chart klines error")
-                return {"error": "klines_unavailable", "detail": str(exc)}
+                return {"error": "klines_unavailable"}
 
         @self.app.get("/api/v1/summary")
         async def v1_user_summary() -> dict[str, Any]:
             try:
                 return await build_user_summary(self.bot, self._live_data)
-            except DEFENSIVE_EXC as exc:
+            except DEFENSIVE_EXC:
                 LOG.exception("v1 summary error")
-                return {"error": "summary_unavailable", "detail": str(exc)}
+                return {"error": "summary_unavailable"}
 
         @self.app.get("/api/v1/strategies/health")
         async def v1_strategies_health() -> list[dict[str, Any]]:
@@ -675,17 +675,17 @@ class BotDashboard:
                     repo,
                     days=max(1, min(int(days), 365)),
                 )
-            except DEFENSIVE_EXC as exc:
+            except DEFENSIVE_EXC:
                 LOG.exception("v1 outcomes analytics error")
-                return {"error": "outcomes_unavailable", "detail": str(exc)}
+                return {"error": "outcomes_unavailable"}
 
         @self.app.get("/api/v1/mobile/summary")
         async def v1_mobile_summary() -> dict[str, Any]:
             try:
                 return await build_mobile_summary(self.bot, self._live_data)
-            except DEFENSIVE_EXC as exc:
+            except DEFENSIVE_EXC:
                 LOG.exception("v1 mobile summary error")
-                return {"error": "mobile_summary_unavailable", "detail": str(exc)}
+                return {"error": "mobile_summary_unavailable"}
 
         @self.app.post("/api/v1/confluence/simulate")
         async def v1_confluence_simulate(body: dict[str, Any]) -> dict[str, Any]:
@@ -829,9 +829,9 @@ class BotDashboard:
                     if isinstance(runtime, dict)
                     else {},
                 }
-            except DEFENSIVE_EXC as exc:
+            except DEFENSIVE_EXC:
                 LOG.exception("dashboard live ws-health error")
-                return {"error": "ws_health_unavailable", "detail": str(exc)}
+                return {"error": "ws_health_unavailable"}
 
         @self.app.get("/api/live/public-audit")
         async def live_public_audit() -> dict[str, Any]:
@@ -865,9 +865,9 @@ class BotDashboard:
                     LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
                     return {"error": "Server is shutting down"}
                 raise
-            except DEFENSIVE_EXC as exc:
+            except DEFENSIVE_EXC:
                 LOG.exception("dashboard live audit error")
-                return {"error": "live_audit_unavailable", "detail": str(exc)}
+                return {"error": "live_audit_unavailable"}
 
     async def _public_audit_manifest(self) -> dict[str, Any]:
         ledger = getattr(self.bot, "public_audit", None)
