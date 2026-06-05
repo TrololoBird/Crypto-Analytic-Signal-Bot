@@ -12,7 +12,7 @@ from ..core.event_bus import EventBus
 from ..delivery import SignalDelivery
 from ..delivery.telegram import build_message_broadcaster
 from ..delivery.watch import AlertCoordinator
-from ..diagnostics.quality import SignalQualityMonitor
+from ..diagnostics.facade import SignalQualityMonitor
 from ..engine import SignalEngine, StrategyRegistry
 from ..market.data import BinanceFuturesMarketData, configure_rest_concurrency
 from ..market.enrichment import PublicIntelligenceService

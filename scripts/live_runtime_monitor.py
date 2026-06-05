@@ -15,7 +15,7 @@ from pathlib import Path
 
 import structlog
 
-from bot.diagnostics.session_ops import parse_cycle_log_lines
+from bot.diagnostics.facade import parse_cycle_log_lines
 
 logging.basicConfig(
     level=logging.INFO,

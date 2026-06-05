@@ -1019,7 +1019,7 @@ class ShortlistService:
 
         store = _radar_store(bot)
         if store is not None and bot.settings.universe.radar.enabled:
-            from bot.diagnostics.runtime_ops import assess_radar_store
+            from bot.diagnostics.facade import assess_radar_store
             from bot.runtime.watch_escalation import emit_radar_watch_candidates
 
             radar_health = assess_radar_store(store, config=bot.settings.universe.radar)

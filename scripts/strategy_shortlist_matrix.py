@@ -21,7 +21,7 @@ except ModuleNotFoundError:  # pragma: no cover
 
 bootstrap_repo_path()
 
-from bot.diagnostics.session_ops import (
+from bot.diagnostics.facade import (
     analyze_telemetry,
     find_live_watch_session,
     resolve_telemetry_analysis_dir,

@@ -38,7 +38,7 @@ from .outcomes import SignalFeatures, create_outcome_from_tracked
 if typing.TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from ..diagnostics.quality import SignalQualityMonitor
+    from ..diagnostics.facade import SignalQualityMonitor
     from ..domain.config import BotSettings
     from ..domain.schemas import AggTrade, Signal
     from ..persistence.repository.memory import MemoryRepository

@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from bot.diagnostics.config_audit import audit_filter_config
-from bot.diagnostics.runtime_ops import assess_radar_store
+from bot.diagnostics.facade import assess_radar_store
 from bot.domain.config import BotSettings, UniverseRadarConfig
 from bot.domain.schemas import UniverseSymbol
 from bot.market.radar_state import MarketRadarStore, SymbolRadarState, SymbolTier

@@ -614,7 +614,7 @@ class DashboardLiveData:
         }
 
     def _radar_summary_uncached(self, *, hot_limit: int) -> JsonDict:
-        from bot.diagnostics.runtime_ops import assess_radar_store
+        from bot.diagnostics.facade import assess_radar_store
         from bot.market.radar_state import SymbolTier
 
         bot = self._bot()

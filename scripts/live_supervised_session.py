@@ -24,7 +24,7 @@ from typing import Any
 
 import structlog
 
-from bot.diagnostics.session_ops import (
+from bot.diagnostics.facade import (
     find_latest_run_dir,
     parse_cycle_log_lines,
     read_jsonl,

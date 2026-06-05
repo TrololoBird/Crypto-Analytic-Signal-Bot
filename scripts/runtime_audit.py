@@ -20,7 +20,7 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - direct script execution
     from common import bootstrap_repo_path
 
-from bot.diagnostics.session_ops import (
+from bot.diagnostics.facade import (
     aggregate_cycle_stats,
     aggregate_rejection_funnel,
     aggregate_symbol_funnel,

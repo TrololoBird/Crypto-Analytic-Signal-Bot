@@ -5,7 +5,7 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from bot.diagnostics.runtime_ops import assess_radar_store
+from bot.diagnostics.facade import assess_radar_store
 from bot.market.proxy_bootstrap import network_probe_status
 from bot.runtime.data_readiness import is_radar_promoted_item
 from bot.runtime.errors import DEFENSIVE_EXC

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-from bot.diagnostics.session_ops import analyze_telemetry, build_zero_hit_triage
+from bot.diagnostics.facade import analyze_telemetry, build_zero_hit_triage
 
 if TYPE_CHECKING:
     from pathlib import Path
