@@ -4,6 +4,7 @@
 
 | run_date | exported | SL | TP | hash | notes |
 |----------|---------:|---:|---:|------|-------|
+| 2026-06-05T11:19:07 | 0 | 0 | 0 | 48e5b03 | pre-full-run 20260605_041905 |
 | 2026-06-05T11:15:25 | 44 | 10 | 0 | a0516e0 | initial archive seed from current bot.db |
 
 **Archive totals:** 44 cases, 10 SL
@@ -11,7 +12,6 @@
 ## TIER 1 — Deterministic (n=1)
 
 ### D1 — FALSE_SIGNAL (recheck failed on confirmed data)
-- `btc_correlation` **ADAUSDT** (run 2026-06-05) — TP1 was touched in-trade before stop closed — thesis held, stop placement or BE trail too tight.
 - `btc_correlation` **TRUMPUSDT** (run 2026-06-05) — Detector fires on real-time unclosed candle but NOT on confirmed historical data — df[-2] fix required for btc_correlation.
 - `spread_strategy` **TAOUSDT** (run 2026-06-05) — Detector fires on real-time unclosed candle but NOT on confirmed historical data — df[-2] fix required for spread_strategy.
 - `spread_strategy` **PENGUUSDT** (run 2026-06-05) — Detector fires on real-time unclosed candle but NOT on confirmed historical data — df[-2] fix required for spread_strategy.

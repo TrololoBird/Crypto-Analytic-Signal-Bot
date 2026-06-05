@@ -128,8 +128,10 @@ async def _run(
 ) -> None:
     if disable_http:
         os.environ["BOT_DISABLE_HTTP_SERVERS"] = "1"
+        os.environ["BOT_DISABLE_DASHBOARD"] = "1"
     else:
         os.environ.pop("BOT_DISABLE_HTTP_SERVERS", None)
+        os.environ.pop("BOT_DISABLE_DASHBOARD", None)
     settings = load_settings()
     before = _fetch_active_signal_row(settings.db_path, tracking_id)
     LOG.info(

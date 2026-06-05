@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sqlite3
 import time
 from collections import Counter, defaultdict, deque
 from dataclasses import dataclass
@@ -152,6 +153,55 @@ def _is_routing_excluded_decision_reason(reason: str) -> bool:
     if code == "runtime.strategy_lane_excluded":
         return True
     return code.startswith("asset_fit.")
+
+
+def _tracking_open_counts(bot: Any) -> dict[str, int]:
+    """Sync read of pending/active rows for dashboard overview (matches bot.db truth)."""
+    settings = getattr(bot, "settings", None)
+    db_path = getattr(settings, "db_path", None)
+    if db_path is None:
+        return {"pending": 0, "active": 0, "open": 0}
+    path = Path(db_path)
+    if not path.exists():
+        return {"pending": 0, "active": 0, "open": 0}
+    try:
+        with sqlite3.connect(path) as conn:
+            rows = conn.execute(
+                "SELECT status, COUNT(*) FROM active_signals "
+                "WHERE status IN ('pending','active') GROUP BY status"
+            ).fetchall()
+    except (OSError, sqlite3.Error):
+        return {"pending": 0, "active": 0, "open": 0}
+    counts = {str(status): int(count) for status, count in rows}
+    pending = counts.get("pending", 0)
+    active = counts.get("active", 0)
+    return {"pending": pending, "active": active, "open": pending + active}
+
+
+def _frame_readiness_fields(bot: Any) -> dict[str, int]:
+    """Expose WS frame freshness counts used by operator runtime blocks."""
+    ws = getattr(bot, "_ws_manager", None)
+    if ws is None or not hasattr(ws, "state_snapshot"):
+        return {}
+    try:
+        snap = ws.state_snapshot()
+    except DEFENSIVE_EXC:
+        return {}
+    if not isinstance(snap, dict):
+        return {}
+    return {
+        "frames_15m_ready": _safe_int(snap.get("fresh_klines_15m")),
+        "frames_1h_ready": _safe_int(snap.get("warm_symbols")),
+        "frames_4h_ready": _safe_int(snap.get("warm_symbols")),
+    }
+
+
+def _effective_shortlist(bot: Any) -> list[Any]:
+    """Match operator shortlist fallback during ws_light bootstrap."""
+    live = list(getattr(bot, "_shortlist", []) or [])
+    if live:
+        return live
+    return list(getattr(bot, "_last_live_shortlist", []) or [])
 
 
 def _compute_cycle_totals(cycles: list[JsonDict]) -> JsonDict:
@@ -459,13 +509,17 @@ class DashboardLiveData:
     def _overview_uncached(self) -> JsonDict:
         bot = self._bot()
         run_id = self._preferred_run_id()
+        tracking = _tracking_open_counts(bot)
+        shortlist = _effective_shortlist(bot)
         status = {
             "run_id": run_id,
             "generated_at": _utc_now().isoformat(),
             "running": not getattr(getattr(bot, "_shutdown", None), "is_set", lambda: True)(),
-            "shortlist_size": len(getattr(bot, "_shortlist", []) or []),
+            "shortlist_size": len(shortlist),
             "shortlist_source": getattr(bot, "_shortlist_source", "unknown"),
-            "open_signals": 0,
+            "open_signals": tracking["open"],
+            "pending_signals": tracking["pending"],
+            "active_signals": tracking["active"],
             "delivery_provider": str(
                 getattr(getattr(getattr(bot, "settings", None), "notifiers", None), "provider", "")
                 or "unknown"
@@ -516,6 +570,7 @@ class DashboardLiveData:
         )
         runtime_rows = list(self._iter_recent("health_runtime", max_rows=5, limit_files=1))
         status["runtime_health"] = runtime_rows[0] if runtime_rows else {}
+        status.update(_frame_readiness_fields(bot))
         status.update(self._market_state_fields())
         return status
 
@@ -666,7 +721,7 @@ class DashboardLiveData:
         )
         priority_symbols = set(self._priority_symbols())
         items = []
-        for item in list(getattr(bot, "_shortlist", []) or [])[: max(1, int(limit))]:
+        for item in list(_effective_shortlist(bot))[: max(1, int(limit))]:
             symbol = str(getattr(item, "symbol", ""))
             reasons = list(getattr(item, "shortlist_reasons", ()) or ())[:6]
             items.append(
@@ -1183,15 +1238,23 @@ def funnel_stage_counts_from_cycle(
 ) -> JsonDict:
     """Per-cycle stage counts derived from telemetry cycle rows."""
     nested = funnel if isinstance(funnel, dict) else {}
+    if not nested and isinstance(cycle_row.get("funnel"), dict):
+        nested = cycle_row["funnel"]
+    candidates = _safe_int(
+        nested.get("post_filter_candidates", cycle_row.get("candidate_count")),
+    )
     selected = _safe_int(
         cycle_row.get("selected_count", cycle_row.get("selected_signals")),
     )
+    rejects_by_stage = nested.get("rejects_by_stage")
+    confluence_rejects = 0
+    if isinstance(rejects_by_stage, dict):
+        confluence_rejects = _safe_int(rejects_by_stage.get("confluence"))
+    confluence = max(0, candidates - confluence_rejects)
     return {
         "detected": _safe_int(nested.get("raw_hits", cycle_row.get("detector_runs"))),
-        "merged": _safe_int(
-            nested.get("post_filter_candidates", cycle_row.get("candidate_count")),
-        ),
-        "confluence": selected,
+        "merged": candidates,
+        "confluence": confluence,
         "tier": selected,
         "delivered": _cycle_delivered_count(cycle_row),
     }

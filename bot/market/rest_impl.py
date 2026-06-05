@@ -1444,6 +1444,33 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         rows = await self._call_public_http_json('kline_candlestick_data', params={'symbol': symbol, 'interval': interval, 'limit': limit}, symbol=symbol)
         return _drop_incomplete_ohlcv_tail(_klines_to_frame(rows), interval)
 
+    async def fetch_klines_between(
+        self,
+        symbol: str,
+        interval: str,
+        *,
+        start_time_ms: int,
+        end_time_ms: int,
+        limit: int = 1500,
+    ) -> pl.DataFrame:
+        """Fetch klines in [start_time_ms, end_time_ms] for forensic replay."""
+        validate_symbol(symbol)
+        validate_interval(interval)
+        validate_limit(limit)
+        params: dict[str, Any] = {
+            'symbol': symbol,
+            'interval': interval,
+            'startTime': max(0, int(start_time_ms)),
+            'endTime': max(0, int(end_time_ms)),
+            'limit': min(1500, max(1, int(limit))),
+        }
+        rows = await self._call_public_http_json(
+            'kline_candlestick_data',
+            params=params,
+            symbol=symbol,
+        )
+        return _klines_to_frame(rows)
+
     async def fetch_klines_cached(self, symbol: str, interval: str, *, limit: int) -> pl.DataFrame:
         """Fetch klines with a TTL cache to prevent REST stampedes."""
         validate_symbol(symbol)

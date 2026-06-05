@@ -443,6 +443,23 @@ class BinanceFuturesMarketData:
     async def fetch_klines(self, symbol: str, interval: str, *, limit: int) -> pl.DataFrame:
         return await self._binance_client.fetch_klines(symbol, interval, limit=limit)
 
+    async def fetch_klines_between(
+        self,
+        symbol: str,
+        interval: str,
+        *,
+        start_time_ms: int,
+        end_time_ms: int,
+        limit: int = 1500,
+    ) -> pl.DataFrame:
+        return await self._binance_client.fetch_klines_between(
+            symbol,
+            interval,
+            start_time_ms=start_time_ms,
+            end_time_ms=end_time_ms,
+            limit=limit,
+        )
+
     async def fetch_klines_cached(self, symbol: str, interval: str, *, limit: int) -> pl.DataFrame:
         return await self._binance_client.fetch_klines_cached(symbol, interval, limit=limit)
 

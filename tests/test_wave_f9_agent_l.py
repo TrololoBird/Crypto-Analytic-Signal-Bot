@@ -161,7 +161,9 @@ async def test_signal_bot_start_runs_network_bootstrap() -> None:
     bot.tracker.reconcile_closed_outcomes = AsyncMock(return_value=0)
     bot._sync_ws_tracked_symbols = AsyncMock()
     bot._ws_manager = None
+    bot._dashboard_enabled = False
     bot._http_servers_enabled = False
+    bot._ensure_dashboard_started = AsyncMock()
     bot.client = object()
     bot._background_tasks = set()
     bot._running = False

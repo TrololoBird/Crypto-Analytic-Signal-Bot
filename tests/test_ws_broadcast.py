@@ -64,7 +64,7 @@ async def test_broadcast_funnel_update_and_ws_health() -> None:
     assert funnel_msg["payload"]["stages"] == {
         "detected": 10,
         "merged": 4,
-        "confluence": 2,
+        "confluence": 4,
         "tier": 2,
         "delivered": 1,
     }

@@ -142,20 +142,33 @@ class SignalBot:
         self.metrics = BotMetricsCollector(
             settings.runtime.metrics_port, host=settings.runtime.metrics_host
         )
-        self._http_servers_enabled = os.getenv(
-            "BOT_DISABLE_HTTP_SERVERS", "0"
-        ).strip().lower() not in (
+        disable_http = os.getenv("BOT_DISABLE_HTTP_SERVERS", "0").strip().lower() in (
             "1",
             "true",
             "yes",
         )
-        if not self._http_servers_enabled:
-            LOG.info(
-                "http servers disabled via BOT_DISABLE_HTTP_SERVERS=1 "
-                "(metrics/dashboard not started)"
-            )
+        disable_dashboard = os.getenv("BOT_DISABLE_DASHBOARD", "0").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        enable_dashboard = os.getenv("BOT_ENABLE_DASHBOARD", "1").strip().lower() not in (
+            "0",
+            "false",
+            "no",
+        )
+        self._metrics_enabled = not disable_http
+        self._dashboard_enabled = enable_dashboard and not disable_dashboard
+        # Back-compat for tests/callers that still flip this flag.
+        self._http_servers_enabled = self._dashboard_enabled
+        if not self._metrics_enabled:
+            LOG.info("metrics server disabled via BOT_DISABLE_HTTP_SERVERS=1")
         else:
             self.metrics.start_server()
+        if not self._dashboard_enabled:
+            LOG.info(
+                "dashboard disabled via BOT_DISABLE_DASHBOARD=1 or BOT_ENABLE_DASHBOARD=0"
+            )
 
         self.dashboard = BotDashboard(
             self, settings.runtime.dashboard_port, host=settings.runtime.dashboard_host
@@ -460,6 +473,14 @@ class SignalBot:
     def request_shutdown(self) -> None:
         self._shutdown.set()
 
+    async def _ensure_dashboard_started(self) -> None:
+        """Start dashboard early so smoke/debug can inspect startup failures."""
+        if not getattr(self, "_dashboard_enabled", False):
+            return
+        await self.dashboard.start_server_async(
+            auto_open=self.settings.runtime.auto_open_dashboard
+        )
+
     async def start(self) -> None:
         """Initial storage checks and WS bootstrap."""
         from pathlib import Path
@@ -484,6 +505,7 @@ class SignalBot:
         from ..diagnostics.config_audit import run_startup_audit
 
         run_startup_audit(self.settings)
+        await self._ensure_dashboard_started()
 
         try:
             expired_count = await self._modern_repo.expire_open_signals_older_than(
@@ -604,11 +626,6 @@ class SignalBot:
             except DEFENSIVE_EXC:
                 LOG.exception("ws_manager start failed; continuing with REST fallback")
 
-        if self._http_servers_enabled:
-            await self.dashboard.start_server_async(
-                auto_open=self.settings.runtime.auto_open_dashboard
-            )
-
         # Preload historical frames in the background so `prepare_symbol` can
         # meet its required 15m/1h history and optional 5m/4h context. This is deliberately
         # lightweight (batch + delay) to avoid REST storms.
@@ -652,8 +669,8 @@ class SignalBot:
             "market_regime=on radar=%s intelligence=%s dashboard=%s metrics=%s",
             radar_on,
             intel_on,
-            self._http_servers_enabled,
-            self.metrics._enabled,
+            self._dashboard_enabled,
+            self._metrics_enabled and self.metrics._enabled,
         )
 
     async def run_forever(self) -> None:
@@ -751,7 +768,7 @@ class SignalBot:
 
         if self._ws_manager is not None:
             await self._ws_manager.stop()
-        if getattr(self, "_http_servers_enabled", False):
+        if getattr(self, "_dashboard_enabled", False):
             await self.dashboard.stop_server_async()
         try:
             delivery_close = getattr(self.delivery, "close", None)

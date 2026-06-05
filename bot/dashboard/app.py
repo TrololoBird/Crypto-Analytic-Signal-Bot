@@ -22,7 +22,7 @@ from bot.strategies import STRATEGY_CLASSES
 from ..domain.strategies import RISK_PROFILE_BY_ID, STRATEGY_STATUS_BY_ID
 from ..persistence.diary_store import DiaryStore
 from .analytics import StrategyAnalytics
-from .live import DashboardLiveData
+from .live import DashboardLiveData, _is_routing_excluded_decision_reason
 from .live_audit import audit_snapshot, build_dashboard_audit_snapshot
 from .mobile_summary import build_mobile_summary
 from .operator_alerts import build_live_operator_alerts
@@ -291,6 +291,8 @@ class BotDashboard:
         async def strategies() -> list[dict[str, Any]]:
             """Return cached list of strategies with their enabled status."""
             try:
+                if self._strategies_cache is None:
+                    await asyncio.to_thread(self._cache_strategies)
                 if self._strategies_cache is not None:
                     return self._strategies_cache
             except DEFENSIVE_EXC:
@@ -1556,6 +1558,8 @@ class BotDashboard:
                     setup_id = str(row.get("setup_id") or "unknown")
                     status = str(row.get("status") or "unknown")
                     reason = str(row.get("reason_code") or row.get("reason") or "unknown")
+                    if _is_routing_excluded_decision_reason(reason):
+                        continue
                     reason_family = str(row.get("reason_family") or reason.split(".", 1)[0])
                     counters = setup_counters.setdefault(
                         setup_id,
@@ -1682,6 +1686,11 @@ class BotDashboard:
         }
 
     def _latest_analysis_file(self, telemetry_dir: Path, filename: str) -> Path | None:
+        current_run_id = self._current_run_id()
+        if current_run_id:
+            preferred = telemetry_dir / "runs" / current_run_id / "analysis" / filename
+            if preferred.exists():
+                return preferred
         runs_dir = telemetry_dir / "runs"
         if not runs_dir.exists():
             return None
@@ -1714,7 +1723,7 @@ class BotDashboard:
             )
             self._uvicorn_server = uvicorn.Server(config)
             self._server_task = asyncio.create_task(
-                self._uvicorn_server.serve(),
+                self._serve_dashboard(),
                 name="dashboard_server",
             )
         except DEFENSIVE_EXC:
@@ -1723,6 +1732,21 @@ class BotDashboard:
         LOG.info("dashboard server started on port %d", self.port)
         if auto_open:
             self._schedule_browser_open(delay_seconds)
+
+    async def _serve_dashboard(self) -> None:
+        if self._uvicorn_server is None:
+            return
+        try:
+            await self._uvicorn_server.serve()
+        except OSError as exc:
+            LOG.warning(
+                "dashboard server not started | host=%s port=%d errno=%s",
+                self.host,
+                self.port,
+                getattr(exc, "errno", None),
+            )
+        except DEFENSIVE_EXC:
+            LOG.exception("dashboard server crashed")
 
     def start_server(self, *, auto_open: bool = True, delay_seconds: float = 1.5) -> None:
         """Legacy thread-based start; prefer ``start_server_async`` from the bot loop."""

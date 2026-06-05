@@ -427,3 +427,77 @@ Post-session delta appended below after each live run. Queries use schema codes 
 - No auto-disable triggered.
 - Pipeline gap persists: 0 `tp1_hit`/`tp2_hit` rows despite 2 TP1 touches in `active_signals`.
 - Re-run M1–M3 after next supervised session; expect fewer `immediate_adverse_entry` SL root causes if fix-sl-A is effective.
+
+---
+
+## Forensic Engine run — 2026-06-05 10:37 UTC
+
+**Command:** `python scripts/sl_forensic_engine.py --bars-before 60 --bars-after 60`  
+**Output:** `data/forensics/SL_FORENSIC_REPORT.md`, `data/forensics/cards/*.md`, table `sl_forensics`
+
+### Candle replay taxonomy (TYPE 1–4)
+
+| TYPE | Label | Count | Share |
+|------|-------|------:|------:|
+| 1 | STOP_HUNT | 8 | 80.0% |
+| 2 | IMMEDIATE_ADVERSE | 2 | 20.0% |
+| 3 | THESIS_FAILED | 0 | 0.0% |
+| 4 | TIMING_OFF | 0 | 0.0% |
+
+**Interpretation:** Candle replay shows post-SL price often reached TP1 zone (stop hunt) — supports **Cause B** (stop too tight) alongside **Cause A** (2 cases immediate adverse). Revisit fix-sl-B after post-fix session.
+
+### Forensic by setup
+
+| setup_id | cases |
+|----------|------:|
+| whale_walls | 4 |
+| spread_strategy | 2 |
+| btc_correlation | 2 |
+| aggression_shift | 1 |
+| depth_imbalance | 1 |
+
+**Aggregated action:** P2 — review `sl_buffer_atr` for high-vol symbols (STOP_HUNT cluster).
+
+
+---
+
+## Forensic snapshot — 2026-06-05 10:42 UTC
+
+
+
+
+---
+
+## Forensic snapshot — 2026-06-05 10:42 UTC
+
+- IMMEDIATE_ADVERSE: 5
+- THESIS_FAILED: 4
+- TIMING_OFF: 1
+
+
+---
+
+## Forensic snapshot — 2026-06-05 10:48 UTC
+
+- IMMEDIATE_ADVERSE: 8
+- STOP_HUNT: 2
+
+
+---
+
+## Forensic snapshot — 2026-06-05 10:49 UTC
+
+- IMMEDIATE_ADVERSE: 5
+- THESIS_FAILED: 3
+- STOP_HUNT: 1
+- TIMING_OFF: 1
+
+
+---
+
+## Forensic snapshot — 2026-06-05 10:50 UTC
+
+- IMMEDIATE_ADVERSE: 7
+- THESIS_FAILED: 1
+- STOP_HUNT: 1
+- TIMING_OFF: 1

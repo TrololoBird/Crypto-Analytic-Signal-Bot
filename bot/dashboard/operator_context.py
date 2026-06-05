@@ -422,9 +422,10 @@ def format_operator_cycles_text(
         ),
     ]
     top = overview.get("top_rejection") if isinstance(overview.get("top_rejection"), dict) else {}
-    if top.get("reason"):
+    top_reason = top.get("key") or top.get("reason")
+    if top_reason:
         lines.append(
-            f"Top reject: <code>{html.escape(str(top.get('reason')))}</code> "
+            f"Top reject: <code>{html.escape(str(top_reason))}</code> "
             f"× <code>{top.get('count') or 0}</code>"
         )
     return "\n".join(lines)

@@ -29,10 +29,11 @@ MONITOR_LOCK = Path("data/bot/monitor.lock")
 
 def _env() -> dict[str, str]:
     env = os.environ.copy()
-    if os.environ.get("BOT_ENABLE_DASHBOARD", "1").strip().lower() not in {"0", "false", "no"}:
-        env.pop("BOT_DISABLE_HTTP_SERVERS", None)
+    if os.environ.get("BOT_ENABLE_DASHBOARD", "1").strip().lower() in {"0", "false", "no"}:
+        env["BOT_DISABLE_DASHBOARD"] = "1"
     else:
-        env["BOT_DISABLE_HTTP_SERVERS"] = "1"
+        env.pop("BOT_DISABLE_DASHBOARD", None)
+    env.pop("BOT_DISABLE_HTTP_SERVERS", None)
     env.pop("BOT_NOTIFIER_PROVIDER", None)
     env["PYTHONUNBUFFERED"] = "1"
     return env
