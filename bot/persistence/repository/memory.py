@@ -403,11 +403,11 @@ class MemoryRepository(AnalyticsMixin):
         async with conn.execute("SELECT * FROM market_context WHERE id = 1") as cursor:
             row = await cursor.fetchone()
             if row:
-                row = dict(row)
+                row_dict: dict[str, Any] = dict(row)
                 intelligence_snapshot: dict[str, Any] = {}
-                raw_intelligence = row.get("intelligence_json")
+                raw_intelligence = row_dict.get("intelligence_json")
                 benchmark_context: dict[str, Any] = {}
-                raw_benchmarks = row.get("benchmark_context_json")
+                raw_benchmarks = row_dict.get("benchmark_context_json")
                 if raw_benchmarks:
                     try:
                         parsed_benchmarks = json.loads(raw_benchmarks)
@@ -421,7 +421,7 @@ class MemoryRepository(AnalyticsMixin):
                     except json.JSONDecodeError:
                         intelligence_snapshot = {}
                 display_snapshot: dict[str, Any] = {}
-                raw_display = row.get("display_snapshot_json")
+                raw_display = row_dict.get("display_snapshot_json")
                 if raw_display:
                     try:
                         parsed_display = json.loads(raw_display)
@@ -430,8 +430,8 @@ class MemoryRepository(AnalyticsMixin):
                     if isinstance(parsed_display, dict):
                         display_snapshot = parsed_display
                 return {
-                    "btc_bias": row["btc_bias"],
-                    "eth_bias": row["eth_bias"],
+                    "btc_bias": row_dict["btc_bias"],
+                    "eth_bias": row_dict["eth_bias"],
                     "sol_bias": str(
                         (benchmark_context.get("SOLUSDT") or {}).get("bias") or "neutral"
                     ),
@@ -444,24 +444,25 @@ class MemoryRepository(AnalyticsMixin):
                     "pax_bias": str(
                         (benchmark_context.get("PAXGUSDT") or {}).get("bias") or "neutral"
                     ),
-                    "altcoin_season_index": float(row["altcoin_season_index"])
-                    if "altcoin_season_index" in row and row["altcoin_season_index"] is not None
+                    "altcoin_season_index": float(row_dict["altcoin_season_index"])
+                    if "altcoin_season_index" in row_dict
+                    and row_dict["altcoin_season_index"] is not None
                     else 50.0,
-                    "btc_phase": row.get("btc_phase", "sideways"),
-                    "high_funding_symbols": json.loads(row["high_funding_symbols"]),
-                    "low_funding_symbols": json.loads(row["low_funding_symbols"]),
-                    "updated_at": row["updated_at"],
-                    "market_regime": row.get("market_regime", "unknown"),
-                    "market_regime_confirmed": bool(row["market_regime_confirmed"])
-                    if "market_regime_confirmed" in row
+                    "btc_phase": row_dict.get("btc_phase", "sideways"),
+                    "high_funding_symbols": json.loads(row_dict["high_funding_symbols"]),
+                    "low_funding_symbols": json.loads(row_dict["low_funding_symbols"]),
+                    "updated_at": row_dict["updated_at"],
+                    "market_regime": row_dict.get("market_regime", "unknown"),
+                    "market_regime_confirmed": bool(row_dict["market_regime_confirmed"])
+                    if "market_regime_confirmed" in row_dict
                     else False,
-                    "macro_risk_mode": row.get("macro_risk_mode", "normal"),
+                    "macro_risk_mode": row_dict.get("macro_risk_mode", "normal"),
                     "benchmark_context": benchmark_context,
                     "intelligence_snapshot": intelligence_snapshot,
-                    "telegram_html": str(row.get("telegram_html") or ""),
+                    "telegram_html": str(row_dict.get("telegram_html") or ""),
                     "display_snapshot": display_snapshot,
                     "market_context_age_seconds": self._market_context_age_seconds(
-                        row.get("updated_at")
+                        row_dict.get("updated_at")
                     ),
                 }
             return {

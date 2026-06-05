@@ -374,11 +374,6 @@ class SignalTracker(TPSLReviewMixin, TelegramTrackingMixin):
             return 0.0
         return abs(entry - stop) / entry * 100.0
 
-    @staticmethod
-
-    @staticmethod
-
-
     def _build_outcome_payload(self, tracked: TrackedSignalState) -> dict[str, Any]:
         features = self.features_store.get(tracked.tracking_id)
         if not features:

@@ -112,6 +112,9 @@ select = [
 # No blanket ignores — fix violations in source (see reports/ruff_inventory_summary.md).
 
 [tool.ruff.lint.per-file-ignores]
+# Late imports after module constants (circular-import guard in ws/rest_impl)
+"bot/market/ws.py" = ["E402"]
+"bot/market/rest_impl.py" = ["E402"]
 "bot/dashboard/**/*.py" = ["RUF001", "RUF002", "E501", "BLE001", "PERF401", "ARG001", "RUF006"]
 "bot/delivery/formatting.py" = ["RUF001", "E501"]
 "bot/domain/labels.py" = ["RUF001"]

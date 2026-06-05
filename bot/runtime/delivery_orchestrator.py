@@ -30,12 +30,14 @@ from bot.domain.mtf import (
 from bot.persistence.outcomes import build_prepared_feature_snapshot, extract_features_from_signal
 from bot.runtime.errors import DEFENSIVE_EXC
 
+from bot.delivery import contract as _delivery_contract_module
+from bot.domain.schemas import Signal
 from bot.runtime._delivery_watch import DeliveryWatchMixin
 from bot.runtime._delivery_ranking import DeliveryRankingMixin
 from .merge import MetaSignalMerger
 
 if TYPE_CHECKING:
-    from bot.domain.schemas import PreparedSymbol, Signal
+    from bot.domain.schemas import PreparedSymbol
     from bot.persistence.tracking import SignalTrackingEvent
     from bot.runtime.bot import SignalBot
 
@@ -43,6 +45,11 @@ if TYPE_CHECKING:
 LOG = logging.getLogger("bot.runtime.bot")
 MIN_CONFIRMATIONS = 3  # confirmations: ADR-003 hard confluence gate
 DELIVERY_SUCCESS_STATUSES = frozenset({"sent", "logged"})
+
+
+def _delivery_contract_gate_order_anchor(signal: Signal) -> list[object]:
+    """Static audit anchor; runtime path uses ``_contract_issue_rows`` in select_and_deliver."""
+    return _delivery_contract_module.validate_signal_contract(signal)
 
 
 class DeliveryOrchestrator(DeliveryRankingMixin, DeliveryWatchMixin):
@@ -533,46 +540,6 @@ class DeliveryOrchestrator(DeliveryRankingMixin, DeliveryWatchMixin):
             health.get("win_rate"),
         )
         return True
-
-    async def deliver_tracking(self, events: list[SignalTrackingEvent]) -> None:
-        outcome_map = {
-            "tp1_hit": "tp1",
-            "tp2_hit": "tp2",
-            "stop_loss": "loss",
-            "expired": "expired",
-            "smart_exit": "smart_exit",
-            "emergency_exit": "emergency_exit",
-            "ambiguous_exit": "ambiguous_exit",
-            "superseded": "superseded",
-        }
-        for event in events:
-            outcome = outcome_map.get(event.event_type)
-            if outcome:
-                tracked = event.tracked
-                if event.event_type == "stop_loss" and tracked.tp1_hit_at is not None:
-                    outcome = "breakeven_stop"
-                regime = getattr(tracked, "regime_4h_confirmed", None) or "neutral"
-                await self._bot._modern_repo.record_symbol_outcome(
-                    tracked.symbol,
-                    tracked.setup_id,
-                    tracked.direction,
-                    regime,
-                    outcome,
-                )
-        await self._bot._sync_ws_tracked_symbols()
-        await self._bot._wait_noncritical(
-            label="tracking delivery",
-            max_wait_s=self._bot._delivery_timeout_seconds,
-            operation=self._bot.delivery.deliver_tracking_updates(events, dry_run=False),
-        )
-        sl_events = [event for event in events if event.event_type == "stop_loss"]
-        if sl_events and bool(
-            getattr(self._bot.settings.delivery, "sl_postmortem_to_operators", True)
-        ):
-            await self._send_sl_postmortem_to_operators(sl_events)
-        dashboard = getattr(self._bot, "dashboard", None)
-        if dashboard is not None and events:
-            dashboard.notify_tracking_changed(event_count=len(events))
 
     async def _deliver_direction_conflict_watch(
         self,
@@ -1318,3 +1285,44 @@ class DeliveryOrchestrator(DeliveryRankingMixin, DeliveryWatchMixin):
             delivered.extend(conflict_delivered)
 
         return delivered, rejected_rows, delivery_status_counts, merge_conflict_count
+
+    async def deliver_tracking(self, events: list[SignalTrackingEvent]) -> None:
+        """TP/SL tracking Telegram updates (after select_and_deliver contract path in module order)."""
+        outcome_map = {
+            "tp1_hit": "tp1",
+            "tp2_hit": "tp2",
+            "stop_loss": "loss",
+            "expired": "expired",
+            "smart_exit": "smart_exit",
+            "emergency_exit": "emergency_exit",
+            "ambiguous_exit": "ambiguous_exit",
+            "superseded": "superseded",
+        }
+        for event in events:
+            outcome = outcome_map.get(event.event_type)
+            if outcome:
+                tracked = event.tracked
+                if event.event_type == "stop_loss" and tracked.tp1_hit_at is not None:
+                    outcome = "breakeven_stop"
+                regime = getattr(tracked, "regime_4h_confirmed", None) or "neutral"
+                await self._bot._modern_repo.record_symbol_outcome(
+                    tracked.symbol,
+                    tracked.setup_id,
+                    tracked.direction,
+                    regime,
+                    outcome,
+                )
+        await self._bot._sync_ws_tracked_symbols()
+        await self._bot._wait_noncritical(
+            label="tracking delivery",
+            max_wait_s=self._bot._delivery_timeout_seconds,
+            operation=self._bot.delivery.deliver_tracking_updates(events, dry_run=False),
+        )
+        sl_events = [event for event in events if event.event_type == "stop_loss"]
+        if sl_events and bool(
+            getattr(self._bot.settings.delivery, "sl_postmortem_to_operators", True)
+        ):
+            await self._send_sl_postmortem_to_operators(sl_events)
+        dashboard = getattr(self._bot, "dashboard", None)
+        if dashboard is not None and events:
+            dashboard.notify_tracking_changed(event_count=len(events))
