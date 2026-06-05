@@ -56,7 +56,7 @@ try:
     HAS_UVICORN = True
 except ImportError:
     HAS_UVICORN = False
-    uvicorn = None  # type: ignore[misc, assignment]
+    uvicorn = None  # type: ignore[assignment]
 
 LOG = logging.getLogger("bot.dashboard")
 
@@ -1139,7 +1139,7 @@ class BotDashboard:
                     df = await asyncio.wait_for(fetch_fn(sym, interval, limit=limit), timeout=8.0)
                     rows = self._dataframe_to_kline_rows(df)
                     source = "rest"
-                except (TimeoutError, *DEFENSIVE_EXC):
+                except (TimeoutError, *DEFENSIVE_EXC):  # type: ignore[misc]
                     rows = None
 
         mark_price = None

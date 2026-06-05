@@ -34,7 +34,7 @@ except ImportError:
     HAS_PROMETHEUS = False
 
     # Stubs for when prometheus_client is not installed
-    class _PromCounterClass:  # type: ignore[no-redef, misc]
+    class _PromCounterClass:  # type: ignore[no-redef]
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             pass
 
@@ -44,7 +44,7 @@ except ImportError:
         def labels(self, *_args: Any, **_kwargs: Any) -> Any:
             return self
 
-    class _PromGaugeClass:  # type: ignore[no-redef, misc]
+    class _PromGaugeClass:  # type: ignore[no-redef]
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             pass
 
@@ -57,14 +57,14 @@ except ImportError:
         def dec(self, *args: Any, **kwargs: Any) -> None:
             pass
 
-    class _PromHistogramClass:  # type: ignore[no-redef, misc]
+    class _PromHistogramClass:  # type: ignore[no-redef]
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             pass
 
         def observe(self, *args: Any, **kwargs: Any) -> None:
             pass
 
-    class _PromInfoClass:  # type: ignore[no-redef, misc]
+    class _PromInfoClass:  # type: ignore[no-redef]
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             pass
 

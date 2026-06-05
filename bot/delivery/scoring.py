@@ -81,7 +81,7 @@ def _regime_confirmed(work: pl.DataFrame, min_bars: int = 3) -> str:
 def _structure_frame(prepared: PreparedSymbol) -> pl.DataFrame:
     if prepared.primary_timeframe != "15m":
         primary = getattr(prepared, "work_primary", None)
-        if primary is not None and not primary.is_empty():
+        if isinstance(primary, pl.DataFrame) and not primary.is_empty():
             return primary
     return prepared.work_1h
 

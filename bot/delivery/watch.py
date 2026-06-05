@@ -345,7 +345,7 @@ class AlertCoordinator:
             ref_id = cand.ref_id
             latency_ms = int(max(0.0, (observed_at - cand.created_at).total_seconds() * 1000.0))
             text = self._format_watch(
-                cand, current_price=current_price, now=observed_at, ref_id=ref_id
+                cand, current_price=current_price, _now=observed_at, ref_id=ref_id
             )
             message_id = await self._send(text, dry_run=dry_run, reply_to_message_id=None)
             async with self._lock:
@@ -385,7 +385,7 @@ class AlertCoordinator:
             reply_to_message_id = int(reply_to) if isinstance(reply_to, int) else None
             latency_ms = int(max(0.0, (observed_at - cand.created_at).total_seconds() * 1000.0))
             text = self._format_entry_zone(
-                cand, current_price=current_price, now=observed_at, ref_id=ref_id
+                cand, current_price=current_price, _now=observed_at, ref_id=ref_id
             )
             message_id = await self._send(
                 text, dry_run=dry_run, reply_to_message_id=reply_to_message_id
@@ -423,7 +423,7 @@ class AlertCoordinator:
             text = self._format_invalidated(
                 cand,
                 current_price=current_price,
-                now=observed_at,
+                _now=observed_at,
                 reason=reason,
                 ref_id=ref_id,
             )

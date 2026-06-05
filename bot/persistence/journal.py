@@ -214,15 +214,18 @@ async def build_journal_report_from_repo(repo: MemoryRepository) -> JournalRepor
     outcome_rows = await repo.get_signal_outcomes(last_days=None)
     outcomes: dict[str, Counter[str]] = defaultdict(Counter)
     seen_refs: set[str] = set()
-    for row in outcome_rows:
-        canonical = normalize_tracking_event(str(row.get("result") or ""))
+    for raw_row in outcome_rows:
+        outcome_row: dict[str, Any] = dict(raw_row)
+        canonical = normalize_tracking_event(str(outcome_row.get("result") or ""))
         if not canonical:
             continue
         _record_terminal_outcome(
             outcomes,
             seen_refs,
-            tracking_ref=str(row.get("tracking_ref") or row.get("tracking_id") or ""),
-            setup_id=str(row.get("setup_id") or "unknown"),
+            tracking_ref=str(
+                outcome_row.get("tracking_ref") or outcome_row.get("tracking_id") or ""
+            ),
+            setup_id=str(outcome_row.get("setup_id") or "unknown"),
             canonical=canonical,
         )
     report.setup_outcomes = {k: dict(v) for k, v in outcomes.items()}

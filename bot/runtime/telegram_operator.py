@@ -346,7 +346,7 @@ class TelegramOperatorConsole:
             await self._reply_tracking(chat_id, detail=True)
             return
         if cmd in {"/cycles", "/pipeline"}:
-            overview = {}
+            overview: dict[str, Any] = {}
             live_data = getattr(getattr(self._bot, "dashboard", None), "_live_data", None)
             if live_data is not None:
                 try:

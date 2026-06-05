@@ -33,6 +33,9 @@ LOG = logging.getLogger("bot.tracking")
 class TPSLReviewMixin:
     """Applies aggTrade/candle/tick review to open tracked signals."""
 
+    _last_agg_trade_fetch_mono: float
+    _agg_trade_semaphore: asyncio.Semaphore
+
     @staticmethod
     def _update_price_excursion(tracked: TrackedSignalState, price: float | None) -> None:
         if price is None or price <= 0.0:

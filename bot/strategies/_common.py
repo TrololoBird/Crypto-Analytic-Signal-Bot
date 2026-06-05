@@ -194,14 +194,14 @@ def with_spec_columns(frame: pl.DataFrame) -> pl.DataFrame:
             pl.col("atr14").cast(pl.Float64, strict=False).alias("spec_atr14")
         )
     else:
-        spec_atr14_value = wilder_mean(tr_series, period=14, name="spec_atr14")  # type: ignore[arg-type]
+        spec_atr14_value = wilder_mean(tr_series, period=14, name="spec_atr14")
 
     if "atr20" in work.columns:
         spec_atr20_value: pl.Expr | pl.Series = (
             pl.col("atr20").cast(pl.Float64, strict=False).alias("spec_atr20")
         )
     else:
-        spec_atr20_value = wilder_mean(tr_series, period=20, name="spec_atr20")  # type: ignore[arg-type]
+        spec_atr20_value = wilder_mean(tr_series, period=20, name="spec_atr20")
 
     pass1: list[pl.Expr | pl.Series] = [
         tr_expr.alias("spec_tr"),
