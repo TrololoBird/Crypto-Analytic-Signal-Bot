@@ -6,7 +6,9 @@
 
 | Место | Назначение | Коммитить? |
 |-------|------------|------------|
-| **`.env`** → `GITHUB_TOKEN=...` | Agent: `scripts/gh_with_env_token.sh`, `scripts/verify_github_token.sh`, git push | **Нет** (в `.gitignore`) |
+| `.env` → `GITHUB_TOKEN=...` | Agent: `scripts/gh_with_env_token.sh`, `scripts/verify_github_token.sh`, git push | **Нет** (в `.gitignore`) |
+| **`env.example` only** | Шаблон без секретов | Да |
+| **Никогда** `env (1).example`, Downloads-копии | Часто случайно копируют реальный `.env` | Удалить; не коммитить |
 | **`~/.zshrc`** → `export GITHUB_TOKEN=...` | Cursor MCP (GitHub server), терминал вне проекта | Нет |
 | **GitHub → Settings → Secrets** | Только CI secrets (Telegram, proxy) — не PAT для локальной разработки | N/A |
 
@@ -47,7 +49,9 @@ GITHUB_TOKEN=github_pat_xxxxxxxx
 
 ### Classic PAT (fallback)
 
-[Classic tokens](https://github.com/settings/tokens/new) — scopes: `repo`, **`workflow`**, `read:org` (optional).
+[Classic tokens](https://github.com/settings/tokens/new) — scopes: `repo` (full), **`workflow`**, `read:org` (optional).
+
+> **Не используй** «full access» дольше, чем нужно: предпочтительно Fine-grained на один репозиторий. Classic `ghp_…` работает с нашими скриптами.
 
 Fine-grained предпочтительнее: один репозиторий, минимальные права.
 
@@ -149,7 +153,7 @@ API/rulesets требуют admin; агент не может включить �
 | Ошибка | Решение |
 |--------|---------|
 | `refusing to allow OAuth App ... workflow scope` | Fine-grained **Actions+Workflows** или classic `workflow` scope; token в `.env` |
-| `gh: To use GitHub CLI in automation...` | `./scripts/verify_github_token.sh` |
+| `syntax error near unexpected token` при verify | Сломанная строка в `.env` (склеенные переменные) — оставь одну переменную на строку; скрипты используют `scripts/load_env.sh` |
 | CI: `dashboard.app is None` | Unit job ставит `[live,dev,test]` — нужен FastAPI |
 | 6 Dependabot aiohttp alerts | Dismissed `tolerable_risk` — см. SECURITY.md |
 | MCP github red | Docker running + `GITHUB_TOKEN` exported before Cursor start |

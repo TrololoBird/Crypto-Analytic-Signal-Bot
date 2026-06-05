@@ -5,12 +5,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_FILE="${ENV_FILE:-$ROOT/.env}"
 
-if [[ -f "$ENV_FILE" ]]; then
-  set -a
-  # shellcheck disable=SC1090
-  source "$ENV_FILE"
-  set +a
-fi
+# shellcheck source=load_env.sh
+source "$ROOT/scripts/load_env.sh"
+load_env_file "$ENV_FILE"
 
 if [[ -z "${GITHUB_TOKEN:-}" ]]; then
   echo "[ERROR] GITHUB_TOKEN is not set." >&2
