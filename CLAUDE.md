@@ -75,6 +75,20 @@ WS kline close → EventBus → SymbolAnalyzer → SignalEngine → DeliveryOrch
 5. All edits must pass: `python -m py_compile $(find bot -name "*.py")`
 6. One commit per logical phase; message: `phase-<X>: <description>`
 
+## SL Analysis (last updated 2026-06-05)
+
+Overall SL rate before fixes: **100%** among executed exits (10/10; n=44 outcomes, see `REPORT_SL_ANALYSIS.md`).
+
+Root causes confirmed: **Cause A only** (entry timing / late chase).
+
+Fixes applied: **fix-sl-A** — confirmed-bar detection in `whale_walls`, `spread_strategy`, `btc_correlation`; `entry_staleness` filter (1.5×ATR%, default on).
+
+Not applied (not confirmed): fix-sl-B (stop tight), fix-sl-C (regime), fix-sl-D (weak score), fix-sl-E (strategy bug).
+
+Score floor: unchanged (`min_score` 0.53 in `config.toml`). Regime filter: not added. Strategies disabled: none.
+
+Next review: after 50+ new executed outcomes with fix-sl-A.
+
 ## Known architectural debt (do not silently work around — report and ask)
 
 - **DUAL PERSISTENCE (resolved Phase E):** legacy `signals` / `outcomes` tables are now **READ-ONLY**. All runtime writes go to `active_signals` / `signal_outcomes`. Dashboard/analytics still reads legacy tables. Do not add writes to legacy tables. Planned: drop legacy tables in a future schema migration (Phase H, not yet started).
