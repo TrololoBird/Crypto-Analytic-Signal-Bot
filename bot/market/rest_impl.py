@@ -413,63 +413,52 @@ class RestHttpMixin(RestCircuitMixin):
     ) -> Any:
         pool = getattr(self, "_proxy_pool", None)
         failover = bool(getattr(self, "_proxy_failover_enabled", False))
-        attempts = len(pool.urls) if pool and failover else 1
-        last_error: Exception | None = None
-        for attempt in range(max(1, attempts)):
-            try:
-                return await self._call_public_http_json_attempt(
-                    operation, params=params, symbol=symbol
-                )
-            except MarketDataUnavailable as exc:
-                last_error = exc
-                detail = str(exc.detail or "")
-                is_ip_ban = "418 ip ban" in detail
-                # On IP ban: activate first available proxy even without rotation alternatives,
-                # then retry once with a clean IP.
-                if is_ip_ban and failover and pool is not None and attempt == 0:
-                    first = pool.current()
-                    if first and first != getattr(self, "_proxy_url", None):
-                        await self._apply_active_proxy(first)
-                        self._rate_limit_pause_until = 0.0
-                        self._futures_data_pause_until = 0.0
-                        continue
-                # No ready proxy — kick off background discovery so future requests recover.
-                if (
-                    is_ip_ban
-                    and not getattr(self, "_proxy_discovery_in_progress", False)
-                    and hasattr(self, "_auto_discover_and_apply_proxy")
-                ):
-                    _disc_task = asyncio.create_task(
-                        self._auto_discover_and_apply_proxy(),
-                        name="auto_proxy_discovery",
-                    )
-                    _disc_task.add_done_callback(
-                        lambda t: t.exception() if not t.cancelled() else None
-                    )
-                if attempt + 1 < attempts and await self._try_failover_proxy(detail):
+        # Proxy rotation is handled per-error-type below, not via a retry loop.
+        # A loop rotated the pool on ANY MarketDataUnavailable (including API errors
+        # like "Invalid contract type"), exhausting all proxies unnecessarily.
+        try:
+            return await self._call_public_http_json_attempt(
+                operation, params=params, symbol=symbol
+            )
+        except MarketDataUnavailable as exc:
+            detail = str(exc.detail or "")
+            is_ip_ban = "418 ip ban" in detail
+            # On IP ban: immediately switch to first pool proxy and retry once.
+            if is_ip_ban and failover and pool is not None:
+                first = pool.current()
+                if first and first != getattr(self, "_proxy_url", None):
+                    await self._apply_active_proxy(first)
                     self._rate_limit_pause_until = 0.0
                     self._futures_data_pause_until = 0.0
-                    continue
-                raise
-            except aiohttp.ClientError as exc:
-                last_error = exc
-                if (
-                    attempt + 1 < attempts
-                    and is_proxy_transport_error(exc)
-                    and await self._try_failover_proxy(str(exc))
-                ):
-                    continue
-                self._record_circuit_failure(operation)
-                raise MarketDataUnavailable(
-                    operation=operation,
-                    detail=f"aiohttp:{exc.__class__.__name__}:{exc}",
-                    symbol=symbol,
-                ) from exc
-        if last_error is not None:
-            raise last_error
-        raise MarketDataUnavailable(
-            operation=operation, detail="proxy_pool_exhausted", symbol=symbol
-        )
+                    try:
+                        return await self._call_public_http_json_attempt(
+                            operation, params=params, symbol=symbol
+                        )
+                    except MarketDataUnavailable:
+                        pass
+            # No ready proxy — kick off background discovery so future requests recover.
+            if (
+                is_ip_ban
+                and not getattr(self, "_proxy_discovery_in_progress", False)
+                and hasattr(self, "_auto_discover_and_apply_proxy")
+            ):
+                _disc_task = asyncio.create_task(
+                    self._auto_discover_and_apply_proxy(),
+                    name="auto_proxy_discovery",
+                )
+                _disc_task.add_done_callback(
+                    lambda t: t.exception() if not t.cancelled() else None
+                )
+            raise
+        except aiohttp.ClientError as exc:
+            if is_proxy_transport_error(exc):
+                await self._try_failover_proxy(str(exc))
+            self._record_circuit_failure(operation)
+            raise MarketDataUnavailable(
+                operation=operation,
+                detail=f"aiohttp:{exc.__class__.__name__}:{exc}",
+                symbol=symbol,
+            ) from exc
 
     async def _call_public_http_json_attempt(
         self, operation: str, *, params: dict[str, Any] | None = None, symbol: str | None = None
