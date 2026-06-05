@@ -47,7 +47,7 @@ class SpecHit:
 def as_float(value: object, default: float = 0.0) -> float:
     try:
         numeric = float(value) if value is not None else default
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return default
     return numeric if math.isfinite(numeric) else default
 
@@ -57,7 +57,7 @@ def finite_or_none(value: object) -> float | None:
         return None
     try:
         numeric = float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     return numeric if math.isfinite(numeric) else None
 
@@ -118,8 +118,7 @@ def _spec_cache_key(frame: pl.DataFrame) -> tuple[object, ...] | None:
     if frame.is_empty() or "close" not in frame.columns:
         return None
     tail_closes = tuple(
-        round(as_float(value), 8)
-        for value in frame.select("close").tail(5).to_series().to_list()
+        round(as_float(value), 8) for value in frame.select("close").tail(5).to_series().to_list()
     )
     tail_time = frame.item(-1, "close_time") if "close_time" in frame.columns else None
     return (frame.height, tail_closes, str(tail_time), tuple(frame.columns))

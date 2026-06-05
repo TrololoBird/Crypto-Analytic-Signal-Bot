@@ -109,7 +109,7 @@ def detect_funding_reversal(
             recent_age = (
                 None if recent_extreme_age_hours is None else float(recent_extreme_age_hours)
             )
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             recent_rate = None
             recent_age = None
         if (

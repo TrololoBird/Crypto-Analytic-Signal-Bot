@@ -471,7 +471,6 @@ class LiquiditySweepSetup(SpecDetectorSetup):
 
     detect_setup = detect_liquidity_sweep_setup
 
-
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         return super().detect(prepared, settings)
 

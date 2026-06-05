@@ -79,7 +79,7 @@ def _finite_or_none(value: object) -> float | None:
         return None
     try:
         numeric = float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     return numeric if math.isfinite(numeric) else None
 
@@ -478,7 +478,6 @@ class TurtleSoupSetup(SpecDetectorSetup):
     }
 
     detect_setup = detect_turtle_soup_setup
-
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         return super().detect(prepared, settings)

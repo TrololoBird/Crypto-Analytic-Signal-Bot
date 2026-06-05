@@ -420,5 +420,4 @@ class VolumeClimaxReversalSetup(SpecDetectorSetup):
     detect_setup = detect_volume_climax_reversal_setup
 
 
-
 __all__ = ["VolumeClimaxReversalSetup"]

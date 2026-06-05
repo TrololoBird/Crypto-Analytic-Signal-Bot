@@ -69,7 +69,7 @@ def _signed_delta_values(values: Any) -> Any:
     try:
         min_value = float(raw.min())
         max_value = float(raw.max())
-    except (AttributeError, TypeError, ValueError):
+    except AttributeError, TypeError, ValueError:
         return raw
     if min_value < 0.0:
         return raw
@@ -357,7 +357,6 @@ class CVDDivergenceSetup(SpecDetectorSetup):
     }
 
     detect_setup = detect_cvd_divergence_setup
-
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         return super().detect(prepared, settings)

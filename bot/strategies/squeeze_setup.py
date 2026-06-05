@@ -454,5 +454,4 @@ class SqueezeSetup(SpecDetectorSetup):
     detect_setup = detect_squeeze_setup
 
 
-
 __all__ = ["SqueezeSetup"]

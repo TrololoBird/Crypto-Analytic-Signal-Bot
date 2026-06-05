@@ -343,7 +343,6 @@ class BreakerBlockSetup(SpecDetectorSetup):
 
     detect_setup = detect_breaker_block_setup
 
-
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
         return super().detect(prepared, settings)
 
