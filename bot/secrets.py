@@ -33,9 +33,13 @@ def parse_operator_user_ids(raw: str) -> tuple[int, ...]:
 
 
 def _first_configured_env(*names: str) -> str:
+    # fix-20260604: skip empty canonical keys so legacy TG_TOKEN / TARGET_CHAT_ID still work
     for name in names:
-        if name in os.environ:
-            return os.environ[name].strip()
+        if name not in os.environ:
+            continue
+        value = os.environ[name].strip()
+        if value:
+            return value
     return ""
 
 
