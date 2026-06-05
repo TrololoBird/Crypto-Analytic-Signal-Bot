@@ -174,7 +174,7 @@ class ShortlistService:
         try:
             bid_value = float(bid) if bid is not None else None
             ask_value = float(ask) if ask is not None else None
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
         if (
             bid_value is None
@@ -392,7 +392,7 @@ class ShortlistService:
             try:
                 mark_price = float(mark.get("mark_price") or 0.0)
                 index_price = float(mark.get("index_price") or 0.0)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 return None
             if mark_price <= 0.0 or index_price <= 0.0:
                 return None

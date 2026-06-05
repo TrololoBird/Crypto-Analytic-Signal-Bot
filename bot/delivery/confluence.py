@@ -150,7 +150,7 @@ class ConfluenceEngine:
             return history_count
         try:
             loaded = int(getter(signal.setup_id))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             LOG.debug("setup_history_count lookup failed | setup_id=%s", signal.setup_id)
             return history_count
         except DEFENSIVE_EXC:
@@ -392,7 +392,7 @@ class ConfluenceEngine:
             return False
         try:
             return math.isfinite(float(value))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return False
 
     @classmethod
@@ -402,11 +402,11 @@ class ConfluenceEngine:
             return False
         try:
             value = frame.item(-1, column)
-        except (IndexError, TypeError, ValueError):
+        except IndexError, TypeError, ValueError:
             return False
         try:
             return value is not None and math.isfinite(float(value))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return False
 
     @classmethod

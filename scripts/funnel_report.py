@@ -79,7 +79,7 @@ def build_report(*, analysis_dir: Path, run_id: str) -> dict[str, object]:
             if key.endswith(("_blocked", "_rejected")):
                 try:
                     funnel_blocks[key] += int(value or 0)
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     continue
 
     sum(int(row.get("prepare_error_count") or 0) for row in cycles)

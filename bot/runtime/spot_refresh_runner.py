@@ -71,7 +71,7 @@ class SpotRefreshRunner:
             last_price = getattr(item, "last_price", None)
             try:
                 futures_mid_by_symbol[symbol] = float(last_price) if last_price else None
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 futures_mid_by_symbol[symbol] = None
         if not symbols:
             return 0

@@ -85,7 +85,7 @@ async def probe_ws_handshake(
                 **connect_kwargs,
             ):
                 return True
-    except (KeyboardInterrupt, SystemExit):
+    except KeyboardInterrupt, SystemExit:
         raise
     except Exception as exc:  # noqa: BLE001 — proxy libs raise non-standard exceptions
         LOG.debug(
@@ -103,7 +103,7 @@ async def _probe_rest(net: NetworkConfig) -> bool:
     try:
         symbols = await market.fetch_exchange_symbols()
         return len(symbols) > _REST_SYMBOL_THRESHOLD
-    except (KeyboardInterrupt, SystemExit):
+    except KeyboardInterrupt, SystemExit:
         raise
     except Exception:  # noqa: BLE001
         return False

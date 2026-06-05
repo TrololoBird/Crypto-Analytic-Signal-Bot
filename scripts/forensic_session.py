@@ -24,7 +24,7 @@ def _read_pid(data_dir: Path) -> int | None:
         return None
     try:
         return int(pid_file.read_text(encoding="utf-8").strip())
-    except (TypeError, ValueError, OSError):
+    except TypeError, ValueError, OSError:
         return None
 
 

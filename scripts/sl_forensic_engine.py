@@ -161,7 +161,7 @@ async def _analyze_rows(
         event_raw = row.get("activated_at") or row.get("closed_at") or row.get("created_at")
         try:
             event_dt = datetime.fromisoformat(str(event_raw))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             LOG.warning("skip %s: bad event time %s", tid, event_raw)
             continue
         if event_dt.tzinfo is None:

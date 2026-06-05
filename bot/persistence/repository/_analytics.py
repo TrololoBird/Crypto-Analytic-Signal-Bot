@@ -209,7 +209,7 @@ class AnalyticsMixin:
                 return True
             try:
                 last_signal_ts = datetime.fromisoformat(str(row["last_signal_ts"]))
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 return True
             if last_signal_ts.tzinfo is None:
                 last_signal_ts = last_signal_ts.replace(tzinfo=UTC)
@@ -434,7 +434,7 @@ class AnalyticsMixin:
             if pnl_r_multiple is not None:
                 try:
                     parsed = float(pnl_r_multiple)
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     parsed = math.nan
                 if math.isfinite(parsed):
                     r_value = round(parsed, 6)
@@ -513,7 +513,7 @@ class AnalyticsMixin:
             return None
         try:
             value = float(raw)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
         return value if math.isfinite(value) else None
 
@@ -600,7 +600,7 @@ class AnalyticsMixin:
             closed_raw = row["closed_at"]
             try:
                 closed_at = datetime.fromisoformat(str(closed_raw))
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 continue
             if closed_at.tzinfo is None:
                 closed_at = closed_at.replace(tzinfo=UTC)

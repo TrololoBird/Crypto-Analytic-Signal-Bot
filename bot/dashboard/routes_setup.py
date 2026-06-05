@@ -150,7 +150,7 @@ def register_routes(dashboard: BotDashboard) -> None:
     async def strategy_decisions(
         limit_files: int = 1,
         max_rows: int = 1_000,
-        ) -> dict[str, Any]:
+    ) -> dict[str, Any]:
         try:
             return await asyncio.to_thread(
                 self._get_strategy_decision_summary,
@@ -297,7 +297,7 @@ def register_routes(dashboard: BotDashboard) -> None:
     async def live_rejections(
         limit: int = 30,
         max_rows: int = 100_000,
-        ) -> dict[str, Any]:
+    ) -> dict[str, Any]:
         try:
             limit = max(1, min(int(limit), 100))
             max_rows = max(1_000, min(int(max_rows), 250_000))
@@ -319,7 +319,7 @@ def register_routes(dashboard: BotDashboard) -> None:
     async def live_decisions(
         limit: int = 40,
         max_rows: int = 100_000,
-        ) -> dict[str, Any]:
+    ) -> dict[str, Any]:
         try:
             limit = max(1, min(int(limit), 100))
             max_rows = max(1_000, min(int(max_rows), 250_000))
@@ -378,13 +378,12 @@ def register_routes(dashboard: BotDashboard) -> None:
             return {"error": "live_telegram_preview_unavailable"}
 
         # ── WebSocket endpoints (spec: /ws/dashboard; canonical: /api/v1/ws) ──
+
     async def _handle_dashboard_ws(ws: WebSocket) -> None:
         if self._dashboard_token:
             provided = (
                 ws.query_params.get("token", "")
-                or (ws.headers.get("authorization", "") or "")
-                .removeprefix("Bearer ")
-                .strip()
+                or (ws.headers.get("authorization", "") or "").removeprefix("Bearer ").strip()
             )
             if not secrets.compare_digest(provided, self._dashboard_token):
                 await ws.close(code=1008, reason="unauthorized")
@@ -411,6 +410,7 @@ def register_routes(dashboard: BotDashboard) -> None:
         await _handle_dashboard_ws(ws)
 
         # ── API v1 endpoints ─────────────────────────────────────────────
+
     @self.app.get("/api/v1/status")
     async def v1_status() -> dict[str, Any]:
         return {
@@ -424,7 +424,7 @@ def register_routes(dashboard: BotDashboard) -> None:
         limit: int = 20,
         symbol: str = "",
         setup_id: str = "",
-        ) -> list[dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         signals = self._get_recent_signals(limit=max(1, min(int(limit), 100)))
         if symbol:
             signals = [s for s in signals if str(s.get("symbol", "")).upper() == symbol.upper()]
@@ -453,7 +453,7 @@ def register_routes(dashboard: BotDashboard) -> None:
         symbol: str,
         interval: str = "15m",
         limit: int = 80,
-        ) -> dict[str, Any]:
+    ) -> dict[str, Any]:
         try:
             return await self._get_chart_klines(
                 symbol=symbol,
@@ -481,12 +481,10 @@ def register_routes(dashboard: BotDashboard) -> None:
             max_rows=50_000,
         )
         zero_ids = {
-            str(row.get("setup_id") or "")
-            for row in (decisions.get("zero_signal_setups") or [])
+            str(row.get("setup_id") or "") for row in (decisions.get("zero_signal_setups") or [])
         }
         setup_rates = {
-            str(row.get("setup_id") or ""): row
-            for row in (decisions.get("setup_reports") or [])
+            str(row.get("setup_id") or ""): row for row in (decisions.get("setup_reports") or [])
         }
         for item in cached:
             setup_id = str(item.get("id") or "")
@@ -507,6 +505,7 @@ def register_routes(dashboard: BotDashboard) -> None:
             return {"error": "regime_unavailable"}
 
         # ── Diary routes ────────────────────────────────────────────────
+
     @self.app.get("/api/v1/diary/trades")
     async def v1_diary_list(
         limit: int = 50,
@@ -514,7 +513,7 @@ def register_routes(dashboard: BotDashboard) -> None:
         status: str = "",
         symbol: str = "",
         decision: str = "",
-        ) -> list[dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         store = await self._ensure_diary_store()
         if store is None:
             return []
@@ -578,6 +577,7 @@ def register_routes(dashboard: BotDashboard) -> None:
         return await store.get_analytics(days=max(1, min(int(days), 365)))
 
         # ── Strategy Correlation / Confluence ───────────────────────────
+
     @self.app.get("/api/v1/strategies/correlation")
     async def v1_strategies_correlation(limit: int = 41) -> dict[str, Any]:
         catalog = self._strategies_cache or []
@@ -631,6 +631,7 @@ def register_routes(dashboard: BotDashboard) -> None:
         return rejections.get("reasons", [])
 
         # ── Config endpoints ────────────────────────────────────────────
+
     @self.app.get("/api/v1/config/strategies")
     async def v1_config_strategies() -> list[dict[str, Any]]:
         return self._strategies_cache or []
@@ -676,6 +677,7 @@ def register_routes(dashboard: BotDashboard) -> None:
         return {"applied": True, **body}
 
         # ── Alerts ──────────────────────────────────────────────────────
+
     @self.app.get("/api/v1/alerts")
     async def v1_alerts(limit: int = 50, since: str = "") -> list[dict[str, Any]]:
         cap = max(1, min(int(limit), 200))
@@ -708,8 +710,7 @@ def register_routes(dashboard: BotDashboard) -> None:
             row
             for row in rows
             if not any(
-                row.get("type") == live.get("type")
-                and row.get("setup_id") == live.get("setup_id")
+                row.get("type") == live.get("type") and row.get("setup_id") == live.get("setup_id")
                 for live in live_rows
             )
         ]
@@ -723,6 +724,7 @@ def register_routes(dashboard: BotDashboard) -> None:
         return merged[:cap]
 
         # ── Sandbox ─────────────────────────────────────────────────────
+
     @self.app.post("/api/v1/sandbox/replay")
     async def v1_sandbox_replay(body: dict[str, Any]) -> dict[str, Any]:
         hours = int(body.get("hours", 24))
@@ -794,7 +796,6 @@ def register_routes(dashboard: BotDashboard) -> None:
             LOG.exception("dashboard live audit error")
             return {"error": "live_audit_unavailable"}
 
-
     @app.get("/api/v1/market/rest-weight")
     async def rest_weight_budget() -> dict[str, Any]:
         try:
@@ -825,4 +826,3 @@ def register_routes(dashboard: BotDashboard) -> None:
         except DEFENSIVE_EXC:
             LOG.exception("dashboard rest weight error")
             return {"error": "rest_weight_unavailable"}
-

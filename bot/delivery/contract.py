@@ -493,7 +493,7 @@ def validate_signal_contract(
                         )
     try:
         scale_weights = [float(item) for item in scale_weights_raw]
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         scale_weights = []
     if len(scale_weights) < 2:
         issues.append(

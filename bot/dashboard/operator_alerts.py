@@ -55,7 +55,7 @@ def build_live_operator_alerts(bot: Any, live_data: DashboardLiveData) -> list[J
     msg_age = ws_snapshot.get("last_message_age_seconds")
     try:
         stale_seconds = float(msg_age) if msg_age is not None else None
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         stale_seconds = None
     if stale_seconds is not None and stale_seconds > 120.0:
         alerts.append(

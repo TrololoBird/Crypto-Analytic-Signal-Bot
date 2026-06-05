@@ -267,7 +267,7 @@ def configure_logging(settings: BotSettings, *, debug_mode: bool = False) -> Non
 def _read_pid_value(pid_file: Path) -> int:
     try:
         return int(pid_file.read_text(encoding="utf-8").strip() or "0")
-    except (OSError, ValueError):
+    except OSError, ValueError:
         return 0
 
 

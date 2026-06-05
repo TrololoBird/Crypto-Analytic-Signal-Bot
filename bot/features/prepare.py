@@ -438,7 +438,7 @@ def _series_numeric_bounds(series: pl.Series) -> tuple[float | None, float | Non
         return None, None
     try:
         return _as_optional_float(numeric.min()), _as_optional_float(numeric.max())
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None, None
 
 
@@ -466,7 +466,7 @@ def _sanity_check_prepared_frame(work: pl.DataFrame, symbol: str, interval: str)
             continue
         try:
             value = float(raw)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             defects.append(f"{column}: last bar non-numeric ({raw!r})")
             continue
         if not math.isfinite(value):
@@ -572,7 +572,7 @@ def _cached_prepare_frame(
     try:
         first_close_time_ns = _timestamp_ns(first["close_time"])
         close_time_ns = _timestamp_ns(last["close_time"])
-    except (KeyError, TypeError, ValueError, OverflowError):
+    except KeyError, TypeError, ValueError, OverflowError:
         result = _prepare_frame(frame)
         for warning in _sanity_check_prepared_frame(result, symbol, interval):
             LOG.warning(
@@ -946,7 +946,7 @@ def prepare_symbol(
             return None
         try:
             value = float(work_15m[col][-1])
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
         return value if math.isfinite(value) else None
 

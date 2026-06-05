@@ -187,7 +187,7 @@ class MarketRegimeAnalyzer:
                 continue
             try:
                 valid_changes.append(float(raw_change))
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 continue
         if not valid_changes:
             return MarketRegimeResult(
@@ -317,7 +317,7 @@ class MarketRegimeAnalyzer:
                 continue
             try:
                 oi_samples.append(float(raw_oi))
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 continue
         if oi_samples:
             avg_oi = sum(oi_samples) / len(oi_samples)
