@@ -48,8 +48,15 @@ WS kline close → EventBus → SymbolAnalyzer → SignalEngine → DeliveryOrch
 | Feature pipeline | `bot/features/prepare.py` → `prepare_frame.py` | Polars hot path |
 | Strategy execution | `bot/engine/engine.py` + `registry.py` | 38 strategies |
 | Signal delivery | `bot/delivery/` (contract → filters → confluence → deliver) | Invariant order enforced |
-| Persistence CRUD | `bot/persistence/repository/memory.py` | SQLite + parquet |
-| Signal lifecycle | `bot/persistence/tracking.py` | `active_signals` / `signal_outcomes` |
+| Persistence CRUD | `bot/persistence/repository/memory.py` | SQLite + parquet; inherits `AnalyticsMixin` |
+| Persistence DDL (schema) | `bot/persistence/repository/_schema.py` | DDL strings only — imported by `memory.py` |
+| Persistence analytics CRUD | `bot/persistence/repository/_analytics.py` | `AnalyticsMixin` inherited by `MemoryRepository` |
+| Signal lifecycle | `bot/persistence/tracking.py` | `active_signals` / `signal_outcomes`; core state machine (~1k LOC post-G) |
+| TP/SL review (tracking) | `bot/persistence/_tracking_review.py` | `TPSLReviewMixin` on `SignalTracker` |
+| Telegram tracking IDs | `bot/persistence/_tracking_telegram.py` | `TelegramTrackingMixin` on `SignalTracker` |
+| Analyzer gate functions | `bot/runtime/_analyzer_gates.py` | Family/context gate mixins for `SymbolAnalyzer` |
+| Delivery ranking | `bot/runtime/_delivery_ranking.py` | `DeliveryRankingMixin` |
+| Delivery watch recording | `bot/runtime/_delivery_watch.py` | `DeliveryWatchMixin` |
 | DB schema migrations | `bot/migrations.py` **only** — sole writer of `schema_version` | |
 | Config | `bot/domain/config.py` + `config.toml` | `BotSettings` |
 | Secrets | `bot/secrets.py` | Canonical: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
@@ -70,8 +77,10 @@ WS kline close → EventBus → SymbolAnalyzer → SignalEngine → DeliveryOrch
 
 ## Known architectural debt (do not silently work around — report and ask)
 
-- **Dual persistence:** `signals` / `outcomes` (legacy, read-only after Phase E) vs `active_signals` / `signal_outcomes` (primary). Do not add new dual-writes.
-- **22 files still >1,000 LOC** (e.g. `memory.py`, `symbol_analyzer.py`, `delivery_orchestrator.py`). Further decomposition = Phase F.
+- **DUAL PERSISTENCE (resolved Phase E):** legacy `signals` / `outcomes` tables are now **READ-ONLY**. All runtime writes go to `active_signals` / `signal_outcomes`. Dashboard/analytics still reads legacy tables. Do not add writes to legacy tables. Planned: drop legacy tables in a future schema migration (Phase H, not yet started).
+- **Phase G (tracking):** `tracking.py` split — lifecycle ~998 LOC; review in `_tracking_review.py` (~935); Telegram ids in `_tracking_telegram.py` (~103). Stats helpers (`_stats_snapshot`, `_record_setup_outcome`) stayed in `tracking.py` (<150 LOC, no `_tracking_stats.py`).
+- **21 files remain above 1,000 LOC.** Largest: `bot/dashboard/app.py` (~1,779), `bot/market/ws.py` (~1,777). Runtime priorities: `symbol_analyzer.py` (~1,459), `delivery_orchestrator.py` (~1,323).
+- **Phase F** decomposed `memory.py` / `symbol_analyzer.py` / `delivery_orchestrator.py` partially; all three remain above 1,000 LOC. Further extraction deferred.
 - **`bot/market/scheduler.py`** — kept; `bot/runtime/kline_handler.py` imports `analysis_intervals`. Do not delete.
 
 ## Strategy catalog
@@ -89,7 +98,7 @@ New strategy: detector file + `STRATEGY_CLASSES` + `CATALOG_ENTRIES` + config ke
 
 ## Environment
 
-- Python **3.14** (`requires-python >=3.14,<3.15` in `pyproject.toml`)
+- Python **3.14.5** (venv); `requires-python >=3.14,<3.15` in `pyproject.toml`
 - Install: `pip install -e ".[live,dev,test]"` or uv equivalent
 - Run bot: `python main.py run` (or `python main.py`)
 - Lint: `ruff check bot/`
