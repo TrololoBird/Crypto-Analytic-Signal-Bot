@@ -98,6 +98,34 @@ MIGRATIONS: Sequence[tuple[int, str, str]] = (
     ),
 )
 
+# Migrations that assume repository DDL already created these tables (see memory.initialize).
+_MIGRATION_REQUIRES_TABLES: dict[int, frozenset[str]] = {
+    4: frozenset({"active_signals", "signal_outcomes"}),
+    5: frozenset({"active_signals"}),
+}
+
+
+async def _table_exists(conn: aiosqlite.Connection, table_name: str) -> bool:
+    async with conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
+        (table_name,),
+    ) as cursor:
+        row = await cursor.fetchone()
+    return row is not None
+
+
+async def _migration_prerequisites_met(
+    conn: aiosqlite.Connection,
+    version: int,
+) -> bool:
+    required = _MIGRATION_REQUIRES_TABLES.get(version)
+    if not required:
+        return True
+    for table_name in required:
+        if not await _table_exists(conn, table_name):
+            return False
+    return True
+
 
 async def _assert_integrity(conn: aiosqlite.Connection) -> None:
     async with conn.execute("PRAGMA integrity_check") as cursor:
@@ -156,6 +184,13 @@ async def migrate_db(conn: aiosqlite.Connection) -> int:
     applied = 0
     for version, description, sql in MIGRATIONS:
         if version <= current:
+            continue
+        if not await _migration_prerequisites_met(conn, version):
+            LOG.info(
+                "db migration deferred | version=%d description=%s reason=missing_prerequisite_tables",
+                version,
+                description,
+            )
             continue
         await conn.executescript(sql)
         await conn.execute(

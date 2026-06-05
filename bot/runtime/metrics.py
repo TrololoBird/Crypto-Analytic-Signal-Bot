@@ -233,6 +233,14 @@ class BotMetricsCollector:
         try:
             prom_start_http_server(self.port, addr=self.host)
             LOG.info("metrics server started on %s:%d", self.host, self.port)
+        except OSError as exc:
+            # fix-loop-2: port collision must not ERROR-abort live smoke / main run
+            LOG.warning(
+                "metrics server not started | host=%s port=%d errno=%s",
+                self.host,
+                self.port,
+                getattr(exc, "errno", None),
+            )
         except Exception:
             LOG.exception("failed to start metrics server")
 

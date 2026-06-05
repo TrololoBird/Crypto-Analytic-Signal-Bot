@@ -139,38 +139,26 @@ def clean_session_artifacts(
 
     if mode == "full":
         _apply("sqlite", reset_sqlite(db_path))
-        repo_root = Path(__file__).resolve().parents[1]
-        migrations = repo_root / "scripts" / "apply_migrations.py"
-        if migrations.exists() and not dry_run:
-            import subprocess
+        if not dry_run:
+            import asyncio
 
-            subprocess.run(
-                [sys.executable, str(migrations)],
-                cwd=str(repo_root),
-                check=False,
-            )
+            from bot.persistence.repository.memory import MemoryRepository
+
             config_path = Path(getattr(settings, "config_path", Path("config.toml")))
-            init_repo = subprocess.run(
-                [
-                    sys.executable,
-                    "-c",
-                    (
-                        "import asyncio; from pathlib import Path; "
-                        "from bot.domain.config import load_settings; "
-                        "from bot.persistence.repository.memory import MemoryRepository; "
-                        f"async def _init():\n"
-                        f"    s = load_settings(config_path=Path({config_path!r}));\n"
-                        "    repo = MemoryRepository(db_path=s.db_path, data_dir=s.data_dir / 'parquet');\n"
-                        "    await repo.initialize();\n"
-                        "    await repo.close();\n"
-                        "asyncio.run(_init())"
-                    ),
-                ],
-                cwd=str(repo_root),
-                check=False,
-            )
-            if init_repo.returncode != 0:
-                LOG.warning("repository schema init after full clean failed")
+
+            async def _init_repository() -> None:
+                s = load_settings(config_path=config_path)
+                repo = MemoryRepository(
+                    db_path=s.db_path,
+                    data_dir=s.data_dir / "parquet",
+                )
+                await repo.initialize()
+                await repo.close()
+
+            try:
+                asyncio.run(_init_repository())
+            except Exception as exc:
+                LOG.warning("repository schema init after full clean failed", error=str(exc))
 
     return stats
 
