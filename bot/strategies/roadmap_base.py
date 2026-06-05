@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, ClassVar
 
+from ..domain.strategy_catalog import catalog_default_params
 from ..setups.base import BaseSetup
 from ..setups.utils import get_dynamic_params
-from ..domain.strategy_catalog import catalog_default_params
 from ._roadmap import (
     _as_float,
     _build_atr_signal,

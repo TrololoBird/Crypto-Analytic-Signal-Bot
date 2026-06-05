@@ -109,7 +109,12 @@ class DashboardWSBroadcaster:
                 self._clients.discard(ws)
 
     def _ensure_worker(self) -> None:
-        if self._queue is not None and self._worker_task is not None and not self._worker_task.done():
+        worker_running = (
+            self._queue is not None
+            and self._worker_task is not None
+            and not self._worker_task.done()
+        )
+        if worker_running:
             return
         try:
             loop = asyncio.get_running_loop()

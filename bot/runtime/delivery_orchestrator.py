@@ -505,8 +505,9 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         if use_weighted_confluence and settings is not None and prepared is not None:
             engine = confluence_engine or ConfluenceEngine(settings)
             conf_result = engine.score(signal, prepared)
+            delivery_cfg = getattr(settings, "delivery", None)
             min_hard = int(
-                getattr(getattr(settings, "delivery", None), "weighted_min_hard_legs", weighted_min_hard_legs)
+                getattr(delivery_cfg, "weighted_min_hard_legs", weighted_min_hard_legs)
                 or weighted_min_hard_legs
             )
             boolean_pass, weighted_details = evaluate_weighted_delivery_gate(

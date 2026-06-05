@@ -481,7 +481,10 @@ class DeliveryConfig(_StrictModel):
     )
     use_weighted_confluence: bool = Field(
         default=True,
-        description="Weighted ConfluenceEngine score is primary delivery gate (boolean legs as floor)",
+        description=(
+            "Weighted ConfluenceEngine score is primary delivery gate "
+            "(boolean legs as floor)"
+        ),
     )
     weighted_min_hard_legs: int = Field(
         default=2,

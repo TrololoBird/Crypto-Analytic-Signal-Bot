@@ -63,7 +63,7 @@ def _strategy_executor() -> concurrent.futures.ThreadPoolExecutor:
 
 def _reset_strategy_executor_after_timeout() -> None:
     """Recycle thread pool after timeouts so queued work does not starve the pool."""
-    global _STRATEGY_EXECUTOR
+    global _STRATEGY_EXECUTOR  # noqa: PLW0603
     if _EXECUTOR_MODULE_STATE.timeout_count % _EXECUTOR_RESET_EVERY_TIMEOUTS != 0:
         return
     with _EXECUTOR_LOCK:

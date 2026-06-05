@@ -10,9 +10,9 @@ from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import TYPE_CHECKING, Any, ClassVar
 
+import aiosqlite
 import numpy as np
 import polars as pl
-import aiosqlite
 
 from bot.persistence.repository.schema import OutcomeRecord, SignalRecord
 

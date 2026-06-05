@@ -19,40 +19,34 @@ from typing import TYPE_CHECKING, Any, cast
 
 import polars as pl
 
-from bot.domain.labels import labels_payload
 from bot.runtime.errors import DEFENSIVE_EXC
 from bot.strategies import STRATEGY_CLASSES
 
 from ..domain.strategies import RISK_PROFILE_BY_ID, STRATEGY_STATUS_BY_ID
 from ..persistence.diary_store import DiaryStore
-from .analytics import StrategyAnalytics
 from .live import DashboardLiveData, _is_routing_excluded_decision_reason
-from .live_audit import audit_snapshot, build_dashboard_audit_snapshot
-from .mobile_summary import build_mobile_summary
-from .operator_alerts import build_live_operator_alerts
-from .outcomes_insights import build_outcomes_insights
+from .routes_setup import register_routes
 from .tracking_view import serialize_tracking_signal
-from .user_summary import build_user_summary
 from .ws_broadcast import DashboardWSBroadcaster
 
 _STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 _DASHBOARD_HTML = (_STATIC_DIR / "dashboard.html").read_text(encoding="utf-8")
 
 if TYPE_CHECKING:
-    from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+    from fastapi import FastAPI
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import HTMLResponse
 
 try:
-    from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+    from fastapi import FastAPI
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import HTMLResponse
+    from fastapi.responses import JSONResponse
     from fastapi.staticfiles import StaticFiles
 
     HAS_FASTAPI = True
 except ImportError:
     HAS_FASTAPI = False
     StaticFiles = None  # type: ignore[misc, assignment]
+    JSONResponse = None  # type: ignore[misc, assignment]
 
 try:
     import uvicorn
@@ -122,18 +116,19 @@ class BotDashboard:
                     # Check query param or Authorization header
                     provided = (
                         request.query_params.get("token", "")
-                        or (request.headers.get("Authorization", "").removeprefix("Bearer ").strip())
+                        or request.headers.get("Authorization", "")
+                        .removeprefix("Bearer ")
+                        .strip()
                     )
-                    if not secrets.compare_digest(provided, self._dashboard_token):
-                        try:
-                            from fastapi.responses import JSONResponse
-                            return JSONResponse(
+                    if (
+                        not secrets.compare_digest(provided, self._dashboard_token)
+                        and JSONResponse is not None
+                    ):
+                        return JSONResponse(
                                 {"detail": "unauthorized"},
                                 status_code=401,
                                 headers={"WWW-Authenticate": "Bearer"},
                             )
-                        except ImportError:
-                            pass
             return await call_next(request)
 
         @app.middleware("http")
@@ -162,8 +157,6 @@ class BotDashboard:
             LOG.debug("failed to mount static files directory")
 
     def _setup_routes(self) -> None:
-        from .routes_setup import register_routes
-
         register_routes(self)
 
     async def _public_audit_manifest(self) -> dict[str, Any]:

@@ -7,23 +7,26 @@ import logging
 import secrets
 import time
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-import polars as pl
-from fastapi import WebSocket
 from fastapi.responses import HTMLResponse
-from starlette.websockets import WebSocketDisconnect
+from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from bot.domain.labels import labels_payload
+from bot.market.rate_limit import (
+    REST_WEIGHT_HARD_LIMIT,
+    REST_WEIGHT_PACE_LIMIT,
+    REST_WEIGHT_SOFT_LIMIT,
+)
 from bot.runtime.errors import DEFENSIVE_EXC
-from bot.strategies import STRATEGY_CLASSES
 
-from ..domain.strategies import RISK_PROFILE_BY_ID, STRATEGY_STATUS_BY_ID
-from ..persistence.diary_store import DiaryStore
 from .analytics import StrategyAnalytics
 from .live_audit import audit_snapshot, build_dashboard_audit_snapshot
 from .mobile_summary import build_mobile_summary
-from .ws_broadcast import DashboardWSBroadcaster
+from .operator_alerts import build_live_operator_alerts
+from .outcomes_insights import build_outcomes_insights
+from .user_summary import build_user_summary
 
 if TYPE_CHECKING:
     from .app import BotDashboard
@@ -795,12 +798,6 @@ def register_routes(dashboard: BotDashboard) -> None:
     @app.get("/api/v1/market/rest-weight")
     async def rest_weight_budget() -> dict[str, Any]:
         try:
-            from bot.market.rate_limit import (
-                REST_WEIGHT_HARD_LIMIT,
-                REST_WEIGHT_PACE_LIMIT,
-                REST_WEIGHT_SOFT_LIMIT,
-            )
-
             client = getattr(self.bot, "client", None) or getattr(self.bot, "_market_data", None)
             snap: dict[str, Any] = {}
             if client is not None and hasattr(client, "state_snapshot"):
