@@ -1,4 +1,4 @@
-.PHONY: check check-imports check-cycles lint typecheck smoke validate-config live-smoke research-harvest monitor-runtime run status stop clean-session graphify-update nightly-calibration reconcile-defaults shortlist-matrix calibration-pipeline
+.PHONY: check check-imports check-cycles lint typecheck smoke validate-config live-smoke research-harvest monitor-runtime run status stop clean-session graphify-install graphify-update nightly-calibration reconcile-defaults shortlist-matrix calibration-pipeline
 
 clean-session:
 	@python scripts/clean_session_data.py --mode smoke --config config.toml
@@ -53,8 +53,11 @@ research-harvest:
 monitor-runtime:
 	@python -m scripts.live_runtime_monitor --duration 300 --poll-interval 5 --log-dir data/bot/logs
 
+graphify-install:
+	@bash scripts/setup_graphify.sh
+
 graphify-update:
-	@if command -v graphify >/dev/null 2>&1; then graphify update .; else echo "graphify not installed — skipping"; fi
+	@if command -v graphify >/dev/null 2>&1; then graphify update .; else echo "graphify not installed — run: make graphify-install"; fi
 
 nightly-calibration:
 	@python scripts/nightly_strategy_calibration.py --config config.toml

@@ -44,7 +44,7 @@ $env:PYTEST_LIVE=1; pytest tests/live/ -v
 
 ## graphify
 
-When `graphify-out/graph.json` exists: `graphify query`, `graphify path`, `graphify explain` before broad grep. After code changes: `graphify update .`
+When `graphify-out/graph.json` exists: `graphify query`, `graphify path`, `graphify explain` before broad grep. After code changes: `make graphify-update`. Setup: `docs/GRAPHIFY_SETUP.md`.
 
 ## Refactor target layout
 

@@ -5,6 +5,8 @@ description: Navigates the graphify knowledge graph for architecture questions b
 
 # Graphify Navigate
 
+Full setup: [docs/GRAPHIFY_SETUP.md](../../docs/GRAPHIFY_SETUP.md)
+
 ## Order
 
 1. `graphify query "<question>"`
@@ -13,13 +15,17 @@ description: Navigates the graphify knowledge graph for architecture questions b
 4. `graphify-out/wiki/index.md` for broad nav
 5. `graphify-out/GRAPH_REPORT.md` only if 1–4 insufficient
 
+## Install (if CLI missing)
+
+```bash
+make graphify-install
+```
+
 ## After code edits
 
 ```bash
 make graphify-update
 ```
-
-Requires graphify CLI on PATH; skip gracefully if not installed.
 
 ## Dirty graph
 

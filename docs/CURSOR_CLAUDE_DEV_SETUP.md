@@ -124,13 +124,25 @@ python scripts/project_health_audit.py --stale-days 2 --full
 
 Smoke без Telegram: `provider = "none"` или `BOT_NOTIFIER_PROVIDER=none`.
 
-### 3.3 graphify (опционально, сильно рекомендуется)
+### 3.3 graphify (рекомендуется — установлен в репо)
+
+Knowledge graph для архитектурных вопросов вместо broad grep.
 
 ```bash
-# установка CLI — см. graphify docs проекта
-graphify update .
-graphify query "delivery path confluence"
+make graphify-install          # один раз: CLI + Cursor + Claude Code + graph build
+make graphify-update           # после правок bot/
+graphify query "delivery path confluence deliver"
 ```
+
+| Артефакт | Путь |
+|----------|------|
+| Полная инструкция | [GRAPHIFY_SETUP.md](GRAPHIFY_SETUP.md) |
+| Cursor rule | `.cursor/rules/graphify.mdc` (`alwaysApply`) |
+| Claude skill | `.claude/skills/graphify/SKILL.md` |
+| Граф | `graphify-out/graph.json` (~11k nodes) |
+| Setup script | `scripts/setup_graphify.sh` |
+
+Slash: `/graphify` в Cursor и Claude Code.
 
 ### 3.4 Binance / proxy
 
@@ -271,6 +283,7 @@ make graphify-update
 
 - [AGENTS.md](../AGENTS.md) — entry для Cursor Cloud
 - [AGENT_QUICK_START.md](../AGENT_QUICK_START.md) — hot files
+- [GRAPHIFY_SETUP.md](GRAPHIFY_SETUP.md) — knowledge graph
 - [ARCHITECTURE_CANONICAL.md](research/ARCHITECTURE_CANONICAL.md)
 - [Cursor Commands docs](https://cursor.com/docs/agent/chat/commands)
 - [Claude Code Hooks](https://code.claude.com/docs/en/hooks-guide)

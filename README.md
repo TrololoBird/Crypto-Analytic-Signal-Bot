@@ -110,6 +110,8 @@ On geo-restricted networks (including some GitHub Actions regions), live tests *
 - **[Project roadmap & status](docs/PROJECT_ROADMAP_AND_STATUS.md)** — completed waves (E1–F11), remaining work, live ops commands
 
 - [docs/CURSOR_SETUP.md](docs/CURSOR_SETUP.md) — editor, venv, skills
+- [docs/GRAPHIFY_SETUP.md](docs/GRAPHIFY_SETUP.md) — knowledge graph (Cursor + Claude Code)
+- [docs/GITHUB_CURSOR_SETUP.md](docs/GITHUB_CURSOR_SETUP.md) — GitHub token, CI, MCP
 - [docs/MARKET_DATA_PRINCIPLES.md](docs/MARKET_DATA_PRINCIPLES.md) — public data only
 - [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) — package usage map
 - [docs/BINANCE_PROXY_RU.md](docs/BINANCE_PROXY_RU.md) — proxy/VPN for geo-blocked regions

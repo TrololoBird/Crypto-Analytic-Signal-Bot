@@ -24,7 +24,8 @@ flowchart LR
 1. `/prime-context` (Cursor) или открыть Claude в корне репо
 2. Проверить `.venv` Python 3.14, `config.toml` из example
 3. Прочитать `docs/PROJECT_ROADMAP_AND_STATUS.md` — P0–P4
-4. `graphify query` если есть `graphify-out/graph.json`
+4. `graphify query "…"` если есть `graphify-out/graph.json` (см. [GRAPHIFY_SETUP.md](GRAPHIFY_SETUP.md))
+5. Если graphify не установлен: `make graphify-install` (агент выполняет сам)
 
 ## Типовые запросы (копируйте в чат)
 

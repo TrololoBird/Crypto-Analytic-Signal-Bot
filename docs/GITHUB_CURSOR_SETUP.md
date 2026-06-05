@@ -163,3 +163,4 @@ API/rulesets требуют admin; агент не может включить �
 - [Fine-grained PAT](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)
 - [GitHub MCP install Cursor](https://github.com/github/github-mcp-server/blob/main/docs/installation-guides/install-cursor.md)
 - [Dependency review action](https://github.com/actions/dependency-review-action)
+- [GRAPHIFY_SETUP.md](GRAPHIFY_SETUP.md) — knowledge graph для Cursor + Claude Code

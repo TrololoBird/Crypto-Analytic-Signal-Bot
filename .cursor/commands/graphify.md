@@ -2,9 +2,11 @@
 
 Answer a codebase question using the knowledge graph first (before broad grep).
 
+**Setup (once):** [docs/GRAPHIFY_SETUP.md](../../docs/GRAPHIFY_SETUP.md) · `make graphify-install`
+
 ## Steps
 
-1. If missing: `graphify update .` (from repo root, `.venv` active)
+1. If missing graph: `make graphify-update` or `graphify update .`
 2. Run: `graphify query "<user question>"`  
    Or: `graphify path "<A>" "<B>"` / `graphify explain "<concept>"`
 3. Use `graphify-out/wiki/index.md` for navigation if present

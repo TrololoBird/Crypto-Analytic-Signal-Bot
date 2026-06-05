@@ -37,7 +37,15 @@ python main.py run && make live-smoke
 
 Calibration: `BOT_ALLOW_CALIBRATION=1 python scripts/calibration_pipeline.py --run-id <RUN_ID>`
 
-## Verify
+## graphify
+
+```bash
+make graphify-install   # once
+graphify query "delivery path confluence"
+make graphify-update    # after bot/ edits
+```
+
+Full doc: [GRAPHIFY_SETUP.md](GRAPHIFY_SETUP.md)
 
 ```bash
 make check

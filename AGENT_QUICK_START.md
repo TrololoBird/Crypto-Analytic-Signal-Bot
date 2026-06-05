@@ -45,6 +45,8 @@ python main.py run
 
 Ops Makefile targets: `make nightly-calibration`, `reconcile-defaults`, `shortlist-matrix`, `graphify-update`.
 
+**graphify (architecture queries):** `make graphify-install` once → `graphify query "<question>"`. See [docs/GRAPHIFY_SETUP.md](docs/GRAPHIFY_SETUP.md).
+
 Dry run without Telegram: `provider = "none"` in config or `BOT_NOTIFIER_PROVIDER=none`.
 
 ## Verify

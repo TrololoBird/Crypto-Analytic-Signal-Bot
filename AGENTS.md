@@ -29,6 +29,8 @@ pytest tests/test_wave_f9_agent_*.py tests/test_wave_f10_agent_*.py tests/test_w
 
 If `graphify-out/graph.json` exists: `graphify query "<q>"` before broad grep; `graphify update .` after `bot/` edits.
 
+**Setup:** [docs/GRAPHIFY_SETUP.md](docs/GRAPHIFY_SETUP.md) · `make graphify-install` · `make graphify-update`
+
 ## LLM in bot
 
 Hot path: **no**. Optional layer: [docs/research/LLM_API_INTEGRATION.md](docs/research/LLM_API_INTEGRATION.md). Cursor API = dev only.

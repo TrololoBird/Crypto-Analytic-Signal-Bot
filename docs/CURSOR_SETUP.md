@@ -8,6 +8,7 @@
 | File | Scope |
 |------|--------|
 | `project-core.mdc` | Always — identity, guardrails, graphify, live tests |
+| `graphify.mdc` | Always — query-first (`graphify query` before grep) |
 | `agent-sole-executor.mdc` | Always — agent runs all commands |
 | `python-core.mdc` | `bot/`, `scripts/`, `tests/` |
 | `strategies.mdc` | Strategy detectors |
@@ -49,6 +50,19 @@ Cloud agents: `sessionStart` does not run on cursor.com/agents — use `/prime-c
 ## Skills (`.cursor/skills/`)
 
 `live-binance-verify`, `refactor-module`, `zero-hit-strategy-triage`, `validate-delivery-path`, `supervised-live-session`, `calibration-wave`, `graphify-navigate`
+
+## graphify
+
+Установка и использование: **[docs/GRAPHIFY_SETUP.md](GRAPHIFY_SETUP.md)**
+
+```bash
+make graphify-install    # один раз
+make graphify-update     # после правок bot/
+graphify query "delivery orchestrator confluence"
+```
+
+- Cursor: rule `.cursor/rules/graphify.mdc` (always-on), slash `/graphify`
+- Claude Code: `.claude/skills/graphify/`, hooks в `.claude/settings.json`
 
 ## Workspace (`.vscode/`)
 

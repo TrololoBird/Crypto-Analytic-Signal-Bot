@@ -6,7 +6,7 @@
 
 1. Hook уже внедрил контекст — **не** дублировать чтение `AGENTS.md` + всех rules.
 2. Если нужен контекст: **только** `AGENT_QUICK_START.md` + `docs/DEFINITION_OF_DONE.md` (~2 файла).
-3. Код: `graphify query "<вопрос>"` если есть `graphify-out/graph.json`; иначе grep по `bot/`, не весь репо.
+3. Код: `graphify query "<вопрос>"` если есть `graphify-out/graph.json`; иначе grep по `bot/`, не весь репо. Setup: [GRAPHIFY_SETUP.md](GRAPHIFY_SETUP.md).
 
 ## Не читать без явного запроса
 
@@ -22,7 +22,7 @@
 
 | Тема | Файл |
 |------|------|
-| Архитектура | `docs/research/ARCHITECTURE_CANONICAL.md` |
+| Архитектура | `graphify query` → при необходимости `docs/research/ARCHITECTURE_CANONICAL.md` |
 | Стратегия | `docs/research/STRATEGY_CATALOG.md` + один `bot/strategies/<id>.py` |
 | Delivery | `bot/delivery/contract.py` + `bot/delivery/confluence.py` |
 | Live ops | `docs/SOLO_OPERATOR_PLAYBOOK.md` |
