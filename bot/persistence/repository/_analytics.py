@@ -392,7 +392,8 @@ class AnalyticsMixin:
             profitable = item.get("was_profitable")
             if isinstance(profitable, bool):
                 return profitable
-            r_value = MemoryRepository._setup_outcome_r_multiple(item)
+            # fix-20260604: use mixin staticmethod (MemoryRepository not imported here)
+            r_value = AnalyticsMixin._setup_outcome_r_multiple(item)
             if r_value is not None:
                 return r_value > 0.0
             return str(item.get("outcome") or "") in win_reasons

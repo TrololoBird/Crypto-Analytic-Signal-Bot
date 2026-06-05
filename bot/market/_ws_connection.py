@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import random
 import socket
@@ -12,10 +13,16 @@ from typing import Any
 import websockets
 from websockets import exceptions as ws_exceptions
 
+from bot.market.network_proxy import websockets_connect_kwargs
+from bot.runtime.errors import DEFENSIVE_EXC
+
 LOG = logging.getLogger("bot.ws_manager")
 _WS_CONNECT_TIMEOUT_SECONDS = 60.0
-
 _WS_CLOSE_TIMEOUT_SECONDS = 10.0
+# fix-20260604: module-local constants (ws.py imports this module; avoid circular import)
+_BACKOFF_RESET_AFTER_SECONDS = 90.0
+_WS_PING_INTERVAL_SECONDS = 20.0
+_WS_PING_TIMEOUT_SECONDS = 60.0
 
 def compute_disconnect_delay(manager: Any, *, endpoint: str, url: str, exc: Exception, elapsed: float, delay: float) -> float:
     """Update streak/reconnect metadata and return next retry delay."""

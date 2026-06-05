@@ -14,7 +14,10 @@ import polars as pl
 
 from bot.runtime.errors import DEFENSIVE_EXC
 
-from ..domain.limit_entry import should_activate_limit_fill_price
+from ..domain.limit_entry import (
+    should_activate_limit_entry,
+    should_activate_limit_fill_price,
+)
 from ..market.data import MarketDataUnavailable
 from ..persistence.tracked import TrackedSignalState, parse_state_dt
 

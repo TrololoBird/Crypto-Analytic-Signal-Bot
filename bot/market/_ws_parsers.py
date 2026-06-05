@@ -135,6 +135,9 @@ def _update_depth_wall_pressure(manager: Any, symbol: str, bids: tuple[tuple[flo
         manager._depth_wall_pressure.pop(symbol, None)
 
 def handle_ticker(manager: Any, symbol: str, data: JsonDict) -> None:
+    # fix-20260604: lazy import avoids ws ↔ _ws_parsers circular import at load time
+    from bot.market.ws import should_throttle_ticker_update
+
     if should_throttle_ticker_update(manager, symbol):
         return
     try:
@@ -148,6 +151,8 @@ def handle_mini_ticker(manager: Any, symbol: str, data: JsonDict) -> None:
     last_full_update = manager._ticker_update_times.get(symbol, 0.0)
     if now - last_full_update < manager._cfg.market_ticker_freshness_seconds:
         return
+    from bot.market.ws import should_throttle_ticker_update
+
     if should_throttle_ticker_update(manager, symbol):
         return
     try:
@@ -162,6 +167,8 @@ def handle_mini_ticker(manager: Any, symbol: str, data: JsonDict) -> None:
 def handle_mark_price(manager: Any, symbol: str, data: JsonDict) -> None:
     if not symbol:
         return
+    from bot.market.ws import should_throttle_mark_price_update
+
     if should_throttle_mark_price_update(manager, symbol):
         return
     try:
