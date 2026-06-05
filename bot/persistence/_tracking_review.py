@@ -21,9 +21,10 @@ from ..market.data import MarketDataUnavailable
 from ..persistence.sl_diagnostics import classify_stop_loss_root_cause
 from ..persistence.tracked import TrackedSignalState, parse_state_dt
 
+from bot.persistence.tracking_events import SignalTrackingEvent
+
 if TYPE_CHECKING:
     from ..domain.schemas import AggTrade
-    from ..persistence.tracking import SignalTrackingEvent
 
 
 LOG = logging.getLogger("bot.tracking")
