@@ -1,0 +1,17 @@
+# Default owner for review routing (solo operator — informational for GitHub UI).
+* @TrololoBird
+
+# Delivery invariants — contract → confluence → deliver
+/bot/delivery/ @TrololoBird
+/bot/runtime/delivery_orchestrator.py @TrololoBird
+
+# Runtime hot path
+/bot/runtime/bot.py @TrololoBird
+/bot/runtime/symbol_analyzer.py @TrololoBird
+/bot/market/ws.py @TrololoBird
+/bot/market/rest_impl.py @TrololoBird
+
+# CI / supply chain
+/.github/ @TrololoBird
+/pyproject.toml @TrololoBird
+/requirements-lock.txt @TrololoBird

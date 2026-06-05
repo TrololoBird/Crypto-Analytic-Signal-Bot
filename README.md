@@ -1,5 +1,9 @@
 # Crypto Analytic Signal Bot (v9)
 
+[![CI](https://github.com/TrololoBird/Crypto-Analytic-Signal-Bot/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/TrololoBird/Crypto-Analytic-Signal-Bot/actions/workflows/ci.yml)
+[![Python 3.14.5](https://img.shields.io/badge/python-3.14.5-blue.svg)](https://www.python.org/downloads/)
+[![Security policy](https://img.shields.io/badge/security-Security.md-green.svg)](SECURITY.md)
+
 Event-driven **Binance USDⓈ-M public** futures signal bot. Detects 38 strategy setups on closed candles, applies delivery gates (contract → 3-of-5 confluence → Telegram), and tracks outcomes locally. **No auto-trading**, no private Binance keys.
 
 | Requirement | Value |
@@ -112,9 +116,21 @@ On geo-restricted networks (including some GitHub Actions regions), live tests *
 - [docs/research/README.md](docs/research/README.md) — strategy research spec
 - [AGENTS.md](AGENTS.md) — agent / graphify rules
 
-## CI
+## CI & GitHub
 
-GitHub Actions (`.github/workflows/ci.yml`): Python **3.14.5**, ruff, offline pytest, mypy critical path, optional live Binance on `main`.
+| Workflow | Trigger | Purpose |
+|----------|---------|---------|
+| [CI](.github/workflows/ci.yml) | push / PR | ruff, pytest, mypy critical, live Binance |
+| [Dependency Review](.github/workflows/dependency-review.yml) | PR | block critical CVEs in dependency diffs |
+| [CodeQL](.github/workflows/codeql-analysis.yml) | push / PR / weekly | static analysis (Python, Actions) |
+| [Nightly Regression](.github/workflows/nightly-regression.yml) | cron 03:00 UTC | live pytest + strategy smoke |
+| [Auto Fix](.github/workflows/auto-fix.yml) | push `bot/` | ruff auto-format PR |
+
+- **Dependabot**: weekly pip + GitHub Actions updates (`.github/dependabot.yml`)
+- **Security**: [SECURITY.md](SECURITY.md) — reporting, known `aiohttp` constraint
+- **CODEOWNERS**: delivery / market / CI paths
+
+Python **3.14.5** on `ubuntu-latest`. Offline tests always; live Binance advisory on PRs, required on `main` pushes where network allows.
 
 ## License
 

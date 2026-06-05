@@ -1,0 +1,41 @@
+# Dependabot: weekly pip + GitHub Actions updates.
+# aiohttp 3.14+ is ignored until aiogram lifts aiohttp<3.14 (see SECURITY.md).
+
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: UTC
+    open-pull-requests-limit: 5
+    groups:
+      python-minor-patch:
+        patterns: ["*"]
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # aiogram 3.28.x requires aiohttp>=3.9.0,<3.14 — cannot adopt 3.14.0 CVE fixes yet.
+      - dependency-name: aiohttp
+        versions: [">=3.14.0"]
+    labels:
+      - dependencies
+      - python
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:30"
+      timezone: UTC
+    open-pull-requests-limit: 3
+    groups:
+      github-actions:
+        patterns: ["*"]
+    labels:
+      - dependencies
+      - github-actions
