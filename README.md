@@ -121,10 +121,10 @@ On geo-restricted networks (including some GitHub Actions regions), live tests *
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
 | [CI](.github/workflows/ci.yml) | push / PR | ruff, pytest, mypy critical, live Binance |
-| [Dependency Review](.github/workflows/dependency-review.yml) | PR | block critical CVEs in dependency diffs |
-| [CodeQL](.github/workflows/codeql-analysis.yml) | push / PR / weekly | static analysis (Python, Actions) |
+| CodeQL (repo setting) | push | static analysis — default GitHub setup |
 | [Nightly Regression](.github/workflows/nightly-regression.yml) | cron 03:00 UTC | live pytest + strategy smoke |
 | [Auto Fix](.github/workflows/auto-fix.yml) | push `bot/` | ruff auto-format PR |
+| [Quality Report](.github/workflows/quality-report.yml) | weekly Mon | ruff/vulture/jscpd artifacts |
 
 - **Dependabot**: weekly pip + GitHub Actions updates (`.github/dependabot.yml`)
 - **Security**: [SECURITY.md](SECURITY.md) — reporting, known `aiohttp` constraint
