@@ -769,7 +769,7 @@ class SignalEngine:
 
     def _engine_score_floor(self, prepared: PreparedSymbol | None = None) -> float:
         """Minimum score for get_best_signal — config-driven, not hardcoded."""
-        return effective_engine_score_floor(self._settings, prepared_or_symbol=prepared)
+        return float(effective_engine_score_floor(self._settings, prepared_or_symbol=prepared))
 
     def get_best_signal(
         self,

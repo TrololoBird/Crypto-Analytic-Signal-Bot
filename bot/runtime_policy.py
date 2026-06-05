@@ -74,7 +74,7 @@ def effective_engine_score_floor(
         primary_timeframe = configured_primary_timeframe(settings, str(symbol or ""))
         deep_score_floor = 0.48 if primary_timeframe in {"1h", "4h"} else 0.50
         floor = min(floor, deep_score_floor) if floor > 0.0 else deep_score_floor
-    return floor
+    return float(floor)
 
 
 def effective_shortlist_unified_routing(

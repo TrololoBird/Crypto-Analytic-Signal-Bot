@@ -27,10 +27,38 @@ from bot.runtime.errors import (
     build_runtime_error_payload,
     classify_runtime_error,
 )
-from bot.runtime._analyzer_gates import AnalyzerFamilyGatesMixin, AnalyzerMixinBase
-
 if TYPE_CHECKING:
     from bot.runtime.bot import SignalBot
+
+    class AnalyzerMixinBase:
+        _bot: SignalBot
+
+    class _AnalyzerFamilyGatesBase:
+        def check_family_precheck(
+            self,
+            signal: Signal,
+            prepared: PreparedSymbol,
+            metadata: Any | None,
+        ) -> tuple[bool, str | None, dict[str, Any]]: ...
+
+        def apply_alignment_penalty(
+            self,
+            signal: Signal,
+            prepared: PreparedSymbol,
+            metadata: Any | None,
+        ) -> tuple[Signal, dict[str, Any]]: ...
+
+        def check_family_confirmation(
+            self,
+            signal: Signal,
+            prepared: PreparedSymbol,
+            metadata: Any | None,
+        ) -> tuple[bool, str | None, dict[str, Any]]: ...
+else:
+    from bot.runtime._analyzer_gates import (
+        AnalyzerFamilyGatesMixin as _AnalyzerFamilyGatesBase,
+        AnalyzerMixinBase,
+    )
 
 
 LOG = logging.getLogger("bot.runtime.bot")
@@ -417,7 +445,7 @@ class AnalyzerContextMixin(AnalyzerMixinBase):
         }
 
 
-class AnalyzerFramesMixin(AnalyzerContextMixin, AnalyzerFamilyGatesMixin):
+class AnalyzerFramesMixin(AnalyzerContextMixin, _AnalyzerFamilyGatesBase):
     async def fetch_frames(self, item: UniverseSymbol) -> SymbolFrames | None:
         symbol = item.symbol
         minimums = self._minimums()

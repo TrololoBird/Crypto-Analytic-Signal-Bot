@@ -33,14 +33,51 @@ from bot.runtime.errors import DEFENSIVE_EXC
 from bot.delivery import contract as _delivery_contract_module
 from bot.delivery.contract import SignalContractIssue
 from bot.domain.schemas import Signal
-from bot.runtime._delivery_watch import DeliveryWatchMixin
-from bot.runtime._delivery_ranking import DeliveryRankingMixin
 from .merge import MetaSignalMerger
 
 if TYPE_CHECKING:
     from bot.domain.schemas import PreparedSymbol
     from bot.persistence.tracking import SignalTrackingEvent
     from bot.runtime.bot import SignalBot
+
+    class _DeliveryOrchestratorBases:
+        _bot: SignalBot
+
+        @staticmethod
+        def _contract_issue_rows(signal: Signal) -> list[dict[str, object]]: ...
+
+        def _new_portfolio_cap_state(self) -> dict[str, Any]: ...
+
+        def _limit_entry_gate(
+            self,
+            signal: Signal,
+            prepared: PreparedSymbol | None,
+        ) -> tuple[bool, str | None, dict[str, object]]: ...
+
+        def _queue_ready_signal(
+            self,
+            signal: Signal,
+            *,
+            portfolio_state: dict[str, Any],
+            ready_to_send: list[Signal],
+            queued_setup_ids: set[str],
+            queued_symbol_direction: set[str],
+            rejected_rows: list[dict[str, Any]],
+            symbol_direction_key: str | None = None,
+        ) -> bool: ...
+
+        @staticmethod
+        def _symbol_direction_cooldown_key(signal: Signal) -> str: ...
+
+        def _record_watch_screener(self, *args: Any, **kwargs: Any) -> None: ...
+
+        def _record_delivery_attempt(self, *args: Any, **kwargs: Any) -> None: ...
+else:
+    from bot.runtime._delivery_ranking import DeliveryRankingMixin
+    from bot.runtime._delivery_watch import DeliveryWatchMixin
+
+    class _DeliveryOrchestratorBases(DeliveryRankingMixin, DeliveryWatchMixin):
+        pass
 
 
 LOG = logging.getLogger("bot.runtime.bot")
@@ -53,7 +90,7 @@ def _delivery_contract_gate_order_anchor(signal: Signal) -> list[SignalContractI
     return _delivery_contract_module.validate_signal_contract(signal)
 
 
-class DeliveryOrchestrator(DeliveryRankingMixin, DeliveryWatchMixin):
+class DeliveryOrchestrator(_DeliveryOrchestratorBases):
     def __init__(self, bot: SignalBot) -> None:
         self._bot = bot
 
@@ -494,7 +531,10 @@ class DeliveryOrchestrator(DeliveryRankingMixin, DeliveryWatchMixin):
 
     async def close_superseded_signal(self, new_signal: Signal) -> list[SignalTrackingEvent] | None:
         try:
-            return await self._bot.tracker.supersede_open_signal(new_signal, dry_run=False)
+            superseded: list[SignalTrackingEvent] | None = (
+                await self._bot.tracker.supersede_open_signal(new_signal, dry_run=False)
+            )
+            return superseded
         except DEFENSIVE_EXC as exc:
             LOG.debug("supersede failed for %s: %s", new_signal.symbol, exc)
             return None

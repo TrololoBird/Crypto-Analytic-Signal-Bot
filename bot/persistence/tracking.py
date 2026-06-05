@@ -26,10 +26,33 @@ from ..domain.limit_entry import (
     DEFAULT_ENTRY_ORDER_TYPE,
 )
 from ..persistence.tracked import TrackedSignalState, parse_state_dt
-from .outcomes import SignalFeatures, create_outcome_from_tracked
-from bot.persistence._tracking_review import TPSLReviewMixin, _price_in_entry_zone
-from bot.persistence._tracking_telegram import TelegramTrackingMixin
+from .outcomes import SignalFeatures, SignalOutcome, create_outcome_from_tracked
+from bot.persistence._tracking_review import _price_in_entry_zone
 from bot.persistence.tracking_events import SignalTrackingEvent
+
+if typing.TYPE_CHECKING:
+    class _SignalTrackerBases:
+        @staticmethod
+        def _update_price_excursion(
+            tracked: TrackedSignalState,
+            price: float | None,
+        ) -> None: ...
+
+        async def arm_signals_with_messages(
+            self,
+            signals: list[Signal],
+            *,
+            dry_run: bool,
+            message_ids: dict[str, int] | None = None,
+        ) -> list[SignalTrackingEvent]: ...
+
+        async def _capture_post_sl_recovery(self, tracked: TrackedSignalState) -> None: ...
+else:
+    from bot.persistence._tracking_review import TPSLReviewMixin
+    from bot.persistence._tracking_telegram import TelegramTrackingMixin
+
+    class _SignalTrackerBases(TPSLReviewMixin, TelegramTrackingMixin):
+        pass
 
 __all__ = ["SignalTracker", "SignalTrackingEvent"]
 
@@ -37,14 +60,32 @@ if typing.TYPE_CHECKING:
     from ..diagnostics.facade import SignalQualityMonitor
     from ..domain.config import BotSettings
     from ..domain.schemas import Signal
-    from ..persistence.repository.memory import MemoryRepository
     from ..telemetry import TelemetryStore
+
+    class MemoryRepository:
+        async def cleanup_signal_outcomes_before(self, cutoff_iso: str) -> int: ...
+
+        async def get_signal_outcomes(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]: ...
+
+        async def record_setup_outcome(self, *args: Any, **kwargs: Any) -> None: ...
+
+        async def get_active_signals(self, *args: Any, **kwargs: Any) -> list[TrackedSignalState]: ...
+
+        async def save_signal_outcomes_batch(self, *args: Any, **kwargs: Any) -> None: ...
+
+        async def get_tracking_stats(self, *args: Any, **kwargs: Any) -> dict[str, int]: ...
+
+        async def save_active_signal(self, *args: Any, **kwargs: Any) -> None: ...
+
+        async def increment_tracking_stats(self, *args: Any, **kwargs: Any) -> None: ...
+
+        async def save_signal_outcome(self, *args: Any, **kwargs: Any) -> None: ...
 
 
 LOG = logging.getLogger("bot.tracking")
 
 
-class SignalTracker(TPSLReviewMixin, TelegramTrackingMixin):
+class SignalTracker(_SignalTrackerBases):
     def __init__(
         self,
         settings: BotSettings,
@@ -259,7 +300,8 @@ class SignalTracker(TPSLReviewMixin, TelegramTrackingMixin):
         return TrackedSignalState(**row)
 
     async def _stats_snapshot(self) -> dict[str, int]:
-        return await self.memory_repo.get_tracking_stats()
+        stats = await self.memory_repo.get_tracking_stats()
+        return {str(key): int(value) for key, value in stats.items()}
 
     async def _active_signals(self, *, symbol: str | None = None) -> list[TrackedSignalState]:
         rows = await self.memory_repo.get_active_signals(symbol=symbol)
@@ -350,13 +392,14 @@ class SignalTracker(TPSLReviewMixin, TelegramTrackingMixin):
                 if adverse < 0.0:
                     max_loss_pct = max(max_loss_pct, abs(adverse))
 
-        outcome = create_outcome_from_tracked(
+        outcome: SignalOutcome = create_outcome_from_tracked(
             tracked,
             features,
             max_profit_pct=max_profit_pct,
             max_loss_pct=max_loss_pct,
         )
-        return outcome.to_dict()
+        payload = outcome.to_dict()
+        return {str(key): value for key, value in payload.items()}
 
     async def reconcile_closed_outcomes(self, *, limit: int = 1000) -> int:
         """Backfill closed active_signals rows that missed signal_outcomes.

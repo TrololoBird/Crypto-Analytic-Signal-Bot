@@ -11,15 +11,20 @@ import json
 import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import aiosqlite
 import polars as pl
 
 from ...migrations import migrate_db
 from ...runtime.errors import DEFENSIVE_EXC
-from bot.persistence.repository._analytics import AnalyticsMixin
 from bot.persistence.repository._schema import REPOSITORY_CORE_DDL
+
+if TYPE_CHECKING:
+    class _MemoryRepositoryBases:
+        pass
+else:
+    from bot.persistence.repository._analytics import AnalyticsMixin as _MemoryRepositoryBases
 from .schema import (
     SIGNAL_ANALYSIS_SCHEMA,
     OutcomeRecord,
@@ -149,7 +154,7 @@ _ACTIVE_SIGNALS_OPTIONAL_COLUMNS: dict[str, str] = {
 }
 
 
-class MemoryRepository(AnalyticsMixin):
+class MemoryRepository(_MemoryRepositoryBases):
     """Unified repository for signals and outcomes.
 
     Uses SQLite for metadata and Parquet for time-series data.

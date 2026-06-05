@@ -19,9 +19,6 @@ from .structure import (
     hull_moving_average as _hull_moving_average_external,
 )
 from .structure import (
-    ichimoku_lines as _ichimoku_lines_external,
-)
-from .structure import (
     weighted_moving_average as _weighted_moving_average_external,
 )
 
@@ -667,7 +664,19 @@ def _safe_close_position(df: pl.DataFrame, window: int = 20) -> pl.Series:
 def _ichimoku_lines(
     df: pl.DataFrame,
 ) -> tuple[pl.Series, pl.Series, pl.Series, pl.Series]:
-    return _ichimoku_lines_external(df)
+    tenkan = (
+        (df["high"].rolling_max(window_size=9) + df["low"].rolling_min(window_size=9)) / 2.0
+    ).rename("tenkan")
+    kijun = (
+        (df["high"].rolling_max(window_size=26) + df["low"].rolling_min(window_size=26)) / 2.0
+    ).rename("kijun")
+    senkou_a = (((tenkan + kijun) / 2.0).shift(26)).rename("senkou_a")
+    senkou_b = (
+        ((df["high"].rolling_max(window_size=52) + df["low"].rolling_min(window_size=52)) / 2.0)
+        .shift(26)
+        .rename("senkou_b")
+    )
+    return tenkan, kijun, senkou_a, senkou_b
 
 
 # ---------------------------------------------------------------------------

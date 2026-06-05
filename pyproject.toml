@@ -165,10 +165,6 @@ disable_error_code = [
     "attr-defined",
     "operator",
     "arg-type",
-    "misc",
-    "dict-item",
-    "assignment",
-    "unused-ignore",
 ]
 
 [[tool.mypy.overrides]]
@@ -185,7 +181,7 @@ disable_error_code = ["no-any-return", "return"]
 
 [[tool.mypy.overrides]]
 module = "bot.features.*"
-disable_error_code = ["arg-type", "call-overload", "no-any-return"]
+disable_error_code = ["arg-type", "call-overload"]
 
 [[tool.mypy.overrides]]
 module = "bot.strategies.*"
@@ -194,8 +190,6 @@ disable_error_code = [
     "return-value",
     "no-untyped-def",
     "attr-defined",
-    "call-overload",
-    "union-attr",
 ]
 
 [[tool.mypy.overrides]]
@@ -208,63 +202,7 @@ disable_error_code = ["union-attr", "arg-type"]
 
 [[tool.mypy.overrides]]
 module = "bot.persistence.*"
-disable_error_code = [
-    "return-value",
-    "index",
-    "arg-type",
-    "attr-defined",
-    "misc",
-    "no-any-return",
-    "assignment",
-    "has-type",
-]
-
-[[tool.mypy.overrides]]
-module = "bot.runtime.*"
-disable_error_code = [
-    "misc",
-    "no-any-return",
-    "attr-defined",
-    "arg-type",
-    "union-attr",
-    "assignment",
-    "var-annotated",
-    "unused-ignore",
-]
-
-[[tool.mypy.overrides]]
-module = "bot.engine.*"
-disable_error_code = ["no-any-return", "misc"]
-
-[[tool.mypy.overrides]]
-module = "bot.delivery.*"
-disable_error_code = [
-    "arg-type",
-    "return-value",
-    "attr-defined",
-    "unused-ignore",
-    "call-arg",
-    "no-any-return",
-]
-
-[[tool.mypy.overrides]]
-module = "bot.domain.*"
-disable_error_code = ["unused-ignore", "return-value", "dict-item", "arg-type"]
-
-[[tool.mypy.overrides]]
-module = "bot.diagnostics.*"
-disable_error_code = ["no-redef", "call-arg", "arg-type", "misc"]
-
-[[tool.mypy.overrides]]
-module = "bot.market.*"
-disable_error_code = [
-    "arg-type",
-    "no-any-return",
-    "var-annotated",
-    "attr-defined",
-    "return-value",
-    "unused-ignore",
-]
+disable_error_code = ["return-value", "index", "arg-type"]
 
 [[tool.mypy.overrides]]
 module = "bot.logging_config"
