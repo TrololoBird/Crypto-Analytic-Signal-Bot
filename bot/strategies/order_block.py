@@ -395,4 +395,5 @@ class OrderBlockSetup(SpecDetectorSetup):
                 return None
             raise
 
+
 __all__ = ["OrderBlockSetup"]
