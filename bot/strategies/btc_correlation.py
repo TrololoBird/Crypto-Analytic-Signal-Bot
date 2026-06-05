@@ -4,8 +4,8 @@ from typing import TYPE_CHECKING, ClassVar
 
 from ._roadmap import (
     _build_atr_signal,
-    _last,
-    _price_change_pct,
+    _prev,
+    _price_change_pct_confirmed,
     _reject,
 )
 from .roadmap_base import RoadmapSetup
@@ -41,9 +41,11 @@ def detect_btc_correlation(
             btc_bias = "bear"
         else:
             btc_bias = "neutral"
-    vol_ratio = _last(prepared.work_15m, "volume_ratio20", 1.0)
+    work = prepared.work_15m
+    # fix-sl-A: confirm momentum on last closed bar (df[-2]), not forming tail.
+    vol_ratio = _prev(work, "volume_ratio20", 1.0)
     volume_penalty = vol_ratio < float(params["min_volume_ratio"])
-    roc10 = _last(prepared.work_15m, "roc10", _price_change_pct(prepared.work_15m, 10))
+    roc10 = _prev(work, "roc10", _price_change_pct_confirmed(work, 10))
     if abs(roc10) < float(params["min_roc10_abs_pct"]):
         _reject(prepared, setup_id, "context.momentum_too_low", roc10=roc10)
         return None
@@ -76,6 +78,7 @@ def detect_btc_correlation(
         setup_id=setup_id,
         direction=direction,
         params=params,
+        confirmed_bar=True,
         reasons=reasons,
         family=family,
         structure_clarity=0.65 if volume_penalty else 0.75,

@@ -9,6 +9,7 @@ if TYPE_CHECKING:
 
 DEFAULT_FILTER_STAGES: tuple[str, ...] = (
     "freshness",
+    "entry_staleness",
     "mark_deviation",
     "spread",
     "atr",

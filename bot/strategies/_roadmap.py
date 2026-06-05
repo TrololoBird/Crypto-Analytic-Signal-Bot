@@ -61,6 +61,19 @@ def _price_change_pct(frame: pl.DataFrame, bars: int = 8) -> float:
     return (end / start - 1.0) * 100.0
 
 
+def _price_change_pct_confirmed(frame: pl.DataFrame, bars: int = 8) -> float:
+    """ROC ending on the last fully closed bar (df[-2]), not a forming tail."""
+    if frame.height < 3 or "close" not in frame.columns:
+        return 0.0
+    end_idx = frame.height - 2
+    anchor_idx = max(0, end_idx - max(2, bars))
+    start = _as_float(frame.item(anchor_idx, "close"))
+    end = _as_float(frame.item(end_idx, "close"))
+    if start <= 0.0 or end <= 0.0:
+        return 0.0
+    return (end / start - 1.0) * 100.0
+
+
 def _flow_delta_with_source(prepared: PreparedSymbol) -> tuple[float | None, str | None]:
     direct_delta = _first_finite(
         prepared.agg_trade_delta_30s,
@@ -152,14 +165,20 @@ def _build_atr_signal(
     structure_clarity: float = 0.5,
     entry_anchor: float | None = None,
     stop_anchor: float | None = None,
+    confirmed_bar: bool = False,
 ) -> Signal | None:
     work = prepared.work_15m
-    close = _last(work, "close")
-    high = _last(work, "high")
-    low = _last(work, "low")
-    atr = _last(work, "atr14")
-    vol_ratio = _last(work, "volume_ratio20", 1.0)
-    rsi = _last(work, "rsi14", 50.0)
+    # fix-sl-A: optional confirmed bar avoids anchoring entry on a forming candle tail.
+    bar_pick = _prev if confirmed_bar else _last
+    if confirmed_bar and work.height < 2:
+        _reject(prepared, setup_id, "insufficient_closed_bars")
+        return None
+    close = bar_pick(work, "close")
+    high = bar_pick(work, "high")
+    low = bar_pick(work, "low")
+    atr = bar_pick(work, "atr14")
+    vol_ratio = bar_pick(work, "volume_ratio20", 1.0)
+    rsi = bar_pick(work, "rsi14", 50.0)
     if min(close, high, low, atr) <= 0.0:
         _reject(prepared, setup_id, "invalid_indicator_state", close=close, atr=atr)
         return None
@@ -238,6 +257,7 @@ __all__ = [
     "_orderbook_source",
     "_prev",
     "_price_change_pct",
+    "_price_change_pct_confirmed",
     "_reject",
     "_series_max_tail",
     "_series_mean_tail",

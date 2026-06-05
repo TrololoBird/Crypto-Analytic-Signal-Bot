@@ -542,6 +542,46 @@ def _frame_is_fresh(
     return delta <= max_age
 
 
+def _entry_staleness_gate(
+    signal: Signal,
+    prepared: PreparedSymbol,
+    settings: BotSettings,
+    *,
+    atr_pct: float,
+) -> tuple[bool, str | None, dict[str, Any] | None]:
+    """Reject when mark/ticker has already moved too far from the planned entry."""
+    current_price = prepared.mark_price or prepared.ticker_price
+    entry_price = float(signal.entry_mid_raw)
+    if (
+        current_price is None
+        or not math.isfinite(float(current_price))
+        or float(current_price) <= 0.0
+        or entry_price <= 0.0
+        or atr_pct <= 0.0
+    ):
+        return True, None, None
+
+    # fix-sl-A: reject entry if price has already moved > N*ATR from signal entry
+    deviation = abs(float(current_price) - entry_price) / entry_price
+    atr_mult = float(getattr(settings.filters, "max_entry_deviation_atr_mult", 1.5))
+    threshold = max(0.001, atr_mult * atr_pct / 100.0)
+    details: dict[str, Any] = {
+        "entry_price": entry_price,
+        "current_price": float(current_price),
+        "entry_deviation_pct": round(deviation * 100.0, 4),
+        "atr_pct": atr_pct,
+        "max_deviation_pct": round(threshold * 100.0, 4),
+        "atr_mult": atr_mult,
+    }
+    if deviation > threshold:
+        return (
+            False,
+            "entry_staleness",
+            details,
+        )
+    return True, None, details
+
+
 def _market_atr_floor(prepared: PreparedSymbol, settings: BotSettings) -> float:
     """Return an ATR floor adapted to current volatility conditions.
 
@@ -622,6 +662,7 @@ def _run_filter_pipeline(
 
     Pipeline order (strict):
       1. Data freshness gates (15m, 1h)
+      1b. Entry staleness (mark vs entry_mid vs ATR)
       2. Mark price deviation guard
       3. Spread gate
       4. ATR gate
@@ -764,6 +805,33 @@ def _run_filter_pipeline(
         primary_timeframe, _ = _primary_freshness_window(prepared, settings)
         primary_frame = _frame_for_timeframe(prepared, primary_timeframe)
         passed.append("freshness_stage_disabled")
+
+    # --- 1b. Entry staleness (fix-sl-A) ---
+    pre_atr_frame = primary_frame if primary_frame is not None else prepared.work_15m
+    pre_atr_pct = 0.0
+    if not pre_atr_frame.is_empty() and "atr_pct" in pre_atr_frame.columns:
+        raw_atr = pre_atr_frame.item(-1, "atr_pct")
+        if raw_atr is not None and not (isinstance(raw_atr, float) and math.isnan(raw_atr)):
+            pre_atr_pct = float(raw_atr)
+    if filter_stage_enabled(settings, "entry_staleness"):
+        staleness_ok, staleness_reason, staleness_details = _entry_staleness_gate(
+            base,
+            prepared,
+            settings,
+            atr_pct=pre_atr_pct,
+        )
+        if not staleness_ok:
+            LOGGER.info(
+                "%s/%s: entry_staleness reject | details=%s",
+                signal.symbol,
+                signal.setup_id,
+                staleness_details,
+            )
+            return _reject(staleness_reason or "entry_staleness", base, details=staleness_details)
+        passed.append("entry_staleness_ok")
+    else:
+        passed.append("entry_staleness_stage_disabled")
+
     # --- 2. Mark price sanity ---
     if filter_stage_enabled(settings, "mark_deviation") and (
         prepared.mark_price is not None

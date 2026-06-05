@@ -6,9 +6,9 @@ from ._roadmap import (
     _build_atr_signal,
     _confirmed_context_conflict,
     _finite_or_none,
-    _last,
     _orderbook_source,
-    _price_change_pct,
+    _prev,
+    _price_change_pct_confirmed,
     _reject,
 )
 from .roadmap_base import RoadmapSetup
@@ -37,8 +37,9 @@ def detect_spread_strategy(
         _reject(prepared, setup_id, "spread_too_wide", spread_bps=spread)
         return None
     work = prepared.work_15m
-    vol_ratio = _last(work, "volume_ratio20", 1.0)
-    roc10 = _last(work, "roc10", _price_change_pct(work, 10))
+    # fix-sl-A: confirm momentum on last closed bar (df[-2]), not forming tail.
+    vol_ratio = _prev(work, "volume_ratio20", 1.0)
+    roc10 = _prev(work, "roc10", _price_change_pct_confirmed(work, 10))
     volume_penalty = vol_ratio < float(params["min_volume_ratio"])
     if vol_ratio < 0.5:
         _reject(prepared, setup_id, "context.momentum_too_low", volume_ratio=vol_ratio)
@@ -71,7 +72,7 @@ def detect_spread_strategy(
         return None
     depth_value = depth
     micro_value = micro
-    close_position = _last(work, "close_position", 0.5)
+    close_position = _prev(work, "close_position", 0.5)
     if direction == "long":
         orderbook_ok = depth_value >= float(params["min_depth_imbalance"]) and micro_value >= float(
             params["min_microprice_bias"]
@@ -105,6 +106,7 @@ def detect_spread_strategy(
         setup_id=setup_id,
         direction=direction,
         params=params,
+        confirmed_bar=True,
         reasons=[
             f"tight_spread_{direction}",
             f"spread_bps={spread:.2f}",

@@ -261,9 +261,12 @@ class FilterConfig(_StrictModel):
     min_bars_4h: int = Field(default=210, ge=30, le=5000)
     # Mark price sanity guard: reject if mark and last diverge beyond this pct.
     max_mark_price_deviation_pct: float = Field(default=0.005, ge=0.0, le=0.10)
+    # fix-sl-A: max |mark-entry|/entry as multiple of atr_pct (1.5 => 1.5 * atr_pct%).
+    max_entry_deviation_atr_mult: float = Field(default=1.5, ge=0.5, le=5.0)
     # Composable filter stages (Phase 6). Empty tuple = all defaults enabled.
     enabled_stages: tuple[str, ...] = (
         "freshness",
+        "entry_staleness",
         "mark_deviation",
         "spread",
         "atr",

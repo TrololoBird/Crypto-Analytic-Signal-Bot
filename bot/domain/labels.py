@@ -13,6 +13,7 @@ REJECT_REASON_RU: dict[str, str] = {
     "hard_confluence_gate": "слабый confluence",
     "mark_price_deviation": "расхождение mark price",
     "family_precheck_failed": "семейный фильтр",
+    "entry_staleness": "цена ушла от entry (>ATR)",
     "limit_late_entry_chase": "цена ушла от зоны (limit)",
     "limit_publish_rejected": "план недействителен при публикации",
     "limit_setup_invalidated": "план недействителен при публикации",  # legacy alias
