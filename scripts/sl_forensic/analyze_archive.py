@@ -21,7 +21,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.sl_forensic._archive_migrations import migrate_forensic_archive
-from scripts.sl_forensic._paths import FORENSIC_ARCHIVE_PATH, REPORT_ARCHIVE_PATH, ensure_forensics_dir
+from scripts.sl_forensic._paths import (
+    FORENSIC_ARCHIVE_PATH,
+    REPORT_ARCHIVE_PATH,
+    ensure_forensics_dir,
+)
 
 SL_LIKE = (
     "stop_loss",
@@ -231,9 +235,7 @@ async def analyze_archive(*, write_report: bool = True) -> str:
                     lines.append(f"  - → widen ATR multiplier for `{p['setup_id']}`")
                 if p["sl_type"] == "STOP_HUNT" and p["n"] >= 2:
                     print(f"    → CASE REVIEW: post-wick entry or widen SL for {p['setup_id']}")
-                    lines.append(
-                        f"  - → post-wick entry delay or widen SL for `{p['setup_id']}`"
-                    )
+                    lines.append(f"  - → post-wick entry delay or widen SL for `{p['setup_id']}`")
         else:
             print("  (no repeated patterns yet — need 2+ cases per setup/type)")
             lines.append("_No repeated patterns yet (need 2+ cases per setup/type)._")

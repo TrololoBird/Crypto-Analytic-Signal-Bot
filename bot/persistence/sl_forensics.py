@@ -221,9 +221,7 @@ def classify_forensic_type(
     atr = float(atr_pct or 0.0)
     stale_threshold = max(0.15, 1.5 * atr) if atr > 0.0 else 1.0
 
-    if post_sl_tp1_reached or (
-        post_sl_favorable_pct >= 1.0 and post_sl_tp1_room_pct > 1.5
-    ):
+    if post_sl_tp1_reached or (post_sl_favorable_pct >= 1.0 and post_sl_tp1_room_pct > 1.5):
         return "STOP_HUNT", "post_sl_recovery"
 
     if mfe <= 0.05:
@@ -422,8 +420,8 @@ def render_case_card(case: ForensicCase) -> str:
     lines = [
         f"## {case.symbol} · {case.setup_id} · {case.direction.upper()}",
         "",
-        f"| Field | Value |",
-        f"|-------|-------|",
+        "| Field | Value |",
+        "|-------|-------|",
         f"| tracking_id | `{case.tracking_id}` |",
         f"| result | `{case.result}` |",
         f"| **Forensic** | **{case.label}** |",
@@ -476,9 +474,7 @@ def render_aggregate_report(
     total = len(cases) or 1
     for ftype in ("STOP_HUNT", "IMMEDIATE_ADVERSE", "THESIS_FAILED", "TIMING_OFF"):
         n = type_counts.get(ftype, 0)
-        lines.append(
-            f"| {_FORENSIC_LABELS.get(ftype, ftype)} | {n} | {100 * n / total:.1f}% |"
-        )
+        lines.append(f"| {_FORENSIC_LABELS.get(ftype, ftype)} | {n} | {100 * n / total:.1f}% |")
     lines.extend(["", "## By setup", "", "| setup_id | n |", "|----------|--:|"])
     for sid, n in setup_counts.most_common():
         lines.append(f"| {sid} | {n} |")
@@ -514,10 +510,10 @@ def _f(value: Any) -> float | None:
 
 
 __all__ = [
+    "SL_RESULTS",
     "ForensicCase",
     "ForensicMetrics",
     "ForensicType",
-    "SL_RESULTS",
     "assess_closed_candle_validity",
     "build_forensic_case",
     "classify_forensic_type",

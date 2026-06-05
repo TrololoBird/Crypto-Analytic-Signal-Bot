@@ -122,7 +122,7 @@ class CandleFetcher:
                         msg = f"unexpected klines payload type: {type(payload)}"
                         raise TypeError(msg)
                     return payload
-            except (aiohttp.ClientError, asyncio.TimeoutError, TypeError) as exc:
+            except (TimeoutError, aiohttp.ClientError, TypeError) as exc:
                 last_exc = exc
                 await asyncio.sleep(2**attempt)
         if last_exc is not None:
@@ -176,7 +176,7 @@ class CandleFetcher:
         signal_tf: str,
     ) -> dict[str, list[dict[str, Any]]]:
         """Fetch all timeframes needed for one forensic case."""
-        tf = signal_tf.split("+")[0].strip() or "15m"
+        tf = signal_tf.split("+", maxsplit=1)[0].strip() or "15m"
         results: dict[str, list[dict[str, Any]]] = {}
         results[tf] = await self.fetch(symbol, tf, anchor_ts_ms, 60, 60)
         results["1h"] = await self.fetch(symbol, "1h", anchor_ts_ms, 24, 24)

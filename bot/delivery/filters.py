@@ -715,9 +715,7 @@ def _run_filter_pipeline(
         )
         return _reject(regime_reason or "regime_long_blocked", base, details=regime_details)
 
-    short_regime_ok, short_regime_reason, short_regime_details = _regime_short_gate(
-        base, prepared
-    )
+    short_regime_ok, short_regime_reason, short_regime_details = _regime_short_gate(base, prepared)
     if not short_regime_ok:
         LOGGER.info(
             "%s/%s: regime short gate reject | reason=%s details=%s",

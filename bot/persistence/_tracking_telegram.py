@@ -6,7 +6,6 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-
 if TYPE_CHECKING:
     from ..domain.schemas import Signal
 
@@ -58,6 +57,7 @@ class TelegramTrackingMixin:
                 },
             )
         await self._persist_tracking_state()
+
     async def update_signal_message_ids(
         self,
         message_ids: dict[str, int | None],

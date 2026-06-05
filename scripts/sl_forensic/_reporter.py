@@ -109,7 +109,9 @@ def generate_case_card(case: dict[str, Any]) -> str:
     tp1_label = (
         f"YES in {tp1_candles} candles"
         if tp1_reached and tp1_candles is not None
-        else "YES (in-trade)" if case.get("tp1_hit_at") else "NO"
+        else "YES (in-trade)"
+        if case.get("tp1_hit_at")
+        else "NO"
     )
 
     direction = str(case.get("direction") or "").upper()

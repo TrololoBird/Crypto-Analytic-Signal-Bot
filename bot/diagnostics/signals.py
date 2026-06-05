@@ -9,7 +9,6 @@ question "why are signals not being generated right now?"
 from __future__ import annotations
 
 import asyncio
-
 import json
 import threading
 from collections import Counter

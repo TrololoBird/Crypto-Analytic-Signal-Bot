@@ -166,9 +166,7 @@ class SignalBot:
         else:
             self.metrics.start_server()
         if not self._dashboard_enabled:
-            LOG.info(
-                "dashboard disabled via BOT_DISABLE_DASHBOARD=1 or BOT_ENABLE_DASHBOARD=0"
-            )
+            LOG.info("dashboard disabled via BOT_DISABLE_DASHBOARD=1 or BOT_ENABLE_DASHBOARD=0")
 
         self.dashboard = BotDashboard(
             self, settings.runtime.dashboard_port, host=settings.runtime.dashboard_host
@@ -477,9 +475,7 @@ class SignalBot:
         """Start dashboard early so smoke/debug can inspect startup failures."""
         if not getattr(self, "_dashboard_enabled", False):
             return
-        await self.dashboard.start_server_async(
-            auto_open=self.settings.runtime.auto_open_dashboard
-        )
+        await self.dashboard.start_server_async(auto_open=self.settings.runtime.auto_open_dashboard)
 
     async def start(self) -> None:
         """Initial storage checks and WS bootstrap."""
@@ -634,6 +630,7 @@ class SignalBot:
                 self._preload_shortlist_frames(), name="preload_frames"
             )
             self._background_tasks.add(preload_task)
+
             def _preload_done(done: asyncio.Task[Any]) -> None:
                 self._background_tasks.discard(done)
                 SignalBot._log_background_task_failure(done)
@@ -687,11 +684,15 @@ class SignalBot:
             return task
 
         background_tasks: list[asyncio.Task[None]] = [
-            _loop_task(run_shortlist_refresh_loop(self._shortlist_service), name="shortlist_refresh"),
+            _loop_task(
+                run_shortlist_refresh_loop(self._shortlist_service), name="shortlist_refresh"
+            ),
             _loop_task(run_heartbeat_loop(self._health_manager), name="heartbeat"),
             _loop_task(run_health_telemetry_loop(self._health_manager), name="health_telemetry"),
             _loop_task(self._health_monitor.run(stop_event=self._shutdown), name="health_monitor"),
-            _loop_task(run_emergency_fallback_loop(self._fallback_runner), name="emergency_fallback"),
+            _loop_task(
+                run_emergency_fallback_loop(self._fallback_runner), name="emergency_fallback"
+            ),
             _loop_task(run_oi_refresh_loop(self._oi_refresh_runner), name="oi_refresh"),
             _loop_task(run_spot_refresh_loop(self._spot_refresh_runner), name="spot_companion"),
             _loop_task(run_tracking_review_loop(self._fallback_runner), name="tracking_review"),

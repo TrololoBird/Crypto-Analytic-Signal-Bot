@@ -16,11 +16,13 @@ from typing import TYPE_CHECKING, Any
 import aiosqlite
 import polars as pl
 
-from ...migrations import migrate_db
-from ...runtime.errors import DEFENSIVE_EXC
 from bot.persistence.repository._schema import REPOSITORY_CORE_DDL
 
+from ...migrations import migrate_db
+from ...runtime.errors import DEFENSIVE_EXC
+
 if TYPE_CHECKING:
+
     class _MemoryRepositoryBases:
         pass
 else:
@@ -490,7 +492,6 @@ class MemoryRepository(_MemoryRepositoryBases):
                 "display_snapshot": {},
             }
 
-
     async def close(self) -> None:
         """Close database connection."""
         if self._conn:
@@ -803,7 +804,6 @@ class MemoryRepository(_MemoryRepositoryBases):
         except json.JSONDecodeError:
             return 0
         return len(window) if isinstance(window, list) else 0
-
 
     # ------------------------------------------------------------------
     # Active signal tracking (replaces SignalTrackingStore)
@@ -1250,4 +1250,3 @@ class MemoryRepository(_MemoryRepositoryBases):
         except Exception:
             LOG.exception("failed to save signal outcomes batch")
             raise
-

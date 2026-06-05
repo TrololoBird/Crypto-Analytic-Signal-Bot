@@ -26,7 +26,6 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from bot.domain.config import load_settings
-
 from scripts.sl_forensic._archive_migrations import migrate_forensic_archive
 from scripts.sl_forensic._case_builder import EXPORT_QUERY, enrich_sl_case, row_to_base_case
 from scripts.sl_forensic._fetcher import CandleFetcher
@@ -151,13 +150,21 @@ async def _insert_case(
             case.get("sl_type"),
             case.get("sl_subtype"),
             case.get("sl_verdict"),
-            1 if case.get("post_sl_tp1_reached") else 0 if case.get("post_sl_tp1_reached") is not None else None,
+            1
+            if case.get("post_sl_tp1_reached")
+            else 0
+            if case.get("post_sl_tp1_reached") is not None
+            else None,
             case.get("post_sl_tp1_candles"),
             case.get("post_sl_max_recovery"),
             case.get("post_sl_max_adverse"),
             case.get("btc_move_sl_candle_pct"),
             case.get("btc_direction_match"),
-            1 if case.get("btc_caused_sl") else 0 if case.get("btc_caused_sl") is not None else None,
+            1
+            if case.get("btc_caused_sl")
+            else 0
+            if case.get("btc_caused_sl") is not None
+            else None,
             case.get("confirmed_candle"),
             case.get("entry_deviation_atr"),
             case.get("false_signal_recheck"),
@@ -200,7 +207,9 @@ async def export_to_archive(*, notes: str = "", dry_run: bool = False) -> dict[s
             await migrate_forensic_archive(arch_conn)
             existing = await _existing_tracking_ids(arch_conn)
         new_rows = [r for r in rows if str(r["tracking_id"]) not in existing]
-        print(f"DRY RUN: would export {len(new_rows)} new / skip {len(rows) - len(new_rows)} existing")
+        print(
+            f"DRY RUN: would export {len(new_rows)} new / skip {len(rows) - len(new_rows)} existing"
+        )
         print(f"Run ID: {run_id}")
         print(f"Codebase: {codebase_hash or 'unknown'}")
         return {"exported": len(new_rows), "skipped": len(rows) - len(new_rows), "run_id": run_id}

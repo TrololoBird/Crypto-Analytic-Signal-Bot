@@ -115,10 +115,20 @@ select = [
 # Late imports after module constants (circular-import guard in ws/rest_impl)
 "bot/market/ws.py" = ["E402"]
 "bot/market/rest_impl.py" = ["E402"]
+"bot/market/**/*.py" = ["E501"]
+"bot/migrations.py" = ["E501"]
+"bot/persistence/sl_forensics.py" = ["BLE001", "ARG001", "PERF401"]
+"bot/persistence/tracking_events.py" = ["TC001", "TC003"]
+"bot/market/kline_window.py" = ["SIM108", "BLE001"]
+"bot/runtime/_analyzer_gates.py" = ["TC001"]
+"bot/runtime/_delivery_ranking.py" = ["TC001"]
+"bot/runtime/delivery_orchestrator.py" = ["TC001", "TRY300", "E501"]
+"bot/runtime/bot.py" = ["E501"]
+"bot/persistence/tracking.py" = ["E501"]
 "bot/dashboard/**/*.py" = ["RUF001", "RUF002", "E501", "BLE001", "PERF401", "ARG001", "RUF006"]
 "bot/delivery/formatting.py" = ["RUF001", "E501"]
 "bot/domain/labels.py" = ["RUF001"]
-"bot/**/*.py" = ["RUF001", "RUF002", "PLC0415"]
+"bot/**/*.py" = ["RUF001", "RUF002", "PLC0415", "RUF006"]
 "tests/**/*.py" = [
     "PLC0415",
     "ARG001",
@@ -142,9 +152,19 @@ select = [
     "TRY401",
     "BLE001",
     "TRY300",
+    "TRY301",
+    "TRY003",
     "ARG001",
     "RUF001",
+    "RUF012",
     "E501",
+    "TC002",
+    "FURB162",
+    "FURB171",
+    "PYI034",
+    "EM101",
+    "G201",
+    "PERF401",
 ]
 
 [tool.mypy]

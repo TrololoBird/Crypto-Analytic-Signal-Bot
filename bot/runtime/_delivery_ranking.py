@@ -128,6 +128,7 @@ class DeliveryRankingMixin:
             symbol_direction_key or self._symbol_direction_cooldown_key(signal)
         )
         return True
+
     def select_and_rank(
         self, all_candidates: dict[str, list[Signal]], max_signals: int
     ) -> list[Signal]:

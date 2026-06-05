@@ -18,6 +18,8 @@ from collections import Counter
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from bot.delivery import contract as _delivery_contract_module
+from bot.delivery.contract import SignalContractIssue
 from bot.delivery.tiers import _finite_score, decide_with_caps
 from bot.delivery.tiers import rank_key as tier_rank_key
 from bot.domain.delivery_policy import r_class_blocks_action, resolve_bear_regime
@@ -27,12 +29,10 @@ from bot.domain.mtf import (
     evaluate_mtf_gate,
     normalize_mtf_reject_reason,
 )
+from bot.domain.schemas import Signal
 from bot.persistence.outcomes import build_prepared_feature_snapshot, extract_features_from_signal
 from bot.runtime.errors import DEFENSIVE_EXC
 
-from bot.delivery import contract as _delivery_contract_module
-from bot.delivery.contract import SignalContractIssue
-from bot.domain.schemas import Signal
 from .merge import MetaSignalMerger
 
 if TYPE_CHECKING:
@@ -127,7 +127,6 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         record = getattr(metrics, "record_signal_rejected", None)
         if callable(record):
             record(signal.setup_id, signal.direction, reason)
-
 
     @staticmethod
     def _latest_float(frame: Any, column: str) -> float | None:
@@ -504,7 +503,6 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
             return False, confirmations, details
         return boolean_pass, confirmations, details
 
-
     async def _send_sl_postmortem_to_operators(self, events: list[SignalTrackingEvent]) -> None:
         if not bool(getattr(self._bot.settings.delivery, "sl_postmortem_enabled", True)):
             return
@@ -527,13 +525,11 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
             except DEFENSIVE_EXC:
                 LOG.debug("sl postmortem operator notify skipped", exc_info=True)
 
-
-
     async def close_superseded_signal(self, new_signal: Signal) -> list[SignalTrackingEvent] | None:
         try:
-            superseded: list[SignalTrackingEvent] | None = (
-                await self._bot.tracker.supersede_open_signal(new_signal, dry_run=False)
-            )
+            superseded: (
+                list[SignalTrackingEvent] | None
+            ) = await self._bot.tracker.supersede_open_signal(new_signal, dry_run=False)
             return superseded
         except DEFENSIVE_EXC as exc:
             LOG.debug("supersede failed for %s: %s", new_signal.symbol, exc)
@@ -1112,7 +1108,9 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
             )
             session_used = int(getattr(self._bot, "_session_action_delivered", 0) or 0)
             if delivery_tier == "action" and session_cap > 0 and session_used >= session_cap:
-                if _finite_score(signal.score) >= float(self._bot.settings.delivery.watch_min_score):
+                if _finite_score(signal.score) >= float(
+                    self._bot.settings.delivery.watch_min_score
+                ):
                     delivery_tier = "watch"
                     tier_reason = "action_session_cap_downgrade"
                 else:
@@ -1344,9 +1342,9 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
             outcome = outcome_map.get(event.event_type)
             if outcome:
                 tracked = event.tracked
-                if event.event_type == "breakeven_stop":
-                    outcome = "breakeven_stop"
-                elif event.event_type == "stop_loss" and tracked.tp1_hit_at is not None:
+                if event.event_type == "breakeven_stop" or (
+                    event.event_type == "stop_loss" and tracked.tp1_hit_at is not None
+                ):
                     outcome = "breakeven_stop"
                 regime = getattr(tracked, "regime_4h_confirmed", None) or "neutral"
                 await self._bot._modern_repo.record_symbol_outcome(
@@ -1363,9 +1361,7 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
             operation=self._bot.delivery.deliver_tracking_updates(events, dry_run=False),
         )
         sl_events = [
-            event
-            for event in events
-            if event.event_type in {"stop_loss", "breakeven_stop"}
+            event for event in events if event.event_type in {"stop_loss", "breakeven_stop"}
         ]
         if sl_events and bool(
             getattr(self._bot.settings.delivery, "sl_postmortem_to_operators", True)

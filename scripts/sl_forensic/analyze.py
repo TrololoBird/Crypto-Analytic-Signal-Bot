@@ -16,7 +16,6 @@ import asyncio
 import json
 import logging
 import sys
-import traceback
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -30,7 +29,6 @@ if str(ROOT) not in sys.path:
 
 from bot.domain.config import load_settings
 from bot.migrations import migrate_db
-
 from scripts.sl_forensic._classifier import (
     assess_closed_candle_validity,
     classify_sl,
@@ -210,9 +208,7 @@ def _row_to_base_case(row: aiosqlite.Row) -> dict[str, Any]:
     funding = snapshot.get("funding_rate")
     entry_mid = float(row["entry_mid"] or entry)
     activation = float(row["activation_price"] or entry)
-    entry_deviation_pct = (
-        abs(activation - entry_mid) / entry_mid * 100.0 if entry_mid > 0 else 0.0
-    )
+    entry_deviation_pct = abs(activation - entry_mid) / entry_mid * 100.0 if entry_mid > 0 else 0.0
     return {
         "tracking_id": row["tracking_id"],
         "signal_id": row["signal_id"],
@@ -341,10 +337,7 @@ def _append_monitoring_hook(report_summary: str) -> None:
     if not path.exists():
         return
     stamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
-    block = (
-        f"\n\n---\n\n## Forensic snapshot — {stamp}\n\n"
-        f"{report_summary}\n"
-    )
+    block = f"\n\n---\n\n## Forensic snapshot — {stamp}\n\n{report_summary}\n"
     with path.open("a", encoding="utf-8") as handle:
         handle.write(block)
 
@@ -370,7 +363,13 @@ def _print_summary(cases: list[dict[str, Any]]) -> None:
         pct = count / total * 100.0
         print(f"  {sl_type}: {count} ({pct:.1f}%)")
         if sl_type == "IMMEDIATE_ADVERSE":
-            for sub in ("BTC_DRAG", "ENTRY_CHASE", "FALSE_SIGNAL", "REGIME_FADE", "IMMEDIATE_ADVERSE"):
+            for sub in (
+                "BTC_DRAG",
+                "ENTRY_CHASE",
+                "FALSE_SIGNAL",
+                "REGIME_FADE",
+                "IMMEDIATE_ADVERSE",
+            ):
                 sub_key = f"IMMEDIATE_ADVERSE/{sub}"
                 if sub_key in subtype_counts:
                     print(f"    - {sub}: {subtype_counts[sub_key]}")
@@ -431,7 +430,8 @@ async def main() -> int:
 
                     try:
                         if anchor_ts is None:
-                            raise ValueError("missing timestamps for candle fetch")
+                            msg = "missing timestamps for candle fetch"
+                            raise ValueError(msg)
 
                         tf = case["timeframe"].split("+")[0].strip() or "15m"
                         windows = await fetcher.fetch_window(
@@ -549,11 +549,10 @@ async def main() -> int:
                         cases.append(case)
                         await asyncio.sleep(0.2)
                     except Exception:
-                        LOG.error(
+                        LOG.exception(
                             "case failed | tracking_id=%s symbol=%s",
                             tracking_id,
                             symbol,
-                            exc_info=True,
                         )
                         continue
             finally:

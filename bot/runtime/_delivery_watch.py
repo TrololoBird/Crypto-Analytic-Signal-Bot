@@ -39,6 +39,7 @@ class DeliveryWatchMixin:
                 "tier_reason": tier_reason,
             },
         )
+
     def _record_delivery_attempt(
         self,
         signal: Signal,

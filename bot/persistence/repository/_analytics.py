@@ -8,7 +8,6 @@ import math
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-
 from ..outcomes import aggregate_setup_stats
 
 # fix-20260604: LOG for outcome_window decode failures (Phase F extraction)
@@ -185,6 +184,7 @@ class AnalyticsMixin:
             "top_setups": top_setups,
             "symbol_count": len(blacklisted),
         }
+
     async def get_setup_score_adjustment(self, setup_id: str) -> float:
         """Get current score adjustment for a setup.
 

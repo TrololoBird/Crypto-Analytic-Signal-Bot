@@ -93,9 +93,7 @@ def row_to_base_case(row: aiosqlite.Row) -> dict[str, Any]:
     funding = snapshot.get("funding_rate")
     entry_mid = float(row["entry_mid"] or entry)
     activation = float(row["activation_price"] or entry)
-    entry_deviation_pct = (
-        abs(activation - entry_mid) / entry_mid * 100.0 if entry_mid > 0 else 0.0
-    )
+    entry_deviation_pct = abs(activation - entry_mid) / entry_mid * 100.0 if entry_mid > 0 else 0.0
     return {
         "tracking_id": row["tracking_id"],
         "signal_id": row["signal_id"],

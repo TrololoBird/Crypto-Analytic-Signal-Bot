@@ -19,7 +19,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-
+from bot.persistence._tracking_review import _price_in_entry_zone
+from bot.persistence.tracking_events import SignalTrackingEvent
 from bot.runtime.errors import DEFENSIVE_EXC
 
 from ..domain.limit_entry import (
@@ -27,10 +28,9 @@ from ..domain.limit_entry import (
 )
 from ..persistence.tracked import TrackedSignalState, parse_state_dt
 from .outcomes import SignalFeatures, SignalOutcome, create_outcome_from_tracked
-from bot.persistence._tracking_review import _price_in_entry_zone
-from bot.persistence.tracking_events import SignalTrackingEvent
 
 if typing.TYPE_CHECKING:
+
     class _SignalTrackerBases:
         @staticmethod
         def _update_price_excursion(
@@ -54,6 +54,7 @@ else:
     class _SignalTrackerBases(TPSLReviewMixin, TelegramTrackingMixin):
         pass
 
+
 __all__ = ["SignalTracker", "SignalTrackingEvent"]
 
 if typing.TYPE_CHECKING:
@@ -69,7 +70,9 @@ if typing.TYPE_CHECKING:
 
         async def record_setup_outcome(self, *args: Any, **kwargs: Any) -> None: ...
 
-        async def get_active_signals(self, *args: Any, **kwargs: Any) -> list[TrackedSignalState]: ...
+        async def get_active_signals(
+            self, *args: Any, **kwargs: Any
+        ) -> list[TrackedSignalState]: ...
 
         async def save_signal_outcomes_batch(self, *args: Any, **kwargs: Any) -> None: ...
 
@@ -693,8 +696,6 @@ class SignalTracker(_SignalTrackerBases):
     async def arm_signals(self, signals: list[Signal], *, dry_run: bool) -> None:
         await self.arm_signals_with_messages(signals, dry_run=dry_run, message_ids={})
 
-
-
     async def cancel_pending_delivery(
         self,
         signal: Signal,
@@ -727,7 +728,6 @@ class SignalTracker(_SignalTrackerBases):
             precision_mode="delivery_cancel",
         )
         await self._persist_tracking_state()
-
 
     async def force_close_tracking_ids(
         self,
@@ -774,12 +774,6 @@ class SignalTracker(_SignalTrackerBases):
         for event in events:
             self.telemetry.append_jsonl("tracking_events.jsonl", event.to_log_row(stats=stats))
         return events
-
-
-
-
-
-
 
     async def _close_event(
         self,
@@ -878,6 +872,7 @@ class SignalTracker(_SignalTrackerBases):
             )
         else:
             task = loop.create_task(self.memory_repo.save_signal_outcome(outcome))
+
             def _log_outcome_task(done: asyncio.Task[object]) -> None:
                 # fix-20260604: surface async outcome write failures (was debug-only)
                 if done.cancelled():
@@ -974,16 +969,3 @@ class SignalTracker(_SignalTrackerBases):
     # ------------------------------------------------------------------
     # Event-driven additions (Фаза 1 рефакторинга)
     # ------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-
-

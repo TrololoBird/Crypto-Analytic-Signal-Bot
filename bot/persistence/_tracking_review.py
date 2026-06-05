@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
+from bot.persistence.tracking_events import SignalTrackingEvent
 from bot.runtime.errors import DEFENSIVE_EXC
 
 from ..domain.limit_entry import (
@@ -20,8 +21,6 @@ from ..domain.limit_entry import (
 from ..market.data import MarketDataUnavailable
 from ..persistence.sl_diagnostics import classify_stop_loss_root_cause
 from ..persistence.tracked import TrackedSignalState, parse_state_dt
-
-from bot.persistence.tracking_events import SignalTrackingEvent
 
 if TYPE_CHECKING:
     from ..domain.schemas import AggTrade
@@ -61,6 +60,7 @@ class TPSLReviewMixin:
         tracked.max_favorable_pct = max(tracked.max_favorable_pct, move_pct)
         if move_pct < 0.0 and abs(move_pct) > tracked.max_adverse_pct:
             tracked.max_adverse_pct = abs(move_pct)
+
     @staticmethod
     def _update_bar_excursion(
         tracked: TrackedSignalState,
@@ -83,6 +83,7 @@ class TPSLReviewMixin:
         if entry and entry > 0.0 and high > entry:
             adverse = (float(high) - float(entry)) / float(entry) * 100.0
             tracked.max_adverse_pct = max(tracked.max_adverse_pct, adverse)
+
     async def _capture_post_sl_recovery(self, tracked: TrackedSignalState) -> None:
         """Record 4h post-stop favorable move into outcome features."""
         sl_close = tracked.close_reason in {"stop_loss", "breakeven_stop"}
@@ -161,6 +162,7 @@ class TPSLReviewMixin:
                 "sl_diagnostics": sl_diag,
             },
         )
+
     async def review_open_signals(self, *, dry_run: bool) -> list[SignalTrackingEvent]:
         if dry_run or not self.settings.tracking.enabled:
             return []
@@ -226,6 +228,7 @@ class TPSLReviewMixin:
                 )
             )
         return events
+
     async def _review_symbol(
         self,
         symbol: str,
@@ -332,6 +335,7 @@ class TPSLReviewMixin:
                     )
                 )
         return events
+
     async def _apply_trade_rows(
         self,
         tracked: TrackedSignalState,
@@ -425,6 +429,7 @@ class TPSLReviewMixin:
             tracked, checked_at=now, last_price=last_price, precision_mode="trade"
         )
         return events
+
     async def _apply_candle_rows(
         self,
         tracked: TrackedSignalState,
@@ -612,6 +617,7 @@ class TPSLReviewMixin:
             precision_mode="candle",
         )
         return events
+
     async def _apply_time_fallback(
         self,
         tracked: TrackedSignalState,
@@ -646,6 +652,7 @@ class TPSLReviewMixin:
             precision_mode=precision_mode,
         )
         return []
+
     async def _apply_time_fallback_rows(
         self,
         tracked_rows: list[TrackedSignalState],
@@ -663,6 +670,7 @@ class TPSLReviewMixin:
                 )
             )
         return events
+
     async def _apply_price_tick(
         self,
         tracked: TrackedSignalState,
@@ -816,6 +824,7 @@ class TPSLReviewMixin:
             )
             return events, False
         return [], False
+
     async def review_open_signals_for_symbol(
         self,
         symbol: str,
@@ -838,6 +847,7 @@ class TPSLReviewMixin:
                 f"tracking state persist failed for {symbol} (continuing without persistence)"
             ),
         )
+
     async def _review_symbol_open_signals_locked(
         self,
         symbol: str,
@@ -883,6 +893,7 @@ class TPSLReviewMixin:
                 tracked_count=tracked_count,
             )
             return events
+
     async def on_agg_trade(
         self,
         symbol: str,
@@ -935,18 +946,28 @@ class TPSLReviewMixin:
                         event.to_log_row(stats=await self._stats_snapshot()),
                     )
             return events
+
+
 def _price_in_entry_zone(tracked: TrackedSignalState, price: float) -> bool:
     return tracked.entry_low <= price <= tracked.entry_high
+
+
 def _bar_touches_entry(tracked: TrackedSignalState, *, high: float, low: float) -> bool:
     return low <= tracked.entry_high and high >= tracked.entry_low
+
+
 def _bar_hits_tp1(tracked: TrackedSignalState, *, high: float, low: float) -> bool:
     if tracked.direction == "long":
         return high >= tracked.take_profit_1
     return low <= tracked.take_profit_1
+
+
 def _bar_hits_tp2(tracked: TrackedSignalState, *, high: float, low: float) -> bool:
     if tracked.direction == "long":
         return high >= tracked.take_profit_2
     return low <= tracked.take_profit_2
+
+
 def _bar_hits_stop(tracked: TrackedSignalState, *, high: float, low: float) -> bool:
     """Stop hit detection (immediate trigger price hit).
 

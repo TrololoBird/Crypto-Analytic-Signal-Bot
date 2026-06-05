@@ -65,7 +65,7 @@ def test_format_operator_help_lists_commands() -> None:
     assert "/scan" in help_text
     assert "/analyze" in help_text
     assert "Канал" in help_text or "канал" in help_text
-    assert "TARGET_CHAT_ID" in help_text
+    assert "TELEGRAM_CHAT_ID" in help_text
 
 
 def test_normalize_operator_symbol() -> None:

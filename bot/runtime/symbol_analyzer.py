@@ -27,6 +27,7 @@ from bot.runtime.errors import (
     build_runtime_error_payload,
     classify_runtime_error,
 )
+
 if TYPE_CHECKING:
     from bot.runtime.bot import SignalBot
 
@@ -57,8 +58,12 @@ if TYPE_CHECKING:
 else:
     from bot.runtime._analyzer_gates import (
         AnalyzerFamilyGatesMixin as _AnalyzerFamilyGatesBase,
+    )
+    from bot.runtime._analyzer_gates import (
         AnalyzerMixinBase,
     )
+
+    AnalyzerFamilyGatesMixin = _AnalyzerFamilyGatesBase
 
 
 LOG = logging.getLogger("bot.runtime.bot")
@@ -136,8 +141,6 @@ def _apply_setup_score_adjustment(
             "reason": reason,
         },
     )
-
-
 
 
 class AnalyzerContextMixin(AnalyzerMixinBase):

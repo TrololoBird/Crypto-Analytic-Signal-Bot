@@ -15,15 +15,12 @@ SL_RESULTS = frozenset({"stop_loss", "breakeven_stop", "trailing_stop"})
 
 def git_short_hash() -> str | None:
     try:
-        return (
-            subprocess.check_output(
-                ["git", "rev-parse", "--short", "HEAD"],
-                cwd=ROOT,
-                text=True,
-                stderr=subprocess.DEVNULL,
-            )
-            .strip()
-        )
+        return subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=ROOT,
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
     except (subprocess.CalledProcessError, FileNotFoundError, OSError):
         return None
 
