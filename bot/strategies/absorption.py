@@ -92,7 +92,7 @@ def detect_absorption_prepared(
     if hit is not None:
         return build_spec_signal(
             prepared=prepared,
-            settings=settings,
+            _settings=settings,
             setup_id=setup_id,
             family=family,
             hit=hit,

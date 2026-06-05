@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 import aiohttp
 
 from bot.domain.labels import tracking_event_ru
-from bot.runtime.errors import DEFENSIVE_EXC
+from bot.runtime.errors import DEFENSIVE_EXC, defensive_exc_types
 
 from ..dashboard.mobile_summary import (
     build_mobile_summary,
@@ -660,7 +660,7 @@ class TelegramOperatorConsole:
                 await self._poll_once()
             except asyncio.CancelledError:
                 raise
-            except (DEFENSIVE_EXC, aiohttp.ClientError):
+            except defensive_exc_types(aiohttp.ClientError):
                 LOG.debug("operator poll error", exc_info=True)
                 await self._reset_session()
                 await asyncio.sleep(3.0)
@@ -680,7 +680,7 @@ class TelegramOperatorConsole:
             session = await self._session_get()
             async with session.get(url, params=params) as resp:
                 data = await resp.json(content_type=None)
-        except (DEFENSIVE_EXC, aiohttp.ClientError):
+        except defensive_exc_types(aiohttp.ClientError):
             await self._reset_session()
             raise
 

@@ -631,12 +631,15 @@ class SignalBot:
         if task.cancelled():
             return
         exc = task.exception()
-        if exc is not None:
-            LOG.error(
-                "background task failed | name=%s",
-                task.get_name(),
-                exc_info=exc,
-            )
+        if exc is None:
+            return
+        if isinstance(exc, asyncio.CancelledError):
+            return
+        LOG.error(
+            "background task failed | name=%s",
+            task.get_name(),
+            exc_info=exc,
+        )
 
     def _log_autonomous_pipeline_armed(self) -> None:
         """Log background tasks started from run_forever (single entry: python main.py)."""

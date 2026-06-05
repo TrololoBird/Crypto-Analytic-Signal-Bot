@@ -16,6 +16,11 @@ DEFENSIVE_EXC: tuple[type[BaseException], ...] = (
     asyncio.TimeoutError,
 )
 
+
+def defensive_exc_types(*extra: type[BaseException]) -> tuple[type[BaseException], ...]:
+    """Flatten DEFENSIVE_EXC with extra types for ``except`` clauses (never nest the tuple)."""
+    return DEFENSIVE_EXC + extra
+
 _NETWORK_ERROR_NAMES = {
     "aiohttperror",
     "clienterror",
