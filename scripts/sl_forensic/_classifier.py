@@ -175,7 +175,7 @@ def _parse_dt(value: Any) -> datetime | None:
     if value is None:
         return None
     try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(str(value))
     except (TypeError, ValueError):
         return None
     return parsed.astimezone(UTC) if parsed.tzinfo else parsed.replace(tzinfo=UTC)
@@ -347,9 +347,7 @@ def classify_sl(case: dict[str, Any]) -> tuple[str, str, str]:
         return "STOP_HUNT", subtype, verdict
 
     # Candle-only setups that fail confirmed-bar recheck are false signals regardless of hold time.
-    if recheck is False and setup_id in {
-        "btc_correlation",
-    }:
+    if recheck is False and setup_id == "btc_correlation":
         subtype = "FALSE_SIGNAL"
         verdict = (
             f"Detector fires on real-time unclosed candle but NOT on "

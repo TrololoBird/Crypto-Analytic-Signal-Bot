@@ -637,7 +637,10 @@ class RestHttpMixin(RestCircuitMixin):
                         retry_after = self._capture_retry_after(headers)
                         self._set_rate_limit_pause(1800.0)
                         LOG.critical(
-                            "BINANCE IP BAN (418) | retry_after=%s pause=1800s+ streak=%d operation=%s",
+                            (
+                                "BINANCE IP BAN (418) | retry_after=%s pause=1800s+ "
+                                "streak=%d operation=%s"
+                            ),
                             retry_after,
                             self._rate_limit_error_streak,
                             operation,
@@ -666,7 +669,10 @@ class RestHttpMixin(RestCircuitMixin):
                             effective_pause = max(1800.0, float(retry_after_header or 0))
                             self._set_rate_limit_pause(effective_pause)
                             LOG.error(
-                                "binance rate limited (429) | retry_after_header=%s effective_pause=%.0fs streak=%d operation=%s",
+                                (
+                                    "binance rate limited (429) | retry_after_header=%s "
+                                    "effective_pause=%.0fs streak=%d operation=%s"
+                                ),
                                 retry_after_header,
                                 effective_pause,
                                 self._rate_limit_error_streak,
@@ -2347,8 +2353,11 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         return max(candidates, key=lambda item: abs(item[0]))
 
     async def fetch_basis(self, symbol: str, *, period: str = "1h", limit: int = 3) -> float | None:
+        """Fetch recent basis (futures vs index %) from /futures/data/basis.
+
+        Returns basis as percent (positive = contango). Cached for 900 seconds.
+        """
         validate_symbol(symbol)
-        "Fetch most recent basis (futures - index price as %) from /futures/data/basis.\n\n        Returns basis as a percentage (positive = contango, negative = backwardation).\n        Cached for 900 seconds.\n        "
         cache_key = (symbol, period)
         now = time.monotonic()
         cached = self._basis_cache.get(cache_key)

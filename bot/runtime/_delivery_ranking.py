@@ -10,9 +10,9 @@ from bot.delivery.contract import validate_signal_contract
 from bot.delivery.tiers import rank_key as tier_rank_key
 from bot.delivery.trade_plan import evaluate_publish_readiness
 from bot.domain.limit_entry import resolve_late_entry_chase_pct
-from bot.domain.schemas import PreparedSymbol, Signal
 
 if TYPE_CHECKING:
+    from bot.domain.schemas import PreparedSymbol, Signal
     from bot.runtime.bot import SignalBot
 
 

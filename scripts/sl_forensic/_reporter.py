@@ -262,11 +262,13 @@ def generate_aggregate_report(cases: list[dict[str, Any]]) -> str:
     ]
     lines.extend(["", "## Cases requiring immediate fix", ""])
     if urgent:
-        for case in urgent:
-            lines.append(
+        lines.extend(
+            (
                 f"- {case.get('symbol')} {case.get('setup_id')}: "
                 f"{case.get('sl_type')}/{case.get('sl_subtype')}"
             )
+            for case in urgent
+        )
     else:
         lines.append("None flagged.")
 
@@ -280,7 +282,6 @@ def generate_aggregate_report(cases: list[dict[str, Any]]) -> str:
     )
 
     lines.extend(["", "## Full case cards", ""])
-    for case in cases:
-        lines.append(generate_case_card(case))
+    lines.extend(generate_case_card(case) for case in cases)
 
     return "\n".join(lines)

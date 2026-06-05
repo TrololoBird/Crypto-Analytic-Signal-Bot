@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import Any, Self
 
 import aiohttp
 
@@ -21,6 +21,17 @@ _INTERVAL_MS: dict[str, int] = {
     "2h": 7_200_000,
     "4h": 14_400_000,
     "1d": 86_400_000,
+}
+_TF_MAP: dict[str, str] = {
+    "1m": "1m",
+    "3m": "3m",
+    "5m": "5m",
+    "15m": "15m",
+    "30m": "30m",
+    "1h": "1h",
+    "2h": "2h",
+    "4h": "4h",
+    "1d": "1d",
 }
 
 
@@ -41,17 +52,6 @@ class CandleFetcher:
     """Fetches historical klines from Binance USDⓈ-M futures public API."""
 
     ENDPOINT = "https://fapi.binance.com/fapi/v1/klines"
-    TF_MAP = {
-        "1m": "1m",
-        "3m": "3m",
-        "5m": "5m",
-        "15m": "15m",
-        "30m": "30m",
-        "1h": "1h",
-        "2h": "2h",
-        "4h": "4h",
-        "1d": "1d",
-    }
 
     def __init__(self, proxy: str | None = None) -> None:
         self._proxy = _resolve_proxy(proxy)
@@ -68,14 +68,14 @@ class CandleFetcher:
             await self._session.close()
             self._session = None
 
-    async def __aenter__(self) -> CandleFetcher:
+    async def __aenter__(self) -> Self:
         return self
 
     async def __aexit__(self, *args: object) -> None:
         await self.close()
 
     def _interval_ms(self, interval: str) -> int:
-        mapped = self.TF_MAP.get(interval, interval)
+        mapped = _TF_MAP.get(interval, interval)
         return _INTERVAL_MS.get(mapped, 900_000)
 
     async def _request_klines(
@@ -90,7 +90,7 @@ class CandleFetcher:
         session = await self._get_session()
         params = {
             "symbol": symbol.upper(),
-            "interval": self.TF_MAP.get(interval, interval),
+            "interval": _TF_MAP.get(interval, interval),
             "startTime": start_ms,
             "endTime": end_ms,
             "limit": min(max(1, limit), 1500),
@@ -118,10 +118,10 @@ class CandleFetcher:
                         continue
                     resp.raise_for_status()
                     payload = await resp.json()
-                    if not isinstance(payload, list):
-                        msg = f"unexpected klines payload type: {type(payload)}"
-                        raise TypeError(msg)
-                    return payload
+                    if isinstance(payload, list):
+                        return payload
+                    last_exc = TypeError(f"unexpected klines payload type: {type(payload)}")
+                    await asyncio.sleep(2**attempt)
             except (TimeoutError, aiohttp.ClientError, TypeError) as exc:
                 last_exc = exc
                 await asyncio.sleep(2**attempt)

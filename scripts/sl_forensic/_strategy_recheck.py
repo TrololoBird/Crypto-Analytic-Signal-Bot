@@ -188,7 +188,7 @@ def ts_ms_from_iso(value: str | None) -> int | None:
     if not value:
         return None
     try:
-        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(str(value))
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=UTC)
         return int(dt.timestamp() * 1000)

@@ -79,7 +79,9 @@ def record_cycle_delivery_outcome(bot: SignalBot, *, delivered_count: int) -> No
         loop = asyncio.get_running_loop()
     except RuntimeError:
         return
-    loop.create_task(_send_zero_delivery_alert(bot, streak=streak))
+    bg_task = loop.create_task(_send_zero_delivery_alert(bot, streak=streak))
+    bot._background_tasks.add(bg_task)
+    bg_task.add_done_callback(bot._background_tasks.discard)
 
 
 def _message_buffer_dropped_total(ws_snapshot: dict[str, Any]) -> int:

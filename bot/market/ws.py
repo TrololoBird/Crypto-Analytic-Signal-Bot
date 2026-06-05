@@ -263,7 +263,8 @@ class MessageBuffer:
             )
             drop_indexes = {drop_index}
             LOG.warning(
-                "message buffer forced to drop a closed kline (all high-priority) | dropped_total=%d",
+                "message buffer forced to drop a closed kline (all high-priority) "
+                "| dropped_total=%d",
                 self._dropped_count + 1,
             )
         dropped = 0
@@ -456,7 +457,10 @@ def validate_endpoint_stream_limits(manager: Any) -> None:
     )
     for endpoint, streams in manager._intended_streams_by_endpoint.items():
         if len(streams) > max_streams:
-            msg = f"websocket stream count exceeds configured safety limit | endpoint={endpoint} streams={len(streams)} max={max_streams}"
+            msg = (
+                f"websocket stream count exceeds configured safety limit "
+                f"| endpoint={endpoint} streams={len(streams)} max={max_streams}"
+            )
             raise ValueError(msg)
 
 
@@ -501,7 +505,8 @@ async def resubscribe_all(manager: Any, endpoint: str, ws: Any) -> None:
         return
     if len(streams) > 200:
         LOG.info(
-            "ws high stream count | endpoint=%s streams=%d symbols=%d - consider reducing shortlist_limit in config",
+            "ws high stream count | endpoint=%s streams=%d symbols=%d "
+            "- consider reducing shortlist_limit in config",
             endpoint,
             len(streams),
             len(manager._symbols),
@@ -1913,7 +1918,10 @@ class FuturesWSManager:
                             usage_pct = count / limit_val * 100 if limit_val > 0 else 0
                             if usage_pct > 95:
                                 LOG.error(
-                                    "ws rate limit high usage | endpoint=%s type=%s interval=%s count=%d limit=%d usage=%.1f%%",
+                                    (
+                                        "ws rate limit high usage | endpoint=%s type=%s "
+                                        "interval=%s count=%d limit=%d usage=%.1f%%"
+                                    ),
                                     endpoint,
                                     limit_type,
                                     interval,
@@ -1923,7 +1931,10 @@ class FuturesWSManager:
                                 )
                             elif usage_pct > 80:
                                 LOG.info(
-                                    "ws rate limit elevated usage | endpoint=%s type=%s interval=%s count=%d limit=%d usage=%.1f%%",
+                                    (
+                                        "ws rate limit elevated usage | endpoint=%s type=%s "
+                                        "interval=%s count=%d limit=%d usage=%.1f%%"
+                                    ),
                                     endpoint,
                                     limit_type,
                                     interval,
@@ -2155,7 +2166,10 @@ class FuturesWSManager:
                 if gap_secs > interval_secs * 0.9:
                     missed = max(1, round(gap_secs / interval_secs) - 1)
                     LOG.warning(
-                        "kline gap detected | symbol=%s interval=%s last_close=%s new_open=%s missed_candles=%d — triggering backfill",
+                        (
+                            "kline gap detected | symbol=%s interval=%s last_close=%s "
+                            "new_open=%s missed_candles=%d — triggering backfill"
+                        ),
                         symbol,
                         interval,
                         deq[-1]["close_time"],

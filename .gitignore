@@ -37,6 +37,7 @@ htmlcov/
 *.pid
 
 # IDE / OS
+.cursor/mcp.json
 .idea/
 # .vscode/ is committed (team settings) — do not ignore
 .DS_Store

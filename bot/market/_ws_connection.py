@@ -58,7 +58,10 @@ def compute_disconnect_delay(
     log_reason = "keepalive_ping_timeout" if keepalive_timeout else str(exc)
     LOG.log(
         level,
-        "ws disconnected | endpoint=%s url=%s reason=%s close_detail=%s uptime=%.1fs retry_in=%.1fs streak=%d",
+        (
+            "ws disconnected | endpoint=%s url=%s reason=%s close_detail=%s "
+            "uptime=%.1fs retry_in=%.1fs streak=%d"
+        ),
         endpoint,
         url,
         log_reason,
@@ -109,7 +112,10 @@ async def evaluate_endpoint_health(manager: Any, ws: Any, endpoint: str) -> bool
                 ):
                     # fix-loop-5: planned reconnect — warning only (not a crash)
                     LOG.warning(
-                        "ws market recovery failed | endpoint=%s age=%.1fs fresh_tickers=%s fresh_mark_prices=%s - forcing reconnect",
+                        (
+                            "ws market recovery failed | endpoint=%s age=%.1fs "
+                            "fresh_tickers=%s fresh_mark_prices=%s - forcing reconnect"
+                        ),
                         endpoint,
                         recovery_age,
                         snapshot.get("fresh_tickers"),
@@ -122,7 +128,10 @@ async def evaluate_endpoint_health(manager: Any, ws: Any, endpoint: str) -> bool
             preview = stale_streams[:3]
             stale_symbols = list({s.split(":")[0] for s in stale_streams})
             LOG.info(
-                "ws stale kline data | endpoint=%s streams=%d sample=%s - backfilling (not reconnecting)",
+                (
+                    "ws stale kline data | endpoint=%s streams=%d sample=%s "
+                    "- backfilling (not reconnecting)"
+                ),
                 endpoint,
                 len(stale_streams),
                 preview,
@@ -144,7 +153,8 @@ async def evaluate_endpoint_health(manager: Any, ws: Any, endpoint: str) -> bool
             connected_at = manager._connected_at_by_endpoint.get(endpoint, 0.0)
             if connected_at > 0.0 and time.monotonic() - connected_at >= grace_seconds:
                 LOG.warning(
-                    "ws public recovery failed | endpoint=%s fresh_book_tickers=0 - forcing reconnect",
+                    "ws public recovery failed | endpoint=%s fresh_book_tickers=0 "
+                    "- forcing reconnect",
                     endpoint,
                 )
                 await ws.close()

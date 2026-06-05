@@ -75,6 +75,7 @@ class PublicAuditLedger:
         self._enabled = enabled
         self._lock = Lock()
         self._action_history: deque[tuple[Signal, datetime]] = deque(maxlen=256)
+        self._async_tasks: set[asyncio.Task[Any]] = set()
         if enabled:
             self._root.mkdir(parents=True, exist_ok=True)
 
@@ -129,7 +130,9 @@ class PublicAuditLedger:
         except RuntimeError:
             self._append_row_sync(row)
         else:
-            loop.create_task(asyncio.to_thread(self._append_row_sync, row))
+            task = loop.create_task(asyncio.to_thread(self._append_row_sync, row))
+            self._async_tasks.add(task)
+            task.add_done_callback(self._async_tasks.discard)
 
     def _append_row_sync(self, row: AuditRow) -> None:
         with self._lock:

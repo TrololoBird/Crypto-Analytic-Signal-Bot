@@ -296,7 +296,8 @@ async def migrate_db(conn: aiosqlite.Connection) -> int:
             continue
         if not await _migration_prerequisites_met(conn, version):
             LOG.info(
-                "db migration deferred | version=%d description=%s reason=missing_prerequisite_tables",
+                "db migration deferred | version=%d description=%s "
+                "reason=missing_prerequisite_tables",
                 version,
                 description,
             )

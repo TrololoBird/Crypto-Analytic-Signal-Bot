@@ -427,12 +427,15 @@ async def main() -> int:
                     signal_ts = ts_ms_from_iso(case["signal_created_at"])
                     sl_ts = ts_ms_from_iso(case["sl_hit_at"])
                     anchor_ts = signal_ts or sl_ts
+                    if anchor_ts is None:
+                        LOG.warning(
+                            "skip candle fetch | tracking_id=%s symbol=%s reason=missing_timestamps",
+                            tracking_id,
+                            symbol,
+                        )
+                        continue
 
                     try:
-                        if anchor_ts is None:
-                            msg = "missing timestamps for candle fetch"
-                            raise ValueError(msg)
-
                         tf = case["timeframe"].split("+")[0].strip() or "15m"
                         windows = await fetcher.fetch_window(
                             symbol,

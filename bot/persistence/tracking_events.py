@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from bot.persistence.tracked import TrackedSignalState
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from bot.persistence.tracked import TrackedSignalState
 
 
 @dataclass(frozen=True, slots=True)

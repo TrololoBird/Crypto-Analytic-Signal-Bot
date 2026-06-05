@@ -252,11 +252,13 @@ async def analyze_archive(*, write_report: bool = True) -> str:
         if len(btc_drag) >= 2:
             lines.append("")
             lines.append("### C3 — BTC_DRAG sessions")
-            for c in btc_drag:
-                lines.append(
+            lines.extend(
+                (
                     f"- {c['run_date'][:10]} {c['setup_id']} {c['symbol']} "
                     f"BTC {c['btc_move_sl_candle_pct']:.2f}%"
                 )
+                for c in btc_drag
+            )
 
         # TIER 3
         print("\n=== TIER 3: STATISTICAL HYPOTHESES (deferred) ===")

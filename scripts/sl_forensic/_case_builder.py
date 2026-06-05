@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import aiosqlite
+if TYPE_CHECKING:
+    import aiosqlite
 
 from scripts.sl_forensic._classifier import (
     assess_closed_candle_validity,

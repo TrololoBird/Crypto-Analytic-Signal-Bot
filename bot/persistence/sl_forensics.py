@@ -268,7 +268,7 @@ def build_forensic_case(
     row: dict[str, Any],
     *,
     candles_15m: pl.DataFrame | None = None,
-    candles_1h: pl.DataFrame | None = None,
+    _candles_1h: pl.DataFrame | None = None,
     btc_candles_15m: pl.DataFrame | None = None,
     bars_before: int = 0,
     bars_after: int = 0,
@@ -317,7 +317,7 @@ def build_forensic_case(
     if candles_15m is not None and not candles_15m.is_empty() and event_dt is not None:
         try:
             work = _prepare_frame(candles_15m)
-        except Exception:
+        except (ValueError, TypeError, RuntimeError):
             work = candles_15m
         closed_valid, roc_signal, roc_prev = assess_closed_candle_validity(
             work, event_dt=event_dt, direction=direction
@@ -349,7 +349,7 @@ def build_forensic_case(
                 btc_roc = _roc10_at_index(btc_closed, btc_closed.height - 1)
                 btc_dir = _direction_from_roc(btc_roc, threshold=0.05)
                 btc_aligned = btc_dir is None or btc_dir == direction.lower()
-        except Exception:
+        except (ValueError, TypeError, RuntimeError):
             pass
 
     entry_deviation = 0.0
@@ -492,8 +492,7 @@ def render_aggregate_report(
         lines.append("- Недостаточно кейсов для агрегированных выводов — собрать post-fix sample.")
 
     lines.extend(["", "## Per-case cards", ""])
-    for case in cases:
-        lines.append(render_case_card(case))
+    lines.extend(render_case_card(case) for case in cases)
     return "\n".join(lines)
 
 

@@ -169,6 +169,7 @@ class TelemetryStore:
         self.raw_dir.mkdir(parents=True, exist_ok=True)
         self.features_dir.mkdir(parents=True, exist_ok=True)
         self.replay_dir.mkdir(parents=True, exist_ok=True)
+        self._async_tasks: set[asyncio.Task[Any]] = set()
         if run_id:
             metadata_path = self.base_dir / "run_metadata.json"
             if not metadata_path.exists():
@@ -230,7 +231,7 @@ class TelemetryStore:
         except RuntimeError:
             _jsonl_append_line(path, line, max_size_mb=self.rotation_max_mb)
         else:
-            loop.create_task(
+            task = loop.create_task(
                 asyncio.to_thread(
                     _jsonl_append_line,
                     path,
@@ -238,6 +239,8 @@ class TelemetryStore:
                     max_size_mb=self.rotation_max_mb,
                 )
             )
+            self._async_tasks.add(task)
+            task.add_done_callback(self._async_tasks.discard)
 
     def write_rejection_summary(self, cycle_id: str, rejections: dict[str, int]) -> None:
         self.append_jsonl(

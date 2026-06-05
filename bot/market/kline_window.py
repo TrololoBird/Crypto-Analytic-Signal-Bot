@@ -27,10 +27,7 @@ async def fetch_klines_window(
     if seconds is None:
         msg = f"unsupported interval for forensic window: {interval}"
         raise ValueError(msg)
-    if center.tzinfo is None:
-        center = center.replace(tzinfo=UTC)
-    else:
-        center = center.astimezone(UTC)
+    center = center.replace(tzinfo=UTC) if center.tzinfo is None else center.astimezone(UTC)
     span = int(bars_before) + int(bars_after) + 5
     start = center - timedelta(seconds=seconds * max(1, bars_before))
     end = center + timedelta(seconds=seconds * max(1, bars_after))
@@ -69,7 +66,7 @@ async def fetch_forensic_candle_pack(
                 bars_before=bars_before,
                 bars_after=bars_after,
             )
-        except Exception:
+        except (OSError, ValueError, RuntimeError):
             packs[tf] = pl.DataFrame()
     if symbol != "BTCUSDT":
         try:
@@ -81,7 +78,7 @@ async def fetch_forensic_candle_pack(
                 bars_before=bars_before,
                 bars_after=bars_after,
             )
-        except Exception:
+        except (OSError, ValueError, RuntimeError):
             packs["btc_15m"] = pl.DataFrame()
     return packs
 

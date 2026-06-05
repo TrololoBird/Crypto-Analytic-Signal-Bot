@@ -99,6 +99,7 @@ class SignalDiagnostics:
         self._lock = threading.Lock()
         self._window = self._new_window(_utc_now())
         self._previous_windows: list[dict[str, Any]] = []
+        self._async_tasks: set[asyncio.Task[Any]] = set()
 
     def record_detector_run(self, setup_id: str) -> None:
         """Record that a detector was evaluated.
@@ -447,7 +448,9 @@ class SignalDiagnostics:
         except RuntimeError:
             self._export_jsonl_sync(output_path, line)
         else:
-            loop.create_task(asyncio.to_thread(self._export_jsonl_sync, output_path, line))
+            task = loop.create_task(asyncio.to_thread(self._export_jsonl_sync, output_path, line))
+            self._async_tasks.add(task)
+            task.add_done_callback(self._async_tasks.discard)
 
     @staticmethod
     def _export_jsonl_sync(output_path: Path, line: str) -> None:

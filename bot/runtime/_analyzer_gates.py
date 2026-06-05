@@ -5,10 +5,10 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
-from bot.domain.schemas import PreparedSymbol, Signal
 from bot.runtime_policy import is_deep_analysis_symbol
 
 if TYPE_CHECKING:
+    from bot.domain.schemas import PreparedSymbol, Signal
     from bot.runtime.bot import SignalBot
 
 

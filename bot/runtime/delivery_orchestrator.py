@@ -19,7 +19,6 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from bot.delivery import contract as _delivery_contract_module
-from bot.delivery.contract import SignalContractIssue
 from bot.delivery.tiers import _finite_score, decide_with_caps
 from bot.delivery.tiers import rank_key as tier_rank_key
 from bot.domain.delivery_policy import r_class_blocks_action, resolve_bear_regime
@@ -29,14 +28,14 @@ from bot.domain.mtf import (
     evaluate_mtf_gate,
     normalize_mtf_reject_reason,
 )
-from bot.domain.schemas import Signal
 from bot.persistence.outcomes import build_prepared_feature_snapshot, extract_features_from_signal
 from bot.runtime.errors import DEFENSIVE_EXC
 
 from .merge import MetaSignalMerger
 
 if TYPE_CHECKING:
-    from bot.domain.schemas import PreparedSymbol
+    from bot.delivery.contract import SignalContractIssue
+    from bot.domain.schemas import PreparedSymbol, Signal
     from bot.persistence.tracking import SignalTrackingEvent
     from bot.runtime.bot import SignalBot
 
@@ -530,10 +529,11 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
             superseded: (
                 list[SignalTrackingEvent] | None
             ) = await self._bot.tracker.supersede_open_signal(new_signal, dry_run=False)
-            return superseded
         except DEFENSIVE_EXC as exc:
             LOG.debug("supersede failed for %s: %s", new_signal.symbol, exc)
             return None
+        else:
+            return superseded
 
     def _quality_monitor_rejects(
         self,
