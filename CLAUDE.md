@@ -79,7 +79,7 @@ WS kline close → EventBus → SymbolAnalyzer → SignalEngine → DeliveryOrch
 
 - **DUAL PERSISTENCE (resolved Phase E):** legacy `signals` / `outcomes` tables are now **READ-ONLY**. All runtime writes go to `active_signals` / `signal_outcomes`. Dashboard/analytics still reads legacy tables. Do not add writes to legacy tables. Planned: drop legacy tables in a future schema migration (Phase H, not yet started).
 - **Phase G (tracking):** `tracking.py` split — lifecycle ~998 LOC; review in `_tracking_review.py` (~935); Telegram ids in `_tracking_telegram.py` (~103). Stats helpers (`_stats_snapshot`, `_record_setup_outcome`) stayed in `tracking.py` (<150 LOC, no `_tracking_stats.py`).
-- **21 files remain above 1,000 LOC.** Largest: `bot/dashboard/app.py` (~1,779), `bot/market/ws.py` (~1,777). Runtime priorities: `symbol_analyzer.py` (~1,459), `delivery_orchestrator.py` (~1,323).
+- **20 files remain above 1,000 LOC** (post-G). Largest: `bot/dashboard/app.py` (~1,779), `bot/market/ws.py` (~1,777). Runtime priorities: `symbol_analyzer.py` (~1,459), `delivery_orchestrator.py` (~1,323).
 - **Phase F** decomposed `memory.py` / `symbol_analyzer.py` / `delivery_orchestrator.py` partially; all three remain above 1,000 LOC. Further extraction deferred.
 - **`bot/market/scheduler.py`** — kept; `bot/runtime/kline_handler.py` imports `analysis_intervals`. Do not delete.
 
