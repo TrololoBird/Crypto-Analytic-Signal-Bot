@@ -130,7 +130,7 @@ def _ops_webhook_auto_enable_warning(config_path: Path) -> str | None:
     try:
         with config_path.open("rb") as handle:
             raw = tomllib.load(handle)
-    except OSError, tomllib.TOMLDecodeError:
+    except (OSError, tomllib.TOMLDecodeError):
         return None
     webhook = raw.get("bot", {}).get("notifiers", {}).get("webhook", {})
     if not isinstance(webhook, dict):

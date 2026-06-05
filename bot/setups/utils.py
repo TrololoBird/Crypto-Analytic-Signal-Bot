@@ -23,7 +23,7 @@ def coerce_int(value: object, default: int) -> int:
         return int(value)
     try:
         return int(float(value))
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return int(default)
 
 
@@ -32,7 +32,7 @@ def coerce_float(value: object, default: float) -> float:
         return float(value)
     try:
         numeric = float(value)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return default
     return numeric if math.isfinite(numeric) else default
 

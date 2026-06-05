@@ -230,7 +230,7 @@ def _frame_metric(
         return None, (column,), ()
     try:
         numeric = float(value)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return None, (), (column,)
     if not math.isfinite(numeric):
         return None, (), (column,)

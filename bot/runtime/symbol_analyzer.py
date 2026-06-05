@@ -120,7 +120,7 @@ def _apply_setup_score_adjustment(
     """Apply adaptive setup scoring without converting mild penalties into hard blocks."""
     try:
         adjustment = float(score_adjustment)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         adjustment = 0.0
     if not adjustment:
         return signal, {"applied": False, "adjustment": 0.0}
@@ -222,13 +222,13 @@ class AnalyzerContextMixin(AnalyzerMixinBase):
             return None
         try:
             value = frame.item(-1, column)
-        except IndexError, TypeError, ValueError:
+        except (IndexError, TypeError, ValueError):
             return None
         try:
             if value is None:
                 return None
             numeric = float(value)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             return None
         return (
             numeric if numeric == numeric and numeric not in (float("inf"), float("-inf")) else None
@@ -837,7 +837,7 @@ class AnalyzerFramesMixin(AnalyzerContextMixin, _AnalyzerFamilyGatesBase):
         next_last_price = item.last_price
         try:
             ticker_last_price = float(ticker.get("last_price") or 0.0)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             return item
         if ticker_last_price > 0:
             next_last_price = ticker_last_price

@@ -190,5 +190,5 @@ def ts_ms_from_iso(value: str | None) -> int | None:
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=UTC)
         return int(dt.timestamp() * 1000)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return None

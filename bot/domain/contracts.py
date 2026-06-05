@@ -91,7 +91,7 @@ def _normalized_float(value: Any, default: float | None = None) -> float | None:
         return default
     try:
         parsed = float(value)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return default
     if math.isnan(parsed) or math.isinf(parsed):
         return default

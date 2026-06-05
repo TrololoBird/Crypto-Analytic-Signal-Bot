@@ -100,7 +100,7 @@ def validate_limit(limit: int, min_val: int = 1, max_val: int = 1500) -> None:
     if not isinstance(limit, int):
         try:
             limit = int(limit)
-        except ValueError, TypeError:
+        except (ValueError, TypeError):
             msg = f"limit must be an integer: {limit!r}"
             raise ValueError(msg) from None
     if limit < min_val or limit > max_val:
@@ -666,7 +666,7 @@ class RestHttpMixin(RestCircuitMixin):
             return None
         try:
             retry_after = max(0, int(float(retry_after_raw)))
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             return None
         if retry_after > 0:
             self._set_operation_rate_limit_pause(operation, retry_after)
@@ -687,7 +687,7 @@ class RestHttpMixin(RestCircuitMixin):
         }:
             try:
                 limit = int((params or {}).get("limit") or _DEFAULT_KLINE_FETCH_LIMIT)
-            except TypeError, ValueError:
+            except (TypeError, ValueError):
                 limit = _DEFAULT_KLINE_FETCH_LIMIT
             if limit < 100:
                 return 1
@@ -701,7 +701,7 @@ class RestHttpMixin(RestCircuitMixin):
                 limit = validate_order_book_depth_limit(
                     int((params or {}).get("limit") or _DEFAULT_ORDER_BOOK_DEPTH_LIMIT)
                 )
-            except TypeError, ValueError:
+            except (TypeError, ValueError):
                 limit = _DEFAULT_ORDER_BOOK_DEPTH_LIMIT
             if limit <= 50:
                 return 5
@@ -748,12 +748,12 @@ class RestHttpMixin(RestCircuitMixin):
                 server_weight = int(weight_raw)
                 self._last_rest_weight_1m = server_weight
                 self._weight_budget.force_floor(server_weight)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             self._last_rest_weight_1m = None
         try:
             if response_time_raw is not None:
                 self._last_rest_response_time_ms = float(response_time_raw.rstrip("ms"))
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             self._last_rest_response_time_ms = None
 
     async def _get_http_session(self) -> aiohttp.ClientSession:
@@ -1325,7 +1325,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         last_update_raw = payload.get("lastUpdateId") or payload.get("last_update_id")
         try:
             last_update_id = float(last_update_raw) if last_update_raw is not None else None
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             last_update_id = None
         snapshot: dict[str, float | None] = {
             "bid_price": bids[0][0],
@@ -1914,7 +1914,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
                         "markPrice": float(item.get("markPrice") or 0.0),
                     }
                 )
-            except TypeError, ValueError:
+            except (TypeError, ValueError):
                 continue
         rows.sort(key=lambda r: r["fundingTime"])
         self._funding_history_cache[symbol] = (now, rows)
@@ -2244,7 +2244,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             try:
                 rate = float(row.get("fundingRate") or 0.0)
                 funding_time = int(row.get("fundingTime") or 0)
-            except TypeError, ValueError:
+            except (TypeError, ValueError):
                 continue
             if funding_time <= 0:
                 continue
@@ -2303,7 +2303,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             try:
                 futures_price = float(row.get("futuresPrice") or 0.0)
                 index_price = float(row.get("indexPrice") or 0.0)
-            except TypeError, ValueError:
+            except (TypeError, ValueError):
                 continue
             if index_price <= 0.0:
                 continue

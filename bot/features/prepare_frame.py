@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 # Pure-Polars fallbacks are canonical; no TA-Lib / pandas on the live path.
 try:
     _plta_module = importlib_util.find_spec("polars_ta.ta")
-except ImportError, ModuleNotFoundError:
+except (ImportError, ModuleNotFoundError):
     _plta_module = None
 
 if _plta_module is not None:
@@ -44,7 +44,7 @@ _USE_POLARS_TA_BACKEND = _HAS_POLARS_TA
 
 try:
     _polars_ols_module = importlib_util.find_spec("polars_ols")
-except ImportError, ModuleNotFoundError:
+except (ImportError, ModuleNotFoundError):
     _polars_ols_module = None
 
 if _polars_ols_module is not None:
@@ -119,7 +119,7 @@ def _tail_value_signature(row: dict[str, object]) -> tuple[_FrameCacheValue, ...
             continue
         try:
             value = float(cast("Any", raw))
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             values.append(None)
             continue
         values.append(None if value != value else value)
@@ -147,7 +147,7 @@ def _normalize_rsi_scale(series: pl.Series, *, name: str) -> pl.Series:
     try:
         max_float = float(max_value) if max_value is not None else 100.0
         min_float = float(min_value) if min_value is not None else 0.0
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return numeric.rename(name)
     if max_float <= 1.5 and min_float >= -0.01:
         return (numeric * 100.0).rename(name)
@@ -157,11 +157,11 @@ def _normalize_rsi_scale(series: pl.Series, *, name: str) -> pl.Series:
 def _numeric_item(df: pl.DataFrame, row: int, column: str, default: float = 0.0) -> float:
     try:
         value = df.item(row, column)
-    except IndexError, ValueError:
+    except (IndexError, ValueError):
         return default
     try:
         return default if value is None else float(value)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return default
 
 
@@ -176,7 +176,7 @@ def _as_float_like(value: object, default: float = 0.0) -> float:
 def _as_optional_float(value: object) -> float | None:
     try:
         numeric = float(cast("Any", value)) if value is not None else None
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return None
     if numeric is None or not np.isfinite(numeric):
         return None
@@ -368,7 +368,7 @@ def _infer_epoch_time_unit(values: pl.Series) -> str | None:
         return None
     try:
         max_abs = float(values.abs().max())
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return None
     if max_abs >= 1_000_000_000_000_000_000:
         return "ns"

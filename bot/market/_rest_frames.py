@@ -139,7 +139,7 @@ def _coerce_rest_row(item: Any) -> Mapping[str, Any]:
 def _safe_float(value: Any, default: float = 0.0) -> float:
     try:
         numeric = float(value)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return default
     return numeric if math.isfinite(numeric) else default
 
@@ -154,7 +154,7 @@ def _parse_depth_levels(raw_levels: Any, *, reverse: bool) -> tuple[tuple[float,
         try:
             price = float(raw[0])
             qty = float(raw[1])
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             continue
         if price <= 0.0 or qty <= 0.0 or (not math.isfinite(price)) or (not math.isfinite(qty)):
             continue

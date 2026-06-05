@@ -70,14 +70,14 @@ def _utc_now() -> datetime:
 def _safe_float(value: Any, default: float = 0.0) -> float:
     try:
         return float(value)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return default
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
     try:
         return int(float(value))
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return default
 
 
@@ -88,7 +88,7 @@ def _parse_ts(value: Any) -> datetime | None:
         return value if value.tzinfo else value.replace(tzinfo=UTC)
     try:
         parsed = datetime.fromisoformat(str(value))
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return None
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
@@ -174,7 +174,7 @@ def _tracking_open_counts(bot: Any) -> dict[str, int]:
                 "SELECT status, COUNT(*) FROM active_signals "
                 "WHERE status IN ('pending','active') GROUP BY status"
             ).fetchall()
-    except OSError, sqlite3.Error:
+    except (OSError, sqlite3.Error):
         return {"pending": 0, "active": 0, "open": 0}
     counts = {str(status): int(count) for status, count in rows}
     pending = counts.get("pending", 0)

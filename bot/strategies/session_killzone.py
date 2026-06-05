@@ -31,7 +31,7 @@ def _finite_or_none(value: object) -> float | None:
         return None
     try:
         numeric = float(value)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return None
     return numeric if math.isfinite(numeric) else None
 
@@ -79,7 +79,7 @@ def _hour_param(params: dict[str, object], key: str, default: int) -> int:
     value = params.get(key, default)
     try:
         hour = int(float(cast("Any", value)))
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return default
     return max(0, min(hour, 24))
 

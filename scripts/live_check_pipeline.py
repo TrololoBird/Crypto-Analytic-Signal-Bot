@@ -189,7 +189,7 @@ def _liquidity_rank(symbol: str, *, ticker_rows: list[dict[str, Any]]) -> int | 
             continue
         try:
             volume = float(row.get("quote_volume") or 0.0)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             volume = 0.0
         ranked.append((candidate, volume))
     ranked.sort(key=lambda item: item[1], reverse=True)
@@ -217,7 +217,7 @@ def _top_volume_symbols(
             continue
         try:
             quote_volume = float(row.get("quote_volume") or 0.0)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             quote_volume = 0.0
         if quote_volume > 0.0:
             rows.append((symbol, quote_volume))

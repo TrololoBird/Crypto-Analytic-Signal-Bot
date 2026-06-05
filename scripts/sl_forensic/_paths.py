@@ -21,7 +21,7 @@ def git_short_hash() -> str | None:
             text=True,
             stderr=subprocess.DEVNULL,
         ).strip()
-    except subprocess.CalledProcessError, FileNotFoundError, OSError:
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
         return None
 
 

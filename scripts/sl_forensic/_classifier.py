@@ -176,7 +176,7 @@ def _parse_dt(value: Any) -> datetime | None:
         return None
     try:
         parsed = datetime.fromisoformat(str(value))
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return None
     return parsed.astimezone(UTC) if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
@@ -189,7 +189,7 @@ def _roc10_at_index(work: pl.DataFrame, end_idx: int, lookback: int = 10) -> flo
     try:
         start = float(work.item(start_idx, "close"))
         end = float(work.item(end_idx, "close"))
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return None
     if start <= 0.0 or end <= 0.0:
         return None
@@ -260,7 +260,7 @@ def extract_indicator_snapshot(features_json: str | None) -> dict[str, Any]:
         return {}
     try:
         raw = json.loads(features_json)
-    except json.JSONDecodeError, TypeError:
+    except (json.JSONDecodeError, TypeError):
         return {}
     if not isinstance(raw, dict):
         return {}

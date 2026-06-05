@@ -24,7 +24,7 @@ def _json_safe(value: Any) -> Any:
     if hasattr(value, "item"):
         try:
             return _json_safe(value.item())
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             pass
     return str(value)
 
@@ -37,14 +37,14 @@ def _frame_tail(frame: Any, *, max_rows: int) -> dict[str, Any] | None:
         return None
     try:
         height = int(frame.height)
-    except AttributeError, TypeError, ValueError:
+    except (AttributeError, TypeError, ValueError):
         return None
     if height <= 0:
         return None
     tail = frame.tail(max_rows)
     try:
         rows = tail.to_dicts()
-    except AttributeError, TypeError, ValueError:
+    except (AttributeError, TypeError, ValueError):
         return {"row_count": height}
     return {"row_count": height, "tail": _json_safe(rows)}
 

@@ -127,7 +127,7 @@ async def _fetch_klines_range(
     for row in rows:
         try:
             dedup[int(row[0])] = row
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             continue
     ordered = [dedup[key] for key in sorted(dedup)]
     return _drop_incomplete_ohlcv_tail(_klines_to_frame(ordered), interval)
@@ -193,7 +193,7 @@ async def _fetch_history_bundle(
 def _safe_float(value: object, default: float = 0.0) -> float:
     try:
         numeric = float(value)  # type: ignore[arg-type]
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return default
     return numeric if math.isfinite(numeric) else default
 

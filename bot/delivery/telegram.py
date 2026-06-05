@@ -125,7 +125,7 @@ def _extract_retry_after_seconds(description: str) -> int | None:
         return None
     try:
         value = int(match.group(1))
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return None
     return value if value > 0 else None
 
@@ -139,7 +139,7 @@ def _telegram_rate_limit_wait(exc: BaseException) -> int | None:
                 value = int(retry_after)
                 if value > 0:
                     return value
-            except TypeError, ValueError:
+            except (TypeError, ValueError):
                 pass
     retry_after = getattr(exc, "retry_after", None)
     if retry_after is not None:
@@ -147,7 +147,7 @@ def _telegram_rate_limit_wait(exc: BaseException) -> int | None:
             value = int(retry_after)
             if value > 0:
                 return value
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             pass
     parsed = _extract_retry_after_seconds(str(exc))
     if parsed:

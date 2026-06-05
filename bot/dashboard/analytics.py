@@ -210,6 +210,6 @@ class StrategyAnalytics:
             return value if value.tzinfo else value.replace(tzinfo=UTC)
         try:
             parsed = datetime.fromisoformat(str(value))
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             return None
         return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)

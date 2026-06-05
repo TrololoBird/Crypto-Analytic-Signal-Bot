@@ -47,7 +47,7 @@ class SpecHit:
 def as_float(value: object, default: float = 0.0) -> float:
     try:
         numeric = float(value) if value is not None else default
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return default
     return numeric if math.isfinite(numeric) else default
 
@@ -57,7 +57,7 @@ def finite_or_none(value: object) -> float | None:
         return None
     try:
         numeric = float(value)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return None
     return numeric if math.isfinite(numeric) else None
 

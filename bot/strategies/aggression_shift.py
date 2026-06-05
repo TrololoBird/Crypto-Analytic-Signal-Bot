@@ -80,7 +80,7 @@ def _delta_shift_candidate(
             raw_current = work.item(idx, "delta_ratio")
             try:
                 current = float(raw_current) - 0.5
-            except TypeError, ValueError:
+            except (TypeError, ValueError):
                 continue
             if not math.isfinite(current):
                 continue
@@ -88,7 +88,7 @@ def _delta_shift_candidate(
             for raw_value in work["delta_ratio"].slice(max(0, idx - 20), min(20, idx)).to_list():
                 try:
                     value = float(raw_value) - 0.5
-                except TypeError, ValueError:
+                except (TypeError, ValueError):
                     continue
                 if math.isfinite(value):
                     baseline_values.append(value)

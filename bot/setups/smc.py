@@ -711,7 +711,7 @@ def _is_missing(value: object) -> bool:
         return True
     try:
         return bool(np.isnan(cast("Any", value)))
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return False
 
 

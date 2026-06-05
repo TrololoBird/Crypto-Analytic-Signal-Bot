@@ -973,7 +973,7 @@ class BotSettings(_StrictModel):
             for item in value:
                 try:
                     ids.append(int(item))
-                except TypeError, ValueError:
+                except (TypeError, ValueError):
                     continue
             return tuple(sorted(set(ids)))
         return ()

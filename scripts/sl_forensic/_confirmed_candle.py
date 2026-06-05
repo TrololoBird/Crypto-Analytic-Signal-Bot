@@ -17,7 +17,7 @@ def _parse_signal_dt(value: str | None) -> datetime | None:
         return None
     try:
         parsed = datetime.fromisoformat(str(value))
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return None
     return parsed.astimezone(UTC) if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 

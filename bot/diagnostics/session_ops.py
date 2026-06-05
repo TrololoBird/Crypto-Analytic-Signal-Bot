@@ -357,7 +357,7 @@ def parse_cycle_log_lines(lines: Iterable[str]) -> dict[str, Any]:
                     if "rejected=" in part:
                         parsed["rejected_total"] += int(part.split("rejected=")[1].split()[0])
                 parsed["cycles"] += 1
-            except IndexError, ValueError:
+            except (IndexError, ValueError):
                 continue
 
         if "ERROR" in line or "error" in line.lower():
