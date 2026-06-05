@@ -10,6 +10,8 @@
 
 **Solo ops:** [docs/SOLO_OPERATOR_PLAYBOOK.md](docs/SOLO_OPERATOR_PLAYBOOK.md) — human directs, agent executes all commands.
 
+**GitHub token / CI / Cursor MCP:** [docs/GITHUB_CURSOR_SETUP.md](docs/GITHUB_CURSOR_SETUP.md) — `GITHUB_TOKEN` in `.env`, `./scripts/verify_github_token.sh`.
+
 ## Invariants
 
 - Delivery: `validate_signal_contract` → `hard_confluence_gate` (3/5) → `deliver`

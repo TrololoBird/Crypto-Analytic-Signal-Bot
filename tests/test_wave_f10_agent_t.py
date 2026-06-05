@@ -262,7 +262,6 @@ def test_funnel_reconcile_matches_delivery_success(tmp_path: Path) -> None:
 
 
 def test_dashboard_funnel_reconcile_route_registered() -> None:
-    pytest.importorskip("fastapi")
     dashboard = BotDashboard(
         bot=SimpleNamespace(
             settings=SimpleNamespace(
