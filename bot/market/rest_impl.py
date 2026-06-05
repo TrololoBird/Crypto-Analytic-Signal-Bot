@@ -11,6 +11,7 @@ import time
 from abc import ABC, abstractmethod
 from collections import deque
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urlparse
 
@@ -422,7 +423,32 @@ class RestHttpMixin(RestCircuitMixin):
             except MarketDataUnavailable as exc:
                 last_error = exc
                 detail = str(exc.detail or "")
+                is_ip_ban = "418 ip ban" in detail
+                # On IP ban: activate first available proxy even without rotation alternatives,
+                # then retry once with a clean IP.
+                if is_ip_ban and failover and pool is not None and attempt == 0:
+                    first = pool.current()
+                    if first and first != getattr(self, "_proxy_url", None):
+                        await self._apply_active_proxy(first)
+                        self._rate_limit_pause_until = 0.0
+                        self._futures_data_pause_until = 0.0
+                        continue
+                # No ready proxy — kick off background discovery so future requests recover.
+                if (
+                    is_ip_ban
+                    and not getattr(self, "_proxy_discovery_in_progress", False)
+                    and hasattr(self, "_auto_discover_and_apply_proxy")
+                ):
+                    _disc_task = asyncio.create_task(
+                        self._auto_discover_and_apply_proxy(),
+                        name="auto_proxy_discovery",
+                    )
+                    _disc_task.add_done_callback(
+                        lambda t: t.exception() if not t.cancelled() else None
+                    )
                 if attempt + 1 < attempts and await self._try_failover_proxy(detail):
+                    self._rate_limit_pause_until = 0.0
+                    self._futures_data_pause_until = 0.0
                     continue
                 raise
             except aiohttp.ClientError as exc:
@@ -591,6 +617,14 @@ class RestHttpMixin(RestCircuitMixin):
         else:
             pause_remaining = self._rate_limit_pause_until - time.monotonic()
         if pause_remaining > 0:
+            # Long pauses (418 IP ban: 1800s) must not block the event loop.
+            # Raise immediately so callers can degrade gracefully; short pauses sleep normally.
+            if pause_remaining > 120:
+                raise MarketDataUnavailable(
+                    operation=operation,
+                    detail=f"rate_limit_paused_{pause_remaining:.0f}s",
+                    symbol=symbol,
+                )
             LOG.debug(
                 "rate-limit backoff | sleeping=%.1fs operation=%s", pause_remaining, operation
             )
@@ -732,7 +766,11 @@ class RestHttpMixin(RestCircuitMixin):
     async def _get_http_session(self) -> aiohttp.ClientSession:
         session = self._http_session
         if session is None or session.closed:
-            timeout = aiohttp.ClientTimeout(total=self._rest_timeout)
+            timeout = aiohttp.ClientTimeout(
+                total=self._rest_timeout,
+                connect=min(8.0, self._rest_timeout),
+                sock_connect=5.0,
+            )
             self._http_session = create_aiohttp_session(
                 proxy_url=getattr(self, "_proxy_url", None),
                 trust_env=bool(getattr(self, "_trust_env", True)),
@@ -873,6 +911,8 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         self._last_endpoint_fallback_used: bool = False
         self._last_endpoint_limiter_wait_ms: float = 0.0
         self._last_endpoint_response_age_s: float | None = None
+        self._proxy_discovery_in_progress: bool = False
+        self._config_path: Path = Path("config.toml")
 
     async def _apply_active_proxy(self, url: str | None) -> None:
         self._proxy_url = url
@@ -883,6 +923,43 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         ws = self._ws
         if ws is not None and hasattr(ws, "update_proxy_url"):
             ws.update_proxy_url(url, trust_env=self._trust_env)
+
+    async def _auto_discover_and_apply_proxy(self) -> None:
+        """Background: discover a working Binance proxy after IP ban and apply hot."""
+        if getattr(self, "_proxy_discovery_in_progress", False):
+            return
+        self._proxy_discovery_in_progress = True
+        LOG.warning("ip ban — starting background proxy discovery")
+        try:
+            cfg = getattr(self, "_config_path", Path("config.toml"))
+            if not cfg.is_file():
+                LOG.warning("auto proxy discovery: config not found | path=%s", cfg)
+                return
+            from bot.domain.config import load_settings as _ls  # noqa: PLC0415
+            from bot.market.proxy_bootstrap import _run_discovery  # noqa: PLC0415
+
+            await asyncio.to_thread(_run_discovery, cfg)
+            new_settings = _ls(cfg)
+            new_urls = new_settings.network.effective_proxy_urls()
+            if not new_urls:
+                LOG.warning("auto proxy discovery: no working proxy found")
+                return
+            new_pool = ProxyPool.from_urls(
+                new_urls, cooldown_seconds=new_settings.network.failover_cooldown_seconds
+            )
+            if new_pool is None:
+                return
+            self._proxy_pool = new_pool
+            first = new_pool.current()
+            if first:
+                await self._apply_active_proxy(first)
+                self._rate_limit_pause_until = 0.0
+                self._futures_data_pause_until = 0.0
+                LOG.info("auto proxy applied | url=%s", mask_proxy_url(first))
+        except Exception as exc:  # noqa: BLE001
+            LOG.warning("auto proxy discovery failed | error=%s", exc)
+        finally:
+            self._proxy_discovery_in_progress = False
 
     async def _try_failover_proxy(self, reason: str) -> bool:
         if not self._proxy_failover_enabled:

@@ -85,7 +85,7 @@ _CACHE_TTL = {
     "global_ls_ratio": 600,
     "funding_rate": 300,
     "funding_history": 1800,
-    "basis": 600,
+    "basis": 1800,
     "continuous_klines": 1800,
     "mark_price_klines": 1800,
     "index_price_klines": 1800,

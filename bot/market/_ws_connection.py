@@ -21,8 +21,9 @@ _WS_CONNECT_TIMEOUT_SECONDS = 60.0
 _WS_CLOSE_TIMEOUT_SECONDS = 10.0
 # fix-20260604: module-local constants (ws.py imports this module; avoid circular import)
 _BACKOFF_RESET_AFTER_SECONDS = 90.0
-_WS_PING_INTERVAL_SECONDS = 20.0
-_WS_PING_TIMEOUT_SECONDS = 60.0
+# Binance server sends pings every 3 min; client must pong within 10 min.
+# Disable client-initiated pings — they cause keepalive_ping_timeout ~80s on fstream.
+_WS_PING_INTERVAL_SECONDS: float | None = None
 
 
 def compute_disconnect_delay(
@@ -298,7 +299,6 @@ async def run_stream_session(
         websockets.connect(
             url,
             ping_interval=_WS_PING_INTERVAL_SECONDS,
-            ping_timeout=_WS_PING_TIMEOUT_SECONDS,
             close_timeout=_WS_CLOSE_TIMEOUT_SECONDS,
             **connect_kwargs,
         ),
