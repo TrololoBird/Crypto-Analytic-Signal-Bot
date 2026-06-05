@@ -18,12 +18,9 @@ from collections import Counter
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from bot.delivery.contract import validate_signal_contract
-from bot.delivery.tiers import decide_with_caps
+from bot.delivery.tiers import _finite_score, decide_with_caps
 from bot.delivery.tiers import rank_key as tier_rank_key
-from bot.delivery.trade_plan import evaluate_publish_readiness
 from bot.domain.delivery_policy import r_class_blocks_action, resolve_bear_regime
-from bot.domain.limit_entry import resolve_late_entry_chase_pct
 from bot.domain.mtf import (
     BREAKOUT_PROFILE,
     REVERSAL_PROFILES,
@@ -1107,7 +1104,7 @@ class DeliveryOrchestrator(DeliveryRankingMixin, DeliveryWatchMixin):
             )
             session_used = int(getattr(self._bot, "_session_action_delivered", 0) or 0)
             if delivery_tier == "action" and session_cap > 0 and session_used >= session_cap:
-                if float(signal.score or 0.0) >= float(self._bot.settings.delivery.watch_min_score):
+                if _finite_score(signal.score) >= float(self._bot.settings.delivery.watch_min_score):
                     delivery_tier = "watch"
                     tier_reason = "action_session_cap_downgrade"
                 else:

@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from bot.runtime.errors import DEFENSIVE_EXC
 
 if TYPE_CHECKING:
     from ..domain.schemas import Signal
-    from ..persistence.tracked import TrackedSignalState
 
 
 LOG = logging.getLogger("bot.tracking")

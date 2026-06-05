@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -19,7 +18,6 @@ import polars as pl
 
 from ...migrations import migrate_db
 from ...runtime.errors import DEFENSIVE_EXC
-from ..outcomes import aggregate_setup_stats
 from bot.persistence.repository._analytics import AnalyticsMixin
 from bot.persistence.repository._schema import REPOSITORY_CORE_DDL
 from .schema import (
@@ -885,6 +883,27 @@ class MemoryRepository(AnalyticsMixin):
 
         placeholders = ", ".join(["?"] * len(columns))
         updates = ", ".join([f"{col} = excluded.{col}" for col in columns if col != "tracking_id"])
+
+        tracking_id = str(signal_data.get("tracking_id") or "")
+        # fix-20260604: reject cross-signal tracking_id reuse (upsert is for lifecycle updates only)
+        if tracking_id:
+            async with self._conn.execute(
+                "SELECT symbol, setup_id FROM active_signals WHERE tracking_id = ?",
+                (tracking_id,),
+            ) as cursor:
+                existing = await cursor.fetchone()
+            if existing is not None:
+                old_symbol = str(existing["symbol"] or "")
+                old_setup = str(existing["setup_id"] or "")
+                new_symbol = str(signal_data.get("symbol") or "")
+                new_setup = str(signal_data.get("setup_id") or "")
+                if old_symbol != new_symbol or old_setup != new_setup:
+                    msg = (
+                        f"tracking_id collision | id={tracking_id} "
+                        f"existing={old_symbol}/{old_setup} new={new_symbol}/{new_setup}"
+                    )
+                    LOG.error(msg)
+                    raise ValueError(msg)
 
         try:
             await self._conn.execute(

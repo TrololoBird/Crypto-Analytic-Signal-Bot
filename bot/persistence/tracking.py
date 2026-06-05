@@ -14,24 +14,18 @@ import math
 import tempfile
 import time
 import typing
-from bisect import bisect_right
 from collections import deque
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-import polars as pl
 
 from bot.runtime.errors import DEFENSIVE_EXC
 
 from ..domain.limit_entry import (
     DEFAULT_ENTRY_ORDER_TYPE,
-    should_activate_limit_entry,
-    should_activate_limit_fill_price,
 )
-from ..market.data import MarketDataUnavailable
-from ..persistence.sl_diagnostics import classify_stop_loss_root_cause
 from ..persistence.tracked import TrackedSignalState, parse_state_dt
 from .outcomes import SignalFeatures, create_outcome_from_tracked
 from bot.persistence._tracking_review import TPSLReviewMixin, _price_in_entry_zone
@@ -42,7 +36,7 @@ if typing.TYPE_CHECKING:
 
     from ..diagnostics.facade import SignalQualityMonitor
     from ..domain.config import BotSettings
-    from ..domain.schemas import AggTrade, Signal
+    from ..domain.schemas import Signal
     from ..persistence.repository.memory import MemoryRepository
     from ..telemetry import TelemetryStore
 
@@ -893,13 +887,19 @@ class SignalTracker(TPSLReviewMixin, TelegramTrackingMixin):
             )
         else:
             task = loop.create_task(self.memory_repo.save_signal_outcome(outcome))
-            task.add_done_callback(
-                lambda done: (
-                    LOG.debug("save_signal_outcome failed: %s", done.exception())
-                    if not done.cancelled() and done.exception() is not None
-                    else None
-                )
-            )
+            def _log_outcome_task(done: asyncio.Task[object]) -> None:
+                # fix-20260604: surface async outcome write failures (was debug-only)
+                if done.cancelled():
+                    return
+                exc = done.exception()
+                if exc is not None:
+                    LOG.error(
+                        "save_signal_outcome failed | tracking_id=%s",
+                        tracked.tracking_id,
+                        exc_info=exc,
+                    )
+
+            task.add_done_callback(_log_outcome_task)
 
         # Очищаем features store
         self.features_store.pop(tracked.tracking_id, None)

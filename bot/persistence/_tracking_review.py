@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import math
 import time
 from bisect import bisect_right
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 import polars as pl

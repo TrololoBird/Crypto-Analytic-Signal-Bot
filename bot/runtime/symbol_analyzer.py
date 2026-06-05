@@ -27,7 +27,6 @@ from bot.runtime.errors import (
     build_runtime_error_payload,
     classify_runtime_error,
 )
-from bot.runtime_policy import is_deep_analysis_symbol
 from bot.runtime._analyzer_gates import AnalyzerFamilyGatesMixin, AnalyzerMixinBase
 
 if TYPE_CHECKING:

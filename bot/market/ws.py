@@ -6,27 +6,23 @@ import contextlib
 import json
 import json as _stdlib_json
 import logging
-import random
-import socket
 import time
 from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 import polars as pl
-import websockets
 from websockets import exceptions as ws_exceptions
 
 from bot.market.network_proxy import (
     apply_proxy_env,
     mask_proxy_url,
     normalize_proxy_url,
-    websockets_connect_kwargs,
 )
 from bot.market.subscription_planner import plan_subscription_budget
 from bot.runtime.errors import DEFENSIVE_EXC
 
-from ..domain.events import BookTickerEvent, KlineCloseEvent
+from ..domain.events import KlineCloseEvent
 from ..domain.schemas import AggTrade, AggTradeSnapshot, SymbolFrames
 from .data import MarketDataUnavailable
 from .universe import build_shortlist
@@ -110,7 +106,6 @@ def _is_global_market_stream(stream: str) -> bool:
 
 
 from bot.market._ws_connection import (
-    apply_connected_state,
     apply_tcp_keepalive,
     build_stream_url,
     clear_endpoint_connection_state,
@@ -120,13 +115,9 @@ from bot.market._ws_connection import (
     get_ws_url_version,
     monitor_connection_silence,
     run_endpoint_loop,
-    run_stream_session,
 )
 from bot.market._ws_parsers import (
-    _clamp,
     _l2_depth_imbalance,
-    _parse_depth_levels,
-    _update_depth_wall_pressure,
     _ws_kline_to_row,
     depth_imbalance_from_book,
     handle_agg_trade,
@@ -138,6 +129,13 @@ from bot.market._ws_parsers import (
     handle_ticker,
     microprice_bias_from_book,
 )
+
+# fix-20260604: explicit exports for mypy attr-defined on features/prepare imports
+__all__ = [
+    "FuturesWSManager",
+    "depth_imbalance_from_book",
+    "microprice_bias_from_book",
+]
 
 class RateLimiter:
     """Rate limiter for incoming WebSocket messages (Binance limit: 10 msg/sec)."""

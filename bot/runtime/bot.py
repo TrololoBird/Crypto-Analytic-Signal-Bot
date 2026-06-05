@@ -617,9 +617,26 @@ class SignalBot:
                 self._preload_shortlist_frames(), name="preload_frames"
             )
             self._background_tasks.add(preload_task)
-            preload_task.add_done_callback(self._background_tasks.discard)
+            def _preload_done(done: asyncio.Task[Any]) -> None:
+                self._background_tasks.discard(done)
+                SignalBot._log_background_task_failure(done)
+
+            preload_task.add_done_callback(_preload_done)
         self._running = True
         self._log_autonomous_pipeline_armed()
+
+    @staticmethod
+    def _log_background_task_failure(task: asyncio.Task[Any]) -> None:
+        # fix-20260604: Python 3.13+ silently drops unhandled task exceptions without this
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            LOG.error(
+                "background task failed | name=%s",
+                task.get_name(),
+                exc_info=exc,
+            )
 
     def _log_autonomous_pipeline_armed(self) -> None:
         """Log background tasks started from run_forever (single entry: python main.py)."""
@@ -639,39 +656,30 @@ class SignalBot:
     async def run_forever(self) -> None:
         """Main loop — EventBus-driven with emergency fallback."""
         bus_task = asyncio.create_task(self._bus.run(), name="event_bus")
+        bus_task.add_done_callback(SignalBot._log_background_task_failure)
         # Give EventBus a moment to start before WS events arrive
         await asyncio.sleep(0.1)
         LOG.info("event bus started and ready")
 
+        def _loop_task(coro: Any, *, name: str) -> asyncio.Task[None]:
+            task = asyncio.create_task(coro, name=name)
+            task.add_done_callback(SignalBot._log_background_task_failure)
+            return task
+
         background_tasks: list[asyncio.Task[None]] = [
-            asyncio.create_task(
-                run_shortlist_refresh_loop(self._shortlist_service), name="shortlist_refresh"
-            ),
-            asyncio.create_task(run_heartbeat_loop(self._health_manager), name="heartbeat"),
-            asyncio.create_task(
-                run_health_telemetry_loop(self._health_manager), name="health_telemetry"
-            ),
-            asyncio.create_task(
-                self._health_monitor.run(stop_event=self._shutdown),
-                name="health_monitor",
-            ),
-            asyncio.create_task(
-                run_emergency_fallback_loop(self._fallback_runner), name="emergency_fallback"
-            ),
-            asyncio.create_task(run_oi_refresh_loop(self._oi_refresh_runner), name="oi_refresh"),
-            asyncio.create_task(
-                run_spot_refresh_loop(self._spot_refresh_runner), name="spot_companion"
-            ),
-            asyncio.create_task(
-                run_tracking_review_loop(self._fallback_runner), name="tracking_review"
-            ),
-            asyncio.create_task(
-                run_market_regime_loop(self._market_context_updater), name="market_regime"
-            ),
+            _loop_task(run_shortlist_refresh_loop(self._shortlist_service), name="shortlist_refresh"),
+            _loop_task(run_heartbeat_loop(self._health_manager), name="heartbeat"),
+            _loop_task(run_health_telemetry_loop(self._health_manager), name="health_telemetry"),
+            _loop_task(self._health_monitor.run(stop_event=self._shutdown), name="health_monitor"),
+            _loop_task(run_emergency_fallback_loop(self._fallback_runner), name="emergency_fallback"),
+            _loop_task(run_oi_refresh_loop(self._oi_refresh_runner), name="oi_refresh"),
+            _loop_task(run_spot_refresh_loop(self._spot_refresh_runner), name="spot_companion"),
+            _loop_task(run_tracking_review_loop(self._fallback_runner), name="tracking_review"),
+            _loop_task(run_market_regime_loop(self._market_context_updater), name="market_regime"),
         ]
         if self.intelligence is not None and self.settings.intelligence.enabled:
             background_tasks.append(
-                asyncio.create_task(
+                _loop_task(
                     run_public_intelligence_loop(self._market_context_updater),
                     name="public_intelligence",
                 )
@@ -682,7 +690,7 @@ class SignalBot:
             console = TelegramOperatorConsole(self)
             self._operator_console = console
             background_tasks.append(
-                asyncio.create_task(
+                _loop_task(
                     console.run_forever(stop_event=self._shutdown),
                     name="telegram_operator",
                 )

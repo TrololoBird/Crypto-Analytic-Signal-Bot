@@ -113,7 +113,7 @@ def decide_with_caps(signals: list[Signal], settings: BotSettings) -> list[TierC
         if tier.tier == "action":
             if action_used >= action_cap:
                 watch_min = float(settings.delivery.watch_min_score)
-                score = float(signal.score or 0.0)
+                score = _finite_score(signal.score)
                 if watch_used < watch_cap and score >= watch_min:
                     resolved_tier = "watch"
                     resolved_reason = "action_cap_demoted_watch"

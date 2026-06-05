@@ -8,7 +8,6 @@ import math
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-import aiosqlite
 
 from ..outcomes import aggregate_setup_stats
 
