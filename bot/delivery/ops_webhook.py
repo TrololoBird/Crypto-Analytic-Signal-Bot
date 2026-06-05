@@ -42,6 +42,13 @@ def _ops_webhook_session(bot: SignalBot) -> aiohttp.ClientSession:
     return session
 
 
+async def close_ops_webhook_session(bot: SignalBot) -> None:
+    session = getattr(bot, "_ops_webhook_session", None)
+    if session is not None and not session.closed:
+        await session.close()
+    bot._ops_webhook_session = None
+
+
 async def send_ops_webhook_alert(
     bot: SignalBot,
     *,

@@ -51,7 +51,8 @@ class RestCircuitMixin:
         if failures >= threshold:
             open_until = time.monotonic() + self._circuit_open_duration_seconds
             self._circuit_open_until[operation] = open_until
-            LOG.error(
+            log_open = LOG.warning if operation not in self._critical_operations else LOG.error
+            log_open(
                 "circuit breaker opened | operation=%s failures=%d threshold=%d duration=%.0fs",
                 operation,
                 failures,

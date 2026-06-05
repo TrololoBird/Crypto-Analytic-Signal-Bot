@@ -803,6 +803,13 @@ class SignalBot:
             LOG.debug("telegram close failed (non-fatal): %s", exc)
 
         try:
+            from bot.delivery.ops_webhook import close_ops_webhook_session
+
+            await close_ops_webhook_session(self)
+        except DEFENSIVE_EXC as exc:
+            LOG.debug("ops webhook session close failed (non-fatal): %s", exc)
+
+        try:
             telemetry = getattr(self, "telemetry", None)
             run_id = getattr(telemetry, "run_id", None)
             finalize = getattr(telemetry, "finalize_run_metadata", None)

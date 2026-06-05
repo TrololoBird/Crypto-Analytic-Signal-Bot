@@ -162,6 +162,9 @@ _DEFAULT_KLINE_FETCH_LIMIT = 500
 _DEFAULT_ORDER_BOOK_DEPTH_LIMIT = 20
 _VALID_ORDER_BOOK_DEPTH_LIMITS = frozenset({5, 10, 20, 50, 100, 500, 1000})
 _FALLBACK_TIMEOUT_DEBUG_OPERATIONS = frozenset({"symbol_order_book_ticker", "order_book_depth"})
+_REST_TIMEOUT_WARNING_OPERATIONS = frozenset(
+    {"kline_candlestick_data", "symbol_order_book_ticker"}
+)
 
 
 @dataclass(frozen=True, slots=True)

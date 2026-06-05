@@ -29,23 +29,27 @@ try:
 
     try:
         from aiogram.exceptions import TelegramAPIError as _AiogramAPIError
+        from aiogram.exceptions import TelegramRetryAfter as _TelegramRetryAfter
 
         AiogramAPIError: Any = _AiogramAPIError
+        TelegramRetryAfter: Any = _TelegramRetryAfter
     except ImportError:
         from aiogram import exceptions as aiogram_exceptions
 
         AiogramAPIError = getattr(aiogram_exceptions, "TelegramAPIError", Exception)
+        TelegramRetryAfter = getattr(aiogram_exceptions, "TelegramRetryAfter", None)
     _HAS_AIogram = True
 except ImportError:
     _HAS_AIogram = False
     BufferedInputFile = None  # type: ignore[misc, assignment]
+    TelegramRetryAfter = None
 
 # tenacity for retries
 try:
     from tenacity import (
         before_sleep_log,
         retry,
-        retry_if_exception_type,
+        retry_if_exception,
         stop_after_attempt,
         wait_exponential,
     )
@@ -115,6 +119,51 @@ def _buffered_input_file_class() -> Any:
     return BufferedInputFile
 
 
+def _extract_retry_after_seconds(description: str) -> int | None:
+    match = re.search(r"retry after\s+(\d+)", str(description or ""), flags=re.IGNORECASE)
+    if not match:
+        return None
+    try:
+        value = int(match.group(1))
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def _telegram_rate_limit_wait(exc: BaseException) -> int | None:
+    """Seconds to wait when Telegram returns flood-control (RetryAfter / 429)."""
+    if TelegramRetryAfter is not None and isinstance(exc, TelegramRetryAfter):
+        retry_after = getattr(exc, "retry_after", None)
+        if retry_after is not None:
+            try:
+                value = int(retry_after)
+                if value > 0:
+                    return value
+            except (TypeError, ValueError):
+                pass
+    retry_after = getattr(exc, "retry_after", None)
+    if retry_after is not None:
+        try:
+            value = int(retry_after)
+            if value > 0:
+                return value
+        except (TypeError, ValueError):
+            pass
+    parsed = _extract_retry_after_seconds(str(exc))
+    if parsed:
+        return parsed
+    name = exc.__class__.__name__.lower()
+    if "retryafter" in name or "too many requests" in str(exc).lower():
+        return 30
+    return None
+
+
+def _telegram_retryable(exc: BaseException) -> bool:
+    if _telegram_rate_limit_wait(exc) is not None:
+        return False
+    return isinstance(exc, Exception)
+
+
 def _telegram_retry() -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
     if HAS_TENACITY:
         return cast(
@@ -122,7 +171,7 @@ def _telegram_retry() -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Await
             retry(
                 stop=stop_after_attempt(3),
                 wait=wait_exponential(multiplier=1, min=2, max=10),
-                retry=retry_if_exception_type((Exception,)),
+                retry=retry_if_exception(_telegram_retryable),
                 before_sleep=before_sleep_log(RETRY_LOG, logging.INFO),
                 reraise=True,
             ),
@@ -266,26 +315,52 @@ class TelegramBroadcaster:
 
     async def edit_html(self, message_id: int, text: str) -> None:
         async with self._send_lock:
-            await self._respect_rate_limit()
-            if self._circuit_state == "open":
-                if (
-                    self._circuit_reset_time is not None
-                    and datetime.now(UTC) < self._circuit_reset_time
-                ):
-                    LOG.debug(
-                        "telegram circuit breaker open; skipping edit for message_id=%s",
-                        message_id,
-                    )
+            rate_retries = 0
+            max_rate_retries = 4
+            while True:
+                await self._respect_rate_limit()
+                if self._circuit_state == "open":
+                    if (
+                        self._circuit_reset_time is not None
+                        and datetime.now(UTC) < self._circuit_reset_time
+                    ):
+                        LOG.debug(
+                            "telegram circuit breaker open; skipping edit for message_id=%s",
+                            message_id,
+                        )
+                        return
+                    self._circuit_state = "half_open"
+                try:
+                    await self._edit_immediate(message_id, text)
+                except DEFENSIVE_EXC as exc:
+                    self._record_send_failure(exc)
+                    raise
+                except Exception as exc:
+                    wait = _telegram_rate_limit_wait(exc)
+                    if wait is not None and rate_retries < max_rate_retries:
+                        rate_retries += 1
+                        self._rate_limit_until = datetime.now(UTC) + timedelta(seconds=wait)
+                        LOG.warning(
+                            "telegram edit flood control; waiting %ss | attempt=%d/%d id=%s",
+                            wait + 1,
+                            rate_retries,
+                            max_rate_retries,
+                            message_id,
+                        )
+                        await asyncio.sleep(wait + 1)
+                        continue
+                    if wait is not None:
+                        LOG.warning(
+                            "telegram edit flood control exhausted; skipping edit | message_id=%s",
+                            message_id,
+                        )
+                        return
+                    raise
+                else:
+                    self._failure_count = 0
+                    self._circuit_state = "closed"
+                    self._circuit_reset_time = None
                     return
-                self._circuit_state = "half_open"
-            try:
-                await self._edit_immediate(message_id, text)
-            except DEFENSIVE_EXC as exc:
-                self._record_send_failure(exc)
-                raise
-            self._failure_count = 0
-            self._circuit_state = "closed"
-            self._circuit_reset_time = None
 
     async def send_photo(
         self,
@@ -458,16 +533,11 @@ class TelegramBroadcaster:
         self._mark_send_timestamp()
 
     def _record_send_failure(self, exc: Exception) -> None:
-        # Extract retry_after from aiogram exception or use fallback
-        retry_after = None
-        if hasattr(exc, "retry_after"):
-            retry_after = getattr(exc, "retry_after", None)
-        elif hasattr(exc, "retry_after_seconds"):
-            retry_after = getattr(exc, "retry_after_seconds", None)
-
+        retry_after = _telegram_rate_limit_wait(exc)
         if retry_after:
             self._rate_limit_until = datetime.now(UTC) + timedelta(seconds=retry_after)
-            LOG.info("telegram rate limited; pausing sends", seconds=retry_after)
+            LOG.warning("telegram rate limited; pausing sends", seconds=retry_after)
+            return
 
         self._failure_count += 1
         LOG.error("telegram send failed", attempt=f"{self._failure_count}/5", error=str(exc))
@@ -561,17 +631,6 @@ def _message_preview(text: str, *, limit: int = TELEGRAM_LOG_PREVIEW_LIMIT) -> s
     if len(preview) <= limit:
         return preview
     return preview[: limit - 1].rstrip() + "…"
-
-
-def _extract_retry_after_seconds(description: str) -> int | None:
-    match = re.search(r"retry after\s+(\d+)", str(description or ""), flags=re.IGNORECASE)
-    if not match:
-        return None
-    try:
-        value = int(match.group(1))
-    except (TypeError, ValueError):
-        return None
-    return value if value > 0 else None
 
 
 def _html_to_plain_text(text: str) -> str:

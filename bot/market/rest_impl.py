@@ -32,6 +32,7 @@ from bot.market.data import (
     _DEFAULT_ORDER_BOOK_DEPTH_LIMIT,
     _ENDPOINT_WEIGHTS,
     _FALLBACK_TIMEOUT_DEBUG_OPERATIONS,
+    _REST_TIMEOUT_WARNING_OPERATIONS,
     _FAPI_BASE_URL,
     _FORBIDDEN_PARAMS_LOWER,
     _FORBIDDEN_PUBLIC_PATH_MARKERS,
@@ -609,7 +610,12 @@ class RestHttpMixin(RestCircuitMixin):
             raise
         except TimeoutError as exc:
             self._record_circuit_failure(operation)
-            log_timeout = LOG.debug if operation in _FALLBACK_TIMEOUT_DEBUG_OPERATIONS else LOG.error
+            if operation in _FALLBACK_TIMEOUT_DEBUG_OPERATIONS:
+                log_timeout = LOG.debug
+            elif operation in _REST_TIMEOUT_WARNING_OPERATIONS:
+                log_timeout = LOG.warning
+            else:
+                log_timeout = LOG.error
             log_timeout('rest timeout | operation=%s symbol=%s timeout=%.1fs exception=%s', operation, symbol, self._rest_timeout, type(exc).__name__)
             raise MarketDataUnavailable(operation=operation, detail=f'timeout after {self._rest_timeout}s', symbol=symbol) from exc
 

@@ -1700,7 +1700,7 @@ class FuturesWSManager:
                 gap_secs = (row['time'] - deq[-1]['close_time']).total_seconds()
                 if gap_secs > interval_secs * 0.9:
                     missed = max(1, round(gap_secs / interval_secs) - 1)
-                    LOG.error('kline gap detected | symbol=%s interval=%s last_close=%s new_open=%s missed_candles=%d — triggering backfill', symbol, interval, deq[-1]['close_time'], row['time'], missed)
+                    LOG.warning('kline gap detected | symbol=%s interval=%s last_close=%s new_open=%s missed_candles=%d — triggering backfill', symbol, interval, deq[-1]['close_time'], row['time'], missed)
                     self._schedule_backfill([symbol], name=f'gap_backfill:{symbol}:{interval}')
             if deq and deq[-1].get('time') == row['time']:
                 LOG.debug('kline dedup update | symbol=%s interval=%s time=%s', symbol, interval, row['time'])
