@@ -128,7 +128,7 @@ class ResearchHarvestRecorder:
                     "symbols": list(symbols),
                     "config_path": str(config_path),
                     "mode": "research_harvest",
-                    "note": "Calibration deferred — capture only; no Telegram delivery.",
+                    "note": "Calibration deferred - capture only; no Telegram delivery.",
                 },
                 ensure_ascii=True,
                 indent=2,

@@ -19,7 +19,7 @@ def main() -> None:
             continue
         if any(ALIASES.get(stem) == setup_id for stem in existing):
             continue
-        text = f"""# {setup_id} — catalog defaults (ops-tunable)
+        text = f"""# {setup_id} - catalog defaults (ops-tunable)
 
 [strategy]
 enabled = true

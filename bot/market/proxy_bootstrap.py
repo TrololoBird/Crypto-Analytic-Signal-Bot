@@ -185,7 +185,7 @@ async def ensure_network_ready(
         return settings
 
     if direct.any_ok or configured.any_ok:
-        LOG.warning("binance REST blocked but WS reachable — continuing without proxy refresh")
+        LOG.warning("binance REST blocked but WS reachable - continuing without proxy refresh")
         return settings
 
     if not auto_discover:
@@ -217,6 +217,6 @@ async def retry_network_after_failure(
     path = config_path or Path("config.toml")
     if not path.is_file():
         return settings
-    LOG.warning("binance REST unreachable — re-running proxy discovery")
+    LOG.warning("binance REST unreachable - re-running proxy discovery")
     await asyncio.to_thread(_run_discovery, path)
     return load_settings(path)

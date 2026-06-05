@@ -529,7 +529,7 @@ def _frame_is_fresh(
         LOGGER.debug("Freshness degraded: failed to compute freshness delta (%s)", exc)
         return False
 
-    # Forming candle: close_time is still in the future — stream is live.
+    # Forming candle: close_time is still in the future - stream is live.
     if delta.total_seconds() < 0:
         return True
 
@@ -951,7 +951,7 @@ def _run_filter_pipeline(
     else:
         passed.append("adx_1h_ok")
 
-    # 4h ranging no longer hard-blocks breakout strategies — a ranging 4h already
+    # 4h ranging no longer hard-blocks breakout strategies - a ranging 4h already
     # lowers the MTF alignment score (0.5 instead of 1.0), which reduces confidence
     # appropriately. Hard-blocking caused too many missed setups on symbols where 4h
     # is transitional but 1h clearly shows direction.
@@ -1111,7 +1111,7 @@ def _run_filter_pipeline(
     else:
         passed.append("rr_stage_disabled")
 
-    # --- 7. Scoring (ConfluenceEngine — unified path) ---
+    # --- 7. Scoring (ConfluenceEngine - unified path) ---
     scoring_result: ScoringResult | None = None
     if filter_stage_enabled(settings, "scoring") and settings.scoring.enabled:
         confluence_result = confluence_engine.score(updated, prepared)

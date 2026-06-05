@@ -39,7 +39,7 @@ from .prepare_frame import (
 
 LOG = structlog.get_logger("bot.features.prepare")
 
-# Frame-level indicator cache — LRU with unique frame-window keys.
+# Frame-level indicator cache - LRU with unique frame-window keys.
 # ---------------------------------------------------------------------------
 
 _MAX_CACHE_ENTRIES = 500
@@ -880,7 +880,7 @@ def prepare_symbol(
         defects = _sanity_check_prepared_frame(frame, sym, interval)
         if defects:
             _log.warning(
-                "%s: prepare rejected — frame quality defects | interval=%s defects=%s",
+                "%s: prepare rejected - frame quality defects | interval=%s defects=%s",
                 sym,
                 interval,
                 defects,

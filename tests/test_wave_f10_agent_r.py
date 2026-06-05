@@ -1,4 +1,4 @@
-"""Wave F10 Agent R — journal repo primary, dedup, migration v6, SL aliases, outcome queries."""
+"""Wave F10 Agent R - journal repo primary, dedup, migration v6, SL aliases, outcome queries."""
 
 from __future__ import annotations
 

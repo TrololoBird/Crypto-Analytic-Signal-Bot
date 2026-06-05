@@ -828,7 +828,7 @@ class TPSLReviewMixin:
         *,
         dry_run: bool,
     ) -> list[SignalTrackingEvent]:
-        """Per-symbol tracking review — called on each 15m candle close.
+        """Per-symbol tracking review - called on each 15m candle close.
 
         Extracts the single-symbol branch from review_open_signals() so that
         the event-driven engine can review each symbol independently without

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 REPOSITORY_CORE_DDL = """
-            -- LEGACY TABLE — read-only. Writes removed in Phase E.
+            -- LEGACY TABLE - read-only. Writes removed in Phase E.
             -- Retained for dashboard backward-compatibility. Drop in a future migration.
             CREATE TABLE IF NOT EXISTS signals (
                 signal_id TEXT PRIMARY KEY,
@@ -33,7 +33,7 @@ REPOSITORY_CORE_DDL = """
             CREATE INDEX IF NOT EXISTS idx_signals_strategy ON signals(strategy_id);
             CREATE INDEX IF NOT EXISTS idx_signals_created ON signals(created_at);
 
-            -- LEGACY TABLE — read-only. Writes removed in Phase E.
+            -- LEGACY TABLE - read-only. Writes removed in Phase E.
             CREATE TABLE IF NOT EXISTS outcomes (
                 outcome_id TEXT PRIMARY KEY,
                 signal_id TEXT NOT NULL,

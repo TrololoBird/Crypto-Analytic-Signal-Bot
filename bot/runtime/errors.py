@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-# BLE001-safe tuple for log-and-continue / degrade paths (not CancelledError — BaseException).
+# BLE001-safe tuple for log-and-continue / degrade paths (not CancelledError - BaseException).
 DEFENSIVE_EXC: tuple[type[BaseException], ...] = (
     OSError,
     ConnectionError,

@@ -10,7 +10,7 @@ from collections import deque
 LOG = logging.getLogger("bot.market.rate_limit")
 
 REST_WEIGHT_SOFT_LIMIT = 1800
-REST_WEIGHT_PACE_LIMIT = 1500  # proactive cap — stay below Binance 2400/min with headroom
+REST_WEIGHT_PACE_LIMIT = 1500  # proactive cap - stay below Binance 2400/min with headroom
 REST_WEIGHT_HARD_LIMIT = 2200
 REST_WEIGHT_CRITICAL_LIMIT = 2350
 

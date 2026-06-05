@@ -407,11 +407,11 @@ class MemoryRepository(_MemoryRepositoryBases):
             self._conn = None
 
     async def save_signal(self, record: SignalRecord) -> None:
-        """Legacy API — no longer writes to ``signals`` (Phase E). Use ``save_active_signal``."""
+        """Legacy API - no longer writes to ``signals`` (Phase E). Use ``save_active_signal``."""
         record.validate()
 
     async def save_outcome(self, record: OutcomeRecord, *, commit: bool = True) -> None:
-        """Legacy API — no longer writes to ``outcomes`` (Phase E). Use ``signal_outcomes`` path."""
+        """Legacy API - no longer writes to ``outcomes`` (Phase E). Use ``signal_outcomes`` path."""
         record.validate()
         del commit
 

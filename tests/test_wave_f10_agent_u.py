@@ -1,4 +1,4 @@
-"""Wave F10 Agent U — calibration pipeline, reconcile patch, outcomes CLI, runtime errors."""
+"""Wave F10 Agent U - calibration pipeline, reconcile patch, outcomes CLI, runtime errors."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Research harvest mode — deep public data capture for strategy design (no Telegram)."""
+"""Research harvest mode - deep public data capture for strategy design (no Telegram)."""
 
 from __future__ import annotations
 

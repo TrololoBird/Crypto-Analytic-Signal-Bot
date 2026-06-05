@@ -1,4 +1,4 @@
-"""Pytest configuration — live Binance tests run only when explicitly enabled."""
+"""Pytest configuration - live Binance tests run only when explicitly enabled."""
 
 from __future__ import annotations
 

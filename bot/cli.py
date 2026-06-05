@@ -1,4 +1,4 @@
-"""Live-only entry point — the bot always runs in full live mode.
+"""Live-only entry point - the bot always runs in full live mode.
 
 No dry-run, no once, no self-check. To verify connectivity, read the logs
 and telemetry. To test, run the bot and watch real data.
@@ -552,7 +552,7 @@ def build_parser() -> argparse.ArgumentParser:
     outcomes.add_argument("--setup", type=str, default="")
     backtest = sub.add_parser(
         "backtest",
-        help="Alias for outcomes — compute signal outcome stats from SQLite",
+        help="Alias for outcomes - compute signal outcome stats from SQLite",
     )
     backtest.add_argument("--days", type=int, default=30)
     backtest.add_argument("--setup", type=str, default="")

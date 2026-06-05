@@ -262,7 +262,7 @@ def main() -> None:
 
     if not urls:
         LOG.warning(
-            "no proxy endpoints in %.1fs — direct-only (trust_env failover)",
+            "no proxy endpoints in %.1fs - direct-only (trust_env failover)",
             elapsed,
         )
         if not args.dry_run:

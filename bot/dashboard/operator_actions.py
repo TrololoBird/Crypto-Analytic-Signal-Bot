@@ -1,4 +1,4 @@
-"""Operator control actions — Telegram console and dashboard parity."""
+"""Operator control actions - Telegram console and dashboard parity."""
 
 from __future__ import annotations
 
@@ -167,12 +167,12 @@ def format_symbol_lookup_html(bot: Any, symbol: str, rows: list[dict[str, Any]])
     lines = [f"<b>{sym}</b>"]
     if item is not None:
         lines.append(
-            f"Shortlist: <code>{html.escape(str(item.shortlist_bucket or '—'))}</code> · "
+            f"Shortlist: <code>{html.escape(str(item.shortlist_bucket or '-'))}</code> · "
             f"score <code>{item.shortlist_score or 0:.3f}</code> · "
             f"fits <code>{len(item.strategy_fits)}</code>"
         )
     else:
-        lines.append("<i>Не в текущем shortlist</i> — /analyze для разового прогона")
+        lines.append("<i>Не в текущем shortlist</i> - /analyze для разового прогона")
     if mark is not None:
         lines.append(f"Mark: <code>{mark}</code>")
     if not rows:
@@ -218,7 +218,7 @@ def format_signal_detail_html(bot: Any, row: dict[str, Any]) -> str:
         lines.append(f"Entry: <code>{entry}</code>")
     el, eh = row.get("entry_low"), row.get("entry_high")
     if el is not None and eh is not None:
-        lines.append(f"Zone: <code>{el}</code> – <code>{eh}</code>")
+        lines.append(f"Zone: <code>{el}</code> - <code>{eh}</code>")
     if stop is not None:
         lines.append(f"SL: <code>{stop}</code>")
     if tp1 is not None:
@@ -274,7 +274,7 @@ async def action_refresh_shortlist(bot: SignalBot) -> dict[str, Any]:
     except DEFENSIVE_EXC as exc:
         return {"error": str(exc)}
     elapsed = (datetime.now(UTC) - started).total_seconds()
-    source = str(getattr(bot, "_shortlist_source", "") or "—")
+    source = str(getattr(bot, "_shortlist_source", "") or "-")
     return {
         "ok": True,
         "size": len(shortlist),

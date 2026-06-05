@@ -14,6 +14,32 @@ from typing import TYPE_CHECKING, Any
 import polars as pl
 from websockets import exceptions as ws_exceptions
 
+from bot.market._ws_connection import (
+    apply_tcp_keepalive,
+    build_stream_url,
+    clear_endpoint_connection_state,
+    compute_disconnect_delay,
+    evaluate_endpoint_health,
+    get_ws_fallback_urls,
+    get_ws_url_version,
+    monitor_connection_silence,
+    run_endpoint_loop,
+)
+from bot.market._ws_parsers import (
+    _l2_depth_imbalance,
+    _ws_kline_to_row,
+    depth_imbalance_from_book,
+    handle_agg_trade,
+    handle_book_ticker,
+    handle_depth_update,
+    handle_force_order,
+    handle_mark_price,
+    handle_mini_ticker,
+    handle_ticker,
+    microprice_bias_from_book,
+    should_throttle_mark_price_update,
+    should_throttle_ticker_update,
+)
 from bot.market.network_proxy import (
     apply_proxy_env,
     mask_proxy_url,
@@ -92,7 +118,7 @@ _STALE_DROP_EVENTS = {
 _WS_PUBLIC = "public"
 _WS_MARKET = "market"
 _WS_ENDPOINTS = (_WS_PUBLIC, _WS_MARKET)
-# Global Binance arrays must not sit behind the kline backlog — stale E timestamps get dropped.
+# Global Binance arrays must not sit behind the kline backlog - stale E timestamps get dropped.
 _GLOBAL_MARKET_STREAM_PREFIXES = (
     "!ticker@arr",
     "!markprice@arr",
@@ -104,33 +130,6 @@ def _is_global_market_stream(stream: str) -> bool:
     normalized = str(stream or "").strip().lower()
     return any(normalized.startswith(prefix) for prefix in _GLOBAL_MARKET_STREAM_PREFIXES)
 
-
-from bot.market._ws_connection import (
-    apply_tcp_keepalive,
-    build_stream_url,
-    clear_endpoint_connection_state,
-    compute_disconnect_delay,
-    evaluate_endpoint_health,
-    get_ws_fallback_urls,
-    get_ws_url_version,
-    monitor_connection_silence,
-    run_endpoint_loop,
-)
-from bot.market._ws_parsers import (
-    _l2_depth_imbalance,
-    _ws_kline_to_row,
-    depth_imbalance_from_book,
-    handle_agg_trade,
-    handle_book_ticker,
-    handle_depth_update,
-    handle_force_order,
-    handle_mark_price,
-    handle_mini_ticker,
-    handle_ticker,
-    microprice_bias_from_book,
-    should_throttle_mark_price_update,
-    should_throttle_ticker_update,
-)
 
 # fix-20260604: explicit exports for mypy attr-defined on features/prepare imports
 __all__ = [
@@ -2129,7 +2128,7 @@ class FuturesWSManager:
                     LOG.warning(
                         (
                             "kline gap detected | symbol=%s interval=%s last_close=%s "
-                            "new_open=%s missed_candles=%d — triggering backfill"
+                            "new_open=%s missed_candles=%d - triggering backfill"
                         ),
                         symbol,
                         interval,

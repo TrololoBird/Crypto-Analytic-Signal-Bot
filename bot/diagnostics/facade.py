@@ -1,4 +1,4 @@
-"""Unified diagnostics imports — re-exports only (phase-D facade)."""
+"""Unified diagnostics imports - re-exports only (phase-D facade)."""
 
 from __future__ import annotations
 

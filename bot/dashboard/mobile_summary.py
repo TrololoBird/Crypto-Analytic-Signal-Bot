@@ -38,7 +38,7 @@ def dashboard_urls(bot: Any) -> dict[str, str | None]:
         "bind": bind_url,
         "mobile_hint": (
             "MacBook и iPhone в разных сетях: LAN недоступен. "
-            "Удалённый мониторинг — Telegram operator console: "
+            "Удалённый мониторинг - Telegram operator console: "
             "/market /status /health в личке с ботом. "
             f"Локально на MacBook: http://127.0.0.1:{port}/"
         ),
@@ -145,15 +145,15 @@ def format_mobile_digest_text(payload: dict[str, Any]) -> str:
     if market.get("risk_label"):
         lines.append(
             f"Market: <code>{market.get('risk_label')}</code> · "
-            f"FG <code>{market.get('fear_greed_value') or '—'}</code> · "
+            f"FG <code>{market.get('fear_greed_value') or '-'}</code> · "
             "breadth "
             f"<code>{market.get('breadth_positive') or 0}/{market.get('breadth_total') or 0}</code>"
         )
     lines.extend(
         [
             (
-                f"Regime: <code>{runtime.get('regime') or '—'}</code> · "
-                f"BTC: <code>{runtime.get('btc_bias') or '—'}</code>"
+                f"Regime: <code>{runtime.get('regime') or '-'}</code> · "
+                f"BTC: <code>{runtime.get('btc_bias') or '-'}</code>"
             ),
             (
                 f"Shortlist: <code>{runtime.get('shortlist_size') or 0}</code> · "
@@ -193,43 +193,43 @@ def format_mobile_digest_text(payload: dict[str, Any]) -> str:
 def format_operator_help_text() -> str:
     return (
         "<b>Operator console</b> (личка с ботом)\n"
-        "Отдельно от канала с сигналами — ops только здесь.\n\n"
+        "Отдельно от канала с сигналами - ops только здесь.\n\n"
         "<b>📢 Канал (TELEGRAM_CHAT_ID)</b>\n"
         "Только ACTION/WATCH сигналы и статусы сделок для подписчиков.\n"
-        "Контекст рынка, audit, digest, startup — <u>не</u> в канал.\n\n"
+        "Контекст рынка, audit, digest, startup - <u>не</u> в канал.\n\n"
         "<b>🧭 Рынок (личка)</b>\n"
-        "/market — полный контекст (breadth, TF, leaders, corr)\n"
-        "/status — режим, shortlist, сегодня, 7d outcomes\n"
-        "/health — WS, REST, klines, signals\n"
-        "/audit — live audit score + action plan\n\n"
+        "/market - полный контекст (breadth, TF, leaders, corr)\n"
+        "/status - режим, shortlist, сегодня, 7d outcomes\n"
+        "/health - WS, REST, klines, signals\n"
+        "/audit - live audit score + action plan\n\n"
         "<b>📊 Сигналы (личка)</b>\n"
-        "/signals — сегодня sent/delivered\n"
-        "/sl — причины stop-loss + последние SL\n"
-        "/tracking · /open — pending/active + entry/SL\n"
-        "/pending · /active — фильтр статуса\n"
-        "/delivery — канал + chase/TTL\n"
-        "/outcomes — детальная статистика 7d\n\n"
+        "/signals - сегодня sent/delivered\n"
+        "/sl - причины stop-loss + последние SL\n"
+        "/tracking · /open - pending/active + entry/SL\n"
+        "/pending · /active - фильтр статуса\n"
+        "/delivery - канал + chase/TTL\n"
+        "/outcomes - детальная статистика 7d\n\n"
         "<b>⚙️ Pipeline (личка)</b>\n"
-        "/shortlist — режим + топ символов\n"
-        "/rejections · /gates — воронка\n"
-        "/strategies — enabled + MTF\n"
-        "/cycles — последний цикл + funnel\n"
-        "/digest — авто-digest (~30 мин)\n"
-        "/notify — флаги operator DM\n\n"
+        "/shortlist - режим + топ символов\n"
+        "/rejections · /gates - воронка\n"
+        "/strategies - enabled + MTF\n"
+        "/cycles - последний цикл + funnel\n"
+        "/digest - авто-digest (~30 мин)\n"
+        "/notify - флаги operator DM\n\n"
         "<b>🔧 Config (личка, read-only)</b>\n"
-        "/policy — runtime policy\n"
-        "/help — этот список\n\n"
+        "/policy - runtime policy\n"
+        "/help - этот список\n\n"
         "<b>🎛 Управление ботом</b>\n"
-        "/symbol BTC — найти сигналы по монете + rejections\n"
-        "/signal REF — аналитика сигнала (ref или символ)\n"
-        "/analyze BTC — принудительный прогон 38 стратегий\n"
-        "/scan — полный скан shortlist (emergency cycle)\n"
-        "/scan BTC — analyze одной монеты\n"
-        "/review BTC — принудительный tracking review\n"
-        "/refresh shortlist — обновить shortlist + WS\n"
-        "/refresh market — market context + regime\n"
-        "/shortlist refresh — то же что refresh shortlist\n"
-        "/market refresh — обновить контекст рынка\n\n"
+        "/symbol BTC - найти сигналы по монете + rejections\n"
+        "/signal REF - аналитика сигнала (ref или символ)\n"
+        "/analyze BTC - принудительный прогон 38 стратегий\n"
+        "/scan - полный скан shortlist (emergency cycle)\n"
+        "/scan BTC - analyze одной монеты\n"
+        "/review BTC - принудительный tracking review\n"
+        "/refresh shortlist - обновить shortlist + WS\n"
+        "/refresh market - market context + regime\n"
+        "/shortlist refresh - то же что refresh shortlist\n"
+        "/market refresh - обновить контекст рынка\n\n"
         "<i>Signal-only · без auto-trade · одна action-команда за раз</i>"
     )
 
@@ -241,8 +241,8 @@ def format_operator_status_text(payload: dict[str, Any], *, detail_outcomes: boo
     lines = [
         "<b>Bot status</b>",
         (
-            f"Regime: <code>{runtime.get('regime') or '—'}</code> · "
-            f"BTC: <code>{runtime.get('btc_bias') or '—'}</code>"
+            f"Regime: <code>{runtime.get('regime') or '-'}</code> · "
+            f"BTC: <code>{runtime.get('btc_bias') or '-'}</code>"
         ),
         (
             f"Shortlist: <code>{runtime.get('shortlist_size') or 0}</code> · "
@@ -296,7 +296,7 @@ def format_operator_sl_text(payload: dict[str, Any]) -> str:
                 continue
             sym = row.get("symbol") or "?"
             setup = row.get("setup_type") or row.get("setup_id") or "?"
-            cause = row.get("sl_root_cause_label") or row.get("sl_root_cause") or "—"
+            cause = row.get("sl_root_cause_label") or row.get("sl_root_cause") or "-"
             lines.append(f"• {sym} {row.get('direction') or ''} · {setup} · {cause}")
     recs = payload.get("recommendations") or []
     if recs:

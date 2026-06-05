@@ -72,7 +72,7 @@ async def _send_zero_delivery_alert(bot: SignalBot, *, streak: int) -> None:
 
 
 def record_cycle_delivery_outcome(bot: SignalBot, *, delivered_count: int) -> None:
-    """Sync hook from cycle telemetry — schedules operator alert when streak threshold hit."""
+    """Sync hook from cycle telemetry - schedules operator alert when streak threshold hit."""
     streak = _update_zero_delivery_streak(bot, delivered_count=delivered_count)
     try:
         loop = asyncio.get_running_loop()

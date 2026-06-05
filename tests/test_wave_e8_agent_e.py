@@ -1,4 +1,4 @@
-"""Wave E8 agent E — freshness_5m, MTF strict HTF, TF fallback badge, filter stages."""
+"""Wave E8 agent E - freshness_5m, MTF strict HTF, TF fallback badge, filter stages."""
 
 from __future__ import annotations
 

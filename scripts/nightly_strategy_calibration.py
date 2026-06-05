@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Nightly strategy calibration report — wraps shortlist matrix for ops."""
+"""Nightly strategy calibration report - wraps shortlist matrix for ops."""
 
 from __future__ import annotations
 

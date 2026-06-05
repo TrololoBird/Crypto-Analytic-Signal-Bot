@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from ..market.scheduler import analysis_intervals
+from ..runtime.errors import DEFENSIVE_EXC
 
 if TYPE_CHECKING:
     from ..domain.events import KlineCloseEvent
@@ -34,8 +35,9 @@ class KlineHandler:
             await self._process_kline(event)
         except asyncio.CancelledError:
             raise
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.exception("kline_handler_error", exc_info=exc, extra={"symbol": event.symbol})
+            raise
 
     async def _process_kline(self, event: KlineCloseEvent) -> None:
         if event.interval not in self._allowed_intervals():

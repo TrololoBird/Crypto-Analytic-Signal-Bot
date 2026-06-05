@@ -1,4 +1,4 @@
-"""MetaSignal merge — one canonical candidate per symbol+direction (target spec)."""
+"""MetaSignal merge - one canonical candidate per symbol+direction (target spec)."""
 
 from __future__ import annotations
 

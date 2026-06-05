@@ -1,7 +1,7 @@
 """Optional FastAPI dashboard (v9 package).
 
 Canonical entry: ``bot.dashboard.app.BotDashboard`` (mounted by ``SignalBot``).
-``live.py`` / ``analytics.py`` / ``ws_broadcast.py`` are helpers — do not add
+``live.py`` / ``analytics.py`` / ``ws_broadcast.py`` are helpers - do not add
 parallel FastAPI apps.
 """
 

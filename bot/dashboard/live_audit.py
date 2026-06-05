@@ -184,7 +184,7 @@ def _collect_findings(snap: Mapping[str, Any]) -> list[AuditFinding]:
             "strategy_routing_empty",
             "Many symbols lack strategy_fits."
             if not unified_routing
-            else "strategy_fits sparse — expected with unified shortlist routing.",
+            else "strategy_fits sparse - expected with unified shortlist routing.",
             "Empty routing skips detectors."
             if not unified_routing
             else "Lanes still apply; unified routing runs all lane setups on shortlist symbols.",

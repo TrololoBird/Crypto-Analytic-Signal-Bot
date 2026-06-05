@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
-from bot.runtime.errors import classify_runtime_error
+from bot.runtime.errors import DEFENSIVE_EXC, classify_runtime_error
 
 from ..diagnostics.signals import get_global_diagnostics
 from ..domain.strategies import StrategyDecision
@@ -709,20 +709,20 @@ class SignalEngine:
         except TypeError:
             try:
                 return bool(checker(prepared))
-            except Exception:
+            except DEFENSIVE_EXC:
                 LOG.exception(
                     "%s: strategy schedule check failed | strategy=%s",
                     prepared.symbol,
                     getattr(strategy, "strategy_id", "unknown"),
                 )
-                return True
-        except Exception:
+                return False
+        except DEFENSIVE_EXC:
             LOG.exception(
                 "%s: strategy schedule check failed | strategy=%s",
                 prepared.symbol,
                 getattr(strategy, "strategy_id", "unknown"),
             )
-            return True
+            return False
 
     def _build_routing_skip_decision(
         self,
@@ -768,7 +768,7 @@ class SignalEngine:
         return None
 
     def _engine_score_floor(self, prepared: PreparedSymbol | None = None) -> float:
-        """Minimum score for get_best_signal — config-driven, not hardcoded."""
+        """Minimum score for get_best_signal - config-driven, not hardcoded."""
         return float(effective_engine_score_floor(self._settings, prepared_or_symbol=prepared))
 
     def get_best_signal(

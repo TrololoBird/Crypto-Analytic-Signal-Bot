@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""v9 refactor gate — forbidden legacy paths and import smoke."""
+"""v9 refactor gate - forbidden legacy paths and import smoke."""
 
 from __future__ import annotations
 

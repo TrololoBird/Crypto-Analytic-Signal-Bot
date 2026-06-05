@@ -1,4 +1,4 @@
-"""Roadmap strategy base — params wiring; detect logic in bot/strategies/."""
+"""Roadmap strategy base - params wiring; detect logic in bot/strategies/."""
 
 from __future__ import annotations
 

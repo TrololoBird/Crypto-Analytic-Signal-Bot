@@ -1,4 +1,4 @@
-"""Delivery policy helpers — R-class WATCH-only and benchmark anchors (target spec)."""
+"""Delivery policy helpers - R-class WATCH-only and benchmark anchors (target spec)."""
 
 from __future__ import annotations
 

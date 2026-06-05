@@ -47,7 +47,7 @@ def format_runtime_ops_block(
     pause_hours = html.escape(clean(runtime_policy.get("stop_loss_pause_hours"), "5"))
     shortlist_source = html.escape(clean(readiness.get("shortlist_source"), "rest_full"))
     shortlist_size = html.escape(clean(readiness.get("shortlist_size"), "0"))
-    latest_ts = html.escape(clean(latest_cycle.get("ts"), "—"))
+    latest_ts = html.escape(clean(latest_cycle.get("ts"), "-"))
 
     title = "⚙️ <b>Runtime</b>"
     if tag:
@@ -79,7 +79,7 @@ def format_runtime_ops_block(
             f"Tracked: open <code>{metrics.get('open_tracked_total', 0)}</code> | "
             f"outcomes <code>{metrics.get('outcomes_total', 0)}</code>"
         )
-    if latest_ts != "—":
+    if latest_ts != "-":
         lines.append(f"Latest cycle: <code>{latest_ts}</code>")
     return "\n".join(lines)
 
@@ -145,11 +145,11 @@ def format_market_from_display_snapshot(snapshot: dict[str, Any]) -> str:
         html.escape(str(snapshot.get("corr_narrative") or "")),
         (
             "Лидеры 24ч (liquid futures): "
-            f"<code>{html.escape(str(snapshot.get('leaders') or '—'))}</code>"
+            f"<code>{html.escape(str(snapshot.get('leaders') or '-'))}</code>"
         ),
         (
             "Аутсайдеры 24ч (liquid futures): "
-            f"<code>{html.escape(str(snapshot.get('laggards') or '—'))}</code>"
+            f"<code>{html.escape(str(snapshot.get('laggards') or '-'))}</code>"
         ),
         (
             "Сопровождение: active "
@@ -164,7 +164,7 @@ def format_market_from_display_snapshot(snapshot: dict[str, Any]) -> str:
 
 
 def format_market_context_warmup(
-    *, note: str = "полный контекст через 1–2 мин после прогрева REST/WS"
+    *, note: str = "полный контекст через 1-2 мин после прогрева REST/WS"
 ) -> str:
     return (
         "🧭 <b>Контекст рынка</b> <code>warmup</code>\n"
@@ -321,8 +321,8 @@ async def format_operator_health_text(bot: SignalBot) -> str:
             f"tiers=<code>{html.escape(str(radar.get('tiers') or {}))}</code>"
         )
     if ws_snap:
-        ws_lag = ws_snap.get("latency_ms") or ws_snap.get("current_latency_ms") or "—"
-        ws_streams = ws_snap.get("active_streams") or ws_snap.get("stream_count") or "—"
+        ws_lag = ws_snap.get("latency_ms") or ws_snap.get("current_latency_ms") or "-"
+        ws_streams = ws_snap.get("active_streams") or ws_snap.get("stream_count") or "-"
         lines.append(f"WS lag <code>{ws_lag}ms</code> · streams <code>{ws_streams}</code>")
     if rest_pause:
         lines.append(html.escape(rest_pause))
@@ -380,8 +380,8 @@ def format_operator_policy_text(bot: SignalBot) -> str:
 
     lines = [
         "<b>Policy / routing</b>",
-        "<b>Канал</b> — только сигналы и tracking для подписчиков.",
-        "<b>Личка оператора</b> — /market, digest, SL analytics, startup.",
+        "<b>Канал</b> - только сигналы и tracking для подписчиков.",
+        "<b>Личка оператора</b> - /market, digest, SL analytics, startup.",
         f"Runtime: <code>{getattr(intel, 'runtime_mode', 'signal_only')}</code> · "
         f"source <code>{getattr(intel, 'source_policy', 'binance_only')}</code>",
         (
@@ -390,7 +390,7 @@ def format_operator_policy_text(bot: SignalBot) -> str:
         ),
         "Shortlist unified: "
         f"<code>{getattr(universe, 'shortlist_unified_routing', False)}</code> · "
-        f"size target <code>{getattr(universe, 'shortlist_size', '—')}</code>",
+        f"size target <code>{getattr(universe, 'shortlist_size', '-')}</code>",
         f"Notifier channel: <code>{getattr(notifiers, 'provider', 'telegram')}</code>",
         f"Operator DMs: market=<code>{getattr(op, 'send_market_context', True)}</code> "
         f"digest=<code>{getattr(op, 'send_digest', True)}</code> "
@@ -411,7 +411,7 @@ def format_operator_cycles_text(
     selected_count = last_cycle.get("selected_count") or last_cycle.get("selected_signals") or 0
     lines = [
         "<b>Pipeline cycles</b>",
-        f"Last cycle: <code>{html.escape(str(last_cycle.get('ts') or '—'))}</code>",
+        f"Last cycle: <code>{html.escape(str(last_cycle.get('ts') or '-'))}</code>",
         (
             f"Candidates <code>{last_cycle.get('candidate_count') or 0}</code> · "
             f"selected <code>{selected_count}</code> · "
@@ -428,6 +428,6 @@ def format_operator_cycles_text(
     if top_reason:
         lines.append(
             f"Top reject: <code>{html.escape(str(top_reason))}</code> "
-            f"× <code>{top.get('count') or 0}</code>"
+            f"x <code>{top.get('count') or 0}</code>"
         )
     return "\n".join(lines)

@@ -1,4 +1,4 @@
-"""Wave F9 Agent R — journal normalization, diary analytics, outcome classification."""
+"""Wave F9 Agent R - journal normalization, diary analytics, outcome classification."""
 
 from __future__ import annotations
 

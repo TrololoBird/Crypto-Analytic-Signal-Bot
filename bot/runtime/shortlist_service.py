@@ -567,7 +567,7 @@ class ShortlistService:
                     ):
                         bot.settings = refreshed
                         LOG.warning(
-                            "proxy pool refreshed after REST failure — "
+                            "proxy pool refreshed after REST failure - "
                             "restart bot to apply new egress"
                         )
                 except DEFENSIVE_EXC:

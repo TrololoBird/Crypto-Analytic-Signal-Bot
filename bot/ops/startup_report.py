@@ -1333,7 +1333,7 @@ def _build_telegram_message(summary: dict[str, Any]) -> str:
                     f"Alt index proxy: <code>{html.escape(alt_index)}/100</code> | "
                     f"macro <code>{html.escape(macro_mode)}</code>"
                 ),
-                "<i>Полный breadth/leaders/corr — после прогрева live-цикла</i>",
+                "<i>Полный breadth/leaders/corr - после прогрева live-цикла</i>",
             ]
         )
 

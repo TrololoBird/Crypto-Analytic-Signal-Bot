@@ -202,7 +202,7 @@ def _terminate_process(proc: subprocess.Popen[bytes]) -> None:
 def _runtime_env() -> dict[str, str]:
     env = os.environ.copy()
     env.pop("BOT_DISABLE_HTTP_SERVERS", None)
-    # Cursor/smoke shells often force local delivery — production run needs real Telegram.
+    # Cursor/smoke shells often force local delivery - production run needs real Telegram.
     env.pop("BOT_NOTIFIER_PROVIDER", None)
     return env
 

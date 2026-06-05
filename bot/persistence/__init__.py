@@ -1,4 +1,4 @@
-"""Signal persistence — tracking, outcomes, diary, repository (v9)."""
+"""Signal persistence - tracking, outcomes, diary, repository (v9)."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Public audit ledger — daily CSV + SHA256 (target spec P3)."""
+"""Public audit ledger - daily CSV + SHA256 (target spec P3)."""
 
 from __future__ import annotations
 

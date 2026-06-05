@@ -110,7 +110,7 @@ async def evaluate_endpoint_health(manager: Any, ws: Any, endpoint: str) -> bool
                     int(snapshot.get("fresh_tickers") or 0) == 0
                     or int(snapshot.get("fresh_mark_prices") or 0) == 0
                 ):
-                    # fix-loop-5: planned reconnect — warning only (not a crash)
+                    # fix-loop-5: planned reconnect - warning only (not a crash)
                     LOG.warning(
                         (
                             "ws market recovery failed | endpoint=%s age=%.1fs "

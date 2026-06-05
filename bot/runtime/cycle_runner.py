@@ -247,7 +247,7 @@ class CycleRunner:
     def _emergency_shortlist_for_scan(
         self, shortlist: list[UniverseSymbol]
     ) -> list[UniverseSymbol]:
-        """Emergency fallback: radar-promoted symbols at half frequency (2× interval)."""
+        """Emergency fallback: radar-promoted symbols at half frequency (2x interval)."""
         bot = self._bot
         fallback_sec = float(bot.settings.runtime.emergency_fallback_seconds)
         min_interval = max(fallback_sec * 2.0, 60.0)

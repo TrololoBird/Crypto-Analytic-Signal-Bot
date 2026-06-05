@@ -1,4 +1,4 @@
-"""volume_anomaly — strategy module (bot/strategies/)."""
+"""volume_anomaly - strategy module (bot/strategies/)."""
 
 from __future__ import annotations
 

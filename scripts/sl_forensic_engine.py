@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SL Forensic Engine — replay candles, classify SL hits, persist + report.
+"""SL Forensic Engine - replay candles, classify SL hits, persist + report.
 
 Usage:
   python scripts/sl_forensic_engine.py

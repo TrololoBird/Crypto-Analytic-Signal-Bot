@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 LOCK = ROOT / "requirements-lock.txt"
 
-# Accepted until aiogram allows aiohttp>=3.14 — see SECURITY.md
+# Accepted until aiogram allows aiohttp>=3.14 - see SECURITY.md
 IGNORED_VULNS = frozenset(
     {
         "CVE-2026-34993",

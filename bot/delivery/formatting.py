@@ -169,19 +169,19 @@ INVALIDATION_BY_SETUP: dict[str, str] = {
 
 TRACKING_TITLES: dict[str, str] = dict(TRACKING_EVENT_RU)
 
-# Legacy / internal — not sent to channel subscribers
+# Legacy / internal - not sent to channel subscribers
 _INTERNAL_TRACKING_TITLES: dict[str, str] = dict(INTERNAL_TRACKING_EVENT_RU)
 
 LIFECYCLE_NOTE_RU: dict[str, str] = {
-    "limit_zone_touched": "цена коснулась лимит-зоны — ждите закрытие 15m внутри зоны",
+    "limit_zone_touched": "цена коснулась лимит-зоны - ждите закрытие 15m внутри зоны",
     "zone_not_touched": "зона не затронута",
     "trend_bar_confirm": "трендовое подтверждение свечи",
-    "trend_bar_reject": "свеча не подтвердила тренд — ждём следующий 15m close",
+    "trend_bar_reject": "свеча не подтвердила тренд - ждём следующий 15m close",
     "breakout_accept": "принятие пробоя в зоне",
-    "breakout_reject": "пробой не принят — ждём close",
+    "breakout_reject": "пробой не принят - ждём close",
     "reversal_confirm": "разворот подтверждён",
     "reversal_reject": "разворот не подтверждён",
-    "close_outside_zone": "close вне зоны — вход не активирован",
+    "close_outside_zone": "close вне зоны - вход не активирован",
 }
 
 
@@ -673,7 +673,7 @@ def _channel_rr_line(facts: SignalMessageFacts) -> str:
 
 
 def _channel_legs_line(facts: SignalMessageFacts) -> str:
-    entry = f"{format_price(facts.entry_low)}–{format_price(facts.entry_high)}"
+    entry = f"{format_price(facts.entry_low)}-{format_price(facts.entry_high)}"
     tp3 = facts.take_profit_3 if facts.take_profit_3 is not None else facts.take_profit_2
     same_tp = (
         abs(facts.take_profit_2 - facts.take_profit_1) <= max(abs(facts.take_profit_1), 1.0) * 1e-8

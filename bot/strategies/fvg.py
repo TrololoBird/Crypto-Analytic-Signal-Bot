@@ -1,4 +1,4 @@
-"""fvg_setup — spec detector + SMC zone extended path."""
+"""fvg_setup - spec detector + SMC zone extended path."""
 
 from __future__ import annotations
 
@@ -381,18 +381,7 @@ class FVGSetup(SpecDetectorSetup):
         return defaults
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
-        try:
-            return super().detect(prepared, settings)
-        except Exception as exc:
-            LOG.exception("%s fvg_setup: unexpected error", prepared.symbol)
-            _reject(
-                prepared,
-                self.setup_id,
-                "runtime.unexpected_exception",
-                stage="runtime",
-                exception_type=type(exc).__name__,
-            )
-            return None
+        return super().detect(prepared, settings)
 
 
 __all__ = ["FVGSetup"]

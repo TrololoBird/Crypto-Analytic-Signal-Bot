@@ -1,4 +1,4 @@
-"""DB status summary — migration version and active signal counts."""
+"""DB status summary - migration version and active signal counts."""
 
 from __future__ import annotations
 

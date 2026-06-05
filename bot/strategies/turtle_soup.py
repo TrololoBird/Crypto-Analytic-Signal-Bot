@@ -1,4 +1,4 @@
-"""turtle_soup — canonical strategy detector."""
+"""turtle_soup - canonical strategy detector."""
 
 from __future__ import annotations
 
@@ -506,18 +506,7 @@ class TurtleSoupSetup(SpecDetectorSetup):
         return defaults
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
-        try:
-            return super().detect(prepared, settings)
-        except Exception as exc:
-            _reject(
-                prepared,
-                self.setup_id,
-                "runtime.unexpected_exception",
-                stage="runtime",
-                exception_type=type(exc).__name__,
-            )
-            LOG.exception("%s turtle_soup: unexpected error", prepared.symbol)
-            return None
+        return super().detect(prepared, settings)
 
 
 __all__ = ["TurtleSoupSetup"]

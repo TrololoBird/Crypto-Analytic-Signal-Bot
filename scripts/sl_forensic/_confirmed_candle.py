@@ -50,7 +50,7 @@ def infer_confirmed_candle(
     if assess_closed_valid is False:
         return 0
 
-    # Approximation — flagged in archive as inferred, not telemetry-native.
+    # Approximation - flagged in archive as inferred, not telemetry-native.
     if setup_id in CONFIRMED_BAR_STRATEGIES:
         created = _parse_signal_dt(signal_created_at)
         if created is not None and created >= FIX_SL_A_COMMIT_DATE:

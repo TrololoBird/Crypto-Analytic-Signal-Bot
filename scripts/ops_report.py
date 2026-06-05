@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Ops reports — startup summary and daily digest (v9 scripts entry)."""
+"""Ops reports - startup summary and daily digest (v9 scripts entry)."""
 
 from __future__ import annotations
 

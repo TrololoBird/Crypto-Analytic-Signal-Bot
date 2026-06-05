@@ -1,4 +1,4 @@
-"""squeeze_setup — canonical strategy detector."""
+"""squeeze_setup - canonical strategy detector."""
 
 from __future__ import annotations
 

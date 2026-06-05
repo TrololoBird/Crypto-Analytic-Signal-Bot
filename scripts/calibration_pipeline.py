@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Ops calibration pipeline — shortlist matrix, defaults reconcile, DB status.
+"""Ops calibration pipeline - shortlist matrix, defaults reconcile, DB status.
 
 Writes consolidated artifacts under data/bot/reports/.
 """
@@ -224,7 +224,7 @@ def main() -> int:
         "yes",
     ):
         LOG.error(
-            "calibration blocked: run after W1–W3 stabilize. "
+            "calibration blocked: run after W1-W3 stabilize. "
             "Set BOT_ALLOW_CALIBRATION=1 or pass --force."
         )
         return 2

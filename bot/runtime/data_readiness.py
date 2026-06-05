@@ -29,7 +29,7 @@ REQUIRED_DERIVATIVES_KEYS: tuple[str, ...] = (
 
 # Positioning REST fields required before kline-only analysis under strict_data_quality.
 # Order-flow columns (depth_imbalance, microprice_bias, agg_trade_delta_30s) are gated
-# per strategy pool via assess_strategy_data_capability — not a global hard stop.
+# per strategy pool via assess_strategy_data_capability - not a global hard stop.
 REQUIRED_PREPARED_LIVE_FIELDS: tuple[str, ...] = (
     "oi_change_pct",
     "ls_ratio",

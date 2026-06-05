@@ -1,4 +1,4 @@
-"""Runtime configuration sanity checker — observation only, non-blocking warnings."""
+"""Runtime configuration sanity checker - observation only, non-blocking warnings."""
 
 from __future__ import annotations
 
@@ -106,11 +106,11 @@ def audit_filter_config(settings: Any) -> list[str]:
             if unknown:
                 warnings.append(
                     "filters.enabled_stages contains unknown stage(s): "
-                    f"{unknown} — delivery may skip expected gates"
+                    f"{unknown} - delivery may skip expected gates"
                 )
             if "min_score" not in active and "scoring" not in active:
                 warnings.append(
-                    "filters.enabled_stages disables both scoring and min_score — "
+                    "filters.enabled_stages disables both scoring and min_score - "
                     "most signals will pass score floor unchecked"
                 )
     except DEFENSIVE_EXC:

@@ -92,7 +92,7 @@ async def maybe_notify_watch_escalation(
         "<b>👀 WATCH → ACTION?</b>\n"
         f"{sym} {direction} · {setup} · <code>#{ref}</code>\n"
         f"Score <code>{float(signal.score or 0) * 100:.0f}%</code> · {html.escape(note)}\n"
-        "<i>Ручное решение — бот не эскалирует в канал автоматически</i>"
+        "<i>Ручное решение - бот не эскалирует в канал автоматически</i>"
     )
     notified = False
     try:
@@ -216,7 +216,7 @@ async def emit_radar_watch_candidates(
             "<b>📡 Radar WATCH</b> (не ACTION)\n"
             f"{sym} · tier <code>{tier}</code>\n"
             f"Flags: <code>{flags}</code>\n"
-            "<i>Кандидат воронки — не прошёл deep shortlist / delivery</i>"
+            "<i>Кандидат воронки - не прошёл deep shortlist / delivery</i>"
         )
         try:
             if await send_operator_html(bot, text):

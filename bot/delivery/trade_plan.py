@@ -1,4 +1,4 @@
-"""Trade plan builder — centralized entry/TP/SL math for manual signals."""
+"""Trade plan builder - centralized entry/TP/SL math for manual signals."""
 
 from __future__ import annotations
 
@@ -95,7 +95,7 @@ def evaluate_publish_readiness(
     stop: float,
     chase_pct: float,
 ) -> tuple[bool, str | None, dict[str, object]]:
-    """Publish-time limit gate — delegates to domain limit_entry semantics."""
+    """Publish-time limit gate - delegates to domain limit_entry semantics."""
     ready, reason, details = limit_delivery_ready(
         direction=direction,
         mark_price=mark_price,

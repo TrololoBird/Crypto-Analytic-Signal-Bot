@@ -108,11 +108,11 @@ def classify_stop_loss_root_cause(
 
     labels = {
         "immediate_adverse_entry": "Вход сразу против движения (MFE≈0)",
-        "bear_long_immediate_stop": "Long в bear — мгновенный стоп без профита",
+        "bear_long_immediate_stop": "Long в bear - мгновенный стоп без профита",
         "bear_long_countertrend": "Long против bear/BTC↓",
         "wide_volatility_stop": "Стоп на фоне высокой волатильности (ATR%)",
         "quick_stop_no_follow_through": "Быстрый стоп без follow-through",
-        "stop_hunt_post_recovery": "Stop hunt — после SL цена шла к TP1",
+        "stop_hunt_post_recovery": "Stop hunt - после SL цена шла к TP1",
         "thesis_failed": "Тезис не реализовался (обычный SL)",
     }
     return {

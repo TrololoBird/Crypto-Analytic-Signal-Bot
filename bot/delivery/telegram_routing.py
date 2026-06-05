@@ -1,11 +1,11 @@
 """Telegram routing: channel (subscribers) vs operator private DM (ops).
 
-Channel ``TELEGRAM_CHAT_ID`` — trading signals only:
+Channel ``TELEGRAM_CHAT_ID`` - trading signals only:
   - ACTION/WATCH signal cards
   - In-place signal card status edits
-  - Subscriber tracking updates (TP/SL/activation — concise)
+  - Subscriber tracking updates (TP/SL/activation - concise)
 
-Operator DM ``TELEGRAM_OPERATOR_USER_IDS`` — monitoring & control:
+Operator DM ``TELEGRAM_OPERATOR_USER_IDS`` - monitoring & control:
   - /command replies, digests, market context, startup reports
   - Detailed SL post-mortem analytics
   - Critical runtime alerts
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 LOG = logging.getLogger("bot.delivery.telegram_routing")
 
 CHANNEL_PURPOSE = (
-    "Канал: только сигналы и статусы сделок для подписчиков. Оператор: личка с ботом — /help"
+    "Канал: только сигналы и статусы сделок для подписчиков. Оператор: личка с ботом - /help"
 )
 OPERATOR_PURPOSE = (
     "Личка оператора: мониторинг и команды (/market /status /audit …). "

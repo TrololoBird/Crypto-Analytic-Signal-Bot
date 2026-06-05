@@ -109,14 +109,14 @@ select = [
     "PGH",
     "RSE",
 ]
-# RUF001/RUF002: operator/Telegram copy is Russian Cyrillic — homoglyph rule is not applicable.
-ignore = ["RUF001", "RUF002"]
-# No per-file ignores for code quality — fix violations in source.
-
-[tool.ruff.lint.per-file-ignores]
-# E402 only: late imports after module constants (circular-import guard in ws/rest_impl)
-"bot/market/ws.py" = ["E402"]
-"bot/market/rest_impl.py" = ["E402"]
+# RUF001/RUF002 stay enabled. Cyrillic in operator/Telegram copy is whitelisted explicitly
+# (not `ignore`) so Latin-homoglyph attacks in identifiers/English still fail the check.
+allowed-confusables = [
+    "Ё", "А", "Б", "В", "Г", "Д", "Е", "Ж", "З", "И", "К", "Л", "М", "Н", "О", "П", "Р", "С",
+    "Т", "У", "Ф", "Х", "Ц", "Ч", "Ш", "Щ", "Ъ", "Ы", "Ь", "Э", "Ю", "Я", "а", "б", "в", "г",
+    "д", "е", "ж", "з", "и", "й", "к", "л", "м", "н", "о", "п", "р", "с", "т", "у", "ф", "х",
+    "ц", "ч", "ш", "щ", "ъ", "ы", "ь", "э", "ю", "я", "ё", "↓", "↑",
+]
 
 [tool.mypy]
 python_version = "3.14"

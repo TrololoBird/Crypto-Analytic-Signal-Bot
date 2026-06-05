@@ -1,4 +1,4 @@
-"""Dashboard tracking serialization — mark price, progress, PnL hints."""
+"""Dashboard tracking serialization - mark price, progress, PnL hints."""
 
 from __future__ import annotations
 
@@ -86,7 +86,7 @@ def compute_progress(
     if entry is None:
         return {
             "progress_pct": 0.0,
-            "progress_label": "—",
+            "progress_label": "-",
             "progress_tone": "muted",
             "unrealized_pnl_pct": None,
             "next_target_label": None,

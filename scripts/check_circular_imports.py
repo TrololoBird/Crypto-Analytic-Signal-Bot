@@ -15,7 +15,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BOT_ROOT = REPO_ROOT / "bot"
 
-# Documented in CLAUDE.md — runtime-safe via lazy imports or TYPE_CHECKING.
+# Documented in CLAUDE.md - runtime-safe via lazy imports or TYPE_CHECKING.
 KNOWN_MITIGATED_CYCLES: frozenset[frozenset[str]] = frozenset(
     {
         frozenset({"bot.domain.config", "bot.domain.strategy_catalog"}),

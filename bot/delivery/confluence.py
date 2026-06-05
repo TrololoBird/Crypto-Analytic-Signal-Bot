@@ -1,4 +1,4 @@
-"""ConfluenceEngine — unified signal quality scoring."""
+"""ConfluenceEngine - unified signal quality scoring."""
 
 from __future__ import annotations
 

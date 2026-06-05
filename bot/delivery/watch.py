@@ -160,7 +160,7 @@ class AlertCoordinator:
                 "entry_sent",
                 "entry_sending",
             }:
-                # Already an active watch — no need to re-arm.
+                # Already an active watch - no need to re-arm.
                 return
         # Keep it intentionally narrow: only "pullback to a structural level" watches for now.
         candidates = self._pullback_watch_candidates(prepared, observed_at=observed_at)
@@ -659,7 +659,7 @@ class AlertCoordinator:
                 ),
                 (
                     f"Интерес {_fmt_pct(self._cfg.watch_interest_pct)}: "
-                    f"<code>{_fmt_price(cand.interest_low)}–{_fmt_price(cand.interest_high)}</code>"
+                    f"<code>{_fmt_price(cand.interest_low)}-{_fmt_price(cand.interest_high)}</code>"
                 ),
             ]
         )
@@ -675,7 +675,7 @@ class AlertCoordinator:
                 f"<code>#{html.escape(ref_id)}</code>",
                 (
                     f"Вход {_fmt_pct(self._cfg.entry_zone_pct)}: "
-                    f"<code>{_fmt_price(cand.entry_low)}–{_fmt_price(cand.entry_high)}</code> · "
+                    f"<code>{_fmt_price(cand.entry_low)}-{_fmt_price(cand.entry_high)}</code> · "
                     f"сейчас <code>{_fmt_price(current_price)}</code>"
                 ),
             ]

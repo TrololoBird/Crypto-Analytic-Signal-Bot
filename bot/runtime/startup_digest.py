@@ -25,5 +25,5 @@ def format_startup_tracking_digest(summary: Mapping[str, Any]) -> str:
     if stale_expired:
         lines.append(f"Stale open signals expired: <code>{stale_expired}</code>")
     if not repaired and not review_closed and not stale_expired:
-        lines.append("<i>Без миграций — состояние чистое</i>")
+        lines.append("<i>Без миграций - состояние чистое</i>")
     return "\n".join(lines)

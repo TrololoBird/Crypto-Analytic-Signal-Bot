@@ -580,7 +580,7 @@ class NotifierConfig(_StrictModel):
 
 
 class ResearchHarvestConfig(_StrictModel):
-    """Deep capture for strategy research — enable via CLI ``harvest`` (calibration comes later)."""
+    """Deep capture for strategy research - enable via CLI ``harvest`` (calibration comes later)."""
 
     enabled: bool = False
     symbols: tuple[str, ...] = ()

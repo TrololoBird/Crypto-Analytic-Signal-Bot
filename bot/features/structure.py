@@ -1,6 +1,6 @@
 """Structure indicators (Ichimoku, HMA/WMA) for the Polars feature pipeline.
 
-Audited: 2026-06-02 (v9 refactor). Leading windows stay null — never coerced to 0.0.
+Audited: 2026-06-02 (v9 refactor). Leading windows stay null - never coerced to 0.0.
 Positive `.shift(N)` on Ichimoku spans is historical displacement only (not live lookahead).
 """
 

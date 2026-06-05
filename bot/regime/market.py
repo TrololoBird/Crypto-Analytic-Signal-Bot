@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 LOG = logging.getLogger("bot.market_regime")
 
-# Shared bear labels for delivery confluence (BTC/global — not alt HTF regime).
+# Shared bear labels for delivery confluence (BTC/global - not alt HTF regime).
 BEAR_BIAS_VALUES: frozenset[str] = frozenset({"downtrend", "bear"})
 BEAR_MARKET_REGIMES: frozenset[str] = frozenset({"bear", "decline", "risk_off"})
 BEAR_MACRO_RISK_MODES: frozenset[str] = frozenset({"risk_off", "risk-off"})

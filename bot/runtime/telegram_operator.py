@@ -1,4 +1,4 @@
-"""Telegram operator console — remote monitoring from any network (no LAN required).
+"""Telegram operator console - remote monitoring from any network (no LAN required).
 
 Authorized users DM the bot with /status, /sl, /tracking, etc. Works behind NAT on
 MacBook via long-polling getUpdates. Configure TELEGRAM_OPERATOR_USER_IDS in .env.
@@ -315,7 +315,7 @@ class TelegramOperatorConsole:
 
         payload = await self._build_payload()
         if payload.get("error"):
-            await self.send_html(chat_id, "<b>Бот ещё прогревается</b> — повторите через минуту.")
+            await self.send_html(chat_id, "<b>Бот ещё прогревается</b> - повторите через минуту.")
             return
 
         if cmd == "/status":
@@ -420,7 +420,7 @@ class TelegramOperatorConsole:
         if self._action_lock.locked():
             await self.send_html(
                 chat_id,
-                "<b>Занято</b> — другая operator-команда уже выполняется. Подождите.",
+                "<b>Занято</b> - другая operator-команда уже выполняется. Подождите.",
             )
             return
         await self.send_html(chat_id, f"⏳ {html.escape(label)}…")
@@ -445,8 +445,8 @@ class TelegramOperatorConsole:
         lines = [
             "<b>Shortlist</b>",
             f"Size: <code>{runtime.get('shortlist_size') or len(symbols)}</code>",
-            f"Regime: <code>{runtime.get('regime') or '—'}</code> · "
-            f"BTC: <code>{runtime.get('btc_bias') or '—'}</code>",
+            f"Regime: <code>{runtime.get('regime') or '-'}</code> · "
+            f"BTC: <code>{runtime.get('btc_bias') or '-'}</code>",
         ]
         if symbols:
             preview = ", ".join(
@@ -550,7 +550,7 @@ class TelegramOperatorConsole:
         lines = [
             "<b>Strategies</b>",
             f"Enabled: <code>{len(enabled)}</code> / registry "
-            f"<code>{len(registry) if registry else '—'}</code>",
+            f"<code>{len(registry) if registry else '-'}</code>",
             "<i>MTF: детектор на 15m, фильтры 1h/4h в pipeline + confluence</i>",
         ]
         preview = ", ".join(html.escape(s) for s in enabled[:12])
@@ -591,7 +591,7 @@ class TelegramOperatorConsole:
         for name in flags:
             val = bool(getattr(op, name, True)) if op is not None else True
             lines.append(f"{html.escape(name)}: <code>{'on' if val else 'off'}</code>")
-        lines.append("<i>Канал: только сигналы и lifecycle — ops в личку.</i>")
+        lines.append("<i>Канал: только сигналы и lifecycle - ops в личку.</i>")
         await self.send_html(chat_id, "\n".join(lines))
 
     async def _reply_signals(self, chat_id: int, payload: dict[str, Any]) -> None:
@@ -619,7 +619,7 @@ class TelegramOperatorConsole:
             return
         summary = await build_user_summary(self._bot, live_data)
         hint = summary.get("funnel_hint") or {}
-        lines = ["<b>Rejections</b>", html.escape(str(hint.get("text") or "—"))]
+        lines = ["<b>Rejections</b>", html.escape(str(hint.get("text") or "-"))]
         top_key = hint.get("top_filter")
         top_count = int(hint.get("top_filter_count") or 0)
         if top_key and top_count:
@@ -646,7 +646,7 @@ class TelegramOperatorConsole:
                 "<b>Operator console</b> активен.\n"
                 "<b>Контроль:</b> /symbol · /signal · /analyze · /scan · /refresh\n"
                 "<b>Мониторинг:</b> /market · /status · /health · /tracking\n"
-                "/help — полный список"
+                "/help - полный список"
             )
         summary = getattr(self._bot, "_startup_tracking_summary", None)
         if summary and bool(getattr(op_cfg, "send_startup_report", True)):

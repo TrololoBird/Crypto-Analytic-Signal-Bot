@@ -1,4 +1,4 @@
-"""Ops webhook alerts — parallel to Telegram operator DMs (PagerDuty/Slack generic hook)."""
+"""Ops webhook alerts - parallel to Telegram operator DMs (PagerDuty/Slack generic hook)."""
 
 from __future__ import annotations
 

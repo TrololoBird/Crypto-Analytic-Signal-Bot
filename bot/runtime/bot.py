@@ -1,4 +1,4 @@
-"""SignalBot — event-driven runtime using EventBus.
+"""SignalBot - event-driven runtime using EventBus.
 
 Architecture
 ------------
@@ -185,7 +185,7 @@ class SignalBot:
         self.tracker = container.tracker
         self.intelligence = container.intelligence
 
-        # Modern SignalEngine — core/ architecture (replaces legacy SignalPipeline)
+        # Modern SignalEngine - core/ architecture (replaces legacy SignalPipeline)
         self._modern_registry = container.registry
         self._modern_engine = container.engine
         LOG.info("SignalEngine initialized with %d strategies", len(self._modern_registry))
@@ -224,7 +224,7 @@ class SignalBot:
                 self._research_harvest_service.recorder.session_dir,
             )
 
-        # Intra-candle scan throttle — monotonic timestamp of last scan per symbol
+        # Intra-candle scan throttle - monotonic timestamp of last scan per symbol
         self._last_intra_scan: dict[str, float] = {}
         self._last_intra_mid: dict[str, float] = {}
         self._last_emergency_radar_scan: dict[str, float] = {}
@@ -671,7 +671,7 @@ class SignalBot:
         )
 
     async def run_forever(self) -> None:
-        """Main loop — EventBus-driven with emergency fallback."""
+        """Main loop - EventBus-driven with emergency fallback."""
         bus_task = asyncio.create_task(self._bus.run(), name="event_bus")
         bus_task.add_done_callback(SignalBot._log_background_task_failure)
         # Give EventBus a moment to start before WS events arrive
@@ -859,7 +859,7 @@ class SignalBot:
         await self._get_kline_handler().on_kline_close(event)
 
     async def _on_reconnect(self, event: ReconnectEvent) -> None:
-        LOG.info("ws reconnected | reason=%s — scheduling shortlist resync", event.reason)
+        LOG.info("ws reconnected | reason=%s - scheduling shortlist resync", event.reason)
         self.metrics.record_ws_reconnect()
         prior = self._reconnect_refresh_task
         if prior is not None and not prior.done():
@@ -888,7 +888,7 @@ class SignalBot:
         await self._get_intra_candle_scanner().handle(event)
 
     # ------------------------------------------------------------------
-    # Shared analysis logic — used by both kline_close and intra_candle paths
+    # Shared analysis logic - used by both kline_close and intra_candle paths
     # ------------------------------------------------------------------
 
     async def _select_and_deliver_for_symbol(
@@ -899,11 +899,11 @@ class SignalBot:
         return await self._get_kline_handler().select_and_deliver_for_symbol(symbol, result)
 
     # ------------------------------------------------------------------
-    # Emergency fallback — full scan when no kline events
+    # Emergency fallback - full scan when no kline events
     # ------------------------------------------------------------------
 
     async def _run_emergency_cycle(self) -> dict[str, Any]:
-        """Full shortlist analysis — used for emergency fallback."""
+        """Full shortlist analysis - used for emergency fallback."""
         return await self._get_cycle_runner().run_emergency_cycle()
 
     # ------------------------------------------------------------------

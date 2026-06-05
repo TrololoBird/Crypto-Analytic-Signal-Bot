@@ -49,7 +49,7 @@ def _fix_recommendation(case: dict[str, Any]) -> str:
     if sl_type == "STOP_HUNT":
         return (
             f"SL was placed at a liquidity sweep zone. Options:\n"
-            f"   (1) Widen ATR multiplier for {setup_id} by 1.3× in "
+            f"   (1) Widen ATR multiplier for {setup_id} by 1.3x in "
             f"config/strategies/{setup_id}.toml\n"
             f"   (2) Use post-wick entry: delay entry by 1 candle after pattern fires\n"
             f"   (3) Place SL below the full wick low, not ATR-based"
@@ -63,7 +63,7 @@ def _fix_recommendation(case: dict[str, Any]) -> str:
         )
     if sl_type == "IMMEDIATE_ADVERSE" and subtype == "ENTRY_CHASE":
         return (
-            f"Price had moved {deviation:.2f}×ATR from entry by activation time.\n"
+            f"Price had moved {deviation:.2f}xATR from entry by activation time.\n"
             f"   fix-sl-A (entry_staleness filter) should catch this in future runs.\n"
             f"   Verify entry_staleness filter is active and max_entry_deviation_atr_mult=1.5"
         )
@@ -128,8 +128,8 @@ def generate_case_card(case: dict[str, Any]) -> str:
         f"| Signal created | {case.get('signal_created_at')} | {case.get('entry_price')} |",
         f"| Position activated | {case.get('entry_activated_at')} | {case.get('entry_price')} |",
         f"| SL hit | {case.get('sl_hit_at')} | {case.get('sl_price')} |",
-        f"| Time to entry | {case.get('time_to_entry_min')} min | — |",
-        f"| Time to SL | {case.get('time_to_sl_min')} min | — |",
+        f"| Time to entry | {case.get('time_to_entry_min')} min | - |",
+        f"| Time to SL | {case.get('time_to_sl_min')} min | - |",
         "",
         "### Setup quality",
         "| Metric | Value | Assessment |",
@@ -137,7 +137,7 @@ def generate_case_card(case: dict[str, Any]) -> str:
         f"| Score | {score} | {_score_band(float(score) if score is not None else None)} |",
         f"| ATR% | {atr_pct} | {_vol_band(float(atr_pct) if atr_pct is not None else None)} |",
         f"| R:R | {rr} | {_rr_band(float(rr) if rr is not None else None)} |",
-        f"| Entry deviation | {deviation}×ATR | "
+        f"| Entry deviation | {deviation}xATR | "
         f"{'STALE' if deviation and float(deviation) > 1.0 else 'FRESH'} |",
         f"| Confirmed candle | {confirmed} | {'YES' if confirmed else 'NO'} |",
         "",
@@ -229,7 +229,7 @@ def generate_aggregate_report(cases: list[dict[str, Any]]) -> str:
     setup_totals = Counter(str(c.get("setup_id") or "unknown") for c in cases)
     for setup in setup_totals:
         n = setup_totals[setup]
-        parts = ", ".join(f"{cnt}×{sub}" for sub, cnt in setup_subtype[setup].most_common())
+        parts = ", ".join(f"{cnt}x{sub}" for sub, cnt in setup_subtype[setup].most_common())
         lines.append(f"- **{setup}:** {n} SL → {parts}")
 
     lines.extend(["", "## Actionable recommendations by type", ""])

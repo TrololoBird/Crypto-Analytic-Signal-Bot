@@ -87,7 +87,7 @@ class BaseSetup(AbstractStrategy):
         pattern_tf = catalog.pattern_tf if catalog is not None else "15m"
         required_tfs = catalog.required_tfs if catalog is not None else (trigger_tf,)
         evidence_level = catalog.evidence_level if catalog is not None else "A"
-        # Trigger routing only — required_tfs are for data/WS union, not lane fallback.
+        # Trigger routing only - required_tfs are for data/WS union, not lane fallback.
         timeframes = list(dict.fromkeys((trigger_tf, *trigger_intervals)))
         return StrategyMetadata(
             strategy_id=self.setup_id,
@@ -135,13 +135,13 @@ class BaseSetup(AbstractStrategy):
             return bool(checker(prepared, self._settings))
         except TypeError:
             return bool(checker(prepared))
-        except Exception:
+        except DEFENSIVE_EXC:
             LOG.exception(
                 "%s: strategy schedule check failed | strategy=%s",
                 prepared.symbol,
                 self.setup_id,
             )
-            return True
+            return False
 
     def calculate(self, prepared: PreparedSymbol) -> SignalResult:
         if self._settings is None:

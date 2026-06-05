@@ -1,4 +1,4 @@
-"""ema_bounce — canonical strategy detector."""
+"""ema_bounce - canonical strategy detector."""
 
 from __future__ import annotations
 

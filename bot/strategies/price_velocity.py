@@ -1,4 +1,4 @@
-"""price_velocity — strategy module (bot/strategies/)."""
+"""price_velocity - strategy module (bot/strategies/)."""
 
 from __future__ import annotations
 

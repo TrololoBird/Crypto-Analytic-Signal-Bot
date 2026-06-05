@@ -1,4 +1,4 @@
-"""Research harvest mode — profile overrides and recorder."""
+"""Research harvest mode - profile overrides and recorder."""
 
 from __future__ import annotations
 

@@ -618,7 +618,7 @@ def verify_config_setup_references(settings: BotSettings) -> list[str]:
     )
     if missing_tfs:
         errors.append(
-            "catalog required timeframes not covered by ws.kline_intervals ∪ "
+            "catalog required timeframes not covered by ws.kline_intervals | "
             f"runtime.analysis_kline_intervals: {', '.join(missing_tfs)}"
         )
     return errors

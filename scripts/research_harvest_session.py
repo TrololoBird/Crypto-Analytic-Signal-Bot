@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Supervised research harvest — deep capture on ~10 symbols (no calibration, no Telegram)."""
+"""Supervised research harvest - deep capture on ~10 symbols (no calibration, no Telegram)."""
 
 from __future__ import annotations
 

@@ -35,7 +35,7 @@ def detect_funding_reversal(
         defaults.get("funding_soft_threshold", defaults["funding_soft_threshold"]),
         defaults["funding_soft_threshold"],
     )
-    # Soft threshold is for relative-tier scoring only — not the primary extreme gate.
+    # Soft threshold is for relative-tier scoring only - not the primary extreme gate.
     effective_threshold = max(0.00002, funding_threshold)
     funding_trend_bars = int(defaults.get("funding_trend_bars", defaults["funding_trend_bars"]))
     funding_recent_extreme_lookback_hours = _as_float(

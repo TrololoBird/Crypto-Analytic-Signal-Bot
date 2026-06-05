@@ -1,4 +1,4 @@
-"""bos_choch — canonical strategy detector."""
+"""bos_choch - canonical strategy detector."""
 
 from __future__ import annotations
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SL Forensic Analyzer — standalone post-mortem for all stop-loss hits.
+"""SL Forensic Analyzer - standalone post-mortem for all stop-loss hits.
 
 Usage:
     python scripts/sl_forensic/analyze.py
@@ -339,7 +339,7 @@ def _append_monitoring_hook(report_summary: str) -> None:
     if not path.exists():
         return
     stamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
-    block = f"\n\n---\n\n## Forensic snapshot — {stamp}\n\n{report_summary}\n"
+    block = f"\n\n---\n\n## Forensic snapshot - {stamp}\n\n{report_summary}\n"
     with path.open("a", encoding="utf-8") as handle:
         handle.write(block)
 

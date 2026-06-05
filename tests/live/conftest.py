@@ -1,4 +1,4 @@
-"""Live Binance session hooks — skip when the runner region is geo-blocked."""
+"""Live Binance session hooks - skip when the runner region is geo-blocked."""
 
 from __future__ import annotations
 

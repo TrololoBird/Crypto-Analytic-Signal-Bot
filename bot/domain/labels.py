@@ -132,7 +132,7 @@ TRACKING_EVENT_RU: dict[str, str] = {
     "superseded": "ЗАМЕНЁН",
 }
 
-# Internal-only lifecycle (operator/logs — not channel subscribers).
+# Internal-only lifecycle (operator/logs - not channel subscribers).
 INTERNAL_TRACKING_EVENT_RU: dict[str, str] = {
     "entry_zone_touched": "ЗОНА",
     "entry_confirm_pending": "ОЖИДАНИЕ",
@@ -175,13 +175,13 @@ def reject_reason_ru(key: str | None) -> str:
 
 def result_label_ru(result: str | None) -> str:
     if not result:
-        return "—"
+        return "-"
     return RESULT_LABEL_RU.get(str(result).lower(), str(result))
 
 
 def tracking_event_ru(event_type: str | None) -> str:
     if not event_type:
-        return "—"
+        return "-"
     key = str(event_type).strip().lower()
     if key in TRACKING_EVENT_RU:
         return TRACKING_EVENT_RU[key]
@@ -192,13 +192,13 @@ def tracking_event_ru(event_type: str | None) -> str:
 
 def confluence_leg_label_ru(leg: str | None) -> str:
     if not leg:
-        return "—"
+        return "-"
     return CONFLUENCE_LEG_LABEL_RU.get(str(leg).strip().lower(), str(leg))
 
 
 def confirmation_profile_label_ru(profile: str | None) -> str:
     if not profile:
-        return "—"
+        return "-"
     key = str(profile).strip().lower()
     return CONFIRMATION_PROFILE_LABEL_RU.get(key, key.replace("_", " "))
 
@@ -216,7 +216,7 @@ def confluence_profile_recommendation_ru(
     leg_label = confluence_leg_label_ru(top_leg)
     return (
         f"Профиль «{profile_label}»: чаще всего не проходит {leg_label} "
-        f"({int(leg_count)} отказов) — проверьте пороги этого leg."
+        f"({int(leg_count)} отказов) - проверьте пороги этого leg."
     )
 
 

@@ -31,7 +31,7 @@ class TierCapDecision:
 
 
 def _finite_score(value: object) -> float:
-    # fix-20260604: NaN is truthy — `score or 0.0` still sorts as NaN
+    # fix-20260604: NaN is truthy - `score or 0.0` still sorts as NaN
     try:
         numeric = float(value or 0.0)
     except (TypeError, ValueError):

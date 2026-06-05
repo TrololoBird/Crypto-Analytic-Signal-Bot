@@ -55,7 +55,7 @@ def compute_post_sl_action(
             "post_sl_price_at_close": None,
         }
 
-    # Include SL candle — wick sweeps often recover within the same bar.
+    # Include SL candle - wick sweeps often recover within the same bar.
     post = candles[sl_idx : sl_idx + analyze_candles]
     if not post:
         return {
@@ -329,11 +329,11 @@ def classify_sl(case: dict[str, Any]) -> tuple[str, str, str]:
     stale_threshold = max(0.15, 1.5 * atr_pct) if atr_pct > 0 else 1.0
     entry_deviation_pct = float(case.get("entry_deviation_pct") or 0.0)
 
-    # TYPE 1: STOP_HUNT — post-SL recovery, in-trade TP1 touch, or partial thesis
+    # TYPE 1: STOP_HUNT - post-SL recovery, in-trade TP1 touch, or partial thesis
     if tp1_reached and tp1_candles is not None and int(tp1_candles) <= 8:
         subtype = "FAST_RECOVERY" if int(tp1_candles) <= 4 else "SLOW_RECOVERY"
         verdict = (
-            f"Price swept SL then recovered to TP1 within {tp1_candles} candles — "
+            f"Price swept SL then recovered to TP1 within {tp1_candles} candles - "
             "likely liquidity hunt at stop pool."
         )
         return "STOP_HUNT", subtype, verdict
@@ -341,7 +341,7 @@ def classify_sl(case: dict[str, Any]) -> tuple[str, str, str]:
     if in_trade_tp1:
         subtype = "IN_TRADE_TP1_THEN_STOP"
         verdict = (
-            "TP1 was touched in-trade before stop closed — thesis held, "
+            "TP1 was touched in-trade before stop closed - thesis held, "
             "stop placement or BE trail too tight."
         )
         return "STOP_HUNT", subtype, verdict
@@ -351,16 +351,16 @@ def classify_sl(case: dict[str, Any]) -> tuple[str, str, str]:
         subtype = "FALSE_SIGNAL"
         verdict = (
             f"Detector fires on real-time unclosed candle but NOT on "
-            f"confirmed historical data — df[-2] fix required for {setup_id}."
+            f"confirmed historical data - df[-2] fix required for {setup_id}."
         )
         return "IMMEDIATE_ADVERSE", subtype, verdict
 
-    # TYPE 4: TIMING_OFF — thesis right, SL too tight for pace (check before broad STOP_HUNT)
+    # TYPE 4: TIMING_OFF - thesis right, SL too tight for pace (check before broad STOP_HUNT)
     if tp1_reached and tp1_candles is not None and int(tp1_candles) > 8:
         if time_to_sl < 15 and int(tp1_candles) > 20:
             subtype = "PREMATURE_SL"
             verdict = (
-                f"SL hit in {time_to_sl} min but TP1 reached {tp1_candles} candles later — "
+                f"SL hit in {time_to_sl} min but TP1 reached {tp1_candles} candles later - "
                 "SL too tight for move pace."
             )
         elif int(tp1_candles) <= 48:
@@ -371,13 +371,13 @@ def classify_sl(case: dict[str, Any]) -> tuple[str, str, str]:
             )
         else:
             subtype = "SLOW_RECOVERY"
-            verdict = f"TP1 reached after {tp1_candles} candles — timing/TTL mismatch."
+            verdict = f"TP1 reached after {tp1_candles} candles - timing/TTL mismatch."
         return "TIMING_OFF", subtype, verdict
 
     if recovery >= 1.0 and abs(tp1_room) > 1.5:
         subtype = "POST_SL_RECOVERY"
         verdict = (
-            f"Price recovered {recovery:.2f}% toward TP1 after SL exit — "
+            f"Price recovered {recovery:.2f}% toward TP1 after SL exit - "
             "likely stop hunt / liquidity sweep."
         )
         return "STOP_HUNT", subtype, verdict
@@ -385,12 +385,12 @@ def classify_sl(case: dict[str, Any]) -> tuple[str, str, str]:
     if mfe > 0.4 and mae > 0.0 and (mfe / mae) >= 0.4:
         subtype = "PARTIAL_THESIS_THEN_STOP"
         verdict = (
-            f"MFE {mfe:.2f}% before SL — partial thesis played out, "
+            f"MFE {mfe:.2f}% before SL - partial thesis played out, "
             "stop was too tight for volatility."
         )
         return "STOP_HUNT", subtype, verdict
 
-    # TYPE 2: IMMEDIATE_ADVERSE — strict time gate per taxonomy
+    # TYPE 2: IMMEDIATE_ADVERSE - strict time gate per taxonomy
     recovery_threshold = 0.15 * sl_dist if sl_dist > 0 else 0.0
     immediate = recovery < recovery_threshold and time_to_sl < 30
     if immediate:
@@ -404,14 +404,14 @@ def classify_sl(case: dict[str, Any]) -> tuple[str, str, str]:
         elif deviation > 1.0 or entry_deviation_pct > stale_threshold:
             subtype = "ENTRY_CHASE"
             verdict = (
-                f"Entry was {deviation:.2f}×ATR from mark at activation — "
+                f"Entry was {deviation:.2f}xATR from mark at activation - "
                 "chased move, never moved favorably."
             )
         elif recheck is False:
             subtype = "FALSE_SIGNAL"
             verdict = (
                 f"Detector fires on real-time unclosed candle but NOT on "
-                f"confirmed historical data — df[-2] fix required for {setup_id}."
+                f"confirmed historical data - df[-2] fix required for {setup_id}."
             )
         elif closed_valid is False and setup_id in {
             "btc_correlation",
@@ -420,7 +420,7 @@ def classify_sl(case: dict[str, Any]) -> tuple[str, str, str]:
         }:
             subtype = "FALSE_SIGNAL"
             verdict = (
-                f"Confirmed-bar momentum disagrees with {direction} on {setup_id} — "
+                f"Confirmed-bar momentum disagrees with {direction} on {setup_id} - "
                 "df[-2] fix required."
             )
         elif vs_bias == "AGAINST":
@@ -449,13 +449,13 @@ def classify_sl(case: dict[str, Any]) -> tuple[str, str, str]:
     elif recheck is True:
         subtype = "INDICATOR_FAILURE"
         verdict = (
-            "Detector still valid on confirmed data but market ignored the setup — "
+            "Detector still valid on confirmed data but market ignored the setup - "
             "genuine thesis failure."
         )
     else:
         subtype = "THESIS_FAILED"
         if thesis_threshold > 0 and recovery < thesis_threshold:
-            verdict = "Price continued against position with insufficient recovery — thesis failed."
+            verdict = "Price continued against position with insufficient recovery - thesis failed."
         else:
             verdict = "Setup did not play out; classified as thesis failure."
 

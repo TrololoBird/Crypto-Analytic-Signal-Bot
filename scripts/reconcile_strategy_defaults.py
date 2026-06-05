@@ -209,7 +209,7 @@ def write_toml_patch(
         "",
     ]
     if not drift_rows:
-        lines.append("# No drift — patch file is empty.")
+        lines.append("# No drift - patch file is empty.")
     for row in drift_rows:
         section_name, key = TOML_SECTION_BY_KEY[row.field]
         rel_path = row.toml_path or ""

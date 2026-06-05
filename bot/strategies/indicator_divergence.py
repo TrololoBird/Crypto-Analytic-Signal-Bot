@@ -1,4 +1,4 @@
-"""indicator_divergence — strategy module (bot/strategies/)."""
+"""indicator_divergence - strategy module (bot/strategies/)."""
 
 from __future__ import annotations
 
@@ -221,7 +221,7 @@ def _detect_indicator_divergence_extended(
         )
         return None
 
-    # Divergence is counter-trend capable — only penalize strong 1h conflict (2+ votes).
+    # Divergence is counter-trend capable - only penalize strong 1h conflict (2+ votes).
     if _confirmed_context_conflict(prepared, direction):
         _reject(prepared, setup_id, "htf_context_conflict", direction=direction)
         return None

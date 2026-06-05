@@ -1,7 +1,7 @@
 """Limit-order entry semantics for signal-only delivery and lifecycle tracking.
 
 Manual limit plan: publish entry zone + SL/TP legs. Tracking becomes **active**
-when price trades into the zone (realtime aggTrade or bar wick) — like a limit
+when price trades into the zone (realtime aggTrade or bar wick) - like a limit
 fill on the exchange. Stop/TP apply only **after** activation. Pending plans
 expire by TTL; they are not "cancelled" because price touched SL before fill.
 """
@@ -106,7 +106,7 @@ def confirm_strategy_activation(
     high: float,
     low: float,
 ) -> tuple[bool, str]:
-    """Legacy bar-quality check — not used for activation anymore (kept for diagnostics)."""
+    """Legacy bar-quality check - not used for activation anymore (kept for diagnostics)."""
     if not limit_zone_touched(
         direction=direction,
         entry_low=entry_low,
@@ -160,7 +160,7 @@ def limit_delivery_ready(
     details["mark_price"] = mark_price
 
     # At publish time only: reject plans whose SL is already violated by mark.
-    # This is not tracking cancellation — the signal never reaches the channel.
+    # This is not tracking cancellation - the signal never reaches the channel.
 
     if norm == "long":
         if mark_price <= stop:

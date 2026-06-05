@@ -84,7 +84,7 @@ def _collect_ws_enrichments(
     ws_manager: FuturesWSManager | None,
     client: BinanceFuturesMarketData,
 ) -> dict[str, Any]:
-    """Collect enrichments from in-memory caches — mimics _ws_cache_enrichments in bot.py."""
+    """Collect enrichments from in-memory caches - mimics _ws_cache_enrichments in bot.py."""
     enrichments: dict[str, Any] = {}
     context_ages: list[float] = []
 

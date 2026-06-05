@@ -1,4 +1,4 @@
-"""Diagnostics — signals funnel, runtime health, config audit, quality."""
+"""Diagnostics - signals funnel, runtime health, config audit, quality."""
 
 from __future__ import annotations
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Project health audit — stale files, forbidden paths, live-path safety patterns.
+"""Project health audit - stale files, forbidden paths, live-path safety patterns.
 
 Run after refactors or before release:
   python scripts/project_health_audit.py

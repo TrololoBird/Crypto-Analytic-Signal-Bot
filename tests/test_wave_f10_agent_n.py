@@ -1,4 +1,4 @@
-"""Wave F10 Agent N — regime cache, btc_phase gate, global_market_regime, funding."""
+"""Wave F10 Agent N - regime cache, btc_phase gate, global_market_regime, funding."""
 
 from __future__ import annotations
 

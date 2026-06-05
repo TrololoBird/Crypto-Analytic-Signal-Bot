@@ -438,7 +438,7 @@ class MarketContextUpdater:
 
     @staticmethod
     def _fmt_signed_pct_value(value: float, *, digits: int = 1) -> str:
-        """Format a display percent (Binance ticker scale, not a 0–1 fraction)."""
+        """Format a display percent (Binance ticker scale, not a 0-1 fraction)."""
         return f"{value:+.{digits}f}%"
 
     @staticmethod
@@ -528,7 +528,7 @@ class MarketContextUpdater:
             return None
         return (
             "Краткосрок (1h/15m) отскакивает внутри слабого 24h/4h снижения; "
-            "суточный risk-off не снимается — long только после подтверждения на старших ТФ."
+            "суточный risk-off не снимается - long только после подтверждения на старших ТФ."
         )
 
     def _liquid_ticker_rows(

@@ -310,7 +310,7 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         details["oi_change_pct"] = oi_value
         details["microstructure_source"] = "funding_oi_proxy"
         if is_positioning_setup(setup_id):
-            # Positioning setups need elevated funding/OI — not a calm-market proxy.
+            # Positioning setups need elevated funding/OI - not a calm-market proxy.
             funding_extreme = abs(funding_value) >= 0.0003
             oi_extreme = abs(oi_value) >= 0.5
             return funding_extreme or oi_extreme, details
@@ -447,7 +447,7 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         else:
             btc_phase_rule = "none"
 
-        # N1: dual HTF bearish is expected for reversal longs in global bear — pass HTF leg.
+        # N1: dual HTF bearish is expected for reversal longs in global bear - pass HTF leg.
         htf_conflict = str(mtf_reason or "").startswith("htf_reversal_conflict")
         if profile in REVERSAL_PROFILES and bear_regime and direction == "long" and htf_conflict:
             mtf_ok = True

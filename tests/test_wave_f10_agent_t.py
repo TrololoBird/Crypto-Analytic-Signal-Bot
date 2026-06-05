@@ -1,4 +1,4 @@
-"""Wave F10 Agent T — run metadata, prune, buffer slim fields, metrics, reconcile."""
+"""Wave F10 Agent T - run metadata, prune, buffer slim fields, metrics, reconcile."""
 
 from __future__ import annotations
 

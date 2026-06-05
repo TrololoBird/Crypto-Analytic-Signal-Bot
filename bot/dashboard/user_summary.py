@@ -1,4 +1,4 @@
-"""Human-friendly dashboard summary — today, funnel hint, recent history."""
+"""Human-friendly dashboard summary - today, funnel hint, recent history."""
 
 from __future__ import annotations
 
@@ -63,9 +63,9 @@ def build_funnel_hint(*, overview: JsonDict | None, funnel: JsonDict | None) -> 
         if top_ru and top_count:
             text += f" Чаще всего отсеивает: {top_ru} ({top_count})."
         else:
-            text += " Бот работает — сигналы пока не проходят порог доставки."
+            text += " Бот работает - сигналы пока не проходят порог доставки."
     else:
-        text = "Бот анализирует рынок. Сигналов в telemetry пока нет — подождите 1–2 цикла."
+        text = "Бот анализирует рынок. Сигналов в telemetry пока нет - подождите 1-2 цикла."
 
     btc_bias = overview.get("btc_bias")
     if btc_bias:

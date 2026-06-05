@@ -1,4 +1,4 @@
-"""volume_climax_reversal — canonical strategy detector."""
+"""volume_climax_reversal - canonical strategy detector."""
 
 from __future__ import annotations
 

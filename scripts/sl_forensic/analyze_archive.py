@@ -49,7 +49,7 @@ async def analyze_archive(*, write_report: bool = True) -> str:
     lines: list[str] = ["# Forensic Archive Analysis", ""]
 
     if not FORENSIC_ARCHIVE_PATH.exists():
-        msg = "forensic_archive.db not found — run export_to_archive.py first"
+        msg = "forensic_archive.db not found - run export_to_archive.py first"
         print(msg)
         lines.extend([msg, ""])
         if write_report:
@@ -107,7 +107,7 @@ async def analyze_archive(*, write_report: bool = True) -> str:
 
         # TIER 1
         print("\n=== TIER 1: DETERMINISTIC BUGS (fix immediately) ===")
-        lines.extend(["## TIER 1 — Deterministic (n=1)", ""])
+        lines.extend(["## TIER 1 - Deterministic (n=1)", ""])
 
         async with conn.execute(
             """
@@ -122,19 +122,19 @@ async def analyze_archive(*, write_report: bool = True) -> str:
 
         if false_signals:
             print("FALSE_SIGNAL DETECTED:")
-            lines.append("### D1 — FALSE_SIGNAL (recheck failed on confirmed data)")
+            lines.append("### D1 - FALSE_SIGNAL (recheck failed on confirmed data)")
             for c in false_signals:
                 print(f"  {c['setup_id']} | {c['symbol']} | run {c['run_date'][:10]}")
                 lines.append(
                     f"- `{c['setup_id']}` **{c['symbol']}** "
-                    f"(run {c['run_date'][:10]}) — {c['sl_verdict'] or ''}"
+                    f"(run {c['run_date'][:10]}) - {c['sl_verdict'] or ''}"
                 )
             print("  → ACTION REQUIRED: apply df[-2] fix to listed strategies")
             lines.append("")
             lines.append("**Action:** apply confirmed-bar / df[-2] fix to listed strategies.")
         else:
             print("FALSE_SIGNAL: none detected ✓")
-            lines.append("### D1 — FALSE_SIGNAL: none detected ✓")
+            lines.append("### D1 - FALSE_SIGNAL: none detected ✓")
 
         confirmed_zero = int(
             await _scalar(
@@ -160,7 +160,7 @@ async def analyze_archive(*, write_report: bool = True) -> str:
         )
         pct = confirmed_zero / total_sl * 100 if total_sl else 0.0
         lines.append("")
-        lines.append("### D2 — confirmed_candle tracking")
+        lines.append("### D2 - confirmed_candle tracking")
         if pct > 90 and total_sl >= 3:
             print(f"TRACKING BUG: {pct:.0f}% of SL cases have confirmed_candle=0")
             print("  → Audit how confirmed_candle field is populated in _confirmed_candle.py")
@@ -173,10 +173,10 @@ async def analyze_archive(*, write_report: bool = True) -> str:
                 "Audit `_confirmed_candle.infer_confirmed_candle()` and features JSON population."
             )
         else:
-            print(f"confirmed_candle=0: {confirmed_zero}/{total_sl} ({pct:.0f}%) — within range")
+            print(f"confirmed_candle=0: {confirmed_zero}/{total_sl} ({pct:.0f}%) - within range")
             lines.append(
                 f"`confirmed_candle=0`: {confirmed_zero}/{total_sl} ({pct:.0f}%), "
-                f"unknown: {confirmed_null} — within range or insufficient n."
+                f"unknown: {confirmed_null} - within range or insufficient n."
             )
 
         async with conn.execute(
@@ -192,13 +192,13 @@ async def analyze_archive(*, write_report: bool = True) -> str:
             fast_sl = await cursor.fetchall()
 
         lines.append("")
-        lines.append("### D3 — Ultra-fast SL (<5 min, zero MFE)")
+        lines.append("### D3 - Ultra-fast SL (<5 min, zero MFE)")
         if fast_sl:
             print(f"\nULTRA-FAST SL (<5 min): {len(fast_sl)} cases")
             for c in fast_sl:
                 print(f"  {c['setup_id']} {c['symbol']} {c['time_to_sl_min']}min")
                 lines.append(
-                    f"- `{c['setup_id']}` {c['symbol']} — "
+                    f"- `{c['setup_id']}` {c['symbol']} - "
                     f"{c['time_to_sl_min']} min, MFE={c['mfe'] or 0:.2f}"
                 )
             lines.append("")
@@ -209,7 +209,7 @@ async def analyze_archive(*, write_report: bool = True) -> str:
 
         # TIER 2
         print("\n=== TIER 2: CASE REVIEW PATTERNS ===")
-        lines.extend(["", "## TIER 2 — Case review (n=3–10)", ""])
+        lines.extend(["", "## TIER 2 - Case review (n=3-10)", ""])
 
         async with conn.execute(
             """
@@ -227,8 +227,8 @@ async def analyze_archive(*, write_report: bool = True) -> str:
         if patterns:
             for p in patterns:
                 label = f"{p['sl_type']}/{p['sl_subtype']}"
-                print(f"  {p['setup_id']}: {p['n']}× {label}")
-                lines.append(f"- **{p['setup_id']}:** {p['n']}× {label}")
+                print(f"  {p['setup_id']}: {p['n']}x {label}")
+                lines.append(f"- **{p['setup_id']}:** {p['n']}x {label}")
                 if p["sl_type"] == "TIMING_OFF" and p["n"] >= 2:
                     print(f"    → CASE REVIEW: widen ATR for {p['setup_id']}")
                     lines.append(f"  - → widen ATR multiplier for `{p['setup_id']}`")
@@ -236,7 +236,7 @@ async def analyze_archive(*, write_report: bool = True) -> str:
                     print(f"    → CASE REVIEW: post-wick entry or widen SL for {p['setup_id']}")
                     lines.append(f"  - → post-wick entry delay or widen SL for `{p['setup_id']}`")
         else:
-            print("  (no repeated patterns yet — need 2+ cases per setup/type)")
+            print("  (no repeated patterns yet - need 2+ cases per setup/type)")
             lines.append("_No repeated patterns yet (need 2+ cases per setup/type)._")
 
         async with conn.execute(
@@ -250,7 +250,7 @@ async def analyze_archive(*, write_report: bool = True) -> str:
             btc_drag = await cursor.fetchall()
         if len(btc_drag) >= 2:
             lines.append("")
-            lines.append("### C3 — BTC_DRAG sessions")
+            lines.append("### C3 - BTC_DRAG sessions")
             lines.extend(
                 (
                     f"- {c['run_date'][:10]} {c['setup_id']} {c['symbol']} "
@@ -261,7 +261,7 @@ async def analyze_archive(*, write_report: bool = True) -> str:
 
         # TIER 3
         print("\n=== TIER 3: STATISTICAL HYPOTHESES (deferred) ===")
-        lines.extend(["", "## TIER 3 — Statistical (deferred)", ""])
+        lines.extend(["", "## TIER 3 - Statistical (deferred)", ""])
         targets = [
             ("Fix B: adaptive ATR", 30, "ATR band SL analysis"),
             ("Fix C: regime filter", 50, "direction vs regime"),
@@ -276,7 +276,7 @@ async def analyze_archive(*, write_report: bool = True) -> str:
             print(f"    Status: {status}")
             lines.append(f"### {name}")
             lines.append(f"- Progress: `[{bar}]` {total_sl}/{required} ({progress:.0f}%)")
-            lines.append(f"- Status: **{status}** — {desc}")
+            lines.append(f"- Status: **{status}** - {desc}")
             lines.append("")
 
     report = "\n".join(lines)

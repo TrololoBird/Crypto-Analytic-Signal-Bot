@@ -1,4 +1,4 @@
-"""Wave F9 Agent T — canonical delivery KPIs, run_id stamping, recent signals."""
+"""Wave F9 Agent T - canonical delivery KPIs, run_id stamping, recent signals."""
 
 from __future__ import annotations
 

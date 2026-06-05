@@ -30,7 +30,7 @@ async def _probe_rest_network(net: NetworkConfig) -> int:
     if active:
         LOG.info("using proxy | url=%s", mask_proxy_url(active))
     else:
-        LOG.warning("no proxy configured — direct connection only")
+        LOG.warning("no proxy configured - direct connection only")
 
     market = BinanceFuturesMarketData(binance_client=client)
     try:
@@ -58,7 +58,7 @@ async def _probe_ws_network(net: NetworkConfig) -> int:
         if env_proxy:
             LOG.info("using env proxy | url=%s", mask_proxy_url(env_proxy))
     else:
-        LOG.warning("no proxy configured — direct connection only")
+        LOG.warning("no proxy configured - direct connection only")
 
     if await probe_ws_handshake(proxy_url=net.proxy_url, trust_env=net.trust_env):
         LOG.info("binance WS reachable | url=wss://fstream.binance.com/ws")
@@ -124,7 +124,7 @@ def main() -> None:
             if env_only:
                 urls = [env_only]
         if not urls:
-            LOG.error("no proxy_urls in config — set [bot.network] or BINANCE_PROXY_URLS")
+            LOG.error("no proxy_urls in config - set [bot.network] or BINANCE_PROXY_URLS")
             raise SystemExit(1)
         any_ok = False
         last_code = 2
@@ -165,7 +165,7 @@ def main() -> None:
         probe_net = NetworkConfig(proxy_url=candidate, trust_env=False, failover_enabled=False)
         code = asyncio.run(_probe_network(probe_net, mode=probe_mode))
         if code == 0:
-            LOG.info("working proxy found — set BINANCE_PROXY_URL=%s", candidate)
+            LOG.info("working proxy found - set BINANCE_PROXY_URL=%s", candidate)
             raise SystemExit(0)
     raise SystemExit(code)
 

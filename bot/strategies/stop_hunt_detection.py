@@ -1,4 +1,4 @@
-"""stop_hunt_detection — canonical strategy detector."""
+"""stop_hunt_detection - canonical strategy detector."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Signal delivery path — contract, confluence, filters, Telegram.
+"""Signal delivery path - contract, confluence, filters, Telegram.
 
 Heavy submodules load lazily so ``domain.schemas`` can import ``contract`` without cycles.
 """

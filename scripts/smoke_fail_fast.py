@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
-# Informational threshold review — not a smoke failure.
+# Informational threshold review - not a smoke failure.
 _WARNING_ALLOWLIST = frozenset({"bot.config_audit"})
 
 
@@ -38,7 +38,7 @@ class SmokeFailFastGuard:
     _handler: logging.Handler | None = None
 
     def mark_startup_complete(self) -> None:
-        """After ``bot.start()`` — runtime WARNINGs no longer abort smoke."""
+        """After ``bot.start()`` - runtime WARNINGs no longer abort smoke."""
         self._startup_active = False
 
     def install(self) -> None:

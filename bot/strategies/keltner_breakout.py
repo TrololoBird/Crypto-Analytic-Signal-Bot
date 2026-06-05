@@ -1,4 +1,4 @@
-"""keltner_breakout — canonical strategy detector."""
+"""keltner_breakout - canonical strategy detector."""
 
 from __future__ import annotations
 

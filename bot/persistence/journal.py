@@ -1,4 +1,4 @@
-"""Trader's journal — analytics over telemetry JSONL files.
+"""Trader's journal - analytics over telemetry JSONL files.
 
 Reads data/bot/telemetry/analysis/{selected,rejected,tracking_events}.jsonl
 and returns a structured JournalReport. No writes, no network calls.
@@ -337,7 +337,7 @@ def build_config_suggestions(telemetry_root: Path) -> list[str]:
                 f"(wins={wins} sl={losses} exp={expired})"
             )
     if len(atr_lines) >= 2:
-        suggestions.append("[SUGGEST] min_atr_pct — win rate by ATR band:")
+        suggestions.append("[SUGGEST] min_atr_pct - win rate by ATR band:")
         suggestions.extend(atr_lines)
         # Find the threshold where win rate drops below 40%
         threshold_hint = None
@@ -382,7 +382,7 @@ def build_config_suggestions(telemetry_root: Path) -> list[str]:
                 f"(wins={wins} sl={losses} exp={expired})"
             )
     if len(score_lines) >= 2:
-        suggestions.append("[SUGGEST] min_score — win rate by score band:")
+        suggestions.append("[SUGGEST] min_score - win rate by score band:")
         suggestions.extend(score_lines)
         # Suggest raising min_score if bottom band has poor win rate
         low_items = score_bins.get("0.64-0.65", []) + score_bins.get("0.65-0.68", [])
@@ -427,7 +427,7 @@ def build_config_suggestions(telemetry_root: Path) -> list[str]:
                 f"(wins={wins} sl={losses} exp={expired})"
             )
     if len(rr_lines) >= 2:
-        suggestions.append("[SUGGEST] min_risk_reward — win rate by RR band:")
+        suggestions.append("[SUGGEST] min_risk_reward - win rate by RR band:")
         suggestions.extend(rr_lines)
         suggestions.append("")
 
@@ -453,7 +453,7 @@ def build_config_suggestions(telemetry_root: Path) -> list[str]:
         suggestions.append("")
 
     if len(suggestions) <= 2:
-        suggestions.append("[ADVISOR] Bins too small for suggestions — keep accumulating outcomes.")
+        suggestions.append("[ADVISOR] Bins too small for suggestions - keep accumulating outcomes.")
 
     return suggestions
 

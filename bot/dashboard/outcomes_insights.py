@@ -113,7 +113,7 @@ async def build_outcomes_insights(
         patterns.append(
             {
                 "key": "zero_mfe",
-                "label": "MFE = 0 — цена не пошла в профит до стопа",
+                "label": "MFE = 0 - цена не пошла в профит до стопа",
                 "count": zero_mfe,
                 "share": round(zero_mfe / len(losses), 4),
             }
@@ -122,7 +122,7 @@ async def build_outcomes_insights(
         patterns.append(
             {
                 "key": "long_only_losses",
-                "label": "Все стопы — long (возможный контр-тренд альтов)",
+                "label": "Все стопы - long (возможный контр-тренд альтов)",
                 "count": len(losses),
                 "share": 1.0,
             }
@@ -157,7 +157,7 @@ async def build_outcomes_insights(
     recommendations: list[str] = []
     if zero_mfe == len(losses) and losses:
         recommendations.append(
-            "Все стопы закрылись без движения в профит (MFE=0) — вход сразу против позиции. "
+            "Все стопы закрылись без движения в профит (MFE=0) - вход сразу против позиции. "
             "Проверьте timing, bear-regime фильтр для long и ширину стопа vs ATR."
         )
 
@@ -199,14 +199,14 @@ async def build_outcomes_insights(
             {
                 "key": "post_sl_thesis_room",
                 "label": (
-                    "После SL до TP1 оставался запас — возможен ранний стоп / отскок после выноса"
+                    "После SL до TP1 оставался запас - возможен ранний стоп / отскок после выноса"
                 ),
                 "count": post_sl_thesis_room,
                 "share": round(post_sl_thesis_room / len(losses), 4),
             }
         )
         recommendations.append(
-            "Часть стопов: тезис (TP1) оставался достижимым после выхода — типично для "
+            "Часть стопов: тезис (TP1) оставался достижимым после выхода - типично для "
             "long в bear (stop hunt → отскок). Усилить HTF/regime gate для long и "
             "не трактовать post-SL движение как «сигнал был верным» без нового входа."
         )
@@ -216,7 +216,7 @@ async def build_outcomes_insights(
         and loss_directions.get("long", 0) == len(losses)
     ):
         recommendations.append(
-            "Short-сетапы дают TP, long-сетапы чаще ловят стоп — возможен bearish alt regime; "
+            "Short-сетапы дают TP, long-сетапы чаще ловят стоп - возможен bearish alt regime; "
             "усилить HTF-фильтр для long или confluence gate."
         )
     if loss_scores and win_scores and (_avg(loss_scores) or 0.0) < 0.62:
@@ -226,7 +226,7 @@ async def build_outcomes_insights(
         )
     if not recommendations and not trade_outcomes:
         recommendations.append(
-            "Недостаточно закрытых сделок — дождитесь накопления outcomes в SQLite."
+            "Недостаточно закрытых сделок - дождитесь накопления outcomes в SQLite."
         )
 
     recent_losses: list[dict[str, Any]] = []
@@ -293,8 +293,8 @@ async def build_outcomes_insights(
         "recommendations": recommendations,
         "sl_root_causes": dict(sl_root_causes),
         "sl_root_cause_labels": {
-            "immediate_adverse_entry": "MFE≈0 — сразу против",
-            "bear_long_immediate_stop": "Long в bear — мгновенный стоп",
+            "immediate_adverse_entry": "MFE≈0 - сразу против",
+            "bear_long_immediate_stop": "Long в bear - мгновенный стоп",
             "bear_long_countertrend": "Long vs bear/BTC↓",
             "stop_hunt_post_recovery": "Stop hunt → отскок к TP",
             "quick_stop_no_follow_through": "Быстрый стоп",

@@ -1,4 +1,4 @@
-"""SL forensic engine — classify stop-loss outcomes with candle replay context."""
+"""SL forensic engine - classify stop-loss outcomes with candle replay context."""
 
 from __future__ import annotations
 
@@ -22,10 +22,10 @@ ForensicType = Literal[
 SL_RESULTS = frozenset({"stop_loss", "breakeven_stop", "trailing_stop"})
 
 _FORENSIC_LABELS: dict[str, str] = {
-    "STOP_HUNT": "TYPE 1 — Stop hunt (тезис остался после SL)",
-    "IMMEDIATE_ADVERSE": "TYPE 2 — Мгновенное движение против входа",
-    "THESIS_FAILED": "TYPE 3 — Тезис не реализовался",
-    "TIMING_OFF": "TYPE 4 — Timing / chase / unclosed candle",
+    "STOP_HUNT": "TYPE 1 - Stop hunt (тезис остался после SL)",
+    "IMMEDIATE_ADVERSE": "TYPE 2 - Мгновенное движение против входа",
+    "THESIS_FAILED": "TYPE 3 - Тезис не реализовался",
+    "TIMING_OFF": "TYPE 4 - Timing / chase / unclosed candle",
 }
 
 
@@ -249,11 +249,11 @@ def _recommendations_for(
     recs: list[str] = []
     if forensic_type == "STOP_HUNT":
         recs.append("Рассмотреть увеличение sl_buffer_atr или structural stop anchor для setup.")
-        recs.append("Проверить post-SL window — возможен stop hunt, не снижать confluence.")
+        recs.append("Проверить post-SL window - возможен stop hunt, не снижать confluence.")
     elif forensic_type == "IMMEDIATE_ADVERSE":
         recs.append("Убедиться что entry_staleness filter активен (fix-sl-A).")
         if subtype == "quick_stop":
-            recs.append("Сигнал активируется слишком поздно — confirmed bar + chase guard.")
+            recs.append("Сигнал активируется слишком поздно - confirmed bar + chase guard.")
         if subtype == "bear_long":
             recs.append("Hard block long при bias_4h=downtrend для continuation setups.")
     elif forensic_type == "TIMING_OFF":
@@ -426,11 +426,11 @@ def render_case_card(case: ForensicCase) -> str:
         f"| tracking_id | `{case.tracking_id}` |",
         f"| result | `{case.result}` |",
         f"| **Forensic** | **{case.label}** |",
-        f"| subtype | `{case.forensic_subtype or '—'}` |",
-        f"| legacy sl_root_cause | `{case.legacy_sl_root_cause or '—'}` |",
-        f"| score | {case.score if case.score is not None else '—'} |",
-        f"| atr_pct | {case.atr_pct if case.atr_pct is not None else '—'}% |",
-        f"| bias_4h | {case.bias_4h or '—'} |",
+        f"| subtype | `{case.forensic_subtype or '-'}` |",
+        f"| legacy sl_root_cause | `{case.legacy_sl_root_cause or '-'}` |",
+        f"| score | {case.score if case.score is not None else '-'} |",
+        f"| atr_pct | {case.atr_pct if case.atr_pct is not None else '-'}% |",
+        f"| bias_4h | {case.bias_4h or '-'} |",
         f"| MFE / MAE | {m.mfe:.2f}% / {m.mae:.2f}% |",
         f"| active_min | {m.active_minutes} |",
         f"| post-SL favorable | {m.post_sl_favorable_pct:.2f}% |",
@@ -447,7 +447,7 @@ def render_case_card(case: ForensicCase) -> str:
     if case.recommendations:
         lines.extend(f"- {r}" for r in case.recommendations)
     else:
-        lines.append("- —")
+        lines.append("- -")
     lines.append("")
     return "\n".join(lines)
 
@@ -481,14 +481,14 @@ def render_aggregate_report(
     lines.extend(["", "## Actionable recommendations (aggregated)", ""])
     if type_counts.get("IMMEDIATE_ADVERSE", 0) >= max(1, len(cases) // 3):
         lines.append(
-            "- **P1:** Доминирует IMMEDIATE_ADVERSE — проверить fix-sl-A в post-fix session."
+            "- **P1:** Доминирует IMMEDIATE_ADVERSE - проверить fix-sl-A в post-fix session."
         )
     if type_counts.get("STOP_HUNT", 0) >= 2:
-        lines.append("- **P2:** STOP_HUNT cluster — review sl_buffer_atr per high-vol symbols.")
+        lines.append("- **P2:** STOP_HUNT cluster - review sl_buffer_atr per high-vol symbols.")
     if type_counts.get("TIMING_OFF", 0) >= 1:
-        lines.append("- **P3:** TIMING_OFF — audit confirmed-bar path на orderbook strategies.")
+        lines.append("- **P3:** TIMING_OFF - audit confirmed-bar path на orderbook strategies.")
     if not lines[-1].startswith("-"):
-        lines.append("- Недостаточно кейсов для агрегированных выводов — собрать post-fix sample.")
+        lines.append("- Недостаточно кейсов для агрегированных выводов - собрать post-fix sample.")
 
     lines.extend(["", "## Per-case cards", ""])
     lines.extend(render_case_card(case) for case in cases)

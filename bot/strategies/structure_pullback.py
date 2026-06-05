@@ -1,4 +1,4 @@
-"""structure_pullback — canonical strategy detector."""
+"""structure_pullback - canonical strategy detector."""
 
 from __future__ import annotations
 

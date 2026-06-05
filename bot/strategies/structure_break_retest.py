@@ -1,4 +1,4 @@
-"""structure_break_retest — canonical strategy detector."""
+"""structure_break_retest - canonical strategy detector."""
 
 from __future__ import annotations
 

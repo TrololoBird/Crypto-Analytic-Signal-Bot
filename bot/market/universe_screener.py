@@ -1,4 +1,4 @@
-"""Light screener (Crypto-Signal-style flags) on radar state — WATCH/radar tier only."""
+"""Light screener (Crypto-Signal-style flags) on radar state - WATCH/radar tier only."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ class ScreenerHit:
 
 
 def _rsi_proxy_from_change(change_24h_pct: float) -> float:
-    """Map 24h change to 0–100 RSI-like proxy (not Wilder RSI — radar tier only)."""
+    """Map 24h change to 0-100 RSI-like proxy (not Wilder RSI - radar tier only)."""
     clamped = max(-15.0, min(15.0, change_24h_pct))
     return 50.0 + (clamped / 15.0) * 35.0
 

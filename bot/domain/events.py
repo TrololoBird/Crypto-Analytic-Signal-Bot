@@ -38,7 +38,7 @@ class OIRefreshDueEvent(msgspec.Struct, frozen=True):
 class BookTickerEvent(msgspec.Struct, frozen=True):
     """Fired by FuturesWSManager on every bookTicker (best bid/ask) update.
 
-    These arrive on every tick — subscribers MUST throttle aggressively.
+    These arrive on every tick - subscribers MUST throttle aggressively.
     """
 
     symbol: str

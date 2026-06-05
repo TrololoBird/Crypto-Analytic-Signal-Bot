@@ -1,4 +1,4 @@
-"""order_block — canonical strategy detector."""
+"""order_block - canonical strategy detector."""
 
 from __future__ import annotations
 
@@ -394,16 +394,5 @@ class OrderBlockSetup(SpecDetectorSetup):
                 )
                 return None
             raise
-        except Exception as exc:
-            LOG.exception("%s order_block: unexpected error", prepared.symbol)
-            _reject(
-                prepared,
-                self.setup_id,
-                "runtime.unexpected_exception",
-                stage="runtime",
-                exception_type=type(exc).__name__,
-            )
-            return None
-
 
 __all__ = ["OrderBlockSetup"]

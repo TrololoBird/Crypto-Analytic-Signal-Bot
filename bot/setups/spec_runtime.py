@@ -1,4 +1,4 @@
-"""Catalog-aligned setup detection — orchestration; logic in bot/strategies/."""
+"""Catalog-aligned setup detection - orchestration; logic in bot/strategies/."""
 
 from __future__ import annotations
 
@@ -126,7 +126,7 @@ def run_setup_detection(
         )
         return None
     LOG.debug(
-        "%s: %s spec miss — invoking extended_detect",
+        "%s: %s spec miss - invoking extended_detect",
         prepared.symbol,
         setup_id,
     )
@@ -134,7 +134,7 @@ def run_setup_detection(
 
 
 class SpecDetectorSetup(BaseSetup):
-    """Thin strategy shell — detection in ``bot/strategies/*`` module."""
+    """Thin strategy shell - detection in ``bot/strategies/*`` module."""
 
     DEFAULTS: ClassVar[dict[str, float]] = {}
     detect_setup: ClassVar[SetupSignalFn | None] = None

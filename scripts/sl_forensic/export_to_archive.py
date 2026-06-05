@@ -250,7 +250,7 @@ async def export_to_archive(*, notes: str = "", dry_run: bool = False) -> dict[s
                         )
                     except DEFENSIVE_EXC:
                         LOG.warning(
-                            "SL enrich failed | tracking_id=%s — storing DB fields only",
+                            "SL enrich failed | tracking_id=%s - storing DB fields only",
                             tracking_id,
                             exc_info=True,
                         )

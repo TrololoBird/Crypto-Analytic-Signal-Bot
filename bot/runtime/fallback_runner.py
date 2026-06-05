@@ -115,7 +115,7 @@ class FallbackRunner:
                 },
             )
             LOG.info(
-                "emergency fallback: no kline events for %.0fs — running full scan",
+                "emergency fallback: no kline events for %.0fs - running full scan",
                 time_since_event,
             )
             try:

@@ -157,7 +157,7 @@ def main(argv: list[str] | None = None) -> int:
                     handle.write(snapshot.stderr)
 
             if not alive and proc.poll() is None:
-                LOG.error("pid file stale but subprocess running — waiting")
+                LOG.error("pid file stale but subprocess running - waiting")
             time.sleep(POLL_SECONDS)
     except KeyboardInterrupt:
         LOG.info("supervisor interrupted")

@@ -67,7 +67,7 @@ def _twenty_family_registry() -> _MockRegistry:
         _meta(f"strategy_{idx:02d}", family=family, trigger_tf="15m")
         for idx, family in enumerate(families)
     ]
-    # Second strategy in continuation family — should lose to strategy_00 in cap.
+    # Second strategy in continuation family - should lose to strategy_00 in cap.
     metadata.append(_meta("strategy_dup_continuation", family="continuation", trigger_tf="15m"))
     return _MockRegistry(metadata)
 

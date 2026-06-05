@@ -1,4 +1,4 @@
-"""Market data plane — REST, WebSocket, universe, enrichments (v9)."""
+"""Market data plane - REST, WebSocket, universe, enrichments (v9)."""
 
 from __future__ import annotations
 

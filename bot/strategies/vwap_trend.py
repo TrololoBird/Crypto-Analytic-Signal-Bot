@@ -1,4 +1,4 @@
-"""vwap_trend — canonical strategy detector."""
+"""vwap_trend - canonical strategy detector."""
 
 from __future__ import annotations
 

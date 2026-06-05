@@ -1,4 +1,4 @@
-"""wick_trap_reversal — canonical strategy detector."""
+"""wick_trap_reversal - canonical strategy detector."""
 
 from __future__ import annotations
 

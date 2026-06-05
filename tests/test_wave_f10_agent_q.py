@@ -1,4 +1,4 @@
-"""Wave F10 agent Q — diagnostics routing, health adapter, quality monitor audit."""
+"""Wave F10 agent Q - diagnostics routing, health adapter, quality monitor audit."""
 
 from __future__ import annotations
 

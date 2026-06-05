@@ -1,4 +1,4 @@
-"""Strategy vs shortlist fit matrix — static theory + live telemetry.
+"""Strategy vs shortlist fit matrix - static theory + live telemetry.
 
 Usage:
   python scripts/strategy_shortlist_matrix.py --static
@@ -259,7 +259,7 @@ async def live_shortlist_fit_counts(
 
 
 def _print_static_table(rows: list[dict[str, Any]]) -> None:
-    print("\n## Static: strategy × shortlist fit (theory)\n")
+    print("\n## Static: strategy x shortlist fit (theory)\n")
     print("| # | setup_id | data | WS tier | heuristic | OI | fund | fit | note |")
     print("|---|----------|------|---------|-----------|----|------|-----|------|")
     for idx, row in enumerate(rows, start=1):

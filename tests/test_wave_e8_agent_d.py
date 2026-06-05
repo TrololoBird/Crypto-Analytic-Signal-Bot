@@ -1,4 +1,4 @@
-"""Wave E8 agent D — primary-aware scoring, history prior, data quality flags."""
+"""Wave E8 agent D - primary-aware scoring, history prior, data quality flags."""
 
 from __future__ import annotations
 

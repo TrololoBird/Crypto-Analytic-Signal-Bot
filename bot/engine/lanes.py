@@ -1,4 +1,4 @@
-"""Strategy lanes — limit detectors per symbol per kline event (target spec)."""
+"""Strategy lanes - limit detectors per symbol per kline event (target spec)."""
 
 from __future__ import annotations
 

@@ -46,13 +46,13 @@ def build_sl_postmortem_html(event: SignalTrackingEvent) -> str:
     direction = str(getattr(tracked, "direction", "") or "?")
     ref = str(getattr(tracked, "tracking_ref", "") or "")
     price = getattr(event, "event_price", None)
-    price_txt = f"{float(price):.6g}" if price is not None else "—"
+    price_txt = f"{float(price):.6g}" if price is not None else "-"
     lines = [
         "<b>POST-MORTEM · STOP</b>",
         f"{symbol} {direction.upper()} · <code>{setup}</code> · <code>#{ref}</code>",
         f"Exit: <code>{price_txt}</code> · MFE <code>{mfe:.2f}%</code> · "
         f"MAE <code>{mae:.2f}%</code>",
-        f"Причина: <b>{sl_diag.get('label') or sl_diag.get('code') or '—'}</b>",
+        f"Причина: <b>{sl_diag.get('label') or sl_diag.get('code') or '-'}</b>",
     ]
     reasons = sl_diag.get("reasons") or []
     if reasons:

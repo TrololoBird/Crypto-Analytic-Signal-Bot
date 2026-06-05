@@ -28,7 +28,7 @@ def _ohlc_frame(rows: list[tuple[float, float, float, float]]) -> pl.DataFrame:
 
 def test_detect_fvg_requires_ict_middle_candle_confirmation() -> None:
     pad = (100.0, 101.0, 99.0, 100.5)
-    # Outer wicks gap but middle candle is bearish — strict ICT rejects.
+    # Outer wicks gap but middle candle is bearish - strict ICT rejects.
     loose_only = _ohlc_frame(
         [
             pad,
@@ -70,7 +70,7 @@ def test_detect_liquidity_sweep_uses_sweep_atr_mult_param() -> None:
             "rsi14": [50.0] * n,
         }
     ).with_row_index("_spec_idx")
-    # wick = 0.25 ATR — passes 0.2, fails 0.3
+    # wick = 0.25 ATR - passes 0.2, fails 0.3
     assert detect_liquidity_sweep(frame, sweep_atr_mult=0.2) is not None
     assert detect_liquidity_sweep(frame, sweep_atr_mult=0.3) is None
 
