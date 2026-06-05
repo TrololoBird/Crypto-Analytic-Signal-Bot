@@ -89,7 +89,9 @@ def test_nightly_calibration_includes_basis_by_default() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, default=Path("config.toml"))
     parser.add_argument("--symbols", type=int, default=25)
-    parser.add_argument("--output", type=Path, default=Path("data/bot/reports/nightly_calibration.json"))
+    parser.add_argument(
+        "--output", type=Path, default=Path("data/bot/reports/nightly_calibration.json")
+    )
     parser.add_argument("--no-include-basis", action="store_true")
     args = parser.parse_args([])
     cmd: list[str] = ["--live-shortlist", "--json"]

@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Mapping
+from typing import TYPE_CHECKING, Any
 
 from bot.migrations import fetch_schema_version_rows
 from bot.persistence.repository.memory import MemoryRepository
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     import aiosqlite
 
     from bot.domain.config import BotSettings
@@ -24,9 +26,7 @@ def normalize_delivery_audit_row(row: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "symbol": str(row.get("symbol") or ""),
         "setup_id": str(row.get("setup_id") or ""),
-        "delivery_status": str(
-            row.get("delivery_status") or row.get("status") or "unknown"
-        ),
+        "delivery_status": str(row.get("delivery_status") or row.get("status") or "unknown"),
         "ts": str(row.get("ts") or ""),
         "message_id": row.get("message_id"),
         "source": str(row.get("source") or "delivery"),

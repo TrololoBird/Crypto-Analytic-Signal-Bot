@@ -21,12 +21,12 @@ import polars as pl
 
 from bot.runtime.errors import DEFENSIVE_EXC
 
-from ..market.data import MarketDataUnavailable
 from ..domain.limit_entry import (
     DEFAULT_ENTRY_ORDER_TYPE,
     should_activate_limit_entry,
     should_activate_limit_fill_price,
 )
+from ..market.data import MarketDataUnavailable
 from ..persistence.sl_diagnostics import classify_stop_loss_root_cause
 from ..persistence.tracked import TrackedSignalState, parse_state_dt
 from .outcomes import SignalFeatures, create_outcome_from_tracked
@@ -444,9 +444,7 @@ class SignalTracker:
             move = direction_sign * (probe - exit_px) / exit_px * 100.0
             if move > max_favorable:
                 max_favorable = move
-        tp1_room = (
-            direction_sign * (tp1 - exit_px) / exit_px * 100.0 if tp1 > 0.0 else 0.0
-        )
+        tp1_room = direction_sign * (tp1 - exit_px) / exit_px * 100.0 if tp1 > 0.0 else 0.0
         regime_at_close: str | None = None
         try:
             market_ctx = await self.memory_repo.get_market_context()
@@ -614,7 +612,9 @@ class SignalTracker:
             spread_bps=signal.spread_bps,
             atr_pct=signal.atr_pct,
             orderflow_delta_ratio=signal.orderflow_delta_ratio,
-            entry_order_type=str(getattr(signal, "entry_order_type", None) or DEFAULT_ENTRY_ORDER_TYPE),
+            entry_order_type=str(
+                getattr(signal, "entry_order_type", None) or DEFAULT_ENTRY_ORDER_TYPE
+            ),
             confirmation_profile=str(
                 getattr(signal, "confirmation_profile", None) or "trend_follow"
             ),
@@ -630,7 +630,7 @@ class SignalTracker:
         *,
         activated_at: datetime,
         price: float,
-        precision_mode: str,
+        precision_mode: str,  # noqa: ARG002
     ) -> None:
         tracked.status = "active"
         tracked.activated_at = activated_at.astimezone(UTC).isoformat()
@@ -647,7 +647,7 @@ class SignalTracker:
         *,
         occurred_at: datetime,
         price: float,
-        precision_mode: str,
+        precision_mode: str,  # noqa: ARG002
         move_stop_to_break_even: bool,
     ) -> None:
         if tracked.tp1_hit_at is not None:
@@ -667,7 +667,7 @@ class SignalTracker:
         *,
         checked_at: datetime,
         last_price: float | None,
-        precision_mode: str,
+        precision_mode: str,  # noqa: ARG002
     ) -> None:
         tracked.last_checked_at = checked_at.astimezone(UTC).isoformat()
         tracked.last_price = last_price
@@ -681,7 +681,7 @@ class SignalTracker:
         reason: str,
         occurred_at: datetime,
         price: float | None,
-        precision_mode: str,
+        precision_mode: str,  # noqa: ARG002
     ) -> None:
         tracked.status = "closed"
         tracked.closed_at = occurred_at.astimezone(UTC).isoformat()
@@ -1273,7 +1273,7 @@ class SignalTracker:
             last_processed_at = bar_close_time
             last_price = bar_close
 
-            entry_touched = _bar_touches_entry(tracked, high=bar_high, low=bar_low)
+            _bar_touches_entry(tracked, high=bar_high, low=bar_low)
             tp1_touched = _bar_hits_tp1(tracked, high=bar_high, low=bar_low)
             tp2_touched = _bar_hits_tp2(tracked, high=bar_high, low=bar_low)
             # Stop triggers immediately on price touch (as in real Binance futures trading)
@@ -1709,10 +1709,8 @@ class SignalTracker:
             )
 
         if event_type == "stop_loss" and tracked.activated_at is not None:
-            try:
+            with contextlib.suppress(RuntimeError):
                 asyncio.get_running_loop().create_task(self._capture_post_sl_recovery(tracked))
-            except RuntimeError:
-                pass
 
         return SignalTrackingEvent(
             event_type=event_type,

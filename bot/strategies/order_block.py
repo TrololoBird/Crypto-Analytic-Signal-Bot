@@ -249,7 +249,6 @@ def _detect_order_block_extended(
     stop = trade_plan_smc.stop
     tp1 = trade_plan_smc.tp1
     tp2 = trade_plan_smc.tp2
-    risk = trade_plan_smc.risk
     reasons_note = trade_plan_smc.reasons_note
 
     is_valid_rr, _ = validate_rr_or_penalty(entry_price, stop, tp1, min_rr)

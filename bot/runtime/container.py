@@ -17,8 +17,8 @@ from ..engine import SignalEngine, StrategyRegistry
 from ..market.data import BinanceFuturesMarketData, configure_rest_concurrency
 from ..market.enrichment import PublicIntelligenceService
 from ..market.proxy_bootstrap import ensure_network_ready
-from ..market.rest_impl import BinanceClientImpl
 from ..market.radar_state import MarketRadarStore
+from ..market.rest_impl import BinanceClientImpl
 from ..market.ws import FuturesWSManager
 from ..persistence.public_audit import PublicAuditLedger
 from ..persistence.repository.memory import MemoryRepository

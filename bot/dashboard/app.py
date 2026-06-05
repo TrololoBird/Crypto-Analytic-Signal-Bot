@@ -15,17 +15,17 @@ from pathlib import Path
 from threading import Thread
 from typing import TYPE_CHECKING, Any, cast
 
+from bot.domain.labels import labels_payload
 from bot.runtime.errors import DEFENSIVE_EXC
 from bot.strategies import STRATEGY_CLASSES
 
 from ..domain.strategies import RISK_PROFILE_BY_ID, STRATEGY_STATUS_BY_ID
-from bot.domain.labels import labels_payload
 from ..persistence.diary_store import DiaryStore
 from .analytics import StrategyAnalytics
 from .live import DashboardLiveData
 from .live_audit import audit_snapshot, build_dashboard_audit_snapshot
+from .mobile_summary import build_mobile_summary
 from .operator_alerts import build_live_operator_alerts
-from .mobile_summary import build_mobile_summary, dashboard_urls, format_mobile_digest_text
 from .outcomes_insights import build_outcomes_insights
 from .tracking_view import serialize_tracking_signal
 from .user_summary import build_user_summary
@@ -1191,7 +1191,9 @@ class BotDashboard:
 
             if isinstance(df, pl.DataFrame) and not df.is_empty():
                 cols = set(df.columns)
-                time_col = "time" if "time" in cols else ("close_time" if "close_time" in cols else None)
+                time_col = (
+                    "time" if "time" in cols else ("close_time" if "close_time" in cols else None)
+                )
                 if time_col is None:
                     return []
                 out: list[dict[str, Any]] = []

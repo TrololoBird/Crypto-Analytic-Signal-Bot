@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from bot.domain.config import BotSettings, NotifierConfig, NotifierWebhookConfig
 from bot.delivery.ops_webhook import ops_webhook_enabled, send_ops_webhook_alert
+from bot.domain.config import BotSettings, NotifierConfig, NotifierWebhookConfig
 
 
 def _bot(*, ops_enabled: bool) -> SimpleNamespace:

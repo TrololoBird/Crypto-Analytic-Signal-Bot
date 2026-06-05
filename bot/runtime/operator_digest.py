@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from bot.runtime.errors import DEFENSIVE_EXC
 
@@ -37,7 +37,9 @@ class OperatorDigestRunner:
         if not operator_dm_enabled(self._bot, "send_digest"):
             return
         op_cfg = getattr(self._bot.settings.notifiers, "telegram_operator", None)
-        interval = float(getattr(op_cfg, "digest_interval_seconds", interval_seconds) or interval_seconds)
+        interval = float(
+            getattr(op_cfg, "digest_interval_seconds", interval_seconds) or interval_seconds
+        )
 
         now = time.monotonic()
         if self._last_sent_ts and (now - self._last_sent_ts) < max(300.0, interval):

@@ -394,7 +394,7 @@ async def _main(
             send_telegram=use_telegram,
             config_path=str(settings.config_path),
         )
-    except Exception as exc:
+    except DEFENSIVE_EXC as exc:
         sys.stderr.write(f"[ERROR] startup report failed (non-fatal): {exc}\n")
 
     debug_mode = os.getenv("DEBUG_BOT", "0") in ("1", "true", "yes")

@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, ClassVar
 
-import polars as pl
-
 from ..domain.strategy_catalog import catalog_default_params
 from ._common import (
     SpecHit,
@@ -17,6 +15,8 @@ from ._roadmap import _build_atr_signal, _flow_delta_with_source, _last, _reject
 from .roadmap_base import RoadmapSetup
 
 if TYPE_CHECKING:
+    import polars as pl
+
     from ..domain.config import BotSettings
     from ..domain.schemas import PreparedSymbol, Signal
 

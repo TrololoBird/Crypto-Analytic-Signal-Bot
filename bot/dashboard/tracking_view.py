@@ -92,10 +92,7 @@ def compute_progress(
             "next_target_label": None,
         }
 
-    if is_long:
-        pnl_pct = (current - entry) / entry * 100.0
-    else:
-        pnl_pct = (entry - current) / entry * 100.0
+    pnl_pct = (current - entry) / entry * 100.0 if is_long else (entry - current) / entry * 100.0
 
     if stop is not None:
         if is_long and current <= stop:
@@ -184,7 +181,9 @@ def serialize_tracking_signal(sig: dict[str, Any], bot: Any | None = None) -> di
     tp3 = _pick_price(sig.get("tp3_price"), sig.get("take_profit_3"))
 
     last_price = _pick_price(sig.get("last_price"))
-    mark_price = resolve_mark_price(bot, symbol, fallback=last_price) if bot is not None else last_price
+    mark_price = (
+        resolve_mark_price(bot, symbol, fallback=last_price) if bot is not None else last_price
+    )
     current = mark_price or last_price
 
     progress = compute_progress(

@@ -49,7 +49,7 @@ def test_hard_gate_blocks_reversal_with_dual_htf_conflict() -> None:
 
 def test_hard_gate_skips_htf_when_mtf_enforcement_disabled() -> None:
     signal = SimpleNamespace(direction="long", confirmation_profile="trend_follow")
-    ok, confirmations, details = DeliveryOrchestrator._hard_confluence_gate(
+    _ok, confirmations, details = DeliveryOrchestrator._hard_confluence_gate(
         signal,  # type: ignore[arg-type]
         _prepared_bearish(),  # type: ignore[arg-type]
         enforce_mtf_gate=False,

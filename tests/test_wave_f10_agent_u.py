@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -13,8 +13,10 @@ from bot.cli import build_parser
 from scripts.calibration_pipeline import run_calibration_pipeline, run_reconcile_defaults
 from scripts.reconcile_strategy_defaults import (
     collect_defaults_drift,
-    main as reconcile_main,
     write_toml_patch,
+)
+from scripts.reconcile_strategy_defaults import (
+    main as reconcile_main,
 )
 
 
@@ -72,7 +74,9 @@ base_score = 0.52
     assert by_field[("order_block", "sl_buffer_atr")].code_value == pytest.approx(0.5)
 
 
-def test_reconcile_writes_patch_and_exits_on_drift(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_reconcile_writes_patch_and_exits_on_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     config_dir = tmp_path / "strategies"
     config_dir.mkdir()
     (config_dir / "order_block.toml").write_text(
@@ -129,7 +133,9 @@ base_score = 0.52
 
 
 @pytest.mark.asyncio
-async def test_calibration_pipeline_writes_reports(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_calibration_pipeline_writes_reports(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     reports_dir = tmp_path / "reports"
     matrix_payload = {"static": [{"setup_id": "order_block", "fit_score": 4}]}
 
@@ -151,6 +157,7 @@ async def test_calibration_pipeline_writes_reports(tmp_path: Path, monkeypatch: 
         signal_counts={"active": 1},
         outcome_counts={"win": 5, "loss": 7},
     )
+
     async def fake_db_report(*, config: Path, output: Path) -> dict[str, object]:
         payload = {
             "generated_at": "2026-01-01T00:00:00+00:00",

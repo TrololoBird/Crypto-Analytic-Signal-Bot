@@ -620,9 +620,7 @@ def _run_filter_pipeline(
         prepared,
         base.direction,
         confirmation_profile=profile,
-        strict_data_quality=bool(
-            getattr(settings.runtime, "strict_data_quality", True)
-        ),
+        strict_data_quality=bool(getattr(settings.runtime, "strict_data_quality", True)),
     )
     passed.append("mtf_precheck")
     if mtf_ok:

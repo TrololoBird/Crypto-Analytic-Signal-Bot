@@ -1,30 +1,35 @@
 from __future__ import annotations
+
 import asyncio
 import collections
 import contextlib
+import json
 import json as _stdlib_json
 import logging
+import random
+import socket
 import time
 from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
+
 import polars as pl
+import websockets
 from websockets import exceptions as ws_exceptions
+
+from bot.market.network_proxy import (
+    apply_proxy_env,
+    mask_proxy_url,
+    normalize_proxy_url,
+    websockets_connect_kwargs,
+)
+from bot.market.subscription_planner import plan_subscription_budget
 from bot.runtime.errors import DEFENSIVE_EXC
-from bot.market.network_proxy import apply_proxy_env, mask_proxy_url, normalize_proxy_url
-from ..domain.events import KlineCloseEvent
+
+from ..domain.events import BookTickerEvent, KlineCloseEvent
 from ..domain.schemas import AggTrade, AggTradeSnapshot, SymbolFrames
 from .data import MarketDataUnavailable
 from .universe import build_shortlist
-import random
-from typing import Any
-import json
-from bot.market.subscription_planner import plan_subscription_budget
-import socket
-import websockets
-from bot.market.network_proxy import websockets_connect_kwargs
-from ..domain.events import BookTickerEvent
-from ..domain.schemas import AggTrade
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -208,8 +213,7 @@ class MessageBuffer:
         ]
         if closed_kline_indexes and non_closed_indexes:
             LOG.debug(
-                "message buffer backpressure with protected closed klines | protected=%d "
-                "queued=%d",
+                "message buffer backpressure with protected closed klines | protected=%d queued=%d",
                 len(closed_kline_indexes),
                 len(batch),
             )
@@ -379,6 +383,7 @@ def microprice_bias_from_book(
         return None
     return round(_clamp(float(delta_ratio)), 4)
 
+
 # --- inlined from ws_reconnect.py ---
 _BACKOFF_RESET_AFTER_SECONDS = 90.0
 
@@ -442,6 +447,7 @@ def compute_disconnect_delay(
         manager._short_lived_streak,
     )
     return next_delay
+
 
 # --- inlined from ws_health.py ---
 async def evaluate_endpoint_health(manager: Any, ws: Any, endpoint: str) -> bool:
@@ -568,6 +574,7 @@ async def monitor_connection_silence(manager: Any, ws: Any, endpoint: str) -> bo
         await ws.close()
         return True
     return False
+
 
 # --- inlined from ws_subscriptions.py ---
 DEFAULT_MAX_STREAMS_PER_CONNECTION = 300
@@ -773,6 +780,7 @@ async def resubscribe_all(manager: Any, endpoint: str, ws: Any) -> None:
         len(streams),
         chunk_count,
     )
+
 
 # --- inlined from ws_connection.py ---
 _WS_PING_INTERVAL_SECONDS = 20.0
@@ -1066,6 +1074,7 @@ async def run_endpoint_loop(
                 await asyncio.sleep(delay)
             except asyncio.CancelledError:
                 return
+
 
 # --- inlined from ws_cache.py ---
 def _parse_depth_levels(raw_levels: Any, *, reverse: bool) -> tuple[tuple[float, float], ...]:
@@ -1560,6 +1569,7 @@ async def handle_agg_trade(manager: Any, symbol: str, data: JsonDict) -> None:
         for callback in manager._agg_trade_cbs:
             task = asyncio.create_task(callback(symbol, batch[-1].price, trade_dt))
             manager._attach_task_logging(task, label=f"agg_trade:{symbol}")
+
 
 class FuturesWSManager:
     """Manages WebSocket connections to Binance Futures for real-time market data."""
@@ -2587,9 +2597,7 @@ class FuturesWSManager:
             symbol: If given, filter to this symbol only.
             window_seconds: Look-back window in seconds.
         """
-        return get_liquidation_sentiment(
-            self, symbol=symbol, window_seconds=window_seconds
-        )
+        return get_liquidation_sentiment(self, symbol=symbol, window_seconds=window_seconds)
 
     def get_liquidation_rollups(
         self,
@@ -2597,9 +2605,7 @@ class FuturesWSManager:
         window_seconds: int = 900,
     ) -> dict[str, float] | None:
         """Notional rollups for liquidation heatmap / positioning context."""
-        return get_liquidation_rollups(
-            self, symbol=symbol, window_seconds=window_seconds
-        )
+        return get_liquidation_rollups(self, symbol=symbol, window_seconds=window_seconds)
 
     def get_liquidation_age_seconds(
         self,
@@ -2607,9 +2613,7 @@ class FuturesWSManager:
         window_seconds: int = 60,
     ) -> float | None:
         """Return age of the newest forceOrder event used for liquidation sentiment."""
-        return get_liquidation_age_seconds(
-            self, symbol=symbol, window_seconds=window_seconds
-        )
+        return get_liquidation_age_seconds(self, symbol=symbol, window_seconds=window_seconds)
 
     async def rebuild_shortlist_on_demand(
         self,

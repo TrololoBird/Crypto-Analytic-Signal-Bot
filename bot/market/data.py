@@ -23,8 +23,7 @@ from .rate_limit import (
 # `BinanceClient` without importing `bot.infrastructure.binance_client` early.
 if TYPE_CHECKING:
     from ..domain.schemas import AggTrade, AggTradeSnapshot, SymbolFrames, SymbolMeta
-    from .rest_impl import BinanceClient
-    from .rest_impl import BinanceClientImpl
+    from .rest_impl import BinanceClient, BinanceClientImpl
     from .ws import FuturesWSManager
 else:
     BinanceClient = Any

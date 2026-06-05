@@ -13,9 +13,8 @@ import structlog
 
 from bot.runtime.errors import DEFENSIVE_EXC
 
-from .rate_limit import REST_WEIGHT_SOFT_LIMIT
-
 from ..features.prepare import _cached_prepare_frame, _swing_points, _to_polars
+from .rate_limit import REST_WEIGHT_SOFT_LIMIT
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -408,7 +407,11 @@ class PublicIntelligenceService:
             results.update(dict(zip(batch, batch_results, strict=False)))
             if index + 10 < len(symbols):
                 budget = getattr(self._client, "_weight_budget", None)
-                pause_s = 1.0 if budget is not None and budget.used_weight >= REST_WEIGHT_SOFT_LIMIT else 0.2
+                pause_s = (
+                    1.0
+                    if budget is not None and budget.used_weight >= REST_WEIGHT_SOFT_LIMIT
+                    else 0.2
+                )
                 await asyncio.sleep(pause_s)
         return results
 
@@ -430,7 +433,11 @@ class PublicIntelligenceService:
             results.update(dict(zip(batch, batch_results, strict=False)))
             if index + 10 < len(symbols):
                 budget = getattr(self._client, "_weight_budget", None)
-                pause_s = 1.0 if budget is not None and budget.used_weight >= REST_WEIGHT_SOFT_LIMIT else 0.2
+                pause_s = (
+                    1.0
+                    if budget is not None and budget.used_weight >= REST_WEIGHT_SOFT_LIMIT
+                    else 0.2
+                )
                 await asyncio.sleep(pause_s)
         return results
 
@@ -441,9 +448,7 @@ class PublicIntelligenceService:
         pinned = set(self._settings.universe.pinned_symbols)
         benchmarks = set(self._settings.intelligence.benchmark_symbols)
         refresh_targets = [
-            symbol
-            for symbol in shortlist_symbols
-            if symbol in pinned or symbol in benchmarks
+            symbol for symbol in shortlist_symbols if symbol in pinned or symbol in benchmarks
         ][:12]
 
         missing_oi = [
@@ -457,9 +462,7 @@ class PublicIntelligenceService:
                 lambda symbol: self._client.fetch_open_interest_change(symbol, period="1h"),
             )
         missing_ls = [
-            symbol
-            for symbol in refresh_targets
-            if self._client.get_cached_ls_ratio(symbol) is None
+            symbol for symbol in refresh_targets if self._client.get_cached_ls_ratio(symbol) is None
         ]
         if missing_ls:
             await self._fetch_value_batch(

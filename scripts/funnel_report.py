@@ -65,7 +65,9 @@ def build_report(*, analysis_dir: Path, run_id: str) -> dict[str, object]:
     watch = list(_iter_jsonl(analysis_dir / "watch_screener.jsonl"))
 
     raw_total = sum(int(row.get("detector_runs") or row.get("raw_setups") or 0) for row in cycles)
-    delivered_total = sum(int(row.get("delivered_count") or row.get("delivered_signals") or 0) for row in cycles)
+    delivered_total = sum(
+        int(row.get("delivered_count") or row.get("delivered_signals") or 0) for row in cycles
+    )
     rejection_counts = _count_rejection_reasons(analysis_dir)
     delivery_status = Counter(str(row.get("delivery_status") or "unknown") for row in delivery)
     funnel_blocks = Counter()
@@ -74,13 +76,13 @@ def build_report(*, analysis_dir: Path, run_id: str) -> dict[str, object]:
         if not isinstance(funnel, dict):
             continue
         for key, value in funnel.items():
-            if key.endswith("_blocked") or key.endswith("_rejected"):
+            if key.endswith(("_blocked", "_rejected")):
                 try:
                     funnel_blocks[key] += int(value or 0)
                 except (TypeError, ValueError):
                     continue
 
-    prepare_errors = sum(int(row.get("prepare_error_count") or 0) for row in cycles)
+    sum(int(row.get("prepare_error_count") or 0) for row in cycles)
     last_cycle = cycles[-1] if cycles else {}
 
     return {

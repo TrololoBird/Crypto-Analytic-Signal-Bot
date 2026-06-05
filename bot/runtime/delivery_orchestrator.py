@@ -18,12 +18,11 @@ from collections import Counter
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from bot.runtime.errors import DEFENSIVE_EXC
 from bot.delivery.contract import validate_signal_contract
 from bot.delivery.tiers import decide_with_caps
 from bot.delivery.tiers import rank_key as tier_rank_key
-from bot.domain.delivery_policy import r_class_blocks_action, resolve_bear_regime
 from bot.delivery.trade_plan import evaluate_publish_readiness
+from bot.domain.delivery_policy import r_class_blocks_action, resolve_bear_regime
 from bot.domain.limit_entry import resolve_late_entry_chase_pct
 from bot.domain.mtf import (
     BREAKOUT_PROFILE,
@@ -32,6 +31,7 @@ from bot.domain.mtf import (
     normalize_mtf_reject_reason,
 )
 from bot.persistence.outcomes import build_prepared_feature_snapshot, extract_features_from_signal
+from bot.runtime.errors import DEFENSIVE_EXC
 
 from .merge import MetaSignalMerger
 
@@ -104,7 +104,9 @@ class DeliveryOrchestrator:
         """Reject when the limit plan is invalidated or price already chased away."""
         mark_price = getattr(signal, "mark_price", None)
         if prepared is not None:
-            mark_price = mark_price if mark_price is not None else getattr(prepared, "mark_price", None)
+            mark_price = (
+                mark_price if mark_price is not None else getattr(prepared, "mark_price", None)
+            )
         chase_pct = resolve_late_entry_chase_pct(self._bot.settings)
         ready, reason, details = evaluate_publish_readiness(
             direction=str(signal.direction or ""),
@@ -139,9 +141,7 @@ class DeliveryOrchestrator:
         regime = str(signal.btc_bias or "neutral").lower()
         key = (direction, regime)
         delivery = self._bot.settings.delivery
-        max_correlated_direction = int(
-            getattr(delivery, "portfolio_max_same_direction_regime", 4)
-        )
+        max_correlated_direction = int(getattr(delivery, "portfolio_max_same_direction_regime", 4))
         max_family_direction = int(getattr(delivery, "portfolio_max_family_direction", 2))
         max_bear_longs = int(getattr(delivery, "portfolio_max_bear_longs", 2))
         if state["counts"].get(key, 0) >= max_correlated_direction:
@@ -234,13 +234,9 @@ class DeliveryOrchestrator:
             return False
         if profile in REVERSAL_PROFILES:
             if direction == "long":
-                return close < ema20 or (
-                    ema50 is not None and close < ema20 < ema50
-                )
+                return close < ema20 or (ema50 is not None and close < ema20 < ema50)
             if direction == "short":
-                return close > ema20 or (
-                    ema50 is not None and close > ema20 > ema50
-                )
+                return close > ema20 or (ema50 is not None and close > ema20 > ema50)
             return False
         if profile == BREAKOUT_PROFILE:
             if direction == "long":
@@ -374,12 +370,8 @@ class DeliveryOrchestrator:
         delivery = self._bot.settings.delivery
         return {
             "enforce_mtf_gate": bool(getattr(delivery, "enforce_mtf_gate", True)),
-            "reversal_min_confirmations": int(
-                getattr(delivery, "reversal_min_confirmations", 2)
-            ),
-            "use_weighted_confluence": bool(
-                getattr(delivery, "use_weighted_confluence", False)
-            ),
+            "reversal_min_confirmations": int(getattr(delivery, "reversal_min_confirmations", 2)),
+            "use_weighted_confluence": bool(getattr(delivery, "use_weighted_confluence", False)),
         }
 
     def _confluence_gate_kwargs(self) -> dict[str, Any]:
@@ -482,27 +474,32 @@ class DeliveryOrchestrator:
         btc_phase = str(getattr(prepared, "btc_phase", "") or "").strip().lower()
         if not btc_phase and isinstance(market_ctx, dict):
             btc_phase = str(market_ctx.get("btc_phase") or "").strip().lower()
-        if profile in REVERSAL_PROFILES and direction == "long" and btc_phase in {
-            "decline",
-            "distribution",
-        }:
+        if (
+            profile in REVERSAL_PROFILES
+            and direction == "long"
+            and btc_phase
+            in {
+                "decline",
+                "distribution",
+            }
+        ):
             btc_phase_rule = "countertrend_decline_penalty_eligible"
-        elif profile in REVERSAL_PROFILES and direction == "short" and btc_phase in {
-            "markup",
-            "accumulation",
-        }:
+        elif (
+            profile in REVERSAL_PROFILES
+            and direction == "short"
+            and btc_phase
+            in {
+                "markup",
+                "accumulation",
+            }
+        ):
             btc_phase_rule = "countertrend_markup_penalty_eligible"
         else:
             btc_phase_rule = "none"
 
         # N1: dual HTF bearish is expected for reversal longs in global bear — pass HTF leg.
         htf_conflict = str(mtf_reason or "").startswith("htf_reversal_conflict")
-        if (
-            profile in REVERSAL_PROFILES
-            and bear_regime
-            and direction == "long"
-            and htf_conflict
-        ):
+        if profile in REVERSAL_PROFILES and bear_regime and direction == "long" and htf_conflict:
             mtf_ok = True
             mtf_reason = "htf_reversal_expected_bear:" + str(mtf_reason).split(":", 1)[-1]
 
@@ -596,6 +593,7 @@ class DeliveryOrchestrator:
         if not bool(getattr(self._bot.settings.delivery, "sl_postmortem_enabled", True)):
             return
         from bot.delivery.telegram_routing import operator_dm_enabled
+
         from .telegram_operator import TelegramOperatorConsole, operator_console_enabled
 
         if not operator_console_enabled(self._bot):
@@ -775,7 +773,9 @@ class DeliveryOrchestrator:
             operation=self._bot.delivery.deliver_tracking_updates(events, dry_run=False),
         )
         sl_events = [event for event in events if event.event_type == "stop_loss"]
-        if sl_events and bool(getattr(self._bot.settings.delivery, "sl_postmortem_to_operators", True)):
+        if sl_events and bool(
+            getattr(self._bot.settings.delivery, "sl_postmortem_to_operators", True)
+        ):
             await self._send_sl_postmortem_to_operators(sl_events)
         dashboard = getattr(self._bot, "dashboard", None)
         if dashboard is not None and events:
@@ -954,7 +954,8 @@ class DeliveryOrchestrator:
                     }
                 )
                 LOG.info(
-                    "Signal rejected by limit entry gate | symbol=%s setup=%s direction=%s reason=%s",
+                    "Signal rejected by limit entry gate | symbol=%s setup=%s "
+                    "direction=%s reason=%s",
                     signal.symbol,
                     signal.setup_id,
                     signal.direction,
@@ -1310,9 +1311,7 @@ class DeliveryOrchestrator:
             )
             session_used = int(getattr(self._bot, "_session_action_delivered", 0) or 0)
             if delivery_tier == "action" and session_cap > 0 and session_used >= session_cap:
-                if float(signal.score or 0.0) >= float(
-                    self._bot.settings.delivery.watch_min_score
-                ):
+                if float(signal.score or 0.0) >= float(self._bot.settings.delivery.watch_min_score):
                     delivery_tier = "watch"
                     tier_reason = "action_session_cap_downgrade"
                 else:

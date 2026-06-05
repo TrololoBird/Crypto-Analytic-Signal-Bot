@@ -8,11 +8,7 @@ from collections import Counter
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
-from bot.runtime.errors import (
-    DEFENSIVE_EXC,
-    build_runtime_error_payload,
-    classify_runtime_error,
-)
+
 from bot.delivery.filters import apply_global_filters
 from bot.domain.schemas import (
     PipelineResult,
@@ -26,6 +22,11 @@ from bot.features.prepare import prepare_symbol
 from bot.features.prepare_frame import min_required_bars
 from bot.market.data import BinanceFuturesMarketData, MarketDataUnavailable
 from bot.runtime.data_readiness import assess_symbol_data_readiness
+from bot.runtime.errors import (
+    DEFENSIVE_EXC,
+    build_runtime_error_payload,
+    classify_runtime_error,
+)
 from bot.runtime_policy import is_deep_analysis_symbol
 
 if TYPE_CHECKING:
@@ -107,10 +108,6 @@ def _apply_setup_score_adjustment(
             "reason": reason,
         },
     )
-
-
-
-
 
 
 class AnalyzerMixinBase:
@@ -618,6 +615,7 @@ class AnalyzerContextMixin(AnalyzerMixinBase):
             "exhaustion_hits": exhaustion_hits,
             "exhaustion_count": sum(1 for value in exhaustion_hits.values() if value),
         }
+
 
 class AnalyzerFramesMixin(AnalyzerContextMixin, AnalyzerFamilyGatesMixin):
     async def fetch_frames(self, item: UniverseSymbol) -> SymbolFrames | None:

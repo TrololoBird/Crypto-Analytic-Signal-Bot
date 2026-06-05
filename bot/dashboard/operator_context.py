@@ -60,10 +60,7 @@ def format_runtime_ops_block(
             f"source=<code>{source_policy}</code> "
             f"pause=<code>{pause_losses}/{pause_hours}h</code>"
         ),
-        (
-            f"Shortlist: source=<code>{shortlist_source}</code> "
-            f"size=<code>{shortlist_size}</code>"
-        ),
+        (f"Shortlist: source=<code>{shortlist_source}</code> size=<code>{shortlist_size}</code>"),
         (
             "WS: streams="
             f"<code>{html.escape(clean(ws_health.get('active_stream_count'), '0'))}</code> "
@@ -166,7 +163,9 @@ def format_market_from_display_snapshot(snapshot: dict[str, Any]) -> str:
     return "\n".join(line for line in lines if line)
 
 
-def format_market_context_warmup(*, note: str = "полный контекст через 1–2 мин после прогрева REST/WS") -> str:
+def format_market_context_warmup(
+    *, note: str = "полный контекст через 1–2 мин после прогрева REST/WS"
+) -> str:
     return (
         "🧭 <b>Контекст рынка</b> <code>warmup</code>\n"
         f"<i>{html.escape(note)}</i>\n"
@@ -245,7 +244,9 @@ async def format_operator_runtime_block(bot: SignalBot) -> str:
         if isinstance(raw, dict):
             ws_snapshot = raw
 
-    shortlist = list(getattr(bot, "_last_live_shortlist", []) or getattr(bot, "_shortlist", []) or [])
+    shortlist = list(
+        getattr(bot, "_last_live_shortlist", []) or getattr(bot, "_shortlist", []) or []
+    )
     return format_runtime_ops_block(
         runtime_policy=runtime_policy,
         readiness={
@@ -263,7 +264,9 @@ async def format_operator_runtime_block(bot: SignalBot) -> str:
             "1h_ready_symbols": overview.get("frames_1h_ready"),
             "4h_ready_symbols": overview.get("frames_4h_ready"),
         },
-        latest_cycle=overview.get("last_cycle") if isinstance(overview.get("last_cycle"), dict) else {},
+        latest_cycle=overview.get("last_cycle")
+        if isinstance(overview.get("last_cycle"), dict)
+        else {},
     )
 
 
@@ -398,7 +401,9 @@ def format_operator_policy_text(bot: SignalBot) -> str:
     return "\n".join(lines)
 
 
-def format_operator_cycles_text(payload: dict[str, Any], overview: dict[str, Any] | None = None) -> str:
+def format_operator_cycles_text(
+    payload: dict[str, Any], overview: dict[str, Any] | None = None
+) -> str:
     overview = overview or {}
     today = payload.get("today") or {}
     last_cycle = overview.get("last_cycle") if isinstance(overview.get("last_cycle"), dict) else {}

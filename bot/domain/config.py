@@ -9,18 +9,19 @@ from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from bot.runtime.errors import DEFENSIVE_EXC
 from bot.domain.limit_entry import DEFAULT_LATE_ENTRY_CHASE_PCT
 from bot.domain.strategy_catalog import (
     CATALOG_SETUP_IDS_ORDERED,
     CATALOG_SETUP_PARAM_KEYS,
 )
+from bot.runtime.errors import DEFENSIVE_EXC
 
 from ..secrets import load_secrets
 
 
 class _StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
 
 REQUIRED_PINNED_SYMBOLS: tuple[str, ...] = (
     "BTCUSDT",
@@ -191,24 +192,26 @@ class UniverseConfig(_StrictModel):
             )
         assert "PAXGUSDT" in pinned
         if self.light_pool_limit < self.shortlist_limit:
-            raise ValueError(
+            msg = (
                 "universe.light_pool_limit must be >= universe.shortlist_limit "
                 f"({self.light_pool_limit} < {self.shortlist_limit})"
             )
+            raise ValueError(msg)
         if self.light_pool_limit < self.dynamic_limit:
-            raise ValueError(
+            msg = (
                 "universe.light_pool_limit must be >= universe.dynamic_limit "
                 f"({self.light_pool_limit} < {self.dynamic_limit})"
             )
+            raise ValueError(msg)
         if self.radar.hot_pool_limit > self.light_pool_limit:
-            raise ValueError(
+            msg = (
                 "universe.radar.hot_pool_limit must be <= universe.light_pool_limit "
                 f"({self.radar.hot_pool_limit} > {self.light_pool_limit})"
             )
+            raise ValueError(msg)
         if self.shortlist_limit + self.radar.promotion_slots_reserve > self.light_pool_limit:
-            raise ValueError(
-                "shortlist_limit + radar.promotion_slots_reserve must be <= light_pool_limit"
-            )
+            msg = "shortlist_limit + radar.promotion_slots_reserve must be <= light_pool_limit"
+            raise ValueError(msg)
         return self
 
 
@@ -308,9 +311,7 @@ class TrackingConfig(_StrictModel):
     pending_expiry_minutes: int = Field(default=180, ge=15, le=1440)
     active_expiry_minutes: int = Field(default=240, ge=30, le=240)
     # Max mark-price chase past entry zone before delivery reject (manual limit entry window).
-    late_entry_chase_pct: float = Field(
-        default=DEFAULT_LATE_ENTRY_CHASE_PCT, ge=0.002, le=0.05
-    )
+    late_entry_chase_pct: float = Field(default=DEFAULT_LATE_ENTRY_CHASE_PCT, ge=0.002, le=0.05)
     outcome_retention_days: int = Field(default=90, ge=7, le=3650)
     move_stop_to_break_even_on_tp1: bool = True
     min_stop_distance_pct: float = Field(default=0.5, ge=0.0, le=100.0)
@@ -460,7 +461,10 @@ class DeliveryConfig(_StrictModel):
     )
     use_weighted_confluence: bool = Field(
         default=False,
-        description="When true, future bridge to ConfluenceEngine weighted scoring (boolean gate until merged)",
+        description=(
+            "When true, future bridge to ConfluenceEngine weighted scoring "
+            "(boolean gate until merged)"
+        ),
     )
     portfolio_max_same_direction_regime: int = Field(default=4, ge=1, le=40)
     portfolio_max_family_direction: int = Field(default=2, ge=1, le=20)
@@ -768,7 +772,7 @@ class WSConfig(_StrictModel):
             items = [str(item).strip() for item in value if str(item).strip()]
         else:
             msg = "intra_candle_setup_subset must be a list of setup ids"
-            raise ValueError(msg)
+            raise TypeError(msg)
         return tuple(dict.fromkeys(items))
 
     @field_validator("base_url", "public_base_url", "market_base_url")
@@ -1135,7 +1139,7 @@ def load_settings(config_path: str | Path = "config.toml") -> BotSettings:
     notifiers_payload = payload.setdefault("notifiers", {})
     if isinstance(notifiers_payload, dict):
         provider_override = str(os.getenv("BOT_NOTIFIER_PROVIDER", "") or "").strip().lower()
-        provider = str(notifiers_payload.get("provider", "telegram") or "telegram").strip().lower()
+        str(notifiers_payload.get("provider", "telegram") or "telegram").strip().lower()
         if provider_override:
             notifiers_payload["provider"] = provider_override
         if (

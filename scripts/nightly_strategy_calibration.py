@@ -23,7 +23,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=Path("config.toml"))
     parser.add_argument("--symbols", type=int, default=25)
-    parser.add_argument("--output", type=Path, default=Path("data/bot/reports/nightly_calibration.json"))
+    parser.add_argument(
+        "--output", type=Path, default=Path("data/bot/reports/nightly_calibration.json")
+    )
     parser.add_argument(
         "--no-include-basis",
         action="store_true",
@@ -46,7 +48,11 @@ def main() -> int:
     LOG.info("running calibration matrix | cmd=%s", " ".join(cmd))
     proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
     if proc.returncode != 0:
-        LOG.error("calibration matrix failed | exit=%s stderr=%s", proc.returncode, (proc.stderr or "")[:300])
+        LOG.error(
+            "calibration matrix failed | exit=%s stderr=%s",
+            proc.returncode,
+            (proc.stderr or "")[:300],
+        )
         return proc.returncode
     if proc.stdout.strip():
         args.output.write_text(proc.stdout, encoding="utf-8")

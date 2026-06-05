@@ -224,7 +224,8 @@ class DiaryStore:
 
         async with conn.execute(
             "SELECT COUNT(*) as total, "
-            "COALESCE(SUM(CASE WHEN exit_reason IN ('tp1','tp2','tp3') THEN 1 ELSE 0 END), 0) as wins, "
+            "COALESCE(SUM(CASE WHEN exit_reason IN ('tp1','tp2','tp3') "
+            "THEN 1 ELSE 0 END), 0) as wins, "
             "COALESCE(SUM(CASE WHEN exit_reason = 'sl' THEN 1 ELSE 0 END), 0) as losses, "
             "AVG(pnl_percent) as avg_pnl_pct, "
             "AVG(pnl_usd) as avg_pnl_usd "
@@ -266,7 +267,8 @@ class DiaryStore:
 
         async with conn.execute(
             "SELECT DATE(entry_time) as day, "
-            "COALESCE(SUM(CASE WHEN exit_reason IN ('tp1','tp2','tp3') THEN 1 ELSE 0 END), 0) as wins, "
+            "COALESCE(SUM(CASE WHEN exit_reason IN ('tp1','tp2','tp3') "
+            "THEN 1 ELSE 0 END), 0) as wins, "
             "COALESCE(SUM(CASE WHEN exit_reason = 'sl' THEN 1 ELSE 0 END), 0) as losses, "
             "COALESCE(SUM(pnl_usd), 0) as day_pnl "
             "FROM trader_diary "

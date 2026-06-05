@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import contextlib
 import math
 import time
 from collections import deque
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from ..domain.config import UniverseRadarConfig
+if TYPE_CHECKING:
+    from ..domain.config import UniverseRadarConfig
 
 JsonDict = dict[str, Any]
 
@@ -91,7 +93,9 @@ class MarketRadarStore:
         try:
             volume = float(row.get("quote_volume") or 0.0)
             price = float(row.get("last_price") or row.get("c") or 0.0)
-            change_pct = float(row.get("price_change_percent") or row.get("price_change_pct") or 0.0)
+            change_pct = float(
+                row.get("price_change_percent") or row.get("price_change_pct") or 0.0
+            )
         except (TypeError, ValueError):
             return None
         if volume < self._cfg.min_quote_volume_usd or price <= 0.0:
@@ -107,16 +111,12 @@ class MarketRadarStore:
         state.ingest_price(price, now=ts)
         funding = row.get("funding_rate")
         if funding is not None:
-            try:
+            with contextlib.suppress(TypeError, ValueError):
                 state.funding_rate = float(funding)
-            except (TypeError, ValueError):
-                pass
         spread = row.get("spread_bps")
         if spread is not None:
-            try:
+            with contextlib.suppress(TypeError, ValueError):
                 state.spread_bps = float(spread)
-            except (TypeError, ValueError):
-                pass
         self._volume_stats[symbol] = math.log10(max(volume, 1.0))
         return state
 
@@ -143,11 +143,7 @@ class MarketRadarStore:
         return list(self._states.values())
 
     def symbols_by_tier(self, tier: SymbolTier) -> list[str]:
-        return sorted(
-            symbol
-            for symbol, state in self._states.items()
-            if state.tier == tier
-        )
+        return sorted(symbol for symbol, state in self._states.items() if state.tier == tier)
 
     def snapshot_summary(self) -> dict[str, int]:
         counts = {tier.value: 0 for tier in SymbolTier}

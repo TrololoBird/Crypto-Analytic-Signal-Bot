@@ -22,11 +22,11 @@ except ModuleNotFoundError:  # pragma: no cover
 bootstrap_repo_path()
 
 from bot.diagnostics.session_ops import (
+    analyze_telemetry,
     find_live_watch_session,
     resolve_telemetry_analysis_dir,
     summarize_live_watch_session,
 )
-from bot.diagnostics.session_ops import analyze_telemetry
 from bot.domain.config import _ALL_SETUP_IDS, load_settings
 from bot.domain.strategy_catalog import CATALOG_BY_ID
 from bot.market.fit import ASSET_FIT_PROFILES
@@ -233,7 +233,9 @@ async def live_shortlist_fit_counts(
     try:
         meta = await client.fetch_exchange_symbols()
         tickers = await client.fetch_ticker_24h()
-        shortlist, summary = build_shortlist(list(meta), list(tickers), settings, seed_source="matrix_live")
+        shortlist, summary = build_shortlist(
+            list(meta), list(tickers), settings, seed_source="matrix_live"
+        )
         basis_warm: dict[str, int] = {}
         if include_basis and shortlist:
             basis_warm = await _warm_basis_cache(
@@ -259,9 +261,7 @@ async def live_shortlist_fit_counts(
 
 def _print_static_table(rows: list[dict[str, Any]]) -> None:
     print("\n## Static: strategy × shortlist fit (theory)\n")
-    print(
-        "| # | setup_id | data | WS tier | heuristic | OI | fund | fit | note |"
-    )
+    print("| # | setup_id | data | WS tier | heuristic | OI | fund | fit | note |")
     print("|---|----------|------|---------|-----------|----|------|-----|------|")
     for idx, row in enumerate(rows, start=1):
         oi = "Y" if row["requires_oi"] else "-"
@@ -359,15 +359,23 @@ def main() -> int:
         run_id = args.run_id
         if not run_id:
             lw_candidates = sorted(
-                (p for p in args.live_watch_dir.iterdir() if p.is_dir() and not p.name.startswith("rollup_")),
+                (
+                    p
+                    for p in args.live_watch_dir.iterdir()
+                    if p.is_dir() and not p.name.startswith("rollup_")
+                ),
                 key=lambda p: p.stat().st_mtime,
                 reverse=True,
             )
-            candidates = sorted(
-                (p for p in runs_dir.iterdir() if p.is_dir()),
-                key=lambda p: p.stat().st_mtime,
-                reverse=True,
-            ) if runs_dir.exists() else []
+            candidates = (
+                sorted(
+                    (p for p in runs_dir.iterdir() if p.is_dir()),
+                    key=lambda p: p.stat().st_mtime,
+                    reverse=True,
+                )
+                if runs_dir.exists()
+                else []
+            )
             if candidates:
                 run_id = candidates[0].name
             elif lw_candidates:

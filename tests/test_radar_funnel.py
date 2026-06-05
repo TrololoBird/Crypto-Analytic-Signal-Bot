@@ -62,7 +62,7 @@ def test_promotion_engine_hot_pool() -> None:
     assert summary["enabled"] is True
     assert summary["hot_pool"] <= 10
     deep = engine.select_deep_symbols(store)
-    assert "BTCUSDT" not in deep or True
+    assert True
     assert len(deep) >= len(settings.universe.pinned_symbols)
 
 
@@ -81,8 +81,8 @@ def test_enrich_ticker_rows_adds_boost() -> None:
 
 
 def test_merge_shortlist_tags_existing_frozen_symbol() -> None:
-    from bot.domain.schemas import UniverseSymbol
     from bot.domain.config import _ALL_SETUP_IDS
+    from bot.domain.schemas import UniverseSymbol
 
     settings = _settings()
     store = MarketRadarStore(settings.universe.radar)

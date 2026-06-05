@@ -188,12 +188,8 @@ def write_drift_report(
             "total": len(rows),
             "drift": len(drift_rows),
             "missing_toml": sum(1 for row in rows if row.status == "missing_toml"),
-            "missing_toml_value": sum(
-                1 for row in rows if row.status == "missing_toml_value"
-            ),
-            "missing_code_value": sum(
-                1 for row in rows if row.status == "missing_code_value"
-            ),
+            "missing_toml_value": sum(1 for row in rows if row.status == "missing_toml_value"),
+            "missing_code_value": sum(1 for row in rows if row.status == "missing_code_value"),
         },
         "drift": [asdict(row) for row in drift_rows],
         "rows": [asdict(row) for row in rows],
@@ -227,7 +223,7 @@ def write_toml_patch(
                 f'field = "{row.field}"',
                 f"code_value = {row.code_value}",
                 f"toml_value = {row.toml_value}",
-                f"",
+                "",
                 f"[{section_name}]",
                 f"{key} = {row.code_value}  # was {row.toml_value}",
                 "",

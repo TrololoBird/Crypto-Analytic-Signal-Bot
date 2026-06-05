@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import html
 import itertools
 import logging
@@ -9,9 +10,9 @@ import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
-from bot.runtime.errors import DEFENSIVE_EXC
 from bot.market.data import BinanceFuturesMarketData
 from bot.regime.composite_regime import build_minimal_regime_frame_4h
+from bot.runtime.errors import DEFENSIVE_EXC
 
 if TYPE_CHECKING:
     from bot.domain.schemas import UniverseSymbol
@@ -481,9 +482,7 @@ class MarketContextUpdater:
         regime: MarketRegimeResult,
         funding_sentiment: str,
     ) -> tuple[int, str]:
-        btc_frac = (
-            btc_24h_pct / 100.0 if abs(btc_24h_pct) > 1.0 else float(btc_24h_pct)
-        )
+        btc_frac = btc_24h_pct / 100.0 if abs(btc_24h_pct) > 1.0 else float(btc_24h_pct)
         score = 50.0
         score += max(-30.0, min(30.0, btc_frac * 500.0))
         score += max(-25.0, min(25.0, (breadth_share - 0.50) * 80.0))
@@ -851,11 +850,7 @@ class MarketContextUpdater:
             html.escape(tf_4h),
             html.escape(tf_1h),
             html.escape(tf_15m),
-            *(
-                [html.escape(intraday_note)]
-                if intraday_note
-                else []
-            ),
+            *([html.escape(intraday_note)] if intraday_note else []),
             (
                 "Крипто-драйверы: "
                 f"BTC <code>{self._fmt_signed_pct_value(btc_24h_pct)}</code> | "
@@ -940,13 +935,11 @@ class MarketContextUpdater:
                 if snapshot_mode and not snapshot_mode.startswith("disabled_"):
                     macro_risk_mode = snapshot_mode
             stats: dict[str, Any] = {}
-            try:
+            with contextlib.suppress(DEFENSIVE_EXC):
                 stats = await asyncio.wait_for(
                     self._bot._modern_repo.get_tracking_stats(),
                     timeout=1.0,
                 )
-            except DEFENSIVE_EXC:
-                pass
             html_text, display_snapshot = await self._build_market_state_text(
                 regime=regime,
                 macro_risk_mode=macro_risk_mode,
@@ -955,10 +948,11 @@ class MarketContextUpdater:
             )
             self._last_market_state_html = html_text
             self._last_display_snapshot = display_snapshot
-            return html_text
         except DEFENSIVE_EXC:
             LOG.debug("operator market html rebuild failed", exc_info=True)
             return self._last_market_state_html or ""
+        else:
+            return html_text
 
     async def _maybe_send_market_state_update(
         self,

@@ -10,8 +10,8 @@ from bot.delivery.filter_stages import DEFAULT_FILTER_STAGES, enabled_filter_sta
 from bot.delivery.filters import _primary_freshness_window
 from bot.delivery.formatting import (
     SignalMessageFacts,
-    format_channel_trade_card,
     _primary_timeframe_fallback_badge,
+    format_channel_trade_card,
 )
 from bot.domain.config import BotSettings, FilterConfig, RuntimeConfig
 from bot.domain.mtf import evaluate_mtf_gate, normalize_mtf_reject_reason
@@ -89,7 +89,9 @@ def test_primary_timeframe_fallback_badge_on_trade_card() -> None:
         valid_until=None,
         passed_filters=("primary_timeframe_fallback:5m",),
     )
-    badge = _primary_timeframe_fallback_badge(facts.passed_filters, actual_timeframe=facts.timeframe)
+    badge = _primary_timeframe_fallback_badge(
+        facts.passed_filters, actual_timeframe=facts.timeframe
+    )
     assert badge == "5m→15m"
     card = format_channel_trade_card(facts, include_chart=False)
     assert "5m→15m" in card
@@ -111,7 +113,8 @@ def test_config_example_documents_freshness_5m_and_filter_stages() -> None:
     assert "freshness_5m_minutes" in example
     assert "filter_stages.py" in example
     assert 'enabled_stages = ["freshness"' in example
-    assert "5m" in example and "REST" in example
+    assert "5m" in example
+    assert "REST" in example
     assert 'kline_intervals = ["15m"]' in example
 
 

@@ -10,6 +10,8 @@ from collections import defaultdict, deque
 from collections.abc import Callable, Coroutine
 from typing import Any, TypeVar
 
+from bot.runtime.errors import classify_runtime_error
+
 from ..domain.events import (
     AnyEvent,
     BookTickerEvent,
@@ -17,7 +19,6 @@ from ..domain.events import (
     OIRefreshDueEvent,
     ShortlistUpdatedEvent,
 )
-from bot.runtime.errors import classify_runtime_error
 
 LOG = logging.getLogger("bot.core.event_bus")
 

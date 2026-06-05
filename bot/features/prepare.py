@@ -900,12 +900,7 @@ def prepare_symbol(
     ask_qty = frames.ask_qty if frames.ask_qty is not None else _frame_last("ask_qty")
 
     spread_bps = None
-    if (
-        bid_price is not None
-        and ask_price is not None
-        and bid_price > 0
-        and ask_price > 0
-    ):
+    if bid_price is not None and ask_price is not None and bid_price > 0 and ask_price > 0:
         midpoint = (bid_price + ask_price) / 2.0
         if midpoint > 0:
             spread_bps = ((ask_price - bid_price) / midpoint) * 10_000.0

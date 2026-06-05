@@ -183,8 +183,7 @@ def _print_report(report: dict[str, Any]) -> None:
     for reason, count in report.get("top_skip_reasons") or []:
         print(f"  {reason}: {count}")
     print(
-        "strategies without shortlist fit: "
-        f"{report.get('strategies_without_shortlist_fit_count')}"
+        f"strategies without shortlist fit: {report.get('strategies_without_shortlist_fit_count')}"
     )
 
 
@@ -192,7 +191,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Audit shortlist funnel and strategy coverage")
     parser.add_argument("--config", type=Path, default=Path("config.toml"))
     parser.add_argument("--run-id", type=str, default="")
-    parser.add_argument("--live", action="store_true", help="Build shortlist from live Binance REST")
+    parser.add_argument(
+        "--live", action="store_true", help="Build shortlist from live Binance REST"
+    )
     parser.add_argument("--json", action="store_true", help="Emit JSON report")
     args = parser.parse_args(argv)
 

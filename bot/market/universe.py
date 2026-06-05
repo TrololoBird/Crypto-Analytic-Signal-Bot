@@ -5,15 +5,18 @@ import math
 import re
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from collections.abc import Awaitable, Callable
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from bot.coercion import row_float
+from bot.runtime.errors import DEFENSIVE_EXC
 
 from ..domain.config import _ALL_SETUP_IDS, BotSettings
 from ..domain.schemas import SymbolMeta, UniverseSymbol
 from ..market.fit import calculate_strategy_fit_score
 from ..market.strategy_pools import asset_strategy_allowlist, fill_shortlist_from_pools
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
 
 LOG = logging.getLogger("bot.universe")
 DEFAULT_PRESCORE_BASIS_WARM_LIMIT = 25
@@ -634,9 +637,7 @@ def _prescore_row(
     """Lightweight score for stage-1 funnel before liquidity_rank is known."""
     volume_floor = max(float(getattr(settings.universe, "min_quote_volume_usd", 0.0)), 1.0)
     volume = float(row.get("quote_volume") or 0.0)
-    liquidity_depth = _clamp(
-        (math.log10(max(volume, 1.0)) - math.log10(volume_floor)) / 2.0 + 0.5
-    )
+    liquidity_depth = _clamp((math.log10(max(volume, 1.0)) - math.log10(volume_floor)) / 2.0 + 0.5)
     freshness = _spread_freshness_score(row, settings)
     oi_score = _oi_participation_score(row)
     micro_score = _microstructure_opportunity_score(row)
@@ -743,7 +744,7 @@ async def warm_prescore_basis_rest(
         attempted += 1
         try:
             basis = await fetch_basis(symbol)
-        except Exception:
+        except DEFENSIVE_EXC:
             failed += 1
             continue
         if basis is None:
@@ -784,11 +785,7 @@ def select_light_pool_rows(
     for row in gate_passed_rows:
         symbol = str(row.get("symbol") or "").strip().upper()
         spread_bps = _safe_float(row.get("spread_bps"))
-        if (
-            spread_bps is not None
-            and spread_bps > max_spread
-            and symbol not in protected
-        ):
+        if spread_bps is not None and spread_bps > max_spread and symbol not in protected:
             spread_rejected += 1
             continue
         eligible_rows.append(row)
@@ -966,7 +963,9 @@ def build_shortlist(
     )
     warm_limit = int(
         prescore_basis_warm_limit
-        or getattr(settings.universe, "prescore_basis_warm_limit", DEFAULT_PRESCORE_BASIS_WARM_LIMIT)
+        or getattr(
+            settings.universe, "prescore_basis_warm_limit", DEFAULT_PRESCORE_BASIS_WARM_LIMIT
+        )
         or DEFAULT_PRESCORE_BASIS_WARM_LIMIT
     )
     basis_warm = warm_prescore_basis_rows(

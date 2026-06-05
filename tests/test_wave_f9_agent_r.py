@@ -3,17 +3,24 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime, timedelta
-from pathlib import Path
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 import pytest
 
-from bot.persistence.db_status import DbStatusSummary, collect_db_status_from_conn, format_db_status_html
+from bot.persistence.db_status import (
+    DbStatusSummary,
+    collect_db_status_from_conn,
+    format_db_status_html,
+)
 from bot.persistence.diary_store import DiaryStore
 from bot.persistence.journal import build_journal_report, normalize_tracking_event
 from bot.persistence.outcomes import aggregate_setup_stats, classify_outcome_result
 from bot.persistence.repository.memory import MemoryRepository
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def test_normalize_tracking_event_maps_runtime_variants() -> None:

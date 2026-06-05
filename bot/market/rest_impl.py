@@ -12,7 +12,7 @@ from abc import ABC, abstractmethod
 from collections import deque
 from collections.abc import Mapping
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 from urllib.parse import urlparse
 
 import aiohttp
@@ -30,29 +30,29 @@ from bot.market.data import (
     _CACHE_TTL,
     _DEFAULT_KLINE_FETCH_LIMIT,
     _DEFAULT_ORDER_BOOK_DEPTH_LIMIT,
+    _ENDPOINT_WEIGHTS,
+    _FALLBACK_TIMEOUT_DEBUG_OPERATIONS,
     _FAPI_BASE_URL,
     _FORBIDDEN_PARAMS_LOWER,
     _FORBIDDEN_PUBLIC_PATH_MARKERS,
     _FUTURES_DATA_IP_LIMIT_DEFAULT,
     _FUTURES_DATA_IP_LIMIT_OFFICIAL_MAX,
     _FUTURES_DATA_IP_LIMIT_WINDOW_S,
+    _FUTURES_DATA_REQUEST_LIMITED_OPS,
+    _HTTP_CONNECTOR_LIMIT,
     _KLINE_COLUMNS,
     _KLINE_FRAME_SCHEMA,
     _PERIOD_WINDOW_SECONDS,
     _PUBLIC_ENDPOINT_REGISTRY,
+    _REST_WEIGHT_HARD_LIMIT,
     _REST_WEIGHT_PACE_LIMIT,
     _REST_WEIGHT_SOFT_LIMIT,
     _VALID_INTERVALS,
     _VALID_ORDER_BOOK_DEPTH_LIMITS,
     FORBIDDEN_PARAMS,
-    MarketDataUnavailable,
     UTC,
-    _ENDPOINT_WEIGHTS,
-    _FALLBACK_TIMEOUT_DEBUG_OPERATIONS,
-    _FUTURES_DATA_REQUEST_LIMITED_OPS,
-    _HTTP_CONNECTOR_LIMIT,
+    MarketDataUnavailable,
     _PublicEndpointSpec,
-    _REST_WEIGHT_HARD_LIMIT,
     rest_global_semaphore,
 )
 from bot.market.network_proxy import (
@@ -64,7 +64,6 @@ from bot.market.network_proxy import (
 )
 from bot.market.proxy_pool import ProxyPool, is_proxy_transport_error
 from bot.market.rate_limit import _SlidingWindowRateLimiter, _WeightBudgetManager
-
 
 # --- validators ---
 
@@ -304,13 +303,6 @@ def _parse_depth_levels(raw_levels: Any, *, reverse: bool) -> tuple[tuple[float,
 
 
 # --- abc ---
-if TYPE_CHECKING:
-    from bot.domain.schemas import (
-        AggTrade,
-        AggTradeSnapshot,
-        SymbolFrames,
-        SymbolMeta,
-    )
 
 LOG = logging.getLogger("bot.market.rest")
 

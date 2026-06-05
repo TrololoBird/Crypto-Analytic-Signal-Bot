@@ -1,23 +1,25 @@
 """Session telemetry, live_watch bridge, runtime log analysis."""
 
 from __future__ import annotations
+
 import json
-from collections import Counter, defaultdict
-from pathlib import Path
-from typing import Any
-from bot.domain.config import _ALL_SETUP_IDS
 import re
+from collections import Counter, defaultdict
 from collections.abc import Iterable
 from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from bot.domain.config import _ALL_SETUP_IDS
+
 
 # --- from telemetry_strategy_analysis.py ---
 def read_analysis_jsonl(path: Path) -> list[dict[str, Any]]:
     if not path.is_file():
         return []
     rows: list[dict[str, Any]] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
         if not line:
             continue
         try:
@@ -69,9 +71,7 @@ def analyze_decision_rows(
                 "skip": counts.get("skip", 0),
                 "not_routed": counts.get("reason:asset_fit.shortlist_not_routed", 0),
                 "shortlist_fit_symbols": int(fit_counts.get(setup_id, 0) or 0),
-                "ran": counts.get("signal", 0)
-                + counts.get("reject", 0)
-                + counts.get("skip", 0)
+                "ran": counts.get("signal", 0) + counts.get("reject", 0) + counts.get("skip", 0)
                 > 0,
             }
         )
@@ -122,6 +122,7 @@ def build_zero_hit_triage(live_telemetry: dict[str, Any] | None) -> dict[str, An
         "decision_rows": int(live_telemetry.get("decision_rows") or 0),
         "strategies_ran": int(live_telemetry.get("strategies_ran") or 0),
     }
+
 
 # --- from runtime_analysis.py ---
 if TYPE_CHECKING:
@@ -407,6 +408,7 @@ def parse_strategy_decision_log_lines(lines: Iterable[str]) -> list[dict[str, An
             }
         )
     return rows
+
 
 # --- from live_watch.py ---
 

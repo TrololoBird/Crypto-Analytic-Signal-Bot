@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Mapping
+from typing import TYPE_CHECKING
 
 from bot.regime.market import BEAR_BIAS_VALUES, BEAR_MACRO_RISK_MODES, BEAR_MARKET_REGIMES
 
 from .config import REQUIRED_PINNED_SYMBOLS
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from .config import BotSettings
 
 # Positioning / funding-OI setups: elevated positioning is signal, not "calm market".

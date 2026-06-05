@@ -6,8 +6,8 @@ import asyncio
 import logging
 from typing import Any
 
-from bot.runtime.errors import DEFENSIVE_EXC
 from bot.market.spot_companion import SpotCompanionService
+from bot.runtime.errors import DEFENSIVE_EXC
 
 LOG = logging.getLogger("bot.runtime.spot_refresh_runner")
 
@@ -31,6 +31,7 @@ class SpotRefreshRunner:
     def _service_instance(self) -> SpotCompanionService:
         if self._service is None:
             settings = self._settings()
+            cfg = self._companion_cfg()
             network = getattr(settings, "network", None)
             self._service = SpotCompanionService(
                 base_url=str(getattr(cfg, "base_url", "") or "https://data-api.binance.vision"),

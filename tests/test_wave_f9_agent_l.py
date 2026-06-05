@@ -84,8 +84,8 @@ def test_emit_cycle_log_aggregates_lane_skips_in_funnel() -> None:
     bot._shortlist_source = "live"
     bot._prepare_error_count = 0
     bot._ws_manager = None
-    bot._bus = SimpleNamespace(stats=lambda: {})
-    bot.client = SimpleNamespace(state_snapshot=lambda: {})
+    bot._bus = SimpleNamespace(stats=dict)
+    bot.client = SimpleNamespace(state_snapshot=dict)
     bot.last_cycle_summary = {}
     bot.dashboard = None
 

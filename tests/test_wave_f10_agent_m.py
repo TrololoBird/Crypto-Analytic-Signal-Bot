@@ -56,8 +56,12 @@ def test_is_clean_fvg_rejects_bridging_middle_candle() -> None:
 
 
 def test_fvg_ce_entry_clamps_to_gap_edge_for_live_price() -> None:
-    assert fvg_ce_entry(bottom=100.0, top=102.0, direction="long", price=101.0) == pytest.approx(101.0)
-    assert fvg_ce_entry(bottom=100.0, top=102.0, direction="short", price=101.0) == pytest.approx(101.0)
+    assert fvg_ce_entry(bottom=100.0, top=102.0, direction="long", price=101.0) == pytest.approx(
+        101.0
+    )
+    assert fvg_ce_entry(bottom=100.0, top=102.0, direction="short", price=101.0) == pytest.approx(
+        101.0
+    )
     assert fvg_ce_entry(bottom=100.0, top=102.0, direction="long") == pytest.approx(101.0)
 
 

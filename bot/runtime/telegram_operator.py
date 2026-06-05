@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 import aiohttp
 
+from bot.domain.labels import tracking_event_ru
 from bot.runtime.errors import DEFENSIVE_EXC
 
 from ..dashboard.mobile_summary import (
@@ -22,7 +23,6 @@ from ..dashboard.mobile_summary import (
     format_operator_sl_text,
     format_operator_status_text,
 )
-from bot.domain.labels import tracking_event_ru
 from ..dashboard.operator_actions import (
     action_analyze_symbol,
     action_refresh_market_context,
@@ -44,7 +44,11 @@ from ..dashboard.operator_context import (
     resolve_operator_market_html,
 )
 from ..dashboard.user_summary import build_user_summary, reject_reason_ru
-from ..persistence.db_status import collect_db_status, collect_db_status_from_conn, format_db_status_html
+from ..persistence.db_status import (
+    collect_db_status,
+    collect_db_status_from_conn,
+    format_db_status_html,
+)
 
 if TYPE_CHECKING:
     from ..runtime.bot import SignalBot
@@ -79,7 +83,9 @@ class TelegramOperatorConsole:
 
     @property
     def _operator_ids(self) -> frozenset[int]:
-        return frozenset(int(x) for x in (getattr(self._bot.settings, "operator_user_ids", ()) or ()))
+        return frozenset(
+            int(x) for x in (getattr(self._bot.settings, "operator_user_ids", ()) or ())
+        )
 
     @property
     def _poll_timeout(self) -> int:
@@ -216,7 +222,9 @@ class TelegramOperatorConsole:
                 return
             row = await lookup_signal_by_ref(self._bot, args[0])
             if row is None:
-                await self.send_html(chat_id, f"Сигнал не найден: <code>{html.escape(args[0])}</code>")
+                await self.send_html(
+                    chat_id, f"Сигнал не найден: <code>{html.escape(args[0])}</code>"
+                )
                 return
             await self.send_html(chat_id, format_signal_detail_html(self._bot, row))
             return
@@ -260,7 +268,9 @@ class TelegramOperatorConsole:
                     quote_asset=self._bot.settings.universe.quote_asset,
                 )
                 if not sym:
-                    await self.send_html(chat_id, "<b>Usage:</b> <code>/scan</code> или <code>/scan BTC</code>")
+                    await self.send_html(
+                        chat_id, "<b>Usage:</b> <code>/scan</code> или <code>/scan BTC</code>"
+                    )
                     return
                 await self._run_action(
                     chat_id,
@@ -317,7 +327,9 @@ class TelegramOperatorConsole:
             await self.send_html(chat_id, format_operator_sl_text(payload))
             return
         if cmd in {"/outcomes", "/stats"}:
-            await self.send_html(chat_id, format_operator_status_text(payload, detail_outcomes=True))
+            await self.send_html(
+                chat_id, format_operator_status_text(payload, detail_outcomes=True)
+            )
             return
         if cmd == "/shortlist":
             if arg0 in {"refresh", "update", "reload"}:
@@ -355,13 +367,13 @@ class TelegramOperatorConsole:
         if cmd == "/active":
             await self._reply_tracking(chat_id, status_filter="active", detail=True)
             return
-        if cmd in {"/rejections"}:
+        if cmd == "/rejections":
             await self._reply_rejections(chat_id)
             return
-        if cmd in {"/funnel"}:
+        if cmd == "/funnel":
             await self._reply_funnel(chat_id)
             return
-        if cmd in {"/gates"}:
+        if cmd == "/gates":
             await self._reply_gates(chat_id)
             return
         if cmd in {"/strategies", "/setups"}:
@@ -430,7 +442,8 @@ class TelegramOperatorConsole:
         lines = [
             "<b>Shortlist</b>",
             f"Size: <code>{runtime.get('shortlist_size') or len(symbols)}</code>",
-            f"Regime: <code>{runtime.get('regime') or '—'}</code> · BTC: <code>{runtime.get('btc_bias') or '—'}</code>",
+            f"Regime: <code>{runtime.get('regime') or '—'}</code> · "
+            f"BTC: <code>{runtime.get('btc_bias') or '—'}</code>",
         ]
         if symbols:
             preview = ", ".join(
@@ -465,10 +478,7 @@ class TelegramOperatorConsole:
             show = pending + active
         lines = [
             "<b>Tracking (signal-only)</b>",
-            (
-                "<i>pending</i> = ждём касание зоны входа · "
-                "<i>active</i> = в сделке, SL/TP в канале"
-            ),
+            ("<i>pending</i> = ждём касание зоны входа · <i>active</i> = в сделке, SL/TP в канале"),
             f"Pending: <code>{len(pending)}</code> · Active: <code>{len(active)}</code>",
         ]
         limit = 10 if detail else 6
@@ -536,7 +546,8 @@ class TelegramOperatorConsole:
         enabled = list(self._bot.settings.setups.enabled_setup_ids())
         lines = [
             "<b>Strategies</b>",
-            f"Enabled: <code>{len(enabled)}</code> / registry <code>{len(registry) if registry else '—'}</code>",
+            f"Enabled: <code>{len(enabled)}</code> / registry "
+            f"<code>{len(registry) if registry else '—'}</code>",
             "<i>MTF: детектор на 15m, фильтры 1h/4h в pipeline + confluence</i>",
         ]
         preview = ", ".join(html.escape(s) for s in enabled[:12])
@@ -591,7 +602,8 @@ class TelegramOperatorConsole:
             "<b>Signals today</b>",
             f"Sent: <code>{today.get('signals_sent') or 0}</code> · "
             f"delivered session <code>{today.get('session_delivered') or 0}</code>",
-            f"Pending/active: <code>{today.get('pending') or 0}</code>/<code>{today.get('active') or 0}</code>",
+            f"Pending/active: <code>{today.get('pending') or 0}</code>/"
+            f"<code>{today.get('active') or 0}</code>",
             f"Rejections logged: <code>{today.get('rejections') or 0}</code>",
             (
                 f"7d WR: <code>{round(float(outcomes.get('win_rate') or 0) * 100, 1)}%</code> · "

@@ -433,9 +433,7 @@ def _collect_findings(snap: Mapping[str, Any]) -> list[AuditFinding]:
     qm = rt.get("quality_monitor") or {}
     pause_count = _int((qm.get("recommendations") or {}).get("pause"))
     paused_setups = [
-        str(setup_id)
-        for setup_id in (qm.get("unhealthy_setups") or [])
-        if str(setup_id).strip()
+        str(setup_id) for setup_id in (qm.get("unhealthy_setups") or []) if str(setup_id).strip()
     ]
     if pause_count > 0 or paused_setups:
         out.append(

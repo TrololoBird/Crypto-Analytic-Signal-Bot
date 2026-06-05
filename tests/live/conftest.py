@@ -7,10 +7,10 @@ import os
 
 import pytest
 
-from bot.runtime.errors import DEFENSIVE_EXC
 from bot.domain.config import load_settings
 from bot.market.data import BinanceFuturesMarketData, MarketDataUnavailable
 from bot.market.rest_impl import BinanceClientImpl
+from bot.runtime.errors import DEFENSIVE_EXC
 
 _GEO_SKIP_REASON: list[str | None] = [None]
 

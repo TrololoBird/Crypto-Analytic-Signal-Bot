@@ -27,7 +27,11 @@ bootstrap_repo_path()
 from bot.diagnostics.session_ops import build_zero_hit_triage
 from bot.domain.config import load_settings
 from bot.persistence.db_status import collect_db_status
-from scripts.reconcile_strategy_defaults import collect_defaults_drift, write_drift_report, write_toml_patch
+from scripts.reconcile_strategy_defaults import (
+    collect_defaults_drift,
+    write_drift_report,
+    write_toml_patch,
+)
 
 LOG = logging.getLogger("scripts.calibration_pipeline")
 

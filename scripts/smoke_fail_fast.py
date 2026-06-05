@@ -82,8 +82,9 @@ class SmokeFailFastGuard:
         if record is None:
             return
         level = logging.getLevelName(record.levelno)
+        msg = f"live smoke fail-fast on {level} [{record.name}] {record.getMessage()}"
         raise SmokeFailFastError(
-            f"live smoke fail-fast on {level} [{record.name}] {record.getMessage()}",
+            msg,
             record=record,
         )
 

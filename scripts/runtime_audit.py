@@ -20,7 +20,6 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - direct script execution
     from common import bootstrap_repo_path
 
-from bot.runtime.errors import DEFENSIVE_EXC
 from bot.diagnostics.session_ops import (
     aggregate_cycle_stats,
     aggregate_rejection_funnel,
@@ -28,6 +27,7 @@ from bot.diagnostics.session_ops import (
     find_latest_run_dir,
     read_jsonl,
 )
+from bot.runtime.errors import DEFENSIVE_EXC
 
 TELEMETRY_DIR = Path("data/bot/telemetry")
 DB_PATH = Path("data/bot/bot.db")

@@ -13,6 +13,7 @@ import aiosqlite
 import polars as pl
 
 from ...migrations import migrate_db
+from ...runtime.errors import DEFENSIVE_EXC
 from ..outcomes import aggregate_setup_stats
 from .schema import (
     SIGNAL_ANALYSIS_SCHEMA,
@@ -120,6 +121,7 @@ async def fetch_signal_outcome_rows(
         item["llm_was_correct"] = None if llm_was_correct is None else bool(llm_was_correct)
         result_rows.append(item)
     return result_rows
+
 
 _REPOSITORY_SCHEMA_VERSION = 2
 _ACTIVE_SIGNALS_OPTIONAL_COLUMNS: dict[str, str] = {
@@ -604,7 +606,7 @@ class MemoryRepository:
         if not updated_at:
             return None
         try:
-            ts = datetime.fromisoformat(str(updated_at).replace("Z", "+00:00"))
+            ts = datetime.fromisoformat(str(updated_at))
             if ts.tzinfo is None:
                 ts = ts.replace(tzinfo=UTC)
             return max(0.0, (datetime.now(UTC) - ts).total_seconds())
@@ -621,9 +623,9 @@ class MemoryRepository:
             if row:
                 row = dict(row)
                 intelligence_snapshot: dict[str, Any] = {}
-                raw_intelligence = row.get("intelligence_json", None)
+                raw_intelligence = row.get("intelligence_json")
                 benchmark_context: dict[str, Any] = {}
-                raw_benchmarks = row.get("benchmark_context_json", None)
+                raw_benchmarks = row.get("benchmark_context_json")
                 if raw_benchmarks:
                     try:
                         parsed_benchmarks = json.loads(raw_benchmarks)
@@ -637,7 +639,7 @@ class MemoryRepository:
                     except json.JSONDecodeError:
                         intelligence_snapshot = {}
                 display_snapshot: dict[str, Any] = {}
-                raw_display = row.get("display_snapshot_json", None)
+                raw_display = row.get("display_snapshot_json")
                 if raw_display:
                     try:
                         parsed_display = json.loads(raw_display)
@@ -1271,7 +1273,7 @@ class MemoryRepository:
                     "SELECT outcome_window FROM setup_scores WHERE setup_id = ?",
                     (setup_id,),
                 ).fetchone()
-        except Exception:
+        except DEFENSIVE_EXC:
             LOG.debug("setup_history_count read failed | setup_id=%s", setup_id, exc_info=True)
             return 0
         if row is None or not row[0]:

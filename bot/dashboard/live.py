@@ -16,18 +16,18 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from bot.runtime.errors import DEFENSIVE_EXC
 from bot.domain.labels import (
-    CONFLUENCE_LEG_KEYS,
     CONFIRMATION_PROFILE_KEYS,
+    CONFLUENCE_LEG_KEYS,
+    confirmation_profile_label_ru,
     confluence_leg_label_ru,
     confluence_profile_recommendation_ru,
-    confirmation_profile_label_ru,
     normalize_reject_reason,
     reject_reason_ru,
 )
 from bot.domain.limit_entry import normalize_confirmation_profile
 from bot.runtime.delivery_orchestrator import DELIVERY_SUCCESS_STATUSES
+from bot.runtime.errors import DEFENSIVE_EXC
 from bot.telemetry import slim_message_buffer_fields
 
 from ..delivery.formatting import message_preview, sample_message_from_row
@@ -175,7 +175,9 @@ def _compute_session_delta(cycles: list[JsonDict]) -> JsonDict:
     }
 
 
-def _build_funnel_widget(cycle_totals: Mapping[str, Any], session_delta: Mapping[str, Any]) -> JsonDict:
+def _build_funnel_widget(
+    cycle_totals: Mapping[str, Any], session_delta: Mapping[str, Any]
+) -> JsonDict:
     stages = []
     for key, label_ru in (
         ("candidates", "кандидаты"),
@@ -509,9 +511,8 @@ class DashboardLiveData:
             decision_counter=decision_counter,
         )
         status["top_blocker"] = top_blocker
-        status["top_rejection"] = (
-            top_blocker
-            or (rejections.get("reasons", [{}])[0] if rejections.get("reasons") else {})
+        status["top_rejection"] = top_blocker or (
+            rejections.get("reasons", [{}])[0] if rejections.get("reasons") else {}
         )
         runtime_rows = list(self._iter_recent("health_runtime", max_rows=5, limit_files=1))
         status["runtime_health"] = runtime_rows[0] if runtime_rows else {}
@@ -626,7 +627,7 @@ class DashboardLiveData:
         if store is not None and hasattr(store, "symbols_by_tier"):
             for tier in (SymbolTier.DEEP, SymbolTier.HOT):
                 for symbol in store.symbols_by_tier(tier)[:hot_limit]:
-                    state = store._states.get(symbol) if hasattr(store, "_states") else None  # noqa: SLF001
+                    state = store._states.get(symbol) if hasattr(store, "_states") else None
                     hot_rows.append(
                         {
                             "symbol": symbol,
@@ -1038,10 +1039,7 @@ class DashboardLiveData:
         return {
             "available": bool(refs) or total > 0,
             "total_rows": total,
-            "counts": [
-                {"key": key, "count": int(count)}
-                for key, count in counts.most_common(20)
-            ],
+            "counts": [{"key": key, "count": int(count)} for key, count in counts.most_common(20)],
         }
 
     def _delivery_uncached(self, *, limit: int) -> JsonDict:

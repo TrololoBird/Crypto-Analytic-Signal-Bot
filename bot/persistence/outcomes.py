@@ -13,8 +13,6 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
 
-from bot.runtime.errors import DEFENSIVE_EXC
-
 from ..domain.contracts import (
     build_public_feature_snapshot,
     validate_public_feature_payload,

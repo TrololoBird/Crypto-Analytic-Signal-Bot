@@ -252,7 +252,9 @@ def _analyze_live_telemetry(analysis_dir: Path) -> dict[str, Any]:
         counts = by_strategy.get(setup_id, Counter())
         skips = sum(v for k, v in counts.items() if k.startswith("skip:"))
         top_skip = ""
-        skip_items = [(k.removeprefix("skip:"), v) for k, v in counts.items() if k.startswith("skip:")]
+        skip_items = [
+            (k.removeprefix("skip:"), v) for k, v in counts.items() if k.startswith("skip:")
+        ]
         if skip_items:
             top_skip = max(skip_items, key=lambda x: x[1])[0]
         live_rows.append(
@@ -276,7 +278,9 @@ def _analyze_live_telemetry(analysis_dir: Path) -> dict[str, Any]:
     }
 
 
-def _merge_rows(static_rows: list[dict[str, Any]], live_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _merge_rows(
+    static_rows: list[dict[str, Any]], live_rows: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
     live_map = {row["setup_id"]: row for row in live_rows}
     merged: list[dict[str, Any]] = []
     for srow in static_rows:
@@ -304,7 +308,9 @@ def _verdict(row: dict[str, Any]) -> str:
 def _print_markdown_table(merged: list[dict[str, Any]], meta: dict[str, Any]) -> None:
     print("# Shortlist ↔ Strategy Fit Matrix\n")
     print(f"- Shortlist size: **{meta.get('shortlist_size', '?')}**")
-    print(f"- Gate passed / light pool: **{meta.get('gate_passed', '?')}** / **{meta.get('light_pool', '?')}**")
+    print(
+        f"- Gate passed / light pool: **{meta.get('gate_passed', '?')}** / **{meta.get('light_pool', '?')}**"
+    )
     print(f"- Live decision rows: **{meta.get('decision_rows', 0)}**")
     print(f"- Telemetry run: `{meta.get('run_id', 'static-only')}`")
     print()
@@ -353,7 +359,8 @@ def main(argv: list[str] | None = None) -> int:
 
     merged = _merge_rows(static.get("static_rows", []), live.get("live_rows", []))
     meta = {
-        "shortlist_size": static.get("shortlist_size") or live.get("latest_shortlist", {}).get("size"),
+        "shortlist_size": static.get("shortlist_size")
+        or live.get("latest_shortlist", {}).get("size"),
         "gate_passed": static.get("summary", {}).get("gate_passed")
         or live.get("latest_shortlist", {}).get("gate_passed"),
         "light_pool": static.get("summary", {}).get("light_pool")

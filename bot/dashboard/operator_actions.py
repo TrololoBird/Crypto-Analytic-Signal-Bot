@@ -141,7 +141,9 @@ async def lookup_signal_by_ref(bot: Any, token: str) -> dict[str, Any] | None:
     return None
 
 
-def symbol_rejection_summary(live_data: Any, symbol: str, *, limit: int = 5) -> list[tuple[str, int]]:
+def symbol_rejection_summary(
+    live_data: Any, symbol: str, *, limit: int = 5
+) -> list[tuple[str, int]]:
     if live_data is None:
         return []
     try:
@@ -184,9 +186,7 @@ def format_symbol_lookup_html(bot: Any, symbol: str, rows: list[dict[str, Any]])
             status = html.escape(str(payload.get("status") or "?"))
             ref = html.escape(str(payload.get("tracking_ref") or "?"))
             progress = html.escape(str(payload.get("progress_label") or ""))
-            lines.append(
-                f"• {setup} {direction} · <code>{status}</code> · ref <code>{ref}</code>"
-            )
+            lines.append(f"• {setup} {direction} · <code>{status}</code> · ref <code>{ref}</code>")
             if progress:
                 lines.append(f"  {progress}")
     live_data = getattr(getattr(bot, "dashboard", None), "_live_data", None)

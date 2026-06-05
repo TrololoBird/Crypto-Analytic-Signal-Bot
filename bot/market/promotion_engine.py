@@ -7,7 +7,7 @@ import time
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
-from ..domain.config import BotSettings, _ALL_SETUP_IDS
+from ..domain.config import _ALL_SETUP_IDS, BotSettings
 from ..domain.schemas import UniverseSymbol
 from .radar_state import MarketRadarStore, SymbolTier
 from .universe_screener import apply_screener_to_store
@@ -27,7 +27,9 @@ class PromotionEngine:
         self._settings = settings
         self._cfg = settings.universe.radar
 
-    def run_tier_cycle(self, store: MarketRadarStore, *, now: float | None = None) -> dict[str, Any]:
+    def run_tier_cycle(
+        self, store: MarketRadarStore, *, now: float | None = None
+    ) -> dict[str, Any]:
         if not self._cfg.enabled:
             return {"enabled": False}
         ts = float(now if now is not None else time.monotonic())
@@ -36,7 +38,7 @@ class PromotionEngine:
         hot_candidates: list[tuple[float, str]] = []
         warm_candidates: list[tuple[float, str]] = []
 
-        for symbol, state in store._states.items():  # noqa: SLF001
+        for symbol, state in store._states.items():
             if symbol in pinned:
                 state.tier = SymbolTier.DEEP
                 state.prescore_boost = max(state.prescore_boost, self._cfg.prescore_boost_hot)
@@ -61,7 +63,7 @@ class PromotionEngine:
 
         demoted = 0
         promoted = 0
-        for symbol, state in store._states.items():  # noqa: SLF001
+        for symbol, state in store._states.items():
             if symbol in pinned:
                 continue
             idle = ts - max(state.last_trigger_ts, state.promoted_at, state.last_update_ts)
@@ -82,14 +84,17 @@ class PromotionEngine:
                 elif state.tier == SymbolTier.WARM:
                     pass
                 continue
-            if state.tier in {SymbolTier.HOT, SymbolTier.WARM} and idle >= self._cfg.demotion_idle_seconds:
+            if (
+                state.tier in {SymbolTier.HOT, SymbolTier.WARM}
+                and idle >= self._cfg.demotion_idle_seconds
+            ):
                 state.tier = SymbolTier.COLD
                 state.prescore_boost = 0.0
                 demoted += 1
 
         deep_symbols = self.select_deep_symbols(store)
         for symbol in deep_symbols:
-            st = store._states.get(symbol)  # noqa: SLF001
+            st = store._states.get(symbol)
             if st is not None:
                 st.tier = SymbolTier.DEEP
 
@@ -102,7 +107,7 @@ class PromotionEngine:
             "promoted": promoted,
             "demoted": demoted,
         }
-        store._last_tier_cycle_ts = ts  # noqa: SLF001
+        store._last_tier_cycle_ts = ts
         return summary
 
     def select_deep_symbols(self, store: MarketRadarStore) -> frozenset[str]:
@@ -110,16 +115,18 @@ class PromotionEngine:
         if not self._cfg.enabled:
             return frozenset(pinned)
         ranked: list[tuple[float, str]] = []
-        for symbol, state in store._states.items():  # noqa: SLF001
+        for symbol, state in store._states.items():
             if symbol in pinned:
                 continue
             if state.tier not in {SymbolTier.HOT, SymbolTier.DEEP}:
                 continue
-            ranked.append((state.prescore_boost + min(abs(state.price_change_pct_24h) / 30.0, 0.2), symbol))
+            ranked.append(
+                (state.prescore_boost + min(abs(state.price_change_pct_24h) / 30.0, 0.2), symbol)
+            )
         ranked.sort(reverse=True)
         reserve = int(self._cfg.promotion_slots_reserve)
         extra = [sym for _, sym in ranked[:reserve]]
-        deep_tier = {sym for sym in store.symbols_by_tier(SymbolTier.DEEP)}
+        deep_tier = set(store.symbols_by_tier(SymbolTier.DEEP))
         return frozenset(pinned | set(extra) | deep_tier)
 
     def enrich_ticker_rows(self, rows: list[JsonDict], store: MarketRadarStore) -> list[JsonDict]:
@@ -186,7 +193,9 @@ class PromotionEngine:
                     last_price=float(state.last_price if state else 0.0),
                     shortlist_bucket="radar",
                     shortlist_score=float(state.prescore_boost if state else 0.5),
-                    shortlist_reasons=tuple(state.promotion_reasons if state else ("radar_promoted",)),
+                    shortlist_reasons=tuple(
+                        state.promotion_reasons if state else ("radar_promoted",)
+                    ),
                     seed_source=seed_source,
                     strategy_fits=tuple(_ALL_SETUP_IDS),
                 )
@@ -197,9 +206,13 @@ class PromotionEngine:
         limit = int(self._settings.universe.shortlist_limit)
         if len(merged) > limit + len(self._settings.universe.pinned_symbols):
             pinned_set = set(self._settings.universe.pinned_symbols)
-            protected = [item for item in merged if item.symbol in pinned_set or item.symbol in deep]
+            protected = [
+                item for item in merged if item.symbol in pinned_set or item.symbol in deep
+            ]
             rest = [item for item in merged if item.symbol not in {p.symbol for p in protected}]
-            rest.sort(key=lambda item: (item.shortlist_score or 0.0, item.quote_volume), reverse=True)
+            rest.sort(
+                key=lambda item: (item.shortlist_score or 0.0, item.quote_volume), reverse=True
+            )
             slots = max(limit, len(protected))
             merged = protected + rest[: max(0, slots - len(protected))]
 

@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import time
 
-import pytest
-
 from bot.domain.config import BotSettings
 from bot.market.outcome_derank import decay_weight, penalties_from_sl_counts
 from bot.market.rest_impl import BinanceClientImpl

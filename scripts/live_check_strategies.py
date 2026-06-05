@@ -23,7 +23,6 @@ except ModuleNotFoundError:  # pragma: no cover - direct script execution
         resolve_symbols,
     )
 
-from bot.runtime.errors import DEFENSIVE_EXC
 from bot.delivery.confluence import ConfluenceEngine
 from bot.delivery.contract import signal_contract_row, validate_signal_contract
 from bot.domain.config import load_settings
@@ -33,6 +32,7 @@ from bot.features.prepare import min_required_bars, prepare_symbol
 from bot.market.data import BinanceFuturesMarketData, MarketDataUnavailable
 from bot.market.rest_impl import BinanceClientImpl
 from bot.market.universe import strategy_fits_for_market_row
+from bot.runtime.errors import DEFENSIVE_EXC
 from bot.setups.base import SetupParams
 from bot.strategies import STRATEGY_CLASSES
 

@@ -29,24 +29,24 @@ TARGET_SECONDS = 21600.0
 POLL_SECONDS = 8.0
 MAX_RESTARTS = 24
 ERROR_PATTERNS = (
-    re.compile(r"\bTraceback \(most recent call last\)", re.I),
+    re.compile(r"\bTraceback \(most recent call last\)", re.IGNORECASE),
     re.compile(r"\| ERROR\s+\|"),
-    re.compile(r"CRITICAL ERROR", re.I),
-    re.compile(r"live_smoke_fail_fast_abort", re.I),
+    re.compile(r"CRITICAL ERROR", re.IGNORECASE),
+    re.compile(r"live_smoke_fail_fast_abort", re.IGNORECASE),
 )
 IGNORE_PATTERNS = (
-    re.compile(r"REST weight pacing", re.I),
-    re.compile(r"rate_limit", re.I),
-    re.compile(r"Unclosed client session", re.I),
-    re.compile(r"Unclosed connector", re.I),
-    re.compile(r"SSL: RECORD_LAYER_FAILURE", re.I),
-    re.compile(r"Connection lost:.*SSL", re.I),
-    re.compile(r"Unhandled exception:.*Unclosed", re.I),
-    re.compile(r"Unhandled exception:.*Connection lost", re.I),
-    re.compile(r"startup telegram send failed", re.I),
-    re.compile(r"failed to start metrics server", re.I),
-    re.compile(r"Address already in use", re.I),
-    re.compile(r"another bot process is already running", re.I),
+    re.compile(r"REST weight pacing", re.IGNORECASE),
+    re.compile(r"rate_limit", re.IGNORECASE),
+    re.compile(r"Unclosed client session", re.IGNORECASE),
+    re.compile(r"Unclosed connector", re.IGNORECASE),
+    re.compile(r"SSL: RECORD_LAYER_FAILURE", re.IGNORECASE),
+    re.compile(r"Connection lost:.*SSL", re.IGNORECASE),
+    re.compile(r"Unhandled exception:.*Unclosed", re.IGNORECASE),
+    re.compile(r"Unhandled exception:.*Connection lost", re.IGNORECASE),
+    re.compile(r"startup telegram send failed", re.IGNORECASE),
+    re.compile(r"failed to start metrics server", re.IGNORECASE),
+    re.compile(r"Address already in use", re.IGNORECASE),
+    re.compile(r"another bot process is already running", re.IGNORECASE),
 )
 
 
@@ -103,7 +103,10 @@ def _read_log_tail(path: Path, offset: int) -> tuple[str, int]:
 def _scan_log_for_fatal(chunk: str) -> str | None:
     if not chunk.strip():
         return None
-    if "Traceback (most recent call last)" in chunk and "STDERR:" not in chunk.split("Traceback")[0][-80:]:
+    if (
+        "Traceback (most recent call last)" in chunk
+        and "STDERR:" not in chunk.split("Traceback", maxsplit=1)[0][-80:]
+    ):
         lowered = chunk.lower()
         if "failed to start metrics server" in lowered or "address already in use" in lowered:
             pass
@@ -181,7 +184,9 @@ def _apply_sl_calibration(event: dict) -> list[str]:
     if code.startswith("bear_long"):
         actions.append("regime_gate_already_active: verify delivery filters blocking bear longs")
     if code == "immediate_adverse_entry":
-        actions.append("limit_entry_confirmation: pending signals should not activate without bar confirm")
+        actions.append(
+            "limit_entry_confirmation: pending signals should not activate without bar confirm"
+        )
     return actions
 
 

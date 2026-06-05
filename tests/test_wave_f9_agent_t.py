@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -19,6 +19,9 @@ from bot.dashboard.live import (
 )
 from bot.runtime.cycle_runner import CycleRunner
 from bot.telemetry import TelemetryStore
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def test_cycle_totals_prefer_delivery_success_count() -> None:
@@ -59,7 +62,7 @@ def test_delivery_success_rows_filters_attempts() -> None:
 def test_delivery_uncached_counts_success_not_all_attempts() -> None:
     live = DashboardLiveData(lambda: None)
 
-    def _fake_iter(stem: str, *, max_rows: int, limit_files: int):  # noqa: ARG001
+    def _fake_iter(stem: str, *, max_rows: int, limit_files: int):
         if stem == "delivery":
             yield {"symbol": "BTCUSDT", "setup_id": "ema_bounce", "delivery_status": "sent"}
             yield {"symbol": "ETHUSDT", "setup_id": "rsi_div", "delivery_status": "failed"}
@@ -78,7 +81,7 @@ def test_delivery_uncached_counts_success_not_all_attempts() -> None:
 def test_overview_session_delivered_uses_delivery_success_count() -> None:
     live = DashboardLiveData(lambda: None)
 
-    def _fake_iter(stem: str, *, max_rows: int, limit_files: int):  # noqa: ARG001
+    def _fake_iter(stem: str, *, max_rows: int, limit_files: int):
         if stem == "cycles":
             yield {
                 "candidate_count": 5,
@@ -100,7 +103,9 @@ def test_overview_session_delivered_uses_delivery_success_count() -> None:
             "_shutdown": type("S", (), {"is_set": lambda self: False})(),
             "_shortlist": [],
             "_shortlist_source": "test",
-            "settings": type("Settings", (), {"notifiers": type("N", (), {"provider": "none"})()})(),
+            "settings": type(
+                "Settings", (), {"notifiers": type("N", (), {"provider": "none"})()}
+            )(),
         },
     )()
     live._bot_getter = lambda: bot

@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from bot.diagnostics.session_ops import analyze_telemetry, build_zero_hit_triage
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def test_build_zero_hit_triage_classifies(tmp_path: Path) -> None:

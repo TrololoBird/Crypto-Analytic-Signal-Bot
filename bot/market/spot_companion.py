@@ -15,9 +15,9 @@ from typing import Any
 
 import aiohttp
 
-from bot.runtime.errors import DEFENSIVE_EXC
 from bot.market.data import _HTTP_CONNECTOR_LIMIT
 from bot.market.network_proxy import aiohttp_request_proxy, create_aiohttp_session
+from bot.runtime.errors import DEFENSIVE_EXC
 
 LOG = logging.getLogger("bot.market.spot_companion")
 
@@ -155,7 +155,9 @@ class SpotCompanionService:
                     self._cache[metrics.symbol] = metrics
                 updated += 1
 
-        await asyncio.gather(*[_one(sym) for sym in symbols if str(sym).strip()], return_exceptions=True)
+        await asyncio.gather(
+            *[_one(sym) for sym in symbols if str(sym).strip()], return_exceptions=True
+        )
         return updated
 
     def enrichments_for(self, symbol: str, *, max_age_seconds: float = 120.0) -> dict[str, float]:

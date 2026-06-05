@@ -5,11 +5,13 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from bot.diagnostics.research_harvest import ResearchHarvestRecorder, prepared_snapshot
 from bot.domain.research_harvest import _resolved_symbols
-from bot.domain.schemas import PipelineResult
+
+if TYPE_CHECKING:
+    from bot.domain.schemas import PipelineResult
 
 LOG = logging.getLogger("bot.runtime.research_harvest")
 

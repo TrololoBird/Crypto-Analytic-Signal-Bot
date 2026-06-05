@@ -368,7 +368,9 @@ def _detect_liquidity_sweep_extended(
         sl_mask=None,
     )
     if trade_plan is None:
-        _reject(prepared, setup_id, "risk_non_positive_long", stop_basis=sweep_bar_l, price=entry_price)
+        _reject(
+            prepared, setup_id, "risk_non_positive_long", stop_basis=sweep_bar_l, price=entry_price
+        )
         return None
     stop = trade_plan.stop
     tp1 = trade_plan.tp1

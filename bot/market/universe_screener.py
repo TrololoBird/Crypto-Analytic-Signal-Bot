@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from ..domain.config import UniverseRadarConfig
 from .radar_state import MarketRadarStore, SymbolRadarState, SymbolTier
+
+if TYPE_CHECKING:
+    from ..domain.config import UniverseRadarConfig
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,11 +91,11 @@ def screen_symbol(
 
 def apply_screener_to_store(store: MarketRadarStore, *, now: float) -> int:
     """Update flags/boost on all symbols; return count with active flags."""
-    cfg = store._cfg  # noqa: SLF001 — paired module
+    cfg = store._cfg
     if not cfg.enabled:
         return 0
     hits = 0
-    for state in store._states.values():  # noqa: SLF001
+    for state in store._states.values():
         hit = screen_symbol(state, config=cfg, store=store, now=now)
         state.flags = hit.flags
         state.prescore_boost = hit.prescore_boost

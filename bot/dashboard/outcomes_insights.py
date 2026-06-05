@@ -52,7 +52,9 @@ async def build_outcomes_insights(
     outcomes = await repo.get_signal_outcomes(last_days=days)
     active_rows = await repo.get_active_signals(include_closed=True)
 
-    trade_outcomes = [row for row in outcomes if str(row.get("result") or "") in _WIN_RESULTS | _LOSS_RESULTS]
+    trade_outcomes = [
+        row for row in outcomes if str(row.get("result") or "") in _WIN_RESULTS | _LOSS_RESULTS
+    ]
     losses = [row for row in trade_outcomes if str(row.get("result") or "") == "stop_loss"]
     wins = [row for row in trade_outcomes if str(row.get("result") or "") in _WIN_RESULTS]
 
@@ -158,9 +160,7 @@ async def build_outcomes_insights(
         )
 
     active_by_tid = {
-        str(row.get("tracking_id") or ""): row
-        for row in active_rows
-        if row.get("tracking_id")
+        str(row.get("tracking_id") or ""): row for row in active_rows if row.get("tracking_id")
     }
     post_sl_thesis_room = 0
     post_sl_recovery_rows: list[dict[str, Any]] = []
@@ -197,8 +197,7 @@ async def build_outcomes_insights(
             {
                 "key": "post_sl_thesis_room",
                 "label": (
-                    "После SL до TP1 оставался запас — возможен ранний стоп / "
-                    "отскок после выноса"
+                    "После SL до TP1 оставался запас — возможен ранний стоп / отскок после выноса"
                 ),
                 "count": post_sl_thesis_room,
                 "share": round(post_sl_thesis_room / len(losses), 4),
@@ -209,7 +208,11 @@ async def build_outcomes_insights(
             "long в bear (stop hunt → отскок). Усилить HTF/regime gate для long и "
             "не трактовать post-SL движение как «сигнал был верным» без нового входа."
         )
-    if losses and win_directions.get("short", 0) >= 3 and loss_directions.get("long", 0) == len(losses):
+    if (
+        losses
+        and win_directions.get("short", 0) >= 3
+        and loss_directions.get("long", 0) == len(losses)
+    ):
         recommendations.append(
             "Short-сетапы дают TP, long-сетапы чаще ловят стоп — возможен bearish alt regime; "
             "усилить HTF-фильтр для long или confluence gate."
@@ -220,7 +223,9 @@ async def build_outcomes_insights(
             "(turtle_soup, funding_reversal, price_velocity)."
         )
     if not recommendations and not trade_outcomes:
-        recommendations.append("Недостаточно закрытых сделок — дождитесь накопления outcomes в SQLite.")
+        recommendations.append(
+            "Недостаточно закрытых сделок — дождитесь накопления outcomes в SQLite."
+        )
 
     recent_losses: list[dict[str, Any]] = []
     for row in sorted(
@@ -262,7 +267,8 @@ async def build_outcomes_insights(
             "stop_losses": len(losses),
             "win_rate": round(len(wins) / total_trades, 4) if total_trades else 0.0,
             "avg_r_multiple": round(
-                sum(_safe_float(r.get("pnl_r_multiple")) or 0.0 for r in trade_outcomes) / total_trades,
+                sum(_safe_float(r.get("pnl_r_multiple")) or 0.0 for r in trade_outcomes)
+                / total_trades,
                 4,
             )
             if total_trades

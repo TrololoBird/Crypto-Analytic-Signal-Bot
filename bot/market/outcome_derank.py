@@ -42,9 +42,7 @@ def penalties_from_sl_counts(
     for symbol_key in symbols:
         ages = ages_by_symbol.get(symbol_key)
         if ages:
-            effective = sum(
-                decay_weight(float(age), half_life_days=half_life_days) for age in ages
-            )
+            effective = sum(decay_weight(float(age), half_life_days=half_life_days) for age in ages)
         else:
             effective = float(sl_counts.get(symbol_key, 0) or 0)
         if effective < threshold:

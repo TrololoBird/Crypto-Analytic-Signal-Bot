@@ -69,11 +69,12 @@ def acquire_pid_lock(pid_file: Path, *, owner_pid: int | None = None) -> None:
                 os.write(fd, str(owner).encode("ascii", errors="strict"))
             finally:
                 os.close(fd)
-            return
         except FileExistsError:
             existing_pid = read_pid_file(pid_file)
             if existing_pid and existing_pid != owner and pid_is_alive(existing_pid):
-                msg = f"another process is already running with pid {existing_pid} (lock={pid_file})"
+                msg = (
+                    f"another process is already running with pid {existing_pid} (lock={pid_file})"
+                )
                 raise SystemExit(msg) from None
             if existing_pid == 0:
                 retries += 1
@@ -91,6 +92,8 @@ def acquire_pid_lock(pid_file: Path, *, owner_pid: int | None = None) -> None:
             except OSError as exc:
                 msg = f"failed to remove stale pid lock {pid_file}: {exc}"
                 raise SystemExit(msg) from exc
+        else:
+            return
 
 
 def release_pid_lock(pid_file: Path, *, owner_pid: int | None = None) -> None:

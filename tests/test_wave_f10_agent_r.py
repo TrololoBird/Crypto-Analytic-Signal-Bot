@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 import pytest
@@ -16,12 +16,15 @@ from bot.persistence.journal import (
     build_journal_report_from_repo,
     build_journal_report_primary,
 )
-from bot.persistence.repository.memory import MemoryRepository
 from bot.persistence.repository.memory import (
+    MemoryRepository,
     fetch_setup_stats_rows,
     fetch_signal_outcome_rows,
 )
 from bot.persistence.sl_diagnostics import classify_stop_loss_root_cause, reclassify_sl_outcomes
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _outcome_row(

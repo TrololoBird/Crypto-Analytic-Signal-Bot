@@ -18,7 +18,6 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - direct script execution
     from common import bootstrap_repo_path, configure_script_logging
 
-from bot.runtime.errors import DEFENSIVE_EXC
 from bot.delivery.contract import validate_signal_contract
 from bot.domain.config import load_settings
 from bot.domain.schemas import Signal, SymbolFrames, SymbolMeta, UniverseSymbol
@@ -30,6 +29,7 @@ from bot.market.data import (
     _klines_to_frame,
 )
 from bot.runtime.delivery_orchestrator import DeliveryOrchestrator
+from bot.runtime.errors import DEFENSIVE_EXC
 from bot.setups.base import SetupParams
 from bot.strategies import STRATEGY_CLASSES
 

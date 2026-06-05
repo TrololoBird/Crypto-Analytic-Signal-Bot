@@ -16,6 +16,7 @@ from bot.domain.config import BotSettings, NetworkConfig, load_settings
 from bot.market.data import BinanceFuturesMarketData, MarketDataUnavailable
 from bot.market.network_proxy import websockets_connect_kwargs
 from bot.market.rest_impl import BinanceClientImpl
+from bot.runtime.errors import DEFENSIVE_EXC
 
 LOG = logging.getLogger("bot.market.proxy_bootstrap")
 
@@ -41,7 +42,7 @@ _PROBE_CACHE_MONOTONIC: float = 0.0
 
 def record_network_probe(scope: str, result: NetworkProbeResult) -> None:
     """Store the latest REST/WS probe for health and operator surfaces."""
-    global _PROBE_CACHE_MONOTONIC
+    global _PROBE_CACHE_MONOTONIC  # noqa: PLW0603
     normalized = str(scope or "").strip().lower()
     if not normalized:
         return
@@ -62,7 +63,7 @@ def network_probe_status() -> dict[str, bool | None]:
 
 def clear_network_probe_cache() -> None:
     """Reset probe cache (tests only)."""
-    global _PROBE_CACHE_MONOTONIC
+    global _PROBE_CACHE_MONOTONIC  # noqa: PLW0603
     _PROBE_CACHE.clear()
     _PROBE_CACHE_MONOTONIC = 0.0
 
@@ -85,7 +86,7 @@ async def probe_ws_handshake(
                 **connect_kwargs,
             ):
                 return True
-    except Exception as exc:
+    except DEFENSIVE_EXC as exc:
         LOG.debug(
             "ws handshake probe failed | proxy=%s trust_env=%s err=%s",
             proxy_url,
@@ -173,7 +174,9 @@ async def ensure_network_ready(
     """Reload settings after optional proxy discovery when egress is missing or dead."""
     urls = settings.network.effective_proxy_urls()
     direct = await _probe_direct()
-    configured = await _probe_configured(urls) if urls else NetworkProbeResult(False, False)
+    configured = (
+        await _probe_configured(urls) if urls else NetworkProbeResult(rest_ok=False, ws_ok=False)
+    )
     _log_probe_result("direct", direct)
     if urls:
         _log_probe_result("configured", configured)
@@ -182,9 +185,7 @@ async def ensure_network_ready(
         return settings
 
     if direct.any_ok or configured.any_ok:
-        LOG.warning(
-            "binance REST blocked but WS reachable — continuing without proxy refresh"
-        )
+        LOG.warning("binance REST blocked but WS reachable — continuing without proxy refresh")
         return settings
 
     if not auto_discover:

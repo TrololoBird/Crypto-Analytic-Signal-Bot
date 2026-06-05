@@ -4,6 +4,8 @@ clean-session:
 	@python scripts/clean_session_data.py --mode smoke --config config.toml
 
 check:
+	@echo "=== Ruff lint ==="
+	@.venv/bin/ruff check bot/ tests/ scripts/ main.py
 	@echo "=== Compile check ==="
 	@.venv/bin/python -m compileall -q bot
 	@echo "=== v9 refactor gate ==="

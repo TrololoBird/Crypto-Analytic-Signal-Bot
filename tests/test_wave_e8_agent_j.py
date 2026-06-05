@@ -112,7 +112,8 @@ async def test_collect_db_status_from_conn() -> None:
     class _Conn:
         async def execute(self, sql: str) -> _Cursor:
             if "schema_version" in sql:
-                raise AssertionError("fetch_schema_version_rows should be patched")
+                msg = "fetch_schema_version_rows should be patched"
+                raise AssertionError(msg)
             return _Cursor()
 
     conn = _Conn()

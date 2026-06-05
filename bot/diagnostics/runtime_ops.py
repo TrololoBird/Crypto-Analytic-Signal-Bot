@@ -19,16 +19,15 @@ from typing import TYPE_CHECKING, Any, cast
 from bot.strategies import STRATEGY_CLASSES
 
 if TYPE_CHECKING:
+    from bot.diagnostics.analyzer_ops import PerformanceMetrics, WinRateCalculator
     from bot.engine.registry import StrategyRegistry
     from bot.runtime.bot import SignalBot
-    from bot.diagnostics.analyzer_ops import PerformanceMetrics, WinRateCalculator
 
 # --- from runtime/health.py ---
 if TYPE_CHECKING:
+    from bot.diagnostics.analyzer_ops import PerformanceMetrics, WinRateCalculator
     from bot.engine.registry import StrategyRegistry
     from bot.runtime.bot import SignalBot
-
-    from bot.diagnostics.analyzer_ops import PerformanceMetrics, WinRateCalculator
 
 LOG = logging.getLogger("bot.diagnostics.runtime_ops")
 HEALTH_CHECK_TIMEOUT_SECONDS = 5.0  # seconds: cap each component health probe
@@ -363,6 +362,7 @@ def assess_radar_store(
         ),
     }
 
+
 # --- from runtime/metrics.py ---
 LOG = logging.getLogger("bot.core.diagnostics.metrics")
 
@@ -399,7 +399,7 @@ class Gauge:
 
 
 @dataclass
-class Counter:
+class MetricCounter:
     """Simple counter metric (monotonically increasing)."""
 
     name: str
@@ -467,8 +467,8 @@ class BotMetrics:
 
     def __init__(self) -> None:
         # Signal metrics
-        self.signals_generated = Counter("signals_total", "Total signals generated")
-        self.signals_by_strategy: dict[str, Counter] = {}
+        self.signals_generated = MetricCounter("signals_total", "Total signals generated")
+        self.signals_by_strategy: dict[str, MetricCounter] = {}
         self.signal_score = Histogram(
             "signal_score",
             "Signal confidence scores",
@@ -486,11 +486,11 @@ class BotMetrics:
             "Strategy calculation time (ms)",
             buckets=[10, 50, 100, 250, 500, 1000],
         )
-        self.strategy_errors = Counter("strategy_errors_total", "Strategy calculation errors")
+        self.strategy_errors = MetricCounter("strategy_errors_total", "Strategy calculation errors")
 
         # WebSocket metrics
-        self.ws_reconnects = Counter("ws_reconnects_total", "WebSocket reconnect count")
-        self.ws_messages = Counter("ws_messages_total", "WebSocket messages received")
+        self.ws_reconnects = MetricCounter("ws_reconnects_total", "WebSocket reconnect count")
+        self.ws_messages = MetricCounter("ws_messages_total", "WebSocket messages received")
         self.ws_latency_ms = Histogram(
             "ws_latency_ms",
             "WebSocket message latency",
@@ -498,9 +498,9 @@ class BotMetrics:
         )
 
         # Market data metrics
-        self.rest_requests = Counter("rest_requests_total", "REST API requests")
-        self.rest_errors = Counter("rest_errors_total", "REST API errors")
-        self.rate_limit_hits = Counter("rate_limit_hits_total", "Rate limit hits")
+        self.rest_requests = MetricCounter("rest_requests_total", "REST API requests")
+        self.rest_errors = MetricCounter("rest_errors_total", "REST API errors")
+        self.rate_limit_hits = MetricCounter("rate_limit_hits_total", "Rate limit hits")
 
         # System health
         self.memory_usage_mb = Gauge("memory_usage_mb", "Memory usage in MB")
@@ -508,8 +508,8 @@ class BotMetrics:
         self.enabled_strategies = Gauge("enabled_strategies", "Number of enabled strategies")
 
         # Telegram metrics
-        self.telegram_sent = Counter("telegram_sent_total", "Messages sent to Telegram")
-        self.telegram_errors = Counter("telegram_errors_total", "Telegram send errors")
+        self.telegram_sent = MetricCounter("telegram_sent_total", "Messages sent to Telegram")
+        self.telegram_errors = MetricCounter("telegram_errors_total", "Telegram send errors")
         self.telegram_queue_size = Gauge("telegram_queue_size", "Current Telegram queue size")
 
     def record_signal(self, strategy_id: str, score: float) -> None:
@@ -519,7 +519,7 @@ class BotMetrics:
 
         # Track by strategy
         if strategy_id not in self.signals_by_strategy:
-            self.signals_by_strategy[strategy_id] = Counter(
+            self.signals_by_strategy[strategy_id] = MetricCounter(
                 f"signals_strategy_{strategy_id}", f"Signals for {strategy_id}"
             )
         self.signals_by_strategy[strategy_id].inc()
@@ -597,11 +597,10 @@ class MetricsExporter:
 
         # Export all counters and gauges
         for metric in self._metrics.__dict__.values():
-            if isinstance(metric, (Counter, Gauge)):
+            if isinstance(metric, (MetricCounter, Gauge)):
                 lines.append(f"# HELP {metric.name} {metric.description}")
-                lines.append(
-                    f"# TYPE {metric.name} {'counter' if isinstance(metric, Counter) else 'gauge'}"
-                )
+                metric_kind = "counter" if isinstance(metric, MetricCounter) else "gauge"
+                lines.append(f"# TYPE {metric.name} {metric_kind}")
                 labels_str = format_labels(metric.labels)
                 lines.append(f"{metric.name}{labels_str} {metric.value}")
 
@@ -610,6 +609,7 @@ class MetricsExporter:
     def export_json(self) -> dict[str, Any]:
         """Export metrics as JSON."""
         return self._metrics.to_dict()
+
 
 # --- from runtime/alerts.py ---
 if TYPE_CHECKING:
@@ -822,6 +822,7 @@ class AlertManager:
             "unacknowledged": unack,
             "by_severity": {k.value: v for k, v in by_severity.items()},
         }
+
 
 # --- from runtime/strategy_audit.py ---
 NON_TRADING_OUTCOMES: frozenset[str] = frozenset(
@@ -1768,4 +1769,3 @@ def print_report(report: StrategyAuditReport, *, include_all: bool = True) -> No
     print(f"score={report.score.to_dict()}")
     print(f"signal_contract={report.contract.to_dict()}")
     print(render_table(report, include_all=include_all))
-

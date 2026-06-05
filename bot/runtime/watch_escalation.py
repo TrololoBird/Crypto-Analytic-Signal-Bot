@@ -1,4 +1,4 @@
-"""WATCH paths: radar funnel candidates + delivered-signal ACTION escalation (no channel auto-publish)."""
+"""WATCH paths: radar funnel + delivered-signal ACTION escalation (no auto-publish)."""
 
 from __future__ import annotations
 
@@ -8,10 +8,10 @@ import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from bot.market.radar_state import SymbolTier
-from bot.runtime.errors import DEFENSIVE_EXC
 from bot.domain.delivery_policy import effective_action_min_score
 from bot.domain.limit_entry import limit_delivery_ready, resolve_late_entry_chase_pct
+from bot.market.radar_state import SymbolTier
+from bot.runtime.errors import DEFENSIVE_EXC
 
 if TYPE_CHECKING:
     from bot.domain.schemas import PreparedSymbol, Signal

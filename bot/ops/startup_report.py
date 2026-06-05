@@ -531,7 +531,9 @@ def _counter_percentages(counter: Counter[str]) -> list[dict[str, Any]]:
 
 def _derive_suspicious_modules(snapshot: dict[str, Any]) -> list[dict[str, str]]:
     modules: list[dict[str, str]] = []
-    radar_health = snapshot.get("radar_health") if isinstance(snapshot.get("radar_health"), dict) else {}
+    radar_health = (
+        snapshot.get("radar_health") if isinstance(snapshot.get("radar_health"), dict) else {}
+    )
     if radar_health.get("status") == "degraded":
         alerts = radar_health.get("alerts") or []
         modules.append(

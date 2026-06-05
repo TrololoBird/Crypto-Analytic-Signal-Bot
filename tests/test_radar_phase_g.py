@@ -7,12 +7,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from bot.diagnostics.config_audit import audit_filter_config
+from bot.diagnostics.runtime_ops import assess_radar_store
 from bot.domain.config import BotSettings, UniverseRadarConfig
 from bot.domain.schemas import UniverseSymbol
-from bot.diagnostics.runtime_ops import assess_radar_store
 from bot.market.radar_state import MarketRadarStore, SymbolRadarState, SymbolTier
 from bot.market.subscription_planner import merge_order_flow_tracked_symbols
-from bot.diagnostics.config_audit import audit_filter_config
 from bot.runtime.cycle_runner import CycleRunner
 from bot.runtime.data_readiness import assess_symbol_data_readiness, is_radar_promoted_item
 from bot.runtime.watch_escalation import collect_radar_watch_rows
@@ -24,7 +24,7 @@ def _settings() -> BotSettings:
 
 def test_assess_radar_store_degraded_low_count() -> None:
     store = MarketRadarStore(UniverseRadarConfig(enabled=True))
-    health = assess_radar_store(store, config=store._cfg)  # noqa: SLF001
+    health = assess_radar_store(store, config=store._cfg)
     assert health["attached"] is True
     assert health["status"] == "degraded"
     assert "low_symbol_count" in health["alerts"]
@@ -38,7 +38,7 @@ def test_assess_radar_store_healthy_with_ingest() -> None:
         sym = f"SYM{idx}USDT"
         state = SymbolRadarState(symbol=sym, tier=SymbolTier.WARM, last_update_ts=now)
         state.flags = ("impulse_5m_up",)
-        store._states[sym] = state  # noqa: SLF001
+        store._states[sym] = state
     health = assess_radar_store(store, config=cfg, now=now)
     assert health["status"] == "healthy"
     assert health["flagged_count"] == 60
@@ -89,7 +89,7 @@ def test_collect_radar_watch_rows_excludes_shortlist() -> None:
 
     cfg = UniverseRadarConfig(enabled=True)
     store = MarketRadarStore(cfg)
-    store._states["HOTUSDT"] = SymbolRadarState(  # noqa: SLF001
+    store._states["HOTUSDT"] = SymbolRadarState(
         symbol="HOTUSDT",
         tier=SymbolTier.HOT,
         flags=("impulse_5m_up",),

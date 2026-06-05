@@ -12,6 +12,7 @@ outcomes (tp/sl/expired) and bins by key parameters to suggest config thresholds
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 from collections import Counter, defaultdict
@@ -206,10 +207,8 @@ async def build_journal_report_from_repo(repo: MemoryRepository) -> JournalRepor
     hourly: Counter[int] = Counter()
     for row in delivered_rows:
         ts = str(row["created_at"] or "")
-        try:
+        with contextlib.suppress(IndexError, ValueError):
             hourly[int(ts[11:13])] += 1
-        except (IndexError, ValueError):
-            pass
     report.hourly_signal_counts = dict(sorted(hourly.items()))
 
     outcome_rows = await repo.get_signal_outcomes(last_days=None)

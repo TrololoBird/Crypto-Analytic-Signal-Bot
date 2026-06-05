@@ -28,13 +28,13 @@ from typing import Any
 
 import structlog
 
-from bot.runtime.errors import DEFENSIVE_EXC
 from bot.domain.config import load_settings
 from bot.domain.schemas import SymbolFrames, UniverseSymbol
 from bot.features.prepare import min_required_bars, prepare_symbol
 from bot.market.data import BinanceFuturesMarketData
 from bot.market.rest_impl import BinanceClientImpl
 from bot.market.ws import FuturesWSManager
+from bot.runtime.errors import DEFENSIVE_EXC
 
 LOG = structlog.get_logger("scripts.live_check_enrichments")
 LIVE_CHECK_HTTP_TIMEOUT_SECONDS = 30.0  # seconds: cap live REST smoke checks

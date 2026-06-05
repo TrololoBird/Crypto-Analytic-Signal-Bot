@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Mapping
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    import polars as pl
+
     from bot.domain.config import BotSettings
     from bot.domain.schemas import PreparedSymbol, UniverseSymbol
 
-import polars as pl
 
 REQUIRED_DERIVATIVES_KEYS: tuple[str, ...] = (
     "oi_change_pct",
@@ -134,10 +137,11 @@ def assess_symbol_data_readiness(
 
     strict = bool(getattr(settings.runtime, "strict_data_quality", True))
     if strict and not radar_promoted:
-        book_missing: list[str] = []
-        for column in ("bid_price", "ask_price", "bid_qty", "ask_qty"):
-            if _last_column_finite(prepared.work_15m, column) is None:
-                book_missing.append(column)
+        book_missing = [
+            column
+            for column in ("bid_price", "ask_price", "bid_qty", "ask_qty")
+            if _last_column_finite(prepared.work_15m, column) is None
+        ]
         if book_missing:
             return DataReadinessResult(
                 ready=False,

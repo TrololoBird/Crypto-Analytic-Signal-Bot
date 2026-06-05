@@ -6,8 +6,8 @@ from collections import Counter
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from bot.runtime.errors import DEFENSIVE_EXC
 from bot.runtime.delivery_orchestrator import DELIVERY_SUCCESS_STATUSES
+from bot.runtime.errors import DEFENSIVE_EXC
 from bot.telemetry import apply_slim_message_buffer
 
 if TYPE_CHECKING:
@@ -551,7 +551,8 @@ class TelemetryManager:
                 actual={"symbol_analysis_delivered": delivered_count},
             )
         LOG.info(
-            "cycle | symbol=%s detector_runs=%d candidates=%d delivered=%d rejected=%d lane_skips=%d status=%s",
+            "cycle | symbol=%s detector_runs=%d candidates=%d delivered=%d "
+            "rejected=%d lane_skips=%d status=%s",
             symbol,
             result.raw_setups,
             len(candidates),
@@ -563,7 +564,7 @@ class TelemetryManager:
         self._notify_dashboard_cycle(
             symbol=symbol,
             cycle_row=cycle_row,
-            funnel=funnel_payload if funnel_payload else (result.funnel if isinstance(result.funnel, dict) else None),
+            funnel=funnel_payload or (result.funnel if isinstance(result.funnel, dict) else None),
         )
         harvest = getattr(self._bot, "_research_harvest_service", None)
         if harvest is not None:

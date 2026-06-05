@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-import pytest
+from typing import TYPE_CHECKING
 
 from bot.dashboard.tracking_view import compute_progress, serialize_tracking_signal
+
+if TYPE_CHECKING:
+    import pytest
 
 
 def test_compute_progress_long_active_halfway_to_tp1() -> None:

@@ -23,8 +23,8 @@ from dataclasses import replace
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from bot.runtime.errors import DEFENSIVE_EXC
 from bot.dashboard import BotDashboard
+from bot.runtime.errors import DEFENSIVE_EXC
 from bot.runtime.metrics import BotMetricsCollector
 
 from ..delivery.confluence import ConfluenceEngine
@@ -67,8 +67,8 @@ from .market_context_updater import (
     run_public_intelligence_loop,
 )
 from .oi_refresh_runner import OIRefreshRunner, run_oi_refresh_loop
-from .spot_refresh_runner import SpotRefreshRunner, run_spot_refresh_loop
 from .shortlist_service import ShortlistService, run_shortlist_refresh_loop
+from .spot_refresh_runner import SpotRefreshRunner, run_spot_refresh_loop
 from .symbol_analyzer import SymbolAnalyzer
 from .telemetry_manager import TelemetryManager
 
@@ -142,7 +142,9 @@ class SignalBot:
         self.metrics = BotMetricsCollector(
             settings.runtime.metrics_port, host=settings.runtime.metrics_host
         )
-        self._http_servers_enabled = os.getenv("BOT_DISABLE_HTTP_SERVERS", "0").strip().lower() not in (
+        self._http_servers_enabled = os.getenv(
+            "BOT_DISABLE_HTTP_SERVERS", "0"
+        ).strip().lower() not in (
             "1",
             "true",
             "yes",
@@ -622,9 +624,7 @@ class SignalBot:
     def _log_autonomous_pipeline_armed(self) -> None:
         """Log background tasks started from run_forever (single entry: python main.py)."""
         radar_on = bool(getattr(self.settings.universe.radar, "enabled", False))
-        intel_on = bool(
-            self.intelligence is not None and self.settings.intelligence.enabled
-        )
+        intel_on = bool(self.intelligence is not None and self.settings.intelligence.enabled)
         LOG.info(
             "autonomous pipeline armed | entry=main.py event_bus=on "
             "shortlist_refresh=on heartbeat=on health_telemetry=on health_monitor=on "
@@ -687,7 +687,10 @@ class SignalBot:
                     name="telegram_operator",
                 )
             )
-            LOG.info("telegram operator console scheduled | operators=%s", list(self.settings.operator_user_ids))
+            LOG.info(
+                "telegram operator console scheduled | operators=%s",
+                list(self.settings.operator_user_ids),
+            )
 
         LOG.info(
             "event-driven mode active | emergency_fallback=%ss",
@@ -807,11 +810,7 @@ class SignalBot:
                 )
                 if isinstance(diag_summary, dict) and diag_summary:
                     extras["signal_diagnostics"] = diag_summary
-                session_totals = (
-                    collect(extras=extras)
-                    if callable(collect)
-                    else dict(extras)
-                )
+                session_totals = collect(extras=extras) if callable(collect) else dict(extras)
                 finalize(session_totals=session_totals)
         except DEFENSIVE_EXC as exc:
             LOG.debug("telemetry run_metadata finalize failed (non-fatal): %s", exc)
@@ -958,10 +957,7 @@ class SignalBot:
             priority_syms: list[str] = []
             ws_mgr = self._ws_manager
             radar_store = getattr(ws_mgr, "_radar_store", None) if ws_mgr is not None else None
-            if (
-                radar_store is not None
-                and getattr(self.settings.universe.radar, "enabled", False)
-            ):
+            if radar_store is not None and getattr(self.settings.universe.radar, "enabled", False):
                 from ..market.radar_state import SymbolTier
 
                 priority_syms = [
@@ -1049,7 +1045,7 @@ class SignalBot:
         try:
             await self.delivery.preflight_check()
             LOG.info("delivery preflight completed")
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.warning(
                 "delivery preflight failed; continuing in signal-only/local mode: %s",
                 exc,

@@ -5,8 +5,9 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from .tracking_view import serialize_tracking_signal
 from bot.domain.labels import reject_reason_ru, result_label_ru
+
+from .tracking_view import serialize_tracking_signal
 
 if TYPE_CHECKING:
     from .live import DashboardLiveData
@@ -14,7 +15,7 @@ if TYPE_CHECKING:
 JsonDict = dict[str, Any]
 
 # Re-export for backward-compatible imports within dashboard package.
-__all__ = ["reject_reason_ru", "result_label_ru", "build_funnel_hint", "build_user_summary"]
+__all__ = ["build_funnel_hint", "build_user_summary", "reject_reason_ru", "result_label_ru"]
 
 
 def build_funnel_hint(*, overview: JsonDict | None, funnel: JsonDict | None) -> JsonDict:
@@ -36,7 +37,9 @@ def build_funnel_hint(*, overview: JsonDict | None, funnel: JsonDict | None) -> 
     )
     top = overview.get("top_blocker") if isinstance(overview.get("top_blocker"), dict) else {}
     if not top:
-        top = overview.get("top_rejection") if isinstance(overview.get("top_rejection"), dict) else {}
+        top = (
+            overview.get("top_rejection") if isinstance(overview.get("top_rejection"), dict) else {}
+        )
     combined = (
         funnel.get("combined_reject_hint")
         if isinstance(funnel.get("combined_reject_hint"), dict)
@@ -161,7 +164,7 @@ async def build_signal_history(bot: Any, *, days: int = 7, limit: int = 30) -> l
                 created = row.get("closed_at") or row.get("created_at")
                 if created:
                     try:
-                        ts = datetime.fromisoformat(str(created).replace("Z", "+00:00"))
+                        ts = datetime.fromisoformat(str(created))
                         if ts.tzinfo is None:
                             ts = ts.replace(tzinfo=UTC)
                         if ts < since:

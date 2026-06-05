@@ -12,10 +12,10 @@ import pytest
 from bot.domain.config import BotSettings, TrackingConfig, WSConfig
 from bot.domain.schemas import PipelineResult, Signal
 from bot.engine.engine import SignalEngine
-from bot.runtime.symbol_analyzer import AnalyzerFamilyGatesMixin
 from bot.runtime.cycle_runner import CycleContext, CycleRunner
 from bot.runtime.delivery_orchestrator import DeliveryOrchestrator
 from bot.runtime.merge import MetaSignalMerger
+from bot.runtime.symbol_analyzer import AnalyzerFamilyGatesMixin
 from bot.runtime.telemetry_manager import TelemetryManager
 
 _TEST_TOKEN = "123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
@@ -195,8 +195,8 @@ def test_l10_cycle_log_records_merge_conflicts() -> None:
     bot._shortlist_source = "live"
     bot._prepare_error_count = 0
     bot._ws_manager = None
-    bot._bus = SimpleNamespace(stats=lambda: {})
-    bot.client = SimpleNamespace(state_snapshot=lambda: {})
+    bot._bus = SimpleNamespace(stats=dict)
+    bot.client = SimpleNamespace(state_snapshot=dict)
     bot.last_cycle_summary = {}
     bot.dashboard = None
 
@@ -235,18 +235,20 @@ async def test_l10_delivery_orchestrator_passes_action_window_to_merger() -> Non
     bot.public_audit.recent_action_signals.return_value = []
 
     orchestrator = DeliveryOrchestrator(bot)
-    with patch.object(orchestrator, "_contract_issue_rows", return_value=[]):
-        with patch.object(
+    with (
+        patch.object(orchestrator, "_contract_issue_rows", return_value=[]),
+        patch.object(
             orchestrator,
             "_hard_confluence_gate",
             return_value=(False, 0, {"reason": "test_gate"}),
-        ):
-            _, _, _, merge_conflicts = await orchestrator.select_and_deliver(
-                [
-                    _signal(direction="long", score=0.9),
-                    _signal(direction="short", score=0.7, setup_id="fvg_setup"),
-                ]
-            )
+        ),
+    ):
+        _, _, _, merge_conflicts = await orchestrator.select_and_deliver(
+            [
+                _signal(direction="long", score=0.9),
+                _signal(direction="short", score=0.7, setup_id="fvg_setup"),
+            ]
+        )
 
     bot.public_audit.recent_action_signals.assert_called_once_with(within_hours=6.0)
     assert merge_conflicts == 1

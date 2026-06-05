@@ -91,7 +91,9 @@ def test_detect_fvg_source_index_matches_smc_middle_candle() -> None:
             (102.5, 103.0, 104.0, 103.5),
         ]
     )
-    smc_idx = next(idx for idx, direction, _, _ in fvg_candidates(frame, max_age=5) if direction == "long")
+    smc_idx = next(
+        idx for idx, direction, _, _ in fvg_candidates(frame, max_age=5) if direction == "long"
+    )
     hit = detect_fvg(frame, max_age=5)
     assert hit is not None
     assert hit.source_index == smc_idx

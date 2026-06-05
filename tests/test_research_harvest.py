@@ -5,14 +5,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from bot.domain.config import BotSettings, NotifierConfig, ResearchHarvestConfig
+from bot.diagnostics.research_harvest import ResearchHarvestRecorder
+from bot.domain.config import BotSettings, ResearchHarvestConfig
 from bot.domain.research_harvest import (
     DEFAULT_RESEARCH_HARVEST_SYMBOLS,
     _resolved_symbols,
     activate_research_harvest,
     apply_research_harvest_profile,
 )
-from bot.diagnostics.research_harvest import ResearchHarvestRecorder
 
 
 def _minimal_settings() -> BotSettings:

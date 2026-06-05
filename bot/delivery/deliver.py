@@ -4,7 +4,6 @@ import asyncio
 import contextlib
 import html
 import logging
-import math
 from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -12,7 +11,6 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from bot.runtime.errors import DEFENSIVE_EXC
 
-from ..persistence.tracking import SignalTrackingEvent
 from .contract import validate_signal_contract
 from .formatting import (
     format_analytics_companion_message,
@@ -26,6 +24,7 @@ from .telegram import DeliveryResult
 
 if TYPE_CHECKING:
     from ..domain.schemas import Signal
+    from ..persistence.tracking import SignalTrackingEvent
 
 LOG = logging.getLogger("bot.delivery.deliver")
 _AUDIT_BATCH_LABELS = {"RAW", "CANDIDATE"}
@@ -478,7 +477,6 @@ class SignalDelivery:
         for batch in event_batches:
             final_event = batch[-1]
             tracked_card = format_tracked_signal_text(final_event.tracked)
-            edited = False
             if len(batch) > 1:
                 LOG.info(
                     "coalesced tracking batch | tracking_ref=%s events=%s final=%s",
@@ -492,7 +490,6 @@ class SignalDelivery:
                         final_event.tracked.signal_message_id, tracked_card
                     )
                     LOG.info("telegram signal card edited\n%s", tracked_card)
-                    edited = True
                 except DEFENSIVE_EXC:
                     LOG.exception(
                         "telegram signal card edit failed for %s",
@@ -500,7 +497,6 @@ class SignalDelivery:
                     )
             elif dry_run:
                 LOG.info("dry-run signal card edit\n%s", tracked_card)
-                edited = True
             if not self._should_send_tracking_follow_up(final_event):
                 continue
             text = format_tracking_event_text(final_event)

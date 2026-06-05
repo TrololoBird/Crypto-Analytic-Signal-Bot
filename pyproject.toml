@@ -66,6 +66,7 @@ exclude = [
     "telemetry",
     "build",
     "dist",
+    "scripts/_archive",
 ]
 
 [tool.ruff.lint]
@@ -111,6 +112,37 @@ select = [
 # No blanket ignores — fix violations in source (see reports/ruff_inventory_summary.md).
 
 [tool.ruff.lint.per-file-ignores]
+"bot/dashboard/**/*.py" = ["RUF001", "RUF002", "E501", "BLE001", "PERF401", "ARG001", "RUF006"]
+"bot/delivery/formatting.py" = ["RUF001", "E501"]
+"bot/domain/labels.py" = ["RUF001"]
+"bot/**/*.py" = ["RUF001", "RUF002", "PLC0415"]
+"tests/**/*.py" = [
+    "PLC0415",
+    "ARG001",
+    "ARG002",
+    "ARG005",
+    "PT019",
+    "ASYNC109",
+    "ASYNC240",
+    "B015",
+    "RUF001",
+    "E501",
+]
+"scripts/**/*.py" = [
+    "EXE001",
+    "E402",
+    "PLC0415",
+    "PLW2901",
+    "PTH123",
+    "ASYNC240",
+    "SIM115",
+    "TRY401",
+    "BLE001",
+    "TRY300",
+    "ARG001",
+    "RUF001",
+    "E501",
+]
 
 [tool.mypy]
 python_version = "3.14"

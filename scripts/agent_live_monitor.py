@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -51,9 +50,7 @@ def main() -> int:
         con = sqlite3.connect(db)
         con.row_factory = sqlite3.Row
         cur = con.cursor()
-        cur.execute(
-            "SELECT status, COUNT(*) c FROM active_signals GROUP BY status"
-        )
+        cur.execute("SELECT status, COUNT(*) c FROM active_signals GROUP BY status")
         print("tracking_open:", {r["status"]: r["c"] for r in cur.fetchall()})
         cur.execute(
             """
@@ -92,7 +89,7 @@ def main() -> int:
             f"  delivered {row.get('symbol')} {row.get('setup_id')} "
             f"ref={row.get('tracking_ref')} msg={row.get('message_id')}"
         )
-    print(f"recent_rejected_top:")
+    print("recent_rejected_top:")
     counts: dict[str, int] = {}
     for row in rejected:
         reason = str(row.get("reason") or row.get("stage") or "?")

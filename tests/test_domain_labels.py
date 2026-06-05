@@ -41,8 +41,14 @@ def test_wave_e4_reject_labels() -> None:
     assert reject_reason_ru("spread_too_wide") == REJECT_REASON_RU["spread_too_wide"]
     assert reject_reason_ru("risk_reward_too_low") == REJECT_REASON_RU["risk_reward_too_low"]
     assert reject_reason_ru("stop_too_tight") == REJECT_REASON_RU["stop_too_tight"]
-    assert reject_reason_ru("adx_penalty_score_too_low") == REJECT_REASON_RU["adx_penalty_score_too_low"]
-    assert reject_reason_ru("benchmark_context_conflict") == REJECT_REASON_RU["benchmark_context_conflict"]
+    assert (
+        reject_reason_ru("adx_penalty_score_too_low")
+        == REJECT_REASON_RU["adx_penalty_score_too_low"]
+    )
+    assert (
+        reject_reason_ru("benchmark_context_conflict")
+        == REJECT_REASON_RU["benchmark_context_conflict"]
+    )
     assert reject_reason_ru("macro_risk_off_long") == REJECT_REASON_RU["macro_risk_off_long"]
     assert reject_reason_ru("5m_opposes_short") == REJECT_REASON_RU["5m_opposes_short"]
     assert normalize_reject_reason("htf_reversal_conflict:1h,4h") == "htf_reversal_conflict"

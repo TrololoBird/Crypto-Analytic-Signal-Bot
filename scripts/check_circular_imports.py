@@ -90,7 +90,7 @@ def _find_cycles(edges: dict[str, set[str]]) -> list[list[str]]:
                 dfs(neighbor)
             elif neighbor in on_stack:
                 idx = stack.index(neighbor)
-                cycle = stack[idx:] + [neighbor]
+                cycle = [*stack[idx:], neighbor]
                 cycles.append(cycle)
         stack.pop()
         on_stack.remove(node)
@@ -120,9 +120,7 @@ def main() -> int:
         if norm in seen_norm:
             continue
         seen_norm.add(norm)
-        if norm in KNOWN_MITIGATED_CYCLES or any(
-            norm <= known for known in KNOWN_MITIGATED_CYCLES
-        ):
+        if norm in KNOWN_MITIGATED_CYCLES or any(norm <= known for known in KNOWN_MITIGATED_CYCLES):
             continue
         novel.append(cycle)
 

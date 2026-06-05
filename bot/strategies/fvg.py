@@ -6,8 +6,6 @@ import logging
 import math
 from typing import TYPE_CHECKING, ClassVar
 
-import polars as pl
-
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.smc import fvg_candidates, fvg_ce_entry, is_clean_fvg, latest_fvg_zone, swing_series
 from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
@@ -15,6 +13,8 @@ from ..setups.utils import build_smc_trade_plan, validate_rr_or_penalty
 from ._common import SpecHit, as_float, with_spec_columns
 
 if TYPE_CHECKING:
+    import polars as pl
+
     from ..domain.config import BotSettings
     from ..domain.schemas import PreparedSymbol, Signal
 
@@ -286,7 +286,6 @@ def _detect_fvg_setup_extended(
     stop = trade_plan.stop
     tp1 = trade_plan.tp1
     tp2 = trade_plan.tp2
-    risk = trade_plan.risk
     reasons_note = trade_plan.reasons_note
 
     is_valid_rr, _ = validate_rr_or_penalty(entry_price, stop, tp1, min_rr)

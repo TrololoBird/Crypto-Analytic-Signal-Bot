@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING, Any
 
 from bot.runtime.errors import DEFENSIVE_EXC
 
-from collections.abc import Mapping
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 LOG = logging.getLogger("bot.contracts")
 

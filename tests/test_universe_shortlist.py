@@ -28,7 +28,9 @@ def _meta(symbol: str, *, volume_rank: int = 0) -> SymbolMeta:
     )
 
 
-def _ticker(symbol: str, quote_volume: float, price_change_pct: float = 2.0) -> dict[str, float | str]:
+def _ticker(
+    symbol: str, quote_volume: float, price_change_pct: float = 2.0
+) -> dict[str, float | str]:
     return {
         "symbol": symbol,
         "quote_volume": quote_volume,
@@ -76,7 +78,9 @@ def test_build_shortlist_reports_funnel_stages() -> None:
     )
     symbols = [f"ALT{i}USDT" for i in range(80)] + list(settings.universe.pinned_symbols)
     meta = [_meta(symbol) for symbol in symbols]
-    tickers = [_ticker(symbol, float(100_000_000 - idx * 500_000)) for idx, symbol in enumerate(symbols)]
+    tickers = [
+        _ticker(symbol, float(100_000_000 - idx * 500_000)) for idx, symbol in enumerate(symbols)
+    ]
     shortlist, summary = build_shortlist(meta, tickers, settings, seed_source="unit_test")
     assert summary["gate_passed"] >= summary["light_pool"]
     assert summary["light_pool"] <= settings.universe.light_pool_limit

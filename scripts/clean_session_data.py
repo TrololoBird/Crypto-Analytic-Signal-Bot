@@ -26,6 +26,7 @@ _TELEMETRY_SUBDIRS = (
     "market_history",
 )
 
+
 def _remove_path(path: Path) -> bool:
     if not path.exists():
         return False
@@ -94,10 +95,10 @@ def clean_session_artifacts(
     keep_logs: int = 0,
     dry_run: bool = False,
 ) -> dict[str, int]:
-    data_dir = Path(getattr(settings, "data_dir"))
-    telemetry_dir = Path(getattr(settings, "telemetry_dir"))
-    logs_dir = Path(getattr(settings, "logs_dir"))
-    db_path = Path(getattr(settings, "db_path"))
+    data_dir = Path(settings.data_dir)
+    telemetry_dir = Path(settings.telemetry_dir)
+    logs_dir = Path(settings.logs_dir)
+    db_path = Path(settings.db_path)
     live_watch_dir = data_dir.parent / "live_watch"
 
     stats: dict[str, int] = {}
@@ -117,7 +118,9 @@ def clean_session_artifacts(
         stats["logs"] = sum(1 for _ in logs_dir.glob("bot_*.log"))
         if mode == "full":
             stats["sqlite"] = sum(
-                1 for path in (db_path, Path(f"{db_path}-wal"), Path(f"{db_path}-shm")) if path.exists()
+                1
+                for path in (db_path, Path(f"{db_path}-wal"), Path(f"{db_path}-shm"))
+                if path.exists()
             )
         return stats
 

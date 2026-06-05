@@ -43,10 +43,13 @@ def test_effective_shortlist_unified_routing_requires_nonempty_shortlist() -> No
     runtime = RuntimeConfig(shortlist_unified_routing=True)
     assert effective_shortlist_unified_routing(runtime, shortlist_total=0) is False
     assert effective_shortlist_unified_routing(runtime, shortlist_total=12) is True
-    assert effective_shortlist_unified_routing(
-        RuntimeConfig(shortlist_unified_routing=False),
-        shortlist_total=12,
-    ) is False
+    assert (
+        effective_shortlist_unified_routing(
+            RuntimeConfig(shortlist_unified_routing=False),
+            shortlist_total=12,
+        )
+        is False
+    )
 
 
 def test_audit_shortlist_zero_fit_warns_under_unified_routing() -> None:
@@ -100,7 +103,15 @@ def test_run_full_audit_includes_runtime_warnings() -> None:
             watch_cap_per_cycle=12,
         ),
         universe=SimpleNamespace(
-            pinned_symbols=("BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "XAUUSDT", "XAGUSDT", "PAXGUSDT"),
+            pinned_symbols=(
+                "BTCUSDT",
+                "ETHUSDT",
+                "SOLUSDT",
+                "XRPUSDT",
+                "XAUUSDT",
+                "XAGUSDT",
+                "PAXGUSDT",
+            ),
             min_quote_volume_usd=50_000_000,
             min_price_change_pct=0.5,
             shortlist_limit=45,

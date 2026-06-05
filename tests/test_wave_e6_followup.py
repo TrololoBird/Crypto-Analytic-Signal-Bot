@@ -30,9 +30,10 @@ def test_liquidation_rollups_use_notional() -> None:
     assert rollups["liquidation_long_notional"] == 200_000.0
     assert rollups["liquidation_short_notional"] == 100_000.0
     assert rollups["liquidation_score"] == -100_000.0 / 300_000.0
-    assert get_liquidation_sentiment(manager, symbol="BTCUSDT", window_seconds=60) == rollups[
-        "liquidation_score"
-    ]
+    assert (
+        get_liquidation_sentiment(manager, symbol="BTCUSDT", window_seconds=60)
+        == rollups["liquidation_score"]
+    )
 
 
 def test_detect_regular_divergence_respects_setup_id() -> None:

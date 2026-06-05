@@ -50,7 +50,8 @@ def build_sl_postmortem_html(event: SignalTrackingEvent) -> str:
     lines = [
         "<b>POST-MORTEM · STOP</b>",
         f"{symbol} {direction.upper()} · <code>{setup}</code> · <code>#{ref}</code>",
-        f"Exit: <code>{price_txt}</code> · MFE <code>{mfe:.2f}%</code> · MAE <code>{mae:.2f}%</code>",
+        f"Exit: <code>{price_txt}</code> · MFE <code>{mfe:.2f}%</code> · "
+        f"MAE <code>{mae:.2f}%</code>",
         f"Причина: <b>{sl_diag.get('label') or sl_diag.get('code') or '—'}</b>",
     ]
     reasons = sl_diag.get("reasons") or []

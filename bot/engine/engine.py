@@ -789,9 +789,7 @@ class SignalEngine:
         valid_signals = [
             r.signal
             for r in results
-            if r.is_valid
-            and r.signal is not None
-            and r.signal.score >= score_floor
+            if r.is_valid and r.signal is not None and r.signal.score >= score_floor
         ]
 
         if not valid_signals:

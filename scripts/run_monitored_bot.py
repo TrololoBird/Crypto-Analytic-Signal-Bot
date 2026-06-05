@@ -82,7 +82,7 @@ def main() -> int:
     try:
         acquire_pid_lock(MONITOR_LOCK)
     except SystemExit as exc:
-        LOG.error("%s", exc)
+        LOG.exception("%s", exc)
         return 1
 
     settings = load_settings("config.toml")
@@ -91,7 +91,9 @@ def main() -> int:
     restarts = 0
     proc: subprocess.Popen[bytes] | None = None
 
-    LOG.info("monitored bot session | provider=%s lock=%s", settings.notifiers.provider, MONITOR_LOCK)
+    LOG.info(
+        "monitored bot session | provider=%s lock=%s", settings.notifiers.provider, MONITOR_LOCK
+    )
 
     try:
         while time.monotonic() - started < MAX_SECONDS:

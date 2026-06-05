@@ -12,7 +12,9 @@ def _settings(**delivery_overrides: object) -> BotSettings:
     return BotSettings(tg_token="test", target_chat_id="1", delivery=delivery)
 
 
-def _signal(*, symbol: str = "DOGEUSDT", score: float = 0.80, setup_id: str = "ema_bounce") -> Signal:
+def _signal(
+    *, symbol: str = "DOGEUSDT", score: float = 0.80, setup_id: str = "ema_bounce"
+) -> Signal:
     return Signal(
         symbol=symbol,
         setup_id=setup_id,
@@ -34,9 +36,7 @@ def test_action_cap_per_cycle_demotes_to_watch_when_slots_available() -> None:
     decisions = decide_with_caps(signals, settings)
     allowed_action = [d for d in decisions if d.tier == "action" and d.allow]
     assert len(allowed_action) == 1
-    demoted = next(
-        d for d in decisions if d.symbol == "ETHUSDT" and d.tier == "watch" and d.allow
-    )
+    demoted = next(d for d in decisions if d.symbol == "ETHUSDT" and d.tier == "watch" and d.allow)
     assert demoted.reason == "action_cap_demoted_watch"
 
 

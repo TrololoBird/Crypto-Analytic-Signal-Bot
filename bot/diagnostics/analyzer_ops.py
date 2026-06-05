@@ -1,18 +1,21 @@
 """Diagnostics analyzer helpers (metrics, tracker, reporter)."""
 
 from __future__ import annotations
+
+import json
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from enum import Enum
+from typing import TYPE_CHECKING, Any, ClassVar
+
 import numpy as np
 import polars as pl
-from datetime import UTC, datetime
-from typing import ClassVar
-from bot.persistence.repository.memory import MemoryRepository
+
 from bot.persistence.repository.schema import OutcomeRecord, SignalRecord
-import json
-from enum import Enum
+
+if TYPE_CHECKING:
+    from bot.persistence.repository.memory import MemoryRepository
 
 # --- from analyzer/metrics.py ---
 LOG = logging.getLogger("bot.core.analyzer.metrics")
@@ -290,6 +293,7 @@ class WinRateCalculator:
 
         return False
 
+
 # --- from analyzer/tracker.py ---
 LOG = logging.getLogger("bot.core.analyzer.tracker")
 
@@ -513,6 +517,7 @@ class OutcomeTracker:
 
         LOG.info("Updated %d outcomes from batch", len(updated))
         return updated
+
 
 # --- from analyzer/reporter.py ---
 LOG = logging.getLogger("bot.core.analyzer.reporter")

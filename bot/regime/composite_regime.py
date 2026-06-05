@@ -47,10 +47,7 @@ def build_minimal_regime_frame_4h(
     roll_window = max(2, min(window, len(clean) - 1))
     return frame.with_columns(
         log_returns.fill_null(0.0).alias("log_returns"),
-        log_returns.abs()
-        .rolling_std(window_size=roll_window)
-        .fill_null(0.0)
-        .alias("realized_vol"),
+        log_returns.abs().rolling_std(window_size=roll_window).fill_null(0.0).alias("realized_vol"),
         (log_returns.abs() * 100.0).fill_null(0.0).alias("atr_pct"),
     ).select("log_returns", "realized_vol", "atr_pct")
 

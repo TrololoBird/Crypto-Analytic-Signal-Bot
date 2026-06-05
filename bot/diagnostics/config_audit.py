@@ -284,23 +284,17 @@ def audit_universe_config(settings: Any) -> list[str]:
         warm = _safe_int(getattr(radar, "warm_pool_limit", 200), 200)
         reserve = _safe_int(getattr(radar, "promotion_slots_reserve", 12), 12)
         if hot > light_pool:
-            warnings.append(
-                f"universe.radar.hot_pool_limit={hot} > light_pool_limit={light_pool}"
-            )
+            warnings.append(f"universe.radar.hot_pool_limit={hot} > light_pool_limit={light_pool}")
         if limit + reserve > light_pool:
             warnings.append(
                 "universe.shortlist_limit + radar.promotion_slots_reserve "
                 f"({limit}+{reserve}) > light_pool_limit={light_pool}"
             )
         if warm < hot:
-            warnings.append(
-                f"universe.radar.warm_pool_limit={warm} < hot_pool_limit={hot}"
-            )
+            warnings.append(f"universe.radar.warm_pool_limit={warm} < hot_pool_limit={hot}")
         if _safe_bool(getattr(radar, "emit_watch_candidates", False)):
             op = getattr(getattr(settings, "notifiers", None), "telegram_operator", None)
-            if op is not None and not _safe_bool(
-                getattr(op, "send_radar_watch_candidate", False)
-            ):
+            if op is not None and not _safe_bool(getattr(op, "send_radar_watch_candidate", False)):
                 warnings.append(
                     "universe.radar.emit_watch_candidates=true but "
                     "notifiers.telegram_operator.send_radar_watch_candidate=false "

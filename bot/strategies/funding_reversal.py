@@ -31,7 +31,7 @@ def detect_funding_reversal(
         defaults.get("funding_threshold", 0.0010),
         defaults["funding_threshold"],
     )
-    funding_soft_threshold = _as_float(
+    _as_float(
         defaults.get("funding_soft_threshold", defaults["funding_soft_threshold"]),
         defaults["funding_soft_threshold"],
     )

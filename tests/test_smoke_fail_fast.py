@@ -5,7 +5,11 @@ import logging
 
 import pytest
 
-from scripts.smoke_fail_fast import SmokeFailFastError, SmokeFailFastGuard, wait_for_runtime_or_abort
+from scripts.smoke_fail_fast import (
+    SmokeFailFastError,
+    SmokeFailFastGuard,
+    wait_for_runtime_or_abort,
+)
 
 
 @pytest.fixture

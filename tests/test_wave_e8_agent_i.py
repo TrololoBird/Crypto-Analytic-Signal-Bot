@@ -99,9 +99,7 @@ def test_repair_deliverable_filters_message_id_only() -> None:
     without_message = SimpleNamespace(tracked=SimpleNamespace(signal_message_id=None))
     repair_events = [with_message, without_message]
     deliverable = [
-        event
-        for event in repair_events
-        if getattr(event.tracked, "signal_message_id", None)
+        event for event in repair_events if getattr(event.tracked, "signal_message_id", None)
     ]
     assert deliverable == [with_message]
 
@@ -132,9 +130,7 @@ async def test_repair_skips_expired_pending_zone_touch() -> None:
 @pytest.mark.asyncio
 async def test_review_open_signals_expires_pending_for_channel_follow_up() -> None:
     memory_repo = MagicMock()
-    memory_repo.get_active_signals = AsyncMock(
-        return_value=[_pending_row(signal_message_id=999)]
-    )
+    memory_repo.get_active_signals = AsyncMock(return_value=[_pending_row(signal_message_id=999)])
     memory_repo.save_active_signal = AsyncMock()
     memory_repo.increment_tracking_stats = AsyncMock()
     memory_repo.get_tracking_stats = AsyncMock(return_value={"expired": 0})

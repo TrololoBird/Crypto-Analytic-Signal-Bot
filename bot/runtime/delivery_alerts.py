@@ -42,7 +42,8 @@ async def _send_zero_delivery_alert(bot: SignalBot, *, streak: int) -> None:
     text = (
         "<b>⚠️ Zero delivery streak</b>\n"
         f"Циклов подряд без отправки: <code>{streak}</code>\n"
-        f"Кандидатов (посл. цикл): <code>{summary.get('candidates') or summary.get('post_filter_candidates') or 0}</code>\n"
+        f"Кандидатов (посл. цикл): "
+        f"<code>{summary.get('candidates') or summary.get('post_filter_candidates') or 0}</code>\n"
         f"Shortlist: <code>{summary.get('shortlist_size') or len(bot._shortlist)}</code>\n"
         "<i>Operator alert · проверьте /funnel и /health</i>"
     )
@@ -78,7 +79,7 @@ def record_cycle_delivery_outcome(bot: SignalBot, *, delivered_count: int) -> No
         loop = asyncio.get_running_loop()
     except RuntimeError:
         return
-    loop.create_task(_send_zero_delivery_alert(bot, streak=streak))
+    loop.create_task(_send_zero_delivery_alert(bot, streak=streak))  # noqa: RUF006
 
 
 def _message_buffer_dropped_total(ws_snapshot: dict[str, Any]) -> int:
@@ -94,9 +95,7 @@ async def check_message_buffer_drop_alert(
     ws_snapshot: dict[str, Any],
 ) -> None:
     """Alert operators when WS message_buffer.dropped jumps beyond threshold per interval."""
-    threshold = int(
-        getattr(bot.settings.ws, "message_buffer_drop_alert_threshold", 0) or 0
-    )
+    threshold = int(getattr(bot.settings.ws, "message_buffer_drop_alert_threshold", 0) or 0)
     if threshold <= 0:
         return
 

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 from bot.domain.config import BotSettings, DeliveryConfig, TrackingConfig
 from bot.domain.schemas import Signal
 from bot.runtime.watch_escalation import watch_ready_for_action_escalation

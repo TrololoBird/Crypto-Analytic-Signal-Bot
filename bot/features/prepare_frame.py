@@ -84,6 +84,7 @@ def _log_indicator_fallback(indicator: str, exc: Exception) -> None:
     _ADVANCED_FALLBACKS_LOGGED.add(indicator)
     LOG.info("advanced indicator fallback activated", indicator=indicator, error=str(exc))
 
+
 _FrameCacheValue = float | None
 _FRAME_CACHE_TAIL_COLUMNS = (
     "open",

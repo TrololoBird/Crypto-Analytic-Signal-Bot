@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import ValidationError
@@ -16,6 +16,9 @@ from bot.domain.strategy_catalog import (
     verify_config_setup_references,
     verify_setup_config_model,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _minimal_settings(**overrides: object) -> BotSettings:
@@ -57,7 +60,9 @@ def test_k2_strict_toml_rejects_unknown_bot_key() -> None:
         _minimal_settings(unknown_section={"foo": 1})
 
 
-def test_k2_load_settings_rejects_orphan_toml_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_k2_load_settings_rejects_orphan_toml_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     config = tmp_path / "config.toml"
     config.write_text(
         """

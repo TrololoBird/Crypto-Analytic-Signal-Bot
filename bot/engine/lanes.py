@@ -61,7 +61,9 @@ def select_lane_setups(
     route_all = bool(runtime.route_all_enabled_strategies)
     allow_trigger_interval_fallback = bool(runtime.allow_trigger_interval_fallback)
     allow_timeframe_fallback = bool(runtime.allow_timeframe_fallback)
-    priority_ids = frozenset(str(item).strip() for item in (priority_setup_ids or ()) if str(item).strip())
+    priority_ids = frozenset(
+        str(item).strip() for item in (priority_setup_ids or ()) if str(item).strip()
+    )
 
     enabled = registry.list_enabled()
     if strategy_fits is not None:
@@ -145,7 +147,9 @@ def _dedupe_sorted(
     return ordered
 
 
-def _sort_key(meta: StrategyMetadata, priority_ids: frozenset[str] = frozenset()) -> tuple[int, str, str]:
+def _sort_key(
+    meta: StrategyMetadata, priority_ids: frozenset[str] = frozenset()
+) -> tuple[int, str, str]:
     priority = 0 if meta.strategy_id in priority_ids else 1
     family = str(meta.family or "")
     return priority, family, meta.strategy_id

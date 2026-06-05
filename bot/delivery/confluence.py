@@ -7,6 +7,8 @@ import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from bot.runtime.errors import DEFENSIVE_EXC
+
 from ..features.microstructure import build_microstructure_context
 from .scoring import (
     ScoringResult,
@@ -151,7 +153,7 @@ class ConfluenceEngine:
         except (TypeError, ValueError):
             LOG.debug("setup_history_count lookup failed | setup_id=%s", signal.setup_id)
             return history_count
-        except Exception:
+        except DEFENSIVE_EXC:
             LOG.debug(
                 "setup_history_count lookup error | setup_id=%s",
                 signal.setup_id,

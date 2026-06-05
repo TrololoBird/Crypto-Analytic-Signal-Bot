@@ -123,17 +123,11 @@ def confirm_strategy_activation(
     norm_dir = str(direction or "").strip().lower()
 
     if profile == "trend_follow":
-        if norm_dir == "long":
-            ok = close >= open_
-        else:
-            ok = close <= open_
+        ok = close >= open_ if norm_dir == "long" else close <= open_
         return (ok, "trend_bar_confirm" if ok else "trend_bar_reject")
 
     if profile == "breakout_acceptance":
-        if norm_dir == "long":
-            ok = close >= mid
-        else:
-            ok = close <= mid
+        ok = close >= mid if norm_dir == "long" else close <= mid
         return (ok, "breakout_accept" if ok else "breakout_reject")
 
     if profile in {"countertrend_exhaustion", "divergence_reversal"}:

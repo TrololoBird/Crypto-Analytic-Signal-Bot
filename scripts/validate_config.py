@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
-from bot.runtime.errors import DEFENSIVE_EXC
 from bot.diagnostics.config_audit import run_startup_audit
 from bot.domain.config import SetupConfig, load_settings
 from bot.domain.contracts import assert_runtime_call_path_is_clean
@@ -22,6 +21,7 @@ from bot.domain.strategy_catalog import (
     verify_strategy_wiring,
 )
 from bot.features.prepare import _add_advanced_indicators
+from bot.runtime.errors import DEFENSIVE_EXC
 from bot.strategies import STRATEGY_CLASSES
 
 if TYPE_CHECKING:
@@ -165,7 +165,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         settings = load_settings(config_path)
         settings.validate_for_runtime(require_telegram=settings.notifiers.provider == "telegram")
         if ops_warn and not settings.notifiers.webhook.ops_alerts_enabled:
-            errors.append("ops_alerts_enabled should be true after auto-enable when webhook_url is set")
+            errors.append(
+                "ops_alerts_enabled should be true after auto-enable when webhook_url is set"
+            )
         errors.extend(verify_setup_config_model(SetupConfig))
         errors.extend(verify_config_setup_references(settings))
     except DEFENSIVE_EXC as exc:  # pragma: no cover - defensive CLI script

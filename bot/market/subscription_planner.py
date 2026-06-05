@@ -32,7 +32,9 @@ class SubscriptionBudget:
 
 def _normalized_symbols(symbols: list[str]) -> list[str]:
     return list(
-        dict.fromkeys(str(symbol or "").strip().lower() for symbol in symbols if str(symbol).strip())
+        dict.fromkeys(
+            str(symbol or "").strip().lower() for symbol in symbols if str(symbol).strip()
+        )
     )
 
 

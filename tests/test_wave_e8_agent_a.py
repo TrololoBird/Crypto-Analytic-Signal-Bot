@@ -14,7 +14,7 @@ from bot.domain.config import (
     UniverseConfig,
 )
 from bot.domain.schemas import Signal
-from bot.domain.strategies import StrategyMetadata, SignalResult, StrategyDecision
+from bot.domain.strategies import SignalResult, StrategyDecision, StrategyMetadata
 from bot.engine.engine import SignalEngine
 from bot.engine.lanes import select_lane_setups
 from bot.market.strategy_pools import DATA_POOL_SETUPS

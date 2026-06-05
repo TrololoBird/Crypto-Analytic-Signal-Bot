@@ -15,11 +15,11 @@ try:
 except ModuleNotFoundError:  # pragma: no cover
     from common import bootstrap_repo_path, configure_script_logging
 
-from bot.runtime.errors import DEFENSIVE_EXC
 from bot.domain.config import NetworkConfig
 from bot.market.data import BinanceFuturesMarketData, MarketDataUnavailable
 from bot.market.network_proxy import mask_proxy_url, normalize_proxy_url, resolve_proxy_url
 from bot.market.rest_impl import BinanceClientImpl
+from bot.runtime.errors import DEFENSIVE_EXC
 
 LOG = configure_script_logging("scripts.discover_binance_proxies")
 

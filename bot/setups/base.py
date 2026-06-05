@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from abc import abstractmethod
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-import logging
-
 from bot.runtime.errors import DEFENSIVE_EXC, classify_runtime_error
 
-LOG = logging.getLogger(__name__)
 from ..domain.strategies import RISK_PROFILE_BY_ID, STRATEGY_STATUS_BY_ID, StrategyDecision
 from ..domain.strategy_catalog import CATALOG_BY_ID
 from ..engine.base import (
@@ -31,6 +29,8 @@ from . import (
     finalize_strategy_decision,
     reset_strategy_decision_capture,
 )
+
+LOG = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from ..domain.config import BotSettings

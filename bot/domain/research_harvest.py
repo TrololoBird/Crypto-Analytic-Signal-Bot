@@ -25,7 +25,7 @@ DEFAULT_RESEARCH_HARVEST_SYMBOLS: tuple[str, ...] = (
 def _resolved_symbols(rh: ResearchHarvestConfig) -> tuple[str, ...]:
     from .config import REQUIRED_PINNED_SYMBOLS
 
-    base = rh.symbols if rh.symbols else DEFAULT_RESEARCH_HARVEST_SYMBOLS
+    base = rh.symbols or DEFAULT_RESEARCH_HARVEST_SYMBOLS
     return tuple(dict.fromkeys((*base, *REQUIRED_PINNED_SYMBOLS)))
 
 
@@ -39,9 +39,7 @@ def activate_research_harvest(
     patch: dict[str, object] = {"enabled": True}
     if symbols:
         patch["symbols"] = tuple(
-            dict.fromkeys(
-                str(item).strip().upper() for item in symbols if str(item).strip()
-            )
+            dict.fromkeys(str(item).strip().upper() for item in symbols if str(item).strip())
         )
     updated = settings.model_copy(
         deep=True,

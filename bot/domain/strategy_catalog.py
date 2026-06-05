@@ -586,9 +586,7 @@ def verify_config_setup_references(settings: BotSettings) -> list[str]:
     errors: list[str] = []
     unknown_overrides = sorted(set(settings.filters.setups) - CATALOG_SETUP_IDS)
     if unknown_overrides:
-        errors.append(
-            "filters.setups contains unknown setup ids: " + ", ".join(unknown_overrides)
-        )
+        errors.append("filters.setups contains unknown setup ids: " + ", ".join(unknown_overrides))
     for setup_id, params in settings.filters.setups.items():
         unknown_keys = sorted(set(params) - CATALOG_SETUP_PARAM_KEYS)
         if unknown_keys:
@@ -597,9 +595,7 @@ def verify_config_setup_references(settings: BotSettings) -> list[str]:
             )
     unknown_enabled = sorted(set(settings.setups.enabled_setup_ids()) - CATALOG_SETUP_IDS)
     if unknown_enabled:
-        errors.append(
-            "enabled setups not in catalog: " + ", ".join(unknown_enabled)
-        )
+        errors.append("enabled setups not in catalog: " + ", ".join(unknown_enabled))
     for symbol, asset in settings.assets.items():
         unknown_excluded = sorted(set(asset.excluded_strategies) - CATALOG_SETUP_IDS)
         if unknown_excluded:
@@ -626,6 +622,7 @@ def verify_config_setup_references(settings: BotSettings) -> list[str]:
             f"runtime.analysis_kline_intervals: {', '.join(missing_tfs)}"
         )
     return errors
+
 
 PR10_WAVES: dict[int, frozenset[str]] = {
     wave: frozenset(entry.setup_id for entry in CATALOG_ENTRIES if entry.wave == wave)

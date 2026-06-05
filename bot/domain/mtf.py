@@ -68,9 +68,9 @@ def evaluate_mtf_gate(
         conflicts: list[str] = []
         for label, frame in frames.items():
             trend = htf_trend_label(frame)
-            if norm_dir == "long" and trend == "bearish":
-                conflicts.append(label)
-            elif norm_dir == "short" and trend == "bullish":
+            if (norm_dir == "long" and trend == "bearish") or (
+                norm_dir == "short" and trend == "bullish"
+            ):
                 conflicts.append(label)
         details: dict[str, object] = {"profile": profile, "conflicts": conflicts}
         if len(conflicts) >= 2:

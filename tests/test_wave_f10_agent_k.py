@@ -6,7 +6,6 @@ from unittest.mock import MagicMock
 
 import polars as pl
 import pytest
-from pydantic import ValidationError
 
 from bot.domain.catalog_guards import catalog_allows_signal
 from bot.domain.config import BotSettings

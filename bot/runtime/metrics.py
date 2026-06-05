@@ -13,7 +13,10 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from importlib import import_module
-from typing import Any, Mapping, cast
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 try:
     prometheus_client = import_module("prometheus_client")

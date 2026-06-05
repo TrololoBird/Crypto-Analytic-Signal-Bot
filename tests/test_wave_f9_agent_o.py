@@ -40,7 +40,9 @@ def _meta(symbol: str) -> SymbolMeta:
     )
 
 
-def _ticker(symbol: str, quote_volume: float, *, basis_pct: float | None = None) -> dict[str, float | str]:
+def _ticker(
+    symbol: str, quote_volume: float, *, basis_pct: float | None = None
+) -> dict[str, float | str]:
     row: dict[str, float | str] = {
         "symbol": symbol,
         "quote_volume": quote_volume,
@@ -125,7 +127,9 @@ def test_build_shortlist_reports_basis_warm_summary() -> None:
     )
     symbols = [f"ALT{i}USDT" for i in range(30)] + list(settings.universe.pinned_symbols)
     meta = [_meta(symbol) for symbol in symbols]
-    tickers = [_ticker(symbol, float(100_000_000 - idx * 500_000)) for idx, symbol in enumerate(symbols)]
+    tickers = [
+        _ticker(symbol, float(100_000_000 - idx * 500_000)) for idx, symbol in enumerate(symbols)
+    ]
 
     _, summary = build_shortlist(
         meta,
@@ -201,15 +205,17 @@ async def test_do_rerank_shortlist_passes_outcome_penalties() -> None:
         return_value=ws.get_global_ticker_data.return_value
     )
 
-    with patch(
-        "bot.runtime.shortlist_service.rerank_shortlist",
-        return_value=[_universe_row("BTCUSDT")],
-    ) as rerank_mock:
-        with patch(
+    with (
+        patch(
+            "bot.runtime.shortlist_service.rerank_shortlist",
+            return_value=[_universe_row("BTCUSDT")],
+        ) as rerank_mock,
+        patch(
             "bot.runtime.shortlist_service._outcome_derank_penalties",
             new=AsyncMock(return_value={"BTCUSDT": 0.12}),
-        ):
-            await service.do_rerank_shortlist()
+        ),
+    ):
+        await service.do_rerank_shortlist()
 
     assert rerank_mock.call_count == 1
     assert rerank_mock.call_args.kwargs["outcome_penalties"] == {"BTCUSDT": 0.12}

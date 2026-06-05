@@ -24,7 +24,9 @@ def _lan_ip() -> str | None:
 
 def dashboard_urls(bot: Any) -> dict[str, str | None]:
     settings = getattr(bot, "settings", None)
-    host = str(getattr(getattr(settings, "runtime", None), "dashboard_host", "127.0.0.1") or "127.0.0.1")
+    host = str(
+        getattr(getattr(settings, "runtime", None), "dashboard_host", "127.0.0.1") or "127.0.0.1"
+    )
     port = int(getattr(getattr(settings, "runtime", None), "dashboard_port", 8080) or 8080)
     lan = _lan_ip()
     local = f"http://127.0.0.1:{port}/"
@@ -37,8 +39,8 @@ def dashboard_urls(bot: Any) -> dict[str, str | None]:
         "mobile_hint": (
             "MacBook и iPhone в разных сетях: LAN недоступен. "
             "Удалённый мониторинг — Telegram operator console: /market /status /health в личке с ботом. "
-            "Локально на MacBook: http://127.0.0.1:{port}/"
-        ).format(port=port),
+            f"Локально на MacBook: http://127.0.0.1:{port}/"
+        ),
         "remote_access": {
             "mode": "local_only",
             "env": "TELEGRAM_OPERATOR_USER_IDS",
@@ -90,7 +92,9 @@ async def build_mobile_summary(bot: Any, live_data: DashboardLiveData) -> dict[s
     urls = dashboard_urls(bot)
     sl_causes = outcomes.get("sl_root_causes") or {}
     urls["remote_access"] = {
-        "mode": "telegram_operator" if getattr(bot.settings, "operator_user_ids", ()) else "local_only",
+        "mode": "telegram_operator"
+        if getattr(bot.settings, "operator_user_ids", ())
+        else "local_only",
         "env": "TELEGRAM_OPERATOR_USER_IDS",
         "commands": [
             "/market",
@@ -143,16 +147,18 @@ def format_mobile_digest_text(payload: dict[str, Any]) -> str:
             f"FG <code>{market.get('fear_greed_value') or '—'}</code> · "
             f"breadth <code>{market.get('breadth_positive') or 0}/{market.get('breadth_total') or 0}</code>"
         )
-    lines.extend([
-        f"Regime: <code>{runtime.get('regime') or '—'}</code> · BTC: <code>{runtime.get('btc_bias') or '—'}</code>",
-        f"Shortlist: <code>{runtime.get('shortlist_size') or 0}</code> · WS: <code>{'ok' if runtime.get('ws_connected') else 'down'}</code>",
-        f"Today signals: <code>{today.get('signals_sent') or 0}</code> · delivered: <code>{today.get('session_delivered') or 0}</code>",
-        (
-            f"7d outcomes: <code>{outcomes.get('wins') or 0}W</code> / "
-            f"<code>{outcomes.get('stop_losses') or 0}SL</code> · "
-            f"WR <code>{round(float(outcomes.get('win_rate') or 0) * 100, 1)}%</code>"
-        ),
-    ])
+    lines.extend(
+        [
+            f"Regime: <code>{runtime.get('regime') or '—'}</code> · BTC: <code>{runtime.get('btc_bias') or '—'}</code>",
+            f"Shortlist: <code>{runtime.get('shortlist_size') or 0}</code> · WS: <code>{'ok' if runtime.get('ws_connected') else 'down'}</code>",
+            f"Today signals: <code>{today.get('signals_sent') or 0}</code> · delivered: <code>{today.get('session_delivered') or 0}</code>",
+            (
+                f"7d outcomes: <code>{outcomes.get('wins') or 0}W</code> / "
+                f"<code>{outcomes.get('stop_losses') or 0}SL</code> · "
+                f"WR <code>{round(float(outcomes.get('win_rate') or 0) * 100, 1)}%</code>"
+            ),
+        ]
+    )
     causes = payload.get("sl_root_causes") or {}
     if causes:
         top = sorted(causes.items(), key=lambda item: -int(item[1]))[:3]
@@ -237,7 +243,9 @@ def format_operator_status_text(payload: dict[str, Any], *, detail_outcomes: boo
         patterns = payload.get("top_sl_patterns") or []
         for row in patterns[:3]:
             if isinstance(row, dict):
-                lines.append(f"• {row.get('label') or row.get('pattern')}: <code>{row.get('count') or 0}</code>")
+                lines.append(
+                    f"• {row.get('label') or row.get('pattern')}: <code>{row.get('count') or 0}</code>"
+                )
     return "\n".join(lines)
 
 

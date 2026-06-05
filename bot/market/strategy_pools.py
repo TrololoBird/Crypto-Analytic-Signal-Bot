@@ -61,7 +61,7 @@ MAX_PER_DECORRELATION_KEY = 2
 
 def decorrelation_key(item: UniverseSymbol) -> str:
     """Proxy cluster: liquidity tier + 1% move bucket (anti clone shortlist)."""
-    move_bucket = int(round(abs(float(item.price_change_pct)) / 1.0))
+    move_bucket = round(abs(float(item.price_change_pct)) / 1.0)
     if (item.liquidity_rank or 999) <= 10:
         tier = "mega"
     elif (item.liquidity_rank or 999) <= 30:
@@ -226,7 +226,9 @@ def fill_shortlist_from_pools(
             break
         if not can_add(cand):
             continue
-        pool_name = SETUP_DATA_POOL.get(cand.strategy_fits[0], "klines") if cand.strategy_fits else "klines"
+        pool_name = (
+            SETUP_DATA_POOL.get(cand.strategy_fits[0], "klines") if cand.strategy_fits else "klines"
+        )
         add_item(cand, pool_name)
         summary["fill"] = int(summary["fill"]) + 1
 
@@ -246,18 +248,12 @@ def asset_strategy_allowlist(
     excluded = set(getattr(asset_cfg, "excluded_strategies", ()) or ())
     allowed_raw = getattr(asset_cfg, "allowed_strategies", ()) or ()
     allowed_ordered = list(
-        dict.fromkeys(
-            str(item).strip()
-            for item in allowed_raw
-            if str(item).strip()
-        )
+        dict.fromkeys(str(item).strip() for item in allowed_raw if str(item).strip())
     )
 
     if allowed_ordered:
         return tuple(
-            setup
-            for setup in allowed_ordered
-            if setup in enabled and setup not in excluded
+            setup for setup in allowed_ordered if setup in enabled and setup not in excluded
         )
 
     return tuple(

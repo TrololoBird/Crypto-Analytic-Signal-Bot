@@ -5,8 +5,9 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from bot.runtime.data_readiness import is_radar_promoted_item
+from bot.diagnostics.runtime_ops import assess_radar_store
 from bot.market.proxy_bootstrap import network_probe_status
+from bot.runtime.data_readiness import is_radar_promoted_item
 from bot.runtime.errors import DEFENSIVE_EXC
 
 from ..features.prepare import cache_stats as frame_cache_stats
@@ -42,11 +43,7 @@ class HealthManager:
             LOG.debug("health check active signal count failed", exc_info=True)
             active_signals = 0
         probe_flags = network_probe_status()
-        radar_store = (
-            getattr(ws_manager, "_radar_store", None) if ws_manager is not None else None
-        )
-        from bot.diagnostics.runtime_ops import assess_radar_store
-
+        radar_store = getattr(ws_manager, "_radar_store", None) if ws_manager is not None else None
         radar_health = assess_radar_store(
             radar_store,
             config=self._bot.settings.universe.radar,
@@ -60,9 +57,7 @@ class HealthManager:
             "fresh_tickers": int(ws_snapshot.get("fresh_tickers") or 0),
             "fresh_mark_prices": int(ws_snapshot.get("fresh_mark_prices") or 0),
             "order_flow_tracked_count": int(ws_snapshot.get("order_flow_tracked_count") or 0),
-            "anchor_symbols_in_agg_trade": int(
-                ws_snapshot.get("anchor_symbols_in_agg_trade") or 0
-            ),
+            "anchor_symbols_in_agg_trade": int(ws_snapshot.get("anchor_symbols_in_agg_trade") or 0),
             "stale_kline_streams": int(ws_snapshot.get("stale_kline_streams") or 0),
             "active_signals": active_signals,
             "pending_outcomes": pending_outcomes,
@@ -155,9 +150,7 @@ class HealthManager:
                 if self._bot._ws_manager is not None:
                     self._bot.metrics.update_ws_streams(len(self._bot._ws_manager._symbols))
                 ws_mgr = self._bot._ws_manager
-                radar_store = (
-                    getattr(ws_mgr, "_radar_store", None) if ws_mgr is not None else None
-                )
+                radar_store = getattr(ws_mgr, "_radar_store", None) if ws_mgr is not None else None
                 radar_health = assess_radar_store(
                     radar_store,
                     config=self._bot.settings.universe.radar,

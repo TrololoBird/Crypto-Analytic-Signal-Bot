@@ -28,7 +28,7 @@ def assess_strategy_data_capability(
 ) -> DataCapabilityResult:
     """Return whether public data for this setup's pool is present on the symbol."""
     pool = data_pool_for_setup(setup_id)
-    symbol = str(getattr(prepared, "symbol", "") or "").strip().upper()
+    str(getattr(prepared, "symbol", "") or "").strip().upper()
 
     if pool == "klines":
         return DataCapabilityResult(ready=True, pool=pool)

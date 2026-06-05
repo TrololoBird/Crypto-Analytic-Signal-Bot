@@ -8,14 +8,14 @@ from unittest.mock import MagicMock, patch
 import polars as pl
 import pytest
 
-from bot.delivery.confluence import ConfluenceEngine, MIN_HISTORY_SAMPLES
+from bot.delivery.confluence import MIN_HISTORY_SAMPLES, ConfluenceEngine
 from bot.delivery.scoring import _mtf_alignment, _structure_clarity
 from bot.domain.config import BotSettings
 from bot.domain.schemas import PreparedSymbol, Signal, UniverseSymbol
 from bot.features.prepare_frame import (
+    _log_indicator_fallback,
     reset_frame_indicator_fallbacks,
     take_frame_indicator_fallbacks,
-    _log_indicator_fallback,
 )
 
 
@@ -176,7 +176,9 @@ def test_calibrated_prior_uses_repository_history_count() -> None:
     repo = MagicMock()
     repo.setup_history_count.return_value = MIN_HISTORY_SAMPLES
     engine = ConfluenceEngine(BotSettings(tg_token="test", target_chat_id="1"), repository=repo)
-    calibrated = engine._calibrate_setup_prior(0.80, history_count=engine._resolve_history_count(_signal()))
+    calibrated = engine._calibrate_setup_prior(
+        0.80, history_count=engine._resolve_history_count(_signal())
+    )
     assert calibrated > 0.5
 
 

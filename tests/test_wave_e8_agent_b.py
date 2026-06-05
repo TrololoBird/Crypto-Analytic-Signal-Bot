@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 import polars as pl
@@ -13,7 +14,6 @@ import pytest
 from bot.domain.config import BotSettings
 from bot.domain.schemas import PreparedSymbol, UniverseSymbol
 from bot.setups.spec_runtime import run_setup_detection
-from bot.strategies._common import SpecHit
 from bot.strategies.absorption import AbsorptionSetup, detect_absorption, detect_absorption_prepared
 from bot.strategies.oi_divergence import (
     OIDivergenceSetup,
@@ -23,6 +23,9 @@ from bot.strategies.oi_divergence import (
 from bot.strategies.order_block import OrderBlockSetup, detect_order_block_setup
 from bot.strategies.session_killzone import SessionKillzoneSetup, detect_session_killzone
 from scripts.reconcile_strategy_defaults import collect_defaults_drift
+
+if TYPE_CHECKING:
+    from bot.strategies._common import SpecHit
 
 
 def _universe() -> UniverseSymbol:
@@ -86,7 +89,7 @@ def test_run_setup_detection_invokes_extended_when_spec_misses() -> None:
 
     def _extended(*_args: object, **_kwargs: object) -> None:
         calls.append("extended")
-        return None
+        return
 
     run_setup_detection(
         prepared=prepared,

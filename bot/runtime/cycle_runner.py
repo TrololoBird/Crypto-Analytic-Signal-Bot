@@ -9,9 +9,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from bot.runtime.errors import DEFENSIVE_EXC
 from bot.runtime.data_readiness import is_radar_promoted_item, missing_derivatives_context
 from bot.runtime.delivery_orchestrator import DELIVERY_SUCCESS_STATUSES
+from bot.runtime.errors import DEFENSIVE_EXC
 
 from ..domain.schemas import PipelineResult, PreparedSymbol, Signal, SymbolFrames, UniverseSymbol
 
@@ -366,7 +366,7 @@ class CycleRunner:
             delivered,
             cooldown_rejected,
             delivery_status_counts,
-            merge_conflict_count,
+            _merge_conflict_count,
         ) = await bot._select_and_deliver(
             selected,
             prepared_by_tracking_id=prepared_by_tracking_id,

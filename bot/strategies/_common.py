@@ -328,7 +328,7 @@ def _spec_cvd_expr(frame: pl.DataFrame) -> pl.Expr:
 def build_spec_signal(
     *,
     prepared: PreparedSymbol,
-    settings: BotSettings,
+    _settings: BotSettings,
     setup_id: str,
     family: str,
     hit: SpecHit,

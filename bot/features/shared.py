@@ -234,4 +234,3 @@ def true_range(df: pl.DataFrame, *, name: str = "true_range") -> pl.Series:
         df=df,
         name=name,
     )
-

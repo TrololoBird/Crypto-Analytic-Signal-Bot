@@ -26,8 +26,7 @@ if TYPE_CHECKING:
 LOG = logging.getLogger("bot.delivery.telegram_routing")
 
 CHANNEL_PURPOSE = (
-    "Канал: только сигналы и статусы сделок для подписчиков. "
-    "Оператор: личка с ботом — /help"
+    "Канал: только сигналы и статусы сделок для подписчиков. Оператор: личка с ботом — /help"
 )
 OPERATOR_PURPOSE = (
     "Личка оператора: мониторинг и команды (/market /status /audit …). "
@@ -47,12 +46,13 @@ async def send_operator_html(bot: SignalBot, text: str) -> int:
         console = TelegramOperatorConsole(bot)
     try:
         sent = await console.send_html_to_operators(text)
-        if sent:
-            LOG.info("operator DM sent | recipients=%s chars=%s", sent, len(text))
-        return sent
     except DEFENSIVE_EXC:
         LOG.debug("operator DM send failed", exc_info=True)
         return 0
+    else:
+        if sent:
+            LOG.info("operator DM sent | recipients=%s chars=%s", sent, len(text))
+        return sent
 
 
 def operator_dm_enabled(bot: SignalBot, flag_name: str, *, default: bool = True) -> bool:

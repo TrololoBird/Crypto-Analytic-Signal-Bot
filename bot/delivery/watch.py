@@ -644,7 +644,7 @@ class AlertCoordinator:
         return candidates
 
     def _format_watch(
-        self, cand: WatchCandidate, *, current_price: float, now: datetime, ref_id: str
+        self, cand: WatchCandidate, *, current_price: float, _now: datetime, ref_id: str
     ) -> str:
         direction = "LONG" if cand.direction == "long" else "SHORT"
         badge = "🟢" if cand.direction == "long" else "🔴"
@@ -665,7 +665,7 @@ class AlertCoordinator:
         )
 
     def _format_entry_zone(
-        self, cand: WatchCandidate, *, current_price: float, now: datetime, ref_id: str
+        self, cand: WatchCandidate, *, current_price: float, _now: datetime, ref_id: str
     ) -> str:
         direction = "LONG" if cand.direction == "long" else "SHORT"
         badge = "🟢" if cand.direction == "long" else "🔴"
@@ -686,7 +686,7 @@ class AlertCoordinator:
         cand: WatchCandidate,
         *,
         current_price: float,
-        now: datetime,
+        _now: datetime,
         reason: str,
         ref_id: str,
     ) -> str:
@@ -695,6 +695,7 @@ class AlertCoordinator:
             [
                 f"⌛ <b>WATCH снят {direction} {html.escape(cand.symbol)}</b> "
                 f"<code>#{html.escape(ref_id)}</code>",
-                f"<code>{html.escape(reason)}</code> · сейчас <code>{_fmt_price(current_price)}</code>",
+                f"<code>{html.escape(reason)}</code> · "
+                f"сейчас <code>{_fmt_price(current_price)}</code>",
             ]
         )

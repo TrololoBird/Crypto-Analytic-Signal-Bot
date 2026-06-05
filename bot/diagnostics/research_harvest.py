@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from bot.domain.schemas import PipelineResult, PreparedSymbol
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from bot.domain.schemas import PipelineResult, PreparedSymbol
 
 
 def _json_safe(value: Any) -> Any:

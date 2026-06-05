@@ -64,10 +64,15 @@ def classify_stop_loss_root_cause(
         code = "immediate_adverse_entry"
         reasons.append("mfe_zero_price_never_favorable")
 
-    bearish = regime in {"bear", "decline", "risk_off"} or btc_bias in {
-        "downtrend",
-        "bear",
-    } or bias_4h == "downtrend"
+    bearish = (
+        regime in {"bear", "decline", "risk_off"}
+        or btc_bias
+        in {
+            "downtrend",
+            "bear",
+        }
+        or bias_4h == "downtrend"
+    )
     if dir_norm == "long" and bearish:
         if code == "immediate_adverse_entry":
             code = "bear_long_immediate_stop"
@@ -89,11 +94,7 @@ def classify_stop_loss_root_cause(
         if "bear" not in code:
             code = "quick_stop_no_follow_through"
 
-    if (
-        regime_at_entry
-        and regime_at_close
-        and regime_at_entry != regime_at_close
-    ):
+    if regime_at_entry and regime_at_close and regime_at_entry != regime_at_close:
         reasons.append(f"regime_shift_{regime_at_entry}_to_{regime_at_close}")
 
     if post_sl_fav is not None and post_sl_fav >= 1.0:

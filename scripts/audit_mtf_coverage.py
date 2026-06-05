@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 try:
@@ -18,7 +17,15 @@ from bot.domain.strategy_catalog import CATALOG_BY_ID
 from bot.strategies import STRATEGY_CLASSES
 
 STRATEGIES_DIR = Path(__file__).resolve().parents[1] / "bot" / "strategies"
-HTF_MARKERS = ("work_1h", "work_4h", "regime_1h", "regime_4h", "bias_1h", "bias_4h", "_confirmed_context_conflict")
+HTF_MARKERS = (
+    "work_1h",
+    "work_4h",
+    "regime_1h",
+    "regime_4h",
+    "bias_1h",
+    "bias_4h",
+    "_confirmed_context_conflict",
+)
 
 
 def main() -> int:
@@ -42,7 +49,7 @@ def main() -> int:
             path = STRATEGIES_DIR / f"{setup_id}.py"
         text = path.read_text(encoding="utf-8") if path.exists() else ""
         catalog = CATALOG_BY_ID.get(setup_id)
-        profile = getattr(catalog, "confirmation_profile", "trend_follow") if catalog else "?"
+        getattr(catalog, "confirmation_profile", "trend_follow") if catalog else "?"
         uses_htf = any(marker in text for marker in HTF_MARKERS)
         claims_mtf = 'timeframe="15m+1h"' in text or "15m+1h" in text
         if claims_mtf and not uses_htf:

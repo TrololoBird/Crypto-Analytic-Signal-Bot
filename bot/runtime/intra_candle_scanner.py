@@ -113,8 +113,8 @@ class IntraCandleScanner:
                         "ask_price": event.ask,
                         "spread_bps": spread_bps,
                     }
-                max_setups, setup_subset = self._bot._get_cycle_runner()._intra_candle_detector_limits(
-                    self._bot
+                max_setups, setup_subset = (
+                    self._bot._get_cycle_runner()._intra_candle_detector_limits(self._bot)
                 )
                 if max_setups is not None or setup_subset is not None:
                     LOG.debug(

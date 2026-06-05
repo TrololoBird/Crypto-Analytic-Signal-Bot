@@ -47,9 +47,7 @@ def _pending_row(*, zone_at: str | None, activated_at: str | None = None) -> dic
 async def test_repair_stuck_pending_promotes_zone_touch_rows() -> None:
     zone_at = "2026-06-01T12:00:00+00:00"
     memory_repo = MagicMock()
-    memory_repo.get_active_signals = AsyncMock(
-        return_value=[_pending_row(zone_at=zone_at)]
-    )
+    memory_repo.get_active_signals = AsyncMock(return_value=[_pending_row(zone_at=zone_at)])
     memory_repo.save_active_signal = AsyncMock()
     memory_repo.increment_tracking_stats = AsyncMock()
     memory_repo.get_tracking_stats = AsyncMock(return_value={"activated": 0})
@@ -83,9 +81,7 @@ async def test_repair_stuck_pending_promotes_zone_touch_rows() -> None:
 @pytest.mark.asyncio
 async def test_repair_skips_pending_without_zone_touch() -> None:
     memory_repo = MagicMock()
-    memory_repo.get_active_signals = AsyncMock(
-        return_value=[_pending_row(zone_at=None)]
-    )
+    memory_repo.get_active_signals = AsyncMock(return_value=[_pending_row(zone_at=None)])
 
     settings = SimpleNamespace(
         tracking=SimpleNamespace(enabled=True, outcome_retention_days=90),

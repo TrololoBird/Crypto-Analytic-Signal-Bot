@@ -454,7 +454,9 @@ def reason_label(reason: str) -> str:
     return raw.replace("_", " ").replace(".", ": ")
 
 
-def _primary_timeframe_fallback_badge(passed_filters: tuple[str, ...], *, actual_timeframe: str) -> str | None:
+def _primary_timeframe_fallback_badge(
+    passed_filters: tuple[str, ...], *, actual_timeframe: str
+) -> str | None:
     """Return a compact badge when prepared primary differs from configured."""
     for item in passed_filters:
         if item == "primary_timeframe_fallback":
@@ -505,9 +507,7 @@ def extract_signal_facts(
     stop = _float(getattr(signal, "stop", getattr(signal, "stop_price", 0.0)))
     take_profit_1 = _float(getattr(signal, "take_profit_1", getattr(signal, "tp1_price", 0.0)))
     take_profit_2 = _float(getattr(signal, "take_profit_2", getattr(signal, "tp2_price", 0.0)))
-    take_profit_3 = _optional_float(
-        getattr(signal, "take_profit_3", getattr(signal, "tp3", None))
-    )
+    take_profit_3 = _optional_float(getattr(signal, "take_profit_3", getattr(signal, "tp3", None)))
     entry_mid = (entry_low + entry_high) / 2.0
     risk = abs(entry_mid - stop)
     rr1 = _optional_float(getattr(signal, "risk_reward_tp1", None))
@@ -523,9 +523,7 @@ def extract_signal_facts(
             rr3 = abs(tp3 - entry_mid) / risk
     weighted_rr = _optional_float(getattr(signal, "weighted_risk_reward", None))
     if weighted_rr is None and rr1 is not None and rr2 is not None and rr3 is not None:
-        weighted_rr = (
-            scale_tuple[0] * rr1 + scale_tuple[1] * rr2 + scale_tuple[2] * rr3
-        )
+        weighted_rr = scale_tuple[0] * rr1 + scale_tuple[1] * rr2 + scale_tuple[2] * rr3
     return SignalMessageFacts(
         symbol=str(getattr(signal, "symbol", "")),
         direction=str(getattr(signal, "direction", "long")),
@@ -642,7 +640,9 @@ def _channel_header(facts: SignalMessageFacts, *, tier: str | None = None) -> st
     badge = "🟢" if is_long else "🔴"
     ref = code("#" + facts.tracking_ref)
     tier_badge = _tier_badge(tier)
-    return f"{tier_badge} {badge} <b>{direction_label(facts.direction)} {code(facts.symbol)}</b> {ref}"
+    return (
+        f"{tier_badge} {badge} <b>{direction_label(facts.direction)} {code(facts.symbol)}</b> {ref}"
+    )
 
 
 def _tier_badge(tier: str | None) -> str:
@@ -653,8 +653,12 @@ def _tier_badge(tier: str | None) -> str:
 
 def _channel_rr_line(facts: SignalMessageFacts) -> str:
     tp3 = facts.take_profit_3 if facts.take_profit_3 is not None else facts.take_profit_2
-    same_tp = abs(facts.take_profit_2 - facts.take_profit_1) <= max(abs(facts.take_profit_1), 1.0) * 1e-8
-    same_tp = same_tp and abs(tp3 - facts.take_profit_2) <= max(abs(facts.take_profit_2), 1.0) * 1e-8
+    same_tp = (
+        abs(facts.take_profit_2 - facts.take_profit_1) <= max(abs(facts.take_profit_1), 1.0) * 1e-8
+    )
+    same_tp = (
+        same_tp and abs(tp3 - facts.take_profit_2) <= max(abs(facts.take_profit_2), 1.0) * 1e-8
+    )
     risk_pct = code(f"{facts.stop_distance_pct:.1f}%")
     if same_tp:
         rr_value = facts.weighted_risk_reward or facts.risk_reward_tp1 or facts.risk_reward
@@ -671,7 +675,9 @@ def _channel_rr_line(facts: SignalMessageFacts) -> str:
 def _channel_legs_line(facts: SignalMessageFacts) -> str:
     entry = f"{format_price(facts.entry_low)}–{format_price(facts.entry_high)}"
     tp3 = facts.take_profit_3 if facts.take_profit_3 is not None else facts.take_profit_2
-    same_tp = abs(facts.take_profit_2 - facts.take_profit_1) <= max(abs(facts.take_profit_1), 1.0) * 1e-8
+    same_tp = (
+        abs(facts.take_profit_2 - facts.take_profit_1) <= max(abs(facts.take_profit_1), 1.0) * 1e-8
+    )
     if same_tp:
         targets = f"TP {code(format_price(facts.take_profit_1))}"
     else:
@@ -680,9 +686,7 @@ def _channel_legs_line(facts: SignalMessageFacts) -> str:
             f"TP2 {code(format_price(facts.take_profit_2))} · "
             f"TP3 {code(format_price(tp3))}"
         )
-    return (
-        f"Вход {code(entry)} · SL {code(format_price(facts.stop))} · {targets}"
-    )
+    return f"Вход {code(entry)} · SL {code(format_price(facts.stop))} · {targets}"
 
 
 def manual_entry_skip_hint(symbol: str, *, chase_pct: float = 0.003) -> str:
@@ -707,9 +711,7 @@ def format_channel_trade_card(
     tier: str | None = None,
 ) -> str:
     """Unified compact card for Telegram channel (new + edited)."""
-    setup_line = (
-        f"{escape_text(setup_label(facts.setup_id))} · {code(facts.timeframe)}"
-    )
+    setup_line = f"{escape_text(setup_label(facts.setup_id))} · {code(facts.timeframe)}"
     fallback_badge = _primary_timeframe_fallback_badge(
         facts.passed_filters,
         actual_timeframe=facts.timeframe,
@@ -830,10 +832,7 @@ def format_safe_signal_fallback(
             f"{escape_text(setup_label(facts.setup_id))} · "
             f"{code(facts.timeframe)} · {code(format_score(facts.score))}"
         ),
-        (
-            f"SL {code(format_price(facts.stop))} · "
-            f"TP {code(format_price(facts.take_profit_1))}"
-        ),
+        (f"SL {code(format_price(facts.stop))} · TP {code(format_price(facts.take_profit_1))}"),
         escape_text("Signal-only analytics. Manual entry."),
     ]
     return "\n".join(lines)
@@ -860,7 +859,9 @@ def format_signal_message(
         reasons = compact_reason_list(facts.reasons, limit=policy.include_reason_limit)
         context = market_context_lines(facts)
         lines = [
-            (f"{bold('SIGNAL-ONLY PLAN')} {code(facts.symbol)} {code(direction_label(facts.direction))}"),
+            (
+                f"{bold('SIGNAL-ONLY PLAN')} {code(facts.symbol)} {code(direction_label(facts.direction))}"
+            ),
             f"{bold(setup_label(facts.setup_id))} {code(facts.timeframe)} | score {code(format_score(facts.score))}",
             f"{bold('Entries')} {entry_levels_line(facts)}",
             f"{bold('Stop')} {code(format_price(facts.stop))}",
@@ -903,7 +904,7 @@ def tracking_status_text(state: Any) -> str:
         act_px = format_price(_optional_float(activation_price))
         return f"✅ в сделке @ {act_px}"
     if tp1_hit_at:
-        return f"🎯 TP1 · TP2 открыт"
+        return "🎯 TP1 · TP2 открыт"
     return f"⏳ лимит · до {format_datetime(pending_expires_at)}"
 
 

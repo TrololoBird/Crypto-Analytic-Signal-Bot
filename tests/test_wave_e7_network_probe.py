@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -21,7 +21,7 @@ from scripts.live_check_binance_api import PUBLIC_FDATA_PATHS, PUBLIC_REST_PATHS
 
 
 class _FakeWS:
-    async def __aenter__(self) -> _FakeWS:
+    async def __aenter__(self) -> Self:
         return self
 
     async def __aexit__(self, *args: object) -> None:
