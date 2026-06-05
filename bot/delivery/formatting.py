@@ -994,10 +994,10 @@ def message_preview(text: str, *, max_lines: int = 12) -> dict[str, Any]:
 def sample_message_from_row(row: Mapping[str, Any]) -> str:
     """Render a Telegram preview from a telemetry row."""
 
-    class RowSignal:
+    class _RowSignal:
         pass
 
-    signal = RowSignal()
+    signal: Any = _RowSignal()
     for key, value in row.items():
         setattr(signal, key, value)
     if not hasattr(signal, "entry_low"):
