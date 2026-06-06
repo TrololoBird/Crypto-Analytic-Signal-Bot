@@ -28,7 +28,7 @@ from bot.dashboard import BotDashboard
 from bot.delivery.ops_webhook import close_ops_webhook_session, send_ops_webhook_alert
 from bot.delivery.telegram_routing import operator_dm_enabled, send_operator_html
 from bot.diagnostics.config_audit import run_startup_audit
-from bot.market.proxy_bootstrap import ensure_network_ready
+from bot.market.proxy_bootstrap import ensure_network_ready, run_proxy_refresh_loop
 from bot.market.radar_state import SymbolTier
 from bot.market.subscription_planner import merge_order_flow_tracked_symbols
 from bot.regime.market import MarketRegimeAnalyzer
@@ -677,7 +677,7 @@ class SignalBot:
             "autonomous pipeline armed | entry=main.py event_bus=on "
             "shortlist_refresh=on heartbeat=on health_telemetry=on health_monitor=on "
             "emergency_fallback=on oi_refresh=on spot_companion=on tracking_review=on "
-            "market_regime=on radar=%s intelligence=%s dashboard=%s metrics=%s",
+            "market_regime=on proxy_refresh=on radar=%s intelligence=%s dashboard=%s metrics=%s",
             radar_on,
             intel_on,
             self._dashboard_enabled,
@@ -711,6 +711,7 @@ class SignalBot:
             _loop_task(run_spot_refresh_loop(self._spot_refresh_runner), name="spot_companion"),
             _loop_task(run_tracking_review_loop(self._fallback_runner), name="tracking_review"),
             _loop_task(run_market_regime_loop(self._market_context_updater), name="market_regime"),
+            _loop_task(run_proxy_refresh_loop(self), name="proxy_refresh"),
         ]
         if self.intelligence is not None and self.settings.intelligence.enabled:
             background_tasks.append(
