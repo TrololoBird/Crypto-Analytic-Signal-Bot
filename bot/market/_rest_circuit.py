@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 
@@ -42,6 +43,12 @@ class RestCircuitMixin:
                 operation,
                 self._circuit_open_duration_seconds,
             )
+            # Probe failure likely means dead proxy — trigger rotation.
+            if hasattr(self, "_try_failover_proxy"):
+                asyncio.create_task(
+                    self._try_failover_proxy(f"circuit_probe_failed:{operation}"),
+                    name="circuit_failover",
+                )
             return
         failures = self._circuit_failures.get(operation, 0) + 1
         self._circuit_failures[operation] = failures
