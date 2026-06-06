@@ -450,6 +450,10 @@ class RestHttpMixin(RestCircuitMixin):
         except MarketDataUnavailable as exc:
             detail = str(exc.detail or "")
             is_ip_ban = "418 ip ban" in detail
+            is_timeout = "timeout after" in detail
+            # On REST timeout through proxy: rotate to next proxy (fire-and-forget, non-blocking).
+            if is_timeout and failover and pool is not None:
+                await self._try_failover_proxy(f"rest_timeout:{operation}")
             # On IP ban: immediately switch to first pool proxy and retry once.
             if is_ip_ban and failover and pool is not None:
                 first = pool.current()

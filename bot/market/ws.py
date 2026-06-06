@@ -960,6 +960,20 @@ class FuturesWSManager:
             self._backfill_tasks.add(task)
             task.add_done_callback(self._backfill_tasks.discard)
 
+    async def _maybe_rotate_proxy(self) -> None:
+        """Rotate to the next pool proxy when WS keeps disconnecting."""
+        inner = getattr(self._rest, "_binance_client", None)
+        if inner is None:
+            return
+        pool = getattr(inner, "_proxy_pool", None)
+        failover = bool(getattr(inner, "_proxy_failover_enabled", False))
+        if not failover or pool is None:
+            return
+        rotated = await inner._try_failover_proxy("ws_persistent_disconnect")
+        if rotated:
+            new_url = getattr(inner, "_proxy_url", None)
+            self.update_proxy_url(new_url)
+
     async def _close_connections_for_proxy_failover(self) -> None:
         for endpoint, ws in list(self._ws_conns.items()):
             if ws is None:

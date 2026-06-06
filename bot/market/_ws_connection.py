@@ -47,6 +47,9 @@ def compute_disconnect_delay(
         min_delay = 300.0
     elif manager._short_lived_streak >= 5:
         min_delay = 30.0
+        # Persistent WS failures: try rotating the proxy so next reconnect uses a fresh egress.
+        if hasattr(manager, "_maybe_rotate_proxy") and manager._short_lived_streak % 3 == 2:
+            asyncio.create_task(manager._maybe_rotate_proxy(), name="ws_proxy_rotate")
     elif manager._short_lived_streak >= 3:
         min_delay = 5.0
     else:

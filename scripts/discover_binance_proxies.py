@@ -34,15 +34,26 @@ _LOCAL_CANDIDATES = (
     "http://127.0.0.1:8080",
 )
 _PUBLIC_LIST_URLS = (
-    "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt",
-    "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
+    # Updated every 5-10 min
+    "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/socks5/data.txt",
+    "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/http/data.txt",
+    # Updated hourly
+    "https://raw.githubusercontent.com/jetkai/proxy-list/main/online/txt/proxies-socks5.txt",
+    "https://raw.githubusercontent.com/jetkai/proxy-list/main/online/txt/proxies-http.txt",
     "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt",
     "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
+    "https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/socks5.txt",
+    "https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/http.txt",
+    # Updated daily
+    "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt",
+    "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
+    "https://raw.githubusercontent.com/hookzof/socks5_list/master/socks5.txt",
+    "https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list-raw.txt",
 )
-_PROBE_CONCURRENCY = 24
+_PROBE_CONCURRENCY = 40
 _PROBE_TIMEOUT = aiohttp.ClientTimeout(total=12.0, connect=8.0)
-_MAX_PUBLIC_TO_TEST = 80
-_MAX_WORKING = 8
+_MAX_PUBLIC_TO_TEST = 300
+_MAX_WORKING = 12
 
 
 def _parse_host_port_lines(text: str) -> list[str]:
