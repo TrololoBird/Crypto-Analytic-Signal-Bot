@@ -303,9 +303,10 @@ async def run_stream_session(
             url,
             ping_interval=_WS_PING_INTERVAL_SECONDS,
             close_timeout=_WS_CLOSE_TIMEOUT_SECONDS,
+            open_timeout=_WS_CONNECT_TIMEOUT_SECONDS,
             **connect_kwargs,
         ),
-        timeout=_WS_CONNECT_TIMEOUT_SECONDS,
+        timeout=_WS_CONNECT_TIMEOUT_SECONDS + 5.0,
     )
     LOG.info("ws connection established | endpoint=%s url=%s", endpoint, url)
     backoff_reset = False

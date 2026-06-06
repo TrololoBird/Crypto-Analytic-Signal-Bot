@@ -14,6 +14,7 @@ every 30 minutes and hot-swaps the live pool without restarting the bot.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import re
 import time
@@ -33,7 +34,11 @@ LOG = logging.getLogger("bot.market.proxy_bootstrap")
 # ---------------------------------------------------------------------------
 # Public proxy-list sources — no registration, no auth, updated frequently
 # ---------------------------------------------------------------------------
-_PROXY_SOURCES: list[str] = [
+# Primary SOCKS5 sources — no auth, no registration, auto-updated
+# Research baseline: 20+ projects surveyed (proxifly, monosans, TheSpeedX, hookzof,
+# ErcinDedeoglu, fyvri, proxygenerator1, VPSLabCloud, iplocate, databay-labs, gfpcom,
+# ClearProxy, Anonym0usWork1221, ProxyScraper, clarketm, openproxy.space, proxyscrape API)
+_SOCKS5_SOURCES: list[str] = [
     # ProxyScrape v4 — 1-minute freshness, returns socks5://ip:port lines
     (
         "https://api.proxyscrape.com/v4/free-proxy-list/get"
@@ -44,29 +49,71 @@ _PROXY_SOURCES: list[str] = [
     "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt",
     # proxifly — 5-minute freshness, ip:port format
     "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/socks5/data.txt",
-    # TheSpeedX — large curated list, ip:port format
+    # TheSpeedX/PROXY-List — large curated list, daily updated
     "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt",
-    # hookzof — additional source, ip:port format
+    # hookzof — auto-updated, Telegram-verified SOCKS5
     "https://raw.githubusercontent.com/hookzof/socks5_list/master/proxy.txt",
-    # jetkai — ip:port format
-    "https://raw.githubusercontent.com/jetkai/proxy-list/main/online-proxies/txt/proxies-socks5.txt",
-    # ShiftyTR — ip:port format
+    # ErcinDedeoglu/proxies — hourly updated
+    "https://raw.githubusercontent.com/ErcinDedeoglu/proxies/main/proxies/socks5.txt",
+    # fyvri/fresh-proxy-list — hourly, multi-format
+    "https://raw.githubusercontent.com/fyvri/fresh-proxy-list/main/source/classic/socks5.txt",
+    # proxygenerator1 — deeply verified, most stable
+    "https://raw.githubusercontent.com/proxygenerator1/ProxyGenerator/main/MostStable/socks5.txt",
+    # iplocate/free-proxy-list — 30-minute freshness
+    "https://raw.githubusercontent.com/iplocate/free-proxy-list/main/proxies/socks5.txt",
+    # databay-labs — 5-minute freshness, strict SSL, zero MITM
+    "https://raw.githubusercontent.com/databay-labs/free-proxy-list/main/proxies/socks5.txt",
+    # gfpcom — 30-minute freshness, large pool
+    "https://raw.githubusercontent.com/gfpcom/free-proxy-list/main/socks5.txt",
+    # Anonym0usWork1221/Free-Proxies — community maintained
+    "https://raw.githubusercontent.com/Anonym0usWork1221/Free-Proxies/main/proxy_files/socks5_proxies.txt",
+    # VPSLabCloud — 15-minute freshness
+    "https://raw.githubusercontent.com/VPSLabCloud/VPSLab-Free-Proxy-List/main/socks5.txt",
+    # ClearProxy — 5-minute, verified against major targets
+    "https://raw.githubusercontent.com/ClearProxy/checked-proxy-list/main/data/socks5.txt",
+    # ShiftyTR — curated community list
     "https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/socks5.txt",
+    # openproxy.space — community-verified, no auth API
+    "https://openproxy.space/list/socks5",
 ]
+
+# HTTP proxy sources — fallback when SOCKS5 pool is insufficient
+# Used only when SOCKS5 discovery yields fewer than _MIN_WORKING_PROXIES
+_HTTP_SOURCES: list[str] = [
+    # ProxyScrape v4 HTTP
+    (
+        "https://api.proxyscrape.com/v4/free-proxy-list/get"
+        "?request=display_proxies&proxy_format=protocolipport"
+        "&format=text&proxy_type=http"
+    ),
+    # monosans HTTP — hourly pre-validated
+    "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
+    # TheSpeedX HTTP — large curated list
+    "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
+    # proxifly HTTP — 5-minute freshness
+    "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/http/data.txt",
+    # ErcinDedeoglu HTTP — hourly
+    "https://raw.githubusercontent.com/ErcinDedeoglu/proxies/main/proxies/http.txt",
+    # fyvri HTTP — hourly
+    "https://raw.githubusercontent.com/fyvri/fresh-proxy-list/main/source/classic/http.txt",
+]
+
+# Keep legacy alias so external callers (scripts/) still work
+_PROXY_SOURCES = _SOCKS5_SOURCES
 
 # Binance futures REST ping — lightweight, returns {} on success
 _BINANCE_PING_URL = "https://fapi.binance.com/fapi/v1/ping"
 _BINANCE_WS_HANDSHAKE_URL = "wss://fstream.binance.com/ws"
 
-_VALIDATE_CONCURRENCY = 60       # simultaneous proxy checks
+_VALIDATE_CONCURRENCY = 80       # simultaneous proxy checks
 _VALIDATE_TIMEOUT_S = 10.0       # per-proxy validation timeout (SOCKS5+SSL needs ~6-8s)
 _FETCH_TIMEOUT_S = 15.0          # per-source HTTP fetch timeout
-_MAX_CANDIDATES = 1500           # cap before validation (memory guard)
-_MIN_WORKING_PROXIES = 3         # minimum to accept discovery result
-_MAX_POOL_SIZE = 15              # proxies kept in the live pool
+_MAX_CANDIDATES = 2000           # cap before validation (memory guard)
+_MIN_WORKING_PROXIES = 2         # minimum to accept discovery result
+_MAX_POOL_SIZE = 25              # proxies kept in the live pool
 _REST_SYMBOL_THRESHOLD = 100
 _WS_PROBE_TIMEOUT_SECONDS = 15.0
-_POOL_REFRESH_INTERVAL_S = 1800.0  # background refresh every 30 min
+_POOL_REFRESH_INTERVAL_S = 900.0   # background refresh every 15 min (was 30)
 
 
 # ---------------------------------------------------------------------------
@@ -130,6 +177,7 @@ async def probe_ws_handshake(
                 ping_interval=None,
                 close_timeout=5.0,
                 open_timeout=timeout_seconds,
+                additional_headers={"User-Agent": "python-websockets/binance-bot"},
                 **connect_kwargs,
             ):
                 return True
@@ -191,8 +239,27 @@ def _log_probe_result(label: str, result: NetworkProbeResult) -> None:
 # Autonomous proxy discovery
 # ---------------------------------------------------------------------------
 
-async def _fetch_source(session: aiohttp.ClientSession, url: str) -> list[str]:
-    """Fetch one public proxy list; return normalized ``socks5://ip:port`` lines."""
+async def _detect_local_tor() -> str | None:
+    """Return socks5://127.0.0.1:9050 if a local Tor SOCKS daemon is reachable."""
+    try:
+        async with asyncio.timeout(2.0):
+            _r, writer = await asyncio.open_connection("127.0.0.1", 9050)
+            writer.close()
+            with contextlib.suppress(Exception):
+                await writer.wait_closed()
+        LOG.info("local Tor daemon detected on 127.0.0.1:9050 — adding to pool")
+        return "socks5://127.0.0.1:9050"
+    except Exception:
+        return None
+
+
+async def _fetch_source(
+    session: aiohttp.ClientSession,
+    url: str,
+    *,
+    protocol: str = "socks5",
+) -> list[str]:
+    """Fetch one public proxy list; return normalized ``<protocol>://ip:port`` lines."""
     try:
         async with asyncio.timeout(_FETCH_TIMEOUT_S):
             async with session.get(url) as resp:
@@ -204,17 +271,22 @@ async def _fetch_source(session: aiohttp.ClientSession, url: str) -> list[str]:
         LOG.debug("proxy source fetch failed | url=%s err=%s", url, exc)
         return []
 
+    scheme = protocol.lower()
     out: list[str] = []
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
-        if line.startswith("socks5://"):
+        if line.startswith(f"{scheme}://"):
+            out.append(line)
+        elif line.startswith("socks5://") and scheme == "socks5":
+            out.append(line)
+        elif line.startswith("http://") and scheme == "http":
             out.append(line)
         elif "://" not in line and ":" in line:
-            # bare ip:port — treat as SOCKS5 (validation will reject non-SOCKS)
-            out.append(f"socks5://{line}")
-        # skip http:// / socks4:// lines
+            # bare ip:port — prefix with requested protocol
+            out.append(f"{scheme}://{line}")
+        # skip mismatched protocols
     return out
 
 
@@ -225,29 +297,85 @@ async def _validate_proxy_binance(
 ) -> tuple[str, float] | None:
     """
     Validate *proxy_url* against the real Binance fstream ping endpoint.
+    Supports SOCKS5 (via aiohttp_socks) and HTTP CONNECT proxies.
     Returns ``(proxy_url, latency_ms)`` on success, ``None`` on any failure.
     """
-    try:
-        from aiohttp_socks import ProxyConnector  # type: ignore[import-untyped]
-    except ImportError:
-        return None
+    is_socks = proxy_url.startswith("socks")
+    if is_socks:
+        try:
+            from aiohttp_socks import ProxyConnector  # type: ignore[import-untyped]
+        except ImportError:
+            return None
 
     async with sem:
-        connector: aiohttp.TCPConnector | None = None
+        connector: aiohttp.BaseConnector | None = None
         try:
-            connector = ProxyConnector.from_url(proxy_url, rdns=True)
             t0 = time.monotonic()
             async with asyncio.timeout(timeout):
-                async with aiohttp.ClientSession(connector=connector) as sess:
-                    async with sess.get(_BINANCE_PING_URL, ssl=True) as resp:
-                        if resp.status == 200:
-                            return proxy_url, (time.monotonic() - t0) * 1000.0
+                if is_socks:
+                    from aiohttp_socks import ProxyConnector  # type: ignore[import-untyped]
+                    connector = ProxyConnector.from_url(proxy_url, rdns=True)
+                    async with aiohttp.ClientSession(connector=connector) as sess:
+                        async with sess.get(_BINANCE_PING_URL, ssl=True) as resp:
+                            if resp.status == 200:
+                                return proxy_url, (time.monotonic() - t0) * 1000.0
+                else:
+                    # HTTP CONNECT proxy — pass via per-request param
+                    connector = aiohttp.TCPConnector()
+                    async with aiohttp.ClientSession(connector=connector) as sess:
+                        async with sess.get(
+                            _BINANCE_PING_URL, proxy=proxy_url, ssl=True
+                        ) as resp:
+                            if resp.status == 200:
+                                return proxy_url, (time.monotonic() - t0) * 1000.0
         except Exception:
             pass
         finally:
             if connector is not None and not connector.closed:
                 connector.close()
     return None
+
+
+async def _gather_candidates(
+    sources: list[str],
+    *,
+    protocol: str = "socks5",
+) -> list[str]:
+    """Fetch all sources in parallel and return deduplicated proxy URLs."""
+    connector_limit = max(len(sources), 20)
+    async with aiohttp.ClientSession(
+        connector=aiohttp.TCPConnector(limit=connector_limit, ssl=False),
+        headers={"User-Agent": "python-aiohttp/3"},
+        timeout=aiohttp.ClientTimeout(total=_FETCH_TIMEOUT_S + 5),
+    ) as session:
+        fetch_results = await asyncio.gather(
+            *[_fetch_source(session, url, protocol=protocol) for url in sources],
+            return_exceptions=True,
+        )
+    seen: set[str] = set()
+    out: list[str] = []
+    for r in fetch_results:
+        if isinstance(r, list):
+            for url in r:
+                if url not in seen:
+                    seen.add(url)
+                    out.append(url)
+    return out
+
+
+async def _validate_batch(
+    candidates: list[str],
+    *,
+    validate_timeout: float,
+    validate_concurrency: int,
+) -> list[tuple[str, float]]:
+    """Validate a list of proxy candidates against Binance and return working ones."""
+    sem = asyncio.Semaphore(validate_concurrency)
+    val_results = await asyncio.gather(
+        *[_validate_proxy_binance(u, sem, validate_timeout) for u in candidates],
+        return_exceptions=True,
+    )
+    return [r for r in val_results if isinstance(r, tuple)]
 
 
 async def auto_discover_proxies(
@@ -257,63 +385,81 @@ async def auto_discover_proxies(
     validate_concurrency: int = _VALIDATE_CONCURRENCY,
 ) -> list[str]:
     """
-    Fetch SOCKS5 lists from all public sources, validate each candidate
-    against the real Binance fstream endpoint, and return up to
-    *max_pool_size* URLs sorted by ascending latency (fastest first).
+    Discover working proxies from 20+ public no-auth sources.
 
-    This is a full replacement for the old subprocess-based discover script.
-    All I/O is async; no external processes are spawned.
+    Strategy:
+    1. Probe local Tor daemon (127.0.0.1:9050) — zero-cost, fast
+    2. Fetch and validate SOCKS5 from 16 GitHub/API sources in parallel
+    3. If pool still insufficient, fetch HTTP proxies as fallback
+    4. Return up to *max_pool_size* URLs sorted by ascending latency (fastest first)
     """
     LOG.info(
-        "proxy auto-discovery: fetching from %d public sources", len(_PROXY_SOURCES)
+        "proxy auto-discovery: %d SOCKS5 sources + %d HTTP fallback + Tor detection",
+        len(_SOCKS5_SOURCES),
+        len(_HTTP_SOURCES),
     )
 
-    # Fetch all sources in parallel (direct internet, no proxy needed here)
-    async with aiohttp.ClientSession(
-        connector=aiohttp.TCPConnector(limit=len(_PROXY_SOURCES), ssl=False),
-        headers={"User-Agent": "python-aiohttp/3"},
-        timeout=aiohttp.ClientTimeout(total=_FETCH_TIMEOUT_S + 5),
-    ) as session:
-        fetch_results = await asyncio.gather(
-            *[_fetch_source(session, url) for url in _PROXY_SOURCES],
-            return_exceptions=True,
-        )
+    # 1. Detect local Tor in parallel with source fetching
+    tor_task: asyncio.Task[str | None] = asyncio.create_task(_detect_local_tor())
 
-    # Deduplicate across all sources
-    seen: set[str] = set()
-    candidates: list[str] = []
-    for r in fetch_results:
-        if isinstance(r, list):
-            for url in r:
-                if url not in seen:
-                    seen.add(url)
-                    candidates.append(url)
+    # 2. Fetch SOCKS5 candidates from all sources
+    candidates = await _gather_candidates(_SOCKS5_SOURCES, protocol="socks5")
+    candidates = candidates[:_MAX_CANDIDATES]
 
     LOG.info(
-        "proxy auto-discovery: %d unique candidates — validating against Binance fstream...",
+        "proxy auto-discovery: %d unique SOCKS5 candidates — validating...",
         len(candidates),
     )
 
-    if not candidates:
-        LOG.error("proxy auto-discovery: all sources returned empty lists")
-        return []
+    working: list[tuple[str, float]] = []
+    if candidates:
+        working = await _validate_batch(
+            candidates,
+            validate_timeout=validate_timeout,
+            validate_concurrency=validate_concurrency,
+        )
 
-    candidates = candidates[:_MAX_CANDIDATES]  # memory guard
+    LOG.info(
+        "proxy auto-discovery SOCKS5: %d/%d reached Binance",
+        len(working),
+        len(candidates),
+    )
 
-    # Validate concurrently against the real Binance endpoint
-    sem = asyncio.Semaphore(validate_concurrency)
-    val_tasks = [
-        _validate_proxy_binance(u, sem, validate_timeout) for u in candidates
-    ]
-    val_results = await asyncio.gather(*val_tasks, return_exceptions=True)
+    # 3. HTTP fallback when SOCKS5 pool is insufficient
+    if len(working) < _MIN_WORKING_PROXIES:
+        LOG.warning(
+            "SOCKS5 pool insufficient (%d) — fetching HTTP fallback sources",
+            len(working),
+        )
+        http_candidates = await _gather_candidates(_HTTP_SOURCES, protocol="http")
+        http_candidates = http_candidates[:_MAX_CANDIDATES]
+        if http_candidates:
+            http_working = await _validate_batch(
+                http_candidates,
+                validate_timeout=validate_timeout,
+                validate_concurrency=validate_concurrency,
+            )
+            LOG.info(
+                "proxy auto-discovery HTTP fallback: %d/%d reached Binance",
+                len(http_working),
+                len(http_candidates),
+            )
+            working.extend(http_working)
 
-    working: list[tuple[str, float]] = [
-        r for r in val_results if isinstance(r, tuple)
-    ]
+    # 4. Inject local Tor if available
+    tor_url = await tor_task
+    if tor_url:
+        # Validate Tor too (it may be slow but reliable)
+        sem = asyncio.Semaphore(1)
+        tor_result = await _validate_proxy_binance(tor_url, sem, validate_timeout)
+        if tor_result:
+            working.insert(0, tor_result)  # Tor goes first — most reliable from RU
+            LOG.info("Tor SOCKS5 validated and added as primary proxy")
 
     if not working:
         LOG.error(
-            "proxy auto-discovery: 0/%d candidates reached Binance", len(candidates)
+            "proxy auto-discovery: 0 working proxies from all %d sources",
+            len(_SOCKS5_SOURCES) + len(_HTTP_SOURCES),
         )
         return []
 
@@ -321,9 +467,8 @@ async def auto_discover_proxies(
     best = [url for url, _ in working[:max_pool_size]]
 
     LOG.info(
-        "proxy auto-discovery done | validated=%d/%d best_ms=%.0f worst_ms=%.0f pool=%d",
+        "proxy auto-discovery done | validated=%d best_ms=%.0f worst_ms=%.0f pool=%d",
         len(working),
-        len(candidates),
         working[0][1],
         working[min(len(best) - 1, len(working) - 1)][1],
         len(best),

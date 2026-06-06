@@ -16,7 +16,7 @@ class ProxyPool:
     """Round-robin proxy list; failed endpoints cool off then become eligible again."""
 
     urls: list[str]
-    cooldown_seconds: float = 300.0
+    cooldown_seconds: float = 120.0
     _index: int = 0
     _bad_until: dict[str, float] = field(default_factory=dict)
     _success_count: dict[str, int] = field(default_factory=dict)
@@ -32,7 +32,7 @@ class ProxyPool:
         cleaned = _dedupe_urls(urls)
         if not cleaned:
             return None
-        return cls(cleaned, cooldown_seconds=max(30.0, float(cooldown_seconds)))
+        return cls(cleaned, cooldown_seconds=max(30.0, float(cooldown_seconds or 120.0)))
 
     def has_alternatives(self) -> bool:
         return len(self.urls) > 1
