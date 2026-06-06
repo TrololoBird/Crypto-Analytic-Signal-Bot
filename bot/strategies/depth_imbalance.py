@@ -7,6 +7,7 @@ from ._roadmap import (
     _confirmed_context_conflict,
     _finite_or_none,
     _has_l2_depth,
+    _last,
     _orderbook_source,
     _prev,
     _price_change_pct_confirmed,
