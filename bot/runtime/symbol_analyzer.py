@@ -80,7 +80,7 @@ _HISTORY_FETCH_BUFFER_BARS = 80
 _HISTORY_FETCH_BASELINE_BY_INTERVAL = {
     "5m": 300,
     "15m": 500,
-    "1h": 280,
+    "1h": 500,  # ema200 warmup (199 NaN rows) + min_bars_1h(210) requires ≥409 raw bars
     "4h": 500,
 }
 
