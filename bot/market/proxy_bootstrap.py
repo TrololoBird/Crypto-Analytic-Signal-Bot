@@ -533,6 +533,21 @@ async def ensure_network_ready(
         _log_probe_result("configured", configured)
 
     if direct.rest_ok:
+        explicit_proxy = str(settings.network.proxy_url or "").strip()
+        if not explicit_proxy:
+            # No explicitly configured proxy_url — auto-discovered pool should not override
+            # direct access.  Clear the pool so WS does not route through unstable free proxies.
+            if urls:
+                LOG.info(
+                    "direct Binance ok, no explicit proxy_url — clearing auto-discovered pool "
+                    "(%d entries) to use direct egress for both REST and WS",
+                    len(urls),
+                )
+            net = settings.network.model_copy(
+                update={"proxy_url": None, "proxy_urls": [], "failover_enabled": False}
+            )
+            return settings.model_copy(update={"network": net})
+        # Explicit proxy_url configured — honour it unless it fails
         if urls and not configured.rest_ok:
             LOG.warning(
                 "direct Binance ok but configured proxy failed — switching to direct egress"
