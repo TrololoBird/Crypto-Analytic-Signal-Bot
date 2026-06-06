@@ -916,6 +916,9 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         self._proxy_url = resolve_proxy_url(config_url=net.proxy_url, trust_env=net.trust_env)
         if not self._proxy_url and self._proxy_pool is not None:
             self._proxy_url = self._proxy_pool.current()
+        # Pool with multiple entries implies failover capability even if flag not set in config.
+        if not self._proxy_failover_enabled and self._proxy_pool is not None and self._proxy_pool.has_alternatives():
+            self._proxy_failover_enabled = True
         if self._proxy_url:
             apply_proxy_env(self._proxy_url)
         if self._proxy_pool is not None:
