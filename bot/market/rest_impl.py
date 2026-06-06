@@ -494,7 +494,9 @@ class RestHttpMixin(RestCircuitMixin):
                 _disc_task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
             raise
         except (*_SOCKS_PROXY_ERRORS, aiohttp.ClientError) as exc:
-            if is_proxy_transport_error(exc):
+            # When routed through a proxy, any connection error is proxy-related.
+            # Also check is_proxy_transport_error for direct-connection proxy errors.
+            if getattr(self, "_proxy_url", None) or is_proxy_transport_error(exc):
                 await self._try_failover_proxy(str(exc))
             self._record_circuit_failure(operation)
             raise MarketDataUnavailable(
