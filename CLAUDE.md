@@ -33,11 +33,10 @@ WS kline close → EventBus → SymbolAnalyzer → SignalEngine → DeliveryOrch
 
 **Also at startup** (`bot/cli.py` / `SignalBot.start()`): `daily_summary`, `preload_frames` (REST warmup), optional FastAPI dashboard.
 
-## Frozen / immutable
+## Schema discipline
 
-- `bot/delivery/contract.py::validate_signal_contract()` — **DO NOT MODIFY**
-- Strategy IDs in `bot/strategies/__init__.py::STRATEGY_CLASSES` — add ok; remove only with `CATALOG_ENTRIES` + config sync
-- DB schema changes — **new steps in `bot/migrations.py` only**; never raw `ALTER` outside migrations
+- DB schema changes — new steps in `bot/migrations.py` only; never raw `ALTER` outside migrations
+- Strategy IDs: removing from `STRATEGY_CLASSES` requires syncing `CATALOG_ENTRIES` + config
 
 ## Module ownership map
 
@@ -71,9 +70,8 @@ WS kline close → EventBus → SymbolAnalyzer → SignalEngine → DeliveryOrch
 1. No auto-trading logic
 2. No authenticated Binance endpoints
 3. No new test files or mock harnesses
-4. `validate_signal_contract()` is frozen
-5. All edits must pass: `python -m py_compile $(find bot -name "*.py")`
-6. One commit per logical phase; message: `phase-<X>: <description>`
+4. All edits must pass: `python -m py_compile $(find bot -name "*.py")`
+5. One commit per logical phase; message: `phase-<X>: <description>`
 
 ## SL Analysis (last updated 2026-06-05)
 

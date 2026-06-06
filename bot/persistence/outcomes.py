@@ -73,6 +73,8 @@ def classify_outcome_result(
             return "win"
         if was_profitable is False or (pnl_r_multiple is not None and pnl_r_multiple < 0.0):
             return "loss"
+        if outcome == "breakeven_stop":
+            return "win"
         return "neutral"
     if activated_at is not None:
         if was_profitable is True:
@@ -544,6 +546,23 @@ def create_outcome_from_tracked(
         elif pnl_r_multiple >= -0.10:
             outcome_result = "breakeven_stop"
 
+    # G1: TP1 marked before terminal close must appear as tp1_hit in signal_outcomes.
+    if tracked.tp1_hit_at is not None and outcome_result in {"expired_active", "breakeven_stop"}:
+        outcome_result = "tp1_hit"
+        tp1_exit = _normalized_float(tracked.tp1_price) or _normalized_float(tracked.take_profit_1)
+        if entry_price and tp1_exit:
+            exit_price = tp1_exit
+            if tracked.direction == "long":
+                pnl_pct = (tp1_exit - entry_price) / entry_price * 100.0
+            else:
+                pnl_pct = (entry_price - tp1_exit) / entry_price * 100.0
+            risk_stop = _normalized_float(
+                tracked.initial_stop if tracked.initial_stop is not None else tracked.stop
+            )
+            risk = abs(entry_price - risk_stop) if risk_stop is not None else 0.0
+            if risk > 0:
+                pnl_r_multiple = pnl_pct / (risk / entry_price * 100.0)
+
     time_to_entry_min = 0
     time_to_exit_min = 0
     if activated_at:
@@ -552,7 +571,8 @@ def create_outcome_from_tracked(
         time_to_exit_min = int((closed_at - created_at).total_seconds() / 60)
 
     # Определение качества сетапа
-    was_profitable = (pnl_pct > 0) if not is_monitoring_close else False
+    executed_for_pnl = not is_monitoring_close or outcome_result == "tp1_hit"
+    was_profitable = (pnl_pct > 0) if executed_for_pnl else False
     setup_quality = (
         "good" if pnl_r_multiple >= 1.0 else ("bad" if pnl_r_multiple <= -1.0 else "neutral")
     )

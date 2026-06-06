@@ -481,13 +481,14 @@ class PublicIntelligenceService:
             funding_trend = self._client.get_cached_funding_trend(symbol)
 
             flow_bias = "neutral"
-            if taker_ratio is not None and oi_change_pct is not None:
-                if taker_ratio > 1.03 and oi_change_pct > 0:
-                    flow_bias = "buyers_in_control"
-                elif taker_ratio < 0.97 and oi_change_pct > 0:
-                    flow_bias = "sellers_in_control"
-                elif oi_change_pct < 0:
-                    flow_bias = "position_unwind"
+            if taker_ratio is not None and taker_ratio > 1.03:
+                flow_bias = "buyers_in_control"
+            elif taker_ratio is not None and taker_ratio < 0.97:
+                flow_bias = "sellers_in_control"
+            elif oi_change_pct is not None and oi_change_pct > 0:
+                flow_bias = "position_build"
+            elif oi_change_pct is not None and oi_change_pct < 0:
+                flow_bias = "position_unwind"
 
             by_symbol[symbol] = {
                 "funding_rate": funding_rate,
@@ -564,7 +565,10 @@ class PublicIntelligenceService:
         risk_on_votes = 0
         confirmed_facts: list[str] = []
         for symbol in self._settings.intelligence.macro_symbols:
-            snapshot = await self._fetch_yahoo_chart_snapshot(symbol)
+            snapshot = await self._fetch_yahoo_chart_snapshot(
+                symbol,
+                max_staleness_s=float(_MACRO_TTL_S),
+            )
             if snapshot is None:
                 snapshot = {
                     "available": False,
@@ -771,10 +775,6 @@ class PublicIntelligenceService:
             "chandelier_dir",
             "zscore30",
             "slope5",
-            "ichi_tenkan",
-            "ichi_kijun",
-            "ichi_senkou_a",
-            "ichi_senkou_b",
         )
         features: dict[str, float | None] = {}
         placeholder_feature_count = 0
@@ -1005,11 +1005,19 @@ class PublicIntelligenceService:
     async def _fetch_options_mark_rows(self, _underlying: str) -> list[dict[str, Any]]:
         return []
 
-    async def _fetch_yahoo_chart_snapshot(self, symbol: str) -> dict[str, Any] | None:
+    async def _fetch_yahoo_chart_snapshot(
+        self,
+        symbol: str,
+        *,
+        max_staleness_s: float | None = None,
+    ) -> dict[str, Any] | None:
         now = time.monotonic()
+        ttl = float(max_staleness_s if max_staleness_s is not None else _MACRO_TTL_S)
         cached = self._macro_cache.get(symbol)
-        if cached is not None and now - cached[0] < _MACRO_TTL_S:
-            return cached[1]
+        if cached is not None and now - cached[0] < ttl:
+            payload = dict(cached[1])
+            payload["cache_age_s"] = round(now - cached[0], 2)
+            return payload
 
         try:
             payload = await self._fetch_json(

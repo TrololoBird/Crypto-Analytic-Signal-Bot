@@ -24,6 +24,7 @@ from bot.strategies import STRATEGY_CLASSES
 
 from ..domain.strategies import RISK_PROFILE_BY_ID, STRATEGY_STATUS_BY_ID
 from ..persistence.diary_store import DiaryStore
+from .access_audit import DashboardAccessAuditor, client_ip_from_request
 from .live import DashboardLiveData, _is_routing_excluded_decision_reason
 from .routes_setup import register_routes
 from .tracking_view import serialize_tracking_signal
@@ -106,6 +107,44 @@ class BotDashboard:
         )
 
         _open_paths = {"/api/health", "/api/status"}
+        runtime_settings = getattr(self.bot, "settings", None)
+        runtime_cfg = getattr(runtime_settings, "runtime", None)
+        rate_limit = int(getattr(runtime_cfg, "dashboard_rate_limit_per_minute", 120) or 120)
+        audit_enabled = bool(getattr(runtime_cfg, "dashboard_audit_log_enabled", True))
+        telemetry_dir = getattr(runtime_settings, "telemetry_dir", None)
+        audit_path = (
+            Path(telemetry_dir) / "dashboard_access.jsonl" if telemetry_dir is not None else None
+        )
+        self._access_auditor = DashboardAccessAuditor(
+            limit_per_minute=rate_limit,
+            log_path=audit_path,
+            enabled=audit_enabled,
+        )
+
+        @app.middleware("http")
+        async def dashboard_rate_limit_and_audit(request: Any, call_next: Any) -> Any:
+            path: str = request.url.path
+            if path in _open_paths or path.startswith("/static/"):
+                return await call_next(request)
+            client_ip = client_ip_from_request(request)
+            if not self._access_auditor.check_rate_limit(client_ip):
+                self._access_auditor.record_access(
+                    client_ip=client_ip,
+                    method=str(request.method),
+                    path=path,
+                    status_code=429,
+                    blocked=True,
+                )
+                if JSONResponse is not None:
+                    return JSONResponse({"detail": "rate_limit_exceeded"}, status_code=429)
+            response = await call_next(request)
+            self._access_auditor.record_access(
+                client_ip=client_ip,
+                method=str(request.method),
+                path=path,
+                status_code=int(getattr(response, "status_code", 200) or 200),
+            )
+            return response
 
         @app.middleware("http")
         async def token_auth(request: Any, call_next: Any) -> Any:

@@ -13,6 +13,7 @@ from .contract import (
     build_trade_plan,
     default_ttl_bars,
     normalize_scale_weights,
+    resolve_target_rr,
     valid_until_from,
 )
 
@@ -53,7 +54,10 @@ class TradePlanBuilder:
         ttl_bars: int | None = None,
         scale_weights: tuple[float, float, float] | list[float] | None = None,
         now: datetime | None = None,
+        target_rr: tuple[float, float, float] | None = None,
+        settings: Any | None = None,
     ) -> TradePlan | None:
+        effective_rr = target_rr or resolve_target_rr(settings)
         return build_trade_plan(
             direction=direction,
             setup_id=setup_id,
@@ -69,6 +73,7 @@ class TradePlanBuilder:
             created_at=created_at if created_at is not None else now,
             ttl_bars=ttl_bars,
             scale_weights=scale_weights,
+            target_rr=effective_rr,
         )
 
     @staticmethod

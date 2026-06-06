@@ -26,7 +26,12 @@ from bot.runtime.errors import DEFENSIVE_EXC
 from ..domain.limit_entry import (
     DEFAULT_ENTRY_ORDER_TYPE,
 )
-from ..persistence.tracked import TrackedSignalState, parse_state_dt
+from ..persistence.tracked import (
+    TrackedSignalState,
+    parse_state_dt,
+    resolve_terminal_close_reason,
+    tp1_reached_from_excursion,
+)
 from .outcomes import SignalFeatures, SignalOutcome, create_outcome_from_tracked
 
 if typing.TYPE_CHECKING:
@@ -467,6 +472,27 @@ class SignalTracker(_SignalTrackerBases):
         LOG.info("tracking reconciled missing closed outcomes | count=%d", len(payloads))
         return len(payloads)
 
+    async def reconcile_tp1_outcome_remap(self, *, limit: int = 200) -> int:
+        """Re-save outcomes where G1 remap applies but DB still shows expired_active."""
+        rows = await self.memory_repo.get_tp1_remap_candidates(limit=limit)
+        if not rows:
+            return 0
+        payloads: list[dict[str, Any]] = []
+        for row in rows:
+            tracking_id = str(row.get("tracking_id") or "")
+            if not tracking_id:
+                continue
+            try:
+                tracked = self._tracked_from_payload(row)
+                payloads.append(self._build_outcome_payload(tracked))
+            except (TypeError, ValueError) as exc:
+                LOG.debug("tp1 outcome remap skipped %s: %s", tracking_id, exc)
+        if not payloads:
+            return 0
+        await self.memory_repo.save_signal_outcomes_batch(payloads)
+        LOG.info("tracking remapped tp1 outcomes | count=%d", len(payloads))
+        return len(payloads)
+
     async def _arm_signal(
         self,
         signal: Signal,
@@ -587,10 +613,18 @@ class SignalTracker(_SignalTrackerBases):
         price: float | None,
         precision_mode: str,  # noqa: ARG002
     ) -> None:
+        reason = resolve_terminal_close_reason(tracked, reason)
+        if reason == "tp1_hit" and tracked.tp1_hit_at is None:
+            tracked.tp1_hit_at = occurred_at.astimezone(UTC).isoformat()
+            tracked.tp1_price = tracked.take_profit_1
+            if tp1_reached_from_excursion(tracked) and price is None:
+                price = tracked.take_profit_1
         tracked.status = "closed"
         tracked.closed_at = occurred_at.astimezone(UTC).isoformat()
         tracked.close_reason = reason
-        tracked.close_price = price
+        tracked.close_price = price if reason != "tp1_hit" else (
+            price if price is not None else tracked.tp1_price or tracked.take_profit_1
+        )
         if reason == "tp1_hit":
             if tracked.tp1_hit_at is None:
                 tracked.tp1_hit_at = occurred_at.astimezone(UTC).isoformat()
@@ -613,6 +647,54 @@ class SignalTracker(_SignalTrackerBases):
         }.get(reason)
         if deltas:
             await self.memory_repo.increment_tracking_stats(**deltas)
+
+    async def _apply_outcome_cooldowns(
+        self,
+        tracked: TrackedSignalState,
+        event_type: str,
+        occurred_at: datetime,
+    ) -> None:
+        filters = self.settings.filters
+        repo = self.memory_repo
+        sent_at = occurred_at.astimezone(UTC)
+        symbol = str(tracked.symbol or "").upper()
+        setup_id = str(tracked.setup_id or "")
+        direction = str(tracked.direction or "").lower()
+
+        symbol_minutes = int(getattr(filters, "symbol_cooldown_minutes", 0) or 0)
+        if symbol_minutes > 0:
+            await repo.set_cooldown(
+                f"strategy_symbol_direction:{symbol}:{direction}",
+                sent_at,
+                setup_id,
+                symbol,
+                "outcome_symbol_direction",
+            )
+
+        if event_type not in {"stop_loss", "breakeven_stop"}:
+            return
+
+        sl_minutes = int(getattr(filters, "outcome_sl_cooldown_minutes", 0) or 0)
+        if sl_minutes <= 0:
+            return
+
+        await repo.set_cooldown(
+            f"outcome_sl:{setup_id}:{symbol}",
+            sent_at,
+            setup_id,
+            symbol,
+            "outcome_sl",
+        )
+        from ..domain.strategy_catalog import catalog_setup_family
+
+        family = catalog_setup_family(setup_id)
+        await repo.set_cooldown(
+            f"outcome_sl_family:{family}:{symbol}:{direction}",
+            sent_at,
+            setup_id,
+            symbol,
+            "outcome_sl_family",
+        )
 
     async def _record_setup_outcome(
         self,
@@ -871,6 +953,22 @@ class SignalTracker(_SignalTrackerBases):
         if event_type in {"stop_loss", "breakeven_stop"} and tracked.activated_at is not None:
             with contextlib.suppress(RuntimeError):
                 asyncio.get_running_loop().create_task(self._capture_post_sl_recovery(tracked))
+
+        if tracked.activated_at is not None and event_type in {
+            "stop_loss",
+            "breakeven_stop",
+            "tp1_hit",
+            "tp2_hit",
+        }:
+            try:
+                await self._apply_outcome_cooldowns(tracked, event_type, occurred_at)
+            except DEFENSIVE_EXC:
+                LOG.debug(
+                    "outcome cooldown skipped | tracking_id=%s setup=%s",
+                    tracked.tracking_id,
+                    tracked.setup_id,
+                    exc_info=True,
+                )
 
         return SignalTrackingEvent(
             event_type=event_type,

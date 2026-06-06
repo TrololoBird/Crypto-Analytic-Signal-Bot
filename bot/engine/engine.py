@@ -39,7 +39,7 @@ def _default_executor_workers() -> int:
 
 _EXECUTOR_LOCK = threading.Lock()
 _EXECUTOR_RESET_EVERY_TIMEOUTS = 5
-_STRATEGY_TIMEOUT_CIRCUIT_THRESHOLD = 5
+_DEFAULT_STRATEGY_TIMEOUT_BREAKER = 5
 _STRATEGY_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
     max_workers=_default_executor_workers(),
     thread_name_prefix="signal-strategy",
@@ -549,14 +549,22 @@ class SignalEngine:
                 )
 
             prior_timeouts = _EXECUTOR_MODULE_STATE.timeout_by_strategy.get(strategy_id, 0)
-            if prior_timeouts >= _STRATEGY_TIMEOUT_CIRCUIT_THRESHOLD:
+            timeout_breaker = int(
+                getattr(
+                    getattr(self._settings, "runtime", None),
+                    "strategy_timeout_breaker",
+                    _DEFAULT_STRATEGY_TIMEOUT_BREAKER,
+                )
+                or _DEFAULT_STRATEGY_TIMEOUT_BREAKER
+            )
+            if prior_timeouts >= timeout_breaker:
                 decision = StrategyDecision.skip(
                     setup_id=strategy_id,
                     reason_code="engine.timeout_circuit_open",
                     details={
                         "symbol": symbol,
                         "prior_timeouts": prior_timeouts,
-                        "threshold": _STRATEGY_TIMEOUT_CIRCUIT_THRESHOLD,
+                        "threshold": timeout_breaker,
                         "queue_wait_ms": queue_wait_ms,
                     },
                 )

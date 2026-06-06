@@ -289,12 +289,17 @@ async def format_operator_health_text(bot: SignalBot) -> str:
     client = getattr(bot, "client", None)
     rest_pause = ""
     if client is not None:
-        pause_until = max(
-            float(getattr(client, "_rate_limit_pause_until", 0.0) or 0.0),
-            float(getattr(client, "_futures_data_pause_until", 0.0) or 0.0),
+        snap_fn = getattr(client, "state_snapshot", None)
+        snap = snap_fn() if callable(snap_fn) else {}
+        if not isinstance(snap, dict):
+            snap = {}
+        pause_remaining = max(
+            float(snap.get("rest_rate_limit_pause_remaining_s") or 0.0),
+            float(snap.get("futures_data_pause_remaining_s") or 0.0),
+            float(snap.get("funding_endpoint_pause_remaining_s") or 0.0),
         )
-        if pause_until > 0:
-            rest_pause = f"REST pause active until monotonic {pause_until:.0f}"
+        if pause_remaining > 0:
+            rest_pause = f"REST pause active ({pause_remaining:.0f}s remaining)"
 
     lines = [
         "<b>Health</b>",

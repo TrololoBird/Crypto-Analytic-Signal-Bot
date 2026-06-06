@@ -12,7 +12,8 @@ WS: [Market Streams](https://developers.binance.com/docs/derivatives/usds-margin
 | REQUEST_WEIGHT | 2400 / minute | exchangeInfo `rateLimits` |
 | 429 → backoff; 418 ban | General Info |
 | `/futures/data/*` | 1000 req / 5 min / IP | OI Statistics docs |
-| WS streams / connection | ≤ 1024 | Connect |
+| `/fapi/v1/fundingRate` + `/fapi/v1/fundingInfo` | 500 req / 5 min / IP (shared) | Funding Rate History |
+| WS streams / connection | ≤ 1024 (bot default 500) | Connect |
 | WS incoming messages | ≤ 10 / sec | Connect |
 | WS reconnect | every 24h | Connect |
 | `GET /fapi/v1/klines` weight | 1–10 by limit | Klines doc |
@@ -27,15 +28,15 @@ WS: [Market Streams](https://developers.binance.com/docs/derivatives/usds-margin
 | `GET /fapi/v1/klines` | 1–10 | OHLCV MTF cache |
 | `GET /fapi/v1/markPriceKlines` | 1–10 | Mark-based TA |
 | `GET /fapi/v1/indexPriceKlines` | 1–10 | Index TA |
-| `GET /fapi/v1/ticker/24hr` | 1 / ~40 all | Universe volume |
-| `GET /fapi/v1/ticker/bookTicker` | 1–2 | Spread |
-| `GET /fapi/v1/premiumIndex` | 1–10 | Mark, funding |
-| `GET /fapi/v1/fundingRate` | 1 | Funding history |
-| `GET /fapi/v1/fundingInfo` | 1 | Funding rules |
-| `GET /fapi/v1/depth` | 2–20 | L2 snapshot |
+| `GET /fapi/v1/ticker/24hr` | 1 / 40 all | Universe volume |
+| `GET /fapi/v1/ticker/bookTicker` | 2 / 5 all | Spread (bid/ask) |
+| `GET /fapi/v2/ticker/price` | 1 / 2 all | Last price (preferred) |
+| `GET /fapi/v1/premiumIndex` | 1 / 10 all | Mark, index, funding, settle est. |
+| `GET /fapi/v1/fundingRate` | weight 1; 500/5min IP | Funding history |
+| `GET /fapi/v1/fundingInfo` | weight 0; 500/5min IP | Cap/floor/interval adjustments |
+| `GET /fapi/v1/depth` | 2/5/10/20 by limit | L2 snapshot |
 | `GET /fapi/v1/aggTrades` | 20 | CVD backfill |
 | `GET /fapi/v1/openInterest` | 1 | OI snapshot |
-| `GET /fapi/v1/ticker/price` | 1–2 | Fallback price |
 | `GET /fapi/v1/constituents` | 2 | Index basket |
 
 ## REST `/futures/data/*` (separate IP budget)

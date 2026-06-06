@@ -10,7 +10,7 @@ from ..features.prepare import _swing_points as _sp
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
 from ..setups.utils import normalize_trade_levels
-from ._common import SpecHit, _latest_values, with_spec_columns
+from ._common import SpecHit, _latest_values, confirmed_pattern_frame, with_spec_columns
 
 if TYPE_CHECKING:
     import polars as pl
@@ -173,7 +173,7 @@ def _detect_turtle_soup_extended(
         ),
     )
 
-    w1h = prepared.work_1h
+    w1h = confirmed_pattern_frame(prepared.work_1h)
     if w1h.height < roll_bars + 3:
         _reject(prepared, setup_id, "insufficient_1h_bars", bars=w1h.height)
         return None
@@ -226,7 +226,7 @@ def _detect_turtle_soup_extended(
         return None
 
     # Confirm on 15m: first bar closes in direction of reversal with volume > avg
-    w15m = prepared.work_15m
+    w15m = confirmed_pattern_frame(prepared.work_15m)
     if w15m.height < 3:
         _reject(prepared, setup_id, "insufficient_15m_bars", bars=w15m.height)
         return None
@@ -461,7 +461,7 @@ class TurtleSoupSetup(SpecDetectorSetup):
     required_context = ("futures_flow",)
 
     DEFAULTS: ClassVar[dict[str, float]] = {
-        "base_score": 0.52,
+        "base_score": 0.60,
         "roll_bars": 20.0,
         "break_atr_mult": 0.1,
         "sl_buffer_atr": 0.5,

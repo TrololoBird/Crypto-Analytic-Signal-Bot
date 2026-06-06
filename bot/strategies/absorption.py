@@ -11,7 +11,7 @@ from ._common import (
     finite_or_none,
     with_spec_columns,
 )
-from ._roadmap import _build_atr_signal, _flow_delta_with_source, _last, _reject
+from ._roadmap import _build_atr_signal, _flow_delta_with_source, _last, _prev, _reject
 from .roadmap_base import RoadmapSetup
 
 if TYPE_CHECKING:
@@ -48,7 +48,7 @@ def detect_absorption(frame: pl.DataFrame, *, timeframe: str = "15m") -> SpecHit
         return SpecHit(
             strategy="absorption",
             direction="long",
-            entry=latest["close"],
+            entry=prev_close,
             stop_basis=as_float(prev.get("low")),
             atr=atr,
             timeframe=timeframe,
@@ -64,7 +64,7 @@ def detect_absorption(frame: pl.DataFrame, *, timeframe: str = "15m") -> SpecHit
         return SpecHit(
             strategy="absorption",
             direction="short",
-            entry=latest["close"],
+            entry=prev_close,
             stop_basis=as_float(prev.get("high")),
             atr=atr,
             timeframe=timeframe,
@@ -110,18 +110,21 @@ def detect_absorption_prepared(
         _reject(prepared, setup_id, "orderflow_delta_missing")
         return None
     work = prepared.work_15m
-    close_position = _last(work, "close_position", 0.5)
-    atr = _last(work, "atr14")
-    high = _last(work, "high")
-    low = _last(work, "low")
-    close = _last(work, "close")
-    open_ = _last(work, "open")
+    if work.height < 2:
+        _reject(prepared, setup_id, "insufficient_bars")
+        return None
+    close_position = _prev(work, "close_position", 0.5)
+    atr = _prev(work, "atr14")
+    high = _prev(work, "high")
+    low = _prev(work, "low")
+    close = _prev(work, "close")
+    open_ = _prev(work, "open")
     if min(atr, high, low, close, open_) <= 0.0:
         _reject(prepared, setup_id, "invalid_indicator_state", atr=atr)
         return None
     lower_wick_atr = (min(open_, close) - low) / atr
     upper_wick_atr = (high - max(open_, close)) / atr
-    vol_ratio = _last(work, "volume_ratio20", 1.0)
+    vol_ratio = _prev(work, "volume_ratio20", 1.0)
     volume_penalty = vol_ratio < float(params["min_volume_ratio"])
     if (
         flow <= -float(params["min_abs_flow_delta"])
@@ -157,6 +160,7 @@ def detect_absorption_prepared(
         ],
         family=family,
         structure_clarity=clarity,
+        confirmed_bar=True,
     )
 
 

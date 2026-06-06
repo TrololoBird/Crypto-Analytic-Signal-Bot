@@ -15,6 +15,7 @@ from ._common import (
     _latest_values,
     _valid_order_block_rows,
     as_float,
+    confirmed_pattern_frame,
     with_spec_columns,
 )
 
@@ -122,7 +123,8 @@ def _detect_breaker_block_extended(
     base_score = float(dynamic_params.get("base_score", defaults["base_score"]))
     min_volume_ratio = float(dynamic_params.get("min_volume_ratio", defaults["min_volume_ratio"]))
 
-    w1h = prepared.work_1h
+    w1h = confirmed_pattern_frame(prepared.work_1h)
+    w15m = confirmed_pattern_frame(prepared.work_15m)
     if w1h.height < 15:
         _reject(prepared, setup_id, "insufficient_1h_bars", bars=w1h.height)
         return None
@@ -156,7 +158,7 @@ def _detect_breaker_block_extended(
     else:
         entry_price = bb_low if bb_low >= price else bb_high
 
-    vol_ratio_15m = _last(prepared.work_15m, "volume_ratio20", 1.0)
+    vol_ratio_15m = _last(w15m, "volume_ratio20", 1.0)
     if vol_ratio_15m < min_volume_ratio:
         _reject(
             prepared,
@@ -167,7 +169,7 @@ def _detect_breaker_block_extended(
         )
         return None
 
-    close_position = _last(prepared.work_15m, "close_position", 0.5)
+    close_position = _last(w15m, "close_position", 0.5)
     if direction == "long" and close_position < float(
         dynamic_params.get(
             "min_acceptance_close_position_long",
@@ -329,7 +331,7 @@ class BreakerBlockSetup(SpecDetectorSetup):
     required_context = ("futures_flow",)
 
     DEFAULTS: ClassVar[dict[str, float]] = {
-        "base_score": 0.52,
+        "base_score": 0.60,
         "scan_bars": 72,
         "mitigation_threshold": 0.3,
         "sl_buffer_atr": 0.5,

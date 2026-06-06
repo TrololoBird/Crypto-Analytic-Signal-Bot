@@ -5,7 +5,9 @@ from typing import TYPE_CHECKING, ClassVar
 from ._roadmap import (
     _build_atr_signal,
     _finite_or_none,
+    _prev,
     _price_change_pct,
+    _price_change_pct_confirmed,
     _reject,
 )
 from .roadmap_base import RoadmapSetup
@@ -21,7 +23,7 @@ def _oi_divergence_price_change(prepared: PreparedSymbol, *, fallback_bars: int 
     frame_4h = prepared.work_4h
     if frame_4h.height >= 2 and "close" in frame_4h.columns:
         return _price_change_pct(frame_4h, bars=1)
-    return _price_change_pct(prepared.work_15m, fallback_bars)
+    return _price_change_pct_confirmed(prepared.work_15m, fallback_bars)
 
 
 def detect_oi_divergence(
@@ -57,6 +59,8 @@ def detect_oi_divergence(
     else:
         direction = "long"
         oi_context = "price_down_oi_contracting"
+    work = prepared.work_15m
+    entry_anchor = _prev(work, "ema20", 0.0) or None
     return _build_atr_signal(
         prepared=prepared,
         setup_id=setup_id,
@@ -69,7 +73,9 @@ def detect_oi_divergence(
             f"price_change={price_change:.2f}",
         ],
         family=family,
+        entry_anchor=entry_anchor,
         structure_clarity=min(abs(oi_change) / 0.05, 1.0),
+        confirmed_bar=True,
     )
 
 

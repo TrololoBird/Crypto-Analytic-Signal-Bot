@@ -24,6 +24,7 @@ from ..runtime_policy import (
     configured_primary_timeframe,
 )
 from .microstructure import add_microstructure_features
+from .prepare_columns import resolve_prepare_groups
 from .prepare_frame import (
     _add_advanced_indicators,
     _as_optional_float,
@@ -45,7 +46,7 @@ LOG = structlog.get_logger("bot.features.prepare")
 _MAX_CACHE_ENTRIES = 1200
 _FrameCacheValue = float | None
 _FrameCacheKey = tuple[
-    str, str, int, int, int, tuple[_FrameCacheValue, ...], tuple[object, ...] | None
+    str, str, int, int, int, tuple[_FrameCacheValue, ...], tuple[object, ...] | None, tuple[str, ...] | None
 ]
 _FRAME_CACHE_TAIL_COLUMNS = (
     "open",
@@ -362,35 +363,75 @@ def _regime_1h_confirmed(work_1h: pl.DataFrame, min_bars: int = 3) -> str:
     return "ranging"
 
 
-def _volume_poc(work: pl.DataFrame, lookback: int = 96, buckets: int = 20) -> float | None:
-    """Simplified Volume Point of Control (vectorized)."""
+def _volume_profile_levels(
+    work: pl.DataFrame,
+    lookback: int = 96,
+    buckets: int = 20,
+    *,
+    value_area_pct: float = 0.70,
+) -> tuple[float | None, float | None, float | None]:
+    """Return POC, VAH, VAL from a volume-profile histogram."""
     if len(work) < 10:
-        return None
+        return None, None, None
 
     tail = work.tail(lookback)
     price_min = _as_optional_float(tail["low"].min())
     price_max = _as_optional_float(tail["high"].max())
-
     if price_min is None or price_max is None or price_max <= price_min:
-        return price_max
+        return price_max, price_max, price_min
 
     bucket_size = (price_max - price_min) / buckets
-
-    # We need to distribute bar volume across all buckets the bar covers.
-    # This is slightly more complex to vectorize than simple close-based POC.
-    # For a simplified vectorized version, we'll use the bar midpoint for bucketing.
     midpoints = (tail["high"] + tail["low"]) / 2.0
     v_buckets = ((midpoints - price_min) / bucket_size).floor().cast(pl.Int32).clip(0, buckets - 1)
-
     vol_by_bucket = (
         pl.DataFrame({"b": v_buckets, "v": tail["volume"]}).group_by("b").agg(pl.col("v").sum())
     )
-
     if vol_by_bucket.is_empty():
-        return price_min
+        return price_min, price_max, price_min
 
-    poc_bucket = int(vol_by_bucket.sort("v", descending=True).row(0)[0])
-    return float(price_min + (poc_bucket + 0.5) * bucket_size)
+    rows = sorted(vol_by_bucket.iter_rows(named=True), key=lambda row: int(row["b"]))
+    total_volume = sum(float(row["v"] or 0.0) for row in rows)
+    if total_volume <= 0.0:
+        return price_min, price_max, price_min
+
+    poc_row = max(rows, key=lambda row: float(row["v"] or 0.0))
+    poc_bucket = int(poc_row["b"])
+    poc = float(price_min + (poc_bucket + 0.5) * bucket_size)
+
+    target_volume = total_volume * max(0.5, min(value_area_pct, 0.95))
+    accumulated = float(poc_row["v"] or 0.0)
+    included = {poc_bucket}
+    left = poc_bucket - 1
+    right = poc_bucket + 1
+    while accumulated < target_volume and (left >= 0 or right < buckets):
+        left_vol = 0.0
+        right_vol = 0.0
+        if left >= 0:
+            left_vol = next((float(row["v"] or 0.0) for row in rows if int(row["b"]) == left), 0.0)
+        if right < buckets:
+            right_vol = next(
+                (float(row["v"] or 0.0) for row in rows if int(row["b"]) == right),
+                0.0,
+            )
+        if right_vol >= left_vol and right < buckets:
+            accumulated += right_vol
+            included.add(right)
+            right += 1
+        elif left >= 0:
+            accumulated += left_vol
+            included.add(left)
+            left -= 1
+        else:
+            break
+
+    val = float(price_min + min(included) * bucket_size)
+    vah = float(price_min + (max(included) + 1) * bucket_size)
+    return poc, vah, val
+
+
+def _volume_poc(work: pl.DataFrame, lookback: int = 96, buckets: int = 20) -> float | None:
+    poc, _vah, _val = _volume_profile_levels(work, lookback=lookback, buckets=buckets)
+    return poc
 
 
 # ---------------------------------------------------------------------------
@@ -549,11 +590,12 @@ def _cached_prepare_frame(
     cache: _FrameCache | None = None,
     ws_manager: Any | None = None,
     fallback_book: tuple[float | None, float | None, float | None, float | None] | None = None,
+    active_groups: frozenset[str] | None = None,
 ) -> pl.DataFrame:
     """_prepare_frame with LRU cache keyed on (symbol, interval, close_time)."""
     if frame.is_empty() or "close_time" not in frame.columns or "close" not in frame.columns:
         result = _enrich_with_ws_data(
-            _prepare_frame(frame),
+            _prepare_frame(frame, active_groups=active_groups),
             symbol,
             ws_manager if interval == "15m" else None,
             fallback_book=fallback_book if interval == "15m" else None,
@@ -573,7 +615,7 @@ def _cached_prepare_frame(
         first_close_time_ns = _timestamp_ns(first["close_time"])
         close_time_ns = _timestamp_ns(last["close_time"])
     except (KeyError, TypeError, ValueError, OverflowError):
-        result = _prepare_frame(frame)
+        result = _prepare_frame(frame, active_groups=active_groups)
         for warning in _sanity_check_prepared_frame(result, symbol, interval):
             LOG.warning(
                 "prepared frame quality defect | symbol=%s interval=%s defect=%s",
@@ -584,6 +626,7 @@ def _cached_prepare_frame(
         return result
 
     tail_signature = _tail_value_signature(last)
+    groups_key = None if active_groups is None else tuple(sorted(active_groups))
     key = (
         symbol,
         interval,
@@ -592,6 +635,7 @@ def _cached_prepare_frame(
         close_time_ns,
         tail_signature,
         _ws_enrichment_signature(symbol, ws_manager if interval == "15m" else None),
+        groups_key,
     )
     target_cache = cache or _FRAME_CACHE
     cached = target_cache.get(key)
@@ -599,7 +643,7 @@ def _cached_prepare_frame(
         return cached
 
     result = _enrich_with_ws_data(
-        _prepare_frame(frame),
+        _prepare_frame(frame, active_groups=active_groups),
         symbol,
         ws_manager if interval == "15m" else None,
         fallback_book=fallback_book if interval == "15m" else None,
@@ -838,7 +882,16 @@ def prepare_symbol(
         )
         return None
 
-    work_1h = _cached_prepare_frame(_to_polars(frames.df_1h), symbol=sym, interval="1h")
+    active_groups = None
+    if settings is not None and hasattr(settings, "setups"):
+        active_groups = resolve_prepare_groups(settings.setups.enabled_setup_ids())
+
+    work_1h = _cached_prepare_frame(
+        _to_polars(frames.df_1h),
+        symbol=sym,
+        interval="1h",
+        active_groups=active_groups,
+    )
     data_quality_flags = take_frame_indicator_fallbacks()
     fallback_book = (frames.bid_price, frames.ask_price, frames.bid_qty, frames.ask_qty)
     work_15m = _cached_prepare_frame(
@@ -847,6 +900,7 @@ def prepare_symbol(
         interval="15m",
         ws_manager=ws_manager,
         fallback_book=fallback_book,
+        active_groups=active_groups,
     )
     data_quality_flags.extend(take_frame_indicator_fallbacks())
     if ws_manager is None and (frames.bid_qty is not None or frames.ask_qty is not None):
@@ -858,11 +912,21 @@ def prepare_symbol(
         )
     work_5m = None
     if frames.df_5m is not None and not frames.df_5m.is_empty():
-        work_5m = _cached_prepare_frame(_to_polars(frames.df_5m), symbol=sym, interval="5m")
+        work_5m = _cached_prepare_frame(
+            _to_polars(frames.df_5m),
+            symbol=sym,
+            interval="5m",
+            active_groups=active_groups,
+        )
         data_quality_flags.extend(take_frame_indicator_fallbacks())
     work_4h = None
     if frames.df_4h is not None and not frames.df_4h.is_empty():
-        work_4h = _cached_prepare_frame(_to_polars(frames.df_4h), symbol=sym, interval="4h")
+        work_4h = _cached_prepare_frame(
+            _to_polars(frames.df_4h),
+            symbol=sym,
+            interval="4h",
+            active_groups=active_groups,
+        )
         data_quality_flags.extend(take_frame_indicator_fallbacks())
 
     prepared_frames: list[tuple[str, pl.DataFrame | None]] = [
@@ -977,6 +1041,8 @@ def prepare_symbol(
 
     work_4h_frame = work_4h if work_4h is not None else pl.DataFrame()
     regime = _market_regime(work_4h_frame, work_1h=work_1h, work_15m=work_15m)
+    profile_1h = _volume_profile_levels(work_1h, lookback=48)
+    profile_15m = _volume_profile_levels(work_15m, lookback=96)
 
     return PreparedSymbol(
         universe=universe_symbol,
@@ -994,8 +1060,12 @@ def prepare_symbol(
         structure_1h=_market_structure_1h(work_1h),
         regime_4h_confirmed=_regime_4h_confirmed(work_4h_frame),
         regime_1h_confirmed=_regime_1h_confirmed(work_1h),  # 1H context for 15M signals
-        poc_1h=_volume_poc(work_1h, lookback=48),
-        poc_15m=_volume_poc(work_15m, lookback=96),
+        poc_1h=profile_1h[0],
+        poc_15m=profile_15m[0],
+        vah_1h=profile_1h[1],
+        val_1h=profile_1h[2],
+        vah_15m=profile_15m[1],
+        val_15m=profile_15m[2],
         depth_imbalance=book_depth_imbalance,
         microprice_bias=book_microprice_bias,
         depth_imbalance_source="rest_book_l1" if book_depth_imbalance is not None else None,

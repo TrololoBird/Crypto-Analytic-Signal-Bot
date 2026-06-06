@@ -65,38 +65,20 @@ def _is_preformatted_log_stderr(line: str) -> bool:
 
 
 def _run_doctor_check(settings: BotSettings) -> None:
-    """Run lightweight doctor diagnostics and log the result."""
+    """Run startup doctor diagnostics (fail-fast on critical issues)."""
+    from bot.diagnostics.startup_doctor import run_startup_doctor
+    from bot.strategies import STRATEGY_CLASSES
+
+    registered = {
+        str(getattr(cls, "setup_id", "") or "").strip()
+        for cls in STRATEGY_CLASSES
+        if str(getattr(cls, "setup_id", "") or "").strip()
+    }
     try:
-        report = {
-            "config_path": str(settings.config_path),
-            "pid_lock": str(settings.pid_file),
-            "logs_dir": str(settings.logs_dir),
-            "telemetry_dir": str(settings.telemetry_dir),
-            "db_path": str(settings.db_path),
-            "notifier": {
-                "provider": settings.notifiers.provider,
-                "telegram_enabled": settings.notifiers.provider == "telegram",
-            },
-            "config_filters": {
-                "min_atr_pct": settings.filters.min_atr_pct,
-                "min_score": settings.filters.min_score,
-                "freshness_15m_minutes": settings.filters.freshness_15m_minutes,
-                "freshness_1h_hours": settings.filters.freshness_1h_hours,
-            },
-            "ws": {
-                "base_url": settings.ws.base_url,
-                "public_base_url": settings.ws.public_base_url,
-                "market_base_url": settings.ws.market_base_url,
-                "subscribe_book_ticker": settings.ws.subscribe_book_ticker,
-            },
-            "setups_enabled": {
-                setup_id: getattr(settings.setups, setup_id, False)
-                for setup_id in settings.setups.enabled_setup_ids()
-            },
-        }
-        logging.getLogger("bot.cli").info("DOCTOR OK | %s", json.dumps(report, default=str))
+        run_startup_doctor(settings, registered_setup_ids=registered)
     except DEFENSIVE_EXC:
-        logging.getLogger("bot.cli").exception("DOCTOR DEGRADED")
+        logging.getLogger("bot.cli").exception("DOCTOR FAILED")
+        raise
 
 
 def _bootstrap_env_if_missing() -> None:
@@ -552,10 +534,12 @@ def build_parser() -> argparse.ArgumentParser:
     outcomes.add_argument("--setup", type=str, default="")
     backtest = sub.add_parser(
         "backtest",
-        help="Alias for outcomes - compute signal outcome stats from SQLite",
+        help="Historical walk-forward validation (Binance klines, no Telegram)",
     )
-    backtest.add_argument("--days", type=int, default=30)
+    backtest.add_argument("--symbol", type=str, default="BTCUSDT")
+    backtest.add_argument("--days", type=int, default=7)
     backtest.add_argument("--setup", type=str, default="")
+    backtest.add_argument("--interval", type=str, default="15m")
     replay = sub.add_parser("replay", help="Show latest replay telemetry rows")
     replay.add_argument("--tail", type=int, default=20)
     db = sub.add_parser("db", help="DB maintenance")
@@ -591,8 +575,17 @@ def run() -> None:
     if args.command == "stop":
         _run_stop_command(config_path)
         return
-    if args.command in ("outcomes", "backtest"):
+    if args.command == "outcomes":
         _run_outcomes_command(days=max(1, int(args.days)), setup_id=str(args.setup or "").strip())
+        return
+    if args.command == "backtest":
+        _run_backtest_command(
+            symbol=str(args.symbol or "BTCUSDT").strip().upper(),
+            days=max(3, int(args.days)),
+            setup_id=str(args.setup or "").strip(),
+            interval=str(args.interval or "15m").strip().lower(),
+            config_path=config_path,
+        )
         return
     if args.command == "replay":
         _run_replay_command(tail=max(1, int(args.tail)))
@@ -718,6 +711,35 @@ def _run_stop_command(config_path: str | Path = _CONFIG_DEFAULT) -> None:
         return
     os.kill(pid, signal.SIGTERM)
     print(f"Sent SIGTERM to pid {pid}.")
+
+
+def _run_backtest_command(
+    *,
+    symbol: str,
+    days: int,
+    setup_id: str,
+    interval: str,
+    config_path: str | Path,
+) -> None:
+    from bot.engine.backtest import run_historical_backtest
+
+    settings = load_settings(config_path)
+
+    async def _run() -> dict[str, Any]:
+        return await run_historical_backtest(
+            settings,
+            symbol=symbol,
+            days=days,
+            setup_id=setup_id,
+            interval=interval,
+            config_path=str(config_path),
+        )
+
+    try:
+        report = asyncio.run(_run())
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise SystemExit(str(exc)) from exc
+    print(json.dumps(report, ensure_ascii=True, indent=2))
 
 
 def _run_outcomes_command(*, days: int, setup_id: str = "") -> None:

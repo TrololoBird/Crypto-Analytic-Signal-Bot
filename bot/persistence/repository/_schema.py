@@ -3,67 +3,6 @@
 from __future__ import annotations
 
 REPOSITORY_CORE_DDL = """
-            -- LEGACY TABLE - read-only. Writes removed in Phase E.
-            -- Retained for dashboard backward-compatibility. Drop in a future migration.
-            CREATE TABLE IF NOT EXISTS signals (
-                signal_id TEXT PRIMARY KEY,
-                symbol TEXT NOT NULL,
-                strategy_id TEXT NOT NULL,
-                direction TEXT NOT NULL,
-                entry_price REAL NOT NULL,
-                stop_loss REAL NOT NULL,
-                take_profit_1 REAL NOT NULL,
-                take_profit_2 REAL NOT NULL,
-                score REAL NOT NULL,
-                created_at TEXT NOT NULL,
-                timeframe TEXT DEFAULT '1h',
-                atr_pct REAL DEFAULT 0.0,
-                spread_bps REAL DEFAULT 0.0,
-                rsi_1h REAL,
-                adx_1h REAL,
-                volume_ratio REAL,
-                funding_rate REAL,
-                oi_change_pct REAL,
-                features TEXT,  -- JSON
-                metadata TEXT,  -- JSON
-                outcome_id TEXT  -- Reference to outcome
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_signals_symbol ON signals(symbol);
-            CREATE INDEX IF NOT EXISTS idx_signals_strategy ON signals(strategy_id);
-            CREATE INDEX IF NOT EXISTS idx_signals_created ON signals(created_at);
-
-            -- LEGACY TABLE - read-only. Writes removed in Phase E.
-            CREATE TABLE IF NOT EXISTS outcomes (
-                outcome_id TEXT PRIMARY KEY,
-                signal_id TEXT NOT NULL,
-                symbol TEXT NOT NULL,
-                price_1h REAL,
-                price_4h REAL,
-                price_24h REAL,
-                pnl_1h REAL,
-                pnl_4h REAL,
-                pnl_24h REAL,
-                max_profit_pct REAL DEFAULT 0.0,
-                max_loss_pct REAL DEFAULT 0.0,
-                mae REAL DEFAULT 0.0,
-                mfe REAL DEFAULT 0.0,
-                hit_tp1 INTEGER DEFAULT 0,
-                hit_tp2 INTEGER DEFAULT 0,
-                hit_sl INTEGER DEFAULT 0,
-                result TEXT DEFAULT '',
-                updated_at TEXT NOT NULL,
-                closed_at TEXT,
-                time_to_tp1_min INTEGER,
-                time_to_tp2_min INTEGER,
-                time_to_sl_min INTEGER,
-                FOREIGN KEY (signal_id) REFERENCES signals(signal_id)
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_outcomes_symbol ON outcomes(symbol);
-            CREATE INDEX IF NOT EXISTS idx_outcomes_signal ON outcomes(signal_id);
-            CREATE INDEX IF NOT EXISTS idx_outcomes_result ON outcomes(result);
-
             CREATE TABLE IF NOT EXISTS config_versions (
                 version_id TEXT PRIMARY KEY,
                 config_json TEXT NOT NULL,

@@ -19,6 +19,36 @@ class AnalyzerMixinBase:
 
 
 class AnalyzerFamilyGatesMixin(AnalyzerMixinBase):
+    @staticmethod
+    def _htf_direction_allows(
+        signal: Signal,
+        prepared: PreparedSymbol,
+    ) -> tuple[bool, str | None, dict[str, Any]]:
+        """Symmetric HTF bias gate: longs need 4h uptrend; shorts need 4h downtrend."""
+        bias_1h = str(getattr(prepared, "bias_1h", "") or "neutral").lower()
+        bias_4h = str(getattr(prepared, "bias_4h", "") or "neutral").lower()
+        details: dict[str, Any] = {
+            "bias_1h": bias_1h,
+            "bias_4h": bias_4h,
+            "signal_direction": signal.direction,
+        }
+        direction = str(signal.direction or "").lower()
+        if direction == "long":
+            if bias_4h == "uptrend" and bias_1h in {"uptrend", "neutral"}:
+                details["htf_gate"] = "long_allowed_4h_uptrend"
+                return True, None, details
+            if bias_1h == "downtrend" and bias_4h != "uptrend":
+                return False, "long_blocked_without_4h_uptrend", details
+        elif direction == "short":
+            if bias_4h == "downtrend" and bias_1h in {"downtrend", "neutral"}:
+                details["htf_gate"] = "short_allowed_4h_downtrend"
+                return True, None, details
+            if bias_1h == "uptrend" and bias_4h != "downtrend":
+                return False, "short_blocked_without_4h_downtrend", details
+        if bias_1h == "neutral" and bias_4h == "neutral":
+            details["htf_gate"] = "neutral_htf_soft_pass"
+        return True, None, details
+
     def check_family_precheck(
         self,
         signal: Signal,
@@ -28,6 +58,10 @@ class AnalyzerFamilyGatesMixin(AnalyzerMixinBase):
         details = self.directional_context(signal, prepared)
         family = getattr(metadata, "family", signal.strategy_family)
         profile = getattr(metadata, "confirmation_profile", signal.confirmation_profile)
+        htf_ok, htf_reason, htf_details = self._htf_direction_allows(signal, prepared)
+        details.update(htf_details)
+        if not htf_ok:
+            return False, htf_reason, details
         details["family"] = family
         details["confirmation_profile"] = profile
         adx_1h = self._frame_float(prepared.work_1h, "adx14")
@@ -78,6 +112,10 @@ class AnalyzerFamilyGatesMixin(AnalyzerMixinBase):
             details["penalty_reason"] = f"family_precheck_opposes_{signal.direction}"
             return True, None, details
         if profile == "trend_follow" and details["flow_opposes"] and not details["trend_confirms"]:
+            bias_4h = str(getattr(prepared, "bias_4h", "") or "neutral").lower()
+            if signal.direction == "long" and bias_4h == "uptrend":
+                details["relaxed_reject"] = f"flow_precheck_opposes_{signal.direction}"
+                return True, None, details
             return False, f"flow_precheck_opposes_{signal.direction}", details
         return True, None, details
 
@@ -205,6 +243,9 @@ class AnalyzerFamilyGatesMixin(AnalyzerMixinBase):
             and details["flow_opposes"]
             and details["exhaustion_count"] == 0
         ):
+            if signal.direction == "long" and details["confirmation_count"] >= 1:
+                details["relaxed_reject"] = f"hard_context_opposes_{signal.direction}"
+                return True, None, details
             return False, f"hard_context_opposes_{signal.direction}", details
         if deep_analysis_asset and (
             primary_timeframe in {"1h", "4h"} or details["confirmation_count"] >= 1

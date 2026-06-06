@@ -1,15 +1,14 @@
 """SQLite + parquet persistence for signals and outcomes."""
 
-# TABLE NARRATIVE NOTE (added phase-C):
 # active_signals / signal_outcomes = primary tracking model (written by tracking.py lifecycle).
-# signals / outcomes = legacy analytics tables retained for dashboard and outcome queries.
-# Migration to unified model is deferred to a dedicated schema migration phase.
+# Legacy signals/outcomes tables removed in migration 9 (Phase H).
 
 from __future__ import annotations
 
 import json
 import logging
 import sqlite3
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -41,6 +40,7 @@ from .schema import (
 )
 
 LOG = logging.getLogger("bot.persistence.repository")
+_CACHE_MISS = object()
 
 
 _ACTIVE_SIGNALS_OPTIONAL_COLUMNS: dict[str, str] = {
@@ -78,6 +78,9 @@ class MemoryRepository(_MemoryRepositoryBases):
         self._data_dir.mkdir(parents=True, exist_ok=True)
         self._conn: aiosqlite.Connection | None = None
         self._extended_tables_ready = False
+        self._cooldown_cache: dict[str, datetime] = {}
+        self._cooldown_cache_mono: dict[str, float] = {}
+        self._cooldown_cache_ttl_s = 30.0
 
     def _require_conn(self) -> aiosqlite.Connection:
         conn = self._conn
@@ -417,75 +420,108 @@ class MemoryRepository(_MemoryRepositoryBases):
         del commit
 
     async def get_signal(self, signal_id: str) -> SignalRecord | None:
-        """Get signal by ID."""
+        """Legacy API shim — reads from ``active_signals`` by tracking_id."""
         if not self._conn:
             msg = "Repository not initialized"
             raise RuntimeError(msg)
 
         async with self._conn.execute(
-            "SELECT * FROM signals WHERE signal_id = ?", (signal_id,)
+            "SELECT * FROM active_signals WHERE tracking_id = ?",
+            (signal_id,),
         ) as cursor:
             row = await cursor.fetchone()
             if row:
-                return self._row_to_signal_record(row)
+                return self._active_row_to_signal_record(row)
             return None
 
     async def get_outcome(self, outcome_id: str) -> OutcomeRecord | None:
-        """Get outcome by ID."""
+        """Legacy API shim — reads from ``signal_outcomes`` by tracking_id."""
         if not self._conn:
             msg = "Repository not initialized"
             raise RuntimeError(msg)
 
         async with self._conn.execute(
-            "SELECT * FROM outcomes WHERE outcome_id = ?", (outcome_id,)
+            "SELECT * FROM signal_outcomes WHERE tracking_id = ?",
+            (outcome_id,),
         ) as cursor:
             row = await cursor.fetchone()
             if row:
-                return self._row_to_outcome_record(row)
+                return self._signal_outcome_row_to_outcome_record(row)
             return None
 
     async def get_outcome_by_signal(self, signal_id: str) -> OutcomeRecord | None:
-        """Get outcome for a signal."""
-        if not self._conn:
-            msg = "Repository not initialized"
-            raise RuntimeError(msg)
+        """Legacy API shim — reads outcome for a tracked signal id."""
+        return await self.get_outcome(signal_id)
 
-        async with self._conn.execute(
-            "SELECT * FROM outcomes WHERE signal_id = ?", (signal_id,)
-        ) as cursor:
-            row = await cursor.fetchone()
-            if row:
-                return self._row_to_outcome_record(row)
-            return None
-
-    async def get_signals_without_outcome(self, limit: int = 100) -> list[SignalRecord]:
-        """Get signals that don't have outcomes yet."""
+    async def get_tp1_remap_candidates(self, *, limit: int = 200) -> list[dict[str, Any]]:
+        """Closed rows where TP1 was marked but outcomes still show expired/BE."""
         if not self._conn:
             msg = "Repository not initialized"
             raise RuntimeError(msg)
 
         async with self._conn.execute(
             """
-            SELECT s.* FROM signals s
-            LEFT JOIN outcomes o ON s.signal_id = o.signal_id
-            WHERE o.outcome_id IS NULL
-            ORDER BY s.created_at DESC
+            SELECT a.*
+            FROM active_signals a
+            INNER JOIN signal_outcomes o ON a.tracking_id = o.tracking_id
+            WHERE a.status = 'closed'
+              AND a.activated_at IS NOT NULL
+              AND (
+                    a.tp1_hit_at IS NOT NULL
+                    OR a.close_reason IN ('tp1_hit', 'breakeven_stop')
+                  )
+              AND o.result IN ('expired_active', 'breakeven_stop')
+            ORDER BY a.closed_at DESC
+            LIMIT ?
+            """,
+            (max(1, int(limit)),),
+        ) as cursor:
+            rows = await cursor.fetchall()
+            result: list[dict[str, Any]] = []
+            for row in rows:
+                data = dict(row)
+                if data.get("reasons"):
+                    try:
+                        data["reasons"] = json.loads(data["reasons"])
+                    except json.JSONDecodeError:
+                        data["reasons"] = []
+                if data.get("scale_weights"):
+                    try:
+                        data["scale_weights"] = json.loads(data["scale_weights"])
+                    except json.JSONDecodeError:
+                        data["scale_weights"] = (0.5, 0.3, 0.2)
+                result.append(data)
+            return result
+
+    async def get_signals_without_outcome(self, limit: int = 100) -> list[SignalRecord]:
+        """Closed active rows missing ``signal_outcomes`` (reconcile backlog)."""
+        if not self._conn:
+            msg = "Repository not initialized"
+            raise RuntimeError(msg)
+
+        async with self._conn.execute(
+            """
+            SELECT a.*
+            FROM active_signals a
+            LEFT JOIN signal_outcomes o ON a.tracking_id = o.tracking_id
+            WHERE a.status = 'closed' AND o.tracking_id IS NULL
+            ORDER BY a.created_at DESC
             LIMIT ?
         """,
             (limit,),
         ) as cursor:
             rows = await cursor.fetchall()
-            return [self._row_to_signal_record(row) for row in rows]
+            return [self._active_row_to_signal_record(row) for row in rows]
 
     async def get_signals_by_strategy(
         self, strategy_id: str, since: datetime | None = None, limit: int = 1000
     ) -> list[SignalRecord]:
-        """Get signals for a strategy."""
+        """Read tracked signals for a setup from ``active_signals``."""
         if not self._conn:
             msg = "Repository not initialized"
             raise RuntimeError(msg)
 
-        query = "SELECT * FROM signals WHERE strategy_id = ?"
+        query = "SELECT * FROM active_signals WHERE setup_id = ?"
         params: list[Any] = [strategy_id]
 
         if since:
@@ -497,7 +533,7 @@ class MemoryRepository(_MemoryRepositoryBases):
 
         async with self._conn.execute(query, params) as cursor:
             rows = await cursor.fetchall()
-            return [self._row_to_signal_record(row) for row in rows]
+            return [self._active_row_to_signal_record(row) for row in rows]
 
     async def get_signals_for_analysis(
         self,
@@ -505,24 +541,33 @@ class MemoryRepository(_MemoryRepositoryBases):
         min_score: float = 0.0,
         until: datetime | None = None,
     ) -> pl.DataFrame:
-        """Get signals as Polars DataFrame for analysis."""
+        """Get tracked signal outcomes as Polars DataFrame for analysis."""
         if not self._conn:
             msg = "Repository not initialized"
             raise RuntimeError(msg)
 
         query = """
-            SELECT s.*, o.result, o.pnl_24h, o.max_profit_pct, o.max_loss_pct
-            FROM signals s
-            LEFT JOIN outcomes o ON s.signal_id = o.signal_id
-            WHERE s.created_at > ? AND s.score >= ?
+            SELECT
+                o.tracking_id AS signal_id,
+                o.symbol,
+                o.setup_id AS strategy_id,
+                o.direction,
+                o.entry_price,
+                o.exit_price,
+                o.result,
+                o.pnl_pct AS pnl_24h,
+                o.max_profit_pct,
+                o.max_loss_pct,
+                o.score,
+                o.created_at
+            FROM signal_outcomes o
+            WHERE o.created_at > ? AND COALESCE(o.score, 0) >= ?
         """
         params: list[Any] = [since.isoformat(), min_score]
         if until is not None:
-            query += " AND s.created_at <= ?"
+            query += " AND o.created_at <= ?"
             params.append(until.isoformat())
-        query += """
-            ORDER BY s.created_at DESC
-        """
+        query += " ORDER BY o.created_at DESC"
 
         async with self._conn.execute(query, params) as cursor:
             rows = await cursor.fetchall()
@@ -530,7 +575,6 @@ class MemoryRepository(_MemoryRepositoryBases):
         if not rows:
             return pl.DataFrame(schema=SIGNAL_ANALYSIS_SCHEMA)
 
-        # Convert to dicts for Polars
         data = [dict(row) for row in rows]
         return pl.DataFrame(data)
 
@@ -578,6 +622,52 @@ class MemoryRepository(_MemoryRepositoryBases):
             row = await cursor.fetchone()
             return row["config_json"] if row else None
 
+    @staticmethod
+    def _active_row_to_signal_record(row: aiosqlite.Row) -> SignalRecord:
+        data = dict(row)
+        entry_mid = float(data.get("entry_mid") or 0.0)
+        mapped = {
+            "signal_id": data.get("tracking_id"),
+            "symbol": data.get("symbol"),
+            "strategy_id": data.get("setup_id"),
+            "direction": data.get("direction"),
+            "entry_price": data.get("activation_price") or entry_mid,
+            "stop_loss": data.get("stop"),
+            "take_profit_1": data.get("take_profit_1"),
+            "take_profit_2": data.get("take_profit_2"),
+            "score": data.get("score") or 0.0,
+            "created_at": data.get("created_at"),
+            "timeframe": data.get("timeframe") or "15m",
+            "atr_pct": data.get("atr_pct") or 0.0,
+            "spread_bps": data.get("spread_bps") or 0.0,
+            "funding_rate": data.get("funding_rate"),
+            "features": {},
+            "metadata": {"status": data.get("status")},
+        }
+        return SignalRecord.from_dict(mapped)
+
+    @staticmethod
+    def _signal_outcome_row_to_outcome_record(row: aiosqlite.Row) -> OutcomeRecord:
+        data = dict(row)
+        result = str(data.get("result") or "")
+        mapped = {
+            "outcome_id": data.get("tracking_id"),
+            "signal_id": data.get("tracking_id"),
+            "symbol": data.get("symbol"),
+            "max_profit_pct": data.get("max_profit_pct") or 0.0,
+            "max_loss_pct": data.get("max_loss_pct") or 0.0,
+            "mae": data.get("mae") or data.get("max_loss_pct") or 0.0,
+            "mfe": data.get("mfe") or data.get("max_profit_pct") or 0.0,
+            "hit_tp1": int(result in {"tp1_hit", "tp2_hit", "tp3_hit"}),
+            "hit_tp2": int(result in {"tp2_hit", "tp3_hit"}),
+            "hit_sl": int(result in {"stop_loss", "breakeven_stop", "trailing_stop"}),
+            "result": result,
+            "updated_at": data.get("closed_at") or data.get("created_at"),
+            "closed_at": data.get("closed_at"),
+            "pnl_24h": data.get("pnl_pct"),
+        }
+        return OutcomeRecord.from_dict(mapped)
+
     def _row_to_signal_record(self, row: aiosqlite.Row) -> SignalRecord:
         """Convert DB row to SignalRecord."""
         data = dict(row)
@@ -615,18 +705,44 @@ class MemoryRepository(_MemoryRepositoryBases):
     # Cooldown methods (replaces SignalCooldownStore)
     # ------------------------------------------------------------------
 
+    def _cooldown_cache_get(self, cooldown_key: str) -> datetime | None | object:
+        loaded_at = self._cooldown_cache_mono.get(cooldown_key)
+        if loaded_at is None:
+            return _CACHE_MISS
+        if (time.monotonic() - loaded_at) > self._cooldown_cache_ttl_s:
+            self._cooldown_cache.pop(cooldown_key, None)
+            self._cooldown_cache_mono.pop(cooldown_key, None)
+            return _CACHE_MISS
+        return self._cooldown_cache.get(cooldown_key)
+
+    def _cooldown_cache_put(self, cooldown_key: str, sent_at: datetime | None) -> None:
+        now = time.monotonic()
+        if sent_at is None:
+            self._cooldown_cache.pop(cooldown_key, None)
+            self._cooldown_cache_mono[cooldown_key] = now
+            return
+        self._cooldown_cache[cooldown_key] = sent_at
+        self._cooldown_cache_mono[cooldown_key] = now
+
     async def get_cooldown(self, cooldown_key: str) -> datetime | None:
         """Get last sent time for a cooldown key."""
         if not self._conn:
             msg = "Repository not initialized"
             raise RuntimeError(msg)
 
+        cached = self._cooldown_cache_get(cooldown_key)
+        if cached is not _CACHE_MISS:
+            return cached if isinstance(cached, datetime) else None
+
         async with self._conn.execute(
             "SELECT last_sent_at FROM cooldowns WHERE cooldown_key = ?", (cooldown_key,)
         ) as cursor:
             row = await cursor.fetchone()
             if row:
-                return datetime.fromisoformat(row["last_sent_at"])
+                parsed = datetime.fromisoformat(row["last_sent_at"])
+                self._cooldown_cache_put(cooldown_key, parsed)
+                return parsed
+            self._cooldown_cache_put(cooldown_key, None)
             return None
 
     async def purge_cooldowns_older_than(
@@ -674,6 +790,32 @@ class MemoryRepository(_MemoryRepositoryBases):
             (cooldown_key, sent_at.isoformat(), setup_id, symbol, cooldown_type),
         )
         await self._conn.commit()
+        self._cooldown_cache_put(cooldown_key, sent_at.astimezone(UTC))
+
+    async def read_market_cache(self, cache_key: str, *, max_age_s: float) -> str | None:
+        if not self._conn:
+            return None
+        from bot.market.data import read_market_data_cache
+
+        return await read_market_data_cache(self._conn, cache_key, max_age_s=max_age_s)
+
+    async def write_market_cache(
+        self,
+        cache_key: str,
+        payload_json: str,
+        *,
+        ttl_seconds: int = 3600,
+    ) -> None:
+        if not self._conn:
+            return
+        from bot.market.data import write_market_data_cache
+
+        await write_market_data_cache(
+            self._conn,
+            cache_key,
+            payload_json,
+            ttl_seconds=ttl_seconds,
+        )
 
     async def is_cooldown_active(
         self, cooldown_key: str, cooldown_minutes: int, now: datetime | None = None
@@ -933,8 +1075,15 @@ class MemoryRepository(_MemoryRepositoryBases):
             """
             UPDATE active_signals
             SET status = 'closed',
-                close_reason = 'expired',
-                close_price = COALESCE(last_price, activation_price, entry_mid, close_price),
+                close_reason = CASE
+                    WHEN activated_at IS NOT NULL AND tp1_hit_at IS NOT NULL THEN 'tp1_hit'
+                    ELSE 'expired'
+                END,
+                close_price = CASE
+                    WHEN activated_at IS NOT NULL AND tp1_hit_at IS NOT NULL
+                        THEN COALESCE(tp1_price, take_profit_1, last_price, activation_price, entry_mid)
+                    ELSE COALESCE(last_price, activation_price, entry_mid, close_price)
+                END,
                 closed_at = ?
             WHERE status IN ('pending', 'active')
               AND created_at < ?

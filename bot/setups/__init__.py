@@ -9,7 +9,9 @@ from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from ..delivery.contract import resolve_target_rr
 from ..delivery.trade_plan import TradePlanBuilder
+from ..domain.risk import RiskParams
 from ..domain.schemas import PreparedSymbol, Signal
 from ..domain.strategies import StrategyDecision
 from ..features.prepare import _swing_points  # shared swing detection helper
@@ -326,7 +328,7 @@ def _build_signal(
     atr: float,
     timeframe: str = "15m",
     strategy_family: str = "continuation",
-    entry_pad_atr_mult: float = 0.08,
+    entry_pad_atr_mult: float = 0.35,
 ) -> Signal | None:
     if not math.isfinite(float(atr)) or atr <= 0.0:
         _reject(
@@ -338,6 +340,9 @@ def _build_signal(
         )
         return None
     signal_timeframe = str(timeframe or "15m")
+    settings = getattr(prepared, "settings", None)
+    target_rr = resolve_target_rr(settings)
+    min_rr = float(getattr(getattr(settings, "filters", None), "min_risk_reward", 1.9))
     trade_plan = TradePlanBuilder.build(
         direction=direction,
         setup_id=setup_id,
@@ -349,6 +354,8 @@ def _build_signal(
         tp1=tp1,
         tp2=tp2,
         entry_pad_atr_mult=entry_pad_atr_mult,
+        target_rr=target_rr,
+        settings=settings,
     )
     if trade_plan is None:
         _reject(
@@ -372,14 +379,32 @@ def _build_signal(
         ls_ratio = getattr(prepared, "ls_ratio", None)
 
     entry_mid = trade_plan.entry_mid
+    risk_params = RiskParams(
+        entry=entry_mid,
+        stop=trade_plan.stop_loss,
+        tp1=trade_plan.tp1,
+        tp2=trade_plan.tp2,
+        tp3=trade_plan.tp3,
+        direction=direction,
+    )
+    risk_issues = risk_params.validate(min_rr=min_rr)
+    if risk_issues:
+        _reject(
+            prepared,
+            setup_id,
+            "targets.risk_params_invalid",
+            issues=",".join(risk_issues),
+            rr1=round(risk_params.rr1(), 4),
+        )
+        return None
     risk = abs(entry_mid - trade_plan.stop_loss)
     reward = abs(trade_plan.tp1 - entry_mid)
     risk_reward = reward / risk if risk > 0 else None
 
     trend_direction = getattr(prepared, "bias_1h", None)
     trend_score = getattr(prepared, "trend_score_1h", None)
-    # floor: no signal delivered below 0.38 after penalties
-    score = max(0.38, round(float(score), 4))
+    # floor: skip sub-threshold signals before filter pipeline (min_score margin)
+    score = max(0.63, round(float(score), 4))
 
     return Signal(
         symbol=prepared.symbol,

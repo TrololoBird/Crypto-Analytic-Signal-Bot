@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from ..setups.spec_runtime import SpecDetectorSetup
-from ._common import SpecHit, _latest_values, with_spec_columns
+from ._common import SpecHit, _latest_values, confirmed_pattern_frame, with_spec_columns
 
 __all__ = ["detect_volume_anomaly"]
 import math
@@ -35,7 +35,7 @@ def detect_volume_anomaly(frame: pl.DataFrame, *, timeframe: str = "15m") -> Spe
     return SpecHit(
         strategy="volume_anomaly",
         direction=direction,
-        entry=row["close"],
+        entry=row["open"],
         stop_basis=stop_basis,
         atr=atr,
         timeframe=timeframe,
@@ -68,7 +68,7 @@ def _detect_volume_anomaly_extended(
     effective_params = effective
     # FIX 2026-05-21: spec demands a decisive latest candle; keep the
     # configured recent-bar volume anomaly fallback live on a miss.
-    work = prepared.work_15m
+    work = confirmed_pattern_frame(prepared.work_15m)
     if work.height < 30:
         _reject(prepared, setup_id, "insufficient_15m_bars")
         return None
@@ -345,7 +345,7 @@ class VolumeAnomalySetup(SpecDetectorSetup):
     required_context = ("futures_flow",)
 
     DEFAULTS: ClassVar[dict[str, float]] = {
-        "base_score": 0.52,
+        "base_score": 0.60,
         "min_volume_ratio": 1.35,
         "adaptive_volume_floor": 1.1,
         "min_body_atr": 0.25,

@@ -6,6 +6,7 @@ from ._roadmap import (
     _as_float,
     _build_atr_signal,
     _missing_columns,
+    _prev,
     _reject,
 )
 from .roadmap_base import RoadmapSetup
@@ -33,7 +34,7 @@ def _current_expansion_candidate(
     min_ratio = float(params["min_atr_expansion_ratio"])
     min_body_atr = float(params["min_body_atr"])
 
-    for idx in range(work.height - 1, start_idx - 1, -1):
+    for idx in range(work.height - 2, start_idx - 1, -1):
         open_ = _as_float(work.item(idx, "open"))
         high = _as_float(work.item(idx, "high"))
         low = _as_float(work.item(idx, "low"))
@@ -92,11 +93,13 @@ def detect_atr_expansion_prepared(
     body_atr = float(candidate["body_atr"])
     signal_lag = int(candidate["signal_lag"])
     source_timeframe = str(candidate["timeframe"])
+    entry_anchor = _prev(prepared.work_15m, "ema20", 0.0) or None
     return _build_atr_signal(
         prepared=prepared,
         setup_id=setup_id,
         direction=direction,
         params=params,
+        confirmed_bar=True,
         reasons=[
             f"atr_expansion_{direction}",
             f"source_tf={source_timeframe}",
@@ -105,6 +108,7 @@ def detect_atr_expansion_prepared(
             f"signal_lag={signal_lag}",
         ],
         family=family,
+        entry_anchor=entry_anchor,
         timeframe=source_timeframe,
         structure_clarity=min((ratio - 1.0) / 1.0, 1.0),
     )

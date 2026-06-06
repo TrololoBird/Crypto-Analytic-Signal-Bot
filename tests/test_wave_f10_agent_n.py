@@ -247,6 +247,8 @@ def _filter_prepared(**overrides: object) -> PreparedSymbol:
         bid_price=100.0,
         ask_price=100.1,
         spread_bps=5.0,
+        mark_price=100.0,
+        ticker_price=100.05,
         btc_phase="decline",
         regime_1h_confirmed="uptrend",
         funding_rate=0.0001,

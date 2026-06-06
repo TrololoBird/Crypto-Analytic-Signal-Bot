@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, ClassVar
 from ..features.prepare import _swing_points as _sp
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
+from ._common import confirmed_pattern_frame
 from ._roadmap import _confirmed_context_conflict
 from .bb_squeeze import detect_bb_squeeze_release
 
@@ -163,7 +164,7 @@ def _detect_squeeze_setup_extended(
     family: str,
 ) -> Signal | None:
     dynamic_params = effective
-    work_15m = prepared.work_15m
+    work_15m = confirmed_pattern_frame(prepared.work_15m)
     # FIX 2026-05-21: the spec layer is intentionally strict; when it misses,
     # keep the prepared squeeze_on/off and compression-window fallback live.
     bb_squeeze_threshold = _as_float(

@@ -231,6 +231,8 @@ async def test_emergency_cycle_per_symbol_delivery_status_from_rejects() -> None
     selected_signal = MagicMock(symbol="BTCUSDT", tracking_id="tid-1")
     selected_signal.to_log_row.return_value = {"symbol": "BTCUSDT", "setup_id": "ema_bounce"}
     bot._select_and_rank.return_value = [selected_signal]
+    bot._delivery_orchestrator = MagicMock()
+    bot._delivery_orchestrator.preload_ranking_cooldowns = AsyncMock()
     bot._select_and_deliver = AsyncMock(
         return_value=(
             [],

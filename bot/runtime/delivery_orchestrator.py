@@ -14,7 +14,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
-from collections import Counter
+import time
+from collections import Counter, deque
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -94,7 +95,7 @@ else:
 
 
 LOG = logging.getLogger("bot.runtime.bot")
-MIN_CONFIRMATIONS = 3  # confirmations: ADR-003 hard confluence gate
+_DEFAULT_MIN_CONFIRMATIONS = 3  # confirmations: ADR-003 hard confluence gate
 WEIGHTED_HARD_LEG_KEYS = ("trend", "momentum", "volume")
 MIN_WEIGHTED_HARD_LEGS = 2
 DELIVERY_SUCCESS_STATUSES = frozenset({"sent", "logged"})
@@ -108,6 +109,22 @@ def _delivery_contract_gate_order_anchor(signal: Signal) -> list[SignalContractI
 class DeliveryOrchestrator(_DeliveryOrchestratorBases):
     def __init__(self, bot: SignalBot) -> None:
         self._bot = bot
+        self._delivery_burst_times: deque[float] = deque(maxlen=256)
+
+    def _burst_delivery_allows(self) -> tuple[bool, int]:
+        cap = int(getattr(self._bot.settings.delivery, "max_signals_per_minute", 0) or 0)
+        if cap <= 0:
+            return True, 0
+        now = time.monotonic()
+        window_start = now - 60.0
+        while self._delivery_burst_times and self._delivery_burst_times[0] < window_start:
+            self._delivery_burst_times.popleft()
+        if len(self._delivery_burst_times) >= cap:
+            return False, cap
+        return True, cap
+
+    def _record_burst_delivery(self) -> None:
+        self._delivery_burst_times.append(time.monotonic())
 
     def _record_delivery_diag_reject(
         self,
@@ -322,6 +339,9 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         delivery = self._bot.settings.delivery
         return {
             "enforce_mtf_gate": bool(getattr(delivery, "enforce_mtf_gate", True)),
+            "min_confirmations": int(
+                getattr(delivery, "min_confirmations", _DEFAULT_MIN_CONFIRMATIONS)
+            ),
             "reversal_min_confirmations": int(getattr(delivery, "reversal_min_confirmations", 3)),
             "use_weighted_confluence": bool(getattr(delivery, "use_weighted_confluence", True)),
             "weighted_min_hard_legs": int(getattr(delivery, "weighted_min_hard_legs", 2)),
@@ -340,6 +360,7 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         prepared: PreparedSymbol | None,
         *,
         enforce_mtf_gate: bool = True,
+        min_confirmations: int = _DEFAULT_MIN_CONFIRMATIONS,
         reversal_min_confirmations: int = 3,
         use_weighted_confluence: bool = True,
         weighted_min_hard_legs: int = MIN_WEIGHTED_HARD_LEGS,
@@ -364,7 +385,7 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
                     "bear_regime_source": "none",
                     "btc_phase": "unknown",
                     "btc_phase_rule": "none",
-                    "required": MIN_CONFIRMATIONS,
+                    "required": min_confirmations,
                     "confirmed": 0,
                     "mtf_reason": "",
                 },
@@ -476,10 +497,11 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
             "microstructure": microstructure,
         }
         confirmation_count = sum(confirmations.values())
-        if profile in REVERSAL_PROFILES and bear_regime and not use_weighted_confluence:
-            required = max(MIN_CONFIRMATIONS, min(int(reversal_min_confirmations), 5))
-        else:
-            required = MIN_CONFIRMATIONS
+        required = min_confirmations
+        if profile in REVERSAL_PROFILES and bear_regime:
+            required = max(required, min(int(reversal_min_confirmations), 5))
+        if btc_phase_rule != "none" and profile in REVERSAL_PROFILES:
+            required = max(required, min_confirmations + 1)
         details: dict[str, object] = {
             "confirmed": confirmation_count,
             "required": required,
@@ -510,6 +532,13 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
                 getattr(delivery_cfg, "weighted_min_hard_legs", weighted_min_hard_legs)
                 or weighted_min_hard_legs
             )
+            if profile in REVERSAL_PROFILES and bear_regime:
+                min_hard = max(
+                    min_hard,
+                    min(int(reversal_min_confirmations), len(WEIGHTED_HARD_LEG_KEYS)),
+                )
+            if btc_phase_rule != "none" and profile in REVERSAL_PROFILES:
+                min_hard = max(min_hard, min(required, len(WEIGHTED_HARD_LEG_KEYS)))
             boolean_pass, weighted_details = evaluate_weighted_delivery_gate(
                 conf_result=conf_result,
                 confirmations=confirmations,
@@ -707,6 +736,7 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         ready_to_send: list[Signal] = []
         rejected_rows: list[dict[str, Any]] = []
         queued_symbol_direction: set[str] = set()
+        queued_family_keys: set[str] = set()
         queued_setup_ids: set[str] = set()
         contract_validated_tracking_ids: set[str] = set()
         confluence_passed_tracking_ids: set[str] = set()
@@ -1046,6 +1076,90 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
                 )
                 continue
 
+            family_key = self._family_cooldown_key(signal)
+            family_minutes = int(getattr(self._bot.settings.filters, "family_cooldown_minutes", 0) or 0)
+            if family_key in queued_family_keys:
+                rejected_rows.append(
+                    {
+                        "ts": datetime.now(UTC).isoformat(),
+                        "symbol": signal.symbol,
+                        "setup_id": signal.setup_id,
+                        "direction": signal.direction,
+                        "stage": "cooldown",
+                        "reason": "family_cooldown_queued",
+                        "cooldown_minutes": family_minutes,
+                    }
+                )
+                continue
+            if family_minutes > 0:
+                is_family_cooldown = await self._bot._modern_repo.is_cooldown_active(
+                    family_key,
+                    family_minutes,
+                )
+                if is_family_cooldown:
+                    rejected_rows.append(
+                        {
+                            "ts": datetime.now(UTC).isoformat(),
+                            "symbol": signal.symbol,
+                            "setup_id": signal.setup_id,
+                            "direction": signal.direction,
+                            "stage": "cooldown",
+                            "reason": "family_cooldown_active",
+                            "cooldown_minutes": family_minutes,
+                        }
+                    )
+                    continue
+
+            outcome_sl_minutes = int(
+                getattr(self._bot.settings.filters, "outcome_sl_cooldown_minutes", 0) or 0
+            )
+            if outcome_sl_minutes > 0:
+                blocked = False
+                for outcome_key in (
+                    f"outcome_sl:{signal.setup_id}:{signal.symbol}",
+                    f"outcome_sl_family:{family_key.removeprefix('family:')}",
+                ):
+                    if await self._bot._modern_repo.is_cooldown_active(
+                        outcome_key,
+                        outcome_sl_minutes,
+                    ):
+                        blocked = True
+                        break
+                if blocked:
+                    rejected_rows.append(
+                        {
+                            "ts": datetime.now(UTC).isoformat(),
+                            "symbol": signal.symbol,
+                            "setup_id": signal.setup_id,
+                            "direction": signal.direction,
+                            "stage": "cooldown",
+                            "reason": "outcome_sl_cooldown_active",
+                            "cooldown_minutes": outcome_sl_minutes,
+                        }
+                    )
+                    continue
+
+            setup_interval = self._setup_interval_minutes(signal.setup_id)
+            if setup_interval > 0:
+                setup_interval_key = self._setup_interval_cooldown_key(signal.setup_id)
+                is_setup_interval_cooldown = await self._bot._modern_repo.is_cooldown_active(
+                    setup_interval_key,
+                    setup_interval,
+                )
+                if is_setup_interval_cooldown:
+                    rejected_rows.append(
+                        {
+                            "ts": datetime.now(UTC).isoformat(),
+                            "symbol": signal.symbol,
+                            "setup_id": signal.setup_id,
+                            "direction": signal.direction,
+                            "stage": "cooldown",
+                            "reason": "setup_interval_cooldown_active",
+                            "cooldown_minutes": setup_interval,
+                        }
+                    )
+                    continue
+
             cooldown_key = f"{signal.setup_id}:{signal.symbol}"
             is_cooldown_active = await self._bot._modern_repo.is_cooldown_active(
                 cooldown_key,
@@ -1071,6 +1185,8 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
                     queued_symbol_direction=queued_symbol_direction,
                     rejected_rows=rejected_rows,
                     symbol_direction_key=symbol_direction_key,
+                    queued_family_keys=queued_family_keys,
+                    family_key=family_key,
                 )
                 continue
 
@@ -1096,6 +1212,8 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
                     queued_symbol_direction=queued_symbol_direction,
                     rejected_rows=rejected_rows,
                     symbol_direction_key=symbol_direction_key,
+                    queued_family_keys=queued_family_keys,
+                    family_key=family_key,
                 )
             else:
                 rejected_rows.append(
@@ -1162,6 +1280,27 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
                         }
                     )
                     continue
+            burst_ok, burst_cap = self._burst_delivery_allows()
+            if not burst_ok:
+                await self._bot.tracker.cancel_pending_delivery(signal)
+                self._record_delivery_diag_reject(
+                    "delivery",
+                    "burst_rate_limit",
+                    setup_id=signal.setup_id,
+                )
+                rejected_rows.append(
+                    {
+                        "ts": datetime.now(UTC).isoformat(),
+                        "symbol": signal.symbol,
+                        "setup_id": signal.setup_id,
+                        "direction": signal.direction,
+                        "stage": "delivery",
+                        "reason": "burst_rate_limit",
+                        "max_signals_per_minute": burst_cap,
+                    }
+                )
+                continue
+
             self._record_watch_screener(
                 signal,
                 tier=delivery_tier,
@@ -1252,6 +1391,15 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
                 delivered.append(item.signal)
                 self._record_delivery_diag_delivered(item.signal.setup_id)
                 self._record_metrics_delivered(item.signal)
+                direction = str(item.signal.direction or "").strip().lower()
+                if direction == "long":
+                    self._bot._session_signals_long = (
+                        int(getattr(self._bot, "_session_signals_long", 0) or 0) + 1
+                    )
+                elif direction == "short":
+                    self._bot._session_signals_short = (
+                        int(getattr(self._bot, "_session_signals_short", 0) or 0) + 1
+                    )
                 if delivery_tier == "action":
                     self._bot._session_action_delivered = (
                         int(getattr(self._bot, "_session_action_delivered", 0) or 0) + 1
@@ -1279,6 +1427,15 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
                     item.signal.symbol,
                     "signal",
                 )
+                setup_interval = self._setup_interval_minutes(item.signal.setup_id)
+                if setup_interval > 0:
+                    await self._bot._modern_repo.set_cooldown(
+                        self._setup_interval_cooldown_key(item.signal.setup_id),
+                        datetime.now(UTC),
+                        item.signal.setup_id,
+                        None,
+                        "setup_interval",
+                    )
                 if self._bot.settings.filters.symbol_cooldown_minutes > 0:
                     await self._bot._modern_repo.set_cooldown(
                         self._symbol_direction_cooldown_key(item.signal),
@@ -1287,6 +1444,18 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
                         item.signal.symbol,
                         "symbol_direction",
                     )
+                family_minutes = int(
+                    getattr(self._bot.settings.filters, "family_cooldown_minutes", 0) or 0
+                )
+                if family_minutes > 0:
+                    await self._bot._modern_repo.set_cooldown(
+                        self._family_cooldown_key(item.signal),
+                        datetime.now(UTC),
+                        item.signal.setup_id,
+                        item.signal.symbol,
+                        "family",
+                    )
+                self._record_burst_delivery()
                 if item.message_id is not None:
                     await self._bot._wait_noncritical(
                         label=f"link {item.signal.symbol}/{item.signal.setup_id}",

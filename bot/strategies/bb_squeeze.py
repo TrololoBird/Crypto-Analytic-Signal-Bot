@@ -6,8 +6,8 @@ from ..domain.strategy_catalog import catalog_default_params
 from ._common import LOGGER, SpecHit, _latest_values, build_spec_signal, with_spec_columns
 from ._roadmap import (
     _build_atr_signal,
-    _last,
     _missing_columns,
+    _prev,
     _reject,
     _series_max_tail,
 )
@@ -42,10 +42,11 @@ def detect_bb_squeeze_release(frame: pl.DataFrame, *, timeframe: str = "15m") ->
     if not was_squeeze or is_squeeze:
         return None
     direction = "long" if row["close"] > row.get("spec_ema20", row["close"]) else "short"
+    ema20 = row.get("spec_ema20", row["close"])
     return SpecHit(
         strategy="bb_squeeze",
         direction=direction,
-        entry=row["close"],
+        entry=ema20,
         stop_basis=row["low"] if direction == "long" else row["high"],
         atr=atr,
         timeframe=timeframe,
@@ -83,14 +84,17 @@ def detect_bb_squeeze_prepared(
     if missing:
         _reject(prepared, setup_id, "missing_columns", missing_fields=missing)
         return None
-    bb_width = _last(work, "bb_width")
+    if work.height < 2:
+        _reject(prepared, setup_id, "insufficient_bars")
+        return None
+    bb_width = _prev(work, "bb_width")
     release_lookback = int(params["squeeze_release_lookback"])
     memory_bars = int(params.get("squeeze_memory_bars", 20))
     prior = work.head(max(0, work.height - 1))
     squeeze_recent = _series_max_tail(prior, "squeeze_on", memory_bars)
     squeeze_release_recent = _series_max_tail(work, "squeeze_off", release_lookback)
-    roc10 = _last(work, "roc10")
-    vol_ratio = _last(work, "volume_ratio20", 1.0)
+    roc10 = _prev(work, "roc10")
+    vol_ratio = _prev(work, "volume_ratio20", 1.0)
     if squeeze_recent <= 0.0 and bb_width > float(params["max_bb_width"]):
         _reject(prepared, setup_id, "bb_squeeze_not_active", bb_width=bb_width)
         return None
@@ -124,6 +128,7 @@ def detect_bb_squeeze_prepared(
         ],
         family=family,
         structure_clarity=clarity,
+        confirmed_bar=True,
     )
 
 

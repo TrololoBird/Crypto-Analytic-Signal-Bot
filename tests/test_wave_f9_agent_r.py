@@ -16,7 +16,17 @@ from bot.persistence.db_status import (
 )
 from bot.persistence.diary_store import DiaryStore
 from bot.persistence.journal import build_journal_report, normalize_tracking_event
-from bot.persistence.outcomes import aggregate_setup_stats, classify_outcome_result
+from bot.persistence.outcomes import (
+    SignalFeatures,
+    aggregate_setup_stats,
+    classify_outcome_result,
+    create_outcome_from_tracked,
+)
+from bot.persistence.tracked import (
+    TrackedSignalState,
+    resolve_terminal_close_reason,
+    tp1_reached_from_excursion,
+)
 from bot.persistence.repository.memory import MemoryRepository
 
 if TYPE_CHECKING:
@@ -72,6 +82,64 @@ def test_classify_outcome_result_win_loss_neutral() -> None:
         classify_outcome_result("breakeven_stop", was_profitable=False, activated_at="2026-01-01")
         == "loss"
     )
+
+
+def _tracked_for_tp1_remap(
+    *,
+    close_reason: str,
+    close_price: float,
+    direction: str = "short",
+) -> TrackedSignalState:
+    ts = "2026-06-05T10:00:00+00:00"
+    return TrackedSignalState(
+        tracking_id="t1",
+        tracking_ref="ref1",
+        signal_key="k1",
+        symbol="ADAUSDT",
+        setup_id="btc_correlation",
+        direction=direction,
+        timeframe="15m",
+        created_at=ts,
+        pending_expires_at=ts,
+        active_expires_at=ts,
+        entry_low=0.40,
+        entry_high=0.42,
+        entry_mid=0.41,
+        initial_stop=0.43,
+        stop=0.41,
+        take_profit_1=0.39,
+        activated_at=ts,
+        activation_price=0.41,
+        closed_at=ts,
+        close_reason=close_reason,
+        close_price=close_price,
+        tp1_hit_at="2026-06-05T11:00:00+00:00",
+        tp1_price=0.39,
+    )
+
+
+def test_resolve_terminal_close_reason_maps_expired_with_mfe() -> None:
+    tracked = _tracked_for_tp1_remap(close_reason="expired", close_price=0.405)
+    tracked.tp1_hit_at = None
+    tracked.max_favorable_pct = 5.5
+    assert tp1_reached_from_excursion(tracked) is True
+    assert resolve_terminal_close_reason(tracked, "expired") == "tp1_hit"
+
+
+def test_create_outcome_remaps_tp1_before_expired_active() -> None:
+    tracked = _tracked_for_tp1_remap(close_reason="expired", close_price=0.405)
+    outcome = create_outcome_from_tracked(tracked, SignalFeatures(base_score=0.7))
+    assert outcome.result == "tp1_hit"
+    assert outcome.was_profitable is True
+    assert outcome.pnl_pct == pytest.approx(4.878, rel=1e-2)
+
+
+def test_create_outcome_remaps_tp1_before_breakeven_stop() -> None:
+    tracked = _tracked_for_tp1_remap(close_reason="breakeven_stop", close_price=0.41)
+    outcome = create_outcome_from_tracked(tracked, SignalFeatures(base_score=0.7))
+    assert outcome.result == "tp1_hit"
+    assert outcome.was_profitable is True
+    assert outcome.exit_price == pytest.approx(0.39)
 
 
 def test_aggregate_setup_stats_uses_win_loss_denominator() -> None:

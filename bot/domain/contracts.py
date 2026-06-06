@@ -59,6 +59,12 @@ PUBLIC_FEATURE_FIELDS: tuple[str, ...] = (
     "book_ticker_age_seconds",
     "data_source_mix",
     "market_regime",
+    "vah_1h",
+    "val_1h",
+    "vah_15m",
+    "val_15m",
+    "funding_rate_zscore_48h",
+    "liquidation_cascade_5m",
 )
 PRIVATE_KEYS = {"balance", "position", "order", "account", "margin"}
 
@@ -201,6 +207,18 @@ def build_public_feature_snapshot(prepared: Any) -> dict[str, Any]:
         getattr(prepared, "data_source_mix", "futures_only") or "futures_only"
     )
     features["market_regime"] = getattr(prepared, "market_regime", "neutral") or "neutral"
+    features["vah_1h"] = _normalized_float(getattr(prepared, "vah_1h", None))
+    features["val_1h"] = _normalized_float(getattr(prepared, "val_1h", None))
+    features["vah_15m"] = _normalized_float(getattr(prepared, "vah_15m", None))
+    features["val_15m"] = _normalized_float(getattr(prepared, "val_15m", None))
+    features["funding_rate_zscore_48h"] = _normalized_float(
+        getattr(prepared, "funding_rate_zscore_48h", None)
+    )
+    cascade = getattr(prepared, "liquidation_cascade_5m", None)
+    if cascade is None:
+        features["liquidation_cascade_5m"] = None
+    else:
+        features["liquidation_cascade_5m"] = bool(cascade)
 
     return normalize_public_feature_payload(features)
 

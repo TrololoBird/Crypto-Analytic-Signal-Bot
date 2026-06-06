@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 from ..features.prepare import _swing_points
 from ..setups import _build_signal, _compute_dynamic_score, _reject
-from ._common import as_float as _as_float
+from ._common import as_float as _as_float, confirmed_pattern_frame
 from .roadmap_base import RoadmapSetup
 
 if TYPE_CHECKING:
@@ -140,7 +140,7 @@ def detect_funding_reversal(
 
     funding_trend = prepared.funding_trend
 
-    w = prepared.work_15m
+    w = confirmed_pattern_frame(prepared.work_15m)
     if w.height < 5:
         _reject(prepared, setup_id, "insufficient_15m_bars", bars=w.height)
         return None
@@ -216,7 +216,7 @@ def detect_funding_reversal(
         risk = stop - entry_price
         trend_start = max(0, w.height - (trend_window + 1))
         tp1 = _as_float(w["low"].slice(trend_start, trend_window).min())
-        w1h = prepared.work_1h
+        w1h = confirmed_pattern_frame(prepared.work_1h)
         tp2 = None
         if w1h.height > 5:
             _, sl_mask = _swing_points(w1h, n=3, include_unconfirmed_tail=True)
@@ -238,13 +238,32 @@ def detect_funding_reversal(
         risk = entry_price - stop
         trend_start = max(0, w.height - (trend_window + 1))
         tp1 = _as_float(w["high"].slice(trend_start, trend_window).max())
-        w1h = prepared.work_1h
+        w1h = confirmed_pattern_frame(prepared.work_1h)
         tp2 = None
         if w1h.height > 5:
             sh_mask, _ = _swing_points(w1h, n=3, include_unconfirmed_tail=True)
             sh_prices = w1h.filter(sh_mask)["high"]
             tp2_cands = sh_prices.filter(sh_prices > entry_price)
             tp2 = _as_float(tp2_cands[0]) if tp2_cands.len() > 0 else None
+
+    funding_cap = getattr(prepared, "funding_rate_cap", None)
+    funding_floor = getattr(prepared, "funding_rate_floor", None)
+    if direction == "short" and funding_cap is not None:
+        try:
+            cap = abs(float(funding_cap))
+        except (TypeError, ValueError):
+            cap = 0.0
+        if cap > 0.0 and abs(effective_fr) >= cap * 0.75:
+            confirmation_score += 0.15
+            confirmation_reasons.append(f"near_funding_cap={cap:.5f}")
+    elif direction == "long" and funding_floor is not None:
+        try:
+            floor = abs(float(funding_floor))
+        except (TypeError, ValueError):
+            floor = 0.0
+        if floor > 0.0 and abs(effective_fr) >= floor * 0.75:
+            confirmation_score += 0.15
+            confirmation_reasons.append(f"near_funding_floor={-floor:.5f}")
 
     if vol_ratio >= min_volume_ratio:
         confirmation_score += 0.25
@@ -365,7 +384,7 @@ class FundingReversalSetup(RoadmapSetup):
 
     DEFAULTS: ClassVar[dict[str, float]] = {
         **RoadmapSetup.DEFAULTS,
-        "base_score": 0.52,
+        "base_score": 0.60,
         "funding_threshold": 0.0010,
         "funding_soft_threshold": 0.00010,
         "funding_trend_bars": 3.0,

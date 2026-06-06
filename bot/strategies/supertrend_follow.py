@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, ClassVar
 from ..features.prepare import _swing_points
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.utils import build_structural_targets
-from ._common import as_float as _as_float
+from ._common import as_float as _as_float, confirmed_pattern_frame
 from .roadmap_base import RoadmapSetup
 
 if TYPE_CHECKING:
@@ -24,8 +24,8 @@ def detect_supertrend_follow(
     setup_id: str,
     family: str,
 ) -> Signal | None:
-    work_15m = prepared.work_15m
-    work_1h = prepared.work_1h
+    work_15m = confirmed_pattern_frame(prepared.work_15m)
+    work_1h = confirmed_pattern_frame(prepared.work_1h)
     if work_15m.height < 30 or work_1h.height < 30:
         _reject(prepared, setup_id, "insufficient_bars")
         return None

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
-from ._common import SpecHit, as_float, with_spec_columns
+from ._common import SpecHit, as_float, confirmed_pattern_frame, with_spec_columns
 
 if TYPE_CHECKING:
     import polars as pl
@@ -41,7 +41,7 @@ def detect_volume_climax_reversal(frame: pl.DataFrame, *, timeframe: str = "15m"
             return SpecHit(
                 strategy="volume_climax_reversal",
                 direction="long",
-                entry=current_close,
+                entry=prev_low,
                 stop_basis=as_float(row.get("low")),
                 atr=atr,
                 timeframe=timeframe,
@@ -53,7 +53,7 @@ def detect_volume_climax_reversal(frame: pl.DataFrame, *, timeframe: str = "15m"
             return SpecHit(
                 strategy="volume_climax_reversal",
                 direction="short",
-                entry=current_close,
+                entry=prev_high,
                 stop_basis=as_float(row.get("high")),
                 atr=atr,
                 timeframe=timeframe,
@@ -80,7 +80,7 @@ def _detect_volume_climax_reversal_extended(
     setup_id: str,
     family: str,
 ) -> Signal | None:
-    work = prepared.work_15m
+    work = confirmed_pattern_frame(prepared.work_15m)
     effective_params = effective
     # FIX 2026-05-21: spec requires a very large recent climax; fall through
     # to the configured wick/body reclaim detector before rejecting.
@@ -403,7 +403,7 @@ class VolumeClimaxReversalSetup(SpecDetectorSetup):
     required_context = ("futures_flow",)
 
     DEFAULTS: ClassVar[dict[str, float]] = {
-        "base_score": 0.52,
+        "base_score": 0.60,
         "min_volume_ratio": 1.8,
         "adaptive_min_volume_ratio": 1.3,
         "min_wick_atr": 0.45,

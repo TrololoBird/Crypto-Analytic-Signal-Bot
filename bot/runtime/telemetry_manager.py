@@ -41,14 +41,32 @@ class TelemetryManager:
         self._lane_skip_count: int = 0
         self._last_rejection_summary_ts = 0.0
 
+    def session_direction_snapshot(self) -> dict[str, int]:
+        """Session delivered-signal counts by direction (T-9 long/short balance)."""
+        return {
+            "signals_long_session": int(getattr(self._bot, "_session_signals_long", 0) or 0),
+            "signals_short_session": int(getattr(self._bot, "_session_signals_short", 0) or 0),
+        }
+
     @staticmethod
     def _frame_indicator_snapshot(frame: Any) -> dict[str, float]:
         if frame is None or getattr(frame, "is_empty", lambda: True)():
             return {}
         columns = set(getattr(frame, "columns", []) or [])
+        skip_columns = {
+            "open_time",
+            "close_time",
+            "timestamp",
+            "symbol",
+            "interval",
+            "is_closed",
+        }
         snapshot: dict[str, float] = {}
-        for column in _INDICATOR_COLUMNS:
-            if column not in columns:
+        ordered_columns = tuple(_INDICATOR_COLUMNS) + tuple(
+            sorted(column for column in columns if column not in skip_columns)
+        )
+        for column in ordered_columns:
+            if column not in columns or column in snapshot:
                 continue
             try:
                 value = frame.item(-1, column)

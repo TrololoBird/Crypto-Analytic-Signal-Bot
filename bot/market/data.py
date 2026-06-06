@@ -71,7 +71,15 @@ def configure_rest_concurrency(max_concurrent: int) -> None:
 
 _FUTURES_DATA_IP_LIMIT_WINDOW_S = 300.0
 _FUTURES_DATA_IP_LIMIT_OFFICIAL_MAX = 1000
-_FUTURES_DATA_IP_LIMIT_DEFAULT = 300
+_FUTURES_DATA_IP_LIMIT_DEFAULT = 600
+_FUNDING_ENDPOINT_IP_LIMIT_WINDOW_S = 300.0
+_FUNDING_ENDPOINT_IP_LIMIT_OFFICIAL_MAX = 500
+_FUNDING_ENDPOINT_REQUEST_LIMITED_OPS = frozenset(
+    {
+        "funding_rate_history",
+        "funding_info",
+    }
+)
 _HTTP_CONNECTOR_LIMIT = 50
 _CACHE_TTL = {
     "klines_5m": 300,
@@ -85,12 +93,14 @@ _CACHE_TTL = {
     "global_ls_ratio": 600,
     "funding_rate": 300,
     "funding_history": 1800,
+    "funding_info": 3600,
     "basis": 1800,
     "continuous_klines": 1800,
     "mark_price_klines": 1800,
     "index_price_klines": 1800,
     "book_ticker": 5,
     "order_book_depth": 5,
+    "symbol_price": 5,
 }
 _PERIOD_WINDOW_SECONDS = {
     "5m": 300,
@@ -131,6 +141,7 @@ _ENDPOINT_WEIGHTS = {
     "exchange_information": 1,
     "ticker24hr_price_change_statistics": 40,
     "symbol_order_book_ticker": 2,
+    "symbol_price_ticker_v2": 1,
     "order_book_depth": 2,
     "compressed_aggregate_trades_list": 20,
     "open_interest": 1,
@@ -142,7 +153,7 @@ _ENDPOINT_WEIGHTS = {
     "basis": 0,
     "premium_index": 1,
     "funding_rate_history": 1,
-    "funding_info": 1,
+    "funding_info": 0,
     "continuous_kline_candlestick_data": 1,
     "mark_price_kline_data": 1,
     "index_price_kline_data": 1,
@@ -155,7 +166,6 @@ _FUTURES_DATA_REQUEST_LIMITED_OPS = frozenset(
         "global_long_short_account_ratio",
         "taker_long_short_ratio",
         "basis",
-        "funding_rate_history",
     }
 )
 _DEFAULT_KLINE_FETCH_LIMIT = 500
@@ -173,11 +183,13 @@ class _PublicEndpointSpec:
     source: str = "rest"
     weight_key: str | None = None
     ip_limited: bool = False
+    funding_ip_limited: bool = False
 
 
 def _build_endpoint_registry() -> dict[str, _PublicEndpointSpec]:
     registry: dict[str, _PublicEndpointSpec] = {}
     fapi1 = "/fapi/v1"
+    fapi2 = "/fapi/v2"
     fdata = "/futures/data"
 
     # Map operation names to API paths
@@ -189,6 +201,7 @@ def _build_endpoint_registry() -> dict[str, _PublicEndpointSpec]:
         "ticker24hr_price_change_statistics": f"{fapi1}/ticker/24hr",
         "kline_candlestick_data": f"{fapi1}/klines",
         "symbol_order_book_ticker": f"{fapi1}/ticker/bookTicker",
+        "symbol_price_ticker_v2": f"{fapi2}/ticker/price",
         "order_book_depth": f"{fapi1}/depth",
         "compressed_aggregate_trades_list": f"{fapi1}/aggTrades",
         "premium_index": f"{fapi1}/premiumIndex",
@@ -208,7 +221,12 @@ def _build_endpoint_registry() -> dict[str, _PublicEndpointSpec]:
 
     for op_name, path in op_paths.items():
         ip_limited = op_name in _FUTURES_DATA_REQUEST_LIMITED_OPS
-        registry[op_name] = _PublicEndpointSpec(path, ip_limited=ip_limited)
+        funding_ip_limited = op_name in _FUNDING_ENDPOINT_REQUEST_LIMITED_OPS
+        registry[op_name] = _PublicEndpointSpec(
+            path,
+            ip_limited=ip_limited,
+            funding_ip_limited=funding_ip_limited,
+        )
 
     return registry
 
@@ -550,6 +568,14 @@ class BinanceFuturesMarketData:
     ) -> list[dict[str, Any]]:
         return await self._binance_client.fetch_funding_rate_history(symbol, limit=limit)
 
+    async def fetch_funding_info_all(self) -> dict[str, dict[str, float | int]]:
+        return await self._binance_client.fetch_funding_info_all()
+
+    def get_cached_funding_info(
+        self, symbol: str, max_age_s: float = 3600.0
+    ) -> dict[str, float | int] | None:
+        return self._binance_client.get_cached_funding_info(symbol, max_age_s)
+
     async def fetch_agg_trade_snapshot(self, symbol: str, *, limit: int = 100) -> AggTradeSnapshot:
         return await self._binance_client.fetch_agg_trade_snapshot(symbol, limit=limit)
 
@@ -572,6 +598,15 @@ class BinanceFuturesMarketData:
 
     async def fetch_book_ticker(self, symbol: str) -> tuple[float | None, float | None]:
         return await self._binance_client.fetch_book_ticker(symbol)
+
+    async def fetch_symbol_price(self, symbol: str) -> float | None:
+        return await self._binance_client.fetch_symbol_price(symbol)
+
+    async def fetch_symbol_prices_all(self) -> dict[str, float]:
+        return await self._binance_client.fetch_symbol_prices_all()
+
+    def get_cached_symbol_price(self, symbol: str, max_age_s: float = 5.0) -> float | None:
+        return self._binance_client.get_cached_symbol_price(symbol, max_age_s)
 
     async def close(self) -> None:
         await self._binance_client.close()
@@ -664,6 +699,14 @@ class BinanceFuturesMarketData:
     def get_cached_funding_trend(self, symbol: str, max_age_s: float = 1800.0) -> str | None:
         return self._binance_client.get_cached_funding_trend(symbol, max_age_s)
 
+    def get_cached_funding_rate_zscore(
+        self, symbol: str, *, max_cache_age_s: float = 1800.0
+    ) -> float | None:
+        getter = getattr(self._binance_client, "get_cached_funding_rate_zscore", None)
+        if not callable(getter):
+            return None
+        return getter(symbol, max_cache_age_s=max_cache_age_s)
+
     def get_cached_funding_recent_extreme(
         self,
         symbol: str,
@@ -702,3 +745,55 @@ class BinanceFuturesMarketData:
 
     async def fetch_symbol_frames(self, symbol: str) -> SymbolFrames:
         return await self._binance_client.fetch_symbol_frames(symbol)
+
+
+async def read_market_data_cache(
+    conn: Any,
+    cache_key: str,
+    *,
+    max_age_s: float,
+) -> str | None:
+    """Load a JSON payload from ``market_data_cache`` when still within TTL."""
+    async with conn.execute(
+        """
+        SELECT payload_json, fetched_at, ttl_seconds
+        FROM market_data_cache
+        WHERE cache_key = ?
+        """,
+        (cache_key,),
+    ) as cursor:
+        row = await cursor.fetchone()
+    if row is None:
+        return None
+    payload_json, fetched_at, ttl_seconds = row
+    try:
+        fetched = datetime.fromisoformat(str(fetched_at))
+    except ValueError:
+        return None
+    ttl = float(ttl_seconds or max_age_s)
+    age_s = (datetime.now(UTC).replace(tzinfo=None) - fetched.replace(tzinfo=None)).total_seconds()
+    if age_s > min(max_age_s, ttl):
+        return None
+    return str(payload_json)
+
+
+async def write_market_data_cache(
+    conn: Any,
+    cache_key: str,
+    payload_json: str,
+    *,
+    ttl_seconds: int = 3600,
+) -> None:
+    """Persist REST enrichment payload with TTL metadata."""
+    await conn.execute(
+        """
+        INSERT INTO market_data_cache (cache_key, payload_json, fetched_at, ttl_seconds)
+        VALUES (?, ?, datetime('now'), ?)
+        ON CONFLICT(cache_key) DO UPDATE SET
+            payload_json = excluded.payload_json,
+            fetched_at = excluded.fetched_at,
+            ttl_seconds = excluded.ttl_seconds
+        """,
+        (cache_key, payload_json, int(ttl_seconds)),
+    )
+    await conn.commit()

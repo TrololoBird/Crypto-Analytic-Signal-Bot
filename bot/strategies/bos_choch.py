@@ -71,7 +71,7 @@ def detect_bos_choch(
         return SpecHit(
             strategy="bos_choch",
             direction="long",
-            entry=current_close if age == 0 else break_level,
+            entry=break_level,
             stop_basis=break_level - atr,
             atr=atr,
             timeframe=timeframe,
@@ -91,7 +91,7 @@ def detect_bos_choch(
     return SpecHit(
         strategy="bos_choch",
         direction="short",
-        entry=current_close if age == 0 else break_level,
+        entry=break_level,
         stop_basis=break_level + atr,
         atr=atr,
         timeframe=timeframe,
@@ -667,7 +667,7 @@ class BOSCHOCHSetup(SpecDetectorSetup):
     required_context = ("futures_flow",)
 
     DEFAULTS: ClassVar[dict[str, float]] = {
-        "base_score": 0.53,
+        "base_score": 0.62,
         "swing_lookback": 6,
         "external_swing_lookback": 20,
         "bos_lookback": 6,

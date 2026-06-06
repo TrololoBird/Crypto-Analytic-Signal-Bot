@@ -201,7 +201,9 @@ def _update_config_toml(path: Path, urls: list[str], *, direct_ok: bool = False)
         text = pattern.sub(block, text, count=1)
     else:
         text = text.rstrip() + "\n\n" + block + "\n"
-    path.write_text(text, encoding="utf-8")
+    tmp_path = path.with_name(f"{path.name}.tmp")
+    tmp_path.write_text(text, encoding="utf-8")
+    tmp_path.replace(path)
     LOG.info("config updated | path=%s endpoints=%d", path, len(urls))
 
 
@@ -227,10 +229,11 @@ failover_cooldown_seconds = 300"""
     ]
     lines.extend(f'  "{item}",' for item in rest)
     lines.append("]")
+    failover_line = "failover_enabled = false" if direct_ok else "failover_enabled = true"
     lines.extend(
         [
             "trust_env = true",
-            "failover_enabled = true",
+            failover_line,
             "failover_cooldown_seconds = 300",
         ]
     )

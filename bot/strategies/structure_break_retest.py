@@ -8,7 +8,7 @@ from ..features.prepare import _swing_points
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
 from ..setups.utils import build_structural_targets, coerce_int, validate_rr_or_penalty
-from ._common import SpecHit, _latest_values, as_float, with_spec_columns
+from ._common import SpecHit, _latest_values, as_float, confirmed_pattern_frame, with_spec_columns
 
 if TYPE_CHECKING:
     import polars as pl
@@ -168,8 +168,8 @@ def _detect_structure_break_retest_extended(
     )
     sl_buffer_atr = float(dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]))
 
-    work_1h = prepared.work_1h
-    work_15m = prepared.work_15m
+    work_1h = confirmed_pattern_frame(prepared.work_1h)
+    work_15m = confirmed_pattern_frame(prepared.work_15m)
 
     if work_1h.height < 10 or work_15m.height < 5:
         _reject(prepared, setup_id, "insufficient_bars")

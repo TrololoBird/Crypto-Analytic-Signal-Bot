@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast
 from ..features.prepare import _swing_points
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.utils import get_dynamic_params
+from ._common import confirmed_pattern_frame
 from .roadmap_base import RoadmapSetup
 
 if TYPE_CHECKING:
@@ -135,7 +136,7 @@ def _in_killzone(hour: int, params: dict[str, object] | None = None) -> bool:
 
 
 def _latest_bar_time_utc(prepared: PreparedSymbol) -> datetime:
-    frame = prepared.work_15m
+    frame = confirmed_pattern_frame(prepared.work_15m)
     if frame.height > 0 and "time" in frame.columns:
         last_bar_time = frame.item(-1, "time")
         if isinstance(last_bar_time, datetime):
@@ -192,7 +193,7 @@ def detect_session_killzone(
         effective_params.get("breakout_atr_mult", defaults["breakout_atr_mult"]),
         defaults["breakout_atr_mult"],
     )
-    w = prepared.work_15m
+    w = confirmed_pattern_frame(prepared.work_15m)
     if w.height < 20:
         _reject(prepared, setup_id, "insufficient_15m_bars", bars=w.height)
         return None
@@ -222,7 +223,7 @@ def detect_session_killzone(
         return None
 
     # ADX check on 1h
-    w1h = prepared.work_1h
+    w1h = confirmed_pattern_frame(prepared.work_1h)
     if w1h.height < 3:
         _reject(prepared, setup_id, "insufficient_1h_bars", bars=w1h.height)
         return None
@@ -374,7 +375,7 @@ def detect_session_killzone(
     entry_price = prior_high if direction == "long" else prior_low
 
     # Look for prior session levels from 1h data
-    w1h = prepared.work_1h
+    w1h = confirmed_pattern_frame(prepared.work_1h)
 
     if direction == "long":
         stop = session_low - atr * sl_buffer_atr

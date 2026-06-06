@@ -7,7 +7,7 @@ from ._roadmap import (
     _confirmed_context_conflict,
     _finite_or_none,
     _first_finite,
-    _last,
+    _prev,
     _reject,
 )
 from .roadmap_base import RoadmapSetup
@@ -64,8 +64,11 @@ def detect_ls_ratio_extreme(
         )
         return None
     work = prepared.work_15m
-    close_position = _last(work, "close_position", 0.5)
-    volume_ratio = _last(work, "volume_ratio20", 1.0)
+    if work.height < 2:
+        _reject(prepared, setup_id, "insufficient_bars")
+        return None
+    close_position = _prev(work, "close_position", 0.5)
+    volume_ratio = _prev(work, "volume_ratio20", 1.0)
     volume_penalty = volume_ratio < float(params["min_volume_ratio"])
     if direction == "long":
         close_ok = close_position >= float(params["min_close_position_long"])
@@ -151,6 +154,7 @@ def detect_ls_ratio_extreme(
         score_multiplier *= 0.88
     if oi_penalty:
         score_multiplier *= float(params.get("oi_missing_penalty", 0.92))
+    entry_anchor = _prev(work, "ema20", 0.0) or None
     return _build_atr_signal(
         prepared=prepared,
         setup_id=setup_id,
@@ -158,7 +162,9 @@ def detect_ls_ratio_extreme(
         params=params,
         reasons=reasons,
         family=family,
+        entry_anchor=entry_anchor,
         structure_clarity=min(abs(long_account - 0.5) * 3.0, 1.0) * score_multiplier,
+        confirmed_bar=True,
     )
 
 

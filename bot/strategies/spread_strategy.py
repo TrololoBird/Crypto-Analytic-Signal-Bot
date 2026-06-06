@@ -6,6 +6,7 @@ from ._roadmap import (
     _build_atr_signal,
     _confirmed_context_conflict,
     _finite_or_none,
+    _last,
     _orderbook_source,
     _prev,
     _price_change_pct_confirmed,
@@ -101,12 +102,14 @@ def detect_spread_strategy(
         clarity *= 0.90
     if context_penalty:
         clarity *= 0.82
+    entry_anchor = _last(work, "ema20", 0.0) or None
     return _build_atr_signal(
         prepared=prepared,
         setup_id=setup_id,
         direction=direction,
         params=params,
         confirmed_bar=True,
+        entry_anchor=entry_anchor,
         reasons=[
             f"tight_spread_{direction}",
             f"spread_bps={spread:.2f}",

@@ -80,7 +80,7 @@ _PROACTIVE_RECONNECT_AFTER_SECONDS = 23 * 3600 + 50 * 60
 _HEALTH_CHECK_INTERVAL_SECONDS = 30.0
 
 # Binance WebSocket limits (from official docs)
-_MAX_STREAMS_PER_CONNECTION = 300  # Conservative limit (docs say 1024, but 10 msg/sec limit)
+_MAX_STREAMS_PER_CONNECTION = 500  # Conservative limit (docs say 1024, but 10 msg/sec limit)
 _MAX_INCOMING_MSG_PER_SECOND = 8  # Below Binance's 10 msg/sec limit with safety margin
 _MAX_SUBSCRIBE_MSG_PER_SECOND = 4  # JSON control messages limit is 5 msg/sec
 
@@ -341,7 +341,7 @@ def _resolve_message_buffer_maxsize(cfg: WSConfig, *, symbol_count: int = 50) ->
 
 _BACKOFF_RESET_AFTER_SECONDS = 90.0
 
-DEFAULT_MAX_STREAMS_PER_CONNECTION = 300
+DEFAULT_MAX_STREAMS_PER_CONNECTION = 500
 
 FORBIDDEN_STREAM_SUFFIXES = ("@userData", "@account", "@balanceUpdate")
 
@@ -380,7 +380,7 @@ def tracked_depth_streams(manager: Any, symbols: list[str]) -> list[str]:
     if levels not in {5, 10, 20}:
         levels = 20
     speed = str(getattr(manager._cfg, "depth_speed", "500ms") or "500ms").lower()
-    suffix = "" if speed == "250ms" else f"@{speed}"
+    suffix = f"@{speed}"
     return [f"{symbol}@depth{levels}{suffix}" for symbol in _normalized_symbols(symbols)[:limit]]
 
 
@@ -651,6 +651,21 @@ def get_funding_sentiment(manager: Any) -> float | None:
     if not rates:
         return None
     return sum(rates) / len(rates)
+
+
+def get_liquidation_event_count(
+    manager: Any, symbol: str | None = None, window_seconds: int = 300
+) -> int:
+    """Count forceOrder events for *symbol* inside the rolling window."""
+    cutoff_ms = int(time.time() * 1000) - window_seconds * 1000
+    count = 0
+    for ts_ms, sym, _side, qty, _price in manager._force_order_buffer:
+        if ts_ms < cutoff_ms or qty <= 0.0:
+            continue
+        if symbol is not None and sym != symbol:
+            continue
+        count += 1
+    return count
 
 
 def get_liquidation_rollups(
@@ -1690,6 +1705,14 @@ class FuturesWSManager:
     ) -> float | None:
         """Return age of the newest forceOrder event used for liquidation sentiment."""
         return get_liquidation_age_seconds(self, symbol=symbol, window_seconds=window_seconds)
+
+    def get_liquidation_event_count(
+        self, symbol: str | None = None, window_seconds: int = 300
+    ) -> int:
+        """Count forceOrder events in the rolling window (liquidation cascade detector)."""
+        return get_liquidation_event_count(
+            self, symbol=symbol, window_seconds=window_seconds
+        )
 
     async def rebuild_shortlist_on_demand(
         self, symbol_meta: list[Any], settings: Any

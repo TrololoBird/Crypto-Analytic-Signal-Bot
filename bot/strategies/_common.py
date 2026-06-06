@@ -73,13 +73,54 @@ def first_finite(*values: object) -> float | None:
 def last(frame: pl.DataFrame, column: str, default: float = 0.0) -> float:
     if frame.is_empty() or column not in frame.columns:
         return default
-    return as_float(frame.item(-1, column), default)
+    source = confirmed_pattern_frame(frame)
+    if source.is_empty():
+        return default
+    return as_float(source.item(-1, column), default)
 
 
 def previous(frame: pl.DataFrame, column: str, default: float = 0.0) -> float:
     if frame.height < 2 or column not in frame.columns:
         return default
     return as_float(frame.item(-2, column), default)
+
+
+def last_bar_is_closed(frame: pl.DataFrame) -> bool:
+    """True when the frame tail is a fully closed bar (not a live forming candle)."""
+    if frame.is_empty():
+        return False
+    if "is_closed" not in frame.columns:
+        return True
+    value = frame["is_closed"].item(-1)
+    if value is None:
+        return True
+    return bool(value)
+
+
+def confirmed_pattern_frame(frame: pl.DataFrame) -> pl.DataFrame:
+    """Return a frame whose last row is the latest closed bar (fix-sl-A)."""
+    if frame.is_empty() or last_bar_is_closed(frame):
+        return frame
+    if frame.height < 2:
+        return frame.head(0)
+    return frame.head(frame.height - 1)
+
+
+def is_confirmed_bar(frame: pl.DataFrame) -> bool:
+    """Whether pattern logic can use a closed bar (not a forming candle tail)."""
+    return confirmed_pattern_frame(frame).height >= 1
+
+
+def bar_value(
+    frame: pl.DataFrame,
+    column: str,
+    *,
+    confirmed: bool = False,
+    default: float = 0.0,
+) -> float:
+    """Read last (or last closed) bar value for strategy pattern helpers."""
+    source = confirmed_pattern_frame(frame) if confirmed else frame
+    return last(source, column, default)
 
 
 def required_columns(frame: pl.DataFrame, columns: tuple[str, ...]) -> list[str]:

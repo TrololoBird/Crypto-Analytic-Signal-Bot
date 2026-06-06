@@ -76,11 +76,11 @@ _DEGRADATION_ERRORS = (
     KeyError,
 )
 _DEFAULT_HISTORY_FETCH_LIMIT = 500
-_HISTORY_FETCH_BUFFER_BARS = 60
+_HISTORY_FETCH_BUFFER_BARS = 80
 _HISTORY_FETCH_BASELINE_BY_INTERVAL = {
     "5m": 300,
     "15m": 500,
-    "1h": 500,
+    "1h": 280,
     "4h": 500,
 }
 
@@ -459,6 +459,7 @@ class AnalyzerFramesMixin(AnalyzerContextMixin, _AnalyzerFamilyGatesBase):
 
         ws_5m = ws_15m = ws_1h = None
         ws_bid = ws_ask = None
+        frame_source_flags: list[str] = []
         if self._bot._ws_manager is not None:
             ws_frames = await self._bot._ws_manager.get_symbol_frames(symbol)
             if ws_frames is not None:
@@ -471,21 +472,36 @@ class AnalyzerFramesMixin(AnalyzerContextMixin, _AnalyzerFamilyGatesBase):
         try:
             if isinstance(self._bot.client, BinanceFuturesMarketData):
                 df_4h = await self._bot.client.fetch_klines_cached(symbol, "4h", limit=limit_4h)
-                df_1h = (
-                    ws_1h
-                    if ws_1h is not None and ws_1h.height >= minimums["1h"]
-                    else await self._bot.client.fetch_klines_cached(symbol, "1h", limit=limit_1h)
-                )
-                df_15m = (
-                    ws_15m
-                    if ws_15m is not None and ws_15m.height >= minimums["15m"]
-                    else await self._bot.client.fetch_klines_cached(symbol, "15m", limit=limit_15m)
-                )
-                df_5m = (
-                    ws_5m
-                    if ws_5m is not None and ws_5m.height >= minimums["5m"]
-                    else await self._bot.client.fetch_klines_cached(symbol, "5m", limit=limit_5m)
-                )
+                if ws_1h is not None and ws_1h.height >= minimums["1h"]:
+                    df_1h = ws_1h
+                    frame_source_flags.append("frames_1h_ws")
+                else:
+                    df_1h = await self._bot.client.fetch_klines_cached(
+                        symbol, "1h", limit=limit_1h
+                    )
+                    frame_source_flags.append("frames_1h_rest")
+                    if ws_1h is not None:
+                        frame_source_flags.append("frames_1h_ws_insufficient")
+                if ws_15m is not None and ws_15m.height >= minimums["15m"]:
+                    df_15m = ws_15m
+                    frame_source_flags.append("frames_15m_ws")
+                else:
+                    df_15m = await self._bot.client.fetch_klines_cached(
+                        symbol, "15m", limit=limit_15m
+                    )
+                    frame_source_flags.append("frames_15m_rest")
+                    if ws_15m is not None:
+                        frame_source_flags.append("frames_15m_ws_insufficient")
+                if ws_5m is not None and ws_5m.height >= minimums["5m"]:
+                    df_5m = ws_5m
+                    frame_source_flags.append("frames_5m_ws")
+                else:
+                    df_5m = await self._bot.client.fetch_klines_cached(
+                        symbol, "5m", limit=limit_5m
+                    )
+                    frame_source_flags.append("frames_5m_rest")
+                    if ws_5m is not None:
+                        frame_source_flags.append("frames_5m_ws_insufficient")
 
                 bid, ask = ws_bid, ws_ask
                 bid_qty = ask_qty = None
@@ -525,6 +541,7 @@ class AnalyzerFramesMixin(AnalyzerContextMixin, _AnalyzerFamilyGatesBase):
                     bid_qty = book_context.get("bid_qty")
                     ask_qty = book_context.get("ask_qty")
 
+                frame_source_flags.append("frames_4h_rest")
                 return SymbolFrames(
                     symbol=symbol,
                     df_1h=df_1h,
@@ -535,6 +552,7 @@ class AnalyzerFramesMixin(AnalyzerContextMixin, _AnalyzerFamilyGatesBase):
                     df_4h=df_4h,
                     bid_qty=bid_qty,
                     ask_qty=ask_qty,
+                    frame_source_flags=tuple(frame_source_flags),
                 )
 
             return await cast("Any", self._bot.client.fetch_symbol_frames(symbol))
@@ -733,6 +751,13 @@ class AnalyzerFramesMixin(AnalyzerContextMixin, _AnalyzerFamilyGatesBase):
                     liq_age = float(liq_age)
                     enrichments["liquidation_score_age_seconds"] = liq_age
                     context_ages.append(liq_age)
+                cascade_count = self._safe_ws_get(
+                    symbol,
+                    "get_liquidation_event_count",
+                    window_seconds=300,
+                )
+                if cascade_count is not None:
+                    enrichments["liquidation_cascade_5m"] = int(cascade_count) > 3
 
         if isinstance(self._bot.client, BinanceFuturesMarketData):
             premium = self._bot.client.get_cached_premium_index(symbol)
@@ -747,10 +772,35 @@ class AnalyzerFramesMixin(AnalyzerContextMixin, _AnalyzerFamilyGatesBase):
                     basis_pct = (mark_price - index_price) / index_price * 100.0
                     enrichments["basis_pct"] = basis_pct
                     enrichments.setdefault("mark_index_spread_bps", basis_pct * 100.0)
+                estimated_settle = float(premium.get("estimated_settle_price") or 0.0)
+                if estimated_settle > 0.0:
+                    enrichments.setdefault("estimated_settle_price", estimated_settle)
+                interest_rate = float(premium.get("interest_rate") or 0.0)
+                if interest_rate != 0.0:
+                    enrichments.setdefault("interest_rate", interest_rate)
+                next_funding_time_ms = float(premium.get("next_funding_time_ms") or 0.0)
+                if next_funding_time_ms > 0.0:
+                    enrichments.setdefault("next_funding_time_ms", int(next_funding_time_ms))
             elif "funding_rate" not in enrichments:
                 funding_rate = self._bot.client.get_cached_funding_rate(symbol)
                 if funding_rate is not None:
                     enrichments["funding_rate"] = funding_rate
+
+            funding_z = self._bot.client.get_cached_funding_rate_zscore(symbol)
+            if funding_z is not None:
+                enrichments["funding_rate_zscore_48h"] = float(funding_z)
+
+            funding_info = self._bot.client.get_cached_funding_info(symbol)
+            if funding_info:
+                cap = funding_info.get("funding_rate_cap")
+                floor = funding_info.get("funding_rate_floor")
+                interval = funding_info.get("funding_interval_hours")
+                if cap is not None:
+                    enrichments.setdefault("funding_rate_cap", float(cap))
+                if floor is not None:
+                    enrichments.setdefault("funding_rate_floor", float(floor))
+                if interval is not None:
+                    enrichments.setdefault("funding_interval_hours", int(interval))
 
             oi_current = self._bot.client.get_cached_open_interest(symbol)
             if oi_current is not None:
@@ -1036,6 +1086,14 @@ class AnalyzerPipelineMixin(AnalyzerFramesMixin):
                 status="prepare_error",
                 prepared=prepared,
                 funnel=funnel,
+            )
+
+        if prepared is not None and getattr(frames, "frame_source_flags", ()):
+            existing_flags = set(getattr(prepared, "data_freshness_flags", ()) or ())
+            existing_flags.update(frames.frame_source_flags)
+            prepared = replace(
+                prepared,
+                data_freshness_flags=tuple(sorted(existing_flags)),
             )
 
         if prepared is not None and ws_enrichments:

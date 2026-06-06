@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, ClassVar
 from ._roadmap import (
     _build_atr_signal,
     _finite_or_none,
-    _last,
+    _prev,
     _reject,
 )
 from .roadmap_base import RoadmapSetup
@@ -49,8 +49,11 @@ def detect_multi_tf_trend(
         return None
     htf_ema = htf["ema50"]
     htf_slope = float(htf_ema[-1] - htf_ema[-5])
-    ltf_delta = _last(ltf, "close") - _last(ltf.head(ltf.height - 5), "close")
-    ltf_atr = _last(ltf, "atr14", 0.0)
+    if ltf.height < 6:
+        _reject(prepared, setup_id, "insufficient_bars")
+        return None
+    ltf_delta = _prev(ltf, "close") - float(ltf.item(-6, "close"))
+    ltf_atr = _prev(ltf, "atr14", 0.0)
     ltf_noise = (
         max(ltf_atr * 0.08, abs(htf_slope) * 0.05) if ltf_atr > 0.0 else abs(htf_slope) * 0.05
     )
@@ -69,8 +72,8 @@ def detect_multi_tf_trend(
         return None
 
     adx_1h = _last(prepared.work_1h, "adx14")
-    vol_ratio = _last(prepared.work_15m, "volume_ratio20", 1.0)
-    rsi_15m = _last(prepared.work_15m, "rsi14", 50.0)
+    vol_ratio = _prev(prepared.work_15m, "volume_ratio20", 1.0)
+    rsi_15m = _prev(prepared.work_15m, "rsi14", 50.0)
     if adx_1h < float(params["min_adx_1h"]):
         _reject(prepared, setup_id, "adx_too_low", adx_1h=adx_1h)
         return None
@@ -141,6 +144,7 @@ def detect_multi_tf_trend(
             depth_imbalance=depth,
         )
         return None
+    entry_anchor = float(htf_ema[-1]) if htf_ema[-1] > 0 else None
     return _build_atr_signal(
         prepared=prepared,
         setup_id=setup_id,
@@ -154,7 +158,9 @@ def detect_multi_tf_trend(
             f"votes_up={up_votes} votes_down={down_votes}",
         ],
         family=family,
+        entry_anchor=entry_anchor,
         structure_clarity=0.85,
+        confirmed_bar=True,
     )
 
 

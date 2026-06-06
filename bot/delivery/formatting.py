@@ -672,11 +672,16 @@ def _channel_rr_line(facts: SignalMessageFacts) -> str:
     )
 
 
+def _tp_equality_tolerance(price: float) -> float:
+    return max(abs(price) * 1e-6, 1e-8)
+
+
 def _channel_legs_line(facts: SignalMessageFacts) -> str:
     entry = f"{format_price(facts.entry_low)}-{format_price(facts.entry_high)}"
     tp3 = facts.take_profit_3 if facts.take_profit_3 is not None else facts.take_profit_2
     same_tp = (
-        abs(facts.take_profit_2 - facts.take_profit_1) <= max(abs(facts.take_profit_1), 1.0) * 1e-8
+        abs(facts.take_profit_2 - facts.take_profit_1)
+        <= _tp_equality_tolerance(facts.take_profit_1)
     )
     if same_tp:
         targets = f"TP {code(format_price(facts.take_profit_1))}"
@@ -737,7 +742,8 @@ def target_line(facts: SignalMessageFacts) -> str:
     """Render target plan."""
     tp3 = facts.take_profit_3 if facts.take_profit_3 is not None else facts.take_profit_2
     same_tp = (
-        abs(facts.take_profit_2 - facts.take_profit_1) <= max(abs(facts.take_profit_1), 1.0) * 1e-8
+        abs(facts.take_profit_2 - facts.take_profit_1)
+        <= _tp_equality_tolerance(facts.take_profit_1)
     )
     if same_tp:
         return f"TP {code(format_price(facts.take_profit_1))}"
@@ -755,9 +761,9 @@ def entry_levels_line(facts: SignalMessageFacts) -> str:
     weights = [round(max(0.0, weight) * 100.0) for weight in facts.scale_weights]
     mid = (facts.entry_low + facts.entry_high) / 2.0
     if direction_label(facts.direction) == "SHORT":
-        levels = [facts.entry_low, mid, facts.entry_high]
-    else:
         levels = [facts.entry_high, mid, facts.entry_low]
+    else:
+        levels = [facts.entry_low, mid, facts.entry_high]
     return (
         f"E1 {code(format_price(levels[0]))} {code(str(weights[0]) + '%')} "
         f"E2 {code(format_price(levels[1]))} {code(str(weights[1]) + '%')} "
@@ -897,7 +903,10 @@ def tracking_status_text(state: Any) -> str:
     pending_expires_at = getattr(state, "pending_expires_at", None)
     tp1_hit_at = getattr(state, "tp1_hit_at", None)
     if close_reason == "breakeven_stop":
-        return f"⚖️ безубыток @ {format_price(_optional_float(close_price))}"
+        be_px = format_price(_optional_float(close_price))
+        if tp1_hit_at:
+            return f"✅ TP1 взят → BE @ {be_px}"
+        return f"⚖️ безубыток @ {be_px}"
     if close_reason == "stop_loss":
         return f"🛑 стоп @ {format_price(_optional_float(close_price))}"
     if close_reason in {"tp1_hit", "tp2_hit"}:
@@ -941,6 +950,9 @@ def format_tracking_event_message(event: Any) -> str:
     if event_type == "tp2_hit":
         return f"🎯 <b>{title}</b> {sym} {ref} @ {code(price)}"
     if event_type in {"stop_loss", "breakeven_stop"}:
+        tp1_hit_at = getattr(tracked, "tp1_hit_at", None)
+        if event_type == "breakeven_stop" and tp1_hit_at:
+            return f"✅ <b>TP1 взят → BE</b> {sym} {ref} @ {code(price)}"
         icon = "⚖️" if event_type == "breakeven_stop" else "🛑"
         return f"{icon} <b>{title}</b> {sym} {ref} @ {code(price)}"
     if event_type == "expired":

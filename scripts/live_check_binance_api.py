@@ -27,6 +27,10 @@ PUBLIC_FAPI_PATHS = {
     "/fapi/v1/exchangeInfo",
     "/fapi/v1/ticker/24hr",
     "/fapi/v1/ticker/bookTicker",
+    "/fapi/v2/ticker/price",
+    "/fapi/v1/premiumIndex",
+    "/fapi/v1/fundingRate",
+    "/fapi/v1/fundingInfo",
     "/fapi/v1/klines",
 }
 PUBLIC_FDATA_PATHS = {
@@ -123,6 +127,15 @@ async def _run(
         ticker_rows = await client.fetch_ticker_24h()
         _assert_public_endpoint("/fapi/v1/ticker/bookTicker")
         book_bid, book_ask = await client.fetch_book_ticker(symbols[0])
+        _assert_public_endpoint("/fapi/v2/ticker/price")
+        symbol_price = await client.fetch_symbol_price(symbols[0])
+        _assert_public_endpoint("/fapi/v1/premiumIndex")
+        premium_rows = await client.fetch_premium_index_all()
+        premium_sample = premium_rows.get(symbols[0], {})
+        _assert_public_endpoint("/fapi/v1/fundingRate")
+        funding_history = await client.fetch_funding_rate_history(symbols[0], limit=5)
+        _assert_public_endpoint("/fapi/v1/fundingInfo")
+        funding_info_rows = await client.fetch_funding_info_all()
         _assert_public_endpoint("/fapi/v1/klines")
         klines_15m = await client.fetch_klines_cached(symbols[0], "15m", limit=64)
         _assert_public_endpoint("/futures/data/openInterestHist")
@@ -138,6 +151,10 @@ async def _run(
             symbol=symbols[0],
             bid=book_bid,
             ask=book_ask,
+            symbol_price=symbol_price,
+            premium_index_price=premium_sample.get("index_price"),
+            funding_history_rows=len(funding_history),
+            funding_info_rows=len(funding_info_rows),
             kline_rows=klines_15m.height,
             oi_change=oi_change,
             ls_ratio=ls_ratio,

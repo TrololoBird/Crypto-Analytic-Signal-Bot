@@ -479,3 +479,30 @@ def _crowd_position(prepared: PreparedSymbol, signal: Signal, _settings: BotSett
     if total_weight <= 0.0:
         return 0.5
     return round(weighted_total / total_weight, 4)
+
+
+def _liquidation_cluster_score(prepared: PreparedSymbol, signal: Signal) -> float:
+    cascade = getattr(prepared, "liquidation_cascade_5m", None)
+    liq_score = getattr(prepared, "liquidation_score", None)
+    if cascade is not True:
+        return 0.5
+    if liq_score is None:
+        return 0.65
+    signed = float(liq_score) * (1.0 if signal.direction == "long" else -1.0)
+    if signed > 0.25:
+        return 0.9
+    if signed < -0.25:
+        return 0.15
+    return 0.5
+
+
+def _session_killzone_score(signal: Signal) -> float:
+    from datetime import UTC, datetime
+
+    hour = datetime.now(UTC).hour
+    in_killzone = hour in {0, 1, 2, 7, 8, 9, 12, 13, 14}
+    if not in_killzone:
+        return 0.45
+    if signal.strategy_family in {"session", "breakout", "momentum"}:
+        return 0.78
+    return 0.58

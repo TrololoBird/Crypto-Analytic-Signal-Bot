@@ -9,7 +9,7 @@ from ..features.prepare import _swing_points
 from ..setups import _build_signal, _compute_dynamic_score, _last_swing_prices, _reject
 from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
 from ..setups.utils import normalize_trade_levels
-from ._common import SpecHit, _latest_values, with_spec_columns
+from ._common import SpecHit, _latest_values, confirmed_pattern_frame, with_spec_columns
 
 if TYPE_CHECKING:
     import polars as pl
@@ -39,7 +39,7 @@ def detect_wick_trap(frame: pl.DataFrame, *, timeframe: str = "15m") -> SpecHit 
         return SpecHit(
             strategy="wick_trap_reversal",
             direction="long",
-            entry=row["close"],
+            entry=prev_low,
             stop_basis=row["low"],
             atr=atr,
             timeframe=timeframe,
@@ -51,7 +51,7 @@ def detect_wick_trap(frame: pl.DataFrame, *, timeframe: str = "15m") -> SpecHit 
         return SpecHit(
             strategy="wick_trap_reversal",
             direction="short",
-            entry=row["close"],
+            entry=prev_high,
             stop_basis=row["high"],
             atr=atr,
             timeframe=timeframe,
@@ -88,8 +88,8 @@ def _detect_wick_trap_reversal_extended(
     family: str,
 ) -> Signal | None:
     dynamic_params = effective
-    work_1h = prepared.work_1h
-    work_15m = prepared.work_15m
+    work_1h = confirmed_pattern_frame(prepared.work_1h)
+    work_15m = confirmed_pattern_frame(prepared.work_15m)
 
     if work_1h.height < 10 or work_15m.height < 8:
         _reject(prepared, setup_id, "insufficient_bars")

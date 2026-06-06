@@ -9,7 +9,7 @@ from ..features.prepare import _swing_points
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
 from ..setups.utils import build_structural_targets
-from ._common import SpecHit, as_float, with_spec_columns
+from ._common import SpecHit, as_float, confirmed_pattern_frame, with_spec_columns
 
 if TYPE_CHECKING:
     import polars as pl
@@ -35,7 +35,7 @@ def detect_vwap_reclaim(frame: pl.DataFrame, *, timeframe: str = "15m") -> SpecH
         return SpecHit(
             strategy="vwap_trend",
             direction="long",
-            entry=close,
+            entry=vwap,
             stop_basis=min(as_float(work.item(-1, "low")), vwap),
             atr=atr,
             timeframe=timeframe,
@@ -47,7 +47,7 @@ def detect_vwap_reclaim(frame: pl.DataFrame, *, timeframe: str = "15m") -> SpecH
         return SpecHit(
             strategy="vwap_trend",
             direction="short",
-            entry=close,
+            entry=vwap,
             stop_basis=max(as_float(work.item(-1, "high")), vwap),
             atr=atr,
             timeframe=timeframe,
@@ -77,8 +77,8 @@ def _detect_vwap_trend_extended(
     setup_id: str,
     family: str,
 ) -> Signal | None:
-    work_15m = prepared.work_15m
-    work_1h = prepared.work_1h
+    work_15m = confirmed_pattern_frame(prepared.work_15m)
+    work_1h = confirmed_pattern_frame(prepared.work_1h)
     effective_params = effective
     if work_15m.height < 30 or work_1h.height < 30:
         _reject(prepared, setup_id, "insufficient_bars")

@@ -165,7 +165,7 @@ def _build_atr_signal(
     structure_clarity: float = 0.5,
     entry_anchor: float | None = None,
     stop_anchor: float | None = None,
-    confirmed_bar: bool = False,
+    confirmed_bar: bool = True,
 ) -> Signal | None:
     work = prepared.work_15m
     # fix-sl-A: optional confirmed bar avoids anchoring entry on a forming candle tail.
@@ -224,8 +224,8 @@ def _build_atr_signal(
         rsi=rsi,
         structure_clarity=max(0.0, min(1.0, structure_clarity)),
     )
-    # floor: no signal delivered below 0.38 after penalties
-    score = max(0.38, round(score, 4))
+    # floor: skip sub-threshold signals before filter pipeline (min_score margin)
+    score = max(0.63, round(score, 4))
     return _build_signal(
         prepared=prepared,
         setup_id=setup_id,

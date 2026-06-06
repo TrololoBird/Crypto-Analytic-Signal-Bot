@@ -8,7 +8,7 @@ from ..features.prepare import _swing_points as _sp
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
 from ..setups.utils import build_structural_targets, validate_rr_or_penalty
-from ._common import SpecHit, _latest_values, as_float, with_spec_columns
+from ._common import SpecHit, _latest_values, as_float, confirmed_pattern_frame, with_spec_columns
 
 if TYPE_CHECKING:
     import polars as pl
@@ -36,7 +36,7 @@ def detect_ema_bounce(frame: pl.DataFrame, *, timeframe: str = "15m") -> SpecHit
             return SpecHit(
                 strategy="ema_bounce",
                 direction="long",
-                entry=row["close"],
+                entry=ema,
                 stop_basis=row["low"],
                 atr=atr,
                 timeframe=timeframe,
@@ -48,7 +48,7 @@ def detect_ema_bounce(frame: pl.DataFrame, *, timeframe: str = "15m") -> SpecHit
             return SpecHit(
                 strategy="ema_bounce",
                 direction="short",
-                entry=row["close"],
+                entry=ema,
                 stop_basis=row["high"],
                 atr=atr,
                 timeframe=timeframe,
@@ -92,8 +92,8 @@ def _detect_ema_bounce_extended(
     )
     sl_buffer_atr = float(dynamic_params.get("sl_buffer_atr", defaults.get("sl_buffer_atr", 1.5)))
 
-    work_1h = prepared.work_1h
-    work_15m = prepared.work_15m
+    work_1h = confirmed_pattern_frame(prepared.work_1h)
+    work_15m = confirmed_pattern_frame(prepared.work_15m)
     context_timeframe = "15m+1h"
     if work_1h.height < 3 or work_15m.height < 5:
         _reject(
@@ -256,12 +256,16 @@ def _detect_ema_bounce_extended(
     min_rr = dynamic_params.get("min_rr", defaults["min_rr"])
     is_valid_rr, _ = validate_rr_or_penalty(price_anchor, stop, tp1, min_rr)
     base_score = dynamic_params.get("base_score", defaults["base_score"])
+    ema_dist_atr = abs(close - bounce_ema) / atr if atr > 0.0 else 1.0
+    touch_quality = max(0.0, 1.0 - min(ema_dist_atr / max(bounce_threshold_atr, 0.05), 1.0))
+    body_quality = min(1.0, abs(close - open_) / atr / 0.5) if atr > 0.0 else 0.5
+    structure_clarity = max(0.35, min(1.0, 0.55 * touch_quality + 0.45 * body_quality))
     score = _compute_dynamic_score(
         direction=signal_direction,
         base_score=base_score,
         vol_ratio=vol_ratio,
         rsi=rsi,
-        structure_clarity=0.3,
+        structure_clarity=structure_clarity,
     )
     if not is_valid_rr and tp1 is not None:
         score *= dynamic_params.get("tp_too_close_penalty", defaults["tp_too_close_penalty"])
@@ -336,7 +340,7 @@ class EmaBounceSetup(SpecDetectorSetup):
     required_context = ("futures_flow",)
 
     DEFAULTS: ClassVar[dict[str, float]] = {
-        "base_score": 0.55,
+        "base_score": 0.62,
         "min_adx_1h": 15.0,
         "vol_ratio_threshold": 1.0,
         "bias_mismatch_penalty": 0.75,

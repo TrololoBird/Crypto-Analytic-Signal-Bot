@@ -50,6 +50,42 @@ def _market_regime_hint(bot: Any) -> str | None:
     return regime or None
 
 
+def _apply_shortlist_tenure(
+    bot: Any,
+    shortlist: list[UniverseSymbol],
+    *,
+    now: datetime,
+) -> list[UniverseSymbol]:
+    min_tenure_s = int(getattr(bot.settings.universe, "shortlist_min_tenure_seconds", 0) or 0)
+    if min_tenure_s <= 0 or not shortlist:
+        for item in shortlist:
+            bot._shortlist_symbol_since.setdefault(item.symbol, now)
+        return shortlist
+
+    since: dict[str, datetime] = getattr(bot, "_shortlist_symbol_since", {}) or {}
+    incoming = {item.symbol: item for item in shortlist}
+    protected: list[UniverseSymbol] = []
+    for item in list(getattr(bot, "_shortlist", []) or []):
+        joined = since.get(item.symbol)
+        if joined is None:
+            continue
+        age_s = (now - joined.astimezone(UTC)).total_seconds()
+        if age_s < min_tenure_s and item.symbol not in incoming:
+            protected.append(item)
+
+    merged: dict[str, UniverseSymbol] = dict(incoming)
+    for item in protected:
+        merged.setdefault(item.symbol, item)
+    ordered = list(shortlist)
+    for item in protected:
+        if item.symbol not in {row.symbol for row in ordered}:
+            ordered.append(item)
+    for item in ordered:
+        since.setdefault(item.symbol, now)
+    bot._shortlist_symbol_since = since
+    return ordered
+
+
 async def _outcome_derank_penalties(bot: Any) -> dict[str, float]:
     repo = getattr(bot, "_modern_repo", None)
     if repo is None or not hasattr(repo, "get_symbol_sl_counts"):
@@ -356,6 +392,23 @@ class ShortlistService:
         return enriched
 
     @staticmethod
+    def _merge_symbol_prices_rows(
+        rows: list[dict[str, Any]],
+        prices_by_symbol: dict[str, float],
+    ) -> list[dict[str, Any]]:
+        if not prices_by_symbol:
+            return rows
+        merged: list[dict[str, Any]] = []
+        for raw in rows:
+            row = dict(raw)
+            symbol = str(row.get("symbol") or "").strip().upper()
+            price = prices_by_symbol.get(symbol)
+            if price is not None and price > 0.0:
+                row["last_price"] = price
+            merged.append(row)
+        return merged
+
+    @staticmethod
     def _merge_premium_index_rows(
         rows: list[dict[str, Any]],
         premium_by_symbol: dict[str, dict[str, float]],
@@ -372,6 +425,12 @@ class ShortlistService:
                     row["funding_rate"] = premium.get("funding_rate")
                 if row.get("basis_pct") is None:
                     row["basis_pct"] = premium.get("basis_pct")
+                if row.get("estimated_settle_price") is None:
+                    row["estimated_settle_price"] = premium.get("estimated_settle_price")
+                if row.get("interest_rate") is None:
+                    row["interest_rate"] = premium.get("interest_rate")
+                if row.get("next_funding_time_ms") is None:
+                    row["next_funding_time_ms"] = premium.get("next_funding_time_ms")
             merged.append(row)
         return merged
 
@@ -537,11 +596,12 @@ class ShortlistService:
                 self.fetch_symbols_with_retry(max_retries=1),
                 bot.client.fetch_ticker_24h(),
                 bot.client.fetch_premium_index_all(),
+                bot.client.fetch_symbol_prices_all(),
                 return_exceptions=True,
             ),
             timeout=timeout_s,
         )
-        symbol_meta_result, tickers_result, premium_result = results
+        symbol_meta_result, tickers_result, premium_result, prices_result = results
         if isinstance(symbol_meta_result, Exception):
             cached_meta = list(getattr(bot, "_symbol_meta_by_symbol", {}).values())
             if not cached_meta:
@@ -585,6 +645,14 @@ class ShortlistService:
             )
         else:
             premium_by_symbol = dict(premium_result)
+        if isinstance(prices_result, Exception):
+            prices_by_symbol: dict[str, float] = {}
+            LOG.info(
+                "shortlist symbol-price refresh failed; using 24h ticker prices | error=%s",
+                prices_result,
+            )
+        else:
+            prices_by_symbol = dict(prices_result)
         bot._symbol_meta_by_symbol = {
             str(getattr(row, "symbol", "")).strip().upper(): row for row in symbol_meta_list
         }
@@ -597,7 +665,10 @@ class ShortlistService:
         }
         outcome_penalties = await _outcome_derank_penalties(bot)
         enriched_tickers = self._enrich_shortlist_rows(
-            self._merge_premium_index_rows(list(tickers_24h), premium_by_symbol)
+            self._merge_symbol_prices_rows(
+                self._merge_premium_index_rows(list(tickers_24h), premium_by_symbol),
+                prices_by_symbol,
+            )
         )
         await self._warm_prescore_basis_for_rows(enriched_tickers)
         enriched_tickers, radar_pre = self._prepare_tickers_with_radar(enriched_tickers)
@@ -864,19 +935,36 @@ class ShortlistService:
                         source = str(medium_summary.get("mode") or "rest_medium")
                         bot._last_shortlist_medium_refresh_at = now
                 elif cached_shortlist:
-                    live_shortlist = list(cached_shortlist)
-                    live_summary = {"mode": "cached"}
-                    source = "cached"
-                    fallback_reason = FALLBACK_REASON_USING_CACHED
+                    max_cache_age = float(
+                        getattr(
+                            bot.settings.universe,
+                            "shortlist_cache_max_age_seconds",
+                            3600,
+                        )
+                        or 3600
+                    )
+                    cache_fresh = (
+                        cached_shortlist_age_s is not None
+                        and cached_shortlist_age_s <= max_cache_age
+                    )
+                    if cache_fresh:
+                        live_shortlist = list(cached_shortlist)
+                        live_summary = {"mode": "cached"}
+                        source = "cached"
+                        fallback_reason = FALLBACK_REASON_USING_CACHED
+                    elif not ws_cache_warm or not has_symbol_meta:
+                        fallback_reason = FALLBACK_REASON_WS_CACHE_COLD
                 elif not ws_cache_warm or not has_symbol_meta:
                     fallback_reason = FALLBACK_REASON_WS_CACHE_COLD
             if full_refresh_due or (not live_shortlist and not cached_shortlist):
                 if full_refresh_due:
                     fallback_reason = FALLBACK_REASON_FULL_REFRESH_DUE
                 live_shortlist, live_summary = await self.build_live_shortlist()
+                fit_counts = [len(item.strategy_fits) for item in live_shortlist]
+                zero_fit = sum(1 for count in fit_counts if count == 0)
                 LOG.info(
                     "shortlist build result | source=%s gate_passed=%s light_pool=%s eligible=%s "
-                    "dynamic_pool=%s pinned=%s total=%d strategy_fits_total=%d",
+                    "dynamic_pool=%s pinned=%s total=%d strategy_fits_total=%d zero_strategy_fit=%d",
                     "rest_full",
                     live_summary.get("gate_passed"),
                     live_summary.get("light_pool"),
@@ -884,8 +972,16 @@ class ShortlistService:
                     live_summary.get("dynamic_pool"),
                     live_summary.get("pinned"),
                     len(live_shortlist),
-                    sum(len(item.strategy_fits) for item in live_shortlist),
+                    sum(fit_counts),
+                    zero_fit,
                 )
+                if live_shortlist and zero_fit > len(live_shortlist) * 0.5:
+                    LOG.warning(
+                        "shortlist DEGRADED (immediate): >50%% symbols have zero strategy_fits "
+                        "(%d/%d) after refresh",
+                        zero_fit,
+                        len(live_shortlist),
+                    )
                 if live_shortlist:
                     bot._last_shortlist_full_refresh_at = now
                     source = "rest_full"
@@ -912,6 +1008,7 @@ class ShortlistService:
                 fallback_reason = FALLBACK_REASON_REFRESH_EXCEPTION
                 LOG.exception("shortlist refresh failed, using pinned fallback")
 
+        shortlist = _apply_shortlist_tenure(bot, shortlist, now=now)
         async with bot._shortlist_lock:
             bot._shortlist = shortlist
         bot._shortlist_source = source

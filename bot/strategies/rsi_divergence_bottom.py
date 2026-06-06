@@ -210,6 +210,7 @@ def detect_rsi_divergence_bottom(
         setup_id=setup_id,
         direction=direction,
         params=params,
+        confirmed_bar=True,
         reasons=[
             f"{reason_prefix}_{direction}",
             f"price_low={prev_low:.4f}->{recent_low:.4f}",

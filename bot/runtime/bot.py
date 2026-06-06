@@ -203,10 +203,13 @@ class SignalBot:
         self._symbol_meta_by_symbol: dict[str, Any] = {}
         self._shortlist_source: str = "startup"
         self._shortlist_lock = asyncio.Lock()
+        self._shortlist_symbol_since: dict[str, datetime] = {}
         self._cycle_failure_streak = 0
         self._circuit_open_until: float = 0.0
         self.last_cycle_summary: dict[str, Any] = {}
         self._session_action_delivered: int = 0
+        self._session_signals_long: int = 0
+        self._session_signals_short: int = 0
         self._zero_delivery_streak: int = 0
         self._last_zero_delivery_alert_mono: float = 0.0
         self._last_message_buffer_dropped: int = 0
@@ -578,6 +581,9 @@ class SignalBot:
                 LOG.info(
                     "startup reconciled closed signal outcomes | count=%d", reconciled_outcomes
                 )
+            remapped_tp1 = await self.tracker.reconcile_tp1_outcome_remap()
+            if remapped_tp1:
+                LOG.info("startup remapped tp1 outcomes | count=%d", remapped_tp1)
         except DEFENSIVE_EXC:
             LOG.exception("startup outcome reconciliation failed")
 

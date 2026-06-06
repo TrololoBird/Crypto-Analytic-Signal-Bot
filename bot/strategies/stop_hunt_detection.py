@@ -11,10 +11,11 @@ from ._common import (
     SpecHit,
     _latest_values,
     build_spec_signal,
+    confirmed_pattern_frame,
     orderflow_supports_reversal,
     with_spec_columns,
 )
-from ._roadmap import _as_float, _build_atr_signal, _last, _missing_columns, _reject
+from ._roadmap import _as_float, _build_atr_signal, _missing_columns, _prev, _reject
 from .roadmap_base import RoadmapSetup
 
 if TYPE_CHECKING:
@@ -92,7 +93,7 @@ def detect_stop_hunt_prepared(
     family: str,
 ) -> Signal | None:
     params = effective_params
-    work = prepared.work_15m
+    work = confirmed_pattern_frame(prepared.work_15m)
     hit = detect_stop_hunt(work, timeframe="15m")
     if hit is not None:
         return build_spec_signal(
@@ -114,8 +115,11 @@ def detect_stop_hunt_prepared(
     if missing:
         _reject(prepared, setup_id, "missing_columns", missing_fields=missing)
         return None
-    close = _last(work, "close")
-    atr = _last(work, "atr14")
+    if work.height < 2:
+        _reject(prepared, setup_id, "insufficient_bars")
+        return None
+    close = _prev(work, "close")
+    atr = _prev(work, "atr14")
     tolerance = max(0.0003, min(float(params["sweep_tolerance_pct"]), 0.0012))
     min_volume_ratio = max(float(params["min_volume_ratio"]), 0.80)
     min_close_position_long = max(float(params["min_close_position_long"]), 0.55)
@@ -127,7 +131,7 @@ def detect_stop_hunt_prepared(
     level = 0.0
     signal_lag = 0
     sweep_extreme = 0.0
-    vol_ratio = _last(work, "volume_ratio20", 1.0)
+    vol_ratio = _prev(work, "volume_ratio20", 1.0)
     entry_drift_atr = 0.0
     reclaim_quality = 1.0
     for local_idx in range(recent.height - 1, -1, -1):
@@ -284,6 +288,7 @@ def detect_stop_hunt_prepared(
         setup_id=setup_id,
         direction=direction,
         params=params,
+        confirmed_bar=True,
         reasons=[
             f"stop_hunt_{direction}",
             f"swept_level={level:.4f}",

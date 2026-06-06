@@ -9,7 +9,14 @@ from typing import TYPE_CHECKING, ClassVar
 from ..features.prepare import _swing_points
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
-from ._common import SpecHit, _latest_values, _pivot_rows, as_float, with_spec_columns
+from ._common import (
+    SpecHit,
+    _latest_values,
+    _pivot_rows,
+    as_float,
+    confirmed_pattern_frame,
+    with_spec_columns,
+)
 
 if TYPE_CHECKING:
     import polars as pl
@@ -39,7 +46,7 @@ def detect_hidden_divergence(frame: pl.DataFrame, *, timeframe: str = "15m") -> 
             return SpecHit(
                 strategy="hidden_divergence",
                 direction="long",
-                entry=row["close"],
+                entry=new["price"],
                 stop_basis=new["price"],
                 atr=atr,
                 timeframe=timeframe,
@@ -57,7 +64,7 @@ def detect_hidden_divergence(frame: pl.DataFrame, *, timeframe: str = "15m") -> 
             return SpecHit(
                 strategy="hidden_divergence",
                 direction="short",
-                entry=row["close"],
+                entry=new["price"],
                 stop_basis=new["price"],
                 atr=atr,
                 timeframe=timeframe,
@@ -135,7 +142,7 @@ def _detect_hidden_divergence_extended(
     min_volume_ratio = float(dynamic_params.get("min_volume_ratio", defaults["min_volume_ratio"]))
     sl_buffer_atr = float(dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]))
 
-    w1h = prepared.work_1h
+    w1h = confirmed_pattern_frame(prepared.work_1h)
     if w1h.height < 20:
         _reject(prepared, setup_id, "insufficient_1h_bars", bars=w1h.height)
         return None
@@ -150,7 +157,7 @@ def _detect_hidden_divergence_extended(
         _reject(prepared, setup_id, "price_missing")
         return None
 
-    w15m = prepared.work_15m
+    w15m = confirmed_pattern_frame(prepared.work_15m)
     if w15m.height < 3:
         _reject(prepared, setup_id, "insufficient_15m_bars", bars=w15m.height)
         return None
@@ -398,7 +405,7 @@ class HiddenDivergenceSetup(SpecDetectorSetup):
     required_context = ("futures_flow",)
 
     DEFAULTS: ClassVar[dict[str, float]] = {
-        "base_score": 0.5,
+        "base_score": 0.62,
         "min_swings": 2.0,
         "bias_mismatch_penalty": 0.75,
         "tp_too_close_penalty": 0.75,

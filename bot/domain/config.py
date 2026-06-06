@@ -41,6 +41,12 @@ class RuntimeConfig(_StrictModel):
     analysis_concurrency: int = Field(default=6, ge=1, le=20)
     strategy_concurrency: int = Field(default=10, ge=1, le=20)
     strategy_timeout_seconds: float = Field(default=12.0, ge=0.5, le=120.0)
+    strategy_timeout_breaker: int = Field(
+        default=5,
+        ge=1,
+        le=50,
+        description="Skip strategy after this many consecutive executor timeouts",
+    )
     max_strategy_queue_wait_seconds: float = Field(default=30.0, ge=0.0, le=300.0)
     max_signals_per_cycle: int = Field(default=80, ge=1, le=80)
     event_bus_max_size: int = Field(default=512, ge=16, le=50_000)
@@ -94,12 +100,32 @@ class RuntimeConfig(_StrictModel):
     oi_refresh_interval_minutes: int = Field(default=30, ge=5, le=1440)
     heartbeat_seconds: float = Field(default=60.0, ge=5.0, le=3600.0)
     cycle_timeout_seconds: float = Field(default=120.0, ge=30.0, le=600.0)
+    shortlist_lock_timeout_seconds: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=120.0,
+        description="Max wait for shortlist_lock in kline handler before skipping event",
+    )
+    doctor_fail_fast: bool = Field(
+        default=True,
+        description="Abort startup when startup doctor reports critical issues",
+    )
     min_restart_interval_seconds: int = Field(default=120, ge=0, le=3600)
     dashboard_weight_alert_pct: float = Field(
         default=80.0,
         ge=50.0,
         le=100.0,
         description="REST weight utilization alert threshold (% of soft limit) for dashboard",
+    )
+    dashboard_rate_limit_per_minute: int = Field(
+        default=120,
+        ge=10,
+        le=10_000,
+        description="Per-client-IP sliding-window request cap for dashboard HTTP routes",
+    )
+    dashboard_audit_log_enabled: bool = Field(
+        default=True,
+        description="Append dashboard HTTP access events to telemetry/dashboard_access.jsonl",
     )
 
     @field_validator("log_level")
@@ -178,6 +204,18 @@ class UniverseConfig(_StrictModel):
     full_refresh_interval_seconds: int = Field(default=7200, ge=60, le=86_400)
     shortlist_spread_max_bps: float = Field(default=8.0, ge=0.5, le=100.0)
     shortlist_book_stale_seconds: float = Field(default=90.0, ge=5.0, le=3600.0)
+    shortlist_min_tenure_seconds: int = Field(
+        default=1800,
+        ge=0,
+        le=86_400,
+        description="Minimum time a symbol stays on shortlist before demotion",
+    )
+    shortlist_cache_max_age_seconds: int = Field(
+        default=3600,
+        ge=60,
+        le=86_400,
+        description="Max age for cached shortlist fallback when WS cache is cold",
+    )
     pinned_symbols: tuple[str, ...] = REQUIRED_PINNED_SYMBOLS
 
     @field_validator("quote_asset")
@@ -232,6 +270,10 @@ class AssetConfig(_StrictModel):
     excluded_strategies: tuple[str, ...] = ()
     allowed_strategies: tuple[str, ...] = ()
     deep_analysis: bool = False
+    filter_overrides: dict[str, float] = Field(
+        default_factory=dict,
+        description="Per-asset filter overrides: min_atr_pct, max_atr_pct, min_adx_1h",
+    )
 
     @field_validator("excluded_strategies", "allowed_strategies")
     @classmethod
@@ -251,6 +293,18 @@ class FilterConfig(_StrictModel):
 
     cooldown_minutes: int = Field(default=60, ge=0, le=1440)
     symbol_cooldown_minutes: int = Field(default=120, ge=0, le=10080)
+    outcome_sl_cooldown_minutes: int = Field(
+        default=90,
+        ge=0,
+        le=10080,
+        description="Extended cooldown after executed stop_loss/breakeven_stop",
+    )
+    family_cooldown_minutes: int = Field(
+        default=45,
+        ge=0,
+        le=10080,
+        description="Cooldown for same strategy family + symbol + direction",
+    )
     max_spread_bps: float = Field(default=8.0, ge=0.1, le=100.0)
     min_atr_pct: float = Field(default=0.40, ge=0.01, le=10.0)
     max_atr_pct: float = Field(default=10.0, ge=0.1, le=50.0)
@@ -275,6 +329,10 @@ class FilterConfig(_StrictModel):
     regime_filter_enabled: bool = Field(
         default=True,
         description="Block trend longs/shorts against BTC regime (P2 SL-fix)",
+    )
+    trend_conflict_soft: bool = Field(
+        default=True,
+        description="When false, 1h trend conflict is a hard reject instead of score penalty",
     )
     # Composable filter stages (Phase 6). Empty tuple = all defaults enabled.
     enabled_stages: tuple[str, ...] = (
@@ -406,6 +464,8 @@ class ScoringConfig(_StrictModel):
     weight_risk_reward: float = Field(default=0.15, ge=0.0, le=1.0)
     weight_crowd_position: float = Field(default=0.10, ge=0.0, le=1.0)
     weight_oi_momentum: float = Field(default=0.10, ge=0.0, le=1.0)
+    weight_liquidation_proximity: float = Field(default=0.04, ge=0.0, le=0.25)
+    weight_session_killzone: float = Field(default=0.03, ge=0.0, le=0.25)
     funding_rate_extreme: float = Field(default=0.0010, ge=0.0, le=0.02)
     funding_rate_moderate: float = Field(default=0.0005, ge=0.0, le=0.01)
 
@@ -420,6 +480,8 @@ class ScoringConfig(_StrictModel):
             "weight_risk_reward": float(self.weight_risk_reward),
             "weight_crowd_position": float(self.weight_crowd_position),
             "weight_oi_momentum": float(self.weight_oi_momentum),
+            "weight_liquidation_proximity": float(self.weight_liquidation_proximity),
+            "weight_session_killzone": float(self.weight_session_killzone),
         }
         total_weight = sum(weights.values())
         if total_weight <= 0.0:
@@ -473,11 +535,33 @@ class DeliveryConfig(_StrictModel):
     watch_screener_enabled: bool = True
     sl_postmortem_enabled: bool = True
     sl_postmortem_to_operators: bool = True
+    min_confirmations: int = Field(
+        default=3,
+        ge=1,
+        le=5,
+        description="Hard confluence gate minimum confirmations (ADR-003)",
+    )
     reversal_min_confirmations: int = Field(
         default=3,
         ge=1,
         le=5,
         description="Hard gate min confirmations for reversal profiles in bear BTC regime",
+    )
+    target_rr: tuple[float, float, float] = Field(
+        default=(1.9, 3.0, 5.0),
+        description="Default TP1/TP2/TP3 risk-reward multiples for trade-plan normalization",
+    )
+    portfolio_max_per_symbol: int = Field(
+        default=2,
+        ge=1,
+        le=20,
+        description="Max ranked deliveries per symbol in one batch",
+    )
+    max_signals_per_minute: int = Field(
+        default=12,
+        ge=0,
+        le=120,
+        description="Global delivery burst cap per rolling minute (0 = disabled)",
     )
     use_weighted_confluence: bool = Field(
         default=True,
@@ -494,6 +578,31 @@ class DeliveryConfig(_StrictModel):
     portfolio_max_same_direction_regime: int = Field(default=4, ge=1, le=40)
     portfolio_max_family_direction: int = Field(default=2, ge=1, le=20)
     portfolio_max_bear_longs: int = Field(default=2, ge=0, le=20)
+    max_strategy_share: float = Field(
+        default=0.25,
+        ge=0.05,
+        le=1.0,
+        description="Max share of one setup_id in a ranked delivery batch",
+    )
+    setup_interval_minutes: dict[str, int] = Field(
+        default_factory=dict,
+        description="Per-setup minimum minutes between any deliveries (setup-wide, not per-symbol)",
+    )
+
+    @field_validator("setup_interval_minutes")
+    @classmethod
+    def _validate_setup_interval_minutes(
+        cls, value: Mapping[str, Any] | None
+    ) -> dict[str, int]:
+        normalized: dict[str, int] = {}
+        for setup_id, minutes in (value or {}).items():
+            coerced = int(minutes)
+            if coerced < 0 or coerced > 1440:
+                msg = f"delivery.setup_interval_minutes.{setup_id} must be in [0, 1440]"
+                raise ValueError(msg)
+            if coerced > 0:
+                normalized[str(setup_id)] = coerced
+        return normalized
 
     @model_validator(mode="after")
     def _validate_tier_caps(self) -> DeliveryConfig:

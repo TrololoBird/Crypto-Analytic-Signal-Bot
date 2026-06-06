@@ -10,7 +10,7 @@ from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.smc import fvg_candidates, fvg_ce_entry, is_clean_fvg, latest_fvg_zone, swing_series
 from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
 from ..setups.utils import build_smc_trade_plan, validate_rr_or_penalty
-from ._common import SpecHit, as_float, with_spec_columns
+from ._common import SpecHit, as_float, confirmed_pattern_frame, with_spec_columns
 
 if TYPE_CHECKING:
     import polars as pl
@@ -84,7 +84,8 @@ def _detect_fvg_setup_extended(
     min_mitigation_pct = dynamic_params.get("min_mitigation_pct", defaults["min_mitigation_pct"])
     sl_buffer_atr = dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"])
 
-    w = prepared.work_15m
+    w = confirmed_pattern_frame(prepared.work_15m)
+    w1h = confirmed_pattern_frame(prepared.work_1h)
     # FIX 2026-05-21: spec FVG only accepts an immediate retest; fall through
     # to the configured SMC zone scanner before rejecting as no setup.
     if w.height < 5:
@@ -258,8 +259,8 @@ def _detect_fvg_setup_extended(
     )
     stop_basis = fvg_low if direction == "long" else fvg_high
     pivots = (
-        swing_series(prepared.work_1h, swing_length=3, include_unconfirmed_tail=True)
-        if prepared.work_1h.height >= 8
+        swing_series(w1h, swing_length=3, include_unconfirmed_tail=True)
+        if w1h.height >= 8
         else None
     )
     trade_plan = build_smc_trade_plan(
@@ -267,7 +268,7 @@ def _detect_fvg_setup_extended(
         price_anchor=entry_price,
         stop_basis=stop_basis,
         atr=atr,
-        work_1h=prepared.work_1h,
+        work_1h=w1h,
         work_4h=prepared.work_4h,
         min_rr=min_rr,
         sl_buffer_atr=float(sl_buffer_atr),

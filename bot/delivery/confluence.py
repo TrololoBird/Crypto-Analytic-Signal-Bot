@@ -14,9 +14,11 @@ from .scoring import (
     ScoringResult,
     _crowd_position,
     _funding_contrarian,
+    _liquidation_cluster_score,
     _mtf_alignment,
     _oi_momentum,
     _risk_reward_quality,
+    _session_killzone_score,
     _structure_clarity,
     _volume_quality,
 )
@@ -192,7 +194,7 @@ class ConfluenceEngine:
         prepared: PreparedSymbol,
         cfg: Any,
     ) -> list[ComponentScore]:
-        funding_weight = max(0.0, min(cfg.weight_crowd_position * 0.5, cfg.weight_crowd_position))
+        funding_weight = max(0.0, float(cfg.weight_crowd_position) * 0.5)
         crowd_weight = max(0.0, cfg.weight_crowd_position - funding_weight)
         micro_context = self._microstructure_context(prepared, signal)
         micro_available = micro_context.confidence >= 0.35
@@ -246,6 +248,18 @@ class ConfluenceEngine:
                 "raw": micro_raw,
                 "available": micro_available,
             },
+            {
+                "name": "liquidation_cluster",
+                "weight": float(getattr(cfg, "weight_liquidation_proximity", 0.04)),
+                "raw": _liquidation_cluster_score(prepared, signal),
+                "available": getattr(prepared, "liquidation_cascade_5m", None) is not None,
+            },
+            {
+                "name": "session_killzone",
+                "weight": float(getattr(cfg, "weight_session_killzone", 0.03)),
+                "raw": _session_killzone_score(signal),
+                "available": True,
+            },
         ]
         specs: list[dict[str, Any]] = []
         for spec in raw_specs:
@@ -289,14 +303,22 @@ class ConfluenceEngine:
                     weight,
                     signal.setup_id,
                 )
+        if weight_total <= 0.0:
+            LOG.warning(
+                "ConfluenceEngine no available weighted components | setup_id=%s",
+                signal.setup_id,
+            )
+            return [
+                self._component_from_spec({**spec, "weight": 0.0, "available": False})
+                for spec in specs
+            ]
         if __debug__:
             active_weight_sum = sum(
                 max(0.0, float(spec["weight"]))
                 for spec in specs
                 if bool(spec["available"]) and float(spec["weight"]) > 0.0
             )
-            if weight_total > 0.0:
-                assert abs(active_weight_sum - 1.0) < 1e-9, active_weight_sum
+            assert abs(active_weight_sum - 1.0) < 1e-9, active_weight_sum
         return [self._component_from_spec(spec) for spec in specs]
 
     @staticmethod

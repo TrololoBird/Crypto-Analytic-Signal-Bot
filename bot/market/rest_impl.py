@@ -43,6 +43,9 @@ from bot.market.data import (
     _FAPI_BASE_URL,
     _FORBIDDEN_PARAMS_LOWER,
     _FORBIDDEN_PUBLIC_PATH_MARKERS,
+    _FUNDING_ENDPOINT_IP_LIMIT_OFFICIAL_MAX,
+    _FUNDING_ENDPOINT_IP_LIMIT_WINDOW_S,
+    _FUNDING_ENDPOINT_REQUEST_LIMITED_OPS,
     _FUTURES_DATA_IP_LIMIT_DEFAULT,
     _FUTURES_DATA_IP_LIMIT_OFFICIAL_MAX,
     _FUTURES_DATA_IP_LIMIT_WINDOW_S,
@@ -241,6 +244,16 @@ class BinanceClient(ABC):
         """Fetch funding rate history."""
 
     @abstractmethod
+    async def fetch_funding_info_all(self) -> dict[str, dict[str, float | int]]:
+        """Fetch funding cap/floor/interval adjustments for affected symbols."""
+
+    @abstractmethod
+    def get_cached_funding_info(
+        self, symbol: str, max_age_s: float = 3600.0
+    ) -> dict[str, float | int] | None:
+        """Return cached funding info row for a symbol if fresh."""
+
+    @abstractmethod
     async def fetch_agg_trade_snapshot(self, symbol: str, *, limit: int = 100) -> AggTradeSnapshot:
         """Fetch aggregate trade snapshot."""
 
@@ -253,6 +266,18 @@ class BinanceClient(ABC):
     @abstractmethod
     async def fetch_book_ticker(self, symbol: str) -> tuple[float | None, float | None]:
         """Fetch best bid/ask price."""
+
+    @abstractmethod
+    async def fetch_symbol_price(self, symbol: str) -> float | None:
+        """Fetch latest traded price (weight 1 via /fapi/v2/ticker/price)."""
+
+    @abstractmethod
+    async def fetch_symbol_prices_all(self) -> dict[str, float]:
+        """Fetch latest traded prices for all symbols (weight 2)."""
+
+    @abstractmethod
+    def get_cached_symbol_price(self, symbol: str, max_age_s: float = 5.0) -> float | None:
+        """Return cached symbol price if still fresh."""
 
     @abstractmethod
     async def fetch_symbol_frames(self, symbol: str) -> SymbolFrames:
@@ -369,11 +394,13 @@ class RestHttpMixin(RestCircuitMixin):
     _futures_data_limit_per_5m: int
     _rate_limit_pause_until: float
     _futures_data_pause_until: float
+    _funding_endpoint_pause_until: float
     _rate_limit_error_streak: int
     _weight_window_weight: int
     _weight_window_start: float
     _weight_budget: _WeightBudgetManager
     _futures_data_limiter: _SlidingWindowRateLimiter
+    _funding_endpoint_limiter: _SlidingWindowRateLimiter
     _http_session: aiohttp.ClientSession | None
     _last_rest_weight_1m: int | None
     _last_rest_response_time_ms: float | None
@@ -430,6 +457,7 @@ class RestHttpMixin(RestCircuitMixin):
                     await self._apply_active_proxy(first)
                     self._rate_limit_pause_until = 0.0
                     self._futures_data_pause_until = 0.0
+                    self._funding_endpoint_pause_until = 0.0
                     try:
                         return await self._call_public_http_json_attempt(
                             operation, params=params, symbol=symbol
@@ -499,18 +527,24 @@ class RestHttpMixin(RestCircuitMixin):
                     if status == 429:
                         self._rate_limit_error_streak += 1
                         retry_after_header = self._capture_retry_after(headers, operation=operation)
-                        is_ip_limited = bool(
-                            _PUBLIC_ENDPOINT_REGISTRY.get(
-                                operation, _PublicEndpointSpec("x")
-                            ).ip_limited
+                        spec_429 = _PUBLIC_ENDPOINT_REGISTRY.get(
+                            operation, _PublicEndpointSpec("x")
                         )
-                        if is_ip_limited:
+                        if spec_429.ip_limited:
                             effective_pause = max(60.0, float(retry_after_header or 60))
                             self._set_futures_data_pause(effective_pause)
                             LOG.info(
                                 "futures-data IP rate limit 429 | operation=%s pause=%.0fs",
                                 operation,
                                 self._futures_data_pause_until - time.monotonic(),
+                            )
+                        elif spec_429.funding_ip_limited:
+                            effective_pause = max(60.0, float(retry_after_header or 60))
+                            self._set_funding_endpoint_pause(effective_pause)
+                            LOG.info(
+                                "funding-endpoint IP rate limit 429 | operation=%s pause=%.0fs",
+                                operation,
+                                self._funding_endpoint_pause_until - time.monotonic(),
                             )
                         else:
                             effective_pause = max(1800.0, float(retry_after_header or 0))
@@ -603,8 +637,12 @@ class RestHttpMixin(RestCircuitMixin):
         limiter_wait_s = 0.0
         if spec.ip_limited:
             limiter_wait_s = await self._futures_data_limiter.acquire(label=operation)
+        elif spec.funding_ip_limited:
+            limiter_wait_s = await self._funding_endpoint_limiter.acquire(label=operation)
         if spec.ip_limited:
             pause_remaining = self._futures_data_pause_until - time.monotonic()
+        elif spec.funding_ip_limited:
+            pause_remaining = self._funding_endpoint_pause_until - time.monotonic()
         else:
             pause_remaining = self._rate_limit_pause_until - time.monotonic()
         if pause_remaining > 0:
@@ -622,6 +660,8 @@ class RestHttpMixin(RestCircuitMixin):
             await asyncio.sleep(pause_remaining)
             if spec.ip_limited:
                 self._futures_data_pause_until = 0.0
+            elif spec.funding_ip_limited:
+                self._funding_endpoint_pause_until = 0.0
         estimated = self._estimate_weight(operation, params)
         weight_wait_s = await self._weight_budget.acquire(weight=estimated, label=operation)
         if weight_wait_s > 0.0:
@@ -651,12 +691,24 @@ class RestHttpMixin(RestCircuitMixin):
             self._futures_data_pause_until, time.monotonic() + seconds
         )
 
+    def _set_funding_endpoint_pause(self, seconds: float) -> None:
+        if seconds <= 0:
+            return
+        self._funding_endpoint_pause_until = max(
+            self._funding_endpoint_pause_until, time.monotonic() + seconds
+        )
+
     def _uses_futures_data_pause(self, operation: str | None) -> bool:
         return bool(operation and operation in _FUTURES_DATA_REQUEST_LIMITED_OPS)
+
+    def _uses_funding_endpoint_pause(self, operation: str | None) -> bool:
+        return bool(operation and operation in _FUNDING_ENDPOINT_REQUEST_LIMITED_OPS)
 
     def _set_operation_rate_limit_pause(self, operation: str | None, seconds: float) -> None:
         if self._uses_futures_data_pause(operation):
             self._set_futures_data_pause(seconds)
+        elif self._uses_funding_endpoint_pause(operation):
+            self._set_funding_endpoint_pause(seconds)
         else:
             self._set_rate_limit_pause(seconds)
 
@@ -704,15 +756,17 @@ class RestHttpMixin(RestCircuitMixin):
             except (TypeError, ValueError):
                 limit = _DEFAULT_ORDER_BOOK_DEPTH_LIMIT
             if limit <= 50:
-                return 5
+                return 2
             if limit <= 100:
-                return 10
+                return 5
             if limit <= 500:
-                return 25
-            return 50
-        if operation == "premium_index":
+                return 10
+            return 20
+        if operation in {"premium_index", "symbol_order_book_ticker", "symbol_price_ticker_v2"}:
             symbol = (params or {}).get("symbol") if isinstance(params, Mapping) else None
-            return 1 if symbol else 10
+            if operation == "symbol_order_book_ticker":
+                return 2 if symbol else 5
+            return 1 if symbol else (10 if operation == "premium_index" else 2)
         return _ENDPOINT_WEIGHTS.get(operation, 10)
 
     def _track_weight(self, operation: str, _params: Mapping[str, Any] | None = None) -> None:
@@ -739,7 +793,7 @@ class RestHttpMixin(RestCircuitMixin):
             return
         weight_raw = (
             None
-            if operation == "symbol_order_book_ticker"
+            if operation in {"symbol_order_book_ticker", "symbol_price_ticker_v2"}
             else self._header_value(headers, "x-mbx-used-weight-1m")
         )
         response_time_raw = self._header_value(headers, "x-response-time")
@@ -786,6 +840,7 @@ class RestHttpMixin(RestCircuitMixin):
         open_circuits = sum(1 for v in self._circuit_open_until.values() if now < float(v))
         rest_pause_remaining = max(0.0, self._rate_limit_pause_until - now)
         futures_data_pause_remaining = max(0.0, self._futures_data_pause_until - now)
+        funding_endpoint_pause_remaining = max(0.0, self._funding_endpoint_pause_until - now)
         return {
             "rest_weight_1m": float(self._last_rest_weight_1m)
             if self._last_rest_weight_1m is not None
@@ -806,8 +861,12 @@ class RestHttpMixin(RestCircuitMixin):
             if self._last_endpoint_response_age_s is not None
             else 0.0,
             "futures_data_limit_per_5m": int(self._futures_data_limit_per_5m),
+            "funding_endpoint_limit_per_5m": int(
+                self._funding_endpoint_limiter.max_requests
+            ),
             "rest_rate_limit_pause_remaining_s": float(rest_pause_remaining),
             "futures_data_pause_remaining_s": float(futures_data_pause_remaining),
+            "funding_endpoint_pause_remaining_s": float(funding_endpoint_pause_remaining),
         }
 
 
@@ -860,6 +919,9 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         self._global_ls_ratio_cache: dict[tuple[str, str], tuple[float, float]] = {}
         self._top_position_ls_ratio_cache: dict[tuple[str, str], tuple[float, float]] = {}
         self._funding_history_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+        self._funding_info_cache: tuple[float, dict[str, dict[str, float | int]]] | None = None
+        self._symbol_price_cache: dict[str, tuple[float, float]] = {}
+        self._symbol_prices_all_cache: tuple[float, dict[str, float]] | None = None
         self._basis_cache: dict[tuple[str, str], tuple[float, float | None]] = {}
         self._basis_stats_cache: dict[tuple[str, str], tuple[float, dict[str, float | None]]] = {}
         self._basis_ws_history: dict[tuple[str, str], deque[tuple[float, float]]] = {}
@@ -871,6 +933,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         self._last_rest_response_time_ms: float | None = None
         self._rate_limit_pause_until = 0.0
         self._futures_data_pause_until = 0.0
+        self._funding_endpoint_pause_until = 0.0
         self._rate_limit_error_streak = 0
         self._weight_window_weight: int = 0
         self._weight_window_start: float = 0.0
@@ -880,6 +943,10 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         self._futures_data_limiter = _SlidingWindowRateLimiter(
             max_requests=self._futures_data_limit_per_5m,
             window_seconds=_FUTURES_DATA_IP_LIMIT_WINDOW_S,
+        )
+        self._funding_endpoint_limiter = _SlidingWindowRateLimiter(
+            max_requests=_FUNDING_ENDPOINT_IP_LIMIT_OFFICIAL_MAX,
+            window_seconds=_FUNDING_ENDPOINT_IP_LIMIT_WINDOW_S,
         )
         self._http_session: aiohttp.ClientSession | None = None
         self._klines_cache: dict[tuple[str, str, int], tuple[float, Any]] = {}
@@ -947,6 +1014,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
                 await self._apply_active_proxy(first)
                 self._rate_limit_pause_until = 0.0
                 self._futures_data_pause_until = 0.0
+                self._funding_endpoint_pause_until = 0.0
                 LOG.info("auto proxy applied | url=%s", mask_proxy_url(first))
         except Exception as exc:  # noqa: BLE001
             LOG.warning("auto proxy discovery failed | error=%s", exc)
@@ -957,9 +1025,16 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         if not self._proxy_failover_enabled:
             return False
         pool = self._proxy_pool
-        if pool is None or not pool.has_alternatives():
+        if pool is None:
             return False
-        nxt = pool.rotate_after_failure(self._proxy_url, reason)
+        current = getattr(self, "_proxy_url", None)
+        # Direct mode (proxy_url empty): do not auto-escalate to pool on transport noise.
+        # Pool proxies are applied on explicit IP-ban recovery or when proxy_url is set.
+        if not current:
+            return False
+        if not pool.has_alternatives():
+            return False
+        nxt = pool.rotate_after_failure(current, reason)
         if not nxt:
             return False
         await self._apply_active_proxy(nxt)
@@ -1440,6 +1515,93 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
                 return cached
         return await self._fetch_book_ticker_rest(symbol)
 
+    async def fetch_symbol_price(self, symbol: str) -> float | None:
+        validate_symbol(symbol)
+        now = time.monotonic()
+        cached = self._symbol_price_cache.get(symbol)
+        ttl = int(_CACHE_TTL["symbol_price"])
+        if cached is not None and now - cached[0] < ttl:
+            self._record_endpoint_snapshot(
+                "symbol_price_ticker_v2",
+                source="rest",
+                cache_hit=True,
+                fallback_used=False,
+                response_age_s=now - cached[0],
+            )
+            return cached[1]
+        try:
+            payload = await self._call_public_http_json(
+                "symbol_price_ticker_v2", params={"symbol": symbol}, symbol=symbol
+            )
+        except MarketDataUnavailable:
+            if cached is not None:
+                self._record_endpoint_snapshot(
+                    "symbol_price_ticker_v2",
+                    source="rest",
+                    cache_hit=True,
+                    fallback_used=True,
+                    response_age_s=now - cached[0],
+                )
+                return cached[1]
+            raise
+        row = payload.model_dump() if hasattr(payload, "model_dump") else dict(payload)
+        value = _safe_float(row.get("price"))
+        if value > 0.0:
+            self._symbol_price_cache[symbol] = (now, value)
+            return value
+        return None
+
+    async def fetch_symbol_prices_all(self) -> dict[str, float]:
+        now = time.monotonic()
+        cached = self._symbol_prices_all_cache
+        ttl = int(_CACHE_TTL["symbol_price"])
+        if cached is not None and now - cached[0] < ttl:
+            self._record_endpoint_snapshot(
+                "symbol_price_ticker_v2",
+                source="rest",
+                cache_hit=True,
+                fallback_used=False,
+                response_age_s=now - cached[0],
+            )
+            return cached[1]
+        try:
+            payload = await self._call_public_http_json("symbol_price_ticker_v2")
+        except MarketDataUnavailable:
+            if cached is not None:
+                self._record_endpoint_snapshot(
+                    "symbol_price_ticker_v2",
+                    source="rest",
+                    cache_hit=True,
+                    fallback_used=True,
+                    response_age_s=now - cached[0],
+                )
+                return cached[1]
+            raise
+        rows: dict[str, float] = {}
+        for item in payload if isinstance(payload, list) else []:
+            if not isinstance(item, Mapping):
+                continue
+            symbol = str(item.get("symbol") or "").strip().upper()
+            price = _safe_float(item.get("price"))
+            if symbol and price > 0.0:
+                rows[symbol] = price
+                self._symbol_price_cache[symbol] = (now, price)
+        self._symbol_prices_all_cache = (now, rows)
+        return rows
+
+    def get_cached_symbol_price(self, symbol: str, max_age_s: float = 5.0) -> float | None:
+        cached = self._symbol_price_cache.get(symbol)
+        if cached is None:
+            all_cached = self._symbol_prices_all_cache
+            if all_cached is not None and time.monotonic() - all_cached[0] <= max_age_s:
+                value = all_cached[1].get(symbol)
+                return float(value) if value is not None else None
+            return None
+        cached_at, value = cached
+        if time.monotonic() - cached_at > max_age_s:
+            return None
+        return value
+
     async def fetch_agg_trade_snapshot(self, symbol: str, *, limit: int = 100) -> AggTradeSnapshot:
         if self._ws is not None:
             snapshot = self._ws.get_agg_trade_snapshot(symbol)
@@ -1591,11 +1753,17 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
                 if mark_price > 0.0 and index_price > 0.0
                 else 0.0
             )
+            estimated_settle_price = _safe_float(item.get("estimatedSettlePrice"))
+            interest_rate = _safe_float(item.get("interestRate"))
+            next_funding_time_ms = _safe_float(item.get("nextFundingTime"))
             rows[symbol] = {
                 "funding_rate": funding_rate,
                 "basis_pct": basis_pct,
                 "mark_price": mark_price,
                 "index_price": index_price,
+                "estimated_settle_price": estimated_settle_price,
+                "interest_rate": interest_rate,
+                "next_funding_time_ms": next_funding_time_ms,
             }
             self._funding_rate_cache[symbol] = (now, funding_rate)
             self._basis_cache[symbol, "1h"] = (now, basis_pct)
@@ -1920,6 +2088,104 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         self._funding_history_cache[symbol] = (now, rows)
         return rows
 
+    def seed_funding_history_cache(self, symbol: str, rows: list[dict[str, Any]]) -> None:
+        if not rows:
+            return
+        self._funding_history_cache[str(symbol).upper()] = (time.monotonic(), list(rows))
+
+    def seed_market_scalar_cache(
+        self,
+        stage: str,
+        symbol: str,
+        value: float | None,
+        *,
+        period: str = "1h",
+    ) -> None:
+        """Hydrate in-memory REST caches from persisted SQLite market_data_cache."""
+        if value is None:
+            return
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return
+        if not math.isfinite(parsed):
+            return
+        now = time.monotonic()
+        symbol_key = str(symbol).upper()
+        period_key = str(period or "1h")
+        if stage == "oi_current":
+            self._open_interest_cache[symbol_key] = (now, parsed)
+        elif stage == "oi_change_1h":
+            self._open_interest_change_cache[(symbol_key, period_key)] = (now, parsed)
+        elif stage == "top_account_ls_ratio_1h":
+            self._long_short_ratio_cache[(symbol_key, period_key)] = (now, parsed)
+        elif stage == "top_position_ls_ratio_1h":
+            self._top_position_ls_ratio_cache[(symbol_key, period_key)] = (now, parsed)
+        elif stage == "global_ls_ratio_1h":
+            self._global_ls_ratio_cache[(symbol_key, period_key)] = (now, parsed)
+        elif stage == "funding_rate":
+            self._funding_rate_cache[symbol_key] = (now, parsed)
+        elif stage in {"basis_1h", "basis_5m"}:
+            basis_period = "1h" if stage == "basis_1h" else "5m"
+            self._basis_cache[(symbol_key, basis_period)] = (now, parsed)
+
+    async def fetch_funding_info_all(self) -> dict[str, dict[str, float | int]]:
+        now = time.monotonic()
+        cached = self._funding_info_cache
+        ttl = int(_CACHE_TTL["funding_info"])
+        if cached is not None and now - cached[0] < ttl:
+            self._record_endpoint_snapshot(
+                "funding_info",
+                source="rest",
+                cache_hit=True,
+                fallback_used=False,
+                response_age_s=now - cached[0],
+            )
+            return cached[1]
+        try:
+            payload = await self._call_public_http_json("funding_info")
+        except MarketDataUnavailable:
+            if cached is not None:
+                self._record_endpoint_snapshot(
+                    "funding_info",
+                    source="rest",
+                    cache_hit=True,
+                    fallback_used=True,
+                    response_age_s=now - cached[0],
+                )
+                return cached[1]
+            raise
+        rows: dict[str, dict[str, float | int]] = {}
+        for item in payload if isinstance(payload, list) else []:
+            if not isinstance(item, Mapping):
+                continue
+            symbol = str(item.get("symbol") or "").strip().upper()
+            if not symbol:
+                continue
+            interval_raw = item.get("fundingIntervalHours")
+            try:
+                interval_hours = int(interval_raw) if interval_raw is not None else 0
+            except (TypeError, ValueError):
+                interval_hours = 0
+            rows[symbol] = {
+                "funding_rate_cap": _safe_float(item.get("adjustedFundingRateCap")),
+                "funding_rate_floor": _safe_float(item.get("adjustedFundingRateFloor")),
+                "funding_interval_hours": interval_hours,
+            }
+        self._funding_info_cache = (now, rows)
+        return rows
+
+    def get_cached_funding_info(
+        self, symbol: str, max_age_s: float = 3600.0
+    ) -> dict[str, float | int] | None:
+        cached = self._funding_info_cache
+        if cached is None:
+            return None
+        cached_at, rows = cached
+        if time.monotonic() - cached_at > max_age_s:
+            return None
+        return rows.get(symbol.upper())
+
     async def _fetch_symbol_frames_rest(self, symbol: str) -> SymbolFrames:
         frame_4h, frame_1h, frame_15m, frame_5m, book_context = await asyncio.gather(
             self.fetch_klines_cached(symbol, "4h", limit=_DEFAULT_KLINE_FETCH_LIMIT),
@@ -2144,6 +2410,32 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         if time.monotonic() - cached_at > max_age_s:
             return None
         return value
+
+    def get_cached_funding_rate_zscore(
+        self, symbol: str, *, max_cache_age_s: float = 1800.0
+    ) -> float | None:
+        cached = self._funding_history_cache.get(symbol)
+        if cached is None:
+            return None
+        cached_at, rows = cached
+        if time.monotonic() - cached_at > max_cache_age_s:
+            return None
+        rates: list[float] = []
+        for row in rows:
+            try:
+                value = float(row.get("fundingRate") or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(value):
+                rates.append(value)
+        if len(rates) < 6:
+            return None
+        mean = sum(rates) / len(rates)
+        variance = sum((item - mean) ** 2 for item in rates) / len(rates)
+        stdev = math.sqrt(variance) if variance > 0.0 else 0.0
+        if stdev <= 1e-12:
+            return 0.0
+        return (rates[-1] - mean) / stdev
 
     def get_cached_funding_trend(self, symbol: str, max_age_s: float = 1800.0) -> str | None:
         cached = self._funding_history_cache.get(symbol)

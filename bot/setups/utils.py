@@ -435,18 +435,25 @@ def validate_rr_or_penalty(
         Tuple of (is_valid, tp1_or_none). If RR < min_rr, returns (False, None).
         Caller should apply penalty to score instead of rejecting signal.
     """
-    risk = abs(price_anchor - stop)
-    if risk <= 0:
-        return False, None
+    from ..domain.risk import RiskParams
 
     if tp1 is None:
         return False, None
 
-    reward = abs(tp1 - price_anchor)
-    rr = reward / risk if risk > 0 else 0
+    risk = abs(price_anchor - stop)
+    if risk <= 0:
+        return False, None
 
-    if rr < min_rr:
-        # Return invalid - caller should apply penalty, not reject
+    direction = "long" if stop < price_anchor else "short"
+    risk_params = RiskParams(
+        entry=price_anchor,
+        stop=stop,
+        tp1=tp1,
+        tp2=tp1,
+        tp3=tp1,
+        direction=direction,
+    )
+    if risk_params.rr1() + 1e-9 < float(min_rr):
         return False, tp1
 
     return True, tp1

@@ -1,92 +1,69 @@
-# HANDOFF_REPORT — 2026-06-04
+# HANDOFF_REPORT — 2026-06-05
 
 ## Session summary
 
-- Files before: 192 | Files after: 185 | Delta: −7
-- Tests before: 409 passed | Tests after: 409 passed
-- Pipeline bugs fixed: 6 | Pipeline bugs pending: 0
+- Wave tests: **154 passed** (`test_wave_f9/f10_*`, `test_wave_i_calibration`)
+- `compileall` + `validate_config` — OK
+- Bot runtime at handoff: started via agent (`python main.py run` after smoke clean)
 
-## What was done
+## SL / delivery fixes (T-block + N-block)
 
-1. Phase 0 baseline → `_master_refactor_baseline.txt` (192 files, 409 tests)
-2. Phase 1 audit → `_master_audit_report.md`, `_stubs.txt`, `_logic_violations.txt`
-3. Deleted dead shims → `bot/alerts.py`, `bot/strategies/catalog_spec.py`, `bot/strategies/spec_patterns.py`
-4. Deleted dead module → `bot/backtest/` (4 `.py` + empty dir)
-5. Archived 8 orphan scripts → `scripts/_archive/` (prior session)
-6. Phase 2D → 10 duplicate wave tests already removed
-7. Phase 2B DONE → collapsed pure-delegation barrels: `bot/features/__init__.py`, `bot/runtime/__init__.py`, `bot/ops/__init__.py`, `bot/persistence/repository/__init__.py`; 38 importers redirected
-8. Fixed pipeline → `bot/strategies/_common.py` Wilder ATR; `delivery_orchestrator.py` contract guard; `dashboard/app.py` to_dicts
-9. Rewrote `CLAUDE.md` strict template (106 lines); backup `CLAUDE.md.prev`
-10. Cleaned `.claude/rules/` — removed Cursor-only rules; merged into `project-core.md`
-11. OPS-2 → `use_weighted_confluence = true`; review `reports/ops2_weighted_confluence_review.json`
-12. Completion gate → `make check`, 409 pytest, circular imports OK
+| Area | Status | Key change |
+|------|--------|------------|
+| T-1 confirmed bar | ✅ | `confirmed_pattern_frame()` — 21/21 strategies on closed bar (`row[-2]`) |
+| T-2 TP at expiry | ✅ | `_expiry_event_type()` + `outcomes.py` G1 remap `expired_active` → `tp1_hit` |
+| T-3 long/short HTF gate | ✅ | `_htf_direction_allows()` symmetric in `_analyzer_gates.py` |
+| T-4/N-1 base_score | ✅ | Catalog + `bot/strategies/*.py` + **`config.toml`** synced; dead setups ≥0.60, whale_walls **0.62** |
+| T-6 short+downtrend+ATR | ✅ | Hard reject `short_downtrend_high_atr` in `filters.py` |
+| T-7 whale_walls cooldown | ✅ | `delivery.setup_interval_minutes = { whale_walls = 20 }` |
+| T-9 long/short telemetry | ✅ | `TelemetryManager.session_direction_snapshot()` → `health.jsonl` |
+| N-2 score floor | ✅ | `_build_signal` floor **0.38 → 0.63** (`setups/__init__.py`, `_roadmap.py`) |
+| N-4 reversal min_rr | ✅ | `min_rr = 2.5` for 6 reversal setups in `config.toml` |
+| Legacy DROP (T-8) | ✅ | Migration v9 applied; dashboard reads `active_signals` only |
 
-## Pipeline bugs (pending, from Phase 3)
+## Config highlights (`config.toml`)
 
-None.
+- `filters.min_score = 0.65`
+- `filters.max_atr_pct = 1.8`
+- `delivery.action_min_score = 0.65`
+- `delivery.setup_interval_minutes.whale_walls = 20`
+- All `[bot.filters.setups]` `base_score` ≥ 0.60 (exceptions at 0.62 per strategy)
+- Reversal `min_rr = 2.5`: `wyckoff_spring`, `turtle_soup`, `rsi_divergence_bottom`, `wick_trap_reversal`, `liquidity_sweep`, `stop_hunt_detection`
 
-## Dead stubs still in code (LIVE_STUBs from Phase 1A)
+## Proxy / network
 
-| file:line | what it should do |
-|-----------|-------------------|
-| bot/setups/spec_runtime.py:156 | `SpecDetectorSetup` subclass must wire `detect_setup`; raises if missing (fail-fast guard) |
+- Primary egress: `socks5://206.123.156.224:6290` in `[bot.network]`
+- Agent owns proxy discovery / failover — not operator task
 
-## Logic violations found (Phase 1D)
+## What to monitor next live session
 
-| file:line | hit | verdict |
-|-----------|-----|---------|
-| bot/logging_config.py:12 | `api_key` in SENSITIVE_FIELDS | security redaction — keep |
-| bot/market/data.py:45,228 | `api_key` in forbidden REST params | public-only guard — keep |
+1. `health.jsonl` → `signals_long_session` / `signals_short_session` (post T-3 long-gate fix)
+2. Reject reasons: `setup_interval_cooldown_active`, `short_downtrend_high_atr`, `min_score`
+3. Outcome remap: no new `expired_active` when `tp1_hit_at` set
+4. Strategy hit rate per setup after N-1/N-2 (expect fewer CPU rejects, more viable candidates)
 
-## What Claude should focus on next
-
-1. OPS-1: post-harvest rollup + strategy redesign notes when 120m capture completes
-2. OPS-3: `make nightly-calibration` when REST stable
-3. Re-evaluate `action_min_score` vs harvest confluence distribution
-4. Monitor `weighted_confluence_bridge_pass` in delivery telemetry
-5. ~~Do not collapse `__init__.py` barrels~~ — done 2026-06-04 per explicit architect OK
-
-## Files Claude must read before any change
+## Files to read before changes
 
 1. `CLAUDE.md`
-2. `HANDOFF_REPORT.md`
-3. `docs/DEFINITION_OF_DONE.md`
-4. `bot/runtime/bot.py`
-5. `bot/runtime/delivery_orchestrator.py`
-6. `bot/delivery/contract.py`
-7. `bot/domain/schemas.py`
-8. `bot/delivery/confluence.py`
+2. `docs/DEFINITION_OF_DONE.md`
+3. `bot/runtime/delivery_orchestrator.py`
+4. `bot/delivery/filters.py`
+5. `bot/persistence/_tracking_review.py`
+6. `config.toml` — **runtime overrides code defaults**
 
-## What Claude must NOT do in this project
+## Invariants (unchanged)
 
-1. Never place orders, use trading APIs, or add account authentication.
-2. Never bypass `validate_signal_contract` → hard confluence gate → `delivery.deliver`.
-3. Never import forbidden legacy paths; strategies only under `bot/strategies/`.
-4. Never use `shift(-N)` or pandas on live signal paths.
-5. Never put LLM inference on the hot path.
-6. Never create ABC/Protocol/factory layers without architect approval.
-7. Never split modules under 500 LOC or frozen monoliths without explicit request.
-8. Never generate test files unless explicitly requested.
-9. Never modify `bot/static/`.
-10. Never disable strategies silently.
-11. Never generate new «50 improvements» backlogs.
+1. No auto-trade / no private Binance endpoints
+2. Delivery: `validate_signal_contract` → hard confluence gate → `deliver`
+3. Strategies only under `bot/strategies/`
+4. No new test files without explicit request
+5. Backlog IDs only from `docs/DEFINITION_OF_DONE.md`
 
-## Test commands
+## Verify commands
 
 ```bash
-make smoke         # offline pytest
-make check         # full gate
-make live-smoke    # requires Binance access
-make validate-config
-python scripts/check_circular_imports.py
+python -m compileall -q bot
+python scripts/validate_config.py --config config.toml
+pytest tests/test_wave_f9_agent_*.py tests/test_wave_f10_agent_*.py tests/test_wave_i_calibration.py -q
+python scripts/clean_session_data.py --mode smoke --config config.toml
 ```
-
-## Completion gate (final)
-
-| Check | Result |
-|-------|--------|
-| `make check` | OK |
-| `pytest --ignore=tests/live` | 409 passed |
-| `check_circular_imports.py` | OK (78 modules) |
-| `wc -l CLAUDE.md` | ≤400 |
-| `find bot/ -name "*.py" \| wc -l` | 185 |

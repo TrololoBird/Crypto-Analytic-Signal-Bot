@@ -10,7 +10,7 @@ from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.smc import latest_liquidity_sweep, sweep_tolerance, swing_series
 from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
 from ..setups.utils import build_smc_trade_plan
-from ._common import SpecHit, _latest_values, with_spec_columns
+from ._common import SpecHit, _latest_values, confirmed_pattern_frame, with_spec_columns
 
 if TYPE_CHECKING:
     import polars as pl
@@ -113,7 +113,8 @@ def _detect_liquidity_sweep_extended(
     max_entry_distance_atr = float(
         dynamic_params.get("max_entry_distance_atr", defaults["max_entry_distance_atr"])
     )
-    w = prepared.work_1h
+    w = confirmed_pattern_frame(prepared.work_1h)
+    w15m = confirmed_pattern_frame(prepared.work_15m)
     if w.height < 10:
         _reject(prepared, setup_id, "insufficient_1h_bars", bars=w.height)
         return None
@@ -227,15 +228,8 @@ def _detect_liquidity_sweep_extended(
     sweep_bar_l = float(lows[sweep_index])
     sweep_bar_c = float(closes[sweep_index])
     confirmation_close = float(closes[-1])
-    if (
-        not prepared.work_15m.is_empty()
-        and "close" in prepared.work_15m.columns
-        and prepared.work_15m.height >= 1
-    ):
-        confirmation_close = _as_float(
-            prepared.work_15m.item(-1, "close"),
-            confirmation_close,
-        )
+    if not w15m.is_empty() and "close" in w15m.columns and w15m.height >= 1:
+        confirmation_close = _as_float(w15m.item(-1, "close"), confirmation_close)
 
     if direction == "short":
         eq_high_level = level
@@ -456,7 +450,7 @@ class LiquiditySweepSetup(SpecDetectorSetup):
     required_context = ("futures_flow",)
 
     DEFAULTS: ClassVar[dict[str, float]] = {
-        "base_score": 0.54,
+        "base_score": 0.62,
         "equal_level_tol": 0.0015,
         "threshold_tol": 0.0015,
         "min_level_hits": 2,

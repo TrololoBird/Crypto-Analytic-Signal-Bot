@@ -5,8 +5,8 @@ from typing import TYPE_CHECKING, ClassVar
 from ._roadmap import (
     _build_atr_signal,
     _finite_or_none,
-    _last,
-    _price_change_pct,
+    _prev,
+    _price_change_pct_confirmed,
     _reject,
 )
 from .roadmap_base import RoadmapSetup
@@ -39,9 +39,13 @@ def detect_altcoin_season_index(
         _reject(prepared, setup_id, "data.altcoin_season_index_missing")
         return None
     alt_index = index
-    vol_ratio = _last(prepared.work_15m, "volume_ratio20", 1.0)
+    work = prepared.work_15m
+    if work.height < 2:
+        _reject(prepared, setup_id, "insufficient_bars")
+        return None
+    vol_ratio = _prev(work, "volume_ratio20", 1.0)
     volume_penalty = vol_ratio < float(params["min_volume_ratio"])
-    roc10 = _last(prepared.work_15m, "roc10", _price_change_pct(prepared.work_15m, 10))
+    roc10 = _prev(work, "roc10", _price_change_pct_confirmed(work, 10))
     symbol_change = float(getattr(prepared.universe, "price_change_pct", 0.0) or 0.0)
     btc_ctx = prepared.benchmark_context.get("BTCUSDT", {}) if prepared.benchmark_context else {}
     btc_change = _finite_or_none(btc_ctx.get("price_change_pct"))
@@ -81,11 +85,13 @@ def detect_altcoin_season_index(
             relative_vs_btc=relative_vs_btc,
         )
         return None
+    entry_anchor = _prev(work, "ema20", 0.0) or None
     return _build_atr_signal(
         prepared=prepared,
         setup_id=setup_id,
         direction=direction,
         params=params,
+        confirmed_bar=True,
         reasons=[
             f"altcoin_season_{direction}",
             f"alt_index={alt_index:.1f}",
@@ -93,6 +99,7 @@ def detect_altcoin_season_index(
             f"relative_vs_btc={relative_vs_btc:.2f}",
         ],
         family=family,
+        entry_anchor=entry_anchor,
         structure_clarity=max(abs(alt_index - 50.0) / 50.0, min(abs(roc10), 1.0))
         * (0.90 if volume_penalty else 1.0),
     )

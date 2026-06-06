@@ -21,6 +21,8 @@ CORE_MODULES = (
     "tenacity",
     "structlog",
     "pydantic",
+    "polars_ols",
+    "polars_ta",
 )
 
 LIVE_MODULES = (
@@ -94,14 +96,6 @@ def main() -> int:
 
     print("Regime extras (optional):")
     errors.extend(_run_checks("regime", REGIME_MODULES, optional=True))
-
-    # polars_ta / polars_ols naming
-    for module in ("polars_ta", "polars_ols"):
-        err = _try_import(module)
-        if err is None:
-            print(f"  [OK] {module}")
-        else:
-            print(f"  [SKIP] {module} (not installed)")
 
     if errors:
         print("DEPENDENCY CHECK FAILED:")

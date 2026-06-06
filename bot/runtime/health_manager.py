@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import Counter
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -175,10 +176,14 @@ class HealthManager:
             await asyncio.sleep(60)
             if self._bot._shutdown.is_set():
                 break
+            direction_counts = self._bot._get_telemetry_manager().session_direction_snapshot()
             row: dict[str, Any] = {
                 "ts": datetime.now(UTC).isoformat(),
                 "prepare_error_count": self._bot._prepare_error_count,
                 "frame_cache": frame_cache_stats(),
+                **direction_counts,
+                "signals_long": direction_counts["signals_long_session"],
+                "signals_short": direction_counts["signals_short_session"],
             }
             if self._bot._last_prepare_error:
                 row["prepare_error_stage"] = self._bot._last_prepare_error.get("stage")
@@ -205,6 +210,29 @@ class HealthManager:
                 radar_store,
                 config=self._bot.settings.universe.radar,
             )
+            repo = getattr(self._bot, "memory_repo", None)
+            if repo is not None:
+                try:
+                    active_rows = await repo.get_active_signals(include_closed=False)
+                    setup_counter = Counter(
+                        str(item.get("setup_id") or "unknown") for item in active_rows
+                    )
+                    family_counter = Counter(
+                        str(item.get("strategy_family") or item.get("setup_id") or "unknown")
+                        for item in active_rows
+                    )
+                    total_active = max(1, len(active_rows))
+                    row["strategy_family_share"] = {
+                        family: round(count / total_active, 4)
+                        for family, count in family_counter.items()
+                    }
+                    row["strategy_setup_share"] = {
+                        setup: round(count / total_active, 4)
+                        for setup, count in setup_counter.items()
+                    }
+                    row["active_signals_by_family"] = dict(family_counter)
+                except DEFENSIVE_EXC as exc:
+                    row["strategy_family_share_error"] = str(exc)
             self._bot.telemetry.append_jsonl("health.jsonl", row)
             digest_runner = getattr(self._bot, "_operator_digest_runner", None)
             if digest_runner is None:

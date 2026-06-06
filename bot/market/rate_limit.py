@@ -24,6 +24,10 @@ class SlidingWindowRateLimiter:
         self._times: deque[float] = deque()
         self._lock = asyncio.Lock()
 
+    @property
+    def max_requests(self) -> int:
+        return self._max_requests
+
     async def acquire(self, *, label: str) -> float:
         waited_s = 0.0
         while True:

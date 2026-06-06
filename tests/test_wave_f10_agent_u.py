@@ -35,18 +35,60 @@ def test_runtime_errors_live_under_bot_runtime() -> None:
     assert not Path("bot/core/runtime_errors.py").exists()
 
 
-def test_cli_outcomes_subcommand_and_backtest_alias_help() -> None:
+def test_cli_outcomes_subcommand_and_backtest_help() -> None:
     parser = build_parser()
     outcomes = parser.parse_args(["outcomes", "--days", "7", "--setup", "order_block"])
-    backtest = parser.parse_args(["backtest", "--days", "14"])
+    backtest = parser.parse_args(
+        ["backtest", "--symbol", "ETHUSDT", "--days", "14", "--setup", "fvg"]
+    )
     assert outcomes.command == "outcomes"
     assert outcomes.days == 7
     assert outcomes.setup == "order_block"
     assert backtest.command == "backtest"
+    assert backtest.symbol == "ETHUSDT"
     assert backtest.days == 14
+    assert backtest.setup == "fvg"
+    assert backtest.interval == "15m"
     help_text = parser.format_help()
     assert "outcomes" in help_text
-    assert "Alias for outcomes" in help_text
+    assert "backtest" in help_text
+    assert "walk-forward" in help_text.lower()
+
+
+def test_backtest_simulate_signal_exit_long_tp1() -> None:
+    from datetime import UTC, datetime
+
+    import polars as pl
+
+    from bot.domain.schemas import Signal
+    from bot.engine.backtest import simulate_signal_exit
+
+    created = datetime(2027, 1, 1, 12, 0, tzinfo=UTC)
+    signal = Signal(
+        symbol="BTCUSDT",
+        setup_id="order_block",
+        direction="long",
+        score=0.7,
+        timeframe="15m",
+        entry_low=99.0,
+        entry_high=101.0,
+        stop=94.0,
+        take_profit_1=112.0,
+        take_profit_2=120.0,
+        valid_until=datetime(2027, 1, 5, 12, 0, tzinfo=UTC),
+        created_at=created,
+    )
+    forward = pl.DataFrame(
+        {
+            "close_time": [datetime(2027, 1, 1, 12, 15, tzinfo=UTC)],
+            "high": [113.0],
+            "low": [99.0],
+            "close": [112.5],
+        }
+    )
+    result, pnl, _ = simulate_signal_exit(signal, forward)
+    assert result == "tp1_hit"
+    assert pnl > 0.0
 
 
 def test_reconcile_detects_min_rr_and_sl_buffer_drift(tmp_path: Path) -> None:
@@ -201,7 +243,7 @@ name = "order_block"
 sl_buffer_atr = 0.5
 min_rr = 1.9
 [scoring]
-base_score = 0.52
+base_score = 0.60
 """.strip(),
         encoding="utf-8",
     )

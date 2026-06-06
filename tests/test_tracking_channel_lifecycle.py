@@ -71,6 +71,22 @@ def test_format_activated_short_reply() -> None:
     assert "BTCUSDT" in text
 
 
+def test_format_breakeven_after_tp1_mentions_win() -> None:
+    tracked = SimpleNamespace(
+        symbol="ADAUSDT",
+        tracking_ref="a1b2",
+        tp1_hit_at="2026-06-05T11:00:00+00:00",
+    )
+    event = SimpleNamespace(
+        event_type="breakeven_stop",
+        tracked=tracked,
+        event_price=0.41,
+    )
+    text = format_tracking_event_message(event)
+    assert "TP1" in text
+    assert "BE" in text
+
+
 def test_format_activated_sent_to_channel_policy() -> None:
     delivery = SignalDelivery(SimpleNamespace(), pending_expiry_minutes=180)
     event = _event("activated", note="limit_filled")

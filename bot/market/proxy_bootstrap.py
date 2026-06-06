@@ -147,10 +147,31 @@ def _log_probe_result(label: str, result: NetworkProbeResult) -> None:
     )
 
 
+_DISCOVERY_FAIL_STREAK = 0
+_LAST_DISCOVERY_MONO = 0.0
+_DISCOVERY_BASE_INTERVAL_S = 300.0
+
+
+def _discovery_backoff_seconds() -> float:
+    return min(3600.0, _DISCOVERY_BASE_INTERVAL_S * (2 ** min(_DISCOVERY_FAIL_STREAK, 4)))
+
+
 def _run_discovery(config_path: Path) -> None:
+    global _DISCOVERY_FAIL_STREAK, _LAST_DISCOVERY_MONO
+
     if not _DISCOVER_SCRIPT.is_file():
         LOG.warning("discover script missing | path=%s", _DISCOVER_SCRIPT)
         return
+    now = time.monotonic()
+    backoff = _discovery_backoff_seconds()
+    if now - _LAST_DISCOVERY_MONO < backoff:
+        LOG.debug(
+            "proxy discovery skipped | reason=backoff remaining_s=%.1f streak=%d",
+            backoff - (now - _LAST_DISCOVERY_MONO),
+            _DISCOVERY_FAIL_STREAK,
+        )
+        return
+    _LAST_DISCOVERY_MONO = now
     LOG.info("running proxy discovery | config=%s", config_path)
     proc = subprocess.run(
         [sys.executable, str(_DISCOVER_SCRIPT), "--config", str(config_path)],
@@ -161,11 +182,16 @@ def _run_discovery(config_path: Path) -> None:
         check=False,
     )
     if proc.returncode not in {0, 2}:
+        _DISCOVERY_FAIL_STREAK += 1
         LOG.warning(
-            "proxy discovery exit=%s stderr=%s",
+            "proxy discovery exit=%s stderr=%s streak=%d next_backoff_s=%.0f",
             proc.returncode,
             (proc.stderr or "")[:400],
+            _DISCOVERY_FAIL_STREAK,
+            _discovery_backoff_seconds(),
         )
+    else:
+        _DISCOVERY_FAIL_STREAK = 0
 
 
 async def ensure_network_ready(
@@ -184,7 +210,14 @@ async def ensure_network_ready(
     if urls:
         _log_probe_result("configured", configured)
 
-    if direct.rest_ok or configured.rest_ok:
+    if direct.rest_ok:
+        if urls and not configured.rest_ok:
+            LOG.warning(
+                "direct binance REST ok but configured proxy pool failed probe — using direct egress"
+            )
+        return settings
+
+    if configured.rest_ok:
         return settings
 
     if direct.any_ok or configured.any_ok:

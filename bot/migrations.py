@@ -205,7 +205,48 @@ MIGRATIONS: Sequence[tuple[int, str, str]] = (
             ON sl_forensics(tracking_id);
         """,
     ),
+    (
+        9,
+        "drop_legacy_signals_outcomes",
+        """
+        DROP TABLE IF EXISTS outcomes;
+        DROP TABLE IF EXISTS signals;
+        """,
+    ),
+    (
+        10,
+        "market_data_cache",
+        """
+        CREATE TABLE IF NOT EXISTS market_data_cache (
+            cache_key TEXT PRIMARY KEY,
+            payload_json TEXT NOT NULL,
+            fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
+            ttl_seconds INTEGER NOT NULL DEFAULT 3600
+        );
+        CREATE INDEX IF NOT EXISTS idx_market_data_cache_fetched
+            ON market_data_cache(fetched_at);
+        """,
+    ),
+    (
+        11,
+        "hot_query_indexes",
+        """
+        CREATE INDEX IF NOT EXISTS idx_signal_outcomes_created_result
+            ON signal_outcomes(created_at, result);
+        CREATE INDEX IF NOT EXISTS idx_sl_forensics_sl_hit_at
+            ON sl_forensics(sl_hit_at);
+        """,
+    ),
 )
+
+
+def _migration_statements(sql: str) -> list[str]:
+    statements: list[str] = []
+    for chunk in sql.split(";"):
+        statement = chunk.strip()
+        if statement:
+            statements.append(statement)
+    return statements
 
 # Migrations that assume repository DDL already created these tables (see memory.initialize).
 _MIGRATION_REQUIRES_TABLES: dict[int, frozenset[str]] = {
@@ -302,12 +343,18 @@ async def migrate_db(conn: aiosqlite.Connection) -> int:
                 description,
             )
             continue
-        await conn.executescript(sql)
-        await conn.execute(
-            "INSERT OR REPLACE INTO schema_version (version, description) VALUES (?, ?)",
-            (version, description),
-        )
-        await conn.commit()
+        await conn.execute("BEGIN IMMEDIATE")
+        try:
+            for statement in _migration_statements(sql):
+                await conn.execute(statement)
+            await conn.execute(
+                "INSERT OR REPLACE INTO schema_version (version, description) VALUES (?, ?)",
+                (version, description),
+            )
+            await conn.commit()
+        except Exception:
+            await conn.rollback()
+            raise
         await _assert_integrity(conn)
         applied += 1
         LOG.info("db migration applied | version=%d description=%s", version, description)

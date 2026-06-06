@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import threading
 from collections import defaultdict, deque
 from collections.abc import Callable, Coroutine
 from typing import Any, TypeVar
@@ -45,12 +44,12 @@ class EventBus:
         self._ready = asyncio.Event()
         self._subscribers: dict[type, list[AsyncHandler]] = defaultdict(list)
         self._running = False
-        self._lock = threading.RLock()
         self._sequence = 0
         self._high_water_mark = 0
         self._coalesced_count = 0
         self._dropped_count = 0
         self._handler_tasks: set[asyncio.Task[None]] = set()
+        self._burst_drops = 0
 
     def subscribe(
         self,
@@ -63,50 +62,21 @@ class EventBus:
         self.publish_nowait(event)
 
     def publish_nowait(self, event: AnyEvent) -> None:
-        queue_depth: int
-        dropped = False
-        with self._lock:
-            token, is_coalesced = self._event_token(event)
-            if token in self._pending_events:
-                self._pending_events[token] = event
-                self._coalesced_count += 1
-                queue_depth = len(self._queue)
-            else:
-                if len(self._queue) >= self._max_size:
-                    dropped = not self._make_room_for(event)
-                if not dropped:
-                    if not is_coalesced:
-                        token = ("queued", self._sequence)
-                        self._sequence += 1
-                    self._queue.append(token)
-                    self._pending_events[token] = event
-                    if is_coalesced:
-                        self._coalescing_keys.add(token)
-                    self._high_water_mark = max(self._high_water_mark, len(self._queue))
-                queue_depth = len(self._queue)
-
-        if dropped:
-            self._record_drop(event)
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._enqueue_event(event)
             return
-
-        if queue_depth >= self._warn_depth:
-            LOG.error(
-                "event bus backlog near capacity | depth=%d high_water=%d max_size=%d",
-                queue_depth,
-                self._high_water_mark,
-                self._max_size,
-            )
-        self._ready.set()
+        loop.call_soon(self._enqueue_event, event)
 
     def stats(self) -> dict[str, int]:
-        with self._lock:
-            return {
-                "current_depth": len(self._queue),
-                "high_water_mark": self._high_water_mark,
-                "coalesced_count": self._coalesced_count,
-                "dropped_count": self._dropped_count,
-                "max_size": self._max_size,
-            }
+        return {
+            "current_depth": len(self._queue),
+            "high_water_mark": self._high_water_mark,
+            "coalesced_count": self._coalesced_count,
+            "dropped_count": self._dropped_count,
+            "max_size": self._max_size,
+        }
 
     async def run(self) -> None:
         self._running = True
@@ -140,9 +110,8 @@ class EventBus:
                     task.add_done_callback(self._task_done)
                     task.add_done_callback(self._handler_tasks.discard)
 
-                with self._lock:
-                    self._pending_events.pop(token, None)
-                    self._coalescing_keys.discard(token)
+                self._pending_events.pop(token, None)
+                self._coalescing_keys.discard(token)
         except asyncio.CancelledError:
             LOG.debug("event bus dispatch loop stopped")
             self._running = False
@@ -152,20 +121,52 @@ class EventBus:
                 await asyncio.gather(*self._handler_tasks, return_exceptions=True)
                 self._handler_tasks.clear()
 
+    def _enqueue_event(self, event: AnyEvent) -> None:
+        queue_depth: int
+        dropped = False
+        token, is_coalesced = self._event_token(event)
+        if token in self._pending_events:
+            self._pending_events[token] = event
+            self._coalesced_count += 1
+            queue_depth = len(self._queue)
+        else:
+            if len(self._queue) >= self._max_size:
+                dropped = not self._make_room_for(event)
+            if not dropped:
+                if not is_coalesced:
+                    token = ("queued", self._sequence)
+                    self._sequence += 1
+                self._queue.append(token)
+                self._pending_events[token] = event
+                if is_coalesced:
+                    self._coalescing_keys.add(token)
+                self._high_water_mark = max(self._high_water_mark, len(self._queue))
+            queue_depth = len(self._queue)
+
+        if dropped:
+            self._record_drop(event)
+            return
+
+        if queue_depth >= self._warn_depth:
+            LOG.error(
+                "event bus backlog near capacity | depth=%d high_water=%d max_size=%d",
+                queue_depth,
+                self._high_water_mark,
+                self._max_size,
+            )
+        self._ready.set()
+
     def _pop_next_event(self) -> tuple[object | None, AnyEvent | None]:
-        with self._lock:
-            if not self._queue:
-                return None, None
-            token = self._queue.popleft()
-            event = self._pending_events.pop(token, None)
-            self._coalescing_keys.discard(token)
-            return token, event
+        if not self._queue:
+            return None, None
+        token = self._queue.popleft()
+        event = self._pending_events.get(token)
+        return token, event
 
     async def _wait_for_event(self) -> None:
-        with self._lock:
-            if self._queue:
-                return
-            self._ready.clear()
+        if self._queue:
+            return
+        self._ready.clear()
         await self._ready.wait()
 
     def _event_token(self, event: AnyEvent) -> tuple[object, bool]:
@@ -234,20 +235,22 @@ class EventBus:
         self._log_drop(event, reason="evicted")
 
     def _record_drop(self, event: AnyEvent) -> None:
-        with self._lock:
-            self._dropped_count += 1
+        self._dropped_count += 1
+        self._burst_drops += 1
         self._log_drop(event, reason="queue_full")
 
     def _log_drop(self, event: AnyEvent, *, reason: str) -> None:
-        if self._dropped_count % self._drop_log_interval != 0:
-            return
-        LOG.error(
-            "event bus dropping events | dropped=%d reason=%s last_type=%s stats=%s",
-            self._dropped_count,
-            reason,
-            type(event).__name__,
-            self.stats(),
-        )
+        if self._dropped_count == 1 or self._dropped_count % self._drop_log_interval == 0:
+            LOG.error(
+                "event bus dropping events | dropped=%d burst=%d reason=%s last_type=%s stats=%s",
+                self._dropped_count,
+                self._burst_drops,
+                reason,
+                type(event).__name__,
+                self.stats(),
+            )
+        if reason == "queue_full":
+            self._burst_drops = 0
 
     @staticmethod
     async def _safe_call(handler: AsyncHandler, event: AnyEvent) -> None:

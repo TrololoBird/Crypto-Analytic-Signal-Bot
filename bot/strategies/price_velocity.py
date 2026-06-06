@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
-from ._common import SpecHit, as_float, with_spec_columns
+from ._common import SpecHit, as_float, confirmed_pattern_frame, with_spec_columns
 
 __all__ = ["detect_price_velocity"]
 
@@ -40,7 +40,7 @@ def detect_price_velocity(
     return SpecHit(
         strategy="price_velocity",
         direction=direction,
-        entry=close,
+        entry=prior,
         stop_basis=as_float(work.item(-1, "low" if direction == "long" else "high")),
         atr=atr,
         timeframe=timeframe,
@@ -110,7 +110,8 @@ def _detect_price_velocity_extended(
     family: str,
 ) -> Signal | None:
     effective_params = effective
-    work = prepared.work_15m
+    work = confirmed_pattern_frame(prepared.work_15m)
+    work_1h = confirmed_pattern_frame(prepared.work_1h)
     if work.height < 30:
         _reject(prepared, setup_id, "insufficient_15m_bars")
         return None
@@ -186,8 +187,8 @@ def _detect_price_velocity_extended(
             return None
 
     adx_1h = (
-        _as_float(prepared.work_1h.item(-1, "adx14"), 0.0)
-        if not prepared.work_1h.is_empty() and "adx14" in prepared.work_1h.columns
+        _as_float(work_1h.item(-1, "adx14"), 0.0)
+        if not work_1h.is_empty() and "adx14" in work_1h.columns
         else 0.0
     )
     min_adx_1h = float(effective_params.get("min_adx_1h", 0.0))
@@ -328,7 +329,7 @@ class PriceVelocitySetup(SpecDetectorSetup):
     required_context = ("futures_flow",)
 
     DEFAULTS: ClassVar[dict[str, float]] = {
-        "base_score": 0.53,
+        "base_score": 0.62,
         "min_roc10_abs_pct": 0.75,
         "min_body_atr": 0.55,
         "min_volume_ratio": 1.0,

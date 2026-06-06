@@ -11,7 +11,7 @@ from ..features.prepare import _swing_points
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
 from ..setups.utils import build_structural_targets
-from ._common import SpecHit, _latest_values, as_float, with_spec_columns
+from ._common import SpecHit, _latest_values, as_float, confirmed_pattern_frame, with_spec_columns
 
 if TYPE_CHECKING:
     from ..domain.config import BotSettings
@@ -154,8 +154,8 @@ def _detect_keltner_breakout_extended(
     family: str,
 ) -> Signal | None:
     effective_params = effective
-    work_15m = prepared.work_15m
-    work_1h = prepared.work_1h
+    work_15m = confirmed_pattern_frame(prepared.work_15m)
+    work_1h = confirmed_pattern_frame(prepared.work_1h)
     if work_15m.height < 30 or work_1h.height < 30:
         _reject(prepared, setup_id, "insufficient_bars")
         return None
@@ -483,7 +483,7 @@ class KeltnerBreakoutSetup(SpecDetectorSetup):
     required_context = ("futures_flow",)
 
     DEFAULTS: ClassVar[dict[str, float]] = {
-        "base_score": 0.54,
+        "base_score": 0.62,
         "min_volume_ratio": 1.15,
         "min_adx_1h": 13.0,
         "sl_buffer_atr": 0.9,

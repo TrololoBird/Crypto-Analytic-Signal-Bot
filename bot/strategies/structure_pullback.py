@@ -8,7 +8,14 @@ from ..features.prepare import _swing_points as _sp
 from ..setups import _build_signal, _compute_dynamic_score, _pullback_levels, _reject
 from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
 from ..setups.utils import select_structural_target
-from ._common import SpecHit, _clean_impulse, _latest_values, as_float, with_spec_columns
+from ._common import (
+    SpecHit,
+    _clean_impulse,
+    _latest_values,
+    as_float,
+    confirmed_pattern_frame,
+    with_spec_columns,
+)
 
 if TYPE_CHECKING:
     import polars as pl
@@ -48,7 +55,7 @@ def detect_structure_pullback(frame: pl.DataFrame, *, timeframe: str = "15m") ->
             return SpecHit(
                 strategy="structure_pullback",
                 direction="long",
-                entry=close,
+                entry=fib50,
                 stop_basis=swing_low,
                 atr=atr,
                 timeframe=timeframe,
@@ -71,7 +78,7 @@ def detect_structure_pullback(frame: pl.DataFrame, *, timeframe: str = "15m") ->
             return SpecHit(
                 strategy="structure_pullback",
                 direction="short",
-                entry=close,
+                entry=zone_high,
                 stop_basis=swing_high,
                 atr=atr,
                 timeframe=timeframe,
@@ -101,8 +108,8 @@ def _detect_structure_pullback_extended(
 ) -> Signal | None:
     dynamic_params = effective
     work_4h = prepared.work_4h
-    work_1h = prepared.work_1h
-    work_15m = prepared.work_15m
+    work_1h = confirmed_pattern_frame(prepared.work_1h)
+    work_15m = confirmed_pattern_frame(prepared.work_15m)
     # FIX 2026-05-21: spec pullback only accepts a narrow fib window; on a
     # miss, continue into the configured trend/pullback-level detector.
     min_trend_score = dynamic_params.get("min_trend_score", defaults["min_trend_score"])

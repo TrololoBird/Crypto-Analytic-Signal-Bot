@@ -330,9 +330,8 @@ class MarketRegimeAnalyzer:
         else:
             oi_momentum = "stable"
 
-        # Dominance proxy: relative BTC leadership versus ETH over the same window.
-        # Positive => BTC outperforms ETH, negative => ETH outperforms BTC.
-        dominance_24h = btc_change - eth_change
+        # Dominance proxy: BTC leadership vs ETH, notional-weighted (~2.5x BTC cap weight).
+        dominance_24h = (btc_change * 2.5) - eth_change
 
         volatility_span = abs(top_gainer_pct - top_loser_pct)
         if volatility_span >= 8.0:

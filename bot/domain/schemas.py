@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from ..delivery.contract import (
     DEFAULT_SCALE_WEIGHTS,
     DEFAULT_TARGET_RR,
+    resolve_target_rr,
     default_ttl_bars,
     normalize_scale_weights,
     valid_until_from,
@@ -62,6 +63,7 @@ class SymbolFrames:
     df_4h: pl.DataFrame | None = None
     bid_qty: float | None = None
     ask_qty: float | None = None
+    frame_source_flags: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,7 +114,15 @@ class PreparedSymbol:
     top_account_ls_ratio: float | None = None
     taker_ratio: float | None = None  # taker buy/sell volume ratio (>1.0 = net buyers)
     liquidation_score: float | None = None  # -1.0 (bearish liq) … +1.0 (bullish liq)
+    liquidation_cascade_5m: bool | None = None
+    funding_rate_zscore_48h: float | None = None
     funding_trend: str | None = None  # "rising" | "falling" | "flat" | None
+    estimated_settle_price: float | None = None
+    interest_rate: float | None = None
+    next_funding_time_ms: int | None = None
+    funding_rate_cap: float | None = None
+    funding_rate_floor: float | None = None
+    funding_interval_hours: int | None = None
     basis_pct: float | None = (
         None  # (futures - index) / index * 100; + = contango, - = backwardation
     )
@@ -172,6 +182,10 @@ class PreparedSymbol:
     )
     poc_1h: float | None = None  # Point of Control on 1h (highest volume price)
     poc_15m: float | None = None  # Point of Control on 15m
+    vah_1h: float | None = None
+    val_1h: float | None = None
+    vah_15m: float | None = None
+    val_15m: float | None = None
     primary_timeframe: str = "15m"
     context_timeframes: tuple[str, ...] = ("1h", "4h")
     settings: BotSettings | None = None
@@ -327,7 +341,7 @@ class Signal:
 
         if self.take_profit_3 is None or not math.isfinite(float(self.take_profit_3)):
             risk = abs(self.entry_mid - self.stop)
-            rr3 = DEFAULT_TARGET_RR[2]
+            rr3 = resolve_target_rr(None)[2]
             if self.direction == "long":
                 tp3 = self.entry_mid + risk * rr3
             else:

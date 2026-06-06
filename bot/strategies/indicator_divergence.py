@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from ..setups.spec_runtime import SpecDetectorSetup
-from ._common import SpecHit, _pivot_rows, as_float, with_spec_columns
+from ._common import SpecHit, _pivot_rows, as_float, confirmed_pattern_frame, with_spec_columns
 
 __all__ = ["detect_regular_divergence"]
 import math
@@ -46,7 +46,7 @@ def detect_regular_divergence(
             return SpecHit(
                 strategy=strategy,
                 direction="long",
-                entry=as_float(work.item(-1, "close")),
+                entry=new["price"],
                 stop_basis=new["price"],
                 atr=atr,
                 timeframe=timeframe,
@@ -63,7 +63,7 @@ def detect_regular_divergence(
             return SpecHit(
                 strategy=setup_id,
                 direction="short",
-                entry=as_float(work.item(-1, "close")),
+                entry=new["price"],
                 stop_basis=new["price"],
                 atr=atr,
                 timeframe=timeframe,
@@ -113,7 +113,7 @@ def _detect_indicator_divergence_extended(
     family: str,
 ) -> Signal | None:
     params = effective
-    work = prepared.work_15m
+    work = confirmed_pattern_frame(prepared.work_15m)
     if work.height < 80:
         _reject(prepared, setup_id, "insufficient_15m_bars", bars=work.height)
         return None
@@ -310,7 +310,7 @@ class IndicatorDivergenceSetup(SpecDetectorSetup):
     required_features = ("rsi14", "macd_hist", "obv", "delta_ratio")
 
     DEFAULTS: ClassVar[dict[str, float]] = {
-        "base_score": 0.53,
+        "base_score": 0.62,
         "swing_lookback": 6.0,
         "min_price_delta_pct": 0.35,
         "min_indicator_votes": 1.5,

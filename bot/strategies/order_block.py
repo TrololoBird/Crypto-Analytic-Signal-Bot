@@ -11,7 +11,7 @@ from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.smc import latest_liquidity_sweep, latest_order_block, swing_series
 from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
 from ..setups.utils import build_smc_trade_plan, validate_rr_or_penalty
-from ._common import SpecHit, _latest_values, as_float, with_spec_columns
+from ._common import SpecHit, _latest_values, as_float, confirmed_pattern_frame, with_spec_columns
 
 if TYPE_CHECKING:
     import polars as pl
@@ -87,8 +87,8 @@ def _detect_order_block_extended(
     dynamic_params = effective
     sl_buffer_atr = float(dynamic_params.get("sl_buffer_atr", defaults.get("sl_buffer_atr", 1.5)))
 
-    w15m = prepared.work_15m
-    w1h = prepared.work_1h
+    w15m = confirmed_pattern_frame(prepared.work_15m)
+    w1h = confirmed_pattern_frame(prepared.work_1h)
     if w15m.height < 10:
         _reject(prepared, setup_id, "insufficient_15m_bars", bars=w15m.height)
         return None
@@ -194,8 +194,6 @@ def _detect_order_block_extended(
     # Use 1H context for 15M signals (not 4H - too lagging for <4h trades)
     bias_1h = getattr(prepared, "bias_1h", prepared.bias_4h)
     structure_1h = prepared.structure_1h
-    rsi_check = float(w15m.item(-1, "rsi14") or 50.0)
-
     min_rr = float(dynamic_params.get("min_rr", defaults["min_rr"]))
 
     vol_ratio = float(w15m.item(-1, "volume_ratio20") or 1.0)
@@ -217,14 +215,14 @@ def _detect_order_block_extended(
 
     rsi_overbought = dynamic_params.get("rsi_overbought", defaults["rsi_overbought"])
     rsi_oversold = dynamic_params.get("rsi_oversold", defaults["rsi_oversold"])
-    if direction == "long" and rsi_check > rsi_overbought:
+    if direction == "long" and rsi > rsi_overbought:
         score *= 0.85
-    if direction == "short" and rsi_check < rsi_oversold:
+    if direction == "short" and rsi < rsi_oversold:
         score *= 0.85
     if zone.state == "mitigated":
         score *= 0.95
 
-    entry_price = ob_low if direction == "long" else ob_high
+    entry_price = (ob_low + ob_high) / 2.0
     stop_basis = ob_low if direction == "long" else ob_high
     pivots = (
         swing_series(w1h, swing_length=3, include_unconfirmed_tail=True)
@@ -288,7 +286,7 @@ def _detect_order_block_extended(
             f"age={age}bars price={price:.4f} limit_entry={entry_price:.4f} "
             f"| 1h_bias={bias_1h} 1h_struct={structure_1h}"
         ),
-        f"rsi={rsi_check:.1f}",
+        f"rsi={rsi:.1f}",
         reasons_note,
     ]
 
@@ -342,7 +340,7 @@ class OrderBlockSetup(SpecDetectorSetup):
     required_context = ("futures_flow",)
 
     DEFAULTS: ClassVar[dict[str, float]] = {
-        "base_score": 0.52,
+        "base_score": 0.60,
         "min_ob_impulse_atr": 1.5,
         "impulse_lookback_bars": 5,
         "ob_max_age": 72.0,

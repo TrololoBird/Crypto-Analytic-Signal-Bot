@@ -36,14 +36,55 @@ class ParquetCache:
         self._cache_dir.mkdir(parents=True, exist_ok=True)
         self._max_chunk_days = max_chunk_days
 
-    def _get_chunk_path(self, symbol: str, timeframe: str, date: datetime) -> Path:
-        """Get path for a specific chunk."""
+    def _hive_chunk_path(self, symbol: str, timeframe: str, date: datetime) -> Path:
+        """Hive-style partition path for a single trading day."""
+        return (
+            self._cache_dir
+            / f"symbol={symbol}"
+            / f"timeframe={timeframe}"
+            / f"date={date.strftime('%Y-%m-%d')}"
+            / "data.parquet"
+        )
+
+    def _legacy_chunk_path(self, symbol: str, timeframe: str, date: datetime) -> Path:
+        """Legacy flat filename kept for backward-compatible reads."""
         chunk_name = f"{symbol}_{timeframe}_{date.strftime('%Y%m%d')}.parquet"
         return self._cache_dir / chunk_name
 
+    def _get_chunk_path(self, symbol: str, timeframe: str, date: datetime) -> Path:
+        """Get path for a specific chunk (Hive layout)."""
+        return self._hive_chunk_path(symbol, timeframe, date)
+
     def _get_chunk_pattern(self, symbol: str, timeframe: str) -> str:
-        """Get glob pattern for symbol/timeframe chunks."""
+        """Get glob pattern for legacy symbol/timeframe chunks."""
         return f"{symbol}_{timeframe}_*.parquet"
+
+    def _hive_scan_paths(self, symbol: str, timeframe: str) -> list[str]:
+        root = self._cache_dir / f"symbol={symbol}" / f"timeframe={timeframe}"
+        if not root.exists():
+            return []
+        return [str(path) for path in sorted(root.rglob("data.parquet"))]
+
+    def _write_parquet(self, frame: pl.DataFrame, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if frame.is_empty():
+            return
+        frame.lazy().sink_parquet(path, compression="zstd", statistics=True)
+
+    def _merge_and_sink(self, existing_path: Path, incoming: pl.DataFrame, *, timestamp_col: str) -> None:
+        if existing_path.exists():
+            merged = (
+                pl.concat(
+                    [pl.scan_parquet(str(existing_path)), incoming.lazy()],
+                    how="diagonal_relaxed",
+                )
+                .unique(subset=[timestamp_col], keep="last")
+                .sort(timestamp_col)
+            )
+        else:
+            merged = incoming.lazy().unique(subset=[timestamp_col], keep="last").sort(timestamp_col)
+        existing_path.parent.mkdir(parents=True, exist_ok=True)
+        merged.sink_parquet(existing_path, compression="zstd", statistics=True)
 
     def append(
         self,
@@ -82,16 +123,7 @@ class ParquetCache:
             # Filter data for this date
             day_df = df.filter(pl.col(timestamp_col).dt.date() == date)
 
-            if chunk_path.exists():
-                # Read existing and merge
-                existing = pl.read_parquet(chunk_path)
-                merged = pl.concat([existing, day_df]).unique(subset=[timestamp_col], keep="last")
-                merged = merged.sort(timestamp_col)
-            else:
-                merged = day_df.sort(timestamp_col)
-
-            # Write to parquet
-            merged.write_parquet(chunk_path, compression="zstd")
+            self._merge_and_sink(chunk_path, day_df, timestamp_col=timestamp_col)
 
         LOG.debug("Cached %d rows for %s/%s", len(df), symbol, timeframe)
 
@@ -113,22 +145,27 @@ class ParquetCache:
         Returns:
             Polars DataFrame with cached data
         """
+        hive_paths = self._hive_scan_paths(symbol, timeframe)
+        if hive_paths:
+            lazy = pl.scan_parquet(hive_paths)
+            if since is not None:
+                lazy = lazy.filter(pl.col("timestamp") >= since)
+            if until is not None:
+                lazy = lazy.filter(pl.col("timestamp") <= until)
+            return lazy.collect()
+
         pattern = self._get_chunk_pattern(symbol, timeframe)
         chunks = list(self._cache_dir.glob(pattern))
 
         if not chunks:
             return pl.DataFrame()
 
-        # Read all chunks and concatenate
-        dfs = [pl.read_parquet(chunk) for chunk in chunks]
-        combined = pl.concat(dfs).unique(keep="last").sort("timestamp")
-
-        # Apply time filters
-        if since:
-            combined = combined.filter(pl.col("timestamp") >= since)
-        if until:
-            combined = combined.filter(pl.col("timestamp") <= until)
-
+        lazy = pl.scan_parquet([str(chunk) for chunk in chunks])
+        if since is not None:
+            lazy = lazy.filter(pl.col("timestamp") >= since)
+        if until is not None:
+            lazy = lazy.filter(pl.col("timestamp") <= until)
+        combined = lazy.collect().unique(keep="last").sort("timestamp")
         return combined
 
     def read_recent(self, symbol: str, timeframe: str, lookback: timedelta) -> pl.DataFrame:
@@ -177,7 +214,7 @@ class ParquetCache:
             )
             if "timestamp" in merged.columns:
                 merged = merged.sort("timestamp")
-            merged.write_parquet(monthly_path, compression="zstd")
+            self._write_parquet(merged, monthly_path)
             for chunk in chunks:
                 if chunk != monthly_path:
                     chunk.unlink(missing_ok=True)
@@ -672,19 +709,21 @@ class HotColdParquetCache:
                 continue
             path.parent.mkdir(parents=True, exist_ok=True)
             if path.exists():
-                existing = pl.read_parquet(path)
-                before = existing.height + chunk.height
+                before = pl.scan_parquet(str(path)).select(pl.len()).collect().item() + chunk.height
                 merged = (
-                    pl.concat([existing, chunk], how="diagonal_relaxed")
+                    pl.concat(
+                        [pl.scan_parquet(str(path)), chunk.lazy()],
+                        how="diagonal_relaxed",
+                    )
                     .unique(subset=["open_time"], keep="last")
                     .sort("open_time")
                 )
-                duplicates += max(0, before - merged.height)
+                duplicates += max(0, before - merged.select(pl.len()).collect().item())
             else:
                 before = chunk.height
-                merged = chunk.unique(subset=["open_time"], keep="last").sort("open_time")
-                duplicates += max(0, before - merged.height)
-            merged.write_parquet(
+                merged = chunk.lazy().unique(subset=["open_time"], keep="last").sort("open_time")
+                duplicates += max(0, before - merged.select(pl.len()).collect().item())
+            merged.sink_parquet(
                 path,
                 compression=cast(
                     "Literal['lz4', 'uncompressed', 'snappy', 'gzip', 'brotli', 'zstd']",

@@ -7,7 +7,7 @@ from ._roadmap import (
     _build_atr_signal,
     _confirmed_context_conflict,
     _finite_or_none,
-    _last,
+    _prev,
     _reject,
 )
 from .roadmap_base import RoadmapSetup
@@ -31,16 +31,20 @@ def detect_liquidation_heatmap(
     score = _finite_or_none(prepared.liquidation_score)
     source = str(getattr(prepared, "liquidation_score_source", None) or "missing")
     oi_change = _finite_or_none(prepared.oi_change_pct)
-    close_position = _last(prepared.work_15m, "close_position", 0.5)
-    vol_ratio = _last(prepared.work_15m, "volume_ratio20", 1.0)
+    work = prepared.work_15m
+    if work.height < 2:
+        _reject(prepared, setup_id, "insufficient_bars")
+        return None
+    close_position = _prev(work, "close_position", 0.5)
+    vol_ratio = _prev(work, "volume_ratio20", 1.0)
     volume_penalty = vol_ratio < float(params["min_volume_ratio"])
     if score is None and oi_change is not None and oi_change <= -float(params["min_oi_drop_pct"]):
-        price_change = _last(prepared.work_15m, "roc10", 0.0)
+        price_change = _prev(work, "roc10", 0.0)
         score = 1.0 if price_change >= 0.0 else -1.0
         source = "oi_drop_proxy"
     threshold = float(params["min_liquidation_score"])
     if score is None:
-        atr = _last(prepared.work_15m, "atr14")
+        atr = _prev(work, "atr14")
         recent = prepared.work_15m.tail(
             min(int(params.get("proxy_lookback_bars", 12)), prepared.work_15m.height)
         )
@@ -129,11 +133,14 @@ def detect_liquidation_heatmap(
         clarity *= 0.90
     if context_penalty:
         clarity *= 0.82
+    entry_anchor = _prev(work, "ema20", 0.0) or None
     return _build_atr_signal(
+        confirmed_bar=True,
         prepared=prepared,
         setup_id=setup_id,
         direction=direction,
         params=params,
+        entry_anchor=entry_anchor,
         reasons=[
             f"liquidation_heatmap_{direction}",
             f"source={source}",

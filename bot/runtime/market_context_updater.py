@@ -558,7 +558,7 @@ class MarketContextUpdater:
                 exc,
             )
             return []
-        if frame.is_empty() or "close" not in frame.columns:
+        if frame is None or frame.is_empty() or "close" not in frame.columns:
             return []
         values = [self._safe_float(value) for value in frame["close"].to_list()]
         return [value for value in values if value > 0.0]

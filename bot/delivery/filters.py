@@ -14,7 +14,7 @@ from ..diagnostics.signals import get_global_diagnostics
 from ..domain.mtf import evaluate_mtf_gate, normalize_mtf_reject_reason
 from ..features.microstructure import MicrostructureContext, build_microstructure_context
 from ..runtime_policy import configured_primary_timeframe, is_deep_analysis_symbol
-from .contract import DEFAULT_TARGET_RR
+from .contract import resolve_target_rr
 from .filter_stages import filter_stage_enabled
 from .scoring import ScoringResult
 from .trade_plan import TradePlanBuilder
@@ -28,6 +28,18 @@ if TYPE_CHECKING:
 
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(numeric):
+        return None
+    return numeric
 
 
 _ADX_POLICY_HARD_GATE = "hard_gate"
@@ -71,12 +83,36 @@ def _resolve_adx_policy(signal: Signal) -> str:
     return _ADX_POLICY_PENALTY
 
 
-def _uses_soft_trend_conflict(signal: Signal) -> bool:
-    """Countertrend strategies should be penalized, not globally suppressed."""
-    return (
-        signal.strategy_family in _TREND_CONFLICT_SOFT_FAMILIES
-        or signal.confirmation_profile in _TREND_CONFLICT_SOFT_PROFILES
-    )
+def _uses_soft_trend_conflict(signal: Signal, settings: BotSettings | None = None) -> bool:
+    """Penalize 1h trend conflict instead of hard-blocking unless config says hard."""
+    if settings is not None and not getattr(settings.filters, "trend_conflict_soft", True):
+        return False
+    _ = signal
+    return True
+
+
+def _resolve_symbol_filter(
+    settings: BotSettings,
+    symbol: str,
+    key: str,
+    default: float,
+) -> float:
+    """Return per-asset filter override when configured under [bot.assets.SYMBOL]."""
+    assets = getattr(settings, "assets", None) or {}
+    asset_cfg = assets.get(str(symbol or "").upper())
+    if asset_cfg is None:
+        return default
+    overrides = getattr(asset_cfg, "filter_overrides", None) or {}
+    if not isinstance(overrides, dict):
+        return default
+    raw = overrides.get(key)
+    if raw is None:
+        return default
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return default
+    return value if math.isfinite(value) else default
 
 
 def _benchmark_context_guard(
@@ -246,10 +282,9 @@ def _regime_long_gate(
         "strategy_family": family,
         "confirmation_profile": profile,
     }
-    if bear_regime and bear_bias and trend_family:
+    hard_bear_phase = btc_phase in {"decline", "distribution"}
+    if bear_regime and bear_bias and trend_family and hard_bear_phase:
         return False, "regime_bear_long_blocked", details
-    if bear_bias and trend_family:
-        return False, "btc_downtrend_long_blocked", details
     return True, None, details
 
 
@@ -360,6 +395,8 @@ def _expand_signal_to_min_stop(
     *,
     min_stop_distance_pct: float,
     min_rr: float,
+    target_rr: tuple[float, float, float] | None = None,
+    settings: BotSettings | None = None,
 ) -> tuple[Signal, bool]:
     """Widen micro-stops to the runtime minimum and preserve TP1 RR.
 
@@ -377,6 +414,8 @@ def _expand_signal_to_min_stop(
     min_risk = entry * (min_stop_distance_pct / 100.0)
     rr_floor = max(1.0, float(min_rr))
     tp2_rr = max(rr_floor * 1.5, rr_floor + 0.5)
+    rr_ladder = target_rr or resolve_target_rr(settings)
+    tp3_rr = float(rr_ladder[2])
     reasons = (
         *signal.reasons,
         f"min_stop_normalized={min_stop_distance_pct:.2f}% rr_floor={rr_floor:.2f}",
@@ -386,12 +425,12 @@ def _expand_signal_to_min_stop(
         stop = entry - min_risk
         tp1 = max(float(signal.take_profit_1), entry + min_risk * rr_floor)
         tp2 = max(float(signal.take_profit_2), tp1, entry + min_risk * tp2_rr)
-        tp3 = max(float(signal.tp3), tp2, entry + min_risk * DEFAULT_TARGET_RR[2])
+        tp3 = max(float(signal.tp3), tp2, entry + min_risk * tp3_rr)
     else:
         stop = entry + min_risk
         tp1 = min(float(signal.take_profit_1), entry - min_risk * rr_floor)
         tp2 = min(float(signal.take_profit_2), tp1, entry - min_risk * tp2_rr)
-        tp3 = min(float(signal.tp3), tp2, entry - min_risk * DEFAULT_TARGET_RR[2])
+        tp3 = min(float(signal.tp3), tp2, entry - min_risk * tp3_rr)
 
     risk_reward = abs(tp1 - entry) / min_risk if min_risk > 0.0 else signal.risk_reward
     plan = TradePlanBuilder.build(
@@ -408,6 +447,8 @@ def _expand_signal_to_min_stop(
         created_at=signal.created_at,
         ttl_bars=signal.ttl_bars,
         scale_weights=signal.scale_weights,
+        target_rr=rr_ladder,
+        settings=settings,
     )
     if plan is not None:
         stop = plan.stop_loss
@@ -561,7 +602,19 @@ def _entry_staleness_gate(
     *,
     atr_pct: float,
 ) -> tuple[bool, str | None, dict[str, Any] | None]:
-    """Reject when mark/ticker has already moved too far from the planned entry."""
+    """Reject when price has blown through the limit entry zone against the signal.
+
+    For limit orders the entry is a structural level (support for longs,
+    resistance for shorts).  Price drifting away on the *intended* side is
+    normal — we are waiting for the fill.  Only reject when price has moved
+    *against* the direction past the entry level by more than N×ATR, which
+    means the structural level was violated and the setup is invalidated.
+
+    LONG : entry is below current price (support).  Reject if current_price
+           has fallen more than threshold *below* entry_price (support broken).
+    SHORT: entry is above current price (resistance).  Reject if current_price
+           has risen more than threshold *above* entry_price (resistance broken).
+    """
     current_price = prepared.mark_price or prepared.ticker_price
     entry_price = float(signal.entry_mid_raw)
     if (
@@ -573,24 +626,31 @@ def _entry_staleness_gate(
     ):
         return True, None, None
 
-    # fix-sl-A: reject entry if price has already moved > N*ATR from signal entry
-    deviation = abs(float(current_price) - entry_price) / entry_price
     atr_mult = float(getattr(settings.filters, "max_entry_deviation_atr_mult", 1.2))
     threshold = max(0.001, atr_mult * atr_pct / 100.0)
+
+    direction = str(signal.direction or "").lower()
+    cur = float(current_price)
+
+    # Directional overshoot: how far price has moved *against* the signal past entry
+    if direction == "long":
+        # Support broken: price fell below entry
+        adverse_deviation = (entry_price - cur) / entry_price
+    else:
+        # Resistance broken: price rose above entry
+        adverse_deviation = (cur - entry_price) / entry_price
+
     details: dict[str, Any] = {
         "entry_price": entry_price,
-        "current_price": float(current_price),
-        "entry_deviation_pct": round(deviation * 100.0, 4),
+        "current_price": cur,
+        "adverse_deviation_pct": round(adverse_deviation * 100.0, 4),
         "atr_pct": atr_pct,
         "max_deviation_pct": round(threshold * 100.0, 4),
         "atr_mult": atr_mult,
+        "direction": direction,
     }
-    if deviation > threshold:
-        return (
-            False,
-            "entry_staleness",
-            details,
-        )
+    if adverse_deviation > threshold:
+        return False, "entry_staleness", details
     return True, None, details
 
 
@@ -609,7 +669,12 @@ def _market_atr_floor(prepared: PreparedSymbol, settings: BotSettings) -> float:
     if atr is not None and atr <= 0.0:
         return 0.0  # ATR pct: non-positive volatility data makes the floor invalid.
 
-    base_min = float(settings.filters.min_atr_pct)
+    base_min = _resolve_symbol_filter(
+        settings,
+        prepared.symbol,
+        "min_atr_pct",
+        float(settings.filters.min_atr_pct),
+    )
     if base_min <= 0.20:
         return base_min
 
@@ -842,12 +907,19 @@ def _run_filter_pipeline(
         passed.append("entry_staleness_stage_disabled")
 
     # --- 2. Mark price sanity ---
-    if filter_stage_enabled(settings, "mark_deviation") and (
-        prepared.mark_price is not None
-        and prepared.mark_price > 0
-        and prepared.ticker_price is not None
-        and prepared.ticker_price > 0
-    ):
+    if filter_stage_enabled(settings, "mark_deviation"):
+        if prepared.mark_price is None or prepared.mark_price <= 0:
+            return _reject(
+                "mark_price_unavailable",
+                base,
+                details={"mark_price": prepared.mark_price},
+            )
+        if prepared.ticker_price is None or prepared.ticker_price <= 0:
+            return _reject(
+                "ticker_price_unavailable",
+                base,
+                details={"ticker_price": prepared.ticker_price},
+            )
         deviation = abs(prepared.mark_price - prepared.ticker_price) / prepared.ticker_price
         mark_price_details = {
             "mark_price": prepared.mark_price,
@@ -859,7 +931,9 @@ def _run_filter_pipeline(
         }
         if deviation > settings.filters.max_mark_price_deviation_pct:
             return _reject("mark_price_deviation", base, details=mark_price_details)
-    passed.append("mark_price_ok")
+        passed.append("mark_price_ok")
+    else:
+        passed.append("mark_deviation_stage_disabled")
 
     # --- 3. Spread ---
     if filter_stage_enabled(settings, "spread"):
@@ -905,7 +979,13 @@ def _run_filter_pipeline(
                     "config_min_atr": settings.filters.min_atr_pct,
                 },
             )
-        if atr_pct > settings.filters.max_atr_pct:
+        max_atr_pct = _resolve_symbol_filter(
+            settings,
+            prepared.symbol,
+            "max_atr_pct",
+            float(settings.filters.max_atr_pct),
+        )
+        if atr_pct > max_atr_pct:
             return _reject("atr_too_high", replace(base, atr_pct=atr_pct))
         passed.append("atr_ok")
     else:
@@ -918,7 +998,13 @@ def _run_filter_pipeline(
     if not prepared.work_1h.is_empty():
         adx_1h = float(prepared.work_1h.item(-1, "adx14") or 0.0)
     setup_overrides = settings.filters.setups.get(signal.setup_id, {})
-    min_adx_1h = float(setup_overrides.get("min_adx_1h", settings.filters.min_adx_1h))
+    default_min_adx = _resolve_symbol_filter(
+        settings,
+        prepared.symbol,
+        "min_adx_1h",
+        float(settings.filters.min_adx_1h),
+    )
+    min_adx_1h = float(setup_overrides.get("min_adx_1h", default_min_adx))
     adx_penalty_factor = float(setup_overrides.get("adx_penalty_factor", 0.85))
     adx_policy = _resolve_adx_policy(signal)
     market_regime = str(getattr(prepared, "market_regime", "neutral") or "neutral").lower()
@@ -990,6 +1076,12 @@ def _run_filter_pipeline(
     btc_phase = str(getattr(prepared, "btc_phase", "") or "").lower()
     btc_decline_penalty_applied = False
     btc_decline_penalty_factor = float(setup_overrides.get("btc_decline_penalty_factor", 0.90))
+    short_downtrend_penalty_applied = False
+    short_downtrend_penalty_factor = float(
+        setup_overrides.get("short_downtrend_penalty_factor", 0.88)
+    )
+    funding_short_penalty_applied = False
+    funding_short_penalty_factor = float(setup_overrides.get("funding_short_penalty_factor", 0.90))
     if trend_conflict:
         trend_details = {
             "signal_direction": signal.direction,
@@ -998,7 +1090,7 @@ def _run_filter_pipeline(
             "strategy_family": signal.strategy_family,
             "confirmation_profile": signal.confirmation_profile,
         }
-        if not _uses_soft_trend_conflict(signal):
+        if not _uses_soft_trend_conflict(signal, settings):
             return _reject("trend_conflict_1h", base, details=trend_details)
         trend_conflict_penalty_applied = True
         passed.append("trend_conflict_1h_penalized")
@@ -1006,7 +1098,7 @@ def _run_filter_pipeline(
         passed.append("trend_context_ok")
 
     if (
-        _uses_soft_trend_conflict(signal)
+        _uses_soft_trend_conflict(signal, settings)
         and signal.direction == "long"
         and btc_phase in {"decline", "distribution"}
     ):
@@ -1014,6 +1106,64 @@ def _run_filter_pipeline(
         passed.append("btc_decline_penalty_eligible")
     elif btc_phase:
         passed.append("btc_phase_ok")
+
+    if (
+        signal.direction == "short"
+        and dominant_1h == "downtrend"
+        and signal.strategy_family in {"continuation", "breakout", "trend_follow"}
+    ):
+        short_downtrend_penalty_applied = True
+        passed.append("short_downtrend_penalty_eligible")
+    else:
+        passed.append("short_downtrend_context_ok")
+
+    bias_4h = str(getattr(prepared, "bias_4h", "") or "neutral").lower()
+    atr_pct = _optional_float(getattr(prepared, "atr_pct", None)) or _optional_float(
+        getattr(signal, "atr_pct", None)
+    )
+    if (
+        signal.direction == "short"
+        and bias_4h == "downtrend"
+        and atr_pct is not None
+        and atr_pct > 1.5
+    ):
+        return _reject(
+            "short_downtrend_high_atr",
+            base,
+            details={
+                "bias_4h": bias_4h,
+                "atr_pct": atr_pct,
+                "threshold_atr_pct": 1.5,
+                "signal_direction": signal.direction,
+            },
+        )
+
+    funding_rate = _optional_float(getattr(prepared, "funding_rate", None))
+    funding_moderate = float(getattr(settings.scoring, "funding_rate_moderate", 0.0005) or 0.0005)
+    funding_extreme = float(getattr(settings.scoring, "funding_rate_extreme", 0.0010) or 0.0010)
+    if (
+        signal.direction == "short"
+        and funding_rate is not None
+        and funding_rate > funding_extreme
+    ):
+        return _reject(
+            "funding_headwind_short",
+            base,
+            details={
+                "funding_rate": funding_rate,
+                "funding_extreme": funding_extreme,
+                "signal_direction": signal.direction,
+            },
+        )
+    if (
+        signal.direction == "short"
+        and funding_rate is not None
+        and funding_rate > funding_moderate
+    ):
+        funding_short_penalty_applied = True
+        passed.append("funding_short_penalty_eligible")
+    elif funding_rate is not None:
+        passed.append("funding_context_ok")
 
     benchmark_ok, benchmark_reason, benchmark_details = _benchmark_context_guard(signal, prepared)
     if not benchmark_ok and not deep_analysis_asset:
@@ -1077,6 +1227,7 @@ def _run_filter_pipeline(
             updated,
             min_stop_distance_pct=min_stop_distance_pct,
             min_rr=effective_min_rr,
+            settings=settings,
         )
         if stop_expanded:
             passed.append("stop_expanded_to_min")
@@ -1208,6 +1359,44 @@ def _run_filter_pipeline(
         updated = replace(
             updated,
             passed_filters=(*updated.passed_filters, "btc_decline_penalty_applied"),
+        )
+
+    if short_downtrend_penalty_applied:
+        pre_penalty_score = updated.score
+        adjusted_score = pre_penalty_score * short_downtrend_penalty_factor
+        updated = replace(updated, score=adjusted_score)
+        penalty_delta = round(adjusted_score - pre_penalty_score, 6)
+        if scoring_result is not None:
+            scoring_result = replace(
+                scoring_result,
+                final_score=adjusted_score,
+                adjustments={
+                    **scoring_result.adjustments,
+                    "short_downtrend_penalty": penalty_delta,
+                },
+            )
+        updated = replace(
+            updated,
+            passed_filters=(*updated.passed_filters, "short_downtrend_penalty_applied"),
+        )
+
+    if funding_short_penalty_applied:
+        pre_penalty_score = updated.score
+        adjusted_score = pre_penalty_score * funding_short_penalty_factor
+        updated = replace(updated, score=adjusted_score)
+        penalty_delta = round(adjusted_score - pre_penalty_score, 6)
+        if scoring_result is not None:
+            scoring_result = replace(
+                scoring_result,
+                final_score=adjusted_score,
+                adjustments={
+                    **scoring_result.adjustments,
+                    "funding_short_penalty": penalty_delta,
+                },
+            )
+        updated = replace(
+            updated,
+            passed_filters=(*updated.passed_filters, "funding_short_penalty_applied"),
         )
 
     # --- 9. Minimum score gate (final gate after ALL adjustments) ---

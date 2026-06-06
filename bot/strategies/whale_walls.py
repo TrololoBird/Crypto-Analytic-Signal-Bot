@@ -7,6 +7,7 @@ from ._roadmap import (
     _confirmed_context_conflict,
     _finite_or_none,
     _has_l2_depth,
+    _last,
     _orderbook_source,
     _prev,
     _price_change_pct_confirmed,
@@ -129,12 +130,16 @@ def detect_whale_walls(
         clarity *= 0.90
     if context_penalty:
         clarity *= 0.82
+    mark = _finite_or_none(prepared.mark_price)
+    close = _prev(work, "close", 0.0)
+    entry_anchor = mark if mark is not None and mark > 0.0 else (close if close > 0.0 else None)
     return _build_atr_signal(
         prepared=prepared,
         setup_id=setup_id,
         direction=direction,
         params=params,
         confirmed_bar=True,
+        entry_anchor=entry_anchor,
         reasons=[
             f"orderbook_wall_proxy_{direction}",
             f"wall_pressure={wall_pressure:.3f}",

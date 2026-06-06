@@ -10,7 +10,7 @@ from ..domain.config import BotSettings
 from ..domain.schemas import PreparedSymbol, Signal
 from ..domain.strategy_catalog import CATALOG_BY_ID, catalog_default_params
 from ..setups.utils import get_dynamic_params
-from ..strategies._common import SpecHit, build_spec_signal
+from ..strategies._common import SpecHit, build_spec_signal, confirmed_pattern_frame
 from ..strategies._roadmap import _configured_params
 from .base import BaseSetup
 
@@ -39,10 +39,19 @@ def pattern_timeframe(setup_id: str) -> str:
     return entry.pattern_tf
 
 
-def pattern_dataframe(prepared: PreparedSymbol, setup_id: str) -> tuple[pl.DataFrame, str]:
+def pattern_dataframe(prepared: PreparedSymbol, setup_id: str) -> tuple[pl.DataFrame, str] | None:
     tf = pattern_timeframe(setup_id)
     attr = _FRAME_ATTR.get(tf, "work_15m")
-    frame = getattr(prepared, attr, prepared.work_15m)
+    frame = getattr(prepared, attr, None)
+    if frame is None or getattr(frame, "is_empty", lambda: True)():
+        LOG.warning(
+            "pattern_tf_missing | symbol=%s setup=%s expected_tf=%s attr=%s",
+            getattr(prepared, "symbol", ""),
+            setup_id,
+            tf,
+            attr,
+        )
+        return None
     return frame, tf
 
 
@@ -79,7 +88,11 @@ def try_spec_signal(
     spec_detect: SpecDetectFn,
     spec_kwargs: dict[str, object] | None = None,
 ) -> Signal | None:
-    work, timeframe = pattern_dataframe(prepared, setup_id)
+    picked = pattern_dataframe(prepared, setup_id)
+    if picked is None:
+        return None
+    work, timeframe = picked
+    work = confirmed_pattern_frame(work)
     hit = spec_detect(work, timeframe=timeframe, **(spec_kwargs or {}))
     if hit is None:
         return None

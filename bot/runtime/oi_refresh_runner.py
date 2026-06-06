@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from typing import Any
@@ -25,6 +26,16 @@ _DEFAULT_PRIORITY_CONTEXT_SYMBOLS = (
     "XAGUSDT",
     "PAXGUSDT",
 )
+_PERSISTENT_SCALAR_STAGES: dict[str, int] = {
+    "oi_current": 1800,
+    "oi_change_1h": 3600,
+    "top_account_ls_ratio_1h": 3600,
+    "top_position_ls_ratio_1h": 3600,
+    "global_ls_ratio_1h": 3600,
+    "funding_rate": 3600,
+    "basis_1h": 3600,
+    "basis_5m": 1800,
+}
 
 
 class OIRefreshRunner:
@@ -114,6 +125,11 @@ class OIRefreshRunner:
         shortlist = self._prioritized_shortlist(shortlist, symbol_limit=symbol_limit)
         if not shortlist:
             return 0
+        try:
+            await self._bot.client.fetch_funding_info_all()
+        except _DEGRADATION_ERRORS as exc:
+            LOG.debug("funding info refresh skipped | error=%s", exc)
+
         deadline = (
             time.monotonic() + max(0.0, float(time_budget_seconds))
             if time_budget_seconds is not None and time_budget_seconds > 0
@@ -327,6 +343,58 @@ class OIRefreshRunner:
         self._single_symbol_limiter = asyncio.Semaphore(capacity)
         return self._single_symbol_limiter
 
+    async def _hydrate_market_cache(self, client: Any, repo: Any, symbol: str) -> None:
+        if hasattr(client, "seed_funding_history_cache"):
+            cache_key = f"funding_rate_history:{symbol}"
+            try:
+                cached_payload = await repo.read_market_cache(cache_key, max_age_s=7200.0)
+                if cached_payload:
+                    rows = json.loads(cached_payload)
+                    if isinstance(rows, list):
+                        client.seed_funding_history_cache(symbol, rows)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                LOG.debug("market cache hydrate skipped | symbol=%s stage=funding_history", symbol)
+        if not hasattr(client, "seed_market_scalar_cache"):
+            return
+        for stage, ttl_seconds in _PERSISTENT_SCALAR_STAGES.items():
+            cache_key = f"{stage}:{symbol}"
+            try:
+                cached_payload = await repo.read_market_cache(
+                    cache_key,
+                    max_age_s=float(ttl_seconds),
+                )
+                if not cached_payload:
+                    continue
+                payload = json.loads(cached_payload)
+                value = payload.get("value") if isinstance(payload, dict) else payload
+                if isinstance(value, (int, float)):
+                    client.seed_market_scalar_cache(stage, symbol, float(value))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                LOG.debug("market cache hydrate skipped | symbol=%s stage=%s", symbol, stage)
+
+    async def _persist_market_cache(
+        self,
+        repo: Any,
+        symbol: str,
+        stage: str,
+        result: Any,
+    ) -> None:
+        if stage == "funding_rate_history" and isinstance(result, list) and result:
+            await repo.write_market_cache(
+                f"funding_rate_history:{symbol}",
+                json.dumps(result, separators=(",", ":")),
+                ttl_seconds=7200,
+            )
+            return
+        ttl_seconds = _PERSISTENT_SCALAR_STAGES.get(stage)
+        if ttl_seconds is None or not isinstance(result, (int, float)):
+            return
+        await repo.write_market_cache(
+            f"{stage}:{symbol}",
+            json.dumps({"value": float(result)}, separators=(",", ":")),
+            ttl_seconds=int(ttl_seconds),
+        )
+
     async def _safe_fetch(
         self,
         symbol: str,
@@ -423,9 +491,15 @@ class OIRefreshRunner:
                     ),
                 )
             )
+        repo = getattr(self._bot, "_modern_repo", None)
+        if repo is not None:
+            await self._hydrate_market_cache(client, repo, symbol)
+
         for source, stage, fetch in fetchers:
             try:
-                await fetch()
+                result = await fetch()
+                if repo is not None:
+                    await self._persist_market_cache(repo, symbol, stage, result)
             except _DEGRADATION_ERRORS as exc:
                 LOG.info(
                     (

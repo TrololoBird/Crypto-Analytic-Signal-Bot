@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 from bot.domain.delivery_policy import KLINE_CLOSE_ONLY_SETUP_IDS
+from bot.market.data import BinanceFuturesMarketData, MarketDataUnavailable
 from bot.runtime.data_readiness import is_radar_promoted_item, missing_derivatives_context
 from bot.runtime.delivery_orchestrator import DELIVERY_SUCCESS_STATUSES
 from bot.runtime.errors import DEFENSIVE_EXC
@@ -57,6 +58,21 @@ class CycleRunner:
             ws_enrichments.update(ws_enrichments_override)
         if include_spot_enrichments:
             ws_enrichments.update(bot._spot_enrichments(symbol))
+
+        if (
+            ws_enrichments.get("ticker_price") is None
+            and isinstance(bot.client, BinanceFuturesMarketData)
+        ):
+            cached_price = bot.client.get_cached_symbol_price(symbol)
+            if cached_price is not None and cached_price > 0.0:
+                ws_enrichments["ticker_price"] = cached_price
+            else:
+                try:
+                    rest_price = await bot.client.fetch_symbol_price(symbol)
+                except MarketDataUnavailable:
+                    rest_price = None
+                if rest_price is not None and rest_price > 0.0:
+                    ws_enrichments["ticker_price"] = rest_price
 
         if require_derivatives and missing_derivatives_context(ws_enrichments):
             try:
@@ -362,6 +378,7 @@ class CycleRunner:
             for signal in res.candidates:
                 prepared_by_tracking_id[signal.tracking_id] = res.prepared
 
+        await bot._delivery_orchestrator.preload_ranking_cooldowns(all_candidates)
         selected = bot._select_and_rank(
             all_candidates,
             max_signals=bot.settings.runtime.max_signals_per_cycle,

@@ -21,9 +21,18 @@ from ..domain.limit_entry import (
 from ..domain.schemas import AggTrade
 from ..market.data import MarketDataUnavailable
 from ..persistence.sl_diagnostics import classify_stop_loss_root_cause
-from ..persistence.tracked import TrackedSignalState, parse_state_dt
+from ..persistence.tracked import (
+    TrackedSignalState,
+    parse_state_dt,
+    resolve_terminal_close_reason,
+)
 
 LOG = logging.getLogger("bot.tracking")
+
+
+def _expiry_event_type(tracked: TrackedSignalState) -> str:
+    """Map expiry to tp1_hit when TP1 was reached before terminal close (G1)."""
+    return resolve_terminal_close_reason(tracked, "expired")
 
 
 def _stop_close_event_type(tracked: TrackedSignalState) -> str:
@@ -370,7 +379,7 @@ class TPSLReviewMixin:
                     events.append(
                         await self._close_event(
                             tracked,
-                            event_type="expired",
+                            event_type=_expiry_event_type(tracked),
                             occurred_at=pending_expires_at,
                             price=last_price,
                             precision_mode="trade",
@@ -424,7 +433,7 @@ class TPSLReviewMixin:
             events.append(
                 await self._close_event(
                     tracked,
-                    event_type="expired",
+                    event_type=_expiry_event_type(tracked),
                     occurred_at=pending_expires_at,
                     price=last_price,
                     precision_mode="trade",
@@ -483,7 +492,7 @@ class TPSLReviewMixin:
                     events.append(
                         await self._close_event(
                             tracked,
-                            event_type="expired",
+                            event_type=_expiry_event_type(tracked),
                             occurred_at=pending_expires_at,
                             price=last_price,
                             precision_mode="candle",
@@ -614,7 +623,7 @@ class TPSLReviewMixin:
             events.append(
                 await self._close_event(
                     tracked,
-                    event_type="expired",
+                    event_type=_expiry_event_type(tracked),
                     occurred_at=pending_expires_at,
                     price=last_price,
                     precision_mode="candle",
@@ -649,7 +658,7 @@ class TPSLReviewMixin:
             return [
                 await self._close_event(
                     tracked,
-                    event_type="expired",
+                    event_type=_expiry_event_type(tracked),
                     occurred_at=pending_expires_at,
                     price=last_price,
                     precision_mode=precision_mode,

@@ -7,10 +7,11 @@ from ._common import (
     SpecHit,
     _latest_values,
     build_spec_signal,
+    confirmed_pattern_frame,
     orderflow_supports_reversal,
     with_spec_columns,
 )
-from ._roadmap import _as_float, _build_atr_signal, _last, _missing_columns, _reject
+from ._roadmap import _as_float, _build_atr_signal, _last, _missing_columns, _prev, _reject
 from .roadmap_base import RoadmapSetup
 
 if TYPE_CHECKING:
@@ -37,7 +38,7 @@ def detect_wyckoff_spring(frame: pl.DataFrame, *, timeframe: str = "15m") -> Spe
         and row["low"] < support
         and row["close"] > support
         and volume_mean > 0.0
-        and volume <= volume_mean * 1.05
+        and volume <= volume_mean * 0.80
     ):
         return SpecHit(
             strategy="wyckoff_spring",
@@ -57,7 +58,7 @@ def detect_wyckoff_spring(frame: pl.DataFrame, *, timeframe: str = "15m") -> Spe
         and row["high"] > resistance
         and row["close"] < resistance
         and volume_mean > 0.0
-        and volume <= volume_mean * 1.05
+        and volume <= volume_mean * 0.80
     ):
         return SpecHit(
             strategy="wyckoff_spring",
@@ -85,7 +86,7 @@ def detect_wyckoff_spring_prepared(
     family: str,
 ) -> Signal | None:
     params = effective_params
-    work = prepared.work_15m
+    work = confirmed_pattern_frame(prepared.work_15m)
     hit = detect_wyckoff_spring(work, timeframe="15m")
     if hit is not None:
         return build_spec_signal(
@@ -107,7 +108,10 @@ def detect_wyckoff_spring_prepared(
     if missing:
         _reject(prepared, setup_id, "missing_columns", missing_fields=missing)
         return None
-    close = _last(work, "close")
+    if work.height < 2:
+        _reject(prepared, setup_id, "insufficient_bars")
+        return None
+    close = _prev(work, "close")
     tolerance = float(params["sweep_tolerance_pct"])
     lookback = max(1, int(params.get("signal_lookback_bars", 12)))
     recent = work.tail(min(lookback, work.height))
@@ -115,7 +119,7 @@ def detect_wyckoff_spring_prepared(
     signal_lag = 0
     level = 0.0
     sweep_extreme = 0.0
-    vol_ratio = _last(work, "volume_ratio20", 1.0)
+    vol_ratio = _prev(work, "volume_ratio20", 1.0)
     dryup_ok = True
     recovery_ok = True
     volume_mean = _last(work, "volume_mean20", 0.0) if "volume_mean20" in work.columns else 0.0
@@ -167,7 +171,7 @@ def detect_wyckoff_spring_prepared(
             recovery_ok = bar_vol_ratio >= recovery_ratio or vol_ratio >= recovery_ratio
             break
     if direction is None:
-        atr = _last(work, "atr14")
+        atr = _prev(work, "atr14")
         near_range_atr = float(params.get("near_range_atr", 0.40))
         min_wick_atr = float(params.get("min_wick_atr", 0.25))
         if atr > 0.0 and recent.height > 0:
@@ -234,6 +238,7 @@ def detect_wyckoff_spring_prepared(
         setup_id=setup_id,
         direction=direction,
         params=params,
+        confirmed_bar=True,
         reasons=[
             f"wyckoff_{direction}",
             f"vol_ratio={vol_ratio:.2f}",
@@ -264,7 +269,7 @@ class WyckoffSpringSetup(RoadmapSetup):
         "near_range_atr": 0.50,
         "min_wick_atr": 0.20,
         "max_signal_lag_bars": 6,
-        "spring_volume_dryup_ratio": 1.10,
+        "spring_volume_dryup_ratio": 0.80,
         "recovery_volume_ratio": 0.95,
         "volume_penalty": 0.90,
     }

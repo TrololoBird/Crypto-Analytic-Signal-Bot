@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast
 from ..features.prepare import _swing_points
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
-from ._common import SpecHit, _pivot_rows, as_float, with_spec_columns
+from ._common import SpecHit, _pivot_rows, as_float, confirmed_pattern_frame, with_spec_columns
 
 if TYPE_CHECKING:
     import polars as pl
@@ -38,7 +38,7 @@ def detect_cvd_divergence(frame: pl.DataFrame, *, timeframe: str = "15m") -> Spe
             return SpecHit(
                 strategy="cvd_divergence",
                 direction="long",
-                entry=as_float(work.item(-1, "close")),
+                entry=new["price"],
                 stop_basis=new["price"],
                 atr=atr,
                 timeframe=timeframe,
@@ -53,7 +53,7 @@ def detect_cvd_divergence(frame: pl.DataFrame, *, timeframe: str = "15m") -> Spe
             return SpecHit(
                 strategy="cvd_divergence",
                 direction="short",
-                entry=as_float(work.item(-1, "close")),
+                entry=new["price"],
                 stop_basis=new["price"],
                 atr=atr,
                 timeframe=timeframe,
@@ -97,7 +97,7 @@ def _detect_cvd_divergence_extended(
     min_rr = float(dynamic_params.get("min_rr", defaults["min_rr"]))
     base_score = float(dynamic_params.get("base_score", defaults["base_score"]))
 
-    w = prepared.work_15m
+    w = confirmed_pattern_frame(prepared.work_15m)
     if w.height < 20:
         _reject(prepared, setup_id, "insufficient_15m_bars", bars=w.height)
         return None
@@ -226,7 +226,7 @@ def _detect_cvd_divergence_extended(
         # TP1: first leg retrace target from the prior divergence segment on close prices.
         tp1 = float(max(window_a))
         # TP2: prior structural level (1h swing high)
-        w1h = prepared.work_1h
+        w1h = confirmed_pattern_frame(prepared.work_1h)
         tp2 = None
         if w1h.height > 5:
             sh_mask, sl_mask = _swing_points(w1h, n=3, include_unconfirmed_tail=True)
@@ -251,7 +251,7 @@ def _detect_cvd_divergence_extended(
         # TP1: first leg retrace target from the prior divergence segment on close prices.
         tp1 = float(min(window_a))
         # TP2: prior structural level (1h swing low)
-        w1h = prepared.work_1h
+        w1h = confirmed_pattern_frame(prepared.work_1h)
         tp2 = None
         if w1h.height > 5:
             _, sl_mask = _swing_points(w1h, n=3, include_unconfirmed_tail=True)
@@ -347,7 +347,7 @@ class CVDDivergenceSetup(SpecDetectorSetup):
     required_context = ("futures_flow",)
 
     DEFAULTS: ClassVar[dict[str, float]] = {
-        "base_score": 0.5,
+        "base_score": 0.62,
         "divergence_lookback": 5,
         "delta_lookback": 3,
         "bias_mismatch_penalty": 0.75,

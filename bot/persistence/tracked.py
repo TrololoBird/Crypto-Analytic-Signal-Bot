@@ -62,6 +62,42 @@ class TrackedSignalState(msgspec.Struct, kw_only=True):
     max_adverse_pct: float = 0.0
 
 
+def tp1_required_move_pct(tracked: TrackedSignalState) -> float | None:
+    """Minimum favorable move % from entry to TP1."""
+    entry = tracked.activation_price or tracked.entry_mid
+    tp1 = float(tracked.take_profit_1 or 0.0)
+    if entry is None or float(entry) <= 0.0 or tp1 <= 0.0:
+        return None
+    return abs(tp1 - float(entry)) / float(entry) * 100.0
+
+
+def tp1_reached_from_excursion(
+    tracked: TrackedSignalState,
+    *,
+    tolerance_pct: float = 0.05,
+) -> bool:
+    """True when MAE/MFE tracking shows price reached TP1 before terminal close."""
+    if tracked.tp1_hit_at:
+        return True
+    required = tp1_required_move_pct(tracked)
+    if required is None:
+        return False
+    return float(tracked.max_favorable_pct or 0.0) >= required - tolerance_pct
+
+
+def resolve_terminal_close_reason(tracked: TrackedSignalState, reason: str) -> str:
+    """Map terminal closes to tp1_hit when TP1 was reached (G1 fix-sl tracking)."""
+    if tracked.activated_at is None:
+        return reason
+    if reason == "expired" and (
+        tracked.tp1_hit_at is not None or tp1_reached_from_excursion(tracked)
+    ):
+        return "tp1_hit"
+    if reason == "breakeven_stop" and tracked.tp1_hit_at is not None:
+        return "tp1_hit"
+    return reason
+
+
 def parse_state_dt(value: str | None) -> datetime | None:
     """Parse ISO datetime used by tracked-signal persistence."""
     if not value:

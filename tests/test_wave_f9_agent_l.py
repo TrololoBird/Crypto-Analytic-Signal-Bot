@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -15,6 +15,8 @@ from bot.domain.strategies import StrategyDecision
 from bot.runtime.bot import SignalBot
 from bot.runtime.container import build_application_container
 from bot.runtime.cycle_runner import CycleRunner
+from bot.delivery.contract import validate_signal_contract
+from bot.domain.limit_entry import limit_delivery_ready
 from bot.runtime.telemetry_manager import TelemetryManager
 
 _TEST_TOKEN = "123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
@@ -40,7 +42,7 @@ def test_select_and_rank_uses_filters_min_score() -> None:
         entry_low=99.0,
         entry_high=101.0,
         stop=98.0,
-        take_profit_1=103.0,
+        take_profit_1=104.0,
         take_profit_2=105.0,
     )
     high = Signal(
@@ -52,7 +54,7 @@ def test_select_and_rank_uses_filters_min_score() -> None:
         entry_low=99.0,
         entry_high=101.0,
         stop=98.0,
-        take_profit_1=103.0,
+        take_profit_1=104.0,
         take_profit_2=105.0,
     )
     bot._delivery_orchestrator.select_and_rank.return_value = [low, high]
@@ -216,3 +218,59 @@ async def test_cycle_timeout_emits_reject_row_and_cycle_log() -> None:
     assert emit_kwargs["symbol"] == "ETHUSDT"
     assert emit_kwargs["result"].status == "cycle_timeout"
     assert emit_kwargs["rejected"][0]["reason_code"] == "runtime.cycle_timeout"
+
+
+def test_limit_long_entry_zone_below_mark() -> None:
+    ready, reason, _ = limit_delivery_ready(
+        direction="long",
+        mark_price=99.5,
+        entry_low=98.0,
+        entry_high=99.0,
+        stop=95.0,
+    )
+    assert ready is True
+    assert reason is None
+    assert 99.5 > 99.0
+
+
+def test_limit_short_entry_zone_above_mark() -> None:
+    ready, reason, _ = limit_delivery_ready(
+        direction="short",
+        mark_price=103.0,
+        entry_low=101.0,
+        entry_high=102.0,
+        stop=105.0,
+    )
+    assert ready is True
+    assert reason is None
+    assert 103.0 > 102.0
+
+
+def test_signal_contract_enforces_limit_geometry() -> None:
+    valid_until = datetime.now(UTC) + timedelta(hours=4)
+    long_issues = validate_signal_contract(
+        SimpleNamespace(
+            direction="long",
+            entry_low=98.0,
+            entry_high=99.0,
+            stop=95.0,
+            take_profit_1=106.0,
+            take_profit_2=110.0,
+            take_profit_3=114.0,
+            valid_until=valid_until,
+        )
+    )
+    short_issues = validate_signal_contract(
+        SimpleNamespace(
+            direction="short",
+            entry_low=101.0,
+            entry_high=102.0,
+            stop=105.0,
+            take_profit_1=94.0,
+            take_profit_2=90.0,
+            take_profit_3=86.0,
+            valid_until=valid_until,
+        )
+    )
+    assert long_issues == []
+    assert short_issues == []

@@ -47,29 +47,52 @@ class KlineHandler:
         symbol = event.symbol
         LOG.info("kline_close received | symbol=%s trigger=%s", symbol, event.trigger)
 
-        async with self._bot._shortlist_lock:
-            shortlist = list(self._bot._shortlist)
-
-        tracking_events = await self._bot.tracker.review_open_signals_for_symbol(
-            symbol, dry_run=False
+        lock_timeout = float(
+            getattr(self._bot.settings.runtime, "shortlist_lock_timeout_seconds", 10.0) or 10.0
         )
-        if tracking_events:
-            await self._bot._deliver_tracking(tracking_events)
-
-        item = next((row for row in shortlist if row.symbol == symbol), None)
-        if item is None:
-            LOG.debug("kline_close skipped | symbol=%s not in shortlist", symbol)
+        cycle_timeout = float(
+            getattr(self._bot.settings.runtime, "cycle_timeout_seconds", 120.0) or 120.0
+        )
+        try:
+            async with asyncio.timeout(lock_timeout):
+                async with self._bot._shortlist_lock:
+                    shortlist = list(self._bot._shortlist)
+        except TimeoutError:
+            LOG.warning(
+                "kline_close skipped | symbol=%s reason=shortlist_lock_timeout timeout_s=%.1f",
+                symbol,
+                lock_timeout,
+            )
             return
 
-        await self._bot._get_cycle_runner().execute_symbol_cycle(
-            symbol=symbol,
-            item=item,
-            interval=event.interval,
-            trigger=event.trigger,
-            event_ts=datetime.now(UTC),
-            tracking_events=tracking_events,
-            shortlist_size=len(shortlist),
-        )
+        try:
+            async with asyncio.timeout(cycle_timeout):
+                tracking_events = await self._bot.tracker.review_open_signals_for_symbol(
+                    symbol, dry_run=False
+                )
+                if tracking_events:
+                    await self._bot._deliver_tracking(tracking_events)
+
+                item = next((row for row in shortlist if row.symbol == symbol), None)
+                if item is None:
+                    LOG.debug("kline_close skipped | symbol=%s not in shortlist", symbol)
+                    return
+
+                await self._bot._get_cycle_runner().execute_symbol_cycle(
+                    symbol=symbol,
+                    item=item,
+                    interval=event.interval,
+                    trigger=event.trigger,
+                    event_ts=datetime.now(UTC),
+                    tracking_events=tracking_events,
+                    shortlist_size=len(shortlist),
+                )
+        except TimeoutError:
+            LOG.warning(
+                "kline_close cycle timeout | symbol=%s timeout_s=%.1f",
+                symbol,
+                cycle_timeout,
+            )
 
     def _allowed_intervals(self) -> frozenset[str]:
         runtime_intervals = analysis_intervals(self._bot.settings)
@@ -150,6 +173,7 @@ class KlineHandler:
             return candidates, rejected, delivered
 
         if candidates:
+            await self._bot._delivery_orchestrator.preload_ranking_cooldowns({symbol: candidates})
             selected = self._bot._select_and_rank(
                 {symbol: candidates},
                 max_signals=self._bot.settings.runtime.max_signals_per_cycle,

@@ -13,7 +13,9 @@ import structlog
 
 from bot.runtime.errors import DEFENSIVE_EXC
 
+from .candle_patterns import add_candle_pattern_columns
 from .microstructure import add_microstructure_features
+from .prepare_columns import group_active
 from .shared import supertrend_series, wilder_mean
 from .structure import (
     hull_moving_average as _hull_moving_average_external,
@@ -313,9 +315,10 @@ def _atr(df: pl.DataFrame, period: int = 14) -> pl.Series:
     )
 
 
-def _adx(df: pl.DataFrame, period: int = 14) -> pl.Series:
-    """Average Directional Index."""
-    # Pure Polars ADX avoids the native TA-Lib dependency.
+def _adx_components(
+    df: pl.DataFrame, period: int = 14
+) -> tuple[pl.Series, pl.Series, pl.Series]:
+    """ADX with directional indicators (+DI / -DI)."""
     high = df["high"]
     low = df["low"]
 
@@ -335,12 +338,26 @@ def _adx(df: pl.DataFrame, period: int = 14) -> pl.Series:
 
     atr = _atr(df, period)
     atr_safe = _clean_non_finite(atr, fill=1e-9).replace(0.0, 1e-9)
-    plus_di = 100.0 * wilder_mean(plus_dm, period=period, name="plus_dm_smoothed") / atr_safe
-    minus_di = 100.0 * wilder_mean(minus_dm, period=period, name="minus_dm_smoothed") / atr_safe
+    plus_di = _materialize_series(
+        _clean_non_finite(
+            100.0 * wilder_mean(plus_dm, period=period, name="plus_dm_smoothed") / atr_safe,
+            fill=0.0,
+        ).clip(0.0, 100.0),
+        df=df,
+        name=f"plus_di{period}",
+    )
+    minus_di = _materialize_series(
+        _clean_non_finite(
+            100.0 * wilder_mean(minus_dm, period=period, name="minus_dm_smoothed") / atr_safe,
+            fill=0.0,
+        ).clip(0.0, 100.0),
+        df=df,
+        name=f"minus_di{period}",
+    )
 
     di_sum = (plus_di + minus_di).replace(0.0, None)
     dx = _clean_non_finite(100.0 * (plus_di - minus_di).abs() / di_sum, fill=0.0)
-    return _materialize_series(
+    adx = _materialize_series(
         _clean_non_finite(
             wilder_mean(dx, period=period, name=f"adx{period}", seed_offset=period - 1),
             fill=0.0,
@@ -348,6 +365,12 @@ def _adx(df: pl.DataFrame, period: int = 14) -> pl.Series:
         df=df,
         name=f"adx{period}",
     )
+    return adx, plus_di, minus_di
+
+
+def _adx(df: pl.DataFrame, period: int = 14) -> pl.Series:
+    adx, _plus_di, _minus_di = _adx_components(df, period=period)
+    return adx
 
 
 def _vwap_session_key(value: object) -> date | None:
@@ -661,24 +684,6 @@ def _safe_close_position(df: pl.DataFrame, window: int = 20) -> pl.Series:
     return value.clip(0.0, 1.0).rename("close_position")
 
 
-def _ichimoku_lines(
-    df: pl.DataFrame,
-) -> tuple[pl.Series, pl.Series, pl.Series, pl.Series]:
-    tenkan = (
-        (df["high"].rolling_max(window_size=9) + df["low"].rolling_min(window_size=9)) / 2.0
-    ).rename("tenkan")
-    kijun = (
-        (df["high"].rolling_max(window_size=26) + df["low"].rolling_min(window_size=26)) / 2.0
-    ).rename("kijun")
-    senkou_a = (((tenkan + kijun) / 2.0).shift(26)).rename("senkou_a")
-    senkou_b = (
-        ((df["high"].rolling_max(window_size=52) + df["low"].rolling_min(window_size=52)) / 2.0)
-        .shift(26)
-        .rename("senkou_b")
-    )
-    return tenkan, kijun, senkou_a, senkou_b
-
-
 # ---------------------------------------------------------------------------
 # Advanced indicators via pure Polars implementations.
 # ---------------------------------------------------------------------------
@@ -860,25 +865,21 @@ def _aroon(df: pl.DataFrame, period: int = 14) -> tuple[pl.Series, pl.Series, pl
 
 
 def _fisher_transform(df: pl.DataFrame, period: int = 10) -> tuple[pl.Series, pl.Series]:
-    high = [_finite_float(v) for v in df["high"]]
-    low = [_finite_float(v) for v in df["low"]]
-    close = [_finite_float(v) for v in df["close"]]
-    size = len(close)
-    values: list[float] = [0.0] * size
-    fisher: list[float] = [0.0] * size
+    hh = df["high"].rolling_max(window_size=period)
+    ll = df["low"].rolling_min(window_size=period)
+    width = (hh - ll).clip(lower_bound=1e-9)
+    price_norm = ((df["close"] - ll) / width).fill_nan(0.5)
+    raw_arr = (price_norm * 2.0 - 1.0).clip(-0.999, 0.999).to_numpy()
+    size = raw_arr.shape[0]
+    values = np.zeros(size, dtype=np.float64)
+    fisher = np.zeros(size, dtype=np.float64)
     for i in range(size):
-        start = max(0, i - period + 1)
-        hh = max(high[start : i + 1])
-        ll = min(low[start : i + 1])
-        width = max(hh - ll, 1e-9)
-        price_norm = (close[i] - ll) / width
-        raw = 2.0 * (price_norm - 0.5)
         prev_v = values[i - 1] if i > 0 else 0.0
-        v = 0.33 * raw + 0.67 * prev_v
-        v = max(min(v, 0.999), -0.999)
-        values[i] = v
+        smoothed = 0.33 * float(raw_arr[i]) + 0.67 * prev_v
+        smoothed = float(np.clip(smoothed, -0.999, 0.999))
+        values[i] = smoothed
         prev_f = fisher[i - 1] if i > 0 else 0.0
-        fisher[i] = 0.5 * np.log((1.0 + v) / (1.0 - v)) + 0.5 * prev_f
+        fisher[i] = 0.5 * np.log((1.0 + smoothed) / (1.0 - smoothed)) + 0.5 * prev_f
     fisher_series = pl.Series("fisher", fisher, dtype=pl.Float64)
     fisher_signal = fisher_series.ewm_mean(span=5, adjust=False).rename("fisher_signal")
     return fisher_series, fisher_signal
@@ -895,11 +896,9 @@ def _squeeze_momentum(
     squeeze_off = (
         ((bb_lower < kc_lower) & (bb_upper > kc_upper)).cast(pl.Float64).rename("squeeze_off")
     )
-    squeeze_no_values = [
-        max(0.0, min(1.0, 1.0 - max(_finite_float(on), _finite_float(off))))
-        for on, off in zip(squeeze_on, squeeze_off, strict=False)
-    ]
-    squeeze_no = pl.Series("squeeze_no", squeeze_no_values, dtype=pl.Float64)
+    squeeze_no = pl.DataFrame({"on": squeeze_on, "off": squeeze_off}).select(
+        (pl.lit(1.0) - pl.max_horizontal("on", "off")).clip(0.0, 1.0).alias("squeeze_no")
+    )["squeeze_no"]
     basis = (
         (df["high"].rolling_max(window_size=period) + df["low"].rolling_min(window_size=period))
         / 2.0
@@ -938,236 +937,271 @@ def _chandelier_exit(
     )
 
 
-def _add_advanced_indicators(df: pl.DataFrame) -> pl.DataFrame:
+def _add_advanced_indicators(
+    df: pl.DataFrame,
+    *,
+    active_groups: frozenset[str] | None = None,
+) -> pl.DataFrame:
     """Add advanced technical indicators using pure Polars implementations."""
     result = df
 
     # --- SuperTrend ---------------------------------------------------------
-    st, st_dir = supertrend_series(df, period=10, multiplier=3.0)
-    result = result.with_columns(
-        [
-            st.alias("supertrend"),
-            st_dir.alias("supertrend_dir"),
-        ]
-    )
+    if group_active(active_groups, "supertrend"):
+        st, st_dir = supertrend_series(df, period=10, multiplier=3.0)
+        result = result.with_columns(
+            [
+                st.alias("supertrend"),
+                st_dir.alias("supertrend_dir"),
+            ]
+        )
 
     # --- OBV ---------------------------------------------------------------
-    try:
-        if _USE_POLARS_TA_BACKEND and _HAS_POLARS_TA and hasattr(plta, "OBV"):
-            obv = _materialize_series(
-                plta.OBV(pl.col("close"), pl.col("volume")), df=df, name="obv"
+    if group_active(active_groups, "obv"):
+        try:
+            if _USE_POLARS_TA_BACKEND and _HAS_POLARS_TA and hasattr(plta, "OBV"):
+                obv = _materialize_series(
+                    plta.OBV(pl.col("close"), pl.col("volume")), df=df, name="obv"
+                )
+            else:
+                close_diff = df["close"].diff()
+                direction = _materialize_series(
+                    pl.when(close_diff > 0.0)
+                    .then(1.0)
+                    .when(close_diff < 0.0)
+                    .then(-1.0)
+                    .otherwise(0.0),
+                    df=df,
+                    name="obv_direction",
+                )
+                obv = (direction * df["volume"]).cum_sum().rename("obv")
+            obv_ema = obv.ewm_mean(span=20, adjust=False)
+            result = result.with_columns(
+                [
+                    obv.alias("obv"),
+                    obv_ema.alias("obv_ema20"),
+                    (obv > obv_ema).cast(pl.Float64).alias("obv_above_ema"),
+                ]
             )
-        else:
-            close_diff = df["close"].diff()
-            direction = _materialize_series(
-                pl.when(close_diff > 0.0)
-                .then(1.0)
-                .when(close_diff < 0.0)
-                .then(-1.0)
-                .otherwise(0.0),
-                df=df,
-                name="obv_direction",
+        except DEFENSIVE_EXC as exc:
+            _log_indicator_fallback("obv", exc)
+            result = result.with_columns(
+                [
+                    pl.lit(0.0).alias("obv"),
+                    pl.lit(0.0).alias("obv_ema20"),
+                    pl.lit(0.0).alias("obv_above_ema"),
+                ]
             )
-            obv = (direction * df["volume"]).cum_sum().rename("obv")
-        obv_ema = obv.ewm_mean(span=20, adjust=False)
-        result = result.with_columns(
-            [
-                obv.alias("obv"),
-                obv_ema.alias("obv_ema20"),
-                (obv > obv_ema).cast(pl.Float64).alias("obv_above_ema"),
-            ]
-        )
-    except DEFENSIVE_EXC as exc:
-        _log_indicator_fallback("obv", exc)
-        result = result.with_columns(
-            [
-                pl.lit(0.0).alias("obv"),
-                pl.lit(0.0).alias("obv_ema20"),
-                pl.lit(0.0).alias("obv_above_ema"),
-            ]
-        )
 
     # --- Bollinger Bands - pure Polars implementation ------------------------
-    upper, middle, lower = _bollinger_bands(df["close"], period=20, nbdev=2.0)
-    bb_pct_b = (df["close"] - lower) / (upper - lower)
-    middle_safe = _clean_non_finite(middle.abs(), fill=1e-10).clip(lower_bound=1e-10)
-    bb_width = (upper - lower) / middle_safe * 100.0
-    result = result.with_columns(
-        [
-            _clean_non_finite(bb_pct_b, fill=0.5).alias("bb_pct_b"),
-            _clean_non_finite(bb_width, fill=0.0).alias("bb_width"),
-        ]
-    )
+    if group_active(active_groups, "bb"):
+        upper, middle, lower = _bollinger_bands(df["close"], period=20, nbdev=2.0)
+        bb_pct_b = (df["close"] - lower) / (upper - lower)
+        middle_safe = _clean_non_finite(middle.abs(), fill=1e-10).clip(lower_bound=1e-10)
+        bb_width = (upper - lower) / middle_safe * 100.0
+        bb_width_clean = _clean_non_finite(bb_width, fill=0.0)
+        result = result.with_columns(
+            [
+                _clean_non_finite(bb_pct_b, fill=0.5).alias("bb_pct_b"),
+                bb_width_clean.alias("bb_width"),
+                (
+                    bb_width_clean.rolling_rank(window_size=50, method="average") / 50.0
+                ).alias("bb_width_pctile50"),
+            ]
+        )
 
     # --- Keltner Channels - pure Polars implementation -----------------------
-    kc_upper, _kc_middle, kc_lower = _keltner_channels(df, period=20, multiplier=2.0)
-    close_safe = _clean_non_finite(df["close"].abs(), fill=1e-10).clip(lower_bound=1e-10)
-    kc_width = (kc_upper - kc_lower) / close_safe
-    result = result.with_columns(
-        [
-            kc_upper.alias("kc_upper"),
-            kc_lower.alias("kc_lower"),
-            _clean_non_finite(kc_width, fill=0.04).alias("kc_width"),
-        ]
-    )
+    if group_active(active_groups, "keltner"):
+        kc_upper, _kc_middle, kc_lower = _keltner_channels(df, period=20, multiplier=2.0)
+        close_safe = _clean_non_finite(df["close"].abs(), fill=1e-10).clip(lower_bound=1e-10)
+        kc_width = (kc_upper - kc_lower) / close_safe
+        result = result.with_columns(
+            [
+                kc_upper.alias("kc_upper"),
+                kc_lower.alias("kc_lower"),
+                _clean_non_finite(kc_width, fill=0.04).alias("kc_width"),
+            ]
+        )
 
     # --- HMA (Hull Moving Average) --------------------------------------------
-    close = df["close"]
-    hma9 = _hull_moving_average(close, 9, name="hma9")
-    hma21 = _hull_moving_average(close, 21, name="hma21")
-    result = result.with_columns(
-        [
-            hma9.alias("hma9"),
-            hma21.alias("hma21"),
-        ]
-    )
+    if group_active(active_groups, "hma"):
+        close = df["close"]
+        hma9 = _hull_moving_average(close, 9, name="hma9")
+        hma21 = _hull_moving_average(close, 21, name="hma21")
+        result = result.with_columns(
+            [
+                hma9.alias("hma9"),
+                hma21.alias("hma21"),
+            ]
+        )
 
     # --- PSAR (Parabolic SAR) -------------------------------------------------
-    psar_long, psar_short, psar_reversal = _parabolic_sar(df, step=0.02, max_step=0.2)
-    result = result.with_columns(
-        [
-            psar_long.alias("psar_long"),
-            psar_short.alias("psar_short"),
-            psar_reversal.alias("psar_reversal"),
-        ]
-    )
+    if group_active(active_groups, "psar"):
+        psar_long, psar_short, psar_reversal = _parabolic_sar(df, step=0.02, max_step=0.2)
+        result = result.with_columns(
+            [
+                psar_long.alias("psar_long"),
+                psar_short.alias("psar_short"),
+                psar_reversal.alias("psar_reversal"),
+            ]
+        )
 
     # --- Aroon ---------------------------------------------------------------
-    aroon_up, aroon_down, aroon_osc = _aroon(df, period=14)
-    result = result.with_columns(
-        [
-            aroon_up.alias("aroon_up14"),
-            aroon_down.alias("aroon_down14"),
-            aroon_osc.alias("aroon_osc14"),
-        ]
-    )
+    if group_active(active_groups, "aroon"):
+        aroon_up, aroon_down, aroon_osc = _aroon(df, period=14)
+        result = result.with_columns(
+            [
+                aroon_up.alias("aroon_up14"),
+                aroon_down.alias("aroon_down14"),
+                aroon_osc.alias("aroon_osc14"),
+            ]
+        )
 
     # --- Stochastic ---------------------------------------------------------
-    stoch_k, stoch_d = _stochastic(df, period=14, smooth_k=3, smooth_d=3)
-    result = result.with_columns(
-        [
-            stoch_k.alias("stoch_k14"),
-            stoch_d.alias("stoch_d14"),
-            (stoch_k - stoch_d).fill_nan(0.0).alias("stoch_h14"),
-        ]
-    )
+    if group_active(active_groups, "stoch"):
+        stoch_k, stoch_d = _stochastic(df, period=14, smooth_k=3, smooth_d=3)
+        result = result.with_columns(
+            [
+                stoch_k.alias("stoch_k14"),
+                stoch_d.alias("stoch_d14"),
+                (stoch_k - stoch_d).fill_nan(0.0).alias("stoch_h14"),
+            ]
+        )
 
     # --- CCI, Williams %R, MFI, CMF, Ultimate Oscillator --------------------
-    rolling_high = df["high"].rolling_max(window_size=14)
-    rolling_low = df["low"].rolling_min(window_size=14)
-    willr = ((rolling_high - df["close"]) / (rolling_high - rolling_low)) * -100.0
-    result = result.with_columns(
-        [
-            _cci(df, 20).fill_nan(0.0).alias("cci20"),
-            _clean_non_finite(willr, fill=-50.0).alias("willr14"),
-            _mfi(df, 14).fill_nan(50.0).alias("mfi14"),
-            _cmf(df, 20).fill_nan(0.0).alias("cmf20"),
-            _ultimate_oscillator(df, 7, 14, 28).fill_nan(50.0).alias("uo"),
-        ]
-    )
+    if group_active(active_groups, "oscillators"):
+        rolling_high = df["high"].rolling_max(window_size=14)
+        rolling_low = df["low"].rolling_min(window_size=14)
+        willr = ((rolling_high - df["close"]) / (rolling_high - rolling_low)) * -100.0
+        result = result.with_columns(
+            [
+                _cci(df, 20).fill_nan(0.0).alias("cci20"),
+                _clean_non_finite(willr, fill=-50.0).alias("willr14"),
+                _mfi(df, 14).fill_nan(50.0).alias("mfi14"),
+                _cmf(df, 20).fill_nan(0.0).alias("cmf20"),
+                _ultimate_oscillator(df, 7, 14, 28).fill_nan(50.0).alias("uo"),
+            ]
+        )
 
     # --- Fisher Transform -----------------------------------------------------
-    fisher, fisher_signal = _fisher_transform(df, period=10)
-    result = result.with_columns(
-        [
-            fisher.alias("fisher"),
-            fisher_signal.alias("fisher_signal"),
-        ]
-    )
+    if group_active(active_groups, "fisher"):
+        fisher, fisher_signal = _fisher_transform(df, period=10)
+        result = result.with_columns(
+            [
+                fisher.alias("fisher"),
+                fisher_signal.alias("fisher_signal"),
+            ]
+        )
 
     # --- Squeeze Momentum ----------------------------------------------------
-    squeeze_hist, squeeze_on, squeeze_off, squeeze_no = _squeeze_momentum(df, period=20)
-    result = result.with_columns(
-        [
-            squeeze_hist.alias("squeeze_hist"),
-            squeeze_on.alias("squeeze_on"),
-            squeeze_off.alias("squeeze_off"),
-            squeeze_no.alias("squeeze_no"),
-        ]
-    )
+    if group_active(active_groups, "squeeze"):
+        squeeze_hist, squeeze_on, squeeze_off, squeeze_no = _squeeze_momentum(df, period=20)
+        result = result.with_columns(
+            [
+                squeeze_hist.alias("squeeze_hist"),
+                squeeze_on.alias("squeeze_on"),
+                squeeze_off.alias("squeeze_off"),
+                squeeze_no.alias("squeeze_no"),
+            ]
+        )
 
     # --- Chandelier Exit -----------------------------------------------------
-    chandelier_long, chandelier_short, chandelier_dir = _chandelier_exit(
-        df, period=22, atr_mult=3.0
-    )
-    result = result.with_columns(
-        [
-            chandelier_long.alias("chandelier_long"),
-            chandelier_short.alias("chandelier_short"),
-            chandelier_dir.alias("chandelier_dir"),
-        ]
-    )
+    if group_active(active_groups, "chandelier"):
+        chandelier_long, chandelier_short, chandelier_dir = _chandelier_exit(
+            df, period=22, atr_mult=3.0
+        )
+        result = result.with_columns(
+            [
+                chandelier_long.alias("chandelier_long"),
+                chandelier_short.alias("chandelier_short"),
+                chandelier_dir.alias("chandelier_dir"),
+            ]
+        )
 
-    result = result.with_columns(
-        [
-            _volume_profile(result, bins=12),
-        ]
-    )
+    if group_active(active_groups, "volume_profile"):
+        poc, vah, val = _volume_profile_levels(result, bins=12)
+        result = result.with_columns(
+            [
+                pl.lit(poc).cast(pl.Float64).alias("volume_profile"),
+                pl.lit(vah).cast(pl.Float64).alias("volume_profile_vah"),
+                pl.lit(val).cast(pl.Float64).alias("volume_profile_val"),
+            ]
+        )
 
     # --- Z-Score and Slope -------------------------------------------------
-    zscore30 = (
-        (df["close"] - df["close"].rolling_mean(window_size=30))
-        / df["close"].rolling_std(window_size=30)
-    ).fill_nan(0.0)
-    result = result.with_columns(
-        [
-            _clean_non_finite(zscore30, fill=0.0).alias("zscore30"),
-            _roc(df, 5).fill_nan(0.0).alias("slope5"),
-        ]
-    )
+    if group_active(active_groups, "zscore"):
+        zscore30 = (
+            (df["close"] - df["close"].rolling_mean(window_size=30))
+            / df["close"].rolling_std(window_size=30)
+        ).fill_nan(0.0)
+        result = result.with_columns(
+            [
+                _clean_non_finite(zscore30, fill=0.0).alias("zscore30"),
+                _roc(df, 5).fill_nan(0.0).alias("slope5"),
+            ]
+        )
 
-    # --- Ichimoku Cloud - UNUSED by strategies -----------------------------
-    tenkan, kijun, senkou_a, senkou_b = _ichimoku_lines(result)
-    return result.with_columns(
-        [
-            tenkan.alias("ichi_tenkan"),
-            kijun.alias("ichi_kijun"),
-            senkou_a.alias("ichi_senkou_a"),
-            senkou_b.alias("ichi_senkou_b"),
-        ]
-    )
+    return result
 
 
-def _volume_profile(df: pl.DataFrame, bins: int = 12) -> pl.Expr:
-    """Return a scalar point-of-control approximation for the frame."""
+def _volume_profile_levels(
+    df: pl.DataFrame, bins: int = 12, *, value_area_pct: float = 0.70
+) -> tuple[float | None, float | None, float | None]:
+    """Scalar POC/VAH/VAL for the current frame window."""
     if df.is_empty() or not {"high", "low", "volume"}.issubset(df.columns):
-        return pl.lit(None).cast(pl.Float64).alias("volume_profile")
-
+        return None, None, None
     prices = ((df["high"] + df["low"]) / 2.0).cast(pl.Float64, strict=False)
     volumes = df["volume"].cast(pl.Float64, strict=False)
-
-    # Filter valid prices and volumes
     valid_mask = prices.is_not_null() & prices.is_finite() & volumes.is_not_null() & (volumes > 0.0)
     v_prices = prices.filter(valid_mask)
     v_volumes = volumes.filter(valid_mask)
-
     if v_prices.is_empty():
-        return pl.lit(None).cast(pl.Float64).alias("volume_profile")
-
+        return None, None, None
     price_min = _as_optional_float(v_prices.min())
     price_max = _as_optional_float(v_prices.max())
-
     if price_min is None or price_max is None or price_max <= price_min:
-        poc = price_max if price_max is not None else price_min
-    else:
-        bucket_count = max(1, int(bins))
-        bucket_size = (price_max - price_min) / bucket_count
-
-        # Vectorized bucketing
-        buckets = (
-            ((v_prices - price_min) / bucket_size).floor().cast(pl.Int32).clip(0, bucket_count - 1)
-        )
-
-        vol_by_bucket = (
-            pl.DataFrame({"b": buckets, "v": v_volumes}).group_by("b").agg(pl.col("v").sum())
-        )
-
-        if vol_by_bucket.is_empty():
-            poc = price_min
+        return price_max, price_max, price_min
+    bucket_count = max(1, int(bins))
+    bucket_size = (price_max - price_min) / bucket_count
+    bucket_ids = (
+        ((v_prices - price_min) / bucket_size).floor().cast(pl.Int32).clip(0, bucket_count - 1)
+    )
+    vol_by_bucket = (
+        pl.DataFrame({"b": bucket_ids, "v": v_volumes}).group_by("b").agg(pl.col("v").sum())
+    )
+    if vol_by_bucket.is_empty():
+        return price_min, price_max, price_min
+    rows = sorted(vol_by_bucket.iter_rows(named=True), key=lambda row: int(row["b"]))
+    total_volume = sum(float(row["v"] or 0.0) for row in rows)
+    if total_volume <= 0.0:
+        return price_min, price_max, price_min
+    poc_row = max(rows, key=lambda row: float(row["v"] or 0.0))
+    poc_bucket = int(poc_row["b"])
+    poc = float(price_min + (poc_bucket + 0.5) * bucket_size)
+    target_volume = total_volume * max(0.5, min(value_area_pct, 0.95))
+    accumulated = float(poc_row["v"] or 0.0)
+    included = {poc_bucket}
+    left = poc_bucket - 1
+    right = poc_bucket + 1
+    while accumulated < target_volume and (left >= 0 or right < bucket_count):
+        left_vol = next((float(row["v"] or 0.0) for row in rows if int(row["b"]) == left), 0.0)
+        right_vol = next((float(row["v"] or 0.0) for row in rows if int(row["b"]) == right), 0.0)
+        if right_vol >= left_vol and right < bucket_count:
+            accumulated += right_vol
+            included.add(right)
+            right += 1
+        elif left >= 0:
+            accumulated += left_vol
+            included.add(left)
+            left -= 1
         else:
-            poc_bucket = int(vol_by_bucket.sort("v", descending=True).row(0)[0])
-            poc = price_min + (poc_bucket + 0.5) * bucket_size
+            break
+    val = float(price_min + min(included) * bucket_size)
+    vah = float(price_min + (max(included) + 1) * bucket_size)
+    return poc, vah, val
 
+
+def _volume_profile(df: pl.DataFrame, bins: int = 12) -> pl.Expr:
+    poc, _vah, _val = _volume_profile_levels(df, bins=bins)
     return pl.lit(0.0 if poc is None else poc).cast(pl.Float64).alias("volume_profile")
 
 
@@ -1239,14 +1273,22 @@ def _add_polars_ols_features(df: pl.DataFrame) -> pl.DataFrame:
 # ---------------------------------------------------------------------------
 
 
-def _prepare_frame(df: pl.DataFrame) -> pl.DataFrame:
+def _prepare_frame(
+    df: pl.DataFrame,
+    *,
+    active_groups: frozenset[str] | None = None,
+) -> pl.DataFrame:
     """Compute all technical indicators for a single OHLCV DataFrame.
 
     Returns a new DataFrame with NaN-seeded rows dropped.
     All backward-compatible column names are preserved.
+
+    When ``active_groups`` is set, optional indicator blocks may be skipped
+    (see ``bot.features.prepare_columns``). ``None`` computes every group.
     """
     df = _coerce_temporal_columns(df)
 
+    adx14, plus_di14, minus_di14 = _adx_components(df, 14)
     # Core indicators
     work = df.with_columns(
         [
@@ -1254,7 +1296,9 @@ def _prepare_frame(df: pl.DataFrame) -> pl.DataFrame:
             _ema(df, 50).alias("ema50"),
             _ema(df, 200).alias("ema200"),
             _rsi(df, 14).alias("rsi14"),
-            _adx(df, 14).alias("adx14"),
+            adx14.alias("adx14"),
+            plus_di14.alias("plus_di14"),
+            minus_di14.alias("minus_di14"),
             _atr(df, 14).alias("atr14"),
         ]
     )
@@ -1347,6 +1391,9 @@ def _prepare_frame(df: pl.DataFrame) -> pl.DataFrame:
             (((pl.col("close") - pl.col("vwap")) / pl.col("vwap")) * 100.0)
             .fill_nan(0.0)
             .alias("vwap_deviation_pct"),
+            ((pl.col("close") - pl.col("vwap")) / pl.col("atr14"))
+            .fill_nan(0.0)
+            .alias("vwap_deviation_atr14"),
         ]
     )
 
@@ -1382,25 +1429,31 @@ def _prepare_frame(df: pl.DataFrame) -> pl.DataFrame:
     )
 
     # Advanced indicators
-    work = _add_advanced_indicators(work)
-    work = add_microstructure_features(work)
-    work = _add_polars_ols_features(work)
-    work = work.with_columns(
-        [
-            _roc(work, 10).fill_nan(0.0).alias("roc10"),
-            _realized_volatility(work, 20).fill_nan(0.0).alias("realized_vol_20"),
-            (
+    work = _add_advanced_indicators(work, active_groups=active_groups)
+    if group_active(active_groups, "microstructure"):
+        work = add_microstructure_features(work)
+    if group_active(active_groups, "ols"):
+        work = _add_polars_ols_features(work)
+    if group_active(active_groups, "tail_metrics"):
+        work = work.with_columns(
+            [
+                _roc(work, 10).fill_nan(0.0).alias("roc10"),
+                _realized_volatility(work, 20).fill_nan(0.0).alias("realized_vol_20"),
                 (
-                    pl.col("vwap_deviation_pct")
-                    - pl.col("vwap_deviation_pct").rolling_mean(window_size=20)
+                    (
+                        pl.col("vwap_deviation_pct")
+                        - pl.col("vwap_deviation_pct").rolling_mean(window_size=20)
+                    )
+                    / pl.col("vwap_deviation_pct").rolling_std(window_size=20, ddof=1)
                 )
-                / pl.col("vwap_deviation_pct").rolling_std(window_size=20, ddof=1)
-            )
-            .fill_nan(0.0)
-            .alias("vwap_deviation_z20"),
-        ]
-    )
-    work = _add_session_features(work)
+                .fill_nan(0.0)
+                .alias("vwap_deviation_z20"),
+            ]
+        )
+    if group_active(active_groups, "session"):
+        work = _add_session_features(work)
+    if group_active(active_groups, "candles"):
+        work = add_candle_pattern_columns(work)
 
     # Drop rows with insufficient data
     # Filter where ema200 or donchian_low20 is null

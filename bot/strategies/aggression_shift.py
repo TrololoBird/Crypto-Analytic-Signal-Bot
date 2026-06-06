@@ -38,7 +38,7 @@ def detect_aggression_shift(frame: pl.DataFrame, *, timeframe: str = "15m") -> S
         return SpecHit(
             strategy="aggression_shift",
             direction="short",
-            entry=row["close"],
+            entry=row["high"],
             stop_basis=row["high"],
             atr=atr,
             timeframe=timeframe,
@@ -51,7 +51,7 @@ def detect_aggression_shift(frame: pl.DataFrame, *, timeframe: str = "15m") -> S
         return SpecHit(
             strategy="aggression_shift",
             direction="long",
-            entry=row["close"],
+            entry=row["low"],
             stop_basis=row["low"],
             atr=atr,
             timeframe=timeframe,
