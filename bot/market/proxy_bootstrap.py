@@ -215,6 +215,9 @@ async def ensure_network_ready(
             LOG.warning(
                 "direct binance REST ok but configured proxy pool failed probe — using direct egress"
             )
+            # Return new settings with proxy cleared so the caller can switch the live REST client.
+            net = settings.network.model_copy(update={"proxy_url": None, "proxy_urls": []})
+            return settings.model_copy(update={"network": net})
         return settings
 
     if configured.rest_ok:

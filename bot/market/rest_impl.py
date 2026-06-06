@@ -73,6 +73,19 @@ from bot.market.network_proxy import (
     resolve_proxy_url,
 )
 from bot.market.proxy_pool import ProxyPool, is_proxy_transport_error
+
+try:
+    from aiohttp_socks import ProxyConnectionError as _SocksProxyConnectionError
+    from aiohttp_socks import ProxyError as _SocksProxyError
+    from aiohttp_socks import ProxyTimeoutError as _SocksProxyTimeoutError
+
+    _SOCKS_PROXY_ERRORS: tuple[type[BaseException], ...] = (
+        _SocksProxyConnectionError,
+        _SocksProxyError,
+        _SocksProxyTimeoutError,
+    )
+except ImportError:
+    _SOCKS_PROXY_ERRORS = ()
 from bot.market.rate_limit import _SlidingWindowRateLimiter, _WeightBudgetManager
 
 # --- validators ---
@@ -480,7 +493,7 @@ class RestHttpMixin(RestCircuitMixin):
                 )
                 _disc_task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
             raise
-        except aiohttp.ClientError as exc:
+        except (*_SOCKS_PROXY_ERRORS, aiohttp.ClientError) as exc:
             if is_proxy_transport_error(exc):
                 await self._try_failover_proxy(str(exc))
             self._record_circuit_failure(operation)

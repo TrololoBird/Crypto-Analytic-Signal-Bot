@@ -494,6 +494,12 @@ class SignalBot:
         if updated is not self.settings:
             self.settings = updated
             LOG.info("network settings refreshed after bootstrap probe")
+            # If proxy was cleared (direct egress fallback), apply to the live REST client now.
+            if not updated.network.effective_proxy_urls():
+                _inner = getattr(self.client, "_binance_client", None)
+                if _inner is not None and hasattr(_inner, "_apply_active_proxy"):
+                    await _inner._apply_active_proxy(None)
+                    LOG.info("REST client switched to direct egress after proxy probe failure")
 
         self._preflight_storage_check()
         await self._preflight_delivery_check()
