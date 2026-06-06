@@ -911,8 +911,11 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             if env_only:
                 urls = [env_only]
         self._proxy_pool = ProxyPool.from_urls(urls, cooldown_seconds=net.failover_cooldown_seconds)
-        # proxy_url="" → direct connection (pool items are failover-only, not the default route)
+        # proxy_url="" → direct preferred, but if pool has entries use first as active route
+        # so _try_failover_proxy has a non-empty current to rotate from.
         self._proxy_url = resolve_proxy_url(config_url=net.proxy_url, trust_env=net.trust_env)
+        if not self._proxy_url and self._proxy_pool is not None:
+            self._proxy_url = self._proxy_pool.current()
         if self._proxy_url:
             apply_proxy_env(self._proxy_url)
         if self._proxy_pool is not None:
