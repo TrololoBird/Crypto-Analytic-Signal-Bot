@@ -54,14 +54,14 @@ _PROXY_SOURCES: list[str] = [
     "https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/socks5.txt",
 ]
 
-# Binance fstream ping — the actual endpoint the bot uses (not a generic judge)
-_BINANCE_PING_URL = "https://fstream.binance.com/fapi/v1/ping"
+# Binance futures REST ping — lightweight, returns {} on success
+_BINANCE_PING_URL = "https://fapi.binance.com/fapi/v1/ping"
 _BINANCE_WS_HANDSHAKE_URL = "wss://fstream.binance.com/ws"
 
-_VALIDATE_CONCURRENCY = 50       # simultaneous proxy checks
-_VALIDATE_TIMEOUT_S = 5.0        # per-proxy validation timeout
+_VALIDATE_CONCURRENCY = 60       # simultaneous proxy checks
+_VALIDATE_TIMEOUT_S = 10.0       # per-proxy validation timeout (SOCKS5+SSL needs ~6-8s)
 _FETCH_TIMEOUT_S = 15.0          # per-source HTTP fetch timeout
-_MAX_CANDIDATES = 600            # cap before validation (memory guard)
+_MAX_CANDIDATES = 1500           # cap before validation (memory guard)
 _MIN_WORKING_PROXIES = 3         # minimum to accept discovery result
 _MAX_POOL_SIZE = 15              # proxies kept in the live pool
 _REST_SYMBOL_THRESHOLD = 100
