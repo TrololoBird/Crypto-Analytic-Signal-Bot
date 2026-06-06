@@ -928,6 +928,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
                 len(self._proxy_pool.urls),
                 self._proxy_failover_enabled,
             )
+        self._last_failover_mono: float = 0.0
         self._rest_timeout = rest_timeout_seconds
         self._futures_data_limit_per_5m = max(
             30, min(int(futures_data_request_limit_per_5m), _FUTURES_DATA_IP_LIMIT_OFFICIAL_MAX)
@@ -1046,6 +1047,8 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         finally:
             self._proxy_discovery_in_progress = False
 
+    _MIN_FAILOVER_INTERVAL_S: float = 30.0
+
     async def _try_failover_proxy(self, reason: str) -> bool:
         if not self._proxy_failover_enabled:
             return False
@@ -1053,15 +1056,18 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         if pool is None:
             return False
         current = getattr(self, "_proxy_url", None)
-        # Direct mode (proxy_url empty): do not auto-escalate to pool on transport noise.
-        # Pool proxies are applied on explicit IP-ban recovery or when proxy_url is set.
         if not current:
             return False
         if not pool.has_alternatives():
             return False
+        # Rate-limit: at most one rotation per 30s to prevent cascade burn on concurrent failures.
+        now = time.monotonic()
+        if now - self._last_failover_mono < self._MIN_FAILOVER_INTERVAL_S:
+            return False
         nxt = pool.rotate_after_failure(current, reason)
         if not nxt:
             return False
+        self._last_failover_mono = now
         await self._apply_active_proxy(nxt)
         return True
 
