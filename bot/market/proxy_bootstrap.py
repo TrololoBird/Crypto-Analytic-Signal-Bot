@@ -603,15 +603,22 @@ async def ensure_network_ready(
         explicit_proxy = str(settings.network.proxy_url or "").strip()
         if not explicit_proxy:
             # No explicitly configured proxy_url — auto-discovered pool should not override
-            # direct access.  Clear the pool so WS does not route through unstable free proxies.
-            if urls:
+            # direct access.  Clear the pool AND disable trust_env so the main aiohttp session
+            # does not pick up broken system proxies (Shadowsocks/Clash/V2rayU on macOS).
+            # The direct probe already confirmed access works with trust_env=False.
+            if urls or settings.network.trust_env:
                 LOG.info(
-                    "direct Binance ok, no explicit proxy_url — clearing auto-discovered pool "
-                    "(%d entries) to use direct egress for both REST and WS",
+                    "direct Binance ok, no explicit proxy_url — using pure direct egress "
+                    "(trust_env=False, pool cleared, %d auto-discovered entries dropped)",
                     len(urls),
                 )
             net = settings.network.model_copy(
-                update={"proxy_url": None, "proxy_urls": [], "failover_enabled": False}
+                update={
+                    "proxy_url": None,
+                    "proxy_urls": [],
+                    "failover_enabled": False,
+                    "trust_env": False,
+                }
             )
             return settings.model_copy(update={"network": net})
         # Explicit proxy_url configured — honour it unless it fails
