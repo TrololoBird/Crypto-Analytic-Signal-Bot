@@ -20,6 +20,13 @@ if TYPE_CHECKING:
 
     from .config import BotSettings
 
+SIGNAL_CONTRACT_VIOLATION_PREFIX = "Signal contract violations"
+
+
+def is_signal_contract_violation(exc: BaseException) -> bool:
+    """True when Signal.__post_init__ rejected an invalid trade plan."""
+    return isinstance(exc, ValueError) and str(exc).startswith(SIGNAL_CONTRACT_VIOLATION_PREFIX)
+
 
 @dataclass(frozen=True, slots=True)
 class SymbolMeta:
@@ -360,7 +367,7 @@ class Signal:
         issues = validate_signal_contract(self)
         if issues:
             detail = [f"{issue.field}:{issue.reason}" for issue in issues]
-            msg = f"Signal contract violations: {detail}"
+            msg = f"{SIGNAL_CONTRACT_VIOLATION_PREFIX}: {detail}"
             raise ValueError(msg)
 
     @property

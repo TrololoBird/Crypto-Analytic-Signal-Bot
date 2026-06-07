@@ -913,7 +913,12 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         # proxy_url="" → direct preferred, but if pool has entries use first as active route
         # so _try_failover_proxy has a non-empty current to rotate from.
         self._proxy_url = resolve_proxy_url(config_url=net.proxy_url, trust_env=net.trust_env)
-        if not self._proxy_url and self._proxy_pool is not None:
+        explicit_proxy = bool(str(net.proxy_url or "").strip())
+        if (
+            not self._proxy_url
+            and self._proxy_pool is not None
+            and (explicit_proxy or net.failover_enabled)
+        ):
             self._proxy_url = self._proxy_pool.current()
         # Pool with multiple entries implies failover capability even if flag not set in config.
         if (
@@ -1024,14 +1029,17 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
                 LOG.warning("auto proxy discovery: config not found | path=%s", cfg)
                 return
             from bot.domain.config import load_settings as _ls  # noqa: PLC0415
-            from bot.market.proxy_bootstrap import _run_discovery  # noqa: PLC0415
+            from bot.market.proxy_bootstrap import (  # noqa: PLC0415
+                _write_proxies_to_config,
+                auto_discover_proxies,
+            )
 
-            await asyncio.to_thread(_run_discovery, cfg)
-            new_settings = _ls(cfg)
-            new_urls = new_settings.network.effective_proxy_urls()
-            if not new_urls:
+            urls = await auto_discover_proxies()
+            if not urls:
                 LOG.warning("auto proxy discovery: no working proxy found")
                 return
+            await asyncio.to_thread(_write_proxies_to_config, cfg, urls)
+            new_settings = _ls(cfg)
             new_pool = ProxyPool.from_urls(
                 new_urls, cooldown_seconds=new_settings.network.failover_cooldown_seconds
             )

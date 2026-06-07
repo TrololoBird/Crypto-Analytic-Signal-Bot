@@ -197,6 +197,8 @@ class MessageBuffer:
                 return 90
             if event_type == "bookTicker":
                 return 85
+            if event_type == "depthUpdate":
+                return 85
             if event_type == "markPriceUpdate":
                 return 95
             if event_type == "aggTrade":
@@ -362,7 +364,13 @@ def base_streams_for_symbols(manager: Any, symbols: list[str]) -> list[str]:
 def public_streams_for_symbols(manager: Any, symbols: list[str]) -> list[str]:
     if not manager._cfg.subscribe_book_ticker:
         return []
-    streams = [f"{symbol}@bookTicker" for symbol in _normalized_symbols(symbols)]
+    book_mode = str(
+        getattr(manager._cfg, "book_ticker_stream_mode", "per_symbol") or "per_symbol"
+    ).lower()
+    if book_mode == "all":
+        streams = ["!bookTicker"]
+    else:
+        streams = [f"{symbol}@bookTicker" for symbol in _normalized_symbols(symbols)]
     return [
         stream
         for stream in streams
@@ -392,7 +400,7 @@ def stream_endpoint_class(stream: str) -> str:
     ):
         msg = f"private/auth websocket streams are not allowed: {stream}"
         raise ValueError(msg)
-    if "@bookticker" in normalized or "@depth" in normalized:
+    if "@bookticker" in normalized or normalized == "!bookticker" or "@depth" in normalized:
         return "public"
     allowed_market = (
         "@kline_",
@@ -2013,6 +2021,31 @@ class FuturesWSManager:
         elif event_type == "forceOrder":
             self._handle_force_order(data)
 
+    @staticmethod
+    def _event_symbol_from_message(stream: str, data: JsonDict) -> str:
+        symbol = str(data.get("s") or "").strip().upper()
+        if symbol:
+            return symbol
+        stream_symbol = str(stream or "").split("@", 1)[0].strip().upper()
+        if stream_symbol.startswith("!"):
+            return ""
+        return stream_symbol
+
+    async def _handle_high_volume_market_event(self, event_type: str, data: JsonDict, stream: str) -> None:
+        """Process bookTicker/depthUpdate/aggTrade inline — skip buffer to avoid compaction drops."""
+        symbol = self._event_symbol_from_message(stream, data)
+        if self._symbols and symbol and symbol not in self._symbols:
+            return
+        if self._should_drop_stale_event(event_type, data.get("E")):
+            self._stale_event_drop_count += 1
+            return
+        if event_type == "bookTicker":
+            await self._handle_book_ticker(symbol, data)
+        elif event_type == "depthUpdate":
+            await self._handle_depth_update(symbol, data)
+        elif event_type == "aggTrade":
+            await self._handle_agg_trade(symbol, data)
+
     async def _handle_message(self, msg: JsonDict, endpoint: str) -> None:
         self._last_message_ts = time.monotonic()
         self._last_message_ts_by_endpoint[endpoint] = self._last_message_ts
@@ -2023,7 +2056,17 @@ class FuturesWSManager:
         stream = str(msg.get("stream") or "")
         if isinstance(data, dict) and data.get("e") == "kline":
             kline = data.get("k", {})
-            if isinstance(kline, dict) and (not kline.get("x")):
+            if isinstance(kline, dict):
+                if not kline.get("x"):
+                    return
+                symbol = self._event_symbol_from_message(stream, data)
+                if symbol:
+                    await self._handle_kline(symbol, data)
+                return
+        if isinstance(data, dict):
+            event_type = str(data.get("e") or "")
+            if event_type in ("bookTicker", "depthUpdate", "aggTrade"):
+                await self._handle_high_volume_market_event(event_type, data, stream)
                 return
         if _is_global_market_stream(stream):
             await self._process_message_internal(msg)
@@ -2045,7 +2088,6 @@ class FuturesWSManager:
                 or str(stream).split("@", 1)[0]
                 or "unknown"
             ).upper()
-        await self._rate_limiter.wait_for_slot()
         if stream not in self._stream_latency_ms:
             self._stream_latency_ms[stream] = collections.deque(maxlen=10)
         if isinstance(data, list):

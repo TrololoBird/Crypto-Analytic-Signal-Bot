@@ -607,6 +607,14 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
                 hard_leg_keys=WEIGHTED_HARD_LEG_KEYS,
             )
             details.update(weighted_details)
+            if boolean_pass and profile in REVERSAL_PROFILES:
+                thesis_ok = bool(confirmations.get("trend")) or bool(
+                    confirmations.get("microstructure")
+                )
+                if not thesis_ok:
+                    boolean_pass = False
+                    details["reason"] = "countertrend_thesis_legs_missing"
+                    details["countertrend_thesis_required"] = "trend_or_microstructure"
             details["boolean_confirmations"] = confirmation_count
             details["boolean_required"] = required
         elif use_weighted_confluence:

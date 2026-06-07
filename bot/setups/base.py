@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from bot.runtime.errors import DEFENSIVE_EXC, classify_runtime_error
 
+from ..domain.schemas import is_signal_contract_violation
 from ..domain.strategies import RISK_PROFILE_BY_ID, STRATEGY_STATUS_BY_ID, StrategyDecision
 from ..domain.strategy_catalog import CATALOG_BY_ID
 from ..engine.base import (
@@ -183,18 +184,32 @@ class BaseSetup(AbstractStrategy):
                 try:
                     outcome = self.detect(prepared, self._settings)
                 except DEFENSIVE_EXC as exc:
-                    error_class = classify_runtime_error(exc)
-                    decision = StrategyDecision.error_result(
-                        setup_id=self.setup_id,
-                        reason_code=f"{error_class}.error",
-                        error=str(exc),
-                        stage="engine",
-                        details={
-                            "symbol": prepared.symbol,
-                            "error_class": error_class,
-                            "exception_type": type(exc).__name__,
-                        },
-                    )
+                    if is_signal_contract_violation(exc):
+                        _reject(
+                            prepared,
+                            self.setup_id,
+                            "targets.contract_violation",
+                            stage="runtime",
+                            detail=str(exc),
+                        )
+                        decision = finalize_strategy_decision(
+                            prepared=prepared,
+                            setup_id=self.setup_id,
+                            outcome=None,
+                        )
+                    else:
+                        error_class = classify_runtime_error(exc)
+                        decision = StrategyDecision.error_result(
+                            setup_id=self.setup_id,
+                            reason_code=f"{error_class}.error",
+                            error=str(exc),
+                            stage="engine",
+                            details={
+                                "symbol": prepared.symbol,
+                                "error_class": error_class,
+                                "exception_type": type(exc).__name__,
+                            },
+                        )
                 else:
                     decision = finalize_strategy_decision(
                         prepared=prepared,

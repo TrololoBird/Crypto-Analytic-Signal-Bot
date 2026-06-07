@@ -355,20 +355,5 @@ class OrderBlockSetup(SpecDetectorSetup):
 
     detect_setup = detect_order_block_setup
 
-    def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
-        try:
-            return super().detect(prepared, settings)
-        except ValueError as exc:
-            if "Signal contract violations" in str(exc):
-                _reject(
-                    prepared,
-                    self.setup_id,
-                    "targets.contract_violation",
-                    stage="runtime",
-                    detail=str(exc),
-                )
-                return None
-            raise
-
 
 __all__ = ["OrderBlockSetup"]
