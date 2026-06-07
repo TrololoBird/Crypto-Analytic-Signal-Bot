@@ -863,7 +863,10 @@ class AnalyzerFramesMixin(AnalyzerContextMixin, _AnalyzerFamilyGatesBase):
         # btc_change_pct / eth_change_pct are declared in PreparedSymbol but were never
         # populated, making btc_correlation always unavailable (weight=0) and causing
         # systematic score degradation in ranging/flat BTC markets.
-        klines_cache = getattr(self._bot.client, "_klines_cache", None)
+        # self._bot.client may be a wrapper; fall back to its _binance_client inner.
+        _raw_client = self._bot.client
+        _inner_client = getattr(_raw_client, "_binance_client", None)
+        klines_cache = getattr(_raw_client, "_klines_cache", None) or getattr(_inner_client, "_klines_cache", None)
         if isinstance(klines_cache, dict):
             for _ref_sym, _ref_field in (("BTCUSDT", "btc_change_pct"), ("ETHUSDT", "eth_change_pct")):
                 for _key, _cached in klines_cache.items():
