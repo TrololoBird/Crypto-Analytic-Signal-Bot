@@ -120,7 +120,7 @@ def detect_rsi_divergence_bottom(
             f"close_position={close_position:.2f}",
         ],
         family=family,
-        entry_anchor=None,
+        entry_anchor=recent_low if direction == "long" else recent_high,
     )
 
 

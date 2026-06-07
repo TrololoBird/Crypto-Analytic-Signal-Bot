@@ -4,7 +4,6 @@ from typing import TYPE_CHECKING, ClassVar
 
 from ._roadmap import (
     _build_atr_signal,
-    _finite_or_none,
     _prev,
     _price_change_pct_confirmed,
     _reject,
@@ -74,9 +73,7 @@ def detect_btc_correlation(
     ]
     if volume_penalty:
         reasons.append(f"volume_penalty={vol_ratio:.2f}")
-    mark = _finite_or_none(prepared.mark_price)
-    close = _prev(work, "close", 0.0)
-    entry_anchor = mark if mark is not None and mark > 0.0 else (close if close > 0.0 else None)
+    entry_anchor = _prev(work, "ema20", 0.0) or None
     return _build_atr_signal(
         prepared=prepared,
         setup_id=setup_id,

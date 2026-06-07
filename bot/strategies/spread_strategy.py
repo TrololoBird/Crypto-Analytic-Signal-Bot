@@ -102,7 +102,7 @@ def detect_spread_strategy(
         clarity *= 0.90
     if context_penalty:
         clarity *= 0.82
-    entry_anchor = _last(work, "ema20", 0.0) or None
+    entry_anchor = _prev(work, "ema20", 0.0) or None
     return _build_atr_signal(
         prepared=prepared,
         setup_id=setup_id,

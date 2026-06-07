@@ -115,20 +115,33 @@ def detect_bb_squeeze_prepared(
         _reject(prepared, setup_id, "momentum_too_low", roc10=roc10)
         return None
     direction = "long" if roc10 > 0.0 else "short"
+    obv_aligned = True
+    if "obv_above_ema" in work.columns:
+        obv_val = float(work.item(-1, "obv_above_ema") or 0.0)
+        obv_aligned = (direction == "long" and obv_val > 0.0) or (
+            direction == "short" and obv_val <= 0.0
+        )
     clarity = min(abs(roc10), 1.0) * (0.90 if volume_penalty else 1.0)
+    if not obv_aligned:
+        clarity *= 0.85
+    reasons = [
+        f"bb_squeeze_{direction}",
+        f"bb_width={bb_width:.2f}",
+        f"release_recent={squeeze_release_recent:.0f}",
+    ]
+    if not obv_aligned:
+        reasons.append("obv_opposes_breakout")
+    entry_anchor = _prev(work, "ema20", 0.0) or None
     return _build_atr_signal(
         prepared=prepared,
         setup_id=setup_id,
         direction=direction,
         params=params,
-        reasons=[
-            f"bb_squeeze_{direction}",
-            f"bb_width={bb_width:.2f}",
-            f"release_recent={squeeze_release_recent:.0f}",
-        ],
+        reasons=reasons,
         family=family,
         structure_clarity=clarity,
         confirmed_bar=True,
+        entry_anchor=entry_anchor,
     )
 
 

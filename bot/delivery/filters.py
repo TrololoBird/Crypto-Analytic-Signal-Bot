@@ -329,6 +329,24 @@ def _regime_short_gate(
         "oi_divergence",
     }
     if profile in reversal_profiles or signal.setup_id in reversal_setups or family == "reversal":
+        # Reversal shorts are NOT unconditionally exempt in a confirmed bull regime.
+        # In markup/bull + uptrend bias, counter-trend shorts have >80% SL rate (empirical).
+        # Only allow when btc_phase signals distribution or transition (genuine reversal opportunity).
+        _regime_chk = str(getattr(prepared, "market_regime", "") or "").lower()
+        _btc_bias_chk = str(getattr(prepared, "btc_bias", None) or signal.btc_bias or "neutral").lower()
+        _bias_4h_chk = str(getattr(prepared, "bias_4h", "") or "neutral").lower()
+        _btc_phase_chk = str(getattr(prepared, "btc_phase", "") or "").lower()
+        _bull_regime_chk = _regime_chk in {"bull", "markup", "risk_on"}
+        _bull_bias_chk = _btc_bias_chk in {"uptrend", "bull"} or _bias_4h_chk == "uptrend"
+        _distribution_phase = _btc_phase_chk in {"distribution", "transition", "decline"}
+        if _bull_regime_chk and _bull_bias_chk and not _distribution_phase:
+            return False, "regime_bull_reversal_short_blocked", {
+                "regime_gate": "reversal_short_blocked_strong_bull",
+                "market_regime": _regime_chk,
+                "btc_bias": _btc_bias_chk,
+                "bias_4h": _bias_4h_chk,
+                "btc_phase": _btc_phase_chk,
+            }
         return True, None, {"regime_gate": "reversal_exempt"}
 
     regime = str(getattr(prepared, "market_regime", "") or "").lower()
