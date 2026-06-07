@@ -36,7 +36,23 @@ def detect_funding_reversal(
         defaults["funding_soft_threshold"],
     )
     # Soft threshold is for relative-tier scoring only - not the primary extreme gate.
-    effective_threshold = max(0.00002, funding_threshold)
+    funding_cap = getattr(prepared, "funding_rate_cap", None)
+    funding_floor = getattr(prepared, "funding_rate_floor", None)
+    dynamic_mult = _as_float(defaults.get("funding_dynamic_threshold_mult", 0.65), 0.65)
+    try:
+        cap_extreme = abs(float(funding_cap)) if funding_cap is not None else 0.0
+    except (TypeError, ValueError):
+        cap_extreme = 0.0
+    try:
+        floor_extreme = abs(float(funding_floor)) if funding_floor is not None else 0.0
+    except (TypeError, ValueError):
+        floor_extreme = 0.0
+    relevant_extreme = max(cap_extreme, floor_extreme)
+    if relevant_extreme > 0.0:
+        dynamic_threshold = max(funding_threshold * 0.40, min(funding_threshold * 1.50, relevant_extreme * dynamic_mult))
+    else:
+        dynamic_threshold = funding_threshold
+    effective_threshold = max(0.00002, dynamic_threshold)
     funding_trend_bars = int(defaults.get("funding_trend_bars", defaults["funding_trend_bars"]))
     funding_recent_extreme_lookback_hours = _as_float(
         defaults.get(
@@ -338,7 +354,7 @@ def detect_funding_reversal(
         vol_ratio=vol_ratio,
         rsi=rsi,
     )
-    score *= min(1.20, max(0.80, 0.85 + confirmation_score * 0.10))
+    score = min(1.0, score * min(1.20, max(0.80, 0.85 + confirmation_score * 0.10)))
     score *= funding_score_penalty
     score *= oi_penalty
 
@@ -386,6 +402,7 @@ class FundingReversalSetup(RoadmapSetup):
         **RoadmapSetup.DEFAULTS,
         "base_score": 0.60,
         "funding_threshold": 0.0010,
+        "funding_dynamic_threshold_mult": 0.65,
         "funding_soft_threshold": 0.00010,
         "funding_trend_bars": 3.0,
         "funding_recent_extreme_lookback_hours": 48.0,
