@@ -203,7 +203,7 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         try:
             raw = frame.item(-1, column)
             value = float(raw) if raw is not None else None
-        except IndexError, TypeError, ValueError:
+        except (IndexError, TypeError, ValueError):
             return None
         return value if value is not None and math.isfinite(value) else None
 
@@ -215,7 +215,7 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         for raw in frame[column].tail(max(1, int(window))).to_list():
             try:
                 value = float(raw) if raw is not None else math.nan
-            except TypeError, ValueError:
+            except (TypeError, ValueError):
                 value = math.nan
             if math.isfinite(value):
                 values.append(value)
@@ -341,7 +341,7 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         if micro is not None:
             try:
                 micro_val = float(micro)
-            except TypeError, ValueError:
+            except (TypeError, ValueError):
                 micro_val = math.nan
             if math.isfinite(micro_val):
                 details["microprice_bias"] = micro_val
@@ -354,7 +354,7 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         if agg is not None:
             try:
                 agg_val = float(agg)
-            except TypeError, ValueError:
+            except (TypeError, ValueError):
                 agg_val = math.nan
             if math.isfinite(agg_val):
                 details["agg_trade_delta_30s"] = agg_val
@@ -371,11 +371,11 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         oi_change = getattr(prepared, "oi_change_pct", None)
         try:
             funding_value = float(funding) if funding is not None else 0.0
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             funding_value = 0.0
         try:
             oi_value = float(oi_change) if oi_change is not None else 0.0
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             oi_value = 0.0
         if not math.isfinite(funding_value):
             funding_value = 0.0

@@ -513,7 +513,7 @@ class OutcomeTracker:
                     if outcome:
                         updated.append(outcome)
             await conn.commit()
-        except aiosqlite.Error, sqlite3.Error:
+        except (aiosqlite.Error, sqlite3.Error):
             await conn.rollback()
             raise
 
@@ -685,7 +685,7 @@ class DailyReporter:
             closed_raw = row.get("closed_at") or row.get("created_at")
             try:
                 closed_at = datetime.fromisoformat(str(closed_raw))
-            except TypeError, ValueError:
+            except (TypeError, ValueError):
                 continue
             if not (day_start <= closed_at < day_end):
                 continue

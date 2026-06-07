@@ -379,7 +379,7 @@ def parse_datetime(value: object) -> datetime | None:
     else:
         try:
             parsed = datetime.fromisoformat(str(value))
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             return None
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=UTC)
@@ -905,7 +905,7 @@ def format_signal_message(
         try:
             pct = _recommend_position_pct(signal, None)
             position_size_pct = pct if pct > 0.0 else None
-        except TypeError, ValueError, AttributeError:
+        except (TypeError, ValueError, AttributeError):
             pass
 
     rendered = format_channel_trade_card(

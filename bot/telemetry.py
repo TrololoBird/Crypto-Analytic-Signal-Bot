@@ -27,7 +27,7 @@ def _parse_iso_datetime(value: Any) -> datetime | None:
         return value if value.tzinfo else value.replace(tzinfo=UTC)
     try:
         parsed = datetime.fromisoformat(str(value))
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return None
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
@@ -103,14 +103,14 @@ def _cycle_delivery_success_count(row: Mapping[str, Any]) -> int:
     if success is not None:
         try:
             return int(success)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             pass
     for key in ("delivered_count", "delivered_signals"):
         value = row.get(key)
         if value is not None:
             try:
                 return int(value)
-            except TypeError, ValueError:
+            except (TypeError, ValueError):
                 continue
     return 0
 

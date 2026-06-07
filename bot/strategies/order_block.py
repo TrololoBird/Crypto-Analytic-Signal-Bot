@@ -132,7 +132,7 @@ def _detect_order_block_extended(
         zone_values_valid = all(
             math.isfinite(float(value)) and float(value) > 0.0 for value in (ob_low, ob_high)
         )
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         zone_values_valid = False
     if (
         direction not in {"long", "short"}
@@ -220,8 +220,11 @@ def _detect_order_block_extended(
     if direction == "short" and rsi < rsi_oversold:
         score *= 0.85
     if zone.state == "mitigated":
-        score *= 0.95
+        # Mitigated OBs have had their orders absorbed — no institutional edge remains.
+        _reject(prepared, setup_id, "order_block_mitigated", state=zone.state)
+        return None
 
+    # Entry at 50% Mean Threshold (ICT standard); zone spans full OB [ob_low, ob_high].
     entry_price = (ob_low + ob_high) / 2.0
     stop_basis = ob_low if direction == "long" else ob_high
     pivots = (
@@ -290,6 +293,8 @@ def _detect_order_block_extended(
         reasons_note,
     ]
 
+    # Scale entry_pad so entry zone = [ob_low, ob_high] exactly.
+    ob_pad_atr_mult = ((ob_high - ob_low) / 2.0) / atr if atr > 0.0 else 0.35
     return _build_signal(
         prepared=prepared,
         setup_id=setup_id,
@@ -303,6 +308,7 @@ def _detect_order_block_extended(
         tp2=tp2,
         price_anchor=entry_price,
         atr=atr,
+        entry_pad_atr_mult=ob_pad_atr_mult,
     )
 
 

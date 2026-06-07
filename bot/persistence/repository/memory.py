@@ -312,7 +312,7 @@ class MemoryRepository(_MemoryRepositoryBases):
             if ts.tzinfo is None:
                 ts = ts.replace(tzinfo=UTC)
             return max(0.0, (datetime.now(UTC) - ts).total_seconds())
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             return None
 
     async def get_market_context(self) -> dict[str, Any]:
@@ -867,7 +867,7 @@ class MemoryRepository(_MemoryRepositoryBases):
             return None
         try:
             window: list[Any] = json.loads(row[0])
-        except json.JSONDecodeError, TypeError:
+        except (json.JSONDecodeError, TypeError):
             return None
         if not isinstance(window, list) or len(window) < 5:
             return None
@@ -1052,7 +1052,7 @@ class MemoryRepository(_MemoryRepositoryBases):
                     if data.get("scale_weights"):
                         try:
                             data["scale_weights"] = tuple(json.loads(data["scale_weights"]))
-                        except json.JSONDecodeError, TypeError, ValueError:
+                        except (json.JSONDecodeError, TypeError, ValueError):
                             LOG.exception(
                                 "failed to decode scale_weights for signal %s",
                                 data.get("tracking_id"),
@@ -1060,7 +1060,7 @@ class MemoryRepository(_MemoryRepositoryBases):
                             data["scale_weights"] = (0.5, 0.3, 0.2)
                     result.append(data)
                 return result
-        except aiosqlite.Error, sqlite3.Error:
+        except (aiosqlite.Error, sqlite3.Error):
             LOG.exception("failed to get active signals")
             return []
 

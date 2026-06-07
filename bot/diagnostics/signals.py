@@ -235,7 +235,7 @@ class SignalDiagnostics:
         state = "pass" if passed else "fail"
         try:
             sample = round(float(atr_pct), 4)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             return
         with self._lock:
             window = self._current_window_unlocked()

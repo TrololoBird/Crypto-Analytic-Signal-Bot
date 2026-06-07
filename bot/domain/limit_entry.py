@@ -34,7 +34,7 @@ def resolve_late_entry_chase_pct(settings: Any | None = None) -> float:
             if raw is not None:
                 try:
                     value = float(raw)
-                except TypeError, ValueError:
+                except (TypeError, ValueError):
                     value = math.nan
                 if math.isfinite(value) and value > 0.0:
                     return value

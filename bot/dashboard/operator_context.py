@@ -100,7 +100,7 @@ def format_market_from_display_snapshot(snapshot: dict[str, Any]) -> str:
     def pct(value: object, *, signed: bool = True, digits: int = 1) -> str:
         try:
             numeric = float(value)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             numeric = 0.0
         if signed:
             return f"{numeric:+.{digits}f}%"

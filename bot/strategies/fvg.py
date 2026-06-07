@@ -107,10 +107,12 @@ def _detect_fvg_setup_extended(
 
     min_gap_width_bps = dynamic_params.get("min_gap_width_bps", defaults["min_gap_width_bps"])
     min_volume_ratio = dynamic_params.get("min_volume_ratio", defaults["min_volume_ratio"])
+    # Only unmitigated (fresh) FVGs — mitigated gaps have been filled;
+    # institutional orders are absorbed and the zone loses predictive power.
     zone = latest_fvg_zone(
         w,
         join_consecutive=True,
-        allowed_states=("fresh", "mitigated"),
+        allowed_states=("fresh",),
         current_price=None,
         touch_buffer=0.0,
     )
@@ -135,7 +137,7 @@ def _detect_fvg_setup_extended(
             math.isfinite(float(value)) and float(value) > 0.0
             for value in (fvg_low, fvg_high, fvg_width, fvg_mid)
         )
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         zone_values_valid = False
     if (
         direction not in {"long", "short"}
@@ -206,7 +208,7 @@ def _detect_fvg_setup_extended(
         try:
             raw_vol_ratio = w.item(zone.created_index, "volume_ratio20")
             impulse_vol_ratio = float(raw_vol_ratio) if raw_vol_ratio is not None else 1.0
-        except IndexError, TypeError, ValueError:
+        except (IndexError, TypeError, ValueError):
             impulse_vol_ratio = 1.0
     if impulse_vol_ratio < min_volume_ratio:
         _reject(
@@ -251,12 +253,11 @@ def _detect_fvg_setup_extended(
     if direction == "short" and structure_1h == "uptrend":
         score *= dynamic_params.get("bias_mismatch_penalty", defaults["bias_mismatch_penalty"])
     min_rr = float(dynamic_params.get("min_rr", defaults["min_rr"]))
-    entry_price = fvg_ce_entry(
-        bottom=fvg_low,
-        top=fvg_high,
-        direction=direction,
-        price=price,
-    )
+    # Entry zone = FVG boundaries exactly. price_anchor = midpoint (fvg_mid).
+    # entry_pad_atr_mult is scaled so that anchor ± pad == [fvg_low, fvg_high].
+    # SL sits beyond the FVG distal line (fvg_low for long, fvg_high for short).
+    entry_price = fvg_mid
+    fvg_pad_atr_mult = (fvg_width / 2.0) / atr if atr > 0.0 else 0.35
     stop_basis = fvg_low if direction == "long" else fvg_high
     pivots = (
         swing_series(w1h, swing_length=3, include_unconfirmed_tail=True)
@@ -317,6 +318,7 @@ def _detect_fvg_setup_extended(
         tp2=tp2,
         price_anchor=entry_price,
         atr=atr,
+        entry_pad_atr_mult=fvg_pad_atr_mult,
     )
 
 

@@ -86,7 +86,7 @@ class SpotCompanionService:
         try:
             prev_close = float(klines[-2][4])
             last_close = float(klines[-1][4])
-        except IndexError, TypeError, ValueError:
+        except (IndexError, TypeError, ValueError):
             return None
         if prev_close <= 0.0:
             return None

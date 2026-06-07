@@ -451,7 +451,7 @@ class BotDashboard:
             if isinstance(snap, dict):
                 try:
                     mark_price = float(snap.get("mark_price") or 0.0) or None
-                except TypeError, ValueError:
+                except (TypeError, ValueError):
                     mark_price = None
 
         normalized = [self._normalize_kline_row(row) for row in (rows or [])]
@@ -471,7 +471,7 @@ class BotDashboard:
             high_px = float(row.get("high") or row.get("h") or 0.0)
             low_px = float(row.get("low") or row.get("l") or 0.0)
             close_px = float(row.get("close") or row.get("c") or 0.0)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             return None
         if close_px <= 0.0:
             return None
@@ -536,12 +536,12 @@ class BotDashboard:
                 parsed = self._parse_datetime(payload.get("started_at"))
                 if parsed is not None:
                     return parsed
-            except OSError, json.JSONDecodeError:
+            except (OSError, json.JSONDecodeError):
                 pass
             try:
                 stamp = "_".join(run_id.split("_")[:2])
                 return datetime.strptime(stamp, "%Y%m%d_%H%M%S").replace(tzinfo=UTC)
-            except ValueError, TypeError:
+            except (ValueError, TypeError):
                 return None
         return None
 
@@ -560,7 +560,7 @@ class BotDashboard:
             return value if value.tzinfo else value.replace(tzinfo=UTC)
         try:
             parsed = datetime.fromisoformat(str(value))
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             return None
         return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
@@ -738,7 +738,7 @@ class BotDashboard:
                 price_raw = row.get("entry_mid")
             try:
                 price = round(float(price_raw), 3) if price_raw is not None else 0.0
-            except TypeError, ValueError:
+            except (TypeError, ValueError):
                 price = 0.0
             key = (symbol, direction, timeframe, price, ts_bucket)
 
@@ -759,7 +759,7 @@ class BotDashboard:
             try:
                 row_score = float(row.get("score") or 0.0)
                 current_score = float(grouped.get("score") or 0.0)
-            except TypeError, ValueError:
+            except (TypeError, ValueError):
                 row_score = 0.0
                 current_score = 0.0
             if row_score > current_score:

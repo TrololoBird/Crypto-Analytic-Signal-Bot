@@ -87,7 +87,7 @@ def add_microstructure_features(df: pl.DataFrame) -> pl.DataFrame:
 def _finite_float(value: object, default: float | None = None) -> float | None:
     try:
         numeric = float(value)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return default
     return numeric if math.isfinite(numeric) else default
 

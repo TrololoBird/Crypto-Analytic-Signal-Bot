@@ -104,7 +104,7 @@ def parse_state_dt(value: str | None) -> datetime | None:
         return None
     try:
         dt = datetime.fromisoformat(str(value))
-    except ValueError, TypeError:
+    except (ValueError, TypeError):
         return None
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=UTC)

@@ -235,10 +235,11 @@ def _detect_ema_bounce_extended(
     sh_mask, sl_mask = _sp(work_1h, n=3, include_unconfirmed_tail=True)
     if signal_direction == "long":
         bounce_ema = min(ema20, ema50) if prev_close <= ema50 * 1.01 else ema20
-        price_anchor = min(bounce_ema, close)
+        # Limit order AT the EMA level — structural anchor, not market close price.
+        price_anchor = bounce_ema
     else:
         bounce_ema = max(ema20, ema50) if prev_close >= ema50 * 0.99 else ema20
-        price_anchor = max(bounce_ema, close)
+        price_anchor = bounce_ema
     reasons.append(f"limit_entry={price_anchor:.4f}")
 
     stop, tp1, tp2 = build_structural_targets(

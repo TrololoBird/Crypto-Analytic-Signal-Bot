@@ -47,7 +47,7 @@ def _optional_float(value: Any) -> float | None:
         return None
     try:
         numeric = float(value)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return None
     if not math.isfinite(numeric):
         return None
@@ -122,7 +122,7 @@ def _resolve_symbol_filter(
         return default
     try:
         value = float(raw)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return default
     return value if math.isfinite(value) else default
 
@@ -155,12 +155,12 @@ def _benchmark_context_guard(
             continue
         try:
             pct_1h_values.append(float(raw_pct))
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             pct_1h_values.append(None)
     context_age_seconds = getattr(prepared, "context_snapshot_age_seconds", None)
     try:
         context_age = float(context_age_seconds) if context_age_seconds is not None else None
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         context_age = None
     benchmark_context_stale = bool(
         context
@@ -184,11 +184,11 @@ def _benchmark_context_guard(
         bias = str(payload.get("bias") or "neutral").lower()
         try:
             pct_1h = float(payload.get("pct_1h") or 0.0)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             pct_1h = 0.0
         try:
             pct_4h = float(payload.get("pct_4h") or 0.0)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             pct_4h = 0.0
         move_score = max(abs(pct_1h) / 0.006, abs(pct_4h) / 0.015)
         if move_score < 1.0 and bias == "neutral":
@@ -391,11 +391,11 @@ def _latest_frame_float(frame: pl.DataFrame | None, column: str) -> float | None
         return None
     try:
         value = frame.item(-1, column)
-    except IndexError, TypeError, ValueError:
+    except (IndexError, TypeError, ValueError):
         return None
     try:
         numeric = float(value)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return None
     return numeric if math.isfinite(numeric) else None
 
@@ -1083,6 +1083,24 @@ def _run_filter_pipeline(
                 primary_timeframe,
                 min_adx_1h,
             )
+    # Absolute ADX floor: below 20 means ranging/absent trend — no trend-following valid.
+    # Independent of per-setup min_adx_1h config (which is always ≥ 20 for trend families).
+    _trend_families = {"trend_follow", "continuation", "breakout", "momentum"}
+    if (
+        adx_1h > 0.0
+        and adx_1h < 20.0
+        and signal.strategy_family in _trend_families
+        and not deep_analysis_asset
+    ):
+        return _reject(
+            "adx_ranging_market_absolute",
+            base,
+            details={
+                "adx_1h": adx_1h,
+                "adx_floor": 20.0,
+                "strategy_family": signal.strategy_family,
+            },
+        )
     adx_penalty_applied = False
     if adx_1h > 0.0 and adx_1h < min_adx_1h:
         if adx_policy == _ADX_POLICY_HARD_GATE:
@@ -1190,21 +1208,88 @@ def _run_filter_pipeline(
     funding_rate = _optional_float(getattr(prepared, "funding_rate", None))
     funding_moderate = float(getattr(settings.scoring, "funding_rate_moderate", 0.0005) or 0.0005)
     funding_extreme = float(getattr(settings.scoring, "funding_rate_extreme", 0.0010) or 0.0010)
-    if signal.direction == "short" and funding_rate is not None and funding_rate > funding_extreme:
-        return _reject(
-            "funding_headwind_short",
-            base,
-            details={
-                "funding_rate": funding_rate,
-                "funding_extreme": funding_extreme,
-                "signal_direction": signal.direction,
-            },
-        )
-    if signal.direction == "short" and funding_rate is not None and funding_rate > funding_moderate:
-        funding_short_penalty_applied = True
-        passed.append("funding_short_penalty_eligible")
-    elif funding_rate is not None:
+    if funding_rate is not None:
+        _fr_abs = abs(funding_rate)
+        _fr_details = {
+            "funding_rate": funding_rate,
+            "funding_extreme": funding_extreme,
+            "signal_direction": signal.direction,
+        }
+        # Hard gate: extreme crowding on the same side as the signal.
+        # Positive funding > extreme → crowded longs → block new longs.
+        # Negative funding < -extreme → crowded shorts → block new shorts.
+        if signal.direction == "long" and funding_rate > funding_extreme:
+            return _reject("funding_crowded_longs", base, details=_fr_details)
+        if signal.direction == "short" and funding_rate < -funding_extreme:
+            return _reject("funding_crowded_shorts", base, details=_fr_details)
+        # Legacy: positive funding headwinds shorts (short squeeze risk).
+        if signal.direction == "short" and funding_rate > funding_extreme:
+            return _reject("funding_headwind_short", base, details=_fr_details)
+        # Moderate penalty zone: applies score penalty later in pipeline.
+        if signal.direction == "long" and funding_rate > funding_moderate:
+            funding_short_penalty_applied = True  # reuse flag; penalty applied below
+            passed.append("funding_long_penalty_eligible")
+        elif signal.direction == "short" and funding_rate > funding_moderate:
+            funding_short_penalty_applied = True
+            passed.append("funding_short_penalty_eligible")
+        else:
+            passed.append("funding_context_ok")
+    else:
         passed.append("funding_context_ok")
+
+    # OI divergence filter: rising price + falling OI = short-covering rally, not real breakout.
+    # Applied only to breakout/continuation/momentum families where OI confirmation matters.
+    _oi_breakout_families = {"breakout", "continuation", "momentum", "trend_follow"}
+    if signal.strategy_family in _oi_breakout_families:
+        oi_chg = prepared.oi_change_pct
+        if oi_chg is not None:
+            _oi_price_up = signal.direction == "long"
+            _oi_price_dn = signal.direction == "short"
+            _oi_falling = oi_chg < -0.03   # OI dropped >3% → participation leaving
+            _oi_rising  = oi_chg >  0.03   # OI grew >3% → new money entering
+            if _oi_price_up and _oi_falling:
+                # Rising price + falling OI = weak breakout; downgrade, don't hard reject
+                # so confluence scoring can still pass high-quality setups.
+                passed.append(f"oi_divergence_weak_breakout|oi_chg={oi_chg:.3f}")
+            elif _oi_price_dn and _oi_rising:
+                passed.append(f"oi_divergence_weak_breakdown|oi_chg={oi_chg:.3f}")
+            elif (_oi_price_up and _oi_rising) or (_oi_price_dn and _oi_falling):
+                passed.append(f"oi_confirming|oi_chg={oi_chg:.3f}")
+            else:
+                passed.append(f"oi_neutral|oi_chg={oi_chg:.3f}")
+        else:
+            passed.append("oi_unavailable")
+
+    # Premium/Discount zone filter (SMC/ICT): longs in discount (<50% of range),
+    # shorts in premium (>50% of range). Soft filter — mismatch degrades score via passed tag.
+    # Only applies to directional trend/continuation setups (not reversal/sentiment).
+    _pd_families = {"trend_follow", "continuation", "breakout", "momentum", "orderbook", "orderflow"}
+    if signal.strategy_family in _pd_families and not prepared.work_1h.is_empty():
+        _w1h = prepared.work_1h
+        _lookback = min(50, _w1h.height)
+        _tail = _w1h.tail(_lookback)
+        try:
+            _range_high = float(_tail["high"].max())
+            _range_low = float(_tail["low"].min())
+            _equilibrium = (_range_high + _range_low) / 2.0
+            _price = prepared.mark_price or signal.entry_mid
+            if _range_high > _range_low and _price is not None and _price > 0:
+                _in_discount = _price <= _equilibrium
+                _in_premium = _price >= _equilibrium
+                if signal.direction == "long" and _in_premium:
+                    passed.append(
+                        f"pd_zone_mismatch_long_in_premium|eq={_equilibrium:.4f}|price={_price:.4f}"
+                    )
+                elif signal.direction == "short" and _in_discount:
+                    passed.append(
+                        f"pd_zone_mismatch_short_in_discount|eq={_equilibrium:.4f}|price={_price:.4f}"
+                    )
+                else:
+                    passed.append(
+                        f"pd_zone_ok|{'discount' if _in_discount else 'premium'}|eq={_equilibrium:.4f}"
+                    )
+        except Exception:  # noqa: BLE001
+            passed.append("pd_zone_unavailable")
 
     benchmark_ok, benchmark_reason, benchmark_details = _benchmark_context_guard(signal, prepared)
     if not benchmark_ok and not deep_analysis_asset:

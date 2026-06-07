@@ -220,7 +220,7 @@ async def probe_ws_handshake(
                 **connect_kwargs,
             ):
                 return True
-    except KeyboardInterrupt, SystemExit:
+    except (KeyboardInterrupt, SystemExit):
         raise
     except (
         OSError,
@@ -238,7 +238,7 @@ async def _probe_rest(net: NetworkConfig) -> bool:
     try:
         symbols = await market.fetch_exchange_symbols()
         return len(symbols) > _REST_SYMBOL_THRESHOLD
-    except KeyboardInterrupt, SystemExit:
+    except (KeyboardInterrupt, SystemExit):
         raise
     except defensive_exc_types(aiohttp.ClientError):
         return False
@@ -294,7 +294,7 @@ async def _detect_local_tor() -> str | None:
             writer.close()
             with contextlib.suppress(OSError):
                 await writer.wait_closed()
-    except OSError, ConnectionRefusedError, TimeoutError:
+    except (OSError, ConnectionRefusedError, TimeoutError):
         return None
     else:
         LOG.info("local Tor daemon detected on 127.0.0.1:9050 — adding to pool")

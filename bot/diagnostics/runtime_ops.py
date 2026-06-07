@@ -299,7 +299,7 @@ LOG = logging.getLogger("bot.core.diagnostics.metrics")
 def _finite_metric_value(value: float) -> float:
     try:
         numeric = float(value)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return 0.0
     return numeric if math.isfinite(numeric) else 0.0
 
@@ -853,7 +853,7 @@ def _load_json(path: Path) -> dict[str, Any]:
         return {}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except OSError, json.JSONDecodeError:
+    except (OSError, json.JSONDecodeError):
         return {}
     return data if isinstance(data, dict) else {}
 
