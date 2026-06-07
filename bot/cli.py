@@ -540,6 +540,10 @@ def build_parser() -> argparse.ArgumentParser:
     backtest.add_argument("--days", type=int, default=7)
     backtest.add_argument("--setup", type=str, default="")
     backtest.add_argument("--interval", type=str, default="15m")
+    export = sub.add_parser("export", help="Export outcomes to CSV or Parquet (п.32)")
+    export.add_argument("--format", choices=["csv", "parquet"], default="csv")
+    export.add_argument("--days", type=int, default=90, help="How many days back to export")
+    export.add_argument("--out", type=str, default="", help="Output file path (default: auto)")
     replay = sub.add_parser("replay", help="Show latest replay telemetry rows")
     replay.add_argument("--tail", type=int, default=20)
     db = sub.add_parser("db", help="DB maintenance")
@@ -585,6 +589,15 @@ def run() -> None:
             setup_id=str(args.setup or "").strip(),
             interval=str(args.interval or "15m").strip().lower(),
             config_path=config_path,
+        )
+        return
+    if args.command == "export":
+        asyncio.run(
+            _run_export_command(
+                days=max(1, int(args.days)),
+                fmt=str(args.format or "csv"),
+                out_path=str(args.out or "").strip(),
+            )
         )
         return
     if args.command == "replay":
@@ -813,6 +826,39 @@ async def _db_migrate_command(config_path: str | Path = _CONFIG_DEFAULT) -> None
             ensure_ascii=True,
         )
     )
+
+
+async def _run_export_command(*, days: int, fmt: str, out_path: str) -> None:
+    """Export signal_outcomes to CSV or Parquet (п.32)."""
+    import polars as pl
+
+    settings = load_settings("config.toml")
+    repo = MemoryRepository(settings.db_path, data_dir=settings.data_dir)
+    await repo.initialize()
+    try:
+        cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
+        rows = await repo._conn.execute_fetchall(
+            "SELECT * FROM signal_outcomes WHERE entry_time >= ? ORDER BY entry_time",
+            (cutoff,),
+        )
+        cols = [d[0] for d in (await repo._conn.execute("SELECT * FROM signal_outcomes LIMIT 0")).description or []]
+        if not cols:
+            # fallback: fetch column names from pragma
+            pragma = await repo._conn.execute_fetchall("PRAGMA table_info(signal_outcomes)")
+            cols = [r[1] for r in pragma]
+        frame = pl.DataFrame(rows, schema=cols, orient="row") if rows else pl.DataFrame(schema=cols)
+    finally:
+        await repo.close()
+
+    if not out_path:
+        ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+        out_path = f"outcomes_{ts}.{fmt}"
+    dest = Path(out_path)
+    if fmt == "parquet":
+        frame.write_parquet(dest)
+    else:
+        frame.write_csv(dest)
+    print(json.dumps({"exported": frame.height, "columns": len(frame.columns), "path": str(dest)}))
 
 
 async def _db_clean_command(*, days: int) -> None:

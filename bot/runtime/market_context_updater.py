@@ -44,8 +44,23 @@ class MarketContextUpdater:
                     LOG.debug("market regime periodic update completed")
             except DEFENSIVE_EXC as exc:
                 LOG.debug("market regime periodic update failed: %s", exc)
+            # п.48: wait for shutdown, trigger event, or 60s timeout — whichever first
+            trigger: asyncio.Event | None = getattr(self._bot, "_regime_refresh_trigger", None)
             try:
-                await asyncio.wait_for(self._bot._shutdown.wait(), timeout=60)
+                if trigger is not None:
+                    trigger.clear()
+                    done, _ = await asyncio.wait(
+                        {
+                            asyncio.ensure_future(self._bot._shutdown.wait()),
+                            asyncio.ensure_future(trigger.wait()),
+                        },
+                        timeout=60,
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    if self._bot._shutdown.is_set():
+                        break
+                else:
+                    await asyncio.wait_for(self._bot._shutdown.wait(), timeout=60)
             except TimeoutError:
                 continue
 

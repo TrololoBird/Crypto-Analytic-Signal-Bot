@@ -32,6 +32,7 @@ from bot.market._rest_frames import (
     _klines_to_frame,
     _parse_depth_levels,
     _safe_float,
+    validate_kline_frame,
 )
 from bot.market.data import (
     _ALLOWED_PUBLIC_REST_PATHS,
@@ -1279,7 +1280,8 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         else:
             msg = f"unsupported derived kline kind: {kind!r}"
             raise ValueError(msg)
-        return _drop_incomplete_ohlcv_tail(_klines_to_frame(rows), interval)
+        frame = _drop_incomplete_ohlcv_tail(_klines_to_frame(rows), interval)
+        return validate_kline_frame(frame, interval, symbol=symbol)
 
     async def _fetch_derived_klines_cached(
         self, kind: str, symbol: str, interval: str, *, limit: int
@@ -2250,7 +2252,8 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             params={"symbol": symbol, "interval": interval, "limit": limit},
             symbol=symbol,
         )
-        return _drop_incomplete_ohlcv_tail(_klines_to_frame(rows), interval)
+        frame = _drop_incomplete_ohlcv_tail(_klines_to_frame(rows), interval)
+        return validate_kline_frame(frame, interval, symbol=symbol)
 
     async def fetch_klines_between(
         self,

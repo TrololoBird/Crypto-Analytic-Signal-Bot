@@ -14,6 +14,7 @@ from bot.runtime.errors import DEFENSIVE_EXC
 from ..features.prepare import cache_stats as frame_cache_stats
 from .delivery_alerts import check_message_buffer_drop_alert
 from .operator_digest import OperatorDigestRunner
+from .telegram_operator import TelegramOperatorConsole, operator_console_enabled
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -27,6 +28,9 @@ LOG = logging.getLogger("bot.runtime.bot")
 class HealthManager:
     def __init__(self, bot: SignalBot) -> None:
         self._bot = bot
+        # п.30: cooldown for win-rate degradation Telegram alerts (6h)
+        self._win_rate_alert_last_sent: float = 0.0
+        self._win_rate_alert_cooldown: float = 21600.0
 
     async def health_check(self) -> dict[str, Any]:
         ws_manager = self._bot._ws_manager
@@ -45,6 +49,20 @@ class HealthManager:
         except DEFENSIVE_EXC:
             LOG.debug("health check active signal count failed", exc_info=True)
             active_signals = 0
+        try:
+            win_rate_data = await self._bot._modern_repo.win_rate_by_strategy(last_days=7)
+            wr_values = [v["win_rate"] for v in win_rate_data.values() if v["total"] >= 3]
+            avg_wr_7d = round(float(sum(wr_values) / len(wr_values)), 4) if wr_values else 0.0
+            low_wr_setups = [
+                sid for sid, v in win_rate_data.items()
+                if v["total"] >= 3 and v["win_rate"] < 0.35
+            ]
+            win_rate_degraded = avg_wr_7d > 0.0 and avg_wr_7d < 0.35
+        except DEFENSIVE_EXC:
+            LOG.debug("health check win-rate query failed", exc_info=True)
+            avg_wr_7d = 0.0
+            low_wr_setups = []
+            win_rate_degraded = False
         probe_flags = network_probe_status()
         radar_store = getattr(ws_manager, "_radar_store", None) if ws_manager is not None else None
         radar_health = assess_radar_store(
@@ -71,6 +89,9 @@ class HealthManager:
             ),
             "frame_cache": frame_cache_stats(),
             "feature_flags": await self._bot.feature_flags.snapshot(),
+            "win_rate_7d": avg_wr_7d,
+            "win_rate_degraded": win_rate_degraded,
+            "low_win_rate_setups": low_wr_setups,
         }
 
     async def heartbeat_periodic(self) -> None:
@@ -170,6 +191,47 @@ class HealthManager:
                         r.strength,
                         r.altcoin_season_index,
                     )
+
+            # п.30: win-rate degradation Telegram alert
+            await self._maybe_send_win_rate_alert()
+
+    async def _maybe_send_win_rate_alert(self) -> None:
+        """Send operator Telegram alert when 7-day win-rate drops below 35% (п.30)."""
+        import time as _time
+        now = _time.monotonic()
+        if now - self._win_rate_alert_last_sent < self._win_rate_alert_cooldown:
+            return
+        if not operator_console_enabled(self._bot):
+            return
+        try:
+            win_rate_data = await self._bot._modern_repo.win_rate_by_strategy(last_days=7)
+            wr_values = [
+                float(v["win_rate"])
+                for v in win_rate_data.values()
+                if int(v.get("total") or 0) >= 3
+            ]
+            if not wr_values:
+                return
+            avg_wr = sum(wr_values) / len(wr_values)
+            if avg_wr >= 0.35:
+                return
+            self._win_rate_alert_last_sent = now
+            low_setups = [
+                f"{sid}:{float(d['win_rate']):.0%}({int(d.get('total',0))})"
+                for sid, d in win_rate_data.items()
+                if int(d.get("total") or 0) >= 3 and float(d["win_rate"]) < 0.35
+            ]
+            text = (
+                "⚠️ <b>Win-rate degradation alert</b>\n"
+                f"7-day avg win-rate: <b>{avg_wr:.0%}</b> (threshold: 35%)\n"
+                f"Affected strategies: <code>{', '.join(low_setups[:8]) or 'n/a'}</code>\n"
+                "Consider pausing low-performing strategies or raising min_score."
+            )
+            console = TelegramOperatorConsole(self._bot)
+            await console.send_html_to_operators(text)
+            LOG.warning("win-rate degradation alert sent | avg_wr_7d=%.2f", avg_wr)
+        except Exception:
+            LOG.debug("win-rate degradation alert failed", exc_info=True)
 
     async def health_telemetry_periodic(self) -> None:
         while not self._bot._shutdown.is_set():

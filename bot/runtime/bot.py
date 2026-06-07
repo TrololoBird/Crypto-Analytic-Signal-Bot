@@ -197,6 +197,8 @@ class SignalBot:
         self._shutdown = asyncio.Event()
         self._analysis_semaphore = asyncio.Semaphore(settings.runtime.analysis_concurrency)
         self._last_kline_event_ts: float = 0.0
+        # п.48: event-driven regime refresh trigger (set by kline_handler on large BTC move)
+        self._regime_refresh_trigger = asyncio.Event()
         self._shortlist: list[UniverseSymbol] = []
         self._last_live_shortlist: list[UniverseSymbol] = []
         self._last_shortlist_full_refresh_at: datetime | None = None
@@ -515,6 +517,7 @@ class SignalBot:
         await self._ensure_dashboard_started()
 
         try:
+            cleanup_count = await self._modern_repo.cleanup_active_signals_on_startup()
             expired_count = await self._modern_repo.expire_open_signals_older_than(
                 max_age_minutes=240
             )

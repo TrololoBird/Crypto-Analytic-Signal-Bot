@@ -29,6 +29,18 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 
+# п.26: per-strategy SL-rate cache. Updated from delivery_orchestrator via
+# update_strategy_sl_rates(). Strategies with >70% SL rate get a score penalty.
+_STRATEGY_SL_RATES: dict[str, float] = {}
+_SL_PENALTY_THRESHOLD = 0.70   # sl_rate above this triggers penalty
+_SL_PENALTY_MAX_MULT = 0.80    # floor multiplier at 100% sl rate
+
+
+def update_strategy_sl_rates(rates: dict[str, float]) -> None:
+    """Refresh the per-strategy SL-rate cache (п.26). rates: setup_id → sl_rate 0..1."""
+    _STRATEGY_SL_RATES.clear()
+    _STRATEGY_SL_RATES.update(rates)
+
 
 def _optional_float(value: Any) -> float | None:
     if value is None:
@@ -1397,6 +1409,29 @@ def _run_filter_pipeline(
         updated = replace(
             updated,
             passed_filters=(*updated.passed_filters, "funding_short_penalty_applied"),
+        )
+
+    # --- 8b. Strategy SL-rate feedback penalty (п.26) ---
+    sl_rate = _STRATEGY_SL_RATES.get(signal.setup_id, 0.0)
+    if sl_rate > _SL_PENALTY_THRESHOLD:
+        excess = (sl_rate - _SL_PENALTY_THRESHOLD) / (1.0 - _SL_PENALTY_THRESHOLD)
+        sl_mult = max(_SL_PENALTY_MAX_MULT, 1.0 - excess * (1.0 - _SL_PENALTY_MAX_MULT))
+        sl_adjusted = updated.score * sl_mult
+        updated = replace(updated, score=sl_adjusted)
+        updated = replace(
+            updated,
+            passed_filters=(
+                *updated.passed_filters,
+                f"strategy_sl_penalty:{sl_rate:.2f}x{sl_mult:.2f}",
+            ),
+        )
+        LOGGER.debug(
+            "strategy sl-rate penalty | setup=%s sl_rate=%.2f mult=%.2f score=%.3f→%.3f",
+            signal.setup_id,
+            sl_rate,
+            sl_mult,
+            updated.score / sl_mult,
+            updated.score,
         )
 
     # --- 9. Minimum score gate (final gate after ALL adjustments) ---

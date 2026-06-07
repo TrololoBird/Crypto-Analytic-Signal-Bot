@@ -19,6 +19,10 @@ LOG = logging.getLogger("bot.runtime.kline_handler")
 class KlineHandler:
     """Handles kline-close orchestration and per-symbol selection/delivery."""
 
+    # п.48: large move on these symbols triggers early regime refresh
+    _REGIME_TRIGGER_SYMBOLS = frozenset({"BTCUSDT", "ETHUSDT"})
+    _REGIME_TRIGGER_MOVE_PCT = 3.0
+
     def __init__(self, bot: Any) -> None:
         self._bot = bot
         self._allowed_intervals_cache: frozenset[str] = frozenset()
@@ -29,6 +33,7 @@ class KlineHandler:
             ]
             | None
         ) = None
+        self._last_regime_trigger_close: dict[str, float] = {}
 
     async def on_kline_close(self, event: KlineCloseEvent) -> None:
         try:
@@ -46,6 +51,23 @@ class KlineHandler:
         self._bot._last_kline_event_ts = asyncio.get_running_loop().time()
         symbol = event.symbol
         LOG.info("kline_close received | symbol=%s trigger=%s", symbol, event.trigger)
+
+        # п.48: trigger early regime refresh on large BTC/ETH move
+        if symbol in self._REGIME_TRIGGER_SYMBOLS and event.interval == "15m":
+            close = float(getattr(event, "close", 0.0) or 0.0)
+            last = self._last_regime_trigger_close.get(symbol, 0.0)
+            if last > 0.0 and close > 0.0:
+                move_pct = abs(close - last) / last * 100.0
+                if move_pct >= self._REGIME_TRIGGER_MOVE_PCT:
+                    trigger = getattr(self._bot, "_regime_refresh_trigger", None)
+                    if trigger is not None:
+                        trigger.set()
+                    LOG.info(
+                        "regime refresh triggered | symbol=%s move_pct=%.2f%%",
+                        symbol, move_pct,
+                    )
+            if close > 0.0:
+                self._last_regime_trigger_close[symbol] = close
 
         lock_timeout = float(
             getattr(self._bot.settings.runtime, "shortlist_lock_timeout_seconds", 10.0) or 10.0

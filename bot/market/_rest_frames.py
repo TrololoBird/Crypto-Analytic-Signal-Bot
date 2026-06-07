@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 from collections.abc import Mapping
 from datetime import datetime, timedelta
@@ -10,6 +11,8 @@ from typing import Any
 import polars as pl
 
 from bot.market.data import _KLINE_COLUMNS, _KLINE_FRAME_SCHEMA, UTC
+
+_LOG = logging.getLogger("bot.market.rest_frames")
 
 
 def _timeframe_to_seconds(timeframe: str) -> int | None:
@@ -116,6 +119,43 @@ def _klines_to_frame(rows: Any) -> pl.DataFrame:
             .alias("open_time"),
         ]
     )
+
+
+def validate_kline_frame(
+    frame: pl.DataFrame,
+    timeframe: str,
+    *,
+    symbol: str = "",
+) -> pl.DataFrame:
+    """Remove duplicate close_times and log timestamp gaps (п.35).
+
+    Called after ``_klines_to_frame`` in REST kline fetch methods.
+    Returns the cleaned frame (may be shorter than input).
+    """
+    if frame.is_empty() or "close_time" not in frame.columns:
+        return frame
+    before = frame.height
+    frame = frame.unique(subset=["close_time"], keep="last", maintain_order=True)
+    dupes = before - frame.height
+    if dupes > 0:
+        _LOG.warning(
+            "kline duplicates removed | symbol=%s tf=%s dupes=%d", symbol, timeframe, dupes
+        )
+    interval_s = _timeframe_to_seconds(timeframe)
+    if interval_s and frame.height >= 2:
+        times_ms = frame["close_time"].cast(pl.Int64) // 1_000_000
+        diffs = times_ms.diff().drop_nulls()
+        expected_ms = interval_s * 1000
+        gaps = int((diffs > expected_ms * 1.5).sum())
+        if gaps > 0:
+            _LOG.warning(
+                "kline gaps detected | symbol=%s tf=%s gaps=%d interval=%ds",
+                symbol,
+                timeframe,
+                gaps,
+                interval_s,
+            )
+    return frame
 
 
 def _unwrap_model(value: Any) -> Any:

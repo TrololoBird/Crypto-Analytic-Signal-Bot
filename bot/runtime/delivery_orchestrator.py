@@ -21,6 +21,8 @@ from typing import TYPE_CHECKING, Any
 
 from bot.delivery import contract as _delivery_contract_module
 from bot.delivery.confluence import ConfluenceEngine, evaluate_weighted_delivery_gate
+from bot.delivery.filters import update_strategy_sl_rates
+from bot.delivery.sizing import update_strategy_win_rates
 from bot.delivery.ops_webhook import notify_ops_delivery_failed, notify_ops_tier_cap_starvation
 from bot.delivery.telegram_routing import (
     operator_dm_enabled,
@@ -110,6 +112,42 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
     def __init__(self, bot: SignalBot) -> None:
         self._bot = bot
         self._delivery_burst_times: deque[float] = deque(maxlen=256)
+        self._recent_content_hashes: deque[str] = deque(maxlen=512)
+        # п.26 / п.28: last time strategy stats caches were refreshed
+        self._strategy_stats_last_refresh: float = 0.0
+        self._strategy_stats_refresh_interval: float = 1800.0  # 30 min
+
+    async def _maybe_refresh_strategy_stats(self) -> None:
+        """Lazily refresh per-strategy win-rate and SL-rate caches (п.26, п.28)."""
+        now = time.monotonic()
+        if now - self._strategy_stats_last_refresh < self._strategy_stats_refresh_interval:
+            return
+        self._strategy_stats_last_refresh = now
+        repo = getattr(self._bot, "_modern_repo", None)
+        if repo is None:
+            return
+        try:
+            rates: dict[str, dict[str, float]] = await repo.win_rate_by_strategy(last_days=30)
+            update_strategy_win_rates(rates)
+            sl_rates = {
+                sid: 1.0 - float(data.get("win_rate") or 0.0)
+                for sid, data in rates.items()
+                if float(data.get("total") or 0) >= 5  # ignore strategies with <5 outcomes
+            }
+            update_strategy_sl_rates(sl_rates)
+            LOG.debug(
+                "strategy stats refreshed | strategies=%d", len(rates)
+            )
+        except Exception:
+            LOG.debug("strategy stats refresh failed", exc_info=True)
+
+    def _is_content_duplicate(self, signal: Signal) -> bool:
+        """Check if signal content was recently delivered (IV.27)."""
+        ch = signal.content_hash
+        if ch in self._recent_content_hashes:
+            return True
+        self._recent_content_hashes.append(ch)
+        return False
 
     def _burst_delivery_allows(self) -> tuple[bool, int]:
         cap = int(getattr(self._bot.settings.delivery, "max_signals_per_minute", 0) or 0)
@@ -222,6 +260,23 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         if direction == "short":
             return bool(close < ema20 < ema50)
         return False
+
+    @classmethod
+    def _rsi_overheat_hard_limit(
+        cls,
+        *,
+        direction: str,
+        profile: str,
+        rsi: float | None,
+    ) -> bool:
+        """Hard reject trend-following signals when RSI is extreme (overheated)."""
+        if rsi is None:
+            return True
+        if profile in REVERSAL_PROFILES:
+            return True
+        if direction == "long" and rsi > 80.0:
+            return False
+        return not (direction == "short" and rsi < 20.0)
 
     @classmethod
     def _momentum_confirmation(
@@ -410,6 +465,11 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
             ema20=ema20,
             ema50=ema50,
         )
+        if not cls._rsi_overheat_hard_limit(direction=direction, profile=profile, rsi=rsi):
+            return False, empty_confirmations, {
+                "reason": "rsi_overheat_hard_limit", "rsi14": rsi, "profile": profile
+            }
+
         momentum = cls._momentum_confirmation(direction=direction, profile=profile, rsi=rsi)
         volume_ok = cls._volume_confirmation(
             profile=profile,
@@ -717,6 +777,9 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         if not signals:
             return [], [], Counter(), 0
 
+        # Lazy refresh per-strategy win-rate / SL-rate caches (п.26, п.28)
+        await self._maybe_refresh_strategy_stats()
+
         ledger = getattr(self._bot, "public_audit", None)
         recent_actions: list[Signal] = []
         action_window_hours = float(self._bot.settings.tracking.action_window_hours)
@@ -738,6 +801,11 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         queued_symbol_direction: set[str] = set()
         queued_family_keys: set[str] = set()
         queued_setup_ids: set[str] = set()
+        dedup_window_hours = float(
+            getattr(self._bot.settings.delivery, "dedup_window_hours", 4.0) or 4.0
+        )
+        dedup_timestamps: dict[str, datetime] = getattr(self, "_dedup_timestamps", {})
+        object.__setattr__(self, "_dedup_timestamps", dedup_timestamps)
         contract_validated_tracking_ids: set[str] = set()
         confluence_passed_tracking_ids: set[str] = set()
         tier_allowed_tracking_ids: set[str] = set()
@@ -753,6 +821,26 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         portfolio_state = self._new_portfolio_cap_state()
 
         for signal in signals:
+            dedup_key = f"{signal.setup_id}:{signal.symbol}:{signal.direction}"
+            last_sent = dedup_timestamps.get(dedup_key)
+            if last_sent is not None and (
+                datetime.now(UTC) - last_sent
+            ).total_seconds() < dedup_window_hours * 3600:
+                rejected_rows.append(
+                    {
+                        "ts": datetime.now(UTC).isoformat(),
+                        "symbol": signal.symbol,
+                        "setup_id": signal.setup_id,
+                        "direction": signal.direction,
+                        "stage": "dedup",
+                        "reason": "duplicate_signal_window",
+                        "last_sent_ago_hours": round(
+                            (datetime.now(UTC) - last_sent).total_seconds() / 3600, 2
+                        ),
+                        "dedup_window_hours": dedup_window_hours,
+                    }
+                )
+                continue
             contract_issues = self._contract_issue_rows(signal)
             if contract_issues:
                 self._record_delivery_diag_reject(
@@ -1280,6 +1368,21 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
                         }
                     )
                     continue
+            if self._is_content_duplicate(signal):
+                self._record_delivery_diag_reject(
+                    "dedup", "content_duplicate", setup_id=signal.setup_id
+                )
+                rejected_rows.append(
+                    {
+                        "ts": datetime.now(UTC).isoformat(),
+                        "symbol": signal.symbol,
+                        "setup_id": signal.setup_id,
+                        "direction": signal.direction,
+                        "stage": "dedup",
+                        "reason": "content_duplicate",
+                    }
+                )
+                continue
             burst_ok, burst_cap = self._burst_delivery_allows()
             if not burst_ok:
                 await self._bot.tracker.cancel_pending_delivery(signal)
