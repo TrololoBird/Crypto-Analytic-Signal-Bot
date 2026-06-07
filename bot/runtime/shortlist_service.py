@@ -963,8 +963,9 @@ class ShortlistService:
                 fit_counts = [len(item.strategy_fits) for item in live_shortlist]
                 zero_fit = sum(1 for count in fit_counts if count == 0)
                 LOG.info(
-                    "shortlist build result | source=%s gate_passed=%s light_pool=%s eligible=%s "
-                    "dynamic_pool=%s pinned=%s total=%d strategy_fits_total=%d zero_strategy_fit=%d",
+                    "shortlist build result | source=%s gate_passed=%s light_pool=%s "
+                    "eligible=%s dynamic_pool=%s pinned=%s total=%d "
+                    "strategy_fits_total=%d zero_strategy_fit=%d",
                     "rest_full",
                     live_summary.get("gate_passed"),
                     live_summary.get("light_pool"),

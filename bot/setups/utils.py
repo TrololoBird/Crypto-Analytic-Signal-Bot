@@ -9,6 +9,7 @@ import math
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
+from ..domain.risk import RiskParams
 from ..domain.strategy_catalog import catalog_default_params
 from ..runtime_policy import is_deep_analysis_symbol
 
@@ -534,8 +535,6 @@ def validate_rr_or_penalty(
         Tuple of (is_valid, tp1_or_none). If RR < min_rr, returns (False, None).
         Caller should apply penalty to score instead of rejecting signal.
     """
-    from ..domain.risk import RiskParams
-
     if tp1 is None:
         return False, None
 

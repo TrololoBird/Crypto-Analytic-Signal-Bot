@@ -46,7 +46,14 @@ LOG = structlog.get_logger("bot.features.prepare")
 _MAX_CACHE_ENTRIES = 1200
 _FrameCacheValue = float | None
 _FrameCacheKey = tuple[
-    str, str, int, int, int, tuple[_FrameCacheValue, ...], tuple[object, ...] | None, tuple[str, ...] | None
+    str,
+    str,
+    int,
+    int,
+    int,
+    tuple[_FrameCacheValue, ...],
+    tuple[object, ...] | None,
+    tuple[str, ...] | None,
 ]
 _FRAME_CACHE_TAIL_COLUMNS = (
     "open",

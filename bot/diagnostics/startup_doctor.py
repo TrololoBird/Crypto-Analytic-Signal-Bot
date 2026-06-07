@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 from bot.migrations import MIGRATIONS
 from bot.runtime.errors import DEFENSIVE_EXC
+from bot.secrets import load_secrets
 
 if TYPE_CHECKING:
     from bot.domain.config import BotSettings
@@ -80,8 +81,6 @@ def _check_telegram(settings: BotSettings) -> list[str]:
     if settings.notifiers.provider != "telegram":
         return []
     try:
-        from bot.secrets import load_secrets
-
         secrets = load_secrets()
     except DEFENSIVE_EXC as exc:
         return [f"telegram_credentials_error:{exc}"]

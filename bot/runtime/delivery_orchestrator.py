@@ -22,8 +22,8 @@ from typing import TYPE_CHECKING, Any
 from bot.delivery import contract as _delivery_contract_module
 from bot.delivery.confluence import ConfluenceEngine, evaluate_weighted_delivery_gate
 from bot.delivery.filters import update_strategy_sl_rates
-from bot.delivery.sizing import update_strategy_win_rates
 from bot.delivery.ops_webhook import notify_ops_delivery_failed, notify_ops_tier_cap_starvation
+from bot.delivery.sizing import update_strategy_win_rates
 from bot.delivery.telegram_routing import (
     operator_dm_enabled,
     send_operator_analytics_companion,
@@ -138,7 +138,7 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
             LOG.debug(
                 "strategy stats refreshed | strategies=%d", len(rates)
             )
-        except Exception:
+        except DEFENSIVE_EXC:
             LOG.debug("strategy stats refresh failed", exc_info=True)
 
     def _is_content_duplicate(self, signal: Signal) -> bool:
@@ -1165,7 +1165,9 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
                 continue
 
             family_key = self._family_cooldown_key(signal)
-            family_minutes = int(getattr(self._bot.settings.filters, "family_cooldown_minutes", 0) or 0)
+            family_minutes = int(
+                getattr(self._bot.settings.filters, "family_cooldown_minutes", 0) or 0
+            )
             if family_key in queued_family_keys:
                 rejected_rows.append(
                     {

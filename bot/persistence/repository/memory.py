@@ -16,6 +16,7 @@ from typing import Any
 import aiosqlite
 import polars as pl
 
+from bot.market.data import read_market_data_cache, write_market_data_cache
 from bot.persistence.repository._analytics import (
     AnalyticsMixin as _MemoryRepositoryBases,
 )
@@ -795,7 +796,6 @@ class MemoryRepository(_MemoryRepositoryBases):
     async def read_market_cache(self, cache_key: str, *, max_age_s: float) -> str | None:
         if not self._conn:
             return None
-        from bot.market.data import read_market_data_cache
 
         return await read_market_data_cache(self._conn, cache_key, max_age_s=max_age_s)
 
@@ -808,7 +808,6 @@ class MemoryRepository(_MemoryRepositoryBases):
     ) -> None:
         if not self._conn:
             return
-        from bot.market.data import write_market_data_cache
 
         await write_market_data_cache(
             self._conn,
@@ -1144,7 +1143,9 @@ class MemoryRepository(_MemoryRepositoryBases):
                 END,
                 close_price = CASE
                     WHEN activated_at IS NOT NULL AND tp1_hit_at IS NOT NULL
-                        THEN COALESCE(tp1_price, take_profit_1, last_price, activation_price, entry_mid)
+                        THEN COALESCE(
+                            tp1_price, take_profit_1, last_price, activation_price, entry_mid
+                        )
                     ELSE COALESCE(last_price, activation_price, entry_mid, close_price)
                 END,
                 closed_at = ?

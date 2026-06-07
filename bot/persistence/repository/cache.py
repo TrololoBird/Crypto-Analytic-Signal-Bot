@@ -71,7 +71,9 @@ class ParquetCache:
             return
         frame.lazy().sink_parquet(path, compression="zstd", statistics=True)
 
-    def _merge_and_sink(self, existing_path: Path, incoming: pl.DataFrame, *, timestamp_col: str) -> None:
+    def _merge_and_sink(
+        self, existing_path: Path, incoming: pl.DataFrame, *, timestamp_col: str
+    ) -> None:
         if existing_path.exists():
             merged = (
                 pl.concat(
@@ -165,8 +167,7 @@ class ParquetCache:
             lazy = lazy.filter(pl.col("timestamp") >= since)
         if until is not None:
             lazy = lazy.filter(pl.col("timestamp") <= until)
-        combined = lazy.collect().unique(keep="last").sort("timestamp")
-        return combined
+        return lazy.collect().unique(keep="last").sort("timestamp")
 
     def read_recent(self, symbol: str, timeframe: str, lookback: timedelta) -> pl.DataFrame:
         """Read recent data for symbol/timeframe."""

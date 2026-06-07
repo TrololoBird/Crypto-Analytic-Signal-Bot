@@ -258,9 +258,11 @@ def _detect_indicator_divergence_extended(
         f_prev = float(work.item(-2, "fisher") or 0.0)
         fs_cur = float(work.item(-1, "fisher_signal") or 0.0)
         fs_prev = float(work.item(-2, "fisher_signal") or 0.0)
-        if direction == "long" and f_cur > fs_cur and f_prev <= fs_prev and f_prev < 0.5:
-            fisher_boost = 1.06
-        elif direction == "short" and f_cur < fs_cur and f_prev >= fs_prev and f_prev > -0.5:
+        if direction == "long":
+            fisher_cross = f_cur > fs_cur and f_prev <= fs_prev and f_prev < 0.5
+        else:
+            fisher_cross = f_cur < fs_cur and f_prev >= fs_prev and f_prev > -0.5
+        if fisher_cross:
             fisher_boost = 1.06
     score = min(1.0, score * fisher_boost)
 

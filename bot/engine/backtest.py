@@ -255,7 +255,7 @@ async def run_historical_backtest(
         msg = f"unsupported backtest interval: {event_interval}"
         raise ValueError(msg)
 
-    settings = await ensure_network_ready(settings, config_path=Path(config_path))
+    settings = await ensure_network_ready(settings, _config_path=Path(config_path))
     client = BinanceClientImpl(
         rest_timeout_seconds=settings.ws.rest_timeout_seconds,
         futures_data_request_limit_per_5m=settings.runtime.futures_data_request_limit_per_5m,

@@ -63,7 +63,7 @@ async def build_application_container_async(
     feature_flags: Any | None = None,
     config_path: str | Path = "config.toml",
 ) -> ApplicationContainer:
-    settings = await ensure_network_ready(settings, config_path=Path(config_path))
+    settings = await ensure_network_ready(settings, _config_path=Path(config_path))
     return _build_application_container_impl(
         settings,
         register_strategies=register_strategies,

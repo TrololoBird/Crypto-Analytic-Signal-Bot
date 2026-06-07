@@ -149,12 +149,16 @@ def _is_in_buffer_zone(hour: int, params: dict[str, object] | None = None) -> bo
     """Check if hour falls in pre/post buffer zone of any session (III.18)."""
     pre = int(params.get("pre_session_buffer_hours", 1)) if params else 1
     post = int(params.get("post_session_buffer_hours", 1)) if params else 1
-    for _name, start, end in _session_windows_from_params(params):
+    for _name, start, _end in _session_windows_from_params(params):
         for offset, direction in [(pre, -1), (post, 1)]:
             for buf_h in range(1, offset + 1):
                 buf_start = (start + direction * buf_h) % 24
                 buf_end = (start + direction * (buf_h - 1)) % 24
-                if _hour_in_window(hour, buf_start, buf_end if buf_end != buf_start else (buf_end + 1) % 24):
+                if _hour_in_window(
+                    hour,
+                    buf_start,
+                    buf_end if buf_end != buf_start else (buf_end + 1) % 24,
+                ):
                     return True
     return False
 

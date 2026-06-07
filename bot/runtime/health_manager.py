@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections import Counter
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -197,8 +198,7 @@ class HealthManager:
 
     async def _maybe_send_win_rate_alert(self) -> None:
         """Send operator Telegram alert when 7-day win-rate drops below 35% (п.30)."""
-        import time as _time
-        now = _time.monotonic()
+        now = time.monotonic()
         if now - self._win_rate_alert_last_sent < self._win_rate_alert_cooldown:
             return
         if not operator_console_enabled(self._bot):
@@ -230,7 +230,7 @@ class HealthManager:
             console = TelegramOperatorConsole(self._bot)
             await console.send_html_to_operators(text)
             LOG.warning("win-rate degradation alert sent | avg_wr_7d=%.2f", avg_wr)
-        except Exception:
+        except DEFENSIVE_EXC:
             LOG.debug("win-rate degradation alert failed", exc_info=True)
 
     async def health_telemetry_periodic(self) -> None:

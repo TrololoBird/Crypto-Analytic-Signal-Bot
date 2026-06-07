@@ -26,9 +26,13 @@ from pathlib import Path
 from typing import Any
 
 import aiosqlite
+import polars as pl
 
+from bot.diagnostics.startup_doctor import run_startup_doctor
 from bot.domain.research_harvest import activate_research_harvest, apply_research_harvest_profile
+from bot.engine.backtest import run_historical_backtest
 from bot.runtime.errors import DEFENSIVE_EXC
+from bot.strategies import STRATEGY_CLASSES
 
 from . import BotSettings, SignalBot, load_settings
 from .logging_config import configure_structlog
@@ -39,6 +43,7 @@ from .persistence.repository.memory import MemoryRepository
 from .telemetry import TelemetryStore, run_dir_started_at
 
 _LOGGER_STDERR_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?:,\d{3})?\s+\|")
+_SESSION_LOG_HANDLES: list[Any] = []
 
 
 def _configure_stdio_for_unicode() -> None:
@@ -66,9 +71,6 @@ def _is_preformatted_log_stderr(line: str) -> bool:
 
 def _run_doctor_check(settings: BotSettings) -> None:
     """Run startup doctor diagnostics (fail-fast on critical issues)."""
-    from bot.diagnostics.startup_doctor import run_startup_doctor
-    from bot.strategies import STRATEGY_CLASSES
-
     registered = {
         str(getattr(cls, "setup_id", "") or "").strip()
         for cls in STRATEGY_CLASSES
@@ -208,8 +210,10 @@ def configure_logging(settings: BotSettings, *, debug_mode: bool = False) -> Non
     log_path = settings.logs_dir / f"bot_{session_stamp}_{os.getpid()}.log"
     try:
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        _log_file = open(log_path, "w", buffering=1, encoding="utf-8")  # noqa: WPS515
-        handlers.append(logging.StreamHandler(_log_file))
+        log_handle = log_path.open("w", buffering=1, encoding="utf-8")
+        _SESSION_LOG_HANDLES.clear()
+        _SESSION_LOG_HANDLES.append(log_handle)
+        handlers.append(logging.StreamHandler(log_handle))
     except OSError as exc:
         sys.stderr.write(f"[ERROR] file logging disabled for {log_path}: {exc}\n")
 
@@ -740,8 +744,6 @@ def _run_backtest_command(
     interval: str,
     config_path: str | Path,
 ) -> None:
-    from bot.engine.backtest import run_historical_backtest
-
     settings = load_settings(config_path)
 
     async def _run() -> dict[str, Any]:
@@ -836,8 +838,6 @@ async def _db_migrate_command(config_path: str | Path = _CONFIG_DEFAULT) -> None
 
 async def _run_export_command(*, days: int, fmt: str, out_path: str) -> None:
     """Export signal_outcomes to CSV or Parquet (п.32)."""
-    import polars as pl
-
     settings = load_settings("config.toml")
     repo = MemoryRepository(settings.db_path, data_dir=settings.data_dir)
     await repo.initialize()
@@ -847,7 +847,8 @@ async def _run_export_command(*, days: int, fmt: str, out_path: str) -> None:
             "SELECT * FROM signal_outcomes WHERE entry_time >= ? ORDER BY entry_time",
             (cutoff,),
         )
-        cols = [d[0] for d in (await repo._conn.execute("SELECT * FROM signal_outcomes LIMIT 0")).description or []]
+        schema_cursor = await repo._conn.execute("SELECT * FROM signal_outcomes LIMIT 0")
+        cols = [d[0] for d in schema_cursor.description or []]
         if not cols:
             # fallback: fetch column names from pragma
             pragma = await repo._conn.execute_fetchall("PRAGMA table_info(signal_outcomes)")

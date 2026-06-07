@@ -269,19 +269,26 @@ def _detect_ema_bounce_extended(
         ha_open_15m = float(work_15m["ha_open"][-1] or 0.0)
         ha_close_15m = float(work_15m["ha_close"][-1] or 0.0)
         ha_high_15m = float(work_15m["ha_high"][-1] or 0.0)
-        if signal_direction == "long" and ha_low_15m == ha_open_15m and ha_close_15m > ha_open_15m:
-            ha_boost = 1.06
-        elif signal_direction == "short" and ha_high_15m == ha_open_15m and ha_close_15m < ha_open_15m:
+        if signal_direction == "long":
+            if (
+                ha_low_15m == ha_open_15m
+                and ha_close_15m > ha_open_15m
+            ):
+                ha_boost = 1.06
+        elif (
+            ha_high_15m == ha_open_15m
+            and ha_close_15m < ha_open_15m
+        ):
             ha_boost = 1.06
 
     kama_boost = 1.0
     if "kama10" in work_15m.columns:
         kama_val = float(work_15m["kama10"][-1] or 0.0)
-        if kama_val > 0.0:
-            if signal_direction == "long" and close > kama_val:
-                kama_boost = 1.05
-            elif signal_direction == "short" and close < kama_val:
-                kama_boost = 1.05
+        if kama_val > 0.0 and (
+            (signal_direction == "long" and close > kama_val)
+            or (signal_direction == "short" and close < kama_val)
+        ):
+            kama_boost = 1.05
 
     touch_quality = max(0.0, 1.0 - min(ema_dist_atr / max(bounce_threshold_atr, 0.05), 1.0))
     body_quality = min(1.0, abs(close - open_) / atr / 0.5) if atr > 0.0 else 0.5

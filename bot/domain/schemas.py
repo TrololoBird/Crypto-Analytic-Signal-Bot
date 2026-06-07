@@ -8,10 +8,9 @@ from typing import TYPE_CHECKING, Any
 
 from ..delivery.contract import (
     DEFAULT_SCALE_WEIGHTS,
-    DEFAULT_TARGET_RR,
-    resolve_target_rr,
     default_ttl_bars,
     normalize_scale_weights,
+    resolve_target_rr,
     valid_until_from,
     validate_signal_contract,
 )
@@ -416,7 +415,10 @@ class Signal:
         """
         rounded_low = f"{self.entry_low:.2f}"
         rounded_high = f"{self.entry_high:.2f}"
-        raw = f"{self.symbol}|{self.direction}|{self.setup_id}|{rounded_low}|{rounded_high}|{self.timeframe}"
+        raw = (
+            f"{self.symbol}|{self.direction}|{self.setup_id}|"
+            f"{rounded_low}|{rounded_high}|{self.timeframe}"
+        )
         return hashlib.sha1(raw.encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
 
     @property

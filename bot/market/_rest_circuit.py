@@ -45,7 +45,7 @@ class RestCircuitMixin:
             )
             # Probe failure likely means dead proxy — trigger rotation.
             if hasattr(self, "_try_failover_proxy"):
-                asyncio.create_task(
+                self._circuit_failover_task = asyncio.create_task(
                     self._try_failover_proxy(f"circuit_probe_failed:{operation}"),
                     name="circuit_failover",
                 )

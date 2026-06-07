@@ -492,7 +492,7 @@ class SignalBot:
 
     async def start(self) -> None:
         """Initial storage checks and WS bootstrap."""
-        updated = await ensure_network_ready(self.settings, config_path=Path("config.toml"))
+        updated = await ensure_network_ready(self.settings, _config_path=Path("config.toml"))
         if updated is not self.settings:
             self.settings = updated
             LOG.info("network settings refreshed after bootstrap probe")
@@ -517,7 +517,7 @@ class SignalBot:
         await self._ensure_dashboard_started()
 
         try:
-            cleanup_count = await self._modern_repo.cleanup_active_signals_on_startup()
+            await self._modern_repo.cleanup_active_signals_on_startup()
             expired_count = await self._modern_repo.expire_open_signals_older_than(
                 max_age_minutes=240
             )

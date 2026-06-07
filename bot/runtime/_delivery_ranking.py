@@ -10,6 +10,7 @@ from bot.delivery.contract import validate_signal_contract
 from bot.delivery.tiers import rank_key as tier_rank_key
 from bot.delivery.trade_plan import evaluate_publish_readiness
 from bot.domain.limit_entry import resolve_late_entry_chase_pct
+from bot.domain.strategy_catalog import catalog_setup_family
 from bot.runtime.errors import DEFENSIVE_EXC
 
 if TYPE_CHECKING:
@@ -58,8 +59,6 @@ class DeliveryRankingMixin:
 
     @staticmethod
     def _family_cooldown_key(signal: Signal) -> str:
-        from bot.domain.strategy_catalog import catalog_setup_family
-
         family = catalog_setup_family(signal.setup_id)
         return f"family:{family}:{signal.symbol}:{signal.direction}"
 

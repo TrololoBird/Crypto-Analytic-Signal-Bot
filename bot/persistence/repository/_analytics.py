@@ -783,7 +783,10 @@ class AnalyticsMixin:
             query += " AND COALESCE(closed_at, created_at) >= ?"
             params.append(since_dt.isoformat())
         query += " ORDER BY COALESCE(closed_at, created_at) DESC"
-        header = "tracking_id,setup_id,symbol,direction,result,was_profitable,pnl_r_multiple,pnl_pct,activated_at,closed_at,created_at"
+        header = (
+            "tracking_id,setup_id,symbol,direction,result,was_profitable,"
+            "pnl_r_multiple,pnl_pct,activated_at,closed_at,created_at"
+        )
         async with self._conn.execute(query, params) as cursor:
             rows = await cursor.fetchall()
         lines = [header]

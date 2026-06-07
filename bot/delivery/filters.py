@@ -331,9 +331,12 @@ def _regime_short_gate(
     if profile in reversal_profiles or signal.setup_id in reversal_setups or family == "reversal":
         # Reversal shorts are NOT unconditionally exempt in a confirmed bull regime.
         # In markup/bull + uptrend bias, counter-trend shorts have >80% SL rate (empirical).
-        # Only allow when btc_phase signals distribution or transition (genuine reversal opportunity).
+        # Only allow when btc_phase signals distribution or transition
+        # (genuine reversal opportunity).
         _regime_chk = str(getattr(prepared, "market_regime", "") or "").lower()
-        _btc_bias_chk = str(getattr(prepared, "btc_bias", None) or signal.btc_bias or "neutral").lower()
+        _btc_bias_chk = str(
+            getattr(prepared, "btc_bias", None) or signal.btc_bias or "neutral"
+        ).lower()
         _bias_4h_chk = str(getattr(prepared, "bias_4h", "") or "neutral").lower()
         _btc_phase_chk = str(getattr(prepared, "btc_phase", "") or "").lower()
         _bull_regime_chk = _regime_chk in {"bull", "markup", "risk_on"}
@@ -637,7 +640,7 @@ def _entry_staleness_gate(
     For limit orders the entry is a structural level (support for longs,
     resistance for shorts).  Price drifting away on the *intended* side is
     normal — we are waiting for the fill.  Only reject when price has moved
-    *against* the direction past the entry level by more than N×ATR, which
+    *against* the direction past the entry level by more than NxATR, which
     means the structural level was violated and the setup is invalidated.
 
     LONG : entry is below current price (support).  Reject if current_price

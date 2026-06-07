@@ -1307,7 +1307,9 @@ def _volume_profile(df: pl.DataFrame, bins: int = 12) -> pl.Expr:
     return pl.lit(0.0 if poc is None else poc).cast(pl.Float64).alias("volume_profile")
 
 
-def _classic_pivot_points(df: pl.DataFrame) -> tuple[float | None, float | None, float | None, float | None, float | None]:
+def _classic_pivot_points(
+    df: pl.DataFrame,
+) -> tuple[float | None, float | None, float | None, float | None, float | None]:
     """Classic daily pivot points from the last ~24h of data (or frame range).
 
     Returns (PP, R1, R2, S1, S2). Returns (None, None, None, None, None) if

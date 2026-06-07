@@ -97,10 +97,10 @@ def detect_multi_tf_trend(
             if close_htf is not None:
                 if close_htf < cloud_top and close_htf > cloud_bottom:
                     ichimoku_cloud_penalty = 0.80
-                elif close_htf < cloud_bottom and spec_direction == "long":
-                    _reject(prepared, setup_id, "ichimoku_cloud_opposes", sa=sa, sb=sb)
-                    return None
-                elif close_htf > cloud_top and spec_direction == "short":
+                elif (
+                    (close_htf < cloud_bottom and spec_direction == "long")
+                    or (close_htf > cloud_top and spec_direction == "short")
+                ):
                     _reject(prepared, setup_id, "ichimoku_cloud_opposes", sa=sa, sb=sb)
                     return None
 

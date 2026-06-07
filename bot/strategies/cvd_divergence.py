@@ -61,14 +61,16 @@ def detect_cvd_divergence(frame: pl.DataFrame, *, timeframe: str = "15m") -> Spe
                 rsi=as_float(work.item(-1, "rsi14"), 50.0),
             )
     # Sessional exhaustion: price new session extreme but session_cvd diverges
-    exhaustion = _detect_session_cvd_exhaustion(work, atr=atr, delta_std=delta_std, timeframe=timeframe)
+    exhaustion = _detect_session_cvd_exhaustion(
+        work, atr=atr, delta_std=delta_std, timeframe=timeframe
+    )
     if exhaustion is not None:
         return exhaustion
     return None
 
 
 def _detect_session_cvd_exhaustion(
-    work: "pl.DataFrame",
+    work: pl.DataFrame,
     *,
     atr: float,
     delta_std: float,
@@ -96,8 +98,12 @@ def _detect_session_cvd_exhaustion(
     price_high_b = float(window_b["high"].max() or 0.0)
     price_low_b = float(window_b["low"].min() or 0.0)
     # Use intra-window CVD change (end - start) to avoid false signals from daily reset at midnight
-    cvd_change_a = float(window_a["session_cvd"][-1] or 0.0) - float(window_a["session_cvd"][0] or 0.0)
-    cvd_change_b = float(window_b["session_cvd"][-1] or 0.0) - float(window_b["session_cvd"][0] or 0.0)
+    cvd_change_a = (
+        float(window_a["session_cvd"][-1] or 0.0) - float(window_a["session_cvd"][0] or 0.0)
+    )
+    cvd_change_b = (
+        float(window_b["session_cvd"][-1] or 0.0) - float(window_b["session_cvd"][0] or 0.0)
+    )
 
     # Require meaningful CVD divergence between windows (at least 1 sigma)
     cvd_diff = abs(cvd_change_b - cvd_change_a)
@@ -117,7 +123,10 @@ def _detect_session_cvd_exhaustion(
             stop_basis=entry,
             atr=atr,
             timeframe=timeframe,
-            reasons=(f"session_cvd_exhaustion_short cvd_chg_a={cvd_change_a:.4f} cvd_chg_b={cvd_change_b:.4f} price_hh={price_high_b:.4f} rsi={rsi:.1f}",),
+            reasons=(
+                f"session_cvd_exhaustion_short cvd_chg_a={cvd_change_a:.4f} "
+                f"cvd_chg_b={cvd_change_b:.4f} price_hh={price_high_b:.4f} rsi={rsi:.1f}",
+            ),
             rsi=rsi,
         )
 
@@ -132,7 +141,10 @@ def _detect_session_cvd_exhaustion(
             stop_basis=entry,
             atr=atr,
             timeframe=timeframe,
-            reasons=(f"session_cvd_exhaustion_long cvd_chg_a={cvd_change_a:.4f} cvd_chg_b={cvd_change_b:.4f} price_ll={price_low_b:.4f} rsi={rsi:.1f}",),
+            reasons=(
+                f"session_cvd_exhaustion_long cvd_chg_a={cvd_change_a:.4f} "
+                f"cvd_chg_b={cvd_change_b:.4f} price_ll={price_low_b:.4f} rsi={rsi:.1f}",
+            ),
             rsi=rsi,
         )
 

@@ -30,15 +30,30 @@ import logging
 import re
 import time
 from dataclasses import dataclass
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import aiohttp
 import websockets
 
-from bot.domain.config import BotSettings, NetworkConfig, load_settings
+from bot.domain.config import BotSettings, NetworkConfig
 from bot.market.data import BinanceFuturesMarketData
 from bot.market.network_proxy import websockets_connect_kwargs
 from bot.market.rest_impl import BinanceClientImpl
+from bot.runtime.errors import DEFENSIVE_EXC, defensive_exc_types
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+try:
+    import stem
+    import stem.control
+except ImportError:
+    stem = None  # type: ignore[assignment,misc]
+
+try:
+    from aiohttp_socks import ProxyConnector
+except ImportError:
+    ProxyConnector = None  # type: ignore[misc,assignment]
 
 LOG = logging.getLogger("bot.market.proxy_bootstrap")
 
@@ -205,7 +220,12 @@ async def probe_ws_handshake(
                 return True
     except (KeyboardInterrupt, SystemExit):
         raise
-    except Exception as exc:
+    except (
+        OSError,
+        ConnectionError,
+        TimeoutError,
+        websockets.exceptions.WebSocketException,
+    ) as exc:
         LOG.debug("ws handshake probe failed | proxy=%s err=%s", proxy_url, exc)
         return False
 
@@ -218,7 +238,7 @@ async def _probe_rest(net: NetworkConfig) -> bool:
         return len(symbols) > _REST_SYMBOL_THRESHOLD
     except (KeyboardInterrupt, SystemExit):
         raise
-    except Exception:
+    except defensive_exc_types(aiohttp.ClientError):
         return False
     finally:
         await market.close()
@@ -267,15 +287,16 @@ async def _detect_local_tor() -> str | None:
         async with asyncio.timeout(2.0):
             _r, writer = await asyncio.open_connection("127.0.0.1", 9050)
             writer.close()
-            with contextlib.suppress(Exception):
+            with contextlib.suppress(OSError):
                 await writer.wait_closed()
+    except (OSError, ConnectionRefusedError, TimeoutError):
+        return None
+    else:
         LOG.info("local Tor daemon detected on 127.0.0.1:9050 — adding to pool")
         return "socks5://127.0.0.1:9050"
-    except Exception:
-        return None
 
 
-async def tor_rotate_circuit(*, control_port: int = 9051, timeout: float = 15.0) -> bool:
+async def tor_rotate_circuit(*, control_port: int = 9051, timeout_s: float = 15.0) -> bool:
     """
     Signal Tor to build a fresh circuit (new exit IP) via NEWNYM.
 
@@ -287,10 +308,7 @@ async def tor_rotate_circuit(*, control_port: int = 9051, timeout: float = 15.0)
     Returns True on success, False if stem is unavailable or control port unreachable.
     Used by ``run_proxy_refresh_loop`` to rotate the Tor exit IP every refresh cycle.
     """
-    try:
-        import stem  # type: ignore[import-untyped]
-        import stem.control  # type: ignore[import-untyped]
-    except ImportError:
+    if stem is None:
         return False
 
     loop = asyncio.get_event_loop()
@@ -302,21 +320,21 @@ async def tor_rotate_circuit(*, control_port: int = 9051, timeout: float = 15.0)
                 wait = ctrl.get_newnym_wait()
                 if wait > 0:
                     LOG.debug("Tor NEWNYM cooldown %.1fs — waiting", wait)
-                    time.sleep(min(wait, timeout * 0.8))
+                    time.sleep(min(wait, timeout_s * 0.8))
                 ctrl.signal(stem.Signal.NEWNYM)
                 return True
-        except Exception as exc:
+        except (OSError, ConnectionError, ValueError, AttributeError) as exc:
             LOG.debug("Tor circuit rotation failed: %s", exc)
             return False
 
     try:
-        async with asyncio.timeout(timeout):
+        async with asyncio.timeout(timeout_s):
             result: bool = await loop.run_in_executor(None, _do_rotate)
             if result:
                 LOG.info("Tor circuit rotated via NEWNYM — fresh exit IP active")
             return result
     except TimeoutError:
-        LOG.debug("Tor circuit rotation timed out after %.1fs", timeout)
+        LOG.debug("Tor circuit rotation timed out after %.1fs", timeout_s)
         return False
 
 
@@ -334,7 +352,7 @@ async def _fetch_source(
                     LOG.debug("proxy source %s → HTTP %d", url, resp.status)
                     return []
                 text = await resp.text()
-    except Exception as exc:
+    except defensive_exc_types(aiohttp.ClientError) as exc:
         LOG.debug("proxy source fetch failed | url=%s err=%s", url, exc)
         return []
 
@@ -344,11 +362,9 @@ async def _fetch_source(
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
-        if line.startswith(f"{scheme}://"):
-            out.append(line)
-        elif line.startswith("socks5://") and scheme == "socks5":
-            out.append(line)
-        elif line.startswith("http://") and scheme == "http":
+        if line.startswith(f"{scheme}://") or (
+            line.startswith("socks5://") and scheme == "socks5"
+        ) or (line.startswith("http://") and scheme == "http"):
             out.append(line)
         elif "://" not in line and ":" in line:
             # bare ip:port — prefix with requested protocol
@@ -360,7 +376,7 @@ async def _fetch_source(
 async def _validate_proxy_binance(
     proxy_url: str,
     sem: asyncio.Semaphore,
-    timeout: float = _VALIDATE_TIMEOUT_S,
+    timeout_s: float = _VALIDATE_TIMEOUT_S,
 ) -> tuple[str, float] | None:
     """
     Validate *proxy_url* against the real Binance fstream ping endpoint.
@@ -368,34 +384,29 @@ async def _validate_proxy_binance(
     Returns ``(proxy_url, latency_ms)`` on success, ``None`` on any failure.
     """
     is_socks = proxy_url.startswith("socks")
-    if is_socks:
-        try:
-            from aiohttp_socks import ProxyConnector  # type: ignore[import-untyped]
-        except ImportError:
-            return None
+    if is_socks and ProxyConnector is None:
+        return None
 
     async with sem:
         connector: aiohttp.BaseConnector | None = None
         try:
             t0 = time.monotonic()
-            async with asyncio.timeout(timeout):
+            async with asyncio.timeout(timeout_s):
                 if is_socks:
-                    from aiohttp_socks import ProxyConnector  # type: ignore[import-untyped]
                     connector = ProxyConnector.from_url(proxy_url, rdns=True)
-                    async with aiohttp.ClientSession(connector=connector) as sess:
-                        async with sess.get(_BINANCE_PING_URL, ssl=True) as resp:
-                            if resp.status == 200:
-                                return proxy_url, (time.monotonic() - t0) * 1000.0
+                    async with aiohttp.ClientSession(connector=connector) as sess, sess.get(
+                        _BINANCE_PING_URL, ssl=True
+                    ) as resp:
+                        if resp.status == 200:
+                            return proxy_url, (time.monotonic() - t0) * 1000.0
                 else:
-                    # HTTP CONNECT proxy — pass via per-request param
                     connector = aiohttp.TCPConnector()
-                    async with aiohttp.ClientSession(connector=connector) as sess:
-                        async with sess.get(
-                            _BINANCE_PING_URL, proxy=proxy_url, ssl=True
-                        ) as resp:
-                            if resp.status == 200:
-                                return proxy_url, (time.monotonic() - t0) * 1000.0
-        except Exception:
+                    async with aiohttp.ClientSession(connector=connector) as sess, sess.get(
+                        _BINANCE_PING_URL, proxy=proxy_url, ssl=True
+                    ) as resp:
+                        if resp.status == 200:
+                            return proxy_url, (time.monotonic() - t0) * 1000.0
+        except defensive_exc_types(aiohttp.ClientError):
             pass
         finally:
             if connector is not None and not connector.closed:
@@ -580,7 +591,7 @@ def _write_proxies_to_config(path: Path, urls: list[str]) -> None:
 async def ensure_network_ready(
     settings: BotSettings,
     *,
-    config_path: Path | None = None,
+    _config_path: Path | None = None,
     auto_discover: bool = True,
 ) -> BotSettings:
     """
@@ -668,7 +679,7 @@ async def run_proxy_refresh_loop(
     bot: object,
     *,
     interval_seconds: float = _POOL_REFRESH_INTERVAL_S,
-    config_path: Path | None = None,
+    _config_path: Path | None = None,
 ) -> None:
     """
     Background task — re-discover working proxies every *interval_seconds*
@@ -686,7 +697,7 @@ async def run_proxy_refresh_loop(
         try:
             await asyncio.wait_for(shutdown.wait(), timeout=interval_seconds)
             break  # shutdown fired
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
 
         LOG.info("proxy refresh: scheduled re-discovery starting")
@@ -710,7 +721,7 @@ async def run_proxy_refresh_loop(
 
         try:
             best = await auto_discover_proxies()
-        except Exception as exc:
+        except DEFENSIVE_EXC as exc:
             LOG.warning("proxy refresh: discovery error | %s", exc)
             continue
 
@@ -732,7 +743,7 @@ async def run_proxy_refresh_loop(
             try:
                 await inner._apply_active_proxy(best[0])
                 inner._last_failover_mono = 0.0  # reset rate-limit after deliberate swap
-            except Exception as exc:
+            except DEFENSIVE_EXC as exc:
                 LOG.warning("proxy refresh: REST client update failed | %s", exc)
 
         # Update WS manager
@@ -740,7 +751,7 @@ async def run_proxy_refresh_loop(
         if ws_mgr is not None and hasattr(ws_mgr, "update_proxy_url"):
             try:
                 ws_mgr.update_proxy_url(best[0])
-            except Exception as exc:
+            except DEFENSIVE_EXC as exc:
                 LOG.warning("proxy refresh: WS proxy update failed | %s", exc)
 
         LOG.info(
@@ -754,7 +765,7 @@ async def run_proxy_refresh_loop(
 async def retry_network_after_failure(
     settings: BotSettings,
     *,
-    config_path: Path | None = None,
+    _config_path: Path | None = None,
 ) -> BotSettings:
     """Re-run discovery when REST paths fail mid-runtime."""
     urls = settings.network.effective_proxy_urls()

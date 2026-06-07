@@ -247,9 +247,10 @@ def _detect_vwap_trend_extended(
         ha_open = _as_float(work_15m["ha_open"][-1])
         ha_close = _as_float(work_15m["ha_close"][-1])
         ha_high = _as_float(work_15m["ha_high"][-1])
-        if direction == "long" and ha_low == ha_open and ha_close > ha_open:
-            ha_boost = 1.05
-        elif direction == "short" and ha_high == ha_open and ha_close < ha_open:
+        if direction == "long":
+            if ha_low == ha_open and ha_close > ha_open:
+                ha_boost = 1.05
+        elif ha_high == ha_open and ha_close < ha_open:
             ha_boost = 1.05
     score = min(1.0, score * ha_boost)
 

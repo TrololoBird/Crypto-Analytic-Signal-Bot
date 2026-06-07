@@ -6,7 +6,8 @@ from typing import TYPE_CHECKING, ClassVar
 
 from ..features.prepare import _swing_points
 from ..setups import _build_signal, _compute_dynamic_score, _reject
-from ._common import as_float as _as_float, confirmed_pattern_frame
+from ._common import as_float as _as_float
+from ._common import confirmed_pattern_frame
 from .roadmap_base import RoadmapSetup
 
 if TYPE_CHECKING:
@@ -49,7 +50,10 @@ def detect_funding_reversal(
         floor_extreme = 0.0
     relevant_extreme = max(cap_extreme, floor_extreme)
     if relevant_extreme > 0.0:
-        dynamic_threshold = max(funding_threshold * 0.40, min(funding_threshold * 1.50, relevant_extreme * dynamic_mult))
+        dynamic_threshold = max(
+            funding_threshold * 0.40,
+            min(funding_threshold * 1.50, relevant_extreme * dynamic_mult),
+        )
     else:
         dynamic_threshold = funding_threshold
     effective_threshold = max(0.00002, dynamic_threshold)

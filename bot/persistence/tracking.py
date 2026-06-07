@@ -19,6 +19,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from bot.domain.strategy_catalog import catalog_setup_family
 from bot.persistence._tracking_review import _price_in_entry_zone
 from bot.persistence.tracking_events import SignalTrackingEvent
 from bot.runtime.errors import DEFENSIVE_EXC
@@ -694,8 +695,6 @@ class SignalTracker(_SignalTrackerBases):
             symbol,
             "outcome_sl",
         )
-        from ..domain.strategy_catalog import catalog_setup_family
-
         family = catalog_setup_family(setup_id)
         await repo.set_cooldown(
             f"outcome_sl_family:{family}:{symbol}:{direction}",

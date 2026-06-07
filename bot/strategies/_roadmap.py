@@ -10,8 +10,6 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-_LOG = logging.getLogger("bot.strategies")
-
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ._common import (
     as_float as _as_float,
@@ -28,6 +26,8 @@ from ._common import (
 from ._common import (
     previous as _prev,
 )
+
+_LOG = logging.getLogger("bot.strategies")
 
 if TYPE_CHECKING:
     import polars as pl

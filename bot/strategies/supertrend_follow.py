@@ -6,7 +6,8 @@ from typing import TYPE_CHECKING, ClassVar
 from ..features.prepare import _swing_points
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.utils import build_structural_targets
-from ._common import as_float as _as_float, confirmed_pattern_frame
+from ._common import as_float as _as_float
+from ._common import confirmed_pattern_frame
 from .roadmap_base import RoadmapSetup
 
 if TYPE_CHECKING:
@@ -219,9 +220,11 @@ def detect_supertrend_follow(
         if sa > 0.0 and sb > 0.0:
             cloud_top = max(sa, sb)
             cloud_bottom = min(sa, sb)
-            if direction == "long" and close > cloud_top:
-                ichimoku_boost = 1.08
-            elif direction == "short" and close < cloud_bottom:
+            ichimoku_clear = (
+                (direction == "long" and close > cloud_top)
+                or (direction == "short" and close < cloud_bottom)
+            )
+            if ichimoku_clear:
                 ichimoku_boost = 1.08
 
     ha_boost = 1.0
@@ -230,9 +233,10 @@ def detect_supertrend_follow(
         ha_open = _as_float(work_15m["ha_open"][-1])
         ha_close = _as_float(work_15m["ha_close"][-1])
         ha_high = _as_float(work_15m["ha_high"][-1])
-        if direction == "long" and ha_low == ha_open and ha_close > ha_open:
-            ha_boost = 1.06
-        elif direction == "short" and ha_high == ha_open and ha_close < ha_open:
+        if direction == "long":
+            if ha_low == ha_open and ha_close > ha_open:
+                ha_boost = 1.06
+        elif ha_high == ha_open and ha_close < ha_open:
             ha_boost = 1.06
 
     score = min(1.0, score * ichimoku_boost * ha_boost)
