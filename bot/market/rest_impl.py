@@ -530,7 +530,15 @@ class RestHttpMixin(RestCircuitMixin):
                     if status == 418:
                         self._rate_limit_error_streak += 1
                         retry_after = self._capture_retry_after(headers)
-                        self._set_rate_limit_pause(1800.0)
+                        spec_418 = _PUBLIC_ENDPOINT_REGISTRY.get(
+                            operation, _PublicEndpointSpec("x")
+                        )
+                        if spec_418.ip_limited:
+                            self._set_futures_data_pause(1800.0)
+                        elif spec_418.funding_ip_limited:
+                            self._set_funding_endpoint_pause(1800.0)
+                        else:
+                            self._set_rate_limit_pause(1800.0)
                         LOG.critical(
                             (
                                 "BINANCE IP BAN (418) | retry_after=%s pause=1800s+ "
@@ -2600,7 +2608,8 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         cache_key = (symbol, period)
         now = time.monotonic()
         cached = self._basis_cache.get(cache_key)
-        if cached is not None and now - cached[0] < 900:
+        _basis_ttl = float(_CACHE_TTL.get("basis", 1800))
+        if cached is not None and now - cached[0] < _basis_ttl:
             self._record_endpoint_snapshot(
                 "basis",
                 source="rest",
