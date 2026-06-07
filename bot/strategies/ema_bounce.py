@@ -172,6 +172,9 @@ def _detect_ema_bounce_extended(
         elif close_1h < ema50_1h and ema20_1h < ema50_1h:
             bias_1h = "downtrend"
 
+    vol_ratio = float(work_15m.item(-1, "volume_ratio20") or 1.0)
+    min_vol = float(dynamic_params.get("min_volume_ratio", defaults.get("min_volume_ratio", 1.0)))
+
     signal_direction: str | None = None
     recent = work_15m.tail(5)
     if bias_1h == "uptrend":
@@ -184,6 +187,7 @@ def _detect_ema_bounce_extended(
             and (close - prev_close >= atr * bounce_threshold_atr or close_position >= 0.60)
             and close >= ema20 * (1.0 - float(ema_touch_tolerance_pct))
             and close_position >= 0.55
+            and vol_ratio >= min_vol
         )
         if touch_ema and bounce:
             signal_direction = "long"
@@ -193,6 +197,7 @@ def _detect_ema_bounce_extended(
                 f"ema20_1h={ema20_1h:.4f}",
                 f"ema50_1h={ema50_1h:.4f}",
                 f"ema20_15m={ema20:.4f}",
+                f"vol_ratio={vol_ratio:.2f}",
             ]
     elif bias_1h == "downtrend":
         recent_high = float(recent["high"].max())
@@ -204,6 +209,7 @@ def _detect_ema_bounce_extended(
             and (prev_close - close >= atr * bounce_threshold_atr or close_position <= 0.40)
             and close <= ema20 * (1.0 + float(ema_touch_tolerance_pct))
             and close_position <= 0.45
+            and vol_ratio >= min_vol
         )
         if touch_ema and bounce:
             signal_direction = "short"
@@ -213,13 +219,13 @@ def _detect_ema_bounce_extended(
                 f"ema20_1h={ema20_1h:.4f}",
                 f"ema50_1h={ema50_1h:.4f}",
                 f"ema20_15m={ema20:.4f}",
+                f"vol_ratio={vol_ratio:.2f}",
             ]
 
     if signal_direction is None:
         _reject(prepared, setup_id, "no_bounce_pattern", bias_1h=bias_1h)
         return None
 
-    vol_ratio = float(work_15m.item(-1, "volume_ratio20") or 1.0)
     rsi = float(work_15m.item(-1, "rsi14") or 50.0)
     adx_1h = float(work_1h.item(-1, "adx14") or 0.0)
     if adx_1h > 0.0 and adx_1h < float(min_adx):
@@ -343,6 +349,7 @@ class EmaBounceSetup(SpecDetectorSetup):
         "base_score": 0.62,
         "min_adx_1h": 15.0,
         "vol_ratio_threshold": 1.0,
+        "min_volume_ratio": 1.0,
         "bias_mismatch_penalty": 0.75,
         "tp_too_close_penalty": 0.75,
         "min_rr": 1.9,

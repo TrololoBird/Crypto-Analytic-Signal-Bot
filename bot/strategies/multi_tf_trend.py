@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, ClassVar
 from ._roadmap import (
     _build_atr_signal,
     _finite_or_none,
+    _last,
     _prev,
     _reject,
 )
@@ -44,11 +45,15 @@ def detect_multi_tf_trend(
             ltf_bars=ltf.height,
         )
         return None
-    if "ema50" not in htf.columns:
-        _reject(prepared, setup_id, "required_feature_missing", missing_fields=("ema50",))
+    if "ema50" not in htf.columns or "atr14" not in htf.columns:
+        missing = [c for c in ("ema50", "atr14") if c not in htf.columns]
+        _reject(prepared, setup_id, "required_feature_missing", missing_fields=tuple(missing))
         return None
     htf_ema = htf["ema50"]
+    htf_atr = float(htf["atr14"][-1]) if htf["atr14"][-1] is not None else 0.0
     htf_slope = float(htf_ema[-1] - htf_ema[-5])
+    htf_slope_atr = (htf_slope / htf_atr) if htf_atr > 0.0 else 0.0
+    min_slope_atr = float(params.get("min_slope_atr", 0.03))
     if ltf.height < 6:
         _reject(prepared, setup_id, "insufficient_bars")
         return None
@@ -57,9 +62,9 @@ def detect_multi_tf_trend(
     ltf_noise = (
         max(ltf_atr * 0.08, abs(htf_slope) * 0.05) if ltf_atr > 0.0 else abs(htf_slope) * 0.05
     )
-    if htf_slope > 0.0 and ltf_delta >= -ltf_noise:
+    if htf_slope_atr > min_slope_atr and ltf_delta >= -ltf_noise:
         spec_direction = "long"
-    elif htf_slope < 0.0 and ltf_delta <= ltf_noise:
+    elif htf_slope_atr < -min_slope_atr and ltf_delta <= ltf_noise:
         spec_direction = "short"
     else:
         _reject(
@@ -153,7 +158,7 @@ def detect_multi_tf_trend(
         reasons=[
             f"multi_tf_pullback_{direction}",
             f"adx_1h={adx_1h:.1f}",
-            f"htf_ema50_slope={htf_slope:.6f}",
+            f"htf_ema50_slope_atr={htf_slope_atr:.4f}",
             f"rsi15={rsi_15m:.1f}",
             f"votes_up={up_votes} votes_down={down_votes}",
         ],
@@ -177,6 +182,7 @@ class MultiTFTrendSetup(RoadmapSetup):
         "pullback_rsi_short_min": 38.0,
         "max_adverse_depth_imbalance": 1.00,
         "min_trend_votes": 2,
+        "min_slope_atr": 0.03,
     }
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:

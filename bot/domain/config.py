@@ -318,10 +318,10 @@ class FilterConfig(_StrictModel):
     freshness_5m_minutes: int = Field(default=8, ge=5, le=120)
     freshness_1h_hours: int = Field(default=3, ge=1, le=48)
     freshness_4h_hours: int = Field(default=10, ge=1, le=240)
-    min_bars_15m: int = Field(default=210, ge=30, le=5000)
-    min_bars_1h: int = Field(default=210, ge=30, le=5000)
-    min_bars_5m: int = Field(default=100, ge=30, le=5000)
-    min_bars_4h: int = Field(default=210, ge=30, le=5000)
+    min_bars_15m: int = Field(default=500, ge=30, le=5000)
+    min_bars_1h: int = Field(default=300, ge=30, le=5000)
+    min_bars_5m: int = Field(default=200, ge=30, le=5000)
+    min_bars_4h: int = Field(default=300, ge=30, le=5000)
     # Mark price sanity guard: reject if mark and last diverge beyond this pct.
     max_mark_price_deviation_pct: float = Field(default=0.005, ge=0.0, le=0.10)
     # fix-sl-A: max |mark-entry|/entry as multiple of atr_pct (1.2 => 1.2 * atr_pct%).

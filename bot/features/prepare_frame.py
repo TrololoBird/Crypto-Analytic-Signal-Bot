@@ -192,10 +192,10 @@ def _finite_float(value: object, default: float = 0.0) -> float:
 
 def min_required_bars(
     *,
-    min_bars_15m: int = 210,
-    min_bars_1h: int = 210,
-    min_bars_5m: int = 96,
-    min_bars_4h: int = 210,
+    min_bars_15m: int = 500,
+    min_bars_1h: int = 300,
+    min_bars_5m: int = 200,
+    min_bars_4h: int = 300,
 ) -> dict[str, int]:
     return {
         "15m": int(min_bars_15m),

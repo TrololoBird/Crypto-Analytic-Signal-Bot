@@ -1,4 +1,4 @@
-"""Minimal historical walk-forward backtest (no Telegram, no delivery)."""
+"""Historical walk-forward backtest with EV, MAE/MFE tracking."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import contextlib
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import polars as pl
@@ -27,12 +28,13 @@ if TYPE_CHECKING:
 LOG = logging.getLogger("bot.engine.backtest")
 
 _BACKTEST_MINIMUMS = min_required_bars(
-    min_bars_15m=120,
-    min_bars_1h=72,
-    min_bars_5m=96,
-    min_bars_4h=42,
+    min_bars_15m=500,
+    min_bars_1h=300,
+    min_bars_5m=200,
+    min_bars_4h=300,
 )
-_WARMUP_DAYS = 4
+_WARMUP_DAYS = 14
+_MIN_BACKTEST_DAYS = 7
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +49,8 @@ class BacktestTrade:
     entry_price: float
     exit_price: float
     pnl_pct: float
+    mae_pct: float
+    mfe_pct: float
 
 
 def _build_engine(settings: BotSettings) -> SignalEngine:
@@ -102,13 +106,22 @@ def _build_frames_at(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class ExitSimResult:
+    result: str
+    pnl_pct: float
+    exit_time: datetime | None
+    mae_pct: float
+    mfe_pct: float
+
+
 def simulate_signal_exit(
     signal: Signal,
     forward_bars: pl.DataFrame,
     *,
     move_stop_to_break_even_on_tp1: bool = True,
-) -> tuple[str, float, datetime | None]:
-    """Simulate TP/SL/expiry on OHLC bars after signal creation (conservative SL-first)."""
+) -> ExitSimResult:
+    """Simulate TP/SL/expiry on OHLC bars, tracking MAE/MFE."""
     direction = str(signal.direction or "").strip().lower()
     entry = (float(signal.entry_low) + float(signal.entry_high)) / 2.0
     stop = float(signal.stop)
@@ -118,52 +131,66 @@ def simulate_signal_exit(
     if valid_until is not None and valid_until.tzinfo is None:
         valid_until = valid_until.replace(tzinfo=UTC)
 
+    mae: float = 0.0
+    mfe: float = 0.0
+
     for row in forward_bars.iter_rows(named=True):
         bar_time = row.get("close_time")
         if not isinstance(bar_time, datetime):
             continue
         if bar_time.tzinfo is None:
             bar_time = bar_time.replace(tzinfo=UTC)
-        if valid_until is not None and bar_time > valid_until:
-            return "expired", entry, bar_time
 
         high = float(row.get("high") or 0.0)
         low = float(row.get("low") or 0.0)
+
+        if direction == "long":
+            adverse = (entry - low) / entry * 100.0
+            favorable = (high - entry) / entry * 100.0
+        else:
+            adverse = (high - entry) / entry * 100.0
+            favorable = (entry - low) / entry * 100.0
+        mae = max(mae, adverse)
+        mfe = max(mfe, favorable)
+
+        if valid_until is not None and bar_time > valid_until:
+            return ExitSimResult("expired", entry, bar_time, mae, mfe)
+
         if direction == "long":
             if low <= stop:
                 pnl = (stop - entry) / entry * 100.0
-                return "stop_loss", pnl, bar_time
+                return ExitSimResult("stop_loss", pnl, bar_time, mae, mfe)
             if signal.single_target_mode and high >= tp1:
                 pnl = (tp1 - entry) / entry * 100.0
-                return "tp1_hit", pnl, bar_time
+                return ExitSimResult("tp1_hit", pnl, bar_time, mae, mfe)
             if high >= tp2:
                 pnl = (tp2 - entry) / entry * 100.0
-                return "tp2_hit", pnl, bar_time
+                return ExitSimResult("tp2_hit", pnl, bar_time, mae, mfe)
             if high >= tp1:
                 if move_stop_to_break_even_on_tp1:
                     stop = entry
                 pnl = (tp1 - entry) / entry * 100.0
-                return "tp1_hit", pnl, bar_time
+                return ExitSimResult("tp1_hit", pnl, bar_time, mae, mfe)
         elif direction == "short":
             if high >= stop:
                 pnl = (entry - stop) / entry * 100.0
-                return "stop_loss", pnl, bar_time
+                return ExitSimResult("stop_loss", pnl, bar_time, mae, mfe)
             if signal.single_target_mode and low <= tp1:
                 pnl = (entry - tp1) / entry * 100.0
-                return "tp1_hit", pnl, bar_time
+                return ExitSimResult("tp1_hit", pnl, bar_time, mae, mfe)
             if low <= tp2:
                 pnl = (entry - tp2) / entry * 100.0
-                return "tp2_hit", pnl, bar_time
+                return ExitSimResult("tp2_hit", pnl, bar_time, mae, mfe)
             if low <= tp1:
                 if move_stop_to_break_even_on_tp1:
                     stop = entry
                 pnl = (entry - tp1) / entry * 100.0
-                return "tp1_hit", pnl, bar_time
+                return ExitSimResult("tp1_hit", pnl, bar_time, mae, mfe)
 
     last_time = forward_bars["close_time"][-1] if forward_bars.height else None
     if isinstance(last_time, datetime) and last_time.tzinfo is None:
         last_time = last_time.replace(tzinfo=UTC)
-    return "open_at_window_end", 0.0, last_time
+    return ExitSimResult("open_at_window_end", 0.0, last_time, mae, mfe)
 
 
 async def _fetch_interval_history(
@@ -210,14 +237,12 @@ async def run_historical_backtest(
     config_path: str = "config.toml",
 ) -> dict[str, Any]:
     """Walk-forward historical validation: detect → simulate TP/SL (no delivery)."""
-    from pathlib import Path
-
     normalized_symbol = str(symbol or "").strip().upper()
     if not normalized_symbol:
         msg = "backtest requires --symbol"
         raise ValueError(msg)
 
-    walk_days = max(3, int(days))
+    walk_days = max(_MIN_BACKTEST_DAYS, int(days))
     event_interval = str(interval or "15m").strip().lower()
     if _timeframe_to_seconds(event_interval) is None:
         msg = f"unsupported backtest interval: {event_interval}"
@@ -333,15 +358,16 @@ async def _run_historical_backtest_impl(
             open_keys.add(key)
             signals_detected += 1
 
-            exit_result, pnl_pct, exit_time = simulate_signal_exit(
+            sim = simulate_signal_exit(
                 signal,
                 forward,
                 move_stop_to_break_even_on_tp1=move_be,
             )
             entry_mid = (float(signal.entry_low) + float(signal.entry_high)) / 2.0
-            exit_price = entry_mid * (1.0 + pnl_pct / 100.0) if signal.direction == "long" else (
-                entry_mid * (1.0 - pnl_pct / 100.0)
-            )
+            if signal.direction == "long":
+                exit_price = entry_mid * (1.0 + sim.pnl_pct / 100.0)
+            else:
+                exit_price = entry_mid * (1.0 - sim.pnl_pct / 100.0)
             trades.append(
                 BacktestTrade(
                     symbol=normalized_symbol,
@@ -349,38 +375,91 @@ async def _run_historical_backtest_impl(
                     direction=signal.direction,
                     score=float(signal.score),
                     entry_time=close_time.isoformat(),
-                    exit_time=exit_time.isoformat() if exit_time else "",
-                    result=exit_result,
+                    exit_time=sim.exit_time.isoformat() if sim.exit_time else "",
+                    result=sim.result,
                     entry_price=entry_mid,
                     exit_price=exit_price,
-                    pnl_pct=round(pnl_pct, 4),
+                    pnl_pct=round(sim.pnl_pct, 4),
+                    mae_pct=round(sim.mae_pct, 4),
+                    mfe_pct=round(sim.mfe_pct, 4),
                 )
             )
-            if exit_result != "open_at_window_end":
+            if sim.result != "open_at_window_end":
                 open_keys.discard(key)
 
     by_setup: dict[str, dict[str, Any]] = {}
     for trade in trades:
         bucket = by_setup.setdefault(
             trade.setup_id,
-            {"total": 0, "wins": 0, "losses": 0, "avg_pnl_pct": 0.0, "results": {}},
+            {
+                "total": 0, "wins": 0, "losses": 0,
+                "avg_pnl_pct": 0.0, "results": {},
+                "avg_win_pnl": 0.0, "avg_loss_pnl": 0.0,
+                "avg_mae_pct": 0.0, "avg_mfe_pct": 0.0,
+                "ev": 0.0,
+            },
         )
         bucket["total"] += 1
         bucket["avg_pnl_pct"] += trade.pnl_pct
+        bucket["avg_mae_pct"] += trade.mae_pct
+        bucket["avg_mfe_pct"] += trade.mfe_pct
         bucket["results"][trade.result] = bucket["results"].get(trade.result, 0) + 1
         if trade.result in {"tp1_hit", "tp2_hit"}:
             bucket["wins"] += 1
+            bucket["avg_win_pnl"] += trade.pnl_pct
         elif trade.result == "stop_loss":
             bucket["losses"] += 1
+            bucket["avg_loss_pnl"] += trade.pnl_pct
 
     for bucket in by_setup.values():
         total = int(bucket["total"])
+        wins = int(bucket["wins"])
+        losses = int(bucket["losses"])
         bucket["avg_pnl_pct"] = round(bucket["avg_pnl_pct"] / total, 4) if total else 0.0
-        bucket["win_rate"] = round(bucket["wins"] / total, 4) if total else 0.0
+        bucket["avg_mae_pct"] = round(bucket["avg_mae_pct"] / total, 4) if total else 0.0
+        bucket["avg_mfe_pct"] = round(bucket["avg_mfe_pct"] / total, 4) if total else 0.0
+        bucket["win_rate"] = round(wins / total, 4) if total else 0.0
+        avg_win = round(bucket["avg_win_pnl"] / wins, 4) if wins else 0.0
+        avg_loss = round(bucket["avg_loss_pnl"] / losses, 4) if losses else 0.0
+        bucket["avg_win_pnl"] = avg_win
+        bucket["avg_loss_pnl"] = avg_loss
+        if wins + losses > 0:
+            wr = wins / (wins + losses)
+            bucket["ev"] = round(
+                wr * avg_win - (1.0 - wr) * abs(avg_loss), 4
+            ) if avg_loss != 0 else 0.0
 
     executed = [t for t in trades if t.result not in {"open_at_window_end", "expired"}]
     wins = sum(1 for t in executed if t.result in {"tp1_hit", "tp2_hit"})
     losses = sum(1 for t in executed if t.result == "stop_loss")
+
+    summary: dict[str, Any] = {
+        "total_trades": len(trades),
+        "executed": len(executed),
+        "wins": wins,
+        "losses": losses,
+        "win_rate": round(wins / len(executed), 4) if executed else 0.0,
+        "avg_pnl_pct": round(
+            sum(t.pnl_pct for t in executed) / len(executed), 4,
+        ) if executed else 0.0,
+        "avg_mae_pct": round(
+            sum(t.mae_pct for t in executed) / len(executed), 4,
+        ) if executed else 0.0,
+        "avg_mfe_pct": round(
+            sum(t.mfe_pct for t in executed) / len(executed), 4,
+        ) if executed else 0.0,
+        "by_setup": by_setup,
+    }
+
+    executed_wins = [t for t in executed if t.result in {"tp1_hit", "tp2_hit"}]
+    executed_losses = [t for t in executed if t.result == "stop_loss"]
+    if executed_wins and executed_losses:
+        avg_win = sum(t.pnl_pct for t in executed_wins) / len(executed_wins)
+        avg_loss = sum(t.pnl_pct for t in executed_losses) / len(executed_losses)
+        summary["avg_win_pnl"] = round(avg_win, 4)
+        summary["avg_loss_pnl"] = round(avg_loss, 4)
+        wr = wins / (wins + losses)
+        summary["ev"] = round(wr * avg_win - (1.0 - wr) * abs(avg_loss), 4)
 
     return {
         "symbol": normalized_symbol,
@@ -391,18 +470,5 @@ async def _run_historical_backtest_impl(
         "bars_evaluated": bars_evaluated,
         "signals_detected": signals_detected,
         "trades": [trade.__dict__ for trade in trades],
-        "summary": {
-            "total_trades": len(trades),
-            "executed": len(executed),
-            "wins": wins,
-            "losses": losses,
-            "win_rate": round(wins / len(executed), 4) if executed else 0.0,
-            "avg_pnl_pct": round(
-                sum(t.pnl_pct for t in executed) / len(executed),
-                4,
-            )
-            if executed
-            else 0.0,
-            "by_setup": by_setup,
-        },
+        "summary": summary,
     }

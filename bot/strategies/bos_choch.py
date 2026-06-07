@@ -109,6 +109,30 @@ def detect_bos_choch(
 _MIN_SWINGS = 6  # Need 3+ of each type for trend context
 
 
+def _classify_swing_chain(
+    sh_vals: list[float],
+    sl_vals: list[float],
+) -> str | None:
+    """Build HH/HL/LH/LL chain from last N swings, return 'uptrend', 'downtrend', or None."""
+    if len(sh_vals) < 3 or len(sl_vals) < 3:
+        return None
+    recent_highs = sh_vals[-3:]
+    recent_lows = sl_vals[-3:]
+    hh = recent_highs[-1] > recent_highs[-2] > recent_highs[-3]
+    hl = recent_lows[-1] > recent_lows[-2] > recent_lows[-3]
+    lh = recent_highs[-1] < recent_highs[-2] < recent_highs[-3]
+    ll = recent_lows[-1] < recent_lows[-2] < recent_lows[-3]
+    if hh and hl:
+        return "uptrend"
+    if lh and ll:
+        return "downtrend"
+    if hh and not lh:
+        return "uptrend"
+    if ll and not hl:
+        return "downtrend"
+    return None
+
+
 def _select_external_stop_level(
     *,
     markers: list[object],
@@ -458,6 +482,25 @@ def _detect_bos_choch_extended(
             kind=break_kind,
         )
         return None
+
+    chain_trend = _classify_swing_chain(sh_vals.tolist(), sl_vals.tolist())
+    chain_ok = chain_trend is None or (
+        (direction == "long" and chain_trend == "uptrend")
+        or (direction == "short" and chain_trend == "downtrend")
+    )
+    if not chain_ok:
+        _reject(
+            prepared,
+            setup_id,
+            "swing_chain_opposes_break",
+            direction=direction,
+            chain_trend=chain_trend,
+            swing_highs=sh_vals.tolist()[-3:],
+            swing_lows=sl_vals.tolist()[-3:],
+            break_kind=break_kind,
+        )
+        return None
+
     stop_price = None
     pivot_level = None
     entry_price = break_level
