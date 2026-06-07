@@ -146,7 +146,7 @@ def _detect_indicator_divergence_extended(
         n=max(2, int(params["swing_lookback"])),
         include_unconfirmed_tail=True,
     )
-    indicator_columns = ("rsi14", "macd_hist", "obv", "delta_ratio")
+    indicator_columns = ("rsi14", "macd_hist", "obv", "delta_ratio", "stoch_rsi14")
     bullish_votes: list[str] = []
     bearish_votes: list[str] = []
     low_pair: tuple[float, float] | None = None
@@ -250,6 +250,21 @@ def _detect_indicator_divergence_extended(
         rsi=rsi,
         structure_clarity=min(1.0, len(votes) / float(len(indicator_columns))),
     )
+
+    # Fisher Transform confluence: cross confirmation boosts reversal confidence
+    fisher_boost = 1.0
+    if "fisher" in w.columns and "fisher_signal" in w.columns and w.height >= 2:
+        f_cur = float(w.item(-1, "fisher") or 0.0)
+        f_prev = float(w.item(-2, "fisher") or 0.0)
+        fs_cur = float(w.item(-1, "fisher_signal") or 0.0)
+        # Bullish: Fisher crossed above signal from negative territory
+        if direction == "long" and f_cur > fs_cur and f_prev <= float(w.item(-2, "fisher_signal") or 0.0) and f_prev < 0.5:
+            fisher_boost = 1.06
+        # Bearish: Fisher crossed below signal from positive territory
+        elif direction == "short" and f_cur < fs_cur and f_prev >= float(w.item(-2, "fisher_signal") or 0.0) and f_prev > -0.5:
+            fisher_boost = 1.06
+    score = min(1.0, score * fisher_boost)
+
     reasons = [
         f"indicator_{'convergence' if direction == 'long' else 'divergence'}_{direction}",
         f"votes={','.join(votes)}",
@@ -257,6 +272,8 @@ def _detect_indicator_divergence_extended(
         f"vol_ratio={vol_ratio:.2f}",
         f"limit_entry={entry_price:.4f}",
     ]
+    if fisher_boost > 1.0:
+        reasons.append("fisher_cross_confirmed")
     return _build_signal(
         prepared=prepared,
         setup_id=setup_id,
