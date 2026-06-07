@@ -135,9 +135,7 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
                 if float(data.get("total") or 0) >= 5  # ignore strategies with <5 outcomes
             }
             update_strategy_sl_rates(sl_rates)
-            LOG.debug(
-                "strategy stats refreshed | strategies=%d", len(rates)
-            )
+            LOG.debug("strategy stats refreshed | strategies=%d", len(rates))
         except DEFENSIVE_EXC:
             LOG.debug("strategy stats refresh failed", exc_info=True)
 
@@ -205,7 +203,7 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         try:
             raw = frame.item(-1, column)
             value = float(raw) if raw is not None else None
-        except (IndexError, TypeError, ValueError):
+        except IndexError, TypeError, ValueError:
             return None
         return value if value is not None and math.isfinite(value) else None
 
@@ -217,7 +215,7 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         for raw in frame[column].tail(max(1, int(window))).to_list():
             try:
                 value = float(raw) if raw is not None else math.nan
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 value = math.nan
             if math.isfinite(value):
                 values.append(value)
@@ -340,7 +338,7 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         if micro is not None:
             try:
                 micro_val = float(micro)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 micro_val = math.nan
             if math.isfinite(micro_val):
                 details["microprice_bias"] = micro_val
@@ -353,7 +351,7 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         if agg is not None:
             try:
                 agg_val = float(agg)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 agg_val = math.nan
             if math.isfinite(agg_val):
                 details["agg_trade_delta_30s"] = agg_val
@@ -370,11 +368,11 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         oi_change = getattr(prepared, "oi_change_pct", None)
         try:
             funding_value = float(funding) if funding is not None else 0.0
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             funding_value = 0.0
         try:
             oi_value = float(oi_change) if oi_change is not None else 0.0
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             oi_value = 0.0
         if not math.isfinite(funding_value):
             funding_value = 0.0
@@ -466,9 +464,11 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
             ema50=ema50,
         )
         if not cls._rsi_overheat_hard_limit(direction=direction, profile=profile, rsi=rsi):
-            return False, empty_confirmations, {
-                "reason": "rsi_overheat_hard_limit", "rsi14": rsi, "profile": profile
-            }
+            return (
+                False,
+                empty_confirmations,
+                {"reason": "rsi_overheat_hard_limit", "rsi14": rsi, "profile": profile},
+            )
 
         momentum = cls._momentum_confirmation(direction=direction, profile=profile, rsi=rsi)
         volume_ok = cls._volume_confirmation(
@@ -823,9 +823,10 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         for signal in signals:
             dedup_key = f"{signal.setup_id}:{signal.symbol}:{signal.direction}"
             last_sent = dedup_timestamps.get(dedup_key)
-            if last_sent is not None and (
-                datetime.now(UTC) - last_sent
-            ).total_seconds() < dedup_window_hours * 3600:
+            if (
+                last_sent is not None
+                and (datetime.now(UTC) - last_sent).total_seconds() < dedup_window_hours * 3600
+            ):
                 rejected_rows.append(
                     {
                         "ts": datetime.now(UTC).isoformat(),

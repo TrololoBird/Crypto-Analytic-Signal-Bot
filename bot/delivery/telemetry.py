@@ -17,6 +17,7 @@ _SLOW_THRESHOLD_MS = 100.0
 
 def timed(name: str | None = None, *, threshold_ms: float = _SLOW_THRESHOLD_MS) -> Callable[[F], F]:
     """Decorator that logs execution time when it exceeds *threshold_ms*."""
+
     def decorator(func: F) -> F:
         label = name or func.__qualname__
 
@@ -31,4 +32,5 @@ def timed(name: str | None = None, *, threshold_ms: float = _SLOW_THRESHOLD_MS) 
                     LOG.warning("SLOW %s | %.2fms", label, elapsed_ms)
 
         return wrapper  # type: ignore[return-value]
+
     return decorator

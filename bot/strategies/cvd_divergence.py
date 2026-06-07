@@ -98,11 +98,11 @@ def _detect_session_cvd_exhaustion(
     price_high_b = float(window_b["high"].max() or 0.0)
     price_low_b = float(window_b["low"].min() or 0.0)
     # Use intra-window CVD change (end - start) to avoid false signals from daily reset at midnight
-    cvd_change_a = (
-        float(window_a["session_cvd"][-1] or 0.0) - float(window_a["session_cvd"][0] or 0.0)
+    cvd_change_a = float(window_a["session_cvd"][-1] or 0.0) - float(
+        window_a["session_cvd"][0] or 0.0
     )
-    cvd_change_b = (
-        float(window_b["session_cvd"][-1] or 0.0) - float(window_b["session_cvd"][0] or 0.0)
+    cvd_change_b = float(window_b["session_cvd"][-1] or 0.0) - float(
+        window_b["session_cvd"][0] or 0.0
     )
 
     # Require meaningful CVD divergence between windows (at least 1 sigma)
@@ -157,7 +157,7 @@ def _signed_delta_values(values: Any) -> Any:
     try:
         min_value = float(raw.min())
         max_value = float(raw.max())
-    except (AttributeError, TypeError, ValueError):
+    except AttributeError, TypeError, ValueError:
         return raw
     if min_value < 0.0:
         return raw

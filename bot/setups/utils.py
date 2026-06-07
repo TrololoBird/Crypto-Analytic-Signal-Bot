@@ -24,7 +24,7 @@ def coerce_int(value: object, default: int) -> int:
         return int(value)
     try:
         return int(float(value))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return int(default)
 
 
@@ -33,7 +33,7 @@ def coerce_float(value: object, default: float) -> float:
         return float(value)
     try:
         numeric = float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return default
     return numeric if math.isfinite(numeric) else default
 
@@ -178,8 +178,10 @@ def select_structural_target(
                 h = _safe_float(high_col[j], default=float("nan"))
                 l_ = _safe_float(low_col[j], default=float("nan"))
                 if (
-                    math.isfinite(h) and math.isfinite(l_)
-                    and l_ <= price + zone and h >= price - zone
+                    math.isfinite(h)
+                    and math.isfinite(l_)
+                    and l_ <= price + zone
+                    and h >= price - zone
                 ):
                     retests += 1
             if retests > max_retests:
@@ -289,12 +291,10 @@ def build_structural_targets(
     _vwap = _safe_float(work_1h["vwap"][-1]) if "vwap" in _cols else None
     _vp_poc = _safe_float(work_1h["volume_profile"][-1]) if "volume_profile" in _cols else None
     _vp_vah = (
-        _safe_float(work_1h["volume_profile_vah"][-1])
-        if "volume_profile_vah" in _cols else None
+        _safe_float(work_1h["volume_profile_vah"][-1]) if "volume_profile_vah" in _cols else None
     )
     _vp_val = (
-        _safe_float(work_1h["volume_profile_val"][-1])
-        if "volume_profile_val" in _cols else None
+        _safe_float(work_1h["volume_profile_val"][-1]) if "volume_profile_val" in _cols else None
     )
     stop_anchor = select_structural_stop_anchor(
         work_1h,
@@ -331,9 +331,7 @@ def build_structural_targets(
                 direction="long",
             )
         # Pivot R1/R2 as TP1 candidate — pick nearest above entry
-        pivot_tp1_candidates = [
-            lvl for lvl in (_r1, _r2) if lvl is not None and lvl > price_anchor
-        ]
+        pivot_tp1_candidates = [lvl for lvl in (_r1, _r2) if lvl is not None and lvl > price_anchor]
         if pivot_tp1_candidates:
             pivot_tp1 = min(pivot_tp1_candidates)
             if tp1 is None or (pivot_tp1 < tp1 and pivot_tp1 > price_anchor):
@@ -369,9 +367,7 @@ def build_structural_targets(
                 direction="short",
             )
         # Pivot S1/S2 as TP1 candidate — pick nearest below entry
-        pivot_tp1_candidates = [
-            lvl for lvl in (_s1, _s2) if lvl is not None and lvl < price_anchor
-        ]
+        pivot_tp1_candidates = [lvl for lvl in (_s1, _s2) if lvl is not None and lvl < price_anchor]
         if pivot_tp1_candidates:
             pivot_tp1 = max(pivot_tp1_candidates)
             if tp1 is None or (pivot_tp1 > tp1 and pivot_tp1 < price_anchor):

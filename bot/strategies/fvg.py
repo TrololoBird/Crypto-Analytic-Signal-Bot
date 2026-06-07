@@ -135,7 +135,7 @@ def _detect_fvg_setup_extended(
             math.isfinite(float(value)) and float(value) > 0.0
             for value in (fvg_low, fvg_high, fvg_width, fvg_mid)
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         zone_values_valid = False
     if (
         direction not in {"long", "short"}
@@ -206,7 +206,7 @@ def _detect_fvg_setup_extended(
         try:
             raw_vol_ratio = w.item(zone.created_index, "volume_ratio20")
             impulse_vol_ratio = float(raw_vol_ratio) if raw_vol_ratio is not None else 1.0
-        except (IndexError, TypeError, ValueError):
+        except IndexError, TypeError, ValueError:
             impulse_vol_ratio = 1.0
     if impulse_vol_ratio < min_volume_ratio:
         _reject(

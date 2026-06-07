@@ -120,7 +120,7 @@ def _apply_setup_score_adjustment(
     """Apply adaptive setup scoring without converting mild penalties into hard blocks."""
     try:
         adjustment = float(score_adjustment)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         adjustment = 0.0
     if not adjustment:
         return signal, {"applied": False, "adjustment": 0.0}
@@ -222,13 +222,13 @@ class AnalyzerContextMixin(AnalyzerMixinBase):
             return None
         try:
             value = frame.item(-1, column)
-        except (IndexError, TypeError, ValueError):
+        except IndexError, TypeError, ValueError:
             return None
         try:
             if value is None:
                 return None
             numeric = float(value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
         return (
             numeric if numeric == numeric and numeric not in (float("inf"), float("-inf")) else None
@@ -476,9 +476,7 @@ class AnalyzerFramesMixin(AnalyzerContextMixin, _AnalyzerFamilyGatesBase):
                     df_1h = ws_1h
                     frame_source_flags.append("frames_1h_ws")
                 else:
-                    df_1h = await self._bot.client.fetch_klines_cached(
-                        symbol, "1h", limit=limit_1h
-                    )
+                    df_1h = await self._bot.client.fetch_klines_cached(symbol, "1h", limit=limit_1h)
                     frame_source_flags.append("frames_1h_rest")
                     if ws_1h is not None:
                         frame_source_flags.append("frames_1h_ws_insufficient")
@@ -496,9 +494,7 @@ class AnalyzerFramesMixin(AnalyzerContextMixin, _AnalyzerFamilyGatesBase):
                     df_5m = ws_5m
                     frame_source_flags.append("frames_5m_ws")
                 else:
-                    df_5m = await self._bot.client.fetch_klines_cached(
-                        symbol, "5m", limit=limit_5m
-                    )
+                    df_5m = await self._bot.client.fetch_klines_cached(symbol, "5m", limit=limit_5m)
                     frame_source_flags.append("frames_5m_rest")
                     if ws_5m is not None:
                         frame_source_flags.append("frames_5m_ws_insufficient")
@@ -894,7 +890,7 @@ class AnalyzerFramesMixin(AnalyzerContextMixin, _AnalyzerFamilyGatesBase):
         next_last_price = item.last_price
         try:
             ticker_last_price = float(ticker.get("last_price") or 0.0)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return item
         if ticker_last_price > 0:
             next_last_price = ticker_last_price

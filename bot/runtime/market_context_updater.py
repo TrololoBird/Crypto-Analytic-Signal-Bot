@@ -49,7 +49,7 @@ class MarketContextUpdater:
             try:
                 if trigger is not None:
                     trigger.clear()
-                    done, _ = await asyncio.wait(
+                    _done, _ = await asyncio.wait(
                         {
                             asyncio.ensure_future(self._bot._shutdown.wait()),
                             asyncio.ensure_future(trigger.wait()),
@@ -250,7 +250,7 @@ class MarketContextUpdater:
                     benchmark_context.setdefault(sym, {})["pct_24h"] = (
                         float(ticker.get("price_change_percent") or 0.0) / 100.0
                     )
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     benchmark_context.setdefault(sym, {})["pct_24h"] = None
             for item in shortlist:
                 ticker = ticker_dict.get(item.symbol)
@@ -376,7 +376,7 @@ class MarketContextUpdater:
                         for value in frame["close"].to_list()
                         if self._safe_float(value) > 0.0
                     ]
-            except (TypeError, ValueError, AttributeError):
+            except TypeError, ValueError, AttributeError:
                 continue
         return best_closes
 
@@ -414,7 +414,7 @@ class MarketContextUpdater:
                 if frame.height >= best_height:
                     best_height = int(frame.height)
                     best_value = (last_close - prev_close) / prev_close
-            except (IndexError, TypeError, ValueError, AttributeError):
+            except IndexError, TypeError, ValueError, AttributeError:
                 continue
         return best_value
 
@@ -422,7 +422,7 @@ class MarketContextUpdater:
     def _fmt_pct(value: object) -> str:
         try:
             numeric = float(value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return "+0.00%"
         return f"{numeric * 100:+.2f}%"
 
@@ -430,7 +430,7 @@ class MarketContextUpdater:
     def _safe_float(value: object, default: float = 0.0) -> float:
         try:
             numeric = float(value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return default
         return numeric if math.isfinite(numeric) else default
 
@@ -989,15 +989,15 @@ class MarketContextUpdater:
         btc_24h = btc.get("pct_24h")
         try:
             btc_1h_abs = abs(float(btc_1h))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             btc_1h_abs = 0.0
         try:
             btc_4h_abs = abs(float(btc_4h))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             btc_4h_abs = 0.0
         try:
             btc_24h_abs = abs(float(btc_24h))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             btc_24h_abs = 0.0
 
         regime_changed = previous_regime != regime.regime
@@ -1082,7 +1082,7 @@ class MarketContextUpdater:
                     bias = bias_from_change((c_new - c_old) / c_old, threshold)
                     if bias != "neutral":
                         return bias
-            except (KeyError, TypeError, ValueError):
+            except KeyError, TypeError, ValueError:
                 continue
 
         for interval, threshold in (
@@ -1101,7 +1101,7 @@ class MarketContextUpdater:
                     bias = bias_from_change((c2 - c1) / c1, threshold)
                     if bias != "neutral":
                         return bias
-            except (KeyError, TypeError, ValueError):
+            except KeyError, TypeError, ValueError:
                 continue
         return "neutral"
 

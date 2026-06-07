@@ -37,8 +37,8 @@ def detect_cvd_exhaustion(
         _reject(prepared, setup_id, "atr_invalid", atr=atr)
         return None
 
-    cvd_col: str | None = "cvd" if "cvd" in w.columns else (
-        "delta_ratio" if "delta_ratio" in w.columns else None
+    cvd_col: str | None = (
+        "cvd" if "cvd" in w.columns else ("delta_ratio" if "delta_ratio" in w.columns else None)
     )
     if cvd_col is None:
         _reject(prepared, setup_id, "cvd_column_missing")

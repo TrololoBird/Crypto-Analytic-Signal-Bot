@@ -18,7 +18,7 @@ def _safe_float(value: Any) -> float | None:
         return None
     try:
         parsed = float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if parsed != parsed:
         return None
@@ -32,7 +32,7 @@ def _parse_dt(value: Any) -> datetime | None:
         return value if value.tzinfo else value.replace(tzinfo=UTC)
     try:
         parsed = datetime.fromisoformat(str(value))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 

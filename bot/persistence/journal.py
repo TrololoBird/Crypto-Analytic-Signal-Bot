@@ -122,7 +122,7 @@ def _build_journal_report_from_jsonl(telemetry_root: Path) -> JournalReport:
             try:
                 hour = int(ts[11:13])
                 hourly[hour] += 1
-            except (IndexError, ValueError):
+            except IndexError, ValueError:
                 pass
     report.signals_sent = signals_count
     report.hourly_signal_counts = dict(sorted(hourly.items()))

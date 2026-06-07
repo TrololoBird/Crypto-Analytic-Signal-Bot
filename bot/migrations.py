@@ -248,6 +248,7 @@ def _migration_statements(sql: str) -> list[str]:
             statements.append(statement)
     return statements
 
+
 # Migrations that assume repository DDL already created these tables (see memory.initialize).
 _MIGRATION_REQUIRES_TABLES: dict[int, frozenset[str]] = {
     4: frozenset({"active_signals", "signal_outcomes"}),

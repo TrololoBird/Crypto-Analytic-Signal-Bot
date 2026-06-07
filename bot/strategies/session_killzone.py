@@ -32,7 +32,7 @@ def _finite_or_none(value: object) -> float | None:
         return None
     try:
         numeric = float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     return numeric if math.isfinite(numeric) else None
 
@@ -80,7 +80,7 @@ def _hour_param(params: dict[str, object], key: str, default: int) -> int:
     value = params.get(key, default)
     try:
         hour = int(float(cast("Any", value)))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return default
     return max(0, min(hour, 24))
 
@@ -479,12 +479,12 @@ def detect_session_killzone(
     )
     # Session quality multiplier: Overlap has the highest liquidity, Asia the lowest
     _SESSION_QUALITY: dict[str, float] = {
-        "Overlap": 1.08,   # London + NY active simultaneously
-        "NY": 1.04,        # Major institutional session
-        "London": 1.04,    # Major institutional session
-        "PreLondon": 0.98, # Setup window before London open
-        "NYClose": 0.93,   # Reduced liquidity, end of NY session
-        "Asia": 0.88,      # Lower crypto futures liquidity
+        "Overlap": 1.08,  # London + NY active simultaneously
+        "NY": 1.04,  # Major institutional session
+        "London": 1.04,  # Major institutional session
+        "PreLondon": 0.98,  # Setup window before London open
+        "NYClose": 0.93,  # Reduced liquidity, end of NY session
+        "Asia": 0.88,  # Lower crypto futures liquidity
     }
     if session_name and session_name in _SESSION_QUALITY:
         score = min(1.0, score * _SESSION_QUALITY[session_name])

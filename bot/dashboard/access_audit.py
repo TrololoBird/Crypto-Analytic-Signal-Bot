@@ -8,8 +8,10 @@ import threading
 import time
 from collections import deque
 from datetime import UTC, datetime
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 LOG = logging.getLogger("bot.dashboard.access_audit")
 

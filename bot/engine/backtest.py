@@ -276,9 +276,7 @@ async def run_historical_backtest(
             await client.close()
 
 
-def _build_time_windows(
-    df: pl.DataFrame, n_windows: int
-) -> list[tuple[datetime, datetime]]:
+def _build_time_windows(df: pl.DataFrame, n_windows: int) -> list[tuple[datetime, datetime]]:
     """Split the time range of *df* into *n_windows* sequential segments."""
     if df.is_empty():
         return []
@@ -430,10 +428,15 @@ async def _run_historical_backtest_impl(
         bucket = by_setup.setdefault(
             trade.setup_id,
             {
-                "total": 0, "wins": 0, "losses": 0,
-                "avg_pnl_pct": 0.0, "results": {},
-                "avg_win_pnl": 0.0, "avg_loss_pnl": 0.0,
-                "avg_mae_pct": 0.0, "avg_mfe_pct": 0.0,
+                "total": 0,
+                "wins": 0,
+                "losses": 0,
+                "avg_pnl_pct": 0.0,
+                "results": {},
+                "avg_win_pnl": 0.0,
+                "avg_loss_pnl": 0.0,
+                "avg_mae_pct": 0.0,
+                "avg_mfe_pct": 0.0,
                 "ev": 0.0,
             },
         )
@@ -463,9 +466,9 @@ async def _run_historical_backtest_impl(
         bucket["avg_loss_pnl"] = avg_loss
         if wins + losses > 0:
             wr = wins / (wins + losses)
-            bucket["ev"] = round(
-                wr * avg_win - (1.0 - wr) * abs(avg_loss), 4
-            ) if avg_loss != 0 else 0.0
+            bucket["ev"] = (
+                round(wr * avg_win - (1.0 - wr) * abs(avg_loss), 4) if avg_loss != 0 else 0.0
+            )
 
     executed = [t for t in trades if t.result not in {"open_at_window_end", "expired"}]
     wins = sum(1 for t in executed if t.result in {"tp1_hit", "tp2_hit"})
@@ -478,14 +481,23 @@ async def _run_historical_backtest_impl(
         "losses": losses,
         "win_rate": round(wins / len(executed), 4) if executed else 0.0,
         "avg_pnl_pct": round(
-            sum(t.pnl_pct for t in executed) / len(executed), 4,
-        ) if executed else 0.0,
+            sum(t.pnl_pct for t in executed) / len(executed),
+            4,
+        )
+        if executed
+        else 0.0,
         "avg_mae_pct": round(
-            sum(t.mae_pct for t in executed) / len(executed), 4,
-        ) if executed else 0.0,
+            sum(t.mae_pct for t in executed) / len(executed),
+            4,
+        )
+        if executed
+        else 0.0,
         "avg_mfe_pct": round(
-            sum(t.mfe_pct for t in executed) / len(executed), 4,
-        ) if executed else 0.0,
+            sum(t.mfe_pct for t in executed) / len(executed),
+            4,
+        )
+        if executed
+        else 0.0,
         "by_setup": by_setup,
     }
 

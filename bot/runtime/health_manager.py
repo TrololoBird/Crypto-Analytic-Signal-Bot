@@ -55,8 +55,7 @@ class HealthManager:
             wr_values = [v["win_rate"] for v in win_rate_data.values() if v["total"] >= 3]
             avg_wr_7d = round(float(sum(wr_values) / len(wr_values)), 4) if wr_values else 0.0
             low_wr_setups = [
-                sid for sid, v in win_rate_data.items()
-                if v["total"] >= 3 and v["win_rate"] < 0.35
+                sid for sid, v in win_rate_data.items() if v["total"] >= 3 and v["win_rate"] < 0.35
             ]
             win_rate_degraded = avg_wr_7d > 0.0 and avg_wr_7d < 0.35
         except DEFENSIVE_EXC:
@@ -217,7 +216,7 @@ class HealthManager:
                 return
             self._win_rate_alert_last_sent = now
             low_setups = [
-                f"{sid}:{float(d['win_rate']):.0%}({int(d.get('total',0))})"
+                f"{sid}:{float(d['win_rate']):.0%}({int(d.get('total', 0))})"
                 for sid, d in win_rate_data.items()
                 if int(d.get("total") or 0) >= 3 and float(d["win_rate"]) < 0.35
             ]

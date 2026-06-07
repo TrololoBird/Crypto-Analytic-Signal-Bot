@@ -6,7 +6,6 @@ from ._roadmap import (
     _build_atr_signal,
     _confirmed_context_conflict,
     _finite_or_none,
-    _last,
     _orderbook_source,
     _prev,
     _price_change_pct_confirmed,

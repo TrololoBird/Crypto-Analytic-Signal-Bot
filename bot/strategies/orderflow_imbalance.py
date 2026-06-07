@@ -5,7 +5,9 @@ import math
 from typing import TYPE_CHECKING, ClassVar
 
 from ..setups import _reject
-from ._common import as_float as _as_float, confirmed_pattern_frame, last as _last
+from ._common import as_float as _as_float
+from ._common import confirmed_pattern_frame
+from ._common import last as _last
 from ._roadmap import _build_atr_signal, _flow_delta_with_source, _prev
 from .roadmap_base import RoadmapSetup
 

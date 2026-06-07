@@ -464,6 +464,7 @@ def catalog_setup_family(setup_id: str) -> str:
     entry = CATALOG_BY_ID.get(str(setup_id or "").strip())
     return entry.family if entry is not None else "misc"
 
+
 # Whitelist for [bot.filters.setups] param keys (config.toml.example + delivery overrides).
 CATALOG_SETUP_PARAM_KEYS: frozenset[str] = frozenset(
     {

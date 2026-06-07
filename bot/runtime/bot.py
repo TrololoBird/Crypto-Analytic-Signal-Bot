@@ -937,7 +937,7 @@ class SignalBot:
     def _ws_cache_enrichments(self, symbol: str) -> dict[str, Any]:
         try:
             return self._symbol_analyzer.ws_cache_enrichments(symbol)
-        except (AttributeError, KeyError, TypeError, ValueError):
+        except AttributeError, KeyError, TypeError, ValueError:
             LOG.debug("ws_cache_enrichment_failed", extra={"symbol": symbol}, exc_info=True)
             return {}
 

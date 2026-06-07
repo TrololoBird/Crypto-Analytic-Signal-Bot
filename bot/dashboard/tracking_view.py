@@ -10,7 +10,7 @@ def _safe_float(value: Any) -> float | None:
         return None
     try:
         parsed = float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if parsed != parsed:  # NaN
         return None

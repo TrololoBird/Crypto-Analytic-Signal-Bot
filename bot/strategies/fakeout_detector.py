@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 from ..features.prepare import _swing_points
 from ._common import confirmed_pattern_frame
-from ._roadmap import _as_float, _build_atr_signal, _last, _prev, _reject
+from ._roadmap import _as_float, _build_atr_signal, _last, _reject
 from .roadmap_base import RoadmapSetup
 
 if TYPE_CHECKING:
@@ -23,19 +23,10 @@ def detect_fakeout(
     family: str,
 ) -> Signal | None:
     defaults = effective_params
-    base_score = _as_float(
-        defaults.get("base_score", defaults["base_score"]),
-        defaults["base_score"],
-    )
     min_volume_ratio = _as_float(
         defaults.get("min_volume_ratio", defaults["min_volume_ratio"]),
         defaults["min_volume_ratio"],
     )
-    sl_buffer_atr = _as_float(
-        defaults.get("sl_buffer_atr", defaults["sl_buffer_atr"]),
-        defaults["sl_buffer_atr"],
-    )
-    min_rr = _as_float(defaults.get("min_rr", defaults["min_rr"]), defaults["min_rr"])
     fakeout_lookback = max(
         5,
         int(
@@ -128,6 +119,7 @@ def detect_fakeout(
         _reject(prepared, setup_id, "fakeout_pattern_missing")
         return None
 
+    breakout_vol = 0.0
     if breakout_idx >= 0 and "volume_ratio20" in tail.columns:
         breakout_vol = _as_float(tail.item(breakout_idx, "volume_ratio20"), 0.0)
         if breakout_vol < min_volume_ratio:

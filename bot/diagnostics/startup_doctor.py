@@ -58,9 +58,7 @@ def _check_schema_version(settings: BotSettings) -> list[str]:
     expected = _expected_schema_version()
     try:
         with sqlite3.connect(db_path) as conn:
-            row = conn.execute(
-                "SELECT COALESCE(MAX(version), 0) FROM schema_version"
-            ).fetchone()
+            row = conn.execute("SELECT COALESCE(MAX(version), 0) FROM schema_version").fetchone()
     except sqlite3.Error as exc:
         return [f"schema_version_unreadable:{exc}"]
     current = int(row[0]) if row and row[0] is not None else 0

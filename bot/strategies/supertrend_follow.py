@@ -220,9 +220,8 @@ def detect_supertrend_follow(
         if sa > 0.0 and sb > 0.0:
             cloud_top = max(sa, sb)
             cloud_bottom = min(sa, sb)
-            ichimoku_clear = (
-                (direction == "long" and close > cloud_top)
-                or (direction == "short" and close < cloud_bottom)
+            ichimoku_clear = (direction == "long" and close > cloud_top) or (
+                direction == "short" and close < cloud_bottom
             )
             if ichimoku_clear:
                 ichimoku_boost = 1.08

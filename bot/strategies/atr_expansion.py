@@ -96,9 +96,7 @@ def detect_atr_expansion_prepared(
     obv_penalty = 1.0
     if "obv_above_ema" in prepared.work_15m.columns:
         obv_val = float(prepared.work_15m["obv_above_ema"][-1] or 0.0)
-        if (direction == "long" and obv_val <= 0.0) or (
-            direction == "short" and obv_val > 0.0
-        ):
+        if (direction == "long" and obv_val <= 0.0) or (direction == "short" and obv_val > 0.0):
             obv_penalty = 0.85
 
     entry_anchor = _prev(prepared.work_15m, "ema20", 0.0) or None

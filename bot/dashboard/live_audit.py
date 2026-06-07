@@ -40,14 +40,14 @@ class AuditFinding:
 def _int(value: Any) -> int:
     try:
         return int(float(value))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return 0
 
 
 def _float(value: Any) -> float:
     try:
         return float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return 0.0
 
 

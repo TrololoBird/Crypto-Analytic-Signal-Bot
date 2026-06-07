@@ -60,12 +60,10 @@ def detect_liquidation_heatmap(
             low = _as_float(recent.item(local_idx, "low"))
             bar_close = _as_float(recent.item(local_idx, "close"))
             bar_volume = (
-                _as_float(recent.item(local_idx, "volume_ratio20"), 1.0)
-                if _has_vol_ratio else 1.0
+                _as_float(recent.item(local_idx, "volume_ratio20"), 1.0) if _has_vol_ratio else 1.0
             )
             bar_close_position = (
-                _as_float(recent.item(local_idx, "close_position"), 0.5)
-                if _has_close_pos else 0.5
+                _as_float(recent.item(local_idx, "close_position"), 0.5) if _has_close_pos else 0.5
             )
             lower_wick_atr = (min(open_, bar_close) - low) / atr
             upper_wick_atr = (high - max(open_, bar_close)) / atr

@@ -2,20 +2,17 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
 import polars as pl
 
 from bot.runtime.errors import DEFENSIVE_EXC
 
-if TYPE_CHECKING:
-    pass
-
 try:
     from importlib import util as importlib_util
 
     _candles_module = importlib_util.find_spec("polars_ta.candles")
-except (ImportError, ModuleNotFoundError):
+except ImportError, ModuleNotFoundError:
     _candles_module = None
 
 if _candles_module is not None:

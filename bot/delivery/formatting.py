@@ -379,7 +379,7 @@ def parse_datetime(value: object) -> datetime | None:
     else:
         try:
             parsed = datetime.fromisoformat(str(value))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=UTC)
@@ -682,9 +682,8 @@ def _tp_equality_tolerance(price: float) -> float:
 def _channel_legs_line(facts: SignalMessageFacts) -> str:
     entry = f"{format_price(facts.entry_low)}-{format_price(facts.entry_high)}"
     tp3 = facts.take_profit_3 if facts.take_profit_3 is not None else facts.take_profit_2
-    same_tp = (
-        abs(facts.take_profit_2 - facts.take_profit_1)
-        <= _tp_equality_tolerance(facts.take_profit_1)
+    same_tp = abs(facts.take_profit_2 - facts.take_profit_1) <= _tp_equality_tolerance(
+        facts.take_profit_1
     )
     if same_tp:
         targets = f"TP {code(format_price(facts.take_profit_1))}"
@@ -757,9 +756,8 @@ def format_channel_trade_card(
 def target_line(facts: SignalMessageFacts) -> str:
     """Render target plan."""
     tp3 = facts.take_profit_3 if facts.take_profit_3 is not None else facts.take_profit_2
-    same_tp = (
-        abs(facts.take_profit_2 - facts.take_profit_1)
-        <= _tp_equality_tolerance(facts.take_profit_1)
+    same_tp = abs(facts.take_profit_2 - facts.take_profit_1) <= _tp_equality_tolerance(
+        facts.take_profit_1
     )
     if same_tp:
         return f"TP {code(format_price(facts.take_profit_1))}"
@@ -907,7 +905,7 @@ def format_signal_message(
         try:
             pct = _recommend_position_pct(signal, None)
             position_size_pct = pct if pct > 0.0 else None
-        except (TypeError, ValueError, AttributeError):
+        except TypeError, ValueError, AttributeError:
             pass
 
     rendered = format_channel_trade_card(

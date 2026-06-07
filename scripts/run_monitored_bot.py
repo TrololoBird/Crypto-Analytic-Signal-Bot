@@ -43,7 +43,7 @@ def _bot_alive(settings: object) -> bool:
         return False
     try:
         return pid_is_alive(int(pid_file.read_text().strip()))
-    except (ValueError, OSError):
+    except ValueError, OSError:
         return False
 
 

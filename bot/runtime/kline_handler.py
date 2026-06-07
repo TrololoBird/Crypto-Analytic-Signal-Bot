@@ -64,7 +64,8 @@ class KlineHandler:
                         trigger.set()
                     LOG.info(
                         "regime refresh triggered | symbol=%s move_pct=%.2f%%",
-                        symbol, move_pct,
+                        symbol,
+                        move_pct,
                     )
             if close > 0.0:
                 self._last_regime_trigger_close[symbol] = close

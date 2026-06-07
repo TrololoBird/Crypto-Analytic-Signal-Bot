@@ -142,20 +142,21 @@ _PROXY_SOURCES = _SOCKS5_SOURCES
 _BINANCE_PING_URL = "https://fapi.binance.com/fapi/v1/ping"
 _BINANCE_WS_HANDSHAKE_URL = "wss://fstream.binance.com/ws"
 
-_VALIDATE_CONCURRENCY = 80       # simultaneous proxy checks
-_VALIDATE_TIMEOUT_S = 10.0       # per-proxy validation timeout (SOCKS5+SSL needs ~6-8s)
-_FETCH_TIMEOUT_S = 15.0          # per-source HTTP fetch timeout
-_MAX_CANDIDATES = 2000           # cap before validation (memory guard)
-_MIN_WORKING_PROXIES = 2         # minimum to accept discovery result
-_MAX_POOL_SIZE = 25              # proxies kept in the live pool
+_VALIDATE_CONCURRENCY = 80  # simultaneous proxy checks
+_VALIDATE_TIMEOUT_S = 10.0  # per-proxy validation timeout (SOCKS5+SSL needs ~6-8s)
+_FETCH_TIMEOUT_S = 15.0  # per-source HTTP fetch timeout
+_MAX_CANDIDATES = 2000  # cap before validation (memory guard)
+_MIN_WORKING_PROXIES = 2  # minimum to accept discovery result
+_MAX_POOL_SIZE = 25  # proxies kept in the live pool
 _REST_SYMBOL_THRESHOLD = 100
 _WS_PROBE_TIMEOUT_SECONDS = 15.0
-_POOL_REFRESH_INTERVAL_S = 900.0   # background refresh every 15 min (was 30)
+_POOL_REFRESH_INTERVAL_S = 900.0  # background refresh every 15 min (was 30)
 
 
 # ---------------------------------------------------------------------------
 # Probe cache
 # ---------------------------------------------------------------------------
+
 
 @dataclass(slots=True, frozen=True)
 class NetworkProbeResult:
@@ -200,6 +201,7 @@ def clear_network_probe_cache() -> None:
 # Basic connectivity probes (direct egress + configured pool)
 # ---------------------------------------------------------------------------
 
+
 async def probe_ws_handshake(
     *,
     proxy_url: str | None = None,
@@ -218,7 +220,7 @@ async def probe_ws_handshake(
                 **connect_kwargs,
             ):
                 return True
-    except (KeyboardInterrupt, SystemExit):
+    except KeyboardInterrupt, SystemExit:
         raise
     except (
         OSError,
@@ -236,7 +238,7 @@ async def _probe_rest(net: NetworkConfig) -> bool:
     try:
         symbols = await market.fetch_exchange_symbols()
         return len(symbols) > _REST_SYMBOL_THRESHOLD
-    except (KeyboardInterrupt, SystemExit):
+    except KeyboardInterrupt, SystemExit:
         raise
     except defensive_exc_types(aiohttp.ClientError):
         return False
@@ -273,13 +275,16 @@ def _log_probe_result(label: str, result: NetworkProbeResult) -> None:
     record_network_probe(label, result)
     LOG.info(
         "network probe | scope=%s rest_ok=%s ws_ok=%s",
-        label, result.rest_ok, result.ws_ok,
+        label,
+        result.rest_ok,
+        result.ws_ok,
     )
 
 
 # ---------------------------------------------------------------------------
 # Autonomous proxy discovery
 # ---------------------------------------------------------------------------
+
 
 async def _detect_local_tor() -> str | None:
     """Return socks5://127.0.0.1:9050 if a local Tor SOCKS daemon is reachable."""
@@ -289,7 +294,7 @@ async def _detect_local_tor() -> str | None:
             writer.close()
             with contextlib.suppress(OSError):
                 await writer.wait_closed()
-    except (OSError, ConnectionRefusedError, TimeoutError):
+    except OSError, ConnectionRefusedError, TimeoutError:
         return None
     else:
         LOG.info("local Tor daemon detected on 127.0.0.1:9050 — adding to pool")
@@ -362,9 +367,11 @@ async def _fetch_source(
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
-        if line.startswith(f"{scheme}://") or (
-            line.startswith("socks5://") and scheme == "socks5"
-        ) or (line.startswith("http://") and scheme == "http"):
+        if (
+            line.startswith(f"{scheme}://")
+            or (line.startswith("socks5://") and scheme == "socks5")
+            or (line.startswith("http://") and scheme == "http")
+        ):
             out.append(line)
         elif "://" not in line and ":" in line:
             # bare ip:port — prefix with requested protocol
@@ -394,16 +401,18 @@ async def _validate_proxy_binance(
             async with asyncio.timeout(timeout_s):
                 if is_socks:
                     connector = ProxyConnector.from_url(proxy_url, rdns=True)
-                    async with aiohttp.ClientSession(connector=connector) as sess, sess.get(
-                        _BINANCE_PING_URL, ssl=True
-                    ) as resp:
+                    async with (
+                        aiohttp.ClientSession(connector=connector) as sess,
+                        sess.get(_BINANCE_PING_URL, ssl=True) as resp,
+                    ):
                         if resp.status == 200:
                             return proxy_url, (time.monotonic() - t0) * 1000.0
                 else:
                     connector = aiohttp.TCPConnector()
-                    async with aiohttp.ClientSession(connector=connector) as sess, sess.get(
-                        _BINANCE_PING_URL, proxy=proxy_url, ssl=True
-                    ) as resp:
+                    async with (
+                        aiohttp.ClientSession(connector=connector) as sess,
+                        sess.get(_BINANCE_PING_URL, proxy=proxy_url, ssl=True) as resp,
+                    ):
                         if resp.status == 200:
                             return proxy_url, (time.monotonic() - t0) * 1000.0
         except defensive_exc_types(aiohttp.ClientError):
@@ -580,13 +589,16 @@ def _write_proxies_to_config(path: Path, urls: list[str]) -> None:
     path.write_text(text, encoding="utf-8")
     LOG.info(
         "proxy config persisted | path=%s primary=%s pool_size=%d",
-        path, primary, len(urls),
+        path,
+        primary,
+        len(urls),
     )
 
 
 # ---------------------------------------------------------------------------
 # Startup gate
 # ---------------------------------------------------------------------------
+
 
 async def ensure_network_ready(
     settings: BotSettings,
@@ -602,9 +614,7 @@ async def ensure_network_ready(
     urls = settings.network.effective_proxy_urls()
     direct = await _probe_direct()
     configured = (
-        await _probe_configured(urls)
-        if urls
-        else NetworkProbeResult(rest_ok=False, ws_ok=False)
+        await _probe_configured(urls) if urls else NetworkProbeResult(rest_ok=False, ws_ok=False)
     )
     _log_probe_result("direct", direct)
     if urls:
@@ -652,15 +662,14 @@ async def ensure_network_ready(
         LOG.error("Binance unreachable and auto_discover=False — starting degraded")
         return settings
 
-    LOG.warning(
-        "Binance unreachable via direct and configured pool — running autonomous discovery"
-    )
+    LOG.warning("Binance unreachable via direct and configured pool — running autonomous discovery")
     best = await auto_discover_proxies()
 
     if len(best) < _MIN_WORKING_PROXIES:
         LOG.error(
             "auto-discovery found %d proxies (need %d) — starting degraded",
-            len(best), _MIN_WORKING_PROXIES,
+            len(best),
+            _MIN_WORKING_PROXIES,
         )
         return settings
 
@@ -674,6 +683,7 @@ async def ensure_network_ready(
 # ---------------------------------------------------------------------------
 # Runtime: background pool refresh loop
 # ---------------------------------------------------------------------------
+
 
 async def run_proxy_refresh_loop(
     bot: object,
@@ -726,9 +736,7 @@ async def run_proxy_refresh_loop(
             continue
 
         if len(best) < _MIN_WORKING_PROXIES:
-            LOG.warning(
-                "proxy refresh: only %d proxies found — keeping current pool", len(best)
-            )
+            LOG.warning("proxy refresh: only %d proxies found — keeping current pool", len(best))
             continue
 
         # Update live REST client pool
@@ -756,7 +764,9 @@ async def run_proxy_refresh_loop(
 
         LOG.info(
             "proxy refresh complete | active=%s pool_size=%d tor_rotated=%s",
-            best[0], len(best), tor_rotated,
+            best[0],
+            len(best),
+            tor_rotated,
         )
 
     LOG.info("proxy refresh loop stopped")

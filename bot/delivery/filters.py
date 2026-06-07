@@ -32,8 +32,8 @@ LOGGER = logging.getLogger(__name__)
 # п.26: per-strategy SL-rate cache. Updated from delivery_orchestrator via
 # update_strategy_sl_rates(). Strategies with >70% SL rate get a score penalty.
 _STRATEGY_SL_RATES: dict[str, float] = {}
-_SL_PENALTY_THRESHOLD = 0.70   # sl_rate above this triggers penalty
-_SL_PENALTY_MAX_MULT = 0.80    # floor multiplier at 100% sl rate
+_SL_PENALTY_THRESHOLD = 0.70  # sl_rate above this triggers penalty
+_SL_PENALTY_MAX_MULT = 0.80  # floor multiplier at 100% sl rate
 
 
 def update_strategy_sl_rates(rates: dict[str, float]) -> None:
@@ -47,7 +47,7 @@ def _optional_float(value: Any) -> float | None:
         return None
     try:
         numeric = float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if not math.isfinite(numeric):
         return None
@@ -122,7 +122,7 @@ def _resolve_symbol_filter(
         return default
     try:
         value = float(raw)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return default
     return value if math.isfinite(value) else default
 
@@ -155,12 +155,12 @@ def _benchmark_context_guard(
             continue
         try:
             pct_1h_values.append(float(raw_pct))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             pct_1h_values.append(None)
     context_age_seconds = getattr(prepared, "context_snapshot_age_seconds", None)
     try:
         context_age = float(context_age_seconds) if context_age_seconds is not None else None
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         context_age = None
     benchmark_context_stale = bool(
         context
@@ -184,11 +184,11 @@ def _benchmark_context_guard(
         bias = str(payload.get("bias") or "neutral").lower()
         try:
             pct_1h = float(payload.get("pct_1h") or 0.0)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             pct_1h = 0.0
         try:
             pct_4h = float(payload.get("pct_4h") or 0.0)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             pct_4h = 0.0
         move_score = max(abs(pct_1h) / 0.006, abs(pct_4h) / 0.015)
         if move_score < 1.0 and bias == "neutral":
@@ -343,13 +343,17 @@ def _regime_short_gate(
         _bull_bias_chk = _btc_bias_chk in {"uptrend", "bull"} or _bias_4h_chk == "uptrend"
         _distribution_phase = _btc_phase_chk in {"distribution", "transition", "decline"}
         if _bull_regime_chk and _bull_bias_chk and not _distribution_phase:
-            return False, "regime_bull_reversal_short_blocked", {
-                "regime_gate": "reversal_short_blocked_strong_bull",
-                "market_regime": _regime_chk,
-                "btc_bias": _btc_bias_chk,
-                "bias_4h": _bias_4h_chk,
-                "btc_phase": _btc_phase_chk,
-            }
+            return (
+                False,
+                "regime_bull_reversal_short_blocked",
+                {
+                    "regime_gate": "reversal_short_blocked_strong_bull",
+                    "market_regime": _regime_chk,
+                    "btc_bias": _btc_bias_chk,
+                    "bias_4h": _bias_4h_chk,
+                    "btc_phase": _btc_phase_chk,
+                },
+            )
         return True, None, {"regime_gate": "reversal_exempt"}
 
     regime = str(getattr(prepared, "market_regime", "") or "").lower()
@@ -387,11 +391,11 @@ def _latest_frame_float(frame: pl.DataFrame | None, column: str) -> float | None
         return None
     try:
         value = frame.item(-1, column)
-    except (IndexError, TypeError, ValueError):
+    except IndexError, TypeError, ValueError:
         return None
     try:
         numeric = float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     return numeric if math.isfinite(numeric) else None
 
@@ -1186,11 +1190,7 @@ def _run_filter_pipeline(
     funding_rate = _optional_float(getattr(prepared, "funding_rate", None))
     funding_moderate = float(getattr(settings.scoring, "funding_rate_moderate", 0.0005) or 0.0005)
     funding_extreme = float(getattr(settings.scoring, "funding_rate_extreme", 0.0010) or 0.0010)
-    if (
-        signal.direction == "short"
-        and funding_rate is not None
-        and funding_rate > funding_extreme
-    ):
+    if signal.direction == "short" and funding_rate is not None and funding_rate > funding_extreme:
         return _reject(
             "funding_headwind_short",
             base,
@@ -1200,11 +1200,7 @@ def _run_filter_pipeline(
                 "signal_direction": signal.direction,
             },
         )
-    if (
-        signal.direction == "short"
-        and funding_rate is not None
-        and funding_rate > funding_moderate
-    ):
+    if signal.direction == "short" and funding_rate is not None and funding_rate > funding_moderate:
         funding_short_penalty_applied = True
         passed.append("funding_short_penalty_eligible")
     elif funding_rate is not None:

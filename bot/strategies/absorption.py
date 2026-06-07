@@ -11,7 +11,7 @@ from ._common import (
     finite_or_none,
     with_spec_columns,
 )
-from ._roadmap import _build_atr_signal, _flow_delta_with_source, _last, _prev, _reject
+from ._roadmap import _build_atr_signal, _flow_delta_with_source, _prev, _reject
 from .roadmap_base import RoadmapSetup
 
 if TYPE_CHECKING:

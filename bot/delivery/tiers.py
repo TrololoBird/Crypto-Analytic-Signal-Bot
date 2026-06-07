@@ -34,7 +34,7 @@ def _finite_score(value: object) -> float:
     # fix-20260604: NaN is truthy - `score or 0.0` still sorts as NaN
     try:
         numeric = float(value or 0.0)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return 0.0
     return numeric if math.isfinite(numeric) else 0.0
 

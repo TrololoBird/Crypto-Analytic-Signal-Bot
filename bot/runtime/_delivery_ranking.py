@@ -92,8 +92,7 @@ class DeliveryRankingMixin:
     def _contract_issue_rows(self, signal: Signal) -> list[dict[str, object]]:
         min_rr = float(self._bot.settings.filters.min_risk_reward)
         return [
-            issue.to_dict()
-            for issue in validate_signal_contract(signal, min_risk_reward=min_rr)
+            issue.to_dict() for issue in validate_signal_contract(signal, min_risk_reward=min_rr)
         ]
 
     def _limit_entry_gate(
@@ -270,9 +269,11 @@ class DeliveryRankingMixin:
 
         setup_lanes = sorted(
             by_setup.values(),
-            key=lambda items: self._rank_key(items[0], diversity_state=portfolio_state)
-            if items
-            else (0.0, 0.0, 0.0),
+            key=lambda items: (
+                self._rank_key(items[0], diversity_state=portfolio_state)
+                if items
+                else (0.0, 0.0, 0.0)
+            ),
             reverse=True,
         )
         for setup_signals in setup_lanes:
@@ -301,9 +302,7 @@ class DeliveryRankingMixin:
             key = signal.signal_key
             if key in selected_keys:
                 continue
-            cap_ok, _ = self._passes_portfolio_cap(
-                signal, portfolio_state, max_signals=max_signals
-            )
+            cap_ok, _ = self._passes_portfolio_cap(signal, portfolio_state, max_signals=max_signals)
             if not cap_ok:
                 continue
             selected.append(signal)

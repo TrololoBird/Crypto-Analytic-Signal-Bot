@@ -228,7 +228,7 @@ class PreparedSymbol:
         value = self.work_15m.item(-1, "atr_pct")
         try:
             return None if value is None else float(value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
 
     @property
@@ -238,7 +238,7 @@ class PreparedSymbol:
         value = self.work_15m.item(-1, "volume_ratio20")
         try:
             return None if value is None else float(value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
 
     @property
@@ -248,7 +248,7 @@ class PreparedSymbol:
         value = self.work_1h.item(-1, "adx14")
         try:
             return None if value is None else float(value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
 
 

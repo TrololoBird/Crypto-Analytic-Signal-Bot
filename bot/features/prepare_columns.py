@@ -57,10 +57,19 @@ GROUP_DEPENDENCIES: dict[str, frozenset[str]] = {
 }
 
 STRATEGY_PREPARE_GROUPS: dict[str, frozenset[str]] = {
-    "squeeze_setup": frozenset({
-        "squeeze", "bb", "keltner", "supertrend", "obv", "stoch",
-        "oscillators", "zscore", "candles",
-    }),
+    "squeeze_setup": frozenset(
+        {
+            "squeeze",
+            "bb",
+            "keltner",
+            "supertrend",
+            "obv",
+            "stoch",
+            "oscillators",
+            "zscore",
+            "candles",
+        }
+    ),
     "bb_squeeze": frozenset({"squeeze", "bb", "keltner", "zscore", "obv"}),
     "wick_trap_reversal": frozenset({"supertrend", "stoch", "oscillators", "candles"}),
     "liquidity_sweep": frozenset({"supertrend", "bb", "candles"}),

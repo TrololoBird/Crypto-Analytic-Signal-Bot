@@ -735,8 +735,7 @@ def register_routes(dashboard: BotDashboard) -> None:
             "disabled_setups": body.get("disabled_setups", []),
             "weights": body.get("weights", {}),
             "note": (
-                "Use CLI: python main.py backtest --symbol BTCUSDT --days 7 "
-                "[--setup order_block]"
+                "Use CLI: python main.py backtest --symbol BTCUSDT --days 7 [--setup order_block]"
             ),
             "engine": "bot.engine.backtest.run_historical_backtest",
         }

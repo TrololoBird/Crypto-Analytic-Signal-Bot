@@ -59,9 +59,8 @@ class CycleRunner:
         if include_spot_enrichments:
             ws_enrichments.update(bot._spot_enrichments(symbol))
 
-        if (
-            ws_enrichments.get("ticker_price") is None
-            and isinstance(bot.client, BinanceFuturesMarketData)
+        if ws_enrichments.get("ticker_price") is None and isinstance(
+            bot.client, BinanceFuturesMarketData
         ):
             cached_price = bot.client.get_cached_symbol_price(symbol)
             if cached_price is not None and cached_price > 0.0:

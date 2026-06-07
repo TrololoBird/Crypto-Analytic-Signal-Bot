@@ -96,7 +96,7 @@ class MarketRadarStore:
             change_pct = float(
                 row.get("price_change_percent") or row.get("price_change_pct") or 0.0
             )
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
         if volume < self._cfg.min_quote_volume_usd or price <= 0.0:
             return None

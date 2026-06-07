@@ -623,9 +623,7 @@ class DeliveryConfig(_StrictModel):
 
     @field_validator("setup_interval_minutes")
     @classmethod
-    def _validate_setup_interval_minutes(
-        cls, value: Mapping[str, Any] | None
-    ) -> dict[str, int]:
+    def _validate_setup_interval_minutes(cls, value: Mapping[str, Any] | None) -> dict[str, int]:
         normalized: dict[str, int] = {}
         for setup_id, minutes in (value or {}).items():
             coerced = int(minutes)
@@ -1113,7 +1111,7 @@ class BotSettings(_StrictModel):
             for item in value:
                 try:
                     ids.append(int(item))
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     continue
             return tuple(sorted(set(ids)))
         return ()

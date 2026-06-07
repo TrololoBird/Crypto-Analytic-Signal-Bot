@@ -22,7 +22,7 @@ def benchmark_funding_median(funding_rates: dict[str, float] | None) -> float:
             continue
         try:
             samples.append(float(raw))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
     if not samples:
         return 0.0

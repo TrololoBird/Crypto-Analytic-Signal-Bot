@@ -270,15 +270,9 @@ def _detect_ema_bounce_extended(
         ha_close_15m = float(work_15m["ha_close"][-1] or 0.0)
         ha_high_15m = float(work_15m["ha_high"][-1] or 0.0)
         if signal_direction == "long":
-            if (
-                ha_low_15m == ha_open_15m
-                and ha_close_15m > ha_open_15m
-            ):
+            if ha_low_15m == ha_open_15m and ha_close_15m > ha_open_15m:
                 ha_boost = 1.06
-        elif (
-            ha_high_15m == ha_open_15m
-            and ha_close_15m < ha_open_15m
-        ):
+        elif ha_high_15m == ha_open_15m and ha_close_15m < ha_open_15m:
             ha_boost = 1.06
 
     kama_boost = 1.0
