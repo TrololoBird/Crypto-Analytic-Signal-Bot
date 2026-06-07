@@ -190,6 +190,8 @@ class PreparedSymbol:
     context_timeframes: tuple[str, ...] = ("1h", "4h")
     settings: BotSettings | None = None
     reject_log: tuple[dict[str, Any], ...] = ()
+    btc_change_pct: float | None = None
+    eth_change_pct: float | None = None
 
     def __post_init__(self) -> None:
         if self.top_account_ls_ratio is None and self.ls_ratio is not None:
@@ -404,6 +406,18 @@ class Signal:
     def tracking_ref(self) -> str:
         digest = hashlib.sha1(self.tracking_id.encode("utf-8"), usedforsecurity=False).hexdigest()
         return digest[:8].upper()
+
+    @property
+    def content_hash(self) -> str:
+        """Deterministic hash of symbol + direction + setup + rounded prices.
+
+        Used for dedup (IV.27): signals with identical content_hash within a
+        dedup window are treated as duplicates.
+        """
+        rounded_low = f"{self.entry_low:.2f}"
+        rounded_high = f"{self.entry_high:.2f}"
+        raw = f"{self.symbol}|{self.direction}|{self.setup_id}|{rounded_low}|{rounded_high}|{self.timeframe}"
+        return hashlib.sha1(raw.encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
 
     @property
     def side(self) -> str:

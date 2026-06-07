@@ -29,11 +29,28 @@ ALL_PREPARE_GROUPS: frozenset[str] = frozenset(
         "ols",
         "session",
         "tail_metrics",
+        "stoch_rsi",
+        "ichimoku",
+        "kama",
+        "heikin_ashi",
+        "pivot_points",
     }
 )
 
 # Not referenced by strategies or enrichment telemetry — safe to skip on live path.
-LIVE_SKIPPABLE_GROUPS: frozenset[str] = frozenset({"psar", "aroon", "hma", "volume_profile"})
+LIVE_SKIPPABLE_GROUPS: frozenset[str] = frozenset(
+    {
+        "psar",
+        "aroon",
+        "hma",
+        "volume_profile",
+        "stoch_rsi",
+        "ichimoku",
+        "kama",
+        "heikin_ashi",
+        "pivot_points",
+    }
+)
 
 GROUP_DEPENDENCIES: dict[str, frozenset[str]] = {
     "squeeze": frozenset({"bb", "keltner"}),
@@ -41,7 +58,7 @@ GROUP_DEPENDENCIES: dict[str, frozenset[str]] = {
 
 STRATEGY_PREPARE_GROUPS: dict[str, frozenset[str]] = {
     "squeeze_setup": frozenset({"squeeze", "bb", "keltner", "supertrend", "obv", "stoch", "oscillators", "zscore", "candles"}),
-    "bb_squeeze": frozenset({"squeeze", "bb", "keltner", "zscore"}),
+    "bb_squeeze": frozenset({"squeeze", "bb", "keltner", "zscore", "obv"}),
     "wick_trap_reversal": frozenset({"supertrend", "stoch", "oscillators", "candles"}),
     "liquidity_sweep": frozenset({"supertrend", "bb", "candles"}),
     "order_block": frozenset({"bb", "keltner", "candles"}),
@@ -49,9 +66,15 @@ STRATEGY_PREPARE_GROUPS: dict[str, frozenset[str]] = {
     "stop_hunt_detection": frozenset({"supertrend", "bb", "candles"}),
     "volume_climax_reversal": frozenset({"oscillators", "stoch", "candles"}),
     "volume_anomaly": frozenset({"oscillators", "bb", "candles"}),
-    "supertrend_follow": frozenset({"supertrend", "obv"}),
+    "supertrend_follow": frozenset({"supertrend", "obv", "ichimoku", "heikin_ashi"}),
     "price_velocity": frozenset({"zscore", "ols"}),
     "keltner_breakout": frozenset({"keltner", "bb", "squeeze"}),
+    "multi_tf_trend": frozenset({"ichimoku"}),
+    "hidden_divergence": frozenset({"stoch_rsi"}),
+    "indicator_divergence": frozenset({"stoch_rsi"}),
+    "ema_bounce": frozenset({"heikin_ashi", "kama"}),
+    "vwap_trend": frozenset({"heikin_ashi"}),
+    "atr_expansion": frozenset({"obv"}),
 }
 
 _BASE_LIVE_GROUPS: frozenset[str] = frozenset(

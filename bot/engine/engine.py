@@ -441,12 +441,14 @@ class SignalEngine:
         for strategy, result in zip(strategies, results, strict=True):
             if isinstance(result, BaseException):
                 error_class = classify_runtime_error(result)
-                LOG.exception(
-                    "%s: Strategy %s failed: %s | error_class=%s",
+                LOG.error(
+                    "%s: Strategy %s failed: %s | error_class=%s | type=%s",
                     symbol,
                     strategy.strategy_id,
                     result,
                     error_class,
+                    type(result).__name__,
+                    exc_info=(type(result), result, result.__traceback__),
                 )
                 decision = StrategyDecision.error_result(
                     setup_id=strategy.strategy_id,

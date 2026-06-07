@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import time
 from bisect import bisect_right
 from datetime import UTC, datetime
@@ -333,6 +334,9 @@ class TPSLReviewMixin:
                 precision_mode="time_fallback",
             )
         events = []
+        if self._check_adverse_event(candles):
+            events.extend(await self._invalidate_all_for_adverse_event(tracked_rows, now=now))
+            return events
         for tracked in tracked_rows:
             try:
                 events.extend(await self._apply_candle_rows(tracked, candles, now=now))
@@ -445,6 +449,94 @@ class TPSLReviewMixin:
         )
         return events
 
+    async def _invalidate_all_for_adverse_event(
+        self,
+        tracked_rows: list[TrackedSignalState],
+        *,
+        now: datetime,
+    ) -> list[SignalTrackingEvent]:
+        events: list[SignalTrackingEvent] = []
+        for tracked in tracked_rows:
+            if tracked.activated_at is None:
+                continue
+            events.append(
+                await self._close_event(
+                    tracked,
+                    event_type="emergency_exit",
+                    occurred_at=now,
+                    price=float(
+                        tracked.last_price or tracked.activation_price or tracked.entry_mid
+                    ),
+                    precision_mode="adverse_event",
+                )
+            )
+        return events
+
+    @staticmethod
+    def _check_adverse_event(candles: pl.DataFrame) -> bool:
+        """Detect flash crash: drop >4% within 5 min from recent 1m candles."""
+        required = {"close", "close_time"}
+        if candles.is_empty() or not required.issubset(candles.columns):
+            return False
+        recent = candles.tail(5)
+        if recent.height < 3:
+            return False
+        closes = [float(c) for c in recent["close"] if c is not None and math.isfinite(float(c))]
+        if len(closes) < 3:
+            return False
+        first_close = closes[0]
+        last_close = closes[-1]
+        if first_close <= 0.0:
+            return False
+        change_pct = (last_close - first_close) / first_close * 100.0
+        time_col = list(recent["close_time"])
+        if len(time_col) >= 2:
+            t0 = time_col[0]
+            if not isinstance(t0, datetime):
+                t0 = datetime.fromisoformat(str(t0))
+            t1 = time_col[-1]
+            if not isinstance(t1, datetime):
+                t1 = datetime.fromisoformat(str(t1))
+            if (t1 - t0).total_seconds() > 600:
+                return False
+        return change_pct <= -4.0
+
+    async def _update_trailing_post_tp1(
+        self,
+        tracked: TrackedSignalState,
+        *,
+        high: float,
+        low: float,
+    ) -> None:
+        """Trail stop by ATR after TP1 hit — 1.5x initial R from best price."""
+        if tracked.tp1_hit_at is None:
+            return
+        entry = tracked.activation_price or tracked.entry_mid
+        stop_init = float(tracked.stop)
+        if not entry or entry <= 0.0 or stop_init <= 0.0:
+            return
+        initial_r = abs(float(entry) - stop_init)
+        if initial_r <= 0.0:
+            return
+        if tracked.direction == "long":
+            best = high if math.isfinite(high) else 0.0
+            if best <= 0.0:
+                return
+            trail_dist = initial_r * 1.5
+            new_stop = best - trail_dist
+            entry_px = float(entry)
+            if new_stop > entry_px and new_stop > self._effective_stop(tracked):
+                self._apply_trailing_stop(tracked, new_stop)
+        else:
+            best = low if math.isfinite(low) else 0.0
+            if best <= 0.0:
+                return
+            trail_dist = initial_r * 1.5
+            new_stop = best + trail_dist
+            entry_px = float(entry)
+            if new_stop < entry_px and new_stop < self._effective_stop(tracked):
+                self._apply_trailing_stop(tracked, new_stop)
+
     async def _apply_candle_rows(
         self,
         tracked: TrackedSignalState,
@@ -535,6 +627,7 @@ class TPSLReviewMixin:
                 if tracked.activated_at is None:
                     continue
             self._update_bar_excursion(tracked, high=bar_high, low=bar_low)
+            await self._update_trailing_post_tp1(tracked, high=bar_high, low=bar_low)
             if (tp2_touched and stop_touched) or (
                 tracked.tp1_hit_at is None and tp1_touched and stop_touched
             ):

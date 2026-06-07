@@ -38,6 +38,19 @@ REQUIRED_PREPARED_LIVE_FIELDS: tuple[str, ...] = (
     "funding_rate",
 )
 
+# prepare_frame drops leading rows until ema200/donchian are populated (~200 bars on 15m).
+_PREPARED_FRAME_WARMUP_RESERVE: dict[str, int] = {
+    "5m": 120,
+    "15m": 200,
+    "1h": 200,
+    "4h": 200,
+}
+
+
+def _effective_prepared_minimum(configured: int, timeframe: str) -> int:
+    reserve = _PREPARED_FRAME_WARMUP_RESERVE.get(timeframe, 120)
+    return max(30, int(configured) - reserve)
+
 
 @dataclass(frozen=True, slots=True)
 class DataReadinessResult:
@@ -96,10 +109,10 @@ def assess_symbol_data_readiness(
         "radar_promoted": radar_promoted,
     }
     minimums = {
-        "5m": int(filters.min_bars_5m),
-        "15m": int(filters.min_bars_15m),
-        "1h": int(filters.min_bars_1h),
-        "4h": int(filters.min_bars_4h),
+        "5m": _effective_prepared_minimum(int(filters.min_bars_5m), "5m"),
+        "15m": _effective_prepared_minimum(int(filters.min_bars_15m), "15m"),
+        "1h": _effective_prepared_minimum(int(filters.min_bars_1h), "1h"),
+        "4h": _effective_prepared_minimum(int(filters.min_bars_4h), "4h"),
     }
     rows = {
         "5m": prepared.work_5m.height if prepared.work_5m is not None else 0,

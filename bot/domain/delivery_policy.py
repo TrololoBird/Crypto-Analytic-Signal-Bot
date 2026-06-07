@@ -109,10 +109,18 @@ def is_metal_anchor(symbol: str) -> bool:
     return bool(key) and key in METAL_ANCHOR_SYMBOLS
 
 
-def effective_action_min_score(settings: BotSettings, symbol: str) -> float:
-    """Higher ACTION bar on benchmark anchors (+delta vs alts)."""
+def effective_action_min_score(
+    settings: BotSettings, symbol: str, setup_id: str | None = None
+) -> float:
+    """Higher ACTION bar on benchmark anchors — plus per-strategy per-symbol deltas."""
     delivery = settings.delivery
     base = float(delivery.action_min_score)
+    strategy_deltas = getattr(delivery, "strategy_symbol_score_deltas", None) or {}
+    if setup_id:
+        key = f"{setup_id}.{symbol}"
+        strat_delta = strategy_deltas.get(key)
+        if strat_delta is not None:
+            base = max(0.0, min(1.0, base + float(strat_delta)))
     if not is_benchmark_anchor(symbol):
         return base
     delta = float(delivery.anchor_action_score_delta)

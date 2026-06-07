@@ -2,8 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, dev]
   pull_request:
+    branches: [main, dev]
 
 permissions:
   contents: read
@@ -44,13 +45,12 @@ jobs:
       - name: Ruff format (apply + verify clean tree)
         run: |
           ruff format bot/ tests/ scripts/ main.py
-          python scripts/fix_py314_except.py bot/ tests/ scripts/ main.py
           git diff --exit-code -- bot/ tests/ scripts/ main.py
 
       - name: Legacy multi-except guard (Python 3.14)
         run: |
           if rg -n '^\s*except [A-Za-z_][A-Za-z0-9_.]*, ' bot tests; then
-            echo "Found legacy except syntax; run scripts/fix_py314_except.py"
+            echo "Found legacy except syntax; use tuple form: except (A, B):"
             exit 1
           fi
 
@@ -86,8 +86,8 @@ jobs:
       - name: Project health audit
         run: python scripts/project_health_audit.py --stale-days 2
 
-      - name: Pytest (offline)
-        run: pytest tests/ -q --ignore=tests/live
+      - name: Pytest (live-only suite; skip live without PYTEST_LIVE)
+        run: pytest tests/ -q
 
   typecheck:
     runs-on: ubuntu-latest

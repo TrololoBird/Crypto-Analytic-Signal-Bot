@@ -869,6 +869,13 @@ class AnalyzerFramesMixin(AnalyzerContextMixin, _AnalyzerFamilyGatesBase):
             enrichments["degrade_reason"] = primary["degrade_reason"]
             enrichments["fallback_used"] = primary["fallback_used"]
             enrichments["degradation_events"] = tuple(degradation_events)
+        try:
+            spot_data = self._bot._spot_enrichments(symbol)
+            if spot_data:
+                enrichments.update(spot_data)
+                enrichments.setdefault("data_source_mix", "futures+spot")
+        except DEFENSIVE_EXC:
+            pass
         enrichments.setdefault("data_source_mix", "futures_only")
         return enrichments
 

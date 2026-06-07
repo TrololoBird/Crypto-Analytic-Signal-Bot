@@ -854,6 +854,41 @@ class MemoryRepository(_MemoryRepositoryBases):
             return 0
         return len(window) if isinstance(window, list) else 0
 
+    def setup_win_rate(self, setup_id: str) -> float | None:
+        """Return win-rate from outcome_window, or None if insufficient data."""
+        try:
+            with sqlite3.connect(self._db_path) as conn:
+                row = conn.execute(
+                    "SELECT outcome_window FROM setup_scores WHERE setup_id = ?",
+                    (setup_id,),
+                ).fetchone()
+        except DEFENSIVE_EXC:
+            return None
+        if row is None or not row[0]:
+            return None
+        try:
+            window: list[Any] = json.loads(row[0])
+        except (json.JSONDecodeError, TypeError):
+            return None
+        if not isinstance(window, list) or len(window) < 5:
+            return None
+        wins = 0
+        total = 0
+        for entry in window:
+            if isinstance(entry, dict):
+                outcome = entry.get("outcome", "")
+                profitable = entry.get("was_profitable")
+            else:
+                outcome = str(entry)
+                profitable = None
+            _win_outcomes = {"tp1_hit", "tp2_hit", "tp3_hit", "partial_tp"}
+            if outcome in _win_outcomes or profitable is True:
+                wins += 1
+                total += 1
+            elif outcome == "stop_loss" or profitable is False:
+                total += 1
+        return wins / total if total >= 5 else None
+
     # ------------------------------------------------------------------
     # Active signal tracking (replaces SignalTrackingStore)
     # ------------------------------------------------------------------
@@ -1060,6 +1095,34 @@ class MemoryRepository(_MemoryRepositoryBases):
         except Exception:
             LOG.exception("failed to close active signal %s", tracking_id)
             raise
+
+    async def cleanup_active_signals_on_startup(self) -> int:
+        """Expire all pending/active signals at startup (V.33).
+
+        After a crash, ``active_signals`` may contain stale entries that block
+        new signals via cooldown. This closes all non-closed signals immediately.
+        """
+        if not self._conn:
+            msg = "Repository not initialized"
+            raise RuntimeError(msg)
+        now = datetime.now(UTC)
+        cursor = await self._conn.execute(
+            """
+            UPDATE active_signals
+            SET status = 'closed',
+                close_reason = 'startup_cleanup',
+                close_price = COALESCE(last_price, activation_price, entry_mid, close_price),
+                closed_at = ?
+            WHERE status IN ('pending', 'active')
+            """,
+            (now.isoformat(),),
+        )
+        changed = int(cursor.rowcount or 0)
+        await cursor.close()
+        await self._conn.commit()
+        if changed:
+            LOG.info("active_signals_cleaned_on_startup | count=%d", changed)
+        return changed
 
     async def expire_open_signals_older_than(
         self, *, max_age_minutes: int, now: datetime | None = None

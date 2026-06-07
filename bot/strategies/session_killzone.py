@@ -473,6 +473,18 @@ def detect_session_killzone(
         vol_ratio=vol_ratio,
         rsi=rsi,
     )
+    # Session quality multiplier: Overlap has the highest liquidity, Asia the lowest
+    _SESSION_QUALITY: dict[str, float] = {
+        "Overlap": 1.08,   # London + NY active simultaneously
+        "NY": 1.04,        # Major institutional session
+        "London": 1.04,    # Major institutional session
+        "PreLondon": 0.98, # Setup window before London open
+        "NYClose": 0.93,   # Reduced liquidity, end of NY session
+        "Asia": 0.88,      # Lower crypto futures liquidity
+    }
+    if session_name and session_name in _SESSION_QUALITY:
+        score = min(1.0, score * _SESSION_QUALITY[session_name])
+
     if buffer_active:
         score *= _as_float(
             effective_params.get("buffer_zone_penalty", defaults["buffer_zone_penalty"]),

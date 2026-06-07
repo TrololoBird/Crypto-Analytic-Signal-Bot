@@ -95,18 +95,20 @@ def _detect_session_cvd_exhaustion(
     price_low_a = float(window_a["low"].min() or 0.0)
     price_high_b = float(window_b["high"].max() or 0.0)
     price_low_b = float(window_b["low"].min() or 0.0)
-    cvd_end_a = float(window_a["session_cvd"][-1] or 0.0)
-    cvd_end_b = float(window_b["session_cvd"][-1] or 0.0)
+    # Use intra-window CVD change (end - start) to avoid false signals from daily reset at midnight
+    cvd_change_a = float(window_a["session_cvd"][-1] or 0.0) - float(window_a["session_cvd"][0] or 0.0)
+    cvd_change_b = float(window_b["session_cvd"][-1] or 0.0) - float(window_b["session_cvd"][0] or 0.0)
 
-    # Require meaningful CVD divergence (at least 1 sigma)
-    cvd_diff = abs(cvd_end_b - cvd_end_a)
+    # Require meaningful CVD divergence between windows (at least 1 sigma)
+    cvd_diff = abs(cvd_change_b - cvd_change_a)
     if cvd_diff < delta_std:
         return None
 
     rsi = as_float(work.item(-1, "rsi14"), 50.0)
 
-    # Bearish: price new session high but CVD declining → exhaustion short
-    if price_high_b > price_high_a and cvd_end_b < cvd_end_a:
+    # Bearish: price new session high but CVD change declining → participation exhaustion
+    # Require RSI overbought confirmation (≥60) to reduce false signals in choppy markets
+    if price_high_b > price_high_a and cvd_change_b < cvd_change_a and rsi >= 60.0:
         entry = price_high_b
         return SpecHit(
             strategy="cvd_divergence",
@@ -115,12 +117,13 @@ def _detect_session_cvd_exhaustion(
             stop_basis=entry,
             atr=atr,
             timeframe=timeframe,
-            reasons=(f"session_cvd_exhaustion_short cvd_diff={cvd_diff:.4f} price_hh={price_high_b:.4f}",),
+            reasons=(f"session_cvd_exhaustion_short cvd_chg_a={cvd_change_a:.4f} cvd_chg_b={cvd_change_b:.4f} price_hh={price_high_b:.4f} rsi={rsi:.1f}",),
             rsi=rsi,
         )
 
-    # Bullish: price new session low but CVD rising → accumulation long
-    if price_low_b < price_low_a and cvd_end_b > cvd_end_a:
+    # Bullish: price new session low but CVD change rising → accumulation long
+    # Require RSI oversold confirmation (≤40) to reduce false signals in choppy markets
+    if price_low_b < price_low_a and cvd_change_b > cvd_change_a and rsi <= 40.0:
         entry = price_low_b
         return SpecHit(
             strategy="cvd_divergence",
@@ -129,7 +132,7 @@ def _detect_session_cvd_exhaustion(
             stop_basis=entry,
             atr=atr,
             timeframe=timeframe,
-            reasons=(f"session_cvd_exhaustion_long cvd_diff={cvd_diff:.4f} price_ll={price_low_b:.4f}",),
+            reasons=(f"session_cvd_exhaustion_long cvd_chg_a={cvd_change_a:.4f} cvd_chg_b={cvd_change_b:.4f} price_ll={price_low_b:.4f} rsi={rsi:.1f}",),
             rsi=rsi,
         )
 

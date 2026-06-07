@@ -253,15 +253,14 @@ def _detect_indicator_divergence_extended(
 
     # Fisher Transform confluence: cross confirmation boosts reversal confidence
     fisher_boost = 1.0
-    if "fisher" in w.columns and "fisher_signal" in w.columns and w.height >= 2:
-        f_cur = float(w.item(-1, "fisher") or 0.0)
-        f_prev = float(w.item(-2, "fisher") or 0.0)
-        fs_cur = float(w.item(-1, "fisher_signal") or 0.0)
-        # Bullish: Fisher crossed above signal from negative territory
-        if direction == "long" and f_cur > fs_cur and f_prev <= float(w.item(-2, "fisher_signal") or 0.0) and f_prev < 0.5:
+    if "fisher" in work.columns and "fisher_signal" in work.columns and work.height >= 2:
+        f_cur = float(work.item(-1, "fisher") or 0.0)
+        f_prev = float(work.item(-2, "fisher") or 0.0)
+        fs_cur = float(work.item(-1, "fisher_signal") or 0.0)
+        fs_prev = float(work.item(-2, "fisher_signal") or 0.0)
+        if direction == "long" and f_cur > fs_cur and f_prev <= fs_prev and f_prev < 0.5:
             fisher_boost = 1.06
-        # Bearish: Fisher crossed below signal from positive territory
-        elif direction == "short" and f_cur < fs_cur and f_prev >= float(w.item(-2, "fisher_signal") or 0.0) and f_prev > -0.5:
+        elif direction == "short" and f_cur < fs_cur and f_prev >= fs_prev and f_prev > -0.5:
             fisher_boost = 1.06
     score = min(1.0, score * fisher_boost)
 

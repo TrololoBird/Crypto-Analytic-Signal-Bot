@@ -85,6 +85,25 @@ def detect_multi_tf_trend(
     if vol_ratio < float(params["min_volume_ratio"]):
         _reject(prepared, setup_id, "volume_too_low", volume_ratio=vol_ratio)
         return None
+
+    ichimoku_cloud_penalty = 1.0
+    if "senkou_a" in htf.columns and "senkou_b" in htf.columns:
+        sa = _last(htf, "senkou_a")
+        sb = _last(htf, "senkou_b")
+        if sa is not None and sb is not None:
+            cloud_top = max(sa, sb)
+            cloud_bottom = min(sa, sb)
+            close_htf = _last(htf, "close")
+            if close_htf is not None:
+                if close_htf < cloud_top and close_htf > cloud_bottom:
+                    ichimoku_cloud_penalty = 0.80
+                elif close_htf < cloud_bottom and spec_direction == "long":
+                    _reject(prepared, setup_id, "ichimoku_cloud_opposes", sa=sa, sb=sb)
+                    return None
+                elif close_htf > cloud_top and spec_direction == "short":
+                    _reject(prepared, setup_id, "ichimoku_cloud_opposes", sa=sa, sb=sb)
+                    return None
+
     context_values = [
         prepared.bias_4h,
         prepared.bias_1h,
@@ -150,21 +169,25 @@ def detect_multi_tf_trend(
         )
         return None
     entry_anchor = float(htf_ema[-1]) if htf_ema[-1] > 0 else None
+    clarity = 0.85 * ichimoku_cloud_penalty
+    reasons = [
+        f"multi_tf_pullback_{direction}",
+        f"adx_1h={adx_1h:.1f}",
+        f"htf_ema50_slope_atr={htf_slope_atr:.4f}",
+        f"rsi15={rsi_15m:.1f}",
+        f"votes_up={up_votes} votes_down={down_votes}",
+    ]
+    if ichimoku_cloud_penalty < 1.0:
+        reasons.append("ichimoku_cloud_inside")
     return _build_atr_signal(
         prepared=prepared,
         setup_id=setup_id,
         direction=direction,
         params=params,
-        reasons=[
-            f"multi_tf_pullback_{direction}",
-            f"adx_1h={adx_1h:.1f}",
-            f"htf_ema50_slope_atr={htf_slope_atr:.4f}",
-            f"rsi15={rsi_15m:.1f}",
-            f"votes_up={up_votes} votes_down={down_votes}",
-        ],
+        reasons=reasons,
         family=family,
         entry_anchor=entry_anchor,
-        structure_clarity=0.85,
+        structure_clarity=clarity,
         confirmed_bar=True,
     )
 

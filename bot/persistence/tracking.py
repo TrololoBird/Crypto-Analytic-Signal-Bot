@@ -327,9 +327,18 @@ class SignalTracker(_SignalTrackerBases):
         return states
 
     def _apply_trailing_stop(self, tracked: TrackedSignalState, stop_price: float) -> None:
-        """Sync in-memory and struct trailing stop; caller persists when ready."""
+        """Sync in-memory and struct trailing stop; caller persists when ready.
+
+        п.38 — Never widen the stop beyond the initial level.
+        """
         if stop_price <= 0.0:
             return
+        initial_stop = float(tracked.stop)
+        if initial_stop > 0.0:
+            if tracked.direction == "long" and stop_price < initial_stop:
+                return
+            if tracked.direction == "short" and stop_price > initial_stop:
+                return
         self._trailing_stops[tracked.tracking_id] = float(stop_price)
         if bool(getattr(self.settings.tracking, "persist_trailing_stop", True)):
             tracked.trailing_stop = float(stop_price)

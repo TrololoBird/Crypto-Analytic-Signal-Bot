@@ -937,6 +937,72 @@ def _chandelier_exit(
     )
 
 
+def _stochastic_rsi(df: pl.DataFrame, period: int = 14) -> pl.Series:
+    """Stochastic RSI = (RSI - min(RSI, N)) / (max(RSI, N) - min(RSI, N))."""
+    rsi = _rsi(df, period=period)
+    min_rsi = rsi.rolling_min(window_size=period)
+    max_rsi = rsi.rolling_max(window_size=period)
+    denom = max_rsi - min_rsi
+    stoch = (rsi - min_rsi) / denom.replace(0.0, float("nan"))
+    return stoch.fill_nan(0.5).fill_null(0.5).alias("stoch_rsi14")
+
+
+def _ichimoku_cloud(df: pl.DataFrame) -> pl.DataFrame:
+    """Compute Ichimoku Cloud components."""
+    high9 = df["high"].rolling_max(window_size=9)
+    low9 = df["low"].rolling_min(window_size=9)
+    tenkan = (high9 + low9) / 2.0
+    high26 = df["high"].rolling_max(window_size=26)
+    low26 = df["low"].rolling_min(window_size=26)
+    kijun = (high26 + low26) / 2.0
+    senkou_a = (tenkan + kijun) / 2.0
+    high52 = df["high"].rolling_max(window_size=52)
+    low52 = df["low"].rolling_min(window_size=52)
+    senkou_b = (high52 + low52) / 2.0
+    chikou = df["close"].shift(26)
+    return df.select(
+        tenkan.alias("tenkan"),
+        kijun.alias("kijun"),
+        senkou_a.alias("senkou_a"),
+        senkou_b.alias("senkou_b"),
+        chikou.alias("chikou"),
+    )
+
+
+def _kama(df: pl.DataFrame, period: int = 10, fast: int = 2, slow: int = 30) -> pl.Series:
+    """Kaufman Adaptive Moving Average."""
+    close = df["close"]
+    change = close.diff(period)
+    volatility = close.diff().abs().rolling_sum(window_size=period)
+    er = (change.abs() / volatility.replace(0.0, float("nan"))).fill_nan(0.0)
+    fastest = 2.0 / (fast + 1.0)
+    slowest = 2.0 / (slow + 1.0)
+    sc_raw = er * (fastest - slowest) + slowest
+    sc = sc_raw ** 2
+    close_np = close.to_numpy()
+    sc_np = sc.to_numpy()
+    kama_np = np.empty_like(close_np)
+    if len(kama_np) > 0:
+        kama_np[0] = close_np[0]
+        for i in range(1, len(kama_np)):
+            kama_np[i] = kama_np[i - 1] + sc_np[i] * (close_np[i] - kama_np[i - 1])
+    return pl.Series("kama10", kama_np).fill_nan(float("nan"))
+
+
+def _heikin_ashi(df: pl.DataFrame) -> pl.DataFrame:
+    """Heikin Ashi candles from OHLC."""
+    ha_close = (df["open"] + df["high"] + df["low"] + df["close"]) / 4.0
+    ha_open = ha_close.shift(1).fill_null(ha_close[0]).ewm_mean(alpha=0.5, adjust=False)
+    ha_high = pl.max_horizontal(df["high"], ha_open, ha_close)
+    ha_low = pl.min_horizontal(df["low"], ha_open, ha_close)
+    return df.select(
+        ha_open.alias("ha_open"),
+        ha_high.alias("ha_high"),
+        ha_low.alias("ha_low"),
+        ha_close.alias("ha_close"),
+    )
+
+
 def _add_advanced_indicators(
     df: pl.DataFrame,
     *,
@@ -1021,6 +1087,30 @@ def _add_advanced_indicators(
                 _clean_non_finite(kc_width, fill=0.04).alias("kc_width"),
             ]
         )
+
+    # --- Stochastic RSI (п.10) ------------------------------------------------
+    if group_active(active_groups, "stoch_rsi"):
+        stoch_rsi = _stochastic_rsi(df, period=14)
+        result = result.with_columns(stoch_rsi.alias("stoch_rsi14"))
+
+    # --- Ichimoku Cloud (п.11) ------------------------------------------------
+    if group_active(active_groups, "ichimoku"):
+        ichi = _ichimoku_cloud(df)
+        if ichi is not None and not ichi.is_empty():
+            for col in ichi.columns:
+                result = result.with_columns(ichi[col].alias(col))
+
+    # --- KAMA (Kaufman Adaptive Moving Average, п.13) -------------------------
+    if group_active(active_groups, "kama"):
+        kama = _kama(df, period=10, fast=2, slow=30)
+        result = result.with_columns(kama.alias("kama10"))
+
+    # --- Heikin Ashi candles (п.15) -------------------------------------------
+    if group_active(active_groups, "heikin_ashi"):
+        ha = _heikin_ashi(df)
+        if ha is not None and not ha.is_empty():
+            for col in ha.columns:
+                result = result.with_columns(ha[col].alias(col))
 
     # --- HMA (Hull Moving Average) --------------------------------------------
     if group_active(active_groups, "hma"):
@@ -1127,6 +1217,18 @@ def _add_advanced_indicators(
             ]
         )
 
+    if group_active(active_groups, "pivot_points"):
+        pp, r1, r2, s1, s2 = _classic_pivot_points(result)
+        result = result.with_columns(
+            [
+                pl.lit(pp).cast(pl.Float64).alias("pivot_point"),
+                pl.lit(r1).cast(pl.Float64).alias("pivot_r1"),
+                pl.lit(r2).cast(pl.Float64).alias("pivot_r2"),
+                pl.lit(s1).cast(pl.Float64).alias("pivot_s1"),
+                pl.lit(s2).cast(pl.Float64).alias("pivot_s2"),
+            ]
+        )
+
     # --- Z-Score and Slope -------------------------------------------------
     if group_active(active_groups, "zscore"):
         zscore30 = (
@@ -1203,6 +1305,28 @@ def _volume_profile_levels(
 def _volume_profile(df: pl.DataFrame, bins: int = 12) -> pl.Expr:
     poc, _vah, _val = _volume_profile_levels(df, bins=bins)
     return pl.lit(0.0 if poc is None else poc).cast(pl.Float64).alias("volume_profile")
+
+
+def _classic_pivot_points(df: pl.DataFrame) -> tuple[float | None, float | None, float | None, float | None, float | None]:
+    """Classic daily pivot points from the last ~24h of data (or frame range).
+
+    Returns (PP, R1, R2, S1, S2). Returns (None, None, None, None, None) if
+    insufficient data.
+    """
+    if df.is_empty() or not {"high", "low", "close"}.issubset(df.columns):
+        return None, None, None, None, None
+    tail = df.tail(min(df.height, 48))
+    prev_high = float(tail["high"].max() or 0.0)
+    prev_low = float(tail["low"].min() or 0.0)
+    prev_close = float(tail["close"][-1] or 0.0)
+    if prev_high <= 0.0 or prev_low <= 0.0 or prev_close <= 0.0:
+        return None, None, None, None, None
+    pp = (prev_high + prev_low + prev_close) / 3.0
+    r1 = 2.0 * pp - prev_low
+    r2 = pp + (prev_high - prev_low)
+    s1 = 2.0 * pp - prev_high
+    s2 = pp - (prev_high - prev_low)
+    return pp, r1, r2, s1, s2
 
 
 def _add_polars_ols_features(df: pl.DataFrame) -> pl.DataFrame:

@@ -51,6 +51,7 @@ class BacktestTrade:
     pnl_pct: float
     mae_pct: float
     mfe_pct: float
+    window_id: int = 0
 
 
 def _build_engine(settings: BotSettings) -> SignalEngine:
@@ -235,8 +236,14 @@ async def run_historical_backtest(
     setup_id: str = "",
     interval: str = "15m",
     config_path: str = "config.toml",
+    walk_forward_windows: int = 1,
 ) -> dict[str, Any]:
-    """Walk-forward historical validation: detect → simulate TP/SL (no delivery)."""
+    """Walk-forward historical validation: detect → simulate TP/SL (no delivery).
+
+    When ``walk_forward_windows > 1``, the evaluation period is split into N
+    sequential windows and results are reported per-window plus aggregate,
+    reducing overfit risk from single-period evaluation.
+    """
     normalized_symbol = str(symbol or "").strip().upper()
     if not normalized_symbol:
         msg = "backtest requires --symbol"
@@ -262,10 +269,32 @@ async def run_historical_backtest(
             walk_days=walk_days,
             event_interval=event_interval,
             setup_id=setup_id,
+            walk_forward_windows=walk_forward_windows,
         )
     finally:
         with contextlib.suppress(OSError, RuntimeError):
             await client.close()
+
+
+def _build_time_windows(
+    df: pl.DataFrame, n_windows: int
+) -> list[tuple[datetime, datetime]]:
+    """Split the time range of *df* into *n_windows* sequential segments."""
+    if df.is_empty():
+        return []
+    times = df["close_time"].sort()
+    start = times[0]
+    end = times[-1]
+    if n_windows <= 1:
+        return [(start, end)]
+    total = (end - start).total_seconds()
+    chunk = total / n_windows
+    windows: list[tuple[datetime, datetime]] = []
+    for i in range(n_windows):
+        ws = start + timedelta(seconds=i * chunk)
+        we = start + timedelta(seconds=(i + 1) * chunk) if i < n_windows - 1 else end
+        windows.append((ws, we))
+    return windows
 
 
 async def _run_historical_backtest_impl(
@@ -276,6 +305,7 @@ async def _run_historical_backtest_impl(
     walk_days: int,
     event_interval: str,
     setup_id: str,
+    walk_forward_windows: int = 1,
 ) -> dict[str, Any]:
     engine = _build_engine(settings)
     score_floor = effective_engine_score_floor(settings)
@@ -314,7 +344,14 @@ async def _run_historical_backtest_impl(
     signals_detected = 0
 
     driver_closed = driver.filter(pl.col("close_time") >= window_start)
+    time_windows = _build_time_windows(driver_closed, n_windows=walk_forward_windows)
     move_be = bool(settings.tracking.move_stop_to_break_even_on_tp1)
+
+    def _window_for(ct: datetime) -> int:
+        for wid, (ws, we) in enumerate(time_windows):
+            if ws <= ct <= we:
+                return wid
+        return 0
 
     for row in driver_closed.iter_rows(named=True):
         close_time = row.get("close_time")
@@ -382,6 +419,7 @@ async def _run_historical_backtest_impl(
                     pnl_pct=round(sim.pnl_pct, 4),
                     mae_pct=round(sim.mae_pct, 4),
                     mfe_pct=round(sim.mfe_pct, 4),
+                    window_id=_window_for(close_time),
                 )
             )
             if sim.result != "open_at_window_end":
@@ -460,6 +498,47 @@ async def _run_historical_backtest_impl(
         summary["avg_loss_pnl"] = round(avg_loss, 4)
         wr = wins / (wins + losses)
         summary["ev"] = round(wr * avg_win - (1.0 - wr) * abs(avg_loss), 4)
+
+    tp1_hits = sum(1 for t in executed if t.result == "tp1_hit")
+    tp2_hits = sum(1 for t in executed if t.result == "tp2_hit")
+    summary["tp1_hits"] = tp1_hits
+    summary["tp2_hits"] = tp2_hits
+    if wins > 0:
+        summary["tp1_hit_rate"] = round(tp1_hits / wins, 4)
+        summary["tp2_hit_rate"] = round(tp2_hits / wins, 4)
+
+    tp_distances: list[float] = []
+    for trade in trades:
+        signal = trade.signal if hasattr(trade, "signal") else None
+        if signal is None:
+            continue
+        entry = (float(signal.entry_low) + float(signal.entry_high)) / 2.0
+        tp1 = getattr(signal, "take_profit_1", None)
+        tp2 = getattr(signal, "take_profit_2", None)
+        if entry > 0.0:
+            if tp1 is not None and float(tp1) > 0.0:
+                tp_distances.append(abs(float(tp1) - entry) / entry * 100.0)
+            if tp2 is not None and float(tp2) > 0.0:
+                tp_distances.append(abs(float(tp2) - entry) / entry * 100.0)
+    if tp_distances:
+        summary["avg_tp_distance_pct"] = round(sum(tp_distances) / len(tp_distances), 4)
+
+    if walk_forward_windows > 1 and time_windows:
+        by_window: dict[int, dict[str, Any]] = {}
+        for trade in executed:
+            w = by_window.setdefault(
+                trade.window_id,
+                {"window_id": trade.window_id, "trades": 0, "wins": 0, "losses": 0},
+            )
+            w["trades"] += 1
+            if trade.result in {"tp1_hit", "tp2_hit"}:
+                w["wins"] += 1
+            elif trade.result == "stop_loss":
+                w["losses"] += 1
+        for w in by_window.values():
+            total = w["trades"]
+            w["win_rate"] = round(w["wins"] / total, 4) if total else 0.0
+        summary["walk_forward"] = sorted(by_window.values(), key=lambda x: x["window_id"])
 
     return {
         "symbol": normalized_symbol,

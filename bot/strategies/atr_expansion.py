@@ -93,24 +93,36 @@ def detect_atr_expansion_prepared(
     body_atr = float(candidate["body_atr"])
     signal_lag = int(candidate["signal_lag"])
     source_timeframe = str(candidate["timeframe"])
+    obv_penalty = 1.0
+    if "obv_above_ema" in prepared.work_15m.columns:
+        obv_val = float(prepared.work_15m["obv_above_ema"][-1] or 0.0)
+        if (direction == "long" and obv_val <= 0.0) or (
+            direction == "short" and obv_val > 0.0
+        ):
+            obv_penalty = 0.85
+
     entry_anchor = _prev(prepared.work_15m, "ema20", 0.0) or None
+    clarity = min((ratio - 1.0) / 1.0, 1.0) * obv_penalty
+    reasons = [
+        f"atr_expansion_{direction}",
+        f"source_tf={source_timeframe}",
+        f"atr_ratio={ratio:.2f}",
+        f"body_atr={body_atr:.2f}",
+        f"signal_lag={signal_lag}",
+    ]
+    if obv_penalty < 1.0:
+        reasons.append("obv_opposes_breakout")
     return _build_atr_signal(
         prepared=prepared,
         setup_id=setup_id,
         direction=direction,
         params=params,
         confirmed_bar=True,
-        reasons=[
-            f"atr_expansion_{direction}",
-            f"source_tf={source_timeframe}",
-            f"atr_ratio={ratio:.2f}",
-            f"body_atr={body_atr:.2f}",
-            f"signal_lag={signal_lag}",
-        ],
+        reasons=reasons,
         family=family,
         entry_anchor=entry_anchor,
         timeframe=source_timeframe,
-        structure_clarity=min((ratio - 1.0) / 1.0, 1.0),
+        structure_clarity=clarity,
     )
 
 

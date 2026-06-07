@@ -691,6 +691,20 @@ async def run_proxy_refresh_loop(
 
         LOG.info("proxy refresh: scheduled re-discovery starting")
 
+        # If direct Binance egress works and no explicit proxy is configured,
+        # do not inject an auto-discovered pool — it would override a working
+        # direct connection with an untested proxy.
+        direct_probe = await _probe_direct()
+        bot_settings = getattr(bot, "settings", None)
+        explicit_proxy = str(
+            getattr(getattr(bot_settings, "network", None), "proxy_url", None) or ""
+        ).strip()
+        if direct_probe.rest_ok and not explicit_proxy:
+            LOG.info(
+                "proxy refresh: direct Binance ok, no explicit proxy_url — skipping pool injection"
+            )
+            continue
+
         # Rotate Tor circuit first (new exit IP before validating new pool)
         tor_rotated = await tor_rotate_circuit()
 

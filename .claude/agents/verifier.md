@@ -11,7 +11,7 @@ source .venv/bin/activate
 python -m compileall -q bot
 python scripts/validate_config.py --config config.toml
 python scripts/verify_refactor_gate.py
-pytest tests/test_wave_f9_agent_*.py tests/test_wave_f10_agent_*.py tests/test_wave_i_calibration.py -q
+PYTEST_LIVE=1 pytest tests/live/ -v
 ```
 
 If Binance REST reachable: `PYTEST_LIVE=1 pytest tests/live/test_strategy_catalog_wiring.py -v`

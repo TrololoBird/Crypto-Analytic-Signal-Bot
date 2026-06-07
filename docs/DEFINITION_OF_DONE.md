@@ -16,7 +16,7 @@
 
 ## Freeze: не плодить файлы
 
-- **194 `.py` в `bot/`** (было ~222). Новый файл только если заменяет **≥2** старых.
+- **208 `.py` в `bot/`** (было ~222). Новый файл только если заменяет **≥2** старых.
 - **Запрещено** split без запроса: `ws.py`, `rest_impl.py`, `symbol_analyzer.py`, `session_ops.py`, `runtime_ops.py`, `memory.py`, `tracking.py`.
 - **Слито (2026-06-04):** `ws_*`→`ws.py` · `rest_*`→`rest_impl.py` · `runtime/*`→`runtime_ops.py` · `analyzer/*`→`analyzer_ops.py` · telemetry+live_watch+runtime_analysis→`session_ops.py` · ex-`analyzer/`→`symbol_analyzer.py` · outcomes SQL→`memory.py`.
 - **Не трогаем:** 45× `bot/strategies/` (каталог).
@@ -82,7 +82,7 @@
 source .venv/bin/activate
 make check
 python scripts/validate_config.py --config config.toml
-pytest tests/test_wave_f9_agent_*.py tests/test_wave_f10_agent_*.py tests/test_wave_i_calibration.py -q
+PYTEST_LIVE=1 pytest tests/live/ -v
 ```
 
 ---

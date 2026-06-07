@@ -83,7 +83,7 @@ Fixes applied: **fix-sl-A** — confirmed-bar detection in `whale_walls`, `sprea
 
 Not applied (not confirmed): fix-sl-B (stop tight), fix-sl-C (regime), fix-sl-D (weak score), fix-sl-E (strategy bug).
 
-Score floor: unchanged (`min_score` 0.53 in `config.toml`). Regime filter: not added. Strategies disabled: none.
+Score floor: `min_score = 0.65` in `config.toml`. Regime filter: not added. Strategies disabled: none.
 
 Next review: after 50+ new executed outcomes with fix-sl-A.
 
@@ -104,9 +104,8 @@ New strategy: detector file + `STRATEGY_CLASSES` + `CATALOG_ENTRIES` + config ke
 
 ## Testing
 
-- Offline waves: `pytest tests/test_wave_f*.py tests/test_wave_i_calibration.py -q`
-- Live: `tests/live/` (`PYTEST_LIVE=1`) — needs network
-- Do **not** add new test files; fix existing tests if a refactor breaks them
+- Live only: `PYTEST_LIVE=1 pytest tests/live/ -v` — needs Binance network
+- Do **not** add new test files
 
 ## Environment
 

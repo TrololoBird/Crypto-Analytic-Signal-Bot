@@ -128,8 +128,8 @@ def _e(
 
 
 CATALOG_ENTRIES: tuple[CatalogEntry, ...] = (
-    _e("structure_pullback", 1, "A", "15m", "15m", "1h,4h,15m", base=0.55),
-    _e("structure_break_retest", 1, "A", "15m", "1h/15m", "1h,15m", base=0.55),
+    _e("structure_pullback", 1, "A", "15m", "15m", "1h,4h,15m", base=0.65),
+    _e("structure_break_retest", 1, "A", "15m", "1h/15m", "1h,15m", base=0.65),
     _e(
         "wick_trap_reversal",
         1,
@@ -140,7 +140,7 @@ CATALOG_ENTRIES: tuple[CatalogEntry, ...] = (
         family="reversal",
         profile="countertrend_exhaustion",
         min_vol=1.0,
-        base=0.56,
+        base=0.60,
     ),
     _e(
         "squeeze_setup",
@@ -154,11 +154,11 @@ CATALOG_ENTRIES: tuple[CatalogEntry, ...] = (
         min_vol=1.2,
         base=0.55,
     ),
-    _e("ema_bounce", 1, "A", "15m", "15m", "1h,15m", base=0.62, min_adx=15.0),
-    _e("fvg_setup", 1, "A", "15m", "15m", "1h,4h,15m", base=0.60),
-    _e("order_block", 1, "A", "15m", "15m", "1h,15m", base=0.60),
-    _e("liquidity_sweep", 1, "A", "15m", "15m", "1h,15m", family="reversal", base=0.62),
-    _e("bos_choch", 1, "A", "15m", "15m", "1h,15m", family="reversal", base=0.62),
+    _e("ema_bounce", 1, "A", "15m", "15m", "1h,15m", base=0.70, min_adx=15.0),
+    _e("fvg_setup", 1, "A", "15m", "15m", "1h,4h,15m", base=0.62),
+    _e("order_block", 1, "A", "15m", "15m", "1h,15m", base=0.65),
+    _e("liquidity_sweep", 1, "A", "15m", "15m", "1h,15m", family="reversal", base=0.60),
+    _e("bos_choch", 1, "A", "15m", "15m", "1h,15m", family="reversal", base=0.60),
     _e(
         "hidden_divergence",
         2,
@@ -169,7 +169,7 @@ CATALOG_ENTRIES: tuple[CatalogEntry, ...] = (
         family="reversal",
         profile="divergence_reversal",
         min_vol=0.55,
-        base=0.62,
+        base=0.60,
     ),
     _e(
         "indicator_divergence",
@@ -181,7 +181,7 @@ CATALOG_ENTRIES: tuple[CatalogEntry, ...] = (
         family="reversal",
         profile="divergence_reversal",
         min_vol=0.75,
-        base=0.62,
+        base=0.60,
     ),
     _e(
         "funding_reversal",
@@ -193,7 +193,7 @@ CATALOG_ENTRIES: tuple[CatalogEntry, ...] = (
         family="reversal",
         profile="countertrend_exhaustion",
         min_vol=0.85,
-        base=0.60,
+        base=0.58,
     ),
     _e(
         "cvd_divergence",
@@ -204,7 +204,7 @@ CATALOG_ENTRIES: tuple[CatalogEntry, ...] = (
         "15m",
         family="reversal",
         profile="divergence_reversal",
-        base=0.62,
+        base=0.60,
     ),
     _e(
         "session_killzone",
@@ -215,9 +215,9 @@ CATALOG_ENTRIES: tuple[CatalogEntry, ...] = (
         "1h,15m",
         family="breakout",
         min_vol=1.0,
-        base=0.55,
+        base=0.52,
     ),
-    _e("breaker_block", 2, "A", "15m", "15m", "1h,15m", family="breakout", min_vol=0.70, base=0.60),
+    _e("breaker_block", 2, "A", "15m", "15m", "1h,15m", family="breakout", min_vol=0.70, base=0.58),
     _e(
         "turtle_soup",
         2,
@@ -227,11 +227,11 @@ CATALOG_ENTRIES: tuple[CatalogEntry, ...] = (
         "1h,15m",
         family="reversal",
         profile="countertrend_exhaustion",
-        base=0.60,
+        base=0.58,
     ),
-    _e("vwap_trend", 2, "A", "15m", "15m", "15m", min_vol=1.05, base=0.55),
-    _e("supertrend_follow", 2, "A", "15m", "15m", "4h,1h,15m", base=0.56),
-    _e("multi_tf_trend", 3, "A", "15m", "4h/1h", "4h,1h,15m", min_vol=0.90, base=0.56),
+    _e("vwap_trend", 2, "A", "15m", "15m", "15m", min_vol=1.05, base=0.65),
+    _e("supertrend_follow", 2, "A", "15m", "15m", "4h,1h,15m", base=0.62),
+    _e("multi_tf_trend", 3, "A", "15m", "4h/1h", "4h,1h,15m", min_vol=0.90, base=0.68),
     _e(
         "price_velocity",
         3,
@@ -243,9 +243,9 @@ CATALOG_ENTRIES: tuple[CatalogEntry, ...] = (
         profile="breakout_acceptance",
         min_vol=1.0,
         min_adx=16.0,
-        base=0.62,
+        base=0.58,
     ),
-    _e("volume_anomaly", 3, "A", "15m", "15m", "15m", family="breakout", min_vol=1.6, base=0.60),
+    _e("volume_anomaly", 3, "A", "15m", "15m", "15m", family="breakout", min_vol=1.6, base=0.55),
     _e(
         "volume_climax_reversal",
         3,
@@ -256,7 +256,7 @@ CATALOG_ENTRIES: tuple[CatalogEntry, ...] = (
         family="reversal",
         profile="countertrend_exhaustion",
         min_vol=1.3,
-        base=0.60,
+        base=0.55,
     ),
     _e(
         "keltner_breakout",
@@ -267,10 +267,10 @@ CATALOG_ENTRIES: tuple[CatalogEntry, ...] = (
         "15m,1h",
         family="breakout",
         min_vol=1.25,
-        base=0.62,
+        base=0.58,
     ),
-    _e("bb_squeeze", 3, "A", "15m", "15m", "15m,4h", family="volatility", min_vol=0.90, base=0.56),
-    _e("atr_expansion", 3, "A", "15m", "15m", "15m", family="volatility", base=0.56),
+    _e("bb_squeeze", 3, "A", "15m", "15m", "15m,4h", family="volatility", min_vol=0.90, base=0.50),
+    _e("atr_expansion", 3, "A", "15m", "15m", "15m", family="volatility", base=0.50),
     _e(
         "whale_walls",
         4,
@@ -281,7 +281,7 @@ CATALOG_ENTRIES: tuple[CatalogEntry, ...] = (
         family="orderbook",
         min_vol=0.90,
         min_adx=0.0,
-        base=0.58,
+        base=0.48,
     ),
     _e(
         "spread_strategy",
@@ -293,7 +293,7 @@ CATALOG_ENTRIES: tuple[CatalogEntry, ...] = (
         family="orderbook",
         min_vol=0.90,
         min_adx=0.0,
-        base=0.58,
+        base=0.48,
     ),
     _e(
         "depth_imbalance",
@@ -305,11 +305,11 @@ CATALOG_ENTRIES: tuple[CatalogEntry, ...] = (
         family="orderbook",
         min_vol=0.80,
         min_adx=0.0,
-        base=0.58,
+        base=0.48,
     ),
-    _e("absorption", 4, "A", "15m", "15m", "15m", family="orderflow", min_vol=0.90, base=0.56),
+    _e("absorption", 4, "A", "15m", "15m", "15m", family="orderflow", min_vol=0.90, base=0.50),
     _e(
-        "aggression_shift", 4, "B", "15m", "15m", "15m", family="orderflow", min_vol=0.90, base=0.56
+        "aggression_shift", 4, "B", "15m", "15m", "15m", family="orderflow", min_vol=0.90, base=0.50
     ),
     _e(
         "liquidation_heatmap",
@@ -320,7 +320,7 @@ CATALOG_ENTRIES: tuple[CatalogEntry, ...] = (
         "15m,1h",
         family="liquidity",
         min_vol=0.90,
-        base=0.56,
+        base=0.52,
     ),
     _e(
         "stop_hunt_detection",
@@ -331,7 +331,7 @@ CATALOG_ENTRIES: tuple[CatalogEntry, ...] = (
         "15m,1h",
         family="liquidity",
         min_vol=0.80,
-        base=0.56,
+        base=0.52,
     ),
     _e(
         "oi_divergence",
@@ -344,7 +344,7 @@ CATALOG_ENTRIES: tuple[CatalogEntry, ...] = (
         family="sentiment",
         min_vol=0.0,
         min_adx=0.0,
-        base=0.56,
+        base=0.52,
     ),
     _e(
         "ls_ratio_extreme",
@@ -356,7 +356,7 @@ CATALOG_ENTRIES: tuple[CatalogEntry, ...] = (
         family="sentiment",
         profile="countertrend_exhaustion",
         min_vol=0.90,
-        base=0.56,
+        base=0.50,
     ),
     _e(
         "rsi_divergence_bottom",
@@ -367,7 +367,7 @@ CATALOG_ENTRIES: tuple[CatalogEntry, ...] = (
         "1h,15m",
         family="reversal",
         profile="divergence_reversal",
-        base=0.56,
+        base=0.55,
     ),
     _e(
         "wyckoff_spring",
@@ -379,7 +379,7 @@ CATALOG_ENTRIES: tuple[CatalogEntry, ...] = (
         family="reversal",
         profile="countertrend_exhaustion",
         min_vol=1.05,
-        base=0.56,
+        base=0.55,
     ),
     _e(
         "btc_correlation",
@@ -390,7 +390,7 @@ CATALOG_ENTRIES: tuple[CatalogEntry, ...] = (
         "1h,15m",
         family="multi_asset",
         min_vol=0.70,
-        base=0.56,
+        base=0.52,
     ),
     _e(
         "altcoin_season_index",
@@ -403,7 +403,55 @@ CATALOG_ENTRIES: tuple[CatalogEntry, ...] = (
         family="multi_asset",
         min_vol=0.80,
         min_adx=0.0,
-        base=0.56,
+        base=0.48,
+    ),
+    _e(
+        "orderflow_imbalance",
+        3,
+        "B",
+        "15m",
+        "15m",
+        "15m,1h",
+        family="reversal",
+        profile="countertrend_exhaustion",
+        min_vol=0.85,
+        base=0.55,
+    ),
+    _e(
+        "pinbar_reversal",
+        3,
+        "B",
+        "15m",
+        "15m",
+        "15m,1h",
+        family="reversal",
+        profile="countertrend_exhaustion",
+        min_vol=0.75,
+        base=0.52,
+    ),
+    _e(
+        "fakeout_detector",
+        3,
+        "B",
+        "15m",
+        "15m",
+        "15m,1h",
+        family="reversal",
+        profile="countertrend_exhaustion",
+        min_vol=1.0,
+        base=0.52,
+    ),
+    _e(
+        "cvd_exhaustion",
+        3,
+        "B",
+        "15m",
+        "15m",
+        "15m,1h",
+        family="reversal",
+        profile="countertrend_exhaustion",
+        min_vol=0.70,
+        base=0.52,
     ),
 )
 

@@ -70,7 +70,7 @@ def classify_tier(signal: Signal, settings: BotSettings) -> TierDecision:
         return TierDecision(tier="watch", reason="r_class_watch_only")
 
     delivery = settings.delivery
-    action_min = effective_action_min_score(settings, signal.symbol)
+    action_min = effective_action_min_score(settings, signal.symbol, setup_id=signal.setup_id)
     watch_min = float(delivery.watch_min_score)
     score = _finite_score(signal.score)
     if score >= action_min:

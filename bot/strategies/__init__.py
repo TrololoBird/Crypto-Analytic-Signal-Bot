@@ -9,8 +9,10 @@ from .bos_choch import BOSCHOCHSetup
 from .breaker_block import BreakerBlockSetup
 from .btc_correlation import BTCCorrelationSetup
 from .cvd_divergence import CVDDivergenceSetup
+from .cvd_exhaustion import CVDExhaustionSetup
 from .depth_imbalance import DepthImbalanceSetup
 from .ema_bounce import EmaBounceSetup
+from .fakeout_detector import FakeoutDetectorSetup
 from .funding_reversal import FundingReversalSetup
 from .fvg import FVGSetup
 from .hidden_divergence import HiddenDivergenceSetup
@@ -22,6 +24,8 @@ from .ls_ratio_extreme import LSRatioExtremeSetup
 from .multi_tf_trend import MultiTFTrendSetup
 from .oi_divergence import OIDivergenceSetup
 from .order_block import OrderBlockSetup
+from .orderflow_imbalance import OrderflowImbalanceSetup
+from .pinbar_reversal import PinbarReversalSetup
 from .price_velocity import PriceVelocitySetup
 from .rsi_divergence_bottom import RSIDivergenceBottomSetup
 from .session_killzone import SessionKillzoneSetup
@@ -45,14 +49,17 @@ STRATEGY_CLASSES = (
     WickTrapReversalSetup,
     SqueezeSetup,
     EmaBounceSetup,
+    FakeoutDetectorSetup,
     FVGSetup,
     OrderBlockSetup,
     LiquiditySweepSetup,
     BOSCHOCHSetup,
+    FundingReversalSetup,
     HiddenDivergenceSetup,
     IndicatorDivergenceSetup,
-    FundingReversalSetup,
+    KeltnerBreakoutSetup,
     CVDDivergenceSetup,
+    CVDExhaustionSetup,
     SessionKillzoneSetup,
     BreakerBlockSetup,
     TurtleSoupSetup,
@@ -61,7 +68,6 @@ STRATEGY_CLASSES = (
     PriceVelocitySetup,
     VolumeAnomalySetup,
     VolumeClimaxReversalSetup,
-    KeltnerBreakoutSetup,
     WhaleWallsSetup,
     SpreadStrategySetup,
     DepthImbalanceSetup,
@@ -78,6 +84,8 @@ STRATEGY_CLASSES = (
     OIDivergenceSetup,
     BTCCorrelationSetup,
     AltcoinSeasonIndexSetup,
+    OrderflowImbalanceSetup,
+    PinbarReversalSetup,
 )
 
 __all__ = [
@@ -91,9 +99,11 @@ __all__ = [
     "BTCCorrelationSetup",
     "BreakerBlockSetup",
     "CVDDivergenceSetup",
+    "CVDExhaustionSetup",
     "DepthImbalanceSetup",
     "EmaBounceSetup",
     "FVGSetup",
+    "FakeoutDetectorSetup",
     "FundingReversalSetup",
     "HiddenDivergenceSetup",
     "IndicatorDivergenceSetup",
@@ -104,6 +114,8 @@ __all__ = [
     "MultiTFTrendSetup",
     "OIDivergenceSetup",
     "OrderBlockSetup",
+    "OrderflowImbalanceSetup",
+    "PinbarReversalSetup",
     "PriceVelocitySetup",
     "RSIDivergenceBottomSetup",
     "SessionKillzoneSetup",

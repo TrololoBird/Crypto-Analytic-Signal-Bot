@@ -203,11 +203,13 @@ def configure_logging(settings: BotSettings, *, debug_mode: bool = False) -> Non
     session_stamp = session_dt.strftime("%Y%m%d_%H%M%S")
     handlers: list[logging.Handler] = [logging.StreamHandler()]
 
-    # Per-session log file with unique name
+    # Per-session log file with unique name — open line-buffered (buffering=1) so every
+    # log record is flushed immediately even when asyncio tasks are the sole writers.
     log_path = settings.logs_dir / f"bot_{session_stamp}_{os.getpid()}.log"
     try:
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        handlers.append(logging.FileHandler(log_path, encoding="utf-8", mode="w"))
+        _log_file = open(log_path, "w", buffering=1, encoding="utf-8")  # noqa: WPS515
+        handlers.append(logging.StreamHandler(_log_file))
     except OSError as exc:
         sys.stderr.write(f"[ERROR] file logging disabled for {log_path}: {exc}\n")
 
@@ -234,6 +236,10 @@ def configure_logging(settings: BotSettings, *, debug_mode: bool = False) -> Non
     logging.getLogger("websockets").setLevel(logging.INFO)
     logging.getLogger("hpack").setLevel(logging.WARNING)
     logging.getLogger("asyncio").setLevel(logging.WARNING)  # Only real warnings, not debug spam
+    logging.getLogger("aiosqlite").setLevel(logging.WARNING)  # Very noisy at DEBUG
+    logging.getLogger("aiohttp").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+    logging.getLogger("charset_normalizer").setLevel(logging.WARNING)
 
     # Log file location
     start_time = session_dt.strftime("%Y-%m-%d %H:%M:%S UTC")

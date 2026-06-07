@@ -29,5 +29,5 @@ Human: direction + acceptance only. Agent: all commands, config, probes, termina
 
 ```bash
 make check
-pytest tests/test_wave_f9_agent_*.py tests/test_wave_f10_agent_*.py tests/test_wave_i_calibration.py -q
+PYTEST_LIVE=1 pytest tests/live/ -v
 ```

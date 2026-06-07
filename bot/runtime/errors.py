@@ -40,6 +40,9 @@ _SCHEMA_ERROR_NAMES = {
     "typeerror",
     "keyerror",
     "attributeerror",
+    "columnnotfounderror",  # polars missing column
+    "invalidoperationerror",  # polars schema mismatch
+    "schemamismatcherror",
 }
 
 _DATA_ERROR_NAMES = {

@@ -54,7 +54,7 @@ flowchart LR
 - **Always-on rules:** только guardrails + sole executor + solo workflow (~3 файла)
 - **Agent-decided:** architecture, graphify, strategies, delivery, features
 - **Skills:** подгружаются по задаче (live verify, calibration, triage)
-- **Длинные docs:** `docs/research/*` — по ссылке из промпта, не в каждый чат
+- **Архитектура:** `graphify query "<вопрос>"` → `ARCHITECTURE.md` при необходимости
 
 ## Инварианты (hooks + rules)
 

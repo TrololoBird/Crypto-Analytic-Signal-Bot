@@ -1,6 +1,6 @@
 # Claude Code Quick Reference
 
-Updated: 2026-06-04 · Full: `CLAUDE.md` · Hot paths: `AGENT_QUICK_START.md`
+Updated: 2026-06-06 · Full: `CLAUDE.md`
 
 ## Product
 
@@ -49,7 +49,6 @@ Full doc: [GRAPHIFY_SETUP.md](GRAPHIFY_SETUP.md)
 
 ```bash
 make check
-pytest tests/test_wave_f9_agent_*.py tests/test_wave_f10_agent_*.py tests/test_wave_i_calibration.py -q
 PYTEST_LIVE=1 pytest tests/live/ -v
 ```
 
@@ -69,7 +68,7 @@ Wilder ATR/RSI; BB ddof=1; no `shift(-N)` live. Strategies in `bot/strategies/` 
 
 ## Skip
 
-`PROJECT_AUDIT.md`, full research pack, `data/`, `telemetry/`, `.env`, monoliths unless editing.
+`data/`, `telemetry/`, `.env`, monoliths unless editing.
 
 ## graphify
 

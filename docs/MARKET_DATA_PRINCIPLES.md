@@ -1,6 +1,6 @@
 # Market data principles (post-refactor)
 
-Aligned with [Binance USD-M docs](https://developers.binance.com/docs/derivatives/usds-margined-futures/general-info) and `docs/research/BINANCE_PUBLIC_DATA_MATRIX.md`.
+Aligned with [Binance USD-M docs](https://developers.binance.com/docs/derivatives/usds-margined-futures/general-info).
 
 ## Correct interaction model
 

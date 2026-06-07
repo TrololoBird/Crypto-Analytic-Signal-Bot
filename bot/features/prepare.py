@@ -150,7 +150,7 @@ def cache_stats() -> dict[str, float | int]:
 
 
 def _bias_4h(work_4h: pl.DataFrame) -> str:
-    """Determine 4h bias from EMA alignment."""
+    """Determine 4h bias from EMA alignment, confirmed by ADX trend strength."""
     if work_4h.is_empty():
         return "neutral"
 
@@ -159,6 +159,11 @@ def _bias_4h(work_4h: pl.DataFrame) -> str:
     ema20 = last["ema20"]
     ema50 = last["ema50"]
     ema200 = last["ema200"]
+    adx = last.get("adx14") or 0.0
+
+    # Require ADX > 15 when available to avoid false trend signals in choppy markets
+    if adx > 0.0 and adx < 15.0:
+        return "neutral"
 
     if close > ema50 > ema200 and ema20 > ema50:
         return "uptrend"
@@ -168,7 +173,7 @@ def _bias_4h(work_4h: pl.DataFrame) -> str:
 
 
 def _bias_1h(work_1h: pl.DataFrame) -> str:
-    """Determine 1h bias from EMA alignment for 15M signal context."""
+    """Determine 1h bias from EMA alignment, confirmed by ADX trend strength."""
     if work_1h.is_empty():
         return "neutral"
 
@@ -177,6 +182,11 @@ def _bias_1h(work_1h: pl.DataFrame) -> str:
     ema20 = last["ema20"]
     ema50 = last["ema50"]
     ema200 = last["ema200"]
+    adx = last.get("adx14") or 0.0
+
+    # Require ADX > 15 when available to avoid false trend signals in choppy markets
+    if adx > 0.0 and adx < 15.0:
+        return "neutral"
 
     if close > ema50 > ema200 and ema20 > ema50:
         return "uptrend"

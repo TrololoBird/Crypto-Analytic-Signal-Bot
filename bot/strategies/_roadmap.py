@@ -7,7 +7,10 @@ exchange APIs and they do not place orders.
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
+
+_LOG = logging.getLogger("bot.strategies")
 
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ._common import (
@@ -226,6 +229,21 @@ def _build_atr_signal(
     )
     # floor: skip sub-threshold signals before filter pipeline (min_score margin)
     score = max(0.63, round(score, 4))
+    _LOG.debug(
+        "build_atr_signal | setup=%s sym=%s dir=%s entry=%.4f stop=%.4f tp1=%.4f"
+        " risk=%.4f atr=%.4f score=%.4f clarity=%.3f anchor=%s",
+        setup_id,
+        prepared.symbol,
+        direction,
+        price_anchor,
+        stop,
+        tp1,
+        risk,
+        atr,
+        score,
+        structure_clarity,
+        f"{entry_anchor:.4f}" if entry_anchor else "candle_mid",
+    )
     return _build_signal(
         prepared=prepared,
         setup_id=setup_id,

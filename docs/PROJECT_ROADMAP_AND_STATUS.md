@@ -1,11 +1,9 @@
 # Project roadmap & status (v9)
 
-> **Last updated:** 2026-06-04  
+> **Last updated:** 2026-06-06  
 > **v1 Definition of Done:** [DEFINITION_OF_DONE.md](DEFINITION_OF_DONE.md) ← единственный backlog  
 > Agent tokens: [AGENT_TOKEN_POLICY.md](AGENT_TOKEN_POLICY.md)  
-> Canonical architecture: [research/ARCHITECTURE_CANONICAL.md](research/ARCHITECTURE_CANONICAL.md)  
-> Refactor matrix: [REFACTOR_PLAN.md](REFACTOR_PLAN.md)  
-> Cursor + Claude: [CURSOR_CLAUDE_DEV_SETUP.md](CURSOR_CLAUDE_DEV_SETUP.md)
+> Refactor matrix: [REFACTOR_PLAN.md](REFACTOR_PLAN.md)
 
 ---
 
@@ -21,7 +19,7 @@
 | **Wave F11** (ops bridge) | Partial — live_watch ↔ matrix/calibration, rollup report, `config.toml.example` strict sync |
 | **Live validation** | 6h supervised sessions completed; current session tooling: `live_supervised_session`, `live_watch_rollup_report` |
 | **F12 de-bloat** | Partial — pipeline/ws_transport/memory_schema done; memory/tracking/ws → v1.1 |
-| **LLM APIs in bot** | Deferred OPT-2 — [research/LLM_API_INTEGRATION.md](research/LLM_API_INTEGRATION.md) |
+| **LLM APIs in bot** | Deferred OPT-2 |
 
 ---
 
@@ -126,7 +124,7 @@
 source .venv/bin/activate
 python -m compileall -q bot
 python scripts/validate_config.py --config config.toml
-python -m pytest tests/test_wave_f9_agent_*.py tests/test_wave_f10_agent_*.py tests/test_wave_i_calibration.py -q
+PYTEST_LIVE=1 pytest tests/live/ -v
 # When Binance REST reachable:
 PYTEST_LIVE=1 pytest tests/live/ -v
 python scripts/live_check_pipeline.py --symbols BTCUSDT --limit 1
@@ -140,17 +138,6 @@ python scripts/live_watch_rollup_report.py
 python scripts/calibration_pipeline.py --run-id <RUN_ID>
 make live-watch-report
 ```
-
----
-
-## Test inventory (agent waves)
-
-| Prefix | Count (files) | Scope |
-|--------|---------------|--------|
-| `test_wave_e1` … `e8` | 18+ | Gates, WS, dashboard, network |
-| `test_wave_f9_agent_*` | 10 | Domain, runtime, setups, regime, market, delivery, telemetry, ops |
-| `test_wave_f10_agent_*` | 10 | F10 follow-up per module |
-| `test_wave_i_calibration` | 1 | Session ops / calibration bridge |
 
 ---
 

@@ -97,16 +97,26 @@ def _check_scoring_weights(settings: BotSettings) -> list[str]:
     scoring = getattr(settings, "scoring", None)
     if scoring is None or not bool(getattr(scoring, "enabled", True)):
         return []
-    weights = (
-        float(getattr(scoring, "weight_mtf_alignment", 0.0)),
-        float(getattr(scoring, "weight_volume_quality", 0.0)),
-        float(getattr(scoring, "weight_structure_clarity", 0.0)),
-        float(getattr(scoring, "weight_risk_reward", 0.0)),
-        float(getattr(scoring, "weight_crowd_position", 0.0)),
-        float(getattr(scoring, "weight_oi_momentum", 0.0)),
-        float(getattr(scoring, "weight_liquidation_proximity", 0.0)),
-        float(getattr(scoring, "weight_session_killzone", 0.0)),
+    weight_fields = (
+        "weight_mtf_alignment",
+        "weight_volume_quality",
+        "weight_structure_clarity",
+        "weight_risk_reward",
+        "weight_crowd_position",
+        "weight_oi_momentum",
+        "weight_liquidation_proximity",
+        "weight_session_killzone",
+        "weight_macd_alignment",
+        "weight_obv_alignment",
+        "weight_adx_strength",
+        "weight_keltner_position",
+        "weight_vwap_position",
+        "weight_regime_alignment",
+        "weight_volume_profile",
+        "weight_pivot_proximity",
+        "weight_btc_correlation",
     )
+    weights = tuple(float(getattr(scoring, field, 0.0)) for field in weight_fields)
     total = sum(weights)
     if total <= 0.0:
         return ["scoring_weights_zero_total"]

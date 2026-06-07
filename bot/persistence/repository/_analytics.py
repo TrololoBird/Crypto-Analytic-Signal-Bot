@@ -664,3 +664,142 @@ class AnalyticsMixin:
         )
         await self._conn.commit()
         return int(cursor.rowcount or 0)
+
+    async def win_rate_by_strategy(
+        self,
+        *,
+        setup_id: str | None = None,
+        last_days: int = 30,
+    ) -> dict[str, dict[str, float]]:
+        """Return win-rate, total trades, avg RR per strategy (V.28).
+
+        Returns dict keyed by setup_id with ``win_rate``, ``total``, ``wins``,
+        ``avg_r_multiple``.
+        """
+        if not self._conn:
+            msg = "Repository not initialized"
+            raise RuntimeError(msg)
+        since = (datetime.now(UTC) - timedelta(days=last_days)).isoformat()
+        query = """
+            SELECT
+                setup_id,
+                COUNT(*) AS total,
+                SUM(CASE WHEN result IN ('tp1_hit', 'tp2_hit', 'breakeven_stop')
+                    THEN 1 ELSE 0 END) AS wins,
+                AVG(pnl_r_multiple) AS avg_r_multiple
+            FROM signal_outcomes
+            WHERE COALESCE(closed_at, created_at) >= ?
+              AND result NOT IN ('expired_pending', 'expired', 'unactivated_close', 'superseded')
+        """
+        params: list[Any] = [since]
+        if setup_id:
+            query += " AND setup_id = ?"
+            params.append(setup_id)
+        query += " GROUP BY setup_id"
+        result: dict[str, dict[str, float]] = {}
+        async with self._conn.execute(query, params) as cursor:
+            rows = await cursor.fetchall()
+        for row in rows:
+            sid = str(row["setup_id"])
+            total = max(float(row["total"] or 0), 0.0)
+            wins = max(float(row["wins"] or 0), 0.0)
+            result[sid] = {
+                "win_rate": round(wins / total, 4) if total > 0 else 0.0,
+                "total": int(total),
+                "wins": int(wins),
+                "avg_r_multiple": round(float(row["avg_r_multiple"] or 0.0), 4),
+            }
+        return result
+
+    async def monthly_setup_metrics(
+        self,
+        *,
+        setup_id: str | None = None,
+        months: int = 3,
+    ) -> list[dict[str, Any]]:
+        if not self._conn:
+            msg = "Repository not initialized"
+            raise RuntimeError(msg)
+        since = (datetime.now(UTC) - timedelta(days=months * 30)).isoformat()
+        query = """
+            SELECT
+                strftime('%Y-%m', COALESCE(closed_at, created_at)) AS month,
+                setup_id,
+                COUNT(*) AS total,
+                SUM(CASE WHEN was_profitable = 1 THEN 1 ELSE 0 END) AS wins,
+                AVG(pnl_r_multiple) AS avg_r_multiple
+            FROM signal_outcomes
+            WHERE COALESCE(closed_at, created_at) >= ?
+        """
+        params: list[Any] = [since]
+        if setup_id:
+            query += " AND setup_id = ?"
+            params.append(setup_id)
+        query += " GROUP BY month, setup_id ORDER BY month DESC, setup_id"
+        result: list[dict[str, Any]] = []
+        async with self._conn.execute(query, params) as cursor:
+            rows = await cursor.fetchall()
+        for row in rows:
+            total = int(row["total"] or 0)
+            wins = int(row["wins"] or 0)
+            win_rate = round(wins / total, 4) if total > 0 else 0.0
+            result.append({
+                "month": str(row["month"]),
+                "setup_id": str(row["setup_id"]),
+                "total": total,
+                "wins": wins,
+                "win_rate": win_rate,
+                "avg_r_multiple": round(float(row["avg_r_multiple"] or 0.0), 4),
+            })
+        return result
+
+    async def export_signal_outcomes_csv(
+        self,
+        *,
+        setup_id: str | None = None,
+        last_days: int = 90,
+        since: datetime | str | None = None,
+    ) -> str:
+        if not self._conn:
+            msg = "Repository not initialized"
+            raise RuntimeError(msg)
+        query = """
+            SELECT tracking_id, setup_id, symbol, direction, result,
+                   was_profitable, pnl_r_multiple, pnl_pct,
+                   activated_at, closed_at, created_at
+            FROM signal_outcomes
+            WHERE 1 = 1
+        """
+        params: list[Any] = []
+        if setup_id:
+            query += " AND setup_id = ?"
+            params.append(setup_id)
+        if since is not None:
+            since_iso = since.isoformat() if isinstance(since, datetime) else str(since)
+            query += " AND COALESCE(closed_at, created_at) >= ?"
+            params.append(since_iso)
+        elif last_days is not None:
+            since_dt = datetime.now(UTC) - timedelta(days=last_days)
+            query += " AND COALESCE(closed_at, created_at) >= ?"
+            params.append(since_dt.isoformat())
+        query += " ORDER BY COALESCE(closed_at, created_at) DESC"
+        header = "tracking_id,setup_id,symbol,direction,result,was_profitable,pnl_r_multiple,pnl_pct,activated_at,closed_at,created_at"
+        async with self._conn.execute(query, params) as cursor:
+            rows = await cursor.fetchall()
+        lines = [header]
+        for row in rows:
+            cols = [
+                str(row["tracking_id"] or ""),
+                str(row["setup_id"] or ""),
+                str(row["symbol"] or ""),
+                str(row["direction"] or ""),
+                str(row["result"] or ""),
+                str(int(bool(row["was_profitable"]))),
+                str(row["pnl_r_multiple"] or ""),
+                str(row["pnl_pct"] or ""),
+                str(row["activated_at"] or ""),
+                str(row["closed_at"] or ""),
+                str(row["created_at"] or ""),
+            ]
+            lines.append(",".join(cols))
+        return "\n".join(lines)

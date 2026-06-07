@@ -4,15 +4,15 @@
 
 ## Session start (обязательно)
 
-1. Hook уже внедрил контекст — **не** дублировать чтение `AGENTS.md` + всех rules.
-2. Если нужен контекст: **только** `AGENT_QUICK_START.md` + `docs/DEFINITION_OF_DONE.md` (~2 файла).
+1. Hook уже внедрил контекст — **не** дублировать чтение всех rules.
+2. Если нужен контекст: **только** `CLAUDE.md` + `docs/DEFINITION_OF_DONE.md` (~2 файла).
 3. Код: `graphify query "<вопрос>"` если есть `graphify-out/graph.json`; иначе grep по `bot/`, не весь репо. Setup: [GRAPHIFY_SETUP.md](GRAPHIFY_SETUP.md).
 
 ## Не читать без явного запроса
 
 | Путь | Почему |
 |------|--------|
-| `docs/research/*.md` (кроме 1 файла по теме) | Spec pack — тысячи строк |
+| `graphify-out/GRAPH_REPORT.md` целиком | Используй `graphify query` |
 | `graphify-out/GRAPH_REPORT.md` | Используй `graphify query` |
 | `bot/persistence/repository/memory.py` целиком | >1500 LOC — graphify/grep |
 | `data/`, `telemetry/`, `.env`, `config.toml` | Секреты/шум; hooks блокируют read |
@@ -22,11 +22,10 @@
 
 | Тема | Файл |
 |------|------|
-| Архитектура | `graphify query` → при необходимости `docs/research/ARCHITECTURE_CANONICAL.md` |
-| Стратегия | `docs/research/STRATEGY_CATALOG.md` + один `bot/strategies/<id>.py` |
+| Архитектура | `graphify query "<вопрос>"` → при необходимости `ARCHITECTURE.md` |
+| Стратегия | `bot/domain/strategy_catalog.py` + один `bot/strategies/<id>.py` |
 | Delivery | `bot/delivery/contract.py` + `bot/delivery/confluence.py` |
 | Live ops | `docs/SOLO_OPERATOR_PLAYBOOK.md` |
-| LLM в боте | `docs/research/LLM_API_INTEGRATION.md` |
 | Статус / backlog | `docs/DEFINITION_OF_DONE.md` |
 
 ## Правила работы
@@ -45,4 +44,4 @@
 | `/verify` | После правок `bot/` |
 | `/handoff` | Конец сессии |
 
-Полный список: `.cursor/commands/` — не перечислять в ответе пользователю.
+Полный список: `.claude/rules/` — не перечислять в ответе пользователю.

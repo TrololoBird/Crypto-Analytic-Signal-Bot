@@ -15,6 +15,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from bot.coercion import as_float as _float
+from bot.delivery.sizing import recommend_position_pct as _recommend_position_pct
 from bot.domain.labels import INTERNAL_TRACKING_EVENT_RU, TRACKING_EVENT_RU
 
 if TYPE_CHECKING:
@@ -196,6 +197,7 @@ class TelegramFormatPolicy:
     include_filter_limit: int = 0
     language: str = "ru"
     compact: bool = True
+    include_position_size: bool = False
 
 
 CHANNEL_SIGNAL_POLICY = TelegramFormatPolicy()
@@ -277,6 +279,7 @@ class SignalMessageFacts:
     xag_bias: str | None = None
     pax_bias: str | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    position_size_pct: float | None = None
 
 
 def escape_text(value: object) -> str:
@@ -714,8 +717,13 @@ def format_channel_trade_card(
     status_line: str | None = None,
     include_chart: bool = True,
     tier: str | None = None,
+    position_size_pct: float | None = None,
 ) -> str:
-    """Unified compact card for Telegram channel (new + edited)."""
+    """Unified compact card for Telegram channel (new + edited).
+
+    IV.21: includes invalidation hint.
+    IV.22: includes market context (ADX, regime, bias).
+    """
     setup_line = f"{escape_text(setup_label(facts.setup_id))} · {code(facts.timeframe)}"
     fallback_badge = _primary_timeframe_fallback_badge(
         facts.passed_filters,
@@ -730,6 +738,14 @@ def format_channel_trade_card(
         _channel_legs_line(facts),
         _channel_rr_line(facts),
     ]
+    if position_size_pct is not None:
+        lines.append(f"size {code(f'{position_size_pct:.1f}%')}")
+
+    context = market_context_lines(facts)
+    if context:
+        lines.append(f"ctx {code(' | '.join(context[:4]))}")
+
+    lines.append(f"inv {code(invalidation_text(facts))}")
     lines.append(escape_text(status_line or status_line_for_signal(facts)))
     lines.append(f"<i>{escape_text(manual_entry_skip_hint(facts.symbol))}</i>")
     if include_chart:
@@ -886,10 +902,19 @@ def format_signal_message(
         rendered = "\n".join(lines)
         return truncate_preserving_footer(rendered, limit=policy.text_limit)
 
+    position_size_pct = None
+    if policy.include_position_size:
+        try:
+            pct = _recommend_position_pct(signal, None)
+            position_size_pct = pct if pct > 0.0 else None
+        except (TypeError, ValueError, AttributeError):
+            pass
+
     rendered = format_channel_trade_card(
         facts,
         include_chart=policy.include_chart_link,
         tier=tier,
+        position_size_pct=position_size_pct,
     )
     return truncate_preserving_footer(rendered, limit=policy.text_limit)
 
@@ -929,7 +954,9 @@ def format_tracked_signal_message(tracked: Any) -> str:
     facts = extract_signal_facts(state, pending_expiry_minutes=None)
     status = tracking_status_text(state)
     return truncate_preserving_footer(
-        format_channel_trade_card(facts, status_line=status, include_chart=True)
+        format_channel_trade_card(
+            facts, status_line=status, include_chart=True, position_size_pct=None
+        )
     )
 
 

@@ -10,6 +10,7 @@ from bot.delivery.contract import validate_signal_contract
 from bot.delivery.tiers import rank_key as tier_rank_key
 from bot.delivery.trade_plan import evaluate_publish_readiness
 from bot.domain.limit_entry import resolve_late_entry_chase_pct
+from bot.runtime.errors import DEFENSIVE_EXC
 
 if TYPE_CHECKING:
     from bot.domain.schemas import PreparedSymbol, Signal
@@ -68,7 +69,26 @@ class DeliveryRankingMixin:
 
     def _setup_interval_minutes(self, setup_id: str) -> int:
         intervals = getattr(self._bot.settings.delivery, "setup_interval_minutes", None) or {}
-        return int(intervals.get(setup_id, 0) or 0)
+        base = int(intervals.get(setup_id, 0) or 0)
+        if base <= 0:
+            return 0
+        repo = getattr(self._bot, "_modern_repo", None)
+        if repo is None:
+            return base
+        getter = getattr(repo, "setup_win_rate", None)
+        if not callable(getter):
+            return base
+        try:
+            win_rate = getter(setup_id)
+        except DEFENSIVE_EXC:
+            return base
+        if win_rate is None:
+            return base
+        if win_rate >= 0.60:
+            return max(1, int(base * 0.7))
+        if win_rate <= 0.35:
+            return int(base * 1.5)
+        return base
 
     def _contract_issue_rows(self, signal: Signal) -> list[dict[str, object]]:
         min_rr = float(self._bot.settings.filters.min_risk_reward)
@@ -188,6 +208,10 @@ class DeliveryRankingMixin:
             )
             return False
         ready_to_send.append(signal)
+        dedup_cache = getattr(self, "_dedup_timestamps", None)
+        if dedup_cache is not None:
+            dedup_key = f"{signal.setup_id}:{signal.symbol}:{signal.direction}"
+            dedup_cache[dedup_key] = datetime.now(UTC)
         queued_setup_ids.add(signal.setup_id)
         queued_symbol_direction.add(
             symbol_direction_key or self._symbol_direction_cooldown_key(signal)

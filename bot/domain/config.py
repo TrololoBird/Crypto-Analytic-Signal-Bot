@@ -92,7 +92,7 @@ class RuntimeConfig(_StrictModel):
     # Startup throttling to prevent REST API flood
     startup_batch_size: int = Field(default=3, ge=1, le=10)
     startup_batch_delay_seconds: float = Field(default=3.0, ge=0.5, le=10.0)
-    max_concurrent_rest_requests: int = Field(default=3, ge=1, le=20)
+    max_concurrent_rest_requests: int = Field(default=8, ge=1, le=20)
     emergency_context_warmup_timeout_seconds: float = Field(default=120.0, ge=1.0, le=120.0)
     emergency_context_warmup_symbol_limit: int = Field(default=45, ge=1, le=100)
     emergency_context_fetch_timeout_seconds: float = Field(default=20.0, ge=0.5, le=30.0)
@@ -446,6 +446,10 @@ class SetupConfig(_StrictModel):
     oi_divergence: bool = True
     btc_correlation: bool = True
     altcoin_season_index: bool = True
+    orderflow_imbalance: bool = True
+    pinbar_reversal: bool = True
+    fakeout_detector: bool = True
+    cvd_exhaustion: bool = True
 
     def enabled_setup_ids(self) -> tuple[str, ...]:
         return tuple(
@@ -458,14 +462,23 @@ class ScoringConfig(_StrictModel):
 
     enabled: bool = True
     setup_prior_weight: float = Field(default=0.65, ge=0.0, le=1.0)
-    weight_mtf_alignment: float = Field(default=0.25, ge=0.0, le=1.0)
-    weight_volume_quality: float = Field(default=0.20, ge=0.0, le=1.0)
-    weight_structure_clarity: float = Field(default=0.20, ge=0.0, le=1.0)
-    weight_risk_reward: float = Field(default=0.15, ge=0.0, le=1.0)
-    weight_crowd_position: float = Field(default=0.10, ge=0.0, le=1.0)
-    weight_oi_momentum: float = Field(default=0.10, ge=0.0, le=1.0)
+    weight_mtf_alignment: float = Field(default=0.20, ge=0.0, le=1.0)
+    weight_volume_quality: float = Field(default=0.16, ge=0.0, le=1.0)
+    weight_structure_clarity: float = Field(default=0.16, ge=0.0, le=1.0)
+    weight_risk_reward: float = Field(default=0.13, ge=0.0, le=1.0)
+    weight_crowd_position: float = Field(default=0.08, ge=0.0, le=1.0)
+    weight_oi_momentum: float = Field(default=0.08, ge=0.0, le=1.0)
     weight_liquidation_proximity: float = Field(default=0.04, ge=0.0, le=0.25)
     weight_session_killzone: float = Field(default=0.03, ge=0.0, le=0.25)
+    weight_macd_alignment: float = Field(default=0.05, ge=0.0, le=0.20)
+    weight_obv_alignment: float = Field(default=0.03, ge=0.0, le=0.20)
+    weight_adx_strength: float = Field(default=0.04, ge=0.0, le=0.20)
+    weight_keltner_position: float = Field(default=0.03, ge=0.0, le=0.20)
+    weight_vwap_position: float = Field(default=0.03, ge=0.0, le=0.20)
+    weight_regime_alignment: float = Field(default=0.04, ge=0.0, le=0.20)
+    weight_volume_profile: float = Field(default=0.03, ge=0.0, le=0.20)
+    weight_pivot_proximity: float = Field(default=0.03, ge=0.0, le=0.20)
+    weight_btc_correlation: float = Field(default=0.04, ge=0.0, le=0.20)
     funding_rate_extreme: float = Field(default=0.0010, ge=0.0, le=0.02)
     funding_rate_moderate: float = Field(default=0.0005, ge=0.0, le=0.01)
 
@@ -482,6 +495,15 @@ class ScoringConfig(_StrictModel):
             "weight_oi_momentum": float(self.weight_oi_momentum),
             "weight_liquidation_proximity": float(self.weight_liquidation_proximity),
             "weight_session_killzone": float(self.weight_session_killzone),
+            "weight_macd_alignment": float(self.weight_macd_alignment),
+            "weight_obv_alignment": float(self.weight_obv_alignment),
+            "weight_adx_strength": float(self.weight_adx_strength),
+            "weight_keltner_position": float(self.weight_keltner_position),
+            "weight_vwap_position": float(self.weight_vwap_position),
+            "weight_regime_alignment": float(self.weight_regime_alignment),
+            "weight_volume_profile": float(self.weight_volume_profile),
+            "weight_pivot_proximity": float(self.weight_pivot_proximity),
+            "weight_btc_correlation": float(self.weight_btc_correlation),
         }
         total_weight = sum(weights.values())
         if total_weight <= 0.0:
@@ -498,6 +520,10 @@ class DeliveryConfig(_StrictModel):
 
     action_min_score: float = Field(default=0.72, ge=0.0, le=1.0)
     watch_min_score: float = Field(default=0.55, ge=0.0, le=1.0)
+    strategy_symbol_score_deltas: dict[str, float] = Field(
+        default_factory=dict,
+        description="Per-strategy per-symbol score deltas: 'setup_id.SYMBOL' → delta (e.g. -0.05)",
+    )
     anchor_action_score_delta: float = Field(
         default=0.04,
         ge=0.0,
@@ -587,6 +613,12 @@ class DeliveryConfig(_StrictModel):
     setup_interval_minutes: dict[str, int] = Field(
         default_factory=dict,
         description="Per-setup minimum minutes between any deliveries (setup-wide, not per-symbol)",
+    )
+    dedup_window_hours: float = Field(
+        default=4.0,
+        ge=0.0,
+        le=168.0,
+        description="Skip same setup+symbol+direction signal if delivered within this window",
     )
 
     @field_validator("setup_interval_minutes")
@@ -843,8 +875,7 @@ class WSConfig(_StrictModel):
     base_url: str = "wss://fstream.binance.com"
     public_base_url: str = "wss://fstream.binance.com/public"
     market_base_url: str = "wss://fstream.binance.com/market"
-    # 4h stays REST-authoritative; WS carries 5m/15m/1h live trigger/context data.
-    kline_intervals: tuple[str, ...] = ("5m", "15m", "1h")
+    kline_intervals: tuple[str, ...] = ("5m", "15m", "1h", "4h")
     subscription_scope: str = "shortlist"
     subscribe_book_ticker: bool = True
     book_ticker_stream_mode: str = "all"
@@ -854,7 +885,7 @@ class WSConfig(_StrictModel):
     subscribe_depth: bool = True
     depth_levels: int = Field(default=20, ge=5, le=20)
     depth_speed: str = "500ms"
-    depth_symbol_limit: int = Field(default=20, ge=0, le=100)
+    depth_symbol_limit: int = Field(default=50, ge=0, le=100)
     # Cap total market WS streams (klines + globals + aggTrade); depth trimmed first.
     max_market_stream_budget: int = Field(default=280, ge=50, le=500)
     depth_band_bps: float = Field(default=8.0, ge=0.5, le=100.0)
