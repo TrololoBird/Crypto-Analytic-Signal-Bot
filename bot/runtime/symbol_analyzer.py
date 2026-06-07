@@ -856,7 +856,18 @@ class AnalyzerFramesMixin(AnalyzerContextMixin, _AnalyzerFamilyGatesBase):
             global_ls = enrichments.get("global_ls_ratio")
             if isinstance(top, (int, float)) and isinstance(global_ls, (int, float)):
                 enrichments["top_vs_global_ls_gap"] = float(top) - float(global_ls)
-            else:
+            # crowding_context_missing only when NO L/S data at all — not just gap absence.
+            # Previously the gap absence (global_ls missing) silently disabled crowd_position
+            # even when ls_ratio / taker_ratio were available, causing 100% crowd_position
+            # unavailability in normal market conditions.
+            _has_any_ls = any(
+                isinstance(enrichments.get(f), (int, float))
+                for f in (
+                    "ls_ratio", "global_ls_ratio", "top_account_ls_ratio",
+                    "top_position_ls_ratio", "taker_ratio",
+                )
+            )
+            if not _has_any_ls:
                 freshness_flags.add("crowding_context_missing")
 
         # BTC/ETH 1h reference change for btc_correlation confluence factor.
