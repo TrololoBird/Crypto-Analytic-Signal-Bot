@@ -419,6 +419,17 @@ def _strategy_fits_for_row(
                 "spread_strategy",
             )
         )
+    # unconditional safety net: any symbol that reached this function gets a minimal set
+    if not fits:
+        fits.extend(
+            (
+                "structure_pullback",
+                "vwap_trend",
+                "fvg_setup",
+                "cvd_divergence",
+                "price_velocity",
+            )
+        )
 
     market_context = {
         "symbol": symbol,
