@@ -146,6 +146,8 @@ def detect_absorption_prepared(
         clarity *= 0.72 if flow_source == "ohlcv_delta_proxy" else 0.85
     if volume_penalty:
         clarity *= 0.90
+    # Absorption entry: wick extreme of the absorption candle is the structural level
+    entry_anchor = low if direction == "long" else high
     return _build_atr_signal(
         prepared=prepared,
         setup_id=setup_id,
@@ -161,6 +163,7 @@ def detect_absorption_prepared(
         family=family,
         structure_clarity=clarity,
         confirmed_bar=True,
+        entry_anchor=entry_anchor if entry_anchor > 0.0 else None,
     )
 
 

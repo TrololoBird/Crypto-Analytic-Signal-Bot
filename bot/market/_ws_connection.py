@@ -44,7 +44,7 @@ def compute_disconnect_delay(
     if keepalive_timeout:
         min_delay = 1.0
     elif manager._short_lived_streak >= 8:
-        min_delay = 300.0
+        min_delay = 60.0  # was 300s — too long for a 15m-candle bot; 60s still backs off hard
     elif manager._short_lived_streak >= 5:
         min_delay = 30.0
         # Persistent WS failures: try rotating the proxy so next reconnect uses a fresh egress.
@@ -54,8 +54,8 @@ def compute_disconnect_delay(
         min_delay = 5.0
     else:
         min_delay = 1.0
-    next_delay = min(300.0, max(1.0, delay, min_delay))
-    next_delay = min(300.0, next_delay + random.uniform(0.0, min(0.5, next_delay * 0.1)))
+    next_delay = min(60.0, max(1.0, delay, min_delay))
+    next_delay = min(60.0, next_delay + random.uniform(0.0, min(0.5, next_delay * 0.1)))
     manager._last_reconnect_reason = f"{endpoint}:{exc}"
     manager._last_reconnect_reason_by_endpoint[endpoint] = str(exc)
     level = logging.INFO

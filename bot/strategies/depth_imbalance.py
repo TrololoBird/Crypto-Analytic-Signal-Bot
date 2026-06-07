@@ -105,7 +105,7 @@ def detect_depth_imbalance(
     if context_penalty:
         clarity *= 0.82
     source_note = "depth_source=proxy" if source_penalty < 1.0 else "depth_source=l2_depth"
-    entry_anchor = _last(work, "ema20", 0.0) or None
+    entry_anchor = _prev(work, "ema20", 0.0) or None
     return _build_atr_signal(
         prepared=prepared,
         setup_id=setup_id,

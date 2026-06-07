@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -12,15 +13,24 @@ from bot.runtime.errors import DEFENSIVE_EXC
 from ..features.microstructure import build_microstructure_context
 from .scoring import (
     ScoringResult,
+    _adx_strength,
+    _btc_correlation_penalty,
     _crowd_position,
     _funding_contrarian,
+    _keltner_position,
     _liquidation_cluster_score,
+    _macd_alignment,
     _mtf_alignment,
+    _obv_alignment,
     _oi_momentum,
+    _pivot_proximity,
+    _regime_alignment_bonus,
     _risk_reward_quality,
     _session_killzone_score,
     _structure_clarity,
+    _volume_profile_position,
     _volume_quality,
+    _vwap_position,
 )
 
 if TYPE_CHECKING:
@@ -109,12 +119,31 @@ class ConfluenceEngine:
     def score(self, signal: Signal, prepared: PreparedSymbol) -> ConfluenceResult:
         cfg = self.settings.scoring
         components = self._compute_components(signal, prepared, cfg)
+        failed = [c.name for c in components if not c.available]
+        if failed:
+            LOG.info(
+                "confluence_factors_failed | setup_id=%s symbol=%s passed=%s failed=%s",
+                signal.setup_id,
+                signal.symbol,
+                [c.name for c in components if c.available and c.contribution > 0.0],
+                failed,
+            )
         model_score = sum(c.contribution for c in components)
         notes = self._scoring_notes(prepared, components)
 
         prior_w = max(0.0, min(cfg.setup_prior_weight, 1.0))
         history_count = self._resolve_history_count(signal)
-        calibrated_prior = self._calibrate_setup_prior(signal.score, history_count=history_count)
+        win_rate: float | None = None
+        if history_count >= 5 and self.repository is not None:
+            getter = getattr(self.repository, "setup_win_rate", None)
+            if callable(getter):
+                with suppress(DEFENSIVE_EXC):
+                    win_rate = getter(signal.setup_id)
+        calibrated_prior = self._calibrate_setup_prior(
+            signal.score,
+            history_count=history_count,
+            win_rate=win_rate,
+        )
         calibrated_model = self._calibrate_component_model(model_score)
         blended = (calibrated_prior * prior_w) + (calibrated_model * (1.0 - prior_w))
         final = round(
@@ -194,6 +223,24 @@ class ConfluenceEngine:
         prepared: PreparedSymbol,
         cfg: Any,
     ) -> list[ComponentScore]:
+        """16-component weighted scoring model.
+
+        Three-layer architecture:
+
+        1. HARD GATE (delivery_orchestrator:weighted_delivery_gate)
+        3-of-5 model: trend, momentum, volume + HTF, microstructure
+
+        2. WEIGHTED (this method, normalised to 1.0)
+        Primary: mtf_alignment, volume_quality, structure_clarity, risk_reward,
+        crowd_position, funding_score, oi_momentum
+        Market context: microstructure_context, liquidation_cluster, session_killzone
+        Indicator: macd_alignment, obv_alignment, adx_strength
+        Structure: keltner_position, vwap_position, regime_alignment
+
+        3. PRIOR BLENDING (score method)
+        strategy.score (65% prior_weight) + weighted model (35%)
+        → calibrated → component edge → final_score
+        """
         funding_weight = max(0.0, float(cfg.weight_crowd_position) * 0.5)
         crowd_weight = max(0.0, cfg.weight_crowd_position - funding_weight)
         micro_context = self._microstructure_context(prepared, signal)
@@ -259,6 +306,66 @@ class ConfluenceEngine:
                 "weight": float(getattr(cfg, "weight_session_killzone", 0.03)),
                 "raw": _session_killzone_score(signal),
                 "available": True,
+            },
+            {
+                "name": "macd_alignment",
+                "weight": float(getattr(cfg, "weight_macd_alignment", 0.05)),
+                "raw": _macd_alignment(prepared, signal),
+                "available": self._has_latest_feature(prepared, "work_15m", "macd_hist"),
+            },
+            {
+                "name": "obv_alignment",
+                "weight": float(getattr(cfg, "weight_obv_alignment", 0.03)),
+                "raw": _obv_alignment(prepared, signal),
+                "available": self._has_latest_feature(prepared, "work_15m", "obv_above_ema"),
+            },
+            {
+                "name": "adx_strength",
+                "weight": float(getattr(cfg, "weight_adx_strength", 0.04)),
+                "raw": _adx_strength(prepared, signal),
+                "available": self._has_latest_feature(prepared, "work_15m", "adx14"),
+            },
+            {
+                "name": "keltner_position",
+                "weight": float(getattr(cfg, "weight_keltner_position", 0.03)),
+                "raw": _keltner_position(prepared, signal),
+                "available": self._has_latest_feature(prepared, "work_15m", "kc_upper"),
+            },
+            {
+                "name": "vwap_position",
+                "weight": float(getattr(cfg, "weight_vwap_position", 0.03)),
+                "raw": _vwap_position(prepared, signal),
+                "available": self._has_latest_feature(prepared, "work_15m", "vwap_deviation_pct"),
+            },
+            {
+                "name": "regime_alignment",
+                "weight": float(getattr(cfg, "weight_regime_alignment", 0.04)),
+                "raw": _regime_alignment_bonus(prepared, signal),
+                "available": True,
+            },
+            {
+                "name": "volume_profile",
+                "weight": float(getattr(cfg, "weight_volume_profile", 0.03)),
+                "raw": _volume_profile_position(prepared, signal),
+                "available": (
+                    getattr(prepared, "vah_15m", None) is not None
+                    and getattr(prepared, "val_15m", None) is not None
+                ),
+            },
+            {
+                "name": "pivot_proximity",
+                "weight": float(getattr(cfg, "weight_pivot_proximity", 0.03)),
+                "raw": _pivot_proximity(prepared, signal),
+                "available": self._has_structure_context(prepared),
+            },
+            {
+                "name": "btc_correlation",
+                "weight": float(getattr(cfg, "weight_btc_correlation", 0.04)),
+                "raw": _btc_correlation_penalty(prepared, signal),
+                "available": (
+                    getattr(prepared, "btc_change_pct", None) is not None
+                    or getattr(prepared, "eth_change_pct", None) is not None
+                ),
             },
         ]
         specs: list[dict[str, Any]] = []
@@ -346,10 +453,21 @@ class ConfluenceEngine:
         return max(0.001, min((value - low) / span, 0.999))
 
     @staticmethod
-    def _calibrate_setup_prior(score: float, *, history_count: int = MIN_HISTORY_SAMPLES) -> float:
-        if history_count < MIN_HISTORY_SAMPLES:
-            return 0.5  # ratio 0..1: neutral prior until 20 setup outcomes exist.
-        numeric = 0.5 + (max(0.0, min(float(score), 1.0)) - 0.5) * 1.15
+    def _calibrate_setup_prior(
+        score: float,
+        *,
+        history_count: int = MIN_HISTORY_SAMPLES,
+        win_rate: float | None = None,
+    ) -> float:
+        # Gradient trust: linearly ramp from neutral (0.5) to fully calibrated score
+        # over 0..MIN_HISTORY_SAMPLES outcomes instead of hard binary threshold.
+        history_weight = min(max(history_count, 0) / max(MIN_HISTORY_SAMPLES, 1), 1.0)
+        calibrated = 0.5 + (max(0.0, min(float(score), 1.0)) - 0.5) * 1.15
+        numeric = 0.5 + (calibrated - 0.5) * history_weight
+        if win_rate is not None and history_count >= 5:
+            # Blend signal score with actual win-rate; weight grows with more data
+            wr_weight = min(history_count / 20.0, 1.0) * 0.35
+            numeric = numeric * (1.0 - wr_weight) + max(0.0, min(float(win_rate), 1.0)) * wr_weight
         return ConfluenceEngine._soft_clip_score(numeric, strength=0.72)
 
     @staticmethod
@@ -394,6 +512,15 @@ class ConfluenceEngine:
                 "funding_score": 0.65,
                 "crowd_position": 0.90,
                 "oi_momentum": 1.10,
+                "macd_alignment": 1.10,
+                "obv_alignment": 1.05,
+                "adx_strength": 1.15,
+                "keltner_position": 1.00,
+                "vwap_position": 1.00,
+                "regime_alignment": 1.20,
+                "volume_profile": 1.05,
+                "pivot_proximity": 1.00,
+                "btc_correlation": 1.10,
             }.get(name, 1.0)
         if family in {"reversal", "sentiment", "liquidity", "orderflow"}:
             return {
@@ -404,6 +531,15 @@ class ConfluenceEngine:
                 "funding_score": 1.25,
                 "crowd_position": 1.25,
                 "oi_momentum": 1.05,
+                "macd_alignment": 0.85,
+                "obv_alignment": 0.90,
+                "adx_strength": 0.95,
+                "keltner_position": 0.90,
+                "vwap_position": 0.85,
+                "regime_alignment": 0.80,
+                "volume_profile": 0.85,
+                "pivot_proximity": 1.10,
+                "btc_correlation": 0.70,
             }.get(name, 1.0)
         return 1.0
 

@@ -172,8 +172,8 @@ def _oi_momentum(prepared: PreparedSymbol, signal: Signal) -> float:
     # --- OI component ---
     oi_chg = prepared.oi_change_pct
     if oi_chg is None:
-        return 0.0  # OI momentum score: no OI data means neutral component contribution.
-    if oi_chg >= 0.10:
+        oi_score = 0.5  # OI unavailable: neutral, continue to CVD/basis sub-components
+    elif oi_chg >= 0.10:
         oi_score = 1.0
     elif oi_chg >= 0.05:
         oi_score = 0.75
@@ -496,13 +496,304 @@ def _liquidation_cluster_score(prepared: PreparedSymbol, signal: Signal) -> floa
     return 0.5
 
 
+def _macd_alignment(prepared: PreparedSymbol, signal: Signal) -> float:
+    frame = getattr(prepared, "work_15m", None)
+    if frame is None or frame.is_empty():
+        return 0.5
+    if not all(c in frame.columns for c in ("macd_line", "macd_signal", "macd_hist")):
+        return 0.5
+    try:
+        macd_line = float(frame.item(-1, "macd_line") or 0.0)
+        macd_signal = float(frame.item(-1, "macd_signal") or 0.0)
+        macd_hist = float(frame.item(-1, "macd_hist") or 0.0)
+    except (IndexError, TypeError, ValueError):
+        return 0.5
+    if not (math.isfinite(macd_line) and math.isfinite(macd_signal) and math.isfinite(macd_hist)):
+        return 0.5
+    line_above_signal = macd_line > macd_signal
+    hist_positive = macd_hist > 0.0
+    if signal.direction == "long":
+        if line_above_signal and hist_positive:
+            return 0.90
+        if line_above_signal or hist_positive:
+            return 0.65
+        if not line_above_signal and not hist_positive:
+            return 0.25
+        return 0.40
+    if not line_above_signal and not hist_positive:
+        return 0.90
+    if not line_above_signal or not hist_positive:
+        return 0.65
+    if line_above_signal and hist_positive:
+        return 0.25
+    return 0.40
+
+
+def _obv_alignment(prepared: PreparedSymbol, signal: Signal) -> float:
+    frame = getattr(prepared, "work_15m", None)
+    if frame is None or frame.is_empty():
+        return 0.5
+    if not all(c in frame.columns for c in ("obv", "obv_ema20", "obv_above_ema")):
+        return 0.5
+    try:
+        obv_val = float(frame.item(-1, "obv") or 0.0)
+        obv_ema = float(frame.item(-1, "obv_ema20") or 0.0)
+        obv_above = float(frame.item(-1, "obv_above_ema") or 0.0)
+    except (IndexError, TypeError, ValueError):
+        return 0.5
+    if not (math.isfinite(obv_val) and math.isfinite(obv_ema)):
+        return 0.5
+    obv_confirms = obv_above > 0.5
+    if obv_val == 0.0 and obv_ema == 0.0:
+        return 0.5
+    obv_rising = obv_val > obv_ema
+    if signal.direction == "long":
+        if obv_confirms and obv_rising:
+            return 0.85
+        if obv_confirms or obv_rising:
+            return 0.65
+        return 0.30
+    if not obv_confirms and not obv_rising:
+        return 0.85
+    if not obv_confirms or not obv_rising:
+        return 0.65
+    return 0.30
+
+
+def _adx_strength(prepared: PreparedSymbol, signal: Signal) -> float:
+    frame = getattr(prepared, "work_15m", None)
+    if frame is None or frame.is_empty():
+        return 0.5
+    if not all(c in frame.columns for c in ("adx14", "plus_di14", "minus_di14")):
+        return 0.5
+    try:
+        adx = float(frame.item(-1, "adx14") or 0.0)
+        plus_di = float(frame.item(-1, "plus_di14") or 0.0)
+        minus_di = float(frame.item(-1, "minus_di14") or 0.0)
+    except (IndexError, TypeError, ValueError):
+        return 0.5
+    if not (math.isfinite(adx) and math.isfinite(plus_di) and math.isfinite(minus_di)):
+        return 0.5
+    if adx < 20.0:
+        base = 0.15
+    elif adx < 25.0:
+        base = 0.45
+    elif adx < 40.0:
+        base = 0.70
+    else:
+        base = 0.90
+    di_aligned = plus_di > minus_di if signal.direction == "long" else minus_di > plus_di
+    if di_aligned:
+        return min(base + 0.10, 1.0)
+    return max(base - 0.10, 0.0)
+
+
+def _keltner_position(prepared: PreparedSymbol, signal: Signal) -> float:
+    frame = getattr(prepared, "work_15m", None)
+    if frame is None or frame.is_empty():
+        return 0.5
+    if not all(c in frame.columns for c in ("kc_upper", "kc_lower", "close")):
+        return 0.5
+    try:
+        close = float(frame.item(-1, "close") or 0.0)
+        upper = float(frame.item(-1, "kc_upper") or 0.0)
+        lower = float(frame.item(-1, "kc_lower") or 0.0)
+    except (IndexError, TypeError, ValueError):
+        return 0.5
+    if not (math.isfinite(close) and math.isfinite(upper) and math.isfinite(lower)):
+        return 0.5
+    span = upper - lower
+    if span <= 0.0:
+        return 0.5
+    position = (close - lower) / span
+    if signal.direction == "long":
+        if position <= 0.15:
+            return 0.85
+        if position <= 0.40:
+            return 0.70
+        if position >= 0.85:
+            return 0.20
+        if position >= 0.60:
+            return 0.40
+        return 0.55
+    if position >= 0.85:
+        return 0.85
+    if position >= 0.60:
+        return 0.70
+    if position <= 0.15:
+        return 0.20
+    if position <= 0.40:
+        return 0.40
+    return 0.55
+
+
+def _vwap_position(prepared: PreparedSymbol, signal: Signal) -> float:
+    frame = getattr(prepared, "work_15m", None)
+    if frame is None or frame.is_empty():
+        return 0.5
+    if "vwap_deviation_atr14" in frame.columns:
+        col = "vwap_deviation_atr14"
+    elif "vwap_deviation_pct" in frame.columns:
+        col = "vwap_deviation_pct"
+    else:
+        return 0.5
+    try:
+        deviation = float(frame.item(-1, col) or 0.0)
+    except (IndexError, TypeError, ValueError):
+        return 0.5
+    if not math.isfinite(deviation):
+        return 0.5
+    if signal.direction == "long":
+        if deviation > 0.5:
+            return 0.15
+        if deviation > 0.15:
+            return 0.35
+        if deviation < -0.5:
+            return 0.90
+        if deviation < -0.15:
+            return 0.75
+        if deviation < -0.05:
+            return 0.60
+        return 0.50
+    if deviation < -0.5:
+        return 0.15
+    if deviation < -0.15:
+        return 0.35
+    if deviation > 0.5:
+        return 0.90
+    if deviation > 0.15:
+        return 0.75
+    if deviation > 0.05:
+        return 0.60
+    return 0.50
+
+
+def _regime_alignment_bonus(prepared: PreparedSymbol, signal: Signal) -> float:
+    score_4h = _directional_alignment(prepared.regime_4h_confirmed, signal.direction)
+    if prepared.primary_timeframe != "15m":
+        primary = _structure_frame(prepared)
+        score_primary = _directional_alignment(_regime_confirmed(primary), signal.direction)
+    else:
+        score_primary = _directional_alignment(prepared.structure_1h, signal.direction)
+    combined = score_primary * 0.60 + score_4h * 0.40
+    if combined >= 0.8:
+        return 0.90
+    if combined >= 0.5:
+        return 0.60
+    if combined >= 0.2:
+        return 0.40
+    return 0.15
+
+
+def _volume_profile_position(prepared: PreparedSymbol, signal: Signal) -> float:
+    vah = prepared.vah_15m or prepared.vah_1h
+    val = prepared.val_15m or prepared.val_1h
+    if vah is None or val is None or vah <= val:
+        return 0.5
+    frame = getattr(prepared, "work_15m", None)
+    if frame is None or frame.is_empty() or "close" not in frame.columns:
+        return 0.5
+    try:
+        close = float(frame.item(-1, "close") or 0.0)
+    except (IndexError, TypeError, ValueError):
+        return 0.5
+    if not math.isfinite(close):
+        return 0.5
+    if signal.direction == "long":
+        if close <= val:
+            return 0.80
+        if close <= val * 1.02:
+            return 0.65
+        if close >= vah:
+            return 0.25
+        return 0.50
+    if close >= vah:
+        return 0.80
+    if close >= vah * 0.98:
+        return 0.65
+    if close <= val:
+        return 0.25
+    return 0.50
+
+
+def _pivot_proximity(prepared: PreparedSymbol, signal: Signal) -> float:
+    frame = getattr(prepared, "work_15m", None)
+    if frame is None or frame.is_empty() or not all(c in frame.columns for c in ("high", "low")):
+        return 0.5
+    try:
+        close = float(frame.item(-1, "close"))
+    except (IndexError, TypeError, ValueError):
+        return 0.5
+    if not math.isfinite(close):
+        return 0.5
+    sh_mask, sl_mask = _swing_points(frame, n=3)
+    swing_highs = frame.filter(sh_mask)["high"].tail(3).to_list()
+    swing_lows = frame.filter(sl_mask)["low"].tail(3).to_list()
+    if signal.direction == "long":
+        if not swing_lows:
+            return 0.5
+        nearest_pivot = min(swing_lows, key=lambda p: abs(float(p) - close))
+        dist = abs(float(nearest_pivot) - close) / max(close, 1.0)
+        if dist < 0.002:
+            return 0.85
+        if dist < 0.005:
+            return 0.70
+        return 0.50
+    if not swing_highs:
+        return 0.5
+    nearest_pivot = min(swing_highs, key=lambda p: abs(float(p) - close))
+    dist = abs(float(nearest_pivot) - close) / max(close, 1.0)
+    if dist < 0.002:
+        return 0.85
+    if dist < 0.005:
+        return 0.70
+    return 0.50
+
+
+def _btc_correlation_penalty(prepared: PreparedSymbol, signal: Signal) -> float:
+    btc_change = getattr(prepared, "btc_change_pct", None)
+    eth_change = getattr(prepared, "eth_change_pct", None)
+    ref_change: float | None = btc_change if btc_change is not None else eth_change
+    if ref_change is None:
+        return 0.5
+    try:
+        ref_change = float(ref_change)
+    except (TypeError, ValueError):
+        return 0.5
+    if not math.isfinite(ref_change):
+        return 0.5
+    if signal.direction == "long":
+        if ref_change < -2.0:
+            return 0.10
+        if ref_change < -1.0:
+            return 0.30
+        if ref_change < -0.5:
+            return 0.45
+        if ref_change > 2.0:
+            return 0.85
+        if ref_change > 1.0:
+            return 0.70
+        return 0.55
+    if ref_change > 2.0:
+        return 0.10
+    if ref_change > 1.0:
+        return 0.30
+    if ref_change > 0.5:
+        return 0.45
+    if ref_change < -2.0:
+        return 0.85
+    if ref_change < -1.0:
+        return 0.70
+    return 0.55
+
+
 def _session_killzone_score(signal: Signal) -> float:
-    from datetime import UTC, datetime
+    from datetime import UTC, datetime  # noqa: PLC0415
 
     hour = datetime.now(UTC).hour
     in_killzone = hour in {0, 1, 2, 7, 8, 9, 12, 13, 14}
     if not in_killzone:
-        return 0.45
+        return 0.30
     if signal.strategy_family in {"session", "breakout", "momentum"}:
         return 0.78
     return 0.58

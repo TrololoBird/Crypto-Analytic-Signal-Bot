@@ -950,18 +950,25 @@ def _run_filter_pipeline(
                 base,
                 details={"ticker_price": prepared.ticker_price},
             )
-        deviation = abs(prepared.mark_price - prepared.ticker_price) / prepared.ticker_price
-        mark_price_details = {
+        ticker_age = prepared.ticker_price_age_seconds or 0.0
+        mark_price_details: dict[str, Any] = {
             "mark_price": prepared.mark_price,
             "comparison_price": prepared.ticker_price,
             "comparison_source": "ws_ticker",
-            "comparison_age_seconds": prepared.ticker_price_age_seconds,
+            "comparison_age_seconds": ticker_age,
             "mark_price_age_seconds": prepared.mark_price_age_seconds,
-            "deviation_pct": deviation,
         }
-        if deviation > settings.filters.max_mark_price_deviation_pct:
-            return _reject("mark_price_deviation", base, details=mark_price_details)
-        passed.append("mark_price_ok")
+        if ticker_age > 60.0:
+            # Stale ticker: skip deviation check — comparing mark price against a
+            # 60s+ old ticker produces false rejects when markets moved normally.
+            mark_price_details["deviation_skipped"] = "ticker_stale"
+            passed.append("mark_price_ok_ticker_stale")
+        else:
+            deviation = abs(prepared.mark_price - prepared.ticker_price) / prepared.ticker_price
+            mark_price_details["deviation_pct"] = deviation
+            if deviation > settings.filters.max_mark_price_deviation_pct:
+                return _reject("mark_price_deviation", base, details=mark_price_details)
+            passed.append("mark_price_ok")
     else:
         passed.append("mark_deviation_stage_disabled")
 
@@ -1021,13 +1028,18 @@ def _run_filter_pipeline(
     else:
         passed.append("atr_stage_disabled")
         atr_frame = primary_frame if primary_frame is not None else prepared.work_15m
-        atr_pct = float(atr_frame.item(-1, "atr_pct") or 0.0) if not atr_frame.is_empty() else 0.0
+        if not atr_frame.is_empty() and "atr_pct" in atr_frame.columns:
+            atr_pct = float(atr_frame.item(-1, "atr_pct") or 0.0)
+        else:
+            atr_pct = 0.0
 
     # --- 4b. ADX policy (setup/family aware) ---
     adx_1h = 0.0
-    if not prepared.work_1h.is_empty():
+    if not prepared.work_1h.is_empty() and "adx14" in prepared.work_1h.columns:
         adx_1h = float(prepared.work_1h.item(-1, "adx14") or 0.0)
     setup_overrides = settings.filters.setups.get(signal.setup_id, {})
+    if not isinstance(setup_overrides, dict):
+        setup_overrides = {}
     default_min_adx = _resolve_symbol_filter(
         settings,
         prepared.symbol,

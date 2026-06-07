@@ -7,7 +7,6 @@ import contextlib
 import json
 import logging
 import os
-import secrets
 import threading
 import time
 import webbrowser
@@ -80,7 +79,7 @@ class BotDashboard:
         self._ws_broadcaster: DashboardWSBroadcaster | None = None
         self._uvicorn_server: Any = None
         self._server_task: asyncio.Task[None] | None = None
-        self._dashboard_token: str = os.environ.get("DASHBOARD_TOKEN", "").strip()
+        self._dashboard_token: str | None = None
 
         bus = getattr(self.bot, "_bus", None)
         if bus is not None:
@@ -145,28 +144,6 @@ class BotDashboard:
                 status_code=int(getattr(response, "status_code", 200) or 200),
             )
             return response
-
-        @app.middleware("http")
-        async def token_auth(request: Any, call_next: Any) -> Any:
-            if self._dashboard_token:
-                path: str = request.url.path
-                # Always allow health/status + static assets
-                if not (path in _open_paths or path.startswith("/static/")):
-                    # Check query param or Authorization header
-                    provided = (
-                        request.query_params.get("token", "")
-                        or request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
-                    )
-                    if (
-                        not secrets.compare_digest(provided, self._dashboard_token)
-                        and JSONResponse is not None
-                    ):
-                        return JSONResponse(
-                            {"detail": "unauthorized"},
-                            status_code=401,
-                            headers={"WWW-Authenticate": "Bearer"},
-                        )
-            return await call_next(request)
 
         @app.middleware("http")
         async def add_security_headers(request: Any, call_next: Any) -> Any:

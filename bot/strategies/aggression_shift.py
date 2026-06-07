@@ -181,8 +181,9 @@ def detect_aggression_shift_prepared(
         )
         return None
     shift, threshold, shift_source, signal_lag, direction = candidate
-    vol_ratio = _last(prepared.work_15m, "volume_ratio20", 1.0)
+    vol_ratio = _prev(prepared.work_15m, "volume_ratio20", 1.0)
     volume_penalty = vol_ratio < float(params["min_volume_ratio"])
+    entry_anchor = _prev(prepared.work_15m, "ema20", 0.0) or None
     return _build_atr_signal(
         prepared=prepared,
         setup_id=setup_id,
@@ -200,6 +201,7 @@ def detect_aggression_shift_prepared(
         structure_clarity=min(abs(shift) * 3.0, 1.0)
         * (0.72 if shift_source != "agg_trade" else 1.0)
         * (0.90 if volume_penalty else 1.0),
+        entry_anchor=entry_anchor,
     )
 
 
