@@ -198,6 +198,12 @@ def _build_atr_signal(
     max_risk_atr = float(params.get("max_risk_atr", 2.0))
     max_risk_pct = float(params.get("max_risk_pct", 3.5))
     max_risk = min(atr * max_risk_atr, price_anchor * max_risk_pct / 100.0)
+    # entry_pad mirrors the zone used in build_trade_plan (entry_pad_atr_mult=0.35).
+    # max_risk must never clamp the stop inside the entry zone — otherwise the signal
+    # contract rejects it. Enforce a minimum: stop must clear the entry zone boundary.
+    entry_pad = max(atr * 0.35, price_anchor * 0.0005)
+    min_risk = entry_pad + atr * 0.06
+    max_risk = max(max_risk, min_risk)
     if direction == "long":
         sweep_stop = stop_anchor if stop_anchor is not None and stop_anchor > 0.0 else low
         stop = min(sweep_stop, close - atr * sl_buffer) - atr * 0.05
