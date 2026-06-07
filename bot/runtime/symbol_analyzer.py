@@ -747,13 +747,17 @@ class AnalyzerFramesMixin(AnalyzerContextMixin, _AnalyzerFamilyGatesBase):
                     liq_age = float(liq_age)
                     enrichments["liquidation_score_age_seconds"] = liq_age
                     context_ages.append(liq_age)
-                cascade_count = self._safe_ws_get(
-                    symbol,
-                    "get_liquidation_event_count",
-                    window_seconds=300,
-                )
-                if cascade_count is not None:
-                    enrichments["liquidation_cascade_5m"] = int(cascade_count) > 3
+            # Cascade flag must be set unconditionally — 0 events is still valid data.
+            # If nested inside "if liquidation is not None", a quiet market (no liq events
+            # in last 900s) leaves liquidation_cascade_5m=None → confluence factor becomes
+            # unavailable for ALL signals, blocking delivery in low-volatility regimes.
+            cascade_count = self._safe_ws_get(
+                symbol,
+                "get_liquidation_event_count",
+                window_seconds=300,
+            )
+            if cascade_count is not None:
+                enrichments["liquidation_cascade_5m"] = int(cascade_count) > 3
 
         if isinstance(self._bot.client, BinanceFuturesMarketData):
             premium = self._bot.client.get_cached_premium_index(symbol)
@@ -854,6 +858,27 @@ class AnalyzerFramesMixin(AnalyzerContextMixin, _AnalyzerFamilyGatesBase):
                 enrichments["top_vs_global_ls_gap"] = float(top) - float(global_ls)
             else:
                 freshness_flags.add("crowding_context_missing")
+
+        # BTC/ETH 1h reference change for btc_correlation confluence factor.
+        # btc_change_pct / eth_change_pct are declared in PreparedSymbol but were never
+        # populated, making btc_correlation always unavailable (weight=0) and causing
+        # systematic score degradation in ranging/flat BTC markets.
+        klines_cache = getattr(self._bot.client, "_klines_cache", None)
+        if isinstance(klines_cache, dict):
+            for _ref_sym, _ref_field in (("BTCUSDT", "btc_change_pct"), ("ETHUSDT", "eth_change_pct")):
+                for _key, _cached in klines_cache.items():
+                    if not (isinstance(_key, tuple) and len(_key) >= 2 and _key[0] == _ref_sym and _key[1] == "1h"):
+                        continue
+                    try:
+                        _, _frame = _cached
+                        if _frame is not None and _frame.height >= 2 and "close" in _frame.columns:
+                            _prev = float(_frame.item(-2, "close") or 0.0)
+                            _last = float(_frame.item(-1, "close") or 0.0)
+                            if _prev > 0.0 and _last > 0.0:
+                                enrichments[_ref_field] = (_last - _prev) / _prev
+                                break
+                    except (IndexError, TypeError, ValueError, AttributeError):
+                        pass
 
         if context_ages:
             enrichments["context_snapshot_age_seconds"] = max(context_ages)
