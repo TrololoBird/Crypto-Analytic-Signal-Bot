@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import math
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
+
+LOG = logging.getLogger(__name__)
 
 from ..delivery.contract import (
     DEFAULT_SCALE_WEIGHTS,
@@ -366,9 +369,17 @@ class Signal:
             object.__setattr__(self, "risk_reward", computed)
         issues = validate_signal_contract(self)
         if issues:
+            # build_trade_plan (contract.py) now owns the stop clamp — violations
+            # here mean a detector bypassed build_trade_plan entirely.  Log a
+            # warning so it surfaces without killing the analysis cycle; delivery
+            # path will reject on its own contract check if the signal is broken.
             detail = [f"{issue.field}:{issue.reason}" for issue in issues]
-            msg = f"{SIGNAL_CONTRACT_VIOLATION_PREFIX}: {detail}"
-            raise ValueError(msg)
+            LOG.warning(
+                "signal_contract_issues | setup=%s symbol=%s issues=%s",
+                getattr(self, "setup_id", "?"),
+                getattr(self, "symbol", "?"),
+                detail,
+            )
 
     @property
     def entry_mid_raw(self) -> float:

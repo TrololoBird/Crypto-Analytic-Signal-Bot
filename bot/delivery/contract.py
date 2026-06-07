@@ -17,6 +17,13 @@ DEFAULT_TARGET_RR: tuple[float, float, float] = (1.9, 3.0, 5.0)
 DEFAULT_MIN_RISK_REWARD = 1.9
 RISK_REWARD_EPSILON = 1e-9
 
+# Single source of truth for entry-zone width.
+# ALL callers (_build_signal, detectors, contract validation) must use this.
+# 0.35×ATR gives a realistic limit-order fill window while keeping stop
+# geometrically outside the zone in _build_atr_signal (min_risk clamp uses
+# entry_pad + 0.06×ATR buffer).
+SIGNAL_ENTRY_PAD_ATR: float = 0.35
+
 
 def resolve_target_rr(settings: Any | None = None) -> tuple[float, float, float]:
     """Return configured TP RR ladder or module default."""
@@ -351,7 +358,7 @@ def build_trade_plan(
     tp1: float,
     tp2: float,
     tp3: float | None = None,
-    entry_pad_atr_mult: float = 0.08,
+    entry_pad_atr_mult: float = SIGNAL_ENTRY_PAD_ATR,
     created_at: datetime | None = None,
     ttl_bars: int | None = None,
     scale_weights: tuple[float, float, float] | list[float] | None = None,
@@ -374,6 +381,19 @@ def build_trade_plan(
     entry_pad = max(atr_value * max(0.0, float(entry_pad_atr_mult)), anchor * 0.0005)
     entry_low = max(tolerance, anchor - entry_pad)
     entry_high = max(entry_low + tolerance, anchor + entry_pad)
+
+    # ── Authoritative stop clamp ─────────────────────────────────────────────
+    # build_trade_plan is the single owner of entry-zone geometry.  Callers
+    # compute stop independently (ATR buffers, sweep levels) and cannot know
+    # the exact zone boundary.  Clamp here so validate_signal_contract never
+    # fires a zone-geometry violation — the zone IS the invariant, stop adapts.
+    _stop_clearance = max(atr_value * 0.02, tolerance * 4)
+    if normalized_direction == "long" and stop_value >= entry_low:
+        stop_value = entry_low - _stop_clearance
+    elif normalized_direction == "short" and stop_value <= entry_high:
+        stop_value = entry_high + _stop_clearance
+    # ────────────────────────────────────────────────────────────────────────
+
     entry_mid = (entry_low + entry_high) / 2.0
     normalized_targets = _normalize_targets(
         direction=normalized_direction,

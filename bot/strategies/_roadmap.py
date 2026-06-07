@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from ..delivery.contract import SIGNAL_ENTRY_PAD_ATR
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ._common import (
     as_float as _as_float,
@@ -187,7 +188,7 @@ def _build_atr_signal(
         return None
 
     sl_buffer = float(params.get("sl_buffer_atr", 0.65))
-    min_rr = float(params.get("min_rr", 1.5))
+    min_rr = float(params.get("min_rr", 1.9))   # align with filter min_risk_reward
     candle_mid = (high + low) / 2.0
     if entry_anchor is not None and entry_anchor > 0.0:
         price_anchor = float(entry_anchor)
@@ -198,12 +199,7 @@ def _build_atr_signal(
     max_risk_atr = float(params.get("max_risk_atr", 2.0))
     max_risk_pct = float(params.get("max_risk_pct", 3.5))
     max_risk = min(atr * max_risk_atr, price_anchor * max_risk_pct / 100.0)
-    # entry_pad mirrors the zone used in build_trade_plan (entry_pad_atr_mult=0.35).
-    # max_risk must never clamp the stop inside the entry zone — otherwise the signal
-    # contract rejects it. Enforce a minimum: stop must clear the entry zone boundary.
-    entry_pad = max(atr * 0.35, price_anchor * 0.0005)
-    min_risk = entry_pad + atr * 0.06
-    max_risk = max(max_risk, min_risk)
+    # build_trade_plan (contract.py) owns the entry-zone clamp — no duplicate here.
     if direction == "long":
         sweep_stop = stop_anchor if stop_anchor is not None and stop_anchor > 0.0 else low
         stop = min(sweep_stop, close - atr * sl_buffer) - atr * 0.05

@@ -9,7 +9,7 @@ from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from ..delivery.contract import resolve_target_rr
+from ..delivery.contract import SIGNAL_ENTRY_PAD_ATR, resolve_target_rr
 from ..delivery.trade_plan import TradePlanBuilder
 from ..domain.risk import RiskParams
 from ..domain.schemas import PreparedSymbol, Signal
@@ -328,7 +328,7 @@ def _build_signal(
     atr: float,
     timeframe: str = "15m",
     strategy_family: str = "continuation",
-    entry_pad_atr_mult: float = 0.35,
+    entry_pad_atr_mult: float = SIGNAL_ENTRY_PAD_ATR,
 ) -> Signal | None:
     if not math.isfinite(float(atr)) or atr <= 0.0:
         _reject(
@@ -403,8 +403,9 @@ def _build_signal(
 
     trend_direction = getattr(prepared, "bias_1h", None)
     trend_score = getattr(prepared, "trend_score_1h", None)
-    # floor: skip sub-threshold signals before filter pipeline (min_score margin)
-    score = max(0.63, round(float(score), 4))
+    # floor: align with config min_score (0.65) — 0.63 let signals through that
+    # filters immediately dropped, creating wasted confluence compute.
+    score = max(0.65, round(float(score), 4))
 
     return Signal(
         symbol=prepared.symbol,
