@@ -154,7 +154,12 @@ def detect_ls_ratio_extreme(
         score_multiplier *= 0.88
     if oi_penalty:
         score_multiplier *= float(params.get("oi_missing_penalty", 0.92))
-    entry_anchor = _prev(work, "ema20", 0.0) or None
+    # Limit order at structural extreme: short into prev-bar high (crowd over-long = resistance),
+    # long at prev-bar low (crowd over-short = support). EMA20 fills immediately like market order.
+    if direction == "long":
+        entry_anchor = _prev(work, "low", 0.0) or None
+    else:
+        entry_anchor = _prev(work, "high", 0.0) or None
     return _build_atr_signal(
         prepared=prepared,
         setup_id=setup_id,

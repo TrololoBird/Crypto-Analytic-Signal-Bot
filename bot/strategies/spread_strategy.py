@@ -101,7 +101,12 @@ def detect_spread_strategy(
         clarity *= 0.90
     if context_penalty:
         clarity *= 0.82
-    entry_anchor = _prev(work, "ema20", 0.0) or None
+    # Limit order: sell into prev-bar high (resistance) for shorts, buy at prev-bar low
+    # (support) for longs — EMA20 ≈ current price yields immediate market-fill.
+    if direction == "long":
+        entry_anchor = _prev(work, "low", 0.0) or None
+    else:
+        entry_anchor = _prev(work, "high", 0.0) or None
     return _build_atr_signal(
         prepared=prepared,
         setup_id=setup_id,

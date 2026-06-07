@@ -126,7 +126,12 @@ def detect_orderflow_imbalance(
         f"z_boost={score_boost:.4f}",
     ]
 
-    entry_anchor = _prev(prepared.work_15m, "ema20", 0.0) or None
+    # Limit order: sell into prev-bar high (resistance) for shorts, buy at prev-bar low
+    # (support) for longs — EMA20 ≈ current price yields immediate market-fill.
+    if direction == "long":
+        entry_anchor = _prev(prepared.work_15m, "low", 0.0) or None
+    else:
+        entry_anchor = _prev(prepared.work_15m, "high", 0.0) or None
     return _build_atr_signal(
         prepared=prepared,
         setup_id=setup_id,

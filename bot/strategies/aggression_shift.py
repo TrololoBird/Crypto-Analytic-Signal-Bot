@@ -183,7 +183,12 @@ def detect_aggression_shift_prepared(
     shift, threshold, shift_source, signal_lag, direction = candidate
     vol_ratio = _prev(prepared.work_15m, "volume_ratio20", 1.0)
     volume_penalty = vol_ratio < float(params["min_volume_ratio"])
-    entry_anchor = _prev(prepared.work_15m, "ema20", 0.0) or None
+    # Limit order: sell into prev-bar high (resistance) for shorts, buy at prev-bar low
+    # (support) for longs — EMA20 ≈ current price yields immediate market-fill.
+    if direction == "long":
+        entry_anchor = _prev(prepared.work_15m, "low", 0.0) or None
+    else:
+        entry_anchor = _prev(prepared.work_15m, "high", 0.0) or None
     return _build_atr_signal(
         prepared=prepared,
         setup_id=setup_id,

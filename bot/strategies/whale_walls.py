@@ -129,9 +129,13 @@ def detect_whale_walls(
         clarity *= 0.90
     if context_penalty:
         clarity *= 0.82
-    mark = _finite_or_none(prepared.mark_price)
-    close = _prev(work, "close", 0.0)
-    entry_anchor = mark if mark is not None and mark > 0.0 else (close if close > 0.0 else None)
+    # Limit order: sell into prev-bar resistance (high) for shorts, buy at prev-bar support
+    # (low) for longs. Using mark_price produced an immediate market-fill, defeating the
+    # purpose of a limit order entirely.
+    if direction == "long":
+        entry_anchor = _prev(work, "low", 0.0) or None
+    else:
+        entry_anchor = _prev(work, "high", 0.0) or None
     return _build_atr_signal(
         prepared=prepared,
         setup_id=setup_id,

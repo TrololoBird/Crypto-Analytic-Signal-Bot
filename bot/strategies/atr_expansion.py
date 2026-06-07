@@ -99,7 +99,12 @@ def detect_atr_expansion_prepared(
         if (direction == "long" and obv_val <= 0.0) or (direction == "short" and obv_val > 0.0):
             obv_penalty = 0.85
 
-    entry_anchor = _prev(prepared.work_15m, "ema20", 0.0) or None
+    # Limit order: sell into prev-bar high (resistance) for shorts, buy at prev-bar low
+    # (support) for longs — EMA20 ≈ current price yields immediate market-fill.
+    if direction == "long":
+        entry_anchor = _prev(prepared.work_15m, "low", 0.0) or None
+    else:
+        entry_anchor = _prev(prepared.work_15m, "high", 0.0) or None
     clarity = min((ratio - 1.0) / 1.0, 1.0) * obv_penalty
     reasons = [
         f"atr_expansion_{direction}",
