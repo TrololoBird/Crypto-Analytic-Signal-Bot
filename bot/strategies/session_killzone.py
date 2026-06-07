@@ -103,12 +103,22 @@ def _session_windows_from_params(
         (
             "NY",
             _hour_param(raw, "ny_start_hour_utc", 13),
-            _hour_param(raw, "ny_end_hour_utc", 16),
+            _hour_param(raw, "ny_end_hour_utc", 17),
         ),
         (
             "Asia",
             _hour_param(raw, "asia_start_hour_utc", 0),
             _hour_param(raw, "asia_end_hour_utc", 3),
+        ),
+        (
+            "PreLondon",
+            _hour_param(raw, "pre_london_start_hour_utc", 5),
+            _hour_param(raw, "pre_london_end_hour_utc", 7),
+        ),
+        (
+            "NYClose",
+            _hour_param(raw, "ny_close_start_hour_utc", 20),
+            _hour_param(raw, "ny_close_end_hour_utc", 22),
         ),
     )
 
@@ -133,6 +143,20 @@ def _active_killzone_name(
 
 def _in_killzone(hour: int, params: dict[str, object] | None = None) -> bool:
     return _active_killzone_name(hour, params) is not None
+
+
+def _is_in_buffer_zone(hour: int, params: dict[str, object] | None = None) -> bool:
+    """Check if hour falls in pre/post buffer zone of any session (III.18)."""
+    pre = int(params.get("pre_session_buffer_hours", 1)) if params else 1
+    post = int(params.get("post_session_buffer_hours", 1)) if params else 1
+    for _name, start, end in _session_windows_from_params(params):
+        for offset, direction in [(pre, -1), (post, 1)]:
+            for buf_h in range(1, offset + 1):
+                buf_start = (start + direction * buf_h) % 24
+                buf_end = (start + direction * (buf_h - 1)) % 24
+                if _hour_in_window(hour, buf_start, buf_end if buf_end != buf_start else (buf_end + 1) % 24):
+                    return True
+    return False
 
 
 def _latest_bar_time_utc(prepared: PreparedSymbol) -> datetime:
@@ -202,7 +226,10 @@ def detect_session_killzone(
         return None
     now_utc = _latest_bar_time_utc(prepared)
     session_name = _active_killzone_name(now_utc.hour, cast("dict[str, object]", effective_params))
-    if session_name is None:
+    buffer_active = session_name is None and _is_in_buffer_zone(
+        now_utc.hour, cast("dict[str, object]", effective_params)
+    )
+    if session_name is None and not buffer_active:
         _reject(
             prepared,
             setup_id,
@@ -446,9 +473,16 @@ def detect_session_killzone(
         vol_ratio=vol_ratio,
         rsi=rsi,
     )
+    if buffer_active:
+        score *= _as_float(
+            effective_params.get("buffer_zone_penalty", defaults["buffer_zone_penalty"]),
+            defaults["buffer_zone_penalty"],
+        )
+        penalty_reasons.append("buffer_zone_penalty")
 
+    session_label = session_name or "Buffer"
     reasons = [
-        f"Session killzone {direction}: {session_name} {now_utc.strftime('%H:%M')}UTC",
+        f"Session killzone {direction}: {session_label} {now_utc.strftime('%H:%M')}UTC",
         f"adx1h={adx_1h:.1f} avg_vol={avg_vol_ratio:.2f}",
         f"limit_entry={entry_price:.4f}",
         f"sl_buffer_atr={sl_buffer_atr:.2f}",
@@ -517,13 +551,20 @@ class SessionKillzoneSetup(RoadmapSetup):
         "orderflow_conflict_penalty": 0.88,
         "structure_conflict_penalty": 0.82,
         "asia_start_hour_utc": 0,
-        "asia_end_hour_utc": 6,
+        "asia_end_hour_utc": 3,
         "london_start_hour_utc": 7,
-        "london_end_hour_utc": 9,
-        "ny_start_hour_utc": 12,
-        "ny_end_hour_utc": 14,
-        "overlap_start_hour_utc": 12,
-        "overlap_end_hour_utc": 14,
+        "london_end_hour_utc": 10,
+        "ny_start_hour_utc": 13,
+        "ny_end_hour_utc": 17,
+        "overlap_start_hour_utc": 13,
+        "overlap_end_hour_utc": 16,
+        "pre_london_start_hour_utc": 5,
+        "pre_london_end_hour_utc": 7,
+        "ny_close_start_hour_utc": 20,
+        "ny_close_end_hour_utc": 22,
+        "pre_session_buffer_hours": 1,
+        "post_session_buffer_hours": 1,
+        "buffer_zone_penalty": 0.88,
     }
 
     def active_session_name(

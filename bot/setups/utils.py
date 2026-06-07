@@ -140,14 +140,19 @@ def select_structural_target(
     column: str,
     price_anchor: float,
     direction: str,
+    max_age_bars: int = 48,
+    max_retests: int = 5,
 ) -> float | None:
     if mask is None or work.is_empty() or column not in work.columns or mask.sum() <= 0:
         return None
 
     prices = work.filter(mask)[column]
+    mask_indices = work.with_row_index("_idx").filter(mask)["_idx"]
     best_price: float | None = None
-    best_distance: float | None = None
-    for raw_price in prices.to_list():
+    best_score: float | None = None
+    total_bars = work.height
+
+    for i, raw_price in enumerate(prices.to_list()):
         price = _safe_float(raw_price, default=float("nan"))
         if math.isnan(price) or price <= 0.0:
             continue
@@ -155,10 +160,37 @@ def select_structural_target(
             continue
         if direction == "short" and price >= price_anchor:
             continue
+
+        bar_idx = int(mask_indices[i]) if i < len(mask_indices) else 0
+        age_bars = total_bars - bar_idx
+        if age_bars > max_age_bars:
+            continue
+
+        retests = 0
+        high_col = work["high"] if "high" in work.columns else None
+        low_col = work["low"] if "low" in work.columns else None
+        if high_col is not None and low_col is not None:
+            zone = price * 0.003
+            for j in range(bar_idx, total_bars):
+                if j >= total_bars:
+                    break
+                h = _safe_float(high_col[j], default=float("nan"))
+                l_ = _safe_float(low_col[j], default=float("nan"))
+                if (
+                    math.isfinite(h) and math.isfinite(l_)
+                    and l_ <= price + zone and h >= price - zone
+                ):
+                    retests += 1
+            if retests > max_retests:
+                continue
+
         distance = abs(price - price_anchor)
-        if best_distance is None or distance <= best_distance:
+        age_penalty = age_bars / max_age_bars
+        retest_penalty = min(retests / max_retests, 1.0)
+        score = distance * (1.0 + age_penalty * 0.5 + retest_penalty * 0.3)
+        if best_score is None or score <= best_score:
             best_price = price
-            best_distance = distance
+            best_score = score
     return best_price
 
 
@@ -170,8 +202,25 @@ def select_structural_stop_anchor(
     price_anchor: float,
     stop_basis: float,
     direction: str,
+    vwap: float | None = None,
+    volume_profile_poc: float | None = None,
+    volume_profile_vah: float | None = None,
+    volume_profile_val: float | None = None,
 ) -> float:
     anchor = float(stop_basis)
+
+    additional_levels: list[float] = []
+    if vwap is not None and math.isfinite(vwap):
+        additional_levels.append(vwap)
+    if volume_profile_poc is not None and math.isfinite(volume_profile_poc):
+        additional_levels.append(volume_profile_poc)
+    if direction == "long":
+        if volume_profile_val is not None and math.isfinite(volume_profile_val):
+            additional_levels.append(volume_profile_val)
+    else:
+        if volume_profile_vah is not None and math.isfinite(volume_profile_vah):
+            additional_levels.append(volume_profile_vah)
+
     if direction == "long":
         structural_support = select_structural_target(
             work,
@@ -182,6 +231,9 @@ def select_structural_stop_anchor(
         )
         if structural_support is not None:
             anchor = min(anchor, structural_support)
+        for level in additional_levels:
+            if level < price_anchor and level > anchor * 0.95:
+                anchor = min(anchor, level)
         return anchor
     structural_resistance = select_structural_target(
         work,
@@ -192,6 +244,9 @@ def select_structural_stop_anchor(
     )
     if structural_resistance is not None:
         anchor = max(anchor, structural_resistance)
+    for level in additional_levels:
+        if level > price_anchor and level < anchor * 1.05:
+            anchor = max(anchor, level)
     return max(anchor, price_anchor)
 
 
@@ -229,6 +284,17 @@ def build_structural_targets(
         Tuple of (stop, tp1, tp2) where tp1/tp2 may be None
     """
     stop_buffer = max(0.05, float(sl_buffer_atr))
+    _cols = work_1h.columns
+    _vwap = _safe_float(work_1h["vwap"][-1]) if "vwap" in _cols else None
+    _vp_poc = _safe_float(work_1h["volume_profile"][-1]) if "volume_profile" in _cols else None
+    _vp_vah = (
+        _safe_float(work_1h["volume_profile_vah"][-1])
+        if "volume_profile_vah" in _cols else None
+    )
+    _vp_val = (
+        _safe_float(work_1h["volume_profile_val"][-1])
+        if "volume_profile_val" in _cols else None
+    )
     stop_anchor = select_structural_stop_anchor(
         work_1h,
         sh_mask=sh_mask,
@@ -236,13 +302,24 @@ def build_structural_targets(
         price_anchor=price_anchor,
         stop_basis=stop_basis,
         direction=direction,
+        vwap=_vwap,
+        volume_profile_poc=_vp_poc,
+        volume_profile_vah=_vp_vah,
+        volume_profile_val=_vp_val,
     )
+
+    # Extract daily pivot levels as additional TP/SL candidates
+    _pp = _safe_float(work_1h["pivot_point"][-1]) if "pivot_point" in work_1h.columns else None
+    _r1 = _safe_float(work_1h["r1"][-1]) if "r1" in work_1h.columns else None
+    _r2 = _safe_float(work_1h["r2"][-1]) if "r2" in work_1h.columns else None
+    _s1 = _safe_float(work_1h["s1"][-1]) if "s1" in work_1h.columns else None
+    _s2 = _safe_float(work_1h["s2"][-1]) if "s2" in work_1h.columns else None
 
     if direction == "long":
         # SL: below stop_basis + configurable ATR noise buffer.
         stop = stop_anchor - atr * stop_buffer
 
-        # TP1: next 1h resistance (swing high above entry)
+        # TP1: nearest resistance — swing high or daily pivot R1/R2 above entry
         tp1 = None
         if sh_mask is not None and sh_mask.sum() > 0:
             tp1 = select_structural_target(
@@ -252,6 +329,14 @@ def build_structural_targets(
                 price_anchor=price_anchor,
                 direction="long",
             )
+        # Pivot R1/R2 as TP1 candidate — pick nearest above entry
+        pivot_tp1_candidates = [
+            lvl for lvl in (_r1, _r2) if lvl is not None and lvl > price_anchor
+        ]
+        if pivot_tp1_candidates:
+            pivot_tp1 = min(pivot_tp1_candidates)
+            if tp1 is None or (pivot_tp1 < tp1 and pivot_tp1 > price_anchor):
+                tp1 = pivot_tp1
 
         # TP2: measured move = prior range projected from breakout point
         tp2 = None
@@ -265,11 +350,14 @@ def build_structural_targets(
             last_4h_high = float(work_4h["high"][-1])
             if last_4h_high > price_anchor * 1.02:  # At least 2% above
                 tp2 = last_4h_high
+        # R2 as TP2 candidate if still missing
+        if tp2 is None and _r2 is not None and _r2 > price_anchor:
+            tp2 = _r2
     else:
         # SL: above stop_basis + configurable ATR noise buffer.
         stop = stop_anchor + atr * stop_buffer
 
-        # TP1: next 1h support (swing low below entry)
+        # TP1: nearest support — swing low or daily pivot S1/S2 below entry
         tp1 = None
         if sl_mask is not None and sl_mask.sum() > 0:
             tp1 = select_structural_target(
@@ -279,6 +367,14 @@ def build_structural_targets(
                 price_anchor=price_anchor,
                 direction="short",
             )
+        # Pivot S1/S2 as TP1 candidate — pick nearest below entry
+        pivot_tp1_candidates = [
+            lvl for lvl in (_s1, _s2) if lvl is not None and lvl < price_anchor
+        ]
+        if pivot_tp1_candidates:
+            pivot_tp1 = max(pivot_tp1_candidates)
+            if tp1 is None or (pivot_tp1 > tp1 and pivot_tp1 < price_anchor):
+                tp1 = pivot_tp1
 
         # TP2: measured move downward from breakout point
         tp2 = None
@@ -292,6 +388,9 @@ def build_structural_targets(
             last_4h_low = float(work_4h["low"][-1])
             if last_4h_low < price_anchor * 0.98:  # At least 2% below
                 tp2 = last_4h_low
+        # S2 as TP2 candidate if still missing
+        if tp2 is None and _s2 is not None and _s2 < price_anchor:
+            tp2 = _s2
 
     # Fallback: if tp2 is None, project a second target beyond TP1.
     if tp2 is None:

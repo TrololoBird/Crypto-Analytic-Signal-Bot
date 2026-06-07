@@ -212,6 +212,31 @@ def detect_supertrend_follow(
     ):
         score *= effective_params.get("bias_mismatch_penalty", 0.75)
 
+    ichimoku_boost = 1.0
+    if "senkou_a" in work_1h.columns and "senkou_b" in work_1h.columns:
+        sa = _as_float(work_1h["senkou_a"][-1])
+        sb = _as_float(work_1h["senkou_b"][-1])
+        if sa > 0.0 and sb > 0.0:
+            cloud_top = max(sa, sb)
+            cloud_bottom = min(sa, sb)
+            if direction == "long" and close > cloud_top:
+                ichimoku_boost = 1.08
+            elif direction == "short" and close < cloud_bottom:
+                ichimoku_boost = 1.08
+
+    ha_boost = 1.0
+    if "ha_low" in work_15m.columns and "ha_open" in work_15m.columns:
+        ha_low = _as_float(work_15m["ha_low"][-1])
+        ha_open = _as_float(work_15m["ha_open"][-1])
+        ha_close = _as_float(work_15m["ha_close"][-1])
+        ha_high = _as_float(work_15m["ha_high"][-1])
+        if direction == "long" and ha_low == ha_open and ha_close > ha_open:
+            ha_boost = 1.06
+        elif direction == "short" and ha_high == ha_open and ha_close < ha_open:
+            ha_boost = 1.06
+
+    score = min(1.0, score * ichimoku_boost * ha_boost)
+
     reasons = [
         f"supertrend_follow_{direction}",
         f"bias_1h={bias_1h}",
@@ -226,6 +251,10 @@ def detect_supertrend_follow(
     ]
     if volume_penalty:
         reasons.append("volume_confirmation_penalty")
+    if ichimoku_boost > 1.0:
+        reasons.append("ichimoku_cloud_aligned")
+    if ha_boost > 1.0:
+        reasons.append("heikin_ashi_confirmed")
     return _build_signal(
         prepared=prepared,
         setup_id=setup_id,

@@ -263,6 +263,26 @@ def _detect_ema_bounce_extended(
     is_valid_rr, _ = validate_rr_or_penalty(price_anchor, stop, tp1, min_rr)
     base_score = dynamic_params.get("base_score", defaults["base_score"])
     ema_dist_atr = abs(close - bounce_ema) / atr if atr > 0.0 else 1.0
+    ha_boost = 1.0
+    if "ha_low" in work_15m.columns and "ha_open" in work_15m.columns:
+        ha_low_15m = float(work_15m["ha_low"][-1] or 0.0)
+        ha_open_15m = float(work_15m["ha_open"][-1] or 0.0)
+        ha_close_15m = float(work_15m["ha_close"][-1] or 0.0)
+        ha_high_15m = float(work_15m["ha_high"][-1] or 0.0)
+        if signal_direction == "long" and ha_low_15m == ha_open_15m and ha_close_15m > ha_open_15m:
+            ha_boost = 1.06
+        elif signal_direction == "short" and ha_high_15m == ha_open_15m and ha_close_15m < ha_open_15m:
+            ha_boost = 1.06
+
+    kama_boost = 1.0
+    if "kama10" in work_15m.columns:
+        kama_val = float(work_15m["kama10"][-1] or 0.0)
+        if kama_val > 0.0:
+            if signal_direction == "long" and close > kama_val:
+                kama_boost = 1.05
+            elif signal_direction == "short" and close < kama_val:
+                kama_boost = 1.05
+
     touch_quality = max(0.0, 1.0 - min(ema_dist_atr / max(bounce_threshold_atr, 0.05), 1.0))
     body_quality = min(1.0, abs(close - open_) / atr / 0.5) if atr > 0.0 else 0.5
     structure_clarity = max(0.35, min(1.0, 0.55 * touch_quality + 0.45 * body_quality))
@@ -276,6 +296,12 @@ def _detect_ema_bounce_extended(
     if not is_valid_rr and tp1 is not None:
         score *= dynamic_params.get("tp_too_close_penalty", defaults["tp_too_close_penalty"])
         reasons.append("tp_too_close_penalty")
+
+    score = min(1.0, score * ha_boost * kama_boost)
+    if ha_boost > 1.0:
+        reasons.append("heikin_ashi_confirmed")
+    if kama_boost > 1.0:
+        reasons.append("kama_aligned")
 
     if tp1 is None:
         risk = abs(price_anchor - stop)

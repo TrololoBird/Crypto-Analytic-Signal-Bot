@@ -60,6 +60,79 @@ def detect_cvd_divergence(frame: pl.DataFrame, *, timeframe: str = "15m") -> Spe
                 reasons=(f"price_hh_cvd_lh shift={cvd_shift:.4f}",),
                 rsi=as_float(work.item(-1, "rsi14"), 50.0),
             )
+    # Sessional exhaustion: price new session extreme but session_cvd diverges
+    exhaustion = _detect_session_cvd_exhaustion(work, atr=atr, delta_std=delta_std, timeframe=timeframe)
+    if exhaustion is not None:
+        return exhaustion
+    return None
+
+
+def _detect_session_cvd_exhaustion(
+    work: "pl.DataFrame",
+    *,
+    atr: float,
+    delta_std: float,
+    timeframe: str,
+    session_bars: int = 16,
+) -> SpecHit | None:
+    """Sessional exhaustion: price makes new session extreme but cumulative session CVD diverges.
+
+    Distinct from bar-delta divergence: uses session_cvd (cumulative intraday CVD reset daily)
+    which reflects aggregate participation over the session, not a single bar's delta.
+    """
+    if "session_cvd" not in work.columns:
+        return None
+    if work.height < session_bars * 2:
+        return None
+
+    half = session_bars // 2
+    window_a = work[-session_bars:-half]
+    window_b = work[-half:]
+    if window_a.height < half or window_b.height < half:
+        return None
+
+    price_high_a = float(window_a["high"].max() or 0.0)
+    price_low_a = float(window_a["low"].min() or 0.0)
+    price_high_b = float(window_b["high"].max() or 0.0)
+    price_low_b = float(window_b["low"].min() or 0.0)
+    cvd_end_a = float(window_a["session_cvd"][-1] or 0.0)
+    cvd_end_b = float(window_b["session_cvd"][-1] or 0.0)
+
+    # Require meaningful CVD divergence (at least 1 sigma)
+    cvd_diff = abs(cvd_end_b - cvd_end_a)
+    if cvd_diff < delta_std:
+        return None
+
+    rsi = as_float(work.item(-1, "rsi14"), 50.0)
+
+    # Bearish: price new session high but CVD declining → exhaustion short
+    if price_high_b > price_high_a and cvd_end_b < cvd_end_a:
+        entry = price_high_b
+        return SpecHit(
+            strategy="cvd_divergence",
+            direction="short",
+            entry=entry,
+            stop_basis=entry,
+            atr=atr,
+            timeframe=timeframe,
+            reasons=(f"session_cvd_exhaustion_short cvd_diff={cvd_diff:.4f} price_hh={price_high_b:.4f}",),
+            rsi=rsi,
+        )
+
+    # Bullish: price new session low but CVD rising → accumulation long
+    if price_low_b < price_low_a and cvd_end_b > cvd_end_a:
+        entry = price_low_b
+        return SpecHit(
+            strategy="cvd_divergence",
+            direction="long",
+            entry=entry,
+            stop_basis=entry,
+            atr=atr,
+            timeframe=timeframe,
+            reasons=(f"session_cvd_exhaustion_long cvd_diff={cvd_diff:.4f} price_ll={price_low_b:.4f}",),
+            rsi=rsi,
+        )
+
     return None
 
 

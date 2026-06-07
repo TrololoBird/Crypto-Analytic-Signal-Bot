@@ -341,6 +341,14 @@ def _detect_hidden_divergence_extended(
         score *= float(dynamic_params.get("delta_mismatch_penalty", 0.88))
     if volume_penalty:
         score *= float(dynamic_params.get("volume_penalty", 0.90))
+    stoch_rsi_boost = 1.0
+    if "stoch_rsi14" in w15m.columns:
+        stoch = float(w15m.item(-1, "stoch_rsi14") or 0.5)
+        if direction == "long" and stoch < 0.2:
+            stoch_rsi_boost = 1.06
+        elif direction == "short" and stoch > 0.8:
+            stoch_rsi_boost = 1.06
+    score = min(1.0, score * stoch_rsi_boost)
 
     reasons = [
         f"Hidden div {direction}: swing_ref={swing_ref:.4f} rsi_sep={rsi_separation:.2f}",

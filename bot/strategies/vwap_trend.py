@@ -241,6 +241,18 @@ def _detect_vwap_trend_extended(
     ):
         score *= effective_params.get("bias_mismatch_penalty", 0.75)
 
+    ha_boost = 1.0
+    if "ha_low" in work_15m.columns and "ha_open" in work_15m.columns:
+        ha_low = _as_float(work_15m["ha_low"][-1])
+        ha_open = _as_float(work_15m["ha_open"][-1])
+        ha_close = _as_float(work_15m["ha_close"][-1])
+        ha_high = _as_float(work_15m["ha_high"][-1])
+        if direction == "long" and ha_low == ha_open and ha_close > ha_open:
+            ha_boost = 1.05
+        elif direction == "short" and ha_high == ha_open and ha_close < ha_open:
+            ha_boost = 1.05
+    score = min(1.0, score * ha_boost)
+
     reasons = [
         f"vwap_reclaim_{direction}",
         f"bias_1h={bias_1h}",
@@ -250,6 +262,8 @@ def _detect_vwap_trend_extended(
         f"adx_1h={adx_1h:.1f}",
         f"reclaim_lag={reclaim_lag}",
     ]
+    if ha_boost > 1.0:
+        reasons.append("heikin_ashi_confirmed")
     return _build_signal(
         prepared=prepared,
         setup_id=setup_id,

@@ -21,7 +21,7 @@ __all__ = ["detect_oi_divergence"]
 
 def _oi_divergence_price_change(prepared: PreparedSymbol, *, fallback_bars: int = 8) -> float:
     frame_4h = prepared.work_4h
-    if frame_4h.height >= 2 and "close" in frame_4h.columns:
+    if frame_4h is not None and frame_4h.height >= 2 and "close" in frame_4h.columns:
         return _price_change_pct(frame_4h, bars=1)
     return _price_change_pct_confirmed(prepared.work_15m, fallback_bars)
 
