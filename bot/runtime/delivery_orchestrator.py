@@ -317,7 +317,10 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         if profile == BREAKOUT_PROFILE:
             multiplier = 1.1
         elif profile in REVERSAL_PROFILES:
-            multiplier = 1.0
+            # Reversal/exhaustion patterns form on declining volume — requiring
+            # above-average volume (1.0x) systematically blocks genuine setups.
+            # 0.7x still ensures adequate liquidity while allowing exhaustion candles.
+            multiplier = 0.7
         else:
             multiplier = 1.2
         return bool(volume > volume_avg * multiplier)
@@ -592,7 +595,10 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
                 getattr(delivery_cfg, "weighted_min_hard_legs", weighted_min_hard_legs)
                 or weighted_min_hard_legs
             )
-            if profile in REVERSAL_PROFILES and bear_regime:
+            # Only escalate when the reversal trades AGAINST the macro bear trend:
+            # long reversal in bear regime = catching a falling knife → stricter gate.
+            # short reversal in bear regime = trend-confirming → no escalation needed.
+            if profile in REVERSAL_PROFILES and bear_regime and direction == "long":
                 min_hard = max(
                     min_hard,
                     min(int(reversal_min_confirmations), len(WEIGHTED_HARD_LEG_KEYS)),
