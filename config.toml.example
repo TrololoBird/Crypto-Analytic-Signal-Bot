@@ -25,7 +25,7 @@ telemetry_max_runs = 120
 shortlist_refresh_interval_seconds = 7200
 emergency_fallback_seconds = 1800
 strict_data_quality = true
-emit_strategy_routing_skips = false
+emit_strategy_routing_skips = true
 route_all_enabled_strategies = false
 shortlist_unified_routing = true
 enable_strategy_lanes = true
@@ -36,19 +36,17 @@ diagnostic_trace_limit_per_symbol = 20
 # Startup throttling to prevent REST API flood on startup
 startup_batch_size = 3
 startup_batch_delay_seconds = 3.0
-max_concurrent_rest_requests = 3
+max_concurrent_rest_requests = 8
 emergency_context_warmup_timeout_seconds = 120.0
 emergency_context_warmup_symbol_limit = 45
 emergency_context_fetch_timeout_seconds = 20.0
 futures_data_request_limit_per_5m = 900
-# OI/L-S derivatives context refresh loop (minutes between full shortlist passes).
 oi_refresh_interval_minutes = 30
 cycle_timeout_seconds = 120.0
 shortlist_lock_timeout_seconds = 10.0
 doctor_fail_fast = true
 min_restart_interval_seconds = 120
-# Dashboard settings
-# Dashboard — bind 0.0.0.0 for LAN/mobile Safari; use 127.0.0.1 if local-only
+# Dashboard settings — 0.0.0.0 allows iPhone on same Wi‑Fi (see Outcomes → Mobile)
 dashboard_host = "0.0.0.0"
 dashboard_port = 8080
 dashboard_weight_alert_pct = 80.0
@@ -59,24 +57,15 @@ auto_open_dashboard = false
 metrics_host = "127.0.0.1"
 metrics_port = 9090
 
-# Binance is geo-blocked in some regions (e.g. Russia). Route via a local proxy client.
-# Examples: socks5h://127.0.0.1:7890 (Clash/Mihomo), socks5h://127.0.0.1:9050 (Tor)
-# Or set BINANCE_PROXY_URL / HTTPS_PROXY in .env (see docs/BINANCE_PROXY_RU.md).
+# Auto-discovered by scripts/discover_binance_proxies.py
 [bot.network]
-# Primary egress (optional). Use your own Clash/Tor/VPS endpoints — never commit untrusted public lists.
 proxy_url = ""
-# Failover chain: bot rotates on transport/geo errors for 24/7 uptime.
-proxy_urls = [
-  # "socks5://127.0.0.1:7890",
-  # "socks5://127.0.0.1:7891",
-]
+proxy_urls = []
 trust_env = true
-failover_enabled = true
+failover_enabled = false
 failover_cooldown_seconds = 300
-
 [bot.universe]
 quote_asset = "USDT"
-# Stage-1 funnel: rank by 24h quote volume, apply gates, keep top-N before scoring.
 light_pool_limit = 180
 dynamic_limit = 120
 shortlist_limit = 50
@@ -101,7 +90,7 @@ promotion_slots_reserve = 12
 impulse_5m_pct = 1.0
 vol_spike_zscore = 2.0
 change_24h_hot_pct = 4.0
-funding_extreme_pct = 0.0008  # fraction (0.0008 = 0.08%)
+funding_extreme_pct = 0.0008
 prescore_boost_hot = 0.12
 prescore_boost_warm = 0.05
 promotion_cooldown_seconds = 1200
@@ -140,7 +129,6 @@ primary_timeframe = "1h"
 context_timeframes = ["4h"]
 excluded_strategies = []
 deep_analysis = true
-filter_overrides = { min_atr_pct = 0.08, max_atr_pct = 0.95, min_adx_1h = 18.0 }
 
 [bot.assets.XAGUSDT]
 primary_timeframe = "1h"
@@ -156,30 +144,27 @@ family_cooldown_minutes = 45
 max_spread_bps = 8.0
 # Keep ATR gate above extreme-noise floor, but avoid over-pruning live shortlist.
 min_atr_pct = 0.18
-max_atr_pct = 10.0
+max_atr_pct = 2.5
 min_adx_1h = 22.0
 min_risk_reward = 1.9
 # Lower bound for post-confluence score; calibrated from live reject telemetry
 # while preserving RR/spread/stop hard-gates.
-min_score = 0.53
+min_score = 0.65
 freshness_15m_minutes = 16
 freshness_5m_minutes = 8
 freshness_1h_hours = 2
 freshness_4h_hours = 10
-min_bars_15m = 210
-min_bars_1h = 210
-min_bars_5m = 100
-min_bars_4h = 210
+min_bars_15m = 500
+min_bars_1h = 300
+min_bars_5m = 200
+min_bars_4h = 300
 max_mark_price_deviation_pct = 0.005
-max_entry_deviation_atr_mult = 1.2
+max_entry_deviation_atr_mult = 2.0
 regime_filter_enabled = true
 trend_conflict_soft = true
-# Composable filter stages — see bot/delivery/filter_stages.py (DEFAULT_FILTER_STAGES).
-# Empty list disables all stages; omit key for module defaults.
-enabled_stages = ["freshness", "mark_deviation", "spread", "atr", "stop", "rr", "scoring", "min_score"]
 
 [bot.filters.setups]
-ema_bounce = { base_score = 0.62, min_adx_1h = 15.0, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.85, min_rr = 1.9, ema_touch_tolerance_pct = 0.005, bounce_threshold_atr = 0.12 }
+ema_bounce = { base_score = 0.62, min_adx_1h = 15.0, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.85, min_rr = 1.9, ema_touch_tolerance_pct = 0.005, bounce_threshold_atr = 0.12, min_volume_ratio = 1.0 }
 structure_pullback = { base_score = 0.60, bias_mismatch_penalty = 0.75, tp_too_close_penalty = 0.75, sl_buffer_atr = 0.95, min_rr = 1.9, ema_proximity_pct = 0.990, ema_deep_pullback_pct = 0.965 }
 structure_break_retest = { base_score = 0.60, threshold_adx = 18.0, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.80, min_rr = 1.9, min_vol_breakout = 0.85, breakout_threshold = 0.0005, retest_atr_mult = 0.85, fallback_lookback_bars = 12, enable_15m_range_fallback = 1.0 }
 wick_trap_reversal = { base_score = 0.60, bias_mismatch_penalty = 0.75, sl_buffer_atr = 1.00, min_rr = 2.5, wick_through_atr_mult = 0.3, closed_back_atr_mult = 0.10, min_volume_ratio = 1.2, max_confirmation_bars = 4, supertrend_opposes_penalty = 0.88 }
@@ -187,7 +172,7 @@ squeeze_setup = { base_score = 0.60, bias_mismatch_penalty = 0.75, sl_buffer_atr
 fvg_setup = { base_score = 0.60, threshold_gap = 0.001, sl_buffer_atr = 1.00, min_rr = 1.9, tp_too_close_penalty = 0.8, max_entry_distance_atr = 1.50 }
 order_block = { base_score = 0.60, min_ob_impulse_atr = 0.9, ob_max_age = 72.0, touch_buffer_atr = 0.25, sl_buffer_atr = 0.85, min_rr = 1.9 }
 liquidity_sweep = { base_score = 0.62, threshold_tol = 0.0015, sl_buffer_atr = 0.90, min_rr = 2.5, max_sweep_age_bars = 4, max_entry_distance_atr = 1.25 }
-bos_choch = { base_score = 0.62, bias_mismatch_penalty = 0.75, sl_buffer_atr = 1.15, min_rr = 1.9, swing_lookback = 5, external_swing_lookback = 18, min_swings = 3, breakout_threshold_atr = 0.20, max_break_age_bars = 10, max_retest_age_bars = 36, retest_atr_mult = 1.50, min_volume_ratio = 0.80 }
+bos_choch = { base_score = 0.62, bias_mismatch_penalty = 0.75, sl_buffer_atr = 1.00, min_rr = 1.9, swing_lookback = 5, external_swing_lookback = 18, min_swings = 3, breakout_threshold_atr = 0.20, max_break_age_bars = 10, max_retest_age_bars = 28, retest_atr_mult = 1.50, min_volume_ratio = 0.80 }
 hidden_divergence = { base_score = 0.62, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.85, min_rr = 1.9, rsi_divergence_threshold = 2.0, max_swing_pair_gap = 6.0, min_volume_ratio = 0.55, volume_penalty = 0.90 }
 indicator_divergence = { base_score = 0.62, swing_lookback = 4.0, min_price_delta_pct = 0.12, min_indicator_votes = 2.0, min_volume_ratio = 0.75, max_rsi_long = 55.0, min_rsi_short = 45.0, sl_buffer_atr = 0.90, min_rr = 1.9 }
 funding_reversal = { base_score = 0.60, funding_threshold = 0.0008, funding_soft_threshold = 0.0003, funding_recent_extreme_lookback_hours = 48.0, historical_funding_score_penalty = 0.92, relative_funding_score_penalty = 0.82, confirmation_lookback_bars = 6, min_confirmation_score = 0.75, min_volume_ratio = 0.85, bias_mismatch_penalty = 0.75, sl_buffer_atr = 0.90, min_rr = 1.75, min_adx_1h = 14.0 }
@@ -203,9 +188,9 @@ volume_climax_reversal = { base_score = 0.60, min_volume_ratio = 1.8, adaptive_m
 keltner_breakout = { base_score = 0.62, min_volume_ratio = 1.25, min_adx_1h = 14.0, sl_buffer_atr = 0.90, min_rr = 1.9, breakout_lookback_bars = 8, max_retest_distance_atr = 1.25, volume_penalty = 0.90 }
 whale_walls = { base_score = 0.62, min_depth_imbalance = 0.3334, min_microprice_bias = 0.20, min_volume_ratio = 0.90, min_close_position_long = 0.55, max_close_position_short = 0.45, max_spread_bps = 8.0, min_roc10_abs_pct = 0.05, sl_buffer_atr = 1.00, min_rr = 1.9 }
 spread_strategy = { base_score = 0.60, max_spread_bps = 6.0, min_volume_ratio = 0.90, min_roc10_abs_pct = 0.15, min_depth_imbalance = 0.10, min_microprice_bias = 0.05, min_close_position_long = 0.55, max_close_position_short = 0.45, sl_buffer_atr = 1.0, min_rr = 1.9 }
-depth_imbalance = { base_score = 0.60, min_depth_imbalance = 0.3334, min_microprice_bias = 0.05, min_close_position_long = 0.52, max_close_position_short = 0.48, min_volume_ratio = 0.80, min_roc10_abs_pct = 0.00, sl_buffer_atr = 1.00, min_rr = 1.9 }
-absorption = { base_score = 0.60, min_abs_flow_delta = 0.05, min_close_position_long = 0.55, max_close_position_short = 0.45, min_wick_atr = 0.12, min_volume_ratio = 0.90, sl_buffer_atr = 0.85, min_rr = 1.9 }
-aggression_shift = { base_score = 0.60, min_shift = 0.05, min_proxy_shift = 0.025, shift_std_mult = 0.75, delta_spike_mult = 2.0, min_volume_ratio = 0.90, signal_lookback_bars = 6, max_entry_drift_atr = 0.75, sl_buffer_atr = 0.85, min_rr = 1.9 }
+depth_imbalance = { base_score = 0.60, min_depth_imbalance = 0.28, min_microprice_bias = 0.05, min_close_position_long = 0.52, max_close_position_short = 0.48, min_volume_ratio = 0.80, min_roc10_abs_pct = 0.00, sl_buffer_atr = 1.00, min_rr = 1.9 }
+absorption = { base_score = 0.60, min_abs_flow_delta = 0.03, min_close_position_long = 0.55, max_close_position_short = 0.45, min_wick_atr = 0.12, min_volume_ratio = 0.90, sl_buffer_atr = 0.85, min_rr = 1.9 }
+aggression_shift = { base_score = 0.60, min_shift = 0.035, min_proxy_shift = 0.018, shift_std_mult = 0.75, delta_spike_mult = 2.0, min_volume_ratio = 0.90, signal_lookback_bars = 6, max_entry_drift_atr = 0.75, sl_buffer_atr = 0.85, min_rr = 1.9 }
 liquidation_heatmap = { base_score = 0.60, min_liquidation_score = 0.28, min_proxy_volume_ratio = 1.10, min_proxy_wick_atr = 0.20, proxy_lookback_bars = 12, min_close_position_long = 0.55, max_close_position_short = 0.45, min_volume_ratio = 0.90, sl_buffer_atr = 1.05, min_rr = 1.75, allow_proxy_liquidation = 1.0 }
 stop_hunt_detection = { base_score = 0.60, sweep_tolerance_pct = 0.0010, min_volume_ratio = 0.80, min_close_position_long = 0.45, max_close_position_short = 0.55, signal_lookback_bars = 20, near_level_atr = 0.35, min_wick_atr = 0.35, max_entry_drift_atr = 1.25, sl_buffer_atr = 0.85, min_rr = 2.5 }
 multi_tf_trend = { base_score = 0.60, min_adx_1h = 15.0, min_volume_ratio = 0.90, pullback_rsi_long_max = 58.0, pullback_rsi_short_min = 42.0, max_adverse_depth_imbalance = 1.00, min_trend_votes = 2, sl_buffer_atr = 1.00, min_rr = 1.9 }
@@ -215,23 +200,21 @@ bb_squeeze = { base_score = 0.60, max_bb_width = 4.5, min_volume_ratio = 0.90, m
 atr_expansion = { base_score = 0.60, atr_mean_window = 20, min_atr_expansion_ratio = 2.5, min_body_atr = 0.25, signal_lookback_bars = 8, sl_buffer_atr = 0.85, min_rr = 1.9 }
 ls_ratio_extreme = { base_score = 0.60, long_account_threshold = 0.65, short_account_threshold = 0.35, soft_long_account_threshold = 0.58, soft_short_account_threshold = 0.42, min_close_position_long = 0.58, max_close_position_short = 0.42, min_volume_ratio = 0.90, max_adverse_depth_imbalance = 0.10, max_adverse_microprice_bias = 0.10, sl_buffer_atr = 1.00, min_rr = 1.9 }
 oi_divergence = { base_score = 0.60, min_abs_oi_change_pct = 0.01, min_price_change_pct = 0.35, sl_buffer_atr = 1.00, min_rr = 1.9 }
-btc_correlation = { base_score = 0.60, min_roc10_abs_pct = 0.15, min_volume_ratio = 0.70, sl_buffer_atr = 0.85, min_rr = 1.9 }
+btc_correlation = { base_score = 0.60, min_roc10_abs_pct = 0.10, min_volume_ratio = 0.70, sl_buffer_atr = 0.90, min_rr = 1.9 }
 altcoin_season_index = { base_score = 0.60, altseason_long_threshold = 55.0, btc_dominance_threshold = 45.0, min_volume_ratio = 0.80, min_roc10_abs_pct = 0.10, sl_buffer_atr = 0.85, min_rr = 1.9 }
 
 [bot.tracking]
 enabled = true
 pending_expiry_minutes = 180
 active_expiry_minutes = 240
-# Reject new signals when mark already chased beyond entry zone (manual limit window).
 late_entry_chase_pct = 0.008
 outcome_retention_days = 90
 move_stop_to_break_even_on_tp1 = true
+persist_trailing_stop = true
 min_stop_distance_pct = 1.10
 max_stop_distance_pct = 15.0
 agg_trade_page_limit = 6
 agg_trade_page_size = 1000
-# MetaSignalMerger direction-conflict window vs recent ACTION signals (hours).
-action_window_hours = 4.0
 
 [bot.setups]
 # Strategy status metadata is descriptive only; enabled flags control runtime.
@@ -276,10 +259,11 @@ ls_ratio_extreme = true
 oi_divergence = true
 btc_correlation = true
 altcoin_season_index = true
+fakeout_detector = true
 
 [bot.scoring]
 enabled = true
-setup_prior_weight = 0.50
+setup_prior_weight = 0.55
 # Component weights are normalized on startup if they do not sum to 1.0.
 weight_mtf_alignment = 0.25
 weight_volume_quality = 0.20
@@ -309,8 +293,8 @@ enabled = true
 base_url = "wss://fstream.binance.com"
 public_base_url = "wss://fstream.binance.com/public"
 market_base_url = "wss://fstream.binance.com/market"
-# WS kline streams: 15m execution interval only. 5m (and 1h context) load via bounded REST
-# when listed in bot.runtime.analysis_kline_intervals — do not add 5m here.
+# Keep only the execution interval on WS to prevent sustained stream overload.
+# 5m/1h context is fetched through the bounded REST cache path when needed.
 kline_intervals = ["15m"]
 subscription_scope = "shortlist"
 subscribe_book_ticker = true
@@ -340,8 +324,6 @@ subscribe_chunk_delay_ms = 500
 health_check_silence_seconds = 60.0
 market_reconnect_grace_seconds = 90.0
 agg_trade_window_seconds = 300
-# Stale aggTrade events older than this are dropped (separate from market_ticker_freshness).
-agg_trade_freshness_seconds = 300
 kline_cache_size = 500
 warmup_timeout_seconds = 60.0
 reconnect_max_delay_seconds = 300.0
@@ -349,29 +331,21 @@ max_agg_trade_buffer = 10000
 agg_trade_flush_interval_ms = 250
 rest_timeout_seconds = 20.0
 subscribe_market_streams = true
-market_ticker_freshness_seconds = 120.0
+market_ticker_freshness_seconds = 30.0
+agg_trade_freshness_seconds = 300
 force_order_window_seconds = 60
 # Intra-candle analysis frequency (lower = more real-time, higher = less CPU load)
 intra_candle_throttle_seconds = 60.0
 # Optional noise gate for intra-candle scans. 0 disables gating.
 intra_candle_min_move_bps = 15.0
-# Intra-candle fast lane: cap detectors per bookTicker scan (0 = lane default only).
-intra_candle_max_setups = 8
-# Optional explicit setup subset for intra-candle (empty = lane-routed setups).
-# intra_candle_setup_subset = ["price_velocity", "absorption", "liquidity_sweep"]
 
 [bot.notifiers]
 # "none" keeps local/log-only delivery until TG_TOKEN and TARGET_CHAT_ID are set.
 # With both Telegram secrets present, load_settings() auto-promotes this to "telegram".
 # Set BOT_NOTIFIER_PROVIDER=none to force local/log-only mode for checks.
-provider = "none"
-send_analytics_companion = true
-# When true, channel companion is ACTION-only; WATCH companion goes to operator DM.
-analytics_companion_action_only = false
+provider = "telegram"
+send_analytics_companion = false
 
-# Remote operator console (private DM commands — works when MacBook and phone are on
-# different networks). Requires TELEGRAM_OPERATOR_USER_IDS in .env (your Telegram user id).
-# Ops messages go to operator DMs only — NOT to TARGET_CHAT_ID (signal channel).
 [bot.notifiers.telegram_operator]
 enabled = true
 digest_interval_seconds = 1800
@@ -381,27 +355,11 @@ send_startup_report = true
 send_digest = true
 send_sl_postmortem = true
 send_critical_alerts = true
-send_watch_escalation = true
-# Radar funnel WATCH hints (operator DM only; requires universe.radar.emit_watch_candidates = true)
-send_radar_watch_candidate = false
-send_watch_companion = true
 notify_on_console_start = true
 
-[bot.notifiers.webhook]
-enabled = false
-webhook_url = ""
-include_html = true
-# Parallel ops alerts (zero-delivery, critical) — does not replace Telegram channel provider
-ops_alerts_enabled = false
-
 [bot.delivery]
-min_confirmations = 3
-target_rr = [1.9, 3.0, 5.0]
-portfolio_max_per_symbol = 2
-max_signals_per_minute = 12
-# Channel gets concise tracking updates; detailed SL post-mortem goes to operator DM.
-# Tier score floors (0–1): ACTION vs WATCH classification in delivery tiers.
-action_min_score = 0.72
+# fix-20260604: aligned with live confluence ceiling ~0.68 (was 0.72 — ACTION tier rarely armed)
+action_min_score = 0.65
 watch_min_score = 0.55
 action_cap_per_cycle = 6
 watch_cap_per_cycle = 12
@@ -409,16 +367,15 @@ action_cap_per_session = 24
 zero_delivery_alert_cycles = 24
 watch_escalation_enabled = true
 enforce_mtf_gate = true
-# Reversal profiles in bear BTC regime: min hard-gate confirmations (default 2-of-5).
 reversal_min_confirmations = 3
-# Enabled 2026-06-04 after live_check confluence review (OPS-2): weighted primary gate.
-use_weighted_confluence = true
+target_rr = [1.9, 3.0, 5.0]
+max_signals_per_minute = 12
+use_weighted_confluence = true  # OPS-2: enabled after live confluence review 2026-06-04
 weighted_min_hard_legs = 2
 portfolio_max_same_direction_regime = 4
 portfolio_max_family_direction = 2
 portfolio_max_bear_longs = 2
 max_strategy_share = 0.25
-# Per-setup minimum minutes between deliveries (setup-wide; whale_walls domination guard).
 setup_interval_minutes = { whale_walls = 20 }
 sl_postmortem_enabled = true
 sl_postmortem_to_operators = true
@@ -432,21 +389,11 @@ enabled = false
 webhook_url = ""
 username = "crypto-signal-bot"
 
-# Research harvest: deep capture on ~10 symbols (CLI: `python main.py harvest`).
-# Keep enabled=false for production; calibration runs after architecture/strategy work.
-[bot.research_harvest]
+[bot.notifiers.webhook]
 enabled = false
-symbols = [
-  "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "BNBUSDT",
-  "DOGEUSDT", "LINKUSDT", "XAUUSDT", "XAGUSDT", "PAXGUSDT",
-]
-output_subdir = "research_harvest"
-skip_telegram_delivery = true
-route_all_enabled_strategies = true
-emit_strategy_routing_skips = true
-enable_spot_companion = true
-snapshot_on_cycle = true
-max_bar_tail = 3
+webhook_url = ""
+include_html = true
+ops_alerts_enabled = false
 
 [bot.spot_companion]
 enabled = true
@@ -474,10 +421,3 @@ stop_loss_pause_hours = 5
 benchmark_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XAUUSDT", "XAGUSDT"]
 option_underlyings = ["BTC", "ETH"]
 macro_symbols = ["^VIX", "DX-Y.NYB", "^TNX", "^GSPC"]
-
-# Optional LLM rationales (v1.1 / OPT-2). Keys in .env only. Hot path must stay off.
-# See docs/research/LLM_API_INTEGRATION.md
-# [bot.intelligence.llm]
-# enabled = false
-# provider = "none"   # anthropic | openai | google
-# use_on_hot_path = false

@@ -102,6 +102,7 @@ Crypto Analytic Signal Bot/
 
 # graphify incremental cache (regenerate locally)
 graphify-out/cache/ast/
+graphify-out/.rebuild.lock
 
 # Backup / scratch churn
 *.bak2
