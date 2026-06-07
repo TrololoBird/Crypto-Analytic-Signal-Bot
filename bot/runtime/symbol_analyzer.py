@@ -968,8 +968,8 @@ class AnalyzerPipelineMixin(AnalyzerFramesMixin):
         minimums = self._minimums()
         rows_4h = frames.df_4h.height if frames.df_4h is not None else 0
         rows_5m = frames.df_5m.height if frames.df_5m is not None else 0
-        rows_1h = frames.df_1h.height
-        rows_15m = frames.df_15m.height
+        rows_1h = frames.df_1h.height if frames.df_1h is not None else 0
+        rows_15m = frames.df_15m.height if frames.df_15m is not None else 0
         funnel["frame_rows"] = {
             "15m": rows_15m,
             "1h": rows_1h,

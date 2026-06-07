@@ -464,18 +464,11 @@ def _strategy_fits_for_row(
             enabled=enabled,
             heuristic_fits=heuristic or tuple(fits),
         )
-    return heuristic or tuple(
-        setup_id
-        for setup_id in dict.fromkeys(fits)
-        if setup_id in enabled
-        and calculate_strategy_fit_score(
-            symbol,
-            setup_id,
-            market_context,
-            settings=settings,
-        )
-        > 0.0
-    )
+    # score-filter wiped all candidates but fits is non-empty → return enabled ∩ fits
+    # so strategy routing is never empty for shortlisted symbols
+    if not heuristic and fits:
+        return tuple(s for s in dict.fromkeys(fits) if s in enabled)
+    return heuristic
 
 
 def strategy_fits_for_market_row(
