@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+__all__ = [
+    "BanDetectionPolicy",
+    "ProxyPool",
+    "is_proxy_transport_error",
+]
+
 import asyncio
 import logging
+import random
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -17,6 +24,34 @@ LOG = logging.getLogger("bot.market.proxy_pool")
 
 _CIRCUIT_BREAKER_MAX_FAILURES = 5  # consecutive failures → permanent removal
 _MAX_BACKOFF_SECONDS = 3600.0  # 1h cap on per-proxy exponential backoff
+
+
+@dataclass
+class BanDetectionPolicy:
+    """Configuration for what constitutes a proxy ban — mirrors scrapy-rotating-proxies pattern.
+
+    Inspectors call the methods below to decide whether a response or
+    exception indicates the proxy was banned by the target.
+    """
+
+    ban_status_codes: frozenset[int] = frozenset({418, 403, 429})
+    ban_on_timeout: bool = True
+    ban_on_proxy_error: bool = True
+
+    def is_response_banned(self, status: int) -> bool:
+        return status in self.ban_status_codes
+
+    def is_exception_banned(self, exc: BaseException) -> bool:
+        if not (self.ban_on_proxy_error or self.ban_on_timeout):
+            return False
+        if self.ban_on_proxy_error and is_proxy_transport_error(exc):
+            return True
+        if self.ban_on_timeout:
+            if isinstance(exc, TimeoutError):
+                return True
+            if exc.__class__.__name__ == "TimeoutError":
+                return True
+        return False
 
 
 @dataclass
@@ -37,6 +72,10 @@ class ProxyPool:
     _bad_until: dict[str, float] = field(default_factory=dict)
     _success_count: dict[str, int] = field(default_factory=dict)
     _failure_count: dict[str, int] = field(default_factory=dict)
+    _success_streak: dict[str, int] = field(default_factory=dict)
+    _last_latencies: dict[str, list[float]] = field(default_factory=dict)
+    _rolling_window: int = 10
+    _failover_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     @classmethod
     def from_urls(
@@ -59,22 +98,33 @@ class ProxyPool:
     def _is_available(self, url: str) -> bool:
         return time.monotonic() >= self._bad_until.get(url, 0.0)
 
-    def _next_available_index(self, start: int) -> int | None:
-        count = len(self.urls)
-        for offset in range(count):
-            idx = (start + offset) % count
-            if self._is_available(self.urls[idx]):
-                return idx
-        return None
+    def _next_available_index(self, _start: int) -> int | None:
+        available = [
+            (i, self.urls[i])
+            for i in range(len(self.urls))
+            if self._is_available(self.urls[i])
+        ]
+        if not available:
+            return None
+        if len(available) == 1:
+            return available[0][0]
+        weights = [self._health_score(url) for _, url in available]
+        total = sum(weights)
+        if total <= 0:
+            return available[0][0]
+        chosen = random.choices(range(len(available)), weights=weights, k=1)[0]
+        return available[chosen][0]
 
     def _backoff_duration(self, failures: int) -> float:
-        """Exponential backoff capped at ``_MAX_BACKOFF_SECONDS``."""
-        return min(_MAX_BACKOFF_SECONDS, self.cooldown_seconds * (2 ** (failures - 1)))  # type: ignore[no-any-return]
+        """Exponential backoff + 10 % jitter, capped at ``_MAX_BACKOFF_SECONDS``."""
+        base = min(_MAX_BACKOFF_SECONDS, self.cooldown_seconds * (2 ** (failures - 1)))
+        return base + random.uniform(0, base * 0.1)  # type: ignore[no-any-return]
 
     def mark_failed(self, url: str, reason: str) -> str | None:
         """Mark *url* bad with exponential backoff; circuit-breaker on N consecutive."""
         if url in self.urls:
             self._failure_count[url] = self._failure_count.get(url, 0) + 1
+            self._success_streak[url] = 0  # reset streak on failure
             backoff = self._backoff_duration(self._failure_count[url])
             self._bad_until[url] = time.monotonic() + backoff
             LOG.warning(
@@ -109,14 +159,25 @@ class ProxyPool:
         self._bad_until.pop(url, None)
         self._success_count.pop(url, None)
         self._failure_count.pop(url, None)
+        self._success_streak.pop(url, None)
+        self._last_latencies.pop(url, None)
         if self._index >= len(self.urls) and self.urls:
             self._index = self._index % len(self.urls)
 
-    def mark_success(self, url: str) -> None:
-        """Record a successful request; resets failure count for circuit breaker."""
+    def mark_success(self, url: str, latency_ms: float | None = None) -> None:
+        """Record a successful request; resets failure count for circuit breaker.
+
+        If *latency_ms* is provided, stores it in a rolling window for health scoring.
+        """
         if url in self.urls:
             self._success_count[url] = self._success_count.get(url, 0) + 1
             self._failure_count[url] = 0  # reset circuit breaker on success
+            self._success_streak[url] = self._success_streak.get(url, 0) + 1
+            if latency_ms is not None:
+                samples = self._last_latencies.setdefault(url, [])
+                samples.append(latency_ms)
+                if len(samples) > self._rolling_window:
+                    samples.pop(0)
 
     def _health_score(self, url: str) -> float:
         success = float(self._success_count.get(url, 0))
@@ -127,7 +188,26 @@ class ProxyPool:
         base = success / total
         if not self._is_available(url):
             return base * 0.25
-        return base
+        # Streak bonus: +0.1 per consecutive success (cap +0.3)
+        streak = float(self._success_streak.get(url, 0))
+        streak_bonus = min(0.3, streak * 0.1)
+        # Latency bonus: 0.0-0.2 based on average latency (lower = better)
+        lat_samples = self._last_latencies.get(url, [])
+        if lat_samples:
+            avg_lat = sum(lat_samples) / len(lat_samples)
+            if avg_lat < 100:
+                latency_bonus = 0.2
+            elif avg_lat < 300:
+                latency_bonus = 0.15
+            elif avg_lat < 800:
+                latency_bonus = 0.1
+            elif avg_lat < 2000:
+                latency_bonus = 0.05
+            else:
+                latency_bonus = 0.0
+        else:
+            latency_bonus = 0.0
+        return min(1.0, base + streak_bonus + latency_bonus)
 
     def reset(self, urls: list[str]) -> None:
         """Replace pool URLs and reset all health state."""
@@ -138,6 +218,8 @@ class ProxyPool:
         self._bad_until.clear()
         self._success_count.clear()
         self._failure_count.clear()
+        self._success_streak.clear()
+        self._last_latencies.clear()
         self._index = 0
 
     async def revalidate(
@@ -172,6 +254,20 @@ class ProxyPool:
             return None
         return self.mark_failed(failed_url or self.current(), reason)
 
+    def log_metrics(self, context: str = "") -> None:
+        snap = self.snapshot()
+        LOG.info(
+            "proxy_pool_metrics | context=%s active=%s count=%d cooldown=%d "
+            "health_avg=%.3f failover_locked=%s%s",
+            context,
+            snap["active"],
+            snap["count"],
+            snap["in_cooldown"],
+            cast("float", snap["health_score_avg"]),
+            self._failover_lock.locked(),
+            f" {snap.get('session_manager', '')}" if snap.get("session_manager") else "",
+        )
+
     def snapshot(self) -> dict[str, object]:
         now = time.monotonic()
         return {
@@ -186,7 +282,12 @@ class ProxyPool:
                     "cooldown_remaining_s": max(0.0, self._bad_until.get(url, 0.0) - now),
                     "success_count": self._success_count.get(url, 0),
                     "failure_count": self._failure_count.get(url, 0),
+                    "success_streak": self._success_streak.get(url, 0),
                     "health_score": round(self._health_score(url), 4),
+                    "latency_avg_ms": round(
+                        sum(self._last_latencies.get(url, []))
+                        / max(len(self._last_latencies.get(url, [])), 1)
+                    ) if self._last_latencies.get(url) else None,
                 }
                 for url in self.urls
             ],

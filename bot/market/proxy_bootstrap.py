@@ -40,6 +40,7 @@ from bot.market._proxy_sources import (
     _VALIDATE_TIMEOUT_S,
     _WS_PROBE_TIMEOUT_SECONDS,
     _gather_candidates,
+    _load_custom_sources,
 )
 from bot.market.network_proxy import websockets_connect_kwargs
 from bot.runtime.errors import DEFENSIVE_EXC, defensive_exc_types
@@ -347,6 +348,11 @@ async def auto_discover_proxies(
     3. If pool still insufficient, fetch HTTP proxies as fallback
     4. Return up to *max_pool_size* URLs sorted by ascending latency (fastest first)
     """
+    # Merge custom proxy source URLs before discovery
+    custom = _load_custom_sources()
+    if custom:
+        LOG.info("proxy auto-discovery: %d custom sources added", len(custom))
+
     LOG.info(
         "proxy auto-discovery: %d SOCKS5 sources + %d HTTP fallback + Tor detection",
         len(_SOCKS5_SOURCES),
@@ -356,8 +362,9 @@ async def auto_discover_proxies(
     # 1. Detect local Tor in parallel with source fetching
     tor_task: asyncio.Task[str | None] = asyncio.create_task(_detect_local_tor())
 
-    # 2. Fetch SOCKS5 candidates from all sources
-    candidates = await _gather_candidates(_SOCKS5_SOURCES, protocol="socks5")
+    # 2. Fetch SOCKS5 candidates from all sources (including custom)
+    socks5_sources = list(_SOCKS5_SOURCES) + custom
+    candidates = await _gather_candidates(socks5_sources, protocol="socks5")
     candidates = candidates[:_MAX_CANDIDATES]
 
     LOG.info(
@@ -385,7 +392,8 @@ async def auto_discover_proxies(
             "SOCKS5 pool insufficient (%d) — fetching HTTP fallback sources",
             len(working),
         )
-        http_candidates = await _gather_candidates(_HTTP_SOURCES, protocol="http")
+        http_sources = list(_HTTP_SOURCES) + custom
+        http_candidates = await _gather_candidates(http_sources, protocol="http")
         http_candidates = http_candidates[:_MAX_CANDIDATES]
         if http_candidates:
             http_working = await _validate_batch(
@@ -655,11 +663,17 @@ async def run_proxy_refresh_loop(
 
         # Update live REST client pool
         if inner is not None:
-            if pool is not None:
-                pool.reset(best)
             try:
-                await inner._apply_active_proxy(best[0])
-                inner._last_failover_mono = 0.0  # reset rate-limit after deliberate swap
+                if hasattr(inner, "refresh_proxy_pool"):
+                    await inner.refresh_proxy_pool(best)
+                else:
+                    if pool is not None:
+                        pool.reset(best)
+                    await inner._apply_active_proxy(best[0])
+                    inner._last_failover_mono = 0.0
+                new_pool = getattr(inner, "_proxy_pool", None)
+                if new_pool is not None:
+                    new_pool.log_metrics("refresh")
             except DEFENSIVE_EXC as exc:
                 LOG.warning("proxy refresh: REST client update failed | %s", exc)
 

@@ -73,7 +73,7 @@ from bot.market.network_proxy import (
     mask_proxy_url,
     resolve_proxy_url,
 )
-from bot.market.proxy_pool import ProxyPool, is_proxy_transport_error
+from bot.market.proxy_pool import BanDetectionPolicy, ProxyPool, is_proxy_transport_error
 
 try:
     from aiohttp_socks import ProxyConnectionError as _SocksProxyConnectionError
@@ -520,10 +520,13 @@ class RestHttpMixin(RestCircuitMixin):
                 self.headers = headers
 
         try:
-            async with rest_global_semaphore():
-                session = await self._get_http_session()
+            session = await self._get_http_session()
+            sem = self._session_manager.get_semaphore()
+            async with sem:
                 request_proxy = aiohttp_request_proxy(session, getattr(self, "_proxy_url", None))
+                _request_start = time.monotonic()
                 async with session.get(url, params=params, proxy=request_proxy) as response:
+                    _elapsed_ms: float = (time.monotonic() - _request_start) * 1000.0
                     headers = response.headers
                     status = int(response.status)
                     if status == 418:
@@ -587,6 +590,8 @@ class RestHttpMixin(RestCircuitMixin):
                                 operation,
                             )
                         self._record_circuit_failure(operation)
+                        if getattr(self, "_ban_policy", None) and self._ban_policy.is_response_banned(429):
+                            await self._try_failover_proxy(f"ban_429:{operation}")
                         raise MarketDataUnavailable(
                             operation=operation,
                             detail=f"429 rate limited (pause={effective_pause}s)",
@@ -615,7 +620,7 @@ class RestHttpMixin(RestCircuitMixin):
                 pool = getattr(self, "_proxy_pool", None)
                 active_proxy = getattr(self, "_proxy_url", None)
                 if pool is not None and active_proxy:
-                    pool.mark_success(str(active_proxy))
+                    pool.mark_success(str(active_proxy), latency_ms=_elapsed_ms)
                 self._track_weight(operation, params)
                 self._record_circuit_success(operation)
                 self._record_endpoint_snapshot(
@@ -1008,7 +1013,28 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         self._last_endpoint_limiter_wait_ms: float = 0.0
         self._last_endpoint_response_age_s: float | None = None
         self._proxy_discovery_in_progress: bool = False
+        self._ban_policy: BanDetectionPolicy = BanDetectionPolicy()
         self._config_path: Path = Path("config.toml")
+
+    async def refresh_proxy_pool(self, urls: list[str]) -> str | None:
+        """Replace pool URLs, apply first proxy, and report active URL.
+
+        Used by bootstrap refresh loop after auto-discovery or manual
+        pool replacement.  Sessions for removed URLs are evicted.
+        """
+        if self._proxy_pool is not None:
+            self._proxy_pool.reset(urls)
+        else:
+            new_pool = ProxyPool.from_urls(urls, cooldown_seconds=300.0)
+            self._proxy_pool = new_pool
+            if self._proxy_pool is not None:
+                self._session_manager.replace_pool(self._proxy_pool)
+        first = None
+        if self._proxy_pool is not None:
+            first = self._proxy_pool.current()
+            await self._apply_active_proxy(first)
+            self._last_failover_mono = 0.0
+        return first
 
     async def _apply_active_proxy(self, url: str | None) -> None:
         self._proxy_url = url
@@ -1072,15 +1098,21 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             return False
         if not pool.has_alternatives():
             return False
-        # Rate-limit: at most one rotation per 30s to prevent cascade burn on concurrent failures.
-        now = time.monotonic()
-        if now - self._last_failover_mono < self._MIN_FAILOVER_INTERVAL_S:
-            return False
-        nxt = pool.rotate_after_failure(current, reason)
-        if not nxt:
-            return False
-        self._last_failover_mono = now
-        await self._apply_active_proxy(nxt)
+        async with pool._failover_lock:
+            # Re-check rate-limit after acquiring lock — another task may have
+            # already rotated while we were waiting.
+            now = time.monotonic()
+            if now - self._last_failover_mono < self._MIN_FAILOVER_INTERVAL_S:
+                return False
+            # Re-check that current is still the active proxy.
+            if getattr(self, "_proxy_url", None) != current:
+                return False
+            nxt = pool.rotate_after_failure(current, reason)
+            if not nxt:
+                return False
+            self._last_failover_mono = now
+            await self._apply_active_proxy(nxt)
+        pool.log_metrics(f"failover:{reason[:60]}")
         return True
 
     def proxy_pool_snapshot(self) -> dict[str, object]:
@@ -1090,6 +1122,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         snap = pool.snapshot()
         snap["enabled"] = True
         snap["failover_enabled"] = self._proxy_failover_enabled
+        snap["session_manager"] = self._session_manager.snapshot()
         return snap
 
     async def fetch_exchange_symbols(self) -> list[SymbolMeta]:

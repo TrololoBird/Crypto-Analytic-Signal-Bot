@@ -7,7 +7,10 @@ Owns: source URL lists, timeout constants, _fetch_source, _gather_candidates.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import os
+from pathlib import Path
 
 import aiohttp
 
@@ -149,6 +152,40 @@ async def _fetch_source(
             # bare ip:port — prefix with requested protocol
             out.append(f"{scheme}://{line}")
     return out
+
+
+def _load_custom_sources() -> list[str]:
+    """Load custom proxy source URLs from external config.
+
+    Sources (first wins):
+      1. ``config/proxy_sources.json`` — JSON array of source URLs
+      2. ``$PROXY_CUSTOM_SOURCES`` — JSON array as env var
+
+    These are merged transparently into the SOCKS5 and HTTP fallback
+    source lists at bootstrap time (no code changes needed to add sources).
+    """
+    urls: list[str] = []
+    # 1. File-based custom sources
+    custom_path = Path("config/proxy_sources.json")
+    if custom_path.is_file():
+        try:
+            data = json.loads(custom_path.read_text(encoding="utf-8"))
+            if isinstance(data, list):
+                urls.extend(str(u) for u in data)
+                LOG.info("loaded %d custom proxy sources from %s", len(data), custom_path)
+        except (json.JSONDecodeError, OSError) as exc:
+            LOG.warning("failed to load custom proxy sources from %s: %s", custom_path, exc)
+    # 2. Environment variable
+    env_raw = os.environ.get("PROXY_CUSTOM_SOURCES", "")
+    if env_raw:
+        try:
+            env_data = json.loads(env_raw)
+            if isinstance(env_data, list):
+                urls.extend(str(u) for u in env_data)
+                LOG.info("loaded %d custom proxy sources from $PROXY_CUSTOM_SOURCES", len(env_data))
+        except (json.JSONDecodeError, TypeError) as exc:
+            LOG.warning("failed to parse $PROXY_CUSTOM_SOURCES: %s", exc)
+    return urls
 
 
 async def _gather_candidates(

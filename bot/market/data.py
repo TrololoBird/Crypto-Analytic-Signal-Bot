@@ -66,7 +66,10 @@ def configure_rest_concurrency(max_concurrent: int) -> None:
     """Align global REST gate with BotSettings (Binance weight budget is separate)."""
     limit = max(1, min(int(max_concurrent), 20))
     _REST_GLOBAL_SEMAPHORE_STATE[0] = asyncio.Semaphore(limit)
-    LOG.info("rest_concurrency_configured | max_concurrent=%d", limit)
+    from bot.market._proxy_session import set_per_proxy_concurrency  # noqa: PLC0415
+
+    set_per_proxy_concurrency(limit)
+    LOG.info("rest_concurrency_configured | max_concurrent=%d per_proxy=%d", limit, limit)
 
 
 _FUTURES_DATA_IP_LIMIT_WINDOW_S = 300.0

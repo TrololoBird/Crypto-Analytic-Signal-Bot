@@ -2,8 +2,30 @@
 
 from __future__ import annotations
 
+__all__ = [
+    "ProxySessionManager",
+    "get_per_proxy_concurrency",
+    "set_per_proxy_concurrency",
+]
+
+import asyncio
 import logging
 from typing import TYPE_CHECKING
+
+from bot.market.network_proxy import close_aiohttp_session, mask_proxy_url
+
+# Module-level per-proxy concurrency — set via configure_rest_concurrency() at startup.
+_PER_PROXY_CONCURRENCY: int = 3
+
+
+def set_per_proxy_concurrency(n: int) -> None:
+    global _PER_PROXY_CONCURRENCY  # noqa: PLW0603
+    _PER_PROXY_CONCURRENCY = max(1, n)
+
+
+def get_per_proxy_concurrency() -> int:
+    return _PER_PROXY_CONCURRENCY
+
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -11,8 +33,6 @@ if TYPE_CHECKING:
     import aiohttp
 
     from bot.market.proxy_pool import ProxyPool
-
-from bot.market.network_proxy import close_aiohttp_session, mask_proxy_url
 
 LOG = logging.getLogger("bot.market._proxy_session")
 
@@ -36,6 +56,8 @@ class ProxySessionManager:
         self._factory = session_factory
         self._sessions: dict[str | None, aiohttp.ClientSession] = {}
         self._active_key: str | None = active_proxy_url
+        self._semaphores: dict[str | None, asyncio.Semaphore] = {}
+        self._per_proxy_concurrency: int = _PER_PROXY_CONCURRENCY
 
     # ------------------------------------------------------------------
     # Public API
@@ -56,6 +78,17 @@ class ProxySessionManager:
         or ``refresh_pool`` — never reads from the pool directly.
         """
         return self._active_key
+
+    def get_semaphore(self) -> asyncio.Semaphore:
+        """Return (or create) the per-proxy concurrency semaphore for the active proxy.
+
+        Replaces the process-wide ``rest_global_semaphore()`` with a per-proxy
+        gate so one slow proxy does not starve others.
+        """
+        url = self.current()
+        if url not in self._semaphores:
+            self._semaphores[url] = asyncio.Semaphore(self._per_proxy_concurrency)
+        return self._semaphores[url]
 
     async def get_session(self) -> aiohttp.ClientSession:
         """Return (or create) the session for the current active proxy."""
@@ -97,21 +130,29 @@ class ProxySessionManager:
         for url in old_urls - set(urls):
             await self._evict(url)
 
-    def replace_pool(self, pool: ProxyPool | None) -> None:
-        """Replace the internal pool reference without closing sessions."""
+    async def replace_pool(self, pool: ProxyPool | None) -> None:
+        """Replace the internal pool reference and evict orphaned sessions."""
+        old_urls: set[str | None] = set()
+        if self._pool is not None:
+            old_urls = set(self._pool.urls)
         self._pool = pool
+        new_urls = set(pool.urls) if pool is not None else set()
+        for url in old_urls - new_urls:
+            await self._evict(url)
 
     async def close_all(self) -> None:
         """Close all managed sessions and clear the cache."""
         for s in self._sessions.values():
             await close_aiohttp_session(s)
         self._sessions.clear()
+        self._semaphores.clear()
         self._active_key = None
 
     def snapshot(self) -> dict[str, object]:
         return {
             "active": mask_proxy_url(self._active_key),
             "cached_sessions": list(self._sessions.keys()),
+            "per_proxy_concurrency": self._per_proxy_concurrency,
         }
 
     # ------------------------------------------------------------------
@@ -122,4 +163,6 @@ class ProxySessionManager:
         s = self._sessions.pop(url, None)
         if s is not None:
             await close_aiohttp_session(s)
+        self._semaphores.pop(url, None)
+        if s is not None:
             LOG.debug("session evicted | url=%s", mask_proxy_url(url))
