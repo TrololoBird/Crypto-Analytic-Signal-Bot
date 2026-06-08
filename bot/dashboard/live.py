@@ -160,7 +160,26 @@ def _is_routing_excluded_decision_reason(reason: str) -> bool:
 
 
 def _tracking_open_counts(bot: Any) -> dict[str, int]:
-    """Sync read of pending/active rows for dashboard overview (matches bot.db truth)."""
+    """Sync read of pending/active rows for dashboard overview.
+
+    TODO(phase-b): Make DashboardLiveData methods async so this can use
+    bot._modern_repo.get_tracking_stats() directly.
+    """
+    repo = getattr(bot, "_modern_repo", None)
+    if repo is not None and hasattr(repo, "_conn") and repo._conn is not None:
+        try:
+            conn = repo._conn
+            cursor = conn.execute(
+                "SELECT status, COUNT(*) FROM active_signals "
+                "WHERE status IN ('pending','active') GROUP BY status"
+            )
+            rows = cursor.fetchall()
+            counts = {str(status): int(count) for status, count in rows}
+            pending = counts.get("pending", 0)
+            active = counts.get("active", 0)
+            return {"pending": pending, "active": active, "open": pending + active}
+        except (OSError, sqlite3.Error):
+            pass
     settings = getattr(bot, "settings", None)
     db_path = getattr(settings, "db_path", None)
     if db_path is None:

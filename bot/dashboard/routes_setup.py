@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from bot.domain.labels import labels_payload
@@ -52,14 +52,6 @@ def register_routes(dashboard: BotDashboard) -> None:
             LOG.exception("dashboard api status error")
             return {"error": "status_unavailable"}
 
-    @self.app.get("/api/signals/active")
-    async def active_signals() -> list[dict[str, Any]]:
-        try:
-            return await self._get_active_signals()
-        except DEFENSIVE_EXC:
-            LOG.exception("dashboard api active signals error")
-            return []
-
     @self.app.get("/api/signals/recent")
     async def recent_signals(limit: int = 20) -> list[dict[str, Any]]:
         try:
@@ -68,14 +60,6 @@ def register_routes(dashboard: BotDashboard) -> None:
         except DEFENSIVE_EXC:
             LOG.exception("dashboard api recent signals error")
             return []
-
-    @self.app.get("/api/market/regime")
-    async def market_regime() -> dict[str, Any]:
-        try:
-            return self._get_market_regime()
-        except DEFENSIVE_EXC:
-            LOG.exception("dashboard api market regime error")
-            return {"error": "regime_unavailable"}
 
     @self.app.get("/api/metrics")
     async def metrics() -> dict[str, Any]:
@@ -142,26 +126,6 @@ def register_routes(dashboard: BotDashboard) -> None:
                 limit_files=limit_files,
                 max_rows=max_rows,
             )
-        except DEFENSIVE_EXC:
-            LOG.exception("dashboard api strategy decisions error")
-            return {"error": "strategy_decisions_unavailable"}
-
-    @self.app.get("/api/analytics/strategy-decisions")
-    async def strategy_decisions(
-        limit_files: int = 1,
-        max_rows: int = 1_000,
-    ) -> dict[str, Any]:
-        try:
-            return await asyncio.to_thread(
-                self._get_strategy_decision_summary,
-                limit_files=limit_files,
-                max_rows=max_rows,
-            )
-        except RuntimeError as exc:
-            if "shutdown" in str(exc).lower():
-                LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
-                return {"error": "Server is shutting down"}
-            raise
         except DEFENSIVE_EXC:
             LOG.exception("dashboard api strategy decisions error")
             return {"error": "strategy_decisions_unavailable"}
@@ -405,10 +369,6 @@ def register_routes(dashboard: BotDashboard) -> None:
     async def dashboard_ws(ws: WebSocket) -> None:
         await _handle_dashboard_ws(ws)
 
-    @self.app.websocket("/ws/dashboard")
-    async def dashboard_ws_legacy(ws: WebSocket) -> None:
-        await _handle_dashboard_ws(ws)
-
         # ── API v1 endpoints ─────────────────────────────────────────────
 
     @self.app.get("/api/v1/status")
@@ -578,12 +538,6 @@ def register_routes(dashboard: BotDashboard) -> None:
 
         # ── Strategy Correlation / Confluence ───────────────────────────
 
-    @self.app.get("/api/v1/strategies/correlation")
-    async def v1_strategies_correlation(limit: int = 41) -> dict[str, Any]:
-        catalog = self._strategies_cache or []
-        setup_ids = [s["id"] for s in catalog[: max(10, min(limit, 41))]]
-        return {"strategies": setup_ids, "matrix": []}
-
     @self.app.get("/api/v1/analytics/confluence-heatmap")
     async def v1_confluence_heatmap() -> list[dict[str, Any]]:
         decisions = self._live_data.decisions(limit=50, max_rows=50000)
@@ -612,19 +566,6 @@ def register_routes(dashboard: BotDashboard) -> None:
             LOG.exception("v1 mobile summary error")
             return {"error": "mobile_summary_unavailable"}
 
-    @self.app.post("/api/v1/confluence/simulate")
-    async def v1_confluence_simulate(body: dict[str, Any]) -> dict[str, Any]:
-        return {
-            "simulated": True,
-            "weights": body.get("weights", {}),
-            "disabled_setups": body.get("disabled_setups", []),
-            "note": "What-if simulation endpoint ready. Full engine integration pending.",
-        }
-
-    @self.app.get("/api/v1/confluence/distribution")
-    async def v1_confluence_distribution(hours: int = 24) -> dict[str, Any]:
-        return {"hours": max(1, min(hours, 168)), "buckets": []}
-
     @self.app.get("/api/v1/confluence/vetos")
     async def v1_confluence_vetos(limit: int = 50) -> list[dict[str, Any]]:
         rejections = self._live_data.rejections(limit=max(1, min(limit, 100)), max_rows=50000)
@@ -637,9 +578,15 @@ def register_routes(dashboard: BotDashboard) -> None:
         return self._strategies_cache or []
 
     @self.app.patch("/api/v1/config/strategies")
-    async def v1_config_strategies_patch(body: dict[str, Any]) -> dict[str, Any]:
-        LOG.info("config strategies patch received: %s", body)
-        return {"applied": True, "updates": body.get("updates", {})}
+    async def v1_config_strategies_patch(body: dict[str, Any]) -> JSONResponse:
+        LOG.warning("config strategies patch not implemented (stub): %s", body)
+        return JSONResponse(
+            status_code=501,
+            content={
+                "error": "not_implemented",
+                "detail": "Use config.toml to change strategy settings",
+            },
+        )
 
     @self.app.get("/api/v1/config/scoring")
     async def v1_config_scoring() -> dict[str, Any]:
@@ -659,9 +606,15 @@ def register_routes(dashboard: BotDashboard) -> None:
         }
 
     @self.app.patch("/api/v1/config/scoring")
-    async def v1_config_scoring_patch(body: dict[str, Any]) -> dict[str, Any]:
-        LOG.info("config scoring patch received: %s", body)
-        return {"applied": True, "weights": body.get("weights", {})}
+    async def v1_config_scoring_patch(body: dict[str, Any]) -> JSONResponse:
+        LOG.warning("config scoring patch not implemented (stub): %s", body)
+        return JSONResponse(
+            status_code=501,
+            content={
+                "error": "not_implemented",
+                "detail": "Use config.toml to change scoring weights",
+            },
+        )
 
     @self.app.get("/api/v1/config/killzone")
     async def v1_config_killzone() -> dict[str, Any]:
@@ -672,9 +625,15 @@ def register_routes(dashboard: BotDashboard) -> None:
         }
 
     @self.app.patch("/api/v1/config/killzone")
-    async def v1_config_killzone_patch(body: dict[str, Any]) -> dict[str, Any]:
-        LOG.info("config killzone patch received: %s", body)
-        return {"applied": True, **body}
+    async def v1_config_killzone_patch(body: dict[str, Any]) -> JSONResponse:
+        LOG.warning("config killzone patch not implemented (stub): %s", body)
+        return JSONResponse(
+            status_code=501,
+            content={
+                "error": "not_implemented",
+                "detail": "Use config.toml to change killzone settings",
+            },
+        )
 
         # ── Alerts ──────────────────────────────────────────────────────
 
@@ -723,27 +682,6 @@ def register_routes(dashboard: BotDashboard) -> None:
             ]
         return merged[:cap]
 
-        # ── Sandbox ─────────────────────────────────────────────────────
-
-    @self.app.post("/api/v1/sandbox/replay")
-    async def v1_sandbox_replay(body: dict[str, Any]) -> dict[str, Any]:
-        hours = int(body.get("hours", 24))
-        return {
-            "job_id": f"sim_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}",
-            "status": "queued",
-            "hours": max(1, min(hours, 168)),
-            "disabled_setups": body.get("disabled_setups", []),
-            "weights": body.get("weights", {}),
-            "note": (
-                "Use CLI: python main.py backtest --symbol BTCUSDT --days 7 [--setup order_block]"
-            ),
-            "engine": "bot.engine.backtest.run_historical_backtest",
-        }
-
-    @self.app.get("/api/v1/sandbox/result/{job_id}")
-    async def v1_sandbox_result(job_id: str) -> dict[str, Any]:
-        return {"job_id": job_id, "status": "pending", "progress": 0}
-
     @self.app.get("/api/live/ws-health")
     async def live_ws_health() -> dict[str, Any]:
         try:
@@ -762,10 +700,6 @@ def register_routes(dashboard: BotDashboard) -> None:
         except DEFENSIVE_EXC:
             LOG.exception("dashboard live ws-health error")
             return {"error": "ws_health_unavailable"}
-
-    @self.app.get("/api/live/public-audit")
-    async def live_public_audit() -> dict[str, Any]:
-        return await self._public_audit_manifest()
 
     @self.app.get("/api/v1/public-audit")
     async def v1_public_audit() -> dict[str, Any]:

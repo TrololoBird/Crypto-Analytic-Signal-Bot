@@ -125,8 +125,8 @@ class BotDashboard:
             if path in _open_paths or path.startswith("/static/"):
                 return await call_next(request)
             client_ip = client_ip_from_request(request)
-            if not self._access_auditor.check_rate_limit(client_ip):
-                self._access_auditor.record_access(
+            if not await self._access_auditor.check_rate_limit(client_ip):
+                await self._access_auditor.record_access(
                     client_ip=client_ip,
                     method=str(request.method),
                     path=path,
@@ -136,7 +136,7 @@ class BotDashboard:
                 if JSONResponse is not None:
                     return JSONResponse({"detail": "rate_limit_exceeded"}, status_code=429)
             response = await call_next(request)
-            self._access_auditor.record_access(
+            await self._access_auditor.record_access(
                 client_ip=client_ip,
                 method=str(request.method),
                 path=path,
