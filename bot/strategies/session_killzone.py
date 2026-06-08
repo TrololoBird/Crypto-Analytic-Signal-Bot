@@ -132,17 +132,26 @@ def _hour_in_window(hour: int, start: int, end: int) -> bool:
 
 
 def _active_killzone_name(
-    hour: int,
+    now_utc: datetime | int,
     params: dict[str, object] | None = None,
 ) -> str | None:
-    for name, start, end in _session_windows_from_params(params):
+    raw = params or {}
+    # DST-aware path (default): delegate to the shared session module so killzone
+    # UTC boundaries follow London/NY daylight saving instead of drifting in summer.
+    if bool(raw.get("session_dst_aware", True)) and isinstance(now_utc, datetime):
+        from bot.domain.sessions import active_killzone  # noqa: PLC0415
+
+        return active_killzone(now_utc)
+    # Legacy fixed-UTC windows (operator override via session_dst_aware=false).
+    hour = now_utc.hour if isinstance(now_utc, datetime) else int(now_utc)
+    for name, start, end in _session_windows_from_params(raw):
         if _hour_in_window(hour, start, end):
             return name
     return None
 
 
-def _in_killzone(hour: int, params: dict[str, object] | None = None) -> bool:
-    return _active_killzone_name(hour, params) is not None
+def _in_killzone(now_utc: datetime | int, params: dict[str, object] | None = None) -> bool:
+    return _active_killzone_name(now_utc, params) is not None
 
 
 def _is_in_buffer_zone(hour: int, params: dict[str, object] | None = None) -> bool:
@@ -229,7 +238,7 @@ def detect_session_killzone(
         _reject(prepared, setup_id, "time_missing")
         return None
     now_utc = _latest_bar_time_utc(prepared)
-    session_name = _active_killzone_name(now_utc.hour, cast("dict[str, object]", effective_params))
+    session_name = _active_killzone_name(now_utc, cast("dict[str, object]", effective_params))
     buffer_active = session_name is None and _is_in_buffer_zone(
         now_utc.hour, cast("dict[str, object]", effective_params)
     )
@@ -593,7 +602,7 @@ class SessionKillzoneSetup(RoadmapSetup):
         dynamic_params = get_dynamic_params(prepared, self.setup_id)
         now_utc = _latest_bar_time_utc(prepared)
         return _active_killzone_name(
-            now_utc.hour,
+            now_utc,
             {**params, **dynamic_params},
         )
 

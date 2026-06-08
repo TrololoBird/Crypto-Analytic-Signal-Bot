@@ -788,12 +788,19 @@ def _btc_correlation_penalty(prepared: PreparedSymbol, signal: Signal) -> float:
 
 
 def _session_killzone_score(signal: Signal) -> float:
-    from datetime import UTC, datetime  # noqa: PLC0415
+    # Single DST-aware source of truth (shared with the session_killzone strategy)
+    # so scoring and the strategy can never disagree on what is an active killzone.
+    from bot.domain.sessions import active_killzone  # noqa: PLC0415
 
-    hour = datetime.now(UTC).hour
-    in_killzone = hour in {0, 1, 2, 7, 8, 9, 12, 13, 14}
-    if not in_killzone:
+    name = active_killzone()
+    if name is None:
         return 0.30
-    if signal.strategy_family in {"session", "breakout", "momentum"}:
-        return 0.78
-    return 0.58
+    # Flow-sensitive families benefit most from session-open liquidity. Families
+    # are real catalog values; the previous {"session","momentum"} branch was dead.
+    flow_families = {"breakout", "liquidity", "orderflow", "continuation"}
+    flow = signal.strategy_family in flow_families
+    if name == "Overlap":  # London + NY simultaneously live = peak liquidity
+        return 0.85 if flow else 0.65
+    if name in {"London", "NY"}:
+        return 0.78 if flow else 0.58
+    return 0.50  # PreLondon / NYClose / Asia — lower-liquidity windows
