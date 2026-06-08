@@ -94,6 +94,7 @@ def detect_btc_correlation(
 
 class BTCCorrelationSetup(RoadmapSetup):
     setup_id = "btc_correlation"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "market"
     family = "multi_asset"
     confirmation_profile = "trend_follow"
     required_context = ("futures_flow",)

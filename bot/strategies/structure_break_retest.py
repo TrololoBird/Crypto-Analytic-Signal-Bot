@@ -426,6 +426,7 @@ __all__ = [
 
 class StructureBreakRetestSetup(SpecDetectorSetup):
     setup_id = "structure_break_retest"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "limit"
     family = "breakout"
     confirmation_profile = "breakout_acceptance"
     required_context = ("futures_flow",)

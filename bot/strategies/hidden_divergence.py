@@ -409,6 +409,7 @@ __all__ = [
 
 class HiddenDivergenceSetup(SpecDetectorSetup):
     setup_id = "hidden_divergence"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "market"
     family = "continuation"
     confirmation_profile = "trend_follow"
     required_context = ("futures_flow",)

@@ -445,6 +445,7 @@ __all__ = [
 
 class LiquiditySweepSetup(SpecDetectorSetup):
     setup_id = "liquidity_sweep"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "limit"
     family = "reversal"
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)

@@ -104,6 +104,7 @@ def try_spec_signal(
         hit=hit,
         defaults=defaults,
         params=effective,
+        entry_order_type=str(hit.entry_order_type or "limit"),
     )
 
 

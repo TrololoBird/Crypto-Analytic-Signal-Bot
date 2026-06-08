@@ -169,6 +169,7 @@ def detect_absorption_prepared(
 
 class AbsorptionSetup(RoadmapSetup):
     setup_id = "absorption"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "limit"
     family = "orderflow"
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)

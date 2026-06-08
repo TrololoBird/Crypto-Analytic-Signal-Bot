@@ -126,6 +126,7 @@ def detect_rsi_divergence_bottom(
 
 class RSIDivergenceBottomSetup(RoadmapSetup):
     setup_id = "rsi_divergence_bottom"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "market"
     family = "reversal"
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)

@@ -478,6 +478,7 @@ __all__ = [
 
 class KeltnerBreakoutSetup(SpecDetectorSetup):
     setup_id = "keltner_breakout"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "market"
     family = "breakout"
     confirmation_profile = "breakout_acceptance"
     required_context = ("futures_flow",)

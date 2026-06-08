@@ -430,6 +430,7 @@ __all__ = [
 
 class CVDDivergenceSetup(SpecDetectorSetup):
     setup_id = "cvd_divergence"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "market"
     family = "reversal"
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)

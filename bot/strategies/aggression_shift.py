@@ -212,6 +212,7 @@ def detect_aggression_shift_prepared(
 
 class AggressionShiftSetup(RoadmapSetup):
     setup_id = "aggression_shift"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "market"
     family = "orderflow"
     confirmation_profile = "breakout_acceptance"
     required_context = ("futures_flow",)

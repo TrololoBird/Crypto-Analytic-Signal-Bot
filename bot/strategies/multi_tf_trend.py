@@ -193,6 +193,7 @@ def detect_multi_tf_trend(
 
 class MultiTFTrendSetup(RoadmapSetup):
     setup_id = "multi_tf_trend"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "market"
     family = "continuation"
     confirmation_profile = "trend_follow"
     required_context = ("futures_flow",)

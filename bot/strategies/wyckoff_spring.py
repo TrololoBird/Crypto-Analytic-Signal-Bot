@@ -256,6 +256,7 @@ def detect_wyckoff_spring_prepared(
 
 class WyckoffSpringSetup(RoadmapSetup):
     setup_id = "wyckoff_spring"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "limit"
     family = "reversal"
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)

@@ -456,6 +456,7 @@ __all__ = ["_detect_turtle_soup_extended", "detect_turtle_soup", "detect_turtle_
 
 class TurtleSoupSetup(SpecDetectorSetup):
     setup_id = "turtle_soup"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "limit"
     family = "reversal"
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)

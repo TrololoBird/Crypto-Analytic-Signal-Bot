@@ -146,6 +146,7 @@ def detect_orderflow_imbalance(
 
 class OrderflowImbalanceSetup(RoadmapSetup):
     setup_id = "orderflow_imbalance"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "limit"
     family = "reversal"
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 from abc import abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from bot.runtime.errors import DEFENSIVE_EXC, classify_runtime_error
 
@@ -49,6 +50,7 @@ class BaseSetup(AbstractStrategy):
     """Base setup class compatible with the modern signal engine."""
 
     setup_id: str  # class-level constant, defined by each subclass
+    ENTRY_ORDER_TYPE: ClassVar[str] = "limit"
     family: str = "continuation"
     confirmation_profile: str = "trend_follow"
     required_context: tuple[str, ...] = ()
@@ -218,13 +220,18 @@ class BaseSetup(AbstractStrategy):
                     )
         finally:
             reset_strategy_decision_capture(token)
-        return SignalResult(
+        sig = decision.signal
+        expected_ot = str(type(self).ENTRY_ORDER_TYPE or "limit").strip().lower()
+        if sig is not None and sig.entry_order_type != expected_ot:
+            sig = dataclasses.replace(sig, entry_order_type=expected_ot)
+        result = SignalResult(
             setup_id=self.setup_id,
-            signal=decision.signal,
+            signal=sig,
             decision=decision,
             error=decision.error,
             metadata={"setup_id": self.setup_id},
         )
+        return result
 
     def can_calculate(self, prepared: PreparedSymbol) -> bool:
         if not self.is_enabled():

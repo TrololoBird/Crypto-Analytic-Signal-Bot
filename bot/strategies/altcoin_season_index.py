@@ -112,6 +112,7 @@ def detect_altcoin_season_index(
 
 class AltcoinSeasonIndexSetup(RoadmapSetup):
     setup_id = "altcoin_season_index"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "market"
     family = "multi_asset"
     confirmation_profile = "trend_follow"
     required_context = ("futures_flow",)

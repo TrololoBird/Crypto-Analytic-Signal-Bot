@@ -134,6 +134,7 @@ def detect_depth_imbalance(
 
 class DepthImbalanceSetup(RoadmapSetup):
     setup_id = "depth_imbalance"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "limit"
     family = "orderbook"
     confirmation_profile = "breakout_acceptance"
     required_context = ("futures_flow",)

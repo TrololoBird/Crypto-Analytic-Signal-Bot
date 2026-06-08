@@ -166,6 +166,7 @@ def detect_fakeout(
 
 class FakeoutDetectorSetup(RoadmapSetup):
     setup_id = "fakeout_detector"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "limit"
     family = "reversal"
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)

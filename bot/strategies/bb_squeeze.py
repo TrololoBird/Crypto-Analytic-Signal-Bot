@@ -152,6 +152,7 @@ def detect_bb_squeeze_prepared(
 
 class BBSqueezeSetup(RoadmapSetup):
     setup_id = "bb_squeeze"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "market"
     family = "volatility"
     confirmation_profile = "breakout_acceptance"
     required_context = ("futures_flow",)

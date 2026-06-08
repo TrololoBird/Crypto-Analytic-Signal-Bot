@@ -329,6 +329,7 @@ def _build_signal(
     timeframe: str = "15m",
     strategy_family: str = "continuation",
     entry_pad_atr_mult: float = SIGNAL_ENTRY_PAD_ATR,
+    entry_order_type: str = "limit",
 ) -> Signal | None:
     if not math.isfinite(float(atr)) or atr <= 0.0:
         _reject(
@@ -442,6 +443,7 @@ def _build_signal(
         premium_zscore_5m=premium_zscore_5m,
         premium_slope_5m=premium_slope_5m,
         ls_ratio=ls_ratio,
+        entry_order_type=str(entry_order_type or "limit").strip().lower(),
     )
 
 

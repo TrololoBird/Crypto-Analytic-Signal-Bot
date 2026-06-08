@@ -340,6 +340,7 @@ __all__ = [
 
 class VolumeAnomalySetup(SpecDetectorSetup):
     setup_id = "volume_anomaly"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "market"
     family = "breakout"
     confirmation_profile = "breakout_acceptance"
     required_context = ("futures_flow",)

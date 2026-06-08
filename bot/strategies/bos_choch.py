@@ -705,6 +705,7 @@ __all__ = ["_detect_bos_choch_extended", "detect_bos_choch", "detect_bos_choch_s
 
 class BOSCHOCHSetup(SpecDetectorSetup):
     setup_id = "bos_choch"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "limit"
     family = "reversal"
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)

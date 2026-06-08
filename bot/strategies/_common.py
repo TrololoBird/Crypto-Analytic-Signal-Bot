@@ -42,6 +42,7 @@ class SpecHit:
     vol_ratio: float = 1.0
     rsi: float = 50.0
     source_index: int | None = None
+    entry_order_type: str = "limit"
 
 
 def as_float(value: object, default: float = 0.0) -> float:
@@ -393,6 +394,7 @@ def build_spec_signal(
     hit: SpecHit,
     defaults: dict[str, float],
     params: dict[str, float] | None = None,
+    entry_order_type: str = "limit",
 ) -> Signal | None:
     effective = {**catalog_default_params(setup_id), **defaults, **(params or {})}
     if not catalog_allows_signal(
@@ -431,6 +433,7 @@ def build_spec_signal(
         rsi=float(hit.rsi),
         structure_clarity=max(0.0, min(1.0, float(hit.structure_clarity))),
     )
+    effective_order_type = str(hit.entry_order_type or entry_order_type or "limit").strip().lower()
     return _build_signal(
         prepared=prepared,
         setup_id=setup_id,
@@ -444,6 +447,7 @@ def build_spec_signal(
         tp2=tp2,
         price_anchor=entry,
         atr=atr,
+        entry_order_type=effective_order_type,
     )
 
 

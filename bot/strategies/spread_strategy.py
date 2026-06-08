@@ -130,6 +130,7 @@ def detect_spread_strategy(
 
 class SpreadStrategySetup(RoadmapSetup):
     setup_id = "spread_strategy"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "limit"
     family = "orderbook"
     confirmation_profile = "breakout_acceptance"
     required_context = ("futures_flow",)

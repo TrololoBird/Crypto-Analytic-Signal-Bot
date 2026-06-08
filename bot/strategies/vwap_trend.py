@@ -308,6 +308,7 @@ __all__ = ["_detect_vwap_trend_extended", "detect_vwap_reclaim", "detect_vwap_tr
 
 class VWAPTrendSetup(SpecDetectorSetup):
     setup_id = "vwap_trend"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "limit"
     family = "continuation"
     confirmation_profile = "trend_follow"
     required_context = ("futures_flow",)

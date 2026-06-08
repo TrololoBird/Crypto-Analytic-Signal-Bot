@@ -369,6 +369,7 @@ def detect_ema_bounce_setup(
 
 class EmaBounceSetup(SpecDetectorSetup):
     setup_id = "ema_bounce"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "market"
     family = "continuation"
     confirmation_profile = "trend_follow"
     required_context = ("futures_flow",)

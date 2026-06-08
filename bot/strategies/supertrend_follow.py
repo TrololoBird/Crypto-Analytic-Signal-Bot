@@ -276,6 +276,7 @@ def detect_supertrend_follow(
 
 class SuperTrendFollowSetup(RoadmapSetup):
     setup_id = "supertrend_follow"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "market"
     family = "continuation"
     confirmation_profile = "trend_follow"
     required_context = ("futures_flow",)

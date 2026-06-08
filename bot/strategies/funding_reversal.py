@@ -397,6 +397,7 @@ def detect_funding_reversal(
 
 class FundingReversalSetup(RoadmapSetup):
     setup_id = "funding_reversal"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "market"
     family = "reversal"
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)

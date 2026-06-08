@@ -162,6 +162,7 @@ def detect_whale_walls(
 
 class WhaleWallsSetup(RoadmapSetup):
     setup_id = "whale_walls"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "limit"
     family = "orderbook"
     confirmation_profile = "breakout_acceptance"
     required_context = ("futures_flow",)

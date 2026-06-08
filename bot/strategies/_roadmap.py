@@ -170,6 +170,7 @@ def _build_atr_signal(
     entry_anchor: float | None = None,
     stop_anchor: float | None = None,
     confirmed_bar: bool = True,
+    entry_order_type: str = "limit",
 ) -> Signal | None:
     work = prepared.work_15m
     # fix-sl-A: optional confirmed bar avoids anchoring entry on a forming candle tail.
@@ -257,6 +258,7 @@ def _build_atr_signal(
         tp2=tp2,
         price_anchor=price_anchor,
         atr=atr,
+        entry_order_type=entry_order_type,
     )
 
 

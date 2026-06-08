@@ -324,6 +324,7 @@ __all__ = [
 
 class PriceVelocitySetup(SpecDetectorSetup):
     setup_id = "price_velocity"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "market"
     family = "breakout"
     confirmation_profile = "breakout_acceptance"
     required_context = ("futures_flow",)

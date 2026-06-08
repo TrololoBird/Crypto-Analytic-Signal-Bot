@@ -545,6 +545,7 @@ def detect_session_killzone(
 
 class SessionKillzoneSetup(RoadmapSetup):
     setup_id = "session_killzone"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "limit"
     family = "breakout"
     confirmation_profile = "breakout_acceptance"
     required_context = ("futures_flow",)

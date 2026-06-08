@@ -145,6 +145,7 @@ def detect_cvd_exhaustion(
 
 class CVDExhaustionSetup(RoadmapSetup):
     setup_id = "cvd_exhaustion"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "market"
     family = "reversal"
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)

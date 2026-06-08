@@ -310,6 +310,7 @@ detect_stop_hunt_detection = detect_stop_hunt_prepared
 
 class StopHuntDetectionSetup(RoadmapSetup):
     setup_id = "stop_hunt_detection"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "market"
     family = "liquidity"
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)

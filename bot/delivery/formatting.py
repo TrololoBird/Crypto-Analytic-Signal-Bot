@@ -272,6 +272,7 @@ class SignalMessageFacts:
     microstructure_label: str | None = None
     microstructure_reason: str | None = None
     microstructure_warnings: tuple[str, ...] = ()
+    entry_order_type: str = "limit"
     btc_bias: str | None = None
     eth_bias: str | None = None
     sol_bias: str | None = None
@@ -561,6 +562,7 @@ def extract_signal_facts(
         premium_zscore_5m=_optional_float(getattr(signal, "premium_zscore_5m", None)),
         premium_slope_5m=_optional_float(getattr(signal, "premium_slope_5m", None)),
         ls_ratio=_optional_float(getattr(signal, "ls_ratio", None)),
+        entry_order_type=str(getattr(signal, "entry_order_type", "limit") or "limit").strip().lower(),
         microstructure_bias_score=_optional_float(
             getattr(signal, "microstructure_bias_score", None)
         ),
@@ -731,6 +733,8 @@ def format_channel_trade_card(
     if fallback_badge:
         setup_line += f" · {code(fallback_badge)}"
     setup_line += f" · {code(format_score(facts.score))}"
+    if str(getattr(facts, "entry_order_type", "limit") or "limit").strip().lower() == "market":
+        setup_line += f" · {code('MARKET')}"
     lines = [
         _channel_header(facts, tier=tier),
         setup_line,

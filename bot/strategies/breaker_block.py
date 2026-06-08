@@ -326,6 +326,7 @@ __all__ = ["_detect_breaker_block_extended", "detect_breaker_block", "detect_bre
 
 class BreakerBlockSetup(SpecDetectorSetup):
     setup_id = "breaker_block"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "limit"
     family = "breakout"
     confirmation_profile = "breakout_acceptance"
     required_context = ("futures_flow",)

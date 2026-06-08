@@ -503,6 +503,7 @@ __all__ = [
 
 class StructurePullbackSetup(SpecDetectorSetup):
     setup_id = "structure_pullback"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "limit"
     family = "continuation"
     confirmation_profile = "trend_follow"
     required_context = ("futures_flow",)

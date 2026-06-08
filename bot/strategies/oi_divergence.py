@@ -86,6 +86,7 @@ def detect_oi_divergence(
 
 class OIDivergenceSetup(RoadmapSetup):
     setup_id = "oi_divergence"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "market"
     family = "sentiment"
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)

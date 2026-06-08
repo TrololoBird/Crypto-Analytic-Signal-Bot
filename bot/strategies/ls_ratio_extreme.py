@@ -175,6 +175,7 @@ def detect_ls_ratio_extreme(
 
 class LSRatioExtremeSetup(RoadmapSetup):
     setup_id = "ls_ratio_extreme"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "market"
     family = "sentiment"
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)

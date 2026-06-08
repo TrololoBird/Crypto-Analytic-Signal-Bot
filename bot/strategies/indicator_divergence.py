@@ -322,6 +322,7 @@ __all__ = [
 
 class IndicatorDivergenceSetup(SpecDetectorSetup):
     setup_id = "indicator_divergence"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "market"
     family = "reversal"
     confirmation_profile = "divergence_reversal"
     required_context = ("futures_flow",)

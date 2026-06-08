@@ -131,6 +131,7 @@ def detect_atr_expansion_prepared(
 
 class ATRExpansionSetup(RoadmapSetup):
     setup_id = "atr_expansion"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "market"
     family = "volatility"
     confirmation_profile = "breakout_acceptance"
     required_context = ("futures_flow",)

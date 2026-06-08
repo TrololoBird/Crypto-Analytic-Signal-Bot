@@ -398,6 +398,7 @@ __all__ = [
 
 class WickTrapReversalSetup(SpecDetectorSetup):
     setup_id = "wick_trap_reversal"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "limit"
     family = "reversal"
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)

@@ -341,6 +341,7 @@ __all__ = ["_detect_order_block_extended", "detect_order_block", "detect_order_b
 
 class OrderBlockSetup(SpecDetectorSetup):
     setup_id = "order_block"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "limit"
     family = "continuation"
     confirmation_profile = "trend_follow"
     required_context = ("futures_flow",)

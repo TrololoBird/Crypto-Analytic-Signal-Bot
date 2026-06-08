@@ -349,6 +349,7 @@ __all__ = ["_detect_fvg_setup_extended", "detect_fvg", "detect_fvg_setup"]
 
 class FVGSetup(SpecDetectorSetup):
     setup_id = "fvg_setup"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "limit"
     family = "continuation"
     confirmation_profile = "trend_follow"
     required_context = ("futures_flow",)

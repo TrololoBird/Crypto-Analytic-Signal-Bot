@@ -431,6 +431,7 @@ __all__ = ["_detect_squeeze_setup_extended", "detect_bb_squeeze_release", "detec
 
 class SqueezeSetup(SpecDetectorSetup):
     setup_id = "squeeze_setup"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "market"
     family = "breakout"
     confirmation_profile = "breakout_acceptance"
     required_context = ("futures_flow",)

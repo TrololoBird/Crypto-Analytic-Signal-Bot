@@ -177,6 +177,7 @@ def detect_pinbar_reversal(
 
 class PinbarReversalSetup(RoadmapSetup):
     setup_id = "pinbar_reversal"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "limit"
     family = "reversal"
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)
