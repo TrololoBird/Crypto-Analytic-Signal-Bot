@@ -18,6 +18,24 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from bot.dashboard._live_helpers import (
+    _build_funnel_widget,
+    _compute_cycle_totals,
+    _compute_session_delta,
+    _counter_rows,
+    _cycle_delivered_count,
+    _delivery_success_rows,
+    _effective_shortlist,
+    _frame_readiness_fields,
+    _is_routing_excluded_decision_reason,
+    _labeled_counter_rows,
+    _parse_ts,
+    _rejected_row_confirmation_profile,
+    _rejected_row_confirmations,
+    _safe_float,
+    _safe_int,
+    _unified_top_blocker,
+)
 from bot.diagnostics.facade import assess_radar_store
 from bot.domain.labels import (
     CONFIRMATION_PROFILE_KEYS,
@@ -28,9 +46,7 @@ from bot.domain.labels import (
     normalize_reject_reason,
     reject_reason_ru,
 )
-from bot.domain.limit_entry import normalize_confirmation_profile
 from bot.market.radar_state import SymbolTier
-from bot.runtime.delivery_orchestrator import DELIVERY_SUCCESS_STATUSES
 from bot.runtime.errors import DEFENSIVE_EXC
 from bot.runtime_policy import effective_shortlist_unified_routing
 from bot.telemetry import slim_message_buffer_fields
@@ -65,98 +81,6 @@ class JsonlFileRef:
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
-
-
-def _safe_float(value: Any, default: float = 0.0) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
-
-
-def _safe_int(value: Any, default: int = 0) -> int:
-    try:
-        return int(float(value))
-    except (TypeError, ValueError):
-        return default
-
-
-def _parse_ts(value: Any) -> datetime | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=UTC)
-    try:
-        parsed = datetime.fromisoformat(str(value))
-    except (TypeError, ValueError):
-        return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
-
-
-def _counter_rows(counter: Counter[str], *, limit: int = 20) -> list[JsonDict]:
-    return [
-        {"key": str(key), "count": int(count)}
-        for key, count in counter.most_common(max(1, int(limit)))
-    ]
-
-
-def _rejected_row_confirmations(row: Mapping[str, Any]) -> dict[str, bool] | None:
-    confirmations = row.get("confirmations")
-    if not isinstance(confirmations, dict):
-        details = row.get("details")
-        if isinstance(details, dict):
-            nested = details.get("confirmations")
-            confirmations = nested if isinstance(nested, dict) else None
-    if not isinstance(confirmations, dict):
-        return None
-    return {str(key): bool(value) for key, value in confirmations.items()}
-
-
-def _rejected_row_confirmation_profile(row: Mapping[str, Any]) -> str:
-    profile = row.get("confirmation_profile")
-    if not profile:
-        details = row.get("details")
-        if isinstance(details, dict):
-            profile = details.get("confirmation_profile")
-    return normalize_confirmation_profile(str(profile) if profile else None)
-
-
-def _labeled_counter_rows(counter: Counter[str], *, limit: int = 20) -> list[JsonDict]:
-    return [
-        {
-            "key": str(key),
-            "count": int(count),
-            "label_ru": reject_reason_ru(str(key)),
-        }
-        for key, count in counter.most_common(max(1, int(limit)))
-    ]
-
-
-def _percent(value: float, digits: int = 2) -> float:
-    return round(float(value) * 100.0, digits)
-
-
-def _delivery_row_status(row: Mapping[str, Any]) -> str:
-    return str(row.get("delivery_status") or row.get("status") or "unknown").strip().lower()
-
-
-def _delivery_success_rows(rows: Iterable[Mapping[str, Any]]) -> list[JsonDict]:
-    return [dict(row) for row in rows if _delivery_row_status(row) in DELIVERY_SUCCESS_STATUSES]
-
-
-def _cycle_delivered_count(row: Mapping[str, Any]) -> int:
-    success = row.get("delivery_success_count")
-    if success is not None:
-        return _safe_int(success)
-    return _safe_int(row.get("delivered_count") or row.get("delivered_signals"))
-
-
-def _is_routing_excluded_decision_reason(reason: str) -> bool:
-    """True when a strategy_decision row reflects routing/asset_fit, not detector evaluation."""
-    code = str(reason or "").strip().lower()
-    if code == "runtime.strategy_lane_excluded":
-        return True
-    return code.startswith("asset_fit.")
 
 
 def _tracking_open_counts(bot: Any) -> dict[str, int]:
@@ -199,103 +123,6 @@ def _tracking_open_counts(bot: Any) -> dict[str, int]:
     pending = counts.get("pending", 0)
     active = counts.get("active", 0)
     return {"pending": pending, "active": active, "open": pending + active}
-
-
-def _frame_readiness_fields(bot: Any) -> dict[str, int]:
-    """Expose WS frame freshness counts used by operator runtime blocks."""
-    ws = getattr(bot, "_ws_manager", None)
-    if ws is None or not hasattr(ws, "state_snapshot"):
-        return {}
-    try:
-        snap = ws.state_snapshot()
-    except DEFENSIVE_EXC:
-        return {}
-    if not isinstance(snap, dict):
-        return {}
-    return {
-        "frames_15m_ready": _safe_int(snap.get("fresh_klines_15m")),
-        "frames_1h_ready": _safe_int(snap.get("warm_symbols")),
-        "frames_4h_ready": _safe_int(snap.get("warm_symbols")),
-    }
-
-
-def _effective_shortlist(bot: Any) -> list[Any]:
-    """Match operator shortlist fallback during ws_light bootstrap."""
-    live = list(getattr(bot, "_shortlist", []) or [])
-    if live:
-        return live
-    return list(getattr(bot, "_last_live_shortlist", []) or [])
-
-
-def _compute_cycle_totals(cycles: list[JsonDict]) -> JsonDict:
-    return {
-        "cycles": len(cycles),
-        "detector_runs": sum(_safe_int(row.get("detector_runs")) for row in cycles),
-        "candidates": sum(_safe_int(row.get("candidate_count")) for row in cycles),
-        "selected": sum(
-            _safe_int(row.get("selected_count") or row.get("selected_signals")) for row in cycles
-        ),
-        "delivered": sum(_cycle_delivered_count(row) for row in cycles),
-    }
-
-
-def _compute_session_delta(cycles: list[JsonDict]) -> JsonDict:
-    latest = cycles[0] if cycles else {}
-    return {
-        "candidates": _safe_int(latest.get("candidate_count")),
-        "selected": _safe_int(latest.get("selected_count") or latest.get("selected_signals")),
-        "delivered": _cycle_delivered_count(latest),
-    }
-
-
-def _build_funnel_widget(
-    cycle_totals: Mapping[str, Any], session_delta: Mapping[str, Any]
-) -> JsonDict:
-    stages = []
-    for key, label_ru in (
-        ("candidates", "кандидаты"),
-        ("selected", "отобрано"),
-        ("delivered", "отправлено"),
-    ):
-        count = _safe_int(cycle_totals.get(key))
-        delta = _safe_int(session_delta.get(key))
-        stages.append(
-            {
-                "key": key,
-                "label_ru": label_ru,
-                "count": count,
-                "session_delta": delta,
-            }
-        )
-    return {"stages": stages}
-
-
-def _unified_top_blocker(
-    *,
-    rejected_counter: Counter[str],
-    decision_counter: Counter[str],
-) -> JsonDict | None:
-    merged: Counter[str] = Counter()
-    merged.update(rejected_counter)
-    merged.update(decision_counter)
-    if not merged:
-        return None
-    key, total = merged.most_common(1)[0]
-    rejected_count = int(rejected_counter.get(key, 0))
-    decision_count = int(decision_counter.get(key, 0))
-    sources: list[str] = []
-    if rejected_count:
-        sources.append("rejected")
-    if decision_count:
-        sources.append("strategy_decisions")
-    return {
-        "key": key,
-        "count": int(total),
-        "label_ru": reject_reason_ru(key),
-        "rejected_count": rejected_count,
-        "decision_count": decision_count,
-        "sources": sources,
-    }
 
 
 class DashboardLiveData:

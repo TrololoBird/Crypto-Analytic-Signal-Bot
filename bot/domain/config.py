@@ -66,6 +66,7 @@ class RuntimeConfig(_StrictModel):
         ]
     )
     auto_open_dashboard: bool = False
+    dashboard_cache_ttl_seconds: float = Field(default=5.0, ge=0.5, le=60.0)
     circuit_breaker_cooldown_seconds: int = Field(default=60, ge=0, le=3600)
     telemetry_subdir: str = "telemetry"
     log_level: str = "INFO"
@@ -203,6 +204,18 @@ class UniverseConfig(_StrictModel):
     medium_refresh_interval_seconds: int = Field(default=900, ge=60, le=7200)
     full_refresh_interval_seconds: int = Field(default=7200, ge=60, le=86_400)
     shortlist_spread_max_bps: float = Field(default=8.0, ge=0.5, le=100.0)
+    radar_max_spread_bps: float = Field(
+        default=20.0,
+        ge=0.5,
+        le=100.0,
+        description="Max spread for radar-tier symbols (report-5 dual-tier universe)",
+    )
+    radar_min_score_delta: float = Field(
+        default=0.05,
+        ge=0.0,
+        le=0.25,
+        description="Extra min_score for radar-tier symbols at delivery",
+    )
     shortlist_book_stale_seconds: float = Field(default=90.0, ge=5.0, le=3600.0)
     shortlist_min_tenure_seconds: int = Field(
         default=1800,
@@ -334,6 +347,22 @@ class FilterConfig(_StrictModel):
         default=True,
         description="When false, 1h trend conflict is a hard reject instead of score penalty",
     )
+    max_signal_age_bars: int = Field(
+        default=2,
+        ge=0,
+        le=20,
+        description="Reject publish when signal age exceeds N primary-TF bars (report-5)",
+    )
+    htf_zone_confluence_required: bool = Field(
+        default=False,
+        description="Hard reject SMC setups when 4h structure opposes direction",
+    )
+    htf_zone_confluence_bonus: float = Field(
+        default=0.03,
+        ge=0.0,
+        le=0.15,
+        description="Score bonus when 15m entry overlaps 1h OB/FVG zone",
+    )
     # Composable filter stages (Phase 6). Empty tuple = all defaults enabled.
     enabled_stages: tuple[str, ...] = (
         "freshness",
@@ -396,6 +425,22 @@ class TrackingConfig(_StrictModel):
     max_stop_distance_pct: float = Field(default=15.0, ge=0.5, le=100.0)
     agg_trade_page_limit: int = Field(default=6, ge=1, le=20)
     agg_trade_page_size: int = Field(default=1000, ge=100, le=1000)
+    # Pre-activation gate: re-check thesis when price enters entry zone (report-2 §G/J).
+    pre_activation_gate_enabled: bool = True
+    activation_staleness_atr_mult: float = Field(default=1.2, ge=0.5, le=3.0)
+    activation_context_max_age_seconds: float = Field(default=120.0, ge=30.0, le=600.0)
+    activation_min_score: float = Field(default=0.65, ge=0.0, le=1.0)
+    activation_score_decay_per_bar: float = Field(default=0.03, ge=0.0, le=0.1)
+    reversal_activation_pin_required: bool = Field(
+        default=False,
+        description="Require pin/engulf on activation bar for reversal profiles",
+    )
+    reversal_pending_expiry_minutes: int = Field(default=150, ge=15, le=720)
+    continuation_pending_expiry_minutes: int = Field(default=240, ge=30, le=1440)
+    trend_follow_activation_requires_close: bool = Field(
+        default=True,
+        description="Require bar close inside entry zone for trend_follow limit fills (report-5 §10)",
+    )
     # Hours for MetaSignalMerger direction-conflict window vs recent ACTION signals.
     action_window_hours: float = Field(default=4.0, ge=0.5, le=168.0)
 
@@ -419,7 +464,6 @@ class SetupConfig(_StrictModel):
     indicator_divergence: bool = True
     funding_reversal: bool = True
     cvd_divergence: bool = True
-    session_killzone: bool = True
     breaker_block: bool = True
     turtle_soup: bool = True
     # Phase 5.3 expansion
@@ -434,22 +478,15 @@ class SetupConfig(_StrictModel):
     spread_strategy: bool = True
     depth_imbalance: bool = True
     absorption: bool = True
-    aggression_shift: bool = True
     liquidation_heatmap: bool = True
-    stop_hunt_detection: bool = True
     multi_tf_trend: bool = True
     rsi_divergence_bottom: bool = True
     wyckoff_spring: bool = True
-    bb_squeeze: bool = True
-    atr_expansion: bool = True
     ls_ratio_extreme: bool = True
     oi_divergence: bool = True
     btc_correlation: bool = True
     altcoin_season_index: bool = True
-    orderflow_imbalance: bool = True
     pinbar_reversal: bool = True
-    fakeout_detector: bool = True
-    cvd_exhaustion: bool = True
 
     def enabled_setup_ids(self) -> tuple[str, ...]:
         return tuple(
@@ -470,6 +507,8 @@ class ScoringConfig(_StrictModel):
     weight_oi_momentum: float = Field(default=0.08, ge=0.0, le=1.0)
     weight_liquidation_proximity: float = Field(default=0.04, ge=0.0, le=0.25)
     weight_session_killzone: float = Field(default=0.03, ge=0.0, le=0.25)
+    weight_orderflow_imbalance: float = Field(default=0.04, ge=0.0, le=0.25)
+    weight_aggression_shift: float = Field(default=0.03, ge=0.0, le=0.25)
     weight_macd_alignment: float = Field(default=0.05, ge=0.0, le=0.20)
     weight_obv_alignment: float = Field(default=0.03, ge=0.0, le=0.20)
     weight_adx_strength: float = Field(default=0.04, ge=0.0, le=0.20)
@@ -495,6 +534,8 @@ class ScoringConfig(_StrictModel):
             "weight_oi_momentum": float(self.weight_oi_momentum),
             "weight_liquidation_proximity": float(self.weight_liquidation_proximity),
             "weight_session_killzone": float(self.weight_session_killzone),
+            "weight_orderflow_imbalance": float(self.weight_orderflow_imbalance),
+            "weight_aggression_shift": float(self.weight_aggression_shift),
             "weight_macd_alignment": float(self.weight_macd_alignment),
             "weight_obv_alignment": float(self.weight_obv_alignment),
             "weight_adx_strength": float(self.weight_adx_strength),
@@ -573,6 +614,18 @@ class DeliveryConfig(_StrictModel):
         le=5,
         description="Hard gate min confirmations for reversal profiles in bear BTC regime",
     )
+    countertrend_reversal_min_confirmations: int = Field(
+        default=4,
+        ge=1,
+        le=5,
+        description="Hard gate min confirmations for counter-trend reversal setups",
+    )
+    min_sl_penalty_samples: int = Field(
+        default=10,
+        ge=1,
+        le=100,
+        description="Minimum executed outcomes before strategy SL-rate penalty applies",
+    )
     target_rr: tuple[float, float, float] = Field(
         default=(1.9, 3.0, 5.0),
         description="Default TP1/TP2/TP3 risk-reward multiples for trade-plan normalization",
@@ -615,7 +668,7 @@ class DeliveryConfig(_StrictModel):
         description="Per-setup minimum minutes between any deliveries (setup-wide, not per-symbol)",
     )
     dedup_window_hours: float = Field(
-        default=4.0,
+        default=0.25,
         ge=0.0,
         le=168.0,
         description="Skip same setup+symbol+direction signal if delivered within this window",
