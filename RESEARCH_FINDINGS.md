@@ -133,3 +133,28 @@ Round 1 зафиксирован. Round 2 в процессе.
 - trendrider.net overfitting, surmount.ai walk-forward, arxiv 2209.05559 DRL backtest overfit
 - metrotrade.com RR ratio, clearank.com breakeven win rate
 
+
+---
+
+## IMPLEMENTATION AUDIT (2026-06-08) — research vs реальный код
+
+Проверил каждую находку против кода. Большинство уже реализовано:
+
+| # | Находка | Статус в коде | Действие |
+|---|---------|---------------|----------|
+| 3 | Volatility-adaptive chase_pct | ❌ был фиксирован 0.8% | ✅ ВНЕДРЕНО: `adaptive_chase_pct()` scale by ATR% (limit_entry.py) |
+| 6 | min_rr 1.9→2.0 | ✅ уже 2.0 (config L174 + все per-strategy) | без изменений |
+| 4 | FVG/OB mitigation | ✅ уже есть: ZoneState fresh/mitigated/invalidated (smc.py); OB режет mitigated (L222); FVG берёт только fresh; `close_mitigation` параметр (wick default = research-correct) | без изменений |
+| 5 | liquidation/sweep direction | ✅ уже корректно: liquidity_sweep & stop_hunt = failed-breakout reversal (sweep high→short+close back below). liquidation_heatmap = score+close_position confirm (валидно) | без изменений |
+| 2 | Signal-lock/дедуп | ✅ уже есть: delivery content-hash deque(512) + dedup 4h window + intra_candle throttle 60s/15bps | без изменений |
+| 1 | Multi-TF trigger | ⚠️ РЕАЛЬНЫЙ ПРОБЕЛ: WS kline_intervals=['15m'], все 42 trigger_tf=15m, хотя analysis_kline_intervals=['5m','15m','1h'] | ТРЕБУЕТ валидации (см. ниже) |
+
+### Task #1 (multi-TF) — почему не хот-патч
+Изменение требует ОБОИХ: WS intervals + reassign 42×trigger_tf. Reassign без бэктеста = ровно то, против чего предупреждает research («90% стратегий overfit, не меняй пороги без walk-forward/OOS»). Только WS-изменение без trigger_tf = чистая нагрузка без эффекта (стратегии всё равно стреляют на 15m).
+**План:** (1) WS kline_intervals=['5m','15m','1h']; (2) reassign trigger_tf по research-таблице ТОЛЬКО где pattern_tf уже указывает старший ТФ (multi_tf_trend pat=4h/1h→trig 1h; structure_break_retest pat=1h/15m); (3) walk-forward валидация per-strategy ПЕРЕД полным rollout. Это отдельный валидируемый проект, не hot-patch на живой системе.
+
+### Реально внедрено в этой сессии
+- ✅ market/limit order разделение (42 стратегии, ENTRY_ORDER_TYPE) — коммиты 12932b3, 1a00438
+- ✅ volatility-adaptive chase_pct — коммит 038be5b
+- ✅ route_all_enabled_strategies=true (5→36 активных стратегий)
+- ✅ intra_candle_max_setups=0 (снят лимит 8)
