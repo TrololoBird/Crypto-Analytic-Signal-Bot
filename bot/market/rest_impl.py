@@ -918,16 +918,12 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             if env_only:
                 urls = [env_only]
         self._proxy_pool = ProxyPool.from_urls(urls, cooldown_seconds=net.failover_cooldown_seconds)
-        # proxy_url="" → direct preferred, but if pool has entries use first as active route
-        # so _try_failover_proxy has a non-empty current to rotate from.
-        self._proxy_url = resolve_proxy_url(config_url=net.proxy_url, trust_env=net.trust_env)
+        # Active egress: pool has first priority. If pool is None or disabled, fall back to env.
         explicit_proxy = bool(str(net.proxy_url or "").strip())
-        if (
-            not self._proxy_url
-            and self._proxy_pool is not None
-            and (explicit_proxy or net.failover_enabled)
-        ):
+        if self._proxy_pool is not None and (explicit_proxy or net.failover_enabled):
             self._proxy_url = self._proxy_pool.current()
+        else:
+            self._proxy_url = resolve_proxy_url(config_url=net.proxy_url, trust_env=net.trust_env)
         # Pool with multiple entries implies failover capability even if flag not set in config.
         if (
             not self._proxy_failover_enabled
@@ -1036,7 +1032,6 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             if not cfg.is_file():
                 LOG.warning("auto proxy discovery: config not found | path=%s", cfg)
                 return
-            from bot.domain.config import load_settings as _ls  # noqa: PLC0415
             from bot.market.proxy_bootstrap import (  # noqa: PLC0415
                 _write_proxies_to_config,
                 auto_discover_proxies,
@@ -1047,9 +1042,8 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
                 LOG.warning("auto proxy discovery: no working proxy found")
                 return
             await asyncio.to_thread(_write_proxies_to_config, cfg, urls)
-            new_settings = _ls(cfg)
             new_pool = ProxyPool.from_urls(
-                new_urls, cooldown_seconds=new_settings.network.failover_cooldown_seconds
+                urls, cooldown_seconds=300.0
             )
             if new_pool is None:
                 return

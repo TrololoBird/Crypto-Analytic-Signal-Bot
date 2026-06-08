@@ -1,25 +1,16 @@
 """Autonomous proxy management: discover → validate → connect → rotate.
 
-Research baseline 2026 (20+ projects, stars-sorted):
-  SOCKS5 lists  — TheSpeedX/PROXY-List ~5.6k★, proxifly ~5.5k★, monosans/proxy-list,
-                  hookzof, ErcinDedeoglu, fyvri, proxygenerator1, vakhov/fresh-proxy-list,
-                  Thordata/awesome-free-proxy-list, dinoz0rg/proxy-list, Firmfox/Proxify,
-                  VPSLabCloud, iplocate, databay-labs, gfpcom, ClearProxy, Anonym0usWork1221
-  HTTP fallback — monosans HTTP, TheSpeedX HTTP, proxifly HTTP, ErcinDedeoglu HTTP,
-                  vakhov HTTP, Thordata HTTP, fyvri HTTP
-  APIs          — ProxyScrape v4 (1-min freshness, SOCKS5+HTTP)
-  Tor           — local daemon on 127.0.0.1:9050 + stem NEWNYM circuit rotation
-  ProxyBroker2  — bluet/proxybroker2, asyncio, 50+ sources (optional dep)
-
 On startup ``ensure_network_ready`` is called.  If direct Binance egress
 works and no explicit proxy_url is set, auto-discovered pools are cleared
-so both REST and WS go direct.  If blocked, the module fetches 20+ public
-no-auth lists, validates against the real Binance fstream endpoint with 80
-concurrent workers, keeps fastest working proxies, and hot-swaps the live
-pool without restarting.
+so both REST and WS go direct.  If blocked, the module discovers proxies
+from 20+ public no-auth lists, validates against the real Binance fstream
+endpoint with 80 concurrent workers, keeps fastest working proxies, and
+hot-swaps the live pool without restarting.
 
 Tor circuit rotation: when a local Tor daemon + stem library are available,
 ``tor_rotate_circuit()`` sends NEWNYM every refresh cycle for a fresh exit IP.
+
+Source list constants live in ``_proxy_sources.py``.
 """
 
 from __future__ import annotations
@@ -36,6 +27,21 @@ import aiohttp
 import websockets
 
 from bot.domain.config import BotSettings, NetworkConfig
+from bot.market._proxy_sources import (
+    _BINANCE_PING_URL,
+    _BINANCE_WS_HANDSHAKE_URL,
+    _HTTP_SOURCES,
+    _MAX_CANDIDATES,
+    _MAX_POOL_SIZE,
+    _MIN_WORKING_PROXIES,
+    _POOL_REFRESH_INTERVAL_S,
+    _REST_SYMBOL_THRESHOLD,
+    _SOCKS5_SOURCES,
+    _VALIDATE_CONCURRENCY,
+    _VALIDATE_TIMEOUT_S,
+    _WS_PROBE_TIMEOUT_SECONDS,
+    _gather_candidates,
+)
 from bot.market.data import BinanceFuturesMarketData
 from bot.market.network_proxy import websockets_connect_kwargs
 from bot.market.rest_impl import BinanceClientImpl
@@ -56,101 +62,6 @@ except ImportError:
     ProxyConnector = None  # type: ignore[misc,assignment]
 
 LOG = logging.getLogger("bot.market.proxy_bootstrap")
-
-# ---------------------------------------------------------------------------
-# Public proxy-list sources — no registration, no auth, updated frequently
-# ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
-# Proxy source lists — 2026 research baseline (stars-sorted)
-# ---------------------------------------------------------------------------
-
-_SOCKS5_SOURCES: list[str] = [
-    # ① ProxyScrape v4 API — 1-min freshness, ~22k proxies, socks5://ip:port
-    (
-        "https://api.proxyscrape.com/v4/free-proxy-list/get"
-        "?request=display_proxies&proxy_format=protocolipport"
-        "&format=text&proxy_type=socks5"
-    ),
-    # ② TheSpeedX/PROXY-List ~5.6k★ — daily, 9k+ proxies
-    "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt",
-    # ③ proxifly/free-proxy-list ~5.5k★ — 5-min freshness
-    "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/socks5/data.txt",
-    # ④ monosans/proxy-list — hourly pre-validated + geolocation
-    "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt",
-    # ⑤ hookzof/socks5_list — auto-updated, Telegram-proxies verified
-    "https://raw.githubusercontent.com/hookzof/socks5_list/master/proxy.txt",
-    # ⑥ ErcinDedeoglu/proxies — hourly, daily-fresh
-    "https://raw.githubusercontent.com/ErcinDedeoglu/proxies/main/proxies/socks5.txt",
-    # ⑦ vakhov/fresh-proxy-list — GitHub Pages, daily tested (2026 research)
-    "https://vakhov.github.io/fresh-proxy-list/socks5.txt",
-    # ⑧ Thordata/awesome-free-proxy-list — GitHub Actions daily auto-verified
-    "https://raw.githubusercontent.com/Thordata/awesome-free-proxy-list/main/proxy/socks5.txt",
-    # ⑨ dinoz0rg/proxy-list — scraped + checked version (2026 research)
-    "https://raw.githubusercontent.com/dinoz0rg/proxy-list/main/checked_proxies/socks5.txt",
-    # ⑩ Firmfox/Proxify — SOCKS5 + V2Ray configs, 50+ sources, hourly (2026 research)
-    "https://raw.githubusercontent.com/Firmfox/Proxify/main/proxy/socks5.txt",
-    # ⑪ fyvri/fresh-proxy-list — hourly, multi-format (JSON/TXT/CSV/XML/YAML)
-    "https://raw.githubusercontent.com/fyvri/fresh-proxy-list/main/source/classic/socks5.txt",
-    # ⑫ proxygenerator1/ProxyGenerator — deeply verified MostStable tier
-    "https://raw.githubusercontent.com/proxygenerator1/ProxyGenerator/main/MostStable/socks5.txt",
-    # ⑬ VPSLabCloud — 15-min freshness, elite+anonymous+transparent tiers
-    "https://raw.githubusercontent.com/VPSLabCloud/VPSLab-Free-Proxy-List/main/socks5.txt",
-    # ⑭ iplocate/free-proxy-list — 30-min freshness
-    "https://raw.githubusercontent.com/iplocate/free-proxy-list/main/proxies/socks5.txt",
-    # ⑮ databay-labs — 5-min freshness, strict SSL, zero MITM policy
-    "https://raw.githubusercontent.com/databay-labs/free-proxy-list/main/proxies/socks5.txt",
-    # ⑯ gfpcom — 30-min, includes V2Ray/XRay/Wireguard configs too
-    "https://raw.githubusercontent.com/gfpcom/free-proxy-list/main/socks5.txt",
-    # ⑰ Anonym0usWork1221/Free-Proxies — community maintained
-    "https://raw.githubusercontent.com/Anonym0usWork1221/Free-Proxies/main/proxy_files/socks5_proxies.txt",
-    # ⑱ ClearProxy/checked-proxy-list — 5-min, verified against Google/Discord/X
-    "https://raw.githubusercontent.com/ClearProxy/checked-proxy-list/main/data/socks5.txt",
-    # ⑲ ShiftyTR/Proxy-List — curated community list
-    "https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/socks5.txt",
-    # ⑳ openproxy.space — community-verified no-auth API
-    "https://openproxy.space/list/socks5",
-]
-
-# HTTP proxy sources — fallback when SOCKS5 pool is insufficient
-_HTTP_SOURCES: list[str] = [
-    # ProxyScrape v4 HTTP — 1-min freshness
-    (
-        "https://api.proxyscrape.com/v4/free-proxy-list/get"
-        "?request=display_proxies&proxy_format=protocolipport"
-        "&format=text&proxy_type=http"
-    ),
-    # monosans HTTP — hourly pre-validated
-    "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
-    # TheSpeedX HTTP
-    "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
-    # proxifly HTTP — 5-min freshness
-    "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/http/data.txt",
-    # ErcinDedeoglu HTTP — hourly
-    "https://raw.githubusercontent.com/ErcinDedeoglu/proxies/main/proxies/http.txt",
-    # vakhov HTTP — daily tested (GitHub Pages, 2026 research)
-    "https://vakhov.github.io/fresh-proxy-list/http.txt",
-    # Thordata HTTP — GitHub Actions daily
-    "https://raw.githubusercontent.com/Thordata/awesome-free-proxy-list/main/proxy/http.txt",
-    # fyvri HTTP — hourly
-    "https://raw.githubusercontent.com/fyvri/fresh-proxy-list/main/source/classic/http.txt",
-]
-
-# Keep legacy alias so external callers (scripts/) still work
-_PROXY_SOURCES = _SOCKS5_SOURCES
-
-# Binance futures REST ping — lightweight, returns {} on success
-_BINANCE_PING_URL = "https://fapi.binance.com/fapi/v1/ping"
-_BINANCE_WS_HANDSHAKE_URL = "wss://fstream.binance.com/ws"
-
-_VALIDATE_CONCURRENCY = 80  # simultaneous proxy checks
-_VALIDATE_TIMEOUT_S = 10.0  # per-proxy validation timeout (SOCKS5+SSL needs ~6-8s)
-_FETCH_TIMEOUT_S = 15.0  # per-source HTTP fetch timeout
-_MAX_CANDIDATES = 2000  # cap before validation (memory guard)
-_MIN_WORKING_PROXIES = 2  # minimum to accept discovery result
-_MAX_POOL_SIZE = 25  # proxies kept in the live pool
-_REST_SYMBOL_THRESHOLD = 100
-_WS_PROBE_TIMEOUT_SECONDS = 15.0
-_POOL_REFRESH_INTERVAL_S = 900.0  # background refresh every 15 min (was 30)
 
 
 # ---------------------------------------------------------------------------
@@ -262,13 +173,26 @@ async def _probe_direct() -> NetworkProbeResult:
 async def _probe_configured(urls: list[str]) -> NetworkProbeResult:
     if not urls:
         return NetworkProbeResult(rest_ok=False, ws_ok=False)
-    net = NetworkConfig(
-        proxy_url=urls[0],
-        proxy_urls=urls[1:],
-        trust_env=False,
-        failover_enabled=True,
+
+    async def _probe_one(url: str) -> NetworkProbeResult:
+        net = NetworkConfig(
+            proxy_url=url,
+            proxy_urls=[],
+            trust_env=False,
+            failover_enabled=False,
+        )
+        return await probe_network(net)
+
+    results = await asyncio.gather(
+        *[_probe_one(u) for u in urls], return_exceptions=True
     )
-    return await probe_network(net)
+    rest_ok = any(
+        isinstance(r, NetworkProbeResult) and r.rest_ok for r in results
+    )
+    ws_ok = any(
+        isinstance(r, NetworkProbeResult) and r.ws_ok for r in results
+    )
+    return NetworkProbeResult(rest_ok=rest_ok, ws_ok=ws_ok)
 
 
 def _log_probe_result(label: str, result: NetworkProbeResult) -> None:
@@ -343,43 +267,6 @@ async def tor_rotate_circuit(*, control_port: int = 9051, timeout_s: float = 15.
         return False
 
 
-async def _fetch_source(
-    session: aiohttp.ClientSession,
-    url: str,
-    *,
-    protocol: str = "socks5",
-) -> list[str]:
-    """Fetch one public proxy list; return normalized ``<protocol>://ip:port`` lines."""
-    try:
-        async with asyncio.timeout(_FETCH_TIMEOUT_S):
-            async with session.get(url) as resp:
-                if resp.status != 200:
-                    LOG.debug("proxy source %s → HTTP %d", url, resp.status)
-                    return []
-                text = await resp.text()
-    except defensive_exc_types(aiohttp.ClientError) as exc:
-        LOG.debug("proxy source fetch failed | url=%s err=%s", url, exc)
-        return []
-
-    scheme = protocol.lower()
-    out: list[str] = []
-    for raw in text.splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        if (
-            line.startswith(f"{scheme}://")
-            or (line.startswith("socks5://") and scheme == "socks5")
-            or (line.startswith("http://") and scheme == "http")
-        ):
-            out.append(line)
-        elif "://" not in line and ":" in line:
-            # bare ip:port — prefix with requested protocol
-            out.append(f"{scheme}://{line}")
-        # skip mismatched protocols
-    return out
-
-
 async def _validate_proxy_binance(
     proxy_url: str,
     sem: asyncio.Semaphore,
@@ -421,33 +308,6 @@ async def _validate_proxy_binance(
             if connector is not None and not connector.closed:
                 connector.close()
     return None
-
-
-async def _gather_candidates(
-    sources: list[str],
-    *,
-    protocol: str = "socks5",
-) -> list[str]:
-    """Fetch all sources in parallel and return deduplicated proxy URLs."""
-    connector_limit = max(len(sources), 20)
-    async with aiohttp.ClientSession(
-        connector=aiohttp.TCPConnector(limit=connector_limit, ssl=False),
-        headers={"User-Agent": "python-aiohttp/3"},
-        timeout=aiohttp.ClientTimeout(total=_FETCH_TIMEOUT_S + 5),
-    ) as session:
-        fetch_results = await asyncio.gather(
-            *[_fetch_source(session, url, protocol=protocol) for url in sources],
-            return_exceptions=True,
-        )
-    seen: set[str] = set()
-    out: list[str] = []
-    for r in fetch_results:
-        if isinstance(r, list):
-            for url in r:
-                if url not in seen:
-                    seen.add(url)
-                    out.append(url)
-    return out
 
 
 async def _validate_batch(
@@ -710,11 +570,10 @@ async def run_proxy_refresh_loop(
         except TimeoutError:
             pass
 
-        LOG.info("proxy refresh: scheduled re-discovery starting")
+        LOG.info("proxy refresh: cycle starting")
 
         # If direct Binance egress works and no explicit proxy is configured,
-        # do not inject an auto-discovered pool — it would override a working
-        # direct connection with an untested proxy.
+        # do not inject an auto-discovered pool.
         direct_probe = await _probe_direct()
         bot_settings = getattr(bot, "settings", None)
         explicit_proxy = str(
@@ -722,12 +581,36 @@ async def run_proxy_refresh_loop(
         ).strip()
         if direct_probe.rest_ok and not explicit_proxy:
             LOG.info(
-                "proxy refresh: direct Binance ok, no explicit proxy_url — skipping pool injection"
+                "proxy refresh: direct Binance ok, no explicit proxy_url — skipping"
             )
             continue
 
-        # Rotate Tor circuit first (new exit IP before validating new pool)
+        # Rotate Tor circuit first (new exit IP)
         tor_rotated = await tor_rotate_circuit()
+
+        # Step 1 — fast path: re-validate existing pool members
+        rest_client = getattr(bot, "client", None)
+        inner = getattr(rest_client, "_binance_client", None)
+        pool = getattr(inner, "_proxy_pool", None) if inner is not None else None
+
+        removed = 0
+        if pool is not None and pool.urls:
+            removed = await pool.revalidate(
+                _validate_proxy_binance,
+                concurrency=min(_VALIDATE_CONCURRENCY, 30),
+                timeout_s=_VALIDATE_TIMEOUT_S,
+            )
+            if removed:
+                LOG.info("proxy refresh: revalidate removed %d dead proxies", removed)
+
+        # Step 2 — top-up or full discovery if pool is too small
+        pool_size = len(pool.urls) if pool is not None else 0
+        if pool_size >= _MIN_WORKING_PROXIES:
+            LOG.info(
+                "proxy refresh: revalidate good, pool has %d proxies — keeping current",
+                pool_size,
+            )
+            continue
 
         try:
             best = await auto_discover_proxies()
@@ -736,18 +619,25 @@ async def run_proxy_refresh_loop(
             continue
 
         if len(best) < _MIN_WORKING_PROXIES:
-            LOG.warning("proxy refresh: only %d proxies found — keeping current pool", len(best))
+            LOG.warning(
+                "proxy refresh: only %d proxies found — keeping current pool (%d)",
+                len(best),
+                pool_size,
+            )
             continue
 
+        # Persist discovered proxies to config.toml for next startup
+        config_path: Path | None = getattr(bot, "_config_path", None) or _config_path
+        if config_path is not None:
+            try:
+                await asyncio.to_thread(_write_proxies_to_config, config_path, best)
+            except DEFENSIVE_EXC as exc:
+                LOG.warning("proxy refresh: config persist failed | %s", exc)
+
         # Update live REST client pool
-        rest_client = getattr(bot, "client", None)
-        inner = getattr(rest_client, "_binance_client", None)
         if inner is not None:
-            pool = getattr(inner, "_proxy_pool", None)
             if pool is not None:
-                pool.urls = best
-                pool._bad_until.clear()
-                pool._index = 0
+                pool.reset(best)
             try:
                 await inner._apply_active_proxy(best[0])
                 inner._last_failover_mono = 0.0  # reset rate-limit after deliberate swap

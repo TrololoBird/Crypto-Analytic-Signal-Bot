@@ -241,9 +241,10 @@ failover_cooldown_seconds = 300"""
     lines.extend(f'  "{item}",' for item in rest)
     lines.append("]")
     failover_line = "failover_enabled = false" if direct_ok else "failover_enabled = true"
+    trust_line = "trust_env = false" if direct_ok else "trust_env = true"
     lines.extend(
         [
-            "trust_env = true",
+            trust_line,
             failover_line,
             "failover_cooldown_seconds = 300",
         ]

@@ -626,10 +626,20 @@ class ShortlistService:
                         != bot.settings.network.effective_proxy_urls()
                     ):
                         bot.settings = refreshed
-                        LOG.warning(
-                            "proxy pool refreshed after REST failure - "
-                            "restart bot to apply new egress"
-                        )
+                        _inner = getattr(bot, "client", None)
+                        _inner = getattr(_inner, "_binance_client", None) if _inner else None
+                        if _inner is not None and hasattr(_inner, "_apply_active_proxy"):
+                            new_url = refreshed.network.proxy_url or (
+                                refreshed.network.effective_proxy_urls()[0]
+                                if refreshed.network.effective_proxy_urls()
+                                else None
+                            )
+                            await _inner._apply_active_proxy(new_url)
+                            LOG.warning(
+                                "proxy pool refreshed after REST failure — "
+                                "hot-swapped egress | url=%s",
+                                new_url,
+                            )
                 except DEFENSIVE_EXC:
                     LOG.debug("network rediscovery after ticker failure skipped", exc_info=True)
             raise tickers_result
