@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 from typing import Any, Literal
 
-EntryOrderType = Literal["limit"]
+EntryOrderType = Literal["limit", "market"]
 DEFAULT_ENTRY_ORDER_TYPE: EntryOrderType = "limit"
 DEFAULT_LATE_ENTRY_CHASE_PCT = 0.008
 
@@ -148,20 +148,34 @@ def limit_delivery_ready(
     entry_high: float,
     stop: float,
     chase_pct: float = DEFAULT_LATE_ENTRY_CHASE_PCT,
+    entry_order_type: str = "limit",
 ) -> tuple[bool, str | None, dict[str, float | str | bool]]:
-    """Reject delivery when the limit plan is already invalidated or chasing."""
-    details: dict[str, float | str | bool] = {"entry_order_type": DEFAULT_ENTRY_ORDER_TYPE}
+    """Reject delivery when the limit plan is already invalidated or chasing.
+
+    Market-order strategies (entry_order_type="market") skip zone-staleness checks —
+    they enter at current price and the chase gate is not applicable.
+    Only SL violation is enforced for both types.
+    """
+    is_market = str(entry_order_type or "limit").strip().lower() == "market"
+    order_type: EntryOrderType = "market" if is_market else "limit"
+    details: dict[str, float | str | bool] = {"entry_order_type": order_type}
     if mark_price is None or not math.isfinite(mark_price) or mark_price <= 0:
         details["mark_price_missing"] = True
         return True, None, details
 
-    chase = max(0.0005, float(chase_pct))
     norm = str(direction or "").strip().lower()
     details["mark_price"] = mark_price
 
-    # At publish time only: reject plans whose SL is already violated by mark.
-    # This is not tracking cancellation - the signal never reaches the channel.
+    # Market strategies: only block if SL already violated at publish time.
+    if is_market:
+        if norm == "long" and mark_price <= stop:
+            return False, "limit_publish_rejected", details
+        if norm == "short" and mark_price >= stop:
+            return False, "limit_publish_rejected", details
+        return True, None, details
 
+    # Limit strategies: reject if SL violated OR price chased away from zone.
+    chase = max(0.0005, float(chase_pct))
     if norm == "long":
         if mark_price <= stop:
             return False, "limit_publish_rejected", details

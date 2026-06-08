@@ -99,6 +99,7 @@ def evaluate_publish_readiness(
     entry_high: float,
     stop: float,
     chase_pct: float,
+    entry_order_type: str = "limit",
 ) -> tuple[bool, str | None, dict[str, object]]:
     """Publish-time limit gate - delegates to domain limit_entry semantics."""
     ready, reason, details = limit_delivery_ready(
@@ -108,5 +109,6 @@ def evaluate_publish_readiness(
         entry_high=entry_high,
         stop=stop,
         chase_pct=chase_pct,
+        entry_order_type=entry_order_type,
     )
     return ready, reason, dict(details)
