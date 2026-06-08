@@ -50,10 +50,11 @@ class ProxySessionManager:
         return self._pool
 
     def current(self) -> str | None:
-        """Return the active proxy URL (or ``None`` for direct)."""
-        if self._pool is not None:
-            cur: str = self._pool.current()
-            return cur
+        """Return the active proxy URL (or ``None`` for direct).
+
+        Always returns the value last set via ``set_active``, ``rotate``,
+        or ``refresh_pool`` — never reads from the pool directly.
+        """
         return self._active_key
 
     async def get_session(self) -> aiohttp.ClientSession:
@@ -81,7 +82,7 @@ class ProxySessionManager:
         """Explicitly set the active proxy URL (bypass pool)."""
         old = self._active_key
         self._active_key = url
-        if old is not None and old != url:
+        if old != url:
             await self._evict(old)
 
     async def refresh_pool(self, urls: list[str]) -> None:

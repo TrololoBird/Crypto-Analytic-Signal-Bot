@@ -415,7 +415,6 @@ class RestHttpMixin(RestCircuitMixin):
     _weight_budget: _WeightBudgetManager
     _futures_data_limiter: _SlidingWindowRateLimiter
     _funding_endpoint_limiter: _SlidingWindowRateLimiter
-    _http_session: aiohttp.ClientSession | None
     _last_rest_weight_1m: int | None
     _last_rest_response_time_ms: float | None
     _circuit_failures: dict[str, int]
