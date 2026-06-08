@@ -158,3 +158,61 @@ Round 1 зафиксирован. Round 2 в процессе.
 - ✅ volatility-adaptive chase_pct — коммит 038be5b
 - ✅ route_all_enabled_strategies=true (5→36 активных стратегий)
 - ✅ intra_candle_max_setups=0 (снят лимит 8)
+
+---
+
+## ROUND 3 — глубокий аудит 14 модулей (проверка против кода, не документации)
+
+Сгенерировано 25 вопросов × 14 групп модулей. Каждый острый вопрос проверен
+против **реального кода**. Вывод: кодовая база ЗРЕЛАЯ — большинство гипотез
+аудита уже корректно реализованы. Слепой рефакторинг рабочего live-кода был бы
+вредом. Найдены и исправлены **2 реальных бага**.
+
+### Подтверждено КОРРЕКТНЫМ (с доказательством в коде)
+| Гипотеза | Реальность |
+|---|---|
+| CVD = грубый proxy по volume-sign | ❌ опровергнуто: `add_session_cvd` = `2·taker_buy_base_volume − volume` (истинная taker-delta); `cvd_divergence` — pivot-based + 1.5σ порог |
+| aggression_shift не использует taker volume | ❌ опровергнуто: `spec_delta = 2·taker_buy − volume` (`_common.py:193`) |
+| OI divergence direction инвертирована | ❌ опровергнуто: price↑+OI↓→short (fade), price↑+OI↑→long (trend) — верно |
+| Calibration примитивна | ❌ опровергнуто: gradient-trust ramp 0..20 outcomes + Bayesian win-rate blend (wr_weight→0.35) |
+| Нет Telegram rate-limit | ❌ опровергнуто: `_respect_rate_limit` + `TelegramRetryAfter` + burst deque(256) |
+| SQLite без WAL | ❌ опровергнуто: `PRAGMA journal_mode=WAL` + `busy_timeout=30000` |
+| Нет дедупа доставки | ❌ опровергнуто: content_hash deque(512) + 4h window + intra-candle throttle |
+| adaptive_chase_pct мёртв (atr_pct не прокинут) | ❌ опровергнуто: `Signal.atr_pct` объявлен + прокинут через оба пути (direct + spec) |
+| SL-rate penalty не обновляется | ❌ опровергнуто: `update_strategy_sl_rates()` из orchestrator:137 |
+| **Multi-TF (Task #1) — реальный пробел** | ❌ опровергнуто: `symbol_analyzer` тянет 4h/1h/15m/5m через `fetch_klines_cached` ПРИ КАЖДОМ анализе (REST-кэш, bar-aware TTL: 1h→3600s, 4h→14400s). WS 15m = триггер-часы; multi-TF УЖЕ работает. Reassign trigger_tf = лишняя нагрузка без эффекта + риск overfit. **Task #1 закрыт.** |
+
+### НАЙДЕНО И ИСПРАВЛЕНО (2 реальных бага)
+
+**Баг #1 — session killzone: рассинхрон + DST + мёртвая ветка** (commit phase-sessions)
+- `scoring.py` использовал часы `{0,1,2,7,8,9,12,13,14}`, а `session_killzone.py` —
+  London 7-10 / NY 13-17: ДВА несовпадающих определения killzone.
+- Оба хардкодили UTC без DST. По ICT killzone фиксированы в ЛОКАЛЬНОМ времени
+  NY/London → их UTC-границы сдвигаются на 1ч в март/ноябрь. Старый код был
+  верен только зимой.
+- `scoring.py` проверял `strategy_family in {"session","momentum"}` — НИ ОДНА из
+  этих family не существует (мёртвая ветка).
+- Фикс: новый `bot/domain/sessions.py` — единый DST-aware источник через zoneinfo
+  (Europe/London, America/New_York). Оба потребителя используют его. Проверено:
+  12:30Z зимой→None, летом→NY (ровно DST-коррекция).
+
+**Баг #2 — entry_order_type терялся на границе persistence (КОРНЕВОЙ)** (commit phase-tracking)
+- market/limit тип считался через весь delivery pipeline, но `active_signals` НЕ
+  имел колонки `entry_order_type`; `save_active_signal` его не whitelist'ил;
+  `_tracked_from_payload` ставил setdefault('limit'). → На каждом reload тип
+  сбрасывался в 'limit'. Lifecycle трактовал ВСЕ сигналы как лимитные, несмотря
+  на весь market/limit рефакторинг.
+- Также: активация в `_tracking_review.py` всегда ждала zone-touch (лимитная
+  семантика), даже для market — market-сигналы, ушедшие из зоны до первого
+  review, никогда не заполнялись → expire без outcome → искажение статистики.
+- Фикс: колонка `entry_order_type` через `_ACTIVE_SIGNALS_OPTIONAL_COLUMNS`
+  (идемпотентный ALTER) + whitelist. Round-trip проверен: market→market,
+  limit→limit. Market активируется на первом наблюдении (fill ≈ publish price);
+  limit сохраняет zone-fill.
+
+### НЕ менял намеренно (риск > польза на live)
+- `_apply_component_edge` +0.025 flat bias + калибровочные множители ×1.15/×1.35:
+  это рычаг tuning доставки, не баг. Снятие подавило бы доставку (а бот и так
+  исторически с трудом доставлял). Менять только с walk-forward.
+- Реассайн trigger_tf 42 стратегий: research прямо предупреждает (overfit), а
+  multi-TF и так работает через REST-кэш. Не трогаю без OOS-валидации.
