@@ -25,6 +25,7 @@ from bot.domain.schemas import (
     SymbolFrames,
     SymbolMeta,
 )
+from bot.market._proxy_session import ProxySessionManager
 from bot.market._rest_circuit import RestCircuitMixin
 from bot.market._rest_frames import (
     _coerce_rest_row,
@@ -68,7 +69,6 @@ from bot.market.data import (
 from bot.market.network_proxy import (
     aiohttp_request_proxy,
     apply_proxy_env,
-    close_aiohttp_session,
     create_aiohttp_session,
     mask_proxy_url,
     resolve_proxy_url,
@@ -838,30 +838,26 @@ class RestHttpMixin(RestCircuitMixin):
         except (TypeError, ValueError):
             self._last_rest_response_time_ms = None
 
+    def _make_http_session(self, url: str | None) -> aiohttp.ClientSession:
+        _using_proxy = bool(url)
+        timeout = aiohttp.ClientTimeout(
+            total=self._rest_timeout,
+            connect=min(8.0, self._rest_timeout),
+            sock_connect=None if _using_proxy else 5.0,
+        )
+        return create_aiohttp_session(
+            proxy_url=url,
+            trust_env=bool(getattr(self, "_trust_env", True)),
+            timeout=timeout,
+            connector_limit=_HTTP_CONNECTOR_LIMIT,
+        )
+
     async def _get_http_session(self) -> aiohttp.ClientSession:
-        session = self._http_session
-        if session is None or session.closed:
-            _using_proxy = bool(getattr(self, "_proxy_url", None))
-            timeout = aiohttp.ClientTimeout(
-                total=self._rest_timeout,
-                connect=min(8.0, self._rest_timeout),
-                # Fast-fail TCP connect only on direct — proxy SOCKS5 handshake needs more time.
-                sock_connect=None if _using_proxy else 5.0,
-            )
-            self._http_session = create_aiohttp_session(
-                proxy_url=getattr(self, "_proxy_url", None),
-                trust_env=bool(getattr(self, "_trust_env", True)),
-                timeout=timeout,
-                connector_limit=_HTTP_CONNECTOR_LIMIT,
-            )
-        session = self._http_session
-        assert session is not None
-        return session
+        return await self._session_manager.get_session()
 
     async def close(self) -> None:
-        """Close aiohttp session."""
-        await close_aiohttp_session(self._http_session)
-        self._http_session = None
+        """Close all proxy sessions."""
+        await self._session_manager.close_all()
 
     def state_snapshot(self) -> dict[str, float | int | str | None]:
         now = time.monotonic()
@@ -986,7 +982,11 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             max_requests=_FUNDING_ENDPOINT_IP_LIMIT_OFFICIAL_MAX,
             window_seconds=_FUNDING_ENDPOINT_IP_LIMIT_WINDOW_S,
         )
-        self._http_session: aiohttp.ClientSession | None = None
+        self._session_manager = ProxySessionManager(
+            self._proxy_pool,
+            session_factory=self._make_http_session,
+            active_proxy_url=self._proxy_url,
+        )
         self._klines_cache: dict[tuple[str, str, int], tuple[float, Any]] = {}
         self._klines_locks: dict[tuple[str, str, int], asyncio.Lock] = {}
         self._derived_klines_cache: dict[tuple[str, str, str, int], tuple[float, Any]] = {}
@@ -1015,8 +1015,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         self._proxy_url = url
         if url:
             apply_proxy_env(url)
-        await close_aiohttp_session(self._http_session)
-        self._http_session = None
+        await self._session_manager.set_active(url)
         ws = self._ws
         if ws is not None and hasattr(ws, "update_proxy_url"):
             ws.update_proxy_url(url, trust_env=self._trust_env)
@@ -1048,6 +1047,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             if new_pool is None:
                 return
             self._proxy_pool = new_pool
+            self._session_manager.replace_pool(new_pool)
             first = new_pool.current()
             if first:
                 await self._apply_active_proxy(first)

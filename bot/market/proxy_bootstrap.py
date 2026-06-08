@@ -35,28 +35,25 @@ from bot.market._proxy_sources import (
     _MAX_POOL_SIZE,
     _MIN_WORKING_PROXIES,
     _POOL_REFRESH_INTERVAL_S,
-    _REST_SYMBOL_THRESHOLD,
     _SOCKS5_SOURCES,
     _VALIDATE_CONCURRENCY,
     _VALIDATE_TIMEOUT_S,
     _WS_PROBE_TIMEOUT_SECONDS,
     _gather_candidates,
 )
-from bot.market.data import BinanceFuturesMarketData
 from bot.market.network_proxy import websockets_connect_kwargs
-from bot.market.rest_impl import BinanceClientImpl
 from bot.runtime.errors import DEFENSIVE_EXC, defensive_exc_types
 
 try:
     import stem
     import stem.control
 except ImportError:
-    stem = None  # type: ignore[assignment,misc]
+    stem = None
 
 try:
     from aiohttp_socks import ProxyConnector
 except ImportError:
-    ProxyConnector = None  # type: ignore[misc,assignment]
+    ProxyConnector = None
 
 LOG = logging.getLogger("bot.market.proxy_bootstrap")
 
@@ -141,17 +138,30 @@ async def probe_ws_handshake(
 
 
 async def _probe_rest(net: NetworkConfig) -> bool:
-    client = BinanceClientImpl(rest_timeout_seconds=12.0, network=net)
-    market = BinanceFuturesMarketData(binance_client=client)
+    """Probe Binance REST ping directly without creating a full client."""
+    proxy_url = str(net.proxy_url or "").strip() or None
+    is_socks = bool(proxy_url and proxy_url.startswith("socks"))
     try:
-        symbols = await market.fetch_exchange_symbols()
-        return len(symbols) > _REST_SYMBOL_THRESHOLD
-    except (KeyboardInterrupt, SystemExit):
-        raise
+        async with asyncio.timeout(12.0):
+            if is_socks:
+                if ProxyConnector is None:
+                    return False
+                connector = ProxyConnector.from_url(proxy_url, rdns=True)
+                async with (
+                    aiohttp.ClientSession(connector=connector) as sess,
+                    sess.get(_BINANCE_PING_URL, ssl=True) as resp,
+                ):
+                    status: int = resp.status
+                    return status == 200
+            else:
+                async with (
+                    aiohttp.ClientSession() as sess,
+                    sess.get(_BINANCE_PING_URL, proxy=proxy_url, ssl=True) as resp,
+                ):
+                    status = resp.status
+                    return status == 200
     except defensive_exc_types(aiohttp.ClientError):
         return False
-    finally:
-        await market.close()
 
 
 async def probe_network(net: NetworkConfig) -> NetworkProbeResult:
@@ -429,10 +439,10 @@ def _write_proxies_to_config(path: Path, urls: list[str]) -> None:
         return
 
     document: tomlkit.TOMLDocument = tomlkit.parse(path.read_text(encoding="utf-8"))
-    network = document.get("bot", tomlkit.table()).get("network", tomlkit.table())  # type: ignore[union-attr]
+    network = document.get("bot", tomlkit.table()).get("network", tomlkit.table())
 
-    network["proxy_url"] = urls[0]  # type: ignore[index]
-    network["proxy_urls"] = urls[1:]  # type: ignore[index]
+    network["proxy_url"] = urls[0]
+    network["proxy_urls"] = urls[1:]
 
     path.write_text(tomlkit.dumps(document), encoding="utf-8")
     LOG.info(
@@ -538,17 +548,23 @@ async def run_proxy_refresh_loop(
     *,
     interval_seconds: float = _POOL_REFRESH_INTERVAL_S,
     _config_path: Path | None = None,
+    shutdown_event: asyncio.Event | None = None,
 ) -> None:
     """
     Background task — re-discover working proxies every *interval_seconds*
     and hot-swap the live pool without restarting the bot.
 
+    Accepts an optional *shutdown_event* to signal graceful termination;
+    falls back to ``bot._shutdown`` if not provided.
+
     Accesses from *bot* (SignalBot):
       ``client._binance_client`` — live BinanceClientImpl
       ``ws_manager``             — live FuturesWSManager
-      ``_shutdown``              — asyncio.Event
+      ``_shutdown``              — asyncio.Event (fallback)
     """
-    shutdown: asyncio.Event = getattr(bot, "_shutdown", asyncio.Event())
+    shutdown: asyncio.Event = shutdown_event if shutdown_event is not None else getattr(
+        bot, "_shutdown", asyncio.Event()
+    )
     LOG.info("proxy refresh loop started | interval=%.0fs", interval_seconds)
 
     while not shutdown.is_set():
@@ -557,6 +573,9 @@ async def run_proxy_refresh_loop(
             break  # shutdown fired
         except TimeoutError:
             pass
+
+        if shutdown.is_set():
+            break
 
         LOG.info("proxy refresh: cycle starting")
 
@@ -572,6 +591,9 @@ async def run_proxy_refresh_loop(
                 "proxy refresh: direct Binance ok, no explicit proxy_url — skipping"
             )
             continue
+
+        if shutdown.is_set():
+            break
 
         # Rotate Tor circuit first (new exit IP)
         tor_rotated = await tor_rotate_circuit()
@@ -591,6 +613,9 @@ async def run_proxy_refresh_loop(
             if removed:
                 LOG.info("proxy refresh: revalidate removed %d dead proxies", removed)
 
+        if shutdown.is_set():
+            break
+
         # Step 2 — top-up or full discovery if pool is too small
         pool_size = len(pool.urls) if pool is not None else 0
         if pool_size >= _MIN_WORKING_PROXIES:
@@ -600,11 +625,17 @@ async def run_proxy_refresh_loop(
             )
             continue
 
+        if shutdown.is_set():
+            break
+
         try:
             best = await auto_discover_proxies()
         except DEFENSIVE_EXC as exc:
             LOG.warning("proxy refresh: discovery error | %s", exc)
             continue
+
+        if shutdown.is_set():
+            break
 
         if len(best) < _MIN_WORKING_PROXIES:
             LOG.warning(
