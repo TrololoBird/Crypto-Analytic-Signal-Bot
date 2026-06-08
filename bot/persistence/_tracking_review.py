@@ -390,11 +390,17 @@ class TPSLReviewMixin:
                         )
                     )
                     return events
-                fill_ok, fill_note = should_activate_limit_fill_price(
-                    entry_low=tracked.entry_low,
-                    entry_high=tracked.entry_high,
-                    price=trade.price,
-                )
+                # Market orders enter at current price immediately (no zone re-touch
+                # wait — that is limit semantics). Limit orders fill only when price
+                # trades back into the published zone.
+                if str(tracked.entry_order_type or "limit").strip().lower() == "market":
+                    fill_ok, fill_note = True, "market_immediate_fill"
+                else:
+                    fill_ok, fill_note = should_activate_limit_fill_price(
+                        entry_low=tracked.entry_low,
+                        entry_high=tracked.entry_high,
+                        price=trade.price,
+                    )
                 if fill_ok:
                     if tracked.entry_zone_touched_at is None:
                         tracked.entry_zone_touched_at = trade.trade_time.astimezone(UTC).isoformat()
@@ -591,22 +597,33 @@ class TPSLReviewMixin:
                         )
                     )
                     return events
-                activate_ok, activate_note = should_activate_limit_entry(
-                    direction=tracked.direction,
-                    confirmation_profile=tracked.confirmation_profile,
-                    entry_low=tracked.entry_low,
-                    entry_high=tracked.entry_high,
-                    open_=bar_open,
-                    close=bar_close,
-                    high=bar_high,
-                    low=bar_low,
-                )
-                if activate_ok:
-                    fill_price = (
-                        bar_close
-                        if _price_in_entry_zone(tracked, bar_close)
-                        else (tracked.entry_low + tracked.entry_high) / 2.0
+                is_market = str(tracked.entry_order_type or "limit").strip().lower() == "market"
+                if is_market:
+                    # Market orders enter at current price on the first observed bar
+                    # (≈ publish price) — no zone re-touch wait, which is limit semantics.
+                    activate_ok, activate_note = True, "market_immediate_fill"
+                else:
+                    activate_ok, activate_note = should_activate_limit_entry(
+                        direction=tracked.direction,
+                        confirmation_profile=tracked.confirmation_profile,
+                        entry_low=tracked.entry_low,
+                        entry_high=tracked.entry_high,
+                        open_=bar_open,
+                        close=bar_close,
+                        high=bar_high,
+                        low=bar_low,
                     )
+                if activate_ok:
+                    if is_market:
+                        # Honest market fill ≈ publish price = zone midpoint; never the
+                        # later bar_close (that would back-date a more favourable fill).
+                        fill_price = (tracked.entry_low + tracked.entry_high) / 2.0
+                    else:
+                        fill_price = (
+                            bar_close
+                            if _price_in_entry_zone(tracked, bar_close)
+                            else (tracked.entry_low + tracked.entry_high) / 2.0
+                        )
                     tracked.entry_zone_touched_at = bar_close_time.astimezone(UTC).isoformat()
                     await self._mark_activated(
                         tracked,

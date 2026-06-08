@@ -63,6 +63,10 @@ _ACTIVE_SIGNALS_OPTIONAL_COLUMNS: dict[str, str] = {
     "entry_confirm_pending_at": "TEXT",
     "last_lifecycle_note": "TEXT",
     "trailing_stop": "REAL",
+    # Market vs limit entry semantics must survive into the lifecycle: without this
+    # column the value was silently dropped on persist and every signal reloaded as
+    # "limit", collapsing the entire market/limit split inside tracking/activation.
+    "entry_order_type": "TEXT DEFAULT 'limit'",
 }
 
 
@@ -960,6 +964,7 @@ class MemoryRepository(_MemoryRepositoryBases):
             "entry_confirm_pending_at",
             "last_lifecycle_note",
             "trailing_stop",
+            "entry_order_type",
         ]
 
         values = []
