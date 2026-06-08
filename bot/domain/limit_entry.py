@@ -15,6 +15,23 @@ EntryOrderType = Literal["limit", "market"]
 DEFAULT_ENTRY_ORDER_TYPE: EntryOrderType = "limit"
 DEFAULT_LATE_ENTRY_CHASE_PCT = 0.008
 
+# Reference ATR% (15m) at which the base chase tolerance applies. In higher-
+# volatility regimes price travels faster, so the chase band scales up with ATR%
+# (research: fixed thresholds deadlock delivery in volatile regimes). Capped to
+# avoid letting a runaway-ATR symbol publish arbitrarily stale limit plans.
+_CHASE_REFERENCE_ATR_PCT = 0.8
+_CHASE_ATR_SCALE_MAX = 3.0
+
+
+def adaptive_chase_pct(base_chase: float, atr_pct: float | None) -> float:
+    """Scale chase tolerance by ATR% relative to reference (volatility-adaptive)."""
+    base = max(0.0005, float(base_chase))
+    if atr_pct is None or not math.isfinite(float(atr_pct)) or atr_pct <= 0.0:
+        return base
+    scale = float(atr_pct) / _CHASE_REFERENCE_ATR_PCT
+    scale = min(_CHASE_ATR_SCALE_MAX, max(1.0, scale))
+    return base * scale
+
 _KNOWN_PROFILES = frozenset(
     {
         "trend_follow",
@@ -149,12 +166,16 @@ def limit_delivery_ready(
     stop: float,
     chase_pct: float = DEFAULT_LATE_ENTRY_CHASE_PCT,
     entry_order_type: str = "limit",
+    atr_pct: float | None = None,
 ) -> tuple[bool, str | None, dict[str, float | str | bool]]:
     """Reject delivery when the limit plan is already invalidated or chasing.
 
     Market-order strategies (entry_order_type="market") skip zone-staleness checks —
     they enter at current price and the chase gate is not applicable.
     Only SL violation is enforced for both types.
+
+    The chase tolerance scales with ``atr_pct`` (volatility-adaptive): higher
+    volatility widens the band so volatile regimes do not deadlock delivery.
     """
     is_market = str(entry_order_type or "limit").strip().lower() == "market"
     order_type: EntryOrderType = "market" if is_market else "limit"
@@ -175,7 +196,8 @@ def limit_delivery_ready(
         return True, None, details
 
     # Limit strategies: reject if SL violated OR price chased away from zone.
-    chase = max(0.0005, float(chase_pct))
+    chase = adaptive_chase_pct(chase_pct, atr_pct)
+    details["chase_pct_effective"] = chase
     if norm == "long":
         if mark_price <= stop:
             return False, "limit_publish_rejected", details

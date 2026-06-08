@@ -115,6 +115,7 @@ class DeliveryRankingMixin:
             stop=float(signal.stop),
             chase_pct=chase_pct,
             entry_order_type=str(getattr(signal, "entry_order_type", "limit") or "limit"),
+            atr_pct=getattr(signal, "atr_pct", None),
         )
         return ready, reason, dict(details)
 
