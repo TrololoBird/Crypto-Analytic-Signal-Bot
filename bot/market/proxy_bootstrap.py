@@ -18,12 +18,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import re
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import aiohttp
+import tomlkit
 import websockets
 
 from bot.domain.config import BotSettings, NetworkConfig
@@ -46,9 +46,6 @@ from bot.market.data import BinanceFuturesMarketData
 from bot.market.network_proxy import websockets_connect_kwargs
 from bot.market.rest_impl import BinanceClientImpl
 from bot.runtime.errors import DEFENSIVE_EXC, defensive_exc_types
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 try:
     import stem
@@ -425,32 +422,23 @@ async def auto_discover_proxies(
 
 def _write_proxies_to_config(path: Path, urls: list[str]) -> None:
     """
-    Persist *urls* into config.toml — updates ``proxy_url`` and
-    ``proxy_urls`` in-place; all other settings are preserved.
+    Persist *urls* into config.toml via tomlkit (preserves comments/formatting).
+    Updates ``proxy_url`` and ``proxy_urls`` in the ``[bot.network]`` section.
     """
     if not path.is_file() or not urls:
         return
-    text = path.read_text(encoding="utf-8")
-    primary = urls[0]
-    rest = urls[1:]
 
-    # Replace proxy_url = "..."
-    text = re.sub(r'(proxy_url\s*=\s*)"[^"]*"', rf'\1"{primary}"', text)
+    document: tomlkit.TOMLDocument = tomlkit.parse(path.read_text(encoding="utf-8"))
+    network = document.get("bot", tomlkit.table()).get("network", tomlkit.table())  # type: ignore[union-attr]
 
-    # Replace proxy_urls = [ ... ] (multi-line block)
-    urls_toml = "[\n" + "".join(f'  "{u}",\n' for u in rest) + "]"
-    text = re.sub(
-        r"proxy_urls\s*=\s*\[.*?\]",
-        f"proxy_urls = {urls_toml}",
-        text,
-        flags=re.DOTALL,
-    )
+    network["proxy_url"] = urls[0]  # type: ignore[index]
+    network["proxy_urls"] = urls[1:]  # type: ignore[index]
 
-    path.write_text(text, encoding="utf-8")
+    path.write_text(tomlkit.dumps(document), encoding="utf-8")
     LOG.info(
         "proxy config persisted | path=%s primary=%s pool_size=%d",
         path,
-        primary,
+        urls[0],
         len(urls),
     )
 
@@ -679,6 +667,7 @@ async def retry_network_after_failure(
     best = await auto_discover_proxies()
     if len(best) < _MIN_WORKING_PROXIES:
         return settings
+    _write_proxies_to_config(_config_path or Path(settings.config_path), best)
     net = settings.network.model_copy(
         update={"proxy_url": best[0], "proxy_urls": best[1:], "failover_enabled": True}
     )

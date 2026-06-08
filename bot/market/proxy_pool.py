@@ -1,4 +1,4 @@
-"""Rotating egress proxy pool with cooldown-based failover and circuit breaker."""
+"""Rotating egress proxy pool with exponential-backoff and circuit breaker."""
 
 from __future__ import annotations
 
@@ -16,11 +16,16 @@ from bot.market.network_proxy import mask_proxy_url
 LOG = logging.getLogger("bot.market.proxy_pool")
 
 _CIRCUIT_BREAKER_MAX_FAILURES = 5  # consecutive failures → permanent removal
+_MAX_BACKOFF_SECONDS = 3600.0  # 1h cap on per-proxy exponential backoff
 
 
 @dataclass
 class ProxyPool:
-    """Round-robin proxy list; failed endpoints cool off then become eligible again.
+    """Round-robin proxy list with per-proxy exponential backoff on failure.
+
+    Base cooldown (``cooldown_seconds``, default 300 s) is doubled on each
+    consecutive failure (1 -> 300 s, 2 -> 600 s, 3 -> 1200 s, ...) capped at 1 h.
+    A single intervening ``mark_success`` resets the backoff to the base value.
 
     Circuit breaker: after ``_CIRCUIT_BREAKER_MAX_FAILURES`` consecutive failures
     without an intervening success, the URL is removed from the pool permanently.
@@ -62,15 +67,20 @@ class ProxyPool:
                 return idx
         return None
 
+    def _backoff_duration(self, failures: int) -> float:
+        """Exponential backoff capped at ``_MAX_BACKOFF_SECONDS``."""
+        return min(_MAX_BACKOFF_SECONDS, self.cooldown_seconds * (2 ** (failures - 1)))  # type: ignore[no-any-return]
+
     def mark_failed(self, url: str, reason: str) -> str | None:
-        """Mark *url* bad; circuit-breaker if too many consecutive failures."""
+        """Mark *url* bad with exponential backoff; circuit-breaker on N consecutive."""
         if url in self.urls:
             self._failure_count[url] = self._failure_count.get(url, 0) + 1
-            self._bad_until[url] = time.monotonic() + self.cooldown_seconds
+            backoff = self._backoff_duration(self._failure_count[url])
+            self._bad_until[url] = time.monotonic() + backoff
             LOG.warning(
-                "proxy marked bad | url=%s cooldown_s=%.0f failures=%d reason=%s",
+                "proxy marked bad | url=%s backoff_s=%.0f failures=%d reason=%s",
                 mask_proxy_url(url),
-                self.cooldown_seconds,
+                backoff,
                 self._failure_count[url],
                 reason[:120],
             )

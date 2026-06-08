@@ -159,7 +159,7 @@ async def _gather_candidates(
     """Fetch all sources in parallel and return deduplicated proxy URLs."""
     connector_limit = max(len(sources), 20)
     async with aiohttp.ClientSession(
-        connector=aiohttp.TCPConnector(limit=connector_limit, ssl=False),
+        connector=aiohttp.TCPConnector(limit=connector_limit, ssl=True),
         headers={"User-Agent": "python-aiohttp/3"},
         timeout=aiohttp.ClientTimeout(total=_FETCH_TIMEOUT_S + 5),
     ) as session:
