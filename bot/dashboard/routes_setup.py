@@ -314,15 +314,19 @@ def register_routes(dashboard: BotDashboard) -> None:
     @self.app.get("/api/v1/signals/history")
     async def v1_signals_history(
         limit: int = 20,
+        offset: int = 0,
         symbol: str = "",
         setup_id: str = "",
-    ) -> list[dict[str, Any]]:
-        signals = self._get_recent_signals(limit=max(1, min(int(limit), 100)))
+    ) -> dict[str, Any]:
+        cap = max(1, min(int(limit), 100))
+        off = max(0, int(offset))
+        signals = self._get_recent_signals(limit=cap + off)
         if symbol:
             signals = [s for s in signals if str(s.get("symbol", "")).upper() == symbol.upper()]
         if setup_id:
             signals = [s for s in signals if str(s.get("setup_id", "")) == setup_id]
-        return signals
+        page = signals[off:off + cap]
+        return {"data": page, "limit": cap, "offset": off, "total": len(signals)}
 
     @self.app.get("/api/v1/signals/active")
     async def v1_signals_active() -> list[dict[str, Any]]:
