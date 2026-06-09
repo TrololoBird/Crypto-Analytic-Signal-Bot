@@ -502,12 +502,15 @@ class RestHttpMixin(RestCircuitMixin):
                 old_proxy = self._proxy_url
                 await self._apply_active_proxy(None)
                 try:
-                    return await self._call_public_http_json_attempt(
+                    result = await self._call_public_http_json_attempt(
                         operation, params=params, symbol=symbol
                     )
                 except (MarketDataUnavailable, *_SOCKS_PROXY_ERRORS, aiohttp.ClientError):
                     LOG.warning("direct fallback also failed | operation=%s", operation)
                     await self._apply_active_proxy(old_proxy)
+                else:
+                    LOG.info("direct fallback ok | operation=%s", operation)
+                    return result
             raise
         except (*_SOCKS_PROXY_ERRORS, aiohttp.ClientError) as exc:
             # When routed through a proxy, any connection error is proxy-related.
@@ -527,7 +530,7 @@ class RestHttpMixin(RestCircuitMixin):
                 old_proxy = self._proxy_url
                 await self._apply_active_proxy(None)
                 try:
-                    return await self._call_public_http_json_attempt(
+                    result = await self._call_public_http_json_attempt(
                         operation, params=params, symbol=symbol
                     )
                 except (MarketDataUnavailable, *_SOCKS_PROXY_ERRORS, aiohttp.ClientError):
@@ -536,6 +539,9 @@ class RestHttpMixin(RestCircuitMixin):
                         operation,
                     )
                     await self._apply_active_proxy(old_proxy)
+                else:
+                    LOG.info("direct fallback ok | operation=%s", operation)
+                    return result
             self._record_circuit_failure(operation)
             raise MarketDataUnavailable(
                 operation=operation,
@@ -1125,6 +1131,19 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
 
     _MIN_FAILOVER_INTERVAL_S: float = 30.0
 
+    async def _maybe_fire_emergency_discovery(self) -> None:
+        """Start background proxy discovery if not already in progress."""
+        if hasattr(self, "_auto_discover_and_apply_proxy") and not getattr(
+            self, "_proxy_discovery_in_progress", False
+        ):
+            _emergency = asyncio.create_task(
+                self._auto_discover_and_apply_proxy(),
+                name="emergency_proxy_discovery",
+            )
+            _emergency.add_done_callback(
+                lambda t: t.exception() if not t.cancelled() else None
+            )
+
     async def _try_failover_proxy(self, reason: str) -> bool:
         if not self._proxy_failover_enabled:
             return False
@@ -1134,7 +1153,9 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
         current = getattr(self, "_proxy_url", None)
         if not current:
             return False
-        if not pool.has_alternatives():
+        # Fire emergency discovery early when pool is too small to rotate.
+        if not pool.has_alternatives() or len(pool.urls) <= 2:
+            await self._maybe_fire_emergency_discovery()
             return False
         async with pool._failover_lock:
             # Re-check rate-limit after acquiring lock — another task may have
@@ -1148,17 +1169,7 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             nxt = pool.rotate_after_failure(current, reason)
             if not nxt:
                 # Pool exhausted — fire emergency background discovery.
-                LOG.warning("proxy pool exhausted — starting emergency discovery")
-                if hasattr(self, "_auto_discover_and_apply_proxy") and not getattr(
-                    self, "_proxy_discovery_in_progress", False
-                ):
-                    _emergency = asyncio.create_task(
-                        self._auto_discover_and_apply_proxy(),
-                        name="emergency_proxy_discovery",
-                    )
-                    _emergency.add_done_callback(
-                        lambda t: t.exception() if not t.cancelled() else None
-                    )
+                await self._maybe_fire_emergency_discovery()
                 return False
             self._last_failover_mono = now
             await self._apply_active_proxy(nxt)
