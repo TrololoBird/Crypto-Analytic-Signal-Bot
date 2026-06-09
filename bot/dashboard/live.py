@@ -10,7 +10,6 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
-import sqlite3
 import time
 from collections import Counter, defaultdict, deque
 from dataclasses import dataclass
@@ -84,45 +83,14 @@ def _utc_now() -> datetime:
 
 
 def _tracking_open_counts(bot: Any) -> dict[str, int]:
-    """Sync read of pending/active rows for dashboard overview.
-
-    TODO(phase-b): Make DashboardLiveData methods async so this can use
-    bot._modern_repo.get_tracking_stats() directly.
-    """
+    """Sync read of pending/active rows for dashboard overview (via repo)."""
     repo = getattr(bot, "_modern_repo", None)
-    if repo is not None and hasattr(repo, "_conn") and repo._conn is not None:
+    if repo is not None and hasattr(repo, "get_open_signal_counts_sync"):
         try:
-            conn = repo._conn
-            cursor = conn.execute(
-                "SELECT status, COUNT(*) FROM active_signals "
-                "WHERE status IN ('pending','active') GROUP BY status"
-            )
-            rows = cursor.fetchall()
-            counts = {str(status): int(count) for status, count in rows}
-            pending = counts.get("pending", 0)
-            active = counts.get("active", 0)
-            return {"pending": pending, "active": active, "open": pending + active}
-        except (OSError, sqlite3.Error):
+            return repo.get_open_signal_counts_sync()
+        except OSError:
             pass
-    settings = getattr(bot, "settings", None)
-    db_path = getattr(settings, "db_path", None)
-    if db_path is None:
-        return {"pending": 0, "active": 0, "open": 0}
-    path = Path(db_path)
-    if not path.exists():
-        return {"pending": 0, "active": 0, "open": 0}
-    try:
-        with sqlite3.connect(path) as conn:
-            rows = conn.execute(
-                "SELECT status, COUNT(*) FROM active_signals "
-                "WHERE status IN ('pending','active') GROUP BY status"
-            ).fetchall()
-    except (OSError, sqlite3.Error):
-        return {"pending": 0, "active": 0, "open": 0}
-    counts = {str(status): int(count) for status, count in rows}
-    pending = counts.get("pending", 0)
-    active = counts.get("active", 0)
-    return {"pending": pending, "active": active, "open": pending + active}
+    return {"pending": 0, "active": 0, "open": 0}
 
 
 class DashboardLiveData:

@@ -67,6 +67,15 @@ _ACTIVE_SIGNALS_OPTIONAL_COLUMNS: dict[str, str] = {
     # column the value was silently dropped on persist and every signal reloaded as
     # "limit", collapsing the entire market/limit split inside tracking/activation.
     "entry_order_type": "TEXT DEFAULT 'limit'",
+    "entry_tf": "TEXT DEFAULT ''",
+    "pattern_tf": "TEXT DEFAULT ''",
+    "context_tfs": "TEXT DEFAULT '[]'",
+}
+
+_SIGNAL_OUTCOMES_OPTIONAL_COLUMNS: dict[str, str] = {
+    "entry_tf": "TEXT DEFAULT ''",
+    "pattern_tf": "TEXT DEFAULT ''",
+    "context_tfs": "TEXT DEFAULT '[]'",
 }
 
 
@@ -109,6 +118,7 @@ class MemoryRepository(_MemoryRepositoryBases):
         )
         await self._ensure_extended_tables(run_column_migrations=True)
         await self._ensure_table_columns("active_signals", _ACTIVE_SIGNALS_OPTIONAL_COLUMNS)
+        await self._ensure_table_columns("signal_outcomes", _SIGNAL_OUTCOMES_OPTIONAL_COLUMNS)
         await migrate_db(self._conn)
         await self._conn.commit()
         LOG.info("Memory repository initialized at %s", self._db_path)
@@ -965,6 +975,9 @@ class MemoryRepository(_MemoryRepositoryBases):
             "last_lifecycle_note",
             "trailing_stop",
             "entry_order_type",
+            "entry_tf",
+            "pattern_tf",
+            "context_tfs",
         ]
 
         values = []
@@ -973,6 +986,8 @@ class MemoryRepository(_MemoryRepositoryBases):
             if col == "reasons" and isinstance(val, (list, tuple)):
                 val = json.dumps(list(val))
             if col == "scale_weights" and isinstance(val, (list, tuple)):
+                val = json.dumps(list(val))
+            if col == "context_tfs" and isinstance(val, (list, tuple)):
                 val = json.dumps(list(val))
             values.append(val)
 
@@ -1063,6 +1078,14 @@ class MemoryRepository(_MemoryRepositoryBases):
                                 data.get("tracking_id"),
                             )
                             data["scale_weights"] = (0.5, 0.3, 0.2)
+                    if data.get("context_tfs"):
+                        try:
+                            parsed = json.loads(data["context_tfs"])
+                            data["context_tfs"] = tuple(str(tf) for tf in parsed) if isinstance(
+                                parsed, list
+                            ) else ()
+                        except (json.JSONDecodeError, TypeError, ValueError):
+                            data["context_tfs"] = ()
                     result.append(data)
                 return result
         except (aiosqlite.Error, sqlite3.Error):
@@ -1239,6 +1262,23 @@ class MemoryRepository(_MemoryRepositoryBases):
         stats["ambiguous"] = int(stats.pop("ambiguous_exit", 0))
         return {key: int(value) for key, value in stats.items()}
 
+    def get_open_signal_counts_sync(self) -> dict[str, int]:
+        """Sync read of pending/active counts for dashboard (runs inside asyncio.to_thread)."""
+        if not self._conn:
+            return {"pending": 0, "active": 0, "open": 0}
+        try:
+            cursor = self._conn.execute(
+                "SELECT status, COUNT(*) FROM active_signals "
+                "WHERE status IN ('pending','active') GROUP BY status"
+            )
+            rows = cursor.fetchall()
+            counts = {str(status): int(count) for status, count in rows}
+            pending = counts.get("pending", 0)
+            active = counts.get("active", 0)
+            return {"pending": pending, "active": active, "open": pending + active}
+        except (OSError, sqlite3.Error):
+            return {"pending": 0, "active": 0, "open": 0}
+
     async def increment_tracking_stats(self, **deltas: int) -> None:
         """Increment one or more tracking counters."""
         if not self._conn:
@@ -1307,11 +1347,12 @@ class MemoryRepository(_MemoryRepositoryBases):
         query = """
             INSERT INTO signal_outcomes (
                 tracking_id, signal_id, tracking_ref, symbol, setup_id, direction, timeframe,
+                entry_tf, pattern_tf, context_tfs,
                 created_at, activated_at, closed_at, entry_price, exit_price, result,
                 pnl_pct, pnl_r_multiple, max_profit_pct, max_loss_pct, mae, mfe,
                 time_to_entry_min, time_to_exit_min, features, was_profitable,
                 llm_was_correct, setup_quality
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(tracking_id) DO UPDATE SET
                 signal_id = excluded.signal_id,
                 tracking_ref = excluded.tracking_ref,
@@ -1319,6 +1360,9 @@ class MemoryRepository(_MemoryRepositoryBases):
                 setup_id = excluded.setup_id,
                 direction = excluded.direction,
                 timeframe = excluded.timeframe,
+                entry_tf = excluded.entry_tf,
+                pattern_tf = excluded.pattern_tf,
+                context_tfs = excluded.context_tfs,
                 created_at = excluded.created_at,
                 activated_at = excluded.activated_at,
                 closed_at = excluded.closed_at,
@@ -1350,6 +1394,13 @@ class MemoryRepository(_MemoryRepositoryBases):
                     item["setup_id"],
                     item["direction"],
                     item["timeframe"],
+                    item.get("entry_tf") or item.get("entry_tf_used") or item["timeframe"],
+                    item.get("pattern_tf", ""),
+                    json.dumps(
+                        list(item.get("context_tfs") or [])
+                        if not isinstance(item.get("context_tfs"), str)
+                        else item.get("context_tfs")
+                    ),
                     item["created_at"],
                     item.get("activated_at"),
                     item.get("closed_at"),

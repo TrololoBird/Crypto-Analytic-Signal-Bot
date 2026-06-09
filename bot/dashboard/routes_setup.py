@@ -54,15 +54,6 @@ def register_routes(dashboard: BotDashboard) -> None:
             LOG.exception("dashboard api status error")
             return {"error": "status_unavailable"}
 
-    @self.app.get("/api/signals/recent")
-    async def recent_signals(limit: int = 20) -> list[dict[str, Any]]:
-        try:
-            limit = max(1, min(int(limit), 100))
-            return self._get_recent_signals(limit)
-        except DEFENSIVE_EXC:
-            LOG.exception("dashboard api recent signals error")
-            return []
-
     @self.app.get("/api/metrics")
     async def metrics() -> dict[str, Any]:
         try:
@@ -117,21 +108,6 @@ def register_routes(dashboard: BotDashboard) -> None:
         self._analytics_cache[cache_key] = (now, merged)
         return merged
 
-    @self.app.get("/api/strategy/decisions")
-    async def strategy_decisions_spec(
-        limit_files: int = 1,
-        max_rows: int = 1_000,
-    ) -> dict[str, Any]:
-        try:
-            return await asyncio.to_thread(
-                self._get_strategy_decision_summary,
-                limit_files=limit_files,
-                max_rows=max_rows,
-            )
-        except DEFENSIVE_EXC:
-            LOG.exception("dashboard api strategy decisions error")
-            return {"error": "strategy_decisions_unavailable"}
-
     @self.app.get("/api/analytics/confluence_legs")
     async def confluence_legs(max_rows: int = 100_000) -> dict[str, Any]:
         try:
@@ -166,19 +142,6 @@ def register_routes(dashboard: BotDashboard) -> None:
             LOG.exception("dashboard api confluence legs by profile error")
             return {"error": "confluence_legs_by_profile_unavailable"}
 
-    @self.app.get("/api/strategies")
-    async def strategies() -> list[dict[str, Any]]:
-        """Return cached list of strategies with their enabled status."""
-        try:
-            if self._strategies_cache is None:
-                await asyncio.to_thread(self._cache_strategies)
-            if self._strategies_cache is not None:
-                return self._strategies_cache
-        except DEFENSIVE_EXC:
-            LOG.exception("dashboard api strategies error")
-            return []
-        else:
-            return []
 
     @self.app.get("/api/meta/labels")
     async def meta_labels() -> dict[str, dict[str, str]]:
@@ -211,23 +174,6 @@ def register_routes(dashboard: BotDashboard) -> None:
             LOG.exception("dashboard live funnel error")
             return {"error": "live_funnel_unavailable"}
 
-    @self.app.get("/api/live/funnel/reconcile")
-    async def live_funnel_reconcile(max_rows: int = 100_000) -> dict[str, Any]:
-        try:
-            max_rows = max(1_000, min(int(max_rows), 250_000))
-            return await asyncio.to_thread(
-                self._live_data.funnel_reconcile,
-                max_rows=max_rows,
-            )
-        except RuntimeError as exc:
-            if "shutdown" in str(exc).lower():
-                LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
-                return {"error": "Server is shutting down"}
-            raise
-        except DEFENSIVE_EXC:
-            LOG.exception("dashboard live funnel reconcile error")
-            return {"error": "live_funnel_reconcile_unavailable"}
-
     @self.app.get("/api/live/shortlist")
     async def live_shortlist(limit: int = 80) -> dict[str, Any]:
         try:
@@ -242,22 +188,6 @@ def register_routes(dashboard: BotDashboard) -> None:
             LOG.exception("dashboard live shortlist error")
             return {"error": "live_shortlist_unavailable"}
 
-    @self.app.get("/api/radar/summary")
-    async def radar_summary(hot_limit: int = 25) -> dict[str, Any]:
-        try:
-            hot_limit = max(1, min(int(hot_limit), 100))
-            return await asyncio.to_thread(
-                self._live_data.radar_summary,
-                hot_limit=hot_limit,
-            )
-        except RuntimeError as exc:
-            if "shutdown" in str(exc).lower():
-                LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
-                return {"error": "Server is shutting down"}
-            raise
-        except DEFENSIVE_EXC:
-            LOG.exception("dashboard radar summary error")
-            return {"error": "radar_summary_unavailable"}
 
     @self.app.get("/api/live/rejections")
     async def live_rejections(
