@@ -16,6 +16,9 @@ concurrency:
 env:
   PYTHON_VERSION: "3.14.5"
   CONFIG_PATH: config.toml.example
+  # Placeholders for validate_config (provider=telegram in config.toml.example).
+  TELEGRAM_BOT_TOKEN: "1234567890:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+  TELEGRAM_CHAT_ID: "-1000000000000"
 
 jobs:
   lint:
