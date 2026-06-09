@@ -133,7 +133,7 @@ def detect_pinbar_reversal(
     swing_touch = False
     w1h = confirmed_pattern_frame(prepared.work_1h)
     if w1h.height > 5:
-        sh_mask, sl_mask = _swing_points(w1h, n=3, include_unconfirmed_tail=True)
+        sh_mask, sl_mask = _swing_points(w1h, n=3, include_unconfirmed_tail=False)
         if direction == "long":
             swing_lows = w1h.filter(sl_mask)["low"]
             for sl_price in swing_lows:
@@ -149,7 +149,14 @@ def detect_pinbar_reversal(
                     reasons.append(f"wick_touches_swing_high={float(sh_price):.4f}")
                     break
 
+    no_htf_level_penalty = _as_float(
+        defaults.get("no_htf_level_penalty", defaults.get("no_htf_level_penalty", 0.70)),
+        0.70,
+    )
     adjusted_base = base_score + (swing_touch_boost if swing_touch else 0.0)
+    if not swing_touch:
+        adjusted_base *= no_htf_level_penalty
+        reasons.append(f"no_htf_swing_level_penalty={no_htf_level_penalty:.2f}")
 
     reasons.append(
         f"pinbar_{direction}: body={body:.4f} upper_wick={upper_wick:.4f} "
@@ -192,6 +199,7 @@ class PinbarReversalSetup(RoadmapSetup):
         "wick_to_atr_min": 0.3,
         "body_to_atr_max": 0.25,
         "swing_touch_boost": 0.10,
+        "no_htf_level_penalty": 0.70,
     }
 
     def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:

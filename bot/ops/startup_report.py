@@ -264,7 +264,7 @@ def _load_sqlite_tracking_snapshot(
 ) -> dict[str, Any]:
     async def _read() -> dict[str, Any]:
         repo = MemoryRepository(db_path=db_path, data_dir=bot_dir / "parquet")
-        await repo.initialize()
+        await repo.initialize(skip_ddl=True)
         try:
             last_days: int | None = None
             if since is not None:

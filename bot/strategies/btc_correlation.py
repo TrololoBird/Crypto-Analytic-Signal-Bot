@@ -41,7 +41,7 @@ def detect_btc_correlation(
             btc_bias = "bear"
         else:
             btc_bias = "neutral"
-    work = prepared.work_15m
+    work = prepared.work_1h
     # fix-sl-A: confirm momentum on last closed bar (df[-2]), not forming tail.
     vol_ratio = _prev(work, "volume_ratio20", 1.0)
     volume_penalty = vol_ratio < float(params["min_volume_ratio"])
@@ -94,7 +94,7 @@ def detect_btc_correlation(
 
 class BTCCorrelationSetup(RoadmapSetup):
     setup_id = "btc_correlation"
-    ENTRY_ORDER_TYPE: ClassVar[str] = "market"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "limit"
     family = "multi_asset"
     confirmation_profile = "trend_follow"
     required_context = ("futures_flow",)

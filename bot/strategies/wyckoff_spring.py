@@ -86,8 +86,8 @@ def detect_wyckoff_spring_prepared(
     family: str,
 ) -> Signal | None:
     params = effective_params
-    work = confirmed_pattern_frame(prepared.work_15m)
-    hit = detect_wyckoff_spring(work, timeframe="15m")
+    work = confirmed_pattern_frame(prepared.work_1h)
+    hit = detect_wyckoff_spring(work, timeframe="1h")
     if hit is not None:
         return build_spec_signal(
             prepared=prepared,

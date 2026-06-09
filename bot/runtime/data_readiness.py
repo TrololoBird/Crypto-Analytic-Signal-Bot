@@ -46,6 +46,56 @@ _PREPARED_FRAME_WARMUP_RESERVE: dict[str, int] = {
     "4h": 200,
 }
 
+# REST may return one bar fewer than requested; tolerate on raw-frame gate.
+_RAW_FRAME_ROW_TOLERANCE: dict[str, int] = {
+    "5m": 2,
+    "15m": 2,
+    "1h": 2,
+    "4h": 2,
+}
+
+_KLINE_FETCH_BUFFER_BARS = 80
+_KLINE_FETCH_BASELINE: dict[str, int] = {
+    "5m": 300,
+    "15m": 500,
+    "1h": 500,
+    "4h": 500,
+}
+_BINANCE_KLINE_MAX = 1500
+
+
+def kline_fetch_limit(configured_min_bars: int, timeframe: str) -> int:
+    """Bars to request from REST/WS so prepare survives warmup trimming."""
+    baseline = _KLINE_FETCH_BASELINE.get(timeframe, 240)
+    required = max(baseline, int(configured_min_bars) + _KLINE_FETCH_BUFFER_BARS)
+    return min(_BINANCE_KLINE_MAX, required)
+
+
+def configured_frame_minimums(settings: BotSettings) -> dict[str, int]:
+    filters = settings.filters
+    return {
+        "5m": int(filters.min_bars_5m),
+        "15m": int(filters.min_bars_15m),
+        "1h": int(filters.min_bars_1h),
+        "4h": int(filters.min_bars_4h),
+    }
+
+
+def raw_frame_minimums(settings: BotSettings) -> dict[str, int]:
+    """Minimum raw kline rows before prepare (with REST shortfall tolerance)."""
+    configured = configured_frame_minimums(settings)
+    return {
+        tf: max(30, int(min_bars) - _RAW_FRAME_ROW_TOLERANCE.get(tf, 2))
+        for tf, min_bars in configured.items()
+    }
+
+
+def effective_prepared_minimums(settings: BotSettings) -> dict[str, int]:
+    configured = configured_frame_minimums(settings)
+    return {
+        tf: _effective_prepared_minimum(min_bars, tf) for tf, min_bars in configured.items()
+    }
+
 
 def _effective_prepared_minimum(configured: int, timeframe: str) -> int:
     reserve = _PREPARED_FRAME_WARMUP_RESERVE.get(timeframe, 120)
@@ -108,12 +158,7 @@ def assess_symbol_data_readiness(
         "symbol": prepared.symbol,
         "radar_promoted": radar_promoted,
     }
-    minimums = {
-        "5m": _effective_prepared_minimum(int(filters.min_bars_5m), "5m"),
-        "15m": _effective_prepared_minimum(int(filters.min_bars_15m), "15m"),
-        "1h": _effective_prepared_minimum(int(filters.min_bars_1h), "1h"),
-        "4h": _effective_prepared_minimum(int(filters.min_bars_4h), "4h"),
-    }
+    minimums = effective_prepared_minimums(settings)
     rows = {
         "5m": prepared.work_5m.height if prepared.work_5m is not None else 0,
         "15m": prepared.work_15m.height if prepared.work_15m is not None else 0,

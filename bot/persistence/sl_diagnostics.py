@@ -2,7 +2,36 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
+
+CauseOfSL = Literal["timing", "regime", "stop_placement", "thesis"]
+
+_TIMING_CAUSES = frozenset({
+    "immediate_adverse_entry",
+    "bounce_phase_short_timing",
+    "late_activation_timing",
+    "quick_stop_no_follow_through",
+})
+_REGIME_CAUSES = frozenset({
+    "bear_long_immediate_stop",
+    "bear_long_countertrend",
+})
+_STOP_PLACEMENT_CAUSES = frozenset({
+    "wide_volatility_stop",
+    "stop_hunt_post_recovery",
+})
+
+
+def classify_cause_of_sl(code: str) -> CauseOfSL:
+    """Map detailed SL root-cause code to answers50 Q26 taxonomy."""
+    normalized = str(code or "").strip().lower()
+    if normalized in _TIMING_CAUSES:
+        return "timing"
+    if normalized in _REGIME_CAUSES:
+        return "regime"
+    if normalized in _STOP_PLACEMENT_CAUSES:
+        return "stop_placement"
+    return "thesis"
 
 
 def _f(value: Any) -> float | None:
@@ -60,9 +89,25 @@ def classify_stop_loss_root_cause(
     reasons: list[str] = []
     code = "thesis_failed"
 
+    activation_lag_s = _feature_float(feat, "activation_lag_seconds")
+    bias_1h = str(feat.get("bias_1h") or "").lower()
+
     if mfe <= 0.0:
         code = "immediate_adverse_entry"
         reasons.append("mfe_zero_price_never_favorable")
+
+    if (
+        dir_norm == "short"
+        and mfe <= 0.05
+        and bias_1h in {"neutral", "uptrend"}
+    ):
+        code = "bounce_phase_short_timing"
+        reasons.append("short_into_1h_bounce_or_neutral")
+
+    if activation_lag_s is not None and activation_lag_s > 300 and mfe <= 0.05:
+        reasons.append(f"activation_lag_{int(activation_lag_s)}s")
+        if code == "immediate_adverse_entry":
+            code = "late_activation_timing"
 
     bearish = (
         regime in {"bear", "decline", "risk_off"}
@@ -114,9 +159,13 @@ def classify_stop_loss_root_cause(
         "quick_stop_no_follow_through": "Быстрый стоп без follow-through",
         "stop_hunt_post_recovery": "Stop hunt - после SL цена шла к TP1",
         "thesis_failed": "Тезис не реализовался (обычный SL)",
+        "bounce_phase_short_timing": "Шорт в фазе 1H-отскока (MFE≈0)",
+        "late_activation_timing": "Поздняя активация limit-entry",
     }
+    cause_of_sl = classify_cause_of_sl(code)
     return {
         "code": code,
+        "cause_of_sl": cause_of_sl,
         "label": labels.get(code, code),
         "reasons": reasons,
         "metrics": {
@@ -125,6 +174,7 @@ def classify_stop_loss_root_cause(
             "time_to_entry_min": int(time_to_entry_min),
             "time_to_exit_min": int(time_to_exit_min),
             "active_minutes": active_minutes,
+            "activation_lag_seconds": activation_lag_s,
             "post_sl_favorable_pct": post_sl_fav,
             "post_sl_tp1_room_pct": post_sl_room,
         },
@@ -149,6 +199,7 @@ def reclassify_sl_outcomes(outcomes: list[dict[str, Any]]) -> list[dict[str, Any
             features=features,
         )
         features["sl_root_cause"] = sl_diag["code"]
+        features["cause_of_sl"] = sl_diag.get("cause_of_sl")
         features["sl_root_cause_label"] = sl_diag["label"]
         features["sl_diagnostics"] = sl_diag
         updated.append({**row, "features": features})

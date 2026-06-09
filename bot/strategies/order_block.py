@@ -27,7 +27,7 @@ __all__ = ["detect_order_block"]
 def detect_order_block(
     frame: pl.DataFrame,
     *,
-    timeframe: str = "15m",
+    timeframe: str = "1h",
     ob_max_age: int = 72,
     touch_buffer_atr: float = 0.25,
 ) -> SpecHit | None:
@@ -42,7 +42,7 @@ def detect_order_block(
     zone = latest_order_block(
         work,
         swing_length=3,
-        include_unconfirmed_tail=True,
+        include_unconfirmed_tail=False,
         current_price=close,
         touch_buffer=touch_buffer_atr * atr,
     )
@@ -54,11 +54,15 @@ def detect_order_block(
     bottom = as_float(zone.bottom)
     top = as_float(zone.top)
     direction = zone.direction
+    meta = zone.metadata or {}
+    wick_low = as_float(meta.get("wick_low"), bottom)
+    wick_high = as_float(meta.get("wick_high"), top)
+    stop_wick = wick_low if direction == "long" else wick_high
     return SpecHit(
         strategy="order_block",
         direction=direction,
         entry=(bottom + top) / 2.0,
-        stop_basis=bottom if direction == "long" else top,
+        stop_basis=stop_wick,
         atr=atr,
         timeframe=timeframe,
         reasons=(f"ob_zone={bottom:.4f}-{top:.4f}", f"age={age}"),
@@ -85,12 +89,15 @@ def _detect_order_block_extended(
     family: str,
 ) -> Signal | None:
     dynamic_params = effective
-    sl_buffer_atr = float(dynamic_params.get("sl_buffer_atr", defaults.get("sl_buffer_atr", 1.5)))
+    sl_buffer_atr = float(dynamic_params.get("sl_buffer_atr", defaults.get("sl_buffer_atr", 0.25)))
 
-    w15m = confirmed_pattern_frame(prepared.work_15m)
-    w1h = confirmed_pattern_frame(prepared.work_1h)
+    # Primary: 1h OB (structural level per research Q6/Q59). Context: 4h swings.
+    w15m = confirmed_pattern_frame(prepared.work_1h)
+    w1h = confirmed_pattern_frame(
+        prepared.work_4h if prepared.work_4h is not None else prepared.work_1h
+    )
     if w15m.height < 10:
-        _reject(prepared, setup_id, "insufficient_15m_bars", bars=w15m.height)
+        _reject(prepared, setup_id, "insufficient_1h_bars", bars=w15m.height)
         return None
 
     atr = float(w15m.item(-1, "atr14") or 0.0)
@@ -117,7 +124,7 @@ def _detect_order_block_extended(
     zone = latest_order_block(
         w15m,
         swing_length=3,
-        include_unconfirmed_tail=True,
+        include_unconfirmed_tail=False,
         current_price=price,
         touch_buffer=touch_buffer_atr * atr,
     )
@@ -155,6 +162,37 @@ def _detect_order_block_extended(
         _reject(prepared, setup_id, "order_block_too_old", age=age, max_age=ob_max_age)
         return None
 
+    ob_idx = int(zone.created_index)
+    ob_open = float(w15m.item(ob_idx, "open"))
+    ob_close = float(w15m.item(ob_idx, "close"))
+    ob_body = abs(ob_close - ob_open)
+    min_ob_body_atr = float(
+        dynamic_params.get("min_ob_body_atr", defaults.get("min_ob_body_atr", 0.5))
+    )
+    if ob_body < min_ob_body_atr * atr:
+        _reject(
+            prepared,
+            setup_id,
+            "order_block_body_too_small",
+            ob_body=ob_body,
+            min_ob_body_atr=min_ob_body_atr,
+        )
+        return None
+
+    min_ob_volume_ratio = float(
+        dynamic_params.get("min_ob_volume_ratio", defaults.get("min_ob_volume_ratio", 1.0))
+    )
+    ob_vol_ratio = float(w15m.item(ob_idx, "volume_ratio20") or 0.0)
+    if ob_vol_ratio < min_ob_volume_ratio:
+        _reject(
+            prepared,
+            setup_id,
+            "order_block_ob_volume_too_low",
+            volume_ratio=ob_vol_ratio,
+            min_ob_volume_ratio=min_ob_volume_ratio,
+        )
+        return None
+
     sweep = latest_liquidity_sweep(w15m, swing_length=3)
     if sweep is not None and sweep.direction != direction:
         _reject(
@@ -190,6 +228,44 @@ def _detect_order_block_extended(
             min_ob_impulse_atr=min_ob_impulse_atr,
         )
         return None
+    for k in range(impulse_start, impulse_end):
+        impulse_vol = float(w15m.item(k, "volume_ratio20") or 0.0)
+        if impulse_vol < min_ob_volume_ratio:
+            _reject(
+                prepared,
+                setup_id,
+                "order_block_ob_volume_too_low",
+                volume_ratio=impulse_vol,
+                min_ob_volume_ratio=min_ob_volume_ratio,
+                impulse_bar=k,
+            )
+            return None
+
+    lookback_start = max(0, ob_idx - 12)
+    if direction == "long":
+        prior_high = float(max(closes[lookback_start:ob_idx]) if ob_idx > lookback_start else closes[ob_idx])
+        post_high = float(max(closes[impulse_start:impulse_end]))
+        if post_high <= prior_high:
+            _reject(
+                prepared,
+                setup_id,
+                "order_block_no_bos_after_ob",
+                prior_high=prior_high,
+                post_high=post_high,
+            )
+            return None
+    else:
+        prior_low = float(min(closes[lookback_start:ob_idx]) if ob_idx > lookback_start else closes[ob_idx])
+        post_low = float(min(closes[impulse_start:impulse_end]))
+        if post_low >= prior_low:
+            _reject(
+                prepared,
+                setup_id,
+                "order_block_no_bos_after_ob",
+                prior_low=prior_low,
+                post_low=post_low,
+            )
+            return None
 
     # Use 1H context for 15M signals (not 4H - too lagging for <4h trades)
     bias_1h = getattr(prepared, "bias_1h", prepared.bias_4h)
@@ -224,11 +300,14 @@ def _detect_order_block_extended(
         _reject(prepared, setup_id, "order_block_mitigated", state=zone.state)
         return None
 
-    # Entry at 50% Mean Threshold (ICT standard); zone spans full OB [ob_low, ob_high].
+    # Entry at 50% body mid; SL beyond far wick (report-2/4 OB body-only).
     entry_price = (ob_low + ob_high) / 2.0
-    stop_basis = ob_low if direction == "long" else ob_high
+    zone_meta = zone.metadata or {}
+    wick_low = float(zone_meta.get("wick_low") or w15m.item(ob_idx, "low"))
+    wick_high = float(zone_meta.get("wick_high") or w15m.item(ob_idx, "high"))
+    stop_basis = wick_low if direction == "long" else wick_high
     pivots = (
-        swing_series(w1h, swing_length=3, include_unconfirmed_tail=True)
+        swing_series(w1h, swing_length=3, include_unconfirmed_tail=False)
         if w1h.height >= 8
         else None
     )
@@ -260,7 +339,7 @@ def _detect_order_block_extended(
         direction=direction,
         setup_id=setup_id,
         strategy_family=family,
-        timeframe="15m",
+        timeframe="1h",
         price_anchor=entry_price,
         atr=atr,
         stop_loss=stop,
@@ -300,7 +379,7 @@ def _detect_order_block_extended(
         setup_id=setup_id,
         direction=direction,
         score=score,
-        timeframe="15m",
+        timeframe="1h",
         reasons=reasons,
         strategy_family=family,
         stop=stop,
@@ -320,10 +399,12 @@ def detect_order_block_setup(
     setup_id: str,
     family: str,
 ) -> Signal | None:
+    from .breaker_block import detect_breaker_block_setup
+
     # Two-tier path: fast spec hit via latest_order_block retest; otherwise
     # extended_detect applies impulse validation on the same 15m SMC scan.
     spec_kwargs = _spec_detect_kwargs(effective)
-    return run_setup_detection(
+    signal = run_setup_detection(
         prepared=prepared,
         settings=settings,
         setup_id=setup_id,
@@ -333,6 +414,17 @@ def detect_order_block_setup(
         spec_detect=detect_order_block,
         extended_detect=_detect_order_block_extended,
         spec_kwargs=spec_kwargs,
+    )
+    if signal is not None:
+        return signal
+    merged = {**defaults, **effective}
+    return detect_breaker_block_setup(
+        prepared,
+        settings,
+        defaults,
+        merged,
+        setup_id=setup_id,
+        family=family,
     )
 
 
@@ -348,14 +440,20 @@ class OrderBlockSetup(SpecDetectorSetup):
 
     DEFAULTS: ClassVar[dict[str, float]] = {
         "base_score": 0.60,
-        "min_ob_impulse_atr": 1.5,
+        "min_ob_impulse_atr": 1.2,
+        "min_ob_body_atr": 0.5,
+        "min_ob_volume_ratio": 1.0,
         "impulse_lookback_bars": 5,
         "ob_max_age": 72.0,
         "touch_buffer_atr": 0.25,
+        "scan_bars": 72,
+        "mitigation_threshold": 0.3,
+        "min_acceptance_close_position_long": 0.45,
+        "max_acceptance_close_position_short": 0.55,
         "bias_mismatch_penalty": 0.75,
         "tp_too_close_penalty": 0.75,
         "min_rr": 1.9,
-        "sl_buffer_atr": 0.5,
+        "sl_buffer_atr": 0.25,
         "rsi_overbought": 76.0,
         "rsi_oversold": 24.0,
     }

@@ -325,7 +325,7 @@ class FilterConfig(_StrictModel):
     # Minimum ADX on 1h required for structure_pullback (trend strength gate).
     min_adx_1h: float = Field(default=20.0, ge=0.0, le=50.0)
     # Minimum final score after the simplified structure-based scoring.
-    min_score: float = Field(default=0.66, ge=0.0, le=1.0)
+    min_score: float = Field(default=0.60, ge=0.0, le=1.0)
     # Data freshness gates (avoid hidden "magic numbers" in filters.py).
     freshness_15m_minutes: int = Field(default=30, ge=5, le=240)
     freshness_5m_minutes: int = Field(default=8, ge=5, le=120)
@@ -429,7 +429,7 @@ class TrackingConfig(_StrictModel):
     pre_activation_gate_enabled: bool = True
     activation_staleness_atr_mult: float = Field(default=1.2, ge=0.5, le=3.0)
     activation_context_max_age_seconds: float = Field(default=120.0, ge=30.0, le=600.0)
-    activation_min_score: float = Field(default=0.65, ge=0.0, le=1.0)
+    activation_min_score: float = Field(default=0.60, ge=0.0, le=1.0)
     activation_score_decay_per_bar: float = Field(default=0.03, ge=0.0, le=0.1)
     reversal_activation_pin_required: bool = Field(
         default=False,
@@ -443,6 +443,22 @@ class TrackingConfig(_StrictModel):
     )
     # Hours for MetaSignalMerger direction-conflict window vs recent ACTION signals.
     action_window_hours: float = Field(default=4.0, ge=0.5, le=168.0)
+    # Post-activation SL/TP review prefers WS mark price when fresh (Binance perp convention).
+    mark_price_max_age_seconds: float = Field(default=30.0, ge=1.0, le=300.0)
+    # Per-setup pending TTL override (minutes); catalog Part 3 defaults when unset.
+    setup_ttl_minutes: dict[str, int] = Field(default_factory=dict)
+
+    @field_validator("setup_ttl_minutes")
+    @classmethod
+    def _validate_setup_ttl_minutes(cls, value: Mapping[str, Any] | None) -> dict[str, int]:
+        normalized: dict[str, int] = {}
+        for setup_id, minutes in (value or {}).items():
+            coerced = int(minutes)
+            if coerced < 15 or coerced > 1440:
+                msg = f"tracking.setup_ttl_minutes.{setup_id} must be in [15, 1440]"
+                raise ValueError(msg)
+            normalized[str(setup_id)] = coerced
+        return normalized
 
 
 _ALL_SETUP_IDS: tuple[str, ...] = CATALOG_SETUP_IDS_ORDERED
@@ -460,11 +476,9 @@ class SetupConfig(_StrictModel):
     order_block: bool = True
     liquidity_sweep: bool = True
     bos_choch: bool = True
-    hidden_divergence: bool = True
     indicator_divergence: bool = True
     funding_reversal: bool = True
     cvd_divergence: bool = True
-    breaker_block: bool = True
     turtle_soup: bool = True
     # Phase 5.3 expansion
     vwap_trend: bool = True
@@ -473,14 +487,9 @@ class SetupConfig(_StrictModel):
     volume_anomaly: bool = True
     volume_climax_reversal: bool = True
     keltner_breakout: bool = True
-    # Roadmap expansion
-    whale_walls: bool = True
-    spread_strategy: bool = True
-    depth_imbalance: bool = True
     absorption: bool = True
     liquidation_heatmap: bool = True
     multi_tf_trend: bool = True
-    rsi_divergence_bottom: bool = True
     wyckoff_spring: bool = True
     ls_ratio_extreme: bool = True
     oi_divergence: bool = True
@@ -509,6 +518,7 @@ class ScoringConfig(_StrictModel):
     weight_session_killzone: float = Field(default=0.03, ge=0.0, le=0.25)
     weight_orderflow_imbalance: float = Field(default=0.04, ge=0.0, le=0.25)
     weight_aggression_shift: float = Field(default=0.03, ge=0.0, le=0.25)
+    weight_depth_imbalance: float = Field(default=0.04, ge=0.0, le=0.25)
     weight_macd_alignment: float = Field(default=0.05, ge=0.0, le=0.20)
     weight_obv_alignment: float = Field(default=0.03, ge=0.0, le=0.20)
     weight_adx_strength: float = Field(default=0.04, ge=0.0, le=0.20)
@@ -536,6 +546,7 @@ class ScoringConfig(_StrictModel):
             "weight_session_killzone": float(self.weight_session_killzone),
             "weight_orderflow_imbalance": float(self.weight_orderflow_imbalance),
             "weight_aggression_shift": float(self.weight_aggression_shift),
+            "weight_depth_imbalance": float(self.weight_depth_imbalance),
             "weight_macd_alignment": float(self.weight_macd_alignment),
             "weight_obv_alignment": float(self.weight_obv_alignment),
             "weight_adx_strength": float(self.weight_adx_strength),
@@ -668,7 +679,7 @@ class DeliveryConfig(_StrictModel):
         description="Per-setup minimum minutes between any deliveries (setup-wide, not per-symbol)",
     )
     dedup_window_hours: float = Field(
-        default=0.25,
+        default=2.0,
         ge=0.0,
         le=168.0,
         description="Skip same setup+symbol+direction signal if delivered within this window",
@@ -838,8 +849,8 @@ class IntelligenceConfig(_StrictModel):
     write_hourly_reports: bool = True
     options_expiry_count: int = Field(default=2, ge=1, le=8)
     barrier_symbol_count: int = Field(default=2, ge=1, le=8)
-    hard_barrier_pct: float = Field(default=1.5, ge=0.1, le=20.0)
-    hard_barrier_window_minutes: int = Field(default=15, ge=5, le=240)
+    hard_barrier_pct: float = Field(default=1.75, ge=0.1, le=20.0)
+    hard_barrier_window_minutes: int = Field(default=30, ge=5, le=240)
     smart_exit_enabled: bool = False
     smart_exit_threshold: float = Field(default=0.62, ge=0.0, le=1.0)
     regime_detector: Literal["legacy", "hmm", "gmm_var", "composite"] = "composite"

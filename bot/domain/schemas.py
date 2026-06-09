@@ -201,6 +201,7 @@ class PreparedSymbol:
     reject_log: tuple[dict[str, Any], ...] = ()
     btc_change_pct: float | None = None
     eth_change_pct: float | None = None
+    btc_corr_1h: float | None = None
 
     def __post_init__(self) -> None:
         if self.top_account_ls_ratio is None and self.ls_ratio is not None:
@@ -314,6 +315,9 @@ class Signal:
     xau_bias: str | None = None
     xag_bias: str | None = None
     pax_bias: str | None = None
+    entry_tf: str = ""
+    pattern_tf: str = ""
+    context_tfs: tuple[str, ...] = ()
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def __post_init__(self) -> None:
@@ -497,6 +501,10 @@ class Signal:
             "tracking_ref": self.tracking_ref,
             "signal_key": self.signal_key,
             "timeframe": self.timeframe,
+            "entry_tf": self.entry_tf or self.timeframe,
+            "entry_tf_used": self.entry_tf or self.timeframe,
+            "pattern_tf": self.pattern_tf,
+            "context_tfs": self.context_tfs,
             "strategy_family": self.strategy_family,
             "confirmation_profile": self.confirmation_profile,
             "confirmation_count": self.confirmation_count,

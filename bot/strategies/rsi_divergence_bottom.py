@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING
 
 from ..domain.strategy_catalog import catalog_default_params
 from ._common import build_spec_signal
 from ._roadmap import _as_float, _build_atr_signal, _missing_columns, _reject
 from .indicator_divergence import detect_regular_divergence
-from .roadmap_base import RoadmapSetup
-
 if TYPE_CHECKING:
     from ..domain.config import BotSettings
     from ..domain.schemas import PreparedSymbol, Signal
@@ -24,10 +22,10 @@ def detect_rsi_divergence_bottom(
     family: str,
 ) -> Signal | None:
     params = effective_params
-    work = prepared.work_15m
+    work = prepared.work_1h
     hit = detect_regular_divergence(
         work,
-        timeframe="15m",
+        timeframe="1h",
         setup_id=setup_id,
         require_oversold=True,
     )
@@ -124,27 +122,3 @@ def detect_rsi_divergence_bottom(
     )
 
 
-class RSIDivergenceBottomSetup(RoadmapSetup):
-    setup_id = "rsi_divergence_bottom"
-    ENTRY_ORDER_TYPE: ClassVar[str] = "market"
-    family = "reversal"
-    confirmation_profile = "countertrend_exhaustion"
-    required_context = ("futures_flow",)
-    DEFAULTS: ClassVar[dict[str, float]] = {
-        **RoadmapSetup.DEFAULTS,
-        "divergence_window": 12,
-        "min_rsi_delta": 1.5,
-        "min_price_delta_pct": 0.05,
-    }
-
-    def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
-        return detect_rsi_divergence_bottom(
-            prepared,
-            settings,
-            self._params(prepared, settings),
-            setup_id=self.setup_id,
-            family=self.family,
-        )
-
-
-__all__ = ["RSIDivergenceBottomSetup"]

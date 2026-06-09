@@ -5,18 +5,23 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from bot.runtime.errors import DEFENSIVE_EXC
+
 if TYPE_CHECKING:
     from .live import DashboardLiveData
 
 JsonDict = dict[str, Any]
 
 
-def build_live_operator_alerts(bot: Any, live_data: DashboardLiveData) -> list[JsonDict]:
+async def build_live_operator_alerts(bot: Any, live_data: DashboardLiveData) -> list[JsonDict]:
     """Return zero-hit, WS health, and stale-stream alerts for the operator dashboard."""
     now = datetime.now(UTC).isoformat()
     alerts: list[JsonDict] = []
 
-    decisions = live_data.decisions(limit=41, max_rows=50_000)
+    try:
+        decisions = await live_data.decisions(limit=41, max_rows=50_000)
+    except DEFENSIVE_EXC:
+        decisions = {}
     for row in decisions.get("zero_signal_setups") or []:
         setup_id = str(row.get("setup_id") or "unknown")
         blockers = row.get("top_blockers") or []
@@ -36,7 +41,10 @@ def build_live_operator_alerts(bot: Any, live_data: DashboardLiveData) -> list[J
             }
         )
 
-    runtime = live_data.runtime()
+    try:
+        runtime = await live_data.runtime()
+    except DEFENSIVE_EXC:
+        runtime = {}
     ws_snapshot = runtime.get("ws_snapshot") if isinstance(runtime.get("ws_snapshot"), dict) else {}
     ws_manager = getattr(bot, "_ws_manager", None)
     ws_connected = bool(getattr(ws_manager, "is_connected", lambda: False)())
@@ -84,7 +92,11 @@ def build_live_operator_alerts(bot: Any, live_data: DashboardLiveData) -> list[J
             }
         )
 
-    last_cycle = (live_data.overview() or {}).get("last_cycle") or {}
+    try:
+        overview = await live_data.overview()
+    except DEFENSIVE_EXC:
+        overview = {}
+    last_cycle = (overview or {}).get("last_cycle") or {}
     if isinstance(last_cycle, dict):
         cap_counts = last_cycle.get("delivery_status_counts") or {}
         if isinstance(cap_counts, dict):

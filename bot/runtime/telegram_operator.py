@@ -213,7 +213,7 @@ class TelegramOperatorConsole:
                 await self.send_html(chat_id, "<b>Usage:</b> <code>/symbol BTCUSDT</code>")
                 return
             rows = await lookup_symbol_signals(self._bot, sym)
-            await self.send_html(chat_id, format_symbol_lookup_html(self._bot, sym, rows))
+            await self.send_html(chat_id, await format_symbol_lookup_html(self._bot, sym, rows))
             return
 
         if cmd == "/signal":
@@ -353,7 +353,7 @@ class TelegramOperatorConsole:
             live_data = getattr(getattr(self._bot, "dashboard", None), "_live_data", None)
             if live_data is not None:
                 try:
-                    overview = live_data.overview() or {}
+                    overview = await live_data.overview() or {}
                 except DEFENSIVE_EXC:
                     overview = {}
             await self.send_html(chat_id, format_operator_cycles_text(payload, overview))
@@ -523,7 +523,7 @@ class TelegramOperatorConsole:
             await self.send_html(chat_id, "<b>Funnel</b>\nНет live данных.")
             return
         try:
-            funnel = live_data.funnel(max_rows=50_000)
+            funnel = await live_data.funnel(max_rows=50_000)
         except DEFENSIVE_EXC:
             await self.send_html(chat_id, "<b>Funnel</b>\nОшибка чтения telemetry.")
             return

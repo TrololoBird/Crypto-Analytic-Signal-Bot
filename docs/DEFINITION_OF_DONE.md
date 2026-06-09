@@ -29,7 +29,7 @@
 **Не** HFT-бот и **не** auto-trader. **Да:**
 
 1. **Signal factory** — public Binance USD-M → trade plans → Telegram.
-2. **38 стратегий** в `bot/strategies/`.
+2. **42 стратегии** в `bot/strategies/`.
 3. **Delivery invariant** — `validate_signal_contract` → `hard_confluence_gate` (3/5) → `deliver`.
 4. **Shortlist** ~40–55 + anchors, tier WATCH/ACTION, R-class WATCH-only.
 5. **Ops loop** — `run` / `harvest` / supervised 6h / rollup / calibration (gated).
@@ -58,9 +58,9 @@
 
 | ID | Задача | Блокер v1? |
 |----|--------|------------|
-| OPS-1 | Harvest 2h+ → strategy redesign notes | Нет |
+| OPS-1 | Harvest 2h+ → strategy redesign notes | Нет (`scripts/run_research_harvest.sh`) |
 | OPS-2 | Enable `use_weighted_confluence` after telemetry review | ✅ 2026-06-04 |
-| OPS-3 | Nightly `make nightly-calibration` when REST OK | Нет |
+| OPS-3 | Nightly `make nightly-calibration` when REST OK | Нет (`scripts/run_nightly_calibration.sh`) |
 | OPT-1 | Prometheus → Grafana dashboard | Нет |
 | OPT-2 | Optional LLM rationales (intelligence layer) | Нет |
 

@@ -73,6 +73,10 @@ def evaluate_mtf_gate(
             ):
                 conflicts.append(label)
         details: dict[str, object] = {"profile": profile, "conflicts": conflicts}
+        # answers50 Q29/Q30: 1H momentum alone blocks reversal shorts/longs;
+        # require both HTFs only when 1H is not in conflict (4H-only noise).
+        if "1h" in conflicts:
+            return False, "htf_reversal_conflict:1h_momentum", details
         if len(conflicts) >= 2:
             return False, "htf_reversal_conflict:" + ",".join(conflicts), details
         return True, "htf_reversal_ok", details

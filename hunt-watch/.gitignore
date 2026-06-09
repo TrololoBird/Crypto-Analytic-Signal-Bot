@@ -1,0 +1,7 @@
+# Runtime state — not versioned
+data/*.jsonl
+data/*.log
+data/*.json
+!data/.gitkeep
+data/snapshots/*
+!data/snapshots/.gitkeep

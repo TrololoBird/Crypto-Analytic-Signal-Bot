@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -90,12 +90,19 @@ def classify_outcome_result(
     return "neutral"
 
 
-def aggregate_setup_stats(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def aggregate_setup_stats(
+    rows: list[dict[str, Any]],
+    *,
+    group_by_entry_tf: bool = False,
+) -> list[dict[str, Any]]:
     """Aggregate signal_outcomes rows into per-setup win/loss stats."""
     buckets: dict[str, dict[str, float | int]] = {}
 
     for row in rows:
         setup_id = str(row.get("setup_id") or "unknown")
+        if group_by_entry_tf:
+            entry_tf = str(row.get("entry_tf") or row.get("entry_tf_used") or row.get("timeframe") or "")
+            setup_id = f"{setup_id}@{entry_tf}" if entry_tf else setup_id
         bucket = buckets.setdefault(
             setup_id,
             {
@@ -231,6 +238,9 @@ class SignalFeatures:
     setup_id: str = ""
     direction: str = ""
     timeframe: str = ""
+    entry_tf: str = ""
+    pattern_tf: str = ""
+    context_tfs: tuple[str, ...] = ()
 
     # Advanced indicators from prepared Polars feature frame (`prepare_frame.py`).
     supertrend_dir_1h: float | None = None
@@ -265,6 +275,18 @@ class SignalFeatures:
     data_source_mix: str = "futures_only"
     market_regime: str = "neutral"  # "trending" | "neutral" | "choppy"
 
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> SignalFeatures:
+        """Hydrate from persisted JSON (tolerates legacy/extra keys)."""
+        data = dict(raw)
+        if not data.get("entry_tf") and data.get("entry_tf_used"):
+            data["entry_tf"] = data["entry_tf_used"]
+        data.pop("entry_tf_used", None)
+        if isinstance(data.get("context_tfs"), list):
+            data["context_tfs"] = tuple(data["context_tfs"])
+        allowed = {item.name for item in fields(cls)}
+        return cls(**{key: value for key, value in data.items() if key in allowed})
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "base_score": self.base_score,
@@ -292,6 +314,10 @@ class SignalFeatures:
             "setup_id": self.setup_id,
             "direction": self.direction,
             "timeframe": self.timeframe,
+            "entry_tf": self.entry_tf,
+            "entry_tf_used": self.entry_tf,
+            "pattern_tf": self.pattern_tf,
+            "context_tfs": list(self.context_tfs),
             # New fields
             "supertrend_dir_1h": self.supertrend_dir_1h,
             "supertrend_dir_15m": self.supertrend_dir_15m,
@@ -371,6 +397,9 @@ class SignalOutcome:
     was_profitable: bool = False
     llm_was_correct: bool | None = None  # None если LLM не использовался
     setup_quality: str = "neutral"  # good, bad, neutral
+    entry_tf: str = ""
+    pattern_tf: str = ""
+    context_tfs: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -381,6 +410,10 @@ class SignalOutcome:
             "setup_id": self.setup_id,
             "direction": self.direction,
             "timeframe": self.timeframe,
+            "entry_tf": self.entry_tf,
+            "entry_tf_used": self.entry_tf,
+            "pattern_tf": self.pattern_tf,
+            "context_tfs": list(self.context_tfs),
             "created_at": self.created_at,
             "activated_at": self.activated_at,
             "closed_at": self.closed_at,
@@ -439,6 +472,9 @@ def extract_features_from_signal(
         setup_id=signal.setup_id,
         direction=signal.direction,
         timeframe=signal.timeframe,
+        entry_tf=getattr(signal, "entry_tf", "") or signal.timeframe,
+        pattern_tf=getattr(signal, "pattern_tf", ""),
+        context_tfs=tuple(getattr(signal, "context_tfs", ()) or ()),
         # Advanced indicators
         supertrend_dir_1h=prepared_data.get("supertrend_dir_1h") if prepared_data else None,
         supertrend_dir_15m=prepared_data.get("supertrend_dir_15m") if prepared_data else None,
@@ -565,8 +601,10 @@ def create_outcome_from_tracked(
 
     time_to_entry_min = 0
     time_to_exit_min = 0
+    activation_lag_seconds = 0
     if activated_at:
-        time_to_entry_min = int((activated_at - created_at).total_seconds() / 60)
+        activation_lag_seconds = int((activated_at - created_at).total_seconds())
+        time_to_entry_min = activation_lag_seconds // 60
     if closed_at:
         time_to_exit_min = int((closed_at - created_at).total_seconds() / 60)
 
@@ -585,6 +623,8 @@ def create_outcome_from_tracked(
         llm_was_correct = not was_profitable
 
     feature_payload = features.to_dict()
+    if activation_lag_seconds > 0:
+        feature_payload["activation_lag_seconds"] = activation_lag_seconds
     if str(outcome_result or "") in {"stop_loss", "breakeven_stop", "trailing_stop"}:
         feature_payload["score"] = feature_payload.get("score") or getattr(tracked, "score", None)
         sl_diag = classify_stop_loss_root_cause(
@@ -596,6 +636,7 @@ def create_outcome_from_tracked(
             features=feature_payload,
         )
         feature_payload["sl_root_cause"] = sl_diag["code"]
+        feature_payload["cause_of_sl"] = sl_diag.get("cause_of_sl")
         feature_payload["sl_root_cause_label"] = sl_diag["label"]
         feature_payload["sl_diagnostics"] = sl_diag
 
@@ -608,6 +649,9 @@ def create_outcome_from_tracked(
         setup_id=tracked.setup_id,
         direction=tracked.direction,
         timeframe=tracked.timeframe,
+        entry_tf=getattr(tracked, "entry_tf", "") or tracked.timeframe,
+        pattern_tf=getattr(tracked, "pattern_tf", ""),
+        context_tfs=tuple(getattr(tracked, "context_tfs", ()) or ()),
         created_at=tracked.created_at,
         activated_at=tracked.activated_at,
         closed_at=tracked.closed_at,

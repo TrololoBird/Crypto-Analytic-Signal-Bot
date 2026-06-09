@@ -7,7 +7,14 @@ import math
 from typing import TYPE_CHECKING, ClassVar
 
 from ..setups import _build_signal, _compute_dynamic_score, _reject
-from ..setups.smc import fvg_candidates, fvg_ce_entry, is_clean_fvg, latest_fvg_zone, swing_series
+from ..setups.smc import (
+    fvg_candidates,
+    fvg_ce_entry,
+    is_clean_fvg,
+    latest_fvg_zone,
+    nearest_fvg_ce_target,
+    swing_series,
+)
 from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
 from ..setups.utils import build_smc_trade_plan, validate_rr_or_penalty
 from ._common import SpecHit, as_float, confirmed_pattern_frame, with_spec_columns
@@ -84,12 +91,13 @@ def _detect_fvg_setup_extended(
     min_mitigation_pct = dynamic_params.get("min_mitigation_pct", defaults["min_mitigation_pct"])
     sl_buffer_atr = dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"])
 
-    w = confirmed_pattern_frame(prepared.work_15m)
-    w1h = confirmed_pattern_frame(prepared.work_1h)
-    # FIX 2026-05-21: spec FVG only accepts an immediate retest; fall through
-    # to the configured SMC zone scanner before rejecting as no setup.
+    # Primary: 1h FVG (higher quality, longer-lived per research). Context: 4h structure.
+    w = confirmed_pattern_frame(prepared.work_1h)
+    w1h = confirmed_pattern_frame(
+        prepared.work_4h if prepared.work_4h is not None else prepared.work_1h
+    )
     if w.height < 5:
-        _reject(prepared, setup_id, "insufficient_15m_bars", bars=w.height)
+        _reject(prepared, setup_id, "insufficient_1h_bars", bars=w.height)
         return None
 
     atr = float(w.item(-1, "atr14") or 0.0)
@@ -260,7 +268,7 @@ def _detect_fvg_setup_extended(
     fvg_pad_atr_mult = (fvg_width / 2.0) / atr if atr > 0.0 else 0.35
     stop_basis = fvg_low if direction == "long" else fvg_high
     pivots = (
-        swing_series(w1h, swing_length=3, include_unconfirmed_tail=True)
+        swing_series(w1h, swing_length=3, include_unconfirmed_tail=False)
         if w1h.height >= 8
         else None
     )
@@ -289,6 +297,23 @@ def _detect_fvg_setup_extended(
     tp1 = trade_plan.tp1
     tp2 = trade_plan.tp2
     reasons_note = trade_plan.reasons_note
+    nearest_ce = nearest_fvg_ce_target(
+        w,
+        direction=direction,
+        price_anchor=entry_price,
+        atr=atr,
+        min_gap_atr=float(min_fvg_size_atr),
+        exclude_index=int(zone.created_index),
+    )
+    if nearest_ce is not None:
+        risk = abs(entry_price - stop)
+        if risk > 0.0:
+            if direction == "long" and nearest_ce - entry_price >= risk * min_rr:
+                tp1 = nearest_ce
+                reasons_note = "tp1_nearest_fvg_ce"
+            elif direction == "short" and entry_price - nearest_ce >= risk * min_rr:
+                tp1 = nearest_ce
+                reasons_note = "tp1_nearest_fvg_ce"
 
     is_valid_rr, _ = validate_rr_or_penalty(entry_price, stop, tp1, min_rr)
     if not is_valid_rr and tp1 is not None:
@@ -310,7 +335,7 @@ def _detect_fvg_setup_extended(
         setup_id=setup_id,
         direction=direction,
         score=score,
-        timeframe="15m",
+        timeframe="1h",
         reasons=reasons,
         strategy_family=family,
         stop=stop,
@@ -363,7 +388,7 @@ class FVGSetup(SpecDetectorSetup):
         "rsi_oversold": 30.0,
         "min_rr": 1.9,
         "tp_too_close_penalty": 0.8,
-        "min_fvg_size_atr": 0.30,
+        "min_fvg_size_atr": 0.20,
         "min_mitigation_pct": 0.2,
         "sl_buffer_atr": 0.8,
         "max_entry_distance_atr": 1.5,

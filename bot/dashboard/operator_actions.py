@@ -141,13 +141,13 @@ async def lookup_signal_by_ref(bot: Any, token: str) -> dict[str, Any] | None:
     return None
 
 
-def symbol_rejection_summary(
+async def symbol_rejection_summary(
     live_data: Any, symbol: str, *, limit: int = 5
 ) -> list[tuple[str, int]]:
     if live_data is None:
         return []
     try:
-        payload = live_data.rejections(limit=200, max_rows=20_000)
+        payload = await live_data.rejections(limit=200, max_rows=20_000)
     except DEFENSIVE_EXC:
         return []
     sym = symbol.upper()
@@ -160,7 +160,7 @@ def symbol_rejection_summary(
     return counter.most_common(limit)
 
 
-def format_symbol_lookup_html(bot: Any, symbol: str, rows: list[dict[str, Any]]) -> str:
+async def format_symbol_lookup_html(bot: Any, symbol: str, rows: list[dict[str, Any]]) -> str:
     sym = html.escape(symbol.upper())
     item = find_shortlist_item(bot, symbol)
     mark = resolve_mark_price(bot, symbol.upper())
@@ -190,7 +190,7 @@ def format_symbol_lookup_html(bot: Any, symbol: str, rows: list[dict[str, Any]])
             if progress:
                 lines.append(f"  {progress}")
     live_data = getattr(getattr(bot, "dashboard", None), "_live_data", None)
-    rejections = symbol_rejection_summary(live_data, symbol)
+    rejections = await symbol_rejection_summary(live_data, symbol)
     if rejections:
         lines.append("<b>Top rejections (session)</b>")
         for reason, count in rejections:

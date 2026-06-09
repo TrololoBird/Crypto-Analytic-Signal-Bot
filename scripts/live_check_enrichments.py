@@ -34,6 +34,7 @@ from bot.features.prepare import min_required_bars, prepare_symbol
 from bot.market.data import BinanceFuturesMarketData
 from bot.market.rest_impl import BinanceClientImpl
 from bot.market.ws import FuturesWSManager
+from bot.runtime.data_readiness import configured_frame_minimums, kline_fetch_limit
 from bot.runtime.errors import DEFENSIVE_EXC
 
 LOG = structlog.get_logger("scripts.live_check_enrichments")
@@ -368,11 +369,19 @@ async def _run(
                 shortlist_bucket="",
             )
 
-            # Fetch klines
-            df_4h = await client.fetch_klines_cached(symbol, "4h", limit=300)
-            df_1h = await client.fetch_klines_cached(symbol, "1h", limit=300)
-            df_15m = await client.fetch_klines_cached(symbol, "15m", limit=300)
-            df_5m = await client.fetch_klines_cached(symbol, "5m", limit=300)
+            configured = configured_frame_minimums(settings)
+            df_4h = await client.fetch_klines_cached(
+                symbol, "4h", limit=kline_fetch_limit(configured["4h"], "4h")
+            )
+            df_1h = await client.fetch_klines_cached(
+                symbol, "1h", limit=kline_fetch_limit(configured["1h"], "1h")
+            )
+            df_15m = await client.fetch_klines_cached(
+                symbol, "15m", limit=kline_fetch_limit(configured["15m"], "15m")
+            )
+            df_5m = await client.fetch_klines_cached(
+                symbol, "5m", limit=kline_fetch_limit(configured["5m"], "5m")
+            )
             book_context = await client.fetch_order_book_depth_snapshot(symbol, limit=20)
 
             frames = SymbolFrames(

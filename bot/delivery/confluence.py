@@ -26,6 +26,9 @@ from .scoring import (
     _pivot_proximity,
     _regime_alignment_bonus,
     _risk_reward_quality,
+    _aggression_shift_leg,
+    _depth_imbalance_leg,
+    _orderflow_imbalance_leg,
     _session_killzone_score,
     _structure_clarity,
     _volume_profile_position,
@@ -38,7 +41,7 @@ if TYPE_CHECKING:
     from ..domain.schemas import PreparedSymbol, Signal
 
 LOG = logging.getLogger("bot.confluence")
-MIN_HISTORY_SAMPLES = 20
+MIN_HISTORY_SAMPLES = 10
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,6 +146,7 @@ class ConfluenceEngine:
             signal.score,
             history_count=history_count,
             win_rate=win_rate,
+            min_history_samples=self._min_history_samples(),
         )
         calibrated_model = self._calibrate_component_model(model_score)
         blended = (calibrated_prior * prior_w) + (calibrated_model * (1.0 - prior_w))
@@ -159,7 +163,12 @@ class ConfluenceEngine:
             notes=notes,
         )
 
+    def _min_history_samples(self) -> int:
+        delivery = getattr(self.settings, "delivery", None)
+        return int(getattr(delivery, "min_sl_penalty_samples", MIN_HISTORY_SAMPLES) or MIN_HISTORY_SAMPLES)
+
     def _resolve_history_count(self, signal: Signal) -> int:
+        min_samples = self._min_history_samples()
         history_count = int(
             getattr(
                 signal,
@@ -168,7 +177,7 @@ class ConfluenceEngine:
             )
             or 0
         )
-        if history_count >= MIN_HISTORY_SAMPLES:
+        if history_count >= min_samples:
             return history_count
         tracking_ref = getattr(signal, "tracking_ref", None)
         if not tracking_ref:
@@ -256,8 +265,13 @@ class ConfluenceEngine:
             {
                 "name": "volume_quality",
                 "weight": cfg.weight_volume_quality,
-                "raw": _volume_quality(prepared),
-                "available": self._has_latest_feature(prepared, "work_15m", "volume_ratio20"),
+                "raw": _volume_quality(prepared, signal),
+                "available": self._has_latest_feature(
+                    prepared,
+                    f"work_{getattr(signal, 'entry_tf', '15m').split('+')[0].split('/')[0]}",
+                    "volume_ratio20",
+                )
+                or self._has_latest_feature(prepared, "work_15m", "volume_ratio20"),
             },
             {
                 "name": "structure_clarity",
@@ -306,6 +320,27 @@ class ConfluenceEngine:
                 "weight": float(getattr(cfg, "weight_session_killzone", 0.03)),
                 "raw": _session_killzone_score(signal),
                 "available": True,
+            },
+            {
+                "name": "orderflow_imbalance",
+                "weight": float(getattr(cfg, "weight_orderflow_imbalance", 0.04)),
+                "raw": _orderflow_imbalance_leg(prepared, signal),
+                "available": self._has_latest_feature(prepared, "work_15m", "delta_ratio"),
+            },
+            {
+                "name": "aggression_shift",
+                "weight": float(getattr(cfg, "weight_aggression_shift", 0.03)),
+                "raw": _aggression_shift_leg(prepared, signal),
+                "available": (
+                    getattr(prepared, "aggression_shift", None) is not None
+                    or self._has_latest_feature(prepared, "work_15m", "delta_ratio")
+                ),
+            },
+            {
+                "name": "depth_imbalance",
+                "weight": float(getattr(cfg, "weight_depth_imbalance", 0.04)),
+                "raw": _depth_imbalance_leg(prepared, signal),
+                "available": getattr(prepared, "depth_imbalance", None) is not None,
             },
             {
                 "name": "macd_alignment",
@@ -458,10 +493,11 @@ class ConfluenceEngine:
         *,
         history_count: int = MIN_HISTORY_SAMPLES,
         win_rate: float | None = None,
+        min_history_samples: int = MIN_HISTORY_SAMPLES,
     ) -> float:
         # Gradient trust: linearly ramp from neutral (0.5) to fully calibrated score
-        # over 0..MIN_HISTORY_SAMPLES outcomes instead of hard binary threshold.
-        history_weight = min(max(history_count, 0) / max(MIN_HISTORY_SAMPLES, 1), 1.0)
+        # over 0..min_history_samples outcomes instead of hard binary threshold.
+        history_weight = min(max(history_count, 0) / max(min_history_samples, 1), 1.0)
         calibrated = 0.5 + (max(0.0, min(float(score), 1.0)) - 0.5) * 1.15
         numeric = 0.5 + (calibrated - 0.5) * history_weight
         if win_rate is not None and history_count >= 5:

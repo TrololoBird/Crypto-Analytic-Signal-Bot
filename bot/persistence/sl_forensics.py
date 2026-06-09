@@ -171,7 +171,7 @@ def measure_post_sl_from_candles(
     exit_price: float,
     tp1: float,
     closed_at: datetime,
-    window_hours: float = 4.0,
+    window_hours: float = 6.0,
 ) -> tuple[float, bool, float]:
     """Max favorable % after SL and whether TP1 was touched."""
     if candles.is_empty() or exit_price <= 0.0:

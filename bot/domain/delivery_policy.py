@@ -24,21 +24,14 @@ POSITIONING_SETUP_IDS: frozenset[str] = frozenset(
 )
 
 # Microstructure / sub-minute setups: no solo ACTION until redesign.
-R_CLASS_SETUP_IDS: frozenset[str] = frozenset(
-    {
-        "price_velocity",
-        "whale_walls",
-        "spread_strategy",
-        "depth_imbalance",
-    }
-)
+# Market-chase / sub-minute setups: WATCH-only until forward-test proves edge.
+R_CLASS_SETUP_IDS: frozenset[str] = frozenset({"price_velocity"})
 
 # Setups that require a closed 15m bar — skip on bookTicker intra_candle scans (fix-sl-A).
 KLINE_CLOSE_ONLY_SETUP_IDS: frozenset[str] = frozenset(
     {
         *R_CLASS_SETUP_IDS,
         "btc_correlation",
-        "aggression_shift",
     }
 )
 

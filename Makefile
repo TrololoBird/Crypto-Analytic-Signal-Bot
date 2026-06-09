@@ -47,8 +47,16 @@ live-smoke:
 	@python scripts/live_smoke_bot.py --warmup-seconds 30 --keep-session-data
 
 research-harvest:
-	@python scripts/clean_session_data.py --mode smoke --config config.toml
-	@python scripts/research_harvest_session.py --config config.toml --minutes 60
+	@chmod +x scripts/run_research_harvest.sh
+	@HARVEST_MINUTES=60 bash scripts/run_research_harvest.sh
+
+research-harvest-2h:
+	@chmod +x scripts/run_research_harvest.sh
+	@HARVEST_MINUTES=120 bash scripts/run_research_harvest.sh
+
+bot-supervisor:
+	@chmod +x scripts/bot_supervisor.sh
+	@bash scripts/bot_supervisor.sh
 
 monitor-runtime:
 	@python -m scripts.live_runtime_monitor --duration 300 --poll-interval 5 --log-dir data/bot/logs
@@ -60,7 +68,8 @@ graphify-update:
 	@if command -v graphify >/dev/null 2>&1; then graphify update .; else echo "graphify not installed — run: make graphify-install"; fi
 
 nightly-calibration:
-	@python scripts/nightly_strategy_calibration.py --config config.toml
+	@chmod +x scripts/run_nightly_calibration.sh
+	@bash scripts/run_nightly_calibration.sh
 
 reconcile-defaults:
 	@python scripts/reconcile_strategy_defaults.py

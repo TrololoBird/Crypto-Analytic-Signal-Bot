@@ -69,45 +69,77 @@ _FAMILY_TTL_BARS: dict[str, int] = {
     "session": 8,
 }
 
+# Source of truth: target TTL in minutes (answers.md Part 3). Bars are derived at runtime.
+_SETUP_TTL_MINUTES: dict[str, int] = {
+    "fvg_setup": 120,
+    "order_block": 180,
+    "breaker_block": 120,
+    "bos_choch": 120,
+    "structure_break_retest": 120,
+    "structure_pullback": 120,
+    "ema_bounce": 120,
+    "turtle_soup": 120,
+    "funding_reversal": 120,
+    "hidden_divergence": 120,
+    "rsi_divergence_bottom": 120,
+    "ls_ratio_extreme": 240,
+    "oi_divergence": 120,
+    "btc_correlation": 30,
+    "wyckoff_spring": 180,
+    "liquidity_sweep": 45,
+    "wick_trap_reversal": 45,
+    "cvd_divergence": 45,
+    "squeeze_setup": 45,
+    "keltner_breakout": 45,
+    "absorption": 45,
+    "liquidation_heatmap": 45,
+    "indicator_divergence": 90,
+    "price_velocity": 30,
+    "volume_anomaly": 30,
+    "volume_climax_reversal": 90,
+    "vwap_trend": 90,
+    "supertrend_follow": 120,
+    "multi_tf_trend": 120,
+    "altcoin_season_index": 240,
+    "pinbar_reversal": 120,
+}
+
+# Legacy bar table kept for display/back-compat; derived from minutes when possible.
 _SETUP_TTL_BARS: dict[str, int] = {
-    "fvg_setup": 20,
-    "order_block": 20,
-    "breaker_block": 18,
-    "bos_choch": 14,
-    "structure_break_retest": 14,
-    "structure_pullback": 16,
-    "ema_bounce": 14,
-    "liquidity_sweep": 20,
-    "stop_hunt_detection": 20,
-    "turtle_soup": 20,
-    "wick_trap_reversal": 24,
-    "session_killzone": 8,
-    "funding_reversal": 24,
-    "ls_ratio_extreme": 24,
-    "liquidation_heatmap": 12,
-    "depth_imbalance": 12,
-    "whale_walls": 12,
-    "spread_strategy": 10,
-    "aggression_shift": 12,
-    "absorption": 12,
-    "cvd_divergence": 16,
-    "hidden_divergence": 30,
-    "indicator_divergence": 30,
-    "rsi_divergence_bottom": 30,
-    "bb_squeeze": 12,
-    "squeeze_setup": 12,
-    "keltner_breakout": 12,
-    "atr_expansion": 10,
-    "price_velocity": 12,
-    "volume_anomaly": 14,
-    "volume_climax_reversal": 18,
-    "multi_tf_trend": 18,
-    "vwap_trend": 12,
-    "supertrend_follow": 12,
-    "btc_correlation": 10,
-    "altcoin_season_index": 12,
-    "oi_divergence": 18,
-    "wyckoff_spring": 24,
+    # 1h entry TF strategies (~120-180min target)
+    "fvg_setup": 2,            # 1h × 2 = 120min
+    "order_block": 3,          # 1h × 3 = 180min
+    "breaker_block": 2,        # 1h × 2 = 120min
+    "bos_choch": 8,            # 15m+1h × 8 = 120min
+    "structure_break_retest": 8,  # 15m+1h × 8 = 120min
+    "structure_pullback": 8,   # 15m+1h × 8 = 120min
+    "ema_bounce": 8,           # 15m+1h × 8 = 120min
+    "turtle_soup": 8,          # 15m+1h × 8 = 120min
+    "funding_reversal": 2,     # 1h × 2 = 120min
+    "hidden_divergence": 8,    # 15m+1h × 8 = 120min
+    "rsi_divergence_bottom": 2,  # 1h × 2 = 120min
+    "ls_ratio_extreme": 4,     # 1h × 4 = 240min (sentiment, slower cadence)
+    "oi_divergence": 2,        # 1h × 2 = 120min
+    "btc_correlation": 2,      # 1h × 2 = 120min
+    "wyckoff_spring": 3,       # 1h × 3 = 180min
+    # 15m trigger strategies (~45min target)
+    "liquidity_sweep": 3,      # 15m × 3 = 45min
+    "wick_trap_reversal": 3,   # 15m+1h × 3 = 45min
+    "cvd_divergence": 3,       # 15m+1h × 3 = 45min
+    "squeeze_setup": 3,        # 15m+1h × 3 = 45min
+    "keltner_breakout": 3,     # 15m+1h × 3 = 45min
+    "absorption": 3,           # 15m × 3 = 45min
+    "liquidation_heatmap": 3,  # 15m × 3 = 45min
+    # momentum/breakout (~30-90min)
+    "indicator_divergence": 6, # 15m × 6 = 90min
+    "price_velocity": 2,       # 15m × 2 = 30min
+    "volume_anomaly": 2,       # 15m × 2 = 30min
+    "volume_climax_reversal": 6,  # 15m × 6 = 90min
+    "vwap_trend": 6,           # 15m+1h × 6 = 90min
+    "supertrend_follow": 8,    # 15m × 8 = 120min
+    "multi_tf_trend": 8,       # 15m+1h × 8 = 120min
+    "altcoin_season_index": 4, # 1h × 4 = 240min
+    "pinbar_reversal": 8,      # 1h × 8 = 120min
 }
 
 
@@ -193,6 +225,9 @@ def timeframe_minutes(timeframe: str | None) -> int:
 
 
 def default_ttl_bars(setup_id: str, strategy_family: str, timeframe: str | None = None) -> int:
+    if setup_id in _SETUP_TTL_MINUTES:
+        tf_min = max(1, timeframe_minutes(timeframe))
+        return max(1, min(96, round(_SETUP_TTL_MINUTES[setup_id] / tf_min)))
     if setup_id in _SETUP_TTL_BARS:
         return _SETUP_TTL_BARS[setup_id]
     family = str(strategy_family or "").strip().lower()

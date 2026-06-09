@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from collections import Counter
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -21,12 +22,47 @@ from bot.domain.strategies import StrategyDecision
 from bot.features.prepare import prepare_symbol
 from bot.features.prepare_frame import min_required_bars
 from bot.market.data import BinanceFuturesMarketData, MarketDataUnavailable
-from bot.runtime.data_readiness import assess_symbol_data_readiness
+from bot.runtime.data_readiness import (
+    assess_symbol_data_readiness,
+    configured_frame_minimums,
+    kline_fetch_limit,
+    raw_frame_minimums,
+)
 from bot.runtime.errors import (
     DEFENSIVE_EXC,
     build_runtime_error_payload,
     classify_runtime_error,
 )
+
+
+def _pearson_correlation_returns(left_closes: list[float], right_closes: list[float]) -> float | None:
+    """Rolling 1h return correlation (report-5 §46 BTC filter threshold)."""
+    n = min(len(left_closes), len(right_closes))
+    if n < 10:
+        return None
+    left = left_closes[-n:]
+    right = right_closes[-n:]
+    left_r: list[float] = []
+    right_r: list[float] = []
+    for idx in range(1, n):
+        prev_l, prev_r = left[idx - 1], right[idx - 1]
+        if prev_l <= 0.0 or prev_r <= 0.0:
+            continue
+        left_r.append((left[idx] - prev_l) / prev_l)
+        right_r.append((right[idx] - prev_r) / prev_r)
+    m = min(len(left_r), len(right_r))
+    if m < 8:
+        return None
+    left_r = left_r[-m:]
+    right_r = right_r[-m:]
+    mean_l = sum(left_r) / m
+    mean_r = sum(right_r) / m
+    num = sum((a - mean_l) * (b - mean_r) for a, b in zip(left_r, right_r, strict=True))
+    den_l = sum((a - mean_l) ** 2 for a in left_r) ** 0.5
+    den_r = sum((b - mean_r) ** 2 for b in right_r) ** 0.5
+    if den_l <= 0.0 or den_r <= 0.0:
+        return None
+    return num / (den_l * den_r)
 
 if TYPE_CHECKING:
     from bot.runtime.bot import SignalBot
@@ -75,20 +111,8 @@ _DEGRADATION_ERRORS = (
     AttributeError,
     KeyError,
 )
-_DEFAULT_HISTORY_FETCH_LIMIT = 500
-_HISTORY_FETCH_BUFFER_BARS = 80
-_HISTORY_FETCH_BASELINE_BY_INTERVAL = {
-    "5m": 300,
-    "15m": 500,
-    "1h": 500,  # ema200 warmup (199 NaN rows) + min_bars_1h(210) requires ≥409 raw bars
-    "4h": 500,
-}
-
-
 def _history_fetch_limit(minimums: dict[str, int], interval: str) -> int:
-    required = int(minimums.get(interval, 0))
-    baseline = _HISTORY_FETCH_BASELINE_BY_INTERVAL.get(interval, 240)
-    return max(baseline, required + _HISTORY_FETCH_BUFFER_BARS)
+    return kline_fetch_limit(int(minimums.get(interval, 0)), interval)
 
 
 def _attach_rejection_rollups(
@@ -894,6 +918,34 @@ class AnalyzerFramesMixin(AnalyzerContextMixin, _AnalyzerFamilyGatesBase):
                     except (IndexError, TypeError, ValueError, AttributeError):
                         pass
 
+        if symbol not in {"BTCUSDT", "ETHUSDT"} and isinstance(klines_cache, dict):
+            sym_closes: list[float] | None = None
+            btc_closes: list[float] | None = None
+            for _key, _cached in klines_cache.items():
+                if not (isinstance(_key, tuple) and len(_key) >= 2 and _key[1] == "1h"):
+                    continue
+                try:
+                    _, _frame = _cached
+                    if _frame is None or _frame.height < 10 or "close" not in _frame.columns:
+                        continue
+                    closes = [
+                        float(value)
+                        for value in _frame["close"].to_list()
+                        if value is not None and float(value) > 0.0
+                    ]
+                except (IndexError, TypeError, ValueError, AttributeError):
+                    continue
+                if len(closes) < 10:
+                    continue
+                if _key[0] == symbol:
+                    sym_closes = closes
+                elif _key[0] == "BTCUSDT":
+                    btc_closes = closes
+            if sym_closes and btc_closes:
+                corr = _pearson_correlation_returns(sym_closes, btc_closes)
+                if corr is not None and math.isfinite(corr):
+                    enrichments["btc_corr_1h"] = float(corr)
+
         if context_ages:
             enrichments["context_snapshot_age_seconds"] = max(context_ages)
         if freshness_flags:
@@ -1005,6 +1057,7 @@ class AnalyzerPipelineMixin(AnalyzerFramesMixin):
             )
 
         minimums = self._minimums()
+        raw_minimums = raw_frame_minimums(self._bot.settings)
         rows_4h = frames.df_4h.height if frames.df_4h is not None else 0
         rows_5m = frames.df_5m.height if frames.df_5m is not None else 0
         rows_1h = frames.df_1h.height if frames.df_1h is not None else 0
@@ -1016,26 +1069,27 @@ class AnalyzerPipelineMixin(AnalyzerFramesMixin):
             "4h": rows_4h,
         }
         funnel["frame_readiness"] = {
-            "15m": rows_15m >= minimums["15m"],
-            "1h": rows_1h >= minimums["1h"],
-            "5m": rows_5m >= minimums["5m"],
-            "4h": rows_4h >= minimums["4h"],
+            "15m": rows_15m >= raw_minimums["15m"],
+            "1h": rows_1h >= raw_minimums["1h"],
+            "5m": rows_5m >= raw_minimums["5m"],
+            "4h": rows_4h >= raw_minimums["4h"],
         }
         if (
-            rows_5m < minimums["5m"]
-            or rows_15m < minimums["15m"]
-            or rows_1h < minimums["1h"]
-            or rows_4h < minimums["4h"]
+            rows_5m < raw_minimums["5m"]
+            or rows_15m < raw_minimums["15m"]
+            or rows_1h < raw_minimums["1h"]
+            or rows_4h < raw_minimums["4h"]
         ):
             missing_required = []
-            if rows_5m < minimums["5m"]:
+            if rows_5m < raw_minimums["5m"]:
                 missing_required.append("5m")
-            if rows_15m < minimums["15m"]:
+            if rows_15m < raw_minimums["15m"]:
                 missing_required.append("15m")
-            if rows_1h < minimums["1h"]:
+            if rows_1h < raw_minimums["1h"]:
                 missing_required.append("1h")
-            if rows_4h < minimums["4h"]:
+            if rows_4h < raw_minimums["4h"]:
                 missing_required.append("4h")
+            configured = configured_frame_minimums(self._bot.settings)
             rejected.append(
                 {
                     "ts": datetime.now(UTC).isoformat(),
@@ -1048,10 +1102,14 @@ class AnalyzerPipelineMixin(AnalyzerFramesMixin):
                     "rows_15m": rows_15m,
                     "rows_5m": rows_5m,
                     "rows_4h": rows_4h,
-                    "need_1h": minimums["1h"],
-                    "need_15m": minimums["15m"],
-                    "need_5m": minimums["5m"],
-                    "need_4h": minimums["4h"],
+                    "need_1h": configured["1h"],
+                    "need_15m": configured["15m"],
+                    "need_5m": configured["5m"],
+                    "need_4h": configured["4h"],
+                    "raw_need_1h": raw_minimums["1h"],
+                    "raw_need_15m": raw_minimums["15m"],
+                    "raw_need_5m": raw_minimums["5m"],
+                    "raw_need_4h": raw_minimums["4h"],
                     "missing_required_frames": missing_required,
                 }
             )
@@ -1062,13 +1120,13 @@ class AnalyzerPipelineMixin(AnalyzerFramesMixin):
                 ),
                 item.symbol,
                 rows_5m,
-                minimums["5m"],
+                raw_minimums["5m"],
                 rows_15m,
-                minimums["15m"],
+                raw_minimums["15m"],
                 rows_1h,
-                minimums["1h"],
+                raw_minimums["1h"],
                 rows_4h,
-                minimums["4h"],
+                raw_minimums["4h"],
             )
             _attach_rejection_rollups(funnel, rejected)
             return PipelineResult(

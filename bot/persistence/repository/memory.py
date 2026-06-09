@@ -103,12 +103,20 @@ class MemoryRepository(_MemoryRepositoryBases):
             raise RuntimeError(msg)
         return conn
 
-    async def initialize(self) -> None:
-        """Initialize database tables."""
+    async def initialize(self, *, skip_ddl: bool = False) -> None:
+        """Initialize database connection and tables.
+
+        Args:
+            skip_ddl: When True, open connection but skip DDL + migration.
+                Use for read-only snapshots that must not contend for write locks.
+        """
         self._conn = await aiosqlite.connect(self._db_path, timeout=30.0)
         self._conn.row_factory = aiosqlite.Row
         await self._conn.execute("PRAGMA busy_timeout=30000")
         await self._conn.execute("PRAGMA journal_mode=WAL")
+        if skip_ddl:
+            LOG.debug("Memory repository opened (skip_ddl) at %s", self._db_path)
+            return
         # Create tables
         await self._conn.executescript(REPOSITORY_CORE_DDL)
 
@@ -1263,15 +1271,14 @@ class MemoryRepository(_MemoryRepositoryBases):
         return {key: int(value) for key, value in stats.items()}
 
     def get_open_signal_counts_sync(self) -> dict[str, int]:
-        """Sync read of pending/active counts for dashboard (runs inside asyncio.to_thread)."""
-        if not self._conn:
-            return {"pending": 0, "active": 0, "open": 0}
+        """Sync read of pending/active counts for dashboard hot-path polls."""
         try:
-            cursor = self._conn.execute(
-                "SELECT status, COUNT(*) FROM active_signals "
-                "WHERE status IN ('pending','active') GROUP BY status"
-            )
-            rows = cursor.fetchall()
+            with sqlite3.connect(self._db_path, timeout=5.0) as conn:
+                cursor = conn.execute(
+                    "SELECT status, COUNT(*) FROM active_signals "
+                    "WHERE status IN ('pending','active') GROUP BY status"
+                )
+                rows = cursor.fetchall()
             counts = {str(status): int(count) for status, count in rows}
             pending = counts.get("pending", 0)
             active = counts.get("active", 0)

@@ -27,7 +27,7 @@ from .analytics import StrategyAnalytics
 from .live_audit import audit_snapshot, build_dashboard_audit_snapshot
 from .mobile_summary import build_mobile_summary
 from .operator_alerts import build_live_operator_alerts
-from .outcomes_insights import build_outcomes_insights
+from .outcomes_insights import build_operator_weekly_kpi, build_outcomes_insights
 from .user_summary import build_user_summary
 
 if TYPE_CHECKING:
@@ -112,10 +112,7 @@ def register_routes(dashboard: BotDashboard) -> None:
     async def confluence_legs(max_rows: int = 100_000) -> dict[str, Any]:
         try:
             max_rows = max(1_000, min(int(max_rows), 250_000))
-            return await asyncio.to_thread(
-                self._live_data.confluence_legs,
-                max_rows=max_rows,
-            )
+            return await self._live_data.confluence_legs(max_rows=max_rows)
         except RuntimeError as exc:
             if "shutdown" in str(exc).lower():
                 LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
@@ -129,10 +126,7 @@ def register_routes(dashboard: BotDashboard) -> None:
     async def confluence_legs_by_profile(max_rows: int = 100_000) -> dict[str, Any]:
         try:
             max_rows = max(1_000, min(int(max_rows), 250_000))
-            return await asyncio.to_thread(
-                self._live_data.confluence_legs_by_profile,
-                max_rows=max_rows,
-            )
+            return await self._live_data.confluence_legs_by_profile(max_rows=max_rows)
         except RuntimeError as exc:
             if "shutdown" in str(exc).lower():
                 LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
@@ -164,7 +158,7 @@ def register_routes(dashboard: BotDashboard) -> None:
     async def live_funnel(max_rows: int = 100_000) -> dict[str, Any]:
         try:
             max_rows = max(1_000, min(int(max_rows), 250_000))
-            return await asyncio.to_thread(self._live_data.funnel, max_rows=max_rows)
+            return await self._live_data.funnel(max_rows=max_rows)
         except RuntimeError as exc:
             if "shutdown" in str(exc).lower():
                 LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
@@ -178,7 +172,7 @@ def register_routes(dashboard: BotDashboard) -> None:
     async def live_shortlist(limit: int = 80) -> dict[str, Any]:
         try:
             limit = max(1, min(int(limit), 200))
-            return await asyncio.to_thread(self._live_data.shortlist, limit=limit)
+            return await self._live_data.shortlist(limit=limit)
         except RuntimeError as exc:
             if "shutdown" in str(exc).lower():
                 LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
@@ -197,11 +191,7 @@ def register_routes(dashboard: BotDashboard) -> None:
         try:
             limit = max(1, min(int(limit), 100))
             max_rows = max(1_000, min(int(max_rows), 250_000))
-            return await asyncio.to_thread(
-                self._live_data.rejections,
-                limit=limit,
-                max_rows=max_rows,
-            )
+            return await self._live_data.rejections(limit=limit, max_rows=max_rows)
         except RuntimeError as exc:
             if "shutdown" in str(exc).lower():
                 LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
@@ -219,11 +209,7 @@ def register_routes(dashboard: BotDashboard) -> None:
         try:
             limit = max(1, min(int(limit), 100))
             max_rows = max(1_000, min(int(max_rows), 250_000))
-            return await asyncio.to_thread(
-                self._live_data.decisions,
-                limit=limit,
-                max_rows=max_rows,
-            )
+            return await self._live_data.decisions(limit=limit, max_rows=max_rows)
         except RuntimeError as exc:
             if "shutdown" in str(exc).lower():
                 LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
@@ -236,7 +222,7 @@ def register_routes(dashboard: BotDashboard) -> None:
     @self.app.get("/api/live/runtime")
     async def live_runtime() -> dict[str, Any]:
         try:
-            return await asyncio.to_thread(self._live_data.runtime)
+            return await self._live_data.runtime()
         except RuntimeError as exc:
             if "shutdown" in str(exc).lower():
                 LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
@@ -250,7 +236,7 @@ def register_routes(dashboard: BotDashboard) -> None:
     async def live_delivery(limit: int = 25) -> dict[str, Any]:
         try:
             limit = max(1, min(int(limit), 100))
-            return await asyncio.to_thread(self._live_data.delivery, limit=limit)
+            return await self._live_data.delivery(limit=limit)
         except RuntimeError as exc:
             if "shutdown" in str(exc).lower():
                 LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
@@ -263,7 +249,7 @@ def register_routes(dashboard: BotDashboard) -> None:
     @self.app.get("/api/live/telegram-preview")
     async def live_telegram_preview() -> dict[str, Any]:
         try:
-            return await asyncio.to_thread(self._live_data.telegram_preview)
+            return await self._live_data.telegram_preview()
         except RuntimeError as exc:
             if "shutdown" in str(exc).lower():
                 LOG.debug("Dashboard endpoint called during shutdown: %s", exc)
@@ -320,7 +306,7 @@ def register_routes(dashboard: BotDashboard) -> None:
     ) -> dict[str, Any]:
         cap = max(1, min(int(limit), 100))
         off = max(0, int(offset))
-        signals = self._get_recent_signals(limit=cap + off)
+        signals = await self._get_recent_signals(limit=cap + off)
         if symbol:
             signals = [s for s in signals if str(s.get("symbol", "")).upper() == symbol.upper()]
         if setup_id:
@@ -339,7 +325,7 @@ def register_routes(dashboard: BotDashboard) -> None:
     @self.app.get("/api/v1/signals/live")
     async def v1_signals_live(limit: int = 20) -> list[dict[str, Any]]:
         try:
-            return self._get_live_signal_feed(max(1, min(int(limit), 100)))
+            return await self._get_live_signal_feed(max(1, min(int(limit), 100)))
         except DEFENSIVE_EXC:
             LOG.exception("v1 live signals error")
             return []
@@ -371,11 +357,7 @@ def register_routes(dashboard: BotDashboard) -> None:
     @self.app.get("/api/v1/strategies/health")
     async def v1_strategies_health() -> list[dict[str, Any]]:
         cached = [dict(item) for item in (self._strategies_cache or [])]
-        decisions = await asyncio.to_thread(
-            self._live_data.decisions,
-            limit=41,
-            max_rows=50_000,
-        )
+        decisions = await self._live_data.decisions(limit=41, max_rows=50_000)
         zero_ids = {
             str(row.get("setup_id") or "") for row in (decisions.get("zero_signal_setups") or [])
         }
@@ -476,7 +458,7 @@ def register_routes(dashboard: BotDashboard) -> None:
 
     @self.app.get("/api/v1/analytics/confluence-heatmap")
     async def v1_confluence_heatmap() -> list[dict[str, Any]]:
-        decisions = self._live_data.decisions(limit=50, max_rows=50000)
+        decisions = await self._live_data.decisions(limit=50, max_rows=50000)
         return decisions.get("setup_reports", [])
 
     @self.app.get("/api/v1/analytics/outcomes")
@@ -493,6 +475,21 @@ def register_routes(dashboard: BotDashboard) -> None:
         except DEFENSIVE_EXC:
             LOG.exception("v1 outcomes analytics error")
             return {"error": "outcomes_unavailable"}
+
+    @self.app.get("/api/v1/analytics/operator-kpi")
+    async def v1_analytics_operator_kpi(days: int = 7) -> dict[str, Any]:
+        bot = self.bot
+        repo = getattr(bot, "_modern_repo", None)
+        if repo is None:
+            return {"error": "repository_unavailable"}
+        try:
+            return await build_operator_weekly_kpi(
+                repo,
+                days=max(1, min(int(days), 90)),
+            )
+        except DEFENSIVE_EXC:
+            LOG.exception("v1 operator KPI error")
+            return {"error": "operator_kpi_unavailable"}
 
     @self.app.get("/api/v1/analytics/export")
     async def v1_analytics_export(days: int = 30) -> StreamingResponse:
@@ -553,7 +550,10 @@ def register_routes(dashboard: BotDashboard) -> None:
 
     @self.app.get("/api/v1/confluence/vetos")
     async def v1_confluence_vetos(limit: int = 50) -> list[dict[str, Any]]:
-        rejections = self._live_data.rejections(limit=max(1, min(limit, 100)), max_rows=50000)
+        rejections = await self._live_data.rejections(
+            limit=max(1, min(limit, 100)),
+            max_rows=50000,
+        )
         return rejections.get("reasons", [])
 
         # ── Config endpoints ────────────────────────────────────────────
@@ -642,11 +642,7 @@ def register_routes(dashboard: BotDashboard) -> None:
         except DEFENSIVE_EXC as exc:
             LOG.debug("alerts telemetry fetch error: %s", exc)
         try:
-            live_rows = await asyncio.to_thread(
-                build_live_operator_alerts,
-                self.bot,
-                self._live_data,
-            )
+            live_rows = await build_live_operator_alerts(self.bot, self._live_data)
         except DEFENSIVE_EXC as exc:
             LOG.debug("alerts live synthesis error: %s", exc)
             live_rows = []
@@ -670,7 +666,7 @@ def register_routes(dashboard: BotDashboard) -> None:
     @self.app.get("/api/live/ws-health")
     async def live_ws_health() -> dict[str, Any]:
         try:
-            runtime = await asyncio.to_thread(self._live_data.runtime)
+            runtime = await self._live_data.runtime()
             ws_snapshot = runtime.get("ws_snapshot") if isinstance(runtime, dict) else {}
             health = await self.bot.health_check()
             return {
@@ -695,20 +691,17 @@ def register_routes(dashboard: BotDashboard) -> None:
         try:
             max_rows = max(1_000, min(int(max_rows), 50_000))
 
-            def _build() -> dict[str, Any]:
-                snapshot = build_dashboard_audit_snapshot(
-                    overview=self._live_data.overview(),
-                    funnel=self._live_data.funnel(max_rows=max_rows),
-                    shortlist=self._live_data.shortlist(),
-                    decisions=self._live_data.decisions(max_rows=max_rows),
-                    rejections=self._live_data.rejections(max_rows=max_rows),
-                    delivery=self._live_data.delivery(),
-                    runtime=self._live_data.runtime(),
-                    telegram=self._live_data.telegram_preview(),
-                )
-                return audit_snapshot(snapshot)
-
-            return await asyncio.to_thread(_build)
+            snapshot = build_dashboard_audit_snapshot(
+                overview=await self._live_data.overview(),
+                funnel=await self._live_data.funnel(max_rows=max_rows),
+                shortlist=await self._live_data.shortlist(),
+                decisions=await self._live_data.decisions(max_rows=max_rows),
+                rejections=await self._live_data.rejections(max_rows=max_rows),
+                delivery=await self._live_data.delivery(),
+                runtime=await self._live_data.runtime(),
+                telegram=await self._live_data.telegram_preview(),
+            )
+            return audit_snapshot(snapshot)
         except RuntimeError as exc:
             if "shutdown" in str(exc).lower():
                 LOG.debug("Dashboard endpoint called during shutdown: %s", exc)

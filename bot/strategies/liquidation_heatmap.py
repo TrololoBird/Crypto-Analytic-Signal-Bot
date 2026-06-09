@@ -166,7 +166,7 @@ def detect_liquidation_heatmap(
 
 class LiquidationHeatmapSetup(RoadmapSetup):
     setup_id = "liquidation_heatmap"
-    ENTRY_ORDER_TYPE: ClassVar[str] = "market"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "limit"
     family = "liquidity"
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)

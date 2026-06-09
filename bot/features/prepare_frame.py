@@ -426,32 +426,17 @@ def _coerce_temporal_columns(df: pl.DataFrame) -> pl.DataFrame:
     return df.with_columns(conversions)
 
 
-def _vwap(df: pl.DataFrame) -> pl.Series:
-    """Volume Weighted Average Price, reset per UTC session when timestamps exist."""
+def _vwap(df: pl.DataFrame, *, rolling_bars: int = 96) -> pl.Series:
+    """Rolling VWAP for 24/7 crypto (default ~4d on 1h bars)."""
     typical_price = (df["high"] + df["low"] + df["close"]) / 3.0
     pv = typical_price * df["volume"]
-
-    time_column = next(
-        (column for column in ("close_time", "time", "open_time") if column in df.columns),
-        None,
-    )
-    if time_column is not None and _is_temporal_dtype(df.schema.get(time_column)):
-        # Create a session key (date) for reset
-        session_key = df[time_column].dt.date().alias("_vwap_session")
-        temp_df = df.with_columns([pv.alias("_pv"), session_key])
-
-        vwap_expr = (
-            pl.col("_pv").cum_sum().over("_vwap_session")
-            / pl.col("volume").cum_sum().over("_vwap_session")
-        ).forward_fill()
-
-        return _materialize_series(vwap_expr, df=temp_df, name="vwap")
-
-    cpv: pl.Series = pv.cum_sum()
-    cv: pl.Series = df["volume"].cum_sum()
-
-    vwap = (cpv / cv).forward_fill()
-    return _materialize_series(vwap, df=df, name="vwap")
+    window = max(20, min(int(rolling_bars), df.height))
+    temp_df = df.with_columns(pv.alias("_pv"))
+    vwap_expr = (
+        pl.col("_pv").rolling_sum(window_size=window, min_periods=max(10, window // 4))
+        / pl.col("volume").rolling_sum(window_size=window, min_periods=max(10, window // 4))
+    ).forward_fill()
+    return _materialize_series(vwap_expr, df=temp_df, name="vwap")
 
 
 def _session_time_column(df: pl.DataFrame) -> str | None:
@@ -465,15 +450,39 @@ def _session_time_column(df: pl.DataFrame) -> str | None:
     )
 
 
+def _bar_delta_expr(df: pl.DataFrame) -> pl.Expr | None:
+    if {"taker_buy_base_volume", "volume"}.issubset(df.columns):
+        return 2.0 * pl.col("taker_buy_base_volume") - pl.col("volume")
+    if {"delta_ratio", "volume"}.issubset(df.columns):
+        return (pl.col("delta_ratio") - 0.5) * 2.0 * pl.col("volume")
+    return None
+
+
+def add_rolling_cvd_24h(df: pl.DataFrame) -> pl.DataFrame:
+    """Rolling 24h cumulative volume delta (answers50b Q8 — algo intraday path)."""
+    if df.is_empty():
+        return df.with_columns(pl.lit(0.0).alias("rolling_cvd_24h"))
+    bar_delta = _bar_delta_expr(df)
+    if bar_delta is None:
+        return df.with_columns(pl.lit(0.0).alias("rolling_cvd_24h"))
+    filled_delta = bar_delta.fill_null(0.0).fill_nan(0.0)
+    time_column = _session_time_column(df)
+    if time_column is not None:
+        temp = df.sort(time_column).with_columns(filled_delta.alias("_cvd_bar_delta"))
+        return temp.with_columns(
+            pl.col("_cvd_bar_delta")
+            .rolling_sum_by(time_column, window_size="24h")
+            .alias("rolling_cvd_24h")
+        ).drop("_cvd_bar_delta")
+    return df.with_columns(filled_delta.rolling_sum(window_size=96, min_periods=1).alias("rolling_cvd_24h"))
+
+
 def add_session_cvd(df: pl.DataFrame) -> pl.DataFrame:
     """Cumulative volume delta reset at each UTC calendar date (session CVD)."""
     if df.is_empty():
         return df
-    if {"taker_buy_base_volume", "volume"}.issubset(df.columns):
-        bar_delta = 2.0 * pl.col("taker_buy_base_volume") - pl.col("volume")
-    elif {"delta_ratio", "volume"}.issubset(df.columns):
-        bar_delta = (pl.col("delta_ratio") - 0.5) * 2.0 * pl.col("volume")
-    else:
+    bar_delta = _bar_delta_expr(df)
+    if bar_delta is None:
         return df.with_columns(pl.lit(0.0).alias("session_cvd"))
 
     filled_delta = bar_delta.fill_null(0.0).fill_nan(0.0)
@@ -695,7 +704,7 @@ def _bollinger_bands(
     Returns (upper, middle, lower) bands.
     """
     middle = close.rolling_mean(window_size=period).rename("bb_middle")
-    std = close.rolling_std(window_size=period, ddof=1).rename("bb_std")
+    std = close.rolling_std(window_size=period, ddof=0).rename("bb_std")
 
     upper = middle + nbdev * std
     lower = middle - nbdev * std
@@ -1537,6 +1546,7 @@ def _prepare_frame(
         work = work.with_columns([pl.lit(0.5).alias("delta_ratio")])
 
     work = add_session_cvd(work)
+    work = add_rolling_cvd_24h(work)
 
     # ATR %
     work = work.with_columns(
@@ -1598,6 +1608,7 @@ __all__ = [
     "_finite_float",
     "_numeric_item",
     "_prepare_frame",
+    "add_rolling_cvd_24h",
     "add_session_cvd",
     "has_minimum_bars",
     "min_required_bars",

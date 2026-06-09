@@ -311,7 +311,7 @@ def with_spec_columns(frame: pl.DataFrame) -> pl.DataFrame:
     ]
     work = work.with_columns(pass1)
 
-    bb_std = pl.col("close").rolling_std(window_size=20, ddof=1)
+    bb_std = pl.col("close").rolling_std(window_size=20, ddof=0)
     if "kc_upper_15" in work.columns and "kc_lower_15" in work.columns:
         kc15_upper_value = pl.col("kc_upper_15").cast(pl.Float64, strict=False)
         kc15_lower_value = pl.col("kc_lower_15").cast(pl.Float64, strict=False)
@@ -368,6 +368,8 @@ def with_spec_columns(frame: pl.DataFrame) -> pl.DataFrame:
 
 
 def _spec_cvd_expr(frame: pl.DataFrame) -> pl.Expr:
+    if "rolling_cvd_24h" in frame.columns:
+        return pl.col("rolling_cvd_24h").cast(pl.Float64, strict=False)
     if "session_cvd" in frame.columns:
         return pl.col("session_cvd").cast(pl.Float64, strict=False)
     time_column = next(

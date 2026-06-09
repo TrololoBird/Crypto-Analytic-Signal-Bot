@@ -13,7 +13,7 @@ from typing import Any, Literal
 
 EntryOrderType = Literal["limit", "market"]
 DEFAULT_ENTRY_ORDER_TYPE: EntryOrderType = "limit"
-DEFAULT_LATE_ENTRY_CHASE_PCT = 0.008
+DEFAULT_LATE_ENTRY_CHASE_PCT = 0.002
 
 # Reference ATR% (15m) at which the base chase tolerance applies. In higher-
 # volatility regimes price travels faster, so the chase band scales up with ATR%
@@ -56,6 +56,43 @@ def resolve_late_entry_chase_pct(settings: Any | None = None) -> float:
                 if math.isfinite(value) and value > 0.0:
                     return value
     return DEFAULT_LATE_ENTRY_CHASE_PCT
+
+
+def pending_expiry_minutes_for_signal(
+    settings: Any,
+    *,
+    confirmation_profile: str | None,
+    entry_order_type: str | None,
+    strategy_family: str | None = None,
+    setup_id: str | None = None,
+) -> int:
+    """Profile-aware pending TTL (report-4 §G30: reversal/market shorter than continuation)."""
+    tracking = getattr(settings, "tracking", None)
+    if tracking is None:
+        return 180
+    sid = str(setup_id or "").strip()
+    if sid:
+        overrides = getattr(tracking, "setup_ttl_minutes", None) or {}
+        if sid in overrides:
+            return int(overrides[sid])
+        from bot.domain.strategy_catalog import resolve_setup_ttl_minutes
+
+        catalog_ttl = resolve_setup_ttl_minutes(sid)
+        if catalog_ttl > 0:
+            return catalog_ttl
+    profile = normalize_confirmation_profile(confirmation_profile)
+    order_type = str(entry_order_type or "limit").strip().lower()
+    family = str(strategy_family or "").strip().lower()
+    reversal_profiles = {"countertrend_exhaustion", "divergence_reversal"}
+    if profile in reversal_profiles or family == "reversal" or order_type == "market":
+        return int(getattr(tracking, "reversal_pending_expiry_minutes", 150))
+    return int(
+        getattr(
+            tracking,
+            "continuation_pending_expiry_minutes",
+            getattr(tracking, "pending_expiry_minutes", 240),
+        )
+    )
 
 
 def normalize_confirmation_profile(profile: str | None) -> str:
@@ -222,18 +259,33 @@ def should_activate_limit_entry(
     close: float,
     high: float,
     low: float,
+    trend_follow_requires_close: bool = False,
 ) -> tuple[bool, str]:
-    """Pending → active when the limit zone is touched (fill), any bar phase."""
-    _ = (confirmation_profile, open_, close)
-    if limit_zone_touched(
+    """Pending → active when zone is touched; reversal profiles need bar confirmation."""
+    if not limit_zone_touched(
         direction=direction,
         entry_low=entry_low,
         entry_high=entry_high,
         high=high,
         low=low,
     ):
-        return True, "limit_filled"
-    return False, "zone_not_touched"
+        return False, "zone_not_touched"
+    profile = normalize_confirmation_profile(confirmation_profile)
+    if profile in {"countertrend_exhaustion", "divergence_reversal"}:
+        return confirm_strategy_activation(
+            direction=direction,
+            confirmation_profile=profile,
+            entry_low=entry_low,
+            entry_high=entry_high,
+            open_=open_,
+            close=close,
+            high=high,
+            low=low,
+        )
+    if trend_follow_requires_close and profile == "trend_follow":
+        if not close_inside_entry_zone(close=close, entry_low=entry_low, entry_high=entry_high):
+            return False, "close_outside_zone"
+    return True, "limit_filled"
 
 
 def should_activate_limit_fill_price(

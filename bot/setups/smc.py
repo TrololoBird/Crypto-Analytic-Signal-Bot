@@ -231,6 +231,43 @@ def fvg_ce_entry(
     return ce if ce >= price else gap_high
 
 
+def nearest_fvg_ce_target(
+    frame: pl.DataFrame,
+    *,
+    direction: str,
+    price_anchor: float,
+    atr: float = 0.0,
+    min_gap_atr: float = 0.0,
+    exclude_index: int | None = None,
+) -> float | None:
+    """Nearest ahead FVG CE (50%) for TP1 — deep-research-report-4 §C9."""
+    if price_anchor <= 0.0:
+        return None
+    best_ce: float | None = None
+    best_dist = float("inf")
+    for created_idx, _gap_dir, bottom, top in fvg_candidates(frame, join_consecutive=True):
+        if exclude_index is not None and created_idx == exclude_index:
+            continue
+        gap_width = top - bottom
+        if min_gap_atr > 0.0 and atr > 0.0 and gap_width < min_gap_atr * atr:
+            continue
+        ce = (bottom + top) / 2.0
+        if direction == "long":
+            if ce <= price_anchor:
+                continue
+            dist = ce - price_anchor
+        elif direction == "short":
+            if ce >= price_anchor:
+                continue
+            dist = price_anchor - ce
+        else:
+            continue
+        if dist < best_dist:
+            best_dist = dist
+            best_ce = ce
+    return best_ce
+
+
 def sweep_tolerance(
     *,
     level: float,
@@ -466,8 +503,6 @@ def order_blocks(
 
         crossed[last_top_index] = True
         default_index = max(close_index - 1, 0)
-        ob_top = high[default_index]
-        ob_bottom = low[default_index]
         ob_index = default_index
 
         if close_index - last_top_index > 1:
@@ -478,10 +513,10 @@ def order_blocks(
                 min_value = float(segment.min())
                 candidates = np.nonzero(segment == min_value)[0]
                 if candidates.size:
-                    candidate_index = int(start + candidates[-1])
-                    ob_bottom = low[candidate_index]
-                    ob_top = high[candidate_index]
-                    ob_index = candidate_index
+                    ob_index = int(start + candidates[-1])
+
+        ob_top = max(open_[ob_index], close[ob_index])
+        ob_bottom = min(open_[ob_index], close[ob_index])
 
         ob[ob_index] = 1
         top_arr[ob_index] = ob_top
@@ -529,8 +564,6 @@ def order_blocks(
 
         crossed[last_bottom_index] = True
         default_index = max(close_index - 1, 0)
-        ob_top = high[default_index]
-        ob_bottom = low[default_index]
         ob_index = default_index
 
         if close_index - last_bottom_index > 1:
@@ -541,10 +574,10 @@ def order_blocks(
                 max_value = float(segment.max())
                 candidates = np.nonzero(segment == max_value)[0]
                 if candidates.size:
-                    candidate_index = int(start + candidates[-1])
-                    ob_top = high[candidate_index]
-                    ob_bottom = low[candidate_index]
-                    ob_index = candidate_index
+                    ob_index = int(start + candidates[-1])
+
+        ob_top = max(open_[ob_index], close[ob_index])
+        ob_bottom = min(open_[ob_index], close[ob_index])
 
         ob[ob_index] = -1
         top_arr[ob_index] = ob_top
@@ -784,18 +817,32 @@ def _order_block_touch_indices(
     top: float,
     bottom: float,
     created_index: int,
+    close_mitigation: bool = True,
 ) -> tuple[int | None, int | None]:
     ohlc = _normalize_ohlcv(frame)
     high = _series_to_float_array(ohlc["high"])
     low = _series_to_float_array(ohlc["low"])
+    close = _series_to_float_array(ohlc["close"])
+    midpoint = (top + bottom) / 2.0
     start = created_index + 1
     if start >= ohlc.height:
         return None, None
 
-    intersects = (low[start:] <= top) & (high[start:] >= bottom)
-    mitigation_index = int(np.argmax(intersects) + start) if np.any(intersects) else None
+    if close_mitigation:
+        mitigation_mask = (
+            close[start:] < midpoint if direction == "long" else close[start:] > midpoint
+        )
+        invalidation_mask = (
+            close[start:] < bottom if direction == "long" else close[start:] > top
+        )
+    else:
+        intersects = (low[start:] <= top) & (high[start:] >= bottom)
+        mitigation_mask = intersects
+        invalidation_mask = low[start:] < bottom if direction == "long" else high[start:] > top
 
-    invalidation_mask = low[start:] < bottom if direction == "long" else high[start:] > top
+    mitigation_index = (
+        int(np.argmax(mitigation_mask) + start) if np.any(mitigation_mask) else None
+    )
     invalidation_index = (
         int(np.argmax(invalidation_mask) + start) if np.any(invalidation_mask) else None
     )
@@ -886,6 +933,7 @@ def latest_order_block(
     allowed_states: tuple[ZoneState, ...] = ("fresh", "mitigated"),
     current_price: float | None = None,
     touch_buffer: float = 0.0,
+    close_mitigation: bool = True,
 ) -> SMCZone | None:
     swings = swing_highs_lows(
         frame,
@@ -893,7 +941,7 @@ def latest_order_block(
         mode=mode,
         include_unconfirmed_tail=include_unconfirmed_tail,
     )
-    zones = order_blocks(frame, swings)
+    zones = order_blocks(frame, swings, close_mitigation=close_mitigation)
     for idx in range(zones.height - 1, -1, -1):
         raw_direction = zones.item(idx, "OB")
         if _is_missing(raw_direction):
@@ -909,6 +957,7 @@ def latest_order_block(
             top=top,
             bottom=bottom,
             created_index=idx,
+            close_mitigation=close_mitigation,
         )
         state = _zone_state(mitigation_index, invalidation_index)
         if state not in allowed_states:
@@ -919,6 +968,8 @@ def latest_order_block(
             (low - touch_buffer) <= current_price <= (high + touch_buffer)
         ):
             continue
+        wick_low = float(frame.item(idx, "low"))
+        wick_high = float(frame.item(idx, "high"))
         return SMCZone(
             kind="order_block",
             direction=direction,
@@ -935,6 +986,8 @@ def latest_order_block(
                 "strength_pct": float(zones.item(idx, "Percentage")),
                 "age_bars": frame.height - idx - 1,
                 "mitigation_state": state,
+                "wick_low": wick_low,
+                "wick_high": wick_high,
             },
         )
     return None
@@ -1086,6 +1139,7 @@ __all__ = [
     "fvg",
     "fvg_candidates",
     "fvg_ce_entry",
+    "nearest_fvg_ce_target",
     "is_clean_fvg",
     "latest_breaker_block",
     "latest_fvg_zone",

@@ -13,6 +13,9 @@ class TrackedSignalState(msgspec.Struct, kw_only=True):
     setup_id: str
     direction: str
     timeframe: str
+    entry_tf: str = ""
+    pattern_tf: str = ""
+    context_tfs: tuple[str, ...] = ()
     created_at: str
     pending_expires_at: str
     active_expires_at: str

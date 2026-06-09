@@ -19,10 +19,11 @@ if TYPE_CHECKING:
 __all__ = ["detect_oi_divergence"]
 
 
-def _oi_divergence_price_change(prepared: PreparedSymbol, *, fallback_bars: int = 8) -> float:
-    frame_4h = prepared.work_4h
-    if frame_4h is not None and frame_4h.height >= 2 and "close" in frame_4h.columns:
-        return _price_change_pct(frame_4h, bars=1)
+def _oi_divergence_price_change(prepared: PreparedSymbol, *, fallback_bars: int = 4) -> float:
+    """Evaluate price change on 1h entry frame (answers.md Part 3: oi_divergence @ 1h)."""
+    frame_1h = prepared.work_1h
+    if frame_1h is not None and frame_1h.height >= 2 and "close" in frame_1h.columns:
+        return _price_change_pct(frame_1h, bars=1)
     return _price_change_pct_confirmed(prepared.work_15m, fallback_bars)
 
 
@@ -59,7 +60,7 @@ def detect_oi_divergence(
     else:
         direction = "long"
         oi_context = "price_down_oi_contracting"
-    work = prepared.work_15m
+    work = prepared.work_1h
     # Limit order: sell into prev-bar high (resistance) for shorts, buy at prev-bar low
     # (support) for longs — EMA20 ≈ current price yields immediate market-fill.
     if direction == "long":

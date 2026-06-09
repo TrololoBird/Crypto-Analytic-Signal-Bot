@@ -128,8 +128,8 @@ def _e(
 
 
 CATALOG_ENTRIES: tuple[CatalogEntry, ...] = (
-    _e("structure_pullback", 1, "A", "15m", "15m", "1h,4h,15m", base=0.65),
-    _e("structure_break_retest", 1, "A", "15m", "1h/15m", "1h,15m", base=0.65),
+    _e("structure_pullback", 1, "A", "1h", "1h", "4h,1h,15m", base=0.65),
+    _e("structure_break_retest", 1, "A", "1h", "1h/15m", "4h,1h,15m", base=0.65),
     _e(
         "wick_trap_reversal",
         1,
@@ -154,30 +154,18 @@ CATALOG_ENTRIES: tuple[CatalogEntry, ...] = (
         min_vol=1.2,
         base=0.55,
     ),
-    _e("ema_bounce", 1, "A", "15m", "15m", "1h,15m", base=0.70, min_adx=15.0),
-    _e("fvg_setup", 1, "A", "15m", "15m", "1h,4h,15m", base=0.62),
-    _e("order_block", 1, "A", "15m", "15m", "1h,15m", base=0.65),
+    _e("ema_bounce", 1, "A", "1h", "1h", "4h,1h,15m", base=0.70, min_adx=15.0),
+    _e("fvg_setup", 1, "A", "1h", "1h", "4h,1h,15m", base=0.62),
+    _e("order_block", 1, "A", "1h", "1h", "4h,1h,15m", base=0.65),
     _e("liquidity_sweep", 1, "A", "15m", "15m", "1h,15m", family="reversal", base=0.60),
-    _e("bos_choch", 1, "A", "15m", "15m", "1h,15m", family="reversal", base=0.60),
-    _e(
-        "hidden_divergence",
-        2,
-        "A",
-        "15m",
-        "15m",
-        "1h,15m",
-        family="reversal",
-        profile="divergence_reversal",
-        min_vol=0.55,
-        base=0.60,
-    ),
+    _e("bos_choch", 1, "A", "1h", "1h", "4h,1h,15m", family="reversal", base=0.60),
     _e(
         "indicator_divergence",
         2,
         "A",
-        "15m",
-        "15m",
-        "15m,1h",
+        "1h",
+        "1h",
+        "4h,1h,15m",
         family="reversal",
         profile="divergence_reversal",
         min_vol=0.75,
@@ -187,9 +175,9 @@ CATALOG_ENTRIES: tuple[CatalogEntry, ...] = (
         "funding_reversal",
         2,
         "B",
-        "1h/15m",
-        "15m",
-        "1h,15m",
+        "1h",
+        "1h",
+        "4h,1h",
         family="reversal",
         profile="countertrend_exhaustion",
         min_vol=0.85,
@@ -201,37 +189,25 @@ CATALOG_ENTRIES: tuple[CatalogEntry, ...] = (
         "A",
         "15m",
         "15m",
-        "15m",
+        "1h,15m",
         family="reversal",
         profile="divergence_reversal",
         base=0.60,
     ),
     _e(
-        "session_killzone",
-        2,
-        "B",
-        "15m+clock",
-        "15m",
-        "1h,15m",
-        family="breakout",
-        min_vol=1.0,
-        base=0.52,
-    ),
-    _e("breaker_block", 2, "A", "15m", "15m", "1h,15m", family="breakout", min_vol=0.70, base=0.58),
-    _e(
         "turtle_soup",
         2,
         "A",
-        "15m",
+        "1h",
         "1h/15m",
-        "1h,15m",
+        "4h,1h,15m",
         family="reversal",
         profile="countertrend_exhaustion",
         base=0.58,
     ),
-    _e("vwap_trend", 2, "A", "15m", "15m", "15m", min_vol=1.05, base=0.65),
-    _e("supertrend_follow", 2, "A", "15m", "15m", "4h,1h,15m", base=0.62),
-    _e("multi_tf_trend", 3, "A", "15m", "4h/1h", "4h,1h,15m", min_vol=0.90, base=0.68),
+    _e("vwap_trend", 2, "A", "1h", "1h", "4h,1h,15m", min_vol=1.05, base=0.65),
+    _e("supertrend_follow", 2, "A", "1h", "1h", "4h,1h,15m", base=0.62),
+    _e("multi_tf_trend", 3, "A", "1h", "4h/1h", "4h,1h,15m", min_vol=0.90, base=0.68),
     _e(
         "price_velocity",
         3,
@@ -250,9 +226,9 @@ CATALOG_ENTRIES: tuple[CatalogEntry, ...] = (
         "volume_climax_reversal",
         3,
         "A",
-        "15m",
-        "15m",
-        "1h,15m",
+        "1h",
+        "1h",
+        "4h,1h,15m",
         family="reversal",
         profile="countertrend_exhaustion",
         min_vol=1.3,
@@ -269,48 +245,7 @@ CATALOG_ENTRIES: tuple[CatalogEntry, ...] = (
         min_vol=1.25,
         base=0.58,
     ),
-    _e("bb_squeeze", 3, "A", "15m", "15m", "15m,4h", family="volatility", min_vol=0.90, base=0.50),
-    _e("atr_expansion", 3, "A", "15m", "15m", "15m", family="volatility", base=0.50),
-    _e(
-        "whale_walls",
-        4,
-        "C",
-        "15m",
-        "15m",
-        "15m",
-        family="orderbook",
-        min_vol=0.90,
-        min_adx=0.0,
-        base=0.48,
-    ),
-    _e(
-        "spread_strategy",
-        4,
-        "C",
-        "15m",
-        "15m",
-        "15m",
-        family="orderbook",
-        min_vol=0.90,
-        min_adx=0.0,
-        base=0.48,
-    ),
-    _e(
-        "depth_imbalance",
-        4,
-        "C",
-        "15m",
-        "15m",
-        "15m",
-        family="orderbook",
-        min_vol=0.80,
-        min_adx=0.0,
-        base=0.48,
-    ),
     _e("absorption", 4, "A", "15m", "15m", "15m", family="orderflow", min_vol=0.90, base=0.50),
-    _e(
-        "aggression_shift", 4, "B", "15m", "15m", "15m", family="orderflow", min_vol=0.90, base=0.50
-    ),
     _e(
         "liquidation_heatmap",
         4,
@@ -323,24 +258,13 @@ CATALOG_ENTRIES: tuple[CatalogEntry, ...] = (
         base=0.52,
     ),
     _e(
-        "stop_hunt_detection",
-        4,
-        "A",
-        "15m",
-        "15m",
-        "15m,1h",
-        family="liquidity",
-        min_vol=0.80,
-        base=0.52,
-    ),
-    _e(
         "oi_divergence",
         5,
         "A",
-        "4h/15m",
-        "15m",
-        "4h,15m",
-        trigger_primary="4h",
+        "1h",
+        "1h",
+        "4h,1h,15m",
+        trigger_primary="1h",
         family="sentiment",
         min_vol=0.0,
         min_adx=0.0,
@@ -350,32 +274,21 @@ CATALOG_ENTRIES: tuple[CatalogEntry, ...] = (
         "ls_ratio_extreme",
         5,
         "B",
-        "4h",
-        "15m",
-        "4h,15m",
+        "1h",
+        "1h",
+        "4h,1d,1h",
         family="sentiment",
         profile="countertrend_exhaustion",
         min_vol=0.90,
         base=0.50,
     ),
     _e(
-        "rsi_divergence_bottom",
-        5,
-        "A",
-        "15m",
-        "15m",
-        "1h,15m",
-        family="reversal",
-        profile="divergence_reversal",
-        base=0.55,
-    ),
-    _e(
         "wyckoff_spring",
         5,
         "A",
-        "15m",
         "1h",
-        "1h,15m",
+        "1h",
+        "4h,1h,15m",
         family="reversal",
         profile="countertrend_exhaustion",
         min_vol=1.05,
@@ -406,58 +319,91 @@ CATALOG_ENTRIES: tuple[CatalogEntry, ...] = (
         base=0.48,
     ),
     _e(
-        "orderflow_imbalance",
-        3,
-        "B",
-        "15m",
-        "15m",
-        "15m,1h",
-        family="reversal",
-        profile="countertrend_exhaustion",
-        min_vol=0.85,
-        base=0.55,
-    ),
-    _e(
         "pinbar_reversal",
         3,
         "B",
-        "15m",
-        "15m",
-        "15m,1h",
+        "1h",
+        "1h",
+        "4h,1h,15m",
         family="reversal",
         profile="countertrend_exhaustion",
         min_vol=0.75,
         base=0.52,
     ),
-    _e(
-        "fakeout_detector",
-        3,
-        "B",
-        "15m",
-        "15m",
-        "15m,1h",
-        family="reversal",
-        profile="countertrend_exhaustion",
-        min_vol=1.0,
-        base=0.52,
-    ),
-    _e(
-        "cvd_exhaustion",
-        3,
-        "B",
-        "15m",
-        "15m",
-        "15m,1h",
-        family="reversal",
-        profile="countertrend_exhaustion",
-        min_vol=0.70,
-        base=0.52,
-    ),
 )
+
+# Former standalone IDs merged per docs/answers.md (telemetry may still reference aliases).
+MERGED_SETUP_ALIASES: dict[str, str] = {
+    "fakeout_detector": "liquidity_sweep",
+    "stop_hunt_detection": "liquidity_sweep",
+    "cvd_exhaustion": "cvd_divergence",
+    "bb_squeeze": "squeeze_setup",
+    "atr_expansion": "squeeze_setup",
+    "session_killzone": "confluence_leg",
+    "orderflow_imbalance": "confluence_leg",
+    "aggression_shift": "confluence_leg",
+    "depth_imbalance": "confluence_leg",
+    "whale_walls": "removed_evidence_c",
+    "spread_strategy": "removed_evidence_c",
+    "hidden_divergence": "indicator_divergence",
+    "rsi_divergence_bottom": "indicator_divergence",
+    "breaker_block": "order_block",
+}
 
 CATALOG_SETUP_IDS: frozenset[str] = frozenset(entry.setup_id for entry in CATALOG_ENTRIES)
 CATALOG_SETUP_IDS_ORDERED: tuple[str, ...] = tuple(entry.setup_id for entry in CATALOG_ENTRIES)
 CATALOG_BY_ID: dict[str, CatalogEntry] = {entry.setup_id: entry for entry in CATALOG_ENTRIES}
+
+# answers.md Part 3 — (entry_order_type, ttl_minutes) per canonical setup.
+PART3_POLICY: dict[str, tuple[str, int]] = {
+    "structure_pullback": ("limit", 120),
+    "structure_break_retest": ("limit", 120),
+    "wick_trap_reversal": ("limit", 45),
+    "squeeze_setup": ("limit", 45),
+    "ema_bounce": ("limit", 120),
+    "fvg_setup": ("limit", 120),
+    "order_block": ("limit", 180),
+    "liquidity_sweep": ("limit", 45),
+    "bos_choch": ("limit", 120),
+    "indicator_divergence": ("market", 90),
+    "funding_reversal": ("market", 120),
+    "cvd_divergence": ("market", 45),
+    "turtle_soup": ("limit", 120),
+    "vwap_trend": ("limit", 90),
+    "supertrend_follow": ("limit", 120),
+    "multi_tf_trend": ("market", 120),
+    "price_velocity": ("market", 30),
+    "volume_anomaly": ("market", 30),
+    "volume_climax_reversal": ("market", 90),
+    "keltner_breakout": ("market", 45),
+    "absorption": ("limit", 45),
+    "liquidation_heatmap": ("limit", 45),
+    "oi_divergence": ("market", 120),
+    "ls_ratio_extreme": ("market", 240),
+    "wyckoff_spring": ("limit", 180),
+    "btc_correlation": ("market", 30),
+    "altcoin_season_index": ("market", 240),
+    "pinbar_reversal": ("limit", 120),
+}
+
+
+def resolve_setup_order_type(setup_id: str, *, default: str = "limit") -> str:
+    """Catalog Part 3 order type (limit vs market)."""
+    policy = PART3_POLICY.get(str(setup_id or "").strip())
+    if policy is not None:
+        return policy[0]
+    return default
+
+
+def resolve_setup_ttl_minutes(setup_id: str, *, default: int = 120) -> int:
+    """Catalog Part 3 pending TTL in minutes."""
+    policy = PART3_POLICY.get(str(setup_id or "").strip())
+    if policy is not None:
+        return int(policy[1])
+    entry = CATALOG_BY_ID.get(str(setup_id or "").strip())
+    if entry is not None and entry.trigger_tf == "15m":
+        return 45
+    return default
 
 
 def catalog_setup_family(setup_id: str) -> str:
@@ -684,18 +630,51 @@ PR10_WAVES: dict[int, frozenset[str]] = {
 }
 
 
+FAMILY_MIN_RR_FLOOR: dict[str, float] = {
+    "reversal": 1.5,
+    "breakout": 2.5,
+    "continuation": 2.5,
+    "trend": 2.5,
+    "volatility": 2.0,
+    "sentiment": 2.0,
+    "multi_asset": 2.0,
+    "orderflow": 2.0,
+    "liquidity": 2.0,
+    "orderbook": 2.0,
+}
+
+
 def catalog_default_params(setup_id: str) -> dict[str, float | str]:
     entry = CATALOG_BY_ID.get(setup_id)
     if entry is None:
         return {}
+    family_floor = FAMILY_MIN_RR_FLOOR.get(entry.family, 2.0)
+    min_rr = max(float(entry.min_rr), family_floor)
     return {
         "base_score": entry.base_score,
-        "min_rr": entry.min_rr,
+        "min_rr": min_rr,
         "min_volume_ratio": entry.min_volume_ratio,
         "min_adx_1h": entry.min_adx_1h,
         "confirmation_profile": entry.confirmation_profile,
         "sl_buffer_atr": 0.85,
     }
+
+
+def resolve_setup_tf_tags(setup_id: str) -> tuple[str, str, tuple[str, ...]]:
+    """Return (entry_tf, pattern_tf, context_tfs) for telemetry and A/B tagging."""
+    entry = CATALOG_BY_ID.get(setup_id)
+    if entry is None:
+        return "15m", "15m", ("1h", "4h")
+    entry_tf = str(entry.trigger_tf or "15m").strip()
+    pattern_tf = str(entry.pattern_tf or entry_tf).strip()
+    context = tuple(
+        dict.fromkeys(
+            tf
+            for tf in (*entry.required_tfs, *entry.trigger_intervals)
+            if str(tf).strip() and str(tf).strip() != entry_tf
+        )
+    )
+    return entry_tf, pattern_tf, context
 
 
 def catalog_timeframe_profile(setup_id: str) -> dict[str, object]:
@@ -708,6 +687,8 @@ def catalog_timeframe_profile(setup_id: str) -> dict[str, object]:
         "trigger_intervals": entry.trigger_intervals,
         "pattern_tf": entry.pattern_tf,
         "required_tfs": entry.required_tfs,
+        "entry_order_type": resolve_setup_order_type(setup_id),
+        "ttl_minutes": resolve_setup_ttl_minutes(setup_id),
     }
 
 

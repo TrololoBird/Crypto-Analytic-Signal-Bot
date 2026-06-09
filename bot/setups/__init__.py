@@ -14,6 +14,7 @@ from ..delivery.trade_plan import TradePlanBuilder
 from ..domain.risk import RiskParams
 from ..domain.schemas import PreparedSymbol, Signal
 from ..domain.strategies import StrategyDecision
+from ..domain.strategy_catalog import resolve_setup_tf_tags
 from ..features.prepare import _swing_points  # shared swing detection helper
 from .utils import (
     apply_graded_penalty,
@@ -407,6 +408,7 @@ def _build_signal(
     # floor: align with config min_score (0.65) — 0.63 let signals through that
     # filters immediately dropped, creating wasted confluence compute.
     score = max(0.65, round(float(score), 4))
+    catalog_entry_tf, catalog_pattern_tf, catalog_context_tfs = resolve_setup_tf_tags(setup_id)
 
     return Signal(
         symbol=prepared.symbol,
@@ -414,6 +416,9 @@ def _build_signal(
         direction=direction,
         score=score,
         timeframe=signal_timeframe,
+        entry_tf=catalog_entry_tf,
+        pattern_tf=catalog_pattern_tf,
+        context_tfs=catalog_context_tfs,
         entry_low=trade_plan.entry_low,
         entry_high=trade_plan.entry_high,
         stop=trade_plan.stop_loss,

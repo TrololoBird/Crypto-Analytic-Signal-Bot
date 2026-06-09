@@ -16,6 +16,13 @@ if TYPE_CHECKING:
 # When a canonical setup subsumes a spec-only sibling, drop the sibling from lanes.
 _SPEC_DELEGATE_CANONICAL: dict[str, str] = {
     "bb_squeeze": "squeeze_setup",
+    "atr_expansion": "squeeze_setup",
+    "fakeout_detector": "liquidity_sweep",
+    "stop_hunt_detection": "liquidity_sweep",
+    "cvd_exhaustion": "cvd_divergence",
+    "hidden_divergence": "indicator_divergence",
+    "rsi_divergence_bottom": "indicator_divergence",
+    "breaker_block": "order_block",
 }
 
 _STANDARD_KLINE_INTERVALS = frozenset(

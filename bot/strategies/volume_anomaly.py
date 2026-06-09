@@ -244,7 +244,14 @@ def _detect_volume_anomaly_extended(
     bias_1h = getattr(prepared, "bias_1h", prepared.bias_4h)
     sl_buffer = float(effective_params["sl_buffer_atr"])
     min_rr = float(effective_params["min_rr"])
-    price_anchor = (signal_high + signal_low) / 2.0
+    # Next-bar-open entry avoids close-bar lookahead (answers.md RETUNE).
+    next_idx = min(signal_idx + 1, work.height - 1)
+    if next_idx > signal_idx:
+        price_anchor = float(work.item(next_idx, "open") or signal_open)
+        entry_mode = "next_open"
+    else:
+        price_anchor = float(signal_open)
+        entry_mode = "signal_open"
     if direction == "long":
         stop = min(signal_low, signal_open) - atr * sl_buffer
         risk = price_anchor - stop
@@ -291,6 +298,7 @@ def _detect_volume_anomaly_extended(
         f"score_penalty={score_penalty:.2f}",
         f"signal_lag={work.height - 1 - signal_idx}",
         f"signal_close={signal_close:.4f}",
+        f"entry_mode={entry_mode}",
         f"limit_entry={price_anchor:.4f}",
     ]
     return _build_signal(

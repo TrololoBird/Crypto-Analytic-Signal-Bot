@@ -5,6 +5,14 @@
 Crypto futures **signal-analytics** bot (no auto-trading, no authenticated Binance endpoints).
 Signals only. Telegram delivery. Public Binance USDⓈ-M endpoints only.
 
+## Active development — agents may change everything
+
+**Not production-frozen.** Codebase is largely AI-generated; architecture, strategies, indicators, and config defaults are provisional until validated by live outcomes and external research.
+
+Agents **may refactor the full stack** (packages, delivery path internals, monolith splits, indicator math, schema migrations) when needed for correctness. Do not preserve broken structure out of caution.
+
+**Hard limits unchanged:** no auto-trading, no authenticated Binance APIs, delivery order `validate_signal_contract` → `hard_confluence_gate` → `deliver`.
+
 ## Runtime topology (read before editing anything)
 
 **Entry:** `main.py` → `bot/cli.py` → `asyncio.run(_main())` → `SignalBot.start()` + `await bot.run_forever()`
@@ -45,7 +53,7 @@ WS kline close → EventBus → SymbolAnalyzer → SignalEngine → DeliveryOrch
 | WS market data | `bot/market/ws.py` + `_ws_connection.py` + `_ws_parsers.py` | Public interface unchanged on `ws.py` |
 | REST market data | `bot/market/rest_impl.py` + `_rest_circuit.py` + `_rest_frames.py` | `RestCircuitMixin` on `RestHttpMixin` |
 | Feature pipeline | `bot/features/prepare.py` → `prepare_frame.py` | Polars hot path |
-| Strategy execution | `bot/engine/engine.py` + `registry.py` | 38 strategies |
+| Strategy execution | `bot/engine/engine.py` + `registry.py` | 42 strategies |
 | Signal delivery | `bot/delivery/` (contract → filters → confluence → deliver) | Invariant order enforced |
 | Persistence CRUD | `bot/persistence/repository/memory.py` | SQLite + parquet; inherits `AnalyticsMixin` |
 | Persistence DDL (schema) | `bot/persistence/repository/_schema.py` | DDL strings only — imported by `memory.py` |
@@ -97,7 +105,7 @@ Next review: after 50+ new executed outcomes with fix-sl-A.
 
 ## Strategy catalog
 
-38 strategies via `STRATEGY_CLASSES` → `StrategyRegistry.register()`.
+42 strategies via `STRATEGY_CLASSES` → `StrategyRegistry.register()`.
 Enabled per strategy: `config.toml` `[setups.<id>]`.
 Metadata: `bot/domain/strategy_catalog.py` (`CATALOG_ENTRIES`, 38 entries).
 New strategy: detector file + `STRATEGY_CLASSES` + `CATALOG_ENTRIES` + config key + optional `config/strategies/<id>.toml`.

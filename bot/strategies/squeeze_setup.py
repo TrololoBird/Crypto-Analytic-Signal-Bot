@@ -7,9 +7,13 @@ from typing import TYPE_CHECKING, ClassVar
 from ..features.prepare import _swing_points as _sp
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
-from ._common import confirmed_pattern_frame
-from ._roadmap import _confirmed_context_conflict
-from .bb_squeeze import detect_bb_squeeze_release
+from ._common import LOGGER, SpecHit, _latest_values, confirmed_pattern_frame, with_spec_columns
+from ._roadmap import (
+    _build_atr_signal,
+    _confirmed_context_conflict,
+    _missing_columns,
+    _prev,
+)
 
 if TYPE_CHECKING:
     import polars as pl
@@ -17,7 +21,41 @@ if TYPE_CHECKING:
     from ..domain.config import BotSettings
     from ..domain.schemas import PreparedSymbol, Signal
 
-__all__ = ["detect_squeeze_setup"]
+__all__ = ["detect_squeeze_setup", "detect_bb_squeeze_release"]
+
+
+def detect_bb_squeeze_release(frame: pl.DataFrame, *, timeframe: str = "15m") -> SpecHit | None:
+    """BB/KC squeeze release (merged from former bb_squeeze strategy)."""
+    work = with_spec_columns(frame)
+    if work.height < 30:
+        return None
+    if "spec_squeeze" not in work.columns:
+        LOGGER.warning("detect_bb_squeeze_release: spec_squeeze column missing")
+        return None
+    row = _latest_values(work)
+    atr = row.get("spec_atr14", 0.0)
+    if atr <= 0.0:
+        return None
+    try:
+        was_squeeze = bool(work.item(-2, "spec_squeeze"))
+        is_squeeze = bool(work.item(-1, "spec_squeeze"))
+    except (IndexError, ValueError, TypeError):
+        return None
+    if not was_squeeze or is_squeeze:
+        return None
+    direction = "long" if row["close"] > row.get("spec_ema20", row["close"]) else "short"
+    ema20 = row.get("spec_ema20", row["close"])
+    return SpecHit(
+        strategy="squeeze_setup",
+        direction=direction,
+        entry=ema20,
+        stop_basis=row["low"] if direction == "long" else row["high"],
+        atr=atr,
+        timeframe=timeframe,
+        reasons=("bb_kc_squeeze_released",),
+        vol_ratio=row.get("volume_ratio20", 1.0),
+        rsi=row.get("rsi14", 50.0),
+    )
 
 
 def _as_float(value: object, default: float = 0.0) -> float:
@@ -404,6 +442,96 @@ def _detect_squeeze_setup_extended(
     )
 
 
+def _detect_atr_expansion_fallback(
+    prepared: PreparedSymbol,
+    _settings: BotSettings,
+    params: dict[str, float],
+    *,
+    setup_id: str,
+    family: str,
+) -> Signal | None:
+    """ATR expansion breakout (merged from atr_expansion)."""
+    work = prepared.work_15m
+    missing = _missing_columns(work, ("open", "high", "low", "close", "atr14"))
+    if missing:
+        _reject(prepared, setup_id, "missing_columns", missing_fields=missing)
+        return None
+
+    lookback = max(1, min(int(params.get("signal_lookback_bars", 8)), 12))
+    start_idx = max(1, work.height - lookback)
+    best: dict[str, float | int | str] | None = None
+    min_ratio = float(params.get("min_atr_expansion_ratio", 2.5))
+    min_body_atr = float(params.get("min_body_atr", 0.25))
+
+    for idx in range(work.height - 2, start_idx - 1, -1):
+        open_ = _as_float(work.item(idx, "open"))
+        high = _as_float(work.item(idx, "high"))
+        low = _as_float(work.item(idx, "low"))
+        close = _as_float(work.item(idx, "close"))
+        prev_close = _as_float(work.item(idx - 1, "close"))
+        atr = _as_float(work.item(idx, "atr14"))
+        if min(open_, high, low, close, prev_close, atr) <= 0.0:
+            continue
+        true_range = max(high - low, abs(high - prev_close), abs(low - prev_close))
+        ratio = true_range / atr if atr > 0.0 else 0.0
+        if ratio < min_ratio:
+            continue
+        body_atr = abs(close - open_) / max(atr, 1e-12)
+        if body_atr < min_body_atr:
+            continue
+        candidate = {
+            "score": ratio + body_atr,
+            "ratio": ratio,
+            "body_atr": body_atr,
+            "direction": "long" if close >= open_ else "short",
+            "signal_lag": work.height - 1 - idx,
+            "timeframe": "15m",
+        }
+        if best is None or float(candidate["score"]) > float(best["score"]):
+            best = candidate
+    if best is None:
+        _reject(
+            prepared,
+            setup_id,
+            "indicator.atr_expansion_too_low",
+            min_atr_expansion_ratio=min_ratio,
+            min_body_atr=min_body_atr,
+        )
+        return None
+
+    direction = str(best["direction"])
+    ratio = float(best["ratio"])
+    body_atr = float(best["body_atr"])
+    signal_lag = int(best["signal_lag"])
+    obv_penalty = 1.0
+    if "obv_above_ema" in work.columns:
+        obv_val = float(work["obv_above_ema"][-1] or 0.0)
+        if (direction == "long" and obv_val <= 0.0) or (direction == "short" and obv_val > 0.0):
+            obv_penalty = 0.85
+    entry_anchor = _prev(work, "low", 0.0) if direction == "long" else _prev(work, "high", 0.0)
+    clarity = min((ratio - 1.0) / 1.0, 1.0) * obv_penalty
+    reasons = [
+        f"atr_expansion_{direction}",
+        f"atr_ratio={ratio:.2f}",
+        f"body_atr={body_atr:.2f}",
+        f"signal_lag={signal_lag}",
+    ]
+    if obv_penalty < 1.0:
+        reasons.append("obv_opposes_breakout")
+    return _build_atr_signal(
+        prepared=prepared,
+        setup_id=setup_id,
+        direction=direction,
+        params=params,
+        confirmed_bar=True,
+        reasons=reasons,
+        family=family,
+        entry_anchor=entry_anchor or None,
+        timeframe="15m",
+        structure_clarity=clarity,
+    )
+
+
 def detect_squeeze_setup(
     prepared: PreparedSymbol,
     settings: BotSettings,
@@ -413,7 +541,7 @@ def detect_squeeze_setup(
     family: str,
 ) -> Signal | None:
     spec_kwargs = None
-    return run_setup_detection(
+    signal = run_setup_detection(
         prepared=prepared,
         settings=settings,
         setup_id=setup_id,
@@ -424,6 +552,16 @@ def detect_squeeze_setup(
         extended_detect=_detect_squeeze_setup_extended,
         spec_kwargs=spec_kwargs,
     )
+    if signal is not None:
+        return signal
+    merged = {**defaults, **effective}
+    return _detect_atr_expansion_fallback(
+        prepared,
+        settings,
+        merged,
+        setup_id=setup_id,
+        family=family,
+    )
 
 
 __all__ = ["_detect_squeeze_setup_extended", "detect_bb_squeeze_release", "detect_squeeze_setup"]
@@ -431,7 +569,7 @@ __all__ = ["_detect_squeeze_setup_extended", "detect_bb_squeeze_release", "detec
 
 class SqueezeSetup(SpecDetectorSetup):
     setup_id = "squeeze_setup"
-    ENTRY_ORDER_TYPE: ClassVar[str] = "market"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "limit"
     family = "breakout"
     confirmation_profile = "breakout_acceptance"
     required_context = ("futures_flow",)
@@ -451,6 +589,9 @@ class SqueezeSetup(SpecDetectorSetup):
         "min_release_width_expansion": 1.5,
         "min_release_roc10_abs_pct": 0.35,
         "no_crowd_confirmation_penalty": 0.92,
+        "min_atr_expansion_ratio": 2.5,
+        "min_body_atr": 0.25,
+        "signal_lookback_bars": 8,
     }
 
     detect_setup = detect_squeeze_setup

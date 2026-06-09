@@ -28,19 +28,13 @@ _RESERVED_PER_STRATEGY = 2
 _PRICE_ACTION_COVERAGE_SETUP_IDS: tuple[str, ...] = (
     "structure_break_retest",
     "squeeze_setup",
-    "bb_squeeze",
-    "atr_expansion",
     "bos_choch",
     "order_block",
-    "breaker_block",
     "price_velocity",
     "volume_anomaly",
     "wick_trap_reversal",
-    "hidden_divergence",
-    "rsi_divergence_bottom",
     "turtle_soup",
     "liquidity_sweep",
-    "stop_hunt_detection",
     "wyckoff_spring",
     "volume_climax_reversal",
 )
@@ -340,7 +334,6 @@ def _strategy_fits_for_row(
                 "fvg_setup",
                 "cvd_divergence",
                 "indicator_divergence",
-                "stop_hunt_detection",
                 "wyckoff_spring",
                 "btc_correlation",
                 "altcoin_season_index",
@@ -351,31 +344,21 @@ def _strategy_fits_for_row(
             (
                 "structure_break_retest",
                 "squeeze_setup",
-                "bb_squeeze",
-                "atr_expansion",
                 "bos_choch",
                 "fvg_setup",
                 "order_block",
-                "breaker_block",
-                "session_killzone",
                 "price_velocity",
                 "volume_anomaly",
                 "keltner_breakout",
-                "spread_strategy",
-                "depth_imbalance",
-                "whale_walls",
-                "aggression_shift",
             )
         )
     if spread_ok and liquid_enough and (reversal_move or crowd_extreme or oi_extreme):
         fits.extend(
             (
                 "wick_trap_reversal",
-                "hidden_divergence",
-                "rsi_divergence_bottom",
+                "indicator_divergence",
                 "turtle_soup",
                 "liquidity_sweep",
-                "stop_hunt_detection",
                 "wyckoff_spring",
                 "liquidation_heatmap",
                 "absorption",
@@ -397,9 +380,6 @@ def _strategy_fits_for_row(
                 "liquidity_sweep",
                 "vwap_trend",
                 "keltner_breakout",
-                "whale_walls",
-                "spread_strategy",
-                "depth_imbalance",
             )
         )
         fits.extend(_PRICE_ACTION_COVERAGE_SETUP_IDS)
@@ -416,7 +396,6 @@ def _strategy_fits_for_row(
                 "cvd_divergence",
                 "price_velocity",
                 "multi_tf_trend",
-                "spread_strategy",
             )
         )
     # unconditional safety net: any symbol that reached this function gets a minimal set
@@ -505,7 +484,11 @@ def strategy_fits_for_market_row(
 
 def _spread_freshness_score(row: dict[str, Any], settings: BotSettings) -> float:
     universe = settings.universe
-    max_spread = float(getattr(universe, "shortlist_spread_max_bps", 8.0))
+    tier = str(row.get("liquidity_tier") or "core").lower()
+    if tier == "radar":
+        max_spread = float(getattr(universe, "radar_max_spread_bps", 20.0))
+    else:
+        max_spread = float(getattr(universe, "shortlist_spread_max_bps", 8.0))
     stale_s = float(getattr(universe, "shortlist_book_stale_seconds", 90.0))
     spread_bps = _safe_float(row.get("spread_bps"))
     book_age = _safe_float(row.get("book_age_seconds"))
@@ -925,6 +908,11 @@ def build_shortlist(
                 "price_change_pct": price_change_pct,
                 "trade_count": trade_count,
                 "last_price": last_price,
+                "liquidity_tier": (
+                    "core"
+                    if quote_volume >= settings.universe.min_quote_volume_usd
+                    else "radar"
+                ),
                 "shortlist_bucket": _bucket_for_price_change(price_change_pct),
                 "spread_bps": _safe_float(ticker_row.get("spread_bps")),
                 "ticker_age_seconds": _safe_float(ticker_row.get("ticker_age_seconds")),

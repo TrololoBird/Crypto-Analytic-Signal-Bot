@@ -296,7 +296,64 @@ def _detect_volume_climax_reversal_extended(
         )
         return None
 
+    climax_open = _as_float(work.item(signal_idx, "open"))
+    climax_close = _as_float(work.item(signal_idx, "close"))
+    climax_close_pos = _as_float(work.item(signal_idx, "close_position"), 0.5)
+    if direction == "short" and climax_close >= climax_open and climax_close_pos >= 0.55:
+        _reject(
+            prepared,
+            setup_id,
+            "volume_climax_continuation_bar",
+            close_position=climax_close_pos,
+            direction=direction,
+        )
+        return None
+    if direction == "long" and climax_close <= climax_open and climax_close_pos <= 0.45:
+        _reject(
+            prepared,
+            setup_id,
+            "volume_climax_continuation_bar",
+            close_position=climax_close_pos,
+            direction=direction,
+        )
+        return None
+
+    adx_1h = getattr(prepared, "adx_1h", None)
+    if adx_1h is None and not prepared.work_1h.is_empty() and "adx14" in prepared.work_1h.columns:
+        adx_1h = _as_float(prepared.work_1h.item(-1, "adx14"), 0.0)
+    adx_4h = None
+    if not prepared.work_4h.is_empty() and "adx14" in prepared.work_4h.columns:
+        adx_4h = _as_float(prepared.work_4h.item(-1, "adx14"), 0.0)
+    adx_15m = None
+    if not work.is_empty() and "adx14" in work.columns:
+        adx_15m = _as_float(work.item(-1, "adx14"), 0.0)
+    strong_trend_adx = float(effective_params.get("max_trend_adx", _defaults.get("max_trend_adx", 20.0)))
+    if (adx_1h is not None and adx_1h > strong_trend_adx) or (
+        adx_4h is not None and adx_4h > strong_trend_adx
+    ) or (adx_15m is not None and adx_15m > strong_trend_adx):
+        _reject(
+            prepared,
+            setup_id,
+            "volume_climax_strong_trend_adx",
+            adx_1h=adx_1h,
+            adx_4h=adx_4h,
+            adx_15m=adx_15m,
+            max_trend_adx=strong_trend_adx,
+        )
+        return None
+
     bias_1h = getattr(prepared, "bias_1h", prepared.bias_4h)
+    market_regime = str(getattr(prepared, "market_regime", "") or "").lower()
+    if market_regime == "trending":
+        _reject(
+            prepared,
+            setup_id,
+            "volume_climax_trend_regime_blocked",
+            market_regime=market_regime,
+            bias_1h=bias_1h,
+            direction=direction,
+        )
+        return None
     sl_buffer = float(effective_params["sl_buffer_atr"])
     min_rr = float(effective_params["min_rr"])
     signal_mid = (signal_high + signal_low) / 2.0
@@ -329,6 +386,25 @@ def _detect_volume_climax_reversal_extended(
         rsi=rsi,
         structure_clarity=clarity,
     )
+
+    # Counter-trend shorts in uptrend require HTF exhaustion evidence; without it,
+    # climax shorts against a rising trend have high fail rate (research Q187).
+    bias_4h = getattr(prepared, "bias_4h", None)
+    if direction == "short" and bias_1h == "uptrend":
+        htf_exhaustion = (
+            rsi >= float(effective_params.get("htf_exhaustion_rsi_min", 72.0))
+            or (bias_4h is not None and bias_4h != "uptrend")
+        )
+        if not htf_exhaustion:
+            _reject(
+                prepared,
+                setup_id,
+                "counter_trend_short_no_htf_exhaustion",
+                bias_1h=bias_1h,
+                bias_4h=bias_4h,
+                rsi=rsi,
+            )
+            return None
 
     # Graded bias alignment
     if (direction == "long" and bias_1h == "downtrend") or (
@@ -405,8 +481,8 @@ class VolumeClimaxReversalSetup(SpecDetectorSetup):
 
     DEFAULTS: ClassVar[dict[str, float]] = {
         "base_score": 0.60,
-        "min_volume_ratio": 1.8,
-        "adaptive_min_volume_ratio": 1.3,
+        "min_volume_ratio": 2.0,
+        "adaptive_min_volume_ratio": 1.5,
         "min_wick_atr": 0.45,
         "strong_wick_multiplier": 1.35,
         "signal_lookback_bars": 10,
@@ -416,6 +492,8 @@ class VolumeClimaxReversalSetup(SpecDetectorSetup):
         "min_rsi_short": 58.0,
         "sl_buffer_atr": 0.45,
         "min_rr": 1.9,
+        "max_trend_adx": 20.0,
+        "htf_exhaustion_rsi_min": 72.0,
     }
 
     detect_setup = detect_volume_climax_reversal_setup

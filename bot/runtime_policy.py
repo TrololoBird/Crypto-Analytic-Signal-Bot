@@ -77,6 +77,38 @@ def effective_engine_score_floor(
     return float(floor)
 
 
+def resolve_setup_entry_tf(setup_id: str, *, default: str = "15m") -> str:
+    """Catalog entry TF with optional future per-setup config override."""
+    from bot.domain.strategy_catalog import CATALOG_BY_ID
+
+    entry = CATALOG_BY_ID.get(str(setup_id or "").strip())
+    if entry is None:
+        return default
+    return str(entry.trigger_tf or default).split("+")[0].split("/")[0].strip().lower() or default
+
+
+def resolve_setup_order_type(setup_id: str, *, default: str = "limit") -> str:
+    from bot.domain.strategy_catalog import resolve_setup_order_type as _catalog_order
+
+    return _catalog_order(setup_id, default=default)
+
+
+def resolve_setup_ttl_minutes(setup_id: str, *, default: int = 120) -> int:
+    from bot.domain.strategy_catalog import resolve_setup_ttl_minutes as _catalog_ttl
+
+    return _catalog_ttl(setup_id, default=default)
+
+
+def resolve_setup_pattern_tf(setup_id: str, *, default: str = "15m") -> str:
+    from bot.domain.strategy_catalog import CATALOG_BY_ID
+
+    entry = CATALOG_BY_ID.get(str(setup_id or "").strip())
+    if entry is None:
+        return default
+    raw = str(entry.pattern_tf or entry.trigger_tf or default)
+    return raw.split("/")[0].split("+")[0].strip().lower() or default
+
+
 def effective_shortlist_unified_routing(
     runtime: Any | None,
     *,

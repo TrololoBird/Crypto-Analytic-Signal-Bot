@@ -237,6 +237,14 @@ MIGRATIONS: Sequence[tuple[int, str, str]] = (
             ON sl_forensics(sl_hit_at);
         """,
     ),
+    (
+        12,
+        "signal_tf_telemetry_index",
+        """
+        CREATE INDEX IF NOT EXISTS idx_signal_outcomes_entry_tf
+            ON signal_outcomes(entry_tf, setup_id);
+        """,
+    ),
 )
 
 
@@ -253,6 +261,7 @@ def _migration_statements(sql: str) -> list[str]:
 _MIGRATION_REQUIRES_TABLES: dict[int, frozenset[str]] = {
     4: frozenset({"active_signals", "signal_outcomes"}),
     5: frozenset({"active_signals"}),
+    12: frozenset({"active_signals", "signal_outcomes"}),
 }
 
 

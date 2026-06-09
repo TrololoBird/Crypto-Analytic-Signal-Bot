@@ -315,8 +315,8 @@ class BotDashboard:
             else:
                 return store
 
-    def _get_live_signal_feed(self, limit: int = 20) -> list[dict[str, Any]]:
-        signals = self._get_recent_signals(limit=limit * 2)
+    async def _get_live_signal_feed(self, limit: int = 20) -> list[dict[str, Any]]:
+        signals = await self._get_recent_signals(limit=limit * 2)
         killzone = _compute_killzone()
         regime_data = self._get_market_regime()
         regime_label = (
@@ -540,7 +540,7 @@ class BotDashboard:
             LOG.debug("error fetching active signals: %s", exc)
             return []
 
-    def _get_recent_signals(self, limit: int = 20) -> list[dict[str, Any]]:
+    async def _get_recent_signals(self, limit: int = 20) -> list[dict[str, Any]]:
         bot = self.bot
         if bot is None or not hasattr(bot, "settings"):
             return []
@@ -583,7 +583,10 @@ class BotDashboard:
         if aggregated:
             return aggregated
 
-        decisions = self._live_data.decisions(limit=max(limit, 20), max_rows=50_000)
+        try:
+            decisions = await self._live_data.decisions(limit=max(limit, 20), max_rows=50_000)
+        except DEFENSIVE_EXC:
+            return rows
         rows: list[dict[str, Any]] = []
         for row in decisions.get("setup_reports", []):
             if int(row.get("signals") or 0) <= 0:

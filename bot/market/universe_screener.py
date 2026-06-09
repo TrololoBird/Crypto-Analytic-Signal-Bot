@@ -40,11 +40,22 @@ def screen_symbol(
     change_5m = state.change_pct_over(300.0, now=now)
     vol_z = store.volume_zscore(state.symbol)
 
-    if abs(state.price_change_pct_24h) >= config.change_24h_hot_pct:
+    change_24h = float(state.price_change_pct_24h)
+    if abs(change_24h) >= config.change_24h_hot_pct:
         flags.append("change_24h_hot")
-        reasons.append(f"change_24h={state.price_change_pct_24h:.2f}%")
+        reasons.append(f"change_24h={change_24h:.2f}%")
         boost = max(boost, config.prescore_boost_warm)
         suggested = SymbolTier.WARM
+
+    if abs(change_24h) >= 15.0:
+        flags.append("pump_extreme")
+        reasons.append(f"pump_extreme={change_24h:.1f}%")
+        boost = max(boost, config.prescore_boost_hot)
+        suggested = SymbolTier.HOT
+
+    if abs(change_24h) >= 8.0:
+        flags.append("range_expansion")
+        boost = max(boost, config.prescore_boost_warm * 0.7)
 
     if change_5m is not None and abs(change_5m) >= config.impulse_5m_pct:
         direction = "up" if change_5m > 0 else "down"
@@ -52,6 +63,10 @@ def screen_symbol(
         reasons.append(f"impulse_5m={change_5m:.2f}%")
         boost = max(boost, config.prescore_boost_hot)
         suggested = SymbolTier.HOT
+        if change_5m > 0 and change_24h >= 10.0:
+            flags.append("pos_near_high_proxy")
+        elif change_5m < 0 and change_24h <= -10.0:
+            flags.append("pos_near_low_proxy")
 
     if vol_z >= config.vol_spike_zscore:
         flags.append("vol_spike")

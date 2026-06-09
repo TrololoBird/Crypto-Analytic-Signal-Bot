@@ -109,6 +109,18 @@ def detect_funding_reversal(
         defaults.get("min_volume_ratio", defaults["min_volume_ratio"]),
         defaults["min_volume_ratio"],
     )
+    min_funding_zscore = _as_float(defaults.get("min_funding_zscore", 1.25), 1.25)
+    funding_interval_hours = getattr(prepared, "funding_interval_hours", None)
+    interval_max_age_hours = funding_recent_extreme_lookback_hours
+    try:
+        if funding_interval_hours is not None:
+            interval_h = max(1.0, float(funding_interval_hours))
+            interval_max_age_hours = min(
+                funding_recent_extreme_lookback_hours,
+                interval_h * 1.25,
+            )
+    except (TypeError, ValueError):
+        pass
 
     if prepared.funding_rate is None:
         _reject(prepared, setup_id, "data.funding_rate_missing")
@@ -135,7 +147,7 @@ def detect_funding_reversal(
         if (
             recent_rate is not None
             and recent_age is not None
-            and recent_age <= funding_recent_extreme_lookback_hours
+            and recent_age <= interval_max_age_hours
             and abs(recent_rate) > effective_threshold
         ):
             effective_fr = recent_rate
@@ -158,11 +170,45 @@ def detect_funding_reversal(
         funding_source = "relative"
         funding_score_penalty = max(0.60, min(1.0, relative_funding_score_penalty))
 
+    funding_zscore = getattr(prepared, "funding_rate_zscore_48h", None)
+    if funding_zscore is not None:
+        try:
+            z_abs = abs(float(funding_zscore))
+        except (TypeError, ValueError):
+            z_abs = 0.0
+        if z_abs < min_funding_zscore and funding_source in {"relative", "history"}:
+            _reject(
+                prepared,
+                setup_id,
+                "indicator.funding_zscore_low",
+                funding_rate=fr,
+                funding_zscore=funding_zscore,
+                min_funding_zscore=min_funding_zscore,
+                funding_interval_hours=funding_interval_hours,
+            )
+            return None
+
+    if funding_source == "history" and recent_extreme_age_hours is not None:
+        try:
+            age_h = float(recent_extreme_age_hours)
+        except (TypeError, ValueError):
+            age_h = None
+        if age_h is not None and age_h > interval_max_age_hours:
+            _reject(
+                prepared,
+                setup_id,
+                "indicator.funding_extreme_stale",
+                recent_extreme_age_hours=age_h,
+                interval_max_age_hours=interval_max_age_hours,
+                funding_interval_hours=funding_interval_hours,
+            )
+            return None
+
     funding_trend = prepared.funding_trend
 
-    w = confirmed_pattern_frame(prepared.work_15m)
+    w = confirmed_pattern_frame(prepared.work_1h)
     if w.height < 5:
-        _reject(prepared, setup_id, "insufficient_15m_bars", bars=w.height)
+        _reject(prepared, setup_id, "insufficient_1h_bars", bars=w.height)
         return None
 
     atr = _as_float(w.item(-1, "atr14"))
@@ -384,7 +430,7 @@ def detect_funding_reversal(
         setup_id=setup_id,
         direction=direction,
         score=score,
-        timeframe="15m+1h",
+        timeframe="1h",
         reasons=reasons,
         strategy_family=family,
         stop=stop,

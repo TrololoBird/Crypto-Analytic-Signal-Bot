@@ -1,7 +1,7 @@
 """Technical analysis feature preparation (Polars-native runtime path).
 
 Indicators stay Polars-native with optional `polars_ta` for EMA/ROC/OBV.
-Pure-Polars formulas are canonical for Wilder RSI/ATR/ADX, MACD, BB (ddof=1), and structure.
+Pure-Polars formulas are canonical for Wilder RSI/ATR/ADX, MACD, BB (ddof=0, TradingView parity), and structure.
 """
 
 from __future__ import annotations
@@ -32,6 +32,7 @@ from .prepare_frame import (
     _prepare_frame,
     _tail_value_signature,
     _timestamp_ns,
+    add_rolling_cvd_24h,
     add_session_cvd,
     has_minimum_bars,
     min_required_bars,
@@ -837,10 +838,12 @@ def _enrich_with_ws_data(
 
     work = add_microstructure_features(work)
     work = add_session_cvd(work)
+    work = add_rolling_cvd_24h(work)
     return work.with_columns(
         [
             pl.col("signed_order_flow").fill_null(0.0).fill_nan(0.0),
             pl.col("session_cvd").fill_null(0.0).fill_nan(0.0),
+            pl.col("rolling_cvd_24h").fill_null(0.0).fill_nan(0.0),
             pl.col("tob_imbalance").fill_null(0.0).fill_nan(0.0),
             pl.col("microprice_deviation_pct").fill_null(0.0).fill_nan(0.0),
         ]

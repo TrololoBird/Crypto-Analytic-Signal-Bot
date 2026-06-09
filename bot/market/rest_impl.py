@@ -1292,17 +1292,22 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
                 )
                 quote_volume = _safe_float(item.get("quoteVolume") or item.get("quote_volume"))
                 trade_count = _safe_float(item.get("count") or item.get("trade_count"))
+                high_price = _safe_float(item.get("highPrice") or item.get("high_price"))
+                low_price = _safe_float(item.get("lowPrice") or item.get("low_price"))
                 if not symbol or last_price <= 0.0 or quote_volume <= 0.0:
                     continue
-                new_rows.append(
-                    {
-                        "symbol": symbol,
-                        "last_price": last_price,
-                        "price_change_percent": price_change_percent,
-                        "quote_volume": quote_volume,
-                        "trade_count": trade_count,
-                    }
-                )
+                row: dict[str, float | str] = {
+                    "symbol": symbol,
+                    "last_price": last_price,
+                    "price_change_percent": price_change_percent,
+                    "quote_volume": quote_volume,
+                    "trade_count": trade_count,
+                }
+                if high_price > 0.0:
+                    row["high_price"] = high_price
+                if low_price > 0.0:
+                    row["low_price"] = low_price
+                new_rows.append(row)
             else:
                 symbol = str(getattr(item, "symbol", "")).strip().upper()
                 last_price = _safe_float(
@@ -1318,17 +1323,26 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
                 trade_count = _safe_float(
                     getattr(item, "count", None) or getattr(item, "trade_count", None)
                 )
+                high_price = _safe_float(
+                    getattr(item, "high_price", None) or getattr(item, "highPrice", None)
+                )
+                low_price = _safe_float(
+                    getattr(item, "low_price", None) or getattr(item, "lowPrice", None)
+                )
                 if not symbol or last_price <= 0.0 or quote_volume <= 0.0:
                     continue
-                new_rows.append(
-                    {
-                        "symbol": symbol,
-                        "last_price": last_price,
-                        "price_change_percent": price_change_percent,
-                        "quote_volume": quote_volume,
-                        "trade_count": trade_count,
-                    }
-                )
+                row_obj: dict[str, float | str] = {
+                    "symbol": symbol,
+                    "last_price": last_price,
+                    "price_change_percent": price_change_percent,
+                    "quote_volume": quote_volume,
+                    "trade_count": trade_count,
+                }
+                if high_price > 0.0:
+                    row_obj["high_price"] = high_price
+                if low_price > 0.0:
+                    row_obj["low_price"] = low_price
+                new_rows.append(row_obj)
         self._ticker_24h_cache = (now, new_rows)
         return new_rows
 

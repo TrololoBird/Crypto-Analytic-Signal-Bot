@@ -221,6 +221,18 @@ def _detect_indicator_divergence_extended(
         )
         return None
 
+    # Confirm-bar: latest closed bar must move in divergence direction (reduces MFE≈0 entries).
+    latest_bar_close = as_float(work.item(-1, "close"))
+    latest_bar_open = as_float(work.item(-1, "open"))
+    if direction == "long" and latest_bar_close < latest_bar_open:
+        _reject(prepared, setup_id, "confirm_bar_missing_long",
+                close=latest_bar_close, open=latest_bar_open)
+        return None
+    if direction == "short" and latest_bar_close > latest_bar_open:
+        _reject(prepared, setup_id, "confirm_bar_missing_short",
+                close=latest_bar_close, open=latest_bar_open)
+        return None
+
     # Divergence is counter-trend capable - only penalize strong 1h conflict (2+ votes).
     if _confirmed_context_conflict(prepared, direction):
         _reject(prepared, setup_id, "htf_context_conflict", direction=direction)
@@ -299,8 +311,11 @@ def detect_indicator_divergence_setup(
     setup_id: str,
     family: str,
 ) -> Signal | None:
+    from .hidden_divergence import detect_hidden_divergence_setup
+    from .rsi_divergence_bottom import detect_rsi_divergence_bottom
+
     spec_kwargs = None
-    return run_setup_detection(
+    signal = run_setup_detection(
         prepared=prepared,
         settings=settings,
         setup_id=setup_id,
@@ -310,6 +325,26 @@ def detect_indicator_divergence_setup(
         spec_detect=detect_regular_divergence,
         extended_detect=_detect_indicator_divergence_extended,
         spec_kwargs=spec_kwargs,
+    )
+    if signal is not None:
+        return signal
+    merged = {**defaults, **effective}
+    hidden_signal = detect_hidden_divergence_setup(
+        prepared,
+        settings,
+        defaults,
+        merged,
+        setup_id=setup_id,
+        family=family,
+    )
+    if hidden_signal is not None:
+        return hidden_signal
+    return detect_rsi_divergence_bottom(
+        prepared,
+        settings,
+        merged,
+        setup_id=setup_id,
+        family=family,
     )
 
 
@@ -338,6 +373,13 @@ class IndicatorDivergenceSetup(SpecDetectorSetup):
         "min_rsi_short": 45.0,
         "sl_buffer_atr": 1.1,
         "min_rr": 1.9,
+        "rsi_divergence_lookback": 3.0,
+        "rsi_divergence_threshold": 2.0,
+        "max_swing_pair_gap": 6.0,
+        "divergence_window": 12,
+        "min_rsi_delta": 1.5,
+        "min_delta_threshold": 0.06,
+        "max_trend_adx": 20.0,
     }
 
     detect_setup = detect_indicator_divergence_setup
