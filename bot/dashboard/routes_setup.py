@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import csv
 import logging
 import secrets
 import time
 from datetime import UTC, datetime
+from io import StringIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from bot.domain.labels import labels_payload
@@ -557,6 +559,55 @@ def register_routes(dashboard: BotDashboard) -> None:
         except DEFENSIVE_EXC:
             LOG.exception("v1 outcomes analytics error")
             return {"error": "outcomes_unavailable"}
+
+    @self.app.get("/api/v1/analytics/export")
+    async def v1_analytics_export(days: int = 30) -> StreamingResponse:
+        bot = self.bot
+        repo = getattr(bot, "_modern_repo", None)
+        if repo is None:
+            return StreamingResponse(
+                StringIO("error,repository_unavailable\n"), media_type="text/csv"
+            )
+        try:
+            insights = await build_outcomes_insights(
+                repo,
+                days=max(1, min(int(days), 365)),
+            )
+            recent = insights.get("recent_stop_losses") or []
+            buf = StringIO()
+            writer = csv.writer(buf)
+            writer.writerow([
+                "symbol", "direction", "setup_id", "result", "pnl_pct", "pnl_r_multiple",
+                "score", "atr_pct", "mae", "mfe", "entry_price", "exit_price",
+                "sl_root_cause", "sl_root_cause_label",
+            ])
+            for row in recent:
+                writer.writerow([
+                    row.get("symbol", ""),
+                    row.get("direction", ""),
+                    row.get("setup_id", ""),
+                    row.get("result", ""),
+                    row.get("pnl_pct", ""),
+                    row.get("pnl_r_multiple", ""),
+                    row.get("score", ""),
+                    row.get("atr_pct", ""),
+                    row.get("mae", ""),
+                    row.get("mfe", ""),
+                    row.get("entry_price", ""),
+                    row.get("exit_price", ""),
+                    row.get("sl_root_cause", ""),
+                    row.get("sl_root_cause_label", ""),
+                ])
+            buf.seek(0)
+            now_str = datetime.now(UTC).strftime("%Y-%m-%d")
+            return StreamingResponse(
+                buf,
+                media_type="text/csv",
+                headers={"Content-Disposition": f"attachment; filename=outcomes-{now_str}.csv"},
+            )
+        except DEFENSIVE_EXC:
+            LOG.exception("v1 analytics export error")
+            return StreamingResponse(StringIO("error,export_failed\n"), media_type="text/csv")
 
     @self.app.get("/api/v1/mobile/summary")
     async def v1_mobile_summary() -> dict[str, Any]:
