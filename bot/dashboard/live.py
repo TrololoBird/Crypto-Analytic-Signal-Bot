@@ -89,7 +89,7 @@ def _tracking_open_counts(bot: Any) -> dict[str, int]:
     if repo is not None and hasattr(repo, "get_open_signal_counts_sync"):
         try:
             return repo.get_open_signal_counts_sync()
-        except (OSError, AttributeError):
+        except OSError, AttributeError:
             pass
     return {"pending": 0, "active": 0, "open": 0}
 

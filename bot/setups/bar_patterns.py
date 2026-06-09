@@ -42,17 +42,11 @@ def engulfing_confirm(
         return False
     if direction == "long":
         return (
-            close > open_
-            and prev_close < prev_open
-            and close >= prev_open
-            and open_ <= prev_close
+            close > open_ and prev_close < prev_open and close >= prev_open and open_ <= prev_close
         )
     if direction == "short":
         return (
-            close < open_
-            and prev_close > prev_open
-            and close <= prev_open
-            and open_ >= prev_close
+            close < open_ and prev_close > prev_open and close <= prev_open and open_ >= prev_close
         )
     return False
 

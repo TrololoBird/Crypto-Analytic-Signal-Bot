@@ -5,9 +5,10 @@ from typing import Any
 
 import polars as pl
 
+from bot.domain.regime_gates import effective_market_regime
+
 from .gmm_var import HAS_SKLEARN, HAS_STATSMODELS, CentroidRegimeDetector
 from .hmm_regime import HAS_HMMLEARN, RuleBasedRegimeDetector
-from bot.domain.regime_gates import effective_market_regime
 
 ML_COMPONENTS_AVAILABLE = HAS_HMMLEARN and HAS_SKLEARN and HAS_STATSMODELS
 
@@ -23,7 +24,7 @@ def benchmark_funding_median(funding_rates: dict[str, float] | None) -> float:
             continue
         try:
             samples.append(float(raw))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
     if not samples:
         return 0.0

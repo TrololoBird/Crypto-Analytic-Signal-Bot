@@ -15,9 +15,10 @@ from scripts.common import bootstrap_repo_path, configure_script_logging
 
 bootstrap_repo_path()
 
-from bot.runtime.errors import DEFENSIVE_EXC
 from hunt_watch.scanner_runner import run_scan
 from hunt_watch.screener import HUNT_SCORE_WATCH_THRESHOLD
+
+from bot.runtime.errors import DEFENSIVE_EXC
 
 LOG = configure_script_logging("hunt_watch.scanner")
 

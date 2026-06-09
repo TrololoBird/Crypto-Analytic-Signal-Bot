@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any, Literal
 
 from bot.domain.config import BotSettings
-
 from hunt_watch.paths import WATCHLIST as WATCHLIST_PATH
 
 WatchMode = Literal["short", "long", "both"]
@@ -29,7 +28,7 @@ def load_watchlist_rows(path: Path = WATCHLIST_PATH) -> list[dict[str, Any]]:
         return []
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except OSError, json.JSONDecodeError:
         return []
     rows = payload.get("watchlist") if isinstance(payload, dict) else None
     return list(rows) if isinstance(rows, list) else []

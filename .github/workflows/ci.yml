@@ -40,12 +40,12 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Ruff check (full tree)
-        run: ruff check bot/ tests/ scripts/ main.py
+        run: ruff check bot/ tests/ scripts/ main.py hunt-watch/
 
       - name: Ruff format (apply + verify clean tree)
         run: |
-          ruff format bot/ tests/ scripts/ main.py
-          git diff --exit-code -- bot/ tests/ scripts/ main.py
+          ruff format bot/ tests/ scripts/ main.py hunt-watch/
+          git diff --exit-code -- bot/ tests/ scripts/ main.py hunt-watch/
 
       - name: Legacy multi-except guard (Python 3.14)
         run: |
@@ -55,7 +55,7 @@ jobs:
           fi
 
       - name: Compile
-        run: python -m compileall -q bot tests
+        run: python -m compileall -q bot tests hunt-watch
 
   unit:
     runs-on: ubuntu-latest

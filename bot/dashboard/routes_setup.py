@@ -136,7 +136,6 @@ def register_routes(dashboard: BotDashboard) -> None:
             LOG.exception("dashboard api confluence legs by profile error")
             return {"error": "confluence_legs_by_profile_unavailable"}
 
-
     @self.app.get("/api/meta/labels")
     async def meta_labels() -> dict[str, dict[str, str]]:
         return labels_payload()
@@ -181,7 +180,6 @@ def register_routes(dashboard: BotDashboard) -> None:
         except DEFENSIVE_EXC:
             LOG.exception("dashboard live shortlist error")
             return {"error": "live_shortlist_unavailable"}
-
 
     @self.app.get("/api/live/rejections")
     async def live_rejections(
@@ -311,7 +309,7 @@ def register_routes(dashboard: BotDashboard) -> None:
             signals = [s for s in signals if str(s.get("symbol", "")).upper() == symbol.upper()]
         if setup_id:
             signals = [s for s in signals if str(s.get("setup_id", "")) == setup_id]
-        page = signals[off:off + cap]
+        page = signals[off : off + cap]
         return {"data": page, "limit": cap, "offset": off, "total": len(signals)}
 
     @self.app.get("/api/v1/signals/active")
@@ -507,28 +505,43 @@ def register_routes(dashboard: BotDashboard) -> None:
             recent = insights.get("recent_stop_losses") or []
             buf = StringIO()
             writer = csv.writer(buf)
-            writer.writerow([
-                "symbol", "direction", "setup_id", "result", "pnl_pct", "pnl_r_multiple",
-                "score", "atr_pct", "mae", "mfe", "entry_price", "exit_price",
-                "sl_root_cause", "sl_root_cause_label",
-            ])
+            writer.writerow(
+                [
+                    "symbol",
+                    "direction",
+                    "setup_id",
+                    "result",
+                    "pnl_pct",
+                    "pnl_r_multiple",
+                    "score",
+                    "atr_pct",
+                    "mae",
+                    "mfe",
+                    "entry_price",
+                    "exit_price",
+                    "sl_root_cause",
+                    "sl_root_cause_label",
+                ]
+            )
             for row in recent:
-                writer.writerow([
-                    row.get("symbol", ""),
-                    row.get("direction", ""),
-                    row.get("setup_id", ""),
-                    row.get("result", ""),
-                    row.get("pnl_pct", ""),
-                    row.get("pnl_r_multiple", ""),
-                    row.get("score", ""),
-                    row.get("atr_pct", ""),
-                    row.get("mae", ""),
-                    row.get("mfe", ""),
-                    row.get("entry_price", ""),
-                    row.get("exit_price", ""),
-                    row.get("sl_root_cause", ""),
-                    row.get("sl_root_cause_label", ""),
-                ])
+                writer.writerow(
+                    [
+                        row.get("symbol", ""),
+                        row.get("direction", ""),
+                        row.get("setup_id", ""),
+                        row.get("result", ""),
+                        row.get("pnl_pct", ""),
+                        row.get("pnl_r_multiple", ""),
+                        row.get("score", ""),
+                        row.get("atr_pct", ""),
+                        row.get("mae", ""),
+                        row.get("mfe", ""),
+                        row.get("entry_price", ""),
+                        row.get("exit_price", ""),
+                        row.get("sl_root_cause", ""),
+                        row.get("sl_root_cause_label", ""),
+                    ]
+                )
             buf.seek(0)
             now_str = datetime.now(UTC).strftime("%Y-%m-%d")
             return StreamingResponse(

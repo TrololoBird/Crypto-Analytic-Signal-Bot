@@ -223,10 +223,14 @@ class BaseSetup(AbstractStrategy):
         sig = decision.signal
         from bot.domain.strategy_catalog import resolve_setup_order_type
 
-        expected_ot = resolve_setup_order_type(
-            self.setup_id,
-            default=str(type(self).ENTRY_ORDER_TYPE or "limit"),
-        ).strip().lower()
+        expected_ot = (
+            resolve_setup_order_type(
+                self.setup_id,
+                default=str(type(self).ENTRY_ORDER_TYPE or "limit"),
+            )
+            .strip()
+            .lower()
+        )
         if sig is not None and sig.entry_order_type != expected_ot:
             sig = dataclasses.replace(sig, entry_order_type=expected_ot)
         result = SignalResult(

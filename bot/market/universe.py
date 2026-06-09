@@ -143,7 +143,7 @@ def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
 def _safe_float(value: Any, default: float | None = None) -> float | None:
     try:
         numeric = float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return default
     if not math.isfinite(numeric):
         return default
@@ -909,9 +909,7 @@ def build_shortlist(
                 "trade_count": trade_count,
                 "last_price": last_price,
                 "liquidity_tier": (
-                    "core"
-                    if quote_volume >= settings.universe.min_quote_volume_usd
-                    else "radar"
+                    "core" if quote_volume >= settings.universe.min_quote_volume_usd else "radar"
                 ),
                 "shortlist_bucket": _bucket_for_price_change(price_change_pct),
                 "spread_bps": _safe_float(ticker_row.get("spread_bps")),

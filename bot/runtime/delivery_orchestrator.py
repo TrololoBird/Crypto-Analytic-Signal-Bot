@@ -36,13 +36,13 @@ from bot.domain.delivery_policy import (
     r_class_blocks_action,
     resolve_bear_regime,
 )
-from bot.domain.regime_gates import is_counter_trend_reversal
 from bot.domain.mtf import (
     BREAKOUT_PROFILE,
     REVERSAL_PROFILES,
     evaluate_mtf_gate,
     normalize_mtf_reject_reason,
 )
+from bot.domain.regime_gates import is_counter_trend_reversal
 from bot.persistence.outcomes import build_prepared_feature_snapshot, extract_features_from_signal
 from bot.runtime.errors import DEFENSIVE_EXC
 
@@ -138,10 +138,7 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
                 for sid, data in rates.items()
                 if float(data.get("total") or 0) >= min_samples
             }
-            sample_counts = {
-                sid: int(float(data.get("total") or 0))
-                for sid, data in rates.items()
-            }
+            sample_counts = {sid: int(float(data.get("total") or 0)) for sid, data in rates.items()}
             update_strategy_sl_rates(sl_rates, sample_counts=sample_counts)
             LOG.debug("strategy stats refreshed | strategies=%d", len(rates))
         except DEFENSIVE_EXC:
@@ -211,7 +208,7 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         try:
             raw = frame.item(-1, column)
             value = float(raw) if raw is not None else None
-        except (IndexError, TypeError, ValueError):
+        except IndexError, TypeError, ValueError:
             return None
         return value if value is not None and math.isfinite(value) else None
 
@@ -223,7 +220,7 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         for raw in frame[column].tail(max(1, int(window))).to_list():
             try:
                 value = float(raw) if raw is not None else math.nan
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 value = math.nan
             if math.isfinite(value):
                 values.append(value)
@@ -349,7 +346,7 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         if micro is not None:
             try:
                 micro_val = float(micro)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 micro_val = math.nan
             if math.isfinite(micro_val):
                 details["microprice_bias"] = micro_val
@@ -362,7 +359,7 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         if agg is not None:
             try:
                 agg_val = float(agg)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 agg_val = math.nan
             if math.isfinite(agg_val):
                 details["agg_trade_delta_30s"] = agg_val
@@ -379,11 +376,11 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         oi_change = getattr(prepared, "oi_change_pct", None)
         try:
             funding_value = float(funding) if funding is not None else 0.0
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             funding_value = 0.0
         try:
             oi_value = float(oi_change) if oi_change is not None else 0.0
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             oi_value = 0.0
         if not math.isfinite(funding_value):
             funding_value = 0.0
@@ -839,11 +836,7 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         rejected_rows: list[dict[str, Any]] = []
         for meta in merge_result.direction_dropped:
             signal = meta.primary
-            conflict_tags = [
-                tag
-                for tag in signal.reasons
-                if tag.startswith("direction_conflict")
-            ]
+            conflict_tags = [tag for tag in signal.reasons if tag.startswith("direction_conflict")]
             rejected_rows.append(
                 {
                     "ts": datetime.now(UTC).isoformat(),

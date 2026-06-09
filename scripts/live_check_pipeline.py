@@ -27,8 +27,8 @@ from bot.domain.schemas import SymbolFrames, UniverseSymbol
 from bot.market.data import BinanceFuturesMarketData, MarketDataUnavailable
 from bot.market.rest_impl import BinanceClientImpl
 from bot.market.universe import strategy_fits_for_market_row
-from bot.runtime.data_readiness import configured_frame_minimums, kline_fetch_limit
 from bot.runtime.bot import SignalBot
+from bot.runtime.data_readiness import configured_frame_minimums, kline_fetch_limit
 from bot.runtime.errors import DEFENSIVE_EXC
 from bot.telemetry import TelemetryStore
 

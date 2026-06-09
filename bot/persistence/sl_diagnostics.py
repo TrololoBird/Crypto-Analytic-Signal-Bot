@@ -6,20 +6,26 @@ from typing import Any, Literal
 
 CauseOfSL = Literal["timing", "regime", "stop_placement", "thesis"]
 
-_TIMING_CAUSES = frozenset({
-    "immediate_adverse_entry",
-    "bounce_phase_short_timing",
-    "late_activation_timing",
-    "quick_stop_no_follow_through",
-})
-_REGIME_CAUSES = frozenset({
-    "bear_long_immediate_stop",
-    "bear_long_countertrend",
-})
-_STOP_PLACEMENT_CAUSES = frozenset({
-    "wide_volatility_stop",
-    "stop_hunt_post_recovery",
-})
+_TIMING_CAUSES = frozenset(
+    {
+        "immediate_adverse_entry",
+        "bounce_phase_short_timing",
+        "late_activation_timing",
+        "quick_stop_no_follow_through",
+    }
+)
+_REGIME_CAUSES = frozenset(
+    {
+        "bear_long_immediate_stop",
+        "bear_long_countertrend",
+    }
+)
+_STOP_PLACEMENT_CAUSES = frozenset(
+    {
+        "wide_volatility_stop",
+        "stop_hunt_post_recovery",
+    }
+)
 
 
 def classify_cause_of_sl(code: str) -> CauseOfSL:
@@ -39,7 +45,7 @@ def _f(value: Any) -> float | None:
         return None
     try:
         parsed = float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if parsed != parsed:
         return None
@@ -96,11 +102,7 @@ def classify_stop_loss_root_cause(
         code = "immediate_adverse_entry"
         reasons.append("mfe_zero_price_never_favorable")
 
-    if (
-        dir_norm == "short"
-        and mfe <= 0.05
-        and bias_1h in {"neutral", "uptrend"}
-    ):
+    if dir_norm == "short" and mfe <= 0.05 and bias_1h in {"neutral", "uptrend"}:
         code = "bounce_phase_short_timing"
         reasons.append("short_into_1h_bounce_or_neutral")
 

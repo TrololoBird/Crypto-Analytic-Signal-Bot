@@ -744,7 +744,7 @@ def _is_missing(value: object) -> bool:
         return True
     try:
         return bool(np.isnan(cast("Any", value)))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return False
 
 
@@ -832,17 +832,13 @@ def _order_block_touch_indices(
         mitigation_mask = (
             close[start:] < midpoint if direction == "long" else close[start:] > midpoint
         )
-        invalidation_mask = (
-            close[start:] < bottom if direction == "long" else close[start:] > top
-        )
+        invalidation_mask = close[start:] < bottom if direction == "long" else close[start:] > top
     else:
         intersects = (low[start:] <= top) & (high[start:] >= bottom)
         mitigation_mask = intersects
         invalidation_mask = low[start:] < bottom if direction == "long" else high[start:] > top
 
-    mitigation_index = (
-        int(np.argmax(mitigation_mask) + start) if np.any(mitigation_mask) else None
-    )
+    mitigation_index = int(np.argmax(mitigation_mask) + start) if np.any(mitigation_mask) else None
     invalidation_index = (
         int(np.argmax(invalidation_mask) + start) if np.any(invalidation_mask) else None
     )
@@ -1139,7 +1135,6 @@ __all__ = [
     "fvg",
     "fvg_candidates",
     "fvg_ce_entry",
-    "nearest_fvg_ce_target",
     "is_clean_fvg",
     "latest_breaker_block",
     "latest_fvg_zone",
@@ -1147,6 +1142,7 @@ __all__ = [
     "latest_order_block",
     "latest_structure_break",
     "liquidity_pools",
+    "nearest_fvg_ce_target",
     "order_blocks",
     "sweep_tolerance",
     "swing_highs_lows",

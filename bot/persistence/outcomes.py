@@ -101,7 +101,9 @@ def aggregate_setup_stats(
     for row in rows:
         setup_id = str(row.get("setup_id") or "unknown")
         if group_by_entry_tf:
-            entry_tf = str(row.get("entry_tf") or row.get("entry_tf_used") or row.get("timeframe") or "")
+            entry_tf = str(
+                row.get("entry_tf") or row.get("entry_tf_used") or row.get("timeframe") or ""
+            )
             setup_id = f"{setup_id}@{entry_tf}" if entry_tf else setup_id
         bucket = buckets.setdefault(
             setup_id,
@@ -165,7 +167,7 @@ def _normalized_float(value: Any, default: float | None = None) -> float | None:
         return default
     try:
         parsed = float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return default
     if math.isnan(parsed) or math.isinf(parsed):
         return default

@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import math
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -58,8 +57,14 @@ def _tf_summary(df: pl.DataFrame | None, label: str) -> dict[str, Any]:
     c_close = float(closed["close"][-1]) if closed.height else last
     rsi_live = _wilder_rsi(closes)
     rsi_closed = _wilder_rsi(closes[:-1]) if len(closes) > 15 else rsi_live
-    hi48 = max(float(x) for x in (work["high"].to_list() if not work.is_empty() else df["high"].to_list())[-48:])
-    lo48 = min(float(x) for x in (work["low"].to_list() if not work.is_empty() else df["low"].to_list())[-48:])
+    hi48 = max(
+        float(x)
+        for x in (work["high"].to_list() if not work.is_empty() else df["high"].to_list())[-48:]
+    )
+    lo48 = min(
+        float(x)
+        for x in (work["low"].to_list() if not work.is_empty() else df["low"].to_list())[-48:]
+    )
     return {
         "tf": label,
         "bars": work.height,
@@ -113,7 +118,11 @@ async def analyze(symbol: str = "BEATUSDT") -> dict[str, Any]:
 
         # Bounce from session low
         m1 = tf_data["1m"]
-        recent_low_1h = min(float(x) for x in klines["1m"]["low"].to_list()[-60:]) if klines["1m"] is not None else None
+        recent_low_1h = (
+            min(float(x) for x in klines["1m"]["low"].to_list()[-60:])
+            if klines["1m"] is not None
+            else None
+        )
         bounce_pct = ((price / recent_low_1h - 1) * 100) if recent_low_1h else None
 
         # Independent verdict
@@ -222,10 +231,16 @@ def main() -> None:
     ind = result["independent"]
     lv = result["levels"]
     print("=== INDEPENDENT BEAT ANALYSIS ===")
-    print(f"price {result['price']} | 24h {result['change_24h_pct']}% | pos {result['pos_in_range_24h']}")
-    print(f"levels: swing {lv['swing48h_low']}-{lv['swing48h_high']} | bot_support {lv['bot_support_break']}")
+    print(
+        f"price {result['price']} | 24h {result['change_24h_pct']}% | pos {result['pos_in_range_24h']}"
+    )
+    print(
+        f"levels: swing {lv['swing48h_low']}-{lv['swing48h_high']} | bot_support {lv['bot_support_break']}"
+    )
     print(f"bounce from 1h low: {lv['bounce_from_1h_low_pct']}%")
-    print(f"5m closed {result['timeframes']['5m'].get('last_closed')} | 15m closed {result['timeframes']['15m'].get('last_closed')}")
+    print(
+        f"5m closed {result['timeframes']['5m'].get('last_closed')} | 15m closed {result['timeframes']['15m'].get('last_closed')}"
+    )
     print(f"still broken (closed): {ind['closed_still_below_old_support']}")
     print(f"VERDICT: {ind['bias']} | short={ind['score_short']} long={ind['score_long']}")
     print("long reasons:", ind["reasons_long"])

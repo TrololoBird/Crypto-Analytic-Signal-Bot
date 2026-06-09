@@ -166,7 +166,7 @@ def _select_external_stop_level(
         raw_marker = markers[idx]
         try:
             marker_value = float(cast("Any", raw_marker)) if raw_marker is not None else 0.0
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             invalid_markers += 1
             continue
         if raw_marker is None or marker_value != marker:
@@ -178,7 +178,7 @@ def _select_external_stop_level(
             continue
         try:
             level = float(cast("Any", raw_level))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             invalid_levels += 1
             continue
         if not math.isfinite(level) or level <= 0.0:

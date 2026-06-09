@@ -15,9 +15,9 @@ import json
 import re
 import sys
 from collections import Counter, defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
-UTC = timezone.utc
+UTC = UTC
 from pathlib import Path
 from typing import Any
 
@@ -41,10 +41,14 @@ RE_RATE_LIMIT = re.compile(r"rate_limit_paused_(\d+)s")
 RE_SL_PENALTY = re.compile(
     r"strategy sl-rate penalty\s+\|.*?setup=(\S+).*?sl_rate=([\d.]+).*?score=([\d.→.]+)"
 )
-RE_BENCHMARK_STALE = re.compile(r"benchmark context stale\s+\|.*?symbol=(\S+).*?age_seconds=([\d.]+)")
+RE_BENCHMARK_STALE = re.compile(
+    r"benchmark context stale\s+\|.*?symbol=(\S+).*?age_seconds=([\d.]+)"
+)
 RE_ERROR = re.compile(r"\|\s+ERROR\s+\|(.+)")
 RE_WARNING = re.compile(r"\|\s+WARNING\s+\|(.+)")
-RE_WS_EVENT = re.compile(r"(ws_disconnect|ws_reconnect|ws.*?error|websocket.*?closed)", re.IGNORECASE)
+RE_WS_EVENT = re.compile(
+    r"(ws_disconnect|ws_reconnect|ws.*?error|websocket.*?closed)", re.IGNORECASE
+)
 RE_CYCLE = re.compile(
     r"cycle\s+\|.*?symbol=(\S+).*?candidates=(\d+).*?delivered=(\d+).*?rejected=(\d+).*?status=(\S+)"
 )
@@ -55,13 +59,18 @@ RE_SHORTLIST = re.compile(r"shortlist.*?symbols=(\d+)", re.IGNORECASE)
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
+
 def _latest_bot_log() -> Path | None:
     logs = sorted(LOG_DIR.glob("bot_*.log"), key=lambda p: p.stat().st_mtime, reverse=True)
     return logs[0] if logs else None
 
 
 def _latest_live_watch() -> Path | None:
-    dirs = sorted(LIVE_WATCH.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True) if LIVE_WATCH.exists() else []
+    dirs = (
+        sorted(LIVE_WATCH.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)
+        if LIVE_WATCH.exists()
+        else []
+    )
     return dirs[0] if dirs else None
 
 
@@ -119,6 +128,7 @@ def _latest_snapshots(watch_dir: Path) -> list[dict[str, Any]]:
 
 # ── Analysis ────────────────────────────────────────────────────────────────
 
+
 def analyze(lookback_seconds: int = 300) -> dict[str, Any]:
     # Bot logs use naive local timestamps — compare with local time
     since = datetime.now() - timedelta(seconds=lookback_seconds)
@@ -153,13 +163,15 @@ def analyze(lookback_seconds: int = 300) -> dict[str, Any]:
                 rejects = _parse_filter_rejects_json(m.group(5))
             except Exception:
                 rejects = []
-            diag_entries.append({
-                "detector_runs": int(m.group(1)),
-                "hits": int(m.group(2)),
-                "candidates": int(m.group(3)),
-                "hit_rate": float(m.group(4)),
-                "top_rejects": rejects,
-            })
+            diag_entries.append(
+                {
+                    "detector_runs": int(m.group(1)),
+                    "hits": int(m.group(2)),
+                    "candidates": int(m.group(3)),
+                    "hit_rate": float(m.group(4)),
+                    "top_rejects": rejects,
+                }
+            )
 
     # Delivered signals
     delivered = []
@@ -176,7 +188,12 @@ def analyze(lookback_seconds: int = 300) -> dict[str, Any]:
     for line in lines:
         m = RE_CYCLE.search(line)
         if m:
-            candidates, delivered_c, rejected, status = int(m.group(2)), int(m.group(3)), int(m.group(4)), m.group(5)
+            candidates, delivered_c, rejected, status = (
+                int(m.group(2)),
+                int(m.group(3)),
+                int(m.group(4)),
+                m.group(5),
+            )
             total_candidates += candidates
             total_delivered_cycles += delivered_c
             if status != "ok":
@@ -189,11 +206,13 @@ def analyze(lookback_seconds: int = 300) -> dict[str, Any]:
     for line in lines:
         m = RE_SL_PENALTY.search(line)
         if m:
-            sl_penalties.append({
-                "setup": m.group(1),
-                "sl_rate": float(m.group(2)),
-                "score_change": m.group(3),
-            })
+            sl_penalties.append(
+                {
+                    "setup": m.group(1),
+                    "sl_rate": float(m.group(2)),
+                    "score_change": m.group(3),
+                }
+            )
 
     # ── API / WS / Data quality ─────────────────────────────────────────────
 
@@ -265,8 +284,12 @@ def analyze(lookback_seconds: int = 300) -> dict[str, Any]:
 
     report["filters"] = {
         "reject_reasons": dict(filter_counter.most_common(10)),
-        "by_setup": {k: dict(v.most_common(5)) for k, v in
-                     sorted(setup_filter_map.items(), key=lambda x: sum(x[1].values()), reverse=True)[:8]},
+        "by_setup": {
+            k: dict(v.most_common(5))
+            for k, v in sorted(
+                setup_filter_map.items(), key=lambda x: sum(x[1].values()), reverse=True
+            )[:8]
+        },
         "sl_penalties_applied": len(sl_penalties),
         "sl_penalties_details": sl_penalties[:5],
         "signal_diagnostics": diag_entries[-1] if diag_entries else None,
@@ -294,13 +317,19 @@ def analyze(lookback_seconds: int = 300) -> dict[str, Any]:
     anomalies: list[str] = []
 
     if snap_runtime.get("delivered_total", 0) == 0 and snap_runtime.get("cycles_total", 0) > 200:
-        anomalies.append("ZERO_DELIVERIES: Bot ran >200 cycles but delivered 0 signals this session")
+        anomalies.append(
+            "ZERO_DELIVERIES: Bot ran >200 cycles but delivered 0 signals this session"
+        )
 
     if len(rate_limit_pauses) > 0:
-        anomalies.append(f"RATE_LIMIT: {len(rate_limit_pauses)} rate-limit hits in window, max pause {max(rate_limit_pauses)}s")
+        anomalies.append(
+            f"RATE_LIMIT: {len(rate_limit_pauses)} rate-limit hits in window, max pause {max(rate_limit_pauses)}s"
+        )
 
     if len(errors) > 5:
-        anomalies.append(f"HIGH_ERROR_RATE: {len(errors)} ERROR lines in {lookback_seconds}s window")
+        anomalies.append(
+            f"HIGH_ERROR_RATE: {len(errors)} ERROR lines in {lookback_seconds}s window"
+        )
 
     if len(exception_blocks) > 0:
         anomalies.append(f"EXCEPTIONS: {len(exception_blocks)} exception/traceback lines detected")
@@ -309,25 +338,35 @@ def analyze(lookback_seconds: int = 300) -> dict[str, Any]:
         anomalies.append(f"WS_INSTABILITY: {len(ws_events)} WebSocket events in window")
 
     if len(degraded_symbols) > 5:
-        anomalies.append(f"DATA_DEGRADATION: {len(degraded_symbols)} symbols with enrichment degradation")
+        anomalies.append(
+            f"DATA_DEGRADATION: {len(degraded_symbols)} symbols with enrichment degradation"
+        )
 
     # Check if hit_rate suspiciously low
     if diag_entries:
         last_diag = diag_entries[-1]
         if last_diag["hit_rate"] < 0.005 and last_diag["detector_runs"] > 1000:
-            anomalies.append(f"LOW_HIT_RATE: hit_rate={last_diag['hit_rate']:.4f} — strategies firing but almost nothing passing")
+            anomalies.append(
+                f"LOW_HIT_RATE: hit_rate={last_diag['hit_rate']:.4f} — strategies firing but almost nothing passing"
+            )
 
     # SL penalty flood
-    sl_setups_high = {s: c for s, c in [(p["setup"], p["sl_rate"]) for p in sl_penalties] if c >= 1.0}
+    sl_setups_high = {
+        s: c for s, c in [(p["setup"], p["sl_rate"]) for p in sl_penalties] if c >= 1.0
+    }
     if sl_setups_high:
-        anomalies.append(f"SL_PENALTY_100PCT: setups with 100% SL rate: {list(sl_setups_high.keys())[:5]}")
+        anomalies.append(
+            f"SL_PENALTY_100PCT: setups with 100% SL rate: {list(sl_setups_high.keys())[:5]}"
+        )
 
     # Filter domination
     if filter_counter:
         top_reason, top_count = filter_counter.most_common(1)[0]
         total_filtered = sum(filter_counter.values())
         if total_filtered > 0 and top_count / total_filtered > 0.7:
-            anomalies.append(f"FILTER_DOMINATED: '{top_reason}' accounts for {top_count}/{total_filtered} ({100*top_count//total_filtered}%) of all rejects")
+            anomalies.append(
+                f"FILTER_DOMINATED: '{top_reason}' accounts for {top_count}/{total_filtered} ({100 * top_count // total_filtered}%) of all rejects"
+            )
 
     report["anomalies"] = anomalies
 
@@ -336,24 +375,27 @@ def analyze(lookback_seconds: int = 300) -> dict[str, Any]:
 
 # ── Formatting ───────────────────────────────────────────────────────────────
 
+
 def _fmt_report(r: dict[str, Any]) -> str:
     lines = []
     ts = r["generated_at"][:19].replace("T", " ")
     window_min = r["lookback_seconds"] // 60
-    lines.append(f"\n{'='*70}")
+    lines.append(f"\n{'=' * 70}")
     lines.append(f"  SIGNAL BOT MONITOR — {ts} UTC  (last {window_min} min)")
-    lines.append(f"{'='*70}")
+    lines.append(f"{'=' * 70}")
 
     # Signals
     sig = r["signals"]
-    lines.append(f"\n📊 SIGNALS")
+    lines.append("\n📊 SIGNALS")
     lines.append(f"  Delivered (window):  {sig['delivered_this_window']}")
     lines.append(f"  Delivered (session): {sig['total_delivered_session']}")
     lines.append(f"  Candidates (window): {sig['candidates_window']}")
     lines.append(f"  Cycles OK/Error:     {sig['cycles_ok_window']}/{sig['cycle_errors_window']}")
-    lines.append(f"  Session cycles:      {sig['total_cycles_session']}  rejected={sig['rejected_session']}")
+    lines.append(
+        f"  Session cycles:      {sig['total_cycles_session']}  rejected={sig['rejected_session']}"
+    )
     if sig["delivered_details"]:
-        lines.append(f"  Last delivered signals:")
+        lines.append("  Last delivered signals:")
         for d in sig["delivered_details"][:5]:
             lines.append(f"    → {d['setup']} [{d['signal_id']}]")
 
@@ -366,17 +408,23 @@ def _fmt_report(r: dict[str, Any]) -> str:
             lines.append(f"    {reason:<35} {cnt}")
     if flt["signal_diagnostics"]:
         d = flt["signal_diagnostics"]
-        lines.append(f"  Last diag: runs={d['detector_runs']} hits={d['hits']} "
-                     f"candidates={d['candidates']} hit_rate={d['hit_rate']:.4f}")
+        lines.append(
+            f"  Last diag: runs={d['detector_runs']} hits={d['hits']} "
+            f"candidates={d['candidates']} hit_rate={d['hit_rate']:.4f}"
+        )
     if flt["sl_penalties_details"]:
         lines.append("  SL-rate penalties (sample):")
         for p in flt["sl_penalties_details"][:3]:
-            lines.append(f"    {p['setup']:<35} sl_rate={p['sl_rate']:.2f}  score {p['score_change']}")
+            lines.append(
+                f"    {p['setup']:<35} sl_rate={p['sl_rate']:.2f}  score {p['score_change']}"
+            )
 
     # API / WS
     api = r["api_ws"]
-    lines.append(f"\n🌐 API / WS")
-    lines.append(f"  Rate-limit pauses:   {api['rate_limit_pauses']}  (max {api['max_rate_limit_pause_s']}s)")
+    lines.append("\n🌐 API / WS")
+    lines.append(
+        f"  Rate-limit pauses:   {api['rate_limit_pauses']}  (max {api['max_rate_limit_pause_s']}s)"
+    )
     lines.append(f"  Degraded symbols:    {len(api['enrichment_degraded_symbols'])}")
     if api["degradation_reasons"]:
         for reason, cnt in api["degradation_reasons"].items():
@@ -390,8 +438,10 @@ def _fmt_report(r: dict[str, Any]) -> str:
 
     # Health
     health = r["health"]
-    lines.append(f"\n🩺 HEALTH")
-    lines.append(f"  Errors:    {health['errors_count']}  |  Warnings: {health['warnings_count']}  |  Exceptions: {health['exception_blocks']}")
+    lines.append("\n🩺 HEALTH")
+    lines.append(
+        f"  Errors:    {health['errors_count']}  |  Warnings: {health['warnings_count']}  |  Exceptions: {health['exception_blocks']}"
+    )
     if health["errors_sample"]:
         lines.append("  Error sample:")
         for e in health["errors_sample"][:3]:
@@ -404,17 +454,20 @@ def _fmt_report(r: dict[str, Any]) -> str:
         for a in anomalies:
             lines.append(f"  ❗ {a}")
     else:
-        lines.append(f"\n✅ No anomalies detected")
+        lines.append("\n✅ No anomalies detected")
 
-    lines.append(f"\n{'='*70}\n")
+    lines.append(f"\n{'=' * 70}\n")
     return "\n".join(lines)
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 
+
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--lookback", type=int, default=300, help="Seconds to look back (default 300 = 5min)")
+    parser.add_argument(
+        "--lookback", type=int, default=300, help="Seconds to look back (default 300 = 5min)"
+    )
     parser.add_argument("--config", default="config.toml")
     parser.add_argument("--json", action="store_true", help="Output raw JSON")
     args = parser.parse_args()

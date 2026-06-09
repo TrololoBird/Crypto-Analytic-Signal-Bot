@@ -225,12 +225,22 @@ def _detect_indicator_divergence_extended(
     latest_bar_close = as_float(work.item(-1, "close"))
     latest_bar_open = as_float(work.item(-1, "open"))
     if direction == "long" and latest_bar_close < latest_bar_open:
-        _reject(prepared, setup_id, "confirm_bar_missing_long",
-                close=latest_bar_close, open=latest_bar_open)
+        _reject(
+            prepared,
+            setup_id,
+            "confirm_bar_missing_long",
+            close=latest_bar_close,
+            open=latest_bar_open,
+        )
         return None
     if direction == "short" and latest_bar_close > latest_bar_open:
-        _reject(prepared, setup_id, "confirm_bar_missing_short",
-                close=latest_bar_close, open=latest_bar_open)
+        _reject(
+            prepared,
+            setup_id,
+            "confirm_bar_missing_short",
+            close=latest_bar_close,
+            open=latest_bar_open,
+        )
         return None
 
     # Divergence is counter-trend capable - only penalize strong 1h conflict (2+ votes).

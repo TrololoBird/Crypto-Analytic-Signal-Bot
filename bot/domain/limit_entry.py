@@ -32,6 +32,7 @@ def adaptive_chase_pct(base_chase: float, atr_pct: float | None) -> float:
     scale = min(_CHASE_ATR_SCALE_MAX, max(1.0, scale))
     return base * scale
 
+
 _KNOWN_PROFILES = frozenset(
     {
         "trend_follow",
@@ -51,7 +52,7 @@ def resolve_late_entry_chase_pct(settings: Any | None = None) -> float:
             if raw is not None:
                 try:
                     value = float(raw)
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     value = math.nan
                 if math.isfinite(value) and value > 0.0:
                     return value

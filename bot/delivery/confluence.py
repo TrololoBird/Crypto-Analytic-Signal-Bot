@@ -14,8 +14,10 @@ from ..features.microstructure import build_microstructure_context
 from .scoring import (
     ScoringResult,
     _adx_strength,
+    _aggression_shift_leg,
     _btc_correlation_penalty,
     _crowd_position,
+    _depth_imbalance_leg,
     _funding_contrarian,
     _keltner_position,
     _liquidation_cluster_score,
@@ -23,12 +25,10 @@ from .scoring import (
     _mtf_alignment,
     _obv_alignment,
     _oi_momentum,
+    _orderflow_imbalance_leg,
     _pivot_proximity,
     _regime_alignment_bonus,
     _risk_reward_quality,
-    _aggression_shift_leg,
-    _depth_imbalance_leg,
-    _orderflow_imbalance_leg,
     _session_killzone_score,
     _structure_clarity,
     _volume_profile_position,
@@ -165,7 +165,9 @@ class ConfluenceEngine:
 
     def _min_history_samples(self) -> int:
         delivery = getattr(self.settings, "delivery", None)
-        return int(getattr(delivery, "min_sl_penalty_samples", MIN_HISTORY_SAMPLES) or MIN_HISTORY_SAMPLES)
+        return int(
+            getattr(delivery, "min_sl_penalty_samples", MIN_HISTORY_SAMPLES) or MIN_HISTORY_SAMPLES
+        )
 
     def _resolve_history_count(self, signal: Signal) -> int:
         min_samples = self._min_history_samples()
@@ -190,7 +192,7 @@ class ConfluenceEngine:
             return history_count
         try:
             loaded = int(getter(signal.setup_id))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             LOG.debug("setup_history_count lookup failed | setup_id=%s", signal.setup_id)
             return history_count
         except DEFENSIVE_EXC:
@@ -586,7 +588,7 @@ class ConfluenceEngine:
             return False
         try:
             return math.isfinite(float(value))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return False
 
     @classmethod
@@ -596,11 +598,11 @@ class ConfluenceEngine:
             return False
         try:
             value = frame.item(-1, column)
-        except (IndexError, TypeError, ValueError):
+        except IndexError, TypeError, ValueError:
             return False
         try:
             return value is not None and math.isfinite(float(value))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return False
 
     @classmethod

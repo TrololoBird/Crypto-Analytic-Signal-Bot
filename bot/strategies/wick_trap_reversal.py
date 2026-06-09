@@ -205,7 +205,7 @@ def _detect_wick_trap_reversal_extended(
     if st_15m is not None:
         try:
             st_15m = float(st_15m)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             st_15m = None
     trig_high = float(work_15m.item(-1, "high"))
     trig_low = float(work_15m.item(-1, "low"))

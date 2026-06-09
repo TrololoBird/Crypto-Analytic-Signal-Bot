@@ -61,4 +61,4 @@ def resolve_context_frame(
         return frame
     if prepared.work_1h is not None and not prepared.work_1h.is_empty():
         return prepared.work_1h
-    return resolve_entry_frame(prepared, entry_tf=entry_tf, signal=signal)
+    return resolve_entry_frame(prepared, signal=signal)

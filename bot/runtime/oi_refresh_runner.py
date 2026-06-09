@@ -352,7 +352,7 @@ class OIRefreshRunner:
                     rows = json.loads(cached_payload)
                     if isinstance(rows, list):
                         client.seed_funding_history_cache(symbol, rows)
-            except (TypeError, ValueError, json.JSONDecodeError):
+            except TypeError, ValueError, json.JSONDecodeError:
                 LOG.debug("market cache hydrate skipped | symbol=%s stage=funding_history", symbol)
         if not hasattr(client, "seed_market_scalar_cache"):
             return
@@ -369,7 +369,7 @@ class OIRefreshRunner:
                 value = payload.get("value") if isinstance(payload, dict) else payload
                 if isinstance(value, (int, float)):
                     client.seed_market_scalar_cache(stage, symbol, float(value))
-            except (TypeError, ValueError, json.JSONDecodeError):
+            except TypeError, ValueError, json.JSONDecodeError:
                 LOG.debug("market cache hydrate skipped | symbol=%s stage=%s", symbol, stage)
 
     async def _persist_market_cache(

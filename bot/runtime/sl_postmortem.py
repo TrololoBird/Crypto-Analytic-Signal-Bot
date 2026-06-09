@@ -15,7 +15,7 @@ def _minutes_between(start: Any, end: Any) -> int:
         return 0
     try:
         return max(0, int((end - start).total_seconds() / 60))
-    except (TypeError, AttributeError, ValueError):
+    except TypeError, AttributeError, ValueError:
         return 0
 
 

@@ -35,7 +35,9 @@ from bot.runtime.errors import (
 )
 
 
-def _pearson_correlation_returns(left_closes: list[float], right_closes: list[float]) -> float | None:
+def _pearson_correlation_returns(
+    left_closes: list[float], right_closes: list[float]
+) -> float | None:
     """Rolling 1h return correlation (report-5 §46 BTC filter threshold)."""
     n = min(len(left_closes), len(right_closes))
     if n < 10:
@@ -63,6 +65,7 @@ def _pearson_correlation_returns(left_closes: list[float], right_closes: list[fl
     if den_l <= 0.0 or den_r <= 0.0:
         return None
     return num / (den_l * den_r)
+
 
 if TYPE_CHECKING:
     from bot.runtime.bot import SignalBot
@@ -111,6 +114,8 @@ _DEGRADATION_ERRORS = (
     AttributeError,
     KeyError,
 )
+
+
 def _history_fetch_limit(minimums: dict[str, int], interval: str) -> int:
     return kline_fetch_limit(int(minimums.get(interval, 0)), interval)
 
@@ -144,7 +149,7 @@ def _apply_setup_score_adjustment(
     """Apply adaptive setup scoring without converting mild penalties into hard blocks."""
     try:
         adjustment = float(score_adjustment)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         adjustment = 0.0
     if not adjustment:
         return signal, {"applied": False, "adjustment": 0.0}
@@ -246,13 +251,13 @@ class AnalyzerContextMixin(AnalyzerMixinBase):
             return None
         try:
             value = frame.item(-1, column)
-        except (IndexError, TypeError, ValueError):
+        except IndexError, TypeError, ValueError:
             return None
         try:
             if value is None:
                 return None
             numeric = float(value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
         return (
             numeric if numeric == numeric and numeric not in (float("inf"), float("-inf")) else None
@@ -887,8 +892,11 @@ class AnalyzerFramesMixin(AnalyzerContextMixin, _AnalyzerFamilyGatesBase):
             _has_any_ls = any(
                 isinstance(enrichments.get(f), (int, float))
                 for f in (
-                    "ls_ratio", "global_ls_ratio", "top_account_ls_ratio",
-                    "top_position_ls_ratio", "taker_ratio",
+                    "ls_ratio",
+                    "global_ls_ratio",
+                    "top_account_ls_ratio",
+                    "top_position_ls_ratio",
+                    "taker_ratio",
                 )
             )
             if not _has_any_ls:
@@ -901,11 +909,21 @@ class AnalyzerFramesMixin(AnalyzerContextMixin, _AnalyzerFamilyGatesBase):
         # self._bot.client may be a wrapper; fall back to its _binance_client inner.
         _raw_client = self._bot.client
         _inner_client = getattr(_raw_client, "_binance_client", None)
-        klines_cache = getattr(_raw_client, "_klines_cache", None) or getattr(_inner_client, "_klines_cache", None)
+        klines_cache = getattr(_raw_client, "_klines_cache", None) or getattr(
+            _inner_client, "_klines_cache", None
+        )
         if isinstance(klines_cache, dict):
-            for _ref_sym, _ref_field in (("BTCUSDT", "btc_change_pct"), ("ETHUSDT", "eth_change_pct")):
+            for _ref_sym, _ref_field in (
+                ("BTCUSDT", "btc_change_pct"),
+                ("ETHUSDT", "eth_change_pct"),
+            ):
                 for _key, _cached in klines_cache.items():
-                    if not (isinstance(_key, tuple) and len(_key) >= 2 and _key[0] == _ref_sym and _key[1] == "1h"):
+                    if not (
+                        isinstance(_key, tuple)
+                        and len(_key) >= 2
+                        and _key[0] == _ref_sym
+                        and _key[1] == "1h"
+                    ):
                         continue
                     try:
                         _, _frame = _cached
@@ -915,7 +933,7 @@ class AnalyzerFramesMixin(AnalyzerContextMixin, _AnalyzerFamilyGatesBase):
                             if _prev > 0.0 and _last > 0.0:
                                 enrichments[_ref_field] = (_last - _prev) / _prev
                                 break
-                    except (IndexError, TypeError, ValueError, AttributeError):
+                    except IndexError, TypeError, ValueError, AttributeError:
                         pass
 
         if symbol not in {"BTCUSDT", "ETHUSDT"} and isinstance(klines_cache, dict):
@@ -933,7 +951,7 @@ class AnalyzerFramesMixin(AnalyzerContextMixin, _AnalyzerFamilyGatesBase):
                         for value in _frame["close"].to_list()
                         if value is not None and float(value) > 0.0
                     ]
-                except (IndexError, TypeError, ValueError, AttributeError):
+                except IndexError, TypeError, ValueError, AttributeError:
                     continue
                 if len(closes) < 10:
                     continue
@@ -981,7 +999,7 @@ class AnalyzerFramesMixin(AnalyzerContextMixin, _AnalyzerFamilyGatesBase):
         next_last_price = item.last_price
         try:
             ticker_last_price = float(ticker.get("last_price") or 0.0)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return item
         if ticker_last_price > 0:
             next_last_price = ticker_last_price

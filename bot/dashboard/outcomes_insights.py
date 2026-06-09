@@ -18,7 +18,7 @@ def _safe_float(value: Any) -> float | None:
         return None
     try:
         parsed = float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if parsed != parsed:
         return None
@@ -32,7 +32,7 @@ def _parse_dt(value: Any) -> datetime | None:
         return value if value.tzinfo else value.replace(tzinfo=UTC)
     try:
         parsed = datetime.fromisoformat(str(value))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
@@ -47,7 +47,7 @@ def _percentile(values: list[float], pct: float) -> float | None:
     if not values:
         return None
     ordered = sorted(values)
-    idx = int(round((len(ordered) - 1) * pct))
+    idx = round((len(ordered) - 1) * pct)
     idx = max(0, min(idx, len(ordered) - 1))
     return ordered[idx]
 
@@ -366,15 +366,9 @@ async def build_operator_weekly_kpi(
     """answers50 Q48 — five weekly operator metrics."""
     outcomes = await repo.get_signal_outcomes(last_days=days)
     trade_rows = [
-        row
-        for row in outcomes
-        if str(row.get("result") or "") in _WIN_RESULTS | _LOSS_RESULTS
+        row for row in outcomes if str(row.get("result") or "") in _WIN_RESULTS | _LOSS_RESULTS
     ]
-    expired_rows = [
-        row
-        for row in outcomes
-        if str(row.get("result") or "").startswith("expired")
-    ]
+    expired_rows = [row for row in outcomes if str(row.get("result") or "").startswith("expired")]
     losses = [row for row in trade_rows if str(row.get("result") or "") == "stop_loss"]
 
     sl_by_regime: dict[str, dict[str, int]] = {

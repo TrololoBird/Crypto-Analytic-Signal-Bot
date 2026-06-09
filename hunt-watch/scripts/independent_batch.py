@@ -65,7 +65,9 @@ def main() -> None:
             f"{sym} ${r['price']} 24h={r['change_24h_pct']}% pos={r['pos_in_range_24h']} "
             f"| {ind.get('bias')} short={ind.get('score_short')} long={ind.get('score_long')}"
         )
-        print(f"  bounce={lv.get('bounce_from_1h_low_pct')}% taker5m={r.get('taker_5m')} fund={r.get('funding_pct')}")
+        print(
+            f"  bounce={lv.get('bounce_from_1h_low_pct')}% taker5m={r.get('taker_5m')} fund={r.get('funding_pct')}"
+        )
         print(f"  short: {ind.get('reasons_short')}")
         print(f"  long:  {ind.get('reasons_long')}")
 

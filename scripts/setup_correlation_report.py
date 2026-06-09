@@ -56,7 +56,9 @@ async def run_report(db_path: Path, *, window_minutes: int = 30) -> dict[str, ob
                 if ta is None:
                     continue
                 for rb in by_setup[b]:
-                    if ra.get("symbol") != rb.get("symbol") or ra.get("direction") != rb.get("direction"):
+                    if ra.get("symbol") != rb.get("symbol") or ra.get("direction") != rb.get(
+                        "direction"
+                    ):
                         continue
                     tb = _parse_dt(str(rb.get("created_at")))
                     if tb is None:

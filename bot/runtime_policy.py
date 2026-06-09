@@ -106,7 +106,7 @@ def resolve_setup_pattern_tf(setup_id: str, *, default: str = "15m") -> str:
     if entry is None:
         return default
     raw = str(entry.pattern_tf or entry.trigger_tf or default)
-    return raw.split("/")[0].split("+")[0].strip().lower() or default
+    return raw.split("/", maxsplit=1)[0].split("+", maxsplit=1)[0].strip().lower() or default
 
 
 def effective_shortlist_unified_routing(

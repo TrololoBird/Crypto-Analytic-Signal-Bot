@@ -158,7 +158,7 @@ def _signed_delta_values(values: Any) -> Any:
     try:
         min_value = float(raw.min())
         max_value = float(raw.max())
-    except (AttributeError, TypeError, ValueError):
+    except AttributeError, TypeError, ValueError:
         return raw
     if min_value < 0.0:
         return raw
@@ -296,8 +296,12 @@ def _detect_cvd_divergence_extended(
         _reject(prepared, setup_id, "no_cvd_divergence_detected")
         return None
 
-    fresh_bars = int(dynamic_params.get("max_divergence_age_bars", defaults.get("max_divergence_age_bars", 5)))
-    price_extreme_idx = int(high_window_b.argmax()) if direction == "short" else int(low_window_b.argmin())
+    fresh_bars = int(
+        dynamic_params.get("max_divergence_age_bars", defaults.get("max_divergence_age_bars", 5))
+    )
+    price_extreme_idx = (
+        int(high_window_b.argmax()) if direction == "short" else int(low_window_b.argmin())
+    )
     if price_extreme_idx < max(0, len(window_b) - fresh_bars):
         _reject(
             prepared,
@@ -311,7 +315,11 @@ def _detect_cvd_divergence_extended(
     # Counter-trend CVD requires HTF exhaustion evidence (overbought/oversold RSI).
     # Without exhaustion, shorting into uptrend has very high fail rate (research Q200).
     market_regime = str(getattr(prepared, "market_regime", "") or "").lower()
-    rsi_for_htf = float(getattr(w, "item", lambda *a, **k: 50.0)(-1, "rsi14") or 50.0) if w.height > 0 else 50.0
+    rsi_for_htf = (
+        float(getattr(w, "item", lambda *a, **k: 50.0)(-1, "rsi14") or 50.0)
+        if w.height > 0
+        else 50.0
+    )
     htf_exhaustion_rsi_overbought = float(dynamic_params.get("htf_exhaustion_rsi_overbought", 70.0))
     htf_exhaustion_rsi_oversold = float(dynamic_params.get("htf_exhaustion_rsi_oversold", 30.0))
     bias_1h_norm = str(bias_1h or "neutral").lower()
@@ -376,8 +384,8 @@ def _detect_cvd_divergence_extended(
     if direction == "short" and require_close_confirmation:
         last_close = float(w.item(-1, "close") or 0.0)
         last_open = float(w.item(-1, "open") or 0.0)
-        prior_high = float(max(high_window_b[:-1])) if len(high_window_b) > 1 else float(
-            max(high_window_b)
+        prior_high = (
+            float(max(high_window_b[:-1])) if len(high_window_b) > 1 else float(max(high_window_b))
         )
         bearish_bar = last_close < last_open
         rejection_close = prior_high > 0.0 and last_close < prior_high
@@ -515,7 +523,9 @@ def _detect_cvd_exhaustion_fallback(
         _reject(prepared, setup_id, "atr_invalid", atr=atr)
         return None
 
-    cvd_col = "cvd" if "cvd" in w.columns else ("delta_ratio" if "delta_ratio" in w.columns else None)
+    cvd_col = (
+        "cvd" if "cvd" in w.columns else ("delta_ratio" if "delta_ratio" in w.columns else None)
+    )
     if cvd_col is None:
         _reject(prepared, setup_id, "cvd_column_missing")
         return None

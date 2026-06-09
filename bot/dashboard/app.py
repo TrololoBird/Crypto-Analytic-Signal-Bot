@@ -413,7 +413,7 @@ class BotDashboard:
             if isinstance(snap, dict):
                 try:
                     mark_price = float(snap.get("mark_price") or 0.0) or None
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     mark_price = None
 
         normalized = [_normalize_kline_row(row) for row in (rows or [])]
@@ -451,12 +451,12 @@ class BotDashboard:
                 parsed = _parse_datetime(payload.get("started_at"))
                 if parsed is not None:
                     return parsed
-            except (OSError, json.JSONDecodeError):
+            except OSError, json.JSONDecodeError:
                 pass
             try:
                 stamp = "_".join(run_id.split("_")[:2])
                 return datetime.strptime(stamp, "%Y%m%d_%H%M%S").replace(tzinfo=UTC)
-            except (ValueError, TypeError):
+            except ValueError, TypeError:
                 return None
         return None
 
@@ -586,7 +586,7 @@ class BotDashboard:
         try:
             decisions = await self._live_data.decisions(limit=max(limit, 20), max_rows=50_000)
         except DEFENSIVE_EXC:
-            return rows
+            return []
         rows: list[dict[str, Any]] = []
         for row in decisions.get("setup_reports", []):
             if int(row.get("signals") or 0) <= 0:
@@ -644,7 +644,7 @@ class BotDashboard:
                 price_raw = row.get("entry_mid")
             try:
                 price = round(float(price_raw), 3) if price_raw is not None else 0.0
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 price = 0.0
             key = (symbol, direction, timeframe, price, ts_bucket)
 
@@ -665,7 +665,7 @@ class BotDashboard:
             try:
                 row_score = float(row.get("score") or 0.0)
                 current_score = float(grouped.get("score") or 0.0)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 row_score = 0.0
                 current_score = 0.0
             if row_score > current_score:

@@ -46,7 +46,7 @@ def load_tracker_state(path: Path = STATE_PATH) -> dict[str, Any]:
         raw = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(raw, dict) and "signals" in raw:
             return raw
-    except (OSError, json.JSONDecodeError):
+    except OSError, json.JSONDecodeError:
         pass
     return {"signals": {}, "followup_sent": {}}
 
@@ -206,10 +206,15 @@ def evaluate_followups(
                 )
                 close_signal(state, symbol=symbol, direction=direction)
 
-        elif direction == "long" and lc_phase in {
-            "exhaustion_at_high",
-            "distribution",
-        } and opened_phase in {"post_dump_bounce", "accumulation", "recovery"}:
+        elif (
+            direction == "long"
+            and lc_phase
+            in {
+                "exhaustion_at_high",
+                "distribution",
+            }
+            and opened_phase in {"post_dump_bounce", "accumulation", "recovery"}
+        ):
             msg_key = f"{k}:invalidate"
             if _followup_allowed(state, msg_key, now=ts):
                 events.append(
@@ -228,11 +233,15 @@ def evaluate_followups(
         else:
             if direction == "short":
                 struct_bad, struct_reason = _short_structure_invalidated(
-                    active, setup, price=price,
+                    active,
+                    setup,
+                    price=price,
                 )
             else:
                 struct_bad, struct_reason = _long_structure_invalidated(
-                    active, setup, price=price,
+                    active,
+                    setup,
+                    price=price,
                 )
             if struct_bad:
                 msg_key = f"{k}:invalidate:{struct_reason}"
@@ -254,7 +263,12 @@ def evaluate_followups(
                     close_signal(state, symbol=symbol, direction=direction)
 
         # Phase change while active
-        if active.get("status") == "active" and lc_phase and opened_phase and lc_phase != opened_phase:
+        if (
+            active.get("status") == "active"
+            and lc_phase
+            and opened_phase
+            and lc_phase != opened_phase
+        ):
             msg_key = f"{k}:phase:{lc_phase}"
             if _followup_allowed(state, msg_key, now=ts):
                 events.append(
@@ -364,7 +378,9 @@ def evaluate_followups(
     return events
 
 
-def mark_followups_sent(state: dict[str, Any], events: list[HuntFollowUp], *, now: datetime) -> None:
+def mark_followups_sent(
+    state: dict[str, Any], events: list[HuntFollowUp], *, now: datetime
+) -> None:
     for ev in events:
         _mark_followup(state, ev.message_key, now=now)
 

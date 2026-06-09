@@ -92,9 +92,7 @@ def raw_frame_minimums(settings: BotSettings) -> dict[str, int]:
 
 def effective_prepared_minimums(settings: BotSettings) -> dict[str, int]:
     configured = configured_frame_minimums(settings)
-    return {
-        tf: _effective_prepared_minimum(min_bars, tf) for tf, min_bars in configured.items()
-    }
+    return {tf: _effective_prepared_minimum(min_bars, tf) for tf, min_bars in configured.items()}
 
 
 def _effective_prepared_minimum(configured: int, timeframe: str) -> int:
@@ -119,7 +117,7 @@ def _finite_float(value: object) -> float | None:
         return None
     try:
         numeric = float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if not math.isfinite(numeric):
         return None

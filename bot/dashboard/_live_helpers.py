@@ -22,22 +22,27 @@ JsonDict = dict[str, Any]
 
 # ── Numeric ───────────────────────────────────────────────────────────────
 
+
 def _safe_float(value: Any, default: float = 0.0) -> float:
     try:
         return float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return default
+
 
 def _safe_int(value: Any, default: int = 0) -> int:
     try:
         return int(float(value))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return default
+
 
 def _percent(value: float, digits: int = 2) -> float:
     return round(float(value) * 100.0, digits)
 
+
 # ── Date ──────────────────────────────────────────────────────────────────
+
 
 def _parse_ts(value: Any) -> datetime | None:
     if value is None:
@@ -46,9 +51,10 @@ def _parse_ts(value: Any) -> datetime | None:
         return value if value.tzinfo else value.replace(tzinfo=UTC)
     try:
         parsed = datetime.fromisoformat(str(value))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
 
 def _parse_datetime(value: Any) -> datetime | None:
     if value is None:
@@ -57,17 +63,20 @@ def _parse_datetime(value: Any) -> datetime | None:
         return value if value.tzinfo else value.replace(tzinfo=UTC)
     try:
         parsed = datetime.fromisoformat(str(value))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
+
 # ── Counter ───────────────────────────────────────────────────────────────
+
 
 def _counter_rows(counter: Counter[str], *, limit: int = 20) -> list[JsonDict]:
     return [
         {"key": str(key), "count": int(count)}
         for key, count in counter.most_common(max(1, int(limit)))
     ]
+
 
 def _labeled_counter_rows(counter: Counter[str], *, limit: int = 20) -> list[JsonDict]:
     return [
@@ -79,7 +88,9 @@ def _labeled_counter_rows(counter: Counter[str], *, limit: int = 20) -> list[Jso
         for key, count in counter.most_common(max(1, int(limit)))
     ]
 
+
 # ── Row extraction ────────────────────────────────────────────────────────
+
 
 def _rejected_row_confirmations(row: Mapping[str, Any]) -> dict[str, bool] | None:
     confirmations = row.get("confirmations")
@@ -92,6 +103,7 @@ def _rejected_row_confirmations(row: Mapping[str, Any]) -> dict[str, bool] | Non
         return None
     return {str(key): bool(value) for key, value in confirmations.items()}
 
+
 def _rejected_row_confirmation_profile(row: Mapping[str, Any]) -> str:
     profile = row.get("confirmation_profile")
     if not profile:
@@ -100,13 +112,17 @@ def _rejected_row_confirmation_profile(row: Mapping[str, Any]) -> str:
             profile = details.get("confirmation_profile")
     return normalize_confirmation_profile(str(profile) if profile else None)
 
+
 # ── Delivery ──────────────────────────────────────────────────────────────
+
 
 def _delivery_row_status(row: Mapping[str, Any]) -> str:
     return str(row.get("delivery_status") or row.get("status") or "unknown").strip().lower()
 
+
 def _delivery_success_rows(rows: Iterable[Mapping[str, Any]]) -> list[JsonDict]:
     return [dict(row) for row in rows if _delivery_row_status(row) in DELIVERY_SUCCESS_STATUSES]
+
 
 def _cycle_delivered_count(row: Mapping[str, Any]) -> int:
     success = row.get("delivery_success_count")
@@ -114,7 +130,9 @@ def _cycle_delivered_count(row: Mapping[str, Any]) -> int:
         return _safe_int(success)
     return _safe_int(row.get("delivered_count") or row.get("delivered_signals"))
 
+
 # ── Decision / Routing ────────────────────────────────────────────────────
+
 
 def _is_routing_excluded_decision_reason(reason: str) -> bool:
     """True when a strategy_decision row reflects routing/asset_fit, not detector evaluation."""
@@ -123,7 +141,9 @@ def _is_routing_excluded_decision_reason(reason: str) -> bool:
         return True
     return code.startswith("asset_fit.")
 
+
 # ── Frame / WS ────────────────────────────────────────────────────────────
+
 
 def _frame_readiness_fields(bot: Any) -> dict[str, int]:
     """Expose WS frame freshness counts used by operator runtime blocks."""
@@ -142,6 +162,7 @@ def _frame_readiness_fields(bot: Any) -> dict[str, int]:
         "frames_4h_ready": _safe_int(snap.get("warm_symbols")),
     }
 
+
 def _effective_shortlist(bot: Any) -> list[Any]:
     """Match operator shortlist fallback during ws_light bootstrap."""
     live = list(getattr(bot, "_shortlist", []) or [])
@@ -149,7 +170,9 @@ def _effective_shortlist(bot: Any) -> list[Any]:
         return live
     return list(getattr(bot, "_last_live_shortlist", []) or [])
 
+
 # ── Funnel ────────────────────────────────────────────────────────────────
+
 
 def _compute_cycle_totals(cycles: list[JsonDict]) -> JsonDict:
     return {
@@ -162,6 +185,7 @@ def _compute_cycle_totals(cycles: list[JsonDict]) -> JsonDict:
         "delivered": sum(_cycle_delivered_count(row) for row in cycles),
     }
 
+
 def _compute_session_delta(cycles: list[JsonDict]) -> JsonDict:
     latest = cycles[0] if cycles else {}
     return {
@@ -169,6 +193,7 @@ def _compute_session_delta(cycles: list[JsonDict]) -> JsonDict:
         "selected": _safe_int(latest.get("selected_count") or latest.get("selected_signals")),
         "delivered": _cycle_delivered_count(latest),
     }
+
 
 def _build_funnel_widget(
     cycle_totals: Mapping[str, Any], session_delta: Mapping[str, Any]
@@ -190,6 +215,7 @@ def _build_funnel_widget(
             }
         )
     return {"stages": stages}
+
 
 def _unified_top_blocker(
     *,
@@ -218,7 +244,9 @@ def _unified_top_blocker(
         "sources": sources,
     }
 
+
 # ── Killzone / Confluence ─────────────────────────────────────────────────
+
 
 def _compute_killzone() -> dict[str, bool]:
     now = datetime.now(UTC)
@@ -228,6 +256,7 @@ def _compute_killzone() -> dict[str, bool]:
         "ny": 13 <= hour < 22,
         "asia": 0 <= hour < 9,
     }
+
 
 def _confluence_color(score: float) -> str:
     if score >= 80:
@@ -240,7 +269,9 @@ def _confluence_color(score: float) -> str:
         return "#ff9f43"
     return "#ff5b6b"
 
+
 # ── Chart ─────────────────────────────────────────────────────────────────
+
 
 def _normalize_kline_row(row: dict[str, Any]) -> dict[str, Any] | None:
     try:
@@ -248,7 +279,7 @@ def _normalize_kline_row(row: dict[str, Any]) -> dict[str, Any] | None:
         high_px = float(row.get("high") or row.get("h") or 0.0)
         low_px = float(row.get("low") or row.get("l") or 0.0)
         close_px = float(row.get("close") or row.get("c") or 0.0)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if close_px <= 0.0:
         return None
@@ -261,6 +292,7 @@ def _normalize_kline_row(row: dict[str, Any]) -> dict[str, Any] | None:
         "low": low_px,
         "close": close_px,
     }
+
 
 def _dataframe_to_kline_rows(df: Any) -> list[dict[str, Any]]:
     if df is None:
@@ -287,7 +319,9 @@ def _dataframe_to_kline_rows(df: Any) -> list[dict[str, Any]]:
         pass
     return []
 
+
 # ── Strategy lifecycle ────────────────────────────────────────────────────
+
 
 def _runtime_strategy_status(row: dict[str, Any], catalog_status: str) -> str:
     trades = int(row.get("trades") or row.get("count") or 0)

@@ -101,9 +101,7 @@ class ProxyPool:
 
     def _next_available_index(self, _start: int) -> int | None:
         available = [
-            (i, self.urls[i])
-            for i in range(len(self.urls))
-            if self._is_available(self.urls[i])
+            (i, self.urls[i]) for i in range(len(self.urls)) if self._is_available(self.urls[i])
         ]
         if not available:
             return None
@@ -299,7 +297,9 @@ class ProxyPool:
                     "latency_avg_ms": round(
                         sum(self._last_latencies.get(url, []))
                         / max(len(self._last_latencies.get(url, [])), 1)
-                    ) if self._last_latencies.get(url) else None,
+                    )
+                    if self._last_latencies.get(url)
+                    else None,
                 }
                 for url in self.urls
             ],

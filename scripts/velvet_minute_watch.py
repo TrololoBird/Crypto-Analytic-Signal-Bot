@@ -10,7 +10,6 @@ import argparse
 import asyncio
 import json
 import signal
-import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -55,7 +54,7 @@ def _col(df: Any, name: str, default: float = 0.0) -> float:
         return default
     try:
         return float(df.item(-1, name))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return default
 
 
@@ -107,7 +106,9 @@ def _tf_snapshot(df: Any) -> dict[str, Any]:
         "dist_ema20_pct": round((c / e20 - 1) * 100, 2) if e20 else None,
         "macd_hist": round(_col(df, "macd_hist"), 6),
         "vol_ratio": round(_col(df, "volume_ratio20", 1), 2),
-        "delta_ratio": round(_col(df, "delta_ratio", 0.5), 3) if "delta_ratio" in df.columns else None,
+        "delta_ratio": round(_col(df, "delta_ratio", 0.5), 3)
+        if "delta_ratio" in df.columns
+        else None,
         "trend": "bull" if c > e20 > e50 else ("bear" if c < e20 < e50 else "mixed"),
         "bearish_rsi_div": bear_div,
         "bullish_rsi_div": bull_div,
@@ -307,7 +308,9 @@ async def _snapshot(*, prev_oi: float | None) -> dict[str, Any]:
         work_1m = _prepare_frame(df_1m)
         delta = _col(prepared.work_15m, "delta_ratio", None)
         prepared.depth_imbalance = depth_imbalance_from_book(
-            bid_qty=frames.bid_qty, ask_qty=frames.ask_qty, delta_ratio=delta,
+            bid_qty=frames.bid_qty,
+            ask_qty=frames.ask_qty,
+            delta_ratio=delta,
         )
         prepared.microprice_bias = microprice_bias_from_book(
             bid=frames.bid_price,
@@ -351,17 +354,22 @@ async def _snapshot(*, prev_oi: float | None) -> dict[str, Any]:
                 continue
             conf = conf_eng.score(r.signal, prepared)
             gate, _, gd = DeliveryOrchestrator._hard_confluence_gate(
-                r.signal, prepared, settings=settings, confluence_engine=conf_eng,
+                r.signal,
+                prepared,
+                settings=settings,
+                confluence_engine=conf_eng,
             )
-            short_hits.append({
-                "setup": r.signal.setup_id,
-                "score": round(float(r.signal.score), 3),
-                "conf": round(float(conf.final_score), 3),
-                "gate": gate,
-                "reason": gd.get("reason"),
-                "stop": r.signal.stop,
-                "tp1": r.signal.take_profit_1,
-            })
+            short_hits.append(
+                {
+                    "setup": r.signal.setup_id,
+                    "score": round(float(r.signal.score), 3),
+                    "conf": round(float(conf.final_score), 3),
+                    "gate": gate,
+                    "reason": gd.get("reason"),
+                    "stop": r.signal.stop,
+                    "tp1": r.signal.take_profit_1,
+                }
+            )
 
         positioning = {
             "oi": prepared.oi_current,

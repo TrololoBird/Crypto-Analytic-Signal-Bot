@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING
 
 from ..features.prepare import _swing_points
 from ..setups import _build_signal, _compute_dynamic_score, _reject
-from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
+from ..setups.spec_runtime import run_setup_detection
 from ._common import (
     SpecHit,
     _latest_values,

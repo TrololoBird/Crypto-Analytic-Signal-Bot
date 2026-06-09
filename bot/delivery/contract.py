@@ -35,7 +35,7 @@ def resolve_target_rr(settings: Any | None = None) -> tuple[float, float, float]
         return DEFAULT_TARGET_RR
     try:
         values = tuple(float(item) for item in configured)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return DEFAULT_TARGET_RR
     if len(values) != 3 or not all(math.isfinite(item) and item > 0.0 for item in values):
         return DEFAULT_TARGET_RR
@@ -107,39 +107,39 @@ _SETUP_TTL_MINUTES: dict[str, int] = {
 # Legacy bar table kept for display/back-compat; derived from minutes when possible.
 _SETUP_TTL_BARS: dict[str, int] = {
     # 1h entry TF strategies (~120-180min target)
-    "fvg_setup": 2,            # 1h × 2 = 120min
-    "order_block": 3,          # 1h × 3 = 180min
-    "breaker_block": 2,        # 1h × 2 = 120min
-    "bos_choch": 8,            # 15m+1h × 8 = 120min
+    "fvg_setup": 2,  # 1h × 2 = 120min
+    "order_block": 3,  # 1h × 3 = 180min
+    "breaker_block": 2,  # 1h × 2 = 120min
+    "bos_choch": 8,  # 15m+1h × 8 = 120min
     "structure_break_retest": 8,  # 15m+1h × 8 = 120min
-    "structure_pullback": 8,   # 15m+1h × 8 = 120min
-    "ema_bounce": 8,           # 15m+1h × 8 = 120min
-    "turtle_soup": 8,          # 15m+1h × 8 = 120min
-    "funding_reversal": 2,     # 1h × 2 = 120min
-    "hidden_divergence": 8,    # 15m+1h × 8 = 120min
+    "structure_pullback": 8,  # 15m+1h × 8 = 120min
+    "ema_bounce": 8,  # 15m+1h × 8 = 120min
+    "turtle_soup": 8,  # 15m+1h × 8 = 120min
+    "funding_reversal": 2,  # 1h × 2 = 120min
+    "hidden_divergence": 8,  # 15m+1h × 8 = 120min
     "rsi_divergence_bottom": 2,  # 1h × 2 = 120min
-    "ls_ratio_extreme": 4,     # 1h × 4 = 240min (sentiment, slower cadence)
-    "oi_divergence": 2,        # 1h × 2 = 120min
-    "btc_correlation": 2,      # 1h × 2 = 120min
-    "wyckoff_spring": 3,       # 1h × 3 = 180min
+    "ls_ratio_extreme": 4,  # 1h × 4 = 240min (sentiment, slower cadence)
+    "oi_divergence": 2,  # 1h × 2 = 120min
+    "btc_correlation": 2,  # 1h × 2 = 120min
+    "wyckoff_spring": 3,  # 1h × 3 = 180min
     # 15m trigger strategies (~45min target)
-    "liquidity_sweep": 3,      # 15m × 3 = 45min
-    "wick_trap_reversal": 3,   # 15m+1h × 3 = 45min
-    "cvd_divergence": 3,       # 15m+1h × 3 = 45min
-    "squeeze_setup": 3,        # 15m+1h × 3 = 45min
-    "keltner_breakout": 3,     # 15m+1h × 3 = 45min
-    "absorption": 3,           # 15m × 3 = 45min
+    "liquidity_sweep": 3,  # 15m × 3 = 45min
+    "wick_trap_reversal": 3,  # 15m+1h × 3 = 45min
+    "cvd_divergence": 3,  # 15m+1h × 3 = 45min
+    "squeeze_setup": 3,  # 15m+1h × 3 = 45min
+    "keltner_breakout": 3,  # 15m+1h × 3 = 45min
+    "absorption": 3,  # 15m × 3 = 45min
     "liquidation_heatmap": 3,  # 15m × 3 = 45min
     # momentum/breakout (~30-90min)
-    "indicator_divergence": 6, # 15m × 6 = 90min
-    "price_velocity": 2,       # 15m × 2 = 30min
-    "volume_anomaly": 2,       # 15m × 2 = 30min
+    "indicator_divergence": 6,  # 15m × 6 = 90min
+    "price_velocity": 2,  # 15m × 2 = 30min
+    "volume_anomaly": 2,  # 15m × 2 = 30min
     "volume_climax_reversal": 6,  # 15m × 6 = 90min
-    "vwap_trend": 6,           # 15m+1h × 6 = 90min
-    "supertrend_follow": 8,    # 15m × 8 = 120min
-    "multi_tf_trend": 8,       # 15m+1h × 8 = 120min
-    "altcoin_season_index": 4, # 1h × 4 = 240min
-    "pinbar_reversal": 8,      # 1h × 8 = 120min
+    "vwap_trend": 6,  # 15m+1h × 6 = 90min
+    "supertrend_follow": 8,  # 15m × 8 = 120min
+    "multi_tf_trend": 8,  # 15m+1h × 8 = 120min
+    "altcoin_season_index": 4,  # 1h × 4 = 240min
+    "pinbar_reversal": 8,  # 1h × 8 = 120min
 }
 
 
@@ -591,7 +591,7 @@ def validate_signal_contract(
                         )
     try:
         scale_weights = [float(item) for item in scale_weights_raw]
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         scale_weights = []
     if len(scale_weights) < 2:
         issues.append(

@@ -139,7 +139,7 @@ def _detect_order_block_extended(
         zone_values_valid = all(
             math.isfinite(float(value)) and float(value) > 0.0 for value in (ob_low, ob_high)
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         zone_values_valid = False
     if (
         direction not in {"long", "short"}
@@ -243,7 +243,9 @@ def _detect_order_block_extended(
 
     lookback_start = max(0, ob_idx - 12)
     if direction == "long":
-        prior_high = float(max(closes[lookback_start:ob_idx]) if ob_idx > lookback_start else closes[ob_idx])
+        prior_high = float(
+            max(closes[lookback_start:ob_idx]) if ob_idx > lookback_start else closes[ob_idx]
+        )
         post_high = float(max(closes[impulse_start:impulse_end]))
         if post_high <= prior_high:
             _reject(
@@ -255,7 +257,9 @@ def _detect_order_block_extended(
             )
             return None
     else:
-        prior_low = float(min(closes[lookback_start:ob_idx]) if ob_idx > lookback_start else closes[ob_idx])
+        prior_low = float(
+            min(closes[lookback_start:ob_idx]) if ob_idx > lookback_start else closes[ob_idx]
+        )
         post_low = float(min(closes[impulse_start:impulse_end]))
         if post_low >= prior_low:
             _reject(

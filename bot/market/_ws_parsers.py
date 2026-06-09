@@ -125,7 +125,7 @@ def _parse_depth_levels(raw_levels: Any, *, reverse: bool) -> tuple[tuple[float,
         try:
             price = float(raw[0])
             qty = float(raw[1])
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         if price <= 0.0 or qty <= 0.0:
             continue
@@ -227,7 +227,7 @@ def handle_ticker(manager: Any, symbol: str, data: JsonDict) -> None:
             "trade_count": int(float(data.get("n") or 0)),
         }
         manager._ticker_cache_ts = time.monotonic()
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return
 
 
@@ -255,7 +255,7 @@ def handle_mini_ticker(manager: Any, symbol: str, data: JsonDict) -> None:
             "low_price": float(data.get("l") or 0.0),
         }
         manager._ticker_cache_ts = time.monotonic()
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return
 
 
@@ -282,7 +282,7 @@ def handle_mark_price(manager: Any, symbol: str, data: JsonDict) -> None:
             "updated_at": now,
         }
         manager._mark_price_update_times[symbol] = now
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return
 
 
@@ -294,12 +294,12 @@ def handle_force_order(manager: Any, data: JsonDict) -> None:
         qty = float(order.get("q") or 0.0)
         try:
             price = float(order.get("p", 0) or 0)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             price = 0.0
         ts_ms = int(order.get("T") or data.get("E") or time.time() * 1000)
         if symbol and side in ("BUY", "SELL") and (qty > 0):
             manager._force_order_buffer.append((ts_ms, symbol, side, qty, price))
-    except (TypeError, ValueError, KeyError):
+    except TypeError, ValueError, KeyError:
         return
 
 
@@ -312,7 +312,7 @@ async def handle_book_ticker(manager: Any, symbol: str, data: JsonDict) -> None:
         bid_qty = float(data["B"]) if data.get("B") is not None else None
         ask_qty = float(data["A"]) if data.get("A") is not None else None
         event_ts_ms = int(data["E"]) if data.get("E") is not None else None
-    except (KeyError, TypeError, ValueError):
+    except KeyError, TypeError, ValueError:
         return
     async with manager._data_lock:
         manager._book[symbol] = (bid, ask)
@@ -353,7 +353,7 @@ async def handle_agg_trade(manager: Any, symbol: str, data: JsonDict) -> None:
             trade_time_ms=int(data["T"]),
             is_buyer_maker=bool(data["m"]),
         )
-    except (KeyError, TypeError, ValueError):
+    except KeyError, TypeError, ValueError:
         return
     pending = manager._pending_agg_trades.setdefault(symbol, [])
     pending.append(trade)

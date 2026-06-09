@@ -42,11 +42,11 @@ def detect_funding_reversal(
     dynamic_mult = _as_float(defaults.get("funding_dynamic_threshold_mult", 0.65), 0.65)
     try:
         cap_extreme = abs(float(funding_cap)) if funding_cap is not None else 0.0
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         cap_extreme = 0.0
     try:
         floor_extreme = abs(float(funding_floor)) if funding_floor is not None else 0.0
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         floor_extreme = 0.0
     relevant_extreme = max(cap_extreme, floor_extreme)
     if relevant_extreme > 0.0:
@@ -119,7 +119,7 @@ def detect_funding_reversal(
                 funding_recent_extreme_lookback_hours,
                 interval_h * 1.25,
             )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         pass
 
     if prepared.funding_rate is None:
@@ -141,7 +141,7 @@ def detect_funding_reversal(
             recent_age = (
                 None if recent_extreme_age_hours is None else float(recent_extreme_age_hours)
             )
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             recent_rate = None
             recent_age = None
         if (
@@ -174,7 +174,7 @@ def detect_funding_reversal(
     if funding_zscore is not None:
         try:
             z_abs = abs(float(funding_zscore))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             z_abs = 0.0
         if z_abs < min_funding_zscore and funding_source in {"relative", "history"}:
             _reject(
@@ -191,7 +191,7 @@ def detect_funding_reversal(
     if funding_source == "history" and recent_extreme_age_hours is not None:
         try:
             age_h = float(recent_extreme_age_hours)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             age_h = None
         if age_h is not None and age_h > interval_max_age_hours:
             _reject(
@@ -317,7 +317,7 @@ def detect_funding_reversal(
     if direction == "short" and funding_cap is not None:
         try:
             cap = abs(float(funding_cap))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             cap = 0.0
         if cap > 0.0 and abs(effective_fr) >= cap * 0.75:
             confirmation_score += 0.15
@@ -325,7 +325,7 @@ def detect_funding_reversal(
     elif direction == "long" and funding_floor is not None:
         try:
             floor = abs(float(funding_floor))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             floor = 0.0
         if floor > 0.0 and abs(effective_fr) >= floor * 0.75:
             confirmation_score += 0.15

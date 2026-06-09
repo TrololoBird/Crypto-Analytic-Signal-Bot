@@ -34,7 +34,9 @@ def _enrich_ticker_rows(raw_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return enriched
 
 
-async def run_scan(*, limit: int = 30, min_score: float = HUNT_SCORE_WATCH_THRESHOLD) -> dict[str, Any]:
+async def run_scan(
+    *, limit: int = 30, min_score: float = HUNT_SCORE_WATCH_THRESHOLD
+) -> dict[str, Any]:
     settings = load_settings()
     client = BinanceFuturesMarketData(
         binance_client=BinanceClientImpl(

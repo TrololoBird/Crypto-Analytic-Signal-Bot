@@ -334,7 +334,7 @@ class MemoryRepository(_MemoryRepositoryBases):
             if ts.tzinfo is None:
                 ts = ts.replace(tzinfo=UTC)
             return max(0.0, (datetime.now(UTC) - ts).total_seconds())
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
 
     async def get_market_context(self) -> dict[str, Any]:
@@ -889,7 +889,7 @@ class MemoryRepository(_MemoryRepositoryBases):
             return None
         try:
             window: list[Any] = json.loads(row[0])
-        except (json.JSONDecodeError, TypeError):
+        except json.JSONDecodeError, TypeError:
             return None
         if not isinstance(window, list) or len(window) < 5:
             return None
@@ -1080,7 +1080,7 @@ class MemoryRepository(_MemoryRepositoryBases):
                     if data.get("scale_weights"):
                         try:
                             data["scale_weights"] = tuple(json.loads(data["scale_weights"]))
-                        except (json.JSONDecodeError, TypeError, ValueError):
+                        except json.JSONDecodeError, TypeError, ValueError:
                             LOG.exception(
                                 "failed to decode scale_weights for signal %s",
                                 data.get("tracking_id"),
@@ -1089,14 +1089,14 @@ class MemoryRepository(_MemoryRepositoryBases):
                     if data.get("context_tfs"):
                         try:
                             parsed = json.loads(data["context_tfs"])
-                            data["context_tfs"] = tuple(str(tf) for tf in parsed) if isinstance(
-                                parsed, list
-                            ) else ()
-                        except (json.JSONDecodeError, TypeError, ValueError):
+                            data["context_tfs"] = (
+                                tuple(str(tf) for tf in parsed) if isinstance(parsed, list) else ()
+                            )
+                        except json.JSONDecodeError, TypeError, ValueError:
                             data["context_tfs"] = ()
                     result.append(data)
                 return result
-        except (aiosqlite.Error, sqlite3.Error):
+        except aiosqlite.Error, sqlite3.Error:
             LOG.exception("failed to get active signals")
             return []
 
@@ -1283,7 +1283,7 @@ class MemoryRepository(_MemoryRepositoryBases):
             pending = counts.get("pending", 0)
             active = counts.get("active", 0)
             return {"pending": pending, "active": active, "open": pending + active}
-        except (OSError, sqlite3.Error):
+        except OSError, sqlite3.Error:
             return {"pending": 0, "active": 0, "open": 0}
 
     async def increment_tracking_stats(self, **deltas: int) -> None:

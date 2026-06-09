@@ -12,7 +12,7 @@ try:
     from importlib import util as importlib_util
 
     _candles_module = importlib_util.find_spec("polars_ta.candles")
-except (ImportError, ModuleNotFoundError):
+except ImportError, ModuleNotFoundError:
     _candles_module = None
 
 if _candles_module is not None:

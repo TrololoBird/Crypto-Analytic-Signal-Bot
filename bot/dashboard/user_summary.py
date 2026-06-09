@@ -176,7 +176,7 @@ async def build_signal_history(bot: Any, *, days: int = 7, limit: int = 30) -> l
                             ts = ts.replace(tzinfo=UTC)
                         if ts < since:
                             continue
-                    except (TypeError, ValueError):
+                    except TypeError, ValueError:
                         continue
                 reason = str(row.get("close_reason") or "closed")
                 history.append(

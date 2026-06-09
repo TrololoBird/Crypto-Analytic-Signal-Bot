@@ -53,7 +53,7 @@ def _f(value: Any, default: float = 0.0) -> float:
     try:
         v = float(value)
         return v if v == v else default  # NaN guard
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return default
 
 
@@ -142,7 +142,7 @@ def assess_hunt_lifecycle(
     bear_cascade = c5.get("bearish") and _f(c5.get("upper_wick_ratio")) >= 0.25
 
     if bounce_from_low >= 3.0 and pos >= 0.60 and fall_from_high >= 3.0:
-        if taker_buy or bull_cascade or micro is not None and micro > 0:
+        if taker_buy or bull_cascade or (micro is not None and micro > 0):
             phase = HuntPhase.POST_DUMP_BOUNCE
             reasons.append(f"bounce={bounce_from_low:.1f}%_pos={pos:.2f}")
             if taker_buy:
@@ -153,7 +153,12 @@ def assess_hunt_lifecycle(
         else:
             phase = HuntPhase.POST_DUMP_BOUNCE
             reasons.append(f"bounce={bounce_from_low:.1f}%")
-    elif pos >= 0.75 and fall_from_high >= 3.0 and fall_from_high < 12.0 and (taker_buy or bull_cascade):
+    elif (
+        pos >= 0.75
+        and fall_from_high >= 3.0
+        and fall_from_high < 12.0
+        and (taker_buy or bull_cascade)
+    ):
         phase = HuntPhase.RECOVERY
         reasons.append(f"squeeze_recovery_pos={pos:.2f}")
     elif near_high and rsi_1h >= 65:
@@ -178,11 +183,15 @@ def assess_hunt_lifecycle(
         HuntPhase.ACCUMULATION,
     }
     short_entry_ok = phase in {HuntPhase.EXHAUSTION_AT_HIGH, HuntPhase.DISTRIBUTION}
-    short_confirm_ok = phase in {
-        HuntPhase.EXHAUSTION_AT_HIGH,
-        HuntPhase.DISTRIBUTION,
-        HuntPhase.DUMP_ACTIVE,
-    } and not invalidate_short
+    short_confirm_ok = (
+        phase
+        in {
+            HuntPhase.EXHAUSTION_AT_HIGH,
+            HuntPhase.DISTRIBUTION,
+            HuntPhase.DUMP_ACTIVE,
+        }
+        and not invalidate_short
+    )
 
     if phase == HuntPhase.DUMP_ACTIVE:
         # VELVET lesson: mid-dump is valid *monitoring* but late TG entry loses (BEAT at 4.65).

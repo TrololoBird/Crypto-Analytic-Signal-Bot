@@ -99,7 +99,7 @@ def _optional_float(value: Any) -> float | None:
         return None
     try:
         numeric = float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if not math.isfinite(numeric):
         return None
@@ -162,7 +162,9 @@ def _htf_zone_confluence_adjustment(
     try:
         from ..setups.smc import latest_fvg_zone, latest_order_block
 
-        close = float(prepared.work_15m.item(-1, "close")) if not prepared.work_15m.is_empty() else 0.0
+        close = (
+            float(prepared.work_15m.item(-1, "close")) if not prepared.work_15m.is_empty() else 0.0
+        )
         zone = latest_order_block(
             prepared.work_1h,
             swing_length=3,
@@ -254,7 +256,7 @@ def _resolve_symbol_filter(
         return default
     try:
         value = float(raw)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return default
     return value if math.isfinite(value) else default
 
@@ -287,12 +289,12 @@ def _benchmark_context_guard(
             continue
         try:
             pct_1h_values.append(float(raw_pct))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             pct_1h_values.append(None)
     context_age_seconds = getattr(prepared, "context_snapshot_age_seconds", None)
     try:
         context_age = float(context_age_seconds) if context_age_seconds is not None else None
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         context_age = None
     benchmark_context_stale = bool(
         context
@@ -316,11 +318,11 @@ def _benchmark_context_guard(
         bias = str(payload.get("bias") or "neutral").lower()
         try:
             pct_1h = float(payload.get("pct_1h") or 0.0)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             pct_1h = 0.0
         try:
             pct_4h = float(payload.get("pct_4h") or 0.0)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             pct_4h = 0.0
         move_score = max(abs(pct_1h) / 0.006, abs(pct_4h) / 0.015)
         if move_score < 1.0 and bias == "neutral":
@@ -398,7 +400,8 @@ def _regime_long_gate(
     regime = effective_market_regime(
         str(getattr(prepared, "market_regime", "") or ""),
         bias_4h=str(getattr(prepared, "bias_4h", "") or "neutral"),
-        price=getattr(prepared, "mark_price", None) or getattr(prepared.universe, "last_price", None),
+        price=getattr(prepared, "mark_price", None)
+        or getattr(prepared.universe, "last_price", None),
         poc=getattr(prepared, "poc_1h", None),
     )
     btc_bias = str(getattr(prepared, "btc_bias", None) or signal.btc_bias or "neutral").lower()
@@ -484,21 +487,25 @@ def _regime_short_gate(
             if isinstance(_btc_payload, dict):
                 try:
                     _btc_pct_1h = float(_btc_payload.get("pct_1h") or 0.0)
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     _btc_pct_1h = 0.0
             if _btc_pct_1h >= 0.006:
                 _btc_corr = getattr(prepared, "btc_corr_1h", None)
                 try:
                     _btc_corr_f = float(_btc_corr) if _btc_corr is not None else None
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     _btc_corr_f = None
                 if _btc_corr_f is not None and abs(_btc_corr_f) < 0.7:
-                    return True, None, {
-                        "regime_gate": "btc_block_skipped_low_corr",
-                        "btc_corr_1h": _btc_corr_f,
-                        "btc_bias": _btc_bias_alt,
-                        "symbol": symbol,
-                    }
+                    return (
+                        True,
+                        None,
+                        {
+                            "regime_gate": "btc_block_skipped_low_corr",
+                            "btc_corr_1h": _btc_corr_f,
+                            "btc_bias": _btc_bias_alt,
+                            "symbol": symbol,
+                        },
+                    )
                 return (
                     False,
                     "btc_uptrend_alt_short_blocked",
@@ -557,12 +564,7 @@ def _regime_short_gate(
             )
         st15 = _latest_frame_float(prepared.work_15m, "supertrend_dir")
         st1h = _latest_frame_float(prepared.work_1h, "supertrend_dir")
-        if (
-            st15 is not None
-            and st1h is not None
-            and st15 > 0.0
-            and st1h > 0.0
-        ):
+        if st15 is not None and st1h is not None and st15 > 0.0 and st1h > 0.0:
             return (
                 False,
                 "supertrend_up_reversal_short_blocked",
@@ -597,7 +599,8 @@ def _regime_short_gate(
     regime = effective_market_regime(
         str(getattr(prepared, "market_regime", "") or ""),
         bias_4h=str(getattr(prepared, "bias_4h", "") or "neutral"),
-        price=getattr(prepared, "mark_price", None) or getattr(prepared.universe, "last_price", None),
+        price=getattr(prepared, "mark_price", None)
+        or getattr(prepared.universe, "last_price", None),
         poc=getattr(prepared, "poc_1h", None),
     )
     btc_bias = str(getattr(prepared, "btc_bias", None) or signal.btc_bias or "neutral").lower()
@@ -634,11 +637,11 @@ def _latest_frame_float(frame: pl.DataFrame | None, column: str) -> float | None
         return None
     try:
         value = frame.item(-1, column)
-    except (IndexError, TypeError, ValueError):
+    except IndexError, TypeError, ValueError:
         return None
     try:
         numeric = float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     return numeric if math.isfinite(numeric) else None
 
@@ -1160,9 +1163,7 @@ def _run_filter_pipeline(
         primary_frame = _frame_for_timeframe(prepared, primary_timeframe)
         passed.append("freshness_stage_disabled")
 
-    age_ok, age_reason = _signal_age_gate(
-        signal, settings, primary_timeframe=primary_timeframe
-    )
+    age_ok, age_reason = _signal_age_gate(signal, settings, primary_timeframe=primary_timeframe)
     if not age_ok:
         return _reject(age_reason or "signal_too_old", base)
 
@@ -1497,8 +1498,8 @@ def _run_filter_pipeline(
         if oi_chg is not None:
             _oi_price_up = signal.direction == "long"
             _oi_price_dn = signal.direction == "short"
-            _oi_falling = oi_chg < -0.03   # OI dropped >3% → participation leaving
-            _oi_rising  = oi_chg >  0.03   # OI grew >3% → new money entering
+            _oi_falling = oi_chg < -0.03  # OI dropped >3% → participation leaving
+            _oi_rising = oi_chg > 0.03  # OI grew >3% → new money entering
             if _oi_price_up and _oi_falling:
                 # Rising price + falling OI = weak breakout; downgrade, don't hard reject
                 # so confluence scoring can still pass high-quality setups.
@@ -1514,7 +1515,14 @@ def _run_filter_pipeline(
 
     # Premium/Discount zone (SMC/ICT): shorts in discount = hard-block (answers50 Q32).
     # Longs in premium = soft penalty for trend/continuation families only.
-    _pd_families = {"trend_follow", "continuation", "breakout", "momentum", "orderbook", "orderflow"}
+    _pd_families = {
+        "trend_follow",
+        "continuation",
+        "breakout",
+        "momentum",
+        "orderbook",
+        "orderflow",
+    }
     if not prepared.work_1h.is_empty():
         _w1h = prepared.work_1h
         _lookback = min(50, _w1h.height)

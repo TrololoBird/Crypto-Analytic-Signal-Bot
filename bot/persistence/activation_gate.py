@@ -35,7 +35,7 @@ def _feature_float(features: dict[str, Any] | None, *keys: str) -> float | None:
             continue
         try:
             value = float(raw)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         if math.isfinite(value):
             return value
@@ -109,27 +109,21 @@ def evaluate_activation_confluence(
             trend_ok = True
 
     momentum_ok = False
-    if direction == "long" and 30.0 < rsi < 65.0:
-        momentum_ok = True
-    elif direction == "short" and 35.0 < rsi < 70.0:
+    if (direction == "long" and 30.0 < rsi < 65.0) or (direction == "short" and 35.0 < rsi < 70.0):
         momentum_ok = True
 
     htf_ok = False
-    if direction == "long" and bias_4h in {"uptrend", "neutral"}:
-        htf_ok = True
-    elif direction == "short" and bias_4h in {"downtrend", "neutral"}:
+    if (direction == "long" and bias_4h in {"uptrend", "neutral"}) or (
+        direction == "short" and bias_4h in {"downtrend", "neutral"}
+    ):
         htf_ok = True
 
     micro_ok = False
     if micro is not None:
-        if direction == "long" and micro >= 0.05:
-            micro_ok = True
-        elif direction == "short" and micro <= -0.05:
+        if (direction == "long" and micro >= 0.05) or (direction == "short" and micro <= -0.05):
             micro_ok = True
     if agg is not None:
-        if direction == "long" and agg >= 0.0:
-            micro_ok = True
-        elif direction == "short" and agg <= 0.0:
+        if (direction == "long" and agg >= 0.0) or (direction == "short" and agg <= 0.0):
             micro_ok = True
 
     legs = {
@@ -143,7 +137,10 @@ def evaluate_activation_confluence(
     if count >= min_confirmations:
         return True, f"activation_confluence_ok count={count}"
     failed = [name for name, ok in legs.items() if not ok]
-    return False, f"activation_confluence_failed count={count}<{min_confirmations} missing={','.join(failed)}"
+    return (
+        False,
+        f"activation_confluence_failed count={count}<{min_confirmations} missing={','.join(failed)}",
+    )
 
 
 def evaluate_pre_activation(
@@ -188,7 +185,9 @@ def evaluate_pre_activation(
 
     publish_score = float(tracked.score or 0.0)
     if publish_score > 0.0 and created is not None and score_decay_per_15m_bar > 0.0:
-        age_bars = max(0, int((now.astimezone(UTC) - created.astimezone(UTC)).total_seconds() / 900.0))
+        age_bars = max(
+            0, int((now.astimezone(UTC) - created.astimezone(UTC)).total_seconds() / 900.0)
+        )
         effective_score = publish_score * (1.0 - float(score_decay_per_15m_bar) * age_bars)
         if effective_score < float(min_score_at_activation):
             return False, (
@@ -235,9 +234,7 @@ def evaluate_pre_activation(
         if not ok:
             return False, note
         if reversal_activation_pin_required:
-            pin_ok = pin_bar_confirm(
-                tracked.direction, bar_open, bar_high, bar_low, bar_close
-            )
+            pin_ok = pin_bar_confirm(tracked.direction, bar_open, bar_high, bar_low, bar_close)
             engulf_ok = engulfing_confirm(
                 tracked.direction,
                 bar_open,

@@ -154,9 +154,7 @@ class TPSLReviewMixin:
             bar_close=bar_close,
             bar_high=bar_high,
             bar_low=bar_low,
-            staleness_atr_mult=float(
-                getattr(tracking_cfg, "activation_staleness_atr_mult", 1.2)
-            ),
+            staleness_atr_mult=float(getattr(tracking_cfg, "activation_staleness_atr_mult", 1.2)),
             max_pending_minutes=pending_minutes,
             min_score_at_activation=float(getattr(tracking_cfg, "activation_min_score", 0.65)),
             score_decay_per_15m_bar=float(
@@ -521,12 +519,12 @@ class TPSLReviewMixin:
                     profile = normalize_confirmation_profile(tracked.confirmation_profile)
                     if profile in _REVERSAL_PROFILES:
                         if tracked.entry_zone_touched_at is None:
-                            tracked.entry_zone_touched_at = (
-                                trade.trade_time.astimezone(UTC).isoformat()
-                            )
-                            tracked.entry_confirm_pending_at = (
-                                trade.trade_time.astimezone(UTC).isoformat()
-                            )
+                            tracked.entry_zone_touched_at = trade.trade_time.astimezone(
+                                UTC
+                            ).isoformat()
+                            tracked.entry_confirm_pending_at = trade.trade_time.astimezone(
+                                UTC
+                            ).isoformat()
                         await self._mark_checked(
                             tracked,
                             checked_at=trade.trade_time,
@@ -553,9 +551,9 @@ class TPSLReviewMixin:
                             )
                             return events
                         if tracked.entry_zone_touched_at is None:
-                            tracked.entry_zone_touched_at = (
-                                trade.trade_time.astimezone(UTC).isoformat()
-                            )
+                            tracked.entry_zone_touched_at = trade.trade_time.astimezone(
+                                UTC
+                            ).isoformat()
                         await self._mark_checked(
                             tracked,
                             checked_at=trade.trade_time,
@@ -798,9 +796,9 @@ class TPSLReviewMixin:
                     )
                     if not gate_ok:
                         if gate_note == "await_bar_confirm":
-                            tracked.entry_confirm_pending_at = (
-                                bar_close_time.astimezone(UTC).isoformat()
-                            )
+                            tracked.entry_confirm_pending_at = bar_close_time.astimezone(
+                                UTC
+                            ).isoformat()
                             continue
                         if _gate_note_closes_pending(gate_note):
                             events.append(

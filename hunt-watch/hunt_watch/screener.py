@@ -34,7 +34,7 @@ class HuntCandidate:
 def _safe_float(value: Any, default: float | None = None) -> float | None:
     try:
         numeric = float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return default
     if not math.isfinite(numeric):
         return default
@@ -78,7 +78,9 @@ def score_hunt_row(row: dict[str, Any]) -> HuntCandidate | None:
     symbol = str(row.get("symbol") or "").strip().upper()
     last_price = _safe_float(row.get("last_price"))
     quote_volume = _safe_float(row.get("quote_volume"), 0.0) or 0.0
-    change_24h = _safe_float(row.get("price_change_percent") or row.get("price_change_pct"), 0.0) or 0.0
+    change_24h = (
+        _safe_float(row.get("price_change_percent") or row.get("price_change_pct"), 0.0) or 0.0
+    )
     if not symbol or last_price is None or last_price <= 0.0:
         return None
     if quote_volume < HUNT_MIN_QUOTE_VOLUME_USD:

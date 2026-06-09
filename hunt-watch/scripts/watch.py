@@ -14,7 +14,6 @@ import json
 import signal
 import time
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any, Literal
 
 from hunt_watch.bootstrap import bootstrap
@@ -25,23 +24,13 @@ from scripts.common import bootstrap_repo_path, configure_script_logging
 
 bootstrap_repo_path()
 
-from bot.delivery.confluence import ConfluenceEngine
-from bot.delivery.contract import validate_signal_contract
-from bot.delivery.telegram import TelegramBroadcaster
-from bot.runtime.delivery_orchestrator import DeliveryOrchestrator
-from bot.domain.config import load_settings
-from bot.domain.schemas import SymbolFrames, UniverseSymbol
-from bot.engine import SignalEngine, StrategyRegistry
-from bot.features.prepare import _prepare_frame, min_required_bars, prepare_symbol
-from bot.market._ws_parsers import depth_imbalance_from_book, microprice_bias_from_book
-from bot.market.data import BinanceFuturesMarketData
+from hunt_watch.levels import structural_long_levels, structural_short_levels
 from hunt_watch.lifecycle import (
     apply_short_invalidation,
     assess_hunt_lifecycle,
     blocks_premature_exhaustion_short,
     effective_support_break,
 )
-from hunt_watch.levels import structural_long_levels, structural_short_levels
 from hunt_watch.paths import TELEGRAM_COOLDOWN, TICK_JSONL
 from hunt_watch.signal_tracker import (
     evaluate_followups,
@@ -51,9 +40,20 @@ from hunt_watch.signal_tracker import (
     save_tracker_state,
 )
 from hunt_watch.targets import effective_watch_mode, resolve_watch_universe
+
+from bot.delivery.confluence import ConfluenceEngine
+from bot.delivery.contract import validate_signal_contract
+from bot.delivery.telegram import TelegramBroadcaster
+from bot.domain.config import load_settings
+from bot.domain.schemas import SymbolFrames, UniverseSymbol
+from bot.engine import SignalEngine, StrategyRegistry
+from bot.features.prepare import _prepare_frame, min_required_bars, prepare_symbol
+from bot.market._ws_parsers import depth_imbalance_from_book, microprice_bias_from_book
+from bot.market.data import BinanceFuturesMarketData
 from bot.market.rest_impl import BinanceClientImpl
 from bot.market.universe import strategy_fits_for_market_row
 from bot.runtime.data_readiness import kline_fetch_limit
+from bot.runtime.delivery_orchestrator import DeliveryOrchestrator
 from bot.runtime.errors import DEFENSIVE_EXC
 from bot.setups.base import SetupParams
 from bot.strategies import STRATEGY_CLASSES
@@ -150,6 +150,8 @@ def _session_stats(work_1m: Any, *, bars: int = 1440) -> dict[str, Any]:
         "pos_in_range": round((last - lo) / (hi - lo), 3) if hi > lo else 0.5,
         "bars_1m_used": n,
     }
+
+
 OUT_PATH = TICK_JSONL
 STATE_PATH = TELEGRAM_COOLDOWN
 SCAN_INTERVAL_S = 900
@@ -259,11 +261,13 @@ def _apply_rest_enrichments(
     prepared.oi_change_pct = pack.get("oi_chg_1h") or client.get_cached_oi_change(symbol, "1h")
     prepared.ls_ratio = pack.get("ls_1h") or client.get_cached_ls_ratio(symbol, "1h")
     prepared.top_account_ls_ratio = prepared.ls_ratio
-    prepared.top_position_ls_ratio = (
-        pack.get("top_ls_1h") or client.get_cached_top_position_ls_ratio(symbol, "1h")
-    )
+    prepared.top_position_ls_ratio = pack.get(
+        "top_ls_1h"
+    ) or client.get_cached_top_position_ls_ratio(symbol, "1h")
     prepared.top_trader_position_ratio = prepared.top_position_ls_ratio
-    prepared.global_ls_ratio = pack.get("global_ls_1h") or client.get_cached_global_ls_ratio(symbol, "1h")
+    prepared.global_ls_ratio = pack.get("global_ls_1h") or client.get_cached_global_ls_ratio(
+        symbol, "1h"
+    )
     prepared.global_account_ls_ratio = prepared.global_ls_ratio
     if prepared.ls_ratio is not None and prepared.global_ls_ratio is not None:
         prepared.top_vs_global_ls_gap = float(prepared.ls_ratio) - float(prepared.global_ls_ratio)
@@ -454,7 +458,9 @@ def _data_quality_report(
         "bars_4h": int(frames.df_4h.height if frames.df_4h is not None else 0),
         "prepare_ok": True,
         "book_ok": book.get("bid_price") is not None and book.get("ask_price") is not None,
-        "book_source": "depth" if pack.get("book_depth") and pack["book_depth"].get("bid_price") else "ticker",
+        "book_source": "depth"
+        if pack.get("book_depth") and pack["book_depth"].get("bid_price")
+        else "ticker",
         "closed_5m_ok": bool(tf.get("5m_closed", {}).get("closed_bar")),
         "closed_1m_ok": bool(tf.get("1m_closed", {}).get("closed_bar")),
         "fields_ok": {k: v is not None for k, v in fields.items()},
@@ -472,12 +478,17 @@ def _col(df: Any, name: str, default: float = 0.0, *, idx: int = -1) -> float:
         return default
     try:
         return float(df.item(idx, name))
-    except (TypeError, ValueError, IndexError):
+    except TypeError, ValueError, IndexError:
         return default
 
 
 def _candle_shape(df: Any, *, idx: int = -1) -> dict[str, Any]:
-    o, h, l, c = _col(df, "open", idx=idx), _col(df, "high", idx=idx), _col(df, "low", idx=idx), _col(df, "close", idx=idx)
+    o, h, l, c = (
+        _col(df, "open", idx=idx),
+        _col(df, "high", idx=idx),
+        _col(df, "low", idx=idx),
+        _col(df, "close", idx=idx),
+    )
     body = abs(c - o)
     full = max(h - l, 1e-12)
     upper_wick = h - max(o, c)
@@ -706,7 +717,11 @@ def _confirm_dump(dump: dict[str, Any], tf: dict[str, Any]) -> tuple[bool, list[
 
     score = float(dump.get("dump_score") or 0)
     div = tf.get("1h", {}).get("bearish_rsi_div") or tf.get("4h", {}).get("bearish_rsi_div")
-    confirmed = bool(hard) and score >= 60 and (div or score >= 68 or "oi_flush" in dump.get("triggers", []))
+    confirmed = (
+        bool(hard)
+        and score >= 60
+        and (div or score >= 68 or "oi_flush" in dump.get("triggers", []))
+    )
     return confirmed, hard
 
 
@@ -856,7 +871,11 @@ def _confirm_long(long_setup: dict[str, Any], tf: dict[str, Any]) -> tuple[bool,
 
     score = float(long_setup.get("long_score") or 0)
     div = tf.get("1h", {}).get("bullish_rsi_div") or tf.get("4h", {}).get("bullish_rsi_div")
-    confirmed = bool(hard) and score >= 60 and (div or score >= 68 or "oi_build" in long_setup.get("triggers", []))
+    confirmed = (
+        bool(hard)
+        and score >= 60
+        and (div or score >= 68 or "oi_build" in long_setup.get("triggers", []))
+    )
     return confirmed, hard
 
 
@@ -966,7 +985,9 @@ def _attach_delivery_meta(
     }
 
 
-def _delivery_audit(short_hits: list[dict[str, Any]], long_hits: list[dict[str, Any]]) -> dict[str, Any]:
+def _delivery_audit(
+    short_hits: list[dict[str, Any]], long_hits: list[dict[str, Any]]
+) -> dict[str, Any]:
     def _summary(hits: list[dict[str, Any]]) -> dict[str, Any]:
         deliverable = [h for h in hits if h.get("deliverable")]
         blocked = [h for h in hits if not h.get("deliverable")]
@@ -1118,7 +1139,9 @@ def _format_setup_lines(
             f"<code>{_fmt_price(setup.get('resistance_liq'))}</code> · impulse H "
             f"<code>{_fmt_price(row.get('impulse_high'))}</code>"
         )
-        bot_line = f"Shorts bot: <code>{hit_n}</code> · top <code>{html.escape(str(top_hit))}</code>"
+        bot_line = (
+            f"Shorts bot: <code>{hit_n}</code> · top <code>{html.escape(str(top_hit))}</code>"
+        )
     else:
         level_line = (
             f"Resistance <code>{_fmt_price(setup.get('resistance_break_level'))}</code> · support "
@@ -1135,7 +1158,11 @@ def _format_setup_lines(
             f"SL <code>{_fmt_price(setup.get('stop_loss'))}</code> · "
             f"TP1 <code>{_fmt_price(setup.get('tp1'))}</code> · "
             f"TP2 <code>{_fmt_price(setup.get('tp2'))}</code>"
-            + (f" · R:R <code>{setup.get('risk_reward')}</code>" if setup.get("risk_reward") else "")
+            + (
+                f" · R:R <code>{setup.get('risk_reward')}</code>"
+                if setup.get("risk_reward")
+                else ""
+            )
         ),
         (
             f"RSI 1m/5m/15m/1h/4h: "
@@ -1450,7 +1477,9 @@ async def _snapshot_symbol(
         "1m": _tf_snapshot(work_1m),
         "1m_closed": _tf_snapshot(work_1m, closed=True),
         "3m": _tf_snapshot(work_3m) if work_3m is not None else {"status": "empty"},
-        "3m_closed": _tf_snapshot(work_3m, closed=True) if work_3m is not None else {"status": "empty"},
+        "3m_closed": _tf_snapshot(work_3m, closed=True)
+        if work_3m is not None
+        else {"status": "empty"},
         "5m": _tf_snapshot(prepared.work_5m),
         "5m_closed": _tf_snapshot(prepared.work_5m, closed=True),
         "15m": _tf_snapshot(prepared.work_15m),
@@ -1460,7 +1489,9 @@ async def _snapshot_symbol(
         "4h": _tf_snapshot(prepared.work_4h),
         "1d": tf_1d,
     }
-    market = _market_snapshot(prepared, pack=pack, book=book, premium_row=premium_row, ticker=ticker)
+    market = _market_snapshot(
+        prepared, pack=pack, book=book, premium_row=premium_row, ticker=ticker
+    )
     regime = _regime_snapshot(prepared)
     short_hits: list[dict[str, Any]] = []
     long_hits: list[dict[str, Any]] = []
@@ -1503,7 +1534,12 @@ async def _snapshot_symbol(
         "bot_long_hits": long_hits,
         "delivery_audit": delivery_audit,
         "data_quality": _data_quality_report(
-            prepared, frames=frames, df_1m=df_1m, pack=pack, book=book, tf=tf,
+            prepared,
+            frames=frames,
+            df_1m=df_1m,
+            pack=pack,
+            book=book,
+            tf=tf,
         ),
     }
 
@@ -1547,7 +1583,10 @@ async def _snapshot_symbol(
         )
         confirmed, confirm_hard = _confirm_dump(dump, tf)
         confirmed, confirm_hard, lifecycle_note = apply_short_invalidation(
-            confirmed, confirm_hard, lifecycle, dump=dump,
+            confirmed,
+            confirm_hard,
+            lifecycle,
+            dump=dump,
         )
         dump["phase"] = _phase(dump, confirmed, lifecycle_note=lifecycle_note)
         dump["confirmed"] = confirmed
@@ -1608,7 +1647,7 @@ async def _run_tick(
             trust_env=settings.network.trust_env,
         ),
     )
-    prev_oi: dict[str, float | None] = {s: None for s in symbols}
+    prev_oi: dict[str, float | None] = dict.fromkeys(symbols)
     state = _load_state()
     tracker_state = load_tracker_state()
     now = datetime.now(UTC)
@@ -1619,9 +1658,7 @@ async def _run_tick(
         exchange_list = await _safe_fetch(client.fetch_exchange_symbols()) or []
         exchange_by_sym = {r.symbol: r for r in exchange_list}
         ticker_raw = await _safe_fetch(client.fetch_ticker_24h()) or []
-        ticker_by_sym = {
-            str(t.get("symbol")): t for t in ticker_raw if t.get("symbol")
-        }
+        ticker_by_sym = {str(t.get("symbol")): t for t in ticker_raw if t.get("symbol")}
         btc_work_1h: Any | None = None
         if any(s != "BTCUSDT" for s in symbols):
             btc_df = await _safe_fetch(client.fetch_klines_cached("BTCUSDT", "1h", limit=500))
@@ -1637,7 +1674,10 @@ async def _run_tick(
                 )
                 row = await asyncio.wait_for(
                     _snapshot_symbol(
-                        client, settings, minimums, symbol,
+                        client,
+                        settings,
+                        minimums,
+                        symbol,
                         watch_mode=mode,
                         prev_oi=prev_oi.get(symbol),
                         engine=engine,
@@ -1737,7 +1777,9 @@ async def _run_tick(
                                 direction=direction,
                                 price=float(row.get("price") or 0),
                                 setup=setup_latch,
-                                lifecycle=lifecycle_raw if isinstance(lifecycle_raw, dict) else None,
+                                lifecycle=lifecycle_raw
+                                if isinstance(lifecycle_raw, dict)
+                                else None,
                                 now=now,
                             )
                             LOG.info(
@@ -1756,7 +1798,9 @@ async def _run_tick(
                             )
             except TimeoutError:
                 LOG.warning("watch_symbol_timeout", symbol=symbol, timeout_s=SYMBOL_TICK_TIMEOUT_S)
-                rows.append({"ts": now.isoformat(), "symbol": symbol, "error": "symbol_tick_timeout"})
+                rows.append(
+                    {"ts": now.isoformat(), "symbol": symbol, "error": "symbol_tick_timeout"}
+                )
             except DEFENSIVE_EXC as exc:
                 LOG.warning("dump_symbol_failed", symbol=symbol, error=repr(exc))
                 rows.append({"ts": now.isoformat(), "symbol": symbol, "error": repr(exc)})

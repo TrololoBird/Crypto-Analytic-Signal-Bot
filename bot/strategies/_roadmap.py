@@ -10,7 +10,6 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from ..delivery.contract import SIGNAL_ENTRY_PAD_ATR
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ._common import (
     as_float as _as_float,
@@ -189,7 +188,7 @@ def _build_atr_signal(
         return None
 
     sl_buffer = float(params.get("sl_buffer_atr", 0.65))
-    min_rr = float(params.get("min_rr", 1.9))   # align with filter min_risk_reward
+    min_rr = float(params.get("min_rr", 1.9))  # align with filter min_risk_reward
     if entry_anchor is None or entry_anchor <= 0.0:
         # Reject: limit order requires a structural anchor (prev_bar low/high, EMA, OB level).
         # candle_mid fallback was removed — it produces market-order-equivalent entries.

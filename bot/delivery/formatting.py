@@ -383,7 +383,7 @@ def parse_datetime(value: object) -> datetime | None:
     else:
         try:
             parsed = datetime.fromisoformat(str(value))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=UTC)
@@ -565,7 +565,9 @@ def extract_signal_facts(
         premium_zscore_5m=_optional_float(getattr(signal, "premium_zscore_5m", None)),
         premium_slope_5m=_optional_float(getattr(signal, "premium_slope_5m", None)),
         ls_ratio=_optional_float(getattr(signal, "ls_ratio", None)),
-        entry_order_type=str(getattr(signal, "entry_order_type", "limit") or "limit").strip().lower(),
+        entry_order_type=str(getattr(signal, "entry_order_type", "limit") or "limit")
+        .strip()
+        .lower(),
         bias_4h=str(getattr(signal, "bias_4h", None) or "") or None,
         bias_1h=str(getattr(signal, "bias_1h", None) or "") or None,
         market_regime=str(getattr(signal, "market_regime", None) or "") or None,
@@ -705,9 +707,11 @@ def _tp_equality_tolerance(price: float) -> float:
 
 def _channel_legs_line(facts: SignalMessageFacts) -> str:
     if str(getattr(facts, "entry_order_type", "limit") or "limit").strip().lower() == "market":
-        ref = facts.mark_price if facts.mark_price and facts.mark_price > 0.0 else (
-            facts.entry_low + facts.entry_high
-        ) / 2.0
+        ref = (
+            facts.mark_price
+            if facts.mark_price and facts.mark_price > 0.0
+            else (facts.entry_low + facts.entry_high) / 2.0
+        )
         entry = f"ref @ {format_price(ref)}"
     else:
         entry = f"{format_price(facts.entry_low)}-{format_price(facts.entry_high)}"
@@ -782,7 +786,9 @@ def format_channel_trade_card(
 
     lines.append(f"inv {code(invalidation_text(facts))}")
     lines.append(escape_text(status_line or status_line_for_signal(facts)))
-    lines.append(f"<i>{escape_text(manual_entry_skip_hint(facts.symbol, chase_pct=chase_pct or 0.002))}</i>")
+    lines.append(
+        f"<i>{escape_text(manual_entry_skip_hint(facts.symbol, chase_pct=chase_pct or 0.002))}</i>"
+    )
     if include_chart:
         chart = html.escape(tradingview_chart_url(facts.symbol, facts.timeframe), quote=True)
         lines.append(f'<a href="{chart}">TradingView</a>')
@@ -942,7 +948,7 @@ def format_signal_message(
         try:
             pct = _recommend_position_pct(signal, None)
             position_size_pct = pct if pct > 0.0 else None
-        except (TypeError, ValueError, AttributeError):
+        except TypeError, ValueError, AttributeError:
             pass
 
     rendered = format_channel_trade_card(

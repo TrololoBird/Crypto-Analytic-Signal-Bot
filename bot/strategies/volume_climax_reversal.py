@@ -327,10 +327,14 @@ def _detect_volume_climax_reversal_extended(
     adx_15m = None
     if not work.is_empty() and "adx14" in work.columns:
         adx_15m = _as_float(work.item(-1, "adx14"), 0.0)
-    strong_trend_adx = float(effective_params.get("max_trend_adx", _defaults.get("max_trend_adx", 20.0)))
-    if (adx_1h is not None and adx_1h > strong_trend_adx) or (
-        adx_4h is not None and adx_4h > strong_trend_adx
-    ) or (adx_15m is not None and adx_15m > strong_trend_adx):
+    strong_trend_adx = float(
+        effective_params.get("max_trend_adx", _defaults.get("max_trend_adx", 20.0))
+    )
+    if (
+        (adx_1h is not None and adx_1h > strong_trend_adx)
+        or (adx_4h is not None and adx_4h > strong_trend_adx)
+        or (adx_15m is not None and adx_15m > strong_trend_adx)
+    ):
         _reject(
             prepared,
             setup_id,
@@ -391,9 +395,8 @@ def _detect_volume_climax_reversal_extended(
     # climax shorts against a rising trend have high fail rate (research Q187).
     bias_4h = getattr(prepared, "bias_4h", None)
     if direction == "short" and bias_1h == "uptrend":
-        htf_exhaustion = (
-            rsi >= float(effective_params.get("htf_exhaustion_rsi_min", 72.0))
-            or (bias_4h is not None and bias_4h != "uptrend")
+        htf_exhaustion = rsi >= float(effective_params.get("htf_exhaustion_rsi_min", 72.0)) or (
+            bias_4h is not None and bias_4h != "uptrend"
         )
         if not htf_exhaustion:
             _reject(

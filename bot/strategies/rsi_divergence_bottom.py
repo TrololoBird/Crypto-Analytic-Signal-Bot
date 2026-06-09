@@ -6,6 +6,7 @@ from ..domain.strategy_catalog import catalog_default_params
 from ._common import build_spec_signal
 from ._roadmap import _as_float, _build_atr_signal, _missing_columns, _reject
 from .indicator_divergence import detect_regular_divergence
+
 if TYPE_CHECKING:
     from ..domain.config import BotSettings
     from ..domain.schemas import PreparedSymbol, Signal
@@ -120,5 +121,3 @@ def detect_rsi_divergence_bottom(
         family=family,
         entry_anchor=recent_low if direction == "long" else recent_high,
     )
-
-

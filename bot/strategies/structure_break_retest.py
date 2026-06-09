@@ -288,8 +288,7 @@ def _detect_structure_break_retest_extended(
     max_retest_age_1h_bars = max(1, int(max_retest_age_hours))
     max_retest_age_15m_bars = max(1, int(max_retest_age_hours * 4.0))
     if not used_15m_fallback and (
-        breakout_bar_idx is None
-        or breakout_bar_idx < work_1h.height - max_retest_age_1h_bars
+        breakout_bar_idx is None or breakout_bar_idx < work_1h.height - max_retest_age_1h_bars
     ):
         _reject(
             prepared,

@@ -218,7 +218,7 @@ class MessageBuffer:
             if open_time is None:
                 return None
             return float(open_time)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
 
     def _drop_oldest_batch(self) -> int:
@@ -654,7 +654,7 @@ def get_funding_sentiment(manager: Any) -> float | None:
             continue
         try:
             rates.append(float(raw_rate))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
     if not rates:
         return None
@@ -691,7 +691,7 @@ def get_liquidation_rollups(
         try:
             qty_val = float(qty)
             price_val = float(price)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         if qty_val <= 0.0:
             continue
@@ -1404,7 +1404,7 @@ class FuturesWSManager:
             else:
                 close_ts = close_time
             return max(0.0, (datetime.now(UTC) - close_ts).total_seconds())
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             return None
 
     def _stale_kline_streams(self) -> list[str]:
@@ -1995,7 +1995,7 @@ class FuturesWSManager:
                             symbol,
                             event_type,
                         )
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 pass
         if event_type == "kline":
             if symbol:
@@ -2031,7 +2031,9 @@ class FuturesWSManager:
             return ""
         return stream_symbol
 
-    async def _handle_high_volume_market_event(self, event_type: str, data: JsonDict, stream: str) -> None:
+    async def _handle_high_volume_market_event(
+        self, event_type: str, data: JsonDict, stream: str
+    ) -> None:
         """Process bookTicker/depthUpdate/aggTrade inline — skip buffer to avoid compaction drops."""
         symbol = self._event_symbol_from_message(stream, data)
         if self._symbols and symbol and symbol not in self._symbols:
@@ -2162,7 +2164,7 @@ class FuturesWSManager:
             return False
         try:
             event_ms = float(event_time_ms)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return False
         if event_ms <= 0:
             return False

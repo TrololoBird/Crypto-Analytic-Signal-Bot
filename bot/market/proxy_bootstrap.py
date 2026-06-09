@@ -126,7 +126,7 @@ async def probe_ws_handshake(
                 **connect_kwargs,
             ):
                 return True
-    except (KeyboardInterrupt, SystemExit):
+    except KeyboardInterrupt, SystemExit:
         raise
     except (
         OSError,
@@ -191,15 +191,9 @@ async def _probe_configured(urls: list[str]) -> NetworkProbeResult:
         )
         return await probe_network(net)
 
-    results = await asyncio.gather(
-        *[_probe_one(u) for u in urls], return_exceptions=True
-    )
-    rest_ok = any(
-        isinstance(r, NetworkProbeResult) and r.rest_ok for r in results
-    )
-    ws_ok = any(
-        isinstance(r, NetworkProbeResult) and r.ws_ok for r in results
-    )
+    results = await asyncio.gather(*[_probe_one(u) for u in urls], return_exceptions=True)
+    rest_ok = any(isinstance(r, NetworkProbeResult) and r.rest_ok for r in results)
+    ws_ok = any(isinstance(r, NetworkProbeResult) and r.ws_ok for r in results)
     return NetworkProbeResult(rest_ok=rest_ok, ws_ok=ws_ok)
 
 
@@ -226,7 +220,7 @@ async def _detect_local_tor() -> str | None:
             writer.close()
             with contextlib.suppress(OSError):
                 await writer.wait_closed()
-    except (OSError, ConnectionRefusedError, TimeoutError):
+    except OSError, ConnectionRefusedError, TimeoutError:
         return None
     else:
         LOG.info("local Tor daemon detected on 127.0.0.1:9050 — adding to pool")
@@ -570,8 +564,8 @@ async def run_proxy_refresh_loop(
       ``ws_manager``             — live FuturesWSManager
       ``_shutdown``              — asyncio.Event (fallback)
     """
-    shutdown: asyncio.Event = shutdown_event if shutdown_event is not None else getattr(
-        bot, "_shutdown", asyncio.Event()
+    shutdown: asyncio.Event = (
+        shutdown_event if shutdown_event is not None else getattr(bot, "_shutdown", asyncio.Event())
     )
     LOG.info("proxy refresh loop started | interval=%.0fs", interval_seconds)
 
@@ -595,9 +589,7 @@ async def run_proxy_refresh_loop(
             getattr(getattr(bot_settings, "network", None), "proxy_url", None) or ""
         ).strip()
         if direct_probe.rest_ok and not explicit_proxy:
-            LOG.info(
-                "proxy refresh: direct Binance ok, no explicit proxy_url — skipping"
-            )
+            LOG.info("proxy refresh: direct Binance ok, no explicit proxy_url — skipping")
             continue
 
         if shutdown.is_set():

@@ -8,12 +8,12 @@ from typing import TYPE_CHECKING, ClassVar
 
 import polars as pl
 
+from ..domain.strategy_catalog import catalog_default_params
 from ..features.prepare import _swing_points
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.smc import latest_liquidity_sweep, sweep_tolerance, swing_series
 from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
 from ..setups.utils import build_smc_trade_plan
-from ..domain.strategy_catalog import catalog_default_params
 from ._common import (
     SpecHit,
     _latest_values,
@@ -22,7 +22,7 @@ from ._common import (
     orderflow_supports_reversal,
     with_spec_columns,
 )
-from ._roadmap import _as_float, _build_atr_signal, _last, _missing_columns, _prev, _reject
+from ._roadmap import _build_atr_signal, _last, _missing_columns, _prev
 
 if TYPE_CHECKING:
     from ..domain.config import BotSettings
