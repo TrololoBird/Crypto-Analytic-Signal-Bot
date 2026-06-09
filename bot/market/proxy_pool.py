@@ -24,6 +24,7 @@ LOG = logging.getLogger("bot.market.proxy_pool")
 
 _CIRCUIT_BREAKER_MAX_FAILURES = 5  # consecutive failures → permanent removal
 _MAX_BACKOFF_SECONDS = 3600.0  # 1h cap on per-proxy exponential backoff
+_MIN_POOL_SIZE = 2  # below this, pool is critically low
 
 
 @dataclass
@@ -140,7 +141,10 @@ class ProxyPool:
         start = (self.urls.index(url) + 1) if url in self.urls else self._index + 1
         nxt = self._next_available_index(start)
         if nxt is None:
-            LOG.error("proxy pool exhausted | all endpoints in cooldown")
+            LOG.error(
+                "proxy pool exhausted | all endpoints in cooldown pool_size=%d",
+                len(self.urls),
+            )
             return None
         self._index = nxt
         active = self.current()
@@ -148,11 +152,12 @@ class ProxyPool:
         return active
 
     def _remove_url(self, url: str, reason: str) -> None:
+        new_size = len(self.urls) - 1
         LOG.warning(
             "proxy removed | url=%s reason=%s pool_size=%d",
             mask_proxy_url(url),
             reason,
-            len(self.urls) - 1,
+            new_size,
         )
         if url in self.urls:
             self.urls = [u for u in self.urls if u != url]
@@ -163,6 +168,13 @@ class ProxyPool:
         self._last_latencies.pop(url, None)
         if self._index >= len(self.urls) and self.urls:
             self._index = self._index % len(self.urls)
+        if new_size <= _MIN_POOL_SIZE:
+            LOG.error(
+                "proxy pool critically low | size=%d min=%d threshold=%d",
+                new_size,
+                _MIN_POOL_SIZE,
+                _CIRCUIT_BREAKER_MAX_FAILURES,
+            )
 
     def mark_success(self, url: str, latency_ms: float | None = None) -> None:
         """Record a successful request; resets failure count for circuit breaker.

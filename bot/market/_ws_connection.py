@@ -298,6 +298,13 @@ async def run_stream_session(
     """
     proxy_url = getattr(manager, "_proxy_url", None)
     trust_env = bool(getattr(manager, "_trust_env", True))
+    # After repeated failures through proxy, fall back to direct connection
+    short_lived = getattr(manager, "_short_lived_streak", 0)
+    if proxy_url and short_lived >= 3:
+        LOG.warning(
+            "ws proxy fallback to direct | endpoint=%s streak=%d", endpoint, short_lived
+        )
+        proxy_url = None
     connect_kwargs: dict[str, Any] = websockets_connect_kwargs(
         proxy_url=proxy_url, trust_env=trust_env
     )

@@ -453,6 +453,7 @@ class RestHttpMixin(RestCircuitMixin):
     ) -> Any:
         pool = getattr(self, "_proxy_pool", None)
         failover = bool(getattr(self, "_proxy_failover_enabled", False))
+        tried_direct = False
         # Proxy rotation is handled per-error-type below, not via a retry loop.
         # A loop rotated the pool on ANY MarketDataUnavailable (including API errors
         # like "Invalid contract type"), exhausting all proxies unnecessarily.
@@ -492,12 +493,49 @@ class RestHttpMixin(RestCircuitMixin):
                     name="auto_proxy_discovery",
                 )
                 _disc_task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
+            # Proxy exhausted — try direct as last resort before failing.
+            if not tried_direct and getattr(self, "_proxy_url", None) is not None:
+                tried_direct = True
+                LOG.warning(
+                    "proxy exhausted — retrying direct | operation=%s", operation
+                )
+                old_proxy = self._proxy_url
+                await self._apply_active_proxy(None)
+                try:
+                    return await self._call_public_http_json_attempt(
+                        operation, params=params, symbol=symbol
+                    )
+                except (MarketDataUnavailable, *_SOCKS_PROXY_ERRORS, aiohttp.ClientError):
+                    LOG.warning("direct fallback also failed | operation=%s", operation)
+                    await self._apply_active_proxy(old_proxy)
             raise
         except (*_SOCKS_PROXY_ERRORS, aiohttp.ClientError) as exc:
             # When routed through a proxy, any connection error is proxy-related.
             # Also check is_proxy_transport_error for direct-connection proxy errors.
             if getattr(self, "_proxy_url", None) or is_proxy_transport_error(exc):
                 await self._try_failover_proxy(str(exc))
+            # Proxy transport error — try direct before giving up.
+            if (
+                not tried_direct
+                and getattr(self, "_proxy_url", None) is not None
+            ):
+                tried_direct = True
+                LOG.warning(
+                    "proxy connection failed — retrying direct | operation=%s error=%s",
+                    operation, exc,
+                )
+                old_proxy = self._proxy_url
+                await self._apply_active_proxy(None)
+                try:
+                    return await self._call_public_http_json_attempt(
+                        operation, params=params, symbol=symbol
+                    )
+                except (MarketDataUnavailable, *_SOCKS_PROXY_ERRORS, aiohttp.ClientError):
+                    LOG.warning(
+                        "direct fallback after proxy error also failed | operation=%s",
+                        operation,
+                    )
+                    await self._apply_active_proxy(old_proxy)
             self._record_circuit_failure(operation)
             raise MarketDataUnavailable(
                 operation=operation,
@@ -1109,6 +1147,18 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
                 return False
             nxt = pool.rotate_after_failure(current, reason)
             if not nxt:
+                # Pool exhausted — fire emergency background discovery.
+                LOG.warning("proxy pool exhausted — starting emergency discovery")
+                if hasattr(self, "_auto_discover_and_apply_proxy") and not getattr(
+                    self, "_proxy_discovery_in_progress", False
+                ):
+                    _emergency = asyncio.create_task(
+                        self._auto_discover_and_apply_proxy(),
+                        name="emergency_proxy_discovery",
+                    )
+                    _emergency.add_done_callback(
+                        lambda t: t.exception() if not t.cancelled() else None
+                    )
                 return False
             self._last_failover_mono = now
             await self._apply_active_proxy(nxt)
