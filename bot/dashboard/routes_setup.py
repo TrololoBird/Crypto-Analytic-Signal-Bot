@@ -150,7 +150,7 @@ def register_routes(dashboard: BotDashboard) -> None:
     @self.app.get("/api/live/overview")
     async def live_overview() -> dict[str, Any]:
         try:
-            return await asyncio.to_thread(self._live_data.overview)
+            return await self._live_data.overview()
         except RuntimeError as exc:
             if "shutdown" in str(exc).lower():
                 LOG.debug("Dashboard endpoint called during shutdown: %s", exc)

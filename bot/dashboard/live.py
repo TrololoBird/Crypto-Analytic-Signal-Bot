@@ -7,6 +7,7 @@ telemetry JSONL files and returns bounded, JSON-serializable summaries.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import logging
@@ -115,87 +116,97 @@ class DashboardLiveData:
         self._cache_ttl = max(1.0, float(cache_ttl_seconds))
         self._cache: dict[tuple[str, tuple[Any, ...]], tuple[float, Any]] = {}
 
-    def overview(self) -> JsonDict:
+    async def overview(self) -> JsonDict:
         """Return a high-level live dashboard summary."""
-        return self._cached("overview", (), self._overview_uncached)
+        return await self._cached_async("overview", (), self._overview_uncached)
 
-    def funnel(self, *, max_rows: int = 100_000) -> JsonDict:
+    async def funnel(self, *, max_rows: int = 100_000) -> JsonDict:
         """Return cycle, rejection, decision, and delivery funnel summary."""
-        return self._cached("funnel", (max_rows,), lambda: self._funnel_uncached(max_rows=max_rows))
+        return await self._cached_async(
+            "funnel", (max_rows,), lambda: self._funnel_uncached(max_rows=max_rows)
+        )
 
-    def funnel_reconcile(self, *, max_rows: int = 100_000) -> JsonDict:
+    async def funnel_reconcile(self, *, max_rows: int = 100_000) -> JsonDict:
         """Compare cycle delivery_success totals vs delivery.jsonl success rows."""
-        return self._cached(
+        return await self._cached_async(
             "funnel_reconcile",
             (max_rows,),
             lambda: self._funnel_reconcile_uncached(max_rows=max_rows),
         )
 
-    def shortlist(self, *, limit: int = 80) -> JsonDict:
+    async def shortlist(self, *, limit: int = 80) -> JsonDict:
         """Return shortlist composition and last telemetry rows."""
-        return self._cached("shortlist", (limit,), lambda: self._shortlist_uncached(limit=limit))
+        return await self._cached_async(
+            "shortlist", (limit,), lambda: self._shortlist_uncached(limit=limit)
+        )
 
-    def radar_summary(self, *, hot_limit: int = 25) -> JsonDict:
+    async def radar_summary(self, *, hot_limit: int = 25) -> JsonDict:
         """Return live radar store health and top HOT/DEEP symbols."""
-        return self._cached(
+        return await self._cached_async(
             "radar_summary",
             (hot_limit,),
             lambda: self._radar_summary_uncached(hot_limit=hot_limit),
         )
 
-    def rejections(self, *, limit: int = 30, max_rows: int = 100_000) -> JsonDict:
+    async def rejections(self, *, limit: int = 30, max_rows: int = 100_000) -> JsonDict:
         """Return rejection reason and stage summaries."""
-        return self._cached(
+        return await self._cached_async(
             "rejections",
             (limit, max_rows),
             lambda: self._rejections_uncached(limit=limit, max_rows=max_rows),
         )
 
-    def confluence_legs(self, *, max_rows: int = 100_000) -> JsonDict:
+    async def confluence_legs(self, *, max_rows: int = 100_000) -> JsonDict:
         """Return hard confluence leg failure counts from rejected telemetry."""
-        return self._cached(
+        return await self._cached_async(
             "confluence_legs",
             (max_rows,),
             lambda: self._confluence_legs_uncached(max_rows=max_rows),
         )
 
-    def confluence_legs_by_profile(self, *, max_rows: int = 100_000) -> JsonDict:
+    async def confluence_legs_by_profile(self, *, max_rows: int = 100_000) -> JsonDict:
         """Return confluence leg failures grouped by confirmation_profile."""
-        return self._cached(
+        return await self._cached_async(
             "confluence_legs_by_profile",
             (max_rows,),
             lambda: self._confluence_legs_by_profile_uncached(max_rows=max_rows),
         )
 
-    def decisions(self, *, limit: int = 40, max_rows: int = 100_000) -> JsonDict:
+    async def decisions(self, *, limit: int = 40, max_rows: int = 100_000) -> JsonDict:
         """Return strategy-decision summaries."""
-        return self._cached(
+        return await self._cached_async(
             "decisions",
             (limit, max_rows),
             lambda: self._decisions_uncached(limit=limit, max_rows=max_rows),
         )
 
-    def runtime(self) -> JsonDict:
+    async def runtime(self) -> JsonDict:
         """Return runtime health, data-quality, and websocket summaries."""
-        return self._cached("runtime", (), self._runtime_uncached)
+        return await self._cached_async("runtime", (), self._runtime_uncached)
 
-    def delivery(self, *, limit: int = 25) -> JsonDict:
+    async def delivery(self, *, limit: int = 25) -> JsonDict:
         """Return delivery and selected-signal telemetry."""
-        return self._cached("delivery", (limit,), lambda: self._delivery_uncached(limit=limit))
+        return await self._cached_async(
+            "delivery", (limit,), lambda: self._delivery_uncached(limit=limit)
+        )
 
-    def telegram_preview(self) -> JsonDict:
+    async def telegram_preview(self) -> JsonDict:
         """Return a Telegram-format preview from the freshest signal-like row."""
-        return self._cached("telegram_preview", (), self._telegram_preview_uncached)
+        return await self._cached_async("telegram_preview", (), self._telegram_preview_uncached)
 
-    def _cached(self, name: str, args: tuple[Any, ...], factory: Callable[[], Any]) -> Any:
+    async def _cached_async(
+        self, name: str, args: tuple[Any, ...], factory: Callable[[], Any]
+    ) -> Any:
         key = (name, args)
         now = time.monotonic()
         cached = self._cache.get(key)
         if cached and now - cached[0] <= self._cache_ttl:
             return cached[1]
-        value = factory()
-        self._cache[key] = (now, value)
-        return value
+        result = factory()
+        if asyncio.iscoroutine(result):
+            result = await result
+        self._cache[key] = (now, result)
+        return result
 
     def _bot(self) -> Any:
         return self._bot_getter()
