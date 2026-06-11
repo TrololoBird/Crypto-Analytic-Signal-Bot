@@ -51,8 +51,8 @@ regime = ["hmmlearn>=0.3.3", "scikit-learn>=1.8.0", "statsmodels>=0.14.6"]
 include-package-data = true
 
 [tool.setuptools.packages.find]
-where = [".", "hunt-watch"]
-include = ["bot*", "hunt_watch*"]
+where = [".", "hunt"]
+include = ["bot*", "engine*", "hunt_watch*"]
 
 [tool.ruff]
 target-version = "py314"
@@ -122,26 +122,26 @@ allowed-confusables = [
 
 [tool.ruff.lint.per-file-ignores]
 "scripts/*.py" = ["E402", "EXE001", "PLC0415", "ASYNC230", "PLW0603", "FBT001", "G004", "E741", "BLE001", "DTZ005", "PERF401", "B007", "PLW2901", "PLW0127", "SIM105", "ARG001", "F841", "E501"]
-"hunt-watch/scripts/*.py" = ["E402", "EXE001", "PLC0415", "ASYNC230", "PLW0603", "FBT001", "G004", "E741", "ARG001", "F841", "E501"]
-"hunt-watch/hunt_watch/*.py" = ["FBT001", "ARG001", "F841", "TRY300", "E501", "E402", "TC003", "TC001"]
+"hunt/scripts/*.py" = ["E402", "EXE001", "PLC0415", "ASYNC230", "PLW0603", "FBT001", "G004", "E741", "ARG001", "F841", "E501"]
+"hunt/hunt_watch/*.py" = ["FBT001", "ARG001", "F841", "TRY300", "E501", "E402", "TC003", "TC001"]
 "scripts/dump_minute_watch.py" = ["E402", "EXE001"]
 "scripts/hunt_scanner.py" = ["E402", "EXE001"]
 "scripts/hunt_independent_batch.py" = ["E402", "EXE001"]
-"bot/domain/schemas.py" = ["E402"]
-"bot/runtime_policy.py" = ["PLC0415"]
+"engine/domain/schemas.py" = ["E402"]
+"engine/runtime_policy.py" = ["PLC0415"]
 "bot/delivery/filters.py" = ["PLC0415", "E501"]
 "bot/delivery/scoring.py" = ["PLC0415"]
-"bot/domain/limit_entry.py" = ["PLC0415", "SIM102"]
+"engine/domain/limit_entry.py" = ["PLC0415", "SIM102"]
 "bot/setups/base.py" = ["PLC0415", "RET504"]
 "bot/strategies/*.py" = ["PLC0415", "SIM102", "ARG005", "TC004", "RUF034", "E501"]
 "bot/persistence/activation_gate.py" = ["SIM102", "E501"]
-"bot/domain/config.py" = ["E501"]
-"bot/domain/regime_gates.py" = ["SIM102", "SIM103"]
-"bot/domain/sessions.py" = ["RUF002"]
-"bot/features/prepare.py" = ["E501"]
-"bot/market/ws.py" = ["E501"]
+"engine/domain/config.py" = ["E501"]
+"engine/domain/regime_gates.py" = ["SIM102", "SIM103"]
+"engine/domain/sessions.py" = ["RUF002"]
+"engine/features/prepare.py" = ["E501"]
+"engine/market/ws.py" = ["E501"]
 "bot/persistence/repository/memory.py" = ["E501"]
-"bot/runtime/data_readiness.py" = ["F841"]
+"engine/data_readiness.py" = ["F841"]
 "scripts/setup_correlation_report.py" = ["FURB162"]
 "scripts/shadow_tf_ab.py" = ["E501"]
 
@@ -166,19 +166,19 @@ disable_error_code = [
 ]
 
 [[tool.mypy.overrides]]
-module = "bot.market.data"
+module = "engine.market.data"
 disable_error_code = ["arg-type", "no-any-return", "var-annotated"]
 
 [[tool.mypy.overrides]]
-module = "bot.market.rest_frames"
+module = "engine.market.rest_frames"
 disable_error_code = ["arg-type"]
 
 [[tool.mypy.overrides]]
-module = "bot.market.rest_impl"
+module = "engine.market.rest_impl"
 disable_error_code = ["no-any-return", "return"]
 
 [[tool.mypy.overrides]]
-module = "bot.features.*"
+module = "engine.features.*"
 disable_error_code = ["arg-type", "call-overload"]
 
 [[tool.mypy.overrides]]

@@ -7,17 +7,22 @@ alwaysApply: false
 
 Import from v9 packages only. Root legacy shims and duplicate trees are removed.
 
+**Three top-level units** (phase-arch split): `engine/` = shared kernel, `bot/` = main bot, `hunt/` = hunter project. Dependency direction: `engine ← bot`, `engine ← hunt`; `engine` never imports `bot.*`/`hunt`; `bot` and `hunt` never import each other.
+
 | Package | Role | Import example |
 |---|---|---|
-| `bot/domain/` | Config, schemas, contracts | `from bot.domain import BotSettings` |
-| `bot/market/` | REST, WS, universe, enrichments | `from bot.market import BinanceFuturesMarketData, FuturesWSManager` |
-| `bot/features/` | Polars pipeline | `from bot.features.prepare import prepare_symbol` |
-| `bot/runtime/` | Bot loop, analyzers, handlers | `from bot.runtime.bot import SignalBot` |
+| `engine/domain/` | Config, schemas, contracts (shared) | `from engine.domain.config import load_settings` |
+| `engine/market/` | REST, WS, universe, enrichments (shared) | `from engine.market.data import BinanceFuturesMarketData` |
+| `engine/features/` | Polars pipeline + pivots (shared) | `from engine.features.prepare import prepare_symbol` |
+| `engine/` leaves | `errors`, `coercion`, `secrets`, `data_readiness`, `telegram`, `contract`, `telemetry` | `from engine.errors import DEFENSIVE_EXC` |
+| `bot/runtime/` | Bot loop, analyzers, handlers, scheduler | `from bot.runtime.bot import SignalBot` |
+| `bot/policy/` | Bot-side domain policies: `mtf`, `catalog_guards`, `labels`, `delivery_policy` | `from bot.policy.catalog_guards import ...` |
 | `bot/persistence/` | Tracking, outcomes, diary | `from bot.persistence import SignalTracker` |
 | `bot/engine/` | Strategy registry + executor | `from bot.engine import SignalEngine, StrategyRegistry` |
 | `bot/strategies/` | 38 setup detectors (single tree) | `from bot.strategies import ...` |
 | `bot/setups/` | Shared SMC, `spec_runtime`, utils — **not** duplicate detectors | `from bot.setups.spec_runtime import SpecDetectorSetup` |
-| `bot/delivery/` | Contract, confluence, orchestrator, telegram | `from bot.delivery import deliver` |
+| `bot/delivery/` | Contract pipeline, confluence, orchestrator | `from bot.delivery import deliver` |
+| `hunt/hunt_watch/` | Hunter package (lifecycle, levels, ignition, tracker) | `from hunt_watch.levels import ...` (sys.path via `hunt_watch.bootstrap`) |
 
 ## Phase order (complete for structure)
 

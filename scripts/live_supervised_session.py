@@ -29,7 +29,6 @@ from bot.diagnostics.facade import (
     parse_cycle_log_lines,
     read_jsonl,
 )
-from bot.domain.config import load_settings
 from bot.ops.pid_utils import (
     clear_stale_pid_file,
     find_bot_main_pids,
@@ -37,6 +36,7 @@ from bot.ops.pid_utils import (
     read_pid_file,
     stop_bot_processes,
 )
+from engine.domain.config import load_settings
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / "config.toml"

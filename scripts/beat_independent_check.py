@@ -18,10 +18,10 @@ bootstrap_repo_path()
 
 import polars as pl
 
-from bot.domain.config import load_settings
-from bot.features.prepare_frame import _prepare_frame
-from bot.market.data import BinanceFuturesMarketData
-from bot.market.rest_impl import BinanceClientImpl
+from engine.domain.config import load_settings
+from engine.features.prepare_frame import _prepare_frame
+from engine.market.data import BinanceFuturesMarketData
+from engine.market.rest_impl import BinanceClientImpl
 
 
 def _wilder_rsi(closes: list[float], period: int = 14) -> float | None:
@@ -114,7 +114,7 @@ async def analyze(symbol: str = "BEATUSDT") -> dict[str, Any]:
         # Key levels (independent)
         swing_high = h1["swing48h_high"]
         swing_low = h1["swing48h_low"]
-        bot_style_support = round(swing_high * 0.998, 4)  # mirrors hunt-watch bug/feature
+        bot_style_support = round(swing_high * 0.998, 4)  # mirrors hunt bug/feature
 
         # Bounce from session low
         m1 = tf_data["1m"]

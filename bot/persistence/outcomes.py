@@ -13,15 +13,16 @@ from dataclasses import dataclass, field, fields
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
 
-from ..domain.contracts import (
+from engine.domain.contracts import (
     build_public_feature_snapshot,
     validate_public_feature_payload,
 )
+
 from ..persistence.tracked import TrackedSignalState, parse_state_dt
 from .sl_diagnostics import classify_stop_loss_root_cause
 
 if TYPE_CHECKING:
-    from ..domain.schemas import Signal
+    from engine.domain.schemas import Signal
 
 LOG = logging.getLogger("bot.outcomes")
 

@@ -15,8 +15,8 @@ from ..setups.spec_runtime import run_setup_detection
 if TYPE_CHECKING:
     import polars as pl
 
-    from ..domain.config import BotSettings
-    from ..domain.schemas import PreparedSymbol, Signal
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import PreparedSymbol, Signal
 
 
 def detect_volume_anomaly(frame: pl.DataFrame, *, timeframe: str = "15m") -> SpecHit | None:

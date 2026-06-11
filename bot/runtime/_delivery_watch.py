@@ -6,8 +6,8 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from bot.domain.schemas import Signal
     from bot.runtime.bot import SignalBot
+    from engine.domain.schemas import Signal
 
 
 class DeliveryWatchMixin:

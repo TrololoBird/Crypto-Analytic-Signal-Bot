@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from bot.domain.schemas import Signal
+    from engine.domain.schemas import Signal
 
 LOG = logging.getLogger("bot.persistence.public_audit")
 

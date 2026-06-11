@@ -9,11 +9,11 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
-from ..features.prepare import _swing_points
+from engine.features.prepare import _swing_points
 
 if TYPE_CHECKING:
-    from ..domain.config import BotSettings
-    from ..domain.schemas import PreparedSymbol, Signal
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import PreparedSymbol, Signal
 
 LOG = logging.getLogger("bot.scoring")
 _FUNDING_DEFAULT_WARNING_STATE: dict[str, bool] = {"emitted": False}
@@ -891,7 +891,7 @@ def _depth_imbalance_leg(prepared: PreparedSymbol, signal: Signal) -> float:
 def _session_killzone_score(signal: Signal) -> float:
     # Single DST-aware source of truth (shared with the session_killzone strategy)
     # so scoring and the strategy can never disagree on what is an active killzone.
-    from bot.domain.sessions import active_killzone
+    from engine.domain.sessions import active_killzone
 
     name = active_killzone()
     if name is None:

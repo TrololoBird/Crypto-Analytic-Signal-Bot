@@ -11,16 +11,16 @@ import math
 from datetime import UTC, datetime
 from typing import Any
 
-from bot.domain.limit_entry import (
+from bot.persistence.tracked import TrackedSignalState, parse_state_dt
+from bot.setups.bar_patterns import engulfing_confirm, pin_bar_confirm
+from engine.domain.limit_entry import (
     confirm_strategy_activation,
     normalize_confirmation_profile,
 )
-from bot.domain.regime_gates import (
+from engine.domain.regime_gates import (
     activation_supertrend_blocked,
     trend_regime_blocks_reversal,
 )
-from bot.persistence.tracked import TrackedSignalState, parse_state_dt
-from bot.setups.bar_patterns import engulfing_confirm, pin_bar_confirm
 
 _REVERSAL_PROFILES = frozenset({"countertrend_exhaustion", "divergence_reversal"})
 _MAX_CONTEXT_AGE_SECONDS = 120.0

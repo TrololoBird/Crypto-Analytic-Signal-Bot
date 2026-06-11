@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from bot.domain.limit_entry import limit_delivery_ready
-
-from .contract import (
+from engine.contract import (
     DEFAULT_SCALE_WEIGHTS,
     DEFAULT_TARGET_RR,
     TradePlan,
@@ -16,6 +14,7 @@ from .contract import (
     resolve_target_rr,
     valid_until_from,
 )
+from engine.domain.limit_entry import limit_delivery_ready
 
 if TYPE_CHECKING:
     from datetime import datetime

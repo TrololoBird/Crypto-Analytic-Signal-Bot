@@ -10,14 +10,14 @@ from typing import TYPE_CHECKING, Any
 
 from bot.delivery.ops_webhook import send_ops_webhook_alert
 from bot.delivery.telegram_routing import operator_dm_enabled, send_operator_html
-from bot.domain.delivery_policy import effective_action_min_score
-from bot.domain.limit_entry import limit_delivery_ready, resolve_late_entry_chase_pct
-from bot.market.radar_state import SymbolTier
-from bot.runtime.errors import DEFENSIVE_EXC
+from bot.policy.delivery_policy import effective_action_min_score
+from engine.domain.limit_entry import limit_delivery_ready, resolve_late_entry_chase_pct
+from engine.errors import DEFENSIVE_EXC
+from engine.market.radar_state import SymbolTier
 
 if TYPE_CHECKING:
-    from bot.domain.schemas import PreparedSymbol, Signal
     from bot.runtime.bot import SignalBot
+    from engine.domain.schemas import PreparedSymbol, Signal
 
 LOG = logging.getLogger("bot.runtime.watch_escalation")
 

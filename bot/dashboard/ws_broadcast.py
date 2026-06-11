@@ -12,14 +12,13 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from bot.runtime.errors import DEFENSIVE_EXC
-
-from ..domain.events import KlineCloseEvent, ReconnectEvent, ShortlistUpdatedEvent
+from engine.domain.events import KlineCloseEvent, ReconnectEvent, ShortlistUpdatedEvent
+from engine.errors import DEFENSIVE_EXC
 
 if TYPE_CHECKING:
     from fastapi import WebSocket
 
-    from ..core.event_bus import EventBus
+    from engine.core.event_bus import EventBus
 
 from .live import funnel_stage_counts_from_cycle
 

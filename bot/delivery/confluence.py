@@ -8,9 +8,9 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from bot.runtime.errors import DEFENSIVE_EXC
+from engine.errors import DEFENSIVE_EXC
+from engine.features.microstructure import build_microstructure_context
 
-from ..features.microstructure import build_microstructure_context
 from .scoring import (
     ScoringResult,
     _adx_strength,
@@ -37,8 +37,8 @@ from .scoring import (
 )
 
 if TYPE_CHECKING:
-    from ..domain.config import BotSettings
-    from ..domain.schemas import PreparedSymbol, Signal
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import PreparedSymbol, Signal
 
 LOG = logging.getLogger("bot.confluence")
 MIN_HISTORY_SAMPLES = 10

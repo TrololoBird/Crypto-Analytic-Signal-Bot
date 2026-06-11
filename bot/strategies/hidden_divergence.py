@@ -6,7 +6,8 @@ import logging
 import math
 from typing import TYPE_CHECKING
 
-from ..features.prepare import _swing_points
+from engine.features.prepare import _swing_points
+
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.spec_runtime import run_setup_detection
 from ._common import (
@@ -21,8 +22,8 @@ from ._common import (
 if TYPE_CHECKING:
     import polars as pl
 
-    from ..domain.config import BotSettings
-    from ..domain.schemas import PreparedSymbol, Signal
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import PreparedSymbol, Signal
 
 LOG = logging.getLogger("bot.strategies.hidden_divergence")
 

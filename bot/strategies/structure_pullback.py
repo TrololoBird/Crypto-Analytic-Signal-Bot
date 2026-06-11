@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, ClassVar
 
-from ..features.prepare import _swing_points as _sp
+from engine.features.prepare import _swing_points as _sp
+
 from ..setups import _build_signal, _compute_dynamic_score, _pullback_levels, _reject
 from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
 from ..setups.utils import select_structural_target
@@ -20,8 +21,8 @@ from ._common import (
 if TYPE_CHECKING:
     import polars as pl
 
-    from ..domain.config import BotSettings
-    from ..domain.schemas import PreparedSymbol, Signal
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import PreparedSymbol, Signal
 
 __all__ = ["detect_structure_pullback"]
 

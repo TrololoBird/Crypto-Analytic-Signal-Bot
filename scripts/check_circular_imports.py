@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Detect static import cycles within the bot/ package.
+"""Detect static import cycles within the bot/ and engine/ packages.
 
 Known mitigated cycles (lazy imports / TYPE_CHECKING) are whitelisted in
 KNOWN_MITIGATED_CYCLES. New cycles fail the check.
@@ -13,14 +13,15 @@ from collections import defaultdict
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-BOT_ROOT = REPO_ROOT / "bot"
+SCAN_ROOTS = (REPO_ROOT / "bot", REPO_ROOT / "engine")
+_PREFIXES = ("bot", "engine")
 
 # Documented in CLAUDE.md - runtime-safe via lazy imports or TYPE_CHECKING.
 KNOWN_MITIGATED_CYCLES: frozenset[frozenset[str]] = frozenset(
     {
-        frozenset({"bot.domain.config", "bot.domain.strategy_catalog"}),
-        frozenset({"bot.domain.config", "bot.domain.contracts"}),
-        frozenset({"bot.domain.schemas", "bot.delivery.contract"}),
+        frozenset({"engine.domain.config", "engine.domain.strategy_catalog"}),
+        frozenset({"engine.domain.config", "engine.domain.contracts"}),
+        frozenset({"engine.domain.schemas", "engine.contract"}),
         frozenset({"bot.runtime.health_manager", "bot.diagnostics.runtime_ops"}),
     }
 )
@@ -36,13 +37,13 @@ def _resolve_import(_from_mod: str, node: ast.Import | ast.ImportFrom) -> set[st
     if isinstance(node, ast.Import):
         for alias in node.names:
             name = alias.name
-            if name == "bot" or name.startswith("bot."):
+            if any(name == p or name.startswith(p + ".") for p in _PREFIXES):
                 targets.add(name)
         return targets
     if node.level or not node.module:
         return targets
     base = node.module
-    if base != "bot" and not base.startswith("bot."):
+    if not any(base == p or base.startswith(p + ".") for p in _PREFIXES):
         return targets
     if node.names and any(a.name == "*" for a in node.names):
         targets.add(base)
@@ -58,7 +59,8 @@ def _resolve_import(_from_mod: str, node: ast.Import | ast.ImportFrom) -> set[st
 
 def _collect_edges() -> dict[str, set[str]]:
     edges: dict[str, set[str]] = defaultdict(set)
-    for py in sorted(BOT_ROOT.rglob("*.py")):
+    candidates = [py for root in SCAN_ROOTS for py in root.rglob("*.py")]
+    for py in sorted(candidates):
         if "__pycache__" in py.parts:
             continue
         mod = _module_name(py)
@@ -108,9 +110,10 @@ def _normalize_cycle(cycle: list[str]) -> frozenset[str]:
 
 
 def main() -> int:
-    if not BOT_ROOT.is_dir():
-        print("bot/ not found", file=sys.stderr)
-        return 1
+    for root in SCAN_ROOTS:
+        if not root.is_dir():
+            print(f"{root.name}/ not found", file=sys.stderr)
+            return 1
     edges = _collect_edges()
     raw_cycles = _find_cycles(edges)
     novel: list[list[str]] = []
@@ -125,7 +128,7 @@ def main() -> int:
         novel.append(cycle)
 
     if not novel:
-        print(f"OK: no new import cycles in bot/ ({len(edges)} modules scanned)")
+        print(f"OK: no new import cycles in bot/ + engine/ ({len(edges)} modules scanned)")
         return 0
 
     print("NEW import cycles detected:", file=sys.stderr)

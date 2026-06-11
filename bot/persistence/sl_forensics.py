@@ -10,7 +10,7 @@ from typing import Any, Literal
 
 import polars as pl
 
-from bot.features.prepare_frame import _prepare_frame
+from engine.features.prepare_frame import _prepare_frame
 
 ForensicType = Literal[
     "STOP_HUNT",

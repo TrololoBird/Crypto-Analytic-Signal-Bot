@@ -28,14 +28,14 @@ from typing import Any
 
 import structlog
 
-from bot.domain.config import load_settings
-from bot.domain.schemas import SymbolFrames, UniverseSymbol
-from bot.features.prepare import min_required_bars, prepare_symbol
-from bot.market.data import BinanceFuturesMarketData
-from bot.market.rest_impl import BinanceClientImpl
-from bot.market.ws import FuturesWSManager
-from bot.runtime.data_readiness import configured_frame_minimums, kline_fetch_limit
-from bot.runtime.errors import DEFENSIVE_EXC
+from engine.data_readiness import configured_frame_minimums, kline_fetch_limit
+from engine.domain.config import load_settings
+from engine.domain.schemas import SymbolFrames, UniverseSymbol
+from engine.errors import DEFENSIVE_EXC
+from engine.features.prepare import min_required_bars, prepare_symbol
+from engine.market.data import BinanceFuturesMarketData
+from engine.market.rest_impl import BinanceClientImpl
+from engine.market.ws import FuturesWSManager
 
 LOG = structlog.get_logger("scripts.live_check_enrichments")
 LIVE_CHECK_HTTP_TIMEOUT_SECONDS = 30.0  # seconds: cap live REST smoke checks

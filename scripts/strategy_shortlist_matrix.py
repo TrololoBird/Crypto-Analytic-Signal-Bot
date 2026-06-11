@@ -25,12 +25,12 @@ from bot.diagnostics.facade import (
     resolve_telemetry_analysis_dir,
     summarize_live_watch_session,
 )
-from bot.domain.config import _ALL_SETUP_IDS, load_settings
-from bot.domain.strategy_catalog import CATALOG_BY_ID
-from bot.market.fit import ASSET_FIT_PROFILES
-from bot.market.rest_impl import BinanceClientImpl
-from bot.market.universe import build_shortlist
-from bot.runtime.errors import DEFENSIVE_EXC
+from engine.domain.config import _ALL_SETUP_IDS, load_settings
+from engine.domain.strategy_catalog import CATALOG_BY_ID
+from engine.errors import DEFENSIVE_EXC
+from engine.market.fit import ASSET_FIT_PROFILES
+from engine.market.rest_impl import BinanceClientImpl
+from engine.market.universe import build_shortlist
 
 LOG = configure_script_logging("scripts.strategy_shortlist_matrix")
 

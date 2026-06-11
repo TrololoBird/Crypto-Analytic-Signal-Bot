@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from bot.domain.config import BotSettings
+    from engine.domain.config import BotSettings
 
 DEFAULT_FILTER_STAGES: tuple[str, ...] = (
     "freshness",

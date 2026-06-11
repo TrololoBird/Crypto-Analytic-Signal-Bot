@@ -28,8 +28,8 @@ try:
 except ModuleNotFoundError:  # pragma: no cover
     from scripts.sl_forensic import _bootstrap  # noqa: F401
 
-from bot.domain.config import load_settings
 from bot.migrations import migrate_db
+from engine.domain.config import load_settings
 from scripts.sl_forensic._classifier import (
     assess_closed_candle_validity,
     classify_sl,

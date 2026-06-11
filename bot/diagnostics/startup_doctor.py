@@ -9,11 +9,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from bot.migrations import MIGRATIONS
-from bot.runtime.errors import DEFENSIVE_EXC
-from bot.secrets import load_secrets
+from engine.errors import DEFENSIVE_EXC
+from engine.secrets import load_secrets
 
 if TYPE_CHECKING:
-    from bot.domain.config import BotSettings
+    from engine.domain.config import BotSettings
 
 LOG = logging.getLogger("bot.diagnostics.startup_doctor")
 

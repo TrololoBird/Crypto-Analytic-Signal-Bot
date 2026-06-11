@@ -8,8 +8,8 @@ from typing import Any, Self
 
 import aiohttp
 
-from bot.domain.config import load_settings
-from bot.runtime.errors import DEFENSIVE_EXC
+from engine.domain.config import load_settings
+from engine.errors import DEFENSIVE_EXC
 
 LOG = logging.getLogger("sl_forensic.fetcher")
 

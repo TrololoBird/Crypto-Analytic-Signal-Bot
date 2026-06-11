@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import polars as pl
 
-    from ..domain.schemas import PreparedSymbol, Signal
+    from engine.domain.schemas import PreparedSymbol, Signal
 
 _VALID_TFS = frozenset({"5m", "15m", "1h", "4h"})
 _FRAME_ATTR = {"5m": "work_5m", "15m": "work_15m", "1h": "work_1h", "4h": "work_4h"}

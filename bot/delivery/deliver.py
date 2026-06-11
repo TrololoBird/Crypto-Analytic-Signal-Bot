@@ -9,9 +9,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Protocol
 
-from bot.runtime.errors import DEFENSIVE_EXC
+from engine.contract import validate_signal_contract
+from engine.errors import DEFENSIVE_EXC
+from engine.telegram import DeliveryResult
 
-from .contract import validate_signal_contract
 from .formatting import (
     format_analytics_companion_message,
     format_safe_signal_fallback,
@@ -20,10 +21,10 @@ from .formatting import (
     format_tracking_event_message,
     validate_telegram_html,
 )
-from .telegram import DeliveryResult
 
 if TYPE_CHECKING:
-    from ..domain.schemas import Signal
+    from engine.domain.schemas import Signal
+
     from ..persistence.tracking import SignalTrackingEvent
 
 LOG = logging.getLogger("bot.delivery.deliver")

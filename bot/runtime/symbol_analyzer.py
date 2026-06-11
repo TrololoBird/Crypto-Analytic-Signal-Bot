@@ -5,34 +5,35 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import time
 from collections import Counter
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
 from bot.delivery.filters import apply_global_filters
-from bot.domain.schemas import (
+from engine.data_readiness import (
+    assess_symbol_data_readiness,
+    configured_frame_minimums,
+    kline_fetch_limit,
+    raw_frame_minimums,
+)
+from engine.domain.schemas import (
     PipelineResult,
     PreparedSymbol,
     Signal,
     SymbolFrames,
     UniverseSymbol,
 )
-from bot.domain.strategies import StrategyDecision
-from bot.features.prepare import prepare_symbol
-from bot.features.prepare_frame import min_required_bars
-from bot.market.data import BinanceFuturesMarketData, MarketDataUnavailable
-from bot.runtime.data_readiness import (
-    assess_symbol_data_readiness,
-    configured_frame_minimums,
-    kline_fetch_limit,
-    raw_frame_minimums,
-)
-from bot.runtime.errors import (
+from engine.domain.strategies import StrategyDecision
+from engine.errors import (
     DEFENSIVE_EXC,
     build_runtime_error_payload,
     classify_runtime_error,
 )
+from engine.features.prepare import prepare_symbol
+from engine.features.prepare_frame import min_required_bars
+from engine.market.data import BinanceFuturesMarketData, MarketDataUnavailable
 
 
 def _pearson_correlation_returns(
@@ -262,6 +263,80 @@ class AnalyzerContextMixin(AnalyzerMixinBase):
         return (
             numeric if numeric == numeric and numeric not in (float("inf"), float("-inf")) else None
         )
+
+    # BTC/ETH 1h reference change refresh cadence for btc_correlation factor.
+    _REFERENCE_CHANGE_TTL_S = 300.0
+
+    @staticmethod
+    def _hourly_close_change_pct(frame: Any) -> float | None:
+        if frame is None or frame.height < 2 or "close" not in frame.columns:
+            return None
+        try:
+            prev = float(frame.item(-2, "close") or 0.0)
+            last = float(frame.item(-1, "close") or 0.0)
+        except IndexError, TypeError, ValueError:
+            return None
+        if prev <= 0.0 or last <= 0.0:
+            return None
+        # Percent (not fraction): _btc_correlation_penalty uses ±0.5/1.0/2.0 % bands.
+        return (last - prev) / prev * 100.0
+
+    def _reference_changes_from_client_cache(self) -> dict[str, float]:
+        """Sync fallback when async refresh has not run yet (WS-frames mode)."""
+        raw_client = self._bot.client
+        inner_client = getattr(raw_client, "_binance_client", None)
+        klines_cache = getattr(raw_client, "_klines_cache", None) or getattr(
+            inner_client, "_klines_cache", None
+        )
+        if not isinstance(klines_cache, dict):
+            return {}
+        changes: dict[str, float] = {}
+        for ref_sym, field in (("BTCUSDT", "btc_change_pct"), ("ETHUSDT", "eth_change_pct")):
+            for key, cached in klines_cache.items():
+                if not (
+                    isinstance(key, tuple)
+                    and len(key) >= 2
+                    and key[0] == ref_sym
+                    and key[1] == "1h"
+                ):
+                    continue
+                try:
+                    _, frame = cached
+                except (TypeError, ValueError):
+                    continue
+                change = self._hourly_close_change_pct(frame)
+                if change is not None:
+                    changes[field] = change
+                    break
+        return changes
+
+    async def _refresh_reference_changes(self, limit_1h: int) -> None:
+        """Keep btc_change_pct / eth_change_pct available regardless of frame source.
+
+        The old approach scanned the client's private _klines_cache — empty in
+        WS-frames mode (fetch_klines_cached is never called for 1h there), so
+        btc_correlation was unavailable on every evaluation. Explicitly fetch
+        the reference klines (client-side TTL cache absorbs the cost).
+        """
+        now = time.monotonic()
+        if now - getattr(self, "_reference_changes_at", 0.0) < self._REFERENCE_CHANGE_TTL_S:
+            return
+        self._reference_changes_at = now
+        changes: dict[str, float] = dict(getattr(self, "_reference_changes", None) or {})
+        if isinstance(self._bot.client, BinanceFuturesMarketData):
+            for ref_sym, field in (("BTCUSDT", "btc_change_pct"), ("ETHUSDT", "eth_change_pct")):
+                try:
+                    frame = await self._bot.client.fetch_klines_cached(
+                        ref_sym, "1h", limit=limit_1h
+                    )
+                except _DEGRADATION_ERRORS:
+                    continue
+                change = self._hourly_close_change_pct(frame)
+                if change is not None:
+                    changes[field] = change
+        changes.update(self._reference_changes_from_client_cache())
+        if changes:
+            self._reference_changes = changes
 
     def _safe_ws_get(self, symbol: str, getter_name: str, *args: Any, **kwargs: Any) -> Any:
         manager = self._bot._ws_manager
@@ -500,6 +575,7 @@ class AnalyzerFramesMixin(AnalyzerContextMixin, _AnalyzerFamilyGatesBase):
 
         try:
             if isinstance(self._bot.client, BinanceFuturesMarketData):
+                await self._refresh_reference_changes(limit_1h)
                 df_4h = await self._bot.client.fetch_klines_cached(symbol, "4h", limit=limit_4h)
                 if ws_1h is not None and ws_1h.height >= minimums["1h"]:
                     df_1h = ws_1h
@@ -785,8 +861,8 @@ class AnalyzerFramesMixin(AnalyzerContextMixin, _AnalyzerFamilyGatesBase):
                 "get_liquidation_event_count",
                 window_seconds=300,
             )
-            if cascade_count is not None:
-                enrichments["liquidation_cascade_5m"] = int(cascade_count) > 3
+            # 0 events is valid — only None means WS getter failed.
+            enrichments["liquidation_cascade_5m"] = int(cascade_count or 0) > 3
 
         if isinstance(self._bot.client, BinanceFuturesMarketData):
             premium = self._bot.client.get_cached_premium_index(symbol)
@@ -903,38 +979,16 @@ class AnalyzerFramesMixin(AnalyzerContextMixin, _AnalyzerFamilyGatesBase):
                 freshness_flags.add("crowding_context_missing")
 
         # BTC/ETH 1h reference change for btc_correlation confluence factor.
-        # btc_change_pct / eth_change_pct are declared in PreparedSymbol but were never
-        # populated, making btc_correlation always unavailable (weight=0) and causing
-        # systematic score degradation in ranging/flat BTC markets.
-        # self._bot.client may be a wrapper; fall back to its _binance_client inner.
+        ref_changes = dict(getattr(self, "_reference_changes", None) or {})
+        ref_changes.update(self._reference_changes_from_client_cache())
+        if ref_changes:
+            self._reference_changes = ref_changes
+            enrichments.update(ref_changes)
         _raw_client = self._bot.client
         _inner_client = getattr(_raw_client, "_binance_client", None)
         klines_cache = getattr(_raw_client, "_klines_cache", None) or getattr(
             _inner_client, "_klines_cache", None
         )
-        if isinstance(klines_cache, dict):
-            for _ref_sym, _ref_field in (
-                ("BTCUSDT", "btc_change_pct"),
-                ("ETHUSDT", "eth_change_pct"),
-            ):
-                for _key, _cached in klines_cache.items():
-                    if not (
-                        isinstance(_key, tuple)
-                        and len(_key) >= 2
-                        and _key[0] == _ref_sym
-                        and _key[1] == "1h"
-                    ):
-                        continue
-                    try:
-                        _, _frame = _cached
-                        if _frame is not None and _frame.height >= 2 and "close" in _frame.columns:
-                            _prev = float(_frame.item(-2, "close") or 0.0)
-                            _last = float(_frame.item(-1, "close") or 0.0)
-                            if _prev > 0.0 and _last > 0.0:
-                                enrichments[_ref_field] = (_last - _prev) / _prev
-                                break
-                    except IndexError, TypeError, ValueError, AttributeError:
-                        pass
 
         if symbol not in {"BTCUSDT", "ETHUSDT"} and isinstance(klines_cache, dict):
             sym_closes: list[float] | None = None
@@ -982,6 +1036,8 @@ class AnalyzerFramesMixin(AnalyzerContextMixin, _AnalyzerFamilyGatesBase):
         except DEFENSIVE_EXC:
             pass
         enrichments.setdefault("data_source_mix", "futures_only")
+        # Quiet market / no WS: False still means "data present, no cascade".
+        enrichments.setdefault("liquidation_cascade_5m", False)
         return enrichments
 
     def refresh_universe_symbol_from_ws(self, item: UniverseSymbol) -> UniverseSymbol:

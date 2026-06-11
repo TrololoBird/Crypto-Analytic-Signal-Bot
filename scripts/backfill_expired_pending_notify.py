@@ -14,10 +14,10 @@ try:
 except ModuleNotFoundError:  # pragma: no cover
     import common  # noqa: F401
 
-from bot.domain.config import load_settings
 from bot.persistence.repository.memory import MemoryRepository
 from bot.persistence.tracking import SignalTracker
-from bot.telemetry import TelemetryStore
+from engine.domain.config import load_settings
+from engine.telemetry import TelemetryStore
 
 LOG = logging.getLogger("scripts.backfill_expired_pending_notify")
 

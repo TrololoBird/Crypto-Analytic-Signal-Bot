@@ -13,10 +13,10 @@ try:
 except ModuleNotFoundError:  # pragma: no cover
     import common  # noqa: F401
 
-from bot.domain.config import load_settings
 from bot.migrations import migrate_db
 from bot.persistence.db_status import collect_db_status
 from bot.persistence.repository.memory import MemoryRepository
+from engine.domain.config import load_settings
 
 
 async def _run(*, config: Path, apply_migrations: bool) -> int:

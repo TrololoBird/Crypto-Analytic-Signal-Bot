@@ -8,10 +8,10 @@ from collections import Counter
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from bot.runtime.errors import DEFENSIVE_EXC
+from engine.domain.config import _ALL_SETUP_IDS
+from engine.domain.schemas import UniverseSymbol
+from engine.errors import DEFENSIVE_EXC
 
-from ..domain.config import _ALL_SETUP_IDS
-from ..domain.schemas import UniverseSymbol
 from .tracking_view import resolve_mark_price, serialize_tracking_signal
 from .user_summary import reject_reason_ru
 

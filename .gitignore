@@ -116,3 +116,6 @@ implemented_methods.txt
 tmp.txt
 scripts/_github_bot_survey_out.json
 scripts/_github_bot_survey_30.json
+
+.claude/worktrees/
+logs/*.nohup

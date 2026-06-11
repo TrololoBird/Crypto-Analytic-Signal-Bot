@@ -22,8 +22,8 @@ from ._common import SpecHit, as_float, confirmed_pattern_frame, with_spec_colum
 if TYPE_CHECKING:
     import polars as pl
 
-    from ..domain.config import BotSettings
-    from ..domain.schemas import PreparedSymbol, Signal
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import PreparedSymbol, Signal
 
 LOG = logging.getLogger("bot.strategies.fvg")
 

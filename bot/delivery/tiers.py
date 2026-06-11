@@ -6,11 +6,11 @@ import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from ..domain.delivery_policy import effective_action_min_score, is_r_class_setup
+from bot.policy.delivery_policy import effective_action_min_score, is_r_class_setup
 
 if TYPE_CHECKING:
-    from ..domain.config import BotSettings
-    from ..domain.schemas import Signal
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import Signal
 
 
 @dataclass(frozen=True, slots=True)

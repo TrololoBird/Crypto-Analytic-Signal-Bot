@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..domain.config import BotSettings
-    from ..domain.schemas import Signal
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import Signal
 
 RISK_PER_TRADE_DEFAULT = 0.02
 MAX_RISK_PER_TRADE = 0.05

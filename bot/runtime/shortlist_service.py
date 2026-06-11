@@ -9,18 +9,16 @@ from datetime import UTC, datetime
 from typing import Any
 
 from bot.diagnostics.facade import assess_radar_store
-from bot.market.data import MarketDataUnavailable
-from bot.market.proxy_bootstrap import retry_network_after_failure
-from bot.runtime.errors import DEFENSIVE_EXC
 from bot.runtime.watch_escalation import emit_radar_watch_candidates
-
-from ..domain.config import _ALL_SETUP_IDS
-from ..domain.events import ShortlistUpdatedEvent
-from ..domain.schemas import UniverseSymbol
-from ..market.data import BinanceFuturesMarketData
-from ..market.outcome_derank import penalties_from_sl_counts
-from ..market.promotion_engine import PromotionEngine
-from ..market.universe import (
+from engine.domain.config import _ALL_SETUP_IDS
+from engine.domain.events import ShortlistUpdatedEvent
+from engine.domain.schemas import UniverseSymbol
+from engine.errors import DEFENSIVE_EXC
+from engine.market.data import BinanceFuturesMarketData, MarketDataUnavailable
+from engine.market.outcome_derank import penalties_from_sl_counts
+from engine.market.promotion_engine import PromotionEngine
+from engine.market.proxy_bootstrap import retry_network_after_failure
+from engine.market.universe import (
     DEFAULT_PRESCORE_BASIS_WARM_LIMIT,
     build_shortlist,
     rerank_shortlist,

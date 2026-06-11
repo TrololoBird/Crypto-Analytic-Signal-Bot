@@ -4,14 +4,15 @@ import logging
 import math
 from typing import TYPE_CHECKING, ClassVar
 
-from ..features.prepare import _swing_points
+from engine.features.prepare import _swing_points
+
 from ._common import confirmed_pattern_frame
 from ._roadmap import _as_float, _build_atr_signal, _prev, _reject
 from .roadmap_base import RoadmapSetup
 
 if TYPE_CHECKING:
-    from ..domain.config import BotSettings
-    from ..domain.schemas import PreparedSymbol, Signal
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import PreparedSymbol, Signal
 
 LOG = logging.getLogger(__name__)
 

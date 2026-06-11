@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, ClassVar
 
-from ..features.prepare import _swing_points
+from engine.features.prepare import _swing_points
+
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.bar_patterns import engulfing_confirm, overshoot_reclaim_valid, pin_bar_confirm
 from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
@@ -14,8 +15,8 @@ from ._common import SpecHit, _latest_values, as_float, confirmed_pattern_frame,
 if TYPE_CHECKING:
     import polars as pl
 
-    from ..domain.config import BotSettings
-    from ..domain.schemas import PreparedSymbol, Signal
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import PreparedSymbol, Signal
 
 __all__ = ["detect_structure_break_retest"]
 

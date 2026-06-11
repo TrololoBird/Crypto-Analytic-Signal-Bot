@@ -10,10 +10,10 @@ except ModuleNotFoundError:  # pragma: no cover
 
 from typing import TYPE_CHECKING
 
-from bot.domain.config import load_settings
-from bot.market.data import BinanceFuturesMarketData, MarketDataUnavailable
-from bot.market.rest_impl import BinanceClientImpl
-from bot.market.ws import FuturesWSManager
+from engine.domain.config import load_settings
+from engine.market.data import BinanceFuturesMarketData, MarketDataUnavailable
+from engine.market.rest_impl import BinanceClientImpl
+from engine.market.ws import FuturesWSManager
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

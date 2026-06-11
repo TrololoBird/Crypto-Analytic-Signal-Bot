@@ -11,14 +11,14 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
 from bot.delivery.telegram_routing import operator_dm_enabled, send_operator_html
-from bot.market.data import BinanceFuturesMarketData
 from bot.regime.composite_regime import build_minimal_regime_frame_4h
-from bot.runtime.errors import DEFENSIVE_EXC
+from engine.errors import DEFENSIVE_EXC
+from engine.market.data import BinanceFuturesMarketData
 
 if TYPE_CHECKING:
-    from bot.domain.schemas import UniverseSymbol
     from bot.regime.market import MarketRegimeResult
     from bot.runtime.bot import SignalBot
+    from engine.domain.schemas import UniverseSymbol
 
 
 LOG = logging.getLogger("bot.runtime.bot")

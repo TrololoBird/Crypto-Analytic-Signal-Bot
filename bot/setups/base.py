@@ -8,22 +8,22 @@ from abc import abstractmethod
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar
 
-from bot.runtime.errors import DEFENSIVE_EXC, classify_runtime_error
-
-from ..domain.schemas import is_signal_contract_violation
-from ..domain.strategies import RISK_PROFILE_BY_ID, STRATEGY_STATUS_BY_ID, StrategyDecision
-from ..domain.strategy_catalog import CATALOG_BY_ID
-from ..engine.base import (
-    AbstractStrategy,
-    SignalResult,
-    StrategyMetadata,
-)
-from ..market.fit import (
+from engine.domain.schemas import is_signal_contract_violation
+from engine.domain.strategies import RISK_PROFILE_BY_ID, STRATEGY_STATUS_BY_ID, StrategyDecision
+from engine.domain.strategy_catalog import CATALOG_BY_ID
+from engine.errors import DEFENSIVE_EXC, classify_runtime_error
+from engine.market.fit import (
     ASSET_FIT_PROFILES,
     DEFAULT_ASSET_FIT,
     AssetFit,
     asset_fit_reject_reason,
     market_context_from_prepared,
+)
+
+from ..engine.base import (
+    AbstractStrategy,
+    SignalResult,
+    StrategyMetadata,
 )
 from . import (
     _reject,
@@ -35,8 +35,8 @@ from . import (
 LOG = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from ..domain.config import BotSettings
-    from ..domain.schemas import PreparedSymbol, Signal
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import PreparedSymbol, Signal
 
 
 @dataclass(frozen=True)
@@ -221,7 +221,7 @@ class BaseSetup(AbstractStrategy):
         finally:
             reset_strategy_decision_capture(token)
         sig = decision.signal
-        from bot.domain.strategy_catalog import resolve_setup_order_type
+        from engine.domain.strategy_catalog import resolve_setup_order_type
 
         expected_ot = (
             resolve_setup_order_type(

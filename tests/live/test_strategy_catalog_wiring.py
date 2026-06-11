@@ -5,10 +5,10 @@ from __future__ import annotations
 import pytest
 
 from bot.delivery.tiers import classify_tier
-from bot.domain.config import BotSettings, DeliveryConfig
-from bot.domain.delivery_policy import R_CLASS_SETUP_IDS, r_class_blocks_action
-from bot.domain.schemas import Signal
-from bot.domain.strategy_catalog import (
+from engine.domain.config import BotSettings, DeliveryConfig
+from bot.policy.delivery_policy import R_CLASS_SETUP_IDS, r_class_blocks_action
+from engine.domain.schemas import Signal
+from engine.domain.strategy_catalog import (
     CATALOG_ENTRIES,
     CATALOG_SETUP_IDS,
     PR10_WAVES,

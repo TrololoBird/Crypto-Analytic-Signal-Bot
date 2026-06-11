@@ -12,18 +12,18 @@ from typing import Any
 
 import polars as pl
 
-from bot.domain.limit_entry import normalize_confirmation_profile
 from bot.persistence.activation_gate import evaluate_pre_activation
 from bot.persistence.tracking_events import SignalTrackingEvent
-from bot.runtime.errors import DEFENSIVE_EXC
-
-from ..domain.limit_entry import (
+from engine.domain.limit_entry import (
+    normalize_confirmation_profile,
     pending_expiry_minutes_for_signal,
     should_activate_limit_entry,
     should_activate_limit_fill_price,
 )
-from ..domain.schemas import AggTrade
-from ..market.data import MarketDataUnavailable
+from engine.domain.schemas import AggTrade
+from engine.errors import DEFENSIVE_EXC
+from engine.market.data import MarketDataUnavailable
+
 from ..persistence.sl_diagnostics import classify_stop_loss_root_cause
 from ..persistence.tracked import (
     TrackedSignalState,

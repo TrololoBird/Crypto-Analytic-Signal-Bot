@@ -15,10 +15,10 @@ from pathlib import Path
 from threading import Thread
 from typing import TYPE_CHECKING, Any, cast
 
-from bot.runtime.errors import DEFENSIVE_EXC
 from bot.strategies import STRATEGY_CLASSES
+from engine.domain.strategies import RISK_PROFILE_BY_ID, STRATEGY_STATUS_BY_ID
+from engine.errors import DEFENSIVE_EXC
 
-from ..domain.strategies import RISK_PROFILE_BY_ID, STRATEGY_STATUS_BY_ID
 from ..persistence.diary_store import DiaryStore
 from ._live_helpers import (
     _compute_killzone,

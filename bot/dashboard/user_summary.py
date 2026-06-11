@@ -5,8 +5,8 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from bot.domain.labels import reject_reason_ru, result_label_ru
-from bot.runtime.errors import DEFENSIVE_EXC
+from bot.policy.labels import reject_reason_ru, result_label_ru
+from engine.errors import DEFENSIVE_EXC
 
 from .tracking_view import serialize_tracking_signal
 

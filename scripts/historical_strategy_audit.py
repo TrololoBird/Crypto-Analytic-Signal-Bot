@@ -18,20 +18,20 @@ try:
 except ModuleNotFoundError:  # pragma: no cover
     from common import configure_script_logging
 
-from bot.delivery.contract import validate_signal_contract
-from bot.domain.config import load_settings
-from bot.domain.schemas import Signal, SymbolFrames, SymbolMeta, UniverseSymbol
 from bot.engine import SignalEngine, StrategyRegistry
-from bot.features.prepare import min_required_bars, prepare_symbol
-from bot.market.data import (
+from bot.runtime.delivery_orchestrator import DeliveryOrchestrator
+from bot.setups.base import SetupParams
+from bot.strategies import STRATEGY_CLASSES
+from engine.contract import validate_signal_contract
+from engine.domain.config import load_settings
+from engine.domain.schemas import Signal, SymbolFrames, SymbolMeta, UniverseSymbol
+from engine.errors import DEFENSIVE_EXC
+from engine.features.prepare import min_required_bars, prepare_symbol
+from engine.market.data import (
     BinanceFuturesMarketData,
     _drop_incomplete_ohlcv_tail,
     _klines_to_frame,
 )
-from bot.runtime.delivery_orchestrator import DeliveryOrchestrator
-from bot.runtime.errors import DEFENSIVE_EXC
-from bot.setups.base import SetupParams
-from bot.strategies import STRATEGY_CLASSES
 
 LOG = configure_script_logging("scripts.historical_strategy_audit")
 

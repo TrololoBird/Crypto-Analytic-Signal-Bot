@@ -1,0 +1,57 @@
+# Hunt Watch — пороги (reference)
+
+# Скопируй нужное в config.toml [universe] / env при кастомизации.
+# Основной runtime читает корневой config.toml.
+
+[scanner]
+min_quote_volume_usd = 10_000_000
+pump_extreme_pct = 15.0
+range_hot_pct = 8.0
+pos_near_high = 0.85
+pos_near_low = 0.25
+score_watch = 45.0
+score_priority = 60.0
+scan_interval_s = 900
+watchlist_limit = 30
+
+[watch]
+tick_interval_s = 60
+# Ignition TG alerts off by default (watchlist-only); set true in env if needed.
+ignition_telegram = false
+symbol_tick_timeout_s = 180
+telegram_cooldown_min = 45
+followup_cooldown_min = 5
+max_dynamic_symbols = 12
+
+[confirm.short]
+min_score = 60
+min_score_without_div = 68
+forming_min_score = 45
+
+[levels.adaptive]
+# Nominal SL cap scales with 24h range (parabolic meme legs).
+sl_max_pct_normal = 8.0
+sl_max_pct_hot = 11.0
+sl_max_pct_parabolic = 14.0
+# Range thresholds for mode switch (see hunt_watch/level_calibration.py).
+hot_range_pct = 60.0
+parabolic_range_pct = 120.0
+parabolic_leg_gain_pct = 80.0
+
+[gate.premature_exhaustion_short]
+pos_min = 0.85
+bounce_from_low_pct = 15.0
+bounce_from_low_pct_tight = 4.0
+pos_min_tight = 0.92
+fall_from_high_max_pct = 5.0
+squeeze_top_pos_min = 0.85
+squeeze_top_bounce_pct = 4.0
+squeeze_top_fall_max_pct = 8.0
+
+[pinned.defaults]
+symbols = ["BTCUSDT", "ETHUSDT", "XAUUSDT", "XAGUSDT"]
+modes = { BTCUSDT = "both", ETHUSDT = "both", XAUUSDT = "both", XAGUSDT = "both" }
+
+[market_regime]
+refresh_hours = 4
+min_liquid_qvol_usd = 10_000_000

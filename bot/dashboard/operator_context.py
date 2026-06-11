@@ -6,7 +6,7 @@ import html
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from bot.runtime.errors import DEFENSIVE_EXC
+from engine.errors import DEFENSIVE_EXC
 
 from .live_audit import audit_snapshot, build_dashboard_audit_snapshot
 

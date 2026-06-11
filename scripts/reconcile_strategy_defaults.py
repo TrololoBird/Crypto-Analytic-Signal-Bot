@@ -22,9 +22,9 @@ except ModuleNotFoundError:  # pragma: no cover
 
 import tomllib
 
-from bot.domain.strategy_catalog import catalog_default_params
-from bot.runtime.errors import DEFENSIVE_EXC
 from bot.strategies import STRATEGY_CLASSES
+from engine.domain.strategy_catalog import catalog_default_params
+from engine.errors import DEFENSIVE_EXC
 
 LOG = logging.getLogger("scripts.reconcile_strategy_defaults")
 

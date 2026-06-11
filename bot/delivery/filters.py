@@ -8,14 +8,14 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from bot.runtime.errors import DEFENSIVE_EXC
+from bot.policy.mtf import evaluate_mtf_gate, normalize_mtf_reject_reason
+from engine.contract import resolve_target_rr
+from engine.domain.regime_gates import effective_market_regime
+from engine.errors import DEFENSIVE_EXC
+from engine.features.microstructure import MicrostructureContext, build_microstructure_context
+from engine.runtime_policy import configured_primary_timeframe, is_deep_analysis_symbol
 
 from ..diagnostics.signals import get_global_diagnostics
-from ..domain.mtf import evaluate_mtf_gate, normalize_mtf_reject_reason
-from ..domain.regime_gates import effective_market_regime
-from ..features.microstructure import MicrostructureContext, build_microstructure_context
-from ..runtime_policy import configured_primary_timeframe, is_deep_analysis_symbol
-from .contract import resolve_target_rr
 from .filter_stages import filter_stage_enabled
 from .scoring import ScoringResult
 from .trade_plan import TradePlanBuilder
@@ -23,8 +23,9 @@ from .trade_plan import TradePlanBuilder
 if TYPE_CHECKING:
     import polars as pl
 
-    from ..domain.config import BotSettings
-    from ..domain.schemas import PreparedSymbol, Signal
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import PreparedSymbol, Signal
+
     from .confluence import ConfluenceEngine
 
 

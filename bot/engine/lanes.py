@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from bot.market.universe import strategy_fits_for_market_row
+from engine.market.universe import strategy_fits_for_market_row
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from bot.domain.config import BotSettings
-    from bot.domain.strategies import StrategyMetadata
     from bot.engine.registry import StrategyRegistry
+    from engine.domain.config import BotSettings
+    from engine.domain.strategies import StrategyMetadata
 
 # When a canonical setup subsumes a spec-only sibling, drop the sibling from lanes.
 _SPEC_DELEGATE_CANONICAL: dict[str, str] = {

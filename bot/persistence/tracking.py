@@ -19,15 +19,15 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from bot.domain.strategy_catalog import catalog_setup_family
 from bot.persistence._tracking_review import _price_in_entry_zone
 from bot.persistence.tracking_events import SignalTrackingEvent
-from bot.runtime.errors import DEFENSIVE_EXC
-
-from ..domain.limit_entry import (
+from engine.domain.limit_entry import (
     DEFAULT_ENTRY_ORDER_TYPE,
     pending_expiry_minutes_for_signal,
 )
+from engine.domain.strategy_catalog import catalog_setup_family
+from engine.errors import DEFENSIVE_EXC
+
 from ..persistence.tracked import (
     TrackedSignalState,
     parse_state_dt,
@@ -65,10 +65,11 @@ else:
 __all__ = ["SignalTracker", "SignalTrackingEvent"]
 
 if typing.TYPE_CHECKING:
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import Signal
+    from engine.telemetry import TelemetryStore
+
     from ..diagnostics.facade import SignalQualityMonitor
-    from ..domain.config import BotSettings
-    from ..domain.schemas import Signal
-    from ..telemetry import TelemetryStore
 
     class MemoryRepository:
         async def cleanup_signal_outcomes_before(self, cutoff_iso: str) -> int: ...

@@ -13,10 +13,10 @@ from typing import TYPE_CHECKING, Any
 
 import aiohttp
 
-from bot.domain.labels import tracking_event_ru
-from bot.domain.limit_entry import resolve_late_entry_chase_pct
+from bot.policy.labels import tracking_event_ru
 from bot.runtime.delivery_session import delivery_session_snapshot
-from bot.runtime.errors import DEFENSIVE_EXC, defensive_exc_types
+from engine.domain.limit_entry import resolve_late_entry_chase_pct
+from engine.errors import DEFENSIVE_EXC, defensive_exc_types
 
 from ..dashboard.mobile_summary import (
     build_mobile_summary,

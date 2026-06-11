@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from bot.domain.config import _ALL_SETUP_IDS
+from engine.domain.config import _ALL_SETUP_IDS
 
 
 # --- from telemetry_strategy_analysis.py ---

@@ -9,7 +9,8 @@ __all__ = ["detect_regular_divergence"]
 import math
 from typing import TYPE_CHECKING, ClassVar
 
-from ..features.prepare import _swing_points
+from engine.features.prepare import _swing_points
+
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.spec_runtime import run_setup_detection
 from ._roadmap import _confirmed_context_conflict
@@ -17,8 +18,8 @@ from ._roadmap import _confirmed_context_conflict
 if TYPE_CHECKING:
     import polars as pl
 
-    from ..domain.config import BotSettings
-    from ..domain.schemas import PreparedSymbol, Signal
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import PreparedSymbol, Signal
 
 
 def detect_regular_divergence(

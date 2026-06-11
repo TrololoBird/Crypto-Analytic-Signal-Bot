@@ -6,7 +6,7 @@ import logging
 import time
 from typing import Any
 
-from ..market.data import BinanceFuturesMarketData
+from engine.market.data import BinanceFuturesMarketData
 
 LOG = logging.getLogger("bot.runtime.oi_refresh_runner")
 _DEGRADATION_ERRORS = (

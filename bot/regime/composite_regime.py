@@ -5,7 +5,7 @@ from typing import Any
 
 import polars as pl
 
-from bot.domain.regime_gates import effective_market_regime
+from engine.domain.regime_gates import effective_market_regime
 
 from .gmm_var import HAS_SKLEARN, HAS_STATSMODELS, CentroidRegimeDetector
 from .hmm_regime import HAS_HMMLEARN, RuleBasedRegimeDetector

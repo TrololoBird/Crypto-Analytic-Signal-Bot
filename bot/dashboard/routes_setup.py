@@ -15,13 +15,13 @@ from typing import TYPE_CHECKING, Any, cast
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from bot.domain.labels import labels_payload
-from bot.market.rate_limit import (
+from bot.policy.labels import labels_payload
+from engine.errors import DEFENSIVE_EXC
+from engine.market.rate_limit import (
     REST_WEIGHT_HARD_LIMIT,
     REST_WEIGHT_PACE_LIMIT,
     REST_WEIGHT_SOFT_LIMIT,
 )
-from bot.runtime.errors import DEFENSIVE_EXC
 
 from .analytics import StrategyAnalytics
 from .live_audit import audit_snapshot, build_dashboard_audit_snapshot

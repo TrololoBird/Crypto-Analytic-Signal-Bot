@@ -6,7 +6,8 @@ import logging
 import math
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
-from ..features.prepare import _swing_points
+from engine.features.prepare import _swing_points
+
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.smc import latest_structure_break, swing_highs_lows
 from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
@@ -16,8 +17,8 @@ from ._common import SpecHit, _latest_values, _row_volume_ratio, as_float, with_
 if TYPE_CHECKING:
     import polars as pl
 
-    from ..domain.config import BotSettings
-    from ..domain.schemas import PreparedSymbol, Signal
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import PreparedSymbol, Signal
 
 LOG = logging.getLogger("bot.strategies.bos_choch")
 

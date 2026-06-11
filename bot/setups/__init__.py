@@ -9,13 +9,14 @@ from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from ..delivery.contract import SIGNAL_ENTRY_PAD_ATR, resolve_target_rr
+from engine.contract import SIGNAL_ENTRY_PAD_ATR, resolve_target_rr
+from engine.domain.risk import RiskParams
+from engine.domain.schemas import PreparedSymbol, Signal
+from engine.domain.strategies import StrategyDecision
+from engine.domain.strategy_catalog import resolve_setup_tf_tags
+from engine.features.prepare import _swing_points  # shared swing detection helper
+
 from ..delivery.trade_plan import TradePlanBuilder
-from ..domain.risk import RiskParams
-from ..domain.schemas import PreparedSymbol, Signal
-from ..domain.strategies import StrategyDecision
-from ..domain.strategy_catalog import resolve_setup_tf_tags
-from ..features.prepare import _swing_points  # shared swing detection helper
 from .utils import (
     apply_graded_penalty,
     build_structural_targets,

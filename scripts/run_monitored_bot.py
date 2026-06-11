@@ -16,8 +16,8 @@ try:
 except ModuleNotFoundError:  # pragma: no cover
     import common  # noqa: F401
 
-from bot.domain.config import load_settings
 from bot.ops.pid_utils import acquire_pid_lock, pid_is_alive, release_pid_lock
+from engine.domain.config import load_settings
 
 LOG = logging.getLogger("scripts.run_monitored_bot")
 MAX_SECONDS = 6 * 3600

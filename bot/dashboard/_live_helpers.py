@@ -8,12 +8,12 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
-from bot.domain.labels import (
+from bot.policy.labels import (
     reject_reason_ru,
 )
-from bot.domain.limit_entry import normalize_confirmation_profile
 from bot.runtime.delivery_orchestrator import DELIVERY_SUCCESS_STATUSES
-from bot.runtime.errors import DEFENSIVE_EXC
+from engine.domain.limit_entry import normalize_confirmation_profile
+from engine.errors import DEFENSIVE_EXC
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping

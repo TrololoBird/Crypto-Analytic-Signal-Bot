@@ -14,9 +14,9 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from bot.coercion import as_float as _float
 from bot.delivery.sizing import recommend_position_pct as _recommend_position_pct
-from bot.domain.labels import INTERNAL_TRACKING_EVENT_RU, TRACKING_EVENT_RU
+from bot.policy.labels import INTERNAL_TRACKING_EVENT_RU, TRACKING_EVENT_RU
+from engine.coercion import as_float as _float
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping

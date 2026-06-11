@@ -5,9 +5,9 @@ clean-session:
 
 check:
 	@echo "=== Ruff lint ==="
-	@.venv/bin/ruff check bot/ tests/ scripts/ main.py
+	@.venv/bin/ruff check bot/ engine/ tests/ scripts/ main.py
 	@echo "=== Compile check ==="
-	@.venv/bin/python -m compileall -q bot
+	@.venv/bin/python -m compileall -q bot engine
 	@echo "=== v9 refactor gate ==="
 	@.venv/bin/python scripts/verify_refactor_gate.py
 	@$(MAKE) check-imports
@@ -22,7 +22,7 @@ check-cycles:
 	@.venv/bin/python scripts/check_circular_imports.py
 
 lint:
-	@ruff check bot/ tests/ scripts/ --fix
+	@ruff check bot/ engine/ tests/ scripts/ --fix
 
 typecheck:
 	@.venv/bin/python scripts/run_mypy_critical.py

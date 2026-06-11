@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from bot.delivery.ops_webhook import send_ops_webhook_alert
 from bot.delivery.telegram_routing import operator_dm_enabled, send_operator_html
-from bot.runtime.errors import DEFENSIVE_EXC
+from engine.errors import DEFENSIVE_EXC
 
 if TYPE_CHECKING:
     from bot.runtime.bot import SignalBot

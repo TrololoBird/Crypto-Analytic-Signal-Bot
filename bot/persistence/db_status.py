@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
     import aiosqlite
 
-    from bot.domain.config import BotSettings
+    from engine.domain.config import BotSettings
 
 
 DELIVERY_AUDIT_ROW_KEYS = frozenset(

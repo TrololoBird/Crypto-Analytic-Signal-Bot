@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from bot.domain.schemas import Signal
+    from engine.domain.schemas import Signal
 
 DEFAULT_ACTION_WINDOW_HOURS = 4.0
 # answers50 Q34: EMA bounce + Keltner = one MA-channel leg, not two confluence votes.

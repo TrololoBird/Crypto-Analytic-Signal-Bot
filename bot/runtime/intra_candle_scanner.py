@@ -6,11 +6,11 @@ import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from bot.runtime.data_readiness import is_radar_promoted_item
-from bot.runtime.errors import DEFENSIVE_EXC
+from engine.data_readiness import is_radar_promoted_item
+from engine.errors import DEFENSIVE_EXC
 
 if TYPE_CHECKING:
-    from ..domain.events import BookTickerEvent
+    from engine.domain.events import BookTickerEvent
 
 LOG = logging.getLogger("bot.runtime.intra_candle_scanner")
 

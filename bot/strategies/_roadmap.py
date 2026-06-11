@@ -32,8 +32,8 @@ _LOG = logging.getLogger("bot.strategies")
 if TYPE_CHECKING:
     import polars as pl
 
-    from ..domain.config import BotSettings
-    from ..domain.schemas import PreparedSymbol, Signal
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import PreparedSymbol, Signal
 
 
 def _missing_columns(frame: pl.DataFrame, columns: tuple[str, ...]) -> list[str]:

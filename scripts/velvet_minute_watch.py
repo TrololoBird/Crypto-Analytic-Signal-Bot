@@ -23,19 +23,19 @@ except ModuleNotFoundError:  # pragma: no cover
 bootstrap_repo_path()
 
 from bot.delivery.confluence import ConfluenceEngine
-from bot.domain.config import load_settings
-from bot.domain.schemas import SymbolFrames, UniverseSymbol
 from bot.engine import SignalEngine, StrategyRegistry
-from bot.features.prepare import _prepare_frame, min_required_bars, prepare_symbol
-from bot.market._ws_parsers import depth_imbalance_from_book, microprice_bias_from_book
-from bot.market.data import BinanceFuturesMarketData
-from bot.market.rest_impl import BinanceClientImpl
-from bot.market.universe import strategy_fits_for_market_row
 from bot.runtime.delivery_orchestrator import DeliveryOrchestrator
-from bot.runtime.errors import DEFENSIVE_EXC
 from bot.setups.base import SetupParams
 from bot.strategies import STRATEGY_CLASSES
 from bot.strategies._common import _pivot_rows, with_spec_columns
+from engine.domain.config import load_settings
+from engine.domain.schemas import SymbolFrames, UniverseSymbol
+from engine.errors import DEFENSIVE_EXC
+from engine.features.prepare import _prepare_frame, min_required_bars, prepare_symbol
+from engine.market._ws_parsers import depth_imbalance_from_book, microprice_bias_from_book
+from engine.market.data import BinanceFuturesMarketData
+from engine.market.rest_impl import BinanceClientImpl
+from engine.market.universe import strategy_fits_for_market_row
 
 SYMBOL = "VELVETUSDT"
 OUT_PATH = Path("data/velvet_minute_watch.jsonl")

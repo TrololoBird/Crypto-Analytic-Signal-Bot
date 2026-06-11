@@ -37,7 +37,7 @@ from bot.dashboard._live_helpers import (
     _unified_top_blocker,
 )
 from bot.diagnostics.facade import assess_radar_store
-from bot.domain.labels import (
+from bot.policy.labels import (
     CONFIRMATION_PROFILE_KEYS,
     CONFLUENCE_LEG_KEYS,
     confirmation_profile_label_ru,
@@ -46,10 +46,10 @@ from bot.domain.labels import (
     normalize_reject_reason,
     reject_reason_ru,
 )
-from bot.market.radar_state import SymbolTier
-from bot.runtime.errors import DEFENSIVE_EXC
-from bot.runtime_policy import effective_shortlist_unified_routing
-from bot.telemetry import slim_message_buffer_fields
+from engine.errors import DEFENSIVE_EXC
+from engine.market.radar_state import SymbolTier
+from engine.runtime_policy import effective_shortlist_unified_routing
+from engine.telemetry import slim_message_buffer_fields
 
 from ..delivery.formatting import message_preview, sample_message_from_row
 

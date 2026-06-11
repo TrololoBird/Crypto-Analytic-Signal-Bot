@@ -8,7 +8,7 @@ from __future__ import annotations
 import importlib
 from typing import Any
 
-from .contract import (
+from engine.contract import (
     DEFAULT_SCALE_WEIGHTS,
     DEFAULT_TARGET_RR,
     SignalContractIssue,

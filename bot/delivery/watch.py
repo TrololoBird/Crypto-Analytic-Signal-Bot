@@ -11,10 +11,10 @@ from typing import TYPE_CHECKING
 from .tiers import classify_tier
 
 if TYPE_CHECKING:
-    from ..domain.config import AlertConfig, BotSettings
-    from ..domain.schemas import PreparedSymbol, Signal
-    from ..telemetry import TelemetryStore
-    from .telegram import DeliveryResult, MessageBroadcaster
+    from engine.domain.config import AlertConfig, BotSettings
+    from engine.domain.schemas import PreparedSymbol, Signal
+    from engine.telegram import DeliveryResult, MessageBroadcaster
+    from engine.telemetry import TelemetryStore
 
 LOG = logging.getLogger("bot.alerts")
 

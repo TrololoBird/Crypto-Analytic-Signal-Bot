@@ -31,8 +31,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from bot.coercion import as_int
-from bot.runtime.errors import DEFENSIVE_EXC
+from engine.coercion import as_int
+from engine.errors import DEFENSIVE_EXC
 
 Recommendation = Literal["keep", "reduce_score", "pause"]
 

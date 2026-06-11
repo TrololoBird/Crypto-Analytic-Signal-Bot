@@ -16,7 +16,6 @@ from typing import Any
 import aiosqlite
 import polars as pl
 
-from bot.market.data import read_market_data_cache, write_market_data_cache
 from bot.persistence.repository._analytics import (
     AnalyticsMixin as _MemoryRepositoryBases,
 )
@@ -25,9 +24,10 @@ from bot.persistence.repository._analytics import (
     fetch_signal_outcome_rows,
 )
 from bot.persistence.repository._schema import REPOSITORY_CORE_DDL
+from engine.errors import DEFENSIVE_EXC
+from engine.market.data import read_market_data_cache, write_market_data_cache
 
 from ...migrations import migrate_db
-from ...runtime.errors import DEFENSIVE_EXC
 
 __all__ = [
     "MemoryRepository",
