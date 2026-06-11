@@ -26,3 +26,5 @@ SIGNAL_EVENTS = DATA / "signal_events.jsonl"
 PREP_SHADOW_STATE = DATA / "prep_shadow_state.json"
 PREP_SHADOW_EVENTS = DATA / "prep_shadow_events.jsonl"
 MARKET_REGIME = DATA / "market_regime.json"
+# Persistent closed signal archive — append-only, never wiped, used for backtest/autotune
+SIGNAL_HISTORY = DATA / "signal_history.jsonl"

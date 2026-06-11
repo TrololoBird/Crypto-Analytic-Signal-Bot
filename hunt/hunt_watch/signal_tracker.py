@@ -20,7 +20,9 @@ SignalEvent = Literal[
 
 from hunt_watch.param_store import tp1_partial_fix_pct as _tp1_pct
 from hunt_watch.param_store import tracker_thresholds
+from hunt_watch.paths import SIGNAL_HISTORY as HISTORY_PATH
 from hunt_watch.paths import SIGNAL_STATE as STATE_PATH
+from hunt_watch.signal_events import append_signal_event as _append_event
 
 FOLLOWUP_COOLDOWN_MINUTES = 5
 # No cosmetic phase_change TG right after entry (WLD: 2 flips in 60s post-confirm).
@@ -139,6 +141,7 @@ def register_signal_open(
         "entry_lifecycle_bias": (lifecycle or {}).get("recommended_bias"),
         "lifecycle_bias": (lifecycle or {}).get("recommended_bias"),
         "score": setup.get("dump_score") or setup.get("long_score"),
+        "fuel": setup.get("dump_fuel") or setup.get("long_fuel"),
         "support_break_level": setup.get("support_break_level"),
         "invalidation_above": setup.get("invalidation_above"),
         "resistance_break_level": setup.get("resistance_break_level"),
@@ -283,6 +286,48 @@ def close_signal(
         sig["duration_min"] = round((ts - opened).total_seconds() / 60.0, 1)
     except (TypeError, ValueError):
         pass
+    # Snapshot MFE and TP1 progress at close for history/backtest analysis
+    mfe = _mfe_pct(sig, direction=direction)
+    sig["mfe_pct"] = round(mfe, 2)
+    tp1 = float(sig.get("tp1") or 0)
+    entry_edge = _worst_entry(sig, direction=direction)
+    if tp1 > 0 and entry_edge > 0:
+        tp1_dist = abs(entry_edge - tp1)
+        if tp1_dist > 0:
+            sig["tp1_progress_pct"] = round(min(mfe / tp1_dist * entry_edge, 100.0), 1)
+    # Archive to closed_history so repeat signals on the same key don't lose prior outcomes
+    history: list = state.setdefault("closed_history", [])
+    record = dict(sig)
+    record.setdefault("symbol", symbol)
+    record.setdefault("direction", direction)
+    history.append(record)
+    try:
+        HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with HISTORY_PATH.open("a", encoding="utf-8") as _hf:
+            _hf.write(json.dumps(record, default=str) + "\n")
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        _append_event(
+            "close",
+            symbol=symbol,
+            direction=direction,
+            detail=reason,
+            payload={
+                "close_reason": reason,
+                "pnl_pct": sig.get("pnl_pct"),
+                "duration_min": sig.get("duration_min"),
+                "exit_price": sig.get("exit_price"),
+                "close_lifecycle_phase": sig.get("close_lifecycle_phase"),
+                "score": sig.get("score"),
+                "fuel": sig.get("fuel"),
+                "entry_lifecycle_phase": sig.get("entry_lifecycle_phase"),
+                "entry_lifecycle_bias": sig.get("entry_lifecycle_bias"),
+                "tp1_managed": sig.get("tp1_managed", False),
+            },
+        )
+    except Exception:  # noqa: BLE001
+        pass
 
 
 # Minimum signal age before trusting wider bars for intrabar extremes: a live 5m
@@ -387,6 +432,24 @@ def _stale_lifecycle_invalidate(
     if not contra:
         active["stale_lc_ticks"] = 0
         return None
+
+    # Near-TP1 grace: if MFE is within 3% of TP1 distance, hold 8 ticks instead
+    # of closing early. HUSDT/ARMUSDT were 1-2% from TP1 when stale fired at 3 ticks.
+    if ticks_needed == STALE_LC_TICKS_DEFAULT and not active.get("tp1_hit"):
+        tp1 = float(active.get("tp1") or 0)
+        entry_lo = float(active.get("entry_lo") or 0)
+        entry_hi = float(active.get("entry_hi") or 0)
+        entry_mid = (entry_lo + entry_hi) / 2.0 if entry_lo and entry_hi else (entry_lo or entry_hi)
+        if tp1 > 0 and entry_mid > 0:
+            if direction == "short":
+                tp1_dist = (entry_mid - tp1) / entry_mid * 100.0
+                mfe = (entry_mid - float(active.get("extreme_lo") or entry_mid)) / entry_mid * 100.0
+            else:
+                tp1_dist = (tp1 - entry_mid) / entry_mid * 100.0
+                mfe = (float(active.get("extreme_hi") or entry_mid) - entry_mid) / entry_mid * 100.0
+            remaining = tp1_dist - mfe
+            if 0 < remaining <= 3.0:
+                ticks_needed = 8
 
     n = int(active.get("stale_lc_ticks") or 0) + 1
     active["stale_lc_ticks"] = n

@@ -261,6 +261,8 @@ def confirm_dump(
     div = tf.get("1h", {}).get("bearish_rsi_div") or tf.get("4h", {}).get("bearish_rsi_div")
     triggers = dump.get("triggers") or []
     structural = [h for h in hard if h in _STRUCTURAL_CONFIRM_DUMP]
+    depth_imb = mkt.get("depth_imbalance")
+    ask_heavy = isinstance(depth_imb, (int, float)) and float(depth_imb) <= -0.10
     secondary = sum(
         1
         for cond in (
@@ -269,6 +271,7 @@ def confirm_dump(
             "dump_continuation" in triggers,
             any(str(t).startswith("ws_liq_cascade") for t in triggers),
             any(str(t).startswith("lost_support") for t in triggers),
+            ask_heavy,
         )
         if cond
     )
@@ -361,6 +364,7 @@ def confirm_long(
         hard.append("1m_5m_bull_cascade")
 
     fuel = float(long_setup.get("long_fuel") or 0)
+    mkt = market or {}
     div = tf.get("1h", {}).get("bullish_rsi_div") or tf.get("4h", {}).get("bullish_rsi_div")
     triggers = long_setup.get("triggers") or []
     structural = [h for h in hard if h in _INITIATION_HARD_LONG]
@@ -373,6 +377,7 @@ def confirm_long(
             any("ws_taker_buy" in str(t) for t in triggers),
             any("spot_lead_pump" in str(t) for t in triggers),
             lc_phase in {"impulse_initiating", "breakout_arming"},
+            isinstance(mkt.get("depth_imbalance"), (int, float)) and float(mkt["depth_imbalance"]) >= 0.10,
         )
         if cond
     )
@@ -392,7 +397,6 @@ def confirm_long(
         confirmed = fuel >= cal.confirm_min_score and (
             len(structural) >= 2 or (closed_break and secondary >= secondary_min)
         )
-    mkt = market or {}
     aligned, of_reason = _orderflow_confirm_aligned("long", mkt, symbol=symbol)
     if not aligned:
         return False, [f"veto_{of_reason}"]

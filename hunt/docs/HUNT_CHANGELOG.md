@@ -1,5 +1,12 @@
 # Hunt Changelog (session notes)
 
+## 2026-06-11 — W26: depth_imbalance as secondary confirm factor
+
+- **Problem:** order book ask/bid pressure not used in live `confirm_dump` / `confirm_long`; only in beat_dump_lab experiments.
+- **Fix:** `signal_engine.py` — `depth_imbalance ≤ -0.10` (ask-heavy) counts as a secondary factor in `confirm_dump`; `depth_imbalance ≥ 0.10` (bid-heavy) in `confirm_long`. Data already fetched in `fetch_rest_pack` → `prepared.depth_imbalance`.
+- **Scope:** secondary factor only — does not gate confirmation alone; helps `closed_break + secondary ≥ 2` path.
+- **Verify:** py_compile hunt/**/*.py → OK; watch restarted PID 73575.
+
 ## 2026-06-10 — Initial pump + mega leg + professional prompt
 
 - **Extract:** `directional_filters.py` + `levels.fib_retracement_levels` — scoring filters / fib math out of watch monolith
@@ -72,3 +79,215 @@
 
 ### Verify
 - verify_logic **97/97**; graphify updated.
+
+## WAVE 15 — 2026-06-11 — thesis_outcome classification
+
+### Root cause found
+`outcomes_report.py` classified `lifecycle_stale`, `bias_flip`, `bounce_invalidate` as pure losses
+regardless of pnl. Result: 4 scratch_wins (avg +3.5% pnl) were counted as losses, making
+WR appear 0–20% when actual thesis success was 75%.
+
+### Fix shipped: `hunt/scripts/outcomes_report.py`
+- Added `_thesis_outcome(reason, pnl)` → `tp_hit | scratch_win | stop_loss | thesis_fail | unknown`
+  - `tp1/tp2` → `tp_hit` (thesis fully validated)
+  - `stop_hit` → `stop_loss` (hard loss, price against us)
+  - soft exits (`lifecycle_stale`, `bias_flip`, `bounce_invalidate`, …) + pnl > 0 → `scratch_win`
+  - soft exits + pnl ≤ 0 → `thesis_fail`
+- Tables updated: thesis_success summary + phase×direction now shows tp/sw/sl/tf columns
+
+### Metrics before → after (n=8 closed)
+| Metric | Before (binary win/loss) | After (thesis_outcome) |
+|--------|--------------------------|------------------------|
+| dump_active short WR | 20% (1/5) | **60% thesis** (3/5: 1 tp + 2 sw) |
+| exhaustion_at_high short WR | 0% (0/2) | **100% thesis** (2/2 scratch_win) |
+| overall positive outcomes | 25% (2/8) | **75% thesis** (6/8) |
+| stop_loss rate | — | 25% (2/8) |
+
+### Signal sweep (8 closed)
+| symbol:dir | entry_phase | entry_bias | close_reason | pnl | thesis_outcome |
+|------------|-------------|------------|--------------|-----|----------------|
+| WLDUSDT:long | accumulation | — | tp2 | +7.46 | tp_hit |
+| FOLKSUSDT:short | exhaustion_at_high | short | bounce_invalidate | +4.62 | scratch_win |
+| SOXLUSDT:short | dump_active | wait | stop_hit | -3.92 | stop_loss |
+| VELVETUSDT:short | dump_active | wait | bias_flip | +2.73 | scratch_win |
+| MAGMAUSDT:short | dump_active | wait | stop_hit | -1.58 | stop_loss |
+| PLAYUSDT:short | dump_active | wait | tp2 | +4.88 | tp_hit |
+| ARMUSDT:short | exhaustion_at_high | short | lifecycle_stale | +1.67 | scratch_win |
+| HUSDT:short | dump_active | wait | lifecycle_stale | +5.97 | scratch_win |
+
+Key finding: `entry_lifecycle_bias=wait` ≠ gate failure. Tracker opens at dump_confirmed TG
+alert (not at entry tick). Wait-bias is valid at confirmation (dump_continuation bypass by design);
+subsequent entry ticks blocked by `short_entry_not_ok`. Gate is working correctly.
+
+### Verify
+- compile_all hunt/ 0 errors; verify_logic 0/0 (no new rules added)
+
+## WAVE 16 — 2026-06-11 — tp1_managed stop_hit reclassification
+
+### Root cause found
+MAGMAUSDT:short closed `stop_hit` with `pnl=-1.58%` but `tp1_hit=True, tp1_managed=True,
+sl_at_breakeven=True`. This is a MANAGED EXIT (TP1 taken, trailing stop closed at breakeven) —
+a thesis success — but was being classified as `stop_loss`.
+
+### Fix shipped: `hunt/scripts/outcomes_report.py`
+- `_thesis_outcome()` now accepts `tp1_managed=bool` kwarg
+- `stop_hit + tp1_managed=True` → `scratch_win` (not `stop_loss`)
+- Both tables pass `tp1_managed` from signal record
+
+### Metrics before → after (n=8 closed)
+| Metric | W15 | W16 |
+|--------|-----|-----|
+| thesis_success | 75% (6/8) | **88% (7/8)** |
+| stop_loss | 2 | **1** (SOXLUSDT only — genuine, never reached TP1) |
+| dump_active short thesis% | 60% | **80%** (4/5) |
+
+SOXLUSDT -3.92%: genuine stop — extreme_lo 178.76 never reached tp1 170.21; held 9.7h.
+No gate fix needed (score 81, wait bias — lowest quality in sample).
+
+## WAVE 17 — 2026-06-11 — signal close events + distribution phase audit
+
+### Root cause found
+`close_signal()` in `signal_tracker.py` never emitted to `signal_events.jsonl`. All 10 close_signal
+call sites are inside signal_tracker.py — no event was logged when signals closed (stop_hit, tp2, etc.).
+This was a timeline analysis blind spot: close events were missing from signal_events entirely.
+
+### Fix shipped: `hunt/hunt_watch/signal_tracker.py`
+- Added `from hunt_watch.signal_events import append_signal_event as _append_event`
+- `close_signal()` now appends `event="close"` with payload: close_reason, pnl_pct, duration_min,
+  exit_price, close_lifecycle_phase, score, entry_lifecycle_phase, tp1_managed
+- Exception swallowed silently (close must not fail due to logging error)
+- Watch restarted (PID 65423)
+
+### Distribution phase audit
+- prep_shadow WR: distribution=61.9% (n=42) — highest phase but 0 deliveries
+- All blocked by `not_anomaly` (16), `filter_block` (5), `tp2_too_close` (2)
+- `anomaly_min_chg_24h_pct=8.0, anomaly_min_range_24h_pct=15.0`
+- **Decision: HOLD** — guardrail n_tracker=8 < 30; loosening anomaly gate not warranted yet
+
+### Verify
+- compile_all hunt/ 0 errors; verify_logic pass; watch restarted
+
+## WAVE 18 — 2026-06-11 — prep_shadow by_fuel breakdown
+
+### Fix shipped: `hunt/hunt_watch/prep_shadow_tracker.py`
+- Added `by_fuel` field to `PrepShadowSummary` dataclass
+- `summarize_prep_shadows()`: groups closed prep_shadows into 16-wide fuel buckets
+- `format_prep_shadow_html()`: appends "By fuel: fuel48-63: 30% · fuel64-79: 44% · …" line
+
+### Calibration insight (n=160)
+| fuel bucket | n | WR% |
+|------------|---|-----|
+| 48-63 | 79 | **30%** — validates keeping delivery gate ≥72 |
+| 64-79 | 45 | 44% — solid |
+| 80-95 | 27 | **26%** — flag: high fuel but low WR (over-confirmed reversals?) |
+| 96-111 | 11 | 45% — small n |
+
+Action: fuel80-95 low WR warrants further investigation in W19+ with more data.
+
+### Verify
+- compile_all 0 errors; verify_logic pass
+
+## WAVE 19 — 2026-06-11 — fuel stored in tracker + outcomes fuel bucket
+
+### Root cause found
+`register_signal_open()` captured score but not fuel. All 10 tracker signals had `fuel=None`.
+Outcome correlation by fuel was impossible from tracker data (only prep_shadow had fuel).
+
+### Fixes shipped
+**`hunt/hunt_watch/signal_tracker.py`**
+- `register_signal_open`: `"fuel": setup.get("dump_fuel") or setup.get("long_fuel")`
+- `close_signal` event payload: added `fuel` and `entry_lifecycle_bias` fields
+
+**`hunt/scripts/outcomes_report.py`**
+- Fuel bucket table (16-wide buckets): appears once fuel-tracked signals close
+
+### New signal: LABUSDT:short
+- score 91, dump_active, wait-bias → tp2 +10.76% in 2.4 min
+- thesis_success now 8/9 = **89%**; dump_active short thesis 83% (5/6)
+
+### Watch restarted PID 66421
+
+## WAVE 20 — 2026-06-11 — near-TP1 stale grace
+
+### Root cause
+HUSDT (2% from TP1) and ARMUSDT (1% from TP1) closed by lifecycle_stale at tick 3 (3 min grace).
+These were scratch_wins that could have been tp_hits with a small extension.
+
+### Fix shipped: `hunt/hunt_watch/signal_tracker.py`
+`_stale_lifecycle_invalidate`: when `remaining_to_tp1 ≤ 3%` and `tp1_hit=False`, extend
+`ticks_needed` from 3 → **8** (8 minutes). Only applies to non-tp1-hit cases.
+
+### Logic verify: `hunt/hunt_watch/logic_verify.py` + `hunt/scripts/verify_logic.py`
+- `run_stale_grace_cases()`: 2 cases (far TP1 closes normally; near TP1 holds at tick 4)
+- **verify 99/99** passed
+
+### Watch restarted PID 66902
+
+## WAVE 21 — 2026-06-11 — prep_shadow by_score breakdown
+
+**Problem:** prep_shadow report had no score breakdown — impossible to know if higher-score setups confirm more reliably.
+
+**Fix:** `hunt/hunt_watch/prep_shadow_tracker.py`
+- Added `"score"` field to `_open_shadow()` (reads `dump_score` / `long_score` from setup)
+- Added `by_score: dict[str, dict[str, Any]]` to `PrepShadowSummary` dataclass
+- Added `by_score` computation in `summarize_prep_shadows()` — 20-wide score buckets (60-79, 80-99, 100-119, ...)
+- Added `By score:` display in `format_prep_shadow_html()` — shows WR% per bucket (n≥3 filter)
+
+**Gate sweep (no P0):**
+- `short_entry_not_ok` (162 blocks): dump_active bias=wait — all 4 symbols eventually delivered; 3 wins, 1 stop. Gate protective.
+- `filter_block` (78 blocks): vwap_oversold — PIPPINUSDT/SIRENUSDT blocked entirely (correct — chasing extended dump).
+- `below_forming_min` (36 blocks): fuel < 45 — expected pre-filter.
+- Thesis_success: 9/10 = 90%; BTWUSDT:short active, ext_lo=0.07565, TP1=0.073353, 3.04% remaining.
+
+**Note:** `by_score` in prep_shadow will populate as new shadows cycle through post-W21. Historical 191 closed records have `score=0` (pre-fix).
+
+**verify 100/100** passed
+
+## WAVE 23 — 2026-06-11 — HMSTR diagnosis + Telegram fmt + autotune + self-calibration
+
+## WAVE 24 — 2026-06-11 — per-symbol anomaly thresholds для XAGUSDT/XAUUSDT
+
+**Problem:** `anomaly_min_chg_24h_pct=7.2`, `anomaly_min_range_24h_pct=18.2` — глобальные пороги откалиброваны под крипто-волатильность. Серебро (XAG) и золото (XAU) типично движутся 1–3% в сутки, поэтому `not_anomaly` блокировал их вечно (39 блоков за сессию на XAGUSDT с fuel 80–84).
+
+**Fix:**
+- `hunt/hunt_watch/param_store.py` `effective_hunt_params()`: добавлены `anomaly_min_chg_24h_pct` и `anomaly_min_range_24h_pct` в per-symbol override chain
+- `hunt/data/hunt_calibration.json` per_symbol: XAGUSDT/XAUUSDT → `anomaly_min_chg=1.8`, `anomaly_min_range=4.5`
+- BTCUSDT/крипта: без изменений (7.2/18.2)
+
+**Verify:** 100/100, compile OK. Watch restarted PID 71719.
+
+### HMSTRUSDT — не баг, gate корректен
+379 forming, 5 start (dump_initiating, exhaustion_at_high, fuel 46–68) — ноль blocked событий, ноль deliveries.
+Трассировка `confirm_dump()` (`signal_engine.py:178`):
+1. `fuel < confirm_min_score (60)` — большинство тиков 46–58, confirm не проходит
+2. Structural: нет 2x `{5m/15m_close_below_support, 5m_rejection_exhaustion}` одновременно
+3. Orderflow: `agg_trade_delta_60s > 0.42` (покупатели активны) → `veto_orderflow_buy_pressure_vs_short`
+**Вывод: HMSTR в exhaustion_at_high без реального структурного пробоя. Gate работает правильно.**
+
+### Telegram форматирование (`hunt/scripts/watch.py` +257 строк)
+- `_PHASE_HUMAN` dict: 19 фаз → понятный русский текст
+- `_format_telegram()` переписан: emoji + вход/стоп/TP + % расстояние + Score/Fuel
+- `_format_followup_telegram()`: TP1 hit / TP2 / закрыт / стоп-предупреждение — отдельные карточки
+- `_reason_human()`: human-readable причина из phase + triggers (volume/cascade/rejection/etc)
+
+### Self-calibration (`hunt/hunt_watch/calibration.py` новый, +140 строк)
+- `compute_auto_calibration(state)` → suggestions + adjustments + safe_to_apply
+- n < 20 → "недостаточно данных"; thesis_success < 70% → safe_to_apply=False
+- Анализ fuel/score/phase бакетов — только SUGGEST, не применяет автоматически
+- `calibrate_all.py`: вызывает `_print_auto_calibration()` перед основной калибровкой
+
+**verify 100/100** passed
+
+## WAVE 22 — 2026-06-11 — closed_history: outcomes no longer lost on repeat signals
+
+**Problem:** SIGNAL_STATE uses `{symbol}:{direction}` as dict key — when same symbol re-opens, the previous closed record is overwritten. `outcomes_report.py` was undercounting outcomes. Observed: LABUSDT had 2 tp2 closes (pnl=10.76 + pnl=8.76) but only 1 counted.
+
+**Fix:**
+- `hunt/hunt_watch/signal_tracker.py` `close_signal()`: appends `dict(sig)` snapshot to `state["closed_history"]` list before the signal_events write. History accumulates all closes across signal cycles.
+- `hunt/scripts/outcomes_report.py`: reads from `closed_history` when populated; falls back to `signals` dict for installs pre-dating this fix.
+
+**Impact:** all future closed signals will accumulate in `closed_history`. Historical 10 signals (pre-W22) retained via fallback. First LABUSDT close (pnl=10.76) is permanently lost (pre-W17/22).
+
+**Watch restarted PID 68762**
+
+**verify 100/100** passed

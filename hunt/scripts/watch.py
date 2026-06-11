@@ -1019,6 +1019,8 @@ def _dump_analysis(
         "stop_loss": levels["stop_loss"],
         "tp1": levels["tp1"],
         "tp2": levels["tp2"],
+        "tp1_label": levels.get("tp1_label", ""),
+        "tp2_label": levels.get("tp2_label", ""),
         "risk_reward": levels.get("risk_reward"),
         "sl_dist_pct": levels.get("sl_dist_pct"),
         "tp2_dist_pct": levels.get("tp2_dist_pct"),
@@ -1259,6 +1261,8 @@ def _long_analysis(
         "stop_loss": levels["stop_loss"],
         "tp1": levels["tp1"],
         "tp2": levels["tp2"],
+        "tp1_label": levels.get("tp1_label", ""),
+        "tp2_label": levels.get("tp2_label", ""),
         "risk_reward": levels.get("risk_reward"),
         "sl_dist_pct": levels.get("sl_dist_pct"),
         "tp2_dist_pct": levels.get("tp2_dist_pct"),
@@ -1615,6 +1619,79 @@ def _format_setup_lines(
     return lines
 
 
+_PHASE_HUMAN: dict[str, str] = {
+    "dump_active": "Активный дамп",
+    "dump_initiating": "Начало дампа",
+    "dump_imminent": "Дамп неизбежен",
+    "dump_setup_forming": "Формируется шорт",
+    "dump_confirmed": "Шорт подтверждён",
+    "exhaustion_at_high": "Истощение на хаях",
+    "exhaustion_watch": "Наблюдение за истощением",
+    "distribution": "Распределение",
+    "impulse_initiating": "Начало импульса",
+    "breakout_arming": "Вооружение пробоя",
+    "post_dump_bounce": "Отскок после дампа",
+    "accumulation": "Накопление",
+    "accumulation_watch": "Наблюдение за накоплением",
+    "long_imminent": "Лонг неизбежен",
+    "long_setup_forming": "Формируется лонг",
+    "long_confirmed": "Лонг подтверждён",
+    "no_setup": "Нет сетапа",
+    "no_dump_yet": "Нет дампа",
+    "no_long_yet": "Нет лонга",
+}
+
+
+def _phase_human(phase: str) -> str:
+    return _PHASE_HUMAN.get(phase, phase)
+
+
+def _pct_str(a: float, b: float, direction: str) -> str:
+    """Percentage distance from entry to target."""
+    if a <= 0 or b <= 0:
+        return ""
+    if direction == "short":
+        pct = (a - b) / a * 100.0
+    else:
+        pct = (b - a) / a * 100.0
+    return f"+{pct:.1f}%"
+
+
+def _reason_human(setup: dict[str, Any], *, direction: str, lc_phase: str) -> str:
+    """Build human-readable reason line from phase + triggers + fuel."""
+    phase_txt = _phase_human(lc_phase) if lc_phase and lc_phase != "—" else _phase_human(
+        str(setup.get("phase") or "")
+    )
+    triggers = setup.get("triggers") or []
+    trig_short: list[str] = []
+    for t in triggers[:3]:
+        ts = str(t)
+        if "volume" in ts or "vol" in ts:
+            trig_short.append("аномальный объём")
+        elif "support" in ts or "break" in ts:
+            trig_short.append("пробой поддержки")
+        elif "resistance" in ts:
+            trig_short.append("пробой сопротивления")
+        elif "cascade" in ts or "liq" in ts:
+            trig_short.append("каскад ликвидаций")
+        elif "rejection" in ts:
+            trig_short.append("отбой от уровня")
+        elif "rsi" in ts or "div" in ts:
+            trig_short.append("RSI-дивергенция")
+        elif "funding" in ts:
+            trig_short.append("перегрев фандинга")
+        elif "oi" in ts:
+            trig_short.append("аномалия OI")
+        elif "whale" in ts:
+            trig_short.append("крупный продавец")
+        else:
+            trig_short.append(ts.replace("_", " ").split(":")[0])
+    trig_txt = ", ".join(dict.fromkeys(trig_short))  # deduplicate, keep order
+    if phase_txt and trig_txt:
+        return f"{phase_txt} · {trig_txt}"
+    return phase_txt or trig_txt or "—"
+
+
 def _format_telegram(row: dict[str, Any], *, direction: str, confirm_reasons: list[str]) -> str:
     sym = html.escape(str(row["symbol"]).replace("USDT", "-USDT"))
     setup = row["dump"] if direction == "short" else row["long"]
@@ -1623,30 +1700,59 @@ def _format_telegram(row: dict[str, Any], *, direction: str, confirm_reasons: li
     price = float(row.get("price") or 0)
     tf = row.get("timeframes") or {}
     pos = row.get("market") or row.get("positioning") or {}
-    badge = "🔴" if direction == "short" else "🟢"
-    label = "DUMP SHORT" if direction == "short" else "LONG"
     lc = row.get("lifecycle") or {}
-    lc_phase = html.escape(str(lc.get("phase") or "—"))
-    lc_bias = html.escape(str(lc.get("recommended_bias") or "—"))
-    header = (
-        f"{badge} <b>{label} {sym}</b> · <b>CONFIRMED</b>\n"
-        f"Fuel <code>{setup.get(fuel_key)}</code> · raw <code>{setup.get(score_key)}</code> · "
-        f"setup <code>{setup.get('phase')}</code> · lc <code>{lc_phase}</code> bias <code>{lc_bias}</code>\n"
-        f"Price <code>{_fmt_price(price)}</code> · 24h <code>{row.get('chg_24h_pct')}%</code>"
-    )
-    body = "\n".join(
-        _format_setup_lines(row, setup, direction=direction, tf=tf, pos=pos, price=price)
-    )
-    regime = row.get("regime") or {}
-    regime_line = (
-        f"Regime 4h/1h: <code>{regime.get('regime_4h') or '—'}/{regime.get('regime_1h') or '—'}</code> · "
-        f"structure <code>{regime.get('structure_1h') or '—'}</code>"
-    )
-    confirm = f"<b>Confirm</b> {html.escape(', '.join(confirm_reasons))}"
-    footer = "<i>Signal-only · closed 5m/1m confirm · открывай сделку вручную.</i>"
+    lc_phase = str(lc.get("phase") or "—")
+
+    badge = "🔴" if direction == "short" else "🟢"
+    dir_label = "SHORT" if direction == "short" else "LONG"
+
+    fuel_val = setup.get(fuel_key)
+    score_val = setup.get(score_key)
+    fuel = float(fuel_val) if fuel_val is not None else 0.0
+    fuel_str = f"{fuel:.0f}" if fuel_val is not None else "—"
+    score_str = f"{float(score_val):.0f}" if score_val is not None else "—"
+
+    # Signal quality rating
+    _strong_phases = frozenset({"dump_active","exhaustion_at_high","distribution","dump_confirmed",
+                                 "accumulation","impulse_initiating","breakout_arming","long_confirmed"})
+    if fuel >= 80 and lc_phase in _strong_phases:
+        rating = "🔥 СИЛЬНЫЙ"
+    elif fuel >= 65 and lc_phase in _strong_phases:
+        rating = "✅ УВЕРЕННЫЙ"
+    elif fuel >= 50:
+        rating = "⚠️ СРЕДНИЙ"
+    else:
+        rating = "📊 СЛАБЫЙ"
+
+    lifecycle_line = html.escape(_phase_human(lc_phase)) if lc_phase != "—" else "—"
+
+    ez = setup.get("entry_zone") or [price, price]
+    entry_lo = _fmt_price(ez[0])
+    entry_hi = _fmt_price(ez[1])
+    sl = _fmt_price(setup.get("stop_loss"))
+    tp1 = setup.get("tp1")
+    tp2 = setup.get("tp2")
+    tp1_pct = _pct_str(price, float(tp1), direction) if tp1 else ""
+    tp2_pct = _pct_str(price, float(tp2), direction) if tp2 else ""
+    tp1_lbl = setup.get("tp1_label") or ""
+    tp2_lbl = setup.get("tp2_label") or ""
+    tp1_str = f"<code>{_fmt_price(tp1)}</code>" + (f" (<b>{tp1_pct}</b>)" if tp1_pct else "") + (f" · {tp1_lbl}" if tp1_lbl else "")
+    tp2_str = f"<code>{_fmt_price(tp2)}</code>" + (f" (<b>{tp2_pct}</b>)" if tp2_pct else "") + (f" · {tp2_lbl}" if tp2_lbl else "")
+
+    reason = _reason_human(setup, direction=direction, lc_phase=lc_phase)
+
+    header = f"{badge} <b>ВХОД ВЗЯТ · {sym} {dir_label}</b>  {rating}"
+    phase_line = f"📌 {lifecycle_line}"
+    entry_line = f"📍 Вход: <code>{entry_lo}–{entry_hi}</code>  |  Стоп: <code>{sl}</code>"
+    tp_line = f"🎯 TP1: {tp1_str}  |  TP2: {tp2_str}"
+    reason_line = f"💡 {html.escape(reason)}"
+    score_line = f"📊 Score: <code>{score_str}</code> · Fuel: <code>{fuel_str}</code>"
+    footer = "<i>Signal-only · closed 5m/1m confirm · открывай сделку вручную</i>"
+
     hist = format_history_telegram(row.get("pump_history"))
     hist_line = f"{html.escape(hist)}\n" if hist else ""
-    return f"{header}\n{confirm}\n{regime_line}\n{hist_line}\n{body}\n\n{footer}"
+
+    return f"{header}\n{phase_line}\n{entry_line}\n{tp_line}\n{reason_line}\n{score_line}\n{hist_line}\n{footer}"
 
 
 # Orphan signals (symbol no longer in watchlist) are re-checked via REST klines.
@@ -1756,30 +1862,31 @@ async def _reconcile_orphan_signals(
     return events
 
 
+def _duration_str(opened: str) -> str:
+    """Human-readable duration from ISO opened_at to now."""
+    try:
+        from datetime import UTC, datetime
+        start = datetime.fromisoformat(opened.replace(" ", "T"))
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=UTC)
+        delta = datetime.now(UTC) - start
+        total_m = int(delta.total_seconds() // 60)
+        h, m = divmod(total_m, 60)
+        if h > 0:
+            return f"{h}ч {m}м"
+        return f"{m}м"
+    except Exception:
+        return "—"
+
+
 def _format_followup_telegram(followup: Any, row: dict[str, Any]) -> str:
     sym = html.escape(str(followup.symbol).replace("USDT", "-USDT"))
     direction = followup.direction.upper()
     price = _fmt_price(followup.price)
     lc = row.get("lifecycle") or {}
     payload = followup.payload if isinstance(followup.payload, dict) else {}
-    badges = {
-        "invalidate": "⛔",
-        "fix_profit_tp1": "💰",
-        "fix_profit_tp2": "💰",
-        "phase_change": "🔄",
-        "stop_warning": "⚠️",
-        "avg_zone": "➕",
-    }
-    titles = {
-        "invalidate": "SIGNAL OFF — фиксируй / не добавляй",
-        "fix_profit_tp1": "FIX partial + SL на entry",
-        "fix_profit_tp2": "FIX PROFIT — TP2 / закрыть",
-        "phase_change": "PHASE CHANGE",
-        "stop_warning": "STOP WARNING — у SL",
-        "avg_zone": "AVG ZONE",
-    }
-    badge = badges.get(followup.event, "📣")
-    title = titles.get(followup.event, followup.event)
+    event = followup.event
+
     # Use levels frozen at entry (payload), not live recalculated setup on this tick.
     sl = _fmt_price(payload.get("stop_loss"))
     tp1_lvl = _fmt_price(payload.get("tp1"))
@@ -1791,21 +1898,98 @@ def _format_followup_telegram(followup: Any, row: dict[str, Any]) -> str:
         if entry_lo is not None and entry_hi is not None
         else "—"
     )
-    opened = str(payload.get("opened_at") or "")[:19].replace("T", " ")
+    opened_raw = str(payload.get("opened_at") or "")[:19].replace("T", " ")
     msg_id = payload.get("entry_message_id")
-    entry_ref = f"Entry {entry_zone} @ {opened} UTC"
+    entry_ref = f"Вход {entry_zone}"
     if msg_id:
-        entry_ref += f" · исходный сигнал TG <code>#{msg_id}</code>"
-    reason = str(payload.get("reason") or "")
-    detail_human = invalidate_detail_human(str(followup.detail or ""), reason=reason)
+        entry_ref += f" · сигнал TG <code>#{msg_id}</code>"
+
+    reason_raw = str(payload.get("reason") or "")
+    detail_human = invalidate_detail_human(str(followup.detail or ""), reason=reason_raw)
+
+    # TP1 hit: structured update card
+    if event == "fix_profit_tp1":
+        fix_pct = int(payload.get("partial_fixed_pct") or 50)
+        new_sl = _fmt_price(payload.get("stop_loss"))
+        tp1_pct_val = payload.get("tp1")
+        entry_price_est = entry_lo or 0
+        if tp1_pct_val and entry_price_est:
+            try:
+                if direction == "SHORT":
+                    tp1_pct = (float(entry_price_est) - float(tp1_pct_val)) / float(entry_price_est) * 100.0
+                else:
+                    tp1_pct = (float(tp1_pct_val) - float(entry_price_est)) / float(entry_price_est) * 100.0
+                tp1_pct_str = f" +{tp1_pct:.1f}%"
+            except Exception:
+                tp1_pct_str = ""
+        else:
+            tp1_pct_str = ""
+        return (
+            f"✅ <b>TP1 достигнут{tp1_pct_str} · {sym} {direction}</b>\n"
+            f"🔒 Зафиксируй <b>{fix_pct}%</b> позиции · Стоп перенесён на безубыток <code>{new_sl}</code>\n"
+            f"🎯 Следующая цель: TP2 <code>{tp2_lvl}</code>\n"
+            f"{entry_ref}\n"
+            f"<i>Hunt follow-up · не auto-trade</i>"
+        )
+
+    # TP2 hit: close card
+    if event == "fix_profit_tp2":
+        duration = _duration_str(opened_raw)
+        skipped = bool(payload.get("tp1_skipped"))
+        extra = " (TP1 пролёт)" if skipped else ""
+        return (
+            f"📋 <b>Закрыт {sym} {direction}{extra}</b>\n"
+            f"💰 PnL: TP2 <code>{tp2_lvl}</code> · Длит: {duration}\n"
+            f"📌 Причина: Достигнут TP2\n"
+            f"{entry_ref}\n"
+            f"<i>Hunt follow-up · не auto-trade</i>"
+        )
+
+    # Signal closed / invalidated
+    if event == "invalidate":
+        duration = _duration_str(opened_raw)
+        reason_label_map = {
+            "stop_hit": "Стоп-лосс пробит",
+            "tp1": "Закрыто по TP1",
+            "tp2": "Закрыто по TP2",
+            "bounce_invalidate": "Lifecycle: отскок — шорт отменён",
+            "time_stall": "Нет прогресса за 8ч — тезис не сработал",
+            "bias_flip": "Lifecycle сменил bias против позиции",
+            "support_lost": "Потеря поддержки (лонг)",
+        }
+        reason_str = reason_label_map.get(reason_raw, html.escape(detail_human))
+        return (
+            f"📋 <b>Закрыт {sym} {direction}</b>\n"
+            f"📌 Причина: {reason_str}\n"
+            f"⏱ Длит: {duration}\n"
+            f"{entry_ref}\n"
+            f"Уровни: SL <code>{sl}</code> · TP1 <code>{tp1_lvl}</code> · TP2 <code>{tp2_lvl}</code>\n"
+            f"<i>Hunt follow-up · не auto-trade</i>"
+        )
+
+    # Stop warning
+    if event == "stop_warning":
+        return (
+            f"⚠️ <b>СТОП РЯДОМ · {sym} {direction}</b>\n"
+            f"Цена <code>{price}</code> близко к SL <code>{sl}</code>\n"
+            f"Реши: держать или фиксировать вручную.\n"
+            f"{entry_ref}\n"
+            f"<i>Hunt follow-up · не auto-trade</i>"
+        )
+
+    # Generic fallback
+    badges = {"phase_change": "🔄", "avg_zone": "➕"}
+    titles = {"phase_change": "PHASE CHANGE", "avg_zone": "AVG ZONE"}
+    badge = badges.get(event, "📣")
+    title = titles.get(event, event)
+    lc_phase_now = html.escape(_phase_human(str(lc.get("phase") or "—")))
     return (
         f"{badge} <b>{title}</b>\n"
-        f"{sym} · <code>{direction}</code> · price <code>{price}</code>\n"
+        f"{sym} · <code>{direction}</code> · цена <code>{price}</code>\n"
         f"{html.escape(detail_human)}\n"
         f"{entry_ref}\n"
-        f"Latch SL <code>{sl}</code> · TP1 <code>{tp1_lvl}</code> · TP2 <code>{tp2_lvl}</code>\n"
-        f"Lifecycle now <code>{html.escape(str(lc.get('phase') or '—'))}</code> · "
-        f"bias <code>{html.escape(str(lc.get('recommended_bias') or '—'))}</code>\n"
+        f"SL <code>{sl}</code> · TP1 <code>{tp1_lvl}</code> · TP2 <code>{tp2_lvl}</code>\n"
+        f"Фаза: {lc_phase_now}\n"
         f"<i>Hunt follow-up · не auto-trade</i>"
     )
 
