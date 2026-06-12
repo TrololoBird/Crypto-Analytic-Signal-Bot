@@ -165,7 +165,10 @@ def _orderflow_confirm_aligned(
     try:
         val = float(agg60)
     except (TypeError, ValueError):
-        return True, ""
+        # Present-but-malformed orderflow must not silently pass a safety gate on a
+        # financial decision (absent data is handled above). Refuse to confirm and
+        # surface the bad input in the confirm reasons.
+        return False, "orderflow_data_invalid"
     buy_min = float(of.get("taker_buy_min", 0.58))
     sell_max = float(of.get("taker_sell_max", 0.42))
     if direction == "long" and val < buy_min:
