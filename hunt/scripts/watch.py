@@ -255,6 +255,12 @@ HUNT_SNIPER_LIVE_PHASES = frozenset({"dump_active"})
 # HMSTR-class squeeze guard: block live short when top-trader L/S ratio is this high
 # (data-grounded on 11 live signals — losers HMSTR 2.48 / EPIC 2.11 vs winners <=1.91).
 HUNT_SNIPER_TOP_LS_MAX = float(os.environ.get("HUNT_SNIPER_TOP_LS_MAX", "2.0"))
+# Require top-trader L/S data present to ship — a financial gate must not fire blind
+# to its own squeeze check (no empty-data pass-through).
+HUNT_SNIPER_REQUIRE_TOP_LS = os.environ.get("HUNT_SNIPER_REQUIRE_TOP_LS", "1") not in {"0", "false", "False"}
+# No-chase freshness: veto a short fade once price has already extended below the entry
+# zone by this fraction (INX shipped after a ~15% fall, price already under the zone).
+HUNT_SNIPER_CHASE_TOL = float(os.environ.get("HUNT_SNIPER_CHASE_TOL", "0.002"))
 
 LOG = configure_script_logging("scripts.dump_minute_watch")
 _STOP = False
@@ -2835,22 +2841,59 @@ async def _run_tick(
                             # Long stays shadow (tracked, never announced).
                             if direction != "short":
                                 continue
-                            _lc_phase = str((lifecycle_raw or {}).get("phase") or "")
+                            _lc = lifecycle_raw if isinstance(lifecycle_raw, dict) else {}
+                            _lc_phase = str(_lc.get("phase") or "")
                             if _lc_phase not in HUNT_SNIPER_LIVE_PHASES:
                                 continue
-                            # HMSTR-class squeeze guard (forensics 2026-06-12): do not
-                            # ship a short while top traders are heavily long — fading
-                            # smart-money positioning is squeeze fuel. On the 11 live
-                            # signals top_ls_1h>=2.0 flagged the genuine bad entry
-                            # (HMSTR 2.48) and EPIC (2.11); every winner with data <=1.91.
-                            # Signal still tracked (shadow) for outcome data.
-                            _top_ls = ((row.get("market") or {})).get("top_ls_1h")
-                            if _top_ls is not None:
+                            # Respect the lifecycle's own entry permission. INXUSDT shipped a
+                            # short in a transient window while the lifecycle said bias=wait /
+                            # short_entry_ok=False (dump already ~15% underway) = late chase.
+                            if _lc.get("short_entry_ok") is not True:
+                                LOG.warning(
+                                    "sniper_block_short_entry_not_ok", symbol=symbol,
+                                    phase=_lc_phase, bias=_lc.get("recommended_bias"),
+                                )
+                                continue
+                            # No-chase freshness: the entry zone is the acceptable fill band;
+                            # if price already extended below it the move happened (INX: price
+                            # 0.00827 under entry_zone[0]=0.008464). Missing/invalid geometry
+                            # on a financial decision -> block loudly, never ship blind.
+                            _ez = setup.get("entry_zone")
+                            try:
+                                _zone_lo = float(_ez[0])
+                                _px = float(row["price"])
+                            except (TypeError, ValueError, IndexError, KeyError):
+                                LOG.error(
+                                    "sniper_block_bad_entry_geometry", symbol=symbol,
+                                    entry_zone=_ez, price=row.get("price"),
+                                )
+                                continue
+                            if _px < _zone_lo * (1.0 - HUNT_SNIPER_CHASE_TOL):
+                                LOG.warning(
+                                    "sniper_block_late_chase", symbol=symbol, price=_px,
+                                    entry_zone_lo=_zone_lo,
+                                    ext_pct=round((_zone_lo - _px) / _zone_lo * 100.0, 2),
+                                )
+                                continue
+                            # HMSTR-class squeeze guard (forensics 2026-06-12): a short while
+                            # top traders are heavily long fades smart money = squeeze fuel
+                            # (HMSTR 2.48 / EPIC 2.11 lost; winners <=1.91). A malformed or
+                            # absent value must not silently bypass the guard — block loudly.
+                            _top_ls = (row.get("market") or {}).get("top_ls_1h")
+                            if _top_ls is None:
+                                if HUNT_SNIPER_REQUIRE_TOP_LS:
+                                    LOG.warning("sniper_block_top_ls_missing", symbol=symbol)
+                                    continue
+                            else:
                                 try:
-                                    if float(_top_ls) >= HUNT_SNIPER_TOP_LS_MAX:
-                                        continue
+                                    _top_ls_f = float(_top_ls)
                                 except (TypeError, ValueError):
-                                    pass
+                                    LOG.error(
+                                        "sniper_block_bad_top_ls", symbol=symbol, top_ls=_top_ls,
+                                    )
+                                    continue
+                                if _top_ls_f >= HUNT_SNIPER_TOP_LS_MAX:
+                                    continue
                         if not _should_alert(
                             setup,
                             direction=direction,
