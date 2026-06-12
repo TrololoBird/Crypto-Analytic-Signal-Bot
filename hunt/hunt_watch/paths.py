@@ -28,3 +28,13 @@ PREP_SHADOW_EVENTS = DATA / "prep_shadow_events.jsonl"
 MARKET_REGIME = DATA / "market_regime.json"
 # Persistent closed signal archive — append-only, never wiped, used for backtest/autotune
 SIGNAL_HISTORY = DATA / "signal_history.jsonl"
+BACKTEST_OUTCOMES = DATA / "backtest_outcomes.jsonl"
+# ATR-enriched grade (realistic vol-based levels) — preferred truth source when present
+BACKTEST_OUTCOMES_ENRICHED = DATA / "backtest_outcomes_enriched.jsonl"
+# Confirmed-gate setups graded vs raw baseline — measures the confirmation edge
+GATE_EDGE_OUTCOMES = DATA / "gate_edge_outcomes.jsonl"
+INTEL_DOSSIER_MD = DATA / "intel_dossier.md"
+INTEL_DOSSIER_JSON = DATA / "intel_dossier.json"
+INTEL_REPORT = DATA / "intel_report.json"
+DEEP_WATCH_GLOB = "deep_watch_*.jsonl"
+DUMP_HUNT_ALERT_STATE = DATA / "dump_hunt_alert_state.json"

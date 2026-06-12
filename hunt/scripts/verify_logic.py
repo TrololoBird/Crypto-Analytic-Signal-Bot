@@ -18,6 +18,7 @@ from hunt_watch.logic_verify import (
     run_btc_corr_cases,
     run_confirm_cases,
     run_delivery_cases,
+    run_sniper_cases,
     run_early_cases,
     run_ensemble_cases,
     run_frame_fallback_cases,
@@ -31,6 +32,12 @@ from hunt_watch.logic_verify import (
     run_dump_continuation_cases,
     run_tracker_be_cases,
     run_tracker_outcome_cases,
+    run_stale_grace_cases,
+    run_stale_entry_phase_cases,
+    run_feature_latch_cases,
+    run_fast_flush_tp1_cases,
+    run_dump_init_score_cases,
+    run_backtest_synthetic_cases,
     run_prep_shadow_cases,
     run_replay_cases,
     run_ws_research_cases,
@@ -66,6 +73,7 @@ async def _main_async(*, live: list[str]) -> int:
     syn_sticky = run_lifecycle_sticky_cases()
     syn_pcp = run_phase_change_policy_cases()
     syn_conf = run_confirm_cases()
+    syn_sniper = run_sniper_cases()
     syn_del = run_delivery_cases()
     syn_early = run_early_cases()
     syn_adx = run_adx_prep_cases()
@@ -77,6 +85,12 @@ async def _main_async(*, live: list[str]) -> int:
     syn_dc = run_dump_continuation_cases()
     syn_be = run_tracker_be_cases()
     syn_out = run_tracker_outcome_cases()
+    syn_stale = run_stale_grace_cases()
+    syn_stale_entry = run_stale_entry_phase_cases()
+    syn_latch = run_feature_latch_cases()
+    syn_ff_tp = run_fast_flush_tp1_cases()
+    syn_di = run_dump_init_score_cases()
+    syn_bt = run_backtest_synthetic_cases()
     syn_pm = run_phase_matrix_cases()
     syn_btc = run_btc_corr_cases()
     syn_ff = run_frame_fallback_cases()
@@ -87,6 +101,7 @@ async def _main_async(*, live: list[str]) -> int:
         + syn_sticky
         + syn_pcp
         + syn_conf
+        + syn_sniper
         + syn_del
         + syn_early
         + syn_adx
@@ -98,6 +113,12 @@ async def _main_async(*, live: list[str]) -> int:
         + syn_dc
         + syn_be
         + syn_out
+        + syn_stale
+        + syn_stale_entry
+        + syn_latch
+        + syn_ff_tp
+        + syn_di
+        + syn_bt
         + syn_pm
         + syn_btc
         + syn_ff

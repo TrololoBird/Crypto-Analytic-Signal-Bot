@@ -11,8 +11,7 @@ from typing import Any
 
 from engine.domain.config import load_settings
 from engine.features.prepare import min_required_bars
-from engine.market.data import BinanceFuturesMarketData
-from engine.market.rest_impl import BinanceClientImpl
+from hunt_core.market import HuntCcxtClient
 from engine.telegram import TelegramBroadcaster
 
 from hunt_watch.alert_explain import evaluate_alert_gate, evaluate_formation
@@ -234,16 +233,8 @@ async def probe_symbol_signal(
         min_bars_1h=settings.filters.min_bars_1h,
         min_bars_4h=settings.filters.min_bars_4h,
     )
-    client = BinanceFuturesMarketData(
-        binance_client=BinanceClientImpl(
-            rest_timeout_seconds=45.0,
-            futures_data_request_limit_per_5m=max(
-                60, settings.runtime.futures_data_request_limit_per_5m // 2
-            ),
-            proxy_url=settings.network.proxy_url,
-            trust_env=settings.network.trust_env,
-        ),
-    )
+    client = HuntCcxtClient.from_settings(settings)
+    await client.load_markets()
     try:
         premium_all = await watch_mod._safe_fetch(client.fetch_premium_index_all()) or {}
         await asyncio.sleep(stagger_ms / 1000.0)

@@ -1,5 +1,87 @@
 # Hunt Changelog (session notes)
 
+## 2026-06-12 — Gate-edge proof (central thesis confirmed)
+
+- **`scripts/gate_edge.py`** — replays the confirm gate's historical output: the tick JSONL stores
+  `dump.confirmed`/`long.confirmed` + frozen levels per tick. Episode-deduped to distinct signals and
+  kline-graded with the SAME hold-to-target method as the raw baseline (apples-to-apples).
+- **Result (hard, n=178):** confirmed **SHORT** sl=**27%** / tp1_reach=48% (n=128); confirmed **LONG**
+  sl=**34%** / tp1_reach=22% (n=50). Raw-fade baseline sl=**52%**. **The gate cuts SL by 25pp (short) /
+  18pp (long) — the confirmation gate IS the edge.** Validates R1's refusal to loosen thresholds.
+- **Asymmetry finding:** shorts (fade pumps) are the real edge (27% sl, 48% reach); longs are marginal
+  (34% sl, only 22% reach). Suggestion for analyst: favor shorts, scrutinize long confirms.
+- Wired `compute_gate_edge()` into calibration + a prominent dossier table (`GATE_EDGE_OUTCOMES` path).
+  Refresh via `python hunt/scripts/gate_edge.py --direction both`.
+
+## 2026-06-12 — R1–R3: backtest as calibration truth-source
+
+- **R1 — truth signal.** `calibration.py`: added `compute_backtest_rates()` (hold-to-target
+  sl_hit/tp1_reach from `backtest_outcomes.jsonl`). `safe_to_apply` now blocks loosening when backtest
+  `sl_hit > 30%` (n≥30) — the live `thesis_success` (100%, early-exit-biased) lost its veto. Backtest
+  rates surface even on small-n early-return. Dossier leads with a live-vs-backtest divergence note.
+- **Bug: test→production pollution.** `logic_verify` ran `close_signal(LATCHUSDT)` which appended to the
+  real `signal_history.jsonl` every verify run (12 identical rows; HUSDT None-opened ×8 from a
+  multi-watcher race). Added `archive=False` to `close_signal`; test opts out. Cleaned history 25→5
+  genuine signals (`.bak` saved); killed 3 stale concurrent watchers.
+- **R2 — early-exit verdict.** `early_exit_verdict()` joins live `lifecycle_stale`/soft closes with the
+  hold-to-target backtest: avoided_stop vs forfeited_tp. Early read (n=5): cut 2 winners, 0 stops avoided
+  → net-NEGATIVE (leaving money on table). Surfaced in dossier.
+- **R3 — sample scale + REST enrichment.** Graded all ~265 pump_history legs (was 53):
+  **sl_hit 40% · tp2 31% · tp1 9% · timeout 20%** — confirms the confirm-gate filters a 40%-SL raw
+  universe down to clean live entries. Added `--enrich`: `atr_pct_from_klines()` (Wilder ATR%) +
+  `atr_levels()` rebuild synthetic TP/SL from real pre-leg volatility instead of the flat 24h heuristic.
+- **R3 enriched comparison.** ATR-realistic levels gave sl_hit **52%** (vs crude 40%) — the crude
+  heuristic was loose on stops. `compute_backtest_rates()` now prefers `backtest_outcomes_enriched.jsonl`
+  when present. Conclusion: the raw fade universe is a genuine loser; the confirm-gate IS the edge.
+- **R4 — tuning.** Suggestions-only by decision. The system now correctly refuses to loosen
+  (`safe_to_apply=False`, backtest_sl 52% > 30% gate). No thresholds changed unilaterally; the dossier
+  carries backtest rates + early-exit verdict + TP1 analysis for human/analyst review.
+- **R5 — `dump_init_score` validation → FAIL, NOT wired.** Extended `backtest_dump_init.py` to
+  outcome-grade the armed bar (fade-short, ATR levels, forward walk). Armed n=8: tp1_hit=3, sl_hit=5 →
+  **62% SL, worse than the 52% baseline.** Verdict FAIL; `dump_init_score` stays offline/experimental,
+  NOT added to live `confirm_dump`. The validation harness prevented shipping a non-edge.
+- **Root-cause fix: multi-watcher race.** The recurring duplicate / `opened_at=None` rows came from
+  concurrent `watch.py` processes writing shared state. Added a single-instance PID lock
+  (`hunt/data/watch.pid`) in `watch.main()` (skipped for `--once`): a second start is refused with a
+  clear message. Cleaned history again → 8 genuine signals (incl. ESPORTSUSDT short TP2 **+35.99%**).
+- **Verify:** `py_compile hunt/**` clean; `verify_logic` 120/120 passes and no longer pollutes; dossier
+  renders truth-note + early-exit verdict; PID lock blocks a second watcher.
+
+## 2026-06-11 — W27: SPACEUSDT instant TP1 + lifecycle_stale ping-pong
+
+- **Problem:** SPACEUSDT short — TG entry → instant TP1 → `lifecycle_stale:impulse_initiating` invalidate ~82s later (+5.86% PnL but UX broken).
+- **Root cause (2 bugs):**
+  1. Price `0.008368` already below TP1 `0.008499` at confirm → TP1 on first tick
+  2. `stale_lc` fired while `entry_lifecycle_phase == impulse_initiating` unchanged (same phase ≠ transition)
+- **Fix:**
+  - `signal_tracker._stale_lifecycle_invalidate` — skip stale when entry phase == current phase; skip after `tp1_hit`/`tp1_managed`
+  - `watch.py` — block TG if price already at/through TP1 (`watch_telegram_skipped_past_tp1`)
+- **Verify:** `run_stale_entry_phase_cases()` 3/3
+
+## 2026-06-11 — P2: intel dossier (Layer 3 scaffold)
+
+- **Fix:** `hunt/intel/` — `dossier.py`, `schema.py`, `report.py`, `provider.py` (optional Gemini)
+- **CLI:** `hunt/scripts/analyze_session.py` → `intel_dossier.md` + `.json`; prints feed-to-Cursor hint
+- **Guardrail:** never writes `hunt_calibration.json`
+
+## 2026-06-11 — P1: backtest pump/dump leg events (sample growth)
+
+- **Problem:** only ~5 closed live signals — stats/calibration blocked on n<30.
+- **Fix:**
+  - `hunt/hunt_watch/backtest_synthetic.py` — `leg_events_to_signals()` from `pump_history.json` leg_pump/leg_dump
+  - `backtest_signals.py` — `--include-pump-events`, writes `hunt/data/backtest_outcomes.jsonl`
+- **Verify:** `run_backtest_synthetic_cases()` 5/5; `backtest_signals.py --include-pump-events --limit 50`
+
+## 2026-06-11 — P0: feature-vector latching + order-book walls (v-Complete data gap)
+
+- **Problem:** `signal_history.jsonl` had outcomes but not the per-tick microstructure at entry/peak/close — stats and future intel dossier cannot learn feature→outcome patterns.
+- **Fix:**
+  - `hunt/hunt_watch/feature_latch.py` — `feature_vector_from_row()`, `book_walls_from_depth()`
+  - `signal_tracker.py` — latch `features_open`/`features_peak`/`features_close` + `book_walls` at open; peak updates on MFE improve
+  - `engine/market/rest_impl.py` — depth snapshot now includes top-5 `bid_levels`/`ask_levels` by notional
+  - `watch.py` — `book_walls` on tick row; pass latched features at `register_signal_open`
+- **Verify:** `run_feature_latch_cases()` 5/5; py_compile hunt/
+
 ## 2026-06-11 — W26: depth_imbalance as secondary confirm factor
 
 - **Problem:** order book ask/bid pressure not used in live `confirm_dump` / `confirm_long`; only in beat_dump_lab experiments.

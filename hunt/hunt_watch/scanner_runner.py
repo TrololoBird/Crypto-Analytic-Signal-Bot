@@ -11,8 +11,8 @@ from typing import Any
 import structlog
 
 from engine.domain.config import load_settings
-from engine.market.data import BinanceFuturesMarketData
-from engine.market.rest_impl import BinanceClientImpl
+
+from hunt_core.market import HuntCcxtClient
 from hunt_watch.adaptive_thresholds import (
     load_adaptive_store,
     save_adaptive_store,
@@ -50,14 +50,8 @@ async def run_scan(
     *, limit: int = 30, min_score: float = HUNT_SCORE_WATCH_THRESHOLD
 ) -> dict[str, Any]:
     settings = load_settings()
-    client = BinanceFuturesMarketData(
-        binance_client=BinanceClientImpl(
-            rest_timeout_seconds=45.0,
-            futures_data_request_limit_per_5m=settings.runtime.futures_data_request_limit_per_5m,
-            proxy_url=settings.network.proxy_url,
-            trust_env=settings.network.trust_env,
-        ),
-    )
+    client = HuntCcxtClient.from_settings(settings)
+    await client.load_markets()
     try:
         tickers = _enrich_ticker_rows(await client.fetch_ticker_24h())
         pump_store = load_pump_history()

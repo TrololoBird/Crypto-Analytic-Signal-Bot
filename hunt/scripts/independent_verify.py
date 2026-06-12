@@ -25,8 +25,7 @@ from hunt_watch.signal_engine import cluster_fuel, confirm_dump, confirm_long
 
 from engine.domain.config import load_settings
 from engine.features.prepare import min_required_bars
-from engine.market.data import BinanceFuturesMarketData
-from engine.market.rest_impl import BinanceClientImpl
+from hunt_core.market import HuntCcxtClient
 
 
 def _load_latest_rows(path: Path, *, max_ticks: int = 2) -> list[dict[str, Any]]:
@@ -178,14 +177,7 @@ async def _independent_snapshot(symbol: str, *, stagger_ms: int = 120) -> dict[s
         min_bars_1h=settings.filters.min_bars_1h,
         min_bars_4h=settings.filters.min_bars_4h,
     )
-    client = BinanceFuturesMarketData(
-        binance_client=BinanceClientImpl(
-            rest_timeout_seconds=45.0,
-            futures_data_request_limit_per_5m=60,
-            proxy_url=settings.network.proxy_url,
-            trust_env=settings.network.trust_env,
-        ),
-    )
+    client = HuntCcxtClient.from_settings(settings)
     try:
         premium_all = await watch_mod._safe_fetch(client.fetch_premium_index_all()) or {}
         await asyncio.sleep(stagger_ms / 1000.0)

@@ -1,6 +1,7 @@
 # Hunt — автономный цикл (промпт для новой сессии)
 
 **Скопируй блок «PROMPT» целиком в новый чат.**  
+**Продолжение после handoff (WAVE 15+):** `docs/HUNT_CONTINUE_PROMPT.md` — **implement-first**: forensic **всех** сигналов → паттерн → Ф6 ship (VELVET = один пример класса, не единственная задача).  
 Связанные файлы (все **гипотезы**, не догма): `HUNT_IMPLEMENTER_PROMPT.md`, `CRITICAL_AUDIT_PROMPT.md`, `HUNT_RESEARCH_*.md`, `ARCHITECTURE.md`, `graphify-out/*`.
 
 > **Важно:** ни `*.md`, ни **код** не канон. Проект в активной разработке; доки и реализация часто AI-generated, устаревают и могут подвергаться **полному рефакторингу**. Единственная опора — **эмпирика** (рынок, JSONL, tracker outcomes, audit vs реальность).

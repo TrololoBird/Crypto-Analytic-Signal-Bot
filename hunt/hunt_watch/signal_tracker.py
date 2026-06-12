@@ -78,7 +78,7 @@ def load_tracker_state(path: Path = STATE_PATH) -> dict[str, Any]:
         raw = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(raw, dict) and "signals" in raw:
             return raw
-    except OSError, json.JSONDecodeError:
+    except (OSError, json.JSONDecodeError):
         pass
     return {"signals": {}, "followup_sent": {}}
 
@@ -204,6 +204,25 @@ def _tick_feature_latch(
         active["features_peak"] = active["features_last"]
 
 
+def _effective_be_buffer_pct(
+    active: dict[str, Any], *, direction: str, symbol: str
+) -> float:
+    """Post-TP1 stop buffer — never below memecoin noise floor (forensics 2026-06-12)."""
+    th = tracker_thresholds(symbol)
+    cfg = float(th.get("breakeven_buffer_pct", 0.15))
+    min_pct = float(th.get("breakeven_buffer_min_pct", 1.0))
+    risk_frac = float(th.get("breakeven_risk_fraction", 0.25))
+    entry = _worst_entry(active, direction=direction)
+    orig = float(active.get("original_stop_loss") or active.get("stop_loss") or 0)
+    risk_pct = 0.0
+    if entry > 0 and orig > 0:
+        if direction == "short" and orig > entry:
+            risk_pct = (orig - entry) / entry * 100.0
+        elif direction == "long" and orig < entry:
+            risk_pct = (entry - orig) / entry * 100.0
+    return max(cfg, min_pct, risk_pct * risk_frac)
+
+
 def apply_tp1_management(
     active: dict[str, Any], *, direction: str, symbol: str = ""
 ) -> bool:
@@ -216,7 +235,7 @@ def apply_tp1_management(
     pct = _tp1_pct(symbol)
     if active.get("original_stop_loss") is None:
         active["original_stop_loss"] = active.get("stop_loss")
-    buf = float(tracker_thresholds(symbol).get("breakeven_buffer_pct", 0.15)) / 100.0
+    buf = _effective_be_buffer_pct(active, direction=direction, symbol=symbol) / 100.0
     if direction == "short":
         be_stop = entry * (1.0 + buf)
     else:

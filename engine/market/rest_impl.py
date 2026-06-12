@@ -138,6 +138,30 @@ def validate_order_book_depth_limit(limit: int) -> int:
     return normalized
 
 
+_TOP_BOOK_WALL_LEVELS = 5
+
+
+def _top_depth_walls(
+    levels: tuple[tuple[float, float], ...],
+    *,
+    top_n: int = _TOP_BOOK_WALL_LEVELS,
+) -> list[dict[str, float]]:
+    """Top bid/ask levels ranked by notional (price × qty) for hunt book-wall capture."""
+    ranked = sorted(
+        (
+            {
+                "price": price,
+                "qty": qty,
+                "notional_usd": round(price * qty, 2),
+            }
+            for price, qty in levels
+        ),
+        key=lambda row: row["notional_usd"],
+        reverse=True,
+    )
+    return ranked[:top_n]
+
+
 def validate_runtime_public_rest_url(url: str) -> None:
     """Validate runtime public REST URL."""
     parsed = urlparse(url)
@@ -1561,12 +1585,14 @@ class BinanceClientImpl(RestHttpMixin, BinanceClient):
             last_update_id = float(last_update_raw) if last_update_raw is not None else None
         except TypeError, ValueError:
             last_update_id = None
-        snapshot: dict[str, float | None] = {
+        snapshot: dict[str, Any] = {
             "bid_price": bids[0][0],
             "ask_price": asks[0][0],
             "bid_qty": sum((qty for _price, qty in bids)),
             "ask_qty": sum((qty for _price, qty in asks)),
             "last_update_id": last_update_id,
+            "bid_levels": _top_depth_walls(bids),
+            "ask_levels": _top_depth_walls(asks),
         }
         self._order_book_depth_cache[key] = (time.monotonic(), snapshot)
         return dict(snapshot)

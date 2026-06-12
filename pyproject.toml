@@ -28,6 +28,7 @@ dependencies = [
     "polars-ols>=0.3.5",
     "polars_ta>=0.5.17",
     "tomlkit>=0.15.0",
+    "ccxt>=4.4.0",
 ]
 
 [project.urls]
@@ -52,7 +53,7 @@ include-package-data = true
 
 [tool.setuptools.packages.find]
 where = [".", "hunt"]
-include = ["bot*", "engine*", "hunt_watch*"]
+include = ["bot*", "engine*", "hunt_watch*", "hunt_core*", "hunt_research*"]
 
 [tool.ruff]
 target-version = "py314"

@@ -22,8 +22,7 @@ from engine.domain.schemas import SymbolFrames, UniverseSymbol
 from engine.errors import DEFENSIVE_EXC
 from engine.features.pivots import _pivot_rows, with_spec_columns
 from engine.features.prepare import _prepare_frame, min_required_bars, prepare_symbol
-from engine.market.data import BinanceFuturesMarketData
-from engine.market.rest_impl import BinanceClientImpl
+from hunt_core.market import HuntCcxtClient
 
 # Same TF set as hunt watch
 TF_KEYS = ("1m", "3m", "5m", "15m", "1h", "4h", "1d")
@@ -204,14 +203,7 @@ async def run(symbol: str) -> dict[str, Any]:
         "4h": kline_fetch_limit(int(minimums.get("4h", 200)), "4h"),
         "1d": 90,
     }
-    client = BinanceFuturesMarketData(
-        binance_client=BinanceClientImpl(
-            rest_timeout_seconds=45.0,
-            futures_data_request_limit_per_5m=settings.runtime.futures_data_request_limit_per_5m,
-            proxy_url=settings.network.proxy_url,
-            trust_env=settings.network.trust_env,
-        ),
-    )
+    client = HuntCcxtClient.from_settings(settings)
     try:
         exchange = await _safe(client.fetch_exchange_symbols()) or []
         ticker_raw = await _safe(client.fetch_ticker_24h()) or []

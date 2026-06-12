@@ -24,6 +24,59 @@ from hunt_watch.symbol_probe import _watch_module, probe_symbol_signal
 _PROBE_RETRIES = 3
 _PROBE_RETRY_DELAY_S = 1.5
 
+_STRONG_PHASES = frozenset({"dump_active", "exhaustion_at_high", "distribution", "dump_confirmed"})
+_LONG_STRONG_PHASES = frozenset({"accumulation", "impulse_initiating", "breakout_arming", "long_confirmed"})
+
+
+def _signal_rating(fuel: float, phase: str, direction: str) -> tuple[str, str]:
+    """Returns (emoji, label) based on fuel + lifecycle phase."""
+    strong = _STRONG_PHASES if direction == "short" else _LONG_STRONG_PHASES
+    if fuel >= 80 and phase in strong:
+        return "🔥", "СИЛЬНЫЙ"
+    if fuel >= 65 and phase in strong:
+        return "✅", "УВЕРЕННЫЙ"
+    if fuel >= 50:
+        return "⚠️", "СРЕДНИЙ"
+    return "📊", "СЛАБЫЙ"
+
+
+def _tp_progress(entry_lo: float, entry_hi: float, tp1: float, ext_extreme: float, direction: str) -> str:
+    """Progress bar + remaining% toward TP1."""
+    mid = (entry_lo + entry_hi) / 2.0 if entry_lo and entry_hi else (entry_lo or entry_hi)
+    if mid <= 0 or tp1 <= 0:
+        return ""
+    if direction == "short":
+        total = (mid - tp1) / mid * 100.0
+        traveled = (mid - ext_extreme) / mid * 100.0 if ext_extreme > 0 else 0.0
+        remaining = (ext_extreme - tp1) / ext_extreme * 100.0 if ext_extreme > 0 else total
+    else:
+        total = (tp1 - mid) / mid * 100.0
+        traveled = (ext_extreme - mid) / mid * 100.0 if ext_extreme > 0 else 0.0
+        remaining = (tp1 - ext_extreme) / ext_extreme * 100.0 if ext_extreme > 0 else total
+    if total <= 0:
+        return ""
+    pct_done = max(0.0, min(1.0, traveled / total))
+    filled = int(pct_done * 8)
+    bar = "█" * filled + "░" * (8 - filled)
+    rem_s = f"{remaining:.1f}%" if remaining > 0 else "TP1!"
+    return f"[{bar}] осталось {rem_s}"
+
+
+def _duration_human(opened_at: str | None) -> str:
+    """Human-readable duration since signal opened."""
+    if not opened_at:
+        return "—"
+    try:
+        opened = datetime.fromisoformat(str(opened_at).replace("Z", "+00:00"))
+        delta = datetime.now(UTC) - opened
+        total_min = int(delta.total_seconds() / 60)
+        if total_min < 60:
+            return f"{total_min}м"
+        h, m = divmod(total_min, 60)
+        return f"{h}ч {m}м" if m else f"{h}ч"
+    except (TypeError, ValueError):
+        return "—"
+
 
 @dataclass(slots=True)
 class _ReportRollup:
@@ -117,21 +170,40 @@ def _rollup_touch(
         rollup.n_bias_conflict += 1
 
 
+_WIN_REASONS = frozenset({"tp1", "tp2", "fix_profit_tp1", "fix_profit_tp2"})
+_STOP_REASONS = frozenset({"stop_hit"})
+_SOFT_REASONS = frozenset({"bounce_invalidate", "trend_exhaustion", "reclaim_invalidation",
+                            "support_lost", "bias_flip", "lifecycle_stale", "opposite_signal"})
+
+
+def _thesis_outcome(reason: str, pnl: float | None, *, tp1_managed: bool = False) -> str:
+    if reason in _WIN_REASONS:
+        return "tp_hit"
+    if reason in _STOP_REASONS:
+        return "scratch_win" if tp1_managed else "stop_loss"
+    if reason in _SOFT_REASONS:
+        return "scratch_win" if (pnl is not None and pnl > 0) else "thesis_fail"
+    return "unknown"
+
+
 def _closed_stats(signals: dict[str, Any]) -> tuple[int, int, int]:
-    """Wins / losses / lifecycle_stale from closed tracker rows."""
-    wins = losses = stale = 0
-    win_reasons = {"tp1", "tp2", "fix_profit_tp1", "fix_profit_tp2"}
+    """tp_hit / stop_loss / thesis_fail counts from closed tracker rows."""
+    tp_hit = stop_loss = thesis_fail = 0
     for sig in signals.values():
         if not isinstance(sig, dict) or sig.get("status") != "closed":
             continue
-        reason = str(sig.get("close_reason") or "")
-        if reason in win_reasons:
-            wins += 1
-        elif reason == "lifecycle_stale":
-            stale += 1
-        else:
-            losses += 1
-    return wins, losses, stale
+        reason = str(sig.get("close_reason") or "unknown")
+        pnl = sig.get("pnl_pct")
+        pnl_f = float(pnl) if pnl is not None else None
+        tp1_managed = bool(sig.get("tp1_managed"))
+        outcome = _thesis_outcome(reason, pnl_f, tp1_managed=tp1_managed)
+        if outcome == "tp_hit":
+            tp_hit += 1
+        elif outcome == "stop_loss":
+            stop_loss += 1
+        elif outcome in ("thesis_fail",):
+            thesis_fail += 1
+    return tp_hit, stop_loss, thesis_fail
 
 
 def _format_tg_funnel(*, signals: dict[str, Any]) -> str:
@@ -238,35 +310,57 @@ def _format_active_block(
 
     sym_label = html.escape(sym.replace("USDT", "-USDT"))
     dir_u = direction.upper()
-    opened = str(sig.get("opened_at") or "")[:19].replace("T", " ")
-    latch_score = sig.get("score") or "—"
-    tp1_hit = "✓" if sig.get("tp1_hit") else "—"
-    tp2_hit = "✓" if sig.get("tp2_hit") else "—"
+    dir_emoji = "🔴" if direction == "short" else "🟢"
+    fuel = float(sig.get("fuel") or 0)
+    lc_phase = str(lc.get("phase") or sig.get("entry_lifecycle_phase") or "")
+    rating_emoji, rating_label = _signal_rating(fuel, lc_phase, direction)
     pnl_s = f"{pnl:+.2f}%" if pnl is not None else "—"
+    pnl_emoji = ("📈" if (pnl or 0) >= 0 else "📉") if direction == "long" else ("📈" if (pnl or 0) >= 0 else "📉")
+    duration = _duration_human(sig.get("opened_at"))
 
     sl_label = _fmt_price(sig.get("stop_loss"))
     if sig.get("sl_at_breakeven"):
-        sl_label = f"{sl_label} (entry BE)"
+        sl_label = f"{sl_label} 🔒BE"
+
+    tp1 = float(sig.get("tp1") or 0)
+    tp2 = float(sig.get("tp2") or 0)
+    entry_lo = float(sig.get("entry_lo") or 0)
+    entry_hi = float(sig.get("entry_hi") or 0)
+    ext_extreme = float(sig.get("extreme_lo" if direction == "short" else "extreme_hi") or 0)
 
     lines = [
-        f"🟢 <b>ОТКРЫТА</b> {sym_label} <code>{dir_u}</code> · PnL <code>{pnl_s}</code> · "
-        f"latch <code>{latch_score}</code>",
+        f"{dir_emoji} <b>ВХОД ВЗЯТ · {sym_label} {dir_u}</b>  {rating_emoji} <b>{rating_label}</b>",
         (
-            f"Открыт <code>{opened}</code> UTC · SL <code>{sl_label}</code> · "
-            f"TP1 <code>{_fmt_price(sig.get('tp1'))}</code>{tp1_hit} · "
-            f"TP2 <code>{_fmt_price(sig.get('tp2'))}</code>{tp2_hit}"
+            f"📍 Вход: <code>{_fmt_price(entry_lo)}–{_fmt_price(entry_hi)}</code>  "
+            f"Стоп: <code>{sl_label}</code>"
+        ),
+        (
+            f"🎯 TP1: <code>{_fmt_price(tp1)}</code>"
+            + ("  ✅" if sig.get("tp1_hit") else "") +
+            f"  TP2: <code>{_fmt_price(tp2)}</code>"
+            + ("  ✅" if sig.get("tp2_hit") else "")
         ),
     ]
+
+    # Progress bar toward TP1
+    progress = _tp_progress(entry_lo, entry_hi, tp1, ext_extreme, direction)
+    if progress:
+        lines.append(f"📊 {progress}")
+
     if sig.get("tp1_hit"):
         pct = sig.get("partial_fixed_pct") or 80
         lines.append(
-            f"✅ <b>TP1</b> — зафиксируй <code>{pct}%</code>"
-            + (" · SL на entry (безубыток)" if sig.get("sl_at_breakeven") else "")
+            f"✅ <b>TP1 достигнут</b> — зафиксируй <code>{pct}%</code>"
+            + (" · стоп на безубыток" if sig.get("sl_at_breakeven") else "")
         )
+
     lines.append(
-        f"Сейчас <code>{watch_mod._fmt_price(price)}</code> · lc "
-        f"<code>{html.escape(str(lc.get('phase') or '—'))}</code> · "
-        f"bias <code>{html.escape(str(lc.get('recommended_bias') or '—'))}</code>"
+        f"💰 PnL: <code>{pnl_s}</code>  ⏱ {duration}  "
+        f"Score: <code>{sig.get('score') or '—'}</code>  Fuel: <code>{int(fuel) if fuel else '—'}</code>"
+    )
+    lines.append(
+        f"Сейчас <code>{watch_mod._fmt_price(price)}</code> · "
+        f"фаза <code>{html.escape(lc_phase or '—')}</code>"
     )
 
     realert_blockers = [
@@ -313,12 +407,18 @@ async def build_signals_report_text() -> str:
     ]
     cw, cl, cs = _closed_stats(signals)
 
+    thesis_success = cw  # tp_hit count
+    thesis_total = cw + cl + cs
     if not active:
-        blocks.append(
-            f"<b>Active tracker:</b> 0 · closed WR {cw}/{cw + cl + cs}"
-            if (cw + cl + cs)
-            else "<b>Active tracker:</b> 0"
-        )
+        if thesis_total:
+            wr_pct = f"{thesis_success / thesis_total * 100:.0f}%" if thesis_total else "—"
+            blocks.append(
+                f"<b>Нет активных позиций</b>\n"
+                f"📊 История: {thesis_total} закрытых · "
+                f"tp_hit {cw} · stop {cl} · fail {cs} · thesis {wr_pct}"
+            )
+        else:
+            blocks.append("<b>Нет активных позиций</b>")
         blocks.append("<i>Hunt tracker · не auto-trade</i>")
         return "\n\n".join(blocks)
 

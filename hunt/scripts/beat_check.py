@@ -17,8 +17,7 @@ import polars as pl
 
 from engine.domain.config import load_settings
 from engine.features.prepare_frame import _prepare_frame
-from engine.market.data import BinanceFuturesMarketData
-from engine.market.rest_impl import BinanceClientImpl
+from hunt_core.market import HuntCcxtClient
 
 
 def _wilder_rsi(closes: list[float], period: int = 14) -> float | None:
@@ -79,14 +78,7 @@ def _tf_summary(df: pl.DataFrame | None, label: str) -> dict[str, Any]:
 
 async def analyze(symbol: str = "BEATUSDT") -> dict[str, Any]:
     settings = load_settings()
-    client = BinanceFuturesMarketData(
-        binance_client=BinanceClientImpl(
-            rest_timeout_seconds=45.0,
-            futures_data_request_limit_per_5m=settings.runtime.futures_data_request_limit_per_5m,
-            proxy_url=settings.network.proxy_url,
-            trust_env=settings.network.trust_env,
-        ),
-    )
+    client = HuntCcxtClient.from_settings(settings)
     try:
         limits = {"1m": 500, "5m": 200, "15m": 120, "1h": 100, "4h": 80}
         klines = {

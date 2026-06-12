@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from typing import Any, Literal
 
 from hunt_watch.param_store import effective_hunt_params
+from hunt_watch.watchlist_ops import watchlist_flags
 
 EarlyKind = Literal["none", "prep", "imminent", "start", "confirm"]
 
@@ -30,12 +31,19 @@ LONG_PREP_SETUP = frozenset({"accumulation_watch", "long_setup_forming"})
 LONG_START_SETUP = frozenset({"long_imminent", "long_initiating"})
 
 EARLY_COOLDOWN_MIN = {
-    "prep": 30,
-    "imminent": 20,
-    "start": 25,
+    "prep": 12,
+    "imminent": 8,
+    "start": 6,
 }
 
-# Prep/start spam without tracker outcomes — confirmed entry only in Telegram.
+
+def early_telegram_enabled(symbol: str) -> bool:
+    if EARLY_TELEGRAM_ENABLED:
+        return True
+    flags = watchlist_flags(symbol)
+    return bool(flags.get("early_telegram") or flags.get("dump_hunt"))
+
+# Prep/start spam without tracker outcomes — per-symbol dump_hunt enables early TG.
 EARLY_TELEGRAM_ENABLED = False
 TP1_PARTIAL_FIX_PCT = 80
 
@@ -66,8 +74,14 @@ def _lc(lifecycle: Any | None) -> dict[str, Any]:
 
 def _fuel(setup: dict[str, Any], direction: str) -> float:
     if direction == "short":
-        return float(setup.get("dump_fuel") or setup.get("dump_score") or 0)
-    return float(setup.get("long_fuel") or setup.get("long_score") or 0)
+        return max(
+            float(setup.get("dump_fuel") or 0),
+            float(setup.get("dump_score") or 0),
+        )
+    return max(
+        float(setup.get("long_fuel") or 0),
+        float(setup.get("long_score") or 0),
+    )
 
 
 def _ignition_pump(row: dict[str, Any] | None) -> dict[str, Any]:
@@ -88,6 +102,8 @@ def evaluate_early_alert(
     """Whether to send preparation/start Telegram (separate from full confirm)."""
     sym = symbol.upper()
     cal = effective_hunt_params(sym)
+    wl = watchlist_flags(sym)
+    dump_hunt = bool(wl.get("dump_hunt"))
     lc = _lc(lifecycle)
     lc_phase = str(lc.get("phase") or "")
     setup_phase = str(setup.get("phase") or "")
@@ -106,6 +122,29 @@ def evaluate_early_alert(
 
         if confirmed:
             return EarlyAlert("confirm", "confirm", "full_confirm")
+
+        price = float((row or {}).get("price") or 0)
+        support = float(setup.get("support_break_level") or 0)
+        below_support = support > 0 and price > 0 and price < support
+
+        if dump_hunt and below_support and fuel >= cal.forming_min_score + 10:
+            return EarlyAlert(
+                "start",
+                "start",
+                f"Пробой support {support:.5f} · fuel {fuel:.0f} · открывай шорт",
+            )
+
+        if dump_hunt and fuel >= cal.confirm_min_score and setup_phase in SHORT_PREP_SETUP | SHORT_START_SETUP:
+            if below_support or any(
+                k in h
+                for h in hard
+                for k in ("close_below_support", "live_below_support", "rejection", "cascade")
+            ):
+                return EarlyAlert(
+                    "imminent",
+                    "imminent",
+                    f"Dump hunt armed · {setup_phase} · fuel {fuel:.0f}",
+                )
 
         if setup_phase in SHORT_START_SETUP and fuel >= cal.forming_min_score:
             has_struct = any(
@@ -131,6 +170,19 @@ def evaluate_early_alert(
                 "imminent",
                 "imminent",
                 f"Дамп imminent · fuel {fuel:.0f} · жди closed-bar",
+            )
+
+        if (
+            dump_hunt
+            and lc_phase in SHORT_PREP_LC
+            and setup_phase in SHORT_PREP_SETUP | {"dump_setup_forming"}
+            and fuel >= cal.forming_min_score + 20
+        ):
+            fall = float(lc.get("fall_from_high_pct") or 0)
+            return EarlyAlert(
+                "imminent",
+                "imminent",
+                f"Fade-zone charged · fuel {fuel:.0f} · fall {fall:.1f}%",
             )
 
         if (

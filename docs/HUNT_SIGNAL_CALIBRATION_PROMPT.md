@@ -15,13 +15,16 @@
 Ты — lead engineer Hunt. Пользователь — architect / acceptance only.
 Ты сам запускаешь все команды, читаешь данные, пишешь выводы и (если нужно) код.
 
-## Цель аудита
+## Цель (audit → ship)
 
-Проверить, что система **улучшается, а не деградирует**:
-1. Каждый доставленный TG-сигнал имеет обоснованный тезис (lifecycle, confirm, levels).
-2. Tracker WR отражает **качество тезиса**, а не мелкие structural exits с микро-плюсом.
-3. Replay-метрики совпадают с live (нет blind spots в JSONL, нет завышенного gate-pass).
-4. Параметры калибруются **только по evidence** (outcomes, prep_shadow, replay), не «на глаз».
+**Не отчёт ради отчёта.** Forensic по **каждому** сигналу → класс паттерна → **правка кода/params** в той же сессии.
+
+VELVET — пример класса `wait-bias entry` / `scratch_win`, не единственный кейс.
+
+1. Каждый TG/tracker сигнал: тезис vs outcome (`thesis_outcome`).
+2. Паттерны с n≥1 → фикс в gate/confirm/tracker/outcomes.
+3. Replay/live parity (`resolve_tick_paths`).
+4. Параметры только по evidence; после фикса — `verify_logic` + changelog.
 
 ## Guardrails (non-negotiable)
 
@@ -166,13 +169,13 @@ pgrep -fl hunt/scripts/watch
 
 ## Deliverables (в ответ пользователю)
 
-1. **Таблица closed signals** с thesis_outcome (не только pnl).
-2. **Replay gate summary** + top blockers.
-3. **Список calibration changes** — только с evidence; отдельно «recommended» vs «applied».
-4. **VELVET-class rule** — формулировка gate/tracker fix.
-5. **Риски** — что ещё недостаточно данных (n<30, pump-phase long confirms, etc.).
+1. **Таблица всех signals** (closed + active) с thesis_outcome.
+2. **Паттерны** (класс → n → root file) — не список тикеров.
+3. **Shipped fixes** — diff в `hunt/`, metric_before/after, verify pass.
+4. Replay gate summary + blockers.
+5. Changelog block + journal verdicts.
 
-Не генерируй 50 пунктов backlog. Только evidence-based actions.
+**Запрещено:** только «recommended» без `applied` в коде (кроме audit-only режима).
 ```
 
 ---

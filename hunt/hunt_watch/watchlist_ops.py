@@ -25,6 +25,31 @@ def load_watchlist_payload(path: Path = WATCHLIST) -> dict[str, Any]:
     return payload
 
 
+def watchlist_row(symbol: str, *, path: Path = WATCHLIST) -> dict[str, Any] | None:
+    sym = symbol.strip().upper()
+    if not sym.endswith("USDT"):
+        sym = f"{sym}USDT"
+    for row in load_watchlist_payload(path).get("watchlist") or []:
+        if isinstance(row, dict) and str(row.get("symbol", "")).upper() == sym:
+            return row
+    return None
+
+
+def watchlist_flags(symbol: str, *, path: Path = WATCHLIST) -> dict[str, Any]:
+    row = watchlist_row(symbol, path=path) or {}
+    return {
+        "early_telegram": bool(row.get("early_telegram")),
+        "dump_hunt": bool(row.get("dump_hunt")),
+        "notify_on_forming": bool(row.get("notify_on_forming")),
+        "hunt_score": float(row.get("hunt_score") or 0),
+    }
+
+
+def early_telegram_enabled(symbol: str, *, path: Path = WATCHLIST) -> bool:
+    flags = watchlist_flags(symbol, path=path)
+    return bool(flags.get("early_telegram") or flags.get("dump_hunt"))
+
+
 def add_to_watchlist(
     symbol: str,
     *,
@@ -32,6 +57,9 @@ def add_to_watchlist(
     hunt_score: float = 0.0,
     watch_bias: str = "both",
     note: str = "",
+    early_telegram: bool = False,
+    dump_hunt: bool = False,
+    notify_on_forming: bool = False,
     path: Path = WATCHLIST,
 ) -> bool:
     """Add or update symbol for minute watch. Returns True if newly added."""
@@ -48,6 +76,12 @@ def add_to_watchlist(
             row["watch_bias"] = watch_bias
             row["source"] = source
             row["updated_at"] = now
+            if early_telegram:
+                row["early_telegram"] = True
+            if dump_hunt:
+                row["dump_hunt"] = True
+            if notify_on_forming:
+                row["notify_on_forming"] = True
             if note:
                 row["note"] = note
             payload["watchlist"] = rows
@@ -63,6 +97,9 @@ def add_to_watchlist(
             "suggest_minute_watch": True,
             "source": source,
             "note": note,
+            "early_telegram": early_telegram,
+            "dump_hunt": dump_hunt,
+            "notify_on_forming": notify_on_forming,
             "added_at": now,
         }
     )
@@ -104,6 +141,8 @@ def register_signal_notify(
     *,
     direction: str,
     phase: str,
+    notify_on_forming: bool = False,
+    min_fuel: float = 70.0,
     path: Path = SIGNAL_NOTIFY,
 ) -> None:
     sym = symbol.strip().upper()
@@ -119,6 +158,8 @@ def register_signal_notify(
             "symbol": sym,
             "direction": direction,
             "await_phase": phase,
+            "notify_on_forming": notify_on_forming,
+            "min_fuel": min_fuel,
             "registered_at": datetime.now(UTC).isoformat(),
         }
     )

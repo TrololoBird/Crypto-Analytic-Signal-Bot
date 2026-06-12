@@ -253,6 +253,7 @@ def _open_shadow(
         "opened_at": now.isoformat(),
         "entry_price": price,
         "fuel": float(setup.get(fuel_key) or setup.get("dump_score" if direction == "short" else "long_score") or 0),
+        "score": float(setup.get("dump_score" if direction == "short" else "long_score") or 0),
         "lifecycle_phase": str(lifecycle.get("phase") or ""),
         "setup_phase": str(setup.get("phase") or ""),
         "alert_message": alert_message,
@@ -350,6 +351,8 @@ class PrepShadowSummary:
     confirm_rate: float | None
     by_tier: dict[str, dict[str, Any]]
     by_phase: dict[str, dict[str, Any]]
+    by_fuel: dict[str, dict[str, Any]]
+    by_score: dict[str, dict[str, Any]]
 
 
 def summarize_prep_shadows(
@@ -395,6 +398,25 @@ def summarize_prep_shadows(
     for phase, rows in phase_groups.items():
         by_phase[phase] = _bucket(rows)
 
+    by_fuel: dict[str, dict[str, Any]] = {}
+    fuel_groups: dict[str, list] = defaultdict(list)
+    for r in closed:
+        fuel = int(r.get("fuel") or 0)
+        lo = (fuel // 16) * 16
+        fuel_groups[f"{lo}-{lo + 15}"].append(r)
+    for fuel_bkt in sorted(fuel_groups):
+        by_fuel[fuel_bkt] = _bucket(fuel_groups[fuel_bkt])
+
+    by_score: dict[str, dict[str, Any]] = {}
+    score_groups: dict[str, list] = defaultdict(list)
+    for r in closed:
+        sc = int(float(r.get("score") or 0))
+        if sc > 0:
+            lo = (sc // 20) * 20
+            score_groups[f"{lo}-{lo + 19}"].append(r)
+    for sc_bkt in sorted(score_groups):
+        by_score[sc_bkt] = _bucket(score_groups[sc_bkt])
+
     return PrepShadowSummary(
         n_closed=len(closed),
         n_active=len(active),
@@ -404,6 +426,8 @@ def summarize_prep_shadows(
         confirm_rate=round(len(conf) / len(closed) * 100.0, 1) if closed else None,
         by_tier=by_tier,
         by_phase=by_phase,
+        by_fuel=by_fuel,
+        by_score=by_score,
     )
 
 
@@ -435,6 +459,22 @@ def format_prep_shadow_html(summary: PrepShadowSummary | None = None) -> str:
     if top_phases:
         ph_txt = " · ".join(f"{p} {b['wr']}% (n={b['n']})" for p, b in top_phases)
         lines.append(f"<b>Phase:</b> {ph_txt}")
+    if s.by_fuel:
+        fuel_txt = " · ".join(
+            f"fuel{bkt}: {b['wr']}% (n={b['n']})"
+            for bkt, b in sorted(s.by_fuel.items())
+            if b.get("n", 0) >= 3
+        )
+        if fuel_txt:
+            lines.append(f"<b>By fuel:</b> {fuel_txt}")
+    if s.by_score:
+        score_txt = " · ".join(
+            f"sc{bkt}: {b['wr']}% (n={b['n']})"
+            for bkt, b in sorted(s.by_score.items())
+            if b.get("n", 0) >= 3
+        )
+        if score_txt:
+            lines.append(f"<b>By score:</b> {score_txt}")
     lines.append("<i>Shadow mode — калибровка охотника, не auto-trade</i>")
     return "\n".join(lines)
 

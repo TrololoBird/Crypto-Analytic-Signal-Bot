@@ -1,86 +1,87 @@
-# Hunter — целевая архитектура и контракты (Track 2 / Gate G3 предложение)
+# Hunter — целевая архитектура и контракты (G3 / H-B rewrite)
 
-> Статус: **предложение** под гейт G3. Цель — задать North Star для split `watch.py`
-> и консолидации sprawl. Контракты основаны на **реальной** текущей схеме тика
-> (прочитана из `hunt/data/*.jsonl`, не из доков). Продукт: **H-A Снайпер**
-> (short fade в `dump_active`, см. `HUNT_PRODUCT_DEFINITION.md`).
+> **Статус:** утверждено под G2=H-B + G1=rewrite.  
+> **Пакет:** `hunt_core/` (production-core ≤8k LOC) · `hunt_research/` (offline) · `hunt/_legacy/hunt_watch/` (freeze после cutover).  
+> **Продукт:** [HUNT_PRODUCT_DEFINITION.md](HUNT_PRODUCT_DEFINITION.md) — H-B «Широкий хантер».
 
 ## 1. Целевой конвейер (production loop)
 
 ```
-ingest → features → detect → score/gate → deliver → track → (outcomes) → calibrate
+ingest → features → detect → gate → deliver → track → outcomes → calibrate
 ```
 
-Каждый слой — узкая ответственность и стабильный контракт на стыке. Research loop
-(backtest/feature-store/edge) читает те же контракты офлайн.
+Research loop читает те же контракты офлайн: lake → edge_harness → walk_forward → suggest.
 
-## 2. Стабильные контракты (точки стыковки research↔production)
+## 2. Стабильные контракты
 
-Менять эти структуры — только осознанно (миграция данных). Это ядро дисциплины.
+Реализация: [hunt_core/contracts.py](../hunt_core/contracts.py).
 
-### TickRow (что пишется в `dump_minute_watch.jsonl`, реальные ключи)
-`ts, symbol, price, chg_24h_pct, range_24h_pct,
-lifecycle{phase, recommended_bias, short_entry_ok, fall_from_high_pct, ...},
-dump{phase, score, fuel, triggers, confirm_hard, confirmed, entry_zone,
-  support_break_level, stop_loss, tp1, tp2, invalidation_above, levels_viable, levels_veto},
-long{...},  market{taker_5m, oi_chg_1h, oi_z_score, funding_pct, top_ls_1h,
-  depth_imbalance, liquidation_score_5m, microprice_bias, ...},
-regime{regime, adx_1h, adx_4h, bear_div_1h, ...}, session{high_24h, low_24h, pos_in_range},
-book_walls{bid_levels, ask_levels}`
+### TickRow
+`ts, symbol, price, chg_24h_pct, range_24h_pct, lifecycle{...}, dump{...}, long{...},
+market{...}, regime{...}, session{...}, book_walls{...}`
 
-### SignalRecord (active/closed; реальные ключи `signal_history.jsonl`)
-`symbol, direction, entry_lo, entry_hi, stop_loss, tp1, tp2, invalidation_above/below,
-fuel, entry_lifecycle_phase/bias, close_reason, exit_price, pnl_pct, mfe_pct,
-duration_min, extreme_hi/lo, entry_message_id, opened_at, closed_at`
+**Правило writer:** не дублировать `positioning` == `market` (humble §23).
 
-### OutcomeRecord (backtest/gate_edge; реальные ключи)
-`symbol, direction, lifecycle_phase, fuel, entry_lo/hi, stop_loss, tp1, tp2,
-bt_outcome∈{tp1_hit,tp2_hit,sl_hit,timeout}, bt_mfe_pct, bt_mae_pct, bt_candles_to_tp1, opened_at`
+### SignalRecord
+`symbol, direction, entry_lo/hi, stop_loss, tp1/tp2, invalidation_*, fuel,
+entry_lifecycle_phase/bias, close_reason, exit_price, pnl_pct, features_open/peak/close`
 
-### FeatureVector (`feature_latch`, open/peak/close) — канон для edge-харнеса/ML.
+### OutcomeRecord
+`symbol, direction, lifecycle_phase` (обязательно), `fuel, entry_*, stop_loss, tp1, tp2,
+bt_outcome ∈ {tp1_hit,tp2_hit,sl_hit,timeout}, bt_mfe_pct, bt_mae_pct, opened_at`
 
-> Замечание из аудита: `lifecycle_phase` заполнен в `gate_edge_outcomes.jsonl`, но
-> почти пуст в `backtest_outcomes.jsonl`. **Контракт обязывает** писать `lifecycle_phase`
-> во ВСЕ outcome-записи — иначе H-A срез не измерить.
+### FeatureVector
+Канон из `feature_latch` — open/peak/close snapshots.
 
-## 3. Целевая карта модулей (куда сходится текущее)
+## 3. Целевая карта модулей (`hunt_core/`)
 
-| Слой | Целевой модуль(и) | Сейчас (консолидировать) |
-|------|-------------------|--------------------------|
-| ingest/data | `data/feed`, `data/universe` | ws_feed, session_state, data_completeness, frame_fallback, screener, scanner_runner, watchlist_ops, symbol_probe, ignition |
-| features | `features` | indicators, feature_latch, levels, targets |
-| detect | `detect` (один short-path для снайпера) | signal_engine, early_alert, dump_hunt_alert, dump_init_score, lifecycle, lifecycle_sticky |
-| score/gate | `gate` (один прозрачный слой) | mtf_policy, directional_filters, phase_matrix_gate, liquidity_gate, btc_alignment, regime_ensemble, adaptive_thresholds |
-| deliver | `deliver` | (в watch.py) + telegram_commands, alert_explain, signal_audit |
-| track | `track` | signal_tracker, prep_shadow_tracker, tracker_outcomes, signal_events, pump_history |
-| calibrate | `calibrate` (один путь) | calibration, param_calibration, level_calibration, autotune_runner |
-| params | `param_store` | param_store (оставить) |
-| research/tooling | `hunt/research/` | logic_verify, verify_diff, monitor, jsonl_replay, backtest_synthetic, *_report |
+| Слой | Модуль | Источник (порт) |
+|------|--------|-----------------|
+| contracts | `contracts.py` | NEW |
+| runtime | `runtime/bot.py`, `runtime/cycle.py` | watch.py оркестрация |
+| data | `data/feed.py`, `universe.py`, `store.py`, `completeness.py` | ws_feed, screener, paths |
+| features | `features/latch.py`, `levels.py`, `indicators.py` | feature_latch, levels |
+| detect | `detect/router.py`, `short_dump.py`, `long_bounce.py`, `early_advisory.py`, `lifecycle.py` | signal_engine, lifecycle |
+| gate | `gate/pipeline.py`, `edge_policy.py`, `phase_matrix.py` | 7 gate modules |
+| deliver | `deliver/telegram.py`, `explain.py` | deliver/, alert_explain |
+| track | `track/tracker.py`, `events.py`, `reconcile.py` | signal_tracker |
+| calibrate | `calibrate/runner.py` | calibration×4 |
+| params | `params/store.py` | param_store |
 
-## 4. Split `watch.py` (3402 LOC → тонкая оркестрация)
+## 4. Detect router (H-B)
 
-Извлечь по слоям, оркестрация остаётся в `watch.py` (образец `bot/runtime/bot.py`):
-- `deliver/telegram.py` — форматтеры (emoji-мапы 1526/1648, `_format_followup_telegram`,
-  `format_dump_hunt_telegram`) + sender (`_send_telegram_chunks`, `maybe_send_*`).
-- `deliver/gate.py` — `_should_alert`/`evaluate_alert_gate` + снайпер-гейт (HUNT_SNIPER_MODE).
-- `runtime/cycle.py` — главный per-symbol цикл тика.
-- `data/collect.py` — сбор market/lifecycle/dump/long блоков тика (`_dump_analysis` и т.п.).
+```
+TickRow → detect/router.py
+  ├─ short_dump     → SetupCandidate (all phases, confirm path)
+  ├─ long_bounce    → SetupCandidate (edge-gated TG)
+  └─ early_advisory → prep_shadow only (no TG until promoted)
+```
 
-## 5. Консолидация дублей (приоритет, осторожно)
-- **Калибровка ×4 модуля + 2 скрипта → один `calibrate`** с guardrails.
-- **Verify ×5 → один регресс-прогон** (`logic_verify` 2093 LOC — раздуть на кейс-группы).
-- **Детекторы:** для снайпера live нужен только short-dump путь; long/early/ignition →
-  research/shadow, не в production detect.
+`gate/edge_policy.py`:
+- Short slices: promote when gate_edge SL ≤ baseline.
+- Long TG: **disabled** until `gate_edge long n≥30` and SL ≤35%.
 
-## 6. Anti-bloat бюджет (предложение для G3)
-- Активный **production-core** (ingest→track, без research/tooling): **цель ≤ 8 000 LOC**
-  (сейчас активное дерево 24 327; tooling/verify/research выносятся в `hunt/research/`).
-- Правило: модуль в production-core обязан быть reachable из `watch.py` И иметь edge-обоснование.
-- reachability-проверка в CI; `hunt/_archive/` и `hunt/research/` вне бюджета.
+## 5. Runtime entry
 
-## 7. Порядок исполнения (после G3)
-1. Split `watch.py` по §4 (поведение неизменно, только перенос) + verify_logic зелёный.
-2. Консолидация calibrate (§5) с guardrails.
-3. Консолидация verify (§5) в один прогон.
-4. Detect упростить под снайпер; long/early → research.
-5. Контракт OutcomeRecord: дописать `lifecycle_phase` везде (§2).
+- `hunt/scripts/watch.py` — thin CLI → `hunt_core.runtime.bot.main`
+- `hunt_core/runtime/cycle.py` — per-tick loop (ex `_run_tick` / `_run_loop`)
+
+## 6. Research separation (`hunt_research/`)
+
+`labels.py`, `logic_verify` (re-export), `backtest_synthetic`, `jsonl_replay`, reports.
+
+## 7. Anti-bloat
+
+- Production-core `hunt_core/`: **≤8 000 LOC**
+- CI: `hunt/scripts/check_core_budget.py` — reachability + LOC
+- `hunt/_archive/`, `hunt_research/` вне бюджета
+
+## 8. Порядок cutover
+
+1. contracts + lake + labels (фаза 1)
+2. runtime shell + data/features port (фаза 2a–b)
+3. detect router + gate pipeline (фаза 2c)
+4. track + deliver + calibrate (фаза 2d)
+5. research split + parity (фаза 3)
+6. multi-source + ops (фазы 4–5)
+7. freeze `hunt_watch` → `_legacy/`

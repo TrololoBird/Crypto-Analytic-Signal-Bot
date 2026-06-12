@@ -1009,9 +1009,10 @@ def run_ws_research_cases() -> list[CaseResult]:
     import collections
     from unittest.mock import patch
 
-    from hunt_watch.ws_feed import HuntWsFeed, _AggPoint
+    from hunt_core.market.streams import HuntCcxtStreams, _AggPoint
+    from hunt_core.market import HuntCcxtClient
 
-    feed = HuntWsFeed()
+    feed = HuntCcxtStreams(client=HuntCcxtClient())
     sym = "BTCUSDT"
     now = 1_700_000_000_000
     feed._agg_points[sym] = collections.deque(
@@ -1021,14 +1022,14 @@ def run_ws_research_cases() -> list[CaseResult]:
         ],
         maxlen=100,
     )
-    with patch("hunt_watch.ws_feed.time") as tm:
+    with patch("hunt_core.market.streams.time") as tm:
         tm.time.return_value = now / 1000.0
         nq_delta = feed.agg_trade_delta(sym, window_seconds=60, use_nq=True)
         q_delta = feed.agg_trade_delta(sym, window_seconds=60, use_nq=False)
         rpi = feed.agg_rpi_skew(sym, window_seconds=60)
 
     feed._mark_state[sym] = (now, 100.0, 99.0, 0.0001, 99.5)
-    with patch("hunt_watch.ws_feed.time") as tm:
+    with patch("hunt_core.market.streams.time") as tm:
         tm.time.return_value = now / 1000.0
         snap = feed.mark_snapshot(sym) or {}
 
@@ -1318,6 +1319,47 @@ def run_replay_cases() -> list[CaseResult]:
             wf.get("error") == "insufficient_rows",
             str(wf.get("n_rows")),
         ),
+    ]
+
+
+def run_sniper_cases() -> list[CaseResult]:
+    from hunt_watch.deliver.sniper import SniperConfig, sniper_block_reason
+
+    cfg = SniperConfig(
+        enabled=True,
+        live_phases=frozenset({"dump_active"}),
+        top_ls_max=2.0,
+        require_top_ls=True,
+        chase_tol=0.002,
+    )
+    setup = {"entry_zone": [0.99, 1.01]}
+    lc_ok = {"phase": "dump_active", "short_entry_ok": True}
+    row_ok = {"price": 1.0, "market": {"top_ls_1h": 1.5}}
+    allow = sniper_block_reason(
+        direction="short", setup=setup, row=row_ok, lifecycle=lc_ok, config=cfg
+    )
+    block_long = sniper_block_reason(
+        direction="long", setup=setup, row=row_ok, lifecycle=lc_ok, config=cfg
+    )
+    block_phase = sniper_block_reason(
+        direction="short",
+        setup=setup,
+        row=row_ok,
+        lifecycle={"phase": "impulse_initiating", "short_entry_ok": True},
+        config=cfg,
+    )
+    block_ls = sniper_block_reason(
+        direction="short",
+        setup=setup,
+        row={"price": 1.0, "market": {"top_ls_1h": 2.5}},
+        lifecycle=lc_ok,
+        config=cfg,
+    )
+    return [
+        CaseResult("sniper_allows_dump_active_short", allow is None, allow or "ok"),
+        CaseResult("sniper_blocks_long_shadow", block_long == "sniper_long_shadow", block_long or ""),
+        CaseResult("sniper_blocks_wrong_phase", block_phase is not None, block_phase or ""),
+        CaseResult("sniper_blocks_top_ls_high", block_ls == "sniper_top_ls_high", block_ls or ""),
     ]
 
 
@@ -1675,19 +1717,34 @@ def run_dump_continuation_cases() -> list[CaseResult]:
 def run_tracker_be_cases() -> list[CaseResult]:
     from hunt_watch.signal_tracker import apply_tp1_management
 
-    active = {
+    active_long = {
         "entry_lo": 1.0,
         "entry_hi": 1.01,
         "stop_loss": 0.95,
         "tp1": 1.05,
     }
-    apply_tp1_management(active, direction="long", symbol="BEATUSDT")
-    be = float(active.get("stop_loss") or 0)
+    apply_tp1_management(active_long, direction="long", symbol="BEATUSDT")
+    be_long = float(active_long.get("stop_loss") or 0)
+    # EPICUSDT post-mortem: 0.15% BE on memecoin → false stop after correct TP1.
+    active_short = {
+        "entry_lo": 0.546,
+        "entry_hi": 0.561962,
+        "stop_loss": 0.597132,
+        "tp1": 0.511245,
+    }
+    apply_tp1_management(active_short, direction="short", symbol="EPICUSDT")
+    be_short = float(active_short.get("stop_loss") or 0)
+    short_buf_pct = (be_short / 0.561962 - 1.0) * 100.0
     return [
         CaseResult(
             "tp1_be_buffer_long",
-            be < 1.0 and be > 0.98,
-            f"stop={be}",
+            be_long < 1.0 and be_long > 0.98,
+            f"stop={be_long}",
+        ),
+        CaseResult(
+            "tp1_be_buffer_short_memecoin_min",
+            short_buf_pct >= 1.0,
+            f"stop={be_short} buf_pct={short_buf_pct:.2f}",
         ),
     ]
 

@@ -75,6 +75,10 @@ UNIVERSAL_DEFAULTS: dict[str, Any] = {
         "bias_flip_chop_adx_max": 20.0,
         "prep_confirm_window_hours": 8.0,
         "breakeven_buffer_pct": 0.15,
+        # Memecoin 1m wicks: 0.15% BE after TP1 caused false stop_hit (EPIC/UBU 2026-06-12).
+        "breakeven_buffer_min_pct": 1.0,
+        # Trailing room = fraction of initial structural risk (orig SL distance).
+        "breakeven_risk_fraction": 0.25,
         "mfe_stall_hours": 8.0,
         "mfe_stall_min_pct": 1.0,
     },
@@ -98,7 +102,7 @@ UNIVERSAL_DEFAULTS: dict[str, Any] = {
         "require_ws_align": True,
     },
     "ws": {
-        "kline_grace_sec": 2.5,
+        "kline_grace_sec": 1.5,
     },
     "filters": {
         "vwap_extreme_atr": 2.25,
@@ -284,6 +288,12 @@ def effective_hunt_params(symbol: str = "") -> HuntCalibratedParams:
     forming = float(per_g.get("forming_min_score", gates_u.get("forming_min_score", base.forming_min_score)))
     adx = float(per_g.get("adx_trend_block", gates_u.get("adx_trend_block", base.adx_trend_block)))
     rr = float(per_g.get("min_risk_reward", gates_u.get("min_risk_reward", base.min_risk_reward)))
+    anomaly_chg = float(
+        per_g.get("anomaly_min_chg_24h_pct", gates_u.get("anomaly_min_chg_24h_pct", base.anomaly_min_chg_24h_pct))
+    )
+    anomaly_rng = float(
+        per_g.get("anomaly_min_range_24h_pct", gates_u.get("anomaly_min_range_24h_pct", base.anomaly_min_range_24h_pct))
+    )
     return replace(
         base,
         confirm_min_score=confirm,
@@ -291,6 +301,8 @@ def effective_hunt_params(symbol: str = "") -> HuntCalibratedParams:
         forming_min_score=forming,
         adx_trend_block=adx,
         min_risk_reward=rr,
+        anomaly_min_chg_24h_pct=anomaly_chg,
+        anomaly_min_range_24h_pct=anomaly_rng,
         source=f"{base.source}+cal",
     )
 

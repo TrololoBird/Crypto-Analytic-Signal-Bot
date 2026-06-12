@@ -85,10 +85,13 @@ _FUNDING_ENDPOINT_REQUEST_LIMITED_OPS = frozenset(
 )
 _HTTP_CONNECTOR_LIMIT = 50
 _CACHE_TTL = {
+    "klines_1m": 50,
+    "klines_3m": 180,
     "klines_5m": 300,
     "klines_15m": 900,
     "klines_1h": 3900,
     "klines_4h": 14400,
+    "klines_1d": 3600,
     "open_interest": 600,
     "open_interest_change": 600,
     "metric_series": 240,

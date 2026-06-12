@@ -11,7 +11,26 @@ from hunt_watch.bootstrap import bootstrap
 
 bootstrap()
 
-from hunt_watch.param_calibration import run_full_calibration
+from hunt_watch.calibration import compute_auto_calibration
+from hunt_core.calibrate.runner import run_full_calibration
+from hunt_watch.paths import SIGNAL_STATE
+
+
+def _print_auto_calibration() -> None:
+    """Print auto-calibration suggestions from closed_history."""
+    try:
+        state = json.loads(SIGNAL_STATE.read_text(encoding="utf-8"))
+    except Exception as exc:
+        print(f"[auto-cal] cannot read signal state: {exc}", file=sys.stderr)
+        return
+    result = compute_auto_calibration(state)
+    print("\n=== AUTO-CALIBRATION (closed_history) ===")
+    for line in result["suggestions"]:
+        print(f"  {line}")
+    if result["adjustments"]:
+        print(f"\n  adjustments: {json.dumps(result['adjustments'], indent=4, default=str)}")
+    print(f"\n  safe_to_apply={result['safe_to_apply']}  (read-only — apply manually if confirmed)")
+    print("=" * 45)
 
 
 def main() -> int:
@@ -19,7 +38,12 @@ def main() -> int:
     parser.add_argument("--no-rest", action="store_true", help="Skip Binance REST volatility profiles")
     parser.add_argument("--no-backfill", action="store_true", help="Skip legacy outcome REST backfill")
     parser.add_argument("--rest-limit", type=int, default=40, help="Max symbols for REST 7d profile")
+    parser.add_argument("--no-auto-cal", action="store_true", help="Skip auto-calibration from closed_history")
     args = parser.parse_args()
+
+    if not args.no_auto_cal:
+        _print_auto_calibration()
+
     payload = run_full_calibration(
         fetch_rest=not args.no_rest,
         backfill=not args.no_backfill,
