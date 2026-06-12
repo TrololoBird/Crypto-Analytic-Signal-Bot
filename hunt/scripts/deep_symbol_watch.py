@@ -23,10 +23,10 @@ bootstrap()
 
 import importlib.util
 
-from engine.domain.config import load_settings
-from engine.features.prepare_frame import _prepare_frame
+from hunt_core.domain.config import load_settings
+from hunt_core.features.prepare_frame import _prepare_frame
 from hunt_core.market import HuntCcxtClient
-from engine.telegram import TelegramBroadcaster
+from hunt_core.telegram import TelegramBroadcaster
 from hunt_watch.dump_hunt_alert import (
     dump_hunt_skip_reason,
     format_dump_hunt_telegram,

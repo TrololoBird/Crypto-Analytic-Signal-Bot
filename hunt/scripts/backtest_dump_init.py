@@ -24,7 +24,7 @@ from hunt_watch.bootstrap import bootstrap
 
 bootstrap()
 
-from engine.features.prepare_frame import _prepare_frame
+from hunt_core.features.prepare_frame import _prepare_frame
 from hunt_watch.dump_init_score import score_dump_init
 from hunt_watch.paths import DATA, PUMP_HISTORY
 

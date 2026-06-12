@@ -7,7 +7,7 @@ from typing import Any
 
 import polars as pl
 
-from engine.features.prepare_frame import _rsi
+from hunt_core.features.prepare_frame import _rsi
 
 RSI_MIN_BARS = 15  # Wilder RSI-14 seed (seed_offset=1 + period)
 

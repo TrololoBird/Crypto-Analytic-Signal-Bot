@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "crypto-hunter"
+version = "1.0.0"
+description = "Standalone crypto futures hunter — Binance USDⓈ-M public data via ccxt(pro), Polars feature engine."
+readme = "../README.md"
+# Standalone build: Python 3.14.5 (not 3.14t).
+requires-python = ">=3.14,<3.15"
+license = { text = "MIT" }
+authors = [{ name = "Crypto Signal Bot" }]
+dependencies = [
+    "python-dotenv>=1.2.2",
+    "polars>=1.41.2",
+    "polars-ols>=0.3.5",
+    "polars_ta>=0.5.17",
+    "numpy>=2.4.6",
+    "aiohttp>=3.13.5,<3.14",
+    "aiohttp-socks>=0.10.1",
+    "python-socks[asyncio]>=2.7.1",
+    "aiogram>=3.28.2",
+    "msgspec>=0.21.1",
+    "tenacity>=9.1.4",
+    "structlog>=25.5.0",
+    "pydantic>=2.13.4,<2.14",
+    "tomlkit>=0.15.0",
+    "ccxt>=4.5",
+]
+
+[project.urls]
+Homepage = "https://github.com/TrololoBird/Crypto-Analytic-Signal-Bot"
+Repository = "https://github.com/TrololoBird/Crypto-Analytic-Signal-Bot"
+
+[project.optional-dependencies]
+dev = ["ruff==0.15.16", "mypy>=2.1.0"]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["hunt_core*", "hunt_watch*", "hunt_research*"]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+exclude = [".git", ".venv", "_archive", "build", "dist"]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/*.py" = ["E402", "EXE001", "PLC0415", "ASYNC230", "PLW0603", "FBT001", "G004", "E741", "ARG001", "F841", "E501"]
+"hunt_watch/*.py" = ["FBT001", "ARG001", "F841", "TRY300", "E501", "E402", "TC003", "TC001"]

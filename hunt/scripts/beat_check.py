@@ -15,8 +15,8 @@ bootstrap()
 
 import polars as pl
 
-from engine.domain.config import load_settings
-from engine.features.prepare_frame import _prepare_frame
+from hunt_core.domain.config import load_settings
+from hunt_core.features.prepare_frame import _prepare_frame
 from hunt_core.market import HuntCcxtClient
 
 

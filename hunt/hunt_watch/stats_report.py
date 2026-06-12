@@ -8,7 +8,7 @@ from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from engine.telegram import TelegramBroadcaster
+from hunt_core.telegram import TelegramBroadcaster
 
 from hunt_watch.market_regime import active_params
 from hunt_watch.param_store import effective_hunt_params

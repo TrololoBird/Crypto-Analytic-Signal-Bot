@@ -9,10 +9,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from engine.domain.config import load_settings
-from engine.features.prepare import min_required_bars
+from hunt_core.domain.config import load_settings
+from hunt_core.features.prepare import min_required_bars
 from hunt_core.market import HuntCcxtClient
-from engine.telegram import TelegramBroadcaster
+from hunt_core.telegram import TelegramBroadcaster
 
 from hunt_watch.alert_explain import evaluate_alert_gate, evaluate_formation
 from hunt_watch.btc_alignment import (

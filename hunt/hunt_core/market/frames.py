@@ -7,8 +7,6 @@ from typing import Any
 
 import polars as pl
 
-from engine.market._rest_frames import _drop_incomplete_ohlcv_tail
-
 _TIMEFRAME_SECONDS = {
     "1m": 60,
     "3m": 180,
@@ -88,6 +86,35 @@ def ccxt_ohlcv_to_frame(rows: list[list[Any]], interval: str) -> pl.DataFrame:
         .alias("close_time"),
         pl.from_epoch(pl.col("time"), time_unit="ms").dt.replace_time_zone("UTC").alias("open_time"),
     )
+
+
+def _ohlcv_frame_has_incomplete_tail(df: pl.DataFrame, timeframe: str) -> bool:
+    if df.is_empty():
+        return False
+    if "close_time" in df.columns:
+        last_close = df["close_time"].tail(1).item()
+        if isinstance(last_close, datetime):
+            return datetime.now(UTC) <= last_close
+    timeframe_seconds = _TIMEFRAME_SECONDS.get(timeframe)
+    if timeframe_seconds is None:
+        return False
+    last_open = df["time"].tail(1).item()
+    if not isinstance(last_open, datetime):
+        return False
+    return datetime.now(UTC) < last_open + timedelta(seconds=timeframe_seconds)
+
+
+def _drop_incomplete_ohlcv_tail(df: pl.DataFrame, timeframe: str) -> pl.DataFrame:
+    if df.is_empty():
+        return df
+    if "close_time" in df.columns:
+        now = datetime.now(UTC)
+        closed = df.filter(pl.col("close_time") < pl.lit(now))
+        if closed.height != df.height:
+            return closed
+    if _ohlcv_frame_has_incomplete_tail(df, timeframe):
+        return df.head(df.height - 1)
+    return df
 
 
 def finalize_kline_frame(frame: pl.DataFrame, interval: str) -> pl.DataFrame:

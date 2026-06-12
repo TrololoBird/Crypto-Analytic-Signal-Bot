@@ -8,7 +8,7 @@ from typing import Any
 
 from hunt_watch.alert_explain import invalidate_detail_human
 from hunt_watch.pump_history import format_history_telegram
-from engine.telegram import TelegramBroadcaster
+from hunt_core.telegram import TelegramBroadcaster
 
 _PHASE_HUMAN: dict[str, str] = {
     "dump_active": "Активный дамп",

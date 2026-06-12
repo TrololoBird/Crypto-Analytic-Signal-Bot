@@ -6,7 +6,7 @@ from typing import Any
 
 import polars as pl
 
-from engine.features.prepare import _prepare_frame
+from hunt_core.features.prepare import _prepare_frame
 
 MIN_1H_BARS_FOR_SYNTH = 48
 MIN_SYNTH_4H_BARS = 12

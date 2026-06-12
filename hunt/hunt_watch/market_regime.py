@@ -7,9 +7,10 @@ Writes hunt/data/market_regime.json for audit and downstream gates.
 from __future__ import annotations
 
 import json
-import statistics
 import time
 from dataclasses import asdict, dataclass, field
+
+import polars as pl
 from datetime import UTC, datetime
 from typing import Any, Literal
 
@@ -175,14 +176,14 @@ def calibrate_from_cross_section(
         snap.params = HuntCalibratedParams(source="insufficient_liquid_sample")
         return snap
 
-    median_chg = statistics.median(chgs)
+    median_chg = float(pl.Series(chgs).median() or 0.0)
     p75_chg = _pctile(chgs, 75)
     p90_chg = _pctile(chgs, 90)
-    median_range = statistics.median(ranges) if ranges else median_chg * 1.4
+    median_range = float(pl.Series(ranges).median() or 0.0) if ranges else median_chg * 1.4
     p75_range = _pctile(ranges, 75) if ranges else median_range * 1.3
-    pct_hot = sum(1 for c in chgs if c >= 8.0) / n_liq * 100.0
+    pct_hot = float((pl.Series(chgs) >= 8.0).sum()) / n_liq * 100.0
     pct_up = up / n_liq * 100.0
-    median_qvol = statistics.median(qvols)
+    median_qvol = float(pl.Series(qvols).median() or 0.0)
     p40_qvol = _pctile(qvols, 40)
 
     regime = _classify_regime(median_chg=median_chg, p90_chg=p90_chg, pct_hot=pct_hot)

@@ -23,8 +23,8 @@ from hunt_watch.market_regime import active_params
 from hunt_watch.paths import TICK_JSONL
 from hunt_watch.signal_engine import cluster_fuel, confirm_dump, confirm_long
 
-from engine.domain.config import load_settings
-from engine.features.prepare import min_required_bars
+from hunt_core.domain.config import load_settings
+from hunt_core.features.prepare import min_required_bars
 from hunt_core.market import HuntCcxtClient
 
 

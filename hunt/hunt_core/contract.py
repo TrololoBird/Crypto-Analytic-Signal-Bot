@@ -1,0 +1,655 @@
+"""Signal trade-plan contract helpers.
+
+The bot is signal-only: each emitted setup must be directly usable as a
+manual limit-order plan. This module keeps the plan math centralized so
+individual detectors do not drift into point entries or partial target gaps.
+"""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
+DEFAULT_SCALE_WEIGHTS: tuple[float, float, float] = (0.5, 0.3, 0.2)
+DEFAULT_TARGET_RR: tuple[float, float, float] = (1.9, 3.0, 5.0)
+DEFAULT_MIN_RISK_REWARD = 1.9
+RISK_REWARD_EPSILON = 1e-9
+
+# Single source of truth for entry-zone width.
+# ALL callers (_build_signal, detectors, contract validation) must use this.
+# 0.35×ATR gives a realistic limit-order fill window while keeping stop
+# geometrically outside the zone in _build_atr_signal (min_risk clamp uses
+# entry_pad + 0.06×ATR buffer).
+SIGNAL_ENTRY_PAD_ATR: float = 0.35
+
+
+def resolve_target_rr(settings: Any | None = None) -> tuple[float, float, float]:
+    """Return configured TP RR ladder or module default."""
+    if settings is None:
+        return DEFAULT_TARGET_RR
+    delivery = getattr(settings, "delivery", None)
+    configured = getattr(delivery, "target_rr", None) if delivery is not None else None
+    if not configured:
+        return DEFAULT_TARGET_RR
+    try:
+        values = tuple(float(item) for item in configured)
+    except TypeError, ValueError:
+        return DEFAULT_TARGET_RR
+    if len(values) != 3 or not all(math.isfinite(item) and item > 0.0 for item in values):
+        return DEFAULT_TARGET_RR
+    return (values[0], values[1], values[2])
+
+
+_TIMEFRAME_MINUTES: dict[str, int] = {
+    "1m": 1,
+    "3m": 3,
+    "5m": 5,
+    "15m": 15,
+    "30m": 30,
+    "1h": 60,
+    "2h": 120,
+    "4h": 240,
+    "1d": 1440,
+}
+
+_FAMILY_TTL_BARS: dict[str, int] = {
+    "breakout": 10,
+    "continuation": 24,
+    "trend_follow": 24,
+    "momentum": 12,
+    "volatility": 12,
+    "reversal": 30,
+    "sentiment": 24,
+    "liquidity": 20,
+    "orderflow": 10,
+    "orderbook": 8,
+    "multi_asset": 12,
+    "session": 8,
+}
+
+# Source of truth: target TTL in minutes (answers.md Part 3). Bars are derived at runtime.
+_SETUP_TTL_MINUTES: dict[str, int] = {
+    "fvg_setup": 120,
+    "order_block": 180,
+    "breaker_block": 120,
+    "bos_choch": 120,
+    "structure_break_retest": 120,
+    "structure_pullback": 120,
+    "ema_bounce": 120,
+    "turtle_soup": 120,
+    "funding_reversal": 120,
+    "hidden_divergence": 120,
+    "rsi_divergence_bottom": 120,
+    "ls_ratio_extreme": 240,
+    "oi_divergence": 120,
+    "btc_correlation": 30,
+    "wyckoff_spring": 180,
+    "liquidity_sweep": 45,
+    "wick_trap_reversal": 45,
+    "cvd_divergence": 45,
+    "squeeze_setup": 45,
+    "keltner_breakout": 45,
+    "absorption": 45,
+    "liquidation_heatmap": 45,
+    "indicator_divergence": 90,
+    "price_velocity": 30,
+    "volume_anomaly": 30,
+    "volume_climax_reversal": 90,
+    "vwap_trend": 90,
+    "supertrend_follow": 120,
+    "multi_tf_trend": 120,
+    "altcoin_season_index": 240,
+    "pinbar_reversal": 120,
+}
+
+# Legacy bar table kept for display/back-compat; derived from minutes when possible.
+_SETUP_TTL_BARS: dict[str, int] = {
+    # 1h entry TF strategies (~120-180min target)
+    "fvg_setup": 2,  # 1h × 2 = 120min
+    "order_block": 3,  # 1h × 3 = 180min
+    "breaker_block": 2,  # 1h × 2 = 120min
+    "bos_choch": 8,  # 15m+1h × 8 = 120min
+    "structure_break_retest": 8,  # 15m+1h × 8 = 120min
+    "structure_pullback": 8,  # 15m+1h × 8 = 120min
+    "ema_bounce": 8,  # 15m+1h × 8 = 120min
+    "turtle_soup": 8,  # 15m+1h × 8 = 120min
+    "funding_reversal": 2,  # 1h × 2 = 120min
+    "hidden_divergence": 8,  # 15m+1h × 8 = 120min
+    "rsi_divergence_bottom": 2,  # 1h × 2 = 120min
+    "ls_ratio_extreme": 4,  # 1h × 4 = 240min (sentiment, slower cadence)
+    "oi_divergence": 2,  # 1h × 2 = 120min
+    "btc_correlation": 2,  # 1h × 2 = 120min
+    "wyckoff_spring": 3,  # 1h × 3 = 180min
+    # 15m trigger strategies (~45min target)
+    "liquidity_sweep": 3,  # 15m × 3 = 45min
+    "wick_trap_reversal": 3,  # 15m+1h × 3 = 45min
+    "cvd_divergence": 3,  # 15m+1h × 3 = 45min
+    "squeeze_setup": 3,  # 15m+1h × 3 = 45min
+    "keltner_breakout": 3,  # 15m+1h × 3 = 45min
+    "absorption": 3,  # 15m × 3 = 45min
+    "liquidation_heatmap": 3,  # 15m × 3 = 45min
+    # momentum/breakout (~30-90min)
+    "indicator_divergence": 6,  # 15m × 6 = 90min
+    "price_velocity": 2,  # 15m × 2 = 30min
+    "volume_anomaly": 2,  # 15m × 2 = 30min
+    "volume_climax_reversal": 6,  # 15m × 6 = 90min
+    "vwap_trend": 6,  # 15m+1h × 6 = 90min
+    "supertrend_follow": 8,  # 15m × 8 = 120min
+    "multi_tf_trend": 8,  # 15m+1h × 8 = 120min
+    "altcoin_season_index": 4,  # 1h × 4 = 240min
+    "pinbar_reversal": 8,  # 1h × 8 = 120min
+}
+
+
+@dataclass(frozen=True, slots=True)
+class TradePlan:
+    direction: str
+    entry_low: float
+    entry_high: float
+    stop_loss: float
+    tp1: float
+    tp2: float
+    tp3: float
+    valid_until: datetime
+    scale_weights: tuple[float, float, float]
+    ttl_bars: int
+    entry_zone_width_pct: float
+    risk_reward_tp1: float
+    risk_reward_tp2: float
+    risk_reward_tp3: float
+    single_target_mode: bool
+    integrity_status: str
+
+    @property
+    def entry_mid(self) -> float:
+        return (self.entry_low + self.entry_high) / 2.0
+
+    @property
+    def entry_zone(self) -> tuple[float, float]:
+        return (self.entry_low, self.entry_high)
+
+
+@dataclass(frozen=True, slots=True)
+class SignalContractIssue:
+    field: str
+    reason: str
+    value: object = None
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "field": self.field,
+            "reason": self.reason,
+            "value": self.value,
+        }
+
+
+def finite_float(value: object, default: float | None = None) -> float | None:
+    if isinstance(value, bool):
+        return float(value)
+    if isinstance(value, (int, float)):
+        numeric = float(value)
+        return numeric if math.isfinite(numeric) else default
+    return default
+
+
+def positive_float(value: object, default: float | None = None) -> float | None:
+    numeric = finite_float(value, default=None)
+    if numeric is None or numeric <= 0.0:
+        return default
+    return numeric
+
+
+def normalize_direction(direction: str) -> str | None:
+    value = str(direction or "").strip().lower()
+    if value in {"long", "buy", "bull", "bullish"}:
+        return "long"
+    if value in {"short", "sell", "bear", "bearish"}:
+        return "short"
+    return None
+
+
+def timeframe_minutes(timeframe: str | None) -> int:
+    raw = str(timeframe or "15m").lower().strip()
+    primary = raw.split("+", 1)[0].strip()
+    if primary in _TIMEFRAME_MINUTES:
+        return _TIMEFRAME_MINUTES[primary]
+    if primary.endswith("m"):
+        numeric = positive_float(primary[:-1])
+        return int(numeric) if numeric else 15
+    if primary.endswith("h"):
+        numeric = positive_float(primary[:-1])
+        return int(numeric * 60) if numeric else 60
+    return 15
+
+
+def default_ttl_bars(setup_id: str, strategy_family: str, timeframe: str | None = None) -> int:
+    if setup_id in _SETUP_TTL_MINUTES:
+        tf_min = max(1, timeframe_minutes(timeframe))
+        return max(1, min(96, round(_SETUP_TTL_MINUTES[setup_id] / tf_min)))
+    if setup_id in _SETUP_TTL_BARS:
+        return _SETUP_TTL_BARS[setup_id]
+    family = str(strategy_family or "").strip().lower()
+    if family in _FAMILY_TTL_BARS:
+        return _FAMILY_TTL_BARS[family]
+    minutes = timeframe_minutes(timeframe)
+    if minutes <= 5:
+        return 24
+    if minutes >= 60:
+        return 8
+    return 24
+
+
+def valid_until_from(
+    *,
+    created_at: datetime | None,
+    setup_id: str,
+    strategy_family: str,
+    timeframe: str | None,
+    ttl_bars: int | None = None,
+) -> datetime:
+    anchor = created_at or datetime.now(UTC)
+    anchor = anchor.replace(tzinfo=UTC) if anchor.tzinfo is None else anchor.astimezone(UTC)
+    bars = (
+        int(ttl_bars)
+        if ttl_bars is not None
+        else default_ttl_bars(
+            setup_id,
+            strategy_family,
+            timeframe,
+        )
+    )
+    bars = max(1, min(bars, 96))
+    return anchor + timedelta(minutes=timeframe_minutes(timeframe) * bars)
+
+
+def normalize_scale_weights(
+    weights: tuple[float, float, float] | list[float] | None,
+) -> tuple[float, float, float]:
+    if not weights or len(weights) != 3:
+        return DEFAULT_SCALE_WEIGHTS
+    cleaned: list[float] = []
+    for value in weights:
+        numeric = finite_float(value, default=0.0) or 0.0
+        cleaned.append(max(0.0, numeric))
+    total = sum(cleaned)
+    if total <= 0.0:
+        return DEFAULT_SCALE_WEIGHTS
+    normalized = tuple(round(value / total, 4) for value in cleaned)
+    drift = round(1.0 - sum(normalized), 4)
+    return (normalized[0] + drift, normalized[1], normalized[2])
+
+
+def _target_from_risk(direction: str, entry_mid: float, risk: float, rr: float) -> float:
+    if direction == "long":
+        return entry_mid + risk * rr
+    return entry_mid - risk * rr
+
+
+def _target_is_ordered(
+    direction: str, entry_mid: float, targets: tuple[float, float, float]
+) -> bool:
+    tp1, tp2, tp3 = targets
+    if direction == "long":
+        return entry_mid < tp1 <= tp2 <= tp3
+    return entry_mid > tp1 >= tp2 >= tp3
+
+
+def _normalize_targets(
+    *,
+    direction: str,
+    entry_mid: float,
+    stop_loss: float,
+    tp1: float,
+    tp2: float,
+    tp3: float | None,
+    target_rr: tuple[float, float, float] = DEFAULT_TARGET_RR,
+) -> tuple[float, float, float, bool, str] | None:
+    rr1, rr2, rr3 = target_rr
+    risk = abs(entry_mid - stop_loss)
+    if risk <= 0.0:
+        return None
+    price_floor = max(entry_mid * 0.02, 1e-8)
+    target_values = [
+        positive_float(tp1),
+        positive_float(tp2),
+        positive_float(tp3),
+    ]
+    for idx, value in enumerate(target_values):
+        if value is None:
+            fallback_rr = (rr1, rr2, rr3)[idx]
+            target_values[idx] = _target_from_risk(direction, entry_mid, risk, fallback_rr)
+    resolved: list[float] = [float(value) for value in target_values if value is not None]
+    if len(resolved) != 3:
+        return None
+    targets: tuple[float, float, float] = (resolved[0], resolved[1], resolved[2])
+    if direction == "long":
+        candidates = sorted(targets)
+        candidates[0] = max(candidates[0], _target_from_risk(direction, entry_mid, risk, rr1))
+        candidates[1] = max(candidates[1], _target_from_risk(direction, entry_mid, risk, rr2))
+        candidates[2] = max(candidates[2], _target_from_risk(direction, entry_mid, risk, rr3))
+    else:
+        candidates = sorted(targets, reverse=True)
+        candidates[0] = max(
+            price_floor,
+            min(candidates[0], _target_from_risk(direction, entry_mid, risk, rr1)),
+        )
+        candidates[1] = max(
+            price_floor,
+            min(candidates[1], _target_from_risk(direction, entry_mid, risk, rr2)),
+        )
+        candidates[2] = max(
+            price_floor,
+            min(candidates[2], _target_from_risk(direction, entry_mid, risk, rr3)),
+        )
+        candidates = sorted(candidates, reverse=True)
+    normalized_list = [float(value) for value in candidates]
+    if len(normalized_list) != 3:
+        return None
+    normalized: tuple[float, float, float] = (
+        normalized_list[0],
+        normalized_list[1],
+        normalized_list[2],
+    )
+    if not _target_is_ordered(direction, entry_mid, normalized):
+        if direction == "long":
+            normalized = (
+                _target_from_risk(direction, entry_mid, risk, rr1),
+                _target_from_risk(direction, entry_mid, risk, rr2),
+                _target_from_risk(direction, entry_mid, risk, rr3),
+            )
+        else:
+            short_targets = [
+                max(price_floor, _target_from_risk(direction, entry_mid, risk, rr))
+                for rr in (rr1, rr2, rr3)
+            ]
+            short_targets.sort(reverse=True)
+            normalized = (short_targets[0], short_targets[1], short_targets[2])
+    scale = max(abs(entry_mid), *(abs(value) for value in normalized), 1.0)
+    tolerance = scale * 1e-8
+    single_target_mode = (
+        abs(normalized[1] - normalized[0]) <= tolerance
+        and abs(normalized[2] - normalized[1]) <= tolerance
+    )
+    status = "valid"
+    original = tuple(targets)
+    if any(abs(a - b) > tolerance for a, b in zip(original, normalized, strict=True)):
+        status = "normalized"
+    if single_target_mode:
+        status = "single_target" if status == "valid" else "normalized_single_target"
+    return normalized[0], normalized[1], normalized[2], single_target_mode, status
+
+
+def build_trade_plan(
+    *,
+    direction: str,
+    setup_id: str,
+    strategy_family: str,
+    timeframe: str,
+    price_anchor: float,
+    atr: float,
+    stop_loss: float,
+    tp1: float,
+    tp2: float,
+    tp3: float | None = None,
+    entry_pad_atr_mult: float = SIGNAL_ENTRY_PAD_ATR,
+    created_at: datetime | None = None,
+    ttl_bars: int | None = None,
+    scale_weights: tuple[float, float, float] | list[float] | None = None,
+    target_rr: tuple[float, float, float] = DEFAULT_TARGET_RR,
+) -> TradePlan | None:
+    normalized_direction = normalize_direction(direction)
+    if normalized_direction is None:
+        return None
+    anchor = positive_float(price_anchor)
+    atr_value = positive_float(atr)
+    stop_value = positive_float(stop_loss)
+    if anchor is None or atr_value is None or stop_value is None:
+        return None
+    tolerance = max(anchor * 1e-8, 1e-8)
+    if normalized_direction == "long" and stop_value >= anchor - tolerance:
+        return None
+    if normalized_direction == "short" and stop_value <= anchor + tolerance:
+        return None
+
+    entry_pad = max(atr_value * max(0.0, float(entry_pad_atr_mult)), anchor * 0.0005)
+    entry_low = max(tolerance, anchor - entry_pad)
+    entry_high = max(entry_low + tolerance, anchor + entry_pad)
+
+    # ── Authoritative stop clamp ─────────────────────────────────────────────
+    # build_trade_plan is the single owner of entry-zone geometry.  Callers
+    # compute stop independently (ATR buffers, sweep levels) and cannot know
+    # the exact zone boundary.  Clamp here so validate_signal_contract never
+    # fires a zone-geometry violation — the zone IS the invariant, stop adapts.
+    _stop_clearance = max(atr_value * 0.02, tolerance * 4)
+    if normalized_direction == "long" and stop_value >= entry_low:
+        stop_value = entry_low - _stop_clearance
+    elif normalized_direction == "short" and stop_value <= entry_high:
+        stop_value = entry_high + _stop_clearance
+    # ────────────────────────────────────────────────────────────────────────
+
+    entry_mid = (entry_low + entry_high) / 2.0
+    normalized_targets = _normalize_targets(
+        direction=normalized_direction,
+        entry_mid=entry_mid,
+        stop_loss=stop_value,
+        tp1=tp1,
+        tp2=tp2,
+        tp3=tp3,
+        target_rr=target_rr,
+    )
+    if normalized_targets is None:
+        return None
+    target_1, target_2, target_3, single_target_mode, integrity_status = normalized_targets
+    risk = abs(entry_mid - stop_value)
+    if risk <= 0.0:
+        return None
+    ttl = (
+        int(ttl_bars)
+        if ttl_bars is not None
+        else default_ttl_bars(
+            setup_id,
+            strategy_family,
+            timeframe,
+        )
+    )
+    entry_zone_width_pct = (entry_high - entry_low) / entry_mid * 100.0 if entry_mid > 0 else 0.0
+    return TradePlan(
+        direction=normalized_direction,
+        entry_low=min(entry_low, entry_high),
+        entry_high=max(entry_low, entry_high),
+        stop_loss=stop_value,
+        tp1=target_1,
+        tp2=target_2,
+        tp3=target_3,
+        valid_until=valid_until_from(
+            created_at=created_at,
+            setup_id=setup_id,
+            strategy_family=strategy_family,
+            timeframe=timeframe,
+            ttl_bars=ttl,
+        ),
+        scale_weights=normalize_scale_weights(scale_weights),
+        ttl_bars=max(1, min(ttl, 96)),
+        entry_zone_width_pct=entry_zone_width_pct,
+        risk_reward_tp1=abs(target_1 - entry_mid) / risk,
+        risk_reward_tp2=abs(target_2 - entry_mid) / risk,
+        risk_reward_tp3=abs(target_3 - entry_mid) / risk,
+        single_target_mode=single_target_mode,
+        integrity_status=integrity_status,
+    )
+
+
+def validate_signal_contract(
+    signal: Any,
+    *,
+    now: datetime | None = None,
+    min_risk_reward: float | None = None,
+) -> list[SignalContractIssue]:
+    effective_min_rr = (
+        float(min_risk_reward) if min_risk_reward is not None else DEFAULT_MIN_RISK_REWARD
+    )
+    issues: list[SignalContractIssue] = []
+    direction = normalize_direction(getattr(signal, "direction", ""))
+    if direction is None:
+        issues.append(
+            SignalContractIssue("direction", "invalid", getattr(signal, "direction", None))
+        )
+        direction = "long"
+
+    entry_low = positive_float(getattr(signal, "entry_low", None))
+    entry_high = positive_float(getattr(signal, "entry_high", None))
+    stop_loss = positive_float(
+        getattr(signal, "stop_loss", None)
+        if hasattr(signal, "stop_loss")
+        else getattr(signal, "stop", None)
+    )
+    tp1 = positive_float(
+        getattr(signal, "tp1", None)
+        if hasattr(signal, "tp1")
+        else getattr(signal, "take_profit_1", None)
+    )
+    tp2 = positive_float(
+        getattr(signal, "tp2", None)
+        if hasattr(signal, "tp2")
+        else getattr(signal, "take_profit_2", None)
+    )
+    tp3 = positive_float(
+        getattr(signal, "tp3", None)
+        if hasattr(signal, "tp3")
+        else getattr(signal, "take_profit_3", None)
+    )
+    valid_until = getattr(signal, "valid_until", None)
+    scale_weights_raw = getattr(signal, "scale_weights", DEFAULT_SCALE_WEIGHTS)
+
+    required_values = {
+        "entry_low": entry_low,
+        "entry_high": entry_high,
+        "stop_loss": stop_loss,
+        "tp1": tp1,
+        "tp2": tp2,
+        "tp3": tp3,
+    }
+    for field, value in required_values.items():
+        if value is None:
+            issues.append(
+                SignalContractIssue(field, "missing_or_non_positive", getattr(signal, field, None))
+            )
+    if entry_low is not None and entry_high is not None:
+        if entry_low >= entry_high:
+            issues.append(SignalContractIssue("entry_zone", "not_a_range", (entry_low, entry_high)))
+        entry_mid = (entry_low + entry_high) / 2.0
+        if stop_loss is not None:
+            if direction == "long" and stop_loss >= entry_low:
+                issues.append(
+                    SignalContractIssue(
+                        "stop_loss",
+                        "long_stop_not_below_entry_low",
+                        stop_loss,
+                    )
+                )
+            if direction == "short" and stop_loss <= entry_high:
+                issues.append(
+                    SignalContractIssue(
+                        "stop_loss",
+                        "short_stop_not_above_entry_high",
+                        stop_loss,
+                    )
+                )
+            if direction == "long" and stop_loss >= entry_mid:
+                issues.append(
+                    SignalContractIssue("stop_loss", "long_stop_not_below_entry", stop_loss)
+                )
+            if direction == "short" and stop_loss <= entry_mid:
+                issues.append(
+                    SignalContractIssue("stop_loss", "short_stop_not_above_entry", stop_loss)
+                )
+        if tp1 is not None and tp2 is not None and tp3 is not None:
+            if direction == "long" and not (entry_mid < tp1 <= tp2 <= tp3):
+                issues.append(
+                    SignalContractIssue("targets", "long_targets_not_ordered", (tp1, tp2, tp3))
+                )
+            if direction == "short" and not (entry_mid > tp1 >= tp2 >= tp3):
+                issues.append(
+                    SignalContractIssue("targets", "short_targets_not_ordered", (tp1, tp2, tp3))
+                )
+            if stop_loss is not None:
+                risk = abs(entry_mid - stop_loss)
+                reward = abs(tp1 - entry_mid)
+                if risk <= 0.0:
+                    issues.append(SignalContractIssue("risk_reward", "zero_or_negative_risk", risk))
+                else:
+                    risk_reward = reward / risk
+                    if risk_reward + RISK_REWARD_EPSILON < effective_min_rr:
+                        issues.append(
+                            SignalContractIssue(
+                                "risk_reward",
+                                "tp1_rr_below_minimum",
+                                round(risk_reward, 6),
+                            )
+                        )
+    try:
+        scale_weights = [float(item) for item in scale_weights_raw]
+    except TypeError, ValueError:
+        scale_weights = []
+    if len(scale_weights) < 2:
+        issues.append(
+            SignalContractIssue(
+                "scale_weights", "less_than_two_entry_allocations", scale_weights_raw
+            )
+        )
+    elif any(not math.isfinite(item) or item <= 0.0 for item in scale_weights):
+        issues.append(
+            SignalContractIssue("scale_weights", "non_positive_or_non_finite", scale_weights_raw)
+        )
+    else:
+        total_weight = sum(scale_weights)
+        max_weight = max(scale_weights)
+        if max_weight <= 1.0 and total_weight > 1.000001:
+            issues.append(
+                SignalContractIssue(
+                    "scale_weights", "fraction_sum_above_one", round(total_weight, 6)
+                )
+            )
+        if max_weight > 1.0 and total_weight > 100.000001:
+            issues.append(
+                SignalContractIssue(
+                    "scale_weights", "percent_sum_above_100", round(total_weight, 6)
+                )
+            )
+    if not isinstance(valid_until, datetime):
+        issues.append(SignalContractIssue("valid_until", "missing_or_not_datetime", valid_until))
+    else:
+        check_now = now or datetime.now(UTC)
+        if check_now.tzinfo is None:
+            check_now = check_now.replace(tzinfo=UTC)
+        if valid_until.tzinfo is None:
+            valid_until = valid_until.replace(tzinfo=UTC)
+        if valid_until <= check_now.astimezone(UTC):
+            issues.append(SignalContractIssue("valid_until", "expired", valid_until.isoformat()))
+    return issues
+
+
+def signal_contract_row(signal: Any) -> dict[str, object]:
+    issues = validate_signal_contract(signal)
+    valid_until = getattr(signal, "valid_until", None)
+    return {
+        "symbol": getattr(signal, "symbol", None),
+        "setup_id": getattr(signal, "setup_id", None),
+        "direction": getattr(signal, "direction", None),
+        "entry_zone": [
+            getattr(signal, "entry_low", None),
+            getattr(signal, "entry_high", None),
+        ],
+        "stop_loss": getattr(signal, "stop_loss", getattr(signal, "stop", None)),
+        "tp1": getattr(signal, "tp1", getattr(signal, "take_profit_1", None)),
+        "tp2": getattr(signal, "tp2", getattr(signal, "take_profit_2", None)),
+        "tp3": getattr(signal, "tp3", getattr(signal, "take_profit_3", None)),
+        "valid_until": valid_until.isoformat()
+        if isinstance(valid_until, datetime)
+        else valid_until,
+        "scale_weights": list(getattr(signal, "scale_weights", DEFAULT_SCALE_WEIGHTS)),
+        "ok": not issues,
+        "issues": [issue.to_dict() for issue in issues],
+    }

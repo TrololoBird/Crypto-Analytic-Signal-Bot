@@ -10,10 +10,10 @@ from typing import Any
 import aiohttp
 import structlog
 
-from engine.domain.config import load_settings
-from engine.errors import DEFENSIVE_EXC, defensive_exc_types
-from engine.secrets import load_secrets
-from engine.telegram import TelegramBroadcaster
+from hunt_core.domain.config import load_settings
+from hunt_core.errors import DEFENSIVE_EXC, defensive_exc_types
+from hunt_core.secrets import load_secrets
+from hunt_core.telegram import TelegramBroadcaster
 
 from hunt_watch.signals_report import deliver_signals_report
 from hunt_watch.autotune_runner import format_autotune_html, run_autotune

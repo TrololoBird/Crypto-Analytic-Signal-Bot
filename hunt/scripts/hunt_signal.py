@@ -20,8 +20,8 @@ LOG = configure_script_logging("hunt.signal")
 
 async def _main_async(symbol: str, *, telegram: bool, stagger_ms: int) -> int:
     if telegram:
-        from engine.domain.config import load_settings
-        from engine.telegram import TelegramBroadcaster
+        from hunt_core.domain.config import load_settings
+        from hunt_core.telegram import TelegramBroadcaster
 
         settings = load_settings()
         if not settings.tg_token or not settings.target_chat_id:

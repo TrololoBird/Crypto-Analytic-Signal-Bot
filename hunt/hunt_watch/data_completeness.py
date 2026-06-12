@@ -9,8 +9,8 @@ import math
 from dataclasses import dataclass, field
 from typing import Any
 
-from engine.data_readiness import effective_prepared_minimums, raw_frame_minimums
-from engine.domain.config import BotSettings
+from hunt_core.data_readiness import effective_prepared_minimums, raw_frame_minimums
+from hunt_core.domain.config import BotSettings
 
 # Canonical indicator columns from full prepare (active_groups=None) minus raw OHLCV.
 # Exactly one side is populated per bar (trend direction); XOR completeness check.

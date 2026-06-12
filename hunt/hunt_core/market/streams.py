@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from engine.errors import defensive_exc_types
+from hunt_core.errors import defensive_exc_types
 from hunt_core.market.client import HuntCcxtClient
 from hunt_core.market.symbols import from_ccxt_symbol, to_binance_symbol, to_ccxt_symbol
 from hunt_watch.param_store import orderflow_use_nq, ws_thresholds
@@ -101,7 +101,7 @@ class _AggPoint:
 
 @dataclass
 class HuntCcxtStreams:
-    """CCXT watch* background tasks — drop-in for legacy ``HuntWsFeed``."""
+    """CCXT watch* background tasks — multiplexed streams via ccxt.pro watch_*_for_symbols."""
 
     client: HuntCcxtClient
     _symbols: set[str] = field(default_factory=set)
@@ -121,6 +121,10 @@ class HuntCcxtStreams:
     mark_price_enabled: bool = True
     _mark_state: dict[str, tuple[int, float, float, float, float]] = field(default_factory=dict)
     _last_msg_ms: int = 0
+    # live book/ticker/funding data from new multiplexed streams
+    _live_books: dict[str, dict[str, Any]] = field(default_factory=dict)
+    _live_tickers: dict[str, dict[str, float]] = field(default_factory=dict)
+    _live_funding: dict[str, dict[str, float]] = field(default_factory=dict)
 
     @property
     def kline_5m_enabled(self) -> bool:
@@ -191,11 +195,26 @@ class HuntCcxtStreams:
             return None
         return round(max(0.0, (q_sum - nq_sum) / q_sum), 4)
 
+    def live_book(self, symbol: str) -> dict[str, Any] | None:
+        """Latest L2 order book snapshot from watch_order_book_for_symbols."""
+        return self._live_books.get(to_binance_symbol(symbol))
+
+    def live_ticker(self, symbol: str) -> dict[str, float] | None:
+        """Latest 24h ticker from watch_tickers."""
+        return self._live_tickers.get(to_binance_symbol(symbol))
+
+    def live_funding(self, symbol: str) -> dict[str, float] | None:
+        """Latest funding rate from watch_funding_rates."""
+        return self._live_funding.get(to_binance_symbol(symbol))
+
     def snapshot(self, symbol: str) -> dict[str, Any]:
         sym = to_binance_symbol(symbol)
         liq = self.liquidation_rollups(sym, window_seconds=300)
         liq_60 = self.liquidation_rollups(sym, window_seconds=60)
         fresh = self._last_msg_ms > 0 and time.time() * 1000 - self._last_msg_ms < 60_000
+        book = self._live_books.get(sym) or {}
+        ticker = self._live_tickers.get(sym) or {}
+        funding = self._live_funding.get(sym) or {}
         return {
             "ws_routed_market": True,
             "ws_base_url": "ccxt.pro",
@@ -218,6 +237,18 @@ class HuntCcxtStreams:
             "agg_rpi_skew_60s": self.agg_rpi_skew(sym, window_seconds=60),
             f"kline_{_KLINE_INTERVAL}_last_close_ms": self._kline_closed_open_ms.get(sym),
             "kline_ws_interval": _KLINE_INTERVAL,
+            # live book microstructure
+            "live_bid": book.get("bid"),
+            "live_ask": book.get("ask"),
+            "live_depth_imbalance": book.get("depth_imbalance"),
+            "live_microprice_bias": book.get("microprice_bias"),
+            # live ticker
+            "live_quote_volume": ticker.get("quoteVolume"),
+            "live_price_change_pct": ticker.get("percentage"),
+            # live funding
+            "live_funding_rate": funding.get("fundingRate"),
+            "live_mark_price": funding.get("markPrice"),
+            "live_index_price": funding.get("indexPrice"),
             **(self.mark_snapshot(sym) or {}),
         }
 
@@ -367,7 +398,11 @@ class HuntCcxtStreams:
         self._tasks = [
             asyncio.create_task(self._watch_liquidations(), name="hunt_ccxt_liq"),
             asyncio.create_task(self._watch_mark_prices(), name="hunt_ccxt_mark"),
-            asyncio.create_task(self._watch_symbol_loops(), name="hunt_ccxt_sym_loops"),
+            asyncio.create_task(self._watch_trades_mux(), name="hunt_ccxt_trades"),
+            asyncio.create_task(self._watch_ohlcv_mux(), name="hunt_ccxt_ohlcv"),
+            asyncio.create_task(self._watch_order_book_mux(), name="hunt_ccxt_book"),
+            asyncio.create_task(self._watch_tickers_mux(), name="hunt_ccxt_tickers"),
+            asyncio.create_task(self._watch_funding_rates_mux(), name="hunt_ccxt_funding"),
         ]
         self._connected = True
         LOG.info("hunt_ccxt_streams_started")
@@ -422,65 +457,170 @@ class HuntCcxtStreams:
                     ap = float(ap_raw) if ap_raw is not None else 0.0
                     if mark > 0:
                         self._mark_state[sym] = (now_ms, mark, index, funding, ap)
-                        self.client.update_basis_from_websocket(sym, mark, index)
+                        self.client.update_basis_from_websocket(sym, mark, index if index > 0 else None)
             except asyncio.CancelledError:
                 break
             except defensive_exc_types(Exception) as exc:
                 LOG.warning("hunt_ccxt_mark_error", error=repr(exc))
                 await asyncio.sleep(1.0)
 
-    async def _watch_symbol_loops(self) -> None:
+    def _ccxt_symbols(self) -> list[str]:
+        ex = self.client.exchange
+        return [to_ccxt_symbol(s, markets=ex.markets) for s in sorted(self._symbols)]
+
+    async def _watch_trades_mux(self) -> None:
+        """Single multiplexed trades stream for all symbols via watch_trades_for_symbols."""
+        ex = self.client.exchange
         while not self._stop.is_set():
-            symbols = sorted(self._symbols)
-            if not symbols:
+            syms = self._ccxt_symbols()
+            if not syms:
                 await asyncio.sleep(0.5)
                 continue
-            if self._symbols_dirty:
-                self._symbols_dirty = False
-            tasks: list[asyncio.Task[None]] = []
-            for sym in symbols:
-                tasks.append(
-                    asyncio.create_task(self._watch_trades(sym), name=f"hunt_ccxt_trades_{sym}")
-                )
-                if self.kline_ws_enabled:
-                    tasks.append(
-                        asyncio.create_task(self._watch_ohlcv(sym), name=f"hunt_ccxt_kline_{sym}")
-                    )
-            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
-            for task in pending:
-                task.cancel()
-            for task in done:
-                with contextlib.suppress(Exception):
-                    task.result()
-            await asyncio.sleep(0.2)
-
-    async def _watch_trades(self, sym: str) -> None:
-        ex = self.client.exchange
-        ccxt_sym = to_ccxt_symbol(sym, markets=ex.markets)
-        while not self._stop.is_set() and sym in self._symbols:
             try:
-                trades = await ex.watch_trades(ccxt_sym)
+                trades = await ex.watch_trades_for_symbols(syms)
                 self._touch()
                 for trade in trades if isinstance(trades, list) else [trades]:
-                    if isinstance(trade, dict):
+                    if not isinstance(trade, dict):
+                        continue
+                    sym = to_binance_symbol(from_ccxt_symbol(str(trade.get("symbol") or "")))
+                    if sym:
                         self._record_trade(sym, trade)
             except asyncio.CancelledError:
                 break
             except defensive_exc_types(Exception) as exc:
-                LOG.warning("hunt_ccxt_trades_error", symbol=sym, error=repr(exc))
+                LOG.warning("hunt_ccxt_trades_error", error=repr(exc))
                 await asyncio.sleep(1.0)
 
-    async def _watch_ohlcv(self, sym: str) -> None:
+    async def _watch_ohlcv_mux(self) -> None:
+        """Single multiplexed OHLCV stream for all symbols via watch_ohlcv_for_symbols."""
+        if not self.kline_ws_enabled:
+            return
         ex = self.client.exchange
-        ccxt_sym = to_ccxt_symbol(sym, markets=ex.markets)
-        while not self._stop.is_set() and sym in self._symbols:
+        while not self._stop.is_set():
+            syms = self._ccxt_symbols()
+            if not syms:
+                await asyncio.sleep(0.5)
+                continue
+            pairs = [(s, _KLINE_INTERVAL) for s in syms]
             try:
-                ohlcv = await ex.watch_ohlcv(ccxt_sym, _KLINE_INTERVAL)
+                result = await ex.watch_ohlcv_for_symbols(pairs)
                 self._touch()
-                if isinstance(ohlcv, list):
-                    self._on_ohlcv_update(sym, ohlcv)
+                # result: {ccxt_sym: {timeframe: [[ts, o, h, l, c, v], ...]}}
+                if isinstance(result, dict):
+                    for ccxt_sym, tf_map in result.items():
+                        sym = to_binance_symbol(from_ccxt_symbol(str(ccxt_sym)))
+                        if not sym or not isinstance(tf_map, dict):
+                            continue
+                        ohlcv = tf_map.get(_KLINE_INTERVAL)
+                        if isinstance(ohlcv, list):
+                            self._on_ohlcv_update(sym, ohlcv)
             except asyncio.CancelledError:
                 break
             except defensive_exc_types(Exception) as exc:
-                LOG.warning("hunt_ccxt_kline_error", symbol=sym, error=repr(exc))
+                LOG.warning("hunt_ccxt_kline_error", error=repr(exc))
+                await asyncio.sleep(1.0)
+
+    async def _watch_order_book_mux(self) -> None:
+        """Live L2 order book via watch_order_book_for_symbols → depth imbalance + microprice."""
+        from hunt_core.market.book_parsers import depth_imbalance_from_book, microprice_bias_from_book
+
+        ex = self.client.exchange
+        while not self._stop.is_set():
+            syms = self._ccxt_symbols()
+            if not syms:
+                await asyncio.sleep(0.5)
+                continue
+            try:
+                book = await ex.watch_order_book_for_symbols(syms)
+                self._touch()
+                if not isinstance(book, dict):
+                    continue
+                sym = to_binance_symbol(from_ccxt_symbol(str(book.get("symbol") or "")))
+                if not sym:
+                    continue
+                bids = book.get("bids") or []
+                asks = book.get("asks") or []
+                bid_p = float(bids[0][0]) if bids else None
+                ask_p = float(asks[0][0]) if asks else None
+                bid_q = float(bids[0][1]) if bids else None
+                ask_q = float(asks[0][1]) if asks else None
+                di = depth_imbalance_from_book(bid_qty=bid_q, ask_qty=ask_q, delta_ratio=None)
+                mp = microprice_bias_from_book(bid=bid_p, ask=ask_p, bid_qty=bid_q, ask_qty=ask_q, delta_ratio=None)
+                self._live_books[sym] = {
+                    "bid": bid_p,
+                    "ask": ask_p,
+                    "bid_qty": bid_q,
+                    "ask_qty": ask_q,
+                    "depth_imbalance": di,
+                    "microprice_bias": mp,
+                }
+            except asyncio.CancelledError:
+                break
+            except defensive_exc_types(Exception) as exc:
+                LOG.warning("hunt_ccxt_book_error", error=repr(exc))
+                await asyncio.sleep(1.0)
+
+    async def _watch_tickers_mux(self) -> None:
+        """Rolling 24h stats for all symbols via watch_tickers."""
+        ex = self.client.exchange
+        while not self._stop.is_set():
+            syms = self._ccxt_symbols()
+            if not syms:
+                await asyncio.sleep(0.5)
+                continue
+            try:
+                tickers = await ex.watch_tickers(syms)
+                self._touch()
+                items = tickers.values() if isinstance(tickers, dict) else []
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    sym = to_binance_symbol(from_ccxt_symbol(str(item.get("symbol") or "")))
+                    if not sym:
+                        continue
+                    self._live_tickers[sym] = {
+                        "last": float(item.get("last") or 0),
+                        "quoteVolume": float(item.get("quoteVolume") or 0),
+                        "percentage": float(item.get("percentage") or 0),
+                        "high": float(item.get("high") or 0),
+                        "low": float(item.get("low") or 0),
+                    }
+            except asyncio.CancelledError:
+                break
+            except defensive_exc_types(Exception) as exc:
+                LOG.warning("hunt_ccxt_tickers_error", error=repr(exc))
+                await asyncio.sleep(1.0)
+
+    async def _watch_funding_rates_mux(self) -> None:
+        """Live funding/mark/index prices via watch_funding_rates."""
+        ex = self.client.exchange
+        while not self._stop.is_set():
+            syms = self._ccxt_symbols()
+            if not syms:
+                await asyncio.sleep(0.5)
+                continue
+            try:
+                rates = await ex.watch_funding_rates(syms)
+                self._touch()
+                items = rates.values() if isinstance(rates, dict) else []
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    sym = to_binance_symbol(from_ccxt_symbol(str(item.get("symbol") or "")))
+                    if not sym:
+                        continue
+                    mark = float(item.get("markPrice") or 0)
+                    index = float(item.get("indexPrice") or 0)
+                    funding = float(item.get("fundingRate") or 0)
+                    self._live_funding[sym] = {
+                        "markPrice": mark,
+                        "indexPrice": index,
+                        "fundingRate": funding,
+                    }
+                    if mark > 0 and index > 0:
+                        self.client.update_basis_from_websocket(sym, mark, index)
+            except asyncio.CancelledError:
+                break
+            except defensive_exc_types(Exception) as exc:
+                LOG.warning("hunt_ccxt_funding_error", error=repr(exc))
                 await asyncio.sleep(1.0)

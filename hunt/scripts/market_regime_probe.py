@@ -13,7 +13,7 @@ bootstrap()
 
 from hunt_watch.market_regime import refresh_market_regime
 
-from engine.domain.config import load_settings
+from hunt_core.domain.config import load_settings
 from hunt_core.market import HuntCcxtClient
 
 

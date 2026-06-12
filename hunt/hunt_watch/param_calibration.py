@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
-import statistics
 import urllib.parse
 import urllib.request
+
+import polars as pl
 from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -144,9 +145,9 @@ def rest_symbol_profile(symbol: str) -> dict[str, float]:
         moves.append(abs(c / o - 1.0) * 100.0)
     if not ranges:
         return {}
-    med_range = statistics.median(ranges)
-    p75_range = sorted(ranges)[int(len(ranges) * 0.75)]
-    med_move = statistics.median(moves)
+    med_range = float(pl.Series(ranges).median() or 0.0)
+    p75_range = float(pl.Series(ranges).quantile(0.75, interpolation="nearest") or 0.0)
+    med_move = float(pl.Series(moves).median() or 0.0)
     return {
         "median_range_1h_pct": round(med_range, 3),
         "p75_range_1h_pct": round(p75_range, 3),
@@ -189,8 +190,8 @@ def sample_tick_profiles(
                 ranges.append(float(sl))
         out[sym] = {
             "tick_samples": len(rows),
-            "median_abs_chg_24h": round(statistics.median(chgs), 2) if chgs else 0.0,
-            "median_sl_dist_pct": round(statistics.median(ranges), 2) if ranges else None,
+            "median_abs_chg_24h": round(float(pl.Series(chgs).median() or 0.0), 2) if chgs else 0.0,
+            "median_sl_dist_pct": round(float(pl.Series(ranges).median() or 0.0), 2) if ranges else None,
         }
     return out
 
@@ -215,7 +216,7 @@ def _grid_confirm_min(closed: list[dict[str, Any]]) -> float:
         if known < 3:
             continue
         winrate = wins / known
-        avg_pnl = statistics.mean(float(r.get("pnl_pct") or 0) for r in subset)
+        avg_pnl = float(pl.Series([float(r.get("pnl_pct") or 0) for r in subset]).mean() or 0.0)
         metric = winrate * 0.7 + (avg_pnl / 20.0) * 0.3
         if metric > best_metric:
             best_metric = metric
@@ -242,7 +243,7 @@ def calibrate_universal(
     confirm_no_div = round(min(72.0, confirm_min + 6.0), 1)
 
     loss_pnls = [abs(float(r["pnl_pct"])) for r in stops]
-    med_stop = statistics.median(loss_pnls) if loss_pnls else 4.0
+    med_stop = float(pl.Series(loss_pnls).median() or 4.0) if loss_pnls else 4.0
     sl_normal = round(min(10.0, max(7.0, med_stop * 1.35)), 1)
     sl_para = round(min(15.0, sl_normal + 4.0), 1)
 
@@ -250,7 +251,7 @@ def calibrate_universal(
     if len(stops) >= 4 and len(wins) <= 2:
         adx_block = max(32.0, adx_block - 2.0)
 
-    win_avg = statistics.mean(float(r["pnl_pct"]) for r in wins) if wins else 0.0
+    win_avg = float(pl.Series([float(r["pnl_pct"]) for r in wins]).mean() or 0.0) if wins else 0.0
     min_rr = 1.0 if win_avg < 10 else 0.95
 
     return {
@@ -323,7 +324,7 @@ def calibrate_per_symbol(
                 entry["source"].append("outcomes_all_win")
             stops = [r for r in labeled if r.get("close_reason") == "stop_hit" and r.get("pnl_pct")]
             if stops:
-                med = statistics.median(abs(float(r["pnl_pct"])) for r in stops)
+                med = float(pl.Series([abs(float(r["pnl_pct"])) for r in stops]).median() or 0.0)
                 levels["sl_max_pct_normal"] = round(min(12.0, max(6.5, med * 1.4)), 2)
                 entry["source"].append("outcome_stop_dist")
 
@@ -340,9 +341,7 @@ def calibrate_per_symbol(
                 entry["source"].append("rest_volatility")
 
         if adapt and adapt.tick_n >= 6:
-            import math
-
-            sigma = math.sqrt(max(adapt.tick_var, 0.05))
+            sigma = float(pl.Series([max(adapt.tick_var, 0.05)]).sqrt()[0])
             scanner["hot_range_pct"] = round(max(3.0, min(25.0, adapt.chg_mu * 0.85)), 2)
             entry["source"].append("ewma_adaptive")
 

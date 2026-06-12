@@ -10,7 +10,7 @@ from typing import Any
 
 import structlog
 
-from engine.domain.config import load_settings
+from hunt_core.domain.config import load_settings
 
 from hunt_core.market import HuntCcxtClient
 from hunt_watch.adaptive_thresholds import (

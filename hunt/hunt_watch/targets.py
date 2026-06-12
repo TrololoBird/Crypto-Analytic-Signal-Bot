@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any, Literal
 
-from engine.domain.config import BotSettings
+from hunt_core.domain.config import BotSettings
 from hunt_watch.paths import WATCHLIST as WATCHLIST_PATH
 
 WatchMode = Literal["short", "long", "both"]

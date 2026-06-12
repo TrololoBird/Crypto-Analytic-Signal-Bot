@@ -11,7 +11,7 @@ from typing import Any
 import ccxt.async_support as ccxt
 import polars as pl
 
-from engine.domain.schemas import AggTradeSnapshot, SymbolMeta
+from hunt_core.domain.schemas import AggTradeSnapshot, SymbolMeta
 from hunt_core.market.frames import ccxt_ohlcv_to_frame, finalize_kline_frame
 from hunt_core.market.symbols import from_ccxt_symbol, to_binance_symbol, to_ccxt_symbol
 
@@ -29,8 +29,6 @@ _CACHE_TTL: dict[str, int] = {
     "open_interest_change": 600,
     "metric_series": 240,
     "long_short_ratio": 600,
-    "taker_ratio": 600,
-    "global_ls_ratio": 600,
     "funding_rate": 300,
     "funding_history": 1800,
     "funding_info": 3600,
@@ -48,23 +46,6 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
     except (TypeError, ValueError):
         return default
     return out if math.isfinite(out) else default
-
-
-def _parse_metric_series(payload: Any, *, keys: tuple[str, ...]) -> list[float]:
-    if not payload:
-        return []
-    rows = [dict(item) if isinstance(item, dict) else {} for item in payload]
-    rows.sort(key=lambda row: int(row.get("timestamp") or 0))
-    series: list[float] = []
-    for row in rows:
-        raw = next((row[k] for k in keys if row.get(k) is not None), None)
-        if raw is None:
-            continue
-        try:
-            series.append(float(raw))
-        except (TypeError, ValueError):
-            continue
-    return series
 
 
 class HuntCcxtClient:
@@ -98,9 +79,6 @@ class HuntCcxtClient:
         self._open_interest_cache: dict[str, tuple[float, float]] = {}
         self._open_interest_change_cache: dict[tuple[str, str], tuple[float, float]] = {}
         self._long_short_ratio_cache: dict[tuple[str, str], tuple[float, float]] = {}
-        self._top_position_ls_ratio_cache: dict[tuple[str, str], tuple[float, float]] = {}
-        self._taker_ratio_cache: dict[tuple[str, str], tuple[float, float]] = {}
-        self._global_ls_ratio_cache: dict[tuple[str, str], tuple[float, float]] = {}
         self._funding_rate_cache: dict[str, tuple[float, float]] = {}
         self._funding_history_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
         self._funding_info_all_cache: tuple[float, dict[str, dict[str, float | int]]] | None = None
@@ -147,20 +125,20 @@ class HuntCcxtClient:
             assert self._exchange_info_cache is not None
             return self._exchange_info_cache[1]
         await self.load_markets()
-        raw = await self._ex.fapiPublicGetExchangeInfo()
-        symbols = raw.get("symbols") if isinstance(raw, dict) else []
-        rows = [
-            SymbolMeta(
-                symbol=str(item.get("symbol") or ""),
-                base_asset=str(item.get("baseAsset") or ""),
-                quote_asset=str(item.get("quoteAsset") or ""),
-                contract_type=str(item.get("contractType") or ""),
-                status=str(item.get("status") or ""),
-                onboard_date_ms=int(item.get("onboardDate") or 0),
+        rows: list[SymbolMeta] = []
+        for market in self._ex.markets.values():
+            info = market.get("info") if isinstance(market, dict) else None
+            info = info if isinstance(info, dict) else {}
+            rows.append(
+                SymbolMeta(
+                    symbol=str(market.get("id") or info.get("symbol") or ""),
+                    base_asset=str(market.get("base") or info.get("baseAsset") or ""),
+                    quote_asset=str(market.get("quote") or info.get("quoteAsset") or ""),
+                    contract_type=str(info.get("contractType") or ""),
+                    status=str(info.get("status") or ""),
+                    onboard_date_ms=int(info.get("onboardDate") or 0),
+                )
             )
-            for item in symbols
-            if isinstance(item, dict)
-        ]
         self._exchange_info_cache = (now, rows)
         return rows
 
@@ -274,8 +252,8 @@ class HuntCcxtClient:
         snapshot: dict[str, Any] = {
             "bid_price": float(bids[0][0]),
             "ask_price": float(asks[0][0]),
-            "bid_qty": sum(float(q) for _p, q in bids),
-            "ask_qty": sum(float(q) for _p, q in asks),
+            "bid_qty": float(pl.Series([float(q) for _p, q in bids]).sum()),
+            "ask_qty": float(pl.Series([float(q) for _p, q in asks]).sum()),
             "bid_levels": bids[:5],
             "ask_levels": asks[:5],
         }
@@ -305,25 +283,6 @@ class HuntCcxtClient:
             LOG.debug("fetch_open_interest failed | symbol=%s error=%s", sym, exc)
         return cached[1] if cached else None  # type: ignore[return-value]
 
-    async def _fapi_ratio(
-        self,
-        method: str,
-        symbol: str,
-        *,
-        period: str,
-        limit: int,
-        ratio_key: str,
-    ) -> float | None:
-        sym = self._bin_sym(symbol)
-        await self.load_markets()
-        fn = getattr(self._ex, method)
-        payload = await fn({"symbol": sym, "period": period, "limit": limit})
-        if not payload:
-            return None
-        item = payload[-1] if isinstance(payload, list) else payload
-        raw = item.get(ratio_key) if isinstance(item, dict) else None
-        return float(raw) if raw is not None else None
-
     async def fetch_open_interest_change(self, symbol: str, *, period: str = "1h") -> float | None:
         sym = self._bin_sym(symbol)
         cache_key = (sym, period)
@@ -332,10 +291,12 @@ class HuntCcxtClient:
         if self._cache_fresh(cached, _CACHE_TTL["open_interest_change"]):
             return cached[1]  # type: ignore[index]
         try:
-            payload = await self._ex.fapiDataGetOpenInterestHist(
-                {"symbol": sym, "period": period, "limit": 2}
+            await self.load_markets()
+            payload = await self._ex.fetch_open_interest_history(
+                self._ccxt_sym(sym), timeframe=period, limit=2
             )
-            series = _parse_metric_series(payload, keys=("sumOpenInterest",))
+            series = [float(item["openInterestAmount"]) for item in payload
+                      if item.get("openInterestAmount") is not None]
             if len(series) < 2 or series[-2] <= 0:
                 return None
             change = series[-1] / series[-2] - 1.0
@@ -346,80 +307,24 @@ class HuntCcxtClient:
             return cached[1] if cached else None  # type: ignore[return-value]
 
     async def fetch_long_short_ratio(self, symbol: str, *, period: str = "1h") -> float | None:
+        """Global long/short account ratio via ccxt unified fetch_long_short_ratio_history."""
         cache_key = (self._bin_sym(symbol), period)
         cached = self._long_short_ratio_cache.get(cache_key)
         if self._cache_fresh(cached, _CACHE_TTL["long_short_ratio"]):
             return cached[1]  # type: ignore[index]
         try:
-            value = await self._fapi_ratio(
-                "fapiDataGetTopLongShortAccountRatio",
-                symbol,
-                period=period,
-                limit=1,
-                ratio_key="longShortRatio",
+            await self.load_markets()
+            payload = await self._ex.fetch_long_short_ratio_history(
+                self._ccxt_sym(symbol), timeframe=period, limit=1
             )
-            if value is not None:
-                self._long_short_ratio_cache[cache_key] = (time.monotonic(), value)
-            return value
+            if payload:
+                value = _safe_float(payload[-1].get("longShortRatio"))
+                if value > 0:
+                    self._long_short_ratio_cache[cache_key] = (time.monotonic(), value)
+                    return value
         except Exception:
-            return cached[1] if cached else None  # type: ignore[return-value]
-
-    async def fetch_top_position_ls_ratio(self, symbol: str, *, period: str = "1h") -> float | None:
-        cache_key = (self._bin_sym(symbol), period)
-        cached = self._top_position_ls_ratio_cache.get(cache_key)
-        if self._cache_fresh(cached, _CACHE_TTL["long_short_ratio"]):
-            return cached[1]  # type: ignore[index]
-        try:
-            value = await self._fapi_ratio(
-                "fapiDataGetTopLongShortPositionRatio",
-                symbol,
-                period=period,
-                limit=1,
-                ratio_key="longShortRatio",
-            )
-            if value is not None:
-                self._top_position_ls_ratio_cache[cache_key] = (time.monotonic(), value)
-            return value
-        except Exception:
-            return cached[1] if cached else None  # type: ignore[return-value]
-
-    async def fetch_taker_ratio(self, symbol: str, *, period: str = "1h") -> float | None:
-        cache_key = (self._bin_sym(symbol), period)
-        cached = self._taker_ratio_cache.get(cache_key)
-        if cached is not None and time.monotonic() - cached[0] < 1200:
-            return cached[1]
-        try:
-            value = await self._fapi_ratio(
-                "fapiDataGetTakerlongshortRatio",
-                symbol,
-                period=period,
-                limit=1,
-                ratio_key="buySellRatio",
-            )
-            if value is not None:
-                self._taker_ratio_cache[cache_key] = (time.monotonic(), value)
-            return value
-        except Exception:
-            return cached[1] if cached else None
-
-    async def fetch_global_ls_ratio(self, symbol: str, *, period: str = "1h") -> float | None:
-        cache_key = (self._bin_sym(symbol), period)
-        cached = self._global_ls_ratio_cache.get(cache_key)
-        if cached is not None and time.monotonic() - cached[0] < 1200:
-            return cached[1]
-        try:
-            value = await self._fapi_ratio(
-                "fapiDataGetGlobalLongShortAccountRatio",
-                symbol,
-                period=period,
-                limit=1,
-                ratio_key="longShortRatio",
-            )
-            if value is not None:
-                self._global_ls_ratio_cache[cache_key] = (time.monotonic(), value)
-            return value
-        except Exception:
-            return cached[1] if cached else None
+            pass
+        return cached[1] if cached else None  # type: ignore[return-value]
 
     async def fetch_open_interest_series(
         self, symbol: str, *, period: str = "5m", limit: int = 48
@@ -430,10 +335,12 @@ class HuntCcxtClient:
         if self._cache_fresh(cached, _CACHE_TTL["metric_series"]):
             return cached[1]  # type: ignore[index]
         try:
-            payload = await self._ex.fapiDataGetOpenInterestHist(
-                {"symbol": sym, "period": period, "limit": int(limit)}
+            await self.load_markets()
+            payload = await self._ex.fetch_open_interest_history(
+                self._ccxt_sym(sym), timeframe=period, limit=int(limit)
             )
-            series = _parse_metric_series(payload, keys=("sumOpenInterest",))
+            series = [float(item["openInterestAmount"]) for item in payload
+                      if item.get("openInterestAmount") is not None]
             if series:
                 self._oi_series_cache[cache_key] = (time.monotonic(), series)
             return series
@@ -449,10 +356,12 @@ class HuntCcxtClient:
         if self._cache_fresh(cached, _CACHE_TTL["metric_series"]):
             return cached[1]  # type: ignore[index]
         try:
-            payload = await self._ex.fapiDataGetGlobalLongShortAccountRatio(
-                {"symbol": sym, "period": period, "limit": int(limit)}
+            await self.load_markets()
+            payload = await self._ex.fetch_long_short_ratio_history(
+                self._ccxt_sym(sym), timeframe=period, limit=int(limit)
             )
-            series = _parse_metric_series(payload, keys=("longShortRatio",))
+            series = [float(item["longShortRatio"]) for item in payload
+                      if item.get("longShortRatio") is not None]
             if series:
                 self._gls_series_cache[cache_key] = (time.monotonic(), series)
             return series
@@ -508,12 +417,11 @@ class HuntCcxtClient:
         if self._cache_fresh(self._premium_index_all_cache, 30):
             assert self._premium_index_all_cache is not None
             return self._premium_index_all_cache[1]
-        raw = await self._ex.fapiPublicGetPremiumIndex()
+        await self.load_markets()
+        funding = await self._ex.fetch_funding_rates()
         rows: dict[str, dict[str, float]] = {}
-        for item in raw if isinstance(raw, list) else []:
-            if not isinstance(item, dict):
-                continue
-            sym = str(item.get("symbol") or "").upper()
+        for ccxt_sym, item in funding.items():
+            sym = self._bin_sym(from_ccxt_symbol(ccxt_sym))
             mark = _safe_float(item.get("markPrice"))
             index = _safe_float(item.get("indexPrice"))
             if not sym or mark <= 0:
@@ -521,7 +429,7 @@ class HuntCcxtClient:
             rows[sym] = {
                 "mark_price": mark,
                 "index_price": index,
-                "last_funding_rate": _safe_float(item.get("lastFundingRate")),
+                "last_funding_rate": _safe_float(item.get("fundingRate")),
             }
         self._premium_index_all_cache = (now, rows)
         return rows
@@ -531,18 +439,19 @@ class HuntCcxtClient:
         if self._cache_fresh(self._funding_info_all_cache, _CACHE_TTL["funding_info"]):
             assert self._funding_info_all_cache is not None
             return self._funding_info_all_cache[1]
-        raw = await self._ex.fapiPublicGetFundingInfo()
+        await self.load_markets()
+        intervals = await self._ex.fetch_funding_intervals()
         rows: dict[str, dict[str, float | int]] = {}
-        for item in raw if isinstance(raw, list) else []:
-            if not isinstance(item, dict):
-                continue
-            sym = str(item.get("symbol") or "").upper()
+        for ccxt_sym, item in intervals.items():
+            info = item.get("info") if isinstance(item, dict) else None
+            info = info if isinstance(info, dict) else {}
+            sym = self._bin_sym(from_ccxt_symbol(ccxt_sym))
             if not sym:
                 continue
             rows[sym] = {
-                "funding_interval_hours": int(item.get("fundingIntervalHours") or 8),
-                "cap": _safe_float(item.get("adjustedFundingRateCap")),
-                "floor": _safe_float(item.get("adjustedFundingRateFloor")),
+                "funding_interval_hours": int(info.get("fundingIntervalHours") or 8),
+                "cap": _safe_float(info.get("adjustedFundingRateCap")),
+                "floor": _safe_float(info.get("adjustedFundingRateFloor")),
             }
         self._funding_info_all_cache = (now, rows)
         return rows
@@ -572,15 +481,14 @@ class HuntCcxtClient:
                 basis_series.append((futures_price - index_price) / index_price * 100.0)
             if not basis_series:
                 return cached[1] if cached else None  # type: ignore[return-value]
-            basis_pct = basis_series[-1]
-            premium_slope = basis_series[-1] - basis_series[-2] if len(basis_series) >= 2 else None
+            s = pl.Series("basis", basis_series)
+            basis_pct = float(s[-1])
+            premium_slope = float(s[-1] - s[-2]) if len(basis_series) >= 2 else None
             premium_zscore = None
             if len(basis_series) >= 3:
-                mean = sum(basis_series) / len(basis_series)
-                variance = sum((v - mean) ** 2 for v in basis_series) / len(basis_series)
-                std = math.sqrt(variance)
+                std = float(s.std(ddof=0) or 0.0)
                 if std > 0:
-                    premium_zscore = (basis_series[-1] - mean) / std
+                    premium_zscore = float((s[-1] - s.mean()) / std)
             self._basis_cache[cache_key] = (now, basis_pct)
             self._basis_stats_cache[cache_key] = (
                 now,
@@ -639,30 +547,6 @@ class HuntCcxtClient:
             return None
         return cached[1]
 
-    def get_cached_top_position_ls_ratio(
-        self, symbol: str, period: str = "1h", max_age_s: float = 1800.0
-    ) -> float | None:
-        cached = self._top_position_ls_ratio_cache.get((self._bin_sym(symbol), period))
-        if cached is None or time.monotonic() - cached[0] > max_age_s:
-            return None
-        return cached[1]
-
-    def get_cached_taker_ratio(
-        self, symbol: str, period: str = "1h", max_age_s: float = 1800.0
-    ) -> float | None:
-        cached = self._taker_ratio_cache.get((self._bin_sym(symbol), period))
-        if cached is None or time.monotonic() - cached[0] > max_age_s:
-            return None
-        return cached[1]
-
-    def get_cached_global_ls_ratio(
-        self, symbol: str, period: str = "1h", max_age_s: float = 1800.0
-    ) -> float | None:
-        cached = self._global_ls_ratio_cache.get((self._bin_sym(symbol), period))
-        if cached is None or time.monotonic() - cached[0] > max_age_s:
-            return None
-        return cached[1]
-
     def get_cached_funding_rate(self, symbol: str, max_age_s: float = 1800.0) -> float | None:
         cached = self._funding_rate_cache.get(self._bin_sym(symbol))
         if cached is None or time.monotonic() - cached[0] > max_age_s:
@@ -676,10 +560,11 @@ class HuntCcxtClient:
         rows = cached[1]
         if len(rows) < 3:
             return None
-        recent = [float(r["fundingRate"]) for r in rows[-4:]]
-        ups = sum(1 for i in range(1, len(recent)) if recent[i] > recent[i - 1])
-        downs = sum(1 for i in range(1, len(recent)) if recent[i] < recent[i - 1])
-        steps = len(recent) - 1
+        s = pl.Series("r", [float(r["fundingRate"]) for r in rows[-4:]])
+        diffs = s.diff().drop_nulls()
+        ups = int((diffs > 0).sum())
+        downs = int((diffs < 0).sum())
+        steps = diffs.len()
         if ups >= steps * 0.75:
             return "rising"
         if downs >= steps * 0.75:
@@ -692,15 +577,13 @@ class HuntCcxtClient:
         cached = self._funding_history_cache.get(self._bin_sym(symbol))
         if cached is None or time.monotonic() - cached[0] > max_cache_age_s:
             return None
-        rates = [float(r["fundingRate"]) for r in cached[1] if math.isfinite(float(r["fundingRate"]))]
-        if len(rates) < 6:
+        s = pl.Series("rates", [float(r["fundingRate"]) for r in cached[1]]).drop_nans()
+        if s.len() < 6:
             return None
-        mean = sum(rates) / len(rates)
-        variance = sum((x - mean) ** 2 for x in rates) / len(rates)
-        stdev = math.sqrt(variance) if variance > 0 else 0.0
+        stdev = float(s.std(ddof=1) or 0.0)
         if stdev <= 1e-12:
             return 0.0
-        return (rates[-1] - mean) / stdev
+        return float((s[-1] - s.mean()) / stdev)
 
     def get_cached_funding_recent_extreme(
         self,
@@ -762,3 +645,72 @@ class HuntCcxtClient:
         self._basis_cache[cache_key] = (now, basis_pct)
         self._basis_stats_cache[cache_key] = (now, stats)
         return stats
+
+    async def fetch_mark_ohlcv(
+        self, symbol: str, interval: str = "1h", *, limit: int = 96
+    ) -> pl.DataFrame:
+        """Mark price OHLCV via ccxt fetch_mark_ohlcv."""
+        await self.load_markets()
+        from hunt_core.market.frames import ccxt_ohlcv_to_frame, finalize_kline_frame
+        rows = await self._ex.fetch_mark_ohlcv(self._ccxt_sym(symbol), interval, limit=limit)
+        return finalize_kline_frame(ccxt_ohlcv_to_frame(rows, interval), interval)
+
+    async def fetch_index_ohlcv(
+        self, symbol: str, interval: str = "1h", *, limit: int = 96
+    ) -> pl.DataFrame:
+        """Index price OHLCV via ccxt fetch_index_ohlcv."""
+        await self.load_markets()
+        from hunt_core.market.frames import ccxt_ohlcv_to_frame, finalize_kline_frame
+        rows = await self._ex.fetch_index_ohlcv(self._ccxt_sym(symbol), interval, limit=limit)
+        return finalize_kline_frame(ccxt_ohlcv_to_frame(rows, interval), interval)
+
+    async def fetch_premium_index_ohlcv(
+        self, symbol: str, interval: str = "1h", *, limit: int = 96
+    ) -> pl.DataFrame:
+        """Premium index (basis %) OHLCV via ccxt fetch_premium_index_ohlcv."""
+        await self.load_markets()
+        from hunt_core.market.frames import ccxt_ohlcv_to_frame, finalize_kline_frame
+        rows = await self._ex.fetch_premium_index_ohlcv(self._ccxt_sym(symbol), interval, limit=limit)
+        return finalize_kline_frame(ccxt_ohlcv_to_frame(rows, interval), interval)
+
+    async def fetch_basis_from_ohlcv(
+        self, symbol: str, interval: str = "1h", *, limit: int = 48
+    ) -> dict[str, float | None]:
+        """Basis stats computed from mark vs index OHLCV frames via polars."""
+        try:
+            mark_df, index_df = await asyncio.gather(
+                self.fetch_mark_ohlcv(symbol, interval, limit=limit),
+                self.fetch_index_ohlcv(symbol, interval, limit=limit),
+            )
+            if mark_df.is_empty() or index_df.is_empty():
+                return {}
+            joined = mark_df.select(["time", pl.col("close").alias("mark_close")]).join(
+                index_df.select(["time", pl.col("close").alias("index_close")]),
+                on="time",
+                how="inner",
+            )
+            if joined.is_empty():
+                return {}
+            basis = (
+                (pl.col("mark_close") - pl.col("index_close")) / pl.col("index_close") * 100.0
+            )
+            joined = joined.with_columns(basis.alias("basis_pct"))
+            s = joined["basis_pct"]
+            latest = float(s[-1])
+            slope = float(s[-1] - s[-2]) if s.len() >= 2 else None
+            std = float(s.std(ddof=0) or 0.0)
+            zscore = float((s[-1] - s.mean()) / std) if std > 0 else None
+            cache_key = (self._bin_sym(symbol), interval)
+            now = time.monotonic()
+            stats = {
+                "latest_basis_pct": latest,
+                "premium_slope_5m": slope,
+                "premium_zscore_5m": zscore,
+                "mark_index_spread_bps": latest * 100.0,
+            }
+            self._basis_cache[cache_key] = (now, latest)
+            self._basis_stats_cache[cache_key] = (now, stats)
+            return stats
+        except Exception as exc:
+            LOG.debug("fetch_basis_from_ohlcv failed | symbol=%s error=%s", symbol, exc)
+            return {}

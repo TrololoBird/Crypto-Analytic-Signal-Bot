@@ -71,10 +71,10 @@ from hunt_watch.targets import PINNED_SYMBOLS, effective_watch_mode, resolve_wat
 from hunt_watch.telegram_commands import build_hunt_telegram_commands
 from hunt_watch.tick_rotate import rotate_hunt_ticks
 from hunt_watch.watchlist_ops import clear_signal_notify, load_pending_notify
-from engine.domain.config import load_settings
-from engine.errors import DEFENSIVE_EXC, defensive_exc_types
-from engine.features.prepare import _prepare_frame, min_required_bars
-from engine.telegram import TelegramBroadcaster
+from hunt_core.domain.config import load_settings
+from hunt_core.errors import DEFENSIVE_EXC, defensive_exc_types
+from hunt_core.features.prepare import _prepare_frame, min_required_bars
+from hunt_core.telegram import TelegramBroadcaster
 
 from hunt_core.market import HuntCcxtClient, HuntCcxtSpotCompanion, HuntCcxtStreams
 from hunt_core.market.factory import create_hunt_market_plane_from_settings

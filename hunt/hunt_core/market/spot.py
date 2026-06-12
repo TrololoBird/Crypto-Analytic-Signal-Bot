@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 import ccxt.async_support as ccxt
 
-from engine.errors import DEFENSIVE_EXC
+from hunt_core.errors import DEFENSIVE_EXC
 from hunt_core.market.symbols import to_binance_symbol
 
 LOG = logging.getLogger("hunt_core.market.spot")

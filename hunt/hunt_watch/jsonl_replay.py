@@ -8,8 +8,9 @@ Rows missing closed-bar keys are skipped in ``iter_tick_rows``.
 from __future__ import annotations
 
 import json
-import statistics
 from collections import Counter, defaultdict
+
+import polars as pl
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -808,7 +809,7 @@ def run_replay_report(
         "prep_funnel": prep_funnel,
         "prep_shadow_replay": prep_shadow,
         "walk_forward": wf,
-        "median_dump_fuel": round(statistics.median(fuels_short), 1) if fuels_short else None,
+        "median_dump_fuel": round(float(pl.Series(fuels_short).median() or 0.0), 1) if fuels_short else None,
         "block_mix": {
             "short": blocks["short"].most_common(12),
             "long": blocks["long"].most_common(12),
