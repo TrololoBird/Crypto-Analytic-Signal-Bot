@@ -11,6 +11,7 @@ import argparse
 import asyncio
 import html
 import json
+import os
 import signal
 import time
 from datetime import UTC, datetime, timedelta
@@ -32,6 +33,16 @@ from hunt_watch.ignition import (
 )
 from hunt_watch.indicators import rsi14_from_ohlc
 from hunt_watch.directional_filters import directional_filters
+from hunt_watch.dump_hunt_alert import (
+    dump_hunt_skip_reason,
+    format_dump_hunt_telegram,
+    maybe_send_dump_hunt_telegram,
+)
+from hunt_watch.feature_latch import (
+    book_walls_from_depth,
+    book_walls_from_row,
+    feature_vector_from_row,
+)
 from hunt_watch.frame_fallback import patch_work_4h, should_use_young_lite_path
 from hunt_watch.levels import fib_retracement_levels, structural_long_levels, structural_short_levels
 from hunt_watch.lifecycle import (
@@ -54,6 +65,7 @@ from hunt_watch.early_alert import (
     EARLY_TELEGRAM_ENABLED,
     evaluate_early_alert,
     early_cooldown_ok,
+    early_telegram_enabled,
     format_early_telegram,
     mark_early_sent,
 )
@@ -232,6 +244,14 @@ IGNITION_MIN_QVOL_USD = 3_000_000.0
 IGNITION_TTL_S = 7200.0  # ignited symbols stay in minute-watch this long
 # Ignition → watchlist only; TG alerts were noisy spam (user request 2026-06-10).
 IGNITION_TELEGRAM_ENABLED = False
+
+# H-A "sniper" product (Gate G2, 2026-06-12): live TG delivery is restricted to the
+# only data-validated edge — short fade confirmed in lifecycle phase `dump_active`
+# (hold-to-target backtest: 19% SL / 68% TP1 on n=37 vs 52% raw baseline). Long setups
+# are still computed and tracked (shadow / research-only) but never delivered to TG;
+# their followups stay silent via the existing `announced` gate. Set 0 to disable.
+HUNT_SNIPER_MODE = os.environ.get("HUNT_SNIPER_MODE", "1") not in {"0", "false", "False"}
+HUNT_SNIPER_LIVE_PHASES = frozenset({"dump_active"})
 
 LOG = configure_script_logging("scripts.dump_minute_watch")
 _STOP = False
@@ -1383,7 +1403,7 @@ async def _maybe_send_early_alert(
     now: datetime,
 ) -> bool:
     """Prep/start Telegram before full closed-bar confirm."""
-    if not EARLY_TELEGRAM_ENABLED:
+    if not early_telegram_enabled(symbol):
         return False
     early = evaluate_early_alert(
         setup,
@@ -1479,6 +1499,16 @@ def _cooldown_ok(
     except ValueError:
         return True
     return now - last >= timedelta(minutes=minutes)
+
+
+def _entry_past_tp1(setup: dict[str, Any], *, direction: str, price: float) -> bool:
+    """Reject TG when price already at/through TP1 — instant TP1 + invalidate ping-pong."""
+    tp1 = float(setup.get("tp1") or 0)
+    if tp1 <= 0 or price <= 0:
+        return False
+    if direction == "short":
+        return price <= tp1
+    return price >= tp1
 
 
 def _fmt_price(value: float | None) -> str:
@@ -2271,6 +2301,7 @@ async def _snapshot_symbol(
             book=book,
             tf=tf,
         ),
+        "book_walls": book_walls_from_depth(pack.get("book_depth")),
     }
 
     lifecycle = stabilize_lifecycle(
@@ -2617,6 +2648,40 @@ async def _run_tick(
                 ):
                     ndir = str(pend.get("direction") or "short")
                     nsetup = dump if ndir == "short" else long_setup
+                    lc_dict = lifecycle_raw if isinstance(lifecycle_raw, dict) else {}
+                    nfuel = max(
+                        float((nsetup or {}).get("dump_fuel") or 0),
+                        float((nsetup or {}).get("long_fuel") or 0),
+                        float((nsetup or {}).get("dump_score") or 0),
+                        float((nsetup or {}).get("long_score") or 0),
+                    )
+                    nphase = str((nsetup or {}).get("phase") or "")
+                    await_phase = str(pend.get("await_phase") or "dump_confirmed")
+                    min_fuel = float(pend.get("min_fuel") or 70.0)
+                    notify_on_forming = bool(pend.get("notify_on_forming"))
+                    forming_phases = frozenset(
+                        {
+                            "dump_setup_forming",
+                            "dump_imminent",
+                            "dump_initiating",
+                            "exhaustion_watch",
+                        }
+                    )
+                    forming_ready = (
+                        notify_on_forming
+                        and nsetup
+                        and not bool(nsetup.get("confirmed"))
+                        and nfuel >= min_fuel
+                        and nphase in forming_phases
+                        and str(lc_dict.get("phase") or "")
+                        in ("exhaustion_at_high", "distribution", "dump_active")
+                    )
+                    phase_ready = (
+                        nsetup
+                        and not bool(nsetup.get("confirmed"))
+                        and nphase == await_phase
+                        and nfuel >= min_fuel
+                    )
                     if nsetup and bool(nsetup.get("confirmed")):
                         if not _should_alert(
                             nsetup,
@@ -2655,6 +2720,82 @@ async def _run_tick(
                                     direction=ndir,
                                     message_id=notify_result.message_id,
                                 )
+                    elif (forming_ready or phase_ready) and ndir == "short":
+                        price_now = float(row.get("price") or 0)
+                        if _entry_past_tp1(nsetup, direction=ndir, price=price_now):
+                            LOG.info(
+                                "signal_notify_skipped_past_tp1",
+                                symbol=symbol,
+                                direction=ndir,
+                                price=price_now,
+                            )
+                        else:
+                            tier: str = (
+                                "likely" if bool(nsetup.get("confirmed")) else
+                                "armed" if nfuel >= effective_hunt_params(symbol).confirm_min_score else
+                                "prep"
+                            )
+                            skip = dump_hunt_skip_reason(
+                                symbol=symbol,
+                                tier=tier,  # type: ignore[arg-type]
+                                price=price_now,
+                                setup=nsetup,
+                                lifecycle=lc_dict,
+                                now=now,
+                            )
+                            if skip:
+                                LOG.debug(
+                                    "signal_notify_skipped",
+                                    symbol=symbol,
+                                    reason=skip,
+                                    tier=tier,
+                                )
+                            else:
+                                imp = row.get("impulse") or {}
+                                notify_msg = format_dump_hunt_telegram(
+                                    symbol=symbol,
+                                    tier=tier,  # type: ignore[arg-type]
+                                    price=price_now,
+                                    setup=nsetup,
+                                    lifecycle=lc_dict,
+                                    chg_24h=float(row.get("chg_24h_pct") or 0),
+                                    impulse_low=float(
+                                        row.get("impulse_low")
+                                        or imp.get("hunt_low")
+                                        or 0
+                                    ),
+                                    atr15=float(
+                                        ((row.get("timeframes") or {}).get("15m") or {}).get("atr14")
+                                        or 0
+                                    ),
+                                    note=f"forming · {nphase} · fuel {nfuel:.0f}",
+                                )
+                                sent = await maybe_send_dump_hunt_telegram(
+                                    broadcaster,
+                                    symbol=symbol,
+                                    tier=tier,  # type: ignore[arg-type]
+                                    message=notify_msg,
+                                    now=now,
+                                    price=price_now,
+                                    setup=nsetup,
+                                    lifecycle=lc_dict,
+                                )
+                                if sent:
+                                    LOG.info(
+                                        "signal_notify_forming_sent",
+                                        symbol=symbol,
+                                        direction=ndir,
+                                        tier=tier,
+                                        phase=nphase,
+                                        fuel=nfuel,
+                                    )
+                                    append_signal_event(
+                                        "forming_notify",
+                                        symbol=symbol,
+                                        direction=ndir,
+                                        detail=nphase,
+                                        payload={"fuel": nfuel, "tier": tier},
+                                    )
 
                 if followups:
                     mark_followups_sent(tracker_state, followups, now=now)
@@ -2686,6 +2827,14 @@ async def _run_tick(
                     for direction, setup in (("short", dump), ("long", long_setup)):
                         if not setup:
                             continue
+                        if HUNT_SNIPER_MODE:
+                            # H-A: only short fade in lifecycle `dump_active` ships live.
+                            # Long stays shadow (tracked, never announced).
+                            if direction != "short":
+                                continue
+                            _lc_phase = str((lifecycle_raw or {}).get("phase") or "")
+                            if _lc_phase not in HUNT_SNIPER_LIVE_PHASES:
+                                continue
                         if not _should_alert(
                             setup,
                             direction=direction,
@@ -2789,6 +2938,16 @@ async def _run_tick(
                             continue
                         if not _cooldown_ok(symbol, direction, state, now=now):
                             continue
+                        price_now = float(row.get("price") or 0)
+                        if _entry_past_tp1(setup, direction=direction, price=price_now):
+                            LOG.info(
+                                "watch_telegram_skipped_past_tp1",
+                                symbol=symbol,
+                                direction=direction,
+                                price=price_now,
+                                tp1=setup.get("tp1"),
+                            )
+                            continue
                         msg = _format_telegram(
                             row,
                             direction=direction,
@@ -2817,6 +2976,8 @@ async def _run_tick(
                                 else None,
                                 now=now,
                                 entry_message_id=result.message_id,
+                                features_open=feature_vector_from_row(row),
+                                book_walls=book_walls_from_row(row),
                             )
                             LOG.info(
                                 "watch_telegram_sent",
@@ -3194,6 +3355,38 @@ async def _run_loop(
             await broadcaster.close()
 
 
+def _acquire_single_instance_lock() -> None:
+    """Refuse to start if another live watcher holds the lock.
+
+    Concurrent watchers write the shared signal_state/history and produce
+    duplicate / opened_at=None rows (the multi-watcher race). One writer only.
+    """
+    from hunt_watch.paths import DATA
+
+    lock = DATA / "watch.pid"
+    if lock.exists():
+        try:
+            other = int(lock.read_text(encoding="utf-8").strip() or "0")
+        except (OSError, ValueError):
+            other = 0
+        if other and other != os.getpid():
+            alive = False
+            try:
+                os.kill(other, 0)  # liveness probe — raises if dead
+                alive = True
+            except ProcessLookupError:
+                alive = False  # stale lock, take it over
+            except PermissionError:
+                alive = True  # exists but not ours
+            if alive:
+                raise SystemExit(
+                    f"watch.py already running (pid={other}); refusing to start a second writer. "
+                    f"Kill it first or remove {lock} if stale."
+                )
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text(str(os.getpid()), encoding="utf-8")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Signal minute watch + Telegram")
     parser.add_argument(
@@ -3209,6 +3402,8 @@ def main() -> None:
     symbols = tuple(dict.fromkeys(s.upper() for s in args.symbols))
     signal.signal(signal.SIGINT, _on_signal)
     signal.signal(signal.SIGTERM, _on_signal)
+    if not args.once:
+        _acquire_single_instance_lock()  # one writer only — prevents the multi-watcher race
     asyncio.run(
         _run_loop(
             symbols,
