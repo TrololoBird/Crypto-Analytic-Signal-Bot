@@ -252,6 +252,9 @@ IGNITION_TELEGRAM_ENABLED = False
 # their followups stay silent via the existing `announced` gate. Set 0 to disable.
 HUNT_SNIPER_MODE = os.environ.get("HUNT_SNIPER_MODE", "1") not in {"0", "false", "False"}
 HUNT_SNIPER_LIVE_PHASES = frozenset({"dump_active"})
+# HMSTR-class squeeze guard: block live short when top-trader L/S ratio is this high
+# (data-grounded on 11 live signals — losers HMSTR 2.48 / EPIC 2.11 vs winners <=1.91).
+HUNT_SNIPER_TOP_LS_MAX = float(os.environ.get("HUNT_SNIPER_TOP_LS_MAX", "2.0"))
 
 LOG = configure_script_logging("scripts.dump_minute_watch")
 _STOP = False
@@ -2835,6 +2838,19 @@ async def _run_tick(
                             _lc_phase = str((lifecycle_raw or {}).get("phase") or "")
                             if _lc_phase not in HUNT_SNIPER_LIVE_PHASES:
                                 continue
+                            # HMSTR-class squeeze guard (forensics 2026-06-12): do not
+                            # ship a short while top traders are heavily long — fading
+                            # smart-money positioning is squeeze fuel. On the 11 live
+                            # signals top_ls_1h>=2.0 flagged the genuine bad entry
+                            # (HMSTR 2.48) and EPIC (2.11); every winner with data <=1.91.
+                            # Signal still tracked (shadow) for outcome data.
+                            _top_ls = ((row.get("market") or {})).get("top_ls_1h")
+                            if _top_ls is not None:
+                                try:
+                                    if float(_top_ls) >= HUNT_SNIPER_TOP_LS_MAX:
+                                        continue
+                                except (TypeError, ValueError):
+                                    pass
                         if not _should_alert(
                             setup,
                             direction=direction,
