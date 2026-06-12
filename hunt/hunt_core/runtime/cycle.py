@@ -123,22 +123,8 @@ HUNT_SNIPER_CHASE_TOL = SNIPER_CONFIG.chase_tol
 
 
 def _format_squeeze_telegram(row: dict[str, Any]) -> str:
-    sym = html.escape(str(row["symbol"]).replace("USDT", "-USDT"))
-    sq = row.get("squeeze") or {}
-
-    def _v(key: str, fmt: str = "{}") -> str:
-        val = sq.get(key)
-        return "—" if val is None else fmt.format(val)
-
-    return (
-        f"⚡ <b>SQUEEZE CHARGED {sym}</b>\n"
-        f"BB-width pctile 1h <code>{_v('bb_width_pctile_1h', '{:.2f}')}</code> · "
-        f"Donchian 1h <code>{_v('donchian_width_pct_1h', '{:.1f}%')}</code>\n"
-        f"OI z <code>{_v('oi_z')}</code> · global L/S z <code>{_v('gls_z')}</code> · "
-        f"fund <code>{_v('funding_pct')}%</code> · vol24h <code>{row.get('vol_24h_m')}M</code>\n"
-        f"<i>Компрессия волатильности — заряжен, направление НЕ определено. "
-        f"Watch-only, вход только по confirmed-сигналу.</i>"
-    )
+    from hunt_watch.deliver.telegram import format_squeeze_telegram  # noqa: PLC0415
+    return format_squeeze_telegram(row)
 
 
 async def _safe_fetch(coro: Any) -> Any:

@@ -33,6 +33,107 @@ _PHASE_HUMAN: dict[str, str] = {
 }
 
 
+def _squeeze_direction(row: dict[str, Any]) -> tuple[str, str, list[str]]:
+    """Infer probable breakout direction. Returns (emoji, label, evidence_lines)."""
+    sq = row.get("squeeze") or {}
+    lifecycle = row.get("lifecycle") or {}
+    dump = row.get("dump") or {}
+    long_setup = row.get("long") or {}
+
+    bear = 0
+    bull = 0
+    evidence: list[str] = []
+
+    bias = str(lifecycle.get("recommended_bias") or "")
+    lc_phase = str(lifecycle.get("phase") or "")
+    phase_txt = phase_human(lc_phase) if lc_phase else ""
+    if bias == "short":
+        bear += 2
+        evidence.append(f"Lifecycle: {html.escape(phase_txt)} (медвежий)")
+    elif bias == "long":
+        bull += 2
+        evidence.append(f"Lifecycle: {html.escape(phase_txt)} (бычий)")
+    elif phase_txt:
+        evidence.append(f"Lifecycle: {html.escape(phase_txt)}")
+
+    dump_score = float(dump.get("dump_score") or 0)
+    long_score = float(long_setup.get("long_score") or 0)
+    if dump_score > long_score + 10:
+        bear += 1
+        evidence.append(f"Score шорт {dump_score:.0f} > лонг {long_score:.0f}")
+    elif long_score > dump_score + 10:
+        bull += 1
+        evidence.append(f"Score лонг {long_score:.0f} > шорт {dump_score:.0f}")
+
+    try:
+        oi_z = float(sq.get("oi_z") or 0)
+        if oi_z < -1.2:
+            bear += 1
+            evidence.append(f"OI падает ({oi_z:+.2f}σ) — позиции сокращаются")
+        elif oi_z > 1.2:
+            bull += 1
+            evidence.append(f"OI растёт ({oi_z:+.2f}σ) — накопление")
+        elif abs(oi_z) > 0.3:
+            evidence.append(f"OI z={oi_z:+.2f}σ (нейтрально)")
+    except (TypeError, ValueError):
+        pass
+
+    try:
+        fund = float(sq.get("funding_pct") or 0)
+        if fund > 0.05:
+            bear += 1
+            evidence.append(f"Funding перегрет ({fund:.4f}%) — лонги платят")
+        elif fund < -0.01:
+            bull += 1
+            evidence.append(f"Funding отрицательный ({fund:.4f}%) — шорты платят")
+        elif abs(fund) > 0.0001:
+            evidence.append(f"Funding {fund:.4f}% (нейтрально)")
+    except (TypeError, ValueError):
+        pass
+
+    if bear > bull + 1:
+        return "🔴", "ВНИЗ — вероятен шорт-пробой", evidence
+    if bull > bear + 1:
+        return "🟢", "ВВЕРХ — вероятен лонг-пробой", evidence
+    return "⚪", "НЕЙТРАЛЬНО — ждать подтверждения", evidence
+
+
+def format_squeeze_telegram(row: dict[str, Any]) -> str:
+    sym = html.escape(str(row["symbol"]).replace("USDT", "-USDT"))
+    sq = row.get("squeeze") or {}
+    vol = row.get("vol_24h_m")
+    vol_str = f"{vol:.0f}M" if vol is not None else "—"
+
+    don = sq.get("donchian_width_pct_1h")
+    compression_str = f"{don:.1f}%" if don is not None else "—"
+
+    dir_emoji, dir_label, evidence = _squeeze_direction(row)
+    evidence_txt = "\n".join(f"   · {e}" for e in evidence) if evidence else "   · нет сигналов"
+
+    dump = row.get("dump") or {}
+    long_setup = row.get("long") or {}
+    res = dump.get("resistance_liq") or dump.get("support_break_level")
+    sup = long_setup.get("support_zone") or dump.get("support_break_level")
+    level_parts: list[str] = []
+    if res:
+        level_parts.append(f"Сопротивление <code>{fmt_price(float(res))}</code>")
+    if sup and sup != res:
+        level_parts.append(f"Поддержка <code>{fmt_price(float(sup))}</code>")
+    levels_line = "  |  ".join(level_parts) if level_parts else ""
+
+    lines = [
+        f"⚡ <b>СЖАТИЕ ЗАРЯЖЕНО · {sym}</b>",
+        f"Волатильность сжата до {compression_str} от диапазона — ожидается сильный пробой. Объём 24h: <code>{vol_str}</code>",
+        "",
+        f"{dir_emoji} <b>Вероятное направление: {dir_label}</b>",
+        evidence_txt,
+    ]
+    if levels_line:
+        lines += ["", f"📍 {levels_line}"]
+    lines += ["", "<i>Watch-only — вход только по confirmed-сигналу системы.</i>"]
+    return "\n".join(lines)
+
+
 def fmt_price(value: float | None) -> str:
     if value is None:
         return "—"
@@ -376,22 +477,71 @@ def format_followup_telegram(followup: Any, row: dict[str, Any]) -> str:
 
     if event == "invalidate":
         duration = _duration_str(opened_raw)
-        reason_label_map = {
-            "stop_hit": "Стоп-лосс пробит",
-            "tp1": "Закрыто по TP1",
-            "tp2": "Закрыто по TP2",
-            "bounce_invalidate": "Lifecycle: отскок — шорт отменён",
-            "time_stall": "Нет прогресса за 8ч — тезис не сработал",
-            "bias_flip": "Lifecycle сменил bias против позиции",
-            "support_lost": "Потеря поддержки (лонг)",
+
+        _reason_map = {
+            "stop_hit": ("🔴 Стоп-лосс пробит", "Позиция закрылась по стопу."),
+            "tp1": ("✅ Достигнут TP1", "Взята первая цель."),
+            "tp2": ("✅ Достигнут TP2", "Взята финальная цель."),
+            "bounce_invalidate": (
+                "🔄 Lifecycle: отскок — шорт отменён",
+                "Рынок начал восстановление — тезис на дамп исчерпан.",
+            ),
+            "time_stall": (
+                "⏳ Тезис не сработал",
+                "Нет прогресса за 8ч — вероятно, сетап поглощён рынком.",
+            ),
+            "bias_flip": (
+                "🔄 Фаза сменилась против позиции",
+                "Lifecycle перешёл в противоположную фазу — продолжение маловероятно.",
+            ),
+            "support_lost": (
+                "⚠️ Потеря поддержки",
+                "Ключевая поддержка утрачена — лонг-тезис сломан.",
+            ),
         }
-        reason_str = reason_label_map.get(reason_raw, html.escape(detail_human))
+        lc_phase_payload = str(payload.get("phase") or "")
+        phase_txt = phase_human(lc_phase_payload) if lc_phase_payload else ""
+
+        reason_title, reason_body = _reason_map.get(
+            reason_raw,
+            (f"📌 {html.escape(detail_human)}", ""),
+        )
+        if reason_raw == "lifecycle_stale" and phase_txt:
+            reason_title = "🔄 Фаза сменилась против позиции"
+            reason_body = f"Новая фаза: <b>{html.escape(phase_txt)}</b> — тезис исчерпан."
+
+        # PnL estimate from entry midpoint vs exit price
+        pnl_line = ""
+        exit_price_raw = followup.price
+        if exit_price_raw and entry_lo is not None and entry_hi is not None:
+            try:
+                entry_mid = (float(entry_lo) + float(entry_hi)) / 2.0
+                exit_p = float(exit_price_raw)
+                if entry_mid > 0 and exit_p > 0:
+                    if direction == "SHORT":
+                        pnl_pct = (entry_mid - exit_p) / entry_mid * 100.0
+                    else:
+                        pnl_pct = (exit_p - entry_mid) / entry_mid * 100.0
+                    sign = "+" if pnl_pct >= 0 else ""
+                    result_emoji = "💰" if pnl_pct > 0 else "💸"
+                    pnl_line = (
+                        f"{result_emoji} Расчётный PnL: <b>{sign}{pnl_pct:.2f}%</b> "
+                        f"(вход ~<code>{fmt_price(entry_mid)}</code> → выход ~<code>{fmt_price(exit_p)}</code>)\n"
+                    )
+            except (TypeError, ValueError):
+                pass
+
+        action_needed = reason_raw not in {"stop_hit", "tp1", "tp2"}
+        action_line = "⚡ <b>Закрой позицию вручную</b>\n" if action_needed else ""
+
         return (
-            f"📋 <b>Закрыт {sym} {direction}</b>\n"
-            f"📌 Причина: {reason_str}\n"
+            f"📋 <b>ПОЗИЦИЯ ЗАКРЫТА · {sym} {direction}</b>\n"
+            f"📌 {reason_title}\n"
+            f"{reason_body}\n"
+            f"{action_line}"
+            f"{pnl_line}"
             f"⏱ Длит: {duration}\n"
             f"{entry_ref}\n"
-            f"Уровни: SL <code>{sl}</code> · TP1 <code>{tp1_lvl}</code> · TP2 <code>{tp2_lvl}</code>\n"
             f"<i>Hunt follow-up · не auto-trade</i>"
         )
 
