@@ -5,9 +5,12 @@ from __future__ import annotations
 import asyncio
 import html
 import importlib.util
+import logging
 import sys
 from pathlib import Path
 from typing import Any
+
+LOG = logging.getLogger("hunt_watch.symbol_probe")
 
 from hunt_core.domain.config import load_settings
 from hunt_core.features.prepare import min_required_bars
@@ -281,6 +284,23 @@ async def probe_symbol_signal(
         if sym in PINNED_SYMBOLS:
             row["_pinned_reference"] = True
             row["_low_volatility_anchor"] = not _is_hunt_anomaly(row, symbol=sym)
+            # MTF confluence analysis (1W/1D/4H/15M) — uses already-built tf snapshots
+            try:
+                from hunt_core.analysis.mtf_confluence import build_mtf_confluence
+                tf = row.get("timeframes") or {}
+                price = float(row.get("price") or 0)
+                if tf and price > 0:
+                    row["mtf"] = build_mtf_confluence(sym, tf, price)
+            except Exception as _mtf_exc:
+                LOG.warning("mtf_confluence_failed | sym=%s error=%s", sym, _mtf_exc)
+            # Cross-exchange snapshot (Bybit / OKX / Bitget)
+            try:
+                row["cross_exchange"] = await asyncio.wait_for(
+                    client.fetch_cross_exchange_snapshot(sym),
+                    timeout=30.0,
+                )
+            except Exception as _cx_exc:
+                LOG.debug("cross_exchange_failed | sym=%s error=%s", sym, _cx_exc)
         audit = audit_probe_row(row, source="signal_cmd")
         bt = await _tracker_levels_backtest(client, sym)
         if bt:
@@ -428,5 +448,18 @@ async def deliver_signal_probe(
             audit_line = "\n<i>✓ indie audit OK</i>"
         elif audit.get("issues"):
             audit_line = "\n<i>audit: " + html.escape(", ".join(audit["issues"][:2])) + "</i>"
-        await broadcaster.send_html(msg + audit_line)
+
+        # For PINNED symbols, prepend MTF analysis + cross-exchange intel
+        mtf_block = ""
+        cx_block = ""
+        if row.get("_pinned_reference"):
+            from hunt_watch.deliver.telegram import format_mtf_section, format_cross_exchange_section
+            mtf = row.get("mtf")
+            if mtf is not None:
+                mtf_block = format_mtf_section(mtf) + "\n\n"
+            cx = row.get("cross_exchange") or {}
+            if cx:
+                cx_block = "\n\n" + format_cross_exchange_section(cx)
+
+        await broadcaster.send_html(mtf_block + msg + cx_block + audit_line)
     return row

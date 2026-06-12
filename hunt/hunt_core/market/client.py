@@ -714,3 +714,156 @@ class HuntCcxtClient:
         except Exception as exc:
             LOG.debug("fetch_basis_from_ohlcv failed | symbol=%s error=%s", symbol, exc)
             return {}
+
+    # ── Secondary exchange REST (Bybit / OKX / Bitget) ──────────────────────
+
+    _SECONDARY_EXCHANGE_IDS: dict[str, str] = {
+        "bybit": "bybit",
+        "okx": "okx",
+        "bitget": "bitget",
+    }
+
+    async def _get_secondary(self, name: str) -> ccxt.Exchange:
+        """Return (and lazily create) a cached secondary ccxt REST client."""
+        if not hasattr(self, "_secondary_clients"):
+            self._secondary_clients: dict[str, ccxt.Exchange] = {}
+        if name not in self._secondary_clients:
+            ex_id = self._SECONDARY_EXCHANGE_IDS[name]
+            cls = getattr(ccxt, ex_id)
+            ex: ccxt.Exchange = cls(
+                {
+                    "enableRateLimit": True,
+                    "options": {"defaultType": "swap"},
+                }
+            )
+            try:
+                await ex.load_markets()
+            except Exception as exc:
+                LOG.warning("secondary_load_markets_failed | exchange=%s error=%s", name, exc)
+            self._secondary_clients[name] = ex
+        return self._secondary_clients[name]
+
+    async def _fetch_secondary_funding(
+        self, name: str, ccxt_sym: str
+    ) -> dict[str, float | None]:
+        try:
+            ex = await self._get_secondary(name)
+            r = await ex.fetch_funding_rate(ccxt_sym)
+            return {"fundingRate": float(r.get("fundingRate") or 0)}
+        except Exception as exc:
+            LOG.debug("secondary_funding_failed | exchange=%s sym=%s error=%s", name, ccxt_sym, exc)
+            return {"fundingRate": None}
+
+    async def _fetch_secondary_oi(
+        self, name: str, ccxt_sym: str
+    ) -> dict[str, float | None]:
+        try:
+            ex = await self._get_secondary(name)
+            r = await ex.fetch_open_interest(ccxt_sym)
+            oi_val = (
+                float(r.get("openInterestValue") or r.get("openInterest") or 0) or None
+            )
+            return {"oi_usd": oi_val}
+        except Exception as exc:
+            LOG.debug("secondary_oi_failed | exchange=%s sym=%s error=%s", name, ccxt_sym, exc)
+            return {"oi_usd": None}
+
+    async def _fetch_secondary_ticker(
+        self, name: str, ccxt_sym: str
+    ) -> dict[str, float | None]:
+        try:
+            ex = await self._get_secondary(name)
+            t = await ex.fetch_ticker(ccxt_sym)
+            mark = float(t.get("mark") or t.get("last") or 0) or None
+            return {"mark_price": mark}
+        except Exception as exc:
+            LOG.debug("secondary_ticker_failed | exchange=%s sym=%s error=%s", name, ccxt_sym, exc)
+            return {"mark_price": None}
+
+    async def fetch_cross_exchange_snapshot(self, symbol: str) -> dict[str, Any]:
+        """
+        Fetch funding / OI / mark-price for symbol from Bybit + OKX + Bitget in parallel.
+
+        Returns a dict with:
+          funding:   {exchange: rate|None}
+          oi_usd:    {exchange: value|None}
+          mark_price:{exchange: price|None}
+          funding_spread: abs(max−min) across exchanges with data
+          funding_consensus: "bull"|"bear"|"neutral"|"divergent"
+          oi_total:  sum of OI across exchanges with data
+          price_divergence_pct: max price spread / mean (%)
+        """
+        # Use the base ccxt symbol (Binance mark price as reference)
+        ref_funding = 0.0
+        ref_mark = 0.0
+        try:
+            pr = (self._premium_index_all_cache or (None, {}))[1].get(symbol) or {}
+            ref_funding = float(pr.get("last_funding_rate") or 0)
+            ref_mark = float(pr.get("mark_price") or 0)
+        except Exception:
+            pass
+
+        # ccxt unified sym works on all three secondary exchanges
+        ccxt_sym = self._ccxt_sym(symbol)
+
+        results = await asyncio.gather(
+            *[
+                asyncio.gather(
+                    self._fetch_secondary_funding(name, ccxt_sym),
+                    self._fetch_secondary_oi(name, ccxt_sym),
+                    self._fetch_secondary_ticker(name, ccxt_sym),
+                )
+                for name in self._SECONDARY_EXCHANGE_IDS
+            ],
+            return_exceptions=True,
+        )
+
+        funding: dict[str, float | None] = {"binance": ref_funding or None}
+        oi_usd: dict[str, float | None] = {}
+        mark_price: dict[str, float | None] = {"binance": ref_mark or None}
+
+        for name, res in zip(self._SECONDARY_EXCHANGE_IDS, results):
+            if isinstance(res, Exception):
+                funding[name] = None
+                oi_usd[name] = None
+                mark_price[name] = None
+                continue
+            f_r, oi_r, t_r = res
+            funding[name] = f_r.get("fundingRate")
+            oi_usd[name] = oi_r.get("oi_usd")
+            mark_price[name] = t_r.get("mark_price")
+
+        # Aggregate
+        rates = [v for v in funding.values() if v is not None]
+        funding_spread = round(max(rates) - min(rates), 6) if len(rates) >= 2 else 0.0
+
+        consensus: str
+        if len(rates) < 2:
+            consensus = "neutral"
+        elif all(r > 0.0001 for r in rates):
+            consensus = "bull"
+        elif all(r < -0.0001 for r in rates):
+            consensus = "bear"
+        elif funding_spread > 0.0005:
+            consensus = "divergent"
+        else:
+            consensus = "neutral"
+
+        oi_values = [v for v in oi_usd.values() if v is not None]
+        oi_total = round(sum(oi_values), 0) if oi_values else 0.0
+
+        prices = [v for v in mark_price.values() if v and v > 0]
+        price_div = 0.0
+        if len(prices) >= 2:
+            mean_p = sum(prices) / len(prices)
+            price_div = round((max(prices) - min(prices)) / mean_p * 100, 4) if mean_p > 0 else 0.0
+
+        return {
+            "funding": funding,
+            "oi_usd": oi_usd,
+            "mark_price": mark_price,
+            "funding_spread": funding_spread,
+            "funding_consensus": consensus,
+            "oi_total": oi_total,
+            "price_divergence_pct": price_div,
+        }

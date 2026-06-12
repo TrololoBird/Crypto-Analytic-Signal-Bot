@@ -10,10 +10,14 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+import ccxt.pro as ccxtpro
+
 from hunt_core.errors import defensive_exc_types
 from hunt_core.market.client import HuntCcxtClient
 from hunt_core.market.symbols import from_ccxt_symbol, to_binance_symbol, to_ccxt_symbol
 from hunt_watch.param_store import orderflow_use_nq, ws_thresholds
+
+_SECONDARY_PRO_IDS: dict[str, str] = {"bybit": "bybit", "okx": "okx", "bitget": "bitget"}
 
 LOG = logging.getLogger("hunt_core.market.streams")
 
@@ -125,6 +129,9 @@ class HuntCcxtStreams:
     _live_books: dict[str, dict[str, Any]] = field(default_factory=dict)
     _live_tickers: dict[str, dict[str, float]] = field(default_factory=dict)
     _live_funding: dict[str, dict[str, float]] = field(default_factory=dict)
+    # cross-exchange funding: {exchange_name: {binance_symbol: {rate, mark, index}}}
+    _live_funding_by_exchange: dict[str, dict[str, dict[str, float]]] = field(default_factory=dict)
+    _secondary_pro_clients: dict[str, Any] = field(default_factory=dict)
 
     @property
     def kline_5m_enabled(self) -> bool:
@@ -206,6 +213,15 @@ class HuntCcxtStreams:
     def live_funding(self, symbol: str) -> dict[str, float] | None:
         """Latest funding rate from watch_funding_rates."""
         return self._live_funding.get(to_binance_symbol(symbol))
+
+    def live_funding_cross(self, symbol: str) -> dict[str, dict[str, float]]:
+        """Latest funding rates from secondary exchanges keyed by exchange name."""
+        sym = to_binance_symbol(symbol)
+        return {
+            ex: data[sym]
+            for ex, data in self._live_funding_by_exchange.items()
+            if sym in data
+        }
 
     def snapshot(self, symbol: str) -> dict[str, Any]:
         sym = to_binance_symbol(symbol)
@@ -403,6 +419,9 @@ class HuntCcxtStreams:
             asyncio.create_task(self._watch_order_book_mux(), name="hunt_ccxt_book"),
             asyncio.create_task(self._watch_tickers_mux(), name="hunt_ccxt_tickers"),
             asyncio.create_task(self._watch_funding_rates_mux(), name="hunt_ccxt_funding"),
+            asyncio.create_task(
+                self._watch_secondary_funding_mux(), name="hunt_ccxt_funding_cross"
+            ),
         ]
         self._connected = True
         LOG.info("hunt_ccxt_streams_started")
@@ -624,3 +643,62 @@ class HuntCcxtStreams:
             except defensive_exc_types(Exception) as exc:
                 LOG.warning("hunt_ccxt_funding_error", error=repr(exc))
                 await asyncio.sleep(1.0)
+
+    async def _watch_one_secondary_funding(self, name: str, ex: Any) -> None:
+        """Continuous watch_funding_rates loop for one secondary exchange."""
+        while not self._stop.is_set():
+            syms_bin = list(self._symbols)
+            if not syms_bin:
+                await asyncio.sleep(2.0)
+                continue
+            # Translate Binance symbols to ccxt unified (works on Bybit/OKX/Bitget)
+            try:
+                ccxt_syms = [to_ccxt_symbol(s, markets=ex.markets) for s in syms_bin]
+            except Exception:
+                ccxt_syms = [s.replace("USDT", "/USDT:USDT") for s in syms_bin]
+            try:
+                rates = await ex.watch_funding_rates(ccxt_syms)
+                items = rates.values() if isinstance(rates, dict) else []
+                bucket = self._live_funding_by_exchange.setdefault(name, {})
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    sym = to_binance_symbol(from_ccxt_symbol(str(item.get("symbol") or "")))
+                    if not sym:
+                        continue
+                    mark = float(item.get("markPrice") or 0)
+                    index = float(item.get("indexPrice") or 0)
+                    funding = float(item.get("fundingRate") or 0)
+                    bucket[sym] = {"markPrice": mark, "indexPrice": index, "fundingRate": funding}
+            except asyncio.CancelledError:
+                return
+            except Exception as exc:
+                LOG.debug("secondary_funding_ws_error | exchange=%s error=%s", name, repr(exc))
+                await asyncio.sleep(5.0)
+
+    async def _watch_secondary_funding_mux(self) -> None:
+        """Spawn per-exchange WS funding tasks for Bybit / OKX / Bitget."""
+        tasks: list[asyncio.Task[None]] = []
+        for name, ex_id in _SECONDARY_PRO_IDS.items():
+            try:
+                cls = getattr(ccxtpro, ex_id)
+                ex = cls({"enableRateLimit": True, "options": {"defaultType": "swap"}})
+                await ex.load_markets()
+                self._secondary_pro_clients[name] = ex
+                tasks.append(
+                    asyncio.create_task(
+                        self._watch_one_secondary_funding(name, ex),
+                        name=f"hunt_ccxt_funding_{name}",
+                    )
+                )
+                LOG.info("secondary_funding_ws_started | exchange=%s", name)
+            except Exception as exc:
+                LOG.warning("secondary_funding_ws_init_failed | exchange=%s error=%s", name, exc)
+        if not tasks:
+            return
+        try:
+            await asyncio.gather(*tasks)
+        except asyncio.CancelledError:
+            for t in tasks:
+                t.cancel()
+            raise

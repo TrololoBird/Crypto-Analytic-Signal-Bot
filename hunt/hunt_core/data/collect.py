@@ -60,9 +60,9 @@ IMPULSE_WINDOW_1H: dict[str, int] = {
 IMPULSE_WINDOW_ALT_4H = 12
 IMPULSE_WINDOW_ALT_1H = 48
 
-def kline_limits(minimums: dict[str, int]) -> dict[str, int]:
+def kline_limits(minimums: dict[str, int], symbol: str = "") -> dict[str, int]:
     """Hunt watch pulls deeper history than default bot warmup (max 1500 bars)."""
-    return {
+    limits: dict[str, int] = {
         "1m": min(1500, max(1440, kline_fetch_limit(int(minimums.get("5m", 300)), "5m") * 2)),
         "3m": 480,
         "5m": kline_fetch_limit(int(minimums.get("5m", 300)), "5m"),
@@ -71,6 +71,9 @@ def kline_limits(minimums: dict[str, int]) -> dict[str, int]:
         "4h": kline_fetch_limit(int(minimums.get("4h", 200)), "4h"),
         "1d": 90,
     }
+    if symbol.upper() in PINNED_SYMBOLS:
+        limits["1w"] = 52  # ~1 year of weekly bars for MTF structure
+    return limits
 
 
 def _swing_range(work: Any, *, window: int) -> tuple[float, float]:
@@ -1234,9 +1237,10 @@ async def snapshot_symbol(
         seed_source="dump_minute_watch",
         strategy_fits=(),
     )
-    limits = kline_limits(minimums)
+    limits = kline_limits(minimums, symbol)
     if stagger_klines_ms > 0 and tier == "full":
-        tf_order = ("1m", "3m", "5m", "15m", "1h", "4h", "1d")
+        _base_tfs = ("1m", "3m", "5m", "15m", "1h", "4h", "1d")
+        tf_order = _base_tfs + (("1w",) if "1w" in limits else ())
         kline_map: dict[str, Any] = {}
         for name in tf_order:
             res = await safe_fetch(
@@ -1360,6 +1364,13 @@ async def snapshot_symbol(
         "4h": _tf_snapshot(prepared.work_4h),
         "1d": tf_1d,
     }
+    if "1w" in limits and kline_map.get("1w") is not None:
+        work_1w = _prepare_frame(kline_map["1w"])
+        tf["1w"] = (
+            _tf_snapshot(work_1w)
+            if work_1w is not None and not work_1w.is_empty()
+            else _tf_snapshot_lite(kline_map["1w"])
+        )
     _merge_ws_kline_closed(tf, symbol, ws_feed)
     ws_snap = ws_feed.snapshot(symbol) if ws_feed is not None else None
     _overlay_ws_market(prepared, ws_snap)

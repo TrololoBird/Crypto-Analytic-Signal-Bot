@@ -609,3 +609,126 @@ async def send_telegram_chunks(
         else:
             log.info(f"{log_key}_sent", part=idx + 1, message_id=result.message_id)
     return ok
+
+
+# ── MTF + Cross-Exchange formatters for /signal (PINNED symbols) ─────────────
+
+def _fmt_price(v: float) -> str:
+    if v >= 10_000:
+        return f"{v:,.0f}"
+    if v >= 1:
+        return f"{v:,.2f}"
+    return f"{v:.5f}"
+
+
+def format_mtf_section(mtf: Any) -> str:
+    """
+    Format MTF structure table + two scenarios for a PINNED /signal reply.
+
+    ``mtf`` is a ``MTFConfluence`` dataclass from ``hunt_core.analysis.mtf_confluence``.
+    """
+    _TREND_EMOJI = {"bull": "🟢", "bear": "🔴", "neutral": "🟡"}
+    _TREND_RU = {"bull": "Bull", "bear": "Bear", "neutral": "Нейт"}
+    _TF_NAME = {"1w": "1W ", "1d": "1D ", "4h": "4H ", "15m": "15M"}
+
+    lines: list[str] = ["📊 <b>МТФ СТРУКТУРА</b>"]
+    for tf_key in ("1w", "1d", "4h", "15m"):
+        sig = (mtf.tf_signals or {}).get(tf_key)
+        if sig is None:
+            continue
+        emoji = _TREND_EMOJI.get(sig.trend, "🟡")
+        tlabel = _TREND_RU.get(sig.trend, "Нейт")
+        name = _TF_NAME.get(tf_key, tf_key.upper())
+        lines.append(
+            f"<code>{name}</code> {emoji} {tlabel:4s} | RSI {sig.rsi14:4.0f} | {html.escape(sig.label)}"
+        )
+
+    dominant = getattr(mtf, "dominant", "neutral")
+    for sc in (mtf.long_scenario, mtf.short_scenario):
+        dir_str = getattr(sc, "direction", "long")
+        is_main = dir_str == dominant
+        star = " ★ ОСНОВНОЙ" if is_main else ""
+        dir_emoji = "📈" if dir_str == "long" else "📉"
+        dir_ru = "ЛОНГ" if dir_str == "long" else "ШОРТ"
+        score = float(getattr(sc, "score", 0))
+        htf_aligned = int(getattr(sc, "htf_count", 0))
+        htf_total = int(getattr(sc, "htf_total", 0))
+        evidence: list[str] = list(getattr(sc, "evidence", []))
+
+        entry_lo = float(getattr(sc, "entry_lo", 0))
+        entry_hi = float(getattr(sc, "entry_hi", 0))
+        tp1 = float(getattr(sc, "tp1", 0))
+        tp2 = float(getattr(sc, "tp2", 0))
+        stop = float(getattr(sc, "stop", 0))
+
+        ref = entry_hi if dir_str == "long" else entry_lo
+        pct1 = (tp1 - ref) / ref * 100 if ref else 0.0
+        pct2 = (tp2 - ref) / ref * 100 if ref else 0.0
+        stop_ref = entry_lo if dir_str == "long" else entry_hi
+        stop_pct = (stop - stop_ref) / stop_ref * 100 if stop_ref else 0.0
+
+        lines.append("")
+        lines.append(
+            f"{dir_emoji} <b>СЦЕНАРИЙ {dir_ru}</b>  [Score: {score:.2f}]{html.escape(star)}"
+        )
+        if htf_total:
+            ev_str = ", ".join(evidence[1:4]) if len(evidence) > 1 else ""
+            lines.append(
+                f"HTF {htf_aligned}/{htf_total}"
+                + (f" · {html.escape(ev_str)}" if ev_str else "")
+            )
+        lines.append(f"Зона входа:  <code>{_fmt_price(entry_lo)} – {_fmt_price(entry_hi)}</code>")
+        lines.append(f"TP1:         <code>{_fmt_price(tp1)}</code>  ({pct1:+.1f}%)")
+        lines.append(f"TP2:         <code>{_fmt_price(tp2)}</code>  ({pct2:+.1f}%)")
+        lines.append(f"Стоп:        <code>{_fmt_price(stop)}</code>  ({stop_pct:+.1f}%)")
+
+    lines.append("")
+    lines.append("<i>⚠️ Watch-only — вход только по confirmed-сигналу системы.</i>")
+    return "\n".join(lines)
+
+
+def format_cross_exchange_section(cx: dict[str, Any]) -> str:
+    """Format cross-exchange intel block for /signal reply."""
+    if not cx:
+        return ""
+    funding: dict[str, Any] = cx.get("funding") or {}
+    oi_usd: dict[str, Any] = cx.get("oi_usd") or {}
+    mark_price: dict[str, Any] = cx.get("mark_price") or {}
+    funding_spread = float(cx.get("funding_spread") or 0)
+    consensus = str(cx.get("funding_consensus") or "neutral")
+    oi_total = float(cx.get("oi_total") or 0)
+    price_div = float(cx.get("price_divergence_pct") or 0)
+
+    _NAMES = {"binance": "BNC", "bybit": "BYB", "okx": "OKX", "bitget": "BGT"}
+
+    funding_parts: list[str] = []
+    for ex, rate in funding.items():
+        if rate is None:
+            continue
+        label = _NAMES.get(ex, ex.upper()[:3])
+        sign = "+" if rate >= 0 else ""
+        funding_parts.append(f"{label} {sign}{rate*100:.4f}%")
+
+    price_parts: list[str] = []
+    for ex, mp in mark_price.items():
+        if not mp:
+            continue
+        label = _NAMES.get(ex, ex.upper()[:3])
+        price_parts.append(f"{label} {_fmt_price(mp)}")
+
+    lines: list[str] = ["🌐 <b>КРОСС-БИРЖЕВЫЕ ДАННЫЕ</b>"]
+    if funding_parts:
+        lines.append("Funding:  " + "  |  ".join(funding_parts))
+        if consensus == "divergent":
+            lines.append("          ⚠️ Дивергенция — биржи не согласованы")
+        elif consensus == "bull":
+            lines.append("          🟢 Фандинг бычий на всех биржах")
+        elif consensus == "bear":
+            lines.append("          🔴 Фандинг медвежий на всех биржах")
+    if oi_total > 0:
+        oi_b = oi_total / 1e9
+        lines.append(f"OI Total: <code>${oi_b:.2f}B</code>")
+    if price_parts:
+        spread_str = f"  (spread {price_div:.3f}%)" if price_div > 0 else ""
+        lines.append("Цены:     " + "  |  ".join(price_parts) + html.escape(spread_str))
+    return "\n".join(lines) if len(lines) > 1 else ""

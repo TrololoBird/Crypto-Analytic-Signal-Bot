@@ -881,6 +881,7 @@ async def run_tick(
     spot_companion: HuntCcxtSpotCompanion | None = None,
     batch_cache: TickBatchCache | None = None,
     tier: SnapshotTier = "full",
+    cross_ex_cache: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     state = _load_state()
     tracker_state = load_tracker_state()
@@ -960,6 +961,8 @@ async def run_tick(
                 oi_val = (row.get("market") or row.get("positioning") or {}).get("oi")
                 if oi_val is not None:
                     prev_oi[symbol] = float(oi_val)
+                if cross_ex_cache and symbol in cross_ex_cache:
+                    row["cross_exchange"] = cross_ex_cache[symbol]
                 rows.append(row)
                 if ignition_by_sym and symbol in ignition_by_sym:
                     row["ignited"] = True
@@ -1585,6 +1588,9 @@ async def run_loop(
 
     last_scan = 0.0
     last_regime = 0.0
+    last_cross_ex = 0.0
+    _cross_ex_cache: dict[str, dict[str, Any]] = {}
+    _CROSS_EX_REFRESH_S = 300.0  # refresh cross-exchange data every 5 min for PINNED
     last_tick_rotate = time.monotonic()
     batch_cache = TickBatchCache()
     cached = load_regime_file()
@@ -1621,6 +1627,20 @@ async def run_loop(
                     except Exception:
                         LOG.exception("market_regime_refresh_failed")
                         last_regime = time.monotonic()
+
+                if time.monotonic() - last_cross_ex >= _CROSS_EX_REFRESH_S:
+                    try:
+                        _tasks = [
+                            client.fetch_cross_exchange_snapshot(sym)
+                            for sym in PINNED_SYMBOLS
+                        ]
+                        _results = await asyncio.gather(*_tasks, return_exceptions=True)
+                        for sym, res in zip(PINNED_SYMBOLS, _results):
+                            if isinstance(res, dict):
+                                _cross_ex_cache[sym] = res
+                    except Exception:
+                        LOG.debug("cross_exchange_refresh_failed")
+                    last_cross_ex = time.monotonic()
 
                 if time.monotonic() - last_scan >= SCAN_INTERVAL_S:
                     try:
@@ -1757,6 +1777,7 @@ async def run_loop(
                     "spot_companion": spot_companion,
                     "batch_cache": batch_cache,
                     "tier": "full",
+                    "cross_ex_cache": _cross_ex_cache,
                 }
                 rows = await run_tick(active, **{k: v for k, v in tick_ctx.items() if k != "active"})
                 save_pump_history(pump_store)

@@ -1,0 +1,196 @@
+"""MTF confluence scoring for PINNED symbols (BTC/ETH/XAU/XAG).
+
+Works entirely from the tf-snapshot dict that snapshot_symbol() already builds —
+no extra REST calls needed.  TF display order for /signal: 1W → 1D → 4H → 15M.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Literal
+
+
+@dataclass
+class TFSignal:
+    tf: str
+    trend: Literal["bull", "bear", "neutral"]
+    rsi14: float
+    adx14: float
+    label: str
+
+
+@dataclass
+class ScenarioScore:
+    direction: Literal["long", "short"]
+    score: float            # 0..1
+    htf_count: int          # how many of 1W/1D/4H align with this direction
+    htf_total: int          # how many HTF TFs had data
+    entry_lo: float
+    entry_hi: float
+    tp1: float
+    tp2: float
+    stop: float
+    evidence: list[str] = field(default_factory=list)
+
+
+@dataclass
+class MTFConfluence:
+    symbol: str
+    price: float
+    tf_signals: dict[str, TFSignal]
+    long_scenario: ScenarioScore
+    short_scenario: ScenarioScore
+    dominant: Literal["long", "short", "neutral"]
+
+
+_DISPLAY_TFS = ["1w", "1d", "4h", "15m"]
+_HTF_TFS = ["1w", "1d", "4h"]
+
+
+def _trend_from_snap(snap: dict[str, Any]) -> Literal["bull", "bear", "neutral"]:
+    t = snap.get("trend") or ""
+    if t == "bull":
+        return "bull"
+    if t == "bear":
+        return "bear"
+    return "neutral"
+
+
+def _tf_label(snap: dict[str, Any], trend: str) -> str:
+    adx = float(snap.get("adx14") or 0)
+    sup = snap.get("supertrend_dir")
+    rsi = float(snap.get("rsi14") or 50)
+    if trend == "bull":
+        if adx >= 25:
+            return "Сильный бычий тренд"
+        if sup == 1:
+            return "Supertrend бычий"
+        return "Выше EMA50"
+    if trend == "bear":
+        if adx >= 25:
+            return "Сильный медвежий тренд"
+        if sup == -1:
+            return "Supertrend медвежий"
+        return "Ниже EMA50"
+    if rsi > 62:
+        return "Импульс восходящий"
+    if rsi < 38:
+        return "Импульс нисходящий"
+    return "EMA переплетены"
+
+
+def _rsi_edge(rsi: float, direction: str) -> float:
+    """0..1 momentum edge for the given direction from RSI."""
+    if direction == "long":
+        return max(0.0, min(1.0, (rsi - 40.0) / 30.0))
+    return max(0.0, min(1.0, (60.0 - rsi) / 30.0))
+
+
+def build_mtf_confluence(symbol: str, tf: dict[str, Any], price: float) -> MTFConfluence:
+    """
+    Build MTF confluence from row['timeframes'] (already contains per-TF snapshots).
+
+    Args:
+        symbol: e.g. "BTCUSDT"
+        tf: row["timeframes"] dict — keys "1w","1d","4h","15m","1h",…
+        price: current mark price
+    """
+    tf_signals: dict[str, TFSignal] = {}
+    for key in _DISPLAY_TFS:
+        snap = tf.get(key) or {}
+        if not snap or snap.get("status") == "empty":
+            continue
+        trend = _trend_from_snap(snap)
+        rsi = float(snap.get("rsi14") or 50)
+        adx = float(snap.get("adx14") or 0)
+        tf_signals[key] = TFSignal(
+            tf=key,
+            trend=trend,
+            rsi14=rsi,
+            adx14=adx,
+            label=_tf_label(snap, trend),
+        )
+
+    # ATR from best available TF for level placement
+    atr = 0.0
+    for k in ("4h", "1d", "1h", "15m"):
+        v = float((tf.get(k) or {}).get("atr14") or 0)
+        if v > 0:
+            atr = v
+            break
+    if atr <= 0:
+        atr = price * 0.01
+
+    def _build(direction: str) -> ScenarioScore:
+        # HTF score
+        htf_aligned = 0
+        htf_total = 0
+        evidence: list[str] = []
+        for k in _HTF_TFS:
+            sig = tf_signals.get(k)
+            if sig is None:
+                continue
+            htf_total += 1
+            ok = (direction == "long" and sig.trend == "bull") or (
+                direction == "short" and sig.trend == "bear"
+            )
+            if ok:
+                htf_aligned += 1
+                evidence.append(f"{k.upper()}: {sig.label}")
+
+        htf_ratio = htf_aligned / htf_total if htf_total else 0.0
+
+        # LTF momentum (15M, fallback 1H)
+        ltf_snap = tf.get("15m") or tf.get("1h") or {}
+        ltf_rsi = float(ltf_snap.get("rsi14") or 50)
+        ltf_edge = _rsi_edge(ltf_rsi, direction)
+
+        score = round(htf_ratio * 0.60 + ltf_edge * 0.40, 3)
+
+        if direction == "long":
+            entry_lo = price - 0.3 * atr
+            entry_hi = price + 0.3 * atr
+            tp1 = price + 2.0 * atr
+            tp2 = price + 4.0 * atr
+            stop = price - 1.5 * atr
+        else:
+            entry_lo = price - 0.3 * atr
+            entry_hi = price + 0.3 * atr
+            tp1 = price - 2.0 * atr
+            tp2 = price - 4.0 * atr
+            stop = price + 1.5 * atr
+
+        if htf_total:
+            evidence.insert(0, f"HTF {htf_aligned}/{htf_total}")
+
+        return ScenarioScore(
+            direction=direction,  # type: ignore[arg-type]
+            score=score,
+            htf_count=htf_aligned,
+            htf_total=htf_total,
+            entry_lo=round(entry_lo, 6),
+            entry_hi=round(entry_hi, 6),
+            tp1=round(tp1, 6),
+            tp2=round(tp2, 6),
+            stop=round(stop, 6),
+            evidence=evidence,
+        )
+
+    long_s = _build("long")
+    short_s = _build("short")
+
+    if long_s.score >= short_s.score + 0.15:
+        dominant: Literal["long", "short", "neutral"] = "long"
+    elif short_s.score >= long_s.score + 0.15:
+        dominant = "short"
+    else:
+        dominant = "neutral"
+
+    return MTFConfluence(
+        symbol=symbol,
+        price=price,
+        tf_signals=tf_signals,
+        long_scenario=long_s,
+        short_scenario=short_s,
+        dominant=dominant,
+    )
