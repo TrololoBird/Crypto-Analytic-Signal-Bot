@@ -441,8 +441,13 @@ def _stale_lifecycle_invalidate(
     price: float,
     ts: datetime,
     announced: bool,
+    archive: bool = True,
 ) -> HuntFollowUp | None:
-    """Close tracker position when lifecycle structurally contradicts the open thesis."""
+    """Close tracker position when lifecycle structurally contradicts the open thesis.
+
+    ``archive`` is threaded to the terminal ``close_signal`` so verify/test callers
+    (``archive=False``) never append rows to the production ``signal_history.jsonl``.
+    """
     k = _key(symbol, direction)
     lc_phase = str(lifecycle.get("phase") or "")
     lc_bias = str(lifecycle.get("recommended_bias") or "")
@@ -519,6 +524,7 @@ def _stale_lifecycle_invalidate(
         reason="lifecycle_stale",
         exit_price=price,
         now=ts,
+        archive=archive,
     )
     msg_key = f"{k}:invalidate:lifecycle_stale:{lc_phase}"
     if not _followup_allowed(state, msg_key, now=ts):

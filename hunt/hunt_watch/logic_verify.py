@@ -1714,6 +1714,374 @@ def run_tracker_outcome_cases() -> list[CaseResult]:
     ]
 
 
+def run_stale_grace_cases() -> list[CaseResult]:
+    """Near-TP1 stale grace: 8-tick hold when ≤3% remaining to TP1.
+
+    Tests use tick counts that stay BELOW the close threshold so close_signal
+    is never triggered — avoids writing TESTUSDT events to real signal_events.jsonl.
+    """
+    from datetime import UTC, datetime
+    from hunt_watch.signal_tracker import _stale_lifecycle_invalidate, STALE_LC_TICKS_DEFAULT
+
+    def _make_state(active: dict) -> dict:
+        return {"signals": {"TESTUSDT:short": active}, "followup_sent": {}}
+
+    ts = datetime.now(UTC)
+    lc_stale = {"phase": "post_dump_bounce", "recommended_bias": "long"}
+
+    # Case 1: far from TP1, tick just below default → still open (not closed yet)
+    active_far_open = {
+        "status": "active", "direction": "short",
+        "entry_lo": 100.0, "entry_hi": 105.0, "tp1": 85.0,
+        "extreme_lo": 99.0, "extreme_hi": 105.0,  # MFE ~5.5%, tp1_dist ~18.8% → far
+        "stale_lc_ticks": STALE_LC_TICKS_DEFAULT - 2,  # one tick before threshold
+    }
+    state1 = _make_state(active_far_open)
+    result1 = _stale_lifecycle_invalidate(
+        state1, active_far_open, symbol="TESTUSDT", direction="short",
+        lifecycle=lc_stale, row={}, price=99.0, ts=ts, announced=False, archive=False,
+    )
+    # tick becomes DEFAULT-1 → still below threshold, stays open
+    far_still_open = result1 is None and state1["signals"]["TESTUSDT:short"].get("status") != "closed"
+
+    # Case 2: near TP1 (≤3% remaining), tick=4 → grace=8, stays open
+    active_near = {
+        "status": "active", "direction": "short",
+        "entry_lo": 100.0, "entry_hi": 105.0, "tp1": 84.0,
+        "extreme_lo": 86.6, "extreme_hi": 105.0,  # MFE ~17.5%, tp1_dist ~19.9%, remaining ~2.9%
+        "stale_lc_ticks": 4,
+    }
+    state2 = _make_state(active_near)
+    result2 = _stale_lifecycle_invalidate(
+        state2, active_near, symbol="TESTUSDT", direction="short",
+        lifecycle=lc_stale, row={}, price=86.6, ts=ts, announced=False, archive=False,
+    )
+    near_tp1_grace_holds = result2 is None and state2["signals"]["TESTUSDT:short"].get("status") != "closed"
+
+    # Case 3: far from TP1 at grace-level ticks → normal close (tick 4 > default 3)
+    # Check via stale_lc_ticks increment only — don't trigger close
+    active_far_ticks = {
+        "status": "active", "direction": "short",
+        "entry_lo": 100.0, "entry_hi": 105.0, "tp1": 85.0,
+        "extreme_lo": 99.0, "extreme_hi": 105.0,
+        "stale_lc_ticks": 1,  # will become 2 — still below 3
+    }
+    state3 = _make_state(active_far_ticks)
+    _stale_lifecycle_invalidate(
+        state3, active_far_ticks, symbol="TESTUSDT", direction="short",
+        lifecycle=lc_stale, row={}, price=99.0, ts=ts, announced=False, archive=False,
+    )
+    far_ticks_incremented = active_far_ticks["stale_lc_ticks"] == 2
+
+    return [
+        CaseResult("stale_far_tp1_still_counting", far_still_open, "tick below default, stays open"),
+        CaseResult("stale_near_tp1_grace_holds_at_tick4", near_tp1_grace_holds, "8-tick grace ≤3% from TP1"),
+        CaseResult("stale_ticks_increment_correctly", far_ticks_incremented, f"stale_lc_ticks 1→2"),
+    ]
+
+
+def run_stale_entry_phase_cases() -> list[CaseResult]:
+    """Same lifecycle phase as entry must not stale-close (SPACEUSDT class)."""
+    from datetime import UTC, datetime
+
+    from hunt_watch.signal_tracker import _stale_lifecycle_invalidate
+
+    ts = datetime.now(UTC)
+    lc = {"phase": "impulse_initiating", "recommended_bias": "long"}
+    session = {"pos_in_range": 0.5}
+
+    active_same = {
+        "status": "active",
+        "direction": "short",
+        "entry_lifecycle_phase": "impulse_initiating",
+        "entry_lo": 0.008763,
+        "entry_hi": 0.009014,
+        "tp1": 0.008499,
+        "extreme_lo": 0.008253,
+        "extreme_hi": 0.008368,
+        "stale_lc_ticks": 2,
+    }
+    state1 = {"signals": {"SPACEUSDT:short": active_same}, "followup_sent": {}}
+    r1 = _stale_lifecycle_invalidate(
+        state1, active_same, symbol="SPACEUSDT", direction="short",
+        lifecycle=lc, row={"session": session}, price=0.008368, ts=ts, announced=True, archive=False,
+    )
+    same_phase_holds = r1 is None and active_same.get("stale_lc_ticks") == 0
+
+    active_tp1 = {
+        **active_same,
+        "stale_lc_ticks": 2,
+        "tp1_hit": True,
+        "tp1_managed": True,
+        "entry_lifecycle_phase": "dump_active",
+    }
+    lc2 = {"phase": "impulse_initiating", "recommended_bias": "long"}
+    state2 = {"signals": {"HUSDT:short": active_tp1}, "followup_sent": {}}
+    r2 = _stale_lifecycle_invalidate(
+        state2, active_tp1, symbol="HUSDT", direction="short",
+        lifecycle=lc2, row={"session": session}, price=0.17, ts=ts, announced=True, archive=False,
+    )
+    tp1_managed_holds = r2 is None and active_tp1.get("status") != "closed"
+
+    active_transition = {
+        "status": "active",
+        "direction": "short",
+        "entry_lifecycle_phase": "dump_active",
+        "entry_lo": 0.18,
+        "entry_hi": 0.19,
+        "tp1": 0.16,
+        "extreme_lo": 0.17,
+        "extreme_hi": 0.19,
+        "stale_lc_ticks": 2,
+    }
+    state3 = {"signals": {"HUSDT:short": active_transition}, "followup_sent": {}}
+    _stale_lifecycle_invalidate(
+        state3, active_transition, symbol="HUSDT", direction="short",
+        lifecycle=lc2, row={"session": session}, price=0.17, ts=ts, announced=False, archive=False,
+    )
+    transition_increments = active_transition.get("stale_lc_ticks") == 3
+
+    return [
+        CaseResult("stale_same_phase_no_close", same_phase_holds, "entry phase == lc phase"),
+        CaseResult("stale_tp1_managed_holds", tp1_managed_holds, "no stale after TP1 mgmt"),
+        CaseResult("stale_phase_transition_counts", transition_increments, "dump→impulse still stale"),
+    ]
+
+
+def run_feature_latch_cases() -> list[CaseResult]:
+    """P0: feature vectors latched at open/peak/close + book_walls at entry."""
+    from datetime import UTC, datetime
+
+    from hunt_watch.feature_latch import book_walls_from_depth, feature_vector_from_row
+    from hunt_watch.signal_tracker import close_signal, register_signal_open
+
+    row_open = {
+        "ts": "2026-06-11T12:00:00+00:00",
+        "price": 1.25,
+        "market": {"depth_imbalance": -0.12, "oi_z": 1.8},
+        "regime": {"market_regime": "trend_down"},
+        "lifecycle": {"phase": "dump_active", "recommended_bias": "short", "fall_from_high_pct": 18.0},
+        "session": {"pos_in_range": 0.22},
+        "book_walls": book_walls_from_depth(
+            {
+                "bid_price": 1.24,
+                "ask_price": 1.26,
+                "bid_levels": [{"price": 1.24, "qty": 1000.0, "notional_usd": 1240.0}],
+                "ask_levels": [{"price": 1.26, "qty": 800.0, "notional_usd": 1008.0}],
+            }
+        ),
+    }
+    fv = feature_vector_from_row(row_open)
+    walls_ok = isinstance(row_open.get("book_walls"), dict) and bool(row_open["book_walls"].get("bid_levels"))
+
+    state: dict[str, Any] = {"signals": {}, "followup_sent": {}}
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    register_signal_open(
+        state,
+        symbol="LATCHUSDT",
+        direction="short",
+        price=1.25,
+        setup={"entry_zone": [1.24, 1.25], "stop_loss": 1.30, "tp1": 1.10, "dump_score": 72},
+        lifecycle={"phase": "dump_active", "recommended_bias": "short"},
+        now=now,
+        features_open=fv,
+        book_walls=row_open["book_walls"],
+    )
+    active = state["signals"]["LATCHUSDT:short"]
+    open_ok = isinstance(active.get("features_open"), dict) and isinstance(active.get("book_walls"), dict)
+
+    active["extreme_lo"] = 1.15
+    row_peak = {**row_open, "ts": "2026-06-11T13:00:00+00:00", "price": 1.15}
+    from hunt_watch.signal_tracker import _tick_feature_latch
+
+    _tick_feature_latch(active, row_peak, direction="short")
+    peak_ok = isinstance(active.get("features_peak"), dict) and float(active.get("peak_mfe_pct") or 0) > 0
+
+    close_signal(
+        state,
+        symbol="LATCHUSDT",
+        direction="short",
+        reason="tp1",
+        exit_price=1.10,
+        now=datetime(2026, 6, 11, 14, 0, tzinfo=UTC),
+        archive=False,  # test must not pollute production signal_history.jsonl
+    )
+    closed = state["closed_history"][-1]
+    close_ok = isinstance(closed.get("features_close"), dict) and "features_last" not in closed
+
+    return [
+        CaseResult("feature_vector_from_row", bool(fv.get("market")), "market dict captured"),
+        CaseResult("book_walls_from_depth", walls_ok, "top bid/ask levels"),
+        CaseResult("register_features_open", open_ok, "features_open + book_walls on open"),
+        CaseResult("latch_features_peak", peak_ok, "features_peak on MFE improve"),
+        CaseResult("latch_features_close", close_ok, "features_close on close, no features_last"),
+    ]
+
+
+def run_fast_flush_tp1_cases() -> list[CaseResult]:
+    """ESPORTS post-mortem: single TP1 must be touched on violent first flush."""
+    from hunt_watch.levels import fib_retracement_levels, structural_short_levels
+
+    ih, il_stale, price = 0.27767, 0.0552, 0.26376
+    atr15 = 0.012
+    fib = fib_retracement_levels(ih, il_stale)
+    old_tp1 = float(fib["ret_382"])
+    flush_low = 0.19506
+
+    lv = structural_short_levels(
+        price=price,
+        impulse_high=ih,
+        impulse_low=il_stale,
+        fib=fib,
+        atr15=atr15,
+        local_support=0.0,
+        local_resistance=0.275,
+        lifecycle_phase="exhaustion_at_high",
+        fall_from_high_pct=5.0,
+        range_pct_24h=220.0,
+        leg_gain_pct=400.0,
+        symbol="ESPORTSUSDT",
+    )
+    new_tp1 = float(lv["tp1"])
+    hit_old = flush_low <= old_tp1
+    hit_new = flush_low <= new_tp1
+
+    return [
+        CaseResult(
+            "fast_flush_tp1_raised",
+            new_tp1 > old_tp1,
+            f"old={old_tp1:.6f} new={new_tp1:.6f}",
+        ),
+        CaseResult(
+            "fast_flush_tp1_touched_on_esports_low",
+            hit_new and not hit_old,
+            f"low={flush_low} old_hit={hit_old} new_hit={hit_new}",
+        ),
+        CaseResult(
+            "fast_flush_tp1_still_below_entry",
+            new_tp1 < price,
+            f"tp1={new_tp1} entry={price}",
+        ),
+    ]
+
+
+def run_backtest_synthetic_cases() -> list[CaseResult]:
+    from hunt_watch.backtest_synthetic import leg_events_to_signals, synthetic_levels
+    from hunt_watch.pump_history import PumpHistoryStore, record_pump_leg
+    from datetime import UTC, datetime
+
+    short_lv = synthetic_levels("pump", 10.0, change_24h_pct=25.0)
+    long_lv = synthetic_levels("dump", 1.0, change_24h_pct=-18.0)
+    short_ok = (
+        short_lv.get("direction") == "short"
+        and float(short_lv["stop_loss"]) > 10.0
+        and float(short_lv["tp1"]) < 10.0
+    )
+    long_ok = (
+        long_lv.get("direction") == "long"
+        and float(long_lv["stop_loss"]) < 1.0
+        and float(long_lv["tp1"]) > 1.0
+    )
+
+    store = PumpHistoryStore()
+    now = datetime(2026, 6, 10, 12, 0, tzinfo=UTC)
+    record_pump_leg(store, symbol="SYNUSDT", kind="pump", source="ignition", price=2.5, now=now)
+    record_pump_leg(store, symbol="SYNUSDT", kind="dump", source="lifecycle", price=2.2, now=now)
+    signals = leg_events_to_signals(store, limit=10, dedupe_hours=1)
+    has_short = any(s.get("leg_kind") == "pump" and s.get("direction") == "short" for s in signals)
+    has_long = any(s.get("leg_kind") == "dump" and s.get("direction") == "long" for s in signals)
+
+    return [
+        CaseResult("synthetic_short_levels", short_ok, "pump→short SL above TP below"),
+        CaseResult("synthetic_long_levels", long_ok, "dump→long SL below TP above"),
+        CaseResult("leg_events_to_signals", len(signals) >= 2, f"n={len(signals)}"),
+        CaseResult("leg_pump_maps_short", has_short, "leg_pump → short"),
+        CaseResult("leg_dump_maps_long", has_long, "leg_dump → long"),
+    ]
+
+
+def run_dump_init_score_cases() -> list[CaseResult]:
+    """Crowded-pump fade: MTF setup + 1m MACD trigger (ESPORTS post-mortem)."""
+    from hunt_watch.dump_init_score import score_dump_init
+
+    setup_tf = {
+        "1m": {"closed_macd_hist": 0.00138, "macd_hist": 0.0015},
+        "5m": {"closed_rsi14": 73.9, "closed_macd_hist": 0.0024},
+        "15m": {"closed_rsi14": 86.0},
+        "1h": {"closed_rsi14": 92.5},
+    }
+    setup_row = {
+        "price": 0.25927,
+        "dump": {},
+        "lifecycle": {"phase": "exhaustion_at_high", "fall_from_high_pct": 1.1},
+        "market": {"top_ls_1h": 1.99, "funding_pct": 0.629, "taker_5m": 0.997},
+    }
+    _, setup_reasons, setup_verdict = score_dump_init(
+        row=setup_row, micro={}, tf=setup_tf, prev=None
+    )
+
+    trap_row = {
+        **setup_row,
+        "price": 0.27549,
+        "lifecycle": {"phase": "exhaustion_at_high", "fall_from_high_pct": 0.0},
+        "market": {**setup_row["market"], "taker_5m": 1.25},
+    }
+    trap_tf = {
+        **setup_tf,
+        "5m": {"closed_rsi14": 75.6, "closed_macd_hist": 0.0019},
+        "1m": {"closed_macd_hist": 0.00154, "macd_hist": 0.0016},
+    }
+    trap_score, trap_reasons, trap_verdict = score_dump_init(
+        row=trap_row, micro={}, tf=trap_tf, prev=None
+    )
+
+    prev_snap = {
+        "price": 0.26544,
+        "lifecycle": {"fall_from_high_pct": 3.8},
+        "timeframes": {
+            "1m": {"closed_macd_hist": 0.00008, "macd_hist": 0.0001},
+        },
+    }
+    trigger_row = {
+        "price": 0.26503,
+        "dump": {"support_break_level": 0.277},
+        "lifecycle": {"phase": "exhaustion_at_high", "fall_from_high_pct": 4.5},
+        "market": {**setup_row["market"], "funding_pct": 0.78, "taker_5m": 1.164},
+    }
+    trigger_tf = {
+        **setup_tf,
+        "1m": {"closed_macd_hist": -0.00043, "macd_hist": -0.0004},
+        "5m": {"closed_rsi14": 80.8, "closed_macd_hist": 0.0023},
+        "1h": {"closed_rsi14": 93.2},
+    }
+    trig_score, trig_reasons, trig_verdict = score_dump_init(
+        row=trigger_row, micro={}, tf=trigger_tf, prev=prev_snap
+    )
+
+    return [
+        CaseResult(
+            "dump_init_setup_watch",
+            setup_verdict in ("DUMP_WATCH", "DUMP_ARMED") and "1h_rsi=" in str(setup_reasons),
+            f"verdict={setup_verdict} reasons={setup_reasons[:4]}",
+        ),
+        CaseResult(
+            "dump_init_squeeze_not_likely",
+            trap_verdict == "DUMP_WATCH" and trap_score < 85,
+            f"verdict={trap_verdict} score={trap_score} trap={trap_reasons}",
+        ),
+        CaseResult(
+            "dump_init_1m_macd_trigger",
+            "1m_macd_cross_down" in trig_reasons or "1m_macd_hist_neg" in trig_reasons,
+            f"reasons={trig_reasons}",
+        ),
+        CaseResult(
+            "dump_init_trigger_armed",
+            trig_verdict in ("DUMP_ARMED", "DUMP_LIKELY") and trig_score >= 70,
+            f"verdict={trig_verdict} score={trig_score}",
+        ),
+    ]
+
+
 def summarize(results: list[CaseResult]) -> dict[str, Any]:
     failed = [r for r in results if not r.ok]
     return {
