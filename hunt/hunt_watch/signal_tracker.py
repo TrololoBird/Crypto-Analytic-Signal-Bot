@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -22,6 +23,7 @@ from hunt_watch.param_store import tp1_partial_fix_pct as _tp1_pct
 from hunt_watch.param_store import tracker_thresholds
 from hunt_watch.paths import SIGNAL_HISTORY as HISTORY_PATH
 from hunt_watch.paths import SIGNAL_STATE as STATE_PATH
+from hunt_watch.feature_latch import feature_vector_from_row
 from hunt_watch.signal_events import append_signal_event as _append_event
 
 FOLLOWUP_COOLDOWN_MINUTES = 5
@@ -32,6 +34,13 @@ RECLAIM_BUFFER = 1.001  # 0.1% above invalidation before structural close
 SIGNAL_TIMEOUT_HOURS = 48.0
 # Lifecycle contradicts open direction — auto-invalidate after N consecutive ticks.
 STALE_LC_TICKS_DEFAULT = 3
+# H-A "sniper" hold-to-target exit (Gate G2, edge-validated 2026-06-12): on the live
+# short slice the soft `lifecycle_stale` close forfeits winners — backtest on
+# dump_active short (n=37) shows 19% SL / 43% reach TP2 when held to target/SL.
+# So in sniper mode short positions ride to SL/TP (evaluate_levels) and structural
+# invalidation (invalidate_short); the soft lifecycle_stale timeout is suppressed.
+# The unit-tested `_stale_lifecycle_invalidate` itself is unchanged — gated at call site.
+SNIPER_HOLD_TO_TARGET = os.environ.get("HUNT_SNIPER_MODE", "1") not in {"0", "false", "False"}
 _SHORT_STALE_PHASES = frozenset(
     {
         "no_setup",
@@ -105,6 +114,8 @@ def register_signal_open(
     lifecycle: dict[str, Any] | None,
     now: datetime,
     entry_message_id: int | None = None,
+    features_open: dict[str, Any] | None = None,
+    book_walls: dict[str, Any] | None = None,
 ) -> None:
     k = _key(symbol, direction)
     # One direction per symbol: a fresh confirmed opposite setup supersedes
@@ -121,7 +132,7 @@ def register_signal_open(
             now=now,
         )
     ez = setup.get("entry_zone") or [price, price]
-    state.setdefault("signals", {})[k] = {
+    sig: dict[str, Any] = {
         "status": "active",
         "opened_at": now.isoformat(),
         "direction": direction,
@@ -152,6 +163,11 @@ def register_signal_open(
         "extreme_lo": price,
         "last_checked_at": now.isoformat(),
     }
+    if isinstance(features_open, dict):
+        sig["features_open"] = features_open
+    if isinstance(book_walls, dict):
+        sig["book_walls"] = book_walls
+    state.setdefault("signals", {})[k] = sig
 
 
 def _worst_entry(active: dict[str, Any], *, direction: str) -> float:
@@ -171,6 +187,21 @@ def _mfe_pct(active: dict[str, Any], *, direction: str) -> float:
         return max(0.0, (entry - best) / entry * 100.0)
     best = float(active.get("extreme_hi") or entry)
     return max(0.0, (best - entry) / entry * 100.0)
+
+
+def _tick_feature_latch(
+    active: dict[str, Any],
+    row: dict[str, Any],
+    *,
+    direction: str,
+) -> None:
+    """Update per-tick feature snapshots; latch peak when MFE improves."""
+    active["features_last"] = feature_vector_from_row(row)
+    cur_mfe = _mfe_pct(active, direction=direction)
+    peak = float(active.get("peak_mfe_pct") or 0.0)
+    if cur_mfe > peak + 0.001:
+        active["peak_mfe_pct"] = round(cur_mfe, 2)
+        active["features_peak"] = active["features_last"]
 
 
 def apply_tp1_management(
@@ -262,8 +293,13 @@ def close_signal(
     reason: str = "manual",
     exit_price: float | None = None,
     now: datetime | None = None,
+    archive: bool = True,
 ) -> None:
-    """Terminal transition: always records outcome (reason / exit / pnl / duration)."""
+    """Terminal transition: always records outcome (reason / exit / pnl / duration).
+
+    ``archive`` appends the closed record to the persistent ``signal_history.jsonl``.
+    Tests pass ``archive=False`` so verify runs never pollute production data.
+    """
     k = _key(symbol, direction)
     sig = (state.get("signals") or {}).get(k)
     if not isinstance(sig, dict) or sig.get("status") == "closed":
@@ -289,6 +325,9 @@ def close_signal(
     # Snapshot MFE and TP1 progress at close for history/backtest analysis
     mfe = _mfe_pct(sig, direction=direction)
     sig["mfe_pct"] = round(mfe, 2)
+    if isinstance(sig.get("features_last"), dict):
+        sig["features_close"] = sig["features_last"]
+    sig.pop("features_last", None)
     tp1 = float(sig.get("tp1") or 0)
     entry_edge = _worst_entry(sig, direction=direction)
     if tp1 > 0 and entry_edge > 0:
@@ -301,12 +340,13 @@ def close_signal(
     record.setdefault("symbol", symbol)
     record.setdefault("direction", direction)
     history.append(record)
-    try:
-        HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with HISTORY_PATH.open("a", encoding="utf-8") as _hf:
-            _hf.write(json.dumps(record, default=str) + "\n")
-    except Exception:  # noqa: BLE001
-        pass
+    if archive:
+        try:
+            HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+            with HISTORY_PATH.open("a", encoding="utf-8") as _hf:
+                _hf.write(json.dumps(record, default=str) + "\n")
+        except Exception:  # noqa: BLE001
+            pass
     try:
         _append_event(
             "close",
@@ -414,6 +454,15 @@ def _stale_lifecycle_invalidate(
     detail = ""
 
     if direction == "short":
+        opened_phase = str(active.get("entry_lifecycle_phase") or active.get("phase") or "")
+        # Phase unchanged since entry — not a lifecycle transition (SPACEUSDT post-mortem:
+        # short opened in impulse_initiating, stale fired 3 ticks later on same phase).
+        if opened_phase and lc_phase == opened_phase:
+            active["stale_lc_ticks"] = 0
+            return None
+        if active.get("tp1_managed") or active.get("tp1_hit"):
+            active["stale_lc_ticks"] = 0
+            return None
         if lc_phase in _SHORT_STALE_PHASES:
             contra = True
             detail = f"lifecycle_stale:{lc_phase}"
@@ -423,6 +472,13 @@ def _stale_lifecycle_invalidate(
             contra = True
             detail = f"lifecycle_stale:bias_long:{lc_phase}"
     else:
+        opened_phase = str(active.get("entry_lifecycle_phase") or active.get("phase") or "")
+        if opened_phase and lc_phase == opened_phase:
+            active["stale_lc_ticks"] = 0
+            return None
+        if active.get("tp1_managed") or active.get("tp1_hit"):
+            active["stale_lc_ticks"] = 0
+            return None
         if lc_phase in _LONG_STALE_PHASES:
             contra = True
             detail = f"lifecycle_stale:{lc_phase}"
@@ -756,6 +812,7 @@ def evaluate_followups(
         # 1) SL/TP against intrabar extremes — ALWAYS first, never skipped by
         # lifecycle branches and never gated by transport flags.
         hi, lo = _bar_extremes(row, active, price=price, ts=ts)
+        _tick_feature_latch(active, row, direction=direction)
         events.extend(
             evaluate_levels(
                 state, symbol=symbol, direction=direction,
@@ -766,17 +823,19 @@ def evaluate_followups(
         if active.get("status") != "active":
             continue
 
-        stale_fu = _stale_lifecycle_invalidate(
-            state,
-            active,
-            symbol=symbol,
-            direction=direction,
-            lifecycle=lifecycle,
-            row=row,
-            price=price,
-            ts=ts,
-            announced=announced,
-        )
+        stale_fu = None
+        if not (SNIPER_HOLD_TO_TARGET and direction == "short"):
+            stale_fu = _stale_lifecycle_invalidate(
+                state,
+                active,
+                symbol=symbol,
+                direction=direction,
+                lifecycle=lifecycle,
+                row=row,
+                price=price,
+                ts=ts,
+                announced=announced,
+            )
         if stale_fu is not None:
             events.append(stale_fu)
             continue
