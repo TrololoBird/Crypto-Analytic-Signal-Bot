@@ -5,6 +5,14 @@
 Crypto futures **signal-analytics** bot (no auto-trading, no authenticated Binance endpoints).
 Signals only. Telegram delivery. Public Binance USDⓈ-M endpoints only.
 
+## Active development — agents may change everything
+
+**Not production-frozen.** Codebase is largely AI-generated; architecture, strategies, indicators, and config defaults are provisional until validated by live outcomes and external research.
+
+Agents **may refactor the full stack** (packages, delivery path internals, monolith splits, indicator math, schema migrations) when needed for correctness. Do not preserve broken structure out of caution.
+
+**Hard limits unchanged:** no auto-trading, no authenticated Binance APIs, delivery order `validate_signal_contract` → `hard_confluence_gate` → `deliver`.
+
 ## Runtime topology (read before editing anything)
 
 **Entry:** `main.py` → `bot/cli.py` → `asyncio.run(_main())` → `SignalBot.start()` + `await bot.run_forever()`
@@ -42,10 +50,10 @@ WS kline close → EventBus → SymbolAnalyzer → SignalEngine → DeliveryOrch
 
 | Concern | Primary module | Notes |
 |---------|----------------|-------|
-| WS market data | `bot/market/ws.py` + `_ws_connection.py` + `_ws_parsers.py` | Public interface unchanged on `ws.py` |
-| REST market data | `bot/market/rest_impl.py` + `_rest_circuit.py` + `_rest_frames.py` | `RestCircuitMixin` on `RestHttpMixin` |
-| Feature pipeline | `bot/features/prepare.py` → `prepare_frame.py` | Polars hot path |
-| Strategy execution | `bot/engine/engine.py` + `registry.py` | 38 strategies |
+| WS market data | `engine/market/ws.py` + `_ws_connection.py` + `_ws_parsers.py` | Shared kernel; public interface unchanged on `ws.py` |
+| REST market data | `engine/market/rest_impl.py` + `_rest_circuit.py` + `_rest_frames.py` | Shared kernel; `RestCircuitMixin` on `RestHttpMixin` |
+| Feature pipeline | `engine/features/prepare.py` → `prepare_frame.py` | Shared kernel; Polars hot path |
+| Strategy execution | `bot/engine/engine.py` + `registry.py` | 42 strategies |
 | Signal delivery | `bot/delivery/` (contract → filters → confluence → deliver) | Invariant order enforced |
 | Persistence CRUD | `bot/persistence/repository/memory.py` | SQLite + parquet; inherits `AnalyticsMixin` |
 | Persistence DDL (schema) | `bot/persistence/repository/_schema.py` | DDL strings only — imported by `memory.py` |
@@ -57,8 +65,10 @@ WS kline close → EventBus → SymbolAnalyzer → SignalEngine → DeliveryOrch
 | Delivery ranking | `bot/runtime/_delivery_ranking.py` | `DeliveryRankingMixin` |
 | Delivery watch recording | `bot/runtime/_delivery_watch.py` | `DeliveryWatchMixin` |
 | DB schema migrations | `bot/migrations.py` **only** — sole writer of `schema_version` | |
-| Config | `bot/domain/config.py` + `config.toml` | `BotSettings` |
-| Secrets | `bot/secrets.py` | Canonical: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
+| Config | `engine/domain/config.py` + `config.toml` | Shared kernel; `BotSettings` |
+| Secrets | `engine/secrets.py` | Canonical: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
+| Bot-side domain policies | `bot/policy/` (`mtf`, `catalog_guards`, `labels`, `delivery_policy`) | Import persistence/regime — NOT kernel material |
+| Hunter project | `hunt/` (package `hunt_watch`, scripts `hunt/scripts/`) | Independent product; imports ONLY `engine.*` |
 | CLI | `bot/cli.py` | Subcommands below |
 | Dashboard | `bot/dashboard/app.py` (FastAPI, optional) | Not hot path |
 | Diagnostics | `bot/diagnostics/facade.py` | Re-export hub |
@@ -93,13 +103,17 @@ Next review: after 50+ new executed outcomes with fix-sl-A.
 - **Phase G (tracking):** `tracking.py` split — lifecycle ~998 LOC; review in `_tracking_review.py` (~935); Telegram ids in `_tracking_telegram.py` (~103). Stats helpers (`_stats_snapshot`, `_record_setup_outcome`) stayed in `tracking.py` (<150 LOC, no `_tracking_stats.py`).
 - **20 files remain above 1,000 LOC** (post-G). Largest: `bot/dashboard/app.py` (~1,779), `bot/market/ws.py` (~1,777). Runtime priorities: `symbol_analyzer.py` (~1,459), `delivery_orchestrator.py` (~1,323).
 - **Phase F** decomposed `memory.py` / `symbol_analyzer.py` / `delivery_orchestrator.py` partially; all three remain above 1,000 LOC. Further extraction deferred.
-- **`bot/market/scheduler.py`** — kept; `bot/runtime/kline_handler.py` imports `analysis_intervals`. Do not delete.
+- **`bot/runtime/scheduler.py`** (ex `bot/market/scheduler.py`) — kept; `bot/runtime/kline_handler.py` imports `analysis_intervals`. Do not delete.
+
+## Top-level layout (phase-arch, 2026-06-10)
+
+`engine/` = shared kernel (market, features, domain, errors/coercion/secrets/telegram/contract/telemetry/data_readiness) · `bot/` = main bot · `hunt/` = hunter. Dependency direction only downward: `engine ← bot`, `engine ← hunt`. `engine` must never import `bot.*`/`hunt`; `bot` and `hunt` never import each other.
 
 ## Strategy catalog
 
-38 strategies via `STRATEGY_CLASSES` → `StrategyRegistry.register()`.
+42 strategies via `STRATEGY_CLASSES` → `StrategyRegistry.register()`.
 Enabled per strategy: `config.toml` `[setups.<id>]`.
-Metadata: `bot/domain/strategy_catalog.py` (`CATALOG_ENTRIES`, 38 entries).
+Metadata: `engine/domain/strategy_catalog.py` (`CATALOG_ENTRIES`, 38 entries).
 New strategy: detector file + `STRATEGY_CLASSES` + `CATALOG_ENTRIES` + config key + optional `config/strategies/<id>.toml`.
 
 ## Testing

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from .domain.config import BotSettings
+    from engine.domain.config import BotSettings
 
 
 @dataclass(slots=True)

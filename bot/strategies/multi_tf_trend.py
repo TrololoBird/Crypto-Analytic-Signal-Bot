@@ -12,8 +12,8 @@ from ._roadmap import (
 from .roadmap_base import RoadmapSetup
 
 if TYPE_CHECKING:
-    from ..domain.config import BotSettings
-    from ..domain.schemas import PreparedSymbol, Signal
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import PreparedSymbol, Signal
 
 __all__ = ["detect_multi_tf_trend"]
 
@@ -193,6 +193,7 @@ def detect_multi_tf_trend(
 
 class MultiTFTrendSetup(RoadmapSetup):
     setup_id = "multi_tf_trend"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "market"
     family = "continuation"
     confirmation_profile = "trend_follow"
     required_context = ("futures_flow",)

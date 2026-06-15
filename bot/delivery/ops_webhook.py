@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 import aiohttp
 
-from bot.runtime.errors import DEFENSIVE_EXC
+from engine.errors import DEFENSIVE_EXC
 
 if TYPE_CHECKING:
     from bot.runtime.bot import SignalBot

@@ -13,8 +13,8 @@ from ._roadmap import (
 from .roadmap_base import RoadmapSetup
 
 if TYPE_CHECKING:
-    from ..domain.config import BotSettings
-    from ..domain.schemas import PreparedSymbol, Signal
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import PreparedSymbol, Signal
 
 __all__ = ["detect_liquidation_heatmap"]
 
@@ -139,7 +139,13 @@ def detect_liquidation_heatmap(
         clarity *= 0.90
     if context_penalty:
         clarity *= 0.82
-    entry_anchor = _prev(work, "ema20", 0.0) or None
+    # Limit order anchored at the wick extreme: longs buy at the prev-bar low (liquidation
+    # cluster = support), shorts sell at the prev-bar high (squeeze level = resistance).
+    # EMA20 ≈ current price → would fill immediately like a market order.
+    if direction == "long":
+        entry_anchor = _prev(work, "low", 0.0) or None
+    else:
+        entry_anchor = _prev(work, "high", 0.0) or None
     return _build_atr_signal(
         confirmed_bar=True,
         prepared=prepared,
@@ -160,6 +166,7 @@ def detect_liquidation_heatmap(
 
 class LiquidationHeatmapSetup(RoadmapSetup):
     setup_id = "liquidation_heatmap"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "limit"
     family = "liquidity"
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)

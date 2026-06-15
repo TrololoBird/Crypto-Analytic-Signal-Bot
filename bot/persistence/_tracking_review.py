@@ -12,15 +12,18 @@ from typing import Any
 
 import polars as pl
 
+from bot.persistence.activation_gate import evaluate_pre_activation
 from bot.persistence.tracking_events import SignalTrackingEvent
-from bot.runtime.errors import DEFENSIVE_EXC
-
-from ..domain.limit_entry import (
+from engine.domain.limit_entry import (
+    normalize_confirmation_profile,
+    pending_expiry_minutes_for_signal,
     should_activate_limit_entry,
     should_activate_limit_fill_price,
 )
-from ..domain.schemas import AggTrade
-from ..market.data import MarketDataUnavailable
+from engine.domain.schemas import AggTrade
+from engine.errors import DEFENSIVE_EXC
+from engine.market.data import MarketDataUnavailable
+
 from ..persistence.sl_diagnostics import classify_stop_loss_root_cause
 from ..persistence.tracked import (
     TrackedSignalState,
@@ -29,6 +32,28 @@ from ..persistence.tracked import (
 )
 
 LOG = logging.getLogger("bot.tracking")
+
+_REVERSAL_PROFILES = frozenset({"countertrend_exhaustion", "divergence_reversal"})
+_HARD_GATE_CLOSE_PREFIXES = (
+    "activation_staleness",
+    "pending_too_old",
+    "activation_context_stale",
+    "activation_trend_regime_",
+    "activation_score_decay",
+)
+_HARD_GATE_CLOSE_NOTES = frozenset(
+    {
+        "zone_invalidated_stop_breached",
+        "activation_blocked_supertrend_up_short",
+        "activation_blocked_supertrend_down_long",
+    }
+)
+
+
+def _gate_note_closes_pending(note: str) -> bool:
+    if note in _HARD_GATE_CLOSE_NOTES:
+        return True
+    return any(note.startswith(prefix) for prefix in _HARD_GATE_CLOSE_PREFIXES)
 
 
 def _expiry_event_type(tracked: TrackedSignalState) -> str:
@@ -55,6 +80,35 @@ class TPSLReviewMixin:
     _last_agg_trade_fetch_mono: float
     _agg_trade_semaphore: asyncio.Semaphore
 
+    def _preferred_review_price(
+        self,
+        symbol: str,
+        fallback_price: float,
+        *,
+        activated: bool,
+    ) -> tuple[float, str]:
+        """Use fresh mark price for post-activation SL/TP (Binance perp trigger convention)."""
+        if not activated:
+            return fallback_price, "trade"
+        ws = getattr(self.market_data, "_ws", None)
+        if ws is None:
+            return fallback_price, "trade"
+        snapshot_fn = getattr(ws, "get_mark_price_snapshot", None)
+        age_fn = getattr(ws, "get_mark_price_age_seconds", None)
+        if snapshot_fn is None or age_fn is None:
+            return fallback_price, "trade"
+        snapshot = snapshot_fn(symbol)
+        if not snapshot:
+            return fallback_price, "trade"
+        mark_price = float(snapshot.get("mark_price") or 0.0)
+        if mark_price <= 0.0:
+            return fallback_price, "trade"
+        age = age_fn(symbol)
+        max_age = float(getattr(self.settings.tracking, "mark_price_max_age_seconds", 30.0))
+        if age is None or float(age) > max_age:
+            return fallback_price, "trade"
+        return mark_price, "mark"
+
     def _effective_stop(self, tracked: TrackedSignalState) -> float:
         trail = getattr(tracked, "trailing_stop", None)
         if trail is not None and float(trail) > 0.0:
@@ -63,6 +117,66 @@ class TPSLReviewMixin:
         if cached is not None and float(cached) > 0.0:
             return float(cached)
         return float(tracked.stop)
+
+    def _activation_feature_payload(self, tracked: TrackedSignalState) -> dict[str, Any] | None:
+        feat = self.features_store.get(tracked.tracking_id)
+        if feat is None:
+            return None
+        return feat.to_dict()
+
+    def _pre_activation_allowed(
+        self,
+        tracked: TrackedSignalState,
+        *,
+        price: float,
+        now: datetime,
+        bar_open: float | None = None,
+        bar_close: float | None = None,
+        bar_high: float | None = None,
+        bar_low: float | None = None,
+    ) -> tuple[bool, str]:
+        tracking_cfg = self.settings.tracking
+        if not getattr(tracking_cfg, "pre_activation_gate_enabled", True):
+            return True, "gate_disabled"
+        profile = normalize_confirmation_profile(tracked.confirmation_profile)
+        pending_minutes = pending_expiry_minutes_for_signal(
+            self.settings,
+            confirmation_profile=profile,
+            entry_order_type=tracked.entry_order_type,
+            setup_id=tracked.setup_id,
+        )
+        ok, note = evaluate_pre_activation(
+            tracked,
+            price=price,
+            now=now,
+            features=self._activation_feature_payload(tracked),
+            bar_open=bar_open,
+            bar_close=bar_close,
+            bar_high=bar_high,
+            bar_low=bar_low,
+            staleness_atr_mult=float(getattr(tracking_cfg, "activation_staleness_atr_mult", 1.2)),
+            max_pending_minutes=pending_minutes,
+            min_score_at_activation=float(getattr(tracking_cfg, "activation_min_score", 0.65)),
+            score_decay_per_15m_bar=float(
+                getattr(tracking_cfg, "activation_score_decay_per_bar", 0.03)
+            ),
+            context_max_age_seconds=float(
+                getattr(tracking_cfg, "activation_context_max_age_seconds", 120.0)
+            ),
+            reversal_activation_pin_required=bool(
+                getattr(tracking_cfg, "reversal_activation_pin_required", False)
+            ),
+        )
+        if not ok:
+            tracked.last_lifecycle_note = note
+            LOG.info(
+                "pre_activation_blocked | ref=%s setup=%s symbol=%s note=%s",
+                tracked.tracking_ref,
+                tracked.setup_id,
+                tracked.symbol,
+                note,
+            )
+        return ok, note
 
     @staticmethod
     def _update_price_excursion(tracked: TrackedSignalState, price: float | None) -> None:
@@ -101,7 +215,7 @@ class TPSLReviewMixin:
             tracked.max_adverse_pct = max(tracked.max_adverse_pct, adverse)
 
     async def _capture_post_sl_recovery(self, tracked: TrackedSignalState) -> None:
-        """Record 4h post-stop favorable move into outcome features."""
+        """Record 6h post-stop favorable move into outcome features."""
         sl_close = tracked.close_reason in {"stop_loss", "breakeven_stop"}
         if not sl_close or tracked.activated_at is None:
             return
@@ -112,7 +226,7 @@ class TPSLReviewMixin:
         if exit_price is None or float(exit_price) <= 0.0:
             return
         try:
-            candles = await self.market_data.fetch_klines(tracked.symbol, "15m", limit=20)
+            candles = await self.market_data.fetch_klines(tracked.symbol, "15m", limit=24)
         except DEFENSIVE_EXC:
             return
         if candles.is_empty():
@@ -127,7 +241,7 @@ class TPSLReviewMixin:
                 bar_time = datetime.fromisoformat(bar_time)
             if bar_time <= closed_at:
                 continue
-            if (bar_time - closed_at).total_seconds() > 4 * 3600:
+            if (bar_time - closed_at).total_seconds() > 6 * 3600:
                 break
             bar_high = float(row["high"])
             bar_low = float(row["low"])
@@ -148,7 +262,7 @@ class TPSLReviewMixin:
         post_sl_features: dict[str, Any] = {
             "post_sl_favorable_pct": round(max_favorable, 4),
             "post_sl_tp1_room_pct": round(tp1_room, 4),
-            "post_sl_window_hours": 4,
+            "post_sl_window_hours": 6,
         }
         if regime_at_close:
             post_sl_features["market_regime_at_close"] = regime_at_close
@@ -390,12 +504,63 @@ class TPSLReviewMixin:
                         )
                     )
                     return events
-                fill_ok, fill_note = should_activate_limit_fill_price(
-                    entry_low=tracked.entry_low,
-                    entry_high=tracked.entry_high,
-                    price=trade.price,
-                )
+                # Market orders enter at current price immediately (no zone re-touch
+                # wait — that is limit semantics). Limit orders fill only when price
+                # trades back into the published zone.
+                if str(tracked.entry_order_type or "limit").strip().lower() == "market":
+                    fill_ok, fill_note = True, "market_immediate_fill"
+                else:
+                    fill_ok, fill_note = should_activate_limit_fill_price(
+                        entry_low=tracked.entry_low,
+                        entry_high=tracked.entry_high,
+                        price=trade.price,
+                    )
                 if fill_ok:
+                    profile = normalize_confirmation_profile(tracked.confirmation_profile)
+                    if profile in _REVERSAL_PROFILES:
+                        if tracked.entry_zone_touched_at is None:
+                            tracked.entry_zone_touched_at = trade.trade_time.astimezone(
+                                UTC
+                            ).isoformat()
+                            tracked.entry_confirm_pending_at = trade.trade_time.astimezone(
+                                UTC
+                            ).isoformat()
+                        await self._mark_checked(
+                            tracked,
+                            checked_at=trade.trade_time,
+                            last_price=last_price,
+                            precision_mode="trade",
+                        )
+                        continue
+                    gate_ok, gate_note = self._pre_activation_allowed(
+                        tracked,
+                        price=trade.price,
+                        now=now,
+                    )
+                    if not gate_ok:
+                        if _gate_note_closes_pending(gate_note):
+                            events.append(
+                                await self._close_event(
+                                    tracked,
+                                    event_type="unactivated_close",
+                                    occurred_at=trade.trade_time,
+                                    price=trade.price,
+                                    precision_mode="trade",
+                                    note=gate_note,
+                                )
+                            )
+                            return events
+                        if tracked.entry_zone_touched_at is None:
+                            tracked.entry_zone_touched_at = trade.trade_time.astimezone(
+                                UTC
+                            ).isoformat()
+                        await self._mark_checked(
+                            tracked,
+                            checked_at=trade.trade_time,
+                            last_price=last_price,
+                            precision_mode="trade",
+                        )
+                        continue
                     if tracked.entry_zone_touched_at is None:
                         tracked.entry_zone_touched_at = trade.trade_time.astimezone(UTC).isoformat()
                     await self._mark_activated(
@@ -422,11 +587,16 @@ class TPSLReviewMixin:
                         precision_mode="trade",
                     )
                     continue
+            review_price, price_mode = self._preferred_review_price(
+                tracked.symbol,
+                trade.price,
+                activated=tracked.activated_at is not None,
+            )
             tick_events, closed = await self._apply_price_tick(
                 tracked,
-                price=trade.price,
+                price=review_price,
                 occurred_at=trade.trade_time,
-                precision_mode="trade",
+                precision_mode=f"trade_{price_mode}",
             )
             if tick_events:
                 events.extend(tick_events)
@@ -591,23 +761,68 @@ class TPSLReviewMixin:
                         )
                     )
                     return events
-                activate_ok, activate_note = should_activate_limit_entry(
-                    direction=tracked.direction,
-                    confirmation_profile=tracked.confirmation_profile,
-                    entry_low=tracked.entry_low,
-                    entry_high=tracked.entry_high,
-                    open_=bar_open,
-                    close=bar_close,
-                    high=bar_high,
-                    low=bar_low,
-                )
-                if activate_ok:
-                    fill_price = (
-                        bar_close
-                        if _price_in_entry_zone(tracked, bar_close)
-                        else (tracked.entry_low + tracked.entry_high) / 2.0
+                is_market = str(tracked.entry_order_type or "limit").strip().lower() == "market"
+                if is_market:
+                    # Market orders enter at current price on the first observed bar
+                    # (≈ publish price) — no zone re-touch wait, which is limit semantics.
+                    activate_ok, activate_note = True, "market_immediate_fill"
+                else:
+                    tracking_cfg = self.settings.tracking
+                    require_close = bool(
+                        getattr(tracking_cfg, "trend_follow_activation_requires_close", True)
                     )
-                    tracked.entry_zone_touched_at = bar_close_time.astimezone(UTC).isoformat()
+                    activate_ok, activate_note = should_activate_limit_entry(
+                        direction=tracked.direction,
+                        confirmation_profile=tracked.confirmation_profile,
+                        entry_low=tracked.entry_low,
+                        entry_high=tracked.entry_high,
+                        open_=bar_open,
+                        close=bar_close,
+                        high=bar_high,
+                        low=bar_low,
+                        trend_follow_requires_close=require_close,
+                    )
+                if activate_ok:
+                    if tracked.entry_zone_touched_at is None:
+                        tracked.entry_zone_touched_at = bar_close_time.astimezone(UTC).isoformat()
+                    gate_ok, gate_note = self._pre_activation_allowed(
+                        tracked,
+                        price=bar_close,
+                        now=now,
+                        bar_open=bar_open,
+                        bar_close=bar_close,
+                        bar_high=bar_high,
+                        bar_low=bar_low,
+                    )
+                    if not gate_ok:
+                        if gate_note == "await_bar_confirm":
+                            tracked.entry_confirm_pending_at = bar_close_time.astimezone(
+                                UTC
+                            ).isoformat()
+                            continue
+                        if _gate_note_closes_pending(gate_note):
+                            events.append(
+                                await self._close_event(
+                                    tracked,
+                                    event_type="unactivated_close",
+                                    occurred_at=bar_close_time,
+                                    price=bar_close,
+                                    precision_mode="candle",
+                                    note=gate_note,
+                                )
+                            )
+                            return events
+                        continue
+                    if is_market:
+                        # Honest market fill ≈ publish price = zone midpoint; never the
+                        # later bar_close (that would back-date a more favourable fill).
+                        fill_price = (tracked.entry_low + tracked.entry_high) / 2.0
+                    else:
+                        fill_price = (
+                            bar_close
+                            if _price_in_entry_zone(tracked, bar_close)
+                            else (tracked.entry_low + tracked.entry_high) / 2.0
+                        )
                     await self._mark_activated(
                         tracked,
                         activated_at=bar_close_time,

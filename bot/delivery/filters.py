@@ -8,13 +8,14 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from bot.runtime.errors import DEFENSIVE_EXC
+from bot.policy.mtf import evaluate_mtf_gate, normalize_mtf_reject_reason
+from engine.contract import resolve_target_rr
+from engine.domain.regime_gates import effective_market_regime
+from engine.errors import DEFENSIVE_EXC
+from engine.features.microstructure import MicrostructureContext, build_microstructure_context
+from engine.runtime_policy import configured_primary_timeframe, is_deep_analysis_symbol
 
 from ..diagnostics.signals import get_global_diagnostics
-from ..domain.mtf import evaluate_mtf_gate, normalize_mtf_reject_reason
-from ..features.microstructure import MicrostructureContext, build_microstructure_context
-from ..runtime_policy import configured_primary_timeframe, is_deep_analysis_symbol
-from .contract import resolve_target_rr
 from .filter_stages import filter_stage_enabled
 from .scoring import ScoringResult
 from .trade_plan import TradePlanBuilder
@@ -22,8 +23,9 @@ from .trade_plan import TradePlanBuilder
 if TYPE_CHECKING:
     import polars as pl
 
-    from ..domain.config import BotSettings
-    from ..domain.schemas import PreparedSymbol, Signal
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import PreparedSymbol, Signal
+
     from .confluence import ConfluenceEngine
 
 
@@ -32,14 +34,65 @@ LOGGER = logging.getLogger(__name__)
 # п.26: per-strategy SL-rate cache. Updated from delivery_orchestrator via
 # update_strategy_sl_rates(). Strategies with >70% SL rate get a score penalty.
 _STRATEGY_SL_RATES: dict[str, float] = {}
+_STRATEGY_SL_SAMPLE_COUNTS: dict[str, int] = {}
 _SL_PENALTY_THRESHOLD = 0.70  # sl_rate above this triggers penalty
 _SL_PENALTY_MAX_MULT = 0.80  # floor multiplier at 100% sl rate
 
+_SMC_HTF_SETUPS = frozenset(
+    {"order_block", "fvg_setup", "liquidity_sweep", "structure_break_retest", "bos_choch"}
+)
+_MIN_STOP_ATR_MULT = 1.5
+_COMPRESSION_ADX_CEILING = 20.0
+_COMPRESSION_ATR_RATIO = 0.8
+# squeeze_setup excluded: fires only on BB/KC release (see _is_compression_regime docstring).
+_COMPRESSION_SHORT_BLOCK_SETUPS = frozenset({"volume_anomaly", "keltner_breakout"})
 
-def update_strategy_sl_rates(rates: dict[str, float]) -> None:
+
+def _effective_min_stop_distance_pct(
+    settings: BotSettings,
+    atr_pct: float,
+) -> float:
+    """answers50 P0: floor stop at max(config%, 1.5×ATR) for volatile symbols."""
+    base = float(settings.tracking.min_stop_distance_pct)
+    if atr_pct > 0.0:
+        return max(base, _MIN_STOP_ATR_MULT * atr_pct)
+    return base
+
+
+def _is_compression_regime(
+    prepared: PreparedSymbol,
+    *,
+    adx_1h: float,
+) -> bool:
+    """answers50 Q5/Q6/Q41: pre-expansion chop — ADX<20 and ATR still below 50-bar avg.
+
+    squeeze_setup is intentionally excluded from ``_COMPRESSION_SHORT_BLOCK_SETUPS``:
+    its detector only fires on BB/KC release (post-compression). When ATR has already
+    expanded vs the 50-bar mean we are no longer in pre-expansion compression even if
+    ADX is still lagging below 20.
+    """
+    if adx_1h <= 0.0 or adx_1h >= _COMPRESSION_ADX_CEILING:
+        return False
+    work = prepared.work_15m
+    if work is not None and not work.is_empty() and "atr14" in work.columns:
+        atr_series = work["atr14"].drop_nulls()
+        if atr_series.len() >= 50:
+            current = float(atr_series[-1] or 0.0)
+            avg50 = float(atr_series.tail(50).mean() or 0.0)
+            if avg50 > 0.0:
+                return current / avg50 < _COMPRESSION_ATR_RATIO
+    return True
+
+
+def update_strategy_sl_rates(
+    rates: dict[str, float], *, sample_counts: dict[str, int] | None = None
+) -> None:
     """Refresh the per-strategy SL-rate cache (п.26). rates: setup_id → sl_rate 0..1."""
     _STRATEGY_SL_RATES.clear()
     _STRATEGY_SL_RATES.update(rates)
+    _STRATEGY_SL_SAMPLE_COUNTS.clear()
+    if sample_counts:
+        _STRATEGY_SL_SAMPLE_COUNTS.update(sample_counts)
 
 
 def _optional_float(value: Any) -> float | None:
@@ -52,6 +105,88 @@ def _optional_float(value: Any) -> float | None:
     if not math.isfinite(numeric):
         return None
     return numeric
+
+
+def _liquidity_tier(prepared: PreparedSymbol, settings: BotSettings) -> str:
+    quote_vol = float(getattr(prepared.universe, "quote_volume", 0.0) or 0.0)
+    if quote_vol <= 0.0:
+        quote_vol = float(getattr(prepared, "quote_volume", 0.0) or 0.0)
+    core_min = float(settings.universe.min_quote_volume_usd)
+    radar_min = float(settings.universe.radar.min_quote_volume_usd)
+    bucket = str(getattr(prepared.universe, "shortlist_bucket", "") or "").lower()
+    if bucket == "radar" or (quote_vol >= radar_min and quote_vol < core_min):
+        return "radar"
+    return "core"
+
+
+def _tier_max_spread_bps(prepared: PreparedSymbol, settings: BotSettings) -> float:
+    if _liquidity_tier(prepared, settings) == "radar":
+        return float(settings.universe.radar_max_spread_bps)
+    return float(settings.filters.max_spread_bps)
+
+
+def _signal_age_gate(
+    signal: Signal,
+    settings: BotSettings,
+    *,
+    primary_timeframe: str,
+) -> tuple[bool, str | None]:
+    max_bars = int(getattr(settings.filters, "max_signal_age_bars", 0) or 0)
+    if max_bars <= 0:
+        return True, None
+    tf_seconds = {"5m": 300, "15m": 900, "1h": 3600, "4h": 14400}.get(primary_timeframe, 900)
+    created = signal.created_at
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=UTC)
+    age_seconds = (datetime.now(UTC) - created.astimezone(UTC)).total_seconds()
+    if age_seconds > max_bars * tf_seconds:
+        return False, "signal_too_old"
+    return True, None
+
+
+def _htf_zone_confluence_adjustment(
+    signal: Signal,
+    prepared: PreparedSymbol,
+    settings: BotSettings,
+) -> tuple[float, str | None, str | None]:
+    """Return (score_delta, pass_note, reject_reason)."""
+    if signal.setup_id not in _SMC_HTF_SETUPS:
+        return 0.0, None, None
+    structure_4h = str(getattr(prepared, "structure_4h", "") or "").lower()
+    if settings.filters.htf_zone_confluence_required:
+        if signal.direction == "long" and structure_4h == "downtrend":
+            return 0.0, None, "htf_structure_conflict_4h"
+        if signal.direction == "short" and structure_4h == "uptrend":
+            return 0.0, None, "htf_structure_conflict_4h"
+    if prepared.work_1h.is_empty():
+        return 0.0, None, None
+    try:
+        from ..setups.smc import latest_fvg_zone, latest_order_block
+
+        close = (
+            float(prepared.work_15m.item(-1, "close")) if not prepared.work_15m.is_empty() else 0.0
+        )
+        zone = latest_order_block(
+            prepared.work_1h,
+            swing_length=3,
+            include_unconfirmed_tail=True,
+            current_price=close or None,
+        )
+        if zone is None:
+            zone = latest_fvg_zone(prepared.work_1h)
+        if zone is None:
+            return 0.0, None, None
+        entry_low = min(signal.entry_low, signal.entry_high)
+        entry_high = max(signal.entry_low, signal.entry_high)
+        zone_low = min(zone.bottom, zone.top)
+        zone_high = max(zone.bottom, zone.top)
+        overlaps = entry_low <= zone_high and entry_high >= zone_low
+        if overlaps:
+            bonus = float(settings.filters.htf_zone_confluence_bonus)
+            return bonus, "htf_zone_overlap_bonus", None
+    except DEFENSIVE_EXC:
+        LOGGER.debug("htf zone confluence check failed", exc_info=True)
+    return 0.0, None, None
 
 
 _ADX_POLICY_HARD_GATE = "hard_gate"
@@ -263,10 +398,23 @@ def _regime_long_gate(
         "cvd_divergence",
         "oi_divergence",
     }
-    regime = str(getattr(prepared, "market_regime", "") or "").lower()
+    regime = effective_market_regime(
+        str(getattr(prepared, "market_regime", "") or ""),
+        bias_4h=str(getattr(prepared, "bias_4h", "") or "neutral"),
+        price=getattr(prepared, "mark_price", None)
+        or getattr(prepared.universe, "last_price", None),
+        poc=getattr(prepared, "poc_1h", None),
+    )
     btc_bias = str(getattr(prepared, "btc_bias", None) or signal.btc_bias or "neutral").lower()
     bias_4h = str(getattr(prepared, "bias_4h", "") or "neutral").lower()
+    bias_1h = str(getattr(prepared, "bias_1h", prepared.bias_4h) or "neutral").lower()
     btc_phase = str(getattr(prepared, "btc_phase", "") or "").lower()
+    trend_family = family in {"continuation", "breakout", "trend_follow"} or profile in {
+        "trend_follow",
+        "breakout_acceptance",
+    }
+    if trend_family and bias_4h == "uptrend" and bias_1h == "downtrend":
+        return True, None, {"regime_gate": "htf_pullback_long_allowed"}
     bear_regime = regime in {"bear", "decline", "risk_off"}
     if profile in reversal_profiles or signal.setup_id in reversal_setups or family == "reversal":
         if bear_regime and btc_phase in {"decline", "distribution"}:
@@ -280,6 +428,25 @@ def _regime_long_gate(
                     "btc_phase": btc_phase,
                 },
             )
+        _bias_1h_chk = str(getattr(prepared, "bias_1h", prepared.bias_4h) or "neutral").lower()
+        if signal.setup_id in {"volume_climax_reversal", "cvd_divergence"}:
+            _prep_regime = str(getattr(prepared, "market_regime", "") or "").lower()
+            if _prep_regime == "trending" and _bias_1h_chk == "downtrend":
+                reject_code = (
+                    "volume_climax_trend_regime_blocked"
+                    if signal.setup_id == "volume_climax_reversal"
+                    else "cvd_trend_regime_blocked"
+                )
+                return (
+                    False,
+                    reject_code,
+                    {
+                        "regime_gate": "reversal_long_blocked_trending",
+                        "market_regime": _prep_regime,
+                        "bias_1h": _bias_1h_chk,
+                        "setup_id": signal.setup_id,
+                    },
+                )
         return True, None, {"regime_gate": "reversal_exempt"}
     bear_bias = btc_bias in {"downtrend", "bear"} or bias_4h == "downtrend"
     trend_family = family in {"continuation", "breakout", "trend_follow"} or profile in {
@@ -308,6 +475,48 @@ def _regime_short_gate(
     direction = str(signal.direction or "").lower()
     if direction != "short":
         return True, None, {"regime_gate": "not_short"}
+
+    symbol = str(signal.symbol or "").upper()
+    if symbol not in {"BTCUSDT", "ETHUSDT", "SOLUSDT"}:
+        _btc_bias_alt = str(
+            getattr(prepared, "btc_bias", None) or signal.btc_bias or "neutral"
+        ).lower()
+        if _btc_bias_alt in {"uptrend", "bull"}:
+            _ctx = getattr(prepared, "benchmark_context", {}) or {}
+            _btc_payload = _ctx.get("BTCUSDT") if isinstance(_ctx, dict) else None
+            _btc_pct_1h = 0.0
+            if isinstance(_btc_payload, dict):
+                try:
+                    _btc_pct_1h = float(_btc_payload.get("pct_1h") or 0.0)
+                except TypeError, ValueError:
+                    _btc_pct_1h = 0.0
+            if _btc_pct_1h >= 0.006:
+                _btc_corr = getattr(prepared, "btc_corr_1h", None)
+                try:
+                    _btc_corr_f = float(_btc_corr) if _btc_corr is not None else None
+                except TypeError, ValueError:
+                    _btc_corr_f = None
+                if _btc_corr_f is not None and abs(_btc_corr_f) < 0.7:
+                    return (
+                        True,
+                        None,
+                        {
+                            "regime_gate": "btc_block_skipped_low_corr",
+                            "btc_corr_1h": _btc_corr_f,
+                            "btc_bias": _btc_bias_alt,
+                            "symbol": symbol,
+                        },
+                    )
+                return (
+                    False,
+                    "btc_uptrend_alt_short_blocked",
+                    {
+                        "regime_gate": "alt_short_vs_btc_uptrend",
+                        "btc_bias": _btc_bias_alt,
+                        "btc_pct_1h": _btc_pct_1h,
+                        "symbol": symbol,
+                    },
+                )
 
     profile = str(signal.confirmation_profile or "trend_follow")
     family = str(signal.strategy_family or "continuation")
@@ -354,9 +563,47 @@ def _regime_short_gate(
                     "btc_phase": _btc_phase_chk,
                 },
             )
+        st15 = _latest_frame_float(prepared.work_15m, "supertrend_dir")
+        st1h = _latest_frame_float(prepared.work_1h, "supertrend_dir")
+        if st15 is not None and st1h is not None and st15 > 0.0 and st1h > 0.0:
+            return (
+                False,
+                "supertrend_up_reversal_short_blocked",
+                {
+                    "regime_gate": "reversal_short_blocked_micro_up",
+                    "supertrend_dir_15m": st15,
+                    "supertrend_dir_1h": st1h,
+                    "market_regime": _regime_chk,
+                },
+            )
+        _bias_1h_chk = str(getattr(prepared, "bias_1h", prepared.bias_4h) or "neutral").lower()
+        if signal.setup_id in {"volume_climax_reversal", "cvd_divergence"}:
+            _prep_regime = str(getattr(prepared, "market_regime", "") or "").lower()
+            if _prep_regime == "trending" and _bias_1h_chk == "uptrend":
+                reject_code = (
+                    "volume_climax_trend_regime_blocked"
+                    if signal.setup_id == "volume_climax_reversal"
+                    else "cvd_trend_regime_blocked"
+                )
+                return (
+                    False,
+                    reject_code,
+                    {
+                        "regime_gate": "reversal_short_blocked_trending",
+                        "market_regime": _prep_regime,
+                        "bias_1h": _bias_1h_chk,
+                        "setup_id": signal.setup_id,
+                    },
+                )
         return True, None, {"regime_gate": "reversal_exempt"}
 
-    regime = str(getattr(prepared, "market_regime", "") or "").lower()
+    regime = effective_market_regime(
+        str(getattr(prepared, "market_regime", "") or ""),
+        bias_4h=str(getattr(prepared, "bias_4h", "") or "neutral"),
+        price=getattr(prepared, "mark_price", None)
+        or getattr(prepared.universe, "last_price", None),
+        poc=getattr(prepared, "poc_1h", None),
+    )
     btc_bias = str(getattr(prepared, "btc_bias", None) or signal.btc_bias or "neutral").lower()
     bias_4h = str(getattr(prepared, "bias_4h", "") or "neutral").lower()
     bull_regime = regime in {"bull", "markup", "risk_on"}
@@ -917,6 +1164,17 @@ def _run_filter_pipeline(
         primary_frame = _frame_for_timeframe(prepared, primary_timeframe)
         passed.append("freshness_stage_disabled")
 
+    age_ok, age_reason = _signal_age_gate(signal, settings, primary_timeframe=primary_timeframe)
+    if not age_ok:
+        return _reject(age_reason or "signal_too_old", base)
+
+    htf_delta, htf_note, htf_reject = _htf_zone_confluence_adjustment(signal, prepared, settings)
+    if htf_reject:
+        return _reject(htf_reject, base)
+    if htf_delta > 0.0:
+        base = replace(base, score=min(1.0, base.score + htf_delta))
+        passed.append(htf_note or "htf_zone_overlap_bonus")
+
     # --- 1b. Entry staleness (fix-sl-A) ---
     pre_atr_frame = primary_frame if primary_frame is not None else prepared.work_15m
     pre_atr_pct = 0.0
@@ -983,8 +1241,11 @@ def _run_filter_pipeline(
     if filter_stage_enabled(settings, "spread"):
         if prepared.spread_bps is None:
             return _reject("spread_unavailable", base)
-        if prepared.spread_bps > settings.filters.max_spread_bps:
+        max_spread = _tier_max_spread_bps(prepared, settings)
+        if prepared.spread_bps > max_spread:
             return _reject("spread_too_wide", base)
+        if _liquidity_tier(prepared, settings) == "radar":
+            passed.append("radar_tier_spread_ok")
         passed.append("spread_ok")
     else:
         passed.append("spread_stage_disabled")
@@ -1083,6 +1344,17 @@ def _run_filter_pipeline(
                 primary_timeframe,
                 min_adx_1h,
             )
+    # answers50 P1: ADX<20 on trend families → soft score penalty, not hard reject.
+    _trend_families = {"trend_follow", "continuation", "breakout", "momentum"}
+    adx_ranging_absolute_penalty = False
+    if (
+        adx_1h > 0.0
+        and adx_1h < _COMPRESSION_ADX_CEILING
+        and signal.strategy_family in _trend_families
+        and not deep_analysis_asset
+    ):
+        adx_ranging_absolute_penalty = True
+        passed.append("adx_ranging_absolute_penalized")
     adx_penalty_applied = False
     if adx_1h > 0.0 and adx_1h < min_adx_1h:
         if adx_policy == _ADX_POLICY_HARD_GATE:
@@ -1190,21 +1462,101 @@ def _run_filter_pipeline(
     funding_rate = _optional_float(getattr(prepared, "funding_rate", None))
     funding_moderate = float(getattr(settings.scoring, "funding_rate_moderate", 0.0005) or 0.0005)
     funding_extreme = float(getattr(settings.scoring, "funding_rate_extreme", 0.0010) or 0.0010)
-    if signal.direction == "short" and funding_rate is not None and funding_rate > funding_extreme:
-        return _reject(
-            "funding_headwind_short",
-            base,
-            details={
-                "funding_rate": funding_rate,
-                "funding_extreme": funding_extreme,
-                "signal_direction": signal.direction,
-            },
-        )
-    if signal.direction == "short" and funding_rate is not None and funding_rate > funding_moderate:
-        funding_short_penalty_applied = True
-        passed.append("funding_short_penalty_eligible")
-    elif funding_rate is not None:
+    if funding_rate is not None:
+        _fr_abs = abs(funding_rate)
+        _fr_details = {
+            "funding_rate": funding_rate,
+            "funding_extreme": funding_extreme,
+            "signal_direction": signal.direction,
+        }
+        # Hard gate: extreme crowding on the same side as the signal.
+        # Positive funding > extreme → crowded longs → block new longs.
+        # Negative funding < -extreme → crowded shorts → block new shorts.
+        if signal.direction == "long" and funding_rate > funding_extreme:
+            return _reject("funding_crowded_longs", base, details=_fr_details)
+        if signal.direction == "short" and funding_rate < -funding_extreme:
+            return _reject("funding_crowded_shorts", base, details=_fr_details)
+        # Legacy: positive funding headwinds shorts (short squeeze risk).
+        if signal.direction == "short" and funding_rate > funding_extreme:
+            return _reject("funding_headwind_short", base, details=_fr_details)
+        # Moderate penalty zone: applies score penalty later in pipeline.
+        if signal.direction == "long" and funding_rate > funding_moderate:
+            funding_short_penalty_applied = True  # reuse flag; penalty applied below
+            passed.append("funding_long_penalty_eligible")
+        elif signal.direction == "short" and funding_rate > funding_moderate:
+            funding_short_penalty_applied = True
+            passed.append("funding_short_penalty_eligible")
+        else:
+            passed.append("funding_context_ok")
+    else:
         passed.append("funding_context_ok")
+
+    # OI divergence filter: rising price + falling OI = short-covering rally, not real breakout.
+    # Applied only to breakout/continuation/momentum families where OI confirmation matters.
+    _oi_breakout_families = {"breakout", "continuation", "momentum", "trend_follow"}
+    if signal.strategy_family in _oi_breakout_families:
+        oi_chg = prepared.oi_change_pct
+        if oi_chg is not None:
+            _oi_price_up = signal.direction == "long"
+            _oi_price_dn = signal.direction == "short"
+            _oi_falling = oi_chg < -0.03  # OI dropped >3% → participation leaving
+            _oi_rising = oi_chg > 0.03  # OI grew >3% → new money entering
+            if _oi_price_up and _oi_falling:
+                # Rising price + falling OI = weak breakout; downgrade, don't hard reject
+                # so confluence scoring can still pass high-quality setups.
+                passed.append(f"oi_divergence_weak_breakout|oi_chg={oi_chg:.3f}")
+            elif _oi_price_dn and _oi_rising:
+                passed.append(f"oi_divergence_weak_breakdown|oi_chg={oi_chg:.3f}")
+            elif (_oi_price_up and _oi_rising) or (_oi_price_dn and _oi_falling):
+                passed.append(f"oi_confirming|oi_chg={oi_chg:.3f}")
+            else:
+                passed.append(f"oi_neutral|oi_chg={oi_chg:.3f}")
+        else:
+            passed.append("oi_unavailable")
+
+    # Premium/Discount zone (SMC/ICT): shorts in discount = hard-block (answers50 Q32).
+    # Longs in premium = soft penalty for trend/continuation families only.
+    _pd_families = {
+        "trend_follow",
+        "continuation",
+        "breakout",
+        "momentum",
+        "orderbook",
+        "orderflow",
+    }
+    if not prepared.work_1h.is_empty():
+        _w1h = prepared.work_1h
+        _lookback = min(50, _w1h.height)
+        _tail = _w1h.tail(_lookback)
+        try:
+            _range_high = float(_tail["high"].max())
+            _range_low = float(_tail["low"].min())
+            _equilibrium = (_range_high + _range_low) / 2.0
+            _price = prepared.mark_price or signal.entry_mid
+            if _range_high > _range_low and _price is not None and _price > 0:
+                _in_discount = _price <= _equilibrium
+                _in_premium = _price >= _equilibrium
+                if signal.direction == "short" and _in_discount:
+                    return _reject(
+                        "pd_zone_short_in_discount",
+                        base,
+                        details={
+                            "equilibrium": _equilibrium,
+                            "price": _price,
+                            "setup_id": signal.setup_id,
+                        },
+                    )
+                if signal.strategy_family in _pd_families:
+                    if signal.direction == "long" and _in_premium:
+                        passed.append(
+                            f"pd_zone_mismatch_long_in_premium|eq={_equilibrium:.4f}|price={_price:.4f}"
+                        )
+                    else:
+                        passed.append(
+                            f"pd_zone_ok|{'discount' if _in_discount else 'premium'}|eq={_equilibrium:.4f}"
+                        )
+        except Exception:  # noqa: BLE001
+            passed.append("pd_zone_unavailable")
 
     benchmark_ok, benchmark_reason, benchmark_details = _benchmark_context_guard(signal, prepared)
     if not benchmark_ok and not deep_analysis_asset:
@@ -1260,9 +1612,23 @@ def _run_filter_pipeline(
         passed_filters=tuple(passed),
     )
 
+    compression_regime = _is_compression_regime(prepared, adx_1h=adx_1h)
+    if compression_regime:
+        passed.append("compression_regime_detected")
+        if signal.direction == "short" and signal.setup_id in _COMPRESSION_SHORT_BLOCK_SETUPS:
+            return _reject(
+                "compression_short_blocked",
+                base,
+                details={
+                    "setup_id": signal.setup_id,
+                    "symbol": signal.symbol,
+                    "adx_1h": adx_1h,
+                },
+            )
+
     # --- 5. Stop distance ---
     if filter_stage_enabled(settings, "stop"):
-        min_stop_distance_pct = float(settings.tracking.min_stop_distance_pct)
+        min_stop_distance_pct = _effective_min_stop_distance_pct(settings, atr_pct)
         effective_min_rr = float(setup_overrides.get("min_rr", settings.filters.min_risk_reward))
         updated, stop_expanded = _expand_signal_to_min_stop(
             updated,
@@ -1328,6 +1694,25 @@ def _run_filter_pipeline(
         updated = replace(updated, passed_filters=tuple(passed))
     elif not filter_stage_enabled(settings, "scoring"):
         passed.append("scoring_stage_disabled")
+
+    if adx_ranging_absolute_penalty:
+        pre_penalty_score = updated.score
+        adjusted_score = max(0.0, pre_penalty_score - 0.10)
+        updated = replace(updated, score=adjusted_score)
+        penalty_delta = round(adjusted_score - pre_penalty_score, 6)
+        if scoring_result is not None:
+            scoring_result = replace(
+                scoring_result,
+                final_score=adjusted_score,
+                adjustments={
+                    **scoring_result.adjustments,
+                    "adx_ranging_absolute_penalty": penalty_delta,
+                },
+            )
+        updated = replace(
+            updated,
+            passed_filters=(*updated.passed_filters, "adx_ranging_absolute_penalty_applied"),
+        )
 
     if adx_penalty_applied:
         # Apply the ADX penalty before the min-score gate so weak-trend
@@ -1442,7 +1827,9 @@ def _run_filter_pipeline(
 
     # --- 8b. Strategy SL-rate feedback penalty (п.26) ---
     sl_rate = _STRATEGY_SL_RATES.get(signal.setup_id, 0.0)
-    if sl_rate > _SL_PENALTY_THRESHOLD:
+    min_samples = int(getattr(settings.delivery, "min_sl_penalty_samples", 10) or 10)
+    sample_count = int(_STRATEGY_SL_SAMPLE_COUNTS.get(signal.setup_id, min_samples))
+    if sl_rate > _SL_PENALTY_THRESHOLD and sample_count >= min_samples:
         excess = (sl_rate - _SL_PENALTY_THRESHOLD) / (1.0 - _SL_PENALTY_THRESHOLD)
         sl_mult = max(_SL_PENALTY_MAX_MULT, 1.0 - excess * (1.0 - _SL_PENALTY_MAX_MULT))
         sl_adjusted = updated.score * sl_mult
@@ -1471,6 +1858,26 @@ def _run_filter_pipeline(
             if signal.setup_id in {"bos_choch", "liquidation_heatmap"}:
                 deep_score_floor = 0.40
             effective_min_score = min(effective_min_score, deep_score_floor)
+        _regime = str(getattr(prepared, "market_regime", "") or "").lower()
+        _btc_bias = str(getattr(prepared, "btc_bias", None) or signal.btc_bias or "neutral").lower()
+        _bias_4h = str(getattr(prepared, "bias_4h", "") or "neutral").lower()
+        if (
+            str(signal.direction or "").lower() == "short"
+            and (_regime in {"bull", "markup", "risk_on"} or _btc_bias in {"uptrend", "bull"})
+            and _bias_4h == "uptrend"
+        ):
+            effective_min_score = min(1.0, effective_min_score + 0.05)
+        if (
+            str(signal.direction or "").lower() == "long"
+            and (_regime in {"bear", "markdown", "risk_off"} or _btc_bias in {"downtrend", "bear"})
+            and _bias_4h == "downtrend"
+        ):
+            effective_min_score = min(1.0, effective_min_score + 0.05)
+        if _liquidity_tier(prepared, settings) == "radar":
+            effective_min_score = min(
+                1.0,
+                effective_min_score + float(settings.universe.radar_min_score_delta),
+            )
         if effective_min_score > 0.0 and updated.score < effective_min_score:
             score_reason = "adx_penalty_score_too_low" if adx_penalty_applied else "score_too_low"
             score_details = {

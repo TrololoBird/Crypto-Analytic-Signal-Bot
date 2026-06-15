@@ -5,7 +5,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from bot.runtime.errors import DEFENSIVE_EXC
+from engine.errors import DEFENSIVE_EXC
 
 LOG = logging.getLogger("bot.runtime.fallback_runner")
 

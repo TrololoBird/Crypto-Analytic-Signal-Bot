@@ -15,11 +15,11 @@ try:
 except ModuleNotFoundError:  # pragma: no cover
     from common import configure_script_logging
 
-from bot.domain.config import NetworkConfig
-from bot.market.data import BinanceFuturesMarketData, MarketDataUnavailable
-from bot.market.network_proxy import mask_proxy_url, normalize_proxy_url, resolve_proxy_url
-from bot.market.rest_impl import BinanceClientImpl
-from bot.runtime.errors import DEFENSIVE_EXC
+from engine.domain.config import NetworkConfig
+from engine.errors import DEFENSIVE_EXC
+from engine.market.data import BinanceFuturesMarketData, MarketDataUnavailable
+from engine.market.network_proxy import mask_proxy_url, normalize_proxy_url, resolve_proxy_url
+from engine.market.rest_impl import BinanceClientImpl
 
 LOG = configure_script_logging("scripts.discover_binance_proxies")
 
@@ -118,7 +118,7 @@ async def _probe_url(url: str | None, *, trust_env: bool) -> bool:
         return False
     except KeyboardInterrupt, SystemExit, asyncio.CancelledError:
         raise
-    except Exception as exc:  # noqa: BLE001 — proxy libs raise non-aiohttp exceptions
+    except Exception as exc:
         LOG.debug("proxy transport fail | url=%s err=%s", mask_proxy_url(url or "direct"), exc)
         return False
     else:
@@ -141,7 +141,7 @@ async def _quick_http_probe(session: aiohttp.ClientSession, proxy_url: str) -> b
             return isinstance(payload, dict) and bool(payload.get("symbols"))
     except KeyboardInterrupt, SystemExit, asyncio.CancelledError:
         raise
-    except Exception:  # noqa: BLE001
+    except Exception:
         return False
 
 
@@ -241,9 +241,10 @@ failover_cooldown_seconds = 300"""
     lines.extend(f'  "{item}",' for item in rest)
     lines.append("]")
     failover_line = "failover_enabled = false" if direct_ok else "failover_enabled = true"
+    trust_line = "trust_env = false" if direct_ok else "trust_env = true"
     lines.extend(
         [
-            "trust_env = true",
+            trust_line,
             failover_line,
             "failover_cooldown_seconds = 300",
         ]

@@ -22,17 +22,17 @@ except ModuleNotFoundError:  # pragma: no cover - direct script execution
     )
 
 from bot.delivery.confluence import ConfluenceEngine
-from bot.delivery.contract import signal_contract_row, validate_signal_contract
-from bot.domain.config import load_settings
-from bot.domain.schemas import SymbolFrames, UniverseSymbol
 from bot.engine import SignalEngine, StrategyRegistry
-from bot.features.prepare import min_required_bars, prepare_symbol
-from bot.market.data import BinanceFuturesMarketData, MarketDataUnavailable
-from bot.market.rest_impl import BinanceClientImpl
-from bot.market.universe import strategy_fits_for_market_row
-from bot.runtime.errors import DEFENSIVE_EXC
 from bot.setups.base import SetupParams
 from bot.strategies import STRATEGY_CLASSES
+from engine.contract import signal_contract_row, validate_signal_contract
+from engine.domain.config import load_settings
+from engine.domain.schemas import SymbolFrames, UniverseSymbol
+from engine.errors import DEFENSIVE_EXC
+from engine.features.prepare import min_required_bars, prepare_symbol
+from engine.market.data import BinanceFuturesMarketData, MarketDataUnavailable
+from engine.market.rest_impl import BinanceClientImpl
+from engine.market.universe import strategy_fits_for_market_row
 
 LOG = configure_script_logging("scripts.live_check_strategies")
 

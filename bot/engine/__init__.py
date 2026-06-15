@@ -1,6 +1,7 @@
 """Core engine for pluggable strategy system."""
 
-from ..domain.strategies import StrategyDecision
+from engine.domain.strategies import StrategyDecision
+
 from .base import AbstractStrategy, SignalResult
 from .engine import SignalEngine
 from .lanes import select_lane_setups

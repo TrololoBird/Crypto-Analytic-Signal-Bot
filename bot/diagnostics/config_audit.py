@@ -6,8 +6,8 @@ import logging
 from typing import Any
 
 from bot.delivery.filter_stages import DEFAULT_FILTER_STAGES, enabled_filter_stages
-from bot.domain.config import REQUIRED_PINNED_SYMBOLS, BotSettings
-from bot.runtime.errors import DEFENSIVE_EXC
+from engine.domain.config import REQUIRED_PINNED_SYMBOLS, BotSettings
+from engine.errors import DEFENSIVE_EXC
 
 LOG = logging.getLogger("bot.config_audit")
 

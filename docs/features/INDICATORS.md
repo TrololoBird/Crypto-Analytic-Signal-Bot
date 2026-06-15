@@ -5,10 +5,12 @@
 | Layer | Implementation |
 |---|---|
 | Core TA | Pure Polars + Wilder smoothing (`shared.wilder_mean`) |
-| Optional accel | `polars_ta` in `[live]` extra — EMA, ROC, OBV only |
+| Hunt accel | `polars_ta` (`ta`/`tdx`/`wq`/`candles`) via `hunt_core/features/polars_ta_bridge.py` |
+| Rolling OLS | `polars-ols` (pinned slope features) |
+| Optional research | `polars-trading`, `polars-ds` via `hunt/[research]` — offline only |
 | Not used | TA-Lib, pandas, shift(-N) on live bars |
 
-BB rolling std uses **ddof=1**. RSI/ATR/ADX follow Wilder (RMA seed).
+BB rolling std uses **ddof=0** (population std, TradingView/Binance parity). RSI/ATR/ADX follow Wilder (RMA seed). Secondary rolling stats (e.g. vwap deviation z-score) may use ddof=1 where noted in `prepare_frame.py`.
 
 Strategies read columns from `PreparedSymbol` / frame tails — no duplicate indicator trees.
 

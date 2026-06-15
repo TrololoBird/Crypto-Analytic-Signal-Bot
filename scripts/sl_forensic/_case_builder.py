@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     import aiosqlite
 
-from bot.runtime.errors import DEFENSIVE_EXC
+from engine.errors import DEFENSIVE_EXC
 from scripts.sl_forensic._classifier import (
     assess_closed_candle_validity,
     classify_sl,

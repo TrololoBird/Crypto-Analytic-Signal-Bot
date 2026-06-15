@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, ClassVar
 
-from ..features.prepare import _swing_points as _sp
+from engine.features.prepare import _swing_points as _sp
+
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
 from ..setups.utils import build_structural_targets, validate_rr_or_penalty
@@ -13,8 +14,8 @@ from ._common import SpecHit, _latest_values, as_float, confirmed_pattern_frame,
 if TYPE_CHECKING:
     import polars as pl
 
-    from ..domain.config import BotSettings
-    from ..domain.schemas import PreparedSymbol, Signal
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import PreparedSymbol, Signal
 
 __all__ = ["detect_ema_bounce", "detect_ema_bounce_setup"]
 
@@ -235,10 +236,11 @@ def _detect_ema_bounce_extended(
     sh_mask, sl_mask = _sp(work_1h, n=3, include_unconfirmed_tail=True)
     if signal_direction == "long":
         bounce_ema = min(ema20, ema50) if prev_close <= ema50 * 1.01 else ema20
-        price_anchor = min(bounce_ema, close)
+        # Limit order AT the EMA level — structural anchor, not market close price.
+        price_anchor = bounce_ema
     else:
         bounce_ema = max(ema20, ema50) if prev_close >= ema50 * 0.99 else ema20
-        price_anchor = max(bounce_ema, close)
+        price_anchor = bounce_ema
     reasons.append(f"limit_entry={price_anchor:.4f}")
 
     stop, tp1, tp2 = build_structural_targets(
@@ -368,6 +370,7 @@ def detect_ema_bounce_setup(
 
 class EmaBounceSetup(SpecDetectorSetup):
     setup_id = "ema_bounce"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "limit"
     family = "continuation"
     confirmation_profile = "trend_follow"
     required_context = ("futures_flow",)

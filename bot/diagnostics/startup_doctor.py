@@ -9,11 +9,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from bot.migrations import MIGRATIONS
-from bot.runtime.errors import DEFENSIVE_EXC
-from bot.secrets import load_secrets
+from engine.errors import DEFENSIVE_EXC
+from engine.secrets import load_secrets
 
 if TYPE_CHECKING:
-    from bot.domain.config import BotSettings
+    from engine.domain.config import BotSettings
 
 LOG = logging.getLogger("bot.diagnostics.startup_doctor")
 
@@ -103,6 +103,9 @@ def _check_scoring_weights(settings: BotSettings) -> list[str]:
         "weight_oi_momentum",
         "weight_liquidation_proximity",
         "weight_session_killzone",
+        "weight_orderflow_imbalance",
+        "weight_aggression_shift",
+        "weight_depth_imbalance",
         "weight_macd_alignment",
         "weight_obv_alignment",
         "weight_adx_strength",

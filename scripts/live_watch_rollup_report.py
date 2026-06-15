@@ -15,8 +15,8 @@ except ModuleNotFoundError:  # pragma: no cover
     import common  # noqa: F401
 
 from bot.diagnostics.facade import find_latest_rollup, summarize_rollup
-from bot.domain.config import load_settings
 from bot.persistence.db_status import collect_db_status
+from engine.domain.config import load_settings
 
 LOG = logging.getLogger("scripts.live_watch_rollup_report")
 

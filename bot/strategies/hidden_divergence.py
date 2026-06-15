@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING
 
-from ..features.prepare import _swing_points
+from engine.features.prepare import _swing_points
+
 from ..setups import _build_signal, _compute_dynamic_score, _reject
-from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
+from ..setups.spec_runtime import run_setup_detection
 from ._common import (
     SpecHit,
     _latest_values,
@@ -21,8 +22,8 @@ from ._common import (
 if TYPE_CHECKING:
     import polars as pl
 
-    from ..domain.config import BotSettings
-    from ..domain.schemas import PreparedSymbol, Signal
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import PreparedSymbol, Signal
 
 LOG = logging.getLogger("bot.strategies.hidden_divergence")
 
@@ -131,16 +132,20 @@ def _detect_hidden_divergence_extended(
     # FIX 2026-05-21: spec divergence only checks the latest 15m pivots; on
     # a miss, keep the existing 1h confirmed-swing hidden divergence scan.
     rsi_divergence_lookback = int(
-        dynamic_params.get("rsi_divergence_lookback", defaults["rsi_divergence_lookback"])
+        dynamic_params.get("rsi_divergence_lookback", defaults.get("rsi_divergence_lookback", 3.0))
     )
     rsi_divergence_threshold = float(
-        dynamic_params.get("rsi_divergence_threshold", defaults["rsi_divergence_threshold"])
+        dynamic_params.get(
+            "rsi_divergence_threshold", defaults.get("rsi_divergence_threshold", 2.0)
+        )
     )
     min_delta_threshold = float(
-        dynamic_params.get("min_delta_threshold", defaults["min_delta_threshold"])
+        dynamic_params.get("min_delta_threshold", defaults.get("min_delta_threshold", 0.06))
     )
-    min_volume_ratio = float(dynamic_params.get("min_volume_ratio", defaults["min_volume_ratio"]))
-    sl_buffer_atr = float(dynamic_params.get("sl_buffer_atr", defaults["sl_buffer_atr"]))
+    min_volume_ratio = float(
+        dynamic_params.get("min_volume_ratio", defaults.get("min_volume_ratio", 0.75))
+    )
+    sl_buffer_atr = float(dynamic_params.get("sl_buffer_atr", defaults.get("sl_buffer_atr", 1.1)))
 
     w1h = confirmed_pattern_frame(prepared.work_1h)
     if w1h.height < 20:
@@ -316,7 +321,7 @@ def _detect_hidden_divergence_extended(
             tp1 = None
             tp2 = None
 
-    min_rr = float(dynamic_params.get("min_rr", defaults["min_rr"]))
+    min_rr = float(dynamic_params.get("min_rr", defaults.get("min_rr", 1.9)))
     if tp1 is None or abs(tp1 - entry_price) < risk * min_rr:
         tp1 = entry_price + risk * min_rr if direction == "long" else entry_price - risk * min_rr
         reasons_note = f"tp1_rr_fallback_{min_rr:.2f}"
@@ -333,7 +338,7 @@ def _detect_hidden_divergence_extended(
     vol_ratio = float(w1h.item(-1, "volume_ratio20") or 1.0)
     score = _compute_dynamic_score(
         direction=direction,
-        base_score=float(dynamic_params.get("base_score", defaults["base_score"])),
+        base_score=float(dynamic_params.get("base_score", defaults.get("base_score", 0.62))),
         vol_ratio=vol_ratio,
         rsi=rsi,
     )
@@ -405,32 +410,3 @@ __all__ = [
     "detect_hidden_divergence",
     "detect_hidden_divergence_setup",
 ]
-
-
-class HiddenDivergenceSetup(SpecDetectorSetup):
-    setup_id = "hidden_divergence"
-    family = "continuation"
-    confirmation_profile = "trend_follow"
-    required_context = ("futures_flow",)
-
-    DEFAULTS: ClassVar[dict[str, float]] = {
-        "base_score": 0.62,
-        "min_swings": 2.0,
-        "bias_mismatch_penalty": 0.75,
-        "tp_too_close_penalty": 0.75,
-        "min_rr": 1.9,
-        "rsi_divergence_lookback": 3.0,
-        "rsi_divergence_threshold": 2.0,
-        "max_swing_pair_gap": 6.0,
-        "min_delta_threshold": 0.0,
-        "min_volume_ratio": 0.55,
-        "sl_buffer_atr": 0.5,
-    }
-
-    detect_setup = detect_hidden_divergence_setup
-
-    def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
-        return super().detect(prepared, settings)
-
-
-__all__ = ["HiddenDivergenceSetup"]

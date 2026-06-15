@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, ClassVar
 
+from ._common import confirmed_pattern_frame
 from ._roadmap import (
     _build_atr_signal,
     _confirmed_context_conflict,
@@ -13,8 +14,8 @@ from ._roadmap import (
 from .roadmap_base import RoadmapSetup
 
 if TYPE_CHECKING:
-    from ..domain.config import BotSettings
-    from ..domain.schemas import PreparedSymbol, Signal
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import PreparedSymbol, Signal
 
 __all__ = ["detect_ls_ratio_extreme"]
 
@@ -63,9 +64,9 @@ def detect_ls_ratio_extreme(
             short_threshold=short_threshold,
         )
         return None
-    work = prepared.work_15m
+    work = confirmed_pattern_frame(prepared.work_1h)
     if work.height < 2:
-        _reject(prepared, setup_id, "insufficient_bars")
+        _reject(prepared, setup_id, "insufficient_1h_bars")
         return None
     close_position = _prev(work, "close_position", 0.5)
     volume_ratio = _prev(work, "volume_ratio20", 1.0)
@@ -154,7 +155,12 @@ def detect_ls_ratio_extreme(
         score_multiplier *= 0.88
     if oi_penalty:
         score_multiplier *= float(params.get("oi_missing_penalty", 0.92))
-    entry_anchor = _prev(work, "ema20", 0.0) or None
+    # Limit order at structural extreme: short into prev-bar high (crowd over-long = resistance),
+    # long at prev-bar low (crowd over-short = support). EMA20 fills immediately like market order.
+    if direction == "long":
+        entry_anchor = _prev(work, "low", 0.0) or None
+    else:
+        entry_anchor = _prev(work, "high", 0.0) or None
     return _build_atr_signal(
         prepared=prepared,
         setup_id=setup_id,
@@ -170,6 +176,7 @@ def detect_ls_ratio_extreme(
 
 class LSRatioExtremeSetup(RoadmapSetup):
     setup_id = "ls_ratio_extreme"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "limit"
     family = "sentiment"
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)

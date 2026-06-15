@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING
 
-from ..features.prepare import _swing_points as _sp
+from engine.features.prepare import _swing_points as _sp
+
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.smc import latest_breaker_block
-from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
+from ..setups.spec_runtime import run_setup_detection
 from ._common import (
     SpecHit,
     _latest_values,
@@ -22,8 +23,8 @@ from ._common import (
 if TYPE_CHECKING:
     import polars as pl
 
-    from ..domain.config import BotSettings
-    from ..domain.schemas import PreparedSymbol, Signal
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import PreparedSymbol, Signal
 
 LOG = logging.getLogger("bot.strategies.breaker_block")
 
@@ -214,7 +215,7 @@ def _detect_breaker_block_extended(
             )
             return None
         # TP1: next 1h swing high (liquidity target / imbalance fill)
-        sh_mask, _ = _sp(w1h, n=3, include_unconfirmed_tail=True)
+        sh_mask, _ = _sp(w1h, n=3, include_unconfirmed_tail=False)
         sh_prices = w1h.filter(sh_mask)["high"]
         tp1_candidates = sh_prices.filter(sh_prices > entry_price)
         tp1 = float(tp1_candidates[0]) if tp1_candidates.len() > 0 else None
@@ -240,7 +241,7 @@ def _detect_breaker_block_extended(
             )
             return None
         # TP1: next 1h swing low (liquidity target)
-        _, sl_mask = _sp(w1h, n=3, include_unconfirmed_tail=True)
+        _, sl_mask = _sp(w1h, n=3, include_unconfirmed_tail=False)
         sl_prices = w1h.filter(sl_mask)["low"]
         tp1_candidates = sl_prices.filter(sl_prices < entry_price)
         tp1 = float(tp1_candidates[-1]) if tp1_candidates.len() > 0 else None
@@ -322,31 +323,3 @@ def detect_breaker_block_setup(
 
 
 __all__ = ["_detect_breaker_block_extended", "detect_breaker_block", "detect_breaker_block_setup"]
-
-
-class BreakerBlockSetup(SpecDetectorSetup):
-    setup_id = "breaker_block"
-    family = "breakout"
-    confirmation_profile = "breakout_acceptance"
-    required_context = ("futures_flow",)
-
-    DEFAULTS: ClassVar[dict[str, float]] = {
-        "base_score": 0.60,
-        "scan_bars": 72,
-        "mitigation_threshold": 0.3,
-        "sl_buffer_atr": 0.5,
-        "min_atr": 0.0001,
-        "min_volume_ratio": 0.75,
-        "min_acceptance_close_position_long": 0.45,
-        "max_acceptance_close_position_short": 0.55,
-        "bias_mismatch_penalty": 0.75,
-        "min_rr": 1.9,
-    }
-
-    detect_setup = detect_breaker_block_setup
-
-    def detect(self, prepared: PreparedSymbol, settings: BotSettings) -> Signal | None:
-        return super().detect(prepared, settings)
-
-
-__all__ = ["BreakerBlockSetup"]

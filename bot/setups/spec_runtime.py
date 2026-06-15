@@ -6,9 +6,10 @@ import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, ClassVar
 
-from ..domain.config import BotSettings
-from ..domain.schemas import PreparedSymbol, Signal
-from ..domain.strategy_catalog import CATALOG_BY_ID, catalog_default_params
+from engine.domain.config import BotSettings
+from engine.domain.schemas import PreparedSymbol, Signal
+from engine.domain.strategy_catalog import CATALOG_BY_ID, catalog_default_params
+
 from ..setups.utils import get_dynamic_params
 from ..strategies._common import SpecHit, build_spec_signal, confirmed_pattern_frame
 from ..strategies._roadmap import _configured_params
@@ -104,6 +105,7 @@ def try_spec_signal(
         hit=hit,
         defaults=defaults,
         params=effective,
+        entry_order_type=str(hit.entry_order_type or "limit"),
     )
 
 

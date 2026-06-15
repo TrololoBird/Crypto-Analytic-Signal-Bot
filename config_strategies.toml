@@ -95,17 +95,6 @@ min_momentum = 0.3
 sl_buffer_atr = 1.5
 min_rr = 1.5
 
-[bot.strategies.hidden_divergence]
-enabled = true
-base_score = 0.52
-# Divergence detection
-rsi_lookback = 14
-price_tolerance_pct = 0.001      # 0.1% for price comparison
-macd_threshold = 0.0
-# SL/TP
-sl_buffer_atr = 1.5
-min_rr = 1.5
-
 [bot.strategies.funding_reversal]
 enabled = true
 base_score = 0.55
@@ -122,16 +111,6 @@ base_score = 0.52
 # CVD detection
 cvd_lookback_bars = 20
 volume_weighting = 0.7           # weight of volume in score
-# SL/TP
-sl_buffer_atr = 1.5
-min_rr = 1.5
-
-[bot.strategies.breaker_block]
-enabled = true
-base_score = 0.53
-# Breaker detection
-break_lookback = 20
-min_break_size_atr = 0.3
 # SL/TP
 sl_buffer_atr = 1.5
 min_rr = 1.5

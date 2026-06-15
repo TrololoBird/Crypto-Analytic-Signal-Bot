@@ -25,8 +25,8 @@ try:
 except ModuleNotFoundError:  # pragma: no cover
     from scripts.sl_forensic import _bootstrap  # noqa: F401
 
-from bot.domain.config import load_settings
-from bot.runtime.errors import DEFENSIVE_EXC
+from engine.domain.config import load_settings
+from engine.errors import DEFENSIVE_EXC
 from scripts.sl_forensic._archive_migrations import migrate_forensic_archive
 from scripts.sl_forensic._case_builder import EXPORT_QUERY, enrich_sl_case, row_to_base_case
 from scripts.sl_forensic._confirmed_candle import infer_confirmed_candle

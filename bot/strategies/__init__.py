@@ -1,21 +1,13 @@
 """Modern strategy exports."""
 
 from .absorption import AbsorptionSetup
-from .aggression_shift import AggressionShiftSetup
 from .altcoin_season_index import AltcoinSeasonIndexSetup
-from .atr_expansion import ATRExpansionSetup
-from .bb_squeeze import BBSqueezeSetup
 from .bos_choch import BOSCHOCHSetup
-from .breaker_block import BreakerBlockSetup
 from .btc_correlation import BTCCorrelationSetup
 from .cvd_divergence import CVDDivergenceSetup
-from .cvd_exhaustion import CVDExhaustionSetup
-from .depth_imbalance import DepthImbalanceSetup
 from .ema_bounce import EmaBounceSetup
-from .fakeout_detector import FakeoutDetectorSetup
 from .funding_reversal import FundingReversalSetup
 from .fvg import FVGSetup
-from .hidden_divergence import HiddenDivergenceSetup
 from .indicator_divergence import IndicatorDivergenceSetup
 from .keltner_breakout import KeltnerBreakoutSetup
 from .liquidation_heatmap import LiquidationHeatmapSetup
@@ -24,14 +16,9 @@ from .ls_ratio_extreme import LSRatioExtremeSetup
 from .multi_tf_trend import MultiTFTrendSetup
 from .oi_divergence import OIDivergenceSetup
 from .order_block import OrderBlockSetup
-from .orderflow_imbalance import OrderflowImbalanceSetup
 from .pinbar_reversal import PinbarReversalSetup
 from .price_velocity import PriceVelocitySetup
-from .rsi_divergence_bottom import RSIDivergenceBottomSetup
-from .session_killzone import SessionKillzoneSetup
-from .spread_strategy import SpreadStrategySetup
 from .squeeze_setup import SqueezeSetup
-from .stop_hunt_detection import StopHuntDetectionSetup
 from .structure_break_retest import StructureBreakRetestSetup
 from .structure_pullback import StructurePullbackSetup
 from .supertrend_follow import SuperTrendFollowSetup
@@ -39,73 +26,56 @@ from .turtle_soup import TurtleSoupSetup
 from .volume_anomaly import VolumeAnomalySetup
 from .volume_climax_reversal import VolumeClimaxReversalSetup
 from .vwap_trend import VWAPTrendSetup
-from .whale_walls import WhaleWallsSetup
 from .wick_trap_reversal import WickTrapReversalSetup
 from .wyckoff_spring import WyckoffSpringSetup
 
+# 28 canonical setups (full answers.md merge):
+# liquidity_sweep ← fakeout, stop_hunt | cvd_divergence ← cvd_exhaustion
+# squeeze_setup ← bb_squeeze, atr_expansion | order_block ← breaker_block
+# indicator_divergence ← hidden_divergence, rsi_divergence_bottom
+# confluence legs ← session_killzone, orderflow, aggression, depth_imbalance
+# removed Evidence C ← whale_walls, spread_strategy
 STRATEGY_CLASSES = (
     StructurePullbackSetup,
     StructureBreakRetestSetup,
     WickTrapReversalSetup,
     SqueezeSetup,
     EmaBounceSetup,
-    FakeoutDetectorSetup,
     FVGSetup,
     OrderBlockSetup,
     LiquiditySweepSetup,
     BOSCHOCHSetup,
     FundingReversalSetup,
-    HiddenDivergenceSetup,
     IndicatorDivergenceSetup,
     KeltnerBreakoutSetup,
     CVDDivergenceSetup,
-    CVDExhaustionSetup,
-    SessionKillzoneSetup,
-    BreakerBlockSetup,
     TurtleSoupSetup,
     VWAPTrendSetup,
     SuperTrendFollowSetup,
     PriceVelocitySetup,
     VolumeAnomalySetup,
     VolumeClimaxReversalSetup,
-    WhaleWallsSetup,
-    SpreadStrategySetup,
-    DepthImbalanceSetup,
     AbsorptionSetup,
-    AggressionShiftSetup,
     LiquidationHeatmapSetup,
-    StopHuntDetectionSetup,
     MultiTFTrendSetup,
-    RSIDivergenceBottomSetup,
     WyckoffSpringSetup,
-    BBSqueezeSetup,
-    ATRExpansionSetup,
     LSRatioExtremeSetup,
     OIDivergenceSetup,
     BTCCorrelationSetup,
     AltcoinSeasonIndexSetup,
-    OrderflowImbalanceSetup,
     PinbarReversalSetup,
 )
 
 __all__ = [
     "STRATEGY_CLASSES",
-    "ATRExpansionSetup",
     "AbsorptionSetup",
-    "AggressionShiftSetup",
     "AltcoinSeasonIndexSetup",
-    "BBSqueezeSetup",
     "BOSCHOCHSetup",
     "BTCCorrelationSetup",
-    "BreakerBlockSetup",
     "CVDDivergenceSetup",
-    "CVDExhaustionSetup",
-    "DepthImbalanceSetup",
     "EmaBounceSetup",
     "FVGSetup",
-    "FakeoutDetectorSetup",
     "FundingReversalSetup",
-    "HiddenDivergenceSetup",
     "IndicatorDivergenceSetup",
     "KeltnerBreakoutSetup",
     "LSRatioExtremeSetup",
@@ -114,14 +84,9 @@ __all__ = [
     "MultiTFTrendSetup",
     "OIDivergenceSetup",
     "OrderBlockSetup",
-    "OrderflowImbalanceSetup",
     "PinbarReversalSetup",
     "PriceVelocitySetup",
-    "RSIDivergenceBottomSetup",
-    "SessionKillzoneSetup",
-    "SpreadStrategySetup",
     "SqueezeSetup",
-    "StopHuntDetectionSetup",
     "StructureBreakRetestSetup",
     "StructurePullbackSetup",
     "SuperTrendFollowSetup",
@@ -129,7 +94,6 @@ __all__ = [
     "VWAPTrendSetup",
     "VolumeAnomalySetup",
     "VolumeClimaxReversalSetup",
-    "WhaleWallsSetup",
     "WickTrapReversalSetup",
     "WyckoffSpringSetup",
 ]

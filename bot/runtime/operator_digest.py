@@ -7,7 +7,7 @@ import time
 from typing import TYPE_CHECKING
 
 from bot.delivery.telegram_routing import operator_dm_enabled
-from bot.runtime.errors import DEFENSIVE_EXC
+from engine.errors import DEFENSIVE_EXC
 
 from ..dashboard.mobile_summary import build_mobile_summary, format_mobile_digest_text
 from .telegram_operator import TelegramOperatorConsole, operator_console_enabled

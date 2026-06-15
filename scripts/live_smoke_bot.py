@@ -34,14 +34,14 @@ except ModuleNotFoundError:  # pragma: no cover
     import common  # noqa: F401
 
 from bot.cli import configure_logging
-from bot.delivery.telegram import DeliveryResult
-from bot.domain.config import load_settings
 from bot.runtime.bot import SignalBot
+from engine.domain.config import load_settings
+from engine.telegram import DeliveryResult
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from bot.market.ws import FuturesWSManager
+    from engine.market.ws import FuturesWSManager
 
 LOG = structlog.get_logger("scripts.live_smoke_bot")
 _MISSING_LOG_VALUE = "not_available"

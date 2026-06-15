@@ -18,12 +18,12 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from bot.delivery.deliver import format_analytics_companion
-from bot.runtime.errors import DEFENSIVE_EXC
 from bot.runtime.telegram_operator import TelegramOperatorConsole, operator_console_enabled
+from engine.errors import DEFENSIVE_EXC
 
 if TYPE_CHECKING:
-    from bot.domain.schemas import Signal
     from bot.runtime.bot import SignalBot
+    from engine.domain.schemas import Signal
 
 LOG = logging.getLogger("bot.delivery.telegram_routing")
 

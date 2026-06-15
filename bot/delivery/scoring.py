@@ -9,11 +9,11 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
-from ..features.prepare import _swing_points
+from engine.features.prepare import _swing_points
 
 if TYPE_CHECKING:
-    from ..domain.config import BotSettings
-    from ..domain.schemas import PreparedSymbol, Signal
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import PreparedSymbol, Signal
 
 LOG = logging.getLogger("bot.scoring")
 _FUNDING_DEFAULT_WARNING_STATE: dict[str, bool] = {"emitted": False}
@@ -105,9 +105,15 @@ def _mtf_alignment(prepared: PreparedSymbol, signal: Signal) -> float:
     return max(0.0, min(score_primary * 0.70 + score_4h * 0.30, 1.0))
 
 
-def _volume_quality(prepared: PreparedSymbol) -> float:
+def _volume_quality(prepared: PreparedSymbol, signal: Signal | None = None) -> float:
+    from .frame_resolve import resolve_entry_frame
+
     primary = getattr(prepared, "work_primary", None)
-    frame = primary if primary is not None and not primary.is_empty() else prepared.work_15m
+    frame = (
+        primary
+        if primary is not None and not primary.is_empty()
+        else resolve_entry_frame(prepared, signal=signal)
+    )
     if frame.is_empty() or "volume_ratio20" not in frame.columns:
         return 0.0
     ratio = float(frame.item(-1, "volume_ratio20") or 0.0)
@@ -787,13 +793,115 @@ def _btc_correlation_penalty(prepared: PreparedSymbol, signal: Signal) -> float:
     return 0.55
 
 
-def _session_killzone_score(signal: Signal) -> float:
-    from datetime import UTC, datetime  # noqa: PLC0415
+def _orderflow_imbalance_leg(prepared: PreparedSymbol, signal: Signal) -> float:
+    """Confluence leg from merged orderflow_imbalance strategy."""
+    frame = getattr(prepared, "work_15m", None)
+    if frame is None or frame.is_empty() or "delta_ratio" not in frame.columns:
+        return 0.5
+    delta_tail = frame.tail(48)["delta_ratio"].drop_nulls()
+    if delta_tail.len() < 20:
+        return 0.5
+    try:
+        delta_mean = float(delta_tail.mean() or 0.5)
+        delta_std = float(delta_tail.std() or 0.0)
+        current_delta = float(frame.item(-1, "delta_ratio") or 0.5)
+    except TypeError, ValueError:
+        return 0.5
+    if delta_std <= 0:
+        return 0.5
+    delta_z = (current_delta - delta_mean) / delta_std
+    if signal.direction == "long":
+        if delta_z >= 1.5:
+            return 0.85
+        if delta_z >= 0.75:
+            return 0.65
+        if delta_z <= -1.0:
+            return 0.25
+    else:
+        if delta_z <= -1.5:
+            return 0.85
+        if delta_z <= -0.75:
+            return 0.65
+        if delta_z >= 1.0:
+            return 0.25
+    return 0.50
 
-    hour = datetime.now(UTC).hour
-    in_killzone = hour in {0, 1, 2, 7, 8, 9, 12, 13, 14}
-    if not in_killzone:
+
+def _aggression_shift_leg(prepared: PreparedSymbol, signal: Signal) -> float:
+    """Confluence leg from merged aggression_shift strategy."""
+    shift = getattr(prepared, "aggression_shift", None)
+    if shift is None:
+        frame = getattr(prepared, "work_15m", None)
+        if frame is None or frame.is_empty() or "delta_ratio" not in frame.columns:
+            return 0.5
+        try:
+            delta = float(frame.item(-1, "delta_ratio") or 0.0)
+            close = float(frame.item(-1, "close") or 0.0)
+            prev_close = float(frame.item(-2, "close") or close)
+        except IndexError, TypeError, ValueError:
+            return 0.5
+        price_up = close > prev_close
+        if price_up and delta < -0.02 and signal.direction == "short":
+            return 0.80
+        if not price_up and delta > 0.02 and signal.direction == "long":
+            return 0.80
+        return 0.45
+    try:
+        shift_val = float(shift)
+    except TypeError, ValueError:
+        return 0.5
+    if signal.direction == "long" and shift_val >= 0.03:
+        return 0.82
+    if signal.direction == "short" and shift_val <= -0.03:
+        return 0.82
+    if abs(shift_val) < 0.01:
+        return 0.45
+    return 0.35
+
+
+def _depth_imbalance_leg(prepared: PreparedSymbol, signal: Signal) -> float:
+    """Confluence leg from merged depth_imbalance / whale_walls orderbook proxy."""
+    depth = getattr(prepared, "depth_imbalance", None)
+    micro = getattr(prepared, "microprice_bias", None)
+    if depth is None:
+        return 0.5
+    try:
+        depth_val = float(depth)
+        micro_val = float(micro) if micro is not None else 0.0
+    except TypeError, ValueError:
+        return 0.5
+    threshold = 0.12
+    if signal.direction == "long":
+        if depth_val >= threshold and micro_val >= 0.05:
+            return 0.82
+        if depth_val >= threshold * 0.6:
+            return 0.65
+        if depth_val <= -threshold:
+            return 0.25
+    else:
+        if depth_val <= -threshold and micro_val <= -0.05:
+            return 0.82
+        if depth_val <= -threshold * 0.6:
+            return 0.65
+        if depth_val >= threshold:
+            return 0.25
+    return 0.50
+
+
+def _session_killzone_score(signal: Signal) -> float:
+    # Single DST-aware source of truth (shared with the session_killzone strategy)
+    # so scoring and the strategy can never disagree on what is an active killzone.
+    from engine.domain.sessions import active_killzone
+
+    name = active_killzone()
+    if name is None:
         return 0.30
-    if signal.strategy_family in {"session", "breakout", "momentum"}:
-        return 0.78
-    return 0.58
+    # Flow-sensitive families benefit most from session-open liquidity. Families
+    # are real catalog values; the previous {"session","momentum"} branch was dead.
+    flow_families = {"breakout", "liquidity", "orderflow", "continuation"}
+    flow = signal.strategy_family in flow_families
+    if name == "Overlap":  # London + NY simultaneously live = peak liquidity
+        return 0.85 if flow else 0.65
+    if name in {"London", "NY"}:
+        return 0.78 if flow else 0.58
+    return 0.50  # PreLondon / NYClose / Asia — lower-liquidity windows

@@ -4,18 +4,25 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from bot.market.universe import strategy_fits_for_market_row
+from engine.market.universe import strategy_fits_for_market_row
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from bot.domain.config import BotSettings
-    from bot.domain.strategies import StrategyMetadata
     from bot.engine.registry import StrategyRegistry
+    from engine.domain.config import BotSettings
+    from engine.domain.strategies import StrategyMetadata
 
 # When a canonical setup subsumes a spec-only sibling, drop the sibling from lanes.
 _SPEC_DELEGATE_CANONICAL: dict[str, str] = {
     "bb_squeeze": "squeeze_setup",
+    "atr_expansion": "squeeze_setup",
+    "fakeout_detector": "liquidity_sweep",
+    "stop_hunt_detection": "liquidity_sweep",
+    "cvd_exhaustion": "cvd_divergence",
+    "hidden_divergence": "indicator_divergence",
+    "rsi_divergence_bottom": "indicator_divergence",
+    "breaker_block": "order_block",
 }
 
 _STANDARD_KLINE_INTERVALS = frozenset(

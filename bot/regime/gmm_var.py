@@ -5,7 +5,7 @@ from typing import Any
 
 import numpy as np
 
-from bot.runtime.errors import DEFENSIVE_EXC
+from engine.errors import DEFENSIVE_EXC
 
 try:  # optional dependencies
     from sklearn.mixture import GaussianMixture

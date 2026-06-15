@@ -5,7 +5,8 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING, ClassVar
 
-from ..features.prepare import _swing_points
+from engine.features.prepare import _swing_points
+
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
 from ..setups.utils import build_structural_targets
@@ -14,8 +15,8 @@ from ._common import SpecHit, as_float, confirmed_pattern_frame, with_spec_colum
 if TYPE_CHECKING:
     import polars as pl
 
-    from ..domain.config import BotSettings
-    from ..domain.schemas import PreparedSymbol, Signal
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import PreparedSymbol, Signal
 
 __all__ = ["detect_vwap_reclaim"]
 
@@ -308,6 +309,7 @@ __all__ = ["_detect_vwap_trend_extended", "detect_vwap_reclaim", "detect_vwap_tr
 
 class VWAPTrendSetup(SpecDetectorSetup):
     setup_id = "vwap_trend"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "limit"
     family = "continuation"
     confirmation_profile = "trend_follow"
     required_context = ("futures_flow",)

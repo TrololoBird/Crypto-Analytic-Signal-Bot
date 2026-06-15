@@ -7,6 +7,10 @@ alwaysApply: true
 
 Human: priorities, acceptance, "OK to merge". **Never** assign runbooks or terminal steps to the human.
 
+## Active development
+
+Project is **not finished** — agents own implementation end-to-end and may refactor architecture, split monoliths, or replace AI-generated modules when evidence says so. `docs/DEFINITION_OF_DONE.md` v1 = historical milestone, not a freeze on structural change.
+
 ## Backlog
 
 Open work only from `docs/DEFINITION_OF_DONE.md` (IDs V1.1-*, OPS-*, OPT-*). Do not generate new «50 improvements» lists.
@@ -18,9 +22,9 @@ Open work only from `docs/DEFINITION_OF_DONE.md` (IDs V1.1-*, OPS-*, OPT-*). Do 
 3. **Verify** — `/verify` or delegate `verifier` subagent; show pass/fail evidence
 4. **Handoff** — `/handoff` at session end (roadmap + blockers)
 
-## File count freeze
+## File count (soft preference)
 
-Do **not** split monoliths (`memory.py`, `tracking.py`, `ws.py`, `pipeline.py`) unless the user explicitly asks. Prefer edits inside existing modules. See `docs/DEFINITION_OF_DONE.md`.
+Prefer focused edits when a small diff suffices. **Split or rewrite** oversized modules (`memory.py`, `tracking.py`, `ws.py`, `pipeline.py`) when correctness, testability, or delivery bugs require it — no need to wait for explicit user permission during active development.
 
 ## Delegate (Task tool)
 

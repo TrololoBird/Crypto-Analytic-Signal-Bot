@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, ClassVar
 
-from ..domain.strategy_catalog import catalog_default_params
+from engine.domain.strategy_catalog import catalog_default_params
+
 from ._common import (
     SpecHit,
     _latest_values,
@@ -17,8 +18,8 @@ from .roadmap_base import RoadmapSetup
 if TYPE_CHECKING:
     import polars as pl
 
-    from ..domain.config import BotSettings
-    from ..domain.schemas import PreparedSymbol, Signal
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import PreparedSymbol, Signal
 
 __all__ = ["detect_absorption", "detect_absorption_prepared"]
 
@@ -169,6 +170,7 @@ def detect_absorption_prepared(
 
 class AbsorptionSetup(RoadmapSetup):
     setup_id = "absorption"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "limit"
     family = "orderflow"
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)

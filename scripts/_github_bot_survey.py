@@ -10,7 +10,7 @@ import urllib.request
 from collections import OrderedDict
 from pathlib import Path
 
-from bot.runtime.errors import DEFENSIVE_EXC
+from engine.errors import DEFENSIVE_EXC
 
 QUERIES = [
     ("popular_futures", "binance futures trading bot language:python", "stars"),

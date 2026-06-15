@@ -12,16 +12,16 @@ from typing import TYPE_CHECKING
 import polars as pl
 
 from bot.diagnostics.config_audit import run_startup_audit
-from bot.domain.config import SetupConfig, load_settings
-from bot.domain.contracts import assert_runtime_call_path_is_clean
-from bot.domain.strategy_catalog import (
+from bot.strategies import STRATEGY_CLASSES
+from engine.domain.config import SetupConfig, load_settings
+from engine.domain.contracts import assert_runtime_call_path_is_clean
+from engine.domain.strategy_catalog import (
     verify_config_setup_references,
     verify_setup_config_model,
     verify_strategy_wiring,
 )
-from bot.features.prepare import _add_advanced_indicators
-from bot.runtime.errors import DEFENSIVE_EXC
-from bot.strategies import STRATEGY_CLASSES
+from engine.errors import DEFENSIVE_EXC
+from engine.features.prepare import _add_advanced_indicators
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence

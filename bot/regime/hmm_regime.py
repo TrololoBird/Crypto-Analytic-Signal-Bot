@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from bot.runtime.errors import DEFENSIVE_EXC
+from engine.errors import DEFENSIVE_EXC
 
 if TYPE_CHECKING:
     from collections.abc import Iterable

@@ -12,6 +12,10 @@ concurrency:
   group: nightly-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  TELEGRAM_BOT_TOKEN: "1234567890:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+  TELEGRAM_CHAT_ID: "-1000000000000"
+
 jobs:
   regression:
     runs-on: ubuntu-latest

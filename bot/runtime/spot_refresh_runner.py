@@ -6,8 +6,8 @@ import asyncio
 import logging
 from typing import Any
 
-from bot.market.spot_companion import SpotCompanionService
-from bot.runtime.errors import DEFENSIVE_EXC
+from engine.errors import DEFENSIVE_EXC
+from engine.market.spot_companion import SpotCompanionService
 
 LOG = logging.getLogger("bot.runtime.spot_refresh_runner")
 

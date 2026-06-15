@@ -5,9 +5,9 @@ clean-session:
 
 check:
 	@echo "=== Ruff lint ==="
-	@.venv/bin/ruff check bot/ tests/ scripts/ main.py
+	@.venv/bin/ruff check bot/ engine/ tests/ scripts/ main.py
 	@echo "=== Compile check ==="
-	@.venv/bin/python -m compileall -q bot
+	@.venv/bin/python -m compileall -q bot engine
 	@echo "=== v9 refactor gate ==="
 	@.venv/bin/python scripts/verify_refactor_gate.py
 	@$(MAKE) check-imports
@@ -22,7 +22,7 @@ check-cycles:
 	@.venv/bin/python scripts/check_circular_imports.py
 
 lint:
-	@ruff check bot/ tests/ scripts/ --fix
+	@ruff check bot/ engine/ tests/ scripts/ --fix
 
 typecheck:
 	@.venv/bin/python scripts/run_mypy_critical.py
@@ -47,8 +47,16 @@ live-smoke:
 	@python scripts/live_smoke_bot.py --warmup-seconds 30 --keep-session-data
 
 research-harvest:
-	@python scripts/clean_session_data.py --mode smoke --config config.toml
-	@python scripts/research_harvest_session.py --config config.toml --minutes 60
+	@chmod +x scripts/run_research_harvest.sh
+	@HARVEST_MINUTES=60 bash scripts/run_research_harvest.sh
+
+research-harvest-2h:
+	@chmod +x scripts/run_research_harvest.sh
+	@HARVEST_MINUTES=120 bash scripts/run_research_harvest.sh
+
+bot-supervisor:
+	@chmod +x scripts/bot_supervisor.sh
+	@bash scripts/bot_supervisor.sh
 
 monitor-runtime:
 	@python -m scripts.live_runtime_monitor --duration 300 --poll-interval 5 --log-dir data/bot/logs
@@ -60,7 +68,8 @@ graphify-update:
 	@if command -v graphify >/dev/null 2>&1; then graphify update .; else echo "graphify not installed — run: make graphify-install"; fi
 
 nightly-calibration:
-	@python scripts/nightly_strategy_calibration.py --config config.toml
+	@chmod +x scripts/run_nightly_calibration.sh
+	@bash scripts/run_nightly_calibration.sh
 
 reconcile-defaults:
 	@python scripts/reconcile_strategy_defaults.py

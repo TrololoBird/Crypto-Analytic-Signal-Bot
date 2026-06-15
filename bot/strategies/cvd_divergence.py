@@ -6,16 +6,18 @@ import logging
 import math
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
-from ..features.prepare import _swing_points
+from engine.features.prepare import _swing_points
+
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
 from ._common import SpecHit, _pivot_rows, as_float, confirmed_pattern_frame, with_spec_columns
+from ._roadmap import _build_atr_signal, _prev
 
 if TYPE_CHECKING:
     import polars as pl
 
-    from ..domain.config import BotSettings
-    from ..domain.schemas import PreparedSymbol, Signal
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import PreparedSymbol, Signal
 
 LOG = logging.getLogger("bot.strategies.cvd_divergence")
 
@@ -295,6 +297,110 @@ def _detect_cvd_divergence_extended(
         _reject(prepared, setup_id, "no_cvd_divergence_detected")
         return None
 
+    fresh_bars = int(
+        dynamic_params.get("max_divergence_age_bars", defaults.get("max_divergence_age_bars", 5))
+    )
+    price_extreme_idx = (
+        int(high_window_b.argmax()) if direction == "short" else int(low_window_b.argmin())
+    )
+    if price_extreme_idx < max(0, len(window_b) - fresh_bars):
+        _reject(
+            prepared,
+            setup_id,
+            "cvd_divergence_stale",
+            extreme_bar_age=len(window_b) - 1 - price_extreme_idx,
+            max_divergence_age_bars=fresh_bars,
+        )
+        return None
+
+    # Counter-trend CVD requires HTF exhaustion evidence (overbought/oversold RSI).
+    # Without exhaustion, shorting into uptrend has very high fail rate (research Q200).
+    market_regime = str(getattr(prepared, "market_regime", "") or "").lower()
+    rsi_for_htf = (
+        float(getattr(w, "item", lambda *a, **k: 50.0)(-1, "rsi14") or 50.0)
+        if w.height > 0
+        else 50.0
+    )
+    htf_exhaustion_rsi_overbought = float(dynamic_params.get("htf_exhaustion_rsi_overbought", 70.0))
+    htf_exhaustion_rsi_oversold = float(dynamic_params.get("htf_exhaustion_rsi_oversold", 30.0))
+    bias_1h_norm = str(bias_1h or "neutral").lower()
+    neutral_short_rsi_min = float(
+        dynamic_params.get("neutral_short_rsi_min", defaults.get("neutral_short_rsi_min", 60.0))
+    )
+    if direction == "short" and bias_1h_norm == "neutral":
+        if rsi_for_htf < neutral_short_rsi_min:
+            _reject(
+                prepared,
+                setup_id,
+                "cvd_neutral_1h_no_rsi_exhaustion",
+                bias_1h=bias_1h_norm,
+                rsi=rsi_for_htf,
+                required_rsi=neutral_short_rsi_min,
+            )
+            return None
+    if direction == "short" and bias_1h_norm == "uptrend":
+        exhaustion = rsi_for_htf >= htf_exhaustion_rsi_overbought
+        if not exhaustion:
+            _reject(
+                prepared,
+                setup_id,
+                "cvd_counter_trend_short_no_exhaustion",
+                bias_1h=bias_1h_norm,
+                rsi=rsi_for_htf,
+                required_rsi=htf_exhaustion_rsi_overbought,
+            )
+            return None
+    elif direction == "long" and bias_1h == "downtrend":
+        exhaustion = rsi_for_htf <= htf_exhaustion_rsi_oversold
+        if not exhaustion:
+            _reject(
+                prepared,
+                setup_id,
+                "cvd_counter_trend_long_no_exhaustion",
+                bias_1h=bias_1h,
+                rsi=rsi_for_htf,
+                required_rsi=htf_exhaustion_rsi_oversold,
+            )
+            return None
+    elif market_regime == "trending":
+        if (direction == "short" and bias_1h_norm == "uptrend") or (
+            direction == "long" and bias_1h_norm == "downtrend"
+        ):
+            _reject(
+                prepared,
+                setup_id,
+                "cvd_trend_regime_blocked",
+                market_regime=market_regime,
+                bias_1h=bias_1h_norm,
+                direction=direction,
+            )
+            return None
+
+    require_close_confirmation = bool(
+        dynamic_params.get(
+            "require_close_confirmation",
+            defaults.get("require_close_confirmation", 1.0),
+        )
+    )
+    if direction == "short" and require_close_confirmation:
+        last_close = float(w.item(-1, "close") or 0.0)
+        last_open = float(w.item(-1, "open") or 0.0)
+        prior_high = (
+            float(max(high_window_b[:-1])) if len(high_window_b) > 1 else float(max(high_window_b))
+        )
+        bearish_bar = last_close < last_open
+        rejection_close = prior_high > 0.0 and last_close < prior_high
+        if not (bearish_bar or rejection_close):
+            _reject(
+                prepared,
+                setup_id,
+                "cvd_short_no_close_confirmation",
+                last_close=last_close,
+                last_open=last_open,
+                prior_high=prior_high,
+            )
+            return None
+
     # --- Compute structural SL/TP ---
     if direction == "long":
         # SL: below the most recent price-action low in window_b + ATR buffer.
@@ -399,6 +505,104 @@ def _detect_cvd_divergence_extended(
     )
 
 
+def _detect_cvd_exhaustion_fallback(
+    prepared: PreparedSymbol,
+    _settings: BotSettings,
+    params: dict[str, float],
+    *,
+    setup_id: str,
+    family: str,
+) -> Signal | None:
+    """CVD slope exhaustion path (merged from cvd_exhaustion)."""
+    w = confirmed_pattern_frame(prepared.work_15m)
+    if w.height < 30:
+        _reject(prepared, setup_id, "insufficient_15m_bars", bars=w.height)
+        return None
+
+    atr = float(w.item(-1, "atr14") or 0.0)
+    if atr <= 0:
+        _reject(prepared, setup_id, "atr_invalid", atr=atr)
+        return None
+
+    cvd_col = (
+        "cvd" if "cvd" in w.columns else ("delta_ratio" if "delta_ratio" in w.columns else None)
+    )
+    if cvd_col is None:
+        _reject(prepared, setup_id, "cvd_column_missing")
+        return None
+
+    lookback = max(3, int(params.get("cvd_lookback_bars", 12)))
+    if w.height < lookback + 1:
+        _reject(prepared, setup_id, "insufficient_lookback_bars", lookback=lookback)
+        return None
+
+    last_n = w.tail(lookback)
+    close_vals = [float(v) for v in last_n["close"].to_list()]
+    cvd_vals = [float(v) for v in last_n[cvd_col].to_list() if v is not None]
+    if len(cvd_vals) < lookback // 2:
+        _reject(prepared, setup_id, "insufficient_cvd_data", valid=len(cvd_vals))
+        return None
+
+    n = len(close_vals)
+    x_bar = (n - 1) / 2.0
+    close_y_bar = sum(close_vals) / n
+    cvd_y_bar = sum(cvd_vals) / n
+    price_num = 0.0
+    cvd_num = 0.0
+    den = 0.0
+    for i in range(n):
+        dx = i - x_bar
+        price_num += dx * (close_vals[i] - close_y_bar)
+        cvd_num += dx * (cvd_vals[i] - cvd_y_bar)
+        den += dx * dx
+    price_slope = price_num / den if den != 0 else 0.0
+    cvd_slope = cvd_num / den if den != 0 else 0.0
+
+    min_div = float(params.get("cvd_divergence_min", 0.02))
+    if price_slope > 0 and cvd_slope < -min_div:
+        direction = "short"
+    elif price_slope < 0 and cvd_slope > min_div:
+        direction = "long"
+    else:
+        _reject(
+            prepared,
+            setup_id,
+            "cvd_exhaustion_not_detected",
+            price_slope=round(price_slope, 6),
+            cvd_slope=round(cvd_slope, 6),
+        )
+        return None
+
+    w1h = confirmed_pattern_frame(prepared.work_1h)
+    if w1h.height < 3:
+        _reject(prepared, setup_id, "insufficient_1h_bars", bars=w1h.height)
+        return None
+    adx = float(w1h.item(-1, "adx14") or 0.0)
+    max_adx = float(params.get("max_adx", 30.0))
+    if adx >= max_adx:
+        _reject(prepared, setup_id, "adx_too_high", adx=adx, max_adx=max_adx)
+        return None
+
+    entry_anchor = _prev(w, "low", 0.0) if direction == "long" else _prev(w, "high", 0.0)
+    return _build_atr_signal(
+        prepared=prepared,
+        setup_id=setup_id,
+        direction=direction,
+        params=params,
+        confirmed_bar=True,
+        entry_anchor=entry_anchor or None,
+        reasons=[
+            f"cvd_exhaustion_{direction}",
+            f"price_slope={price_slope:.6f}",
+            f"cvd_slope={cvd_slope:.6f}",
+            f"adx_1h={adx:.1f}",
+            f"cvd_source={cvd_col}",
+        ],
+        family=family,
+        structure_clarity=0.60,
+    )
+
+
 def detect_cvd_divergence_setup(
     prepared: PreparedSymbol,
     settings: BotSettings,
@@ -408,7 +612,7 @@ def detect_cvd_divergence_setup(
     family: str,
 ) -> Signal | None:
     spec_kwargs = None
-    return run_setup_detection(
+    signal = run_setup_detection(
         prepared=prepared,
         settings=settings,
         setup_id=setup_id,
@@ -418,6 +622,16 @@ def detect_cvd_divergence_setup(
         spec_detect=detect_cvd_divergence,
         extended_detect=_detect_cvd_divergence_extended,
         spec_kwargs=spec_kwargs,
+    )
+    if signal is not None:
+        return signal
+    merged = {**defaults, **effective}
+    return _detect_cvd_exhaustion_fallback(
+        prepared,
+        settings,
+        merged,
+        setup_id=setup_id,
+        family=family,
     )
 
 
@@ -430,6 +644,7 @@ __all__ = [
 
 class CVDDivergenceSetup(SpecDetectorSetup):
     setup_id = "cvd_divergence"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "market"
     family = "reversal"
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)
@@ -441,7 +656,15 @@ class CVDDivergenceSetup(SpecDetectorSetup):
         "bias_mismatch_penalty": 0.75,
         "min_rr": 1.9,
         "min_delta_threshold": 0.06,
+        "max_divergence_age_bars": 5.0,
         "sl_buffer_atr": 0.5,
+        "htf_exhaustion_rsi_overbought": 70.0,
+        "htf_exhaustion_rsi_oversold": 30.0,
+        "neutral_short_rsi_min": 65.0,
+        "require_close_confirmation": 1.0,
+        "cvd_lookback_bars": 12.0,
+        "max_adx": 30.0,
+        "cvd_divergence_min": 0.02,
     }
 
     detect_setup = detect_cvd_divergence_setup

@@ -7,10 +7,10 @@ telemetry JSONL files and returns bounded, JSON-serializable summaries.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import logging
-import sqlite3
 import time
 from collections import Counter, defaultdict, deque
 from dataclasses import dataclass
@@ -18,8 +18,26 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from bot.dashboard._live_helpers import (
+    _build_funnel_widget,
+    _compute_cycle_totals,
+    _compute_session_delta,
+    _counter_rows,
+    _cycle_delivered_count,
+    _delivery_success_rows,
+    _effective_shortlist,
+    _frame_readiness_fields,
+    _is_routing_excluded_decision_reason,
+    _labeled_counter_rows,
+    _parse_ts,
+    _rejected_row_confirmation_profile,
+    _rejected_row_confirmations,
+    _safe_float,
+    _safe_int,
+    _unified_top_blocker,
+)
 from bot.diagnostics.facade import assess_radar_store
-from bot.domain.labels import (
+from bot.policy.labels import (
     CONFIRMATION_PROFILE_KEYS,
     CONFLUENCE_LEG_KEYS,
     confirmation_profile_label_ru,
@@ -28,12 +46,10 @@ from bot.domain.labels import (
     normalize_reject_reason,
     reject_reason_ru,
 )
-from bot.domain.limit_entry import normalize_confirmation_profile
-from bot.market.radar_state import SymbolTier
-from bot.runtime.delivery_orchestrator import DELIVERY_SUCCESS_STATUSES
-from bot.runtime.errors import DEFENSIVE_EXC
-from bot.runtime_policy import effective_shortlist_unified_routing
-from bot.telemetry import slim_message_buffer_fields
+from engine.errors import DEFENSIVE_EXC
+from engine.market.radar_state import SymbolTier
+from engine.runtime_policy import effective_shortlist_unified_routing
+from engine.telemetry import slim_message_buffer_fields
 
 from ..delivery.formatting import message_preview, sample_message_from_row
 
@@ -67,216 +83,15 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-def _safe_float(value: Any, default: float = 0.0) -> float:
-    try:
-        return float(value)
-    except TypeError, ValueError:
-        return default
-
-
-def _safe_int(value: Any, default: int = 0) -> int:
-    try:
-        return int(float(value))
-    except TypeError, ValueError:
-        return default
-
-
-def _parse_ts(value: Any) -> datetime | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=UTC)
-    try:
-        parsed = datetime.fromisoformat(str(value))
-    except TypeError, ValueError:
-        return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
-
-
-def _counter_rows(counter: Counter[str], *, limit: int = 20) -> list[JsonDict]:
-    return [
-        {"key": str(key), "count": int(count)}
-        for key, count in counter.most_common(max(1, int(limit)))
-    ]
-
-
-def _rejected_row_confirmations(row: Mapping[str, Any]) -> dict[str, bool] | None:
-    confirmations = row.get("confirmations")
-    if not isinstance(confirmations, dict):
-        details = row.get("details")
-        if isinstance(details, dict):
-            nested = details.get("confirmations")
-            confirmations = nested if isinstance(nested, dict) else None
-    if not isinstance(confirmations, dict):
-        return None
-    return {str(key): bool(value) for key, value in confirmations.items()}
-
-
-def _rejected_row_confirmation_profile(row: Mapping[str, Any]) -> str:
-    profile = row.get("confirmation_profile")
-    if not profile:
-        details = row.get("details")
-        if isinstance(details, dict):
-            profile = details.get("confirmation_profile")
-    return normalize_confirmation_profile(str(profile) if profile else None)
-
-
-def _labeled_counter_rows(counter: Counter[str], *, limit: int = 20) -> list[JsonDict]:
-    return [
-        {
-            "key": str(key),
-            "count": int(count),
-            "label_ru": reject_reason_ru(str(key)),
-        }
-        for key, count in counter.most_common(max(1, int(limit)))
-    ]
-
-
-def _percent(value: float, digits: int = 2) -> float:
-    return round(float(value) * 100.0, digits)
-
-
-def _delivery_row_status(row: Mapping[str, Any]) -> str:
-    return str(row.get("delivery_status") or row.get("status") or "unknown").strip().lower()
-
-
-def _delivery_success_rows(rows: Iterable[Mapping[str, Any]]) -> list[JsonDict]:
-    return [dict(row) for row in rows if _delivery_row_status(row) in DELIVERY_SUCCESS_STATUSES]
-
-
-def _cycle_delivered_count(row: Mapping[str, Any]) -> int:
-    success = row.get("delivery_success_count")
-    if success is not None:
-        return _safe_int(success)
-    return _safe_int(row.get("delivered_count") or row.get("delivered_signals"))
-
-
-def _is_routing_excluded_decision_reason(reason: str) -> bool:
-    """True when a strategy_decision row reflects routing/asset_fit, not detector evaluation."""
-    code = str(reason or "").strip().lower()
-    if code == "runtime.strategy_lane_excluded":
-        return True
-    return code.startswith("asset_fit.")
-
-
 def _tracking_open_counts(bot: Any) -> dict[str, int]:
-    """Sync read of pending/active rows for dashboard overview (matches bot.db truth)."""
-    settings = getattr(bot, "settings", None)
-    db_path = getattr(settings, "db_path", None)
-    if db_path is None:
-        return {"pending": 0, "active": 0, "open": 0}
-    path = Path(db_path)
-    if not path.exists():
-        return {"pending": 0, "active": 0, "open": 0}
-    try:
-        with sqlite3.connect(path) as conn:
-            rows = conn.execute(
-                "SELECT status, COUNT(*) FROM active_signals "
-                "WHERE status IN ('pending','active') GROUP BY status"
-            ).fetchall()
-    except OSError, sqlite3.Error:
-        return {"pending": 0, "active": 0, "open": 0}
-    counts = {str(status): int(count) for status, count in rows}
-    pending = counts.get("pending", 0)
-    active = counts.get("active", 0)
-    return {"pending": pending, "active": active, "open": pending + active}
-
-
-def _frame_readiness_fields(bot: Any) -> dict[str, int]:
-    """Expose WS frame freshness counts used by operator runtime blocks."""
-    ws = getattr(bot, "_ws_manager", None)
-    if ws is None or not hasattr(ws, "state_snapshot"):
-        return {}
-    try:
-        snap = ws.state_snapshot()
-    except DEFENSIVE_EXC:
-        return {}
-    if not isinstance(snap, dict):
-        return {}
-    return {
-        "frames_15m_ready": _safe_int(snap.get("fresh_klines_15m")),
-        "frames_1h_ready": _safe_int(snap.get("warm_symbols")),
-        "frames_4h_ready": _safe_int(snap.get("warm_symbols")),
-    }
-
-
-def _effective_shortlist(bot: Any) -> list[Any]:
-    """Match operator shortlist fallback during ws_light bootstrap."""
-    live = list(getattr(bot, "_shortlist", []) or [])
-    if live:
-        return live
-    return list(getattr(bot, "_last_live_shortlist", []) or [])
-
-
-def _compute_cycle_totals(cycles: list[JsonDict]) -> JsonDict:
-    return {
-        "cycles": len(cycles),
-        "detector_runs": sum(_safe_int(row.get("detector_runs")) for row in cycles),
-        "candidates": sum(_safe_int(row.get("candidate_count")) for row in cycles),
-        "selected": sum(
-            _safe_int(row.get("selected_count") or row.get("selected_signals")) for row in cycles
-        ),
-        "delivered": sum(_cycle_delivered_count(row) for row in cycles),
-    }
-
-
-def _compute_session_delta(cycles: list[JsonDict]) -> JsonDict:
-    latest = cycles[0] if cycles else {}
-    return {
-        "candidates": _safe_int(latest.get("candidate_count")),
-        "selected": _safe_int(latest.get("selected_count") or latest.get("selected_signals")),
-        "delivered": _cycle_delivered_count(latest),
-    }
-
-
-def _build_funnel_widget(
-    cycle_totals: Mapping[str, Any], session_delta: Mapping[str, Any]
-) -> JsonDict:
-    stages = []
-    for key, label_ru in (
-        ("candidates", "кандидаты"),
-        ("selected", "отобрано"),
-        ("delivered", "отправлено"),
-    ):
-        count = _safe_int(cycle_totals.get(key))
-        delta = _safe_int(session_delta.get(key))
-        stages.append(
-            {
-                "key": key,
-                "label_ru": label_ru,
-                "count": count,
-                "session_delta": delta,
-            }
-        )
-    return {"stages": stages}
-
-
-def _unified_top_blocker(
-    *,
-    rejected_counter: Counter[str],
-    decision_counter: Counter[str],
-) -> JsonDict | None:
-    merged: Counter[str] = Counter()
-    merged.update(rejected_counter)
-    merged.update(decision_counter)
-    if not merged:
-        return None
-    key, total = merged.most_common(1)[0]
-    rejected_count = int(rejected_counter.get(key, 0))
-    decision_count = int(decision_counter.get(key, 0))
-    sources: list[str] = []
-    if rejected_count:
-        sources.append("rejected")
-    if decision_count:
-        sources.append("strategy_decisions")
-    return {
-        "key": key,
-        "count": int(total),
-        "label_ru": reject_reason_ru(key),
-        "rejected_count": rejected_count,
-        "decision_count": decision_count,
-        "sources": sources,
-    }
+    """Sync read of pending/active rows for dashboard overview (via repo)."""
+    repo = getattr(bot, "_modern_repo", None)
+    if repo is not None and hasattr(repo, "get_open_signal_counts_sync"):
+        try:
+            return repo.get_open_signal_counts_sync()
+        except OSError, AttributeError:
+            pass
+    return {"pending": 0, "active": 0, "open": 0}
 
 
 class DashboardLiveData:
@@ -301,87 +116,97 @@ class DashboardLiveData:
         self._cache_ttl = max(1.0, float(cache_ttl_seconds))
         self._cache: dict[tuple[str, tuple[Any, ...]], tuple[float, Any]] = {}
 
-    def overview(self) -> JsonDict:
+    async def overview(self) -> JsonDict:
         """Return a high-level live dashboard summary."""
-        return self._cached("overview", (), self._overview_uncached)
+        return await self._cached_async("overview", (), self._overview_uncached)
 
-    def funnel(self, *, max_rows: int = 100_000) -> JsonDict:
+    async def funnel(self, *, max_rows: int = 100_000) -> JsonDict:
         """Return cycle, rejection, decision, and delivery funnel summary."""
-        return self._cached("funnel", (max_rows,), lambda: self._funnel_uncached(max_rows=max_rows))
+        return await self._cached_async(
+            "funnel", (max_rows,), lambda: self._funnel_uncached(max_rows=max_rows)
+        )
 
-    def funnel_reconcile(self, *, max_rows: int = 100_000) -> JsonDict:
+    async def funnel_reconcile(self, *, max_rows: int = 100_000) -> JsonDict:
         """Compare cycle delivery_success totals vs delivery.jsonl success rows."""
-        return self._cached(
+        return await self._cached_async(
             "funnel_reconcile",
             (max_rows,),
             lambda: self._funnel_reconcile_uncached(max_rows=max_rows),
         )
 
-    def shortlist(self, *, limit: int = 80) -> JsonDict:
+    async def shortlist(self, *, limit: int = 80) -> JsonDict:
         """Return shortlist composition and last telemetry rows."""
-        return self._cached("shortlist", (limit,), lambda: self._shortlist_uncached(limit=limit))
+        return await self._cached_async(
+            "shortlist", (limit,), lambda: self._shortlist_uncached(limit=limit)
+        )
 
-    def radar_summary(self, *, hot_limit: int = 25) -> JsonDict:
+    async def radar_summary(self, *, hot_limit: int = 25) -> JsonDict:
         """Return live radar store health and top HOT/DEEP symbols."""
-        return self._cached(
+        return await self._cached_async(
             "radar_summary",
             (hot_limit,),
             lambda: self._radar_summary_uncached(hot_limit=hot_limit),
         )
 
-    def rejections(self, *, limit: int = 30, max_rows: int = 100_000) -> JsonDict:
+    async def rejections(self, *, limit: int = 30, max_rows: int = 100_000) -> JsonDict:
         """Return rejection reason and stage summaries."""
-        return self._cached(
+        return await self._cached_async(
             "rejections",
             (limit, max_rows),
             lambda: self._rejections_uncached(limit=limit, max_rows=max_rows),
         )
 
-    def confluence_legs(self, *, max_rows: int = 100_000) -> JsonDict:
+    async def confluence_legs(self, *, max_rows: int = 100_000) -> JsonDict:
         """Return hard confluence leg failure counts from rejected telemetry."""
-        return self._cached(
+        return await self._cached_async(
             "confluence_legs",
             (max_rows,),
             lambda: self._confluence_legs_uncached(max_rows=max_rows),
         )
 
-    def confluence_legs_by_profile(self, *, max_rows: int = 100_000) -> JsonDict:
+    async def confluence_legs_by_profile(self, *, max_rows: int = 100_000) -> JsonDict:
         """Return confluence leg failures grouped by confirmation_profile."""
-        return self._cached(
+        return await self._cached_async(
             "confluence_legs_by_profile",
             (max_rows,),
             lambda: self._confluence_legs_by_profile_uncached(max_rows=max_rows),
         )
 
-    def decisions(self, *, limit: int = 40, max_rows: int = 100_000) -> JsonDict:
+    async def decisions(self, *, limit: int = 40, max_rows: int = 100_000) -> JsonDict:
         """Return strategy-decision summaries."""
-        return self._cached(
+        return await self._cached_async(
             "decisions",
             (limit, max_rows),
             lambda: self._decisions_uncached(limit=limit, max_rows=max_rows),
         )
 
-    def runtime(self) -> JsonDict:
+    async def runtime(self) -> JsonDict:
         """Return runtime health, data-quality, and websocket summaries."""
-        return self._cached("runtime", (), self._runtime_uncached)
+        return await self._cached_async("runtime", (), self._runtime_uncached)
 
-    def delivery(self, *, limit: int = 25) -> JsonDict:
+    async def delivery(self, *, limit: int = 25) -> JsonDict:
         """Return delivery and selected-signal telemetry."""
-        return self._cached("delivery", (limit,), lambda: self._delivery_uncached(limit=limit))
+        return await self._cached_async(
+            "delivery", (limit,), lambda: self._delivery_uncached(limit=limit)
+        )
 
-    def telegram_preview(self) -> JsonDict:
+    async def telegram_preview(self) -> JsonDict:
         """Return a Telegram-format preview from the freshest signal-like row."""
-        return self._cached("telegram_preview", (), self._telegram_preview_uncached)
+        return await self._cached_async("telegram_preview", (), self._telegram_preview_uncached)
 
-    def _cached(self, name: str, args: tuple[Any, ...], factory: Callable[[], Any]) -> Any:
+    async def _cached_async(
+        self, name: str, args: tuple[Any, ...], factory: Callable[[], Any]
+    ) -> Any:
         key = (name, args)
         now = time.monotonic()
         cached = self._cache.get(key)
         if cached and now - cached[0] <= self._cache_ttl:
             return cached[1]
-        value = factory()
-        self._cache[key] = (now, value)
-        return value
+        result = factory()
+        if asyncio.iscoroutine(result):
+            result = await result
+        self._cache[key] = (now, result)
+        return result
 
     def _bot(self) -> Any:
         return self._bot_getter()

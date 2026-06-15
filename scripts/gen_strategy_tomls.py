@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from bot.domain.strategy_catalog import CATALOG_ENTRIES
+from engine.domain.strategy_catalog import CATALOG_ENTRIES
 
 ALIASES = {"fvg": "fvg_setup"}
 

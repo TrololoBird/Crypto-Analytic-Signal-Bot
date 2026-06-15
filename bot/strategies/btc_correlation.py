@@ -11,8 +11,8 @@ from ._roadmap import (
 from .roadmap_base import RoadmapSetup
 
 if TYPE_CHECKING:
-    from ..domain.config import BotSettings
-    from ..domain.schemas import PreparedSymbol, Signal
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import PreparedSymbol, Signal
 
 __all__ = ["detect_btc_correlation"]
 
@@ -41,7 +41,7 @@ def detect_btc_correlation(
             btc_bias = "bear"
         else:
             btc_bias = "neutral"
-    work = prepared.work_15m
+    work = prepared.work_1h
     # fix-sl-A: confirm momentum on last closed bar (df[-2]), not forming tail.
     vol_ratio = _prev(work, "volume_ratio20", 1.0)
     volume_penalty = vol_ratio < float(params["min_volume_ratio"])
@@ -73,7 +73,12 @@ def detect_btc_correlation(
     ]
     if volume_penalty:
         reasons.append(f"volume_penalty={vol_ratio:.2f}")
-    entry_anchor = _prev(work, "ema20", 0.0) or None
+    # Limit order: sell into prev-bar high (resistance) for shorts, buy at prev-bar low
+    # (support) for longs — EMA20 ≈ current price yields immediate market-fill.
+    if direction == "long":
+        entry_anchor = _prev(work, "low", 0.0) or None
+    else:
+        entry_anchor = _prev(work, "high", 0.0) or None
     return _build_atr_signal(
         prepared=prepared,
         setup_id=setup_id,
@@ -89,6 +94,7 @@ def detect_btc_correlation(
 
 class BTCCorrelationSetup(RoadmapSetup):
     setup_id = "btc_correlation"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "limit"
     family = "multi_asset"
     confirmation_profile = "trend_follow"
     required_context = ("futures_flow",)

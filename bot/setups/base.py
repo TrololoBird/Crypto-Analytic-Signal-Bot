@@ -2,26 +2,28 @@
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 from abc import abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
-from bot.runtime.errors import DEFENSIVE_EXC, classify_runtime_error
-
-from ..domain.strategies import RISK_PROFILE_BY_ID, STRATEGY_STATUS_BY_ID, StrategyDecision
-from ..domain.strategy_catalog import CATALOG_BY_ID
-from ..engine.base import (
-    AbstractStrategy,
-    SignalResult,
-    StrategyMetadata,
-)
-from ..market.fit import (
+from engine.domain.schemas import is_signal_contract_violation
+from engine.domain.strategies import RISK_PROFILE_BY_ID, STRATEGY_STATUS_BY_ID, StrategyDecision
+from engine.domain.strategy_catalog import CATALOG_BY_ID
+from engine.errors import DEFENSIVE_EXC, classify_runtime_error
+from engine.market.fit import (
     ASSET_FIT_PROFILES,
     DEFAULT_ASSET_FIT,
     AssetFit,
     asset_fit_reject_reason,
     market_context_from_prepared,
+)
+
+from ..engine.base import (
+    AbstractStrategy,
+    SignalResult,
+    StrategyMetadata,
 )
 from . import (
     _reject,
@@ -33,8 +35,8 @@ from . import (
 LOG = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from ..domain.config import BotSettings
-    from ..domain.schemas import PreparedSymbol, Signal
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import PreparedSymbol, Signal
 
 
 @dataclass(frozen=True)
@@ -48,6 +50,7 @@ class BaseSetup(AbstractStrategy):
     """Base setup class compatible with the modern signal engine."""
 
     setup_id: str  # class-level constant, defined by each subclass
+    ENTRY_ORDER_TYPE: ClassVar[str] = "limit"
     family: str = "continuation"
     confirmation_profile: str = "trend_follow"
     required_context: tuple[str, ...] = ()
@@ -183,18 +186,32 @@ class BaseSetup(AbstractStrategy):
                 try:
                     outcome = self.detect(prepared, self._settings)
                 except DEFENSIVE_EXC as exc:
-                    error_class = classify_runtime_error(exc)
-                    decision = StrategyDecision.error_result(
-                        setup_id=self.setup_id,
-                        reason_code=f"{error_class}.error",
-                        error=str(exc),
-                        stage="engine",
-                        details={
-                            "symbol": prepared.symbol,
-                            "error_class": error_class,
-                            "exception_type": type(exc).__name__,
-                        },
-                    )
+                    if is_signal_contract_violation(exc):
+                        _reject(
+                            prepared,
+                            self.setup_id,
+                            "targets.contract_violation",
+                            stage="runtime",
+                            detail=str(exc),
+                        )
+                        decision = finalize_strategy_decision(
+                            prepared=prepared,
+                            setup_id=self.setup_id,
+                            outcome=None,
+                        )
+                    else:
+                        error_class = classify_runtime_error(exc)
+                        decision = StrategyDecision.error_result(
+                            setup_id=self.setup_id,
+                            reason_code=f"{error_class}.error",
+                            error=str(exc),
+                            stage="engine",
+                            details={
+                                "symbol": prepared.symbol,
+                                "error_class": error_class,
+                                "exception_type": type(exc).__name__,
+                            },
+                        )
                 else:
                     decision = finalize_strategy_decision(
                         prepared=prepared,
@@ -203,13 +220,27 @@ class BaseSetup(AbstractStrategy):
                     )
         finally:
             reset_strategy_decision_capture(token)
-        return SignalResult(
+        sig = decision.signal
+        from engine.domain.strategy_catalog import resolve_setup_order_type
+
+        expected_ot = (
+            resolve_setup_order_type(
+                self.setup_id,
+                default=str(type(self).ENTRY_ORDER_TYPE or "limit"),
+            )
+            .strip()
+            .lower()
+        )
+        if sig is not None and sig.entry_order_type != expected_ot:
+            sig = dataclasses.replace(sig, entry_order_type=expected_ot)
+        result = SignalResult(
             setup_id=self.setup_id,
-            signal=decision.signal,
+            signal=sig,
             decision=decision,
             error=decision.error,
             metadata={"setup_id": self.setup_id},
         )
+        return result
 
     def can_calculate(self, prepared: PreparedSymbol) -> bool:
         if not self.is_enabled():

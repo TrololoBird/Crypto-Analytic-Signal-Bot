@@ -4,29 +4,69 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
+import time
 from collections import Counter
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
 from bot.delivery.filters import apply_global_filters
-from bot.domain.schemas import (
+from engine.data_readiness import (
+    assess_symbol_data_readiness,
+    configured_frame_minimums,
+    kline_fetch_limit,
+    raw_frame_minimums,
+)
+from engine.domain.schemas import (
     PipelineResult,
     PreparedSymbol,
     Signal,
     SymbolFrames,
     UniverseSymbol,
 )
-from bot.domain.strategies import StrategyDecision
-from bot.features.prepare import prepare_symbol
-from bot.features.prepare_frame import min_required_bars
-from bot.market.data import BinanceFuturesMarketData, MarketDataUnavailable
-from bot.runtime.data_readiness import assess_symbol_data_readiness
-from bot.runtime.errors import (
+from engine.domain.strategies import StrategyDecision
+from engine.errors import (
     DEFENSIVE_EXC,
     build_runtime_error_payload,
     classify_runtime_error,
 )
+from engine.features.prepare import prepare_symbol
+from engine.features.prepare_frame import min_required_bars
+from engine.market.data import BinanceFuturesMarketData, MarketDataUnavailable
+
+
+def _pearson_correlation_returns(
+    left_closes: list[float], right_closes: list[float]
+) -> float | None:
+    """Rolling 1h return correlation (report-5 §46 BTC filter threshold)."""
+    n = min(len(left_closes), len(right_closes))
+    if n < 10:
+        return None
+    left = left_closes[-n:]
+    right = right_closes[-n:]
+    left_r: list[float] = []
+    right_r: list[float] = []
+    for idx in range(1, n):
+        prev_l, prev_r = left[idx - 1], right[idx - 1]
+        if prev_l <= 0.0 or prev_r <= 0.0:
+            continue
+        left_r.append((left[idx] - prev_l) / prev_l)
+        right_r.append((right[idx] - prev_r) / prev_r)
+    m = min(len(left_r), len(right_r))
+    if m < 8:
+        return None
+    left_r = left_r[-m:]
+    right_r = right_r[-m:]
+    mean_l = sum(left_r) / m
+    mean_r = sum(right_r) / m
+    num = sum((a - mean_l) * (b - mean_r) for a, b in zip(left_r, right_r, strict=True))
+    den_l = sum((a - mean_l) ** 2 for a in left_r) ** 0.5
+    den_r = sum((b - mean_r) ** 2 for b in right_r) ** 0.5
+    if den_l <= 0.0 or den_r <= 0.0:
+        return None
+    return num / (den_l * den_r)
+
 
 if TYPE_CHECKING:
     from bot.runtime.bot import SignalBot
@@ -75,20 +115,10 @@ _DEGRADATION_ERRORS = (
     AttributeError,
     KeyError,
 )
-_DEFAULT_HISTORY_FETCH_LIMIT = 500
-_HISTORY_FETCH_BUFFER_BARS = 80
-_HISTORY_FETCH_BASELINE_BY_INTERVAL = {
-    "5m": 300,
-    "15m": 500,
-    "1h": 500,  # ema200 warmup (199 NaN rows) + min_bars_1h(210) requires ≥409 raw bars
-    "4h": 500,
-}
 
 
 def _history_fetch_limit(minimums: dict[str, int], interval: str) -> int:
-    required = int(minimums.get(interval, 0))
-    baseline = _HISTORY_FETCH_BASELINE_BY_INTERVAL.get(interval, 240)
-    return max(baseline, required + _HISTORY_FETCH_BUFFER_BARS)
+    return kline_fetch_limit(int(minimums.get(interval, 0)), interval)
 
 
 def _attach_rejection_rollups(
@@ -233,6 +263,80 @@ class AnalyzerContextMixin(AnalyzerMixinBase):
         return (
             numeric if numeric == numeric and numeric not in (float("inf"), float("-inf")) else None
         )
+
+    # BTC/ETH 1h reference change refresh cadence for btc_correlation factor.
+    _REFERENCE_CHANGE_TTL_S = 300.0
+
+    @staticmethod
+    def _hourly_close_change_pct(frame: Any) -> float | None:
+        if frame is None or frame.height < 2 or "close" not in frame.columns:
+            return None
+        try:
+            prev = float(frame.item(-2, "close") or 0.0)
+            last = float(frame.item(-1, "close") or 0.0)
+        except IndexError, TypeError, ValueError:
+            return None
+        if prev <= 0.0 or last <= 0.0:
+            return None
+        # Percent (not fraction): _btc_correlation_penalty uses ±0.5/1.0/2.0 % bands.
+        return (last - prev) / prev * 100.0
+
+    def _reference_changes_from_client_cache(self) -> dict[str, float]:
+        """Sync fallback when async refresh has not run yet (WS-frames mode)."""
+        raw_client = self._bot.client
+        inner_client = getattr(raw_client, "_binance_client", None)
+        klines_cache = getattr(raw_client, "_klines_cache", None) or getattr(
+            inner_client, "_klines_cache", None
+        )
+        if not isinstance(klines_cache, dict):
+            return {}
+        changes: dict[str, float] = {}
+        for ref_sym, field in (("BTCUSDT", "btc_change_pct"), ("ETHUSDT", "eth_change_pct")):
+            for key, cached in klines_cache.items():
+                if not (
+                    isinstance(key, tuple)
+                    and len(key) >= 2
+                    and key[0] == ref_sym
+                    and key[1] == "1h"
+                ):
+                    continue
+                try:
+                    _, frame = cached
+                except TypeError, ValueError:
+                    continue
+                change = self._hourly_close_change_pct(frame)
+                if change is not None:
+                    changes[field] = change
+                    break
+        return changes
+
+    async def _refresh_reference_changes(self, limit_1h: int) -> None:
+        """Keep btc_change_pct / eth_change_pct available regardless of frame source.
+
+        The old approach scanned the client's private _klines_cache — empty in
+        WS-frames mode (fetch_klines_cached is never called for 1h there), so
+        btc_correlation was unavailable on every evaluation. Explicitly fetch
+        the reference klines (client-side TTL cache absorbs the cost).
+        """
+        now = time.monotonic()
+        if now - getattr(self, "_reference_changes_at", 0.0) < self._REFERENCE_CHANGE_TTL_S:
+            return
+        self._reference_changes_at = now
+        changes: dict[str, float] = dict(getattr(self, "_reference_changes", None) or {})
+        if isinstance(self._bot.client, BinanceFuturesMarketData):
+            for ref_sym, field in (("BTCUSDT", "btc_change_pct"), ("ETHUSDT", "eth_change_pct")):
+                try:
+                    frame = await self._bot.client.fetch_klines_cached(
+                        ref_sym, "1h", limit=limit_1h
+                    )
+                except _DEGRADATION_ERRORS:
+                    continue
+                change = self._hourly_close_change_pct(frame)
+                if change is not None:
+                    changes[field] = change
+        changes.update(self._reference_changes_from_client_cache())
+        if changes:
+            self._reference_changes = changes
 
     def _safe_ws_get(self, symbol: str, getter_name: str, *args: Any, **kwargs: Any) -> Any:
         manager = self._bot._ws_manager
@@ -471,6 +575,7 @@ class AnalyzerFramesMixin(AnalyzerContextMixin, _AnalyzerFamilyGatesBase):
 
         try:
             if isinstance(self._bot.client, BinanceFuturesMarketData):
+                await self._refresh_reference_changes(limit_1h)
                 df_4h = await self._bot.client.fetch_klines_cached(symbol, "4h", limit=limit_4h)
                 if ws_1h is not None and ws_1h.height >= minimums["1h"]:
                     df_1h = ws_1h
@@ -747,13 +852,17 @@ class AnalyzerFramesMixin(AnalyzerContextMixin, _AnalyzerFamilyGatesBase):
                     liq_age = float(liq_age)
                     enrichments["liquidation_score_age_seconds"] = liq_age
                     context_ages.append(liq_age)
-                cascade_count = self._safe_ws_get(
-                    symbol,
-                    "get_liquidation_event_count",
-                    window_seconds=300,
-                )
-                if cascade_count is not None:
-                    enrichments["liquidation_cascade_5m"] = int(cascade_count) > 3
+            # Cascade flag must be set unconditionally — 0 events is still valid data.
+            # If nested inside "if liquidation is not None", a quiet market (no liq events
+            # in last 900s) leaves liquidation_cascade_5m=None → confluence factor becomes
+            # unavailable for ALL signals, blocking delivery in low-volatility regimes.
+            cascade_count = self._safe_ws_get(
+                symbol,
+                "get_liquidation_event_count",
+                window_seconds=300,
+            )
+            # 0 events is valid — only None means WS getter failed.
+            enrichments["liquidation_cascade_5m"] = int(cascade_count or 0) > 3
 
         if isinstance(self._bot.client, BinanceFuturesMarketData):
             premium = self._bot.client.get_cached_premium_index(symbol)
@@ -852,8 +961,62 @@ class AnalyzerFramesMixin(AnalyzerContextMixin, _AnalyzerFamilyGatesBase):
             global_ls = enrichments.get("global_ls_ratio")
             if isinstance(top, (int, float)) and isinstance(global_ls, (int, float)):
                 enrichments["top_vs_global_ls_gap"] = float(top) - float(global_ls)
-            else:
+            # crowding_context_missing only when NO L/S data at all — not just gap absence.
+            # Previously the gap absence (global_ls missing) silently disabled crowd_position
+            # even when ls_ratio / taker_ratio were available, causing 100% crowd_position
+            # unavailability in normal market conditions.
+            _has_any_ls = any(
+                isinstance(enrichments.get(f), (int, float))
+                for f in (
+                    "ls_ratio",
+                    "global_ls_ratio",
+                    "top_account_ls_ratio",
+                    "top_position_ls_ratio",
+                    "taker_ratio",
+                )
+            )
+            if not _has_any_ls:
                 freshness_flags.add("crowding_context_missing")
+
+        # BTC/ETH 1h reference change for btc_correlation confluence factor.
+        ref_changes = dict(getattr(self, "_reference_changes", None) or {})
+        ref_changes.update(self._reference_changes_from_client_cache())
+        if ref_changes:
+            self._reference_changes = ref_changes
+            enrichments.update(ref_changes)
+        _raw_client = self._bot.client
+        _inner_client = getattr(_raw_client, "_binance_client", None)
+        klines_cache = getattr(_raw_client, "_klines_cache", None) or getattr(
+            _inner_client, "_klines_cache", None
+        )
+
+        if symbol not in {"BTCUSDT", "ETHUSDT"} and isinstance(klines_cache, dict):
+            sym_closes: list[float] | None = None
+            btc_closes: list[float] | None = None
+            for _key, _cached in klines_cache.items():
+                if not (isinstance(_key, tuple) and len(_key) >= 2 and _key[1] == "1h"):
+                    continue
+                try:
+                    _, _frame = _cached
+                    if _frame is None or _frame.height < 10 or "close" not in _frame.columns:
+                        continue
+                    closes = [
+                        float(value)
+                        for value in _frame["close"].to_list()
+                        if value is not None and float(value) > 0.0
+                    ]
+                except IndexError, TypeError, ValueError, AttributeError:
+                    continue
+                if len(closes) < 10:
+                    continue
+                if _key[0] == symbol:
+                    sym_closes = closes
+                elif _key[0] == "BTCUSDT":
+                    btc_closes = closes
+            if sym_closes and btc_closes:
+                corr = _pearson_correlation_returns(sym_closes, btc_closes)
+                if corr is not None and math.isfinite(corr):
+                    enrichments["btc_corr_1h"] = float(corr)
 
         if context_ages:
             enrichments["context_snapshot_age_seconds"] = max(context_ages)
@@ -873,6 +1036,8 @@ class AnalyzerFramesMixin(AnalyzerContextMixin, _AnalyzerFamilyGatesBase):
         except DEFENSIVE_EXC:
             pass
         enrichments.setdefault("data_source_mix", "futures_only")
+        # Quiet market / no WS: False still means "data present, no cascade".
+        enrichments.setdefault("liquidation_cascade_5m", False)
         return enrichments
 
     def refresh_universe_symbol_from_ws(self, item: UniverseSymbol) -> UniverseSymbol:
@@ -966,10 +1131,11 @@ class AnalyzerPipelineMixin(AnalyzerFramesMixin):
             )
 
         minimums = self._minimums()
+        raw_minimums = raw_frame_minimums(self._bot.settings)
         rows_4h = frames.df_4h.height if frames.df_4h is not None else 0
         rows_5m = frames.df_5m.height if frames.df_5m is not None else 0
-        rows_1h = frames.df_1h.height
-        rows_15m = frames.df_15m.height
+        rows_1h = frames.df_1h.height if frames.df_1h is not None else 0
+        rows_15m = frames.df_15m.height if frames.df_15m is not None else 0
         funnel["frame_rows"] = {
             "15m": rows_15m,
             "1h": rows_1h,
@@ -977,26 +1143,27 @@ class AnalyzerPipelineMixin(AnalyzerFramesMixin):
             "4h": rows_4h,
         }
         funnel["frame_readiness"] = {
-            "15m": rows_15m >= minimums["15m"],
-            "1h": rows_1h >= minimums["1h"],
-            "5m": rows_5m >= minimums["5m"],
-            "4h": rows_4h >= minimums["4h"],
+            "15m": rows_15m >= raw_minimums["15m"],
+            "1h": rows_1h >= raw_minimums["1h"],
+            "5m": rows_5m >= raw_minimums["5m"],
+            "4h": rows_4h >= raw_minimums["4h"],
         }
         if (
-            rows_5m < minimums["5m"]
-            or rows_15m < minimums["15m"]
-            or rows_1h < minimums["1h"]
-            or rows_4h < minimums["4h"]
+            rows_5m < raw_minimums["5m"]
+            or rows_15m < raw_minimums["15m"]
+            or rows_1h < raw_minimums["1h"]
+            or rows_4h < raw_minimums["4h"]
         ):
             missing_required = []
-            if rows_5m < minimums["5m"]:
+            if rows_5m < raw_minimums["5m"]:
                 missing_required.append("5m")
-            if rows_15m < minimums["15m"]:
+            if rows_15m < raw_minimums["15m"]:
                 missing_required.append("15m")
-            if rows_1h < minimums["1h"]:
+            if rows_1h < raw_minimums["1h"]:
                 missing_required.append("1h")
-            if rows_4h < minimums["4h"]:
+            if rows_4h < raw_minimums["4h"]:
                 missing_required.append("4h")
+            configured = configured_frame_minimums(self._bot.settings)
             rejected.append(
                 {
                     "ts": datetime.now(UTC).isoformat(),
@@ -1009,10 +1176,14 @@ class AnalyzerPipelineMixin(AnalyzerFramesMixin):
                     "rows_15m": rows_15m,
                     "rows_5m": rows_5m,
                     "rows_4h": rows_4h,
-                    "need_1h": minimums["1h"],
-                    "need_15m": minimums["15m"],
-                    "need_5m": minimums["5m"],
-                    "need_4h": minimums["4h"],
+                    "need_1h": configured["1h"],
+                    "need_15m": configured["15m"],
+                    "need_5m": configured["5m"],
+                    "need_4h": configured["4h"],
+                    "raw_need_1h": raw_minimums["1h"],
+                    "raw_need_15m": raw_minimums["15m"],
+                    "raw_need_5m": raw_minimums["5m"],
+                    "raw_need_4h": raw_minimums["4h"],
                     "missing_required_frames": missing_required,
                 }
             )
@@ -1023,13 +1194,13 @@ class AnalyzerPipelineMixin(AnalyzerFramesMixin):
                 ),
                 item.symbol,
                 rows_5m,
-                minimums["5m"],
+                raw_minimums["5m"],
                 rows_15m,
-                minimums["15m"],
+                raw_minimums["15m"],
                 rows_1h,
-                minimums["1h"],
+                raw_minimums["1h"],
                 rows_4h,
-                minimums["4h"],
+                raw_minimums["4h"],
             )
             _attach_rejection_rollups(funnel, rejected)
             return PipelineResult(

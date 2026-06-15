@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, ClassVar
 
-from ..features.prepare import _swing_points
+from engine.features.prepare import _swing_points
+
 from ..setups import _build_signal, _compute_dynamic_score, _reject
+from ..setups.bar_patterns import engulfing_confirm, overshoot_reclaim_valid, pin_bar_confirm
 from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
 from ..setups.utils import build_structural_targets, coerce_int, validate_rr_or_penalty
 from ._common import SpecHit, _latest_values, as_float, confirmed_pattern_frame, with_spec_columns
@@ -13,8 +15,8 @@ from ._common import SpecHit, _latest_values, as_float, confirmed_pattern_frame,
 if TYPE_CHECKING:
     import polars as pl
 
-    from ..domain.config import BotSettings
-    from ..domain.schemas import PreparedSymbol, Signal
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import PreparedSymbol, Signal
 
 __all__ = ["detect_structure_break_retest"]
 
@@ -184,7 +186,7 @@ def _detect_structure_break_retest_extended(
     regime_1h = prepared.regime_1h_confirmed
     bias_1h = prepared.bias_1h
 
-    sh_mask, sl_mask = _swing_points(work_1h, n=swing_lookback, include_unconfirmed_tail=True)
+    sh_mask, sl_mask = _swing_points(work_1h, n=swing_lookback, include_unconfirmed_tail=False)
     if not sh_mask.any() and not sl_mask.any():
         _reject(prepared, setup_id, "no_swing_points")
         return None
@@ -280,14 +282,95 @@ def _detect_structure_break_retest_extended(
             _reject(prepared, setup_id, "no_breakout_detected", regime=regime_1h)
             return None
     broken_level_value = broken_level
+    # Timeout in hours (not bars) — invariant across TF changes (research Q33/Q84).
+    max_retest_age_hours = float(
+        dynamic_params.get("max_retest_age_hours", defaults.get("max_retest_age_hours", 4.0))
+    )
+    max_retest_age_1h_bars = max(1, int(max_retest_age_hours))
+    max_retest_age_15m_bars = max(1, int(max_retest_age_hours * 4.0))
     if not used_15m_fallback and (
-        breakout_bar_idx is None or breakout_bar_idx < work_1h.height - 4
+        breakout_bar_idx is None or breakout_bar_idx < work_1h.height - max_retest_age_1h_bars
     ):
         _reject(
             prepared,
             setup_id,
             "stale_breakout_retest",
             breakout_bar_idx=breakout_bar_idx,
+            max_retest_age_hours=max_retest_age_hours,
+        )
+        return None
+    if used_15m_fallback and fallback_reason is not None:
+        lag_str = fallback_reason.split("lag=")[-1] if "lag=" in fallback_reason else ""
+        try:
+            lag_bars = int(lag_str)
+        except ValueError:
+            lag_bars = 0
+        if lag_bars > max_retest_age_15m_bars:
+            _reject(
+                prepared,
+                setup_id,
+                "stale_15m_retest",
+                lag_bars=lag_bars,
+                max_retest_age_15m_bars=max_retest_age_15m_bars,
+            )
+            return None
+
+    structure_1h = prepared.structure_1h
+    if direction == "long" and structure_1h == "downtrend":
+        _reject(
+            prepared,
+            setup_id,
+            "structure_break_retest_1h_conflict",
+            direction=direction,
+            structure_1h=structure_1h,
+        )
+        return None
+    if direction == "short" and structure_1h == "uptrend":
+        _reject(
+            prepared,
+            setup_id,
+            "structure_break_retest_1h_conflict",
+            direction=direction,
+            structure_1h=structure_1h,
+        )
+        return None
+
+    retest_open = _as_float(work_15m.item(-1, "open"))
+    retest_high = _as_float(work_15m.item(-1, "high"))
+    retest_low = _as_float(work_15m.item(-1, "low"))
+    retest_close = _as_float(work_15m.item(-1, "close"))
+    prev_open = _as_float(work_15m.item(-2, "open")) if work_15m.height >= 2 else retest_open
+    prev_high = _as_float(work_15m.item(-2, "high")) if work_15m.height >= 2 else retest_high
+    prev_low = _as_float(work_15m.item(-2, "low")) if work_15m.height >= 2 else retest_low
+    prev_close = _as_float(work_15m.item(-2, "close")) if work_15m.height >= 2 else retest_close
+    pin_ok = pin_bar_confirm(direction, retest_open, retest_high, retest_low, retest_close)
+    engulf_ok = engulfing_confirm(
+        direction,
+        retest_open,
+        retest_high,
+        retest_low,
+        retest_close,
+        prev_open,
+        prev_high,
+        prev_low,
+        prev_close,
+    )
+    overshoot_ok = overshoot_reclaim_valid(
+        direction,
+        broken_level_value,
+        atr,
+        retest_high,
+        retest_low,
+        retest_close,
+    )
+    if not (pin_ok or engulf_ok or overshoot_ok):
+        _reject(
+            prepared,
+            setup_id,
+            "structure_break_retest_no_retest_confirm",
+            pin=pin_ok,
+            engulf=engulf_ok,
+            overshoot=overshoot_ok,
         )
         return None
 
@@ -426,6 +509,7 @@ __all__ = [
 
 class StructureBreakRetestSetup(SpecDetectorSetup):
     setup_id = "structure_break_retest"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "limit"
     family = "breakout"
     confirmation_profile = "breakout_acceptance"
     required_context = ("futures_flow",)
@@ -433,10 +517,12 @@ class StructureBreakRetestSetup(SpecDetectorSetup):
     DEFAULTS: ClassVar[dict[str, float]] = {
         "base_score": 0.62,
         "swing_lookback": 3,
-        "min_vol_breakout": 1.3,
+        "min_vol_breakout": 1.2,
         "retest_atr_tol": 0.5,
         "retest_atr_mult": 0.5,
-        "fallback_lookback_bars": 12,
+        "fallback_lookback_bars": 16,
+        "max_retest_age_bars": 16,
+        "max_retest_age_hours": 4.0,
         "sl_buffer_atr": 0.5,
         "breakout_threshold": 0.002,
         "bias_mismatch_penalty": 0.75,

@@ -43,6 +43,58 @@ def _avg(values: list[float]) -> float | None:
     return sum(values) / len(values)
 
 
+def _percentile(values: list[float], pct: float) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    idx = round((len(ordered) - 1) * pct)
+    idx = max(0, min(idx, len(ordered) - 1))
+    return ordered[idx]
+
+
+def _score_outcome_r_squared(rows: list[dict[str, Any]]) -> float | None:
+    """answers50 Q48(e): score_at_delivery vs binary win correlation."""
+    pairs: list[tuple[float, float]] = []
+    for row in rows:
+        score = _safe_float(row.get("score"))
+        if score is None:
+            feat = row.get("features") if isinstance(row.get("features"), dict) else {}
+            score = _safe_float(feat.get("score"))
+        if score is None:
+            continue
+        result = str(row.get("result") or "")
+        outcome = 1.0 if result in _WIN_RESULTS else 0.0 if result in _LOSS_RESULTS else None
+        if outcome is None:
+            continue
+        pairs.append((score, outcome))
+    if len(pairs) < 5:
+        return None
+    xs = [p[0] for p in pairs]
+    ys = [p[1] for p in pairs]
+    mean_x = sum(xs) / len(xs)
+    mean_y = sum(ys) / len(ys)
+    var_x = sum((x - mean_x) ** 2 for x in xs)
+    if var_x <= 0.0:
+        return None
+    cov = sum((x - mean_x) * (y - mean_y) for x, y in pairs)
+    slope = cov / var_x
+    intercept = mean_y - slope * mean_x
+    ss_res = sum((y - (slope * x + intercept)) ** 2 for x, y in pairs)
+    ss_tot = sum((y - mean_y) ** 2 for y in ys)
+    if ss_tot <= 0.0:
+        return None
+    return round(1.0 - ss_res / ss_tot, 4)
+
+
+def _regime_bucket(features: dict[str, Any]) -> str:
+    bias = str(features.get("bias_4h") or features.get("market_regime") or "neutral").lower()
+    if bias in {"downtrend", "bear", "decline", "risk_off"}:
+        return "bear"
+    if bias in {"uptrend", "bull", "markup", "risk_on"}:
+        return "bull"
+    return "neutral"
+
+
 async def build_outcomes_insights(
     repo: MemoryRepository,
     *,
@@ -303,4 +355,80 @@ async def build_outcomes_insights(
         },
         "recent_stop_losses": recent_losses,
         "post_sl_recovery": post_sl_recovery_rows[:12],
+    }
+
+
+async def build_operator_weekly_kpi(
+    repo: MemoryRepository,
+    *,
+    days: int = 7,
+) -> dict[str, Any]:
+    """answers50 Q48 — five weekly operator metrics."""
+    outcomes = await repo.get_signal_outcomes(last_days=days)
+    trade_rows = [
+        row for row in outcomes if str(row.get("result") or "") in _WIN_RESULTS | _LOSS_RESULTS
+    ]
+    expired_rows = [row for row in outcomes if str(row.get("result") or "").startswith("expired")]
+    losses = [row for row in trade_rows if str(row.get("result") or "") == "stop_loss"]
+
+    sl_by_regime: dict[str, dict[str, int]] = {
+        "bear": {"sl": 0, "total": 0},
+        "neutral": {"sl": 0, "total": 0},
+        "bull": {"sl": 0, "total": 0},
+    }
+    for row in trade_rows:
+        feat = row.get("features") if isinstance(row.get("features"), dict) else {}
+        bucket = _regime_bucket(feat)
+        sl_by_regime[bucket]["total"] += 1
+        if str(row.get("result") or "") == "stop_loss":
+            sl_by_regime[bucket]["sl"] += 1
+    sl_rate_by_regime = {
+        key: round(vals["sl"] / vals["total"], 4) if vals["total"] else None
+        for key, vals in sl_by_regime.items()
+    }
+
+    expired_by_tf: Counter[str] = Counter()
+    expired_by_setup: Counter[str] = Counter()
+    for row in expired_rows:
+        entry_tf = str(row.get("entry_tf") or row.get("timeframe") or "unknown")
+        expired_by_tf[entry_tf] += 1
+        expired_by_setup[str(row.get("setup_id") or "unknown")] += 1
+    total_outcomes = len(outcomes) or 1
+    expired_rate = round(len(expired_rows) / total_outcomes, 4)
+
+    zero_mfe_sl = sum(1 for row in losses if (_safe_float(row.get("mfe")) or 0.0) <= 0.0)
+    mfe_max_before_sl = [_safe_float(row.get("mfe")) or 0.0 for row in losses]
+
+    exit_minutes = [
+        float(v)
+        for v in (_safe_float(row.get("time_to_exit_min")) for row in trade_rows)
+        if v is not None
+    ]
+
+    return {
+        "generated_at": datetime.now(UTC).isoformat(),
+        "window_days": int(days),
+        "sample_size": len(outcomes),
+        "metrics": {
+            "sl_rate_by_regime_4h": sl_rate_by_regime,
+            "sl_rate_by_regime_counts": sl_by_regime,
+            "expired_rate": expired_rate,
+            "expired_count": len(expired_rows),
+            "expired_by_entry_tf": dict(expired_by_tf),
+            "expired_by_setup": dict(
+                sorted(expired_by_setup.items(), key=lambda item: (-item[1], item[0]))
+            ),
+            "zero_mfe_before_sl": zero_mfe_sl,
+            "zero_mfe_share_of_sl": round(zero_mfe_sl / len(losses), 4) if losses else None,
+            "mfe_median_before_sl": round(_percentile(mfe_max_before_sl, 0.5) or 0.0, 4)
+            if mfe_max_before_sl
+            else None,
+            "time_to_exit_min_median": round(_percentile(exit_minutes, 0.5) or 0.0, 1)
+            if exit_minutes
+            else None,
+            "time_to_exit_min_p90": round(_percentile(exit_minutes, 0.9) or 0.0, 1)
+            if exit_minutes
+            else None,
+            "score_vs_outcome_r_squared": _score_outcome_r_squared(trade_rows),
+        },
     }

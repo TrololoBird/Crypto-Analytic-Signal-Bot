@@ -9,18 +9,16 @@ from datetime import UTC, datetime
 from typing import Any
 
 from bot.diagnostics.facade import assess_radar_store
-from bot.market.data import MarketDataUnavailable
-from bot.market.proxy_bootstrap import retry_network_after_failure
-from bot.runtime.errors import DEFENSIVE_EXC
 from bot.runtime.watch_escalation import emit_radar_watch_candidates
-
-from ..domain.config import _ALL_SETUP_IDS
-from ..domain.events import ShortlistUpdatedEvent
-from ..domain.schemas import UniverseSymbol
-from ..market.data import BinanceFuturesMarketData
-from ..market.outcome_derank import penalties_from_sl_counts
-from ..market.promotion_engine import PromotionEngine
-from ..market.universe import (
+from engine.domain.config import _ALL_SETUP_IDS
+from engine.domain.events import ShortlistUpdatedEvent
+from engine.domain.schemas import UniverseSymbol
+from engine.errors import DEFENSIVE_EXC
+from engine.market.data import BinanceFuturesMarketData, MarketDataUnavailable
+from engine.market.outcome_derank import penalties_from_sl_counts
+from engine.market.promotion_engine import PromotionEngine
+from engine.market.proxy_bootstrap import retry_network_after_failure
+from engine.market.universe import (
     DEFAULT_PRESCORE_BASIS_WARM_LIMIT,
     build_shortlist,
     rerank_shortlist,
@@ -626,10 +624,20 @@ class ShortlistService:
                         != bot.settings.network.effective_proxy_urls()
                     ):
                         bot.settings = refreshed
-                        LOG.warning(
-                            "proxy pool refreshed after REST failure - "
-                            "restart bot to apply new egress"
-                        )
+                        _inner = getattr(bot, "client", None)
+                        _inner = getattr(_inner, "_binance_client", None) if _inner else None
+                        if _inner is not None and hasattr(_inner, "_apply_active_proxy"):
+                            new_url = refreshed.network.proxy_url or (
+                                refreshed.network.effective_proxy_urls()[0]
+                                if refreshed.network.effective_proxy_urls()
+                                else None
+                            )
+                            await _inner._apply_active_proxy(new_url)
+                            LOG.warning(
+                                "proxy pool refreshed after REST failure — "
+                                "hot-swapped egress | url=%s",
+                                new_url,
+                            )
                 except DEFENSIVE_EXC:
                     LOG.debug("network rediscovery after ticker failure skipped", exc_info=True)
             raise tickers_result

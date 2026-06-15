@@ -11,22 +11,23 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
-from bot.runtime.errors import DEFENSIVE_EXC, classify_runtime_error
+from engine.domain.strategies import StrategyDecision
+from engine.errors import DEFENSIVE_EXC, classify_runtime_error
+from engine.market.data_capability import assess_strategy_data_capability
+from engine.market.fit import asset_fit_reject_reason, market_context_from_prepared
+from engine.market.strategy_pools import DATA_POOL_SETUPS
+from engine.runtime_policy import effective_engine_score_floor
 
 from ..diagnostics.signals import get_global_diagnostics
-from ..domain.strategies import StrategyDecision
-from ..market.data_capability import assess_strategy_data_capability
-from ..market.fit import asset_fit_reject_reason, market_context_from_prepared
-from ..market.strategy_pools import DATA_POOL_SETUPS
-from ..runtime_policy import effective_engine_score_floor
 from .base import SignalResult
 from .lanes import is_standard_kline_interval, select_lane_setups
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from ..domain.config import BotSettings
-    from ..domain.schemas import PreparedSymbol, Signal
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import PreparedSymbol, Signal
+
     from .registry import StrategyRegistry
 
 LOG = logging.getLogger("bot.engine.engine")

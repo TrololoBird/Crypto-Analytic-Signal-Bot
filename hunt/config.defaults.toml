@@ -1,0 +1,136 @@
+# Hunt Watch — пороги (reference)
+
+# Скопируй нужное в config.toml [universe] / env при кастомизации.
+# Основной runtime читает корневой config.toml.
+
+[scanner]
+min_quote_volume_usd = 10_000_000
+pump_extreme_pct = 15.0
+range_hot_pct = 8.0
+pos_near_high = 0.85
+pos_near_low = 0.25
+score_watch = 45.0
+score_priority = 60.0
+scan_interval_s = 900
+watchlist_limit = 30
+
+[watch]
+tick_interval_s = 30
+# Ignition TG alerts off by default (watchlist-only); set true in env if needed.
+ignition_telegram = false
+symbol_tick_timeout_s = 180
+telegram_cooldown_min = 45
+followup_cooldown_min = 5
+max_dynamic_symbols = 12
+# Advisory digest: optional periodic summary (additive). 0 = no top-N cap.
+# HUNT_DIGEST_MAX_ENTRIES=0 HUNT_DIGEST_TOP_N=5 HUNT_ADVISORY_MAX_PER_HOUR=0
+# Liquidation burst advisory (P1.9): HUNT_LIQ_BURST_TG=1 to enable cascade radar TG
+
+[confirm]
+# Closed-bar TF for structural entry confirm (5m entry precision; 15m secondary).
+entry_confirm_tf = "5m"
+# Direction-aware confirm TF: dumps complete in minutes, pumps build over hours.
+# Dump confirms on the 1m closed bar; long stays on 5m. Fall back to entry_confirm_tf.
+entry_confirm_tf_dump = "1m"
+entry_confirm_tf_long = "5m"
+# On a sub-5m dump confirm TF, one fast closed break + 1 secondary factor confirms
+# (avoids waiting 2× 5m bars on liq-thin alts and missing the dump).
+dump_fast_confirm = true
+
+[confirm.short]
+min_score = 60
+min_score_without_div = 68
+forming_min_score = 45
+
+[levels.adaptive]
+# Nominal SL cap scales with 24h range (parabolic meme legs).
+sl_max_pct_normal = 8.0
+sl_max_pct_hot = 11.0
+sl_max_pct_parabolic = 14.0
+# Range thresholds for mode switch (see hunt_watch/level_calibration.py).
+hot_range_pct = 60.0
+parabolic_range_pct = 120.0
+parabolic_leg_gain_pct = 80.0
+
+[gate.premature_exhaustion_short]
+pos_min = 0.85
+bounce_from_low_pct = 15.0
+bounce_from_low_pct_tight = 4.0
+pos_min_tight = 0.92
+fall_from_high_max_pct = 5.0
+squeeze_top_pos_min = 0.85
+squeeze_top_bounce_pct = 4.0
+squeeze_top_fall_max_pct = 8.0
+
+[pinned.defaults]
+symbols = ["BTCUSDT", "ETHUSDT", "XAUUSDT", "XAGUSDT"]
+modes = { BTCUSDT = "both", ETHUSDT = "both", XAUUSDT = "both", XAGUSDT = "both" }
+# Deep /signal uses HUNT_FULL_PREPARE=1 + microstructure for these anchors.
+deep_analysis = { BTCUSDT = true, ETHUSDT = true, XAUUSDT = true, XAGUSDT = true }
+
+[market_regime]
+refresh_hours = 4
+min_liquid_qvol_usd = 10_000_000
+
+[tracker]
+# Auto-close active signals with no successful reconcile longer than this (orphan path).
+orphan_ttl_hours = 24
+stale_lc_ticks_default = 3
+stale_lc_ticks_near_tp1 = 8
+near_tp1_remaining_pct = 3.0
+reclaim_buffer = 1.001
+breakeven_buffer_pct = 0.15
+breakeven_buffer_min_pct = 1.0
+breakeven_risk_fraction = 0.25
+tp1_partial_fix_pct_normal = 50.0
+tp1_partial_fix_pct_hot = 80.0
+
+[collect]
+# Raw dump/long trigger thresholds (collect.py → scoring fuel).
+rsi15_overbought = 72.0
+rsi1h_overbought = 72.0
+rsi15_oversold = 32.0
+rsi1h_oversold = 35.0
+extended_above_impulse_pct = 3.0
+extended_below_impulse_pct = 3.0
+taker_sell_max = 0.98
+taker_buy_min = 1.02
+funding_crowded_long_pct = 0.05
+funding_crowded_short_pct = -0.02
+oi_flush_ratio = 0.997
+oi_build_ratio = 1.003
+basis_ap_premium_bps = 100.0
+basis_ap_discount_bps = -80.0
+microprice_sell_max = -0.05
+microprice_buy_min = 0.05
+structure_break_score = 28.0
+
+[scoring]
+# Cluster-capped fuel weights (scoring.py cluster_fuel).
+cluster_cap = 28.0
+trigger_weight_default = 12.0
+trigger_weight_structure = 28.0
+trigger_weight_close_break = 22.0
+trigger_weight_div = 18.0
+trigger_weight_trendline = 8.0
+trigger_weight_rejection = 16.0
+fuel_raw_blend_ratio = 0.55
+accumulation_long_fuel_cap = 72.0
+squeeze_bb_boundary = 0.08
+ema200_confluence_pct = 0.005
+ema200_fuel = 8.0
+squeeze_boundary_fuel = 8.0
+hidden_div_fuel = 10.0
+wall_max_distance_pct = 2.0
+zone_imb_threshold = 0.15
+wall_fuel_score = 6.0
+zone_fuel_score = 4.0
+
+[lifecycle.squeeze]
+bb_width_pctile_max = 0.25
+donchian_width_pct_max = 10.0
+rsi_exhaustion_enter = 66.0
+rsi_exhaustion_exit = 63.0
+taker_buy_min = 1.05
+taker_sell_max = 0.98
+cascade_wick_ratio_min = 0.25

@@ -11,19 +11,19 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
-from bot.domain.schemas import Signal, SymbolFrames, UniverseSymbol
 from bot.engine import SignalEngine, StrategyRegistry
-from bot.features.prepare import prepare_symbol
-from bot.features.prepare_frame import min_required_bars
-from bot.market.data import _timeframe_to_seconds
-from bot.market.proxy_bootstrap import ensure_network_ready
-from bot.market.rest_impl import BinanceClientImpl
-from bot.runtime_policy import effective_engine_score_floor
 from bot.setups.base import SetupParams
 from bot.strategies import STRATEGY_CLASSES
+from engine.domain.schemas import Signal, SymbolFrames, UniverseSymbol
+from engine.features.prepare import prepare_symbol
+from engine.features.prepare_frame import min_required_bars
+from engine.market.data import _timeframe_to_seconds
+from engine.market.proxy_bootstrap import ensure_network_ready
+from engine.market.rest_impl import BinanceClientImpl
+from engine.runtime_policy import effective_engine_score_floor
 
 if TYPE_CHECKING:
-    from bot.domain.config import BotSettings
+    from engine.domain.config import BotSettings
 
 LOG = logging.getLogger("bot.engine.backtest")
 

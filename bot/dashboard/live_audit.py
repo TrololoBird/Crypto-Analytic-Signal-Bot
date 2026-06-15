@@ -11,7 +11,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from bot.domain.labels import normalize_reject_reason
+from bot.policy.labels import normalize_reject_reason
 
 if TYPE_CHECKING:
     from collections.abc import Mapping

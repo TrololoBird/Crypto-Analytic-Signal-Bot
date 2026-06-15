@@ -14,9 +14,9 @@ try:
 except ModuleNotFoundError:  # pragma: no cover
     from common import configure_script_logging
 
-from bot.domain.config import load_settings
 from bot.persistence.repository.memory import MemoryRepository
-from bot.runtime.errors import DEFENSIVE_EXC
+from engine.domain.config import load_settings
+from engine.errors import DEFENSIVE_EXC
 
 LOG = configure_script_logging("scripts.clean_session_data")
 

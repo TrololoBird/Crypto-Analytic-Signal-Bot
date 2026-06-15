@@ -6,7 +6,7 @@ import html
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from bot.runtime.errors import DEFENSIVE_EXC
+from engine.errors import DEFENSIVE_EXC
 
 from .live_audit import audit_snapshot, build_dashboard_audit_snapshot
 
@@ -225,7 +225,7 @@ async def format_operator_runtime_block(bot: SignalBot) -> str:
     overview: dict[str, Any] = {}
     if live_data is not None:
         try:
-            overview = live_data.overview() or {}
+            overview = await live_data.overview() or {}
         except DEFENSIVE_EXC:
             overview = {}
 
@@ -339,21 +339,18 @@ async def format_operator_audit_text(_bot: SignalBot, live_data: DashboardLiveDa
     if live_data is None:
         return "<b>Audit</b>\nLive data недоступна."
 
-    def _build() -> dict[str, Any]:
-        snapshot = build_dashboard_audit_snapshot(
-            overview=live_data.overview(),
-            funnel=live_data.funnel(max_rows=20_000),
-            shortlist=live_data.shortlist(),
-            decisions=live_data.decisions(max_rows=20_000),
-            rejections=live_data.rejections(max_rows=20_000),
-            delivery=live_data.delivery(),
-            runtime=live_data.runtime(),
-            telegram=live_data.telegram_preview(),
-        )
-        return audit_snapshot(snapshot)
-
     try:
-        audit = _build()
+        snapshot = build_dashboard_audit_snapshot(
+            overview=await live_data.overview(),
+            funnel=await live_data.funnel(max_rows=20_000),
+            shortlist=await live_data.shortlist(),
+            decisions=await live_data.decisions(max_rows=20_000),
+            rejections=await live_data.rejections(max_rows=20_000),
+            delivery=await live_data.delivery(),
+            runtime=await live_data.runtime(),
+            telegram=await live_data.telegram_preview(),
+        )
+        audit = audit_snapshot(snapshot)
     except DEFENSIVE_EXC:
         return "<b>Audit</b>\nОшибка построения."
 

@@ -6,7 +6,8 @@ import logging
 import math
 from typing import TYPE_CHECKING, ClassVar
 
-from ..features.prepare import _swing_points as _sp
+from engine.features.prepare import _swing_points as _sp
+
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
 from ..setups.utils import normalize_trade_levels
@@ -15,8 +16,8 @@ from ._common import SpecHit, _latest_values, confirmed_pattern_frame, with_spec
 if TYPE_CHECKING:
     import polars as pl
 
-    from ..domain.config import BotSettings
-    from ..domain.schemas import PreparedSymbol, Signal
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import PreparedSymbol, Signal
 
 LOG = logging.getLogger("bot.strategies.turtle_soup")
 
@@ -456,6 +457,7 @@ __all__ = ["_detect_turtle_soup_extended", "detect_turtle_soup", "detect_turtle_
 
 class TurtleSoupSetup(SpecDetectorSetup):
     setup_id = "turtle_soup"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "limit"
     family = "reversal"
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)

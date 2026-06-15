@@ -5,13 +5,13 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from ..market.scheduler import analysis_intervals
-from ..runtime.errors import DEFENSIVE_EXC
+from bot.runtime.scheduler import analysis_intervals
+from engine.errors import DEFENSIVE_EXC
 
 if TYPE_CHECKING:
-    from ..domain.events import KlineCloseEvent
-    from ..domain.schemas import PipelineResult, Signal
-    from ..domain.strategies import StrategyMetadata
+    from engine.domain.events import KlineCloseEvent
+    from engine.domain.schemas import PipelineResult, Signal
+    from engine.domain.strategies import StrategyMetadata
 
 LOG = logging.getLogger("bot.runtime.kline_handler")
 

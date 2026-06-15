@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
-import threading
 import time
 from collections import deque
 from datetime import UTC, datetime
@@ -39,12 +39,12 @@ class DashboardAccessAuditor:
         self._log_path = log_path
         self._enabled = bool(enabled)
         self._hits: dict[str, deque[float]] = {}
-        self._lock = threading.Lock()
+        self._lock = asyncio.Lock()
 
-    def check_rate_limit(self, client_ip: str) -> bool:
+    async def check_rate_limit(self, client_ip: str) -> bool:
         """Return True when request is allowed."""
         now = time.monotonic()
-        with self._lock:
+        async with self._lock:
             window = self._hits.setdefault(client_ip, deque())
             while window and now - window[0] > 60.0:
                 window.popleft()
@@ -53,7 +53,7 @@ class DashboardAccessAuditor:
             window.append(now)
             return True
 
-    def record_access(
+    async def record_access(
         self,
         *,
         client_ip: str,

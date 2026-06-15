@@ -5,14 +5,14 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
 
-from ..domain.strategies import (
+from engine.domain.strategies import (
     SignalResult,
     StrategyDecision,
     StrategyMetadata,
 )
 
 if TYPE_CHECKING:
-    from ..domain.schemas import PreparedSymbol
+    from engine.domain.schemas import PreparedSymbol
 
 __all__ = ["AbstractStrategy", "SignalResult", "StrategyDecision", "StrategyMetadata"]
 

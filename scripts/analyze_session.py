@@ -16,7 +16,7 @@ import statistics
 from pathlib import Path
 from typing import Any
 
-from bot.runtime.errors import DEFENSIVE_EXC
+from engine.errors import DEFENSIVE_EXC
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:

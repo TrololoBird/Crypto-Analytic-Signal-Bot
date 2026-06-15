@@ -6,7 +6,7 @@ import logging
 import threading
 from typing import TYPE_CHECKING, Any
 
-from ..domain.strategies import StrategyMetadata
+from engine.domain.strategies import StrategyMetadata
 
 if TYPE_CHECKING:
     from .base import AbstractStrategy

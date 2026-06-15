@@ -3,7 +3,8 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING, ClassVar
 
-from ..features.prepare import _swing_points
+from engine.features.prepare import _swing_points
+
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.utils import build_structural_targets
 from ._common import as_float as _as_float
@@ -11,8 +12,8 @@ from ._common import confirmed_pattern_frame
 from .roadmap_base import RoadmapSetup
 
 if TYPE_CHECKING:
-    from ..domain.config import BotSettings
-    from ..domain.schemas import PreparedSymbol, Signal
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import PreparedSymbol, Signal
 
 __all__ = ["detect_supertrend_follow"]
 
@@ -276,6 +277,7 @@ def detect_supertrend_follow(
 
 class SuperTrendFollowSetup(RoadmapSetup):
     setup_id = "supertrend_follow"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "limit"
     family = "continuation"
     confirmation_profile = "trend_follow"
     required_context = ("futures_flow",)

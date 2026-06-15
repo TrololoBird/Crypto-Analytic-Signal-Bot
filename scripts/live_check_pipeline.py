@@ -21,15 +21,16 @@ except ModuleNotFoundError:  # pragma: no cover - direct script execution
         resolve_symbols,
     )
 
-from bot.delivery.telegram import DeliveryResult
-from bot.domain.config import load_settings
-from bot.domain.schemas import SymbolFrames, UniverseSymbol
-from bot.market.data import BinanceFuturesMarketData, MarketDataUnavailable
-from bot.market.rest_impl import BinanceClientImpl
-from bot.market.universe import strategy_fits_for_market_row
 from bot.runtime.bot import SignalBot
-from bot.runtime.errors import DEFENSIVE_EXC
-from bot.telemetry import TelemetryStore
+from engine.data_readiness import configured_frame_minimums, kline_fetch_limit
+from engine.domain.config import load_settings
+from engine.domain.schemas import SymbolFrames, UniverseSymbol
+from engine.errors import DEFENSIVE_EXC
+from engine.market.data import BinanceFuturesMarketData, MarketDataUnavailable
+from engine.market.rest_impl import BinanceClientImpl
+from engine.market.universe import strategy_fits_for_market_row
+from engine.telegram import DeliveryResult
+from engine.telemetry import TelemetryStore
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -230,7 +231,9 @@ async def _fetch_frames(
     symbol: str,
     *,
     max_wait_s: float,
+    settings: Any,
 ) -> SymbolFrames:
+    configured = configured_frame_minimums(settings)
     book_context = await _wait_for(
         "order_book_depth",
         lambda: client.fetch_order_book_depth_snapshot(symbol, limit=20),
@@ -239,22 +242,30 @@ async def _fetch_frames(
     df_1h, df_15m, df_5m, df_4h = await asyncio.gather(
         _wait_for(
             "klines_1h",
-            lambda: client.fetch_klines_cached(symbol, "1h", limit=500),
+            lambda: client.fetch_klines_cached(
+                symbol, "1h", limit=kline_fetch_limit(configured["1h"], "1h")
+            ),
             max_wait_s=max_wait_s,
         ),
         _wait_for(
             "klines_15m",
-            lambda: client.fetch_klines_cached(symbol, "15m", limit=500),
+            lambda: client.fetch_klines_cached(
+                symbol, "15m", limit=kline_fetch_limit(configured["15m"], "15m")
+            ),
             max_wait_s=max_wait_s,
         ),
         _wait_for(
             "klines_5m",
-            lambda: client.fetch_klines_cached(symbol, "5m", limit=300),
+            lambda: client.fetch_klines_cached(
+                symbol, "5m", limit=kline_fetch_limit(configured["5m"], "5m")
+            ),
             max_wait_s=max_wait_s,
         ),
         _wait_for(
             "klines_4h",
-            lambda: client.fetch_klines_cached(symbol, "4h", limit=500),
+            lambda: client.fetch_klines_cached(
+                symbol, "4h", limit=kline_fetch_limit(configured["4h"], "4h")
+            ),
             max_wait_s=max_wait_s,
         ),
     )
@@ -375,7 +386,9 @@ async def _run(
                     )
                 try:
                     frame_timeout = max(5.0, float(settings.ws.rest_timeout_seconds))
-                    frames = await _fetch_frames(client, symbol, max_wait_s=frame_timeout)
+                    frames = await _fetch_frames(
+                        client, symbol, max_wait_s=frame_timeout, settings=settings
+                    )
                     engine_timeout = max(
                         15.0,
                         float(

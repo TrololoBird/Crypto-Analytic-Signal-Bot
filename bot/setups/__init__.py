@@ -9,12 +9,14 @@ from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from ..delivery.contract import resolve_target_rr
+from engine.contract import SIGNAL_ENTRY_PAD_ATR, resolve_target_rr
+from engine.domain.risk import RiskParams
+from engine.domain.schemas import PreparedSymbol, Signal
+from engine.domain.strategies import StrategyDecision
+from engine.domain.strategy_catalog import resolve_setup_tf_tags
+from engine.features.prepare import _swing_points  # shared swing detection helper
+
 from ..delivery.trade_plan import TradePlanBuilder
-from ..domain.risk import RiskParams
-from ..domain.schemas import PreparedSymbol, Signal
-from ..domain.strategies import StrategyDecision
-from ..features.prepare import _swing_points  # shared swing detection helper
 from .utils import (
     apply_graded_penalty,
     build_structural_targets,
@@ -328,7 +330,8 @@ def _build_signal(
     atr: float,
     timeframe: str = "15m",
     strategy_family: str = "continuation",
-    entry_pad_atr_mult: float = 0.35,
+    entry_pad_atr_mult: float = SIGNAL_ENTRY_PAD_ATR,
+    entry_order_type: str = "limit",
 ) -> Signal | None:
     if not math.isfinite(float(atr)) or atr <= 0.0:
         _reject(
@@ -403,8 +406,10 @@ def _build_signal(
 
     trend_direction = getattr(prepared, "bias_1h", None)
     trend_score = getattr(prepared, "trend_score_1h", None)
-    # floor: skip sub-threshold signals before filter pipeline (min_score margin)
-    score = max(0.63, round(float(score), 4))
+    # floor: align with config min_score (0.65) — 0.63 let signals through that
+    # filters immediately dropped, creating wasted confluence compute.
+    score = max(0.65, round(float(score), 4))
+    catalog_entry_tf, catalog_pattern_tf, catalog_context_tfs = resolve_setup_tf_tags(setup_id)
 
     return Signal(
         symbol=prepared.symbol,
@@ -412,6 +417,9 @@ def _build_signal(
         direction=direction,
         score=score,
         timeframe=signal_timeframe,
+        entry_tf=catalog_entry_tf,
+        pattern_tf=catalog_pattern_tf,
+        context_tfs=catalog_context_tfs,
         entry_low=trade_plan.entry_low,
         entry_high=trade_plan.entry_high,
         stop=trade_plan.stop_loss,
@@ -441,6 +449,7 @@ def _build_signal(
         premium_zscore_5m=premium_zscore_5m,
         premium_slope_5m=premium_slope_5m,
         ls_ratio=ls_ratio,
+        entry_order_type=str(entry_order_type or "limit").strip().lower(),
     )
 
 

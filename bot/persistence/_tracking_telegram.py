@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..domain.schemas import Signal
+    from engine.domain.schemas import Signal
 
 
 LOG = logging.getLogger("bot.tracking")

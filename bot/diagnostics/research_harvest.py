@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from bot.domain.schemas import PipelineResult, PreparedSymbol
+    from engine.domain.schemas import PipelineResult, PreparedSymbol
 
 
 def _json_safe(value: Any) -> Any:

@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from bot.domain.limit_entry import limit_delivery_ready
-
-from .contract import (
+from engine.contract import (
     DEFAULT_SCALE_WEIGHTS,
     DEFAULT_TARGET_RR,
     TradePlan,
@@ -16,6 +14,7 @@ from .contract import (
     resolve_target_rr,
     valid_until_from,
 )
+from engine.domain.limit_entry import limit_delivery_ready
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -99,6 +98,8 @@ def evaluate_publish_readiness(
     entry_high: float,
     stop: float,
     chase_pct: float,
+    entry_order_type: str = "limit",
+    atr_pct: float | None = None,
 ) -> tuple[bool, str | None, dict[str, object]]:
     """Publish-time limit gate - delegates to domain limit_entry semantics."""
     ready, reason, details = limit_delivery_ready(
@@ -108,5 +109,7 @@ def evaluate_publish_readiness(
         entry_high=entry_high,
         stop=stop,
         chase_pct=chase_pct,
+        entry_order_type=entry_order_type,
+        atr_pct=atr_pct,
     )
     return ready, reason, dict(details)

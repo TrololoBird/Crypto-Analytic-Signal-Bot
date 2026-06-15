@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, ClassVar
 
-from ..features.prepare import _swing_points as _sp
+from engine.features.prepare import _swing_points as _sp
+
 from ..setups import _build_signal, _compute_dynamic_score, _pullback_levels, _reject
 from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
 from ..setups.utils import select_structural_target
@@ -20,8 +21,8 @@ from ._common import (
 if TYPE_CHECKING:
     import polars as pl
 
-    from ..domain.config import BotSettings
-    from ..domain.schemas import PreparedSymbol, Signal
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import PreparedSymbol, Signal
 
 __all__ = ["detect_structure_pullback"]
 
@@ -363,7 +364,7 @@ def _detect_structure_pullback_extended(
     # --- Compute structural SL/TP ---
     work_15m_tail = work_15m.tail(10)
     _sh15, _sl15 = _sp(work_15m_tail, n=2)
-    sh_1h_mask, sl_1h_mask = _sp(work_1h, n=3, include_unconfirmed_tail=True)
+    sh_1h_mask, sl_1h_mask = _sp(work_1h, n=3, include_unconfirmed_tail=False)
     sh_4h_mask = None
     sl_4h_mask = None
     if work_4h is not None and not work_4h.is_empty():
@@ -503,6 +504,7 @@ __all__ = [
 
 class StructurePullbackSetup(SpecDetectorSetup):
     setup_id = "structure_pullback"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "limit"
     family = "continuation"
     confirmation_profile = "trend_follow"
     required_context = ("futures_flow",)

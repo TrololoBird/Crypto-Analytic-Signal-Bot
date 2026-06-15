@@ -5,8 +5,8 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from bot.domain.labels import reject_reason_ru, result_label_ru
-from bot.runtime.errors import DEFENSIVE_EXC
+from bot.policy.labels import reject_reason_ru, result_label_ru
+from engine.errors import DEFENSIVE_EXC
 
 from .tracking_view import serialize_tracking_signal
 
@@ -107,8 +107,14 @@ async def build_today_summary(bot: Any, live_data: DashboardLiveData | None) -> 
         except DEFENSIVE_EXC:
             pass
 
-    overview = live_data.overview() if live_data is not None else {}
-    funnel = live_data.funnel() if live_data is not None else {}
+    overview: JsonDict = {}
+    funnel: JsonDict = {}
+    if live_data is not None:
+        try:
+            overview = await live_data.overview() or {}
+            funnel = await live_data.funnel() or {}
+        except DEFENSIVE_EXC:
+            pass
     hint = build_funnel_hint(overview=overview, funnel=funnel)
     session_delivered = int(hint.get("delivered") or 0)
 

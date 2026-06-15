@@ -7,6 +7,7 @@ on:
       - "bot/**"
       - "tests/**"
       - "scripts/**"
+      - "hunt-watch/**"
       - "main.py"
       - "pyproject.toml"
 
@@ -43,9 +44,9 @@ jobs:
 
       - name: Fix with ruff
         run: |
-          ruff check --fix bot/ tests/ scripts/ main.py
-          ruff format bot/ tests/ scripts/ main.py
-          python -m compileall -q bot tests
+          ruff check --fix bot/ tests/ scripts/ main.py hunt-watch/
+          ruff format bot/ tests/ scripts/ main.py hunt-watch/
+          python -m compileall -q bot tests hunt-watch
 
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@c5a7806660adbe173f04e3e038b0ccdcd758773c # v6.1.0

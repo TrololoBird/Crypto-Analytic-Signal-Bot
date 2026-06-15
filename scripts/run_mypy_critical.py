@@ -13,14 +13,14 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SKIP_IMPORTS = (
     "bot/runtime/merge.py",
     "bot/engine/lanes.py",
-    "bot/delivery/contract.py",
+    "engine/contract.py",
     "bot/delivery/formatting.py",
-    "bot/domain/strategy_catalog.py",
+    "engine/domain/strategy_catalog.py",
     "bot/delivery/confluence.py",
 )
 
 # follow-imports=silent: follow pydantic/dotenv for config models only.
-SILENT_IMPORTS = ("bot/domain/config.py",)
+SILENT_IMPORTS = ("engine/domain/config.py",)
 
 
 def _run_mypy(targets: tuple[str, ...], extra_args: list[str]) -> int:

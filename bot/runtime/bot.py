@@ -28,16 +28,9 @@ from bot.dashboard import BotDashboard
 from bot.delivery.ops_webhook import close_ops_webhook_session, send_ops_webhook_alert
 from bot.delivery.telegram_routing import operator_dm_enabled, send_operator_html
 from bot.diagnostics.config_audit import run_startup_audit
-from bot.market.proxy_bootstrap import ensure_network_ready, run_proxy_refresh_loop
-from bot.market.radar_state import SymbolTier
-from bot.market.subscription_planner import merge_order_flow_tracked_symbols
 from bot.regime.market import MarketRegimeAnalyzer
-from bot.runtime.errors import DEFENSIVE_EXC
 from bot.runtime.metrics import BotMetricsCollector
-
-from ..delivery.confluence import ConfluenceEngine
-from ..diagnostics.signals import SignalDiagnostics, set_global_diagnostics
-from ..domain import (
+from engine.domain import (
     BookTickerEvent,
     BotSettings,
     KlineCloseEvent,
@@ -49,8 +42,15 @@ from ..domain import (
     SymbolFrames,
     UniverseSymbol,
 )
+from engine.errors import DEFENSIVE_EXC
+from engine.market.data import BinanceFuturesMarketData
+from engine.market.proxy_bootstrap import ensure_network_ready, run_proxy_refresh_loop
+from engine.market.radar_state import SymbolTier
+from engine.market.subscription_planner import merge_order_flow_tracked_symbols
+
+from ..delivery.confluence import ConfluenceEngine
+from ..diagnostics.signals import SignalDiagnostics, set_global_diagnostics
 from ..feature_flags import FeatureFlags
-from ..market.data import BinanceFuturesMarketData
 from ..setups.base import SetupParams
 from ..strategies import STRATEGY_CLASSES
 from .container import build_application_container
@@ -86,9 +86,10 @@ if TYPE_CHECKING:
     from collections import Counter
     from datetime import datetime
 
+    from engine.telemetry import TelemetryStore
+
     from ..engine import StrategyRegistry
     from ..persistence.tracking import SignalTrackingEvent
-    from ..telemetry import TelemetryStore
 
 LOG = logging.getLogger("bot.runtime.bot")
 
@@ -496,13 +497,15 @@ class SignalBot:
         if updated is not self.settings:
             self.settings = updated
             LOG.info("network settings refreshed after bootstrap probe")
-            # If proxy was cleared (direct egress fallback), apply to the live REST client now.
-            if not updated.network.effective_proxy_urls():
-                _inner = getattr(self.client, "_binance_client", None)
-                if _inner is not None and hasattr(_inner, "_apply_active_proxy"):
-                    await _inner._apply_active_proxy(None)
-                    LOG.info("REST client switched to direct egress after proxy probe failure")
+        net = self.settings.network
+        use_direct = not str(net.proxy_url or "").strip() and not net.failover_enabled
+        if use_direct or not net.effective_proxy_urls():
+            _inner = getattr(self.client, "_binance_client", None)
+            if _inner is not None and hasattr(_inner, "_apply_active_proxy"):
+                await _inner._apply_active_proxy(None)
+                LOG.info("REST client on direct egress | failover=%s", net.failover_enabled)
 
+        self._last_kline_event_ts = asyncio.get_running_loop().time()
         self._preflight_storage_check()
         await self._preflight_delivery_check()
 

@@ -23,8 +23,8 @@ except ModuleNotFoundError:  # pragma: no cover
     import common  # noqa: F401
 
 from bot.diagnostics.facade import build_zero_hit_triage
-from bot.domain.config import load_settings
 from bot.persistence.db_status import collect_db_status
+from engine.domain.config import load_settings
 from scripts.reconcile_strategy_defaults import (
     collect_defaults_drift,
     write_drift_report,

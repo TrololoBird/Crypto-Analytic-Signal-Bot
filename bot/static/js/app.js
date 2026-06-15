@@ -38,10 +38,7 @@ const App = {
 
   async _loadLabelMaps() {
     try {
-      const resp = await fetch("/api/meta/labels");
-      if (resp.ok) {
-        this.state.labelMaps = await resp.json();
-      }
+      this.state.labelMaps = await this.apiFetch("/api/meta/labels");
     } catch (e) {
       console.warn("label maps load failed", e);
     }
@@ -81,6 +78,8 @@ const App = {
     };
     connect();
   },
+
+  apiFetch(path, options = {}) { return apiFetch(path, options); },
 
   _onWSMessage(data) {
     switch (data.type) {
@@ -186,10 +185,7 @@ const App = {
       ];
       const results = await Promise.allSettled(
         endpoints.map(([key, url]) =>
-          fetch(url, { cache: "no-store" }).then((r) => {
-            if (!r.ok) throw new Error(`HTTP ${r.status}`);
-            return r.json().then((data) => ({ key, data }));
-          })
+          this.apiFetch(url).then((data) => ({ key, data }))
         )
       );
       for (const result of results) {
@@ -212,9 +208,7 @@ const App = {
 
   async _refreshTrackingBadge() {
     try {
-      const res = await fetch("/api/v1/signals/active", { cache: "no-store" });
-      if (!res.ok) return;
-      const rows = await res.json();
+      const rows = await this.apiFetch("/api/v1/signals/active");
       if (typeof _updateTrackingBadge === "function") _updateTrackingBadge(rows);
     } catch (_err) {
       /* ignore */
@@ -223,8 +217,7 @@ const App = {
 
   async _refreshAudit() {
     try {
-      const res = await fetch("/api/live/audit?max_rows=20000", { cache: "no-store" });
-      if (res.ok) this.state.audit = await res.json();
+      this.state.audit = await this.apiFetch("/api/live/audit?max_rows=20000");
     } catch (err) {
       console.warn("audit refresh failed", err);
     }
@@ -262,6 +255,13 @@ const App = {
     if (runId) runId.textContent = "сессия " + (this.state.overview?.run_id || "—");
   },
 };
+
+async function apiFetch(path, options = {}) {
+  const url = path.startsWith("/") ? path : `/api/${path}`;
+  const resp = await fetch(url, { cache: "no-store", ...options });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status} for ${path}`);
+  return resp.json();
+}
 
 function text(value) {
   if (value === null || value === undefined || value === "") return "—";

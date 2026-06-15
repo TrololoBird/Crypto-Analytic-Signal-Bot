@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, ClassVar
 
-from ..domain.strategy_catalog import catalog_default_params
+from engine.domain.strategy_catalog import catalog_default_params
+
 from ..setups.base import BaseSetup
 from ..setups.utils import get_dynamic_params
 from ._roadmap import (
@@ -29,8 +30,8 @@ from ._roadmap import (
 )
 
 if TYPE_CHECKING:
-    from ..domain.config import BotSettings
-    from ..domain.schemas import PreparedSymbol
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import PreparedSymbol
 
 
 class RoadmapSetup(BaseSetup):

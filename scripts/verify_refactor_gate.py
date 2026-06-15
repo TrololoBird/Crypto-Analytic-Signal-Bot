@@ -6,10 +6,10 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from bot.domain.strategy_catalog import PR10_WAVES, verify_strategy_wiring, wave_status
 from bot.runtime.bot import SignalBot  # noqa: F401
-from bot.runtime.errors import DEFENSIVE_EXC
 from bot.strategies import STRATEGY_CLASSES
+from engine.domain.strategy_catalog import PR10_WAVES, verify_strategy_wiring, wave_status
+from engine.errors import DEFENSIVE_EXC
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -63,7 +63,12 @@ BOT_PRIVATE_API_IMPORT_SNIPPETS = (
 def _scan_imports() -> list[str]:
     errors: list[str] = []
     skip = {Path("scripts/verify_refactor_gate.py")}
-    for root in (REPO_ROOT / "bot", REPO_ROOT / "scripts", REPO_ROOT / "tests"):
+    for root in (
+        REPO_ROOT / "bot",
+        REPO_ROOT / "engine",
+        REPO_ROOT / "scripts",
+        REPO_ROOT / "tests",
+    ):
         if not root.exists():
             continue
         for py in root.rglob("*.py"):
@@ -89,25 +94,25 @@ def _scan_imports() -> list[str]:
 
 def _scan_bot_private_api_imports() -> list[str]:
     errors: list[str] = []
-    root = REPO_ROOT / "bot"
-    if not root.exists():
-        return errors
-    for py in root.rglob("*.py"):
-        if "__pycache__" in py.parts:
+    for root in (REPO_ROOT / "bot", REPO_ROOT / "engine"):
+        if not root.exists():
             continue
-        rel = py.relative_to(REPO_ROOT)
-        try:
-            lines = py.read_text(encoding="utf-8").splitlines()
-        except OSError:
-            continue
-        for line in lines:
-            stripped = line.strip()
-            if not stripped.startswith(("from ", "import ")):
+        for py in root.rglob("*.py"):
+            if "__pycache__" in py.parts:
                 continue
-            for snippet in BOT_PRIVATE_API_IMPORT_SNIPPETS:
-                if snippet in stripped:
-                    errors.append(f"{rel}: private/ccxt import {snippet!r}")
-                    break
+            rel = py.relative_to(REPO_ROOT)
+            try:
+                lines = py.read_text(encoding="utf-8").splitlines()
+            except OSError:
+                continue
+            for line in lines:
+                stripped = line.strip()
+                if not stripped.startswith(("from ", "import ")):
+                    continue
+                for snippet in BOT_PRIVATE_API_IMPORT_SNIPPETS:
+                    if snippet in stripped:
+                        errors.append(f"{rel}: private/ccxt import {snippet!r}")
+                        break
     return errors
 
 

@@ -15,15 +15,22 @@ from pathlib import Path
 from threading import Thread
 from typing import TYPE_CHECKING, Any, cast
 
-import polars as pl
-
-from bot.runtime.errors import DEFENSIVE_EXC
 from bot.strategies import STRATEGY_CLASSES
+from engine.domain.strategies import RISK_PROFILE_BY_ID, STRATEGY_STATUS_BY_ID
+from engine.errors import DEFENSIVE_EXC
 
-from ..domain.strategies import RISK_PROFILE_BY_ID, STRATEGY_STATUS_BY_ID
 from ..persistence.diary_store import DiaryStore
+from ._live_helpers import (
+    _compute_killzone,
+    _confluence_color,
+    _dataframe_to_kline_rows,
+    _is_routing_excluded_decision_reason,
+    _normalize_kline_row,
+    _parse_datetime,
+    _runtime_strategy_status,
+)
 from .access_audit import DashboardAccessAuditor, client_ip_from_request
-from .live import DashboardLiveData, _is_routing_excluded_decision_reason
+from .live import DashboardLiveData
 from .routes_setup import register_routes
 from .tracking_view import serialize_tracking_signal
 from .ws_broadcast import DashboardWSBroadcaster
@@ -72,7 +79,13 @@ class BotDashboard:
         self._decision_cache: dict[
             tuple[int, int], tuple[float, tuple[tuple[str, float], ...], dict[str, Any]]
         ] = {}
-        self._live_data = DashboardLiveData(lambda: self.bot)
+        settings = getattr(bot, "settings", None)
+        cache_ttl = (
+            settings.runtime.dashboard_cache_ttl_seconds
+            if settings and hasattr(settings, "runtime")
+            else 5.0
+        )
+        self._live_data = DashboardLiveData(lambda: self.bot, cache_ttl_seconds=cache_ttl)
         self._diary_store: DiaryStore | None = None
         self._diary_init_lock = asyncio.Lock()
         self._ws_broadcaster: DashboardWSBroadcaster | None = None
@@ -125,8 +138,8 @@ class BotDashboard:
             if path in _open_paths or path.startswith("/static/"):
                 return await call_next(request)
             client_ip = client_ip_from_request(request)
-            if not self._access_auditor.check_rate_limit(client_ip):
-                self._access_auditor.record_access(
+            if not await self._access_auditor.check_rate_limit(client_ip):
+                await self._access_auditor.record_access(
                     client_ip=client_ip,
                     method=str(request.method),
                     path=path,
@@ -136,7 +149,7 @@ class BotDashboard:
                 if JSONResponse is not None:
                     return JSONResponse({"detail": "rate_limit_exceeded"}, status_code=429)
             response = await call_next(request)
-            self._access_auditor.record_access(
+            await self._access_auditor.record_access(
                 client_ip=client_ip,
                 method=str(request.method),
                 path=path,
@@ -212,35 +225,6 @@ class BotDashboard:
             LOG.exception("failed to cache strategies")
             self._strategies_cache = []
 
-    @staticmethod
-    def _runtime_strategy_status(row: dict[str, Any], catalog_status: str) -> str:
-        trades = int(row.get("trades") or row.get("count") or 0)
-        pending = int(row.get("pending_signals") or 0)
-        active = int(row.get("active_signals") or 0)
-        signals_seen = int(row.get("signals_seen") or 0)
-        missing_outcomes = int(row.get("closed_missing_outcomes") or 0)
-        detector_runs = int(row.get("detector_runs") or 0)
-        detector_hits = int(row.get("detector_hits") or 0)
-        expectancy = float(row.get("expectancy_r") or row.get("avg_rr") or 0.0)
-        win_rate = float(row.get("win_rate") or 0.0)
-        if trades <= 0:
-            if pending or active:
-                return "observing:open"
-            if missing_outcomes:
-                return "observing:outcome_repair_needed"
-            if detector_hits:
-                return "observing:detector_active"
-            if detector_runs:
-                return "observing:market_condition"
-            if signals_seen:
-                return f"observing:{catalog_status}"
-            return "unverified"
-        if trades >= 5 and expectancy < 0.0:
-            return "needs_rework"
-        if trades >= 5 and expectancy > 0.0 and win_rate >= 0.45:
-            return "validated"
-        return f"observing:{catalog_status}"
-
     def _merge_strategy_catalog(
         self,
         report: dict[str, Any],
@@ -292,7 +276,7 @@ class BotDashboard:
             row["enabled"] = is_enabled
             catalog_status = str(item.get("status", "beta") or "beta")
             row["catalog_status"] = catalog_status
-            row["status"] = self._runtime_strategy_status(row, catalog_status)
+            row["status"] = _runtime_strategy_status(row, catalog_status)
             row["risk_profile"] = item.get("risk_profile", "generic")
             row["family"] = item.get("family", "generic")
 
@@ -331,31 +315,9 @@ class BotDashboard:
             else:
                 return store
 
-    @staticmethod
-    def _compute_killzone() -> dict[str, bool]:
-        now = datetime.now(UTC)
-        hour = now.hour + now.minute / 60.0
-        return {
-            "london": 8 <= hour < 17,
-            "ny": 13 <= hour < 22,
-            "asia": 0 <= hour < 9,
-        }
-
-    @staticmethod
-    def _confluence_color(score: float) -> str:
-        if score >= 80:
-            return "#2fd17c"
-        if score >= 60:
-            return "#63a5ff"
-        if score >= 40:
-            return "#f5bf4f"
-        if score >= 20:
-            return "#ff9f43"
-        return "#ff5b6b"
-
-    def _get_live_signal_feed(self, limit: int = 20) -> list[dict[str, Any]]:
-        signals = self._get_recent_signals(limit=limit * 2)
-        killzone = self._compute_killzone()
+    async def _get_live_signal_feed(self, limit: int = 20) -> list[dict[str, Any]]:
+        signals = await self._get_recent_signals(limit=limit * 2)
+        killzone = _compute_killzone()
         regime_data = self._get_market_regime()
         regime_label = (
             regime_data.get("regime", "unknown") if isinstance(regime_data, dict) else "unknown"
@@ -365,7 +327,7 @@ class BotDashboard:
             score = float(sig.get("score") or sig.get("confluence_score") or 0.0)
             enriched = dict(sig)
             enriched["confluence_score"] = round(score, 1)
-            enriched["confluence_color"] = self._confluence_color(score)
+            enriched["confluence_color"] = _confluence_color(score)
             enriched["killzone"] = killzone
             enriched["market_regime"] = regime_label
             enriched["active_strategies"] = [
@@ -440,7 +402,7 @@ class BotDashboard:
             if callable(fetch_fn):
                 try:
                     df = await asyncio.wait_for(fetch_fn(sym, interval, limit=limit), timeout=8.0)
-                    rows = self._dataframe_to_kline_rows(df)
+                    rows = _dataframe_to_kline_rows(df)
                     source = "rest"
                 except (TimeoutError, *DEFENSIVE_EXC):  # type: ignore[misc]
                     rows = None
@@ -454,7 +416,7 @@ class BotDashboard:
                 except TypeError, ValueError:
                     mark_price = None
 
-        normalized = [self._normalize_kline_row(row) for row in (rows or [])]
+        normalized = [_normalize_kline_row(row) for row in (rows or [])]
         normalized = [row for row in normalized if row is not None]
         return {
             "symbol": sym,
@@ -463,53 +425,6 @@ class BotDashboard:
             "mark_price": mark_price,
             "klines": normalized,
         }
-
-    @staticmethod
-    def _normalize_kline_row(row: dict[str, Any]) -> dict[str, Any] | None:
-        try:
-            open_px = float(row.get("open") or row.get("o") or 0.0)
-            high_px = float(row.get("high") or row.get("h") or 0.0)
-            low_px = float(row.get("low") or row.get("l") or 0.0)
-            close_px = float(row.get("close") or row.get("c") or 0.0)
-        except TypeError, ValueError:
-            return None
-        if close_px <= 0.0:
-            return None
-        ts = row.get("time") or row.get("close_time") or row.get("t")
-        ts_text = ts.isoformat() if hasattr(ts, "isoformat") else str(ts or "")
-        return {
-            "time": ts_text,
-            "open": open_px,
-            "high": high_px,
-            "low": low_px,
-            "close": close_px,
-        }
-
-    @staticmethod
-    def _dataframe_to_kline_rows(df: Any) -> list[dict[str, Any]]:
-        if df is None:
-            return []
-        try:
-            if isinstance(df, pl.DataFrame) and not df.is_empty():
-                cols = set(df.columns)
-                time_col = (
-                    "time" if "time" in cols else ("close_time" if "close_time" in cols else None)
-                )
-                if time_col is None:
-                    return []
-                return [
-                    {
-                        "time": row.get(time_col),
-                        "open": row.get("open"),
-                        "high": row.get("high"),
-                        "low": row.get("low"),
-                        "close": row.get("close"),
-                    }
-                    for row in df.tail(200).to_dicts()
-                ]
-        except DEFENSIVE_EXC:
-            return []
-        return []
 
     def _get_html_dashboard(self) -> str:
         return _DASHBOARD_HTML
@@ -522,7 +437,7 @@ class BotDashboard:
     def _current_run_started_at(self) -> datetime | None:
         telemetry = getattr(self.bot, "telemetry", None)
         started_at = getattr(telemetry, "started_at", None)
-        parsed = self._parse_datetime(started_at)
+        parsed = _parse_datetime(started_at)
         if parsed is not None:
             return parsed
 
@@ -533,7 +448,7 @@ class BotDashboard:
             metadata_path = Path(telemetry_dir) / "runs" / run_id / "run_metadata.json"
             try:
                 payload = json.loads(metadata_path.read_text(encoding="utf-8"))
-                parsed = self._parse_datetime(payload.get("started_at"))
+                parsed = _parse_datetime(payload.get("started_at"))
                 if parsed is not None:
                     return parsed
             except OSError, json.JSONDecodeError:
@@ -551,18 +466,6 @@ class BotDashboard:
         if scope == "all":
             return None
         return datetime.now(UTC) - timedelta(days=max(1, int(days)))
-
-    @staticmethod
-    def _parse_datetime(value: Any) -> datetime | None:
-        if value is None:
-            return None
-        if isinstance(value, datetime):
-            return value if value.tzinfo else value.replace(tzinfo=UTC)
-        try:
-            parsed = datetime.fromisoformat(str(value))
-        except TypeError, ValueError:
-            return None
-        return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
     async def _get_status(self) -> dict[str, Any]:
         bot = self.bot
@@ -637,7 +540,7 @@ class BotDashboard:
             LOG.debug("error fetching active signals: %s", exc)
             return []
 
-    def _get_recent_signals(self, limit: int = 20) -> list[dict[str, Any]]:
+    async def _get_recent_signals(self, limit: int = 20) -> list[dict[str, Any]]:
         bot = self.bot
         if bot is None or not hasattr(bot, "settings"):
             return []
@@ -680,7 +583,10 @@ class BotDashboard:
         if aggregated:
             return aggregated
 
-        decisions = self._live_data.decisions(limit=max(limit, 20), max_rows=50_000)
+        try:
+            decisions = await self._live_data.decisions(limit=max(limit, 20), max_rows=50_000)
+        except DEFENSIVE_EXC:
+            return []
         rows: list[dict[str, Any]] = []
         for row in decisions.get("setup_reports", []):
             if int(row.get("signals") or 0) <= 0:

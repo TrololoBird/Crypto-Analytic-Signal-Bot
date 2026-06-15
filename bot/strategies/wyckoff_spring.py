@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, ClassVar
 
-from ..domain.strategy_catalog import catalog_default_params
+from engine.domain.strategy_catalog import catalog_default_params
+
 from ._common import (
     SpecHit,
     _latest_values,
@@ -17,8 +18,8 @@ from .roadmap_base import RoadmapSetup
 if TYPE_CHECKING:
     import polars as pl
 
-    from ..domain.config import BotSettings
-    from ..domain.schemas import PreparedSymbol, Signal
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import PreparedSymbol, Signal
 
 __all__ = ["detect_wyckoff_spring", "detect_wyckoff_spring_prepared"]
 
@@ -86,8 +87,8 @@ def detect_wyckoff_spring_prepared(
     family: str,
 ) -> Signal | None:
     params = effective_params
-    work = confirmed_pattern_frame(prepared.work_15m)
-    hit = detect_wyckoff_spring(work, timeframe="15m")
+    work = confirmed_pattern_frame(prepared.work_1h)
+    hit = detect_wyckoff_spring(work, timeframe="1h")
     if hit is not None:
         return build_spec_signal(
             prepared=prepared,
@@ -256,6 +257,7 @@ def detect_wyckoff_spring_prepared(
 
 class WyckoffSpringSetup(RoadmapSetup):
     setup_id = "wyckoff_spring"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "limit"
     family = "reversal"
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)

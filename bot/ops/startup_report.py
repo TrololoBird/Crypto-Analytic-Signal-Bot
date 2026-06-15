@@ -12,14 +12,14 @@ from datetime import UTC, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
 from bot.delivery.telegram_routing import send_operator_html
-from bot.runtime.errors import DEFENSIVE_EXC
 from bot.runtime.telegram_operator import operator_console_enabled
+from engine.domain.config import BotSettings, load_settings
+from engine.errors import DEFENSIVE_EXC
 
 from ..dashboard.operator_context import (
     format_market_from_display_snapshot,
     format_runtime_ops_block,
 )
-from ..domain.config import BotSettings, load_settings
 from ..persistence.journal import build_config_suggestions
 from ..persistence.repository.memory import MemoryRepository
 from ..persistence.tracked import parse_state_dt
@@ -264,7 +264,7 @@ def _load_sqlite_tracking_snapshot(
 ) -> dict[str, Any]:
     async def _read() -> dict[str, Any]:
         repo = MemoryRepository(db_path=db_path, data_dir=bot_dir / "parquet")
-        await repo.initialize()
+        await repo.initialize(skip_ddl=True)
         try:
             last_days: int | None = None
             if since is not None:
@@ -540,7 +540,7 @@ def _derive_suspicious_modules(snapshot: dict[str, Any]) -> list[dict[str, str]]
         alerts = radar_health.get("alerts") or []
         modules.append(
             {
-                "module": "bot.market.radar_state",
+                "module": "engine.market.radar_state",
                 "reason": f"radar funnel degraded ({', '.join(alerts) or 'unknown'})",
             }
         )
@@ -590,7 +590,7 @@ def _derive_suspicious_modules(snapshot: dict[str, Any]) -> list[dict[str, str]]
     if latest_cycle.get("reconnect_reason") not in {None, "connected"}:
         modules.append(
             {
-                "module": "bot.market.ws",
+                "module": "engine.market.ws",
                 "reason": (
                     f"latest cycle recorded reconnect_reason={latest_cycle.get('reconnect_reason')}"
                 ),
@@ -602,7 +602,7 @@ def _derive_suspicious_modules(snapshot: dict[str, Any]) -> list[dict[str, str]]
     ):
         modules.append(
             {
-                "module": "bot.market.data",
+                "module": "engine.market.data",
                 "reason": "rest_weight_1m was high in the latest persisted cycle",
             }
         )
@@ -695,7 +695,7 @@ def _derive_recommended_fixes(snapshot: dict[str, Any]) -> list[dict[str, str]]:
         fixes.append(
             {
                 "priority": "medium",
-                "module": "bot.market.data",
+                "module": "engine.market.data",
                 "action": (
                     "Reduce bursty REST usage or add adaptive backoff when Binance "
                     "used weight approaches the minute limit."

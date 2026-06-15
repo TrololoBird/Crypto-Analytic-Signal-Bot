@@ -21,7 +21,44 @@ function renderOutcomes() {
   const cmp = data.comparisons || {};
   const quality = data.data_quality || {};
 
-  setChildren("outcomes-kpis", [
+  const exportBtn = el("button", {
+    class: "btn btn-sm",
+    text: "CSV",
+    title: "Скачать последние стоп-лоссы в CSV",
+    onclick: () => { window.open("/api/v1/analytics/export?days=30", "_blank"); },
+  });
+
+  fetch("/api/v1/analytics/operator-kpi?days=7", { cache: "no-store" })
+    .then((res) => (res.ok ? res.json() : null))
+    .then((kpi) => {
+      if (!kpi || kpi.error) {
+        setChildren("outcomes-operator-kpi", [
+          el("div", { class: "empty", text: "Operator KPI недоступен" }),
+        ]);
+        return;
+      }
+      const m = kpi.metrics || {};
+      const slReg = m.sl_rate_by_regime_4h || {};
+      setChildren("outcomes-operator-kpi", [
+        kpi("SL bear", pct(slReg.bear || 0), `bull ${pct(slReg.bull || 0)}`, "red"),
+        kpi("Expired%", pct(m.expired_rate || 0), `${m.expired_count || 0} plans`, "yellow"),
+        kpi("MFE=0 SL", m.zero_mfe_before_sl || 0, pct(m.zero_mfe_share_of_sl || 0), "red"),
+        kpi(
+          "Exit min",
+          number(m.time_to_exit_min_median || 0, 0),
+          `p90 ${number(m.time_to_exit_min_p90 || 0, 0)}`,
+          "muted"
+        ),
+        kpi("Score R²", number(m.score_vs_outcome_r_squared || 0, 3), "score vs win", "green"),
+      ]);
+    })
+    .catch(() => {
+      setChildren("outcomes-operator-kpi", [
+        el("div", { class: "empty", text: "Operator KPI error" }),
+      ]);
+    });
+
+  setChildren("outcomes-kpis", [exportBtn,
     kpi("Win rate", pct(summary.win_rate || 0), `${summary.wins || 0}W / ${summary.stop_losses || 0}SL`, clsByValue(summary.win_rate)),
     kpi("Avg R", number(summary.avg_r_multiple || 0, 2), "закрытые сделки", clsByValue(summary.avg_r_multiple)),
     kpi("Score SL", number(cmp.avg_score_stop_loss || 0, 3), `wins ${number(cmp.avg_score_wins || 0, 3)}`, "red"),

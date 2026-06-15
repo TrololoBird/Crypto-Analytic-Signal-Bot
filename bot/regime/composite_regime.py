@@ -5,6 +5,8 @@ from typing import Any
 
 import polars as pl
 
+from engine.domain.regime_gates import effective_market_regime
+
 from .gmm_var import HAS_SKLEARN, HAS_STATSMODELS, CentroidRegimeDetector
 from .hmm_regime import HAS_HMMLEARN, RuleBasedRegimeDetector
 
@@ -112,6 +114,22 @@ class CompositeRegimeAnalyzer:
         strength = max(0.45, min(0.9, weighted_scores[regime]))
         confidence = min(0.95, (centroid_conf * 0.5) + (rule_based_pred.confidence * 0.5))
         return RegimeResult(regime=regime, strength=strength, confidence=confidence)
+
+    @staticmethod
+    def filter_regime(
+        *,
+        market_regime: str,
+        bias_4h: str = "neutral",
+        price: float | None = None,
+        poc: float | None = None,
+    ) -> str:
+        """Neutral→bull inference for delivery filters without mutating stored regime."""
+        return effective_market_regime(
+            market_regime,
+            bias_4h=bias_4h,
+            price=price,
+            poc=poc,
+        )
 
     @property
     def gmm(self) -> CentroidRegimeDetector:

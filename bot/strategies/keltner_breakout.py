@@ -7,15 +7,16 @@ from typing import TYPE_CHECKING, ClassVar
 
 import polars as pl
 
-from ..features.prepare import _swing_points
+from engine.features.prepare import _swing_points
+
 from ..setups import _build_signal, _compute_dynamic_score, _reject
 from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
 from ..setups.utils import build_structural_targets
 from ._common import SpecHit, _latest_values, as_float, confirmed_pattern_frame, with_spec_columns
 
 if TYPE_CHECKING:
-    from ..domain.config import BotSettings
-    from ..domain.schemas import PreparedSymbol, Signal
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import PreparedSymbol, Signal
 
 __all__ = ["detect_keltner_breakout"]
 
@@ -478,6 +479,7 @@ __all__ = [
 
 class KeltnerBreakoutSetup(SpecDetectorSetup):
     setup_id = "keltner_breakout"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "market"
     family = "breakout"
     confirmation_profile = "breakout_acceptance"
     required_context = ("futures_flow",)

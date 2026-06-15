@@ -32,8 +32,8 @@ _LOG = logging.getLogger("bot.strategies")
 if TYPE_CHECKING:
     import polars as pl
 
-    from ..domain.config import BotSettings
-    from ..domain.schemas import PreparedSymbol, Signal
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import PreparedSymbol, Signal
 
 
 def _missing_columns(frame: pl.DataFrame, columns: tuple[str, ...]) -> list[str]:
@@ -169,6 +169,7 @@ def _build_atr_signal(
     entry_anchor: float | None = None,
     stop_anchor: float | None = None,
     confirmed_bar: bool = True,
+    entry_order_type: str = "limit",
 ) -> Signal | None:
     work = prepared.work_15m
     # fix-sl-A: optional confirmed bar avoids anchoring entry on a forming candle tail.
@@ -187,17 +188,17 @@ def _build_atr_signal(
         return None
 
     sl_buffer = float(params.get("sl_buffer_atr", 0.65))
-    min_rr = float(params.get("min_rr", 1.5))
-    candle_mid = (high + low) / 2.0
-    if entry_anchor is not None and entry_anchor > 0.0:
-        price_anchor = float(entry_anchor)
-    elif direction == "long":
-        price_anchor = min(candle_mid, close)
-    else:
-        price_anchor = max(candle_mid, close)
+    min_rr = float(params.get("min_rr", 1.9))  # align with filter min_risk_reward
+    if entry_anchor is None or entry_anchor <= 0.0:
+        # Reject: limit order requires a structural anchor (prev_bar low/high, EMA, OB level).
+        # candle_mid fallback was removed — it produces market-order-equivalent entries.
+        _reject(prepared, setup_id, "no_structural_anchor", entry_anchor=entry_anchor)
+        return None
+    price_anchor = float(entry_anchor)
     max_risk_atr = float(params.get("max_risk_atr", 2.0))
     max_risk_pct = float(params.get("max_risk_pct", 3.5))
     max_risk = min(atr * max_risk_atr, price_anchor * max_risk_pct / 100.0)
+    # build_trade_plan (contract.py) owns the entry-zone clamp — no duplicate here.
     if direction == "long":
         sweep_stop = stop_anchor if stop_anchor is not None and stop_anchor > 0.0 else low
         stop = min(sweep_stop, close - atr * sl_buffer) - atr * 0.05
@@ -227,8 +228,7 @@ def _build_atr_signal(
         rsi=rsi,
         structure_clarity=max(0.0, min(1.0, structure_clarity)),
     )
-    # floor: skip sub-threshold signals before filter pipeline (min_score margin)
-    score = max(0.63, round(score, 4))
+    score = round(score, 4)
     _LOG.debug(
         "build_atr_signal | setup=%s sym=%s dir=%s entry=%.4f stop=%.4f tp1=%.4f"
         " risk=%.4f atr=%.4f score=%.4f clarity=%.3f anchor=%s",
@@ -257,6 +257,7 @@ def _build_atr_signal(
         tp2=tp2,
         price_anchor=price_anchor,
         atr=atr,
+        entry_order_type=entry_order_type,
     )
 
 

@@ -19,14 +19,15 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from bot.domain.strategy_catalog import catalog_setup_family
 from bot.persistence._tracking_review import _price_in_entry_zone
 from bot.persistence.tracking_events import SignalTrackingEvent
-from bot.runtime.errors import DEFENSIVE_EXC
-
-from ..domain.limit_entry import (
+from engine.domain.limit_entry import (
     DEFAULT_ENTRY_ORDER_TYPE,
+    pending_expiry_minutes_for_signal,
 )
+from engine.domain.strategy_catalog import catalog_setup_family
+from engine.errors import DEFENSIVE_EXC
+
 from ..persistence.tracked import (
     TrackedSignalState,
     parse_state_dt,
@@ -64,10 +65,11 @@ else:
 __all__ = ["SignalTracker", "SignalTrackingEvent"]
 
 if typing.TYPE_CHECKING:
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import Signal
+    from engine.telemetry import TelemetryStore
+
     from ..diagnostics.facade import SignalQualityMonitor
-    from ..domain.config import BotSettings
-    from ..domain.schemas import Signal
-    from ..telemetry import TelemetryStore
 
     class MemoryRepository:
         async def cleanup_signal_outcomes_before(self, cutoff_iso: str) -> int: ...
@@ -209,7 +211,7 @@ class SignalTracker(_SignalTrackerBases):
             result: dict[str, SignalFeatures] = {}
             for tid, fdict in data.items():
                 try:
-                    result[tid] = SignalFeatures(**fdict)
+                    result[tid] = SignalFeatures.from_dict(fdict)
                 except (ValueError, TypeError) as exc:
                     LOG.debug("features_store entry skipped | tracking_id=%s error=%s", tid, exc)
             if result:
@@ -302,6 +304,21 @@ class SignalTracker(_SignalTrackerBases):
         row.setdefault("target_integrity_status", "unchecked")
         row.setdefault("entry_order_type", DEFAULT_ENTRY_ORDER_TYPE)
         row.setdefault("confirmation_profile", "trend_follow")
+        row.setdefault("entry_tf", row.get("timeframe", ""))
+        row.setdefault("pattern_tf", "")
+        context_raw = row.get("context_tfs")
+        if isinstance(context_raw, str):
+            try:
+                parsed = json.loads(context_raw)
+                row["context_tfs"] = (
+                    tuple(str(tf) for tf in parsed) if isinstance(parsed, list) else ()
+                )
+            except json.JSONDecodeError:
+                row["context_tfs"] = ()
+        elif isinstance(context_raw, list):
+            row["context_tfs"] = tuple(str(tf) for tf in context_raw)
+        else:
+            row.setdefault("context_tfs", ())
         row.setdefault("entry_zone_touched_at", None)
         row.setdefault("entry_confirm_pending_at", None)
         row.setdefault("last_lifecycle_note", None)
@@ -510,6 +527,13 @@ class SignalTracker(_SignalTrackerBases):
         signal_message_id: int | None,
     ) -> TrackedSignalState:
         created_at = signal.created_at.astimezone(UTC)
+        pending_minutes = pending_expiry_minutes_for_signal(
+            self.settings,
+            confirmation_profile=signal.confirmation_profile,
+            entry_order_type=getattr(signal, "entry_order_type", "limit"),
+            strategy_family=getattr(signal, "strategy_family", None),
+            setup_id=signal.setup_id,
+        )
         tracked = TrackedSignalState(
             tracking_id=signal.tracking_id,
             tracking_ref=signal.tracking_ref,
@@ -518,10 +542,11 @@ class SignalTracker(_SignalTrackerBases):
             setup_id=signal.setup_id,
             direction=signal.direction,
             timeframe=signal.timeframe,
+            entry_tf=getattr(signal, "entry_tf", "") or signal.timeframe,
+            pattern_tf=getattr(signal, "pattern_tf", ""),
+            context_tfs=tuple(getattr(signal, "context_tfs", ()) or ()),
             created_at=created_at.isoformat(),
-            pending_expires_at=(
-                created_at + timedelta(minutes=self.settings.tracking.pending_expiry_minutes)
-            ).isoformat(),
+            pending_expires_at=(created_at + timedelta(minutes=pending_minutes)).isoformat(),
             active_expires_at=(
                 created_at
                 + timedelta(minutes=min(self.settings.tracking.active_expiry_minutes, 240))

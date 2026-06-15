@@ -16,9 +16,9 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from bot.runtime.errors import DEFENSIVE_EXC
 from bot.runtime.health_manager import HealthManager
 from bot.strategies import STRATEGY_CLASSES
+from engine.errors import DEFENSIVE_EXC
 
 if TYPE_CHECKING:
     from bot.diagnostics.analyzer_ops import PerformanceMetrics, WinRateCalculator

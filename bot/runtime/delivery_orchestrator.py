@@ -19,7 +19,6 @@ from collections import Counter, deque
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from bot.delivery import contract as _delivery_contract_module
 from bot.delivery.confluence import ConfluenceEngine, evaluate_weighted_delivery_gate
 from bot.delivery.filters import update_strategy_sl_rates
 from bot.delivery.ops_webhook import notify_ops_delivery_failed, notify_ops_tier_cap_starvation
@@ -31,19 +30,21 @@ from bot.delivery.telegram_routing import (
 )
 from bot.delivery.tiers import _finite_score, decide_with_caps
 from bot.delivery.tiers import rank_key as tier_rank_key
-from bot.domain.delivery_policy import (
+from bot.persistence.outcomes import build_prepared_feature_snapshot, extract_features_from_signal
+from bot.policy.delivery_policy import (
     is_positioning_setup,
     r_class_blocks_action,
     resolve_bear_regime,
 )
-from bot.domain.mtf import (
+from bot.policy.mtf import (
     BREAKOUT_PROFILE,
     REVERSAL_PROFILES,
     evaluate_mtf_gate,
     normalize_mtf_reject_reason,
 )
-from bot.persistence.outcomes import build_prepared_feature_snapshot, extract_features_from_signal
-from bot.runtime.errors import DEFENSIVE_EXC
+from engine import contract as _delivery_contract_module
+from engine.domain.regime_gates import is_counter_trend_reversal
+from engine.errors import DEFENSIVE_EXC
 
 from .merge import MetaSignalMerger
 from .sl_postmortem import build_sl_postmortem_html
@@ -51,10 +52,10 @@ from .telegram_operator import TelegramOperatorConsole, operator_console_enabled
 from .watch_escalation import maybe_notify_watch_escalation
 
 if TYPE_CHECKING:
-    from bot.delivery.contract import SignalContractIssue
-    from bot.domain.schemas import PreparedSymbol, Signal
     from bot.persistence.tracking import SignalTrackingEvent
     from bot.runtime.bot import SignalBot
+    from engine.contract import SignalContractIssue
+    from engine.domain.schemas import PreparedSymbol, Signal
 
     class _DeliveryOrchestratorBases:
         _bot: SignalBot
@@ -129,12 +130,16 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         try:
             rates: dict[str, dict[str, float]] = await repo.win_rate_by_strategy(last_days=30)
             update_strategy_win_rates(rates)
+            min_samples = int(
+                getattr(self._bot.settings.delivery, "min_sl_penalty_samples", 10) or 10
+            )
             sl_rates = {
                 sid: 1.0 - float(data.get("win_rate") or 0.0)
                 for sid, data in rates.items()
-                if float(data.get("total") or 0) >= 5  # ignore strategies with <5 outcomes
+                if float(data.get("total") or 0) >= min_samples
             }
-            update_strategy_sl_rates(sl_rates)
+            sample_counts = {sid: int(float(data.get("total") or 0)) for sid, data in rates.items()}
+            update_strategy_sl_rates(sl_rates, sample_counts=sample_counts)
             LOG.debug("strategy stats refreshed | strategies=%d", len(rates))
         except DEFENSIVE_EXC:
             LOG.debug("strategy stats refresh failed", exc_info=True)
@@ -317,9 +322,12 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         if profile == BREAKOUT_PROFILE:
             multiplier = 1.1
         elif profile in REVERSAL_PROFILES:
-            multiplier = 1.0
+            # Reversal/exhaustion patterns form on declining volume — requiring
+            # above-average volume (1.0x) systematically blocks genuine setups.
+            # 0.7x still ensures adequate liquidity while allowing exhaustion candles.
+            multiplier = 0.7
         else:
-            multiplier = 1.2
+            multiplier = 1.5
         return bool(volume > volume_avg * multiplier)
 
     @classmethod
@@ -396,6 +404,9 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
                 getattr(delivery, "min_confirmations", _DEFAULT_MIN_CONFIRMATIONS)
             ),
             "reversal_min_confirmations": int(getattr(delivery, "reversal_min_confirmations", 3)),
+            "countertrend_reversal_min_confirmations": int(
+                getattr(delivery, "countertrend_reversal_min_confirmations", 4)
+            ),
             "use_weighted_confluence": bool(getattr(delivery, "use_weighted_confluence", True)),
             "weighted_min_hard_legs": int(getattr(delivery, "weighted_min_hard_legs", 2)),
         }
@@ -415,6 +426,7 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         enforce_mtf_gate: bool = True,
         min_confirmations: int = _DEFAULT_MIN_CONFIRMATIONS,
         reversal_min_confirmations: int = 3,
+        countertrend_reversal_min_confirmations: int = 4,
         use_weighted_confluence: bool = True,
         weighted_min_hard_legs: int = MIN_WEIGHTED_HARD_LEGS,
         settings: Any | None = None,
@@ -558,8 +570,19 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         }
         confirmation_count = sum(confirmations.values())
         required = min_confirmations
+        countertrend = is_counter_trend_reversal(
+            direction,
+            bias_4h=regime_4h,
+            bear_regime=bear_regime,
+            confirmation_profile=profile,
+        )
         if profile in REVERSAL_PROFILES and bear_regime:
             required = max(required, min(int(reversal_min_confirmations), 5))
+        if countertrend:
+            required = max(
+                required,
+                min(int(countertrend_reversal_min_confirmations), 5),
+            )
         if btc_phase_rule != "none" and profile in REVERSAL_PROFILES:
             required = max(required, min_confirmations + 1)
         details: dict[str, object] = {
@@ -592,7 +615,10 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
                 getattr(delivery_cfg, "weighted_min_hard_legs", weighted_min_hard_legs)
                 or weighted_min_hard_legs
             )
-            if profile in REVERSAL_PROFILES and bear_regime:
+            # Only escalate when the reversal trades AGAINST the macro bear trend:
+            # long reversal in bear regime = catching a falling knife → stricter gate.
+            # short reversal in bear regime = trend-confirming → no escalation needed.
+            if profile in REVERSAL_PROFILES and bear_regime and direction == "long":
                 min_hard = max(
                     min_hard,
                     min(int(reversal_min_confirmations), len(WEIGHTED_HARD_LEG_KEYS)),
@@ -607,6 +633,14 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
                 hard_leg_keys=WEIGHTED_HARD_LEG_KEYS,
             )
             details.update(weighted_details)
+            if boolean_pass and profile in REVERSAL_PROFILES:
+                thesis_ok = bool(confirmations.get("trend")) or bool(
+                    confirmations.get("microstructure")
+                )
+                if not thesis_ok:
+                    boolean_pass = False
+                    details["reason"] = "countertrend_thesis_legs_missing"
+                    details["countertrend_thesis_required"] = "trend_or_microstructure"
             details["boolean_confirmations"] = confirmation_count
             details["boolean_required"] = required
         elif use_weighted_confluence:
@@ -792,12 +826,29 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         )
         merged_meta = merge_result.merged
         direction_conflict_signals = [meta.primary for meta in merge_result.direction_conflicts]
-        merge_conflict_count = len(merge_result.direction_conflicts)
+        merge_conflict_count = len(merge_result.direction_dropped) + len(
+            merge_result.direction_conflicts
+        )
         merge_meta_by_tracking_id = {meta.primary.tracking_id: meta for meta in merged_meta}
         signals = [meta.primary for meta in merged_meta]
 
         ready_to_send: list[Signal] = []
         rejected_rows: list[dict[str, Any]] = []
+        for meta in merge_result.direction_dropped:
+            signal = meta.primary
+            conflict_tags = [tag for tag in signal.reasons if tag.startswith("direction_conflict")]
+            rejected_rows.append(
+                {
+                    "ts": datetime.now(UTC).isoformat(),
+                    "symbol": signal.symbol,
+                    "setup_id": signal.setup_id,
+                    "direction": signal.direction,
+                    "stage": "merge",
+                    "reason": conflict_tags[-1] if conflict_tags else "direction_conflict_dropped",
+                    "bias_4h": signal.bias_4h,
+                    "details": {"aligned_setup_ids": meta.aligned_setup_ids},
+                }
+            )
         queued_symbol_direction: set[str] = set()
         queued_family_keys: set[str] = set()
         queued_setup_ids: set[str] = set()
@@ -1607,7 +1658,12 @@ class DeliveryOrchestrator(_DeliveryOrchestratorBases):
         if delivered:
             await self._bot._sync_ws_tracked_symbols()
 
+        # answers50 Q45: bias-resolved losers are hard-dropped (no WATCH tier).
         if direction_conflict_signals:
+            LOG.warning(
+                "legacy direction_conflict WATCH path still has %s pending signals",
+                len(direction_conflict_signals),
+            )
             conflict_delivered = await self._deliver_direction_conflict_watch(
                 direction_conflict_signals,
                 prepared_by_tracking_id=prepared_by_tracking_id,

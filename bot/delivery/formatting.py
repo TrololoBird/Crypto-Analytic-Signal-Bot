@@ -14,9 +14,9 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from bot.coercion import as_float as _float
 from bot.delivery.sizing import recommend_position_pct as _recommend_position_pct
-from bot.domain.labels import INTERNAL_TRACKING_EVENT_RU, TRACKING_EVENT_RU
+from bot.policy.labels import INTERNAL_TRACKING_EVENT_RU, TRACKING_EVENT_RU
+from engine.coercion import as_float as _float
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -272,6 +272,10 @@ class SignalMessageFacts:
     microstructure_label: str | None = None
     microstructure_reason: str | None = None
     microstructure_warnings: tuple[str, ...] = ()
+    entry_order_type: str = "limit"
+    bias_4h: str | None = None
+    bias_1h: str | None = None
+    market_regime: str | None = None
     btc_bias: str | None = None
     eth_bias: str | None = None
     sol_bias: str | None = None
@@ -561,6 +565,12 @@ def extract_signal_facts(
         premium_zscore_5m=_optional_float(getattr(signal, "premium_zscore_5m", None)),
         premium_slope_5m=_optional_float(getattr(signal, "premium_slope_5m", None)),
         ls_ratio=_optional_float(getattr(signal, "ls_ratio", None)),
+        entry_order_type=str(getattr(signal, "entry_order_type", "limit") or "limit")
+        .strip()
+        .lower(),
+        bias_4h=str(getattr(signal, "bias_4h", None) or "") or None,
+        bias_1h=str(getattr(signal, "bias_1h", None) or "") or None,
+        market_regime=str(getattr(signal, "market_regime", None) or "") or None,
         microstructure_bias_score=_optional_float(
             getattr(signal, "microstructure_bias_score", None)
         ),
@@ -580,6 +590,22 @@ def extract_signal_facts(
         pax_bias=getattr(signal, "pax_bias", None),
         created_at=created_at,
     )
+
+
+def mtf_conflict_label(facts: SignalMessageFacts) -> str | None:
+    """answers50 Q35: surface HTF bias conflict on delivered signals."""
+    direction = direction_label(facts.direction)
+    bias_4h = str(facts.bias_4h or "neutral").strip().lower()
+    if direction == "LONG" and bias_4h == "downtrend":
+        return "CONFLICTED (BEAR_BIAS)"
+    if direction == "SHORT" and bias_4h == "uptrend":
+        return "CONFLICTED (BULL_BIAS)"
+    btc = str(facts.btc_bias or "").strip().lower()
+    if direction == "LONG" and btc in {"downtrend", "bear"}:
+        return "CONFLICTED (BEAR_BIAS)"
+    if direction == "SHORT" and btc in {"uptrend", "bull"}:
+        return "CONFLICTED (BULL_BIAS)"
+    return None
 
 
 def market_context_lines(facts: SignalMessageFacts) -> list[str]:
@@ -680,7 +706,15 @@ def _tp_equality_tolerance(price: float) -> float:
 
 
 def _channel_legs_line(facts: SignalMessageFacts) -> str:
-    entry = f"{format_price(facts.entry_low)}-{format_price(facts.entry_high)}"
+    if str(getattr(facts, "entry_order_type", "limit") or "limit").strip().lower() == "market":
+        ref = (
+            facts.mark_price
+            if facts.mark_price and facts.mark_price > 0.0
+            else (facts.entry_low + facts.entry_high) / 2.0
+        )
+        entry = f"ref @ {format_price(ref)}"
+    else:
+        entry = f"{format_price(facts.entry_low)}-{format_price(facts.entry_high)}"
     tp3 = facts.take_profit_3 if facts.take_profit_3 is not None else facts.take_profit_2
     same_tp = abs(facts.take_profit_2 - facts.take_profit_1) <= _tp_equality_tolerance(
         facts.take_profit_1
@@ -696,7 +730,7 @@ def _channel_legs_line(facts: SignalMessageFacts) -> str:
     return f"Вход {code(entry)} · SL {code(format_price(facts.stop))} · {targets}"
 
 
-def manual_entry_skip_hint(symbol: str, *, chase_pct: float = 0.003) -> str:
+def manual_entry_skip_hint(symbol: str, *, chase_pct: float = 0.002) -> str:
     """Late-entry guidance for manual channel subscribers (signal-only)."""
     majors = frozenset({"BTCUSDT", "ETHUSDT", "XRPUSDT", "BNBUSDT"})
     metals = frozenset({"XAUUSDT", "XAGUSDT", "PAXGUSDT"})
@@ -717,6 +751,7 @@ def format_channel_trade_card(
     include_chart: bool = True,
     tier: str | None = None,
     position_size_pct: float | None = None,
+    chase_pct: float | None = None,
 ) -> str:
     """Unified compact card for Telegram channel (new + edited).
 
@@ -730,7 +765,12 @@ def format_channel_trade_card(
     )
     if fallback_badge:
         setup_line += f" · {code(fallback_badge)}"
+    conflict = mtf_conflict_label(facts)
+    if conflict:
+        setup_line += f" · {code(conflict)}"
     setup_line += f" · {code(format_score(facts.score))}"
+    if str(getattr(facts, "entry_order_type", "limit") or "limit").strip().lower() == "market":
+        setup_line += f" · {code('MARKET')}"
     lines = [
         _channel_header(facts, tier=tier),
         setup_line,
@@ -746,7 +786,9 @@ def format_channel_trade_card(
 
     lines.append(f"inv {code(invalidation_text(facts))}")
     lines.append(escape_text(status_line or status_line_for_signal(facts)))
-    lines.append(f"<i>{escape_text(manual_entry_skip_hint(facts.symbol))}</i>")
+    lines.append(
+        f"<i>{escape_text(manual_entry_skip_hint(facts.symbol, chase_pct=chase_pct or 0.002))}</i>"
+    )
     if include_chart:
         chart = html.escape(tradingview_chart_url(facts.symbol, facts.timeframe), quote=True)
         lines.append(f'<a href="{chart}">TradingView</a>')
@@ -866,6 +908,7 @@ def format_signal_message(
     eth_bias: str | None = None,
     policy: TelegramFormatPolicy | None = None,
     tier: str | None = None,
+    chase_pct: float | None = None,
 ) -> str:
     """Render the main Telegram signal message (compact channel card)."""
     policy = policy or CHANNEL_SIGNAL_POLICY
@@ -913,6 +956,7 @@ def format_signal_message(
         include_chart=policy.include_chart_link,
         tier=tier,
         position_size_pct=position_size_pct,
+        chase_pct=chase_pct,
     )
     return truncate_preserving_footer(rendered, limit=policy.text_limit)
 

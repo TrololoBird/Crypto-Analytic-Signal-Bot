@@ -8,27 +8,28 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from ..core.event_bus import EventBus
+from engine.core.event_bus import EventBus
+from engine.market.data import BinanceFuturesMarketData, configure_rest_concurrency
+from engine.market.enrichment import PublicIntelligenceService
+from engine.market.proxy_bootstrap import ensure_network_ready
+from engine.market.radar_state import MarketRadarStore
+from engine.market.rest_impl import BinanceClientImpl
+from engine.market.ws import FuturesWSManager
+from engine.telegram import build_message_broadcaster
+from engine.telemetry import TelemetryStore
+
 from ..delivery import SignalDelivery
-from ..delivery.telegram import build_message_broadcaster
 from ..delivery.watch import AlertCoordinator
 from ..diagnostics.facade import SignalQualityMonitor
 from ..engine import SignalEngine, StrategyRegistry
-from ..market.data import BinanceFuturesMarketData, configure_rest_concurrency
-from ..market.enrichment import PublicIntelligenceService
-from ..market.proxy_bootstrap import ensure_network_ready
-from ..market.radar_state import MarketRadarStore
-from ..market.rest_impl import BinanceClientImpl
-from ..market.ws import FuturesWSManager
 from ..persistence.public_audit import PublicAuditLedger
 from ..persistence.repository.memory import MemoryRepository
 from ..persistence.tracking import SignalTracker
-from ..telemetry import TelemetryStore
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from ..domain import BotSettings
+    from engine.domain import BotSettings
 
 LOG = logging.getLogger("bot.runtime.container")
 

@@ -5,7 +5,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, ClassVar
 
-from ..features.prepare import _swing_points
+from engine.features.prepare import _swing_points
+
 from ..setups import _build_signal, _compute_dynamic_score, _last_swing_prices, _reject
 from ..setups.spec_runtime import SpecDetectorSetup, run_setup_detection
 from ..setups.utils import normalize_trade_levels
@@ -14,8 +15,8 @@ from ._common import SpecHit, _latest_values, confirmed_pattern_frame, with_spec
 if TYPE_CHECKING:
     import polars as pl
 
-    from ..domain.config import BotSettings
-    from ..domain.schemas import PreparedSymbol, Signal
+    from engine.domain.config import BotSettings
+    from engine.domain.schemas import PreparedSymbol, Signal
 
 __all__ = ["detect_wick_trap"]
 
@@ -398,6 +399,7 @@ __all__ = [
 
 class WickTrapReversalSetup(SpecDetectorSetup):
     setup_id = "wick_trap_reversal"
+    ENTRY_ORDER_TYPE: ClassVar[str] = "limit"
     family = "reversal"
     confirmation_profile = "countertrend_exhaustion"
     required_context = ("futures_flow",)

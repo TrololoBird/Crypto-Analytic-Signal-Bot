@@ -21,10 +21,10 @@ try:
 except ModuleNotFoundError:  # pragma: no cover
     from common import configure_script_logging
 
-from bot.domain.config import _ALL_SETUP_IDS, load_settings
-from bot.market.fit import ASSET_FIT_PROFILES, asset_fit_for_strategy
-from bot.market.rest_impl import BinanceClientImpl
-from bot.market.universe import build_shortlist
+from engine.domain.config import _ALL_SETUP_IDS, load_settings
+from engine.market.fit import ASSET_FIT_PROFILES, asset_fit_for_strategy
+from engine.market.rest_impl import BinanceClientImpl
+from engine.market.universe import build_shortlist
 
 LOG = configure_script_logging("scripts.analyze_shortlist_strategy_matrix")
 

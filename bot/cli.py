@@ -29,10 +29,11 @@ import aiosqlite
 import polars as pl
 
 from bot.diagnostics.startup_doctor import run_startup_doctor
-from bot.domain.research_harvest import activate_research_harvest, apply_research_harvest_profile
 from bot.engine.backtest import run_historical_backtest
-from bot.runtime.errors import DEFENSIVE_EXC
 from bot.strategies import STRATEGY_CLASSES
+from engine.domain.research_harvest import activate_research_harvest, apply_research_harvest_profile
+from engine.errors import DEFENSIVE_EXC
+from engine.telemetry import TelemetryStore, run_dir_started_at
 
 from . import BotSettings, SignalBot, load_settings
 from .logging_config import configure_structlog
@@ -40,7 +41,6 @@ from .migrations import migrate_db
 from .ops.pid_utils import pid_is_alive as _pid_is_alive
 from .ops.startup_report import generate_and_send_startup_report, run_daily_summary_loop
 from .persistence.repository.memory import MemoryRepository
-from .telemetry import TelemetryStore, run_dir_started_at
 
 _LOGGER_STDERR_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?:,\d{3})?\s+\|")
 _SESSION_LOG_HANDLES: list[Any] = []

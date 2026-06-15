@@ -8,10 +8,10 @@ from typing import Any
 
 import polars as pl
 
-from bot.domain.schemas import PreparedSymbol, UniverseSymbol
-from bot.features.prepare_frame import _prepare_frame
-from bot.runtime.errors import DEFENSIVE_EXC
 from bot.strategies import STRATEGY_CLASSES
+from engine.domain.schemas import PreparedSymbol, UniverseSymbol
+from engine.errors import DEFENSIVE_EXC
+from engine.features.prepare_frame import _prepare_frame
 
 LOG = logging.getLogger("sl_forensic.strategy_recheck")
 

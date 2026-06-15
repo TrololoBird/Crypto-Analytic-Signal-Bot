@@ -9,14 +9,14 @@ import math
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
-from ..domain.risk import RiskParams
-from ..domain.strategy_catalog import catalog_default_params
-from ..runtime_policy import is_deep_analysis_symbol
+from engine.domain.risk import RiskParams
+from engine.domain.strategy_catalog import catalog_default_params
+from engine.runtime_policy import is_deep_analysis_symbol
 
 if TYPE_CHECKING:
     import polars as pl
 
-    from ..domain.schemas import PreparedSymbol, Signal
+    from engine.domain.schemas import PreparedSymbol, Signal
 
 
 def coerce_int(value: object, default: int) -> int:

@@ -10,9 +10,9 @@ try:
 except ModuleNotFoundError:  # pragma: no cover
     import common  # noqa: F401
 
-from bot.domain.config import load_settings
-from bot.domain.strategy_catalog import CATALOG_BY_ID
 from bot.strategies import STRATEGY_CLASSES
+from engine.domain.config import load_settings
+from engine.domain.strategy_catalog import CATALOG_BY_ID
 
 STRATEGIES_DIR = Path(__file__).resolve().parents[1] / "bot" / "strategies"
 HTF_MARKERS = (
