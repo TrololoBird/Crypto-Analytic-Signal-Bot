@@ -15,12 +15,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "hunt"))
 
-from hunt_watch.bootstrap import bootstrap
+from hunt_core.bootstrap import bootstrap
 
 bootstrap()
 
-from hunt_watch.paths import TICK_JSONL
-from hunt_watch.targets import DEFAULT_SYMBOLS
+from hunt_core.data.universe import DEFAULT_SYMBOLS
+from hunt_core.paths import TICK_JSONL
 
 LOG = logging.getLogger("hunt_minute_monitor")
 OUT = ROOT / "logs" / "hunt_minute_monitor.jsonl"
@@ -119,7 +119,6 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Hunt watch minute monitor")
     parser.add_argument("--hours", type=float, default=6.0)
     parser.add_argument("--interval", type=int, default=60)
-    parser.add_argument("--verify-every", type=int, default=10, help="Full verify_diff every N passes")
     args = parser.parse_args()
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
@@ -152,18 +151,6 @@ def main() -> int:
         core_summary = [_summarize_row(s, ticks[s]) for s in CORE if s in ticks]
         log_counts = _log_tail_counts(session_marker)
 
-        mismatch_count: int | None = None
-        if pass_n % max(1, args.verify_every) == 0:
-            try:
-                from hunt_watch.monitor import run_verify_sync
-
-                vr = run_verify_sync(limit=15)
-                mismatch_count = int(vr["mismatch_count"])
-                if mismatch_count > 0:
-                    LOG.warning("verify_mismatches=%s alert=%s", mismatch_count, vr.get("alert_path"))
-            except Exception as exc:
-                LOG.exception("verify_failed")
-
         snap = {
             "ts": datetime.now(UTC).isoformat(),
             "pass": pass_n,
@@ -172,7 +159,6 @@ def main() -> int:
             "restarted": restarted,
             "log_counts": log_counts,
             "core": core_summary,
-            "mismatches": mismatch_count,
         }
         with OUT.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(snap, default=str) + "\n")
@@ -184,14 +170,13 @@ def main() -> int:
             elif (c.get("short") or 0) >= 68 or (c.get("long") or 0) >= 68:
                 highlights.append(f"{c['symbol']} imminent")
         LOG.info(
-            "pass=%s alive=%s tg=%s blocked=%s ticks=%s highlights=%s mismatches=%s",
+            "pass=%s alive=%s tg=%s blocked=%s ticks=%s highlights=%s",
             pass_n,
             alive,
             log_counts.get("tg_sent"),
             log_counts.get("blocked"),
             log_counts.get("ticks"),
             highlights or "—",
-            mismatch_count if mismatch_count is not None else "skip",
         )
 
         sleep_s = min(float(args.interval), max(1.0, end_at - time.time()))

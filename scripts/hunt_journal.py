@@ -16,6 +16,7 @@
     .venv/bin/python scripts/hunt_journal.py summary          # счётчики verdict по волнам
     .venv/bin/python scripts/hunt_journal.py wave 2           # записи волны 2
 """
+
 from __future__ import annotations
 
 import json
@@ -74,9 +75,16 @@ def add(args: list[str]) -> None:
 
 def asked() -> None:
     rows = _read()
-    out = [{"q_id": r.get("q_id"), "wave": r.get("wave"),
-            "type": r.get("type"), "verdict": r.get("verdict")}
-           for r in rows if r.get("q_id")]
+    out = [
+        {
+            "q_id": r.get("q_id"),
+            "wave": r.get("wave"),
+            "type": r.get("type"),
+            "verdict": r.get("verdict"),
+        }
+        for r in rows
+        if r.get("q_id")
+    ]
     print(json.dumps(out, default=str))
 
 
