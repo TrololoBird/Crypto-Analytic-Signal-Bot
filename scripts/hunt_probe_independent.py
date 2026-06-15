@@ -12,6 +12,7 @@
 
 Вывод — компактный JSONL (одна строка на символ) в stdout. Никакой прозы.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -40,7 +41,9 @@ class ProbeError(RuntimeError):
 def _fin(name: str, symbol: str, val: float) -> float:
     """Гарантия конечного числа. Не конечно → raise (NaN/inf/None запрещены)."""
     if val is None or not isinstance(val, (int, float)) or not math.isfinite(val):
-        raise ProbeError(f"{symbol}: {name}={val!r} не конечно — баг вычисления, не валидное состояние")
+        raise ProbeError(
+            f"{symbol}: {name}={val!r} не конечно — баг вычисления, не валидное состояние"
+        )
     return float(val)
 
 
@@ -62,12 +65,29 @@ def _get(path: str, params: dict, proxy: str | None) -> object:
 def fetch_klines(symbol: str, interval: str, limit: int, proxy: str | None) -> pl.DataFrame:
     raw = _get("/fapi/v1/klines", {"symbol": symbol, "interval": interval, "limit": limit}, proxy)
     if not isinstance(raw, list) or len(raw) < WARMUP_MIN:
-        raise ProbeError(f"{symbol}: klines вернул {len(raw) if isinstance(raw, list) else type(raw)} баров, нужно ≥{WARMUP_MIN}")
-    cols = ["open_time", "open", "high", "low", "close", "volume", "close_time",
-            "quote_vol", "trades", "taker_base", "taker_quote", "ignore"]
+        raise ProbeError(
+            f"{symbol}: klines вернул {len(raw) if isinstance(raw, list) else type(raw)} баров, нужно ≥{WARMUP_MIN}"
+        )
+    cols = [
+        "open_time",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "close_time",
+        "quote_vol",
+        "trades",
+        "taker_base",
+        "taker_quote",
+        "ignore",
+    ]
     df = pl.DataFrame(raw, schema=cols, orient="row").select(
         pl.col("open_time").cast(pl.Int64),
-        *[pl.col(c).cast(pl.Float64) for c in ("open", "high", "low", "close", "volume", "quote_vol")],
+        *[
+            pl.col(c).cast(pl.Float64)
+            for c in ("open", "high", "low", "close", "volume", "quote_vol")
+        ],
     )
     nulls = df.null_count().sum_horizontal().item()
     if nulls:
@@ -76,10 +96,13 @@ def fetch_klines(symbol: str, interval: str, limit: int, proxy: str | None) -> p
 
 
 def fetch_oi_delta(symbol: str, proxy: str | None) -> float:
-    raw = _get("/futures/data/openInterestHist",
-               {"symbol": symbol, "period": "5m", "limit": 12}, proxy)
+    raw = _get(
+        "/futures/data/openInterestHist", {"symbol": symbol, "period": "5m", "limit": 12}, proxy
+    )
     if not isinstance(raw, list) or len(raw) < 2:
-        raise ProbeError(f"{symbol}: openInterestHist вернул <2 точек — OI недоступен (не None, а явная ошибка)")
+        raise ProbeError(
+            f"{symbol}: openInterestHist вернул <2 точек — OI недоступен (не None, а явная ошибка)"
+        )
     oi = [float(x["sumOpenInterest"]) for x in raw]
     if oi[0] == 0.0:
         raise ProbeError(f"{symbol}: первая точка OI = 0, деление невозможно")
@@ -114,8 +137,9 @@ def compute(df: pl.DataFrame, symbol: str, n: int = 14) -> dict:
     atr = _wilder(tr, n)
     out = df.with_columns(
         # avg_loss==0 → RSI=100 по определению (корректный предел, не маскировка)
-        rsi=pl.when(avg_loss <= 0.0).then(100.0)
-            .otherwise(100.0 - 100.0 / (1.0 + avg_gain / avg_loss)),
+        rsi=pl.when(avg_loss <= 0.0)
+        .then(100.0)
+        .otherwise(100.0 - 100.0 / (1.0 + avg_gain / avg_loss)),
         atr=atr,
         _pdi=pl.when(atr <= 0.0).then(0.0).otherwise(100.0 * _wilder(plus_dm, n) / atr),
         _mdi=pl.when(atr <= 0.0).then(0.0).otherwise(100.0 * _wilder(minus_dm, n) / atr),
@@ -123,8 +147,9 @@ def compute(df: pl.DataFrame, symbol: str, n: int = 14) -> dict:
     )
     di_sum = pl.col("_pdi") + pl.col("_mdi")
     out = out.with_columns(
-        _dx=pl.when(di_sum <= 0.0).then(0.0)
-            .otherwise(100.0 * (pl.col("_pdi") - pl.col("_mdi")).abs() / di_sum),
+        _dx=pl.when(di_sum <= 0.0)
+        .then(0.0)
+        .otherwise(100.0 * (pl.col("_pdi") - pl.col("_mdi")).abs() / di_sum),
     ).with_columns(adx=_wilder(pl.col("_dx"), n))
 
     tail = out.tail(1).row(0, named=True)
@@ -150,7 +175,7 @@ def compute(df: pl.DataFrame, symbol: str, n: int = 14) -> dict:
 
     rsi_series = out["rsi"].tail(4).to_list()
     for i, v in enumerate(rsi_series):
-        _fin(f"rsi[t-{3-i}]", symbol, v)
+        _fin(f"rsi[t-{3 - i}]", symbol, v)
 
     return {
         "close": round(close, 8),
@@ -158,7 +183,9 @@ def compute(df: pl.DataFrame, symbol: str, n: int = 14) -> dict:
         "rsi_slope": round(rsi_series[-1] - rsi_series[0], 1),
         "atr_pct": round(_fin("atr_pct", symbol, atr_v / close * 100.0), 3),
         "adx": round(_fin("adx", symbol, tail["adx"]), 1),
-        "pdi_minus_mdi": round(_fin("pdi", symbol, tail["_pdi"]) - _fin("mdi", symbol, tail["_mdi"]), 1),
+        "pdi_minus_mdi": round(
+            _fin("pdi", symbol, tail["_pdi"]) - _fin("mdi", symbol, tail["_mdi"]), 1
+        ),
         "vwap_dev_atr": round(_fin("vwap_dev", symbol, (close - vwap_v) / atr_v), 2),
         "pos_in_range": round(_fin("pos", symbol, (close - low) / rng), 2),
         "vol_expansion_x": round(_fin("vol_exp", symbol, vol_now / vol_base), 2),
@@ -215,8 +242,15 @@ def main() -> int:
             oi = fetch_oi_delta(sym, args.proxy)
             fund = fetch_funding(sym, args.proxy)
             v, why = verdict(m, oi)
-            rec = {"symbol": sym, "interval": args.interval, "probe_verdict": v,
-                   "why": why, "oi_delta_pct": oi, "funding_pct": fund, **m}
+            rec = {
+                "symbol": sym,
+                "interval": args.interval,
+                "probe_verdict": v,
+                "why": why,
+                "oi_delta_pct": oi,
+                "funding_pct": fund,
+                **m,
+            }
             # Финальный контракт: каждое число конечно — иначе строку не выпускаем.
             print(json.dumps(rec, allow_nan=False))
             sys.stdout.flush()
@@ -225,8 +259,10 @@ def main() -> int:
             print(f"PROBE_FAIL {sym}: {exc}", file=sys.stderr)
             failures.append(sym)
     if failures:
-        print(f"PROBE_FAIL_SUMMARY: {len(failures)}/{len(symbols)} провалились: {failures}",
-              file=sys.stderr)
+        print(
+            f"PROBE_FAIL_SUMMARY: {len(failures)}/{len(symbols)} провалились: {failures}",
+            file=sys.stderr,
+        )
         return 1
     return 0
 

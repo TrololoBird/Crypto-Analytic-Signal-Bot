@@ -302,7 +302,7 @@ class AnalyzerContextMixin(AnalyzerMixinBase):
                     continue
                 try:
                     _, frame = cached
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     continue
                 change = self._hourly_close_change_pct(frame)
                 if change is not None:

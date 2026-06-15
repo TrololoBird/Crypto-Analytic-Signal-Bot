@@ -63,7 +63,12 @@ BOT_PRIVATE_API_IMPORT_SNIPPETS = (
 def _scan_imports() -> list[str]:
     errors: list[str] = []
     skip = {Path("scripts/verify_refactor_gate.py")}
-    for root in (REPO_ROOT / "bot", REPO_ROOT / "engine", REPO_ROOT / "scripts", REPO_ROOT / "tests"):
+    for root in (
+        REPO_ROOT / "bot",
+        REPO_ROOT / "engine",
+        REPO_ROOT / "scripts",
+        REPO_ROOT / "tests",
+    ):
         if not root.exists():
             continue
         for py in root.rglob("*.py"):

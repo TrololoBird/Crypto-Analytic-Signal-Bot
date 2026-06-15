@@ -7,6 +7,7 @@ watch alive, свежие dump-JSONL. Цель — не печатать про�
 
     .venv/bin/python scripts/hunt_boot_snapshot.py
 """
+
 from __future__ import annotations
 
 import json
@@ -74,10 +75,10 @@ def prep_summary() -> dict:
 
 
 def watch_alive() -> dict:
-    out = subprocess.run(["pgrep", "-fl", "hunt_core.* watch"],
-                         capture_output=True, text=True)
-    mon = subprocess.run(["pgrep", "-fl", "hunt_agent_monitor_loop"],
-                         capture_output=True, text=True)
+    out = subprocess.run(["pgrep", "-fl", "hunt_core.* watch"], capture_output=True, text=True)
+    mon = subprocess.run(
+        ["pgrep", "-fl", "hunt_agent_monitor_loop"], capture_output=True, text=True
+    )
     return {
         "watch": bool(out.stdout.strip()),
         "monitor": bool(mon.stdout.strip()),
@@ -161,6 +162,7 @@ def main() -> int:
 
 if __name__ == "__main__":
     import sys
+
     try:
         raise SystemExit(main())
     except SnapshotError as exc:

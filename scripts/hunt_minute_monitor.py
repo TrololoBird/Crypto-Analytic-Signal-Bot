@@ -119,7 +119,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Hunt watch minute monitor")
     parser.add_argument("--hours", type=float, default=6.0)
     parser.add_argument("--interval", type=int, default=60)
-    parser.add_argument("--verify-every", type=int, default=10, help="Full verify_diff every N passes")
+    parser.add_argument(
+        "--verify-every", type=int, default=10, help="Full verify_diff every N passes"
+    )
     args = parser.parse_args()
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
@@ -160,7 +162,9 @@ def main() -> int:
                 vr = run_verify_sync(limit=15)
                 mismatch_count = int(vr["mismatch_count"])
                 if mismatch_count > 0:
-                    LOG.warning("verify_mismatches=%s alert=%s", mismatch_count, vr.get("alert_path"))
+                    LOG.warning(
+                        "verify_mismatches=%s alert=%s", mismatch_count, vr.get("alert_path")
+                    )
             except Exception as exc:
                 LOG.exception("verify_failed")
 
