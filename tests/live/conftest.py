@@ -8,9 +8,9 @@ import os
 import pytest
 
 from engine.domain.config import load_settings
+from engine.errors import DEFENSIVE_EXC
 from engine.market.data import BinanceFuturesMarketData, MarketDataUnavailable
 from engine.market.rest_impl import BinanceClientImpl
-from engine.errors import DEFENSIVE_EXC
 
 _GEO_SKIP_REASON: list[str | None] = [None]
 

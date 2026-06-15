@@ -97,7 +97,7 @@ def format_signal_probe_telegram(
     from hunt_core.deliver.dispatch import (
         readiness_short_for_setup,
     )
-    from hunt_core.runtime.cycle._impl import _fmt_price, _format_setup_lines
+    from hunt_core.deliver.telegram import fmt_price, format_setup_lines
 
     sym = html.escape(str(row.get("symbol", "?")).replace("USDT", "-USDT"))
     if row.get("error"):
@@ -153,7 +153,7 @@ def format_signal_probe_telegram(
             f"<code>{readiness_short_for_setup(other_setup, direction=other_dir, row=row)}</code>"
         ),
         (
-            f"Цена <code>{_fmt_price(price)}</code> · 24h "
+            f"Цена <code>{fmt_price(price)}</code> · 24h "
             f"<code>{row.get('chg_24h_pct')}%</code> · lifecycle "
             f"<code>{html.escape(str(lc.get('phase') or '—'))}</code>"
         ),
@@ -187,7 +187,7 @@ def format_signal_probe_telegram(
             "Ниже — уровни, OI, funding и триггеры для ручного решения.</i>"
         )
         lines.extend(
-            _format_setup_lines(
+            format_setup_lines(
                 row,
                 setup,
                 direction=direction,
@@ -593,7 +593,7 @@ async def deliver_signal_probe(
     delivery_tier = None
     if show_dir:
         from hunt_core.deliver.dispatch import evaluate_delivery
-        from hunt_core.runtime.settings import SNIPER_CONFIG
+        from hunt_core.runtime.state import SNIPER_CONFIG
 
         gate, delivery_tier = evaluate_delivery(
             row,

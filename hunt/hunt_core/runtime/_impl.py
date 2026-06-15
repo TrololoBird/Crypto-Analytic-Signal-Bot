@@ -15,7 +15,7 @@ bootstrap()
 require_feature_stack()
 
 from hunt_core.runtime.cycle import run_loop
-from hunt_core.runtime.settings import request_stop
+from hunt_core.runtime.state import request_stop
 from hunt_core.data.universe import DEFAULT_SYMBOLS
 
 

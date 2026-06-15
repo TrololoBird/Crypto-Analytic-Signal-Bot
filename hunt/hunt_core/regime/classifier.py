@@ -63,7 +63,7 @@ class _RegimeLatch:
 def _resolve_state(state: Any | None) -> Any:
     if state is not None:
         return state
-    from hunt_core.runtime.settings import current_symbol_state
+    from hunt_core.runtime.state import current_symbol_state
 
     return current_symbol_state()
 

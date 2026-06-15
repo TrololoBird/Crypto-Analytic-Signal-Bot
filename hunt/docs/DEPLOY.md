@@ -24,7 +24,7 @@ python scripts/clean_session_data.py --mode smoke --config config.toml
 |---------|---------|
 | `python -m hunt_core watch --interval 60` | Production minute loop + Telegram |
 | `python -m hunt_core watch --once --no-telegram` | Single tick smoke |
-| `python -m hunt_core verify` | Synthetic logic cases (dev gate) |
+| `python -m hunt_core._dev.check_logic` | Offline logic self-check (replaces removed `verify`) |
 
 ## Data paths (canonical: `hunt_core.paths`)
 
@@ -40,8 +40,8 @@ python scripts/clean_session_data.py --mode smoke --config config.toml
 
 | Gate | Command | Pass |
 |------|---------|------|
-| Logic | `python -m hunt_core verify` | all synthetic cases |
-| LOC budget | `python -m hunt_core._dev.budget` | ≤26k LOC, no engine/bot imports |
+| Logic | `python -m hunt_core._dev.check_logic` + `check_scenarios` | exit 0 |
+| LOC budget | `python -m hunt_core._dev.budget` | ≤44k hot LOC, no engine/bot imports |
 | Compile | `python -m compileall -q hunt/hunt_core` | exit 0 |
 
 ## Architecture

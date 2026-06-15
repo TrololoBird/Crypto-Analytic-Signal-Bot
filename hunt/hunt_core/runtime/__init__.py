@@ -13,7 +13,7 @@ def __getattr__(name: str) -> Any:
 
         return run_loop if name == "run_loop" else run_tick
     if name == "request_stop":
-        from hunt_core.runtime.settings import request_stop
+        from hunt_core.runtime.state import request_stop
 
         return request_stop
     msg = f"module {__name__!r} has no attribute {name!r}"

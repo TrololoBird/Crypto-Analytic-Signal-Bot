@@ -130,6 +130,35 @@ def main() -> int:
         print(f"FAIL presqueeze unexpected type {type(squeeze)}", file=sys.stderr)
         return 1
 
+    high_vote = MTFConfluence(
+        symbol="TESTUSDT",
+        price=1.0,
+        tf_signals={},
+        long_scenario=ScenarioScore(
+            direction="long", score=0.3, htf_count=0, htf_total=3,
+            entry_lo=0, entry_hi=0, tp1=0, tp2=0, stop=0,
+        ),
+        short_scenario=ScenarioScore(
+            direction="short", score=0.9, htf_count=3, htf_total=3,
+            entry_lo=0.99, entry_hi=1.0, tp1=0.9, tp2=0.85, stop=1.05,
+        ),
+        dominant="short",
+    )
+    if family_vote_count(high_vote, direction="short") < FAMILY_VOTE_MIN:
+        print("FAIL expected high family vote fixture", file=sys.stderr)
+        return 1
+
+    from hunt_core.deliver.dispatch import evaluate_forming_gate
+
+    forming_gate = evaluate_forming_gate(
+        {"confirmed": False, "dump_score": 50},
+        direction="short",
+        symbol="TESTUSDT",
+    )
+    if not forming_gate.ok and forming_gate.code == "invalid_setup":
+        print(f"FAIL forming gate unexpected block {forming_gate.code}", file=sys.stderr)
+        return 1
+
     print("scenarios ok")
     return 0
 

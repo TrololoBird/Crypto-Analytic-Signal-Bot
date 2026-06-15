@@ -576,7 +576,7 @@ def disabled_phase_pairs(
     force: bool = False,
     state: Any | None = None,
 ) -> dict[tuple[str, str], PhaseStats]:
-    from hunt_core.runtime.settings import current_symbol_state  # noqa: PLC0415
+    from hunt_core.runtime.state import current_symbol_state  # noqa: PLC0415
 
     store = state or current_symbol_state()
     mtime = SIGNAL_STATE.stat().st_mtime if SIGNAL_STATE.is_file() else 0.0

@@ -124,7 +124,7 @@ allowed-confusables = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"scripts/*.py" = ["E402", "EXE001", "PLC0415", "ASYNC230", "PLW0603", "FBT001", "G004", "E741", "BLE001", "DTZ005", "PERF401", "B007", "PLW2901", "PLW0127", "SIM105", "ARG001", "F841", "E501"]
+"scripts/*.py" = ["E402", "EXE001", "PLC0415", "ASYNC230", "PLW0603", "FBT001", "G004", "E741", "BLE001", "DTZ005", "PERF401", "B007", "PLW2901", "PLW0127", "SIM105", "ARG001", "F841", "E501", "TRY003", "EM101", "EM102", "PLW1510"]
 "scripts/dump_minute_watch.py" = ["E402", "EXE001"]
 "scripts/hunt_scanner.py" = ["E402", "EXE001"]
 "scripts/hunt_independent_batch.py" = ["E402", "EXE001"]

@@ -313,7 +313,7 @@ def universal_section(section: str) -> dict[str, Any]:
     if not isinstance(base, dict):
         base = {}
     try:
-        from hunt_core.config_defaults import universal_section_from_defaults
+        from hunt_core.domain.config import universal_section_from_defaults
 
         from_defaults = universal_section_from_defaults(section)
     except ImportError:

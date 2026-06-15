@@ -5,8 +5,9 @@ from __future__ import annotations
 import pytest
 
 from bot.delivery.tiers import classify_tier
-from engine.domain.config import BotSettings, DeliveryConfig
 from bot.policy.delivery_policy import R_CLASS_SETUP_IDS, r_class_blocks_action
+from bot.strategies import STRATEGY_CLASSES
+from engine.domain.config import BotSettings, DeliveryConfig
 from engine.domain.schemas import Signal
 from engine.domain.strategy_catalog import (
     CATALOG_ENTRIES,
@@ -15,7 +16,6 @@ from engine.domain.strategy_catalog import (
     verify_strategy_wiring,
     wave_status,
 )
-from bot.strategies import STRATEGY_CLASSES
 
 
 @pytest.mark.live

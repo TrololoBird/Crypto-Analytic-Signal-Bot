@@ -81,7 +81,7 @@ from hunt_core.features.fib import leg_fib_levels
 from hunt_core.market import HuntCcxtClient, HuntCcxtSpotCompanion, HuntCcxtStreams
 from hunt_core.market.client import normalize_depth_levels
 from hunt_core.market.live_price import resolve_live_price
-from hunt_core.runtime.settings import SymbolStateStore, merge_hunt_extremes
+from hunt_core.runtime.state import SymbolStateStore, merge_hunt_extremes
 
 LOG = logging.getLogger("hunt_core.runtime.tick_assembly")
 

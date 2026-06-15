@@ -1,4 +1,9 @@
-"""Market regime snapshot + classifier (P4 canonical merge)."""
+"""Market regime snapshot + classifier (P4 canonical API).
+
+Implementation: ``regime/market_regime.py`` (cross-section survey) +
+``regime/classifier.py`` (per-symbol structural regime). This module is the
+stable import surface for gate/cycle consumers.
+"""
 from __future__ import annotations
 
 from hunt_core.analysis.adx_thresholds import (

@@ -14,7 +14,7 @@ Target: standalone hunter per [HUNT_ARCHITECTURE.md](HUNT_ARCHITECTURE.md).
 | `hunt/scripts/` | ~50 ops scripts | **removed** |
 
 LOC budget gate: **44 000** hot path (`_dev/budget.py` excludes `_dev/`, `cycle/_impl.py`, `_engine_impl.py`, `_dump_core.py`).  
-Stretch target **32 000** — needs full physical split into predump/prepump/presqueeze (wave 3C).
+Stretch target **32 000** — wave 4 (`cycle/_impl`, `gate/delivery`, `deliver/telegram` splits); wave 3C scanner split **done**.
 
 ## God modules — keep whole until split
 
@@ -39,7 +39,7 @@ Stretch target **32 000** — needs full physical split into predump/prepump/pre
 |------|-------|
 | hot LOC 44k → 32k | further cycle/_impl + gate/delivery splits (wave 4) |
 | `data/lake.py` | **done** — feature parquet + tracker/tick batch flush |
-| config unification | **done** — `domain/config.py` canonical constants; `runtime/settings.py` session state; `params/store.py` calibration overlay |
+| config unification | **done** — `domain/config.py` TOML + watch constants; `runtime/state.py` session memory; `params/store.py` calibration overlay; shims: `settings.py`, `config_defaults.py` |
 | Long TG | off until n≥30 |
 
 ## Verification

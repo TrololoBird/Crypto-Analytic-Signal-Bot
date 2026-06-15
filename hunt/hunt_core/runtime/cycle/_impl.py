@@ -132,26 +132,28 @@ from hunt_core.deliver.dispatch import (
     unified_cooldown_ok,
 )
 from hunt_core.gate.delivery import delivery_hard_block
-from hunt_core.runtime.settings import SymbolStateStore, new_session_state
-from hunt_core.runtime.settings import (
+from hunt_core.runtime.state import SymbolStateStore, new_session_state
+from hunt_core.runtime.state import (
+    LOG,
+    OUT_PATH,
+    SNIPER_CONFIG,
+    STATE_PATH,
+    STOP,
+    SYMBOL_WATCH_MODES,
+    WatchMode,
+)
+from hunt_core.domain.config import (
     COOLDOWN_MINUTES,
     IGNITION_MIN_VOL_DELTA_USD,
     IGNITION_TELEGRAM_ENABLED,
     IGNITION_TTL_S,
     IGNITION_WINDOW_S,
-    LOG,
-    OUT_PATH,
     SCAN_INTERVAL_S,
-    SNIPER_CONFIG,
     SQUEEZE_COOLDOWN_MINUTES,
     SQUEEZE_MIN_VOL_24H_M,
-    STATE_PATH,
-    STOP,
     SYMBOL_TICK_TIMEOUT_S,
-    SYMBOL_WATCH_MODES,
     TICK_ROTATE_INTERVAL_S,
     TICK_ROTATE_MIN_BYTES,
-    WatchMode,
 )
 
 
@@ -202,12 +204,6 @@ def _refresh_live_price(
             source=row.get("price_source"),
         )
     return px
-
-
-def _format_squeeze_telegram(row: dict[str, Any]) -> str:
-    from hunt_core.deliver.templates import format_squeeze_telegram
-
-    return format_squeeze_telegram(row)
 
 
 def _advisory_tg_enabled() -> bool:
@@ -702,23 +698,6 @@ def _reason_human(setup: dict[str, Any], *, direction: str, lc_phase: str) -> st
     return phase_txt or trig_txt or "—"
 
 
-def _format_telegram(
-    row: dict[str, Any],
-    *,
-    direction: str,
-    confirm_reasons: list[str],
-    delivery_tier: str = "triggered",
-) -> str:
-    from hunt_core.deliver.templates import format_telegram_confirm
-
-    return format_telegram_confirm(
-        row,
-        direction=direction,
-        confirm_reasons=confirm_reasons,
-        delivery_tier=delivery_tier,
-    )
-
-
 # Orphan signals (symbol no longer in watchlist) are re-checked via REST klines.
 ORPHAN_RECONCILE_MINUTES = 5
 INWATCH_KLINE_RECONCILE_SECONDS = 45
@@ -843,12 +822,6 @@ def _duration_str(opened: str) -> str:
         return "—"
 
 
-def _format_followup_telegram(followup: Any, row: dict[str, Any]) -> str:
-    from hunt_core.deliver.templates import format_followup_telegram_message
-
-    return format_followup_telegram_message(followup, row)
-
-
 async def _deliver_followup(
     broadcaster: Any,
     fu: Any,
@@ -862,7 +835,9 @@ async def _deliver_followup(
     announced = bool((fu.payload or {}).get("announced", True))
     if not send_telegram or broadcaster is None or not announced:
         return False
-    msg = _format_followup_telegram(fu, row)
+    from hunt_core.deliver.templates import format_followup_telegram_message
+
+    msg = format_followup_telegram_message(fu, row)
     result = await broadcaster.send_html(msg)
     if result.status != "sent":
         LOG.warning(
@@ -1329,7 +1304,9 @@ async def run_tick(
                             minutes=SQUEEZE_COOLDOWN_MINUTES,
                         )
                     ):
-                        result = await broadcaster.send_html(_format_squeeze_telegram(row))
+                        from hunt_core.deliver.templates import format_squeeze_telegram
+
+                        result = await broadcaster.send_html(format_squeeze_telegram(row))
                         if result.status == "sent":
                             state[f"{symbol}:squeeze"] = now.isoformat()
                             mark_unified_sent(
@@ -1463,7 +1440,9 @@ async def run_tick(
                                 clear_signal_notify(symbol)
                                 continue
                             sym_label = html.escape(symbol.replace("USDT", "-USDT"))
-                            body = _format_telegram(
+                            from hunt_core.deliver.templates import format_telegram_confirm
+
+                            body = format_telegram_confirm(
                                 row,
                                 direction=ndir,
                                 confirm_reasons=list(nsetup.get("confirm_hard") or []),
@@ -1869,7 +1848,9 @@ async def run_tick(
                                 reason=gate.code if not gate.ok else "stale_tier",
                             )
                             continue
-                        msg = _format_telegram(
+                        from hunt_core.deliver.templates import format_telegram_confirm
+
+                        msg = format_telegram_confirm(
                             row,
                             direction=direction,
                             confirm_reasons=setup.get("confirm_hard") or [],
