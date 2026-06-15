@@ -17,6 +17,18 @@ def _htf_bias_override(*args, **kwargs):
 
 
 
+# Lifecycle phases where long confirm is allowed despite short/wait bias.
+_LONG_PUMP_PHASES = frozenset(
+    {
+        "breakout_arming",
+        "impulse_initiating",
+        "post_dump_bounce",
+        "accumulation",
+        "recovery",
+    }
+)
+
+
 # Cluster caps prevent correlated triggers (RSI15+RSI1H+div+funding) inflating fuel.
 _FUEL_CLUSTER_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     (

@@ -230,18 +230,6 @@ def confirm_dump(
     return confirmed, hard
 
 
-_LONG_PUMP_PHASES = frozenset(
-    {
-        "breakout_arming",
-        "impulse_initiating",
-        "post_dump_bounce",
-        "accumulation",
-        "recovery",
-    }
-)
-
-
-
 def phase_dump(
     dump: dict[str, Any],
     confirmed: bool,
