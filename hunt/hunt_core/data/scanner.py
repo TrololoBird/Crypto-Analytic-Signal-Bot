@@ -347,9 +347,8 @@ class PrescanDebounceQueue:
 
 # --- merged from data/scanner.py ---
 
-import math
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Literal
 
 from hunt_core.scan._engine_impl import (
     AdaptiveStore,
@@ -363,7 +362,6 @@ import contextlib
 import json
 from dataclasses import asdict
 from datetime import UTC, datetime
-from typing import Any
 
 import structlog
 

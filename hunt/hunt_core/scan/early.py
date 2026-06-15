@@ -15,7 +15,6 @@ import polars as pl
 from hunt_core.data.universe import watchlist_flags
 from hunt_core.params.store import effective_hunt_params
 from hunt_core.paths import ADAPTIVE_THRESHOLDS, EWMA_THRESHOLDS, IGNITION_STATE
-from hunt_core.features.structure import detect_pp
 
 EWMA_ALPHA = 0.12
 VAR_FLOOR = 1e-8

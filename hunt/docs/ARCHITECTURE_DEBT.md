@@ -39,7 +39,7 @@ Stretch target **32 000** — needs full physical split into predump/prepump/pre
 |------|-------|
 | hot LOC 44k → 32k | further cycle/_impl + gate/delivery splits (wave 4) |
 | `data/lake.py` | **done** — feature parquet + tracker/tick batch flush |
-| config unification | **done** — `domain/config.py` canonical; shims for `config_defaults` + `runtime/settings` |
+| config unification | **done** — `domain/config.py` canonical constants; `runtime/settings.py` session state; `params/store.py` calibration overlay |
 | Long TG | off until n≥30 |
 
 ## Verification

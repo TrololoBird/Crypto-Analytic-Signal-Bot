@@ -22,7 +22,6 @@ from hunt_core.market.factory import (
 )
 from hunt_core.market.factory import ccxt_ohlcv_to_frame, finalize_kline_frame
 from hunt_core.market.symbols import (
-    from_ccxt_symbol,
     is_linear_usdt_swap_market,
     resolve_linear_usdt_swap,
     to_binance_symbol,
@@ -1351,7 +1350,6 @@ class HuntCcxtClient:
 
 # --- merged from market/book_parsers.py ---
 
-from typing import Any
 
 
 def _clamp(value: float) -> float:
@@ -1422,7 +1420,6 @@ def microprice_bias_from_book(
 # --- merged from market/depth_walls.py ---
 
 from dataclasses import dataclass
-from typing import Any
 
 _TOP_BOOK_WALL_LEVELS = 5
 
@@ -1677,9 +1674,7 @@ def wall_cluster_to_dict(cluster: WallCluster) -> dict[str, Any]:
 # --- merged from market/liquidation_heatmap.py ---
 
 import collections
-import time
 from dataclasses import dataclass
-from typing import Any
 
 _DEFAULT_LEVERAGE_TIERS = (5, 10, 20, 50)
 

@@ -3,13 +3,12 @@ from __future__ import annotations
 
 import json
 import threading
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import polars as pl
 
-from hunt_core.paths import LAKE_PARQUET, TICK_JSONL
+from hunt_core.paths import LAKE_PARQUET, SIGNAL_STATE, TICK_JSONL
 
 
 class LakeDataError(RuntimeError):
@@ -40,9 +39,7 @@ def flush_tick_buffer() -> int:
 
 def buffer_tracker_state(state: dict[str, Any], path: Path | None = None) -> None:
     global _tracker_flush
-    from hunt_core.track.tracker import STATE_PATH
-
-    _tracker_flush = (state, path or STATE_PATH)
+    _tracker_flush = (state, path or SIGNAL_STATE)
 
 
 def buffer_cooldown_state(state: dict[str, str], path: Path) -> None:

@@ -29,7 +29,6 @@ from hunt_core.track.events import append_audit_log, audit_probe_row, backtest_l
 from hunt_core.track.tracker import load_tracker_state
 from hunt_core.data.universe import PINNED_SYMBOLS
 from hunt_core.params.store import effective_hunt_params
-from hunt_core.track.candidates import format_symbol_candidates_html
 from hunt_core.data.universe import add_to_watchlist, register_signal_notify
 
 _STAGGER_MS = 150
@@ -96,7 +95,6 @@ def format_signal_probe_telegram(
         format_liquidity_scenarios_telegram,
     )
     from hunt_core.deliver.dispatch import (
-        readiness_label_for_setup,
         readiness_short_for_setup,
     )
     from hunt_core.runtime.cycle._impl import _fmt_price, _format_setup_lines
@@ -355,7 +353,7 @@ async def probe_symbol_signal(
             # MTF confluence (pinned + any explicit /signal symbol with frames)
             try:
                 from hunt_core.analysis.deep_signal import build_liquidity_scenarios
-                from hunt_core.analysis.deep_signal import build_mtf_confluence
+                from hunt_core.confluence.mtf import build_mtf_confluence
 
                 tf = row.get("timeframes") or {}
                 price = float(row.get("price") or 0)
@@ -493,7 +491,7 @@ async def probe_pinned_deep(
         row["_deep_analysis"] = True
         price = float(row.get("price") or 0)
         if tf and price > 0 and row.get("mtf") is None:
-            from hunt_core.analysis.deep_signal import build_mtf_confluence
+            from hunt_core.confluence.mtf import build_mtf_confluence
 
             row["mtf"] = build_mtf_confluence(
                 sym,

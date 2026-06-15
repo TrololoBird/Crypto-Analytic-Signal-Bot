@@ -3,29 +3,11 @@ from __future__ import annotations
 
 import html
 import json
-import math
-import os
-from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any, Literal
 
-import polars as pl
 
-from hunt_core.data.universe import watchlist_flags
-from hunt_core.domain.market_regime import HuntCalibratedParams
-from hunt_core.params.store import (
-    confirm_thresholds,
-    dump_fast_confirm_enabled,
-    effective_hunt_params,
-    entry_confirm_tf,
-    liquidation_thresholds,
-    listings_thresholds,
-    orderflow_thresholds,
-    scoring_thresholds,
-)
-from hunt_core.paths import ADAPTIVE_THRESHOLDS, DUMP_HUNT_ALERT_STATE, EWMA_THRESHOLDS, IGNITION_STATE
-from hunt_core.errors import optional_finite_float, require_mark_price
+from hunt_core.paths import DUMP_HUNT_ALERT_STATE
 
 
 def _htf_bias_override(*args, **kwargs):
@@ -329,7 +311,7 @@ def dump_hunt_skip_reason(
     now = now or datetime.now(UTC)
     sym = _sym_key(symbol)
     lc = lifecycle or {}
-    fall = float(lc.get("fall_from_high_pct") or 0)
+    float(lc.get("fall_from_high_pct") or 0)
     phase = str(lc.get("phase") or "")
 
     leg_tp1 = float(setup.get("leg_tp1") or setup.get("tp1") or 0)

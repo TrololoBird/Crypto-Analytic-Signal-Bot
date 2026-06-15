@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Literal
 
 
@@ -230,8 +230,6 @@ def probe_header(row: dict[str, Any]) -> tuple[str, str, str]:
     lc = row.get("lifecycle") or {}
     bias = str(lc.get("recommended_bias") or "")
     phase = str(lc.get("phase") or "")
-    dump = row.get("dump") or {}
-    long_setup = row.get("long") or {}
     direction, _, _, _ = resolve_trade_direction(row)
 
     if phase == "no_setup":
@@ -292,10 +290,8 @@ def correlated_direction(
     # Positive corr: alt moves with BTC. Negative: inverse.
     if btc_trend == "up":
         aligned = "long" if corr > 0 else "short"
-        contra = "short" if aligned == "long" else "long"
     else:
         aligned = "short" if corr > 0 else "long"
-        contra = "long" if aligned == "short" else "short"
 
     aligned_fuel = short_fuel if aligned == "short" else long_fuel
     raw_fuel = short_fuel if raw == "short" else long_fuel
@@ -798,12 +794,6 @@ def format_liquidity_scenarios_telegram(pack: LiquidityScenarioPack | dict[str, 
 
 
 
-from hunt_core.confluence.mtf import (
-    MTFConfluence,
-    ScenarioScore,
-    TFSignal,
-    build_mtf_confluence,
-)
 
 
 

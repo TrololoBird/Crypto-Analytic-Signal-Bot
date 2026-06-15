@@ -213,6 +213,33 @@ def evaluate_delivery(
     return gate, tier
 
 
+def evaluate_forming_gate(
+    setup: dict[str, Any],
+    *,
+    direction: str,
+    symbol: str,
+    lifecycle: Any | None = None,
+    row: dict[str, Any] | None = None,
+    sniper_config: SniperConfig | None = None,
+) -> "GateResult":
+    """Gate check for non-confirmed (forming) setups — single entry for run_gate_pipeline."""
+    from hunt_core.gate.delivery import GateResult, run_gate_pipeline
+
+    if not isinstance(setup, dict):
+        return GateResult(ok=False, code="invalid_setup", message="invalid_setup")
+    if bool(setup.get("confirmed")):
+        return GateResult(ok=True, code="", message="")
+    cfg = sniper_config or SniperConfig.from_env()
+    return run_gate_pipeline(
+        setup=setup,
+        direction=direction,
+        symbol=symbol,
+        lifecycle=lifecycle,
+        row=row or {},
+        sniper_config=cfg,
+    )
+
+
 def build_delivery_contract(
     row: dict[str, Any],
     *,
@@ -297,7 +324,6 @@ def format_delivery_telegram(
 
 import os
 from dataclasses import dataclass
-from typing import Any
 
 
 @dataclass(frozen=True, slots=True)
@@ -368,7 +394,6 @@ def sniper_block_reason(
 # --- merged from deliver/card_formatter.py ---
 
 import html
-from typing import Any
 
 from hunt_core.analysis.deep_signal import format_order_flow_block, synthesize_order_flow
 
@@ -575,7 +600,6 @@ def invalidate_detail_human(detail: str, *, reason: str = "") -> str:
 
 # --- merged from deliver/readiness_labels.py ---
 
-from typing import Any
 
 _DEFAULT_MIN_RR = 1.6
 _POC_HEADWIND_PCT = 0.5

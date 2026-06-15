@@ -31,7 +31,6 @@ from hunt_core.scan._engine_impl import (
     save_adaptive_store,
     save_ignition_state,
 )
-from hunt_core.deliver.dispatch import invalidate_detail_human
 from hunt_core.features.prepare_columns import book_walls_from_row, feature_vector_from_row
 from hunt_core.regime.leg_fsm import promote_initial_pump_lifecycle, record_delivery_fsm
 from hunt_core.domain.market_regime import (
@@ -75,7 +74,6 @@ from hunt_core.track.tracker import (
     mark_followups_sent,
     reconcile_signal,
     register_signal_open,
-    save_tracker_state,
 )
 from hunt_core.data.universe import PINNED_SYMBOLS, effective_watch_mode, resolve_watch_universe
 from hunt_core.data.universe import save_pinned_cache
@@ -120,7 +118,6 @@ from hunt_core.data.lake import (
     buffer_tick_rows,
     buffer_tracker_state,
     flush_lake,
-    flush_tick_buffer,
 )
 from hunt_core.features.feature_engine import FeatureExtractError, build_feature_vector
 from hunt_core.deliver.digest import (
@@ -130,11 +127,11 @@ from hunt_core.deliver.digest import (
     get_digest_scheduler,
 )
 from hunt_core.deliver.dispatch import (
+    evaluate_forming_gate,
     mark_unified_sent,
     unified_cooldown_ok,
 )
 from hunt_core.gate.delivery import delivery_hard_block
-from hunt_core.gate.delivery import run_gate_pipeline
 from hunt_core.runtime.settings import SymbolStateStore, new_session_state
 from hunt_core.runtime.settings import (
     COOLDOWN_MINUTES,
@@ -230,51 +227,6 @@ def _confirm_blocked_bias_wait(
         str(lifecycle.get("phase") or "") == "dump_active"
         and str(lifecycle.get("recommended_bias") or "") == "wait"
     )
-
-
-def _should_alert(
-    setup: dict[str, Any],
-    *,
-    direction: str,
-    symbol: str,
-    lifecycle: Any | None = None,
-    row: dict[str, Any] | None = None,
-) -> bool:
-    """Forming-path gate check — confirm delivery uses evaluate_delivery only."""
-    if not isinstance(setup, dict):
-        return False
-    if bool(setup.get("confirmed")):
-        return True
-    return run_gate_pipeline(
-        setup=setup,
-        direction=direction,
-        symbol=symbol,
-        lifecycle=lifecycle,
-        row=row or {},
-        sniper_config=SNIPER_CONFIG,
-    ).ok
-
-
-def _alert_block_reason(
-    setup: dict[str, Any],
-    *,
-    direction: str,
-    symbol: str,
-    lifecycle: Any | None = None,
-    row: dict[str, Any] | None = None,
-) -> str:
-    if not isinstance(setup, dict):
-        return "invalid_setup"
-    if bool(setup.get("confirmed")):
-        return ""
-    return run_gate_pipeline(
-        setup=setup,
-        direction=direction,
-        symbol=symbol,
-        lifecycle=lifecycle,
-        row=row or {},
-        sniper_config=SNIPER_CONFIG,
-    ).message
 
 
 def _phase_long(long_setup: dict[str, Any], confirmed: bool, *, symbol: str = "") -> str:
@@ -539,7 +491,6 @@ def _format_setup_lines(
     suppress_context: bool = False,
 ) -> list[str]:
     score_key = "dump_score" if direction == "short" else "long_score"
-    fuel_key = "dump_fuel" if direction == "short" else "long_fuel"
     phase = str(setup.get("phase") or "—")
     confirmed = bool(setup.get("confirmed"))
     badge = _phase_badge(phase, confirmed, direction=direction)
@@ -1791,13 +1742,14 @@ async def run_tick(
                                     block_code=str(confirm_gate.code or ""),
                                 )
                                 continue
-                        elif not _should_alert(
+                        elif not evaluate_forming_gate(
                             setup,
                             direction=direction,
                             symbol=symbol,
                             lifecycle=lifecycle_raw,
                             row=row,
-                        ):
+                            sniper_config=SNIPER_CONFIG,
+                        ).ok:
                             lc = lifecycle_raw if isinstance(lifecycle_raw, dict) else {}
                             fuel = float(
                                 setup.get("dump_fuel") or setup.get("long_fuel")

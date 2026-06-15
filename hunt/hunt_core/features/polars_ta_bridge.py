@@ -9,7 +9,6 @@ from __future__ import annotations
 
 
 from collections.abc import Callable
-from typing import Any
 
 import polars as pl
 import polars_ta.ta as plta

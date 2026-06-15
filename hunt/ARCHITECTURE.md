@@ -55,9 +55,9 @@ flowchart TB
         L --> A[_dump_analysis / _long_analysis]
         A --> C[_confirm_dump / _confirm_long]
         C --> G[gates: premature_exhaustion / lifecycle]
-        G --> TG{confirmed + _should_alert?}
+        G --> TG{confirmed → evaluate_delivery?}
         TG -->|yes| Send[Telegram entry + register_signal_open latch]
-        TG -->|no| Log[watch_tick / watch_alert_blocked]
+        TG -->|no| Log[watch_tick / watch_alert_blocked / forming]
         Send --> TR[evaluate_followups structural invalidate / TP / SL warn]
     end
 
@@ -86,10 +86,9 @@ flowchart TB
    - Short: `_dump_analysis` → score + triggers → `_confirm_dump` → `apply_short_invalidation`
    - Long: `_long_analysis` → `_confirm_long`
 
-6. **Alert gate** (`_should_alert`)
-   - `confirmed` + score ≥ forming min
-   - Short: lifecycle `short_entry_ok`, not `invalidate_short`
-   - Short: **не** `blocks_premature_exhaustion_short`
+6. **Delivery gate** (`evaluate_delivery` confirm / `evaluate_forming_gate` forming)
+   - Confirm: contract → must_pass → family_vote → `run_gate_pipeline` (single path via dispatch)
+   - Forming: telemetry only when gate blocks below forming min score
 
 7. **Telegram**
    - Cooldown 45 min per `symbol:direction`

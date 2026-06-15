@@ -74,7 +74,7 @@ def detect_double_bottom(work: pl.DataFrame, lookback: int = 50) -> dict[str, An
     if low_delta_pct > 0.025:
         return dict(_EMPTY)
 
-    neckline = max(mid_highs)
+    max(mid_highs)
     close = float(frame["close"][-1])
     recovery = (close - avg_low) / avg_low if close > avg_low else 0.0
     conf = _norm_confidence(0.45 + (0.025 - low_delta_pct) / 0.025 * 0.35 + min(recovery, 0.02) / 0.02 * 0.2)

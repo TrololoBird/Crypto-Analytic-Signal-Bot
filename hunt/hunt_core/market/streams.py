@@ -11,7 +11,6 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-import ccxt.pro as ccxtpro
 
 from hunt_core.errors import defensive_exc_types
 from hunt_core.market.factory import close_exchange_async, create_pro_secondary_swap

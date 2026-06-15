@@ -31,7 +31,7 @@ Single module: [hunt_core/contract.py](../hunt_core/contract.py)
 | data | `collect.py`, `universe.py`, `completeness.py`, `lake.py`, `scanner.py` |
 | market | `factory.py`, `client.py`, `network.py`, `cross.py`, `streams.py` |
 | features | `prepare_frame.py`, `snapshot.py`, `factors.py`, `structure.py`, `fib.py` |
-| scan | `_dump_core.py`, `_engine_impl.py`, `routing.py`, `predump.py`, `prepump.py`, `presqueeze.py`, `scanner.py` |
+| scan | `_engine_impl.py` (facade), `routing.py`, `predump.py`, `prepump.py`, `presqueeze.py`, `early.py`, `scanner.py` |
 | regime | `leg_fsm.py`, `regime.py` |
 | levels | `levels.py` (canonical SL/TP) |
 | confluence | `confluence.py`, `mtf.py` |

@@ -10,39 +10,15 @@ from typing import Any, Literal
 
 from hunt_core.data.universe import DEFAULT_MODES
 from hunt_core.deliver.dispatch import SniperConfig
-from hunt_core.domain.config import (
-    COOLDOWN_MINUTES,
-    FORMING_MIN_SCORE,
-    HUNT_MIN_RISK_REWARD,
-    MIN_RISK_REWARD,
-    BOUNCE_MIN_RISK_REWARD,
-    SCAN_INTERVAL_S,
-    SYMBOL_TICK_TIMEOUT_S,
-    TICK_ROTATE_INTERVAL_S,
-    TICK_ROTATE_MIN_BYTES,
-)
 from hunt_core.paths import SESSION_DIR, TELEGRAM_COOLDOWN, TICK_JSONL
 from hunt_core.runtime.logging import configure_script_logging
 
 WatchMode = Literal["short", "long", "both"]
 
 SYMBOL_WATCH_MODES: dict[str, WatchMode] = dict(DEFAULT_MODES)
-SYMBOL_TICK_TIMEOUT_S = 180
 
 OUT_PATH = TICK_JSONL
 STATE_PATH = TELEGRAM_COOLDOWN
-
-IGNITION_WINDOW_S = 300
-IGNITION_MIN_PCT = 2.5
-IGNITION_MIN_VOL_DELTA_USD = 250_000.0
-IGNITION_MIN_QVOL_USD = 3_000_000.0
-IGNITION_TTL_S = 7200.0
-IGNITION_TELEGRAM_ENABLED = False
-
-SQUEEZE_BB_PCTILE_MAX = 0.20
-SQUEEZE_DONCHIAN_MAX_PCT = 8.0
-SQUEEZE_MIN_VOL_24H_M = 5.0
-SQUEEZE_COOLDOWN_MINUTES = 240
 
 SNIPER_CONFIG = SniperConfig.from_env()
 LOG = configure_script_logging("scripts.dump_minute_watch")

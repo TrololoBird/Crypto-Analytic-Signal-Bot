@@ -228,7 +228,7 @@ def _open_shadow(
     alert_message: str,
     now: datetime,
 ) -> dict[str, Any]:
-    cfg = prep_shadow_thresholds()
+    prep_shadow_thresholds()
     price = float(row.get("price") or 0)
     sym = symbol.upper()
     key = _active_key(sym, direction)

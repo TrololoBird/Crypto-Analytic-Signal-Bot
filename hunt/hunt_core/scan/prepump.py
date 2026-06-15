@@ -1,31 +1,17 @@
 """Pre-pump scanner path (§4.2 — long bounce / squeeze-up)."""
 from __future__ import annotations
 
-import html
-import json
-import math
-import os
-from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime, timedelta
-from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
-import polars as pl
 
-from hunt_core.data.universe import watchlist_flags
 from hunt_core.domain.market_regime import HuntCalibratedParams
 from hunt_core.params.store import (
     confirm_thresholds,
-    dump_fast_confirm_enabled,
     effective_hunt_params,
     entry_confirm_tf,
-    liquidation_thresholds,
     listings_thresholds,
-    orderflow_thresholds,
     scoring_thresholds,
 )
-from hunt_core.paths import ADAPTIVE_THRESHOLDS, DUMP_HUNT_ALERT_STATE, EWMA_THRESHOLDS, IGNITION_STATE
-from hunt_core.errors import optional_finite_float, require_mark_price
 
 
 def _htf_bias_override(*args, **kwargs):

@@ -149,10 +149,7 @@ __all__ = [
 
 # --- merged from data/pinned_cache.py ---
 
-import json
 from datetime import UTC, datetime
-from pathlib import Path
-from typing import Any
 
 from hunt_core.paths import DATA
 
@@ -278,10 +275,6 @@ def cache_is_fresh(symbol: str, *, max_age_s: float = _STALE_SECONDS) -> bool:
 
 # --- merged from data/watchlist.py ---
 
-import json
-from datetime import UTC, datetime
-from pathlib import Path
-from typing import Any
 
 from hunt_core.paths import WATCHLIST
 
@@ -446,7 +439,6 @@ def register_signal_notify(
 # --- merged from data/sources.py ---
 
 from abc import ABC, abstractmethod
-from typing import Any
 
 
 class SourceAdapter(ABC):

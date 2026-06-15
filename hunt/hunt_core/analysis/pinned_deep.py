@@ -10,7 +10,7 @@ from typing import Any, Literal
 import polars as pl
 
 from hunt_core.analysis.adx_thresholds import ADX_PANEL_NEUTRAL, ADX_RANGE_MAX
-from hunt_core.analysis.deep_signal import MTFConfluence, ScenarioScore, build_mtf_confluence
+from hunt_core.confluence.mtf import ScenarioScore, build_mtf_confluence
 from hunt_core.analysis.trend_engine import (
     normalize_rsi14,
     resolve_tf_snap,
@@ -593,7 +593,7 @@ def _trade_ready(row: dict[str, Any]) -> tuple[bool, str, str | None]:
         return True, "confirmed", None
     short_r = readiness_score(dump, direction="short")
     long_r = readiness_score(long_setup, direction="long")
-    best = max(short_r, long_r)
+    max(short_r, long_r)
     active_setup = dump if short_r >= long_r else long_setup
     active_dir = "short" if short_r >= long_r else "long"
     display = display_readiness_score(

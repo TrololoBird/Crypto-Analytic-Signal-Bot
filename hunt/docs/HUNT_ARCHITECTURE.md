@@ -33,7 +33,7 @@ hunt/
 │   ├── regime/             # leg_fsm (canonical lifecycle), regime.py
 │   ├── levels/             # levels.py (canonical SL/TP builder)
 │   ├── confluence/         # MTF family-vote + must-pass
-│   ├── scan/               # _dump_core, _engine_impl, routing, predump/prepump/presqueeze, scanner
+│   ├── scan/               # routing, predump/prepump/presqueeze/early, scanner (wave 3C done)
 │   ├── gate/               # delivery, policy (3 files)
 │   ├── deliver/            # dispatch, telegram, digest (4 files)
 │   ├── track/              # tracker, events, outcomes, …
@@ -46,13 +46,13 @@ hunt/
 └── data/baseline/          # smoke regression snapshots
 ```
 
-Wave 3C scanner split in progress: dump/long logic in `_dump_core.py` (~2106 LOC); adaptive/early in `_engine_impl.py` (~1072 LOC); `predump`/`prepump`/`presqueeze` are thin wrappers until logic moves.
+Wave 3C scanner split **done** (2026-06-15): `_engine_impl.py` is a 17 LOC compat facade; logic in `predump`/`prepump`/`early`/`_confirm_shared`/`predump_dump_hunt`; `presqueeze` owns squeeze detection.
 
 ## Hot path (one watch tick)
 
 ```
 run_loop → market.factory → data.collect.snapshot_symbol
-  → features.prepare → scan (_dump_core + _engine_impl) + regime.leg_fsm
+  → features.prepare → scan (routing + predump/prepump/early) + regime.leg_fsm
   → track (prep_shadow, candidates, reconcile)
   → [confirmed] gate.delivery → deliver.dispatch → deliver.telegram
   → [pinned] analysis.pinned_deep + deep_signal
@@ -78,8 +78,9 @@ python -m hunt_core._dev.smoke_signals --baseline data/baseline/hunt_baseline.js
 | File | LOC | Policy |
 |------|-----|--------|
 | `runtime/cycle/_impl.py` | ~2500 | watch loop |
-| `scan/_dump_core.py` | ~2100 | dump/long confirm — wave 3C intermediate |
-| `scan/_engine_impl.py` | ~1070 | adaptive/early — wave 3C split target |
+| `scan/_engine_impl.py` | ~17 | compat facade (wave 3C done) |
+| `scan/predump.py` + `early.py` | ~1300 | dump confirm + adaptive |
+| `scan/presqueeze.py` | ~50 | squeeze detection (canonical) |
 | `regime/leg_fsm.py` | ~1600 | lifecycle FSM |
 | `levels/levels.py` | ~1200 | SL/TP geometry |
 | `gate/delivery.py` | ~2100 | delivery gates |

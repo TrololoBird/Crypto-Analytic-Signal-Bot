@@ -1,18 +1,9 @@
 """Pre-dump scanner path (§4.1 — CONFIRM short cascade)."""
 from __future__ import annotations
 
-import html
-import json
-import math
-import os
-from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime, timedelta
-from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
-import polars as pl
 
-from hunt_core.data.universe import watchlist_flags
 from hunt_core.domain.market_regime import HuntCalibratedParams
 from hunt_core.params.store import (
     confirm_thresholds,
@@ -21,11 +12,7 @@ from hunt_core.params.store import (
     entry_confirm_tf,
     liquidation_thresholds,
     listings_thresholds,
-    orderflow_thresholds,
-    scoring_thresholds,
 )
-from hunt_core.paths import ADAPTIVE_THRESHOLDS, DUMP_HUNT_ALERT_STATE, EWMA_THRESHOLDS, IGNITION_STATE
-from hunt_core.errors import optional_finite_float, require_mark_price
 
 
 def _htf_bias_override(*args, **kwargs):
@@ -103,7 +90,7 @@ def confirm_dump(
     hard: list[str] = []
     c5 = _closed_candle(tf, "5m")
     c1 = _closed_candle(tf, "1m")
-    r5_close = _closed_tf_close(tf, "5m")
+    _closed_tf_close(tf, "5m")
     r15_rsi = _required_closed_rsi(tf, "15m")
     if r15_rsi is None:
         return False, ["veto_data_missing_rsi15m"]

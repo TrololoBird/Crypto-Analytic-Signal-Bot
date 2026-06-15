@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import math
 import time
 from typing import Any, Literal
 
@@ -11,18 +10,10 @@ import polars as pl
 
 LOG = logging.getLogger("hunt_core.data.collect")
 
-from hunt_core.data.completeness import (
-    REQUIRED_SIGNAL_KLINE_TFS,
-    audit_kline_integrity,
-    repair_kline_map_gaps,
-)
 from hunt_core.data.universe import PINNED_SYMBOLS
 from hunt_core.data_readiness import kline_fetch_limit
-from hunt_core.domain.schemas import SymbolFrames, UniverseSymbol
 from hunt_core.errors import DEFENSIVE_EXC
-from hunt_core.features.prepare import _prepare_frame
 from hunt_core.market import HuntCcxtClient, HuntCcxtStreams
-from hunt_core.market.client import normalize_depth_levels
 
 def kline_limits(minimums: dict[str, int], symbol: str = "") -> dict[str, int]:
     """Hunt watch pulls deeper history than default bot warmup (max 1500 bars)."""
@@ -155,7 +146,6 @@ def _btc_corr_1h(sym_work_1h: Any, btc_work_1h: Any, *, lookback: int = 24) -> f
         or btc_work_1h.height < lookback + 2
     ):
         return None
-    import polars as pl
 
     sym_close = sym_work_1h["close"].tail(lookback + 1).cast(pl.Float64)
     btc_close = btc_work_1h["close"].tail(lookback + 1).cast(pl.Float64)
@@ -396,11 +386,7 @@ _fetch_rest_pack = fetch_rest_pack
 
 # --- merged from data/rest_tiers.py ---
 
-import asyncio
-import time
-from typing import Any, Literal
 
-from hunt_core.market import HuntCcxtClient
 
 SnapshotTier = Literal["full", "fast"]
 

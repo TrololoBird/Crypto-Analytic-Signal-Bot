@@ -8,7 +8,7 @@ from hunt_core.confluence.confluence import (
     evaluate_must_pass,
     family_vote_count,
 )
-from hunt_core.confluence.mtf import MTFConfluence, ScenarioScore, TFSignal
+from hunt_core.confluence.mtf import MTFConfluence, ScenarioScore
 from hunt_core.deliver.dispatch import evaluate_delivery
 
 

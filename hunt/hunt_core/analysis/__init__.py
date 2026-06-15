@@ -9,9 +9,14 @@ from hunt_core.analysis.adx_thresholds import (
     ADX_STRONG_MIN,
     ADX_TREND_MIN,
 )
+from hunt_core.confluence.mtf import (
+    MTFConfluence,
+    ScenarioScore,
+    TFSignal,
+    build_mtf_confluence,
+)
 from hunt_core.analysis.deep_signal import (
     build_liquidity_scenarios,
-    build_mtf_confluence,
     build_poc_level_scenarios,
     probe_header,
     synthesize_order_flow,
@@ -45,9 +50,12 @@ __all__ = [
     "build_poc_level_scenarios",
     "is_pinned_symbol",
     "legacy_trend_label",
+    "MTFConfluence",
     "normalize_rsi14",
     "probe_header",
     "resolve_tf_snap",
+    "ScenarioScore",
     "synthesize_order_flow",
+    "TFSignal",
     "trend_from_snapshot",
 ]

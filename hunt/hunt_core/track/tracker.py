@@ -27,7 +27,6 @@ SignalEvent = Literal[
 from hunt_core.params.store import tp1_partial_fix_pct as _tp1_pct
 from hunt_core.params.store import tracker_thresholds
 from hunt_core.features.prepare_columns import feature_vector_from_row
-from hunt_core.paths import SIGNAL_HISTORY as HISTORY_PATH
 from hunt_core.paths import SIGNAL_STATE as STATE_PATH
 from hunt_core.track.events import append_signal_event as _append_event
 from hunt_core.track.events import record_phase_transition as _record_phase_transition
@@ -1228,7 +1227,7 @@ def evaluate_levels(
         active["tp1_hit"] = True
         apply_tp1_management(active, direction=direction, symbol=symbol)
         latch = {**_latched_levels_payload(active), "announced": announced, "tp1": tp1}
-        entry = _worst_entry(active, direction=direction)
+        _worst_entry(active, direction=direction)
         fix_pct = int(active.get("partial_fixed_pct") or _tp1_pct(symbol))
         msg_key = f"{k}:tp1"
         if _followup_allowed(state, msg_key, now=ts):

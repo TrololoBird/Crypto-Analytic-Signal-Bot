@@ -40,7 +40,7 @@ def _candle_exprs(open_: pl.Expr, high: pl.Expr, low: pl.Expr, close: pl.Expr) -
     prev2_close = close.shift(2)
     prev2_body = (prev2_close - prev2_open).abs()
     prev_body = (prev_close - prev_open).abs()
-    body = (close - open_).abs()
+    (close - open_).abs()
     mid_high = pl.max_horizontal(prev_open, prev_close)
     mid_low = pl.min_horizontal(prev_open, prev_close)
 

@@ -1,8 +1,6 @@
 """TF / market / regime snapshot builders (P2 extract from tick_assembly)."""
 from __future__ import annotations
 
-import asyncio
-import html
 import logging
 import math
 from datetime import UTC, datetime
@@ -11,7 +9,6 @@ from typing import Any, Literal
 import polars as pl
 
 from hunt_core.data.collect import (
-    _apply_rest_enrichments,
     _book_from_pack,
     _kline_integrity_reject,
     _overlay_ws_market,
@@ -24,9 +21,8 @@ from hunt_core.features.chart_patterns import chart_pattern_snapshot
 from hunt_core.features.pivots import _pivot_rows, rsi_trendline_break, with_spec_columns
 from hunt_core.features.polars_ta_bridge import rsi_series as _rsi_series
 from hunt_core.features.research_plugins import enrich_research_columns, research_snapshot_fields
-from hunt_core.analysis.pinned_deep import enrich_pinned_tf_snapshot, prepare_htf_frame
+from hunt_core.analysis.pinned_deep import enrich_pinned_tf_snapshot
 from hunt_core.analysis.trend_engine import legacy_trend_label, trend_from_snapshot
-from hunt_core.domain.market_regime import symbol_regime_features
 from hunt_core.data.universe import PINNED_SYMBOLS
 from hunt_core.features.structure import detect_pp
 from hunt_core.errors import DEFENSIVE_EXC
@@ -150,7 +146,7 @@ def session_stats(work_1m: Any, *, bars: int = 1440) -> dict[str, Any]:
     lows = [float(x) for x in work_1m["low"].to_list()[-n:]]
     closes = [float(x) for x in work_1m["close"].to_list()[-n:]]
     hi, lo, last = max(highs), min(lows), closes[-1]
-    mid = (hi + lo) / 2.0 if hi > lo else last
+    (hi + lo) / 2.0 if hi > lo else last
     return {
         "high_24h": round(hi, 6),
         "low_24h": round(lo, 6),
@@ -348,7 +344,6 @@ def btc_corr_1h(sym_work_1h: Any, btc_work_1h: Any, *, lookback: int = 24) -> fl
         or btc_work_1h.height < lookback + 2
     ):
         return None
-    import polars as pl
 
     sym_close = sym_work_1h["close"].tail(lookback + 1).cast(pl.Float64)
     btc_close = btc_work_1h["close"].tail(lookback + 1).cast(pl.Float64)
@@ -1061,36 +1056,16 @@ def tf_snapshot(
 
 
 # Squeeze-watch (hunt-v3 item 5): volatility compression = pre-pump/pre-dump state.
-# TTM squeeze fires BEFORE the move — opposite of every other (post-hoc) trigger here.
-SQUEEZE_BB_PCTILE_MAX = 0.20  # bb_width_pctile50 on 1h
-SQUEEZE_DONCHIAN_MAX_PCT = 8.0  # 20-bar 1h range, % of price
-SQUEEZE_MIN_VOL_24H_M = 5.0  # $5M floor — dead symbols compress forever
-SQUEEZE_COOLDOWN_MINUTES = 240
 
 
 def squeeze_watch(tf: dict[str, Any], market: dict[str, Any]) -> dict[str, Any] | None:
-    """Charged state: 1h BB-width in bottom quintile + narrow Donchian channel."""
-    r1h = tf.get("1h") or {}
-    pctile = r1h.get("bb_width_pctile")
-    don = r1h.get("donchian_width_pct")
-    if pctile is None or don is None:
-        return None
-    charged = float(pctile) <= SQUEEZE_BB_PCTILE_MAX and float(don) <= SQUEEZE_DONCHIAN_MAX_PCT
-    if not charged:
-        return None
-    return {
-        "charged": True,
-        "bb_width_pctile_1h": float(pctile),
-        "donchian_width_pct_1h": float(don),
-        "squeeze_on_1h": r1h.get("squeeze_on"),
-        "oi_z": market.get("oi_z"),
-        "gls_z": market.get("gls_z"),
-        "funding_pct": market.get("funding_pct"),
-    }
+    from hunt_core.scan.presqueeze import squeeze_watch as _squeeze_watch
+
+    return _squeeze_watch(tf, market)
 
 
 def format_squeeze_telegram(row: dict[str, Any]) -> str:
-    from hunt_core.deliver.telegram import format_squeeze_telegram as _fmt  # noqa: PLC0415
+    from hunt_core.deliver.templates import format_squeeze_telegram as _fmt
 
     return _fmt(row)
 

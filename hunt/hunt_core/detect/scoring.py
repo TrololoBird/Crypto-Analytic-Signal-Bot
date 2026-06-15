@@ -6,8 +6,6 @@ from typing import Any
 from hunt_core.scan._engine_impl import (
     confirm_dump as _se_confirm_dump,
     confirm_long as _se_confirm_long,
-    enrich_dump_setup,
-    enrich_long_setup,
     phase_dump as _se_phase_dump,
     phase_long as _se_phase_long,
     wall_depth_fuel_triggers,
@@ -15,7 +13,6 @@ from hunt_core.scan._engine_impl import (
 from hunt_core.data.collect import SnapshotTier
 from hunt_core.features.levels import (
     build_liquidity_context,
-    fib_retracement_levels,
     structural_long_levels,
     structural_short_levels,
 )

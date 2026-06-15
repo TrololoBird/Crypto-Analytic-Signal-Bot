@@ -66,9 +66,7 @@ def detect_dump_initiation(
     )
 
 # --- merged from squeeze_expansion.py ---
-from typing import Any
 
-from hunt_core.setups.catalog import SetupEvidence, atr_from_tf, confirm_tf_chain
 
 
 def detect_squeeze_expansion(
@@ -126,9 +124,7 @@ def detect_squeeze_expansion(
     )
 
 # --- merged from liquidity_sweep.py ---
-from typing import Any
 
-from hunt_core.setups.catalog import SetupEvidence, atr_from_tf, confirm_tf_chain
 
 
 def detect_liquidity_sweep(
@@ -188,9 +184,7 @@ def detect_liquidity_sweep(
     )
 
 # --- merged from bos_choch.py ---
-from typing import Any
 
-from hunt_core.setups.catalog import SetupEvidence, atr_from_tf, confirm_tf_chain
 
 
 def detect_bos_choch(
@@ -265,9 +259,7 @@ def detect_bos_choch(
     )
 
 # --- merged from value_accept_reject.py ---
-from typing import Any
 
-from hunt_core.setups.catalog import SetupEvidence, atr_from_tf, confirm_tf_chain
 
 
 def detect_value_accept_reject(
@@ -347,9 +339,7 @@ def detect_value_accept_reject(
     )
 
 # --- merged from oi_cascade.py ---
-from typing import Any
 
-from hunt_core.setups.catalog import SetupEvidence, atr_from_tf, confirm_tf_chain
 
 
 def detect_oi_cascade(
@@ -416,9 +406,7 @@ def detect_oi_cascade(
     )
 
 # --- merged from accumulation_breakout.py ---
-from typing import Any
 
-from hunt_core.setups.catalog import SetupEvidence, atr_from_tf, confirm_tf_chain
 
 
 def detect_accumulation_breakout(

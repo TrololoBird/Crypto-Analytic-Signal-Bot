@@ -175,7 +175,7 @@ def _update_rollup(state: dict[str, Any], closed: dict[str, Any]) -> None:
     entry = float(closed.get("entry_price") or 0)
     tp1 = float(closed.get("tp1") or 0)
     sl = float(closed.get("stop_loss") or 0)
-    direc = str(closed.get("direction") or "short")
+    str(closed.get("direction") or "short")
     if entry > 0 and tp1 > 0:
         tp1_dist = abs(entry - tp1) / entry * 100.0
         prev = rollup.get("median_tp1_dist_pct")
