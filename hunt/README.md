@@ -1,66 +1,61 @@
-# Hunt Watch
+# Hunt Watch (crypto-hunter)
 
-**Memecoin pump/dump minute scanner** — отдельный подпроект основного signal-bot.
+**Memecoin pump/dump minute scanner** — independent package in the monorepo.
 
-- Только **публичные** Binance USDⓈ-M REST endpoints
-- **Telegram manual signals** на closed-bar confirm
-- **Не auto-trade**, не bypass main-bot delivery path для обычных символов
-- Зависит от monorepo: `bot/market`, `bot/features`, `bot/engine`, `config.toml`, `.env`
+- Public **Binance USDⓈ-M** via **CCXT** REST + Pro WebSocket
+- **Telegram** manual signals on closed-bar confirm
+- **No auto-trading**, no private Binance auth
+- Canonical package: **`hunt_core/`** only — `python -m hunt_core`
 
-## Быстрый старт
+## Quick start
 
 ```bash
-# из корня репозитория
-source .venv/bin/activate
-pip install -e ".[live,dev]"   # подхватывает hunt_watch
+# repo root, venv active
+pip install -e "./hunt"
 
-# разовый скан universe
-python hunt/scripts/scanner.py --print
+# single tick (no Telegram)
+python -m hunt_core watch --once --no-telegram
 
-# minute watch (60s tick, Telegram on confirm)
-python hunt/scripts/watch.py --interval 60
+# production loop
+python -m hunt_core watch --interval 60
 
-# Independent bot vs REST verification (Binance API only)
-python hunt/scripts/verify_diff.py
-python scripts/hunt_verify_diff.py VELVETUSDT JCTUSDT
+# logic verification (dev gate)
+python -m hunt_core verify
 ```
 
-**Секреты:** `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` в `.env` (как у main bot).
+Secrets: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` in `.env`.
 
-**Данные:** `hunt/data/` — watchlist, ticks, signal state, cooldown.
+Data: `hunt/data/` — see [docs/DEPLOY.md](docs/DEPLOY.md).
 
-**Legacy wrappers** (совместимость): `scripts/dump_minute_watch.py`, `scripts/hunt_scanner.py`.
-
-## Структура
+## Package layout
 
 ```
 hunt/
-├── README.md              ← этот файл
-├── ARCHITECTURE.md        ← полный pipeline, условия, стратегия
-├── config.defaults.toml   ← пороги (reference)
-├── hunt_watch/            ← Python package
-│   ├── lifecycle.py       ← FSM фаз пампа/дампа
-│   ├── screener.py        ← radar scoring 24h ticker
-│   ├── scanner_runner.py  ← scan → watchlist.json
-│   ├── targets.py         ← universe merge
-│   ├── levels.py          ← entry/SL/TP structural
-│   ├── signal_tracker.py  ← latch, follow-up TG
-│   └── paths.py           ← data paths
-├── scripts/
-│   ├── watch.py           ← main loop
-│   ├── scanner.py
-│   ├── independent_batch.py
-│   └── beat_check.py
-└── data/                  ← runtime state
+├── hunt_core/          # Canonical: market, data/collect, features, runtime, gate, deliver
+├── hunt_research/      # Offline labels, replay, calibrate extras
+├── docs/               # HUNT_ARCHITECTURE, DEPLOY, LIBRARY_STACK
+├── config.defaults.toml
+└── data/               # Runtime state + lake
 ```
 
-## Отличие от main bot
+## vs main bot
 
-| | Main bot | Hunt Watch |
-|---|----------|------------|
-| Trigger | WS kline close | REST poll 60s |
-| Delivery | contract → confluence 3/5 → TG | Hunt confirm → TG |
-| Memecoin short | часто `htf_conflict` | hunt confirm + advisory audit |
-| Universe | shortlist | pinned + defaults + scanner |
+| | Main bot (`bot/`) | Hunt |
+|---|-------------------|------|
+| Trigger | WS kline close | REST poll + WS enrich |
+| Delivery | contract → confluence 3/5 | Hunt confirm → TG |
+| Universe | shortlist | pinned + scanner watchlist |
 
-Подробности: [ARCHITECTURE.md](./ARCHITECTURE.md)
+## Verification
+
+```bash
+python -m compileall -q hunt/hunt_core
+python -m hunt_core verify
+python -m hunt_core._dev.budget
+```
+
+## Docs
+
+- [HUNT_ARCHITECTURE.md](docs/HUNT_ARCHITECTURE.md) — canonical architecture
+- [DEPLOY.md](docs/DEPLOY.md) — install, run, ops
+- [LIBRARY_STACK.md](docs/LIBRARY_STACK.md) — polars + ccxt deps

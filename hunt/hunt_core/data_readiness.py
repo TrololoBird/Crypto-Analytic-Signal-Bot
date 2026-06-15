@@ -1,6 +1,7 @@
 """Symbol data readiness gate (shortlist Phase 3)."""
-
 from __future__ import annotations
+
+
 
 import math
 from dataclasses import dataclass, field
@@ -11,7 +12,7 @@ if TYPE_CHECKING:
 
     import polars as pl
 
-    from hunt_core.domain.config import BotSettings
+    from hunt_core.domain.config import HuntSettings as BotSettings
     from hunt_core.domain.schemas import PreparedSymbol, UniverseSymbol
 
 

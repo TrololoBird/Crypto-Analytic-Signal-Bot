@@ -1,5 +1,31 @@
 # Hunt Changelog (session notes)
 
+## 2026-06-15 — Hunt redesign completion (P0–P12)
+
+- **Phase 0:** `--once` fast path (skip scan/cross-ex; CLI symbol cap); `watch_once_smoke`; baseline `data/baseline/hunt_baseline.json`
+- **P2:** Split `tick_assembly` → `features/snapshot.py` + `detect/scoring.py` (649 LOC orchestrator)
+- **P3:** `factor_panel` on tick row; real `structure.py`; `fib.leg_fib_levels`
+- **P4:** Canonical FSM in `regime/leg_fsm.py`; `detect/lifecycle` shim
+- **P5:** Canonical levels in `levels/levels.py`; B1 `atr1h` SL floor; `MIN_RR=1.5`
+- **P6:** `evaluate_must_pass` wired in `evaluate_delivery`; ADX unified via `adx_thresholds`
+- **P7:** Engine moved to `scan/_engine_impl.py`; `HUNT_SCANNER_V2`; `domain/setup_registry.py`
+- **P8–P9:** `confluence_grid` + `templates` in confirm TG; single gate pass; tick lake buffer
+- **P10:** `HUNT_EXIT_V2`; `append_outcome_record`; `track/candidates.py`; audit re-export in `events`
+- **P12:** CI live-smoke job (network)
+
+- **P1:** Removed `hunt_research/`, `intel/`, `_legacy/`, `calibrate/`, `/autotune`, `verify`, `monitor`.
+- **P2:** Split `collect.py` → ingest-only (`data/collect.py`); tick assembly → `runtime/tick_assembly.py`; scanner → `data/scanner.py`. Fixed `SymbolFrames.book_bids` / `PreparedSymbol` POC fields.
+- **P3:** Added `features/factors.py`, `structure.py`, `fib.py`; `_dev/check_factors.py`, `check_imports.py`.
+- **P4:** Added `regime/leg_fsm.py`, `regime/regime.py`; rewired gate + cycle consumers.
+- **P5:** Added `levels/` package; `_dev/check_levels.py`; structural levels wired in tick assembly.
+- **P6:** Added `confluence/confluence.py` with family-vote + must-pass split.
+- **P7:** Added `scan/predump|prepump|presqueeze|scanner.py`; `detect/__init__` re-exports scan facade.
+- **P8:** Added `analysis/confluence_grid.py`; baseline `data/hunt_baseline.json` + `_dev/smoke_signals.py`.
+- **P9:** Added `deliver/templates.py` table-driven formatters.
+- **P10:** Extended `track/outcomes.py` single-writer KPI helpers.
+- **P11:** Updated this changelog; lazy `runtime/__init__.py` breaks import cycles.
+- **P12:** Added `.github/workflows/ci.yml` hunt static gates.
+
 ## 2026-06-12 — Gate-edge proof (central thesis confirmed)
 
 - **`scripts/gate_edge.py`** — replays the confirm gate's historical output: the tick JSONL stores

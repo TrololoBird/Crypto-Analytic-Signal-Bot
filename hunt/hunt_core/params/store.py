@@ -1,15 +1,608 @@
-"""Parameter store — port."""
+"""Unified hunt calibration: universal gates + per-symbol overrides.
 
-from hunt_watch.param_store import (
-    effective_hunt_params,
-    migrate_calibration_split,
-    universal_section,
-    walk_forward_thresholds,
+Persisted in hunt/data/hunt_calibration.json (separate from EWMA tick stats).
+"""
+from __future__ import annotations
+
+
+
+import json
+from dataclasses import replace
+from functools import lru_cache
+from pathlib import Path
+from typing import Any
+
+from hunt_core.domain.market_regime import HuntCalibratedParams, active_params
+from hunt_core.paths import ADAPTIVE_THRESHOLDS, EWMA_THRESHOLDS, HUNT_CALIBRATION
+
+_CALIBRATION_KEYS = frozenset(
+    {"computed_at", "data_summary", "universal", "per_symbol", "outcome_calibration"}
 )
 
-__all__ = [
-    "effective_hunt_params",
-    "migrate_calibration_split",
-    "universal_section",
-    "walk_forward_thresholds",
-]
+# Defaults mirror hardcoded hunt sources when no calibration file exists.
+#
+# Score ladder (P0 doc): ``gates.confirm_min_score`` (60) = raw trigger sum at confirm;
+# ``delivery.min_fuel`` (72) = cluster-capped fuel floor for Telegram delivery — intentionally
+# stricter than confirm_min; do not collapse without gate_edge evidence.
+UNIVERSAL_DEFAULTS: dict[str, Any] = {
+    "gates": {
+        "confirm_min_score": 60.0,
+        "confirm_min_score_no_div": 68.0,
+        "forming_min_score": 45.0,
+        "adx_trend_block": 40.0,
+        "adx_trend_min": 28.0,
+        "min_risk_reward": 1.15,
+    },
+    "delivery": {
+        "min_fuel": 72.0,
+        "min_structural_hard": 2,
+        "exhaustion_short_min_fuel": 78.0,
+        "accumulation_long_min_fuel": 74.0,
+        "exhaustion_adx_max": 32.0,
+        "impulse_long_min_pos": 0.52,
+        "impulse_long_above_mid": True,
+        "impulse_long_min_oi_chg_1h": 0.005,
+        "short_start_max_fall_pct": 3.0,
+        "short_pre_dump_headroom_pct": 5.0,
+        "short_first_break_max_fall_pct": 5.0,
+    },
+    "lifecycle": {
+        "meaningful_dump_pct": 8.0,
+        "pre_dump_max_fall_pct": 3.0,
+        "pre_dump_headroom_pct": 5.0,
+        "violent_dump_fall_pct": 15.0,
+        "fast_dump_fall_pct": 12.0,
+        "parabolic_leg_gain_pct": 20.0,
+        "mega_leg_gain_pct": 80.0,
+        "near_high_pos": 0.82,
+        "near_high_price_ratio": 0.97,
+        "post_dump_bounce_pos": 0.55,
+        "bounce_min_floor_pct": 5.0,
+        "bounce_min_atr_mult": 1.5,
+        "rsi_1h_overbought": 65.0,
+        "rsi_exhaustion_enter": 66.0,
+        "rsi_exhaustion_exit": 63.0,
+        "squeeze_bb_width_pctile_max": 0.25,
+        "squeeze_donchian_width_pct_max": 10.0,
+        "taker_buy_min": 1.05,
+        "taker_sell_max": 0.98,
+        "cascade_wick_ratio_min": 0.25,
+        "premature_exhaustion_pos_tight": 0.92,
+        "premature_exhaustion_bounce_tight_pct": 4.0,
+        "premature_exhaustion_pos": 0.85,
+        "premature_exhaustion_bounce_pct": 15.0,
+    },
+    "collect": {
+        "rsi15_overbought": 72.0,
+        "rsi1h_overbought": 72.0,
+        "rsi15_oversold": 32.0,
+        "rsi1h_oversold": 35.0,
+        "extended_above_impulse_pct": 3.0,
+        "extended_below_impulse_pct": 3.0,
+        "taker_sell_max": 0.98,
+        "taker_buy_min": 1.02,
+        "funding_crowded_long_pct": 0.05,
+        "funding_crowded_short_pct": -0.02,
+        "oi_flush_ratio": 0.997,
+        "oi_build_ratio": 1.003,
+        "basis_ap_premium_bps": 100.0,
+        "basis_ap_discount_bps": -80.0,
+        "microprice_sell_max": -0.05,
+        "microprice_buy_min": 0.05,
+        "structure_break_score": 28.0,
+    },
+    "scoring": {
+        "cluster_cap": 28.0,
+        "trigger_weight_default": 12.0,
+        "trigger_weight_structure": 28.0,
+        "trigger_weight_close_break": 22.0,
+        "trigger_weight_div": 18.0,
+        "trigger_weight_trendline": 8.0,
+        "trigger_weight_rejection": 16.0,
+        "fuel_raw_blend_ratio": 0.55,
+        "accumulation_long_fuel_cap": 72.0,
+        "squeeze_bb_boundary": 0.08,
+        "ema200_confluence_pct": 0.005,
+        "ema200_fuel": 8.0,
+        "squeeze_boundary_fuel": 8.0,
+        "hidden_div_fuel": 10.0,
+        "wall_max_distance_pct": 2.0,
+        "zone_imb_threshold": 0.15,
+        "wall_fuel_score": 6.0,
+        "zone_fuel_score": 4.0,
+    },
+    "levels": {
+        "sl_max_pct_normal": 8.0,
+        "sl_max_pct_hot": 11.0,
+        "sl_max_pct_parabolic": 14.0,
+        "hot_range_pct": 60.0,
+        "parabolic_range_pct": 120.0,
+        "parabolic_leg_gain_pct": 80.0,
+        "sl_min_atr": 0.6,
+        "min_rr": 1.0,
+    },
+    "scanner": {
+        "hot_range_pct": 8.0,
+        "pump_extreme_pct": 15.0,
+        "pos_near_high": 0.85,
+        "pos_near_low": 0.25,
+    },
+    "tracker": {
+        "tp1_partial_fix_pct_normal": 50.0,
+        "tp1_partial_fix_pct_hot": 80.0,
+        "bias_flip_chop_adx_max": 20.0,
+        "prep_confirm_window_hours": 8.0,
+        "breakeven_buffer_pct": 0.15,
+        # Memecoin 1m wicks: 0.15% BE after TP1 caused false stop_hit (EPIC/UBU 2026-06-12).
+        "breakeven_buffer_min_pct": 1.0,
+        # Trailing room = fraction of initial structural risk (orig SL distance).
+        "breakeven_risk_fraction": 0.25,
+        "mfe_stall_hours": 8.0,
+        "mfe_stall_min_pct": 1.0,
+        "orphan_ttl_hours": 24.0,
+        "stale_lc_ticks_default": 3.0,
+        "stale_lc_ticks_near_tp1": 8.0,
+        "near_tp1_remaining_pct": 3.0,
+        "reclaim_buffer": 1.001,
+    },
+    "btc": {
+        "corr_soft_min": 0.45,
+        "corr_hard_min": 0.70,
+        "soft_fuel_gap_max": 10.0,
+        "hard_fuel_gap_max": 18.0,
+    },
+    "basis": {
+        "ap_overheat_bps": 120.0,
+        "ap_underheat_bps": -120.0,
+        "prefer_ap_basis": True,
+    },
+    "orderflow": {
+        "use_nq": True,
+        "confirm_window_sec": 60,
+        "fast_window_sec": 30,
+        "taker_buy_min": 0.58,
+        "taker_sell_max": 0.42,
+        "require_ws_align": True,
+    },
+    "ws": {
+        "kline_grace_sec": 1.5,
+    },
+    "filters": {
+        "vwap_extreme_atr": 2.25,
+    },
+    "confirm": {
+        "entry_confirm_tf": "5m",
+        # Dumps complete in minutes; longs build over hours. Confirm asymmetrically:
+        # dump on the 1m closed bar, long stays on 5m. Fall back to entry_confirm_tf.
+        "entry_confirm_tf_dump": "1m",
+        "entry_confirm_tf_long": "5m",
+        # When the dump confirm TF is sub-5m, a single closed break on that fast TF
+        # + 1 secondary factor is enough (avoids waiting 2× 5m on liq-thin alts).
+        "dump_fast_confirm": True,
+        "accumulation_secondary_min": 3,
+        "short_bounce_recovery_bounce_min_pct": 8.0,
+        "short_bounce_recovery_fall_max_pct": 15.0,
+    },
+    "liquidation": {
+        "min_long_notional_5m_usd": 25000.0,
+        "min_short_notional_5m_usd": 25000.0,
+        "min_events_5m": 6,
+        "score_threshold": 0.30,
+    },
+    "listings": {
+        "min_1h_bars_confirm": 24,
+        "min_1h_bars_synth": 48,
+        "min_4h_bars_native": 100,
+    },
+    "phase_matrix": {
+        "min_samples": 12,
+        "max_wr": 0.28,
+        "prior_wr": 0.35,
+    },
+    "stats": {
+        "forward_horizon_hours": 8.0,
+        "meme_slippage_pct": 0.15,
+        "win_label_min_pct": 2.0,
+        "loss_label_max_pct": -2.0,
+    },
+    "walk_forward": {
+        "is_ratio": 0.70,
+        "min_oos_ticks": 400,
+        "min_oos_outcomes": 30,
+        "min_confirm_rate": 0.015,
+        "floors": [60, 62, 64, 66, 68, 70, 72],
+    },
+    "prep_shadow": {
+        "enabled": True,
+        "horizon_hours": 8.0,
+        "direction_ok_min_mfe_pct": 2.0,
+        "wrong_direction_mae_pct": 2.5,
+        "min_tier": "prep",
+        "delivery_min_samples": 8,
+        "delivery_wr_floor_pct": 50.0,
+        "delivery_wr_relax_pct": 62.0,
+        "delivery_fuel_bump": 3.0,
+        "delivery_fuel_relax": 1.0,
+    },
+}
+
+
+def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
+    out = dict(base)
+    for key, val in overlay.items():
+        if isinstance(val, dict) and isinstance(out.get(key), dict):
+            out[key] = _deep_merge(out[key], val)
+        else:
+            out[key] = val
+    return out
+
+
+def _parse_calibration_raw(raw: dict[str, Any]) -> dict[str, Any]:
+    uni = _deep_merge(UNIVERSAL_DEFAULTS, raw.get("universal") or {})
+    per = raw.get("per_symbol") if isinstance(raw.get("per_symbol"), dict) else {}
+    return {
+        "computed_at": raw.get("computed_at"),
+        "data_summary": raw.get("data_summary") or {},
+        "universal": uni,
+        "per_symbol": per,
+        "outcome_calibration": raw.get("outcome_calibration") or {},
+    }
+
+
+def migrate_calibration_split(*, force: bool = False) -> bool:
+    """Move calibration keys out of adaptive_thresholds.json into hunt_calibration.json."""
+    if HUNT_CALIBRATION.exists() and not force:
+        return False
+    if not ADAPTIVE_THRESHOLDS.exists():
+        return False
+    try:
+        raw = json.loads(ADAPTIVE_THRESHOLDS.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(raw, dict) or not any(k in raw for k in _CALIBRATION_KEYS):
+        return False
+
+    cal_payload = {k: raw[k] for k in _CALIBRATION_KEYS if k in raw}
+    if HUNT_CALIBRATION.exists() and force:
+        try:
+            existing = json.loads(HUNT_CALIBRATION.read_text(encoding="utf-8"))
+            if isinstance(existing, dict):
+                for key in _CALIBRATION_KEYS:
+                    if key not in cal_payload and key in existing:
+                        cal_payload[key] = existing[key]
+        except (OSError, json.JSONDecodeError):
+            pass
+    save_calibration_payload(cal_payload, path=HUNT_CALIBRATION)
+
+    symbols = raw.get("symbols") if isinstance(raw.get("symbols"), dict) else {}
+    ewma_doc = {"symbols": symbols}
+    EWMA_THRESHOLDS.parent.mkdir(parents=True, exist_ok=True)
+    EWMA_THRESHOLDS.write_text(json.dumps(ewma_doc, indent=2), encoding="utf-8")
+    ADAPTIVE_THRESHOLDS.write_text(json.dumps(ewma_doc, indent=2), encoding="utf-8")
+    invalidate_calibration_cache()
+    return True
+
+
+@lru_cache(maxsize=1)
+def load_calibration(path: Path = HUNT_CALIBRATION) -> dict[str, Any]:
+    if path.exists():
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                return _parse_calibration_raw(raw)
+        except (OSError, json.JSONDecodeError):
+            pass
+    if ADAPTIVE_THRESHOLDS.exists():
+        try:
+            raw = json.loads(ADAPTIVE_THRESHOLDS.read_text(encoding="utf-8"))
+            if isinstance(raw, dict) and any(k in raw for k in _CALIBRATION_KEYS):
+                migrate_calibration_split()
+                return load_calibration(path)
+        except (OSError, json.JSONDecodeError):
+            pass
+    return _parse_calibration_raw({})
+
+
+def invalidate_calibration_cache() -> None:
+    load_calibration.cache_clear()
+
+
+def universal_section(section: str) -> dict[str, Any]:
+    cal = load_calibration()
+    base = UNIVERSAL_DEFAULTS.get(section, {})
+    if not isinstance(base, dict):
+        base = {}
+    try:
+        from hunt_core.config_defaults import universal_section_from_defaults
+
+        from_defaults = universal_section_from_defaults(section)
+    except ImportError:
+        from_defaults = {}
+    overlay = (cal.get("universal") or {}).get(section) or {}
+    return _deep_merge(_deep_merge(base, from_defaults), overlay)
+
+
+def symbol_section(symbol: str, section: str) -> dict[str, Any]:
+    sym = symbol.upper()
+    per = (load_calibration().get("per_symbol") or {}).get(sym) or {}
+    block = per.get(section) if isinstance(per.get(section), dict) else {}
+    return dict(block)
+
+
+def resolve_float(
+    symbol: str,
+    section: str,
+    key: str,
+    *,
+    default: float,
+) -> float:
+    sym_val = symbol_section(symbol, section).get(key)
+    if sym_val is not None:
+        try:
+            return float(sym_val)
+        except (TypeError, ValueError):
+            pass
+    uni_val = universal_section(section).get(key)
+    if uni_val is not None:
+        try:
+            return float(uni_val)
+        except (TypeError, ValueError):
+            pass
+    return float(default)
+
+
+def effective_hunt_params(symbol: str = "") -> HuntCalibratedParams:
+    """Market regime params with universal + per-symbol gate overrides."""
+    base = active_params()
+    sym = symbol.upper()
+    gates_u = universal_section("gates")
+    per_g = symbol_section(sym, "gates") if sym else {}
+    confirm = float(per_g.get("confirm_min_score", gates_u.get("confirm_min_score", base.confirm_min_score)))
+    confirm_nd = float(
+        per_g.get(
+            "confirm_min_score_no_div",
+            gates_u.get("confirm_min_score_no_div", base.confirm_min_score_no_div),
+        )
+    )
+    forming = float(per_g.get("forming_min_score", gates_u.get("forming_min_score", base.forming_min_score)))
+    adx = float(per_g.get("adx_trend_block", gates_u.get("adx_trend_block", base.adx_trend_block)))
+    rr = float(per_g.get("min_risk_reward", gates_u.get("min_risk_reward", base.min_risk_reward)))
+    anomaly_chg = float(
+        per_g.get("anomaly_min_chg_24h_pct", gates_u.get("anomaly_min_chg_24h_pct", base.anomaly_min_chg_24h_pct))
+    )
+    anomaly_rng = float(
+        per_g.get("anomaly_min_range_24h_pct", gates_u.get("anomaly_min_range_24h_pct", base.anomaly_min_range_24h_pct))
+    )
+    return replace(
+        base,
+        confirm_min_score=confirm,
+        confirm_min_score_no_div=confirm_nd,
+        forming_min_score=forming,
+        adx_trend_block=adx,
+        min_risk_reward=rr,
+        anomaly_min_chg_24h_pct=anomaly_chg,
+        anomaly_min_range_24h_pct=anomaly_rng,
+        source=f"{base.source}+cal",
+    )
+
+
+def lifecycle_thresholds(symbol: str = "") -> dict[str, float]:
+    lc = universal_section("lifecycle")
+    per = symbol_section(symbol.upper(), "lifecycle") if symbol else {}
+    merged = _deep_merge(lc, per)
+    return {k: float(v) for k, v in merged.items() if isinstance(v, (int, float))}
+
+
+def levels_thresholds(symbol: str = "") -> dict[str, float]:
+    lv = universal_section("levels")
+    per = symbol_section(symbol.upper(), "levels") if symbol else {}
+    merged = _deep_merge(lv, per)
+    return {k: float(v) for k, v in merged.items() if isinstance(v, (int, float))}
+
+
+def tracker_thresholds(symbol: str = "") -> dict[str, float]:
+    tr = universal_section("tracker")
+    per = symbol_section(symbol.upper(), "tracker") if symbol else {}
+    merged = _deep_merge(tr, per)
+    return {k: float(v) for k, v in merged.items() if isinstance(v, (int, float))}
+
+
+def tp1_partial_fix_pct(symbol: str = "") -> float:
+    """Industry default 50%; hot/extreme meme legs keep 80% partial."""
+    tr = tracker_thresholds(symbol)
+    normal = float(tr.get("tp1_partial_fix_pct_normal", 50.0))
+    hot = float(tr.get("tp1_partial_fix_pct_hot", 80.0))
+    regime = active_params().regime
+    if regime in {"hot", "extreme"}:
+        return hot
+    return normal
+
+
+def btc_corr_thresholds(symbol: str = "") -> dict[str, float]:
+    btc = universal_section("btc")
+    per = symbol_section(symbol.upper(), "btc") if symbol else {}
+    merged = _deep_merge(btc, per)
+    return {k: float(v) for k, v in merged.items() if isinstance(v, (int, float))}
+
+
+def ws_thresholds(symbol: str = "") -> dict[str, float]:
+    ws = universal_section("ws")
+    per = symbol_section(symbol.upper(), "ws") if symbol else {}
+    merged = _deep_merge(ws, per)
+    return {k: float(v) for k, v in merged.items() if isinstance(v, (int, float))}
+
+
+def filter_thresholds(symbol: str = "") -> dict[str, float]:
+    flt = universal_section("filters")
+    per = symbol_section(symbol.upper(), "filters") if symbol else {}
+    merged = _deep_merge(flt, per)
+    return {k: float(v) for k, v in merged.items() if isinstance(v, (int, float))}
+
+
+def basis_thresholds(symbol: str = "") -> dict[str, float]:
+    basis = universal_section("basis")
+    per = symbol_section(symbol.upper(), "basis") if symbol else {}
+    merged = _deep_merge(basis, per)
+    out: dict[str, float] = {}
+    for k, v in merged.items():
+        if k == "prefer_ap_basis":
+            continue
+        if isinstance(v, (int, float)):
+            out[k] = float(v)
+    return out
+
+
+def confirm_thresholds(symbol: str = "") -> dict[str, float]:
+    conf = universal_section("confirm")
+    per = symbol_section(symbol.upper(), "confirm") if symbol else {}
+    merged = _deep_merge(conf, per)
+    return {k: float(v) for k, v in merged.items() if isinstance(v, (int, float))}
+
+
+_ENTRY_CONFIRM_TF_ALLOWED = frozenset({"1m", "3m", "5m", "15m"})
+
+
+def entry_confirm_tf(symbol: str = "", direction: str = "") -> str:
+    """Closed-bar interval for structural entry confirm (Phase 13A).
+
+    Direction-aware: dumps confirm on a faster TF than longs because a 5–8% dump
+    can complete in minutes while a pump builds over hours. ``direction="short"``
+    reads ``entry_confirm_tf_dump``, ``"long"`` reads ``entry_confirm_tf_long``,
+    both falling back to the base ``entry_confirm_tf``.
+    """
+    conf = universal_section("confirm")
+    per = symbol_section(symbol.upper(), "confirm") if symbol else {}
+    merged = _deep_merge(conf, per)
+    base = merged.get("entry_confirm_tf") or "5m"
+    dir_key = {"short": "entry_confirm_tf_dump", "long": "entry_confirm_tf_long"}.get(direction)
+    chosen = merged.get(dir_key) if dir_key else None
+    raw = str(chosen if chosen is not None else base).strip().lower().removesuffix("_closed")
+    if raw in _ENTRY_CONFIRM_TF_ALLOWED:
+        return raw
+    base_raw = str(base).strip().lower().removesuffix("_closed")
+    return base_raw if base_raw in _ENTRY_CONFIRM_TF_ALLOWED else "5m"
+
+
+def dump_fast_confirm_enabled(symbol: str = "") -> bool:
+    """Allow single fast-TF closed break + 1 secondary to confirm a dump."""
+    conf = universal_section("confirm")
+    per = symbol_section(symbol.upper(), "confirm") if symbol else {}
+    merged = _deep_merge(conf, per)
+    return bool(merged.get("dump_fast_confirm", True))
+
+
+def collect_thresholds(symbol: str = "") -> dict[str, float]:
+    col = universal_section("collect")
+    per = symbol_section(symbol.upper(), "collect") if symbol else {}
+    merged = _deep_merge(col, per)
+    return {k: float(v) for k, v in merged.items() if isinstance(v, (int, float))}
+
+
+def scoring_thresholds(symbol: str = "") -> dict[str, float]:
+    sc = universal_section("scoring")
+    per = symbol_section(symbol.upper(), "scoring") if symbol else {}
+    merged = _deep_merge(sc, per)
+    return {k: float(v) for k, v in merged.items() if isinstance(v, (int, float))}
+
+
+def orderflow_use_nq(symbol: str = "") -> bool:
+    of = universal_section("orderflow")
+    per = symbol_section(symbol.upper(), "orderflow") if symbol else {}
+    merged = _deep_merge(of, per)
+    val = merged.get("use_nq", True)
+    return bool(val)
+
+
+def orderflow_thresholds(symbol: str = "") -> dict[str, float | bool]:
+    of = universal_section("orderflow")
+    per = symbol_section(symbol.upper(), "orderflow") if symbol else {}
+    merged = _deep_merge(of, per)
+    out: dict[str, float | bool] = {}
+    for k, v in merged.items():
+        if k == "use_nq" or k == "require_ws_align":
+            out[k] = bool(v)
+        elif isinstance(v, (int, float)):
+            out[k] = float(v)
+    return out
+
+
+def stats_thresholds(symbol: str = "") -> dict[str, float]:
+    st = universal_section("stats")
+    per = symbol_section(symbol.upper(), "stats") if symbol else {}
+    merged = _deep_merge(st, per)
+    return {k: float(v) for k, v in merged.items() if isinstance(v, (int, float))}
+
+
+def delivery_thresholds(symbol: str = "") -> dict[str, float]:
+    dl = universal_section("delivery")
+    per = symbol_section(symbol.upper(), "delivery") if symbol else {}
+    merged = _deep_merge(dl, per)
+    return {k: float(v) for k, v in merged.items() if isinstance(v, (int, float))}
+
+
+def prep_shadow_thresholds(symbol: str = "") -> dict[str, float | bool | str]:
+    ps = universal_section("prep_shadow")
+    per = symbol_section(symbol.upper(), "prep_shadow") if symbol else {}
+    merged = _deep_merge(ps, per)
+    out: dict[str, float | bool | str] = {}
+    for k, v in merged.items():
+        if k == "enabled":
+            out[k] = bool(v)
+        elif k == "min_tier" and isinstance(v, str):
+            out[k] = v
+        elif isinstance(v, (int, float)):
+            out[k] = float(v)
+    return out
+
+
+def walk_forward_thresholds(symbol: str = "") -> dict[str, float | list[int]]:
+    wf = universal_section("walk_forward")
+    per = symbol_section(symbol.upper(), "walk_forward") if symbol else {}
+    merged = _deep_merge(wf, per)
+    out: dict[str, float | list[int]] = {}
+    for k, v in merged.items():
+        if k == "floors" and isinstance(v, list):
+            out[k] = [int(x) for x in v]
+        elif isinstance(v, (int, float)):
+            out[k] = float(v)
+    return out
+
+
+def liquidation_thresholds(symbol: str = "") -> dict[str, float]:
+    liq = universal_section("liquidation")
+    per = symbol_section(symbol.upper(), "liquidation") if symbol else {}
+    merged = _deep_merge(liq, per)
+    return {k: float(v) for k, v in merged.items() if isinstance(v, (int, float))}
+
+
+def listings_thresholds(symbol: str = "") -> dict[str, float]:
+    lst = universal_section("listings")
+    per = symbol_section(symbol.upper(), "listings") if symbol else {}
+    merged = _deep_merge(lst, per)
+    return {k: float(v) for k, v in merged.items() if isinstance(v, (int, float))}
+
+
+def phase_matrix_thresholds(symbol: str = "") -> dict[str, float]:
+    pm = universal_section("phase_matrix")
+    per = symbol_section(symbol.upper(), "phase_matrix") if symbol else {}
+    merged = _deep_merge(pm, per)
+    return {k: float(v) for k, v in merged.items() if isinstance(v, (int, float))}
+
+
+def save_calibration_payload(payload: dict[str, Any], path: Path = HUNT_CALIBRATION) -> None:
+    """Persist hunt calibration without touching EWMA symbol stats."""
+    existing: dict[str, Any] = {}
+    if path.exists():
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(existing, dict):
+                existing = {}
+        except (OSError, json.JSONDecodeError):
+            existing = {}
+    merged = dict(existing)
+    for key in _CALIBRATION_KEYS:
+        if key in payload:
+            merged[key] = payload[key]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(merged, indent=2), encoding="utf-8")
+    invalidate_calibration_cache()

@@ -3,20 +3,114 @@
 Moved out of ``bot.strategies._common`` so both the main bot strategies and the
 independent hunt project can use the same spec columns / divergence pivots.
 """
-
 from __future__ import annotations
+
+
 
 import math
 import threading
 
 import polars as pl
 
-from hunt_core.features.prepare import _swing_points
 from hunt_core.features.shared import wilder_mean
 
 _SPEC_COLUMN_CACHE: dict[tuple[object, ...], pl.DataFrame] = {}
 _SPEC_COLUMN_CACHE_MAX = 512
 _SPEC_COLUMN_CACHE_LOCK = threading.Lock()
+
+
+def _swing_detect_python(
+    highs: list[float],
+    lows: list[float],
+    *,
+    lookback: int,
+    include_unconfirmed_tail: bool,
+) -> tuple[list[bool], list[bool]]:
+    height = len(highs)
+    swing_high_values = [False] * height
+    swing_low_values = [False] * height
+
+    def _finite(values: list[float]) -> bool:
+        return all(math.isfinite(value) for value in values)
+
+    for confirm_idx in range(lookback + 1, height):
+        pivot_idx = confirm_idx - 1
+        left_start = pivot_idx - lookback
+        left_highs = highs[left_start:pivot_idx]
+        left_lows = lows[left_start:pivot_idx]
+        pivot_high = highs[pivot_idx]
+        pivot_low = lows[pivot_idx]
+        confirm_high = highs[confirm_idx]
+        confirm_low = lows[confirm_idx]
+
+        if _finite([*left_highs, pivot_high, confirm_high]):
+            swing_high_values[pivot_idx] = (
+                pivot_high > max(left_highs) and pivot_high > confirm_high
+            )
+        if _finite([*left_lows, pivot_low, confirm_low]):
+            swing_low_values[pivot_idx] = pivot_low < min(left_lows) and pivot_low < confirm_low
+
+    if include_unconfirmed_tail and height > lookback:
+        tail_idx = height - 1
+        left_highs = highs[tail_idx - lookback : tail_idx]
+        left_lows = lows[tail_idx - lookback : tail_idx]
+        tail_high = highs[tail_idx]
+        tail_low = lows[tail_idx]
+        if _finite([*left_highs, tail_high]):
+            swing_high_values[tail_idx] = tail_high > max(left_highs)
+        if _finite([*left_lows, tail_low]):
+            swing_low_values[tail_idx] = tail_low < min(left_lows)
+
+    return swing_high_values, swing_low_values
+
+
+def _swing_detect(
+    highs: list[float],
+    lows: list[float],
+    *,
+    lookback: int,
+    include_unconfirmed_tail: bool = False,
+) -> tuple[list[bool], list[bool]]:
+    """Live-safe swing pivot detection without right-side lookahead."""
+    return _swing_detect_python(
+        highs,
+        lows,
+        lookback=lookback,
+        include_unconfirmed_tail=include_unconfirmed_tail,
+    )
+
+
+def _swing_points(
+    work: pl.DataFrame,
+    n: int = 3,
+    *,
+    include_unconfirmed_tail: bool = False,
+) -> tuple[pl.Series, pl.Series]:
+    """Detect live-safe swing highs and lows without right-side lookahead."""
+    if work.is_empty():
+        return (
+            pl.Series("swing_high", [], dtype=pl.Boolean),
+            pl.Series("swing_low", [], dtype=pl.Boolean),
+        )
+    if "high" not in work.columns or "low" not in work.columns:
+        return (
+            pl.Series("swing_high", [False] * work.height, dtype=pl.Boolean),
+            pl.Series("swing_low", [False] * work.height, dtype=pl.Boolean),
+        )
+
+    lookback = max(1, int(n))
+    highs = [float(value) if value is not None else float("nan") for value in work["high"]]
+    lows = [float(value) if value is not None else float("nan") for value in work["low"]]
+    swing_high_values, swing_low_values = _swing_detect(
+        highs,
+        lows,
+        lookback=lookback,
+        include_unconfirmed_tail=include_unconfirmed_tail,
+    )
+    return (
+        pl.Series("swing_high", swing_high_values, dtype=pl.Boolean),
+        pl.Series("swing_low", swing_low_values, dtype=pl.Boolean),
+    )
 
 
 def as_float(value: object, default: float = 0.0) -> float:
@@ -298,3 +392,60 @@ def _pivot_rows(
         for row in confirmed[-8:]
         if current_idx - int(row["_spec_idx"]) <= max_lookback
     ]
+
+
+def _trendline_rsi_at(p1: dict[str, float], p2: dict[str, float], idx: float) -> float:
+    dx = p2["idx"] - p1["idx"]
+    if dx <= 0:
+        return p1["indicator"]
+    return p1["indicator"] + (p2["indicator"] - p1["indicator"]) * (idx - p1["idx"]) / dx
+
+
+def rsi_trendline_break(
+    work: pl.DataFrame | None = None,
+    *,
+    rsi_series: pl.Series | None = None,
+    swing_highs: list[dict[str, float]] | None = None,
+    swing_lows: list[dict[str, float]] | None = None,
+) -> dict[str, bool]:
+    """Connect RSI swing highs/lows; detect bearish/bullish trendline breaks on the last bar."""
+    false = {"rsi_trendline_bearish_break": False, "rsi_trendline_bullish_break": False}
+    if work is not None:
+        if work.is_empty() or work.height < 7:
+            return false
+        spec = work if "_spec_idx" in work.columns else with_spec_columns(work)
+        if "rsi14" not in spec.columns:
+            return false
+        rsi = spec["rsi14"].cast(pl.Float64, strict=False)
+        cur_idx = float(spec.item(-1, "_spec_idx"))
+        prev_idx = float(spec.item(-2, "_spec_idx"))
+        highs = swing_highs or _pivot_rows(
+            spec, price_column="high", indicator_column="rsi14", pivot="high"
+        )
+        lows = swing_lows or _pivot_rows(
+            spec, price_column="low", indicator_column="rsi14", pivot="low"
+        )
+    elif rsi_series is not None and swing_highs is not None and swing_lows is not None:
+        if rsi_series.len() < 7:
+            return false
+        rsi = rsi_series.cast(pl.Float64, strict=False)
+        cur_idx = float(rsi.len() - 1)
+        prev_idx = cur_idx - 1.0
+        highs, lows = swing_highs, swing_lows
+    else:
+        return false
+
+    cur_rsi = as_float(rsi[-1], 50.0)
+    prev_rsi = as_float(rsi[-2], 50.0)
+    bear = bull = False
+    if len(highs) >= 2:
+        p1, p2 = highs[-2], highs[-1]
+        line_cur = _trendline_rsi_at(p1, p2, cur_idx)
+        line_prev = _trendline_rsi_at(p1, p2, prev_idx)
+        bear = prev_rsi >= line_prev and cur_rsi < line_cur
+    if len(lows) >= 2:
+        p1, p2 = lows[-2], lows[-1]
+        line_cur = _trendline_rsi_at(p1, p2, cur_idx)
+        line_prev = _trendline_rsi_at(p1, p2, prev_idx)
+        bull = prev_rsi <= line_prev and cur_rsi > line_cur
+    return {"rsi_trendline_bearish_break": bear, "rsi_trendline_bullish_break": bull}

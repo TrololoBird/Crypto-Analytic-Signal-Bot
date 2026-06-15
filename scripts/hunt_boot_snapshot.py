@@ -74,7 +74,7 @@ def prep_summary() -> dict:
 
 
 def watch_alive() -> dict:
-    out = subprocess.run(["pgrep", "-fl", "hunt/scripts/watch"],
+    out = subprocess.run(["pgrep", "-fl", "hunt_core.* watch"],
                          capture_output=True, text=True)
     mon = subprocess.run(["pgrep", "-fl", "hunt_agent_monitor_loop"],
                          capture_output=True, text=True)
@@ -116,11 +116,12 @@ def _tail_jsonl_row(path: Path) -> dict | None:
 
 def latest_tick_meta() -> dict:
     """Newest tick across daily archives + live staging buffer."""
-    from hunt_watch.jsonl_replay import resolve_tick_paths
-    from hunt_watch.paths import TICK_JSONL
+    from hunt_core.paths import TICK_JSONL
 
     daily = sorted(DATA.glob("dump_minute_watch-*.jsonl"))
-    paths = resolve_tick_paths(daily[-2:] if len(daily) >= 2 else daily)
+    paths = list(daily[-2:] if len(daily) >= 2 else daily)
+    if TICK_JSONL.exists() and TICK_JSONL not in paths:
+        paths.append(TICK_JSONL)
     best: dict | None = None
     best_ts = ""
     for path in paths:

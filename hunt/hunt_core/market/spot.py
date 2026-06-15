@@ -1,6 +1,7 @@
 """Spot companion for hunt — CCXT binance spot (public)."""
-
 from __future__ import annotations
+
+
 
 import asyncio
 import logging
@@ -10,6 +11,7 @@ from dataclasses import dataclass
 import ccxt.async_support as ccxt
 
 from hunt_core.errors import DEFENSIVE_EXC
+from hunt_core.market.factory import create_async_binance_spot
 from hunt_core.market.symbols import to_binance_symbol
 
 LOG = logging.getLogger("hunt_core.market.spot")
@@ -34,16 +36,11 @@ class HuntCcxtSpotCompanion:
         trust_env: bool = True,
         timeout_ms: int = 12_000,
     ) -> None:
-        config: dict = {
-            "enableRateLimit": True,
-            "timeout": timeout_ms,
-        }
-        if proxy_url:
-            config["aiohttp_proxy"] = proxy_url
-            config["proxies"] = {"http": proxy_url, "https": proxy_url}
-        if trust_env:
-            config["aiohttp_trust_env"] = True
-        self._ex: ccxt.binance = ccxt.binance(config)
+        self._ex: ccxt.binance = create_async_binance_spot(
+            proxy_url=proxy_url,
+            trust_env=trust_env,
+            timeout_ms=timeout_ms,
+        )
         self._cache: dict[str, SpotMetrics] = {}
         self._lock = asyncio.Lock()
         self._markets_loaded = False
@@ -109,7 +106,7 @@ class HuntCcxtSpotCompanion:
                 fetched_at=time.monotonic(),
             )
         except DEFENSIVE_EXC as exc:
-            LOG.debug("spot fetch failed | symbol=%s error=%s", sym, exc)
+            LOG.warning("spot_fetch_failed | symbol=%s error=%s", sym, exc)
             return None
 
     async def refresh_symbols(

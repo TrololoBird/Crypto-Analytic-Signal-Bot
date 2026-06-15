@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 import hashlib
 import logging
 import math
@@ -72,6 +73,8 @@ class SymbolFrames:
     df_4h: pl.DataFrame | None = None
     bid_qty: float | None = None
     ask_qty: float | None = None
+    book_bids: list[tuple[float, float]] | None = None
+    book_asks: list[tuple[float, float]] | None = None
     frame_source_flags: tuple[str, ...] = ()
 
 
@@ -191,10 +194,15 @@ class PreparedSymbol:
     )
     poc_1h: float | None = None  # Point of Control on 1h (highest volume price)
     poc_15m: float | None = None  # Point of Control on 15m
+    poc_direction_1h: str | None = None
+    poc_direction_15m: str | None = None
     vah_1h: float | None = None
     val_1h: float | None = None
     vah_15m: float | None = None
     val_15m: float | None = None
+    nearest_bid_wall: dict[str, Any] | None = None
+    nearest_ask_wall: dict[str, Any] | None = None
+    depth_zone_imbalance: float | None = None
     primary_timeframe: str = "15m"
     context_timeframes: tuple[str, ...] = ("1h", "4h")
     settings: BotSettings | None = None

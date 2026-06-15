@@ -960,18 +960,11 @@ def _stochastic_rsi(df: pl.DataFrame, period: int = 14) -> pl.Series:
 
 
 def _ichimoku_cloud(df: pl.DataFrame) -> pl.DataFrame:
-    """Compute Ichimoku Cloud components."""
-    high9 = df["high"].rolling_max(window_size=9)
-    low9 = df["low"].rolling_min(window_size=9)
-    tenkan = (high9 + low9) / 2.0
-    high26 = df["high"].rolling_max(window_size=26)
-    low26 = df["low"].rolling_min(window_size=26)
-    kijun = (high26 + low26) / 2.0
-    senkou_a = (tenkan + kijun) / 2.0
-    high52 = df["high"].rolling_max(window_size=52)
-    low52 = df["low"].rolling_min(window_size=52)
-    senkou_b = (high52 + low52) / 2.0
-    chikou = df["close"].shift(26)
+    """Compute Ichimoku Cloud components (TradingView-style displacement)."""
+    from engine.features.structure import ichimoku_lines
+
+    tenkan, kijun, senkou_a, senkou_b = ichimoku_lines(df)
+    chikou = df["close"].alias("chikou")
     return df.select(
         tenkan.alias("tenkan"),
         kijun.alias("kijun"),

@@ -1,19 +1,19 @@
 """Hunter production-core — rewrite target (H-B wide hunter)."""
 
-from hunt_core.contracts import (
+from hunt_core.contract import (
     BtOutcome,
     Direction,
-    FeatureVector,
     OutcomeRecord,
     SignalRecord,
     TickRow,
+    TrackerFeatureVector,
 )
 
 __all__ = [
     "BtOutcome",
     "Direction",
-    "FeatureVector",
     "OutcomeRecord",
     "SignalRecord",
     "TickRow",
+    "TrackerFeatureVector",
 ]

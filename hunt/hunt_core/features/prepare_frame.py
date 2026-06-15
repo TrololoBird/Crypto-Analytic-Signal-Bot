@@ -1,88 +1,45 @@
 """Per-frame OHLCV indicator pipeline (_prepare_frame)."""
-
 from __future__ import annotations
 
-import importlib
+
+
 from datetime import UTC, date, datetime
-from importlib import util as importlib_util
 from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import polars as pl
+import polars_ols
+import polars_ols.least_squares as polars_ols_ls
 import structlog
-
-from hunt_core.errors import DEFENSIVE_EXC
 
 from .candle_patterns import add_candle_pattern_columns
 from .microstructure import add_microstructure_features
-from .prepare_columns import group_active
+from .polars_ta_bridge import (
+    adx_from_polars_ta,
+    aroon_series,
+    atr_series,
+    bbands_series,
+    cci_from_polars_ta,
+    ema_series,
+    macd_series,
+    mfi_from_polars_ta,
+    obv_series,
+    polars_ta_extended_exprs,
+    polars_wq_exprs,
+    roc_series,
+    rsi_series,
+    stochastic_series,
+    willr_from_polars_ta,
+)
+from .prepare_columns import group_active, hull_moving_average, ichimoku_lines
 from .shared import supertrend_series, wilder_mean
-from .structure import (
-    hull_moving_average as _hull_moving_average_external,
-)
-from .structure import (
-    weighted_moving_average as _weighted_moving_average_external,
-)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from ..domain.schemas import SymbolFrames
 
-# Optional polars_ta backend for a few indicators (EMA/ROC/OBV).
-# Pure-Polars fallbacks are canonical; no TA-Lib / pandas on the live path.
-try:
-    _plta_module = importlib_util.find_spec("polars_ta.ta")
-except ImportError, ModuleNotFoundError:
-    _plta_module = None
-
-if _plta_module is not None:
-    plta = cast("Any", importlib.import_module("polars_ta.ta"))
-    _HAS_POLARS_TA = True
-else:
-    plta = cast("Any", None)
-    _HAS_POLARS_TA = False
-_USE_POLARS_TA_BACKEND = _HAS_POLARS_TA
-
-try:
-    _polars_ols_module = importlib_util.find_spec("polars_ols")
-except ImportError, ModuleNotFoundError:
-    _polars_ols_module = None
-
-if _polars_ols_module is not None:
-    _polars_ols = cast("Any", importlib.import_module("polars_ols"))
-    _polars_ols_ls = cast("Any", importlib.import_module("polars_ols.least_squares"))
-    _HAS_POLARS_OLS = True
-else:
-    _polars_ols = cast("Any", None)
-    _polars_ols_ls = cast("Any", None)
-    _HAS_POLARS_OLS = False
-
-# Compatibility name for the decomposed feature modules/tests. This tracks the
-LOG = structlog.get_logger("bot.features.prepare_frame")
-_ADVANCED_FALLBACKS_LOGGED: set[str] = set()
-_FRAME_PREP_FALLBACKS: list[str] = []
-
-
-def reset_frame_indicator_fallbacks() -> None:
-    _FRAME_PREP_FALLBACKS.clear()
-
-
-def take_frame_indicator_fallbacks() -> list[str]:
-    flags = [f"indicator_fallback:{name}" for name in _FRAME_PREP_FALLBACKS]
-    _FRAME_PREP_FALLBACKS.clear()
-    return flags
-
-
-def _log_indicator_fallback(indicator: str, exc: Exception) -> None:
-    if indicator not in _FRAME_PREP_FALLBACKS:
-        _FRAME_PREP_FALLBACKS.append(indicator)
-    if indicator in _ADVANCED_FALLBACKS_LOGGED:
-        LOG.debug("advanced indicator fallback reused", indicator=indicator, error=str(exc))
-        return
-    _ADVANCED_FALLBACKS_LOGGED.add(indicator)
-    LOG.info("advanced indicator fallback activated", indicator=indicator, error=str(exc))
-
+LOG = structlog.get_logger("hunt_core.features.prepare_frame")
 
 _FrameCacheValue = float | None
 _FRAME_CACHE_TAIL_COLUMNS = (
@@ -139,21 +96,6 @@ def _materialize_series(
     if isinstance(value, pl.Expr):
         return df.select(value.alias(name)).to_series()
     return pl.Series(name, [value] * df.height, dtype=pl.Float64)
-
-
-def _normalize_rsi_scale(series: pl.Series, *, name: str) -> pl.Series:
-    """Normalize RSI to the project contract: 0..100."""
-    numeric = series.cast(pl.Float64, strict=False)
-    max_value = numeric.max()
-    min_value = numeric.min()
-    try:
-        max_float = float(max_value) if max_value is not None else 100.0
-        min_float = float(min_value) if min_value is not None else 0.0
-    except TypeError, ValueError:
-        return numeric.rename(name)
-    if max_float <= 1.5 and min_float >= -0.01:
-        return (numeric * 100.0).rename(name)
-    return numeric.rename(name)
 
 
 def _numeric_item(df: pl.DataFrame, row: int, column: str, default: float = 0.0) -> float:
@@ -230,221 +172,6 @@ def has_minimum_bars(
     return True
 
 
-# ---------------------------------------------------------------------------
-# Core indicators using Polars (hand-rolled for exact backward compatibility)
-# ---------------------------------------------------------------------------
-
-
-def _ema(df: pl.DataFrame, period: int) -> pl.Series:
-    """Exponential Moving Average using polars_ta or pure Polars."""
-    if _USE_POLARS_TA_BACKEND and _HAS_POLARS_TA and hasattr(plta, "EMA"):
-        try:
-            return _materialize_series(
-                plta.EMA(pl.col("close"), timeperiod=int(period)),
-                df=df,
-                name=f"ema{period}",
-            )
-        except DEFENSIVE_EXC as exc:
-            _log_indicator_fallback("ema_polars_ta", exc)
-    return _materialize_series(
-        df["close"].ewm_mean(span=period, adjust=False), df=df, name=f"ema{period}"
-    )
-
-
-def _rsi(df: pl.DataFrame, period: int = 14) -> pl.Series:
-    """RSI via polars_ta primary; Wilder-ewm fallback."""
-    if _USE_POLARS_TA_BACKEND and _HAS_POLARS_TA and hasattr(plta, "RSI"):
-        try:
-            return _materialize_series(
-                plta.RSI(pl.col("close"), timeperiod=int(period)),
-                df=df,
-                name=f"rsi{period}",
-            )
-        except DEFENSIVE_EXC as exc:
-            _log_indicator_fallback("rsi_polars_ta", exc)
-    close = df["close"].cast(pl.Float64, strict=False)
-    delta = close.diff()
-    gains = delta.clip(lower_bound=0.0)
-    losses = (-delta).clip(lower_bound=0.0)
-    avg_gain = _materialize_series(
-        wilder_mean(_materialize_series(gains, df=df, name="gain"), period=period, name="avg_gain", seed_offset=1),
-        df=df,
-        name="avg_gain",
-    )
-    avg_loss = _materialize_series(
-        wilder_mean(_materialize_series(losses, df=df, name="loss"), period=period, name="avg_loss", seed_offset=1),
-        df=df,
-        name="avg_loss",
-    )
-    rs = avg_gain / avg_loss
-    rsi_raw = (100.0 - (100.0 / (1.0 + rs))).fill_nan(50.0)
-    return _materialize_series(
-        pl.when((avg_loss == 0.0) & (avg_gain > 0.0))
-        .then(100.0)
-        .when((avg_gain == 0.0) & (avg_loss > 0.0))
-        .then(0.0)
-        .when((avg_gain == 0.0) & (avg_loss == 0.0))
-        .then(50.0)
-        .otherwise(rsi_raw),
-        df=df,
-        name=f"rsi{period}",
-    )
-
-
-def _atr(df: pl.DataFrame, period: int = 14) -> pl.Series:
-    """ATR via polars_ta primary; Wilder-ewm fallback."""
-    if _USE_POLARS_TA_BACKEND and _HAS_POLARS_TA and hasattr(plta, "ATR"):
-        try:
-            return _materialize_series(
-                plta.ATR(pl.col("high"), pl.col("low"), pl.col("close"), timeperiod=int(period)),
-                df=df,
-                name=f"atr{period}",
-            )
-        except DEFENSIVE_EXC as exc:
-            _log_indicator_fallback("atr_polars_ta", exc)
-    high = df["high"].cast(pl.Float64, strict=False)
-    low = df["low"].cast(pl.Float64, strict=False)
-    close = df["close"].cast(pl.Float64, strict=False)
-    prev_close = close.shift(1)
-    tr = pl.max_horizontal(
-        (high - low).abs(),
-        (high - prev_close).abs(),
-        (low - prev_close).abs(),
-    )
-    tr_series = _materialize_series(tr, df=df, name="true_range")
-    return _materialize_series(
-        wilder_mean(tr_series, period=period, name=f"atr{period}"),
-        df=df,
-        name=f"atr{period}",
-    )
-
-
-def _natr(df: pl.DataFrame, period: int = 14) -> pl.Series:
-    """Normalized ATR (% of close) via polars_ta."""
-    if _USE_POLARS_TA_BACKEND and _HAS_POLARS_TA and hasattr(plta, "NATR"):
-        try:
-            return _materialize_series(
-                plta.NATR(pl.col("high"), pl.col("low"), pl.col("close"), timeperiod=int(period)),
-                df=df,
-                name=f"natr{period}",
-            )
-        except DEFENSIVE_EXC as exc:
-            _log_indicator_fallback("natr_polars_ta", exc)
-    atr = _atr(df, period)
-    close = df["close"].cast(pl.Float64, strict=False)
-    return (atr / close.replace(0.0, float("nan")) * 100.0).fill_nan(0.0).rename(f"natr{period}")
-
-
-def _willr(df: pl.DataFrame, period: int = 14) -> pl.Series:
-    """Williams %R via polars_ta.WILLR primary; pure-polars fallback."""
-    if _USE_POLARS_TA_BACKEND and _HAS_POLARS_TA and hasattr(plta, "WILLR"):
-        try:
-            return _materialize_series(
-                plta.WILLR(pl.col("high"), pl.col("low"), pl.col("close"), timeperiod=int(period)),
-                df=df,
-                name=f"willr{period}",
-            )
-        except DEFENSIVE_EXC as exc:
-            _log_indicator_fallback("willr_polars_ta", exc)
-    hh = df["high"].rolling_max(window_size=period)
-    ll = df["low"].rolling_min(window_size=period)
-    width = hh - ll
-    return _clean_non_finite(
-        ((hh - df["close"]) / width) * -100.0, fill=0.0
-    ).rename(f"willr{period}")
-
-
-def _macd(
-    df: pl.DataFrame,
-    *,
-    fast: int = 12,
-    slow: int = 26,
-    signal: int = 9,
-) -> tuple[pl.Series, pl.Series, pl.Series]:
-    """MACD via polars_ta.MACD primary; dual-EMA polars fallback.
-
-    Returns (macd_line, macd_signal, macd_hist).
-    """
-    if _USE_POLARS_TA_BACKEND and _HAS_POLARS_TA and hasattr(plta, "MACD"):
-        try:
-            result = df.select(
-                plta.MACD(
-                    pl.col("close"),
-                    fastperiod=int(fast),
-                    slowperiod=int(slow),
-                    signalperiod=int(signal),
-                )
-            )
-            sc = result.get_column(result.columns[0])
-            line = _materialize_series(sc.struct.field("macd"), df=df, name="macd_line")
-            sig = _materialize_series(sc.struct.field("macdsignal"), df=df, name="macd_signal")
-            hist = _materialize_series(sc.struct.field("macdhist"), df=df, name="macd_hist")
-            return line, sig, hist
-        except DEFENSIVE_EXC as exc:
-            _log_indicator_fallback("macd_polars_ta", exc)
-    macd_line = _ema(df, fast) - _ema(df, slow)
-    tmp = df.with_columns(macd_line.alias("macd_line"))
-    macd_sig = tmp["macd_line"].ewm_mean(span=signal, adjust=False).rename("macd_signal")
-    macd_hist = (tmp["macd_line"] - macd_sig).rename("macd_hist")
-    return macd_line.rename("macd_line"), macd_sig, macd_hist
-
-
-def _adx_components(df: pl.DataFrame, period: int = 14) -> tuple[pl.Series, pl.Series, pl.Series]:
-    """ADX with directional indicators (+DI / -DI)."""
-    high = df["high"]
-    low = df["low"]
-
-    up_move = high.diff()
-    down_move = -low.diff()
-
-    plus_dm = _materialize_series(
-        pl.when((up_move > down_move) & (up_move > 0.0)).then(up_move).otherwise(0.0),
-        df=df,
-        name="plus_dm",
-    )
-    minus_dm = _materialize_series(
-        pl.when((down_move > up_move) & (down_move > 0.0)).then(down_move).otherwise(0.0),
-        df=df,
-        name="minus_dm",
-    )
-
-    atr = _atr(df, period)
-    atr_safe = _clean_non_finite(atr, fill=1e-9).replace(0.0, 1e-9)
-    plus_di = _materialize_series(
-        _clean_non_finite(
-            100.0 * wilder_mean(plus_dm, period=period, name="plus_dm_smoothed") / atr_safe,
-            fill=0.0,
-        ).clip(0.0, 100.0),
-        df=df,
-        name=f"plus_di{period}",
-    )
-    minus_di = _materialize_series(
-        _clean_non_finite(
-            100.0 * wilder_mean(minus_dm, period=period, name="minus_dm_smoothed") / atr_safe,
-            fill=0.0,
-        ).clip(0.0, 100.0),
-        df=df,
-        name=f"minus_di{period}",
-    )
-
-    di_sum = (plus_di + minus_di).replace(0.0, None)
-    dx = _clean_non_finite(100.0 * (plus_di - minus_di).abs() / di_sum, fill=0.0)
-    adx = _materialize_series(
-        _clean_non_finite(
-            wilder_mean(dx, period=period, name=f"adx{period}", seed_offset=period - 1),
-            fill=0.0,
-        ).clip(0.0, 100.0),
-        df=df,
-        name=f"adx{period}",
-    )
-    return adx, plus_di, minus_di
-
-
-def _adx(df: pl.DataFrame, period: int = 14) -> pl.Series:
-    adx, _plus_di, _minus_di = _adx_components(df, period=period)
-    return adx
-
-
 def _vwap_session_key(value: object) -> date | None:
     if isinstance(value, datetime):
         return value.astimezone(UTC).date() if value.tzinfo else value.date()
@@ -498,19 +225,6 @@ def _coerce_temporal_columns(df: pl.DataFrame) -> pl.DataFrame:
     if not conversions:
         return df
     return df.with_columns(conversions)
-
-
-def _vwap(df: pl.DataFrame, *, rolling_bars: int = 96) -> pl.Series:
-    """Rolling VWAP for 24/7 crypto (default ~4d on 1h bars)."""
-    typical_price = (df["high"] + df["low"] + df["close"]) / 3.0
-    pv = typical_price * df["volume"]
-    window = max(20, min(int(rolling_bars), df.height))
-    temp_df = df.with_columns(pv.alias("_pv"))
-    vwap_expr = (
-        pl.col("_pv").rolling_sum(window_size=window, min_periods=max(10, window // 4))
-        / pl.col("volume").rolling_sum(window_size=window, min_periods=max(10, window // 4))
-    ).forward_fill()
-    return _materialize_series(vwap_expr, df=temp_df, name="vwap")
 
 
 def _session_time_column(df: pl.DataFrame) -> str | None:
@@ -575,83 +289,6 @@ def add_session_cvd(df: pl.DataFrame) -> pl.DataFrame:
         ).drop("_cvd_bar_delta", "_cvd_session")
 
     return df.with_columns(filled_delta.cum_sum().alias("session_cvd"))
-
-
-def _roc(df: pl.DataFrame, period: int = 10) -> pl.Series:
-    if _USE_POLARS_TA_BACKEND and _HAS_POLARS_TA and hasattr(plta, "ROC"):
-        try:
-            return _materialize_series(
-                plta.ROC(pl.col("close"), timeperiod=int(period)),
-                df=df,
-                name=f"roc{period}",
-            )
-        except DEFENSIVE_EXC as exc:
-            _log_indicator_fallback("roc_polars_ta", exc)
-    prev_close = df["close"].shift(period)
-    return (((df["close"] / prev_close) - 1.0) * 100.0).fill_nan(0.0).rename(f"roc{period}")
-
-
-def _stochastic(
-    df: pl.DataFrame,
-    period: int = 14,
-    smooth_k: int = 3,
-    smooth_d: int = 3,
-) -> tuple[pl.Series, pl.Series]:
-    """Stochastic via polars_ta.STOCHF primary; pure-polars fallback."""
-    if _USE_POLARS_TA_BACKEND and _HAS_POLARS_TA and hasattr(plta, "STOCHF"):
-        try:
-            result = df.select(
-                plta.STOCHF(
-                    pl.col("high"), pl.col("low"), pl.col("close"),
-                    fastk_period=int(period), fastd_period=int(smooth_d),
-                )
-            )
-            sc = result.get_column(result.columns[0])
-            k = _clean_non_finite(sc.struct.field("fastk"), fill=50.0).rename("stoch_k14")
-            d = _clean_non_finite(sc.struct.field("fastd"), fill=50.0).rename("stoch_d14")
-            return k, d
-        except DEFENSIVE_EXC as exc:
-            _log_indicator_fallback("stochf_polars_ta", exc)
-    rolling_low = df["low"].rolling_min(window_size=period)
-    rolling_high = df["high"].rolling_max(window_size=period)
-    width = rolling_high - rolling_low
-    raw_k = _clean_non_finite(((df["close"] - rolling_low) / width) * 100.0, fill=50.0)
-    k = _clean_non_finite(raw_k.rolling_mean(window_size=smooth_k), fill=50.0).rename("stoch_k14")
-    d = _clean_non_finite(k.rolling_mean(window_size=smooth_d), fill=50.0).rename("stoch_d14")
-    return k, d
-
-
-def _cci(df: pl.DataFrame, period: int = 20) -> pl.Series:
-    typical_price = (df["high"] + df["low"] + df["close"]) / 3.0
-    sma = typical_price.rolling_mean(window_size=period)
-    mean_dev = (typical_price - sma).abs().rolling_mean(window_size=period)
-    return _clean_non_finite((typical_price - sma) / (0.015 * mean_dev), fill=0.0).rename(
-        f"cci{period}"
-    )
-
-
-def _mfi(df: pl.DataFrame, period: int = 14) -> pl.Series:
-    typical_price = (df["high"] + df["low"] + df["close"]) / 3.0
-    money_flow = typical_price * df["volume"]
-    delta = typical_price.diff()
-
-    pos_flow = pl.when(delta > 0.0).then(money_flow).otherwise(0.0)
-    neg_flow = pl.when(delta < 0.0).then(money_flow).otherwise(0.0)
-
-    pos_sum = pos_flow.rolling_sum(window_size=period)
-    neg_sum = neg_flow.rolling_sum(window_size=period)
-
-    mfi_raw = 100.0 - (100.0 / (1.0 + (pos_sum / neg_sum)))
-
-    return _materialize_series(
-        pl.when((neg_sum <= 0.0) & (pos_sum <= 0.0))
-        .then(50.0)
-        .when(neg_sum <= 0.0)
-        .then(100.0)
-        .otherwise(mfi_raw),
-        df=df,
-        name=f"mfi{period}",
-    )
 
 
 def _cmf(df: pl.DataFrame, period: int = 20) -> pl.Series:
@@ -772,51 +409,9 @@ def _add_session_features(work: pl.DataFrame, period: int = 20) -> pl.DataFrame:
     )
 
 
-def _safe_close_position(df: pl.DataFrame, window: int = 20) -> pl.Series:
-    """Close position within rolling high-low range (0-1)."""
-    rolling_low = df["low"].rolling_min(window_size=window)
-    rolling_high = df["high"].rolling_max(window_size=window)
-    width = rolling_high - rolling_low
-
-    value = _clean_non_finite((df["close"] - rolling_low) / width, fill=0.5)
-    return value.clip(0.0, 1.0).rename("close_position")
-
-
 # ---------------------------------------------------------------------------
 # Advanced indicators via pure Polars implementations.
 # ---------------------------------------------------------------------------
-
-
-def _bollinger_bands(
-    close: pl.Series, period: int = 20, nbdev: float = 2.0
-) -> tuple[pl.Series, pl.Series, pl.Series]:
-    """Bollinger Bands via polars_ta.BBANDS primary; pure-polars fallback."""
-    if _USE_POLARS_TA_BACKEND and _HAS_POLARS_TA and hasattr(plta, "BBANDS"):
-        try:
-            tmp = pl.DataFrame({"close": close})
-            result = tmp.select(
-                plta.BBANDS(pl.col("close"), timeperiod=int(period), nbdevup=float(nbdev), nbdevdn=float(nbdev))
-            )
-            sc = result.get_column(result.columns[0])
-            upper = sc.struct.field("upperband").rename("bb_upper")
-            middle = sc.struct.field("middleband").rename("bb_middle")
-            lower = sc.struct.field("lowerband").rename("bb_lower")
-            return upper, middle, lower
-        except DEFENSIVE_EXC as exc:
-            _log_indicator_fallback("bbands_polars_ta", exc)
-    middle = close.rolling_mean(window_size=period).rename("bb_middle")
-    std = close.rolling_std(window_size=period, ddof=0).rename("bb_std")
-    upper = middle + nbdev * std
-    lower = middle - nbdev * std
-    return upper, middle, lower
-
-
-def _weighted_moving_average(series: pl.Series, period: int, *, name: str) -> pl.Series:
-    return _weighted_moving_average_external(series, period, name=name)
-
-
-def _hull_moving_average(close: pl.Series, period: int, *, name: str) -> pl.Series:
-    return _hull_moving_average_external(close, period, name=name)
 
 
 def _keltner_channels(
@@ -931,39 +526,6 @@ def _parabolic_sar(
     )
 
 
-def _aroon(df: pl.DataFrame, period: int = 14) -> tuple[pl.Series, pl.Series, pl.Series]:
-    """Aroon via polars_ta.AROON primary; polars rolling argmax/argmin fallback."""
-    if _USE_POLARS_TA_BACKEND and _HAS_POLARS_TA and hasattr(plta, "AROON"):
-        try:
-            result = df.select(plta.AROON(pl.col("high"), pl.col("low"), timeperiod=int(period)))
-            sc = result.get_column(result.columns[0])
-            aroon_down = _materialize_series(sc.struct.field("aroondown"), df=df, name=f"aroon_down{period}")
-            aroon_up = _materialize_series(sc.struct.field("aroonup"), df=df, name=f"aroon_up{period}")
-            return (
-                aroon_up,
-                aroon_down,
-                _materialize_series(aroon_up - aroon_down, df=df, name=f"aroon_osc{period}"),
-            )
-        except DEFENSIVE_EXC as exc:
-            _log_indicator_fallback("aroon_polars_ta", exc)
-    high = df["high"]
-    low = df["low"]
-    # polars-native argmax/argmin over rolling window (no Python loop per element)
-    up_days = high.rolling_map(
-        lambda s: float(len(s) - 1 - int(s.arg_max() or 0)), window_size=period + 1
-    )
-    down_days = low.rolling_map(
-        lambda s: float(len(s) - 1 - int(s.arg_min() or 0)), window_size=period + 1
-    )
-    aroon_up = (period - up_days) / period * 100.0
-    aroon_down = (period - down_days) / period * 100.0
-    return (
-        _materialize_series(aroon_up, df=df, name=f"aroon_up{period}"),
-        _materialize_series(aroon_down, df=df, name=f"aroon_down{period}"),
-        _materialize_series(aroon_up - aroon_down, df=df, name=f"aroon_osc{period}"),
-    )
-
-
 def _fisher_transform(df: pl.DataFrame, period: int = 10) -> tuple[pl.Series, pl.Series]:
     hh = df["high"].rolling_max(window_size=period)
     ll = df["low"].rolling_min(window_size=period)
@@ -988,7 +550,7 @@ def _fisher_transform(df: pl.DataFrame, period: int = 10) -> tuple[pl.Series, pl
 def _squeeze_momentum(
     df: pl.DataFrame, period: int = 20
 ) -> tuple[pl.Series, pl.Series, pl.Series, pl.Series]:
-    bb_upper, bb_mid, bb_lower = _bollinger_bands(df["close"], period=period, nbdev=2.0)
+    bb_upper, bb_mid, bb_lower = bbands_series(df, period=period, nbdev=2.0)
     kc_upper, _, kc_lower = _keltner_channels(df, period=period, multiplier=1.5)
     squeeze_on = (
         ((bb_lower > kc_lower) & (bb_upper < kc_upper)).cast(pl.Float64).rename("squeeze_on")
@@ -1013,7 +575,7 @@ def _squeeze_momentum(
 def _chandelier_exit(
     df: pl.DataFrame, period: int = 22, atr_mult: float = 3.0
 ) -> tuple[pl.Series, pl.Series, pl.Series]:
-    atr = _atr(df, period)
+    atr = atr_series(df, period)
     long_exit = (df["high"].rolling_max(window_size=period) - atr * atr_mult).rename(
         "chandelier_long"
     )
@@ -1039,7 +601,7 @@ def _chandelier_exit(
 
 def _stochastic_rsi(df: pl.DataFrame, period: int = 14) -> pl.Series:
     """Stochastic RSI = (RSI - min(RSI, N)) / (max(RSI, N) - min(RSI, N))."""
-    rsi = _rsi(df, period=period)
+    rsi = rsi_series(df, period=period)
     min_rsi = rsi.rolling_min(window_size=period)
     max_rsi = rsi.rolling_max(window_size=period)
     denom = max_rsi - min_rsi
@@ -1048,18 +610,9 @@ def _stochastic_rsi(df: pl.DataFrame, period: int = 14) -> pl.Series:
 
 
 def _ichimoku_cloud(df: pl.DataFrame) -> pl.DataFrame:
-    """Compute Ichimoku Cloud components."""
-    high9 = df["high"].rolling_max(window_size=9)
-    low9 = df["low"].rolling_min(window_size=9)
-    tenkan = (high9 + low9) / 2.0
-    high26 = df["high"].rolling_max(window_size=26)
-    low26 = df["low"].rolling_min(window_size=26)
-    kijun = (high26 + low26) / 2.0
-    senkou_a = (tenkan + kijun) / 2.0
-    high52 = df["high"].rolling_max(window_size=52)
-    low52 = df["low"].rolling_min(window_size=52)
-    senkou_b = (high52 + low52) / 2.0
-    chikou = df["close"].shift(26)
+    """Compute Ichimoku Cloud components (TradingView-style displacement)."""
+    tenkan, kijun, senkou_a, senkou_b = ichimoku_lines(df)
+    chikou = df["close"].alias("chikou")
     return df.select(
         tenkan.alias("tenkan"),
         kijun.alias("kijun"),
@@ -1123,50 +676,29 @@ def _add_advanced_indicators(
 
     # --- OBV ---------------------------------------------------------------
     if group_active(active_groups, "obv"):
-        try:
-            if _USE_POLARS_TA_BACKEND and _HAS_POLARS_TA and hasattr(plta, "OBV"):
-                obv = _materialize_series(
-                    plta.OBV(pl.col("close"), pl.col("volume")), df=df, name="obv"
-                )
-            else:
-                close_diff = df["close"].diff()
-                direction = _materialize_series(
-                    pl.when(close_diff > 0.0)
-                    .then(1.0)
-                    .when(close_diff < 0.0)
-                    .then(-1.0)
-                    .otherwise(0.0),
-                    df=df,
-                    name="obv_direction",
-                )
-                obv = (direction * df["volume"]).cum_sum().rename("obv")
-            obv_ema = obv.ewm_mean(span=20, adjust=False)
-            result = result.with_columns(
-                [
-                    obv.alias("obv"),
-                    obv_ema.alias("obv_ema20"),
-                    (obv > obv_ema).cast(pl.Float64).alias("obv_above_ema"),
-                ]
-            )
-        except DEFENSIVE_EXC as exc:
-            _log_indicator_fallback("obv", exc)
-            result = result.with_columns(
-                [
-                    pl.lit(0.0).alias("obv"),
-                    pl.lit(0.0).alias("obv_ema20"),
-                    pl.lit(0.0).alias("obv_above_ema"),
-                ]
-            )
+        obv = obv_series(df)
+        obv_ema = obv.ewm_mean(span=20, adjust=False)
+        result = result.with_columns(
+            [
+                obv.alias("obv"),
+                obv_ema.alias("obv_ema20"),
+                (obv > obv_ema).cast(pl.Float64).alias("obv_above_ema"),
+                (obv > obv_ema).alias("obv_rising"),
+            ]
+        )
 
     # --- Bollinger Bands - pure Polars implementation ------------------------
     if group_active(active_groups, "bb"):
-        upper, middle, lower = _bollinger_bands(df["close"], period=20, nbdev=2.0)
+        upper, middle, lower = bbands_series(df, period=20, nbdev=2.0)
         bb_pct_b = (df["close"] - lower) / (upper - lower)
         middle_safe = _clean_non_finite(middle.abs(), fill=1e-10).clip(lower_bound=1e-10)
         bb_width = (upper - lower) / middle_safe * 100.0
         bb_width_clean = _clean_non_finite(bb_width, fill=0.0)
         result = result.with_columns(
             [
+                upper.alias("bb_upper"),
+                middle.alias("bb_mid"),
+                lower.alias("bb_lower"),
                 _clean_non_finite(bb_pct_b, fill=0.5).alias("bb_pct_b"),
                 bb_width_clean.alias("bb_width"),
                 (bb_width_clean.rolling_rank(window_size=50, method="average") / 50.0).alias(
@@ -1215,8 +747,8 @@ def _add_advanced_indicators(
     # --- HMA (Hull Moving Average) --------------------------------------------
     if group_active(active_groups, "hma"):
         close = df["close"]
-        hma9 = _hull_moving_average(close, 9, name="hma9")
-        hma21 = _hull_moving_average(close, 21, name="hma21")
+        hma9 = hull_moving_average(close, 9, name="hma9")
+        hma21 = hull_moving_average(close, 21, name="hma21")
         result = result.with_columns(
             [
                 hma9.alias("hma9"),
@@ -1237,7 +769,7 @@ def _add_advanced_indicators(
 
     # --- Aroon ---------------------------------------------------------------
     if group_active(active_groups, "aroon"):
-        aroon_up, aroon_down, aroon_osc = _aroon(df, period=14)
+        aroon_up, aroon_down, aroon_osc = aroon_series(df, period=14)
         result = result.with_columns(
             [
                 aroon_up.alias("aroon_up14"),
@@ -1248,7 +780,7 @@ def _add_advanced_indicators(
 
     # --- Stochastic ---------------------------------------------------------
     if group_active(active_groups, "stoch"):
-        stoch_k, stoch_d = _stochastic(df, period=14, smooth_k=3, smooth_d=3)
+        stoch_k, stoch_d = stochastic_series(df, period=14, smooth_k=3, smooth_d=3)
         result = result.with_columns(
             [
                 stoch_k.alias("stoch_k14"),
@@ -1259,14 +791,11 @@ def _add_advanced_indicators(
 
     # --- CCI, Williams %R, MFI, CMF, Ultimate Oscillator --------------------
     if group_active(active_groups, "oscillators"):
-        rolling_high = df["high"].rolling_max(window_size=14)
-        rolling_low = df["low"].rolling_min(window_size=14)
-        willr = ((rolling_high - df["close"]) / (rolling_high - rolling_low)) * -100.0
         result = result.with_columns(
             [
-                _cci(df, 20).fill_nan(0.0).alias("cci20"),
-                _clean_non_finite(willr, fill=-50.0).alias("willr14"),
-                _mfi(df, 14).fill_nan(50.0).alias("mfi14"),
+                cci_from_polars_ta(df, 20).fill_nan(0.0).alias("cci20"),
+                willr_from_polars_ta(df, 14).alias("willr14"),
+                mfi_from_polars_ta(df, 14).fill_nan(50.0).alias("mfi14"),
                 _cmf(df, 20).fill_nan(0.0).alias("cmf20"),
                 _ultimate_oscillator(df, 7, 14, 28).fill_nan(50.0).alias("uo"),
             ]
@@ -1308,7 +837,11 @@ def _add_advanced_indicators(
         )
 
     if group_active(active_groups, "volume_profile"):
-        poc, vah, val = _volume_profile_levels(result, bins=12)
+        poc, vah, val = _volume_profile_levels(
+            result,
+            bins=VP_BUCKETS_DEFAULT,
+            lookback=VP_LOOKBACK_15M,
+        )
         result = result.with_columns(
             [
                 pl.lit(poc).cast(pl.Float64).alias("volume_profile"),
@@ -1338,68 +871,45 @@ def _add_advanced_indicators(
         result = result.with_columns(
             [
                 _clean_non_finite(zscore30, fill=0.0).alias("zscore30"),
-                _roc(df, 5).fill_nan(0.0).alias("slope5"),
+                roc_series(df, 5).fill_nan(0.0).alias("slope5"),
             ]
         )
+
+    if group_active(active_groups, "polars_ta_extended"):
+        extended = polars_ta_extended_exprs(df)
+        if extended:
+            result = result.with_columns(extended)
+
+    if group_active(active_groups, "polars_wq_features"):
+        wq_cols = polars_wq_exprs(result)
+        if wq_cols:
+            result = result.with_columns(wq_cols)
 
     return result
 
 
+from .volume_profile import (
+    VP_BUCKETS_DEFAULT,
+    VP_LOOKBACK_15M,
+    VP_VALUE_AREA_PCT,
+    volume_profile_levels as _volume_profile_levels_core,
+)
+
+
 def _volume_profile_levels(
-    df: pl.DataFrame, bins: int = 12, *, value_area_pct: float = 0.70
+    df: pl.DataFrame,
+    bins: int = VP_BUCKETS_DEFAULT,
+    *,
+    lookback: int | None = VP_LOOKBACK_15M,
+    value_area_pct: float = VP_VALUE_AREA_PCT,
 ) -> tuple[float | None, float | None, float | None]:
-    """Scalar POC/VAH/VAL for the current frame window."""
-    if df.is_empty() or not {"high", "low", "volume"}.issubset(df.columns):
-        return None, None, None
-    prices = ((df["high"] + df["low"]) / 2.0).cast(pl.Float64, strict=False)
-    volumes = df["volume"].cast(pl.Float64, strict=False)
-    valid_mask = prices.is_not_null() & prices.is_finite() & volumes.is_not_null() & (volumes > 0.0)
-    v_prices = prices.filter(valid_mask)
-    v_volumes = volumes.filter(valid_mask)
-    if v_prices.is_empty():
-        return None, None, None
-    price_min = _as_optional_float(v_prices.min())
-    price_max = _as_optional_float(v_prices.max())
-    if price_min is None or price_max is None or price_max <= price_min:
-        return price_max, price_max, price_min
-    bucket_count = max(1, int(bins))
-    bucket_size = (price_max - price_min) / bucket_count
-    bucket_ids = (
-        ((v_prices - price_min) / bucket_size).floor().cast(pl.Int32).clip(0, bucket_count - 1)
+    """Scalar POC/VAH/VAL — same algorithm as PreparedSymbol poc_* fields."""
+    return _volume_profile_levels_core(
+        df,
+        lookback=lookback,
+        buckets=bins,
+        value_area_pct=value_area_pct,
     )
-    vol_by_bucket = (
-        pl.DataFrame({"b": bucket_ids, "v": v_volumes}).group_by("b").agg(pl.col("v").sum())
-    )
-    if vol_by_bucket.is_empty():
-        return price_min, price_max, price_min
-    rows = sorted(vol_by_bucket.iter_rows(named=True), key=lambda row: int(row["b"]))
-    total_volume = sum(float(row["v"] or 0.0) for row in rows)
-    if total_volume <= 0.0:
-        return price_min, price_max, price_min
-    poc_row = max(rows, key=lambda row: float(row["v"] or 0.0))
-    poc_bucket = int(poc_row["b"])
-    poc = float(price_min + (poc_bucket + 0.5) * bucket_size)
-    target_volume = total_volume * max(0.5, min(value_area_pct, 0.95))
-    accumulated = float(poc_row["v"] or 0.0)
-    included = {poc_bucket}
-    left = poc_bucket - 1
-    right = poc_bucket + 1
-    while accumulated < target_volume and (left >= 0 or right < bucket_count):
-        left_vol = next((float(row["v"] or 0.0) for row in rows if int(row["b"]) == left), 0.0)
-        right_vol = next((float(row["v"] or 0.0) for row in rows if int(row["b"]) == right), 0.0)
-        if right_vol >= left_vol and right < bucket_count:
-            accumulated += right_vol
-            included.add(right)
-            right += 1
-        elif left >= 0:
-            accumulated += left_vol
-            included.add(left)
-            left -= 1
-        else:
-            break
-    val = float(price_min + min(included) * bucket_size)
-    vah = float(price_min + (max(included) + 1) * bucket_size)
-    return poc, vah, val
 
 
 def _volume_profile(df: pl.DataFrame, bins: int = 12) -> pl.Expr:
@@ -1432,52 +942,29 @@ def _classic_pivot_points(
 
 
 def _add_polars_ols_features(df: pl.DataFrame) -> pl.DataFrame:
-    """Add shared regression-slope features using polars_ols when available."""
+    """Add shared regression-slope features using polars_ols."""
     if df.is_empty() or "close" not in df.columns:
         return df
-    if not _HAS_POLARS_OLS:
-        LOG.debug("polars_ols_unavailable_skipping_ols_features")
-        return df
     index_expr = pl.int_range(0, pl.len()).cast(pl.Float64)
-    try:
-        rolling_kwargs = _polars_ols_ls.RollingKwargs(
-            window_size=20,
-            min_periods=20,
-            use_woodbury=None,
-            alpha=None,
-            null_policy="drop",
-        )
-        slope_struct = _polars_ols.compute_rolling_least_squares(
-            pl.col("close"),
-            index_expr,
-            add_intercept=True,
-            mode="coefficients",
-            rolling_kwargs=rolling_kwargs,
-        )
-        work = df.with_columns(slope_struct.alias("_ols_close20"))
-        work = work.with_columns(
-            pl.col("_ols_close20").struct.field("literal").alias("close_ols_slope20")
-        )
-        return work.drop("_ols_close20").with_columns(
-            [
-                (pl.col("close_ols_slope20") / pl.col("close") * 100.0)
-                .fill_nan(0.0)
-                .fill_null(0.0)
-                .alias("close_ols_slope_pct20"),
-                (
-                    pl.col("close_ols_slope20")
-                    / pl.when(pl.col("atr14") > 0.0).then(pl.col("atr14")).otherwise(None)
-                )
-                .fill_nan(0.0)
-                .fill_null(0.0)
-                .alias("close_ols_slope_atr20"),
-            ]
-        )
-    except DEFENSIVE_EXC as exc:
-        _log_indicator_fallback("polars_ols_close_slope20", exc)
-
-    fallback_slope = (pl.col("close") - pl.col("close").shift(19)) / 19.0
-    return df.with_columns(fallback_slope.alias("close_ols_slope20")).with_columns(
+    rolling_kwargs = polars_ols_ls.RollingKwargs(
+        window_size=20,
+        min_periods=20,
+        use_woodbury=None,
+        alpha=None,
+        null_policy="drop",
+    )
+    slope_struct = polars_ols.compute_rolling_least_squares(
+        pl.col("close"),
+        index_expr,
+        add_intercept=True,
+        mode="coefficients",
+        rolling_kwargs=rolling_kwargs,
+    )
+    work = df.with_columns(slope_struct.alias("_ols_close20"))
+    work = work.with_columns(
+        pl.col("_ols_close20").struct.field("literal").alias("close_ols_slope20")
+    )
+    return work.drop("_ols_close20").with_columns(
         [
             (pl.col("close_ols_slope20") / pl.col("close") * 100.0)
             .fill_nan(0.0)
@@ -1503,6 +990,7 @@ def _prepare_frame(
     df: pl.DataFrame,
     *,
     active_groups: frozenset[str] | None = None,
+    warmup_ema: int = 200,
 ) -> pl.DataFrame:
     """Compute all technical indicators for a single OHLCV DataFrame.
 
@@ -1514,140 +1002,147 @@ def _prepare_frame(
     """
     df = _coerce_temporal_columns(df)
 
-    adx14, plus_di14, minus_di14 = _adx_components(df, 14)
-    # Core indicators
-    work = df.with_columns(
-        [
-            _ema(df, 20).alias("ema20"),
-            _ema(df, 50).alias("ema50"),
-            _ema(df, 200).alias("ema200"),
-            _rsi(df, 14).alias("rsi14"),
-            adx14.alias("adx14"),
-            plus_di14.alias("plus_di14"),
-            minus_di14.alias("minus_di14"),
-            _atr(df, 14).alias("atr14"),
-        ]
-    )
+    adx14, plus_di14, minus_di14 = adx_from_polars_ta(df, 14)
 
-    # MACD via polars_ta
-    _macd_line, _macd_signal, _macd_hist = _macd(work)
-    work = work.with_columns(
-        [
-            _macd_line.alias("macd_line"),
-            _macd_signal.alias("macd_signal"),
-            _macd_hist.alias("macd_hist"),
-        ]
-    )
+    macd_line, macd_signal, macd_hist = macd_series(df)
 
-    # Donchian Channels
-    work = work.with_columns(
-        [
-            pl.col("low").rolling_min(window_size=20).alias("donchian_low20"),
-            pl.col("high").rolling_max(window_size=20).alias("donchian_high20"),
-        ]
-    )
-    work = work.with_columns(
-        [
-            pl.col("donchian_low20").shift(1).alias("prev_donchian_low20"),
-            pl.col("donchian_high20").shift(1).alias("prev_donchian_high20"),
-        ]
-    )
-
-    # Volume metrics
-    work = work.with_columns(
-        [
-            pl.col("volume").rolling_mean(window_size=20).alias("volume_mean20"),
-        ]
-    )
-    work = work.with_columns(
-        [
-            (pl.col("volume") / pl.col("volume_mean20")).alias("volume_ratio20"),
-        ]
-    )
-
-    # VWAP and bands
-    work = work.with_columns(
-        [
-            _vwap(work).alias("vwap"),
-        ]
-    )
-
-    price_dev_sq = (work["close"] - work["vwap"]) ** 2
     vwap_time_column = next(
         (
             column
             for column in ("close_time", "time", "open_time")
-            if column in work.columns and _is_temporal_dtype(work.schema.get(column))
+            if column in df.columns and _is_temporal_dtype(df.schema.get(column))
         ),
         None,
     )
+    vwap_window = max(20, min(96, df.height))
+    vwap_min_periods = max(10, vwap_window // 4)
+    typical_price = (pl.col("high") + pl.col("low") + pl.col("close")) / 3.0
+    vwap_expr = (
+        (typical_price * pl.col("volume")).rolling_sum(
+            window_size=vwap_window,
+            min_periods=vwap_min_periods,
+        )
+        / pl.col("volume").rolling_sum(
+            window_size=vwap_window,
+            min_periods=vwap_min_periods,
+        )
+    ).forward_fill()
     if vwap_time_column is not None:
-        temp_vwap = work.with_columns(
-            [
-                price_dev_sq.alias("_vwap_dev_sq"),
-                pl.col(vwap_time_column).dt.date().alias("_vwap_session"),
-            ]
-        )
-        vwap_std = _materialize_series(
-            (
-                pl.col("_vwap_dev_sq").cum_sum().over("_vwap_session")
-                / pl.col("_vwap_dev_sq").cum_count().over("_vwap_session")
-            ).sqrt(),
-            df=temp_vwap,
-            name="vwap_std",
-        )
-    elif work.height:
-        denom = pl.Series("n", range(1, work.height + 1), dtype=pl.Float64)
-        vwap_std = (price_dev_sq.cum_sum() / denom).sqrt()
+        vwap_std_expr = (
+            pl.col("_vwap_dev_sq").cum_sum().over("_vwap_session")
+            / pl.col("_vwap_dev_sq").cum_count().over("_vwap_session")
+        ).sqrt()
+    elif df.height:
+        vwap_std_expr = (
+            ((pl.col("close") - pl.col("vwap")) ** 2).cum_sum()
+            / pl.int_range(1, pl.len() + 1)
+        ).sqrt()
     else:
-        vwap_std = price_dev_sq
-    work = work.with_columns(
+        vwap_std_expr = (pl.col("close") - pl.col("vwap")) ** 2
+
+    delta_ratio_exprs = (
         [
-            vwap_std.alias("vwap_std"),
-            (pl.col("vwap") + vwap_std).alias("vwap_upper1"),
-            (pl.col("vwap") - vwap_std).alias("vwap_lower1"),
-            (pl.col("vwap") + 2.0 * vwap_std).alias("vwap_upper2"),
-            (pl.col("vwap") - 2.0 * vwap_std).alias("vwap_lower2"),
-            (((pl.col("close") - pl.col("vwap")) / pl.col("vwap")) * 100.0)
-            .fill_nan(0.0)
-            .alias("vwap_deviation_pct"),
-            ((pl.col("close") - pl.col("vwap")) / pl.col("atr14"))
-            .fill_nan(0.0)
-            .alias("vwap_deviation_atr14"),
+            (
+                (pl.col("taker_buy_base_volume") / pl.col("volume"))
+                .rolling_mean(window_size=5)
+                .clip(0.0, 1.0)
+                .alias("delta_ratio")
+            ),
         ]
+        if "taker_buy_base_volume" in df.columns
+        else [pl.lit(0.5).alias("delta_ratio")]
+    )
+    close_position_expr = (
+        (
+            (pl.col("close") - pl.col("low").rolling_min(window_size=20))
+            / (pl.col("high").rolling_max(window_size=20) - pl.col("low").rolling_min(window_size=20))
+        )
+        .replace([float("inf"), float("-inf")], None)
+        .fill_nan(0.5)
+        .fill_null(0.5)
+        .clip(0.0, 1.0)
+        .alias("close_position")
     )
 
-    # Delta ratio (if taker_buy available)
-    if "taker_buy_base_volume" in work.columns:
-        work = work.with_columns(
+    lf = (
+        df.lazy()
+        # Batch 1 — polars-ta eager series + MACD
+        .with_columns(
             [
-                (
-                    (pl.col("taker_buy_base_volume") / pl.col("volume"))
-                    .rolling_mean(window_size=5)
-                    .clip(0.0, 1.0)
-                    .alias("delta_ratio")
+                ema_series(df, 20).alias("ema20"),
+                ema_series(df, 50).alias("ema50"),
+                ema_series(df, 200).alias("ema200"),
+                rsi_series(df, 14).alias("rsi14"),
+                adx14.alias("adx14"),
+                plus_di14.alias("plus_di14"),
+                minus_di14.alias("minus_di14"),
+                atr_series(df, 14).alias("atr14"),
+                macd_line.alias("macd_line"),
+                macd_signal.alias("macd_signal"),
+                macd_hist.alias("macd_hist"),
+            ]
+        )
+        # Batch 2 — Donchian + volume (pure expr)
+        .with_columns(
+            [
+                pl.col("low").rolling_min(window_size=20).alias("donchian_low20"),
+                pl.col("high").rolling_max(window_size=20).alias("donchian_high20"),
+                pl.col("low").rolling_min(window_size=20).shift(1).alias("prev_donchian_low20"),
+                pl.col("high").rolling_max(window_size=20).shift(1).alias("prev_donchian_high20"),
+                pl.col("volume").rolling_mean(window_size=20).alias("volume_mean20"),
+                (pl.col("volume") / pl.col("volume").rolling_mean(window_size=20)).alias(
+                    "volume_ratio20"
                 ),
             ]
         )
+        # Batch 3 — VWAP
+        .with_columns([vwap_expr.alias("vwap")])
+    )
+    if vwap_time_column is not None:
+        lf = (
+            lf.with_columns(
+                [
+                    ((pl.col("close") - pl.col("vwap")) ** 2).alias("_vwap_dev_sq"),
+                    pl.col(vwap_time_column).dt.date().alias("_vwap_session"),
+                ]
+            )
+            .with_columns([vwap_std_expr.alias("vwap_std")])
+            .drop("_vwap_dev_sq", "_vwap_session")
+        )
     else:
-        work = work.with_columns([pl.lit(0.5).alias("delta_ratio")])
+        lf = lf.with_columns([vwap_std_expr.alias("vwap_std")])
+    work = (
+        lf
+        # Batch 4 — VWAP bands + deviation
+        .with_columns(
+            [
+                (pl.col("vwap") + pl.col("vwap_std")).alias("vwap_upper1"),
+                (pl.col("vwap") - pl.col("vwap_std")).alias("vwap_lower1"),
+                (pl.col("vwap") + 2.0 * pl.col("vwap_std")).alias("vwap_upper2"),
+                (pl.col("vwap") - 2.0 * pl.col("vwap_std")).alias("vwap_lower2"),
+                (((pl.col("close") - pl.col("vwap")) / pl.col("vwap")) * 100.0)
+                .fill_nan(0.0)
+                .alias("vwap_deviation_pct"),
+                ((pl.col("close") - pl.col("vwap")) / pl.col("atr14"))
+                .fill_nan(0.0)
+                .alias("vwap_deviation_atr14"),
+            ]
+        )
+        # Batch 5 — delta ratio + ATR% + close position
+        .with_columns(delta_ratio_exprs)
+        .with_columns(
+            [
+                ((pl.col("atr14") / pl.col("close")) * 100.0)
+                .clip(lower_bound=0.001)
+                .alias("atr_pct"),
+            ]
+        )
+        .with_columns([close_position_expr])
+        .collect()
+    )
 
     work = add_session_cvd(work)
     work = add_rolling_cvd_24h(work)
-
-    # ATR %
-    work = work.with_columns(
-        [
-            ((pl.col("atr14") / pl.col("close")) * 100.0).clip(lower_bound=0.001).alias("atr_pct"),
-        ]
-    )
-
-    # Close position
-    work = work.with_columns(
-        [
-            _safe_close_position(work, window=20).alias("close_position"),
-        ]
-    )
 
     # Advanced indicators
     work = _add_advanced_indicators(work, active_groups=active_groups)
@@ -1658,7 +1153,7 @@ def _prepare_frame(
     if group_active(active_groups, "tail_metrics"):
         work = work.with_columns(
             [
-                _roc(work, 10).fill_nan(0.0).alias("roc10"),
+                roc_series(work, 10).fill_nan(0.0).alias("roc10"),
                 _realized_volatility(work, 20).fill_nan(0.0).alias("realized_vol_20"),
                 (
                     (
@@ -1676,9 +1171,11 @@ def _prepare_frame(
     if group_active(active_groups, "candles"):
         work = add_candle_pattern_columns(work)
 
-    # Drop rows with insufficient data
-    # Filter where ema200 or donchian_low20 is null
-    work = work.filter(pl.col("ema200").is_not_null() & pl.col("donchian_low20").is_not_null())
+    # Drop rows with insufficient data (pinned HTF may use ema50 warmup)
+    trim_col = "ema50" if warmup_ema <= 50 else "ema200"
+    if trim_col not in work.columns:
+        trim_col = "ema200"
+    work = work.filter(pl.col(trim_col).is_not_null() & pl.col("donchian_low20").is_not_null())
 
     return work
 

@@ -1,0 +1,1212 @@
+"""Structural entry / SL / TP for hunt watch (swing + fib, not naive ATR-only).
+
+Canonical hunt_core port of hunt_watch.levels + level_calibration + tp_ladder.
+"""
+from __future__ import annotations
+
+
+
+from dataclasses import dataclass, replace
+from functools import lru_cache
+from typing import Any, Literal
+
+# ── level_calibration ─────────────────────────────────────────────────────────
+
+LevelMode = Literal["normal", "hot", "parabolic"]
+
+# Defaults (overridden by hunt/data/hunt_calibration.json after calibrate_levels.py).
+_SL_MAX_NORMAL = 8.0
+_SL_MAX_HOT = 11.0
+_SL_MAX_PARABOLIC = 14.0
+_HOT_RANGE_PCT = 60.0
+_PARABOLIC_RANGE_PCT = 120.0
+_PARABOLIC_LEG_GAIN_PCT = 80.0
+
+_FADE_SL_PHASES = frozenset({"exhaustion_at_high", "distribution"})
+_BOUNCE_SL_PHASES = frozenset({"post_dump_bounce", "recovery", "accumulation"})
+_PUMP_LONG_SL_PHASES = frozenset({"impulse_initiating", "breakout_arming"})
+
+
+def _apply_phase_sl_atr(phase: str, params: AdaptiveLevelParams) -> AdaptiveLevelParams:
+    """Q14: distribution fade 2.25×ATR cap; bounce long floor 2.0×ATR on 15m Wilder."""
+    p = str(phase or "").strip()
+    out = params
+    if p and params.mode != "parabolic":
+        atr = params.sl_max_atr
+        if p in _FADE_SL_PHASES:
+            atr = min(atr, 2.25)
+        elif p in _BOUNCE_SL_PHASES:
+            atr = max(2.0, min(atr, 2.25))
+        if atr != params.sl_max_atr:
+            out = replace(out, sl_max_atr=atr)
+    pct = out.sl_max_pct
+    if p in _PUMP_LONG_SL_PHASES:
+        if out.mode == "hot":
+            pct = round(min(17.0, pct + 5.0), 2)
+        elif out.mode == "parabolic":
+            pct = round(min(18.0, pct + 2.0), 2)
+    elif p in _BOUNCE_SL_PHASES and out.mode == "hot":
+        pct = round(min(14.0, pct + 2.0), 2)
+    if pct != out.sl_max_pct:
+        out = replace(out, sl_max_pct=pct)
+    return out
+
+
+@lru_cache(maxsize=1)
+def _load_calibrated_caps() -> dict[str, float]:
+    from hunt_core.params.store import levels_thresholds, load_calibration
+
+    lv = levels_thresholds()
+    cal = load_calibration().get("outcome_calibration") or {}
+    merged = {k: float(v) for k, v in cal.items() if isinstance(v, (int, float))}
+    for key in (
+        "sl_max_pct_normal",
+        "sl_max_pct_parabolic",
+        "sl_max_pct_hot",
+        "hot_range_pct",
+        "parabolic_range_pct",
+        "parabolic_leg_gain_pct",
+    ):
+        if key in lv:
+            merged[key] = float(lv[key])
+    return merged
+
+
+@dataclass(frozen=True, slots=True)
+class AdaptiveLevelParams:
+    mode: LevelMode
+    sl_max_pct: float
+    sl_max_atr: float
+    sl_tp2_cap_ratio: float
+    use_local_pivot_only: bool
+
+
+def adaptive_level_params(
+    *,
+    range_pct_24h: float = 0.0,
+    leg_gain_pct: float = 0.0,
+    fall_from_high_pct: float = 0.0,
+    symbol: str = "",
+    lifecycle_phase: str = "",
+) -> AdaptiveLevelParams:
+    """Derive per-symbol level caps from session volatility."""
+    from hunt_core.params.store import levels_thresholds
+
+    sym_lv = levels_thresholds(symbol) if symbol else {}
+    caps = _load_calibrated_caps()
+    normal_cap = sym_lv.get("sl_max_pct_normal", caps.get("sl_max_pct_normal", _SL_MAX_NORMAL))
+    para_cap = sym_lv.get("sl_max_pct_parabolic", caps.get("sl_max_pct_parabolic", _SL_MAX_PARABOLIC))
+    hot_cap = sym_lv.get("sl_max_pct_hot", min(_SL_MAX_HOT, round(normal_cap + 2.5, 2)))
+    hot_range = sym_lv.get("hot_range_pct", caps.get("hot_range_pct", _HOT_RANGE_PCT))
+    para_range = sym_lv.get("parabolic_range_pct", caps.get("parabolic_range_pct", _PARABOLIC_RANGE_PCT))
+    para_leg = sym_lv.get("parabolic_leg_gain_pct", caps.get("parabolic_leg_gain_pct", _PARABOLIC_LEG_GAIN_PCT))
+
+    rng = max(0.0, float(range_pct_24h))
+    leg = max(0.0, float(leg_gain_pct))
+
+    if rng >= para_range or leg >= para_leg:
+        extra = min(6.0, max(0.0, rng - 50.0) * 0.028)
+        base = min(normal_cap, 8.0)
+        # Mid-dump on parabolic leg: use full para cap (BEAT −19% off high vetoed at 9.8% SL).
+        sl_cap = para_cap if fall_from_high_pct >= 12.0 else min(para_cap, base + extra)
+        return _apply_phase_sl_atr(
+            lifecycle_phase,
+            AdaptiveLevelParams(
+            mode="parabolic",
+            sl_max_pct=round(sl_cap, 2),
+            sl_max_atr=2.0,
+            sl_tp2_cap_ratio=0.45,
+            use_local_pivot_only=True,
+            ),
+        )
+    if rng >= hot_range or leg >= 40.0:
+        extra = min(3.0, max(0.0, rng - hot_range) * 0.04)
+        return _apply_phase_sl_atr(
+            lifecycle_phase,
+            AdaptiveLevelParams(
+            mode="hot",
+            sl_max_pct=round(min(hot_cap, normal_cap + extra), 2),
+            sl_max_atr=2.25,
+            sl_tp2_cap_ratio=0.5,
+            use_local_pivot_only=fall_from_high_pct < 5.0 and leg >= 30.0,
+            ),
+        )
+    return _apply_phase_sl_atr(
+        lifecycle_phase,
+        AdaptiveLevelParams(
+        mode="normal",
+        sl_max_pct=normal_cap,
+        sl_max_atr=2.5,
+        sl_tp2_cap_ratio=0.5,
+        use_local_pivot_only=False,
+        ),
+    )
+
+
+def calibrate_from_outcomes(closed: list[dict]) -> dict[str, float]:
+    """Suggest SL_MAX_PCT from closed signals with known pnl (offline calibration)."""
+    wins = [r for r in closed if r.get("close_reason") in {"tp1", "tp2"} and r.get("pnl_pct")]
+    losses = [r for r in closed if r.get("close_reason") == "stop_hit" and r.get("pnl_pct")]
+    if not losses:
+        return {"sl_max_pct_normal": 8.0, "sl_max_pct_parabolic": 14.0}
+    loss_pnls = [abs(float(r["pnl_pct"])) for r in losses]
+    med_loss = sorted(loss_pnls)[len(loss_pnls) // 2]
+    # Nominal cap slightly above median stop loss so viable setups pass when structure is tight.
+    normal_cap = round(min(10.0, max(7.5, med_loss * 1.35)), 1)
+    para_cap = round(min(15.0, normal_cap + 4.0), 1)
+    win_avg = (
+        sum(float(r["pnl_pct"]) for r in wins) / len(wins) if wins else 0.0
+    )
+    return {
+        "sl_max_pct_normal": normal_cap,
+        "sl_max_pct_parabolic": para_cap,
+        "median_stop_loss_pct": round(med_loss, 2),
+        "avg_win_pnl": round(win_avg, 2),
+        "n_wins": len(wins),
+        "n_stops": len(losses),
+    }
+
+
+# ── levels core ───────────────────────────────────────────────────────────────
+
+_TF_MINUTES: dict[str, int] = {
+    "1m": 1,
+    "5m": 5,
+    "15m": 15,
+    "1h": 60,
+    "4h": 240,
+    "1d": 1440,
+    "1w": 10080,
+}
+
+
+def _normalize_tf(tf: str) -> str:
+    return str(tf or "15m").strip().lower().removesuffix("_closed")
+
+
+def _tf_rank(tf: str) -> int:
+    return _TF_MINUTES.get(_normalize_tf(tf), 15)
+
+# SL may use at most this fraction of the TP2 distance (worst-edge based).
+SL_TP2_CAP_RATIO = 0.5
+# Minimum SL breathing room in ATRs so the cap cannot put SL inside noise.
+SL_MIN_ATR = 0.6
+# Maximum SL distance in ATRs regardless of structure.
+SL_MAX_ATR = 2.5
+# Entry zone width cap: min(ENTRY_ZONE_MAX_ATR x ATR, ENTRY_ZONE_MAX_PCT of price).
+ENTRY_ZONE_MAX_ATR = 1.5
+ENTRY_ZONE_MAX_PCT = 3.0
+# Nominal risk sanity: SL further than this from the worst edge is untradable.
+SL_MAX_PCT = 8.0
+# Minimum R:R from the worst edge for a setup to be viable.
+MIN_RR = 1.5
+# Memecoin 1m wick floor — sl_tp2_cap cannot squeeze SL below this (SPACE/EPIC post-mortem).
+SHORT_MIN_SL_DIST_PCT = 1.0
+_ANCHOR_SYMBOLS = frozenset({"BTCUSDT", "ETHUSDT", "XAUUSDT", "XAGUSDT"})
+_ANCHOR_SHORT_MIN_SL_DIST_PCT = 0.40
+_BOUNCE_MIN_RR = 0.5
+_PUMP_START_MIN_RR = 0.85
+# Ancient hunt_low on parabolic names (ESPORTS 0.055 vs 0.27) drags fib TP1 too deep.
+_STALE_IMPULSE_LOW_RATIO = 0.55
+# Fast 1m flushes wick 2-3% past textbook fib — single TP1 must be reachable.
+_FAST_FLUSH_TP1_BUFFER_ATR = 0.45
+_FAST_FLUSH_TP1_BUFFER_PCT = 2.8
+_FAST_FLUSH_LIFECYCLE = frozenset(
+    {
+        "exhaustion_at_high",
+        "distribution",
+        "dump_setup_forming",
+        "dump_imminent",
+        "dump_initiating",
+        "dump_active",
+    }
+)
+
+
+def _phase_min_rr_short(lifecycle_phase: str) -> float:
+    p = str(lifecycle_phase or "").strip()
+    if p in {
+        "dump_initiating",
+        "dump_confirmed",
+        "dump_setup_forming",
+        "dump_imminent",
+        "dump_active",
+        "distribution",
+    }:
+        return 1.05
+    if p in _FAST_FLUSH_LIFECYCLE:
+        return 1.08
+    return MIN_RR
+
+
+def _snap_short_tp1_for_min_rr(
+    *,
+    worst: float,
+    entry_lo: float,
+    tp1: float,
+    stop: float,
+    min_rr: float,
+    floor: float,
+) -> tuple[float, float]:
+    risk = max(stop - worst, 1e-9)
+    reward = max(worst - tp1, 0.0)
+    rr = reward / risk
+    if rr >= min_rr:
+        return tp1, round(rr, 2)
+    needed_reward = risk * min_rr
+    new_tp1 = round(worst - needed_reward, 6)
+    new_tp1 = min(new_tp1, entry_lo * 0.999)
+    if floor > 0:
+        new_tp1 = max(new_tp1, floor * 1.005)
+    reward2 = max(worst - new_tp1, 0.0)
+    return new_tp1, round(reward2 / risk, 2)
+
+
+def _phase_min_rr_long(lifecycle_phase: str) -> float:
+    p = str(lifecycle_phase or "").strip()
+    if p in {"post_dump_bounce", "recovery"}:
+        return _BOUNCE_MIN_RR
+    if p in {"impulse_initiating", "breakout_arming"}:
+        return _PUMP_START_MIN_RR
+    return MIN_RR
+
+
+def _f(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _veto(reasons: list[str], price: float) -> dict[str, Any]:
+    return {
+        "viable": False,
+        "veto": reasons,
+        "entry_zone": [price, price],
+        "stop_loss": 0.0,
+        "tp1": 0.0,
+        "tp2": 0.0,
+        "invalidation_above": 0.0,
+        "invalidation_below": 0.0,
+        "risk_reward": 0.0,
+        "sl_dist_pct": None,
+        "tp2_dist_pct": None,
+    }
+
+
+def _effective_short_leg_low(
+    ih: float,
+    price: float,
+    impulse_low: float,
+    local_support: float,
+) -> float:
+    """When hunt_low is ancient pre-pump base, shrink fib leg slightly for flush wicks."""
+    if ih <= 0 or price <= 0:
+        return impulse_low or local_support or price
+    if impulse_low > 0 and impulse_low >= price * _STALE_IMPULSE_LOW_RATIO:
+        if local_support > 0:
+            return min(impulse_low, local_support, price)
+        return min(impulse_low, price)
+    if impulse_low > 0 and ih > impulse_low:
+        leg = ih - impulse_low
+        # ESPORTS: full leg → TP1 0.193, low 0.195 missed by ~1.2% — use 98% leg depth.
+        return max(impulse_low, ih - leg * 0.98)
+    return local_support if local_support > 0 else price * 0.85
+
+
+def _short_min_sl_dist_pct(symbol: str) -> float:
+    sym = str(symbol or "").upper().replace("-", "").replace("/", "")
+    if sym in _ANCHOR_SYMBOLS:
+        return _ANCHOR_SHORT_MIN_SL_DIST_PCT
+    return SHORT_MIN_SL_DIST_PCT
+
+
+def _apply_fast_flush_tp1_buffer(
+    tp1: float,
+    *,
+    entry_lo: float,
+    atr: float,
+    lifecycle_phase: str,
+) -> tuple[float, str]:
+    """Raise short TP1 slightly toward entry — violent 1m dumps often miss deep fib by ~2%."""
+    if str(lifecycle_phase or "") not in _FAST_FLUSH_LIFECYCLE or tp1 <= 0 or entry_lo <= 0:
+        return tp1, "38.2% fib"
+    buffer = max(atr * _FAST_FLUSH_TP1_BUFFER_ATR, tp1 * _FAST_FLUSH_TP1_BUFFER_PCT / 100.0)
+    raised = round(tp1 + buffer, 6)
+    cap = round(entry_lo - atr * 0.15, 6)
+    if cap > tp1:
+        raised = min(raised, cap)
+    label = "38.2% fib+flush" if raised > tp1 + 1e-9 else "38.2% fib"
+    return raised, label
+
+
+def _validate_tp_target_tf(
+    veto: list[str],
+    *,
+    source_tf: str,
+    tp1_target_tf: str,
+    tp2_target_tf: str,
+) -> None:
+    """TP magnets must come from the same or higher TF than the setup source (Phase 4D)."""
+    src = _normalize_tf(source_tf)
+    src_rank = _tf_rank(src)
+    for slot, target_tf in (("tp1", tp1_target_tf), ("tp2", tp2_target_tf)):
+        tgt_rank = _tf_rank(target_tf)
+        if tgt_rank < src_rank:
+            veto.append(f"{slot}_lower_tf_than_source")
+
+
+
+# ── tp_ladder ─────────────────────────────────────────────────────────────────
+
+Direction = Literal["short", "long"]
+
+TP1_MIN_ATR = 0.8
+TP1_MAX_ATR = 2.5
+TP2_MIN_ATR = 1.5
+TP2_MAX_ATR = 5.5
+_POC_HEADWIND_PCT = 0.5
+_POC_SUPPORT_SOURCES = frozenset({"poc", "val", "poc_15m"})
+
+_SOURCE_WEIGHT: dict[str, float] = {
+    "poc": 1.05,
+    "val": 0.92,
+    "vah": 0.92,
+    "poc_15m": 0.88,
+    "wall_bid": 0.95,
+    "wall_ask": 0.95,
+    "pivot": 0.78,
+    "resistance": 0.82,
+    "support": 0.80,
+    "fib": 0.68,
+    "impulse": 0.72,
+    "atr": 0.45,
+}
+
+_CONTINUATION_PHASES = frozenset(
+    {"dump_active", "distribution", "impulse_initiating", "dump_initiating"}
+)
+
+
+@dataclass(frozen=True, slots=True)
+class LiquidityContext:
+    poc: float | None = None
+    vah: float | None = None
+    val: float | None = None
+    poc_15m: float | None = None
+    bid_walls: tuple[float, ...] = ()
+    ask_walls: tuple[float, ...] = ()
+    pivot_pp: float | None = None
+    pivot_s1: float | None = None
+    pivot_s2: float | None = None
+    pivot_r1: float | None = None
+    pivot_r2: float | None = None
+
+
+# Liquidity source → originating timeframe (Phase 4D).
+_SOURCE_TARGET_TF: dict[str, str] = {
+    "fib": "source",
+    "impulse": "source",
+    "support": "source",
+    "resistance": "source",
+    "poc": "1h",
+    "val": "1h",
+    "vah": "1h",
+    "poc_15m": "15m",
+    "wall_bid": "5m",
+    "wall_ask": "5m",
+    "pivot": "1d",
+    "atr": "5m",
+}
+
+
+def _resolve_target_tf(source: str, *, source_tf: str) -> str:
+    mapped = _SOURCE_TARGET_TF.get(source, "source")
+    return source_tf if mapped == "source" else mapped
+
+
+@dataclass(frozen=True, slots=True)
+class TpCandidate:
+    price: float
+    label: str
+    source: str
+    target_tf: str = "15m"
+
+
+def _f_pos(value: Any) -> float | None:
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    return v if v > 0 else None
+
+
+def _dedupe_prices(prices: list[float], *, mark: float, bin_pct: float = 0.0004) -> tuple[float, ...]:
+    """Merge nearby wall prices into one representative level per zone."""
+    if not prices or mark <= 0:
+        return ()
+    bin_abs = max(mark * bin_pct, mark * 1e-6)
+    sorted_px = sorted(set(prices))
+    clusters: list[list[float]] = []
+    for px in sorted_px:
+        if not clusters or px - clusters[-1][-1] > bin_abs:
+            clusters.append([px])
+        else:
+            clusters[-1].append(px)
+    return tuple(round(sum(c) / len(c), 6) for c in clusters)
+
+
+def _wall_prices(walls: dict[str, Any] | None, side: str, *, mark: float) -> tuple[float, ...]:
+    if not walls:
+        return ()
+    key = "bid_levels" if side == "bid" else "ask_levels"
+    raw: list[float] = []
+    for lvl in walls.get(key) or []:
+        if isinstance(lvl, dict):
+            px = _f(lvl.get("price"))
+        elif isinstance(lvl, (list, tuple)) and len(lvl) >= 1:
+            px = _f(lvl[0])
+        else:
+            px = None
+        if px is not None:
+            raw.append(px)
+    return _dedupe_prices(raw, mark=mark)
+
+
+def build_liquidity_context(
+    *,
+    price: float,
+    regime: dict[str, Any] | None = None,
+    book_walls: dict[str, Any] | None = None,
+    cross_micro: dict[str, Any] | None = None,
+    tf_15m: dict[str, Any] | None = None,
+    tf_1d: dict[str, Any] | None = None,
+) -> LiquidityContext:
+    """Collect liquidity magnets from regime, cross micro, book, pivots."""
+    reg = regime or {}
+    cx = cross_micro or {}
+    vp1h = cx.get("volume_profile_1h") if isinstance(cx.get("volume_profile_1h"), dict) else {}
+    vp15 = cx.get("volume_profile_15m") if isinstance(cx.get("volume_profile_15m"), dict) else {}
+    walls = book_walls or cx.get("book_walls") or {}
+    if not isinstance(walls, dict):
+        walls = {}
+
+    snap = tf_1d if tf_1d else tf_15m
+    snap = snap if isinstance(snap, dict) else {}
+
+    def _pivot(key: str, alt: str = "") -> float | None:
+        return _f_pos(snap.get(key)) or _f_pos(snap.get(alt))
+
+    return LiquidityContext(
+        poc=_f_pos(vp1h.get("poc")) or _f_pos(reg.get("poc_1h")),
+        vah=_f_pos(vp1h.get("vah")) or _f_pos(reg.get("vah_1h")),
+        val=_f_pos(vp1h.get("val")) or _f_pos(reg.get("val_1h")),
+        poc_15m=_f_pos(vp15.get("poc")) or _f_pos(reg.get("poc_15m")),
+        bid_walls=_wall_prices(walls, "bid", mark=price),
+        ask_walls=_wall_prices(walls, "ask", mark=price),
+        pivot_pp=_pivot("pivot_point", "pp"),
+        pivot_s1=_pivot("pivot_s1", "s1"),
+        pivot_s2=_pivot("pivot_s2", "s2"),
+        pivot_r1=_pivot("pivot_r1", "r1"),
+        pivot_r2=_pivot("pivot_r2", "r2"),
+    )
+
+
+def _skip_short_poc_support_candidate(
+    cand: TpCandidate,
+    *,
+    mark: float,
+    poc_direction: str = "",
+) -> bool:
+    """Short TP must not sit on POC/VAL support (shallow target → bad RR)."""
+    if cand.source not in _POC_SUPPORT_SOURCES:
+        return False
+    if str(poc_direction or "").strip().lower() == "long":
+        return True
+    if mark > 0 and cand.price > 0:
+        dist_pct = abs(mark - cand.price) / mark * 100.0
+        if dist_pct <= _POC_HEADWIND_PCT:
+            return True
+    return False
+
+
+def _score_candidate(
+    cand: TpCandidate,
+    *,
+    direction: Direction,
+    anchor: float,
+    atr: float,
+    tp_slot: int,
+) -> float:
+    if atr <= 0 or cand.price <= 0:
+        return -1.0
+    if direction == "short":
+        dist = anchor - cand.price
+        if dist <= 0:
+            return -1.0
+    else:
+        dist = cand.price - anchor
+        if dist <= 0:
+            return -1.0
+
+    lo = TP1_MIN_ATR if tp_slot == 1 else TP2_MIN_ATR
+    hi = TP1_MAX_ATR if tp_slot == 1 else TP2_MAX_ATR
+    base = _SOURCE_WEIGHT.get(cand.source, 0.5)
+    dist_atr = dist / atr
+    if lo <= dist_atr <= hi:
+        window = 1.25
+    elif dist_atr < lo:
+        window = max(0.25, dist_atr / lo)
+    elif dist_atr <= hi * 1.35:
+        window = 0.85
+    else:
+        window = 0.35
+    return base * window
+
+
+def _pick_best(
+    candidates: list[TpCandidate],
+    *,
+    direction: Direction,
+    anchor: float,
+    atr: float,
+    tp_slot: int,
+    source_tf: str = "15m",
+    exclude_above: float | None = None,
+    exclude_below: float | None = None,
+    poc_direction: str = "",
+) -> TpCandidate | None:
+    src_rank = _tf_rank(source_tf)
+    best: TpCandidate | None = None
+    best_score = -1.0
+    for cand in candidates:
+        if _tf_rank(cand.target_tf) < src_rank:
+            continue
+        if exclude_above is not None and cand.price >= exclude_above:
+            continue
+        if exclude_below is not None and cand.price <= exclude_below:
+            continue
+        if direction == "short" and _skip_short_poc_support_candidate(
+            cand, mark=anchor, poc_direction=poc_direction
+        ):
+            continue
+        sc = _score_candidate(cand, direction=direction, anchor=anchor, atr=atr, tp_slot=tp_slot)
+        if sc > best_score:
+            best_score = sc
+            best = cand
+    return best
+
+
+def _short_candidates(
+    *,
+    fib_tp1: float,
+    fib_tp2: float,
+    fib_tp1_label: str,
+    impulse_low: float,
+    local_support: float,
+    liquidity: LiquidityContext | None,
+    source_tf: str = "15m",
+) -> list[TpCandidate]:
+    out: list[TpCandidate] = []
+    if fib_tp1 > 0:
+        out.append(
+            TpCandidate(
+                fib_tp1,
+                fib_tp1_label or "38.2% fib",
+                "fib",
+                _resolve_target_tf("fib", source_tf=source_tf),
+            )
+        )
+    if fib_tp2 > 0 and abs(fib_tp2 - fib_tp1) > 1e-9:
+        out.append(
+            TpCandidate(
+                fib_tp2,
+                "50% fib",
+                "fib",
+                _resolve_target_tf("fib", source_tf=source_tf),
+            )
+        )
+    if impulse_low > 0:
+        out.append(
+            TpCandidate(
+                round(impulse_low * 1.015, 6),
+                "impulse_low",
+                "impulse",
+                _resolve_target_tf("impulse", source_tf=source_tf),
+            )
+        )
+    if local_support > 0:
+        out.append(
+            TpCandidate(
+                local_support,
+                "local support",
+                "support",
+                _resolve_target_tf("support", source_tf=source_tf),
+            )
+        )
+
+    liq = liquidity or LiquidityContext()
+    if liq.poc and liq.poc > 0:
+        out.append(TpCandidate(liq.poc, "POC 1h", "poc", _resolve_target_tf("poc", source_tf=source_tf)))
+    if liq.val and liq.val > 0:
+        out.append(TpCandidate(liq.val, "VAL 1h", "val", _resolve_target_tf("val", source_tf=source_tf)))
+    if liq.poc_15m and liq.poc_15m > 0:
+        out.append(
+            TpCandidate(liq.poc_15m, "POC 15m", "poc_15m", _resolve_target_tf("poc_15m", source_tf=source_tf))
+        )
+    for px in liq.bid_walls:
+        out.append(TpCandidate(px, "bid wall", "wall_bid", _resolve_target_tf("wall_bid", source_tf=source_tf)))
+    for key, label in (
+        ("pivot_s1", "S1"),
+        ("pivot_s2", "S2"),
+        ("pivot_pp", "PP"),
+    ):
+        pv = getattr(liq, key, None)
+        if pv and pv > 0:
+            out.append(TpCandidate(pv, label, "pivot", _resolve_target_tf("pivot", source_tf=source_tf)))
+    return out
+
+
+def _long_candidates(
+    *,
+    fib_tp1: float,
+    fib_tp2: float,
+    local_resistance: float,
+    impulse_high: float,
+    liquidity: LiquidityContext | None,
+    source_tf: str = "15m",
+) -> list[TpCandidate]:
+    out: list[TpCandidate] = []
+    if fib_tp1 > 0:
+        out.append(
+            TpCandidate(
+                fib_tp1,
+                "local res" if local_resistance else "fib TP1",
+                "fib",
+                _resolve_target_tf("fib", source_tf=source_tf),
+            )
+        )
+    if fib_tp2 > 0 and abs(fib_tp2 - fib_tp1) > 1e-9:
+        out.append(
+            TpCandidate(
+                fib_tp2,
+                "127.2% ext",
+                "fib",
+                _resolve_target_tf("fib", source_tf=source_tf),
+            )
+        )
+    if local_resistance > 0:
+        out.append(
+            TpCandidate(
+                local_resistance,
+                "local res",
+                "resistance",
+                _resolve_target_tf("resistance", source_tf=source_tf),
+            )
+        )
+    if impulse_high > 0:
+        out.append(
+            TpCandidate(
+                impulse_high,
+                "impulse_high",
+                "impulse",
+                _resolve_target_tf("impulse", source_tf=source_tf),
+            )
+        )
+
+    liq = liquidity or LiquidityContext()
+    if liq.poc and liq.poc > 0:
+        out.append(TpCandidate(liq.poc, "POC 1h", "poc", _resolve_target_tf("poc", source_tf=source_tf)))
+    if liq.vah and liq.vah > 0:
+        out.append(TpCandidate(liq.vah, "VAH 1h", "vah", _resolve_target_tf("vah", source_tf=source_tf)))
+    if liq.poc_15m and liq.poc_15m > 0:
+        out.append(
+            TpCandidate(liq.poc_15m, "POC 15m", "poc_15m", _resolve_target_tf("poc_15m", source_tf=source_tf))
+        )
+    for px in liq.ask_walls:
+        out.append(TpCandidate(px, "ask wall", "wall_ask", _resolve_target_tf("wall_ask", source_tf=source_tf)))
+    for key, label in (
+        ("pivot_r1", "R1"),
+        ("pivot_r2", "R2"),
+        ("pivot_pp", "PP"),
+    ):
+        pv = getattr(liq, key, None)
+        if pv and pv > 0:
+            out.append(TpCandidate(pv, label, "pivot", _resolve_target_tf("pivot", source_tf=source_tf)))
+    return out
+
+
+def apply_liquidity_tp_ladder_short(
+    *,
+    worst_entry: float,
+    entry_lo: float,
+    atr: float,
+    fib_tp1: float,
+    fib_tp2: float,
+    fib_tp1_label: str,
+    impulse_low: float,
+    local_support: float,
+    liquidity: LiquidityContext | None,
+    lifecycle_phase: str = "",
+    source_tf: str = "15m",
+    poc_direction: str = "",
+) -> tuple[float, str, float, str, str, str, str]:
+    """Return (tp1, tp1_label, tp2, tp2_label, level_mode, tp1_target_tf, tp2_target_tf)."""
+    src_tf = _normalize_tf(source_tf)
+    if worst_entry <= 0 or atr <= 0:
+        return fib_tp1, fib_tp1_label, fib_tp2, "50% fib", "fib_only", src_tf, src_tf
+    poc_dir = str(poc_direction or "")
+
+    phase = str(lifecycle_phase or "")
+    if phase in _CONTINUATION_PHASES:
+        cont = continuation_short_targets(
+            price=worst_entry,
+            atr15=atr,
+            impulse_low=impulse_low,
+            lifecycle_phase=phase,
+            fall_from_high_pct=0.0,
+            leg_tp1=fib_tp1,
+            leg_tp2=fib_tp2,
+        )
+        fib_tp1 = float(cont.get("tp1") or fib_tp1)
+        fib_tp2 = float(cont.get("tp2") or fib_tp2)
+        fib_tp1_label = str(cont.get("tp1_label") or fib_tp1_label)
+        mode_prefix = "continuation+"
+    else:
+        mode_prefix = ""
+
+    cands = _short_candidates(
+        fib_tp1=fib_tp1,
+        fib_tp2=fib_tp2,
+        fib_tp1_label=fib_tp1_label,
+        impulse_low=impulse_low,
+        local_support=local_support,
+        liquidity=liquidity,
+        source_tf=src_tf,
+    )
+
+    tp1_c = _pick_best(
+        cands,
+        direction="short",
+        anchor=worst_entry,
+        atr=atr,
+        tp_slot=1,
+        source_tf=src_tf,
+        exclude_above=entry_lo if entry_lo > 0 else None,
+        poc_direction=poc_dir,
+    )
+    if tp1_c is None or tp1_c.price < fib_tp1:
+        return fib_tp1, fib_tp1_label, fib_tp2, "50% fib", f"{mode_prefix}fib_fallback", src_tf, src_tf
+
+    tp2_c = _pick_best(
+        cands,
+        direction="short",
+        anchor=worst_entry,
+        atr=atr,
+        tp_slot=2,
+        source_tf=src_tf,
+        exclude_above=tp1_c.price,
+        poc_direction=poc_dir,
+    )
+    tp1 = tp1_c.price
+    tp2 = tp2_c.price if tp2_c and tp2_c.price >= fib_tp2 else fib_tp2
+    if tp2 >= tp1:
+        tp2 = round(min(tp1 - atr * 0.5, fib_tp2), 6)
+
+    mode = f"{mode_prefix}liquidity" if tp1_c.source != "fib" else f"{mode_prefix}fib"
+    tp2_tf = tp2_c.target_tf if tp2_c and tp2_c.price >= fib_tp2 else src_tf
+    return tp1, tp1_c.label, tp2, tp2_c.label if tp2_c and tp2_c.price >= fib_tp2 else "50% fib", mode, tp1_c.target_tf, tp2_tf
+
+
+def apply_liquidity_tp_ladder_long(
+    *,
+    worst_entry: float,
+    entry_hi: float,
+    atr: float,
+    fib_tp1: float,
+    fib_tp2: float,
+    local_resistance: float,
+    impulse_high: float,
+    liquidity: LiquidityContext | None,
+    source_tf: str = "15m",
+) -> tuple[float, str, float, str, str, str, str]:
+    src_tf = _normalize_tf(source_tf)
+    if worst_entry <= 0 or atr <= 0:
+        return fib_tp1, "local res", fib_tp2, "127.2% ext", "fib_only", src_tf, src_tf
+
+    cands = _long_candidates(
+        fib_tp1=fib_tp1,
+        fib_tp2=fib_tp2,
+        local_resistance=local_resistance,
+        impulse_high=impulse_high,
+        liquidity=liquidity,
+        source_tf=src_tf,
+    )
+    tp1_c = _pick_best(
+        cands,
+        direction="long",
+        anchor=worst_entry,
+        atr=atr,
+        tp_slot=1,
+        source_tf=src_tf,
+        exclude_below=entry_hi if entry_hi > 0 else None,
+    )
+    if tp1_c is None or (entry_hi > 0 and tp1_c.price <= entry_hi):
+        return fib_tp1, "local res", fib_tp2, "127.2% ext", "fib_fallback", src_tf, src_tf
+
+    tp2_c = _pick_best(
+        cands,
+        direction="long",
+        anchor=worst_entry,
+        atr=atr,
+        tp_slot=2,
+        source_tf=src_tf,
+        exclude_below=tp1_c.price,
+    )
+    tp1 = tp1_c.price
+    tp2 = tp2_c.price if tp2_c and tp2_c.price > tp1 else fib_tp2
+    if tp2 <= tp1:
+        tp2 = round(max(tp1 + atr * 0.8, fib_tp2), 6)
+
+    mode = "liquidity" if tp1_c.source != "fib" else "fib"
+    tp2_tf = tp2_c.target_tf if tp2_c and tp2_c.price > tp1 else src_tf
+    return tp1, tp1_c.label, tp2, tp2_c.label if tp2_c and tp2_c.price > tp1 else "127.2% ext", mode, tp1_c.target_tf, tp2_tf
+
+
+__all__ = [
+    "LiquidityContext",
+    "TpCandidate",
+    "apply_liquidity_tp_ladder_long",
+    "apply_liquidity_tp_ladder_short",
+    "build_liquidity_context",
+]
+
+
+def structural_short_levels(
+    *,
+    price: float,
+    impulse_high: float,
+    impulse_low: float,
+    fib: dict[str, float],
+    atr15: float,
+    atr1h: float | None = None,
+    local_support: float,
+    local_resistance: float,
+    range_pct_24h: float = 0.0,
+    leg_gain_pct: float = 0.0,
+    fall_from_high_pct: float = 0.0,
+    symbol: str = "",
+    lifecycle_phase: str = "",
+    liquidity: LiquidityContext | None = None,
+    source_tf: str = "15m",
+    poc_direction: str = "",
+) -> dict[str, float | list[float] | bool | list[str] | str]:
+    """Short fade: SL above LOCAL pivot, TPs toward liquidity magnets / fib fallback."""
+    veto: list[str] = []
+    if price <= 0:
+        return _veto(["price_missing"], 0.0)
+    atr = _f(atr15)
+    if atr <= 0:
+        return _veto(["atr_missing"], price)
+    sl_atr = _f(atr1h) if atr1h is not None and _f(atr1h) > 0 else atr
+    adapt: AdaptiveLevelParams = adaptive_level_params(
+        range_pct_24h=range_pct_24h,
+        leg_gain_pct=leg_gain_pct,
+        fall_from_high_pct=fall_from_high_pct,
+        symbol=symbol,
+        lifecycle_phase=lifecycle_phase,
+    )
+    sl_max_pct = adapt.sl_max_pct
+    sl_max_atr = adapt.sl_max_atr
+    sl_tp2_cap = adapt.sl_tp2_cap_ratio
+    if adapt.use_local_pivot_only and local_resistance > 0:
+        ih = max(price, local_resistance)
+    else:
+        ih = max(impulse_high, price, local_resistance)
+    il_tp = _effective_short_leg_low(ih, price, impulse_low, local_support)
+    fib_tp = fib_retracement_levels(ih, il_tp) if ih > il_tp else fib
+
+    # Entry anchors to current price; zone width hard-capped — a wide zone means
+    # "somewhere around here", which is not an entry.
+    entry_hi = round(max(price, min(ih * 0.995, price + atr * 2.0)), 6)
+    entry_lo = round(min(price * 0.998, local_support * 1.002, entry_hi * 0.996), 6)
+    width_cap = min(atr * ENTRY_ZONE_MAX_ATR, price * ENTRY_ZONE_MAX_PCT / 100.0)
+    if entry_hi - entry_lo > width_cap:
+        entry_lo = round(entry_hi - width_cap, 6)
+    worst = entry_hi  # short fills at the top of the zone in the worst case
+
+    # --- TPs first: the SL ceiling depends on the TP2 distance ---
+    tp1 = _f(fib_tp.get("ret_382"))
+    tp2 = _f(fib_tp.get("ret_50"))
+    if tp1 <= 0 or tp1 >= entry_lo:
+        leg = ih - il_tp
+        tp1 = round(ih - leg * 0.382, 6) if leg > 0 else round(entry_lo - atr * 2, 6)
+    if tp2 <= 0 or tp2 >= tp1:
+        leg = ih - il_tp
+        tp2 = round(ih - leg * 0.5, 6) if leg > 0 else round(il_tp * 1.01, 6)
+    if tp1 >= entry_lo:
+        tp1 = round((entry_lo + il_tp) / 2.0, 6)
+    if tp2 >= tp1:
+        tp2 = round(il_tp * 1.015, 6)
+
+    tp1, tp1_label = _apply_fast_flush_tp1_buffer(
+        tp1, entry_lo=entry_lo, atr=atr, lifecycle_phase=lifecycle_phase
+    )
+    tp1, tp1_label, tp2, tp2_label, tp_mode, tp1_target_tf, tp2_target_tf = apply_liquidity_tp_ladder_short(
+        worst_entry=worst,
+        entry_lo=entry_lo,
+        atr=atr,
+        fib_tp1=tp1,
+        fib_tp2=tp2,
+        fib_tp1_label=tp1_label,
+        impulse_low=il_tp,
+        local_support=local_support,
+        liquidity=liquidity,
+        lifecycle_phase=lifecycle_phase,
+        source_tf=source_tf,
+        poc_direction=poc_direction,
+    )
+    _validate_tp_target_tf(
+        veto,
+        source_tf=source_tf,
+        tp1_target_tf=tp1_target_tf,
+        tp2_target_tf=tp2_target_tf,
+    )
+
+    # --- SL: local pivot anchor + TP2-proportional ceiling, measured from worst edge ---
+    pivot = local_resistance if 0 < local_resistance < ih else ih
+    stop = max(pivot * 1.015, entry_hi + atr * 1.1)
+    stop = min(stop, entry_hi + atr * sl_max_atr)
+    floor_stop = entry_hi + sl_atr * SL_MIN_ATR
+    abs_floor_stop = worst * (1.0 + _short_min_sl_dist_pct(symbol) / 100.0)
+    floor_stop = max(floor_stop, abs_floor_stop)
+    tp2_dist = worst - tp2
+    cap_stop = worst + tp2_dist * sl_tp2_cap if tp2_dist > 0 else floor_stop
+    if floor_stop > cap_stop:
+        # The minimum breathing room already breaks the R:R mandate — zone too noisy.
+        veto.append("sl_floor_exceeds_tp2_cap")
+    effective_cap = max(cap_stop, floor_stop)
+    stop = round(min(max(stop, floor_stop), effective_cap), 6)
+
+    risk = max(stop - worst, atr * 0.25)
+    reward = max(worst - tp1, 0.0)
+    rr = round(reward / risk, 2) if risk > 0 else 0.0
+    target_rr = _phase_min_rr_short(lifecycle_phase)
+    if rr < target_rr and risk > 0:
+        tp1, rr = _snap_short_tp1_for_min_rr(
+            worst=worst,
+            entry_lo=entry_lo,
+            tp1=tp1,
+            stop=stop,
+            min_rr=target_rr,
+            floor=il_tp,
+        )
+        reward = max(worst - tp1, 0.0)
+    sl_dist_pct = round((stop - worst) / worst * 100.0, 2)
+    if sl_dist_pct > sl_max_pct:
+        veto.append("sl_nominal_too_wide")
+    if rr < target_rr:
+        veto.append("rr_below_min")
+
+    return {
+        "viable": not veto,
+        "veto": veto,
+        "entry_zone": [entry_lo, entry_hi],
+        "stop_loss": stop,
+        "tp1": tp1,
+        "tp2": tp2,
+        "tp1_label": tp1_label,
+        "tp2_label": tp2_label,
+        "invalidation_above": stop,
+        "risk_reward": rr,
+        "sl_dist_pct": sl_dist_pct,
+        "tp2_dist_pct": round((worst - tp2) / worst * 100.0, 2),
+        "level_mode": adapt.mode if tp_mode in {"fib", "fib_only", "fib_fallback"} else f"{adapt.mode}+{tp_mode}",
+        "sl_max_pct_used": sl_max_pct,
+        "source_tf": _normalize_tf(source_tf),
+        "target_tf": tp1_target_tf,
+        "tp1_target_tf": tp1_target_tf,
+        "tp2_target_tf": tp2_target_tf,
+    }
+
+
+def structural_long_levels(
+    *,
+    price: float,
+    impulse_high: float,
+    impulse_low: float,
+    fib: dict[str, float],
+    atr15: float,
+    atr1h: float | None = None,
+    local_support: float,
+    local_resistance: float,
+    range_pct_24h: float = 0.0,
+    leg_gain_pct: float = 0.0,
+    fall_from_high_pct: float = 0.0,
+    symbol: str = "",
+    lifecycle_phase: str = "",
+    liquidity: LiquidityContext | None = None,
+    source_tf: str = "15m",
+) -> dict[str, float | list[float] | bool | list[str] | str]:
+    """Long bounce: SL under LOCAL pivot support, TPs toward liquidity / fib ext."""
+    veto: list[str] = []
+    if price <= 0:
+        return _veto(["price_missing"], 0.0)
+    atr = _f(atr15)
+    if atr <= 0:
+        return _veto(["atr_missing"], price)
+    sl_atr = _f(atr1h) if atr1h is not None and _f(atr1h) > 0 else atr
+    adapt: AdaptiveLevelParams = adaptive_level_params(
+        range_pct_24h=range_pct_24h,
+        leg_gain_pct=leg_gain_pct,
+        fall_from_high_pct=fall_from_high_pct,
+        symbol=symbol,
+        lifecycle_phase=lifecycle_phase,
+    )
+    sl_max_pct = adapt.sl_max_pct
+    sl_max_atr = adapt.sl_max_atr
+    sl_tp2_cap = adapt.sl_tp2_cap_ratio
+    ih = max(impulse_high, local_resistance, price)
+    il = min(impulse_low, local_support, price) if impulse_low > 0 else local_support
+
+    support_zone = _f(fib.get("ret_382"), il)
+    entry_lo = round(max(min(price * 0.998, support_zone * 1.002), price - atr * 2.0), 6)
+    entry_hi = round(max(price, entry_lo * 1.006), 6)
+    width_cap = min(atr * ENTRY_ZONE_MAX_ATR, price * ENTRY_ZONE_MAX_PCT / 100.0)
+    if entry_hi - entry_lo > width_cap:
+        entry_lo = round(entry_hi - width_cap, 6)
+    worst = entry_lo  # long fills at the bottom of the zone in the worst case
+
+    # --- TPs first ---
+    tp1 = round(min(local_resistance, ih * 0.998), 6) if local_resistance > 0 else round(ih * 0.998, 6)
+    tp2 = _f(fib.get("ext_1272"))
+    if tp2 <= tp1:
+        leg = ih - il
+        tp2 = round(ih + leg * 0.272, 6) if leg > 0 else round(ih * 1.03, 6)
+    # Squeeze at/above impulse high — TPs must be above price (STG/EPIC lesson).
+    if price >= ih * 0.97:
+        tp1 = round(max(tp1, price + atr * 1.8), 6)
+        tp2 = round(max(tp2, price + atr * 3.5, ih * 1.02), 6)
+    elif tp1 <= entry_hi:
+        tp1 = round(entry_hi + atr * 1.5, 6)
+
+    fib_tp1, fib_tp2 = tp1, tp2
+    tp1, tp1_label, tp2, tp2_label, tp_mode, tp1_target_tf, tp2_target_tf = apply_liquidity_tp_ladder_long(
+        worst_entry=worst,
+        entry_hi=entry_hi,
+        atr=atr,
+        fib_tp1=fib_tp1,
+        fib_tp2=fib_tp2,
+        local_resistance=local_resistance,
+        impulse_high=ih,
+        liquidity=liquidity,
+        source_tf=source_tf,
+    )
+    _validate_tp_target_tf(
+        veto,
+        source_tf=source_tf,
+        tp1_target_tf=tp1_target_tf,
+        tp2_target_tf=tp2_target_tf,
+    )
+
+    # --- SL: local pivot support anchor + TP2-proportional ceiling, worst-edge based ---
+    pivot = local_support if 0 < local_support < price else il
+    stop = min(pivot * 0.985, entry_lo - atr * 1.1)
+    stop = max(stop, entry_lo - atr * sl_max_atr)
+    floor_stop = entry_lo - sl_atr * SL_MIN_ATR
+    tp2_dist = tp2 - worst
+    cap_stop = worst - tp2_dist * sl_tp2_cap if tp2_dist > 0 else floor_stop
+    if floor_stop < cap_stop:
+        veto.append("sl_floor_exceeds_tp2_cap")
+    stop = round(max(min(stop, floor_stop), min(cap_stop, floor_stop)), 6)
+    if stop <= 0:
+        veto.append("sl_non_positive")
+
+    risk = max(worst - stop, atr * 0.25)
+    reward = max(tp1 - worst, 0.0)
+    rr = round(reward / risk, 2) if risk > 0 else 0.0
+    sl_dist_pct = round((worst - stop) / worst * 100.0, 2)
+    min_rr = _phase_min_rr_long(lifecycle_phase)
+    if sl_dist_pct > sl_max_pct:
+        veto.append("sl_nominal_too_wide")
+    if rr < min_rr:
+        veto.append("rr_below_min")
+
+    return {
+        "viable": not veto,
+        "veto": veto,
+        "entry_zone": [entry_lo, entry_hi],
+        "stop_loss": stop,
+        "tp1": tp1,
+        "tp2": tp2,
+        "tp1_label": tp1_label,
+        "tp2_label": tp2_label,
+        "invalidation_below": stop,
+        "risk_reward": rr,
+        "sl_dist_pct": sl_dist_pct,
+        "tp2_dist_pct": round((tp2 - worst) / worst * 100.0, 2),
+        "level_mode": adapt.mode if tp_mode in {"fib", "fib_only", "fib_fallback"} else f"{adapt.mode}+{tp_mode}",
+        "sl_max_pct_used": sl_max_pct,
+        "source_tf": _normalize_tf(source_tf),
+        "target_tf": tp1_target_tf,
+        "tp1_target_tf": tp1_target_tf,
+        "tp2_target_tf": tp2_target_tf,
+    }
+
+
+def fib_retracement_levels(high: float, low: float) -> dict[str, float]:
+    """Fib extensions above high and retracements into the leg (hunt impulse window)."""
+    leg = high - low
+    return {
+        "ext_1272": round(high + leg * 0.272, 6),
+        "ext_1618": round(high + leg * 0.618, 6),
+        "ret_236": round(high - leg * 0.236, 6),
+        "ret_382": round(high - leg * 0.382, 6),
+        "ret_50": round(high - leg * 0.5, 6),
+    }
+
+
+def continuation_short_targets(
+    *,
+    price: float,
+    atr15: float,
+    impulse_low: float,
+    lifecycle_phase: str,
+    fall_from_high_pct: float,
+    leg_tp1: float,
+    leg_tp2: float,
+) -> dict[str, Any]:
+    """Mid-dump TPs from current price — leg fib targets stale after deep fall."""
+    phase = str(lifecycle_phase or "")
+    fall = float(fall_from_high_pct or 0)
+    active = phase in {"dump_active", "distribution", "impulse_initiating"}
+    atr = _f(atr15) or max(price * 0.015, 1e-9)
+    near_leg_tp1 = leg_tp1 > 0 and price > 0 and price <= leg_tp1 * 1.06
+    deep_fall = fall >= 10.0
+
+    if not active and not near_leg_tp1 and not deep_fall:
+        return {
+            "tp1": leg_tp1,
+            "tp2": leg_tp2,
+            "tp1_label": "38.2% fib",
+            "tp2_label": "50% fib",
+            "level_mode": "leg_fib",
+        }
+
+    il = impulse_low if impulse_low > 0 else price * 0.85
+    tp1 = round(price - atr * 1.5, 6)
+    tp2 = round(max(il, price - atr * 3.0), 6)
+    if tp1 >= price:
+        tp1 = round(price - atr, 6)
+    if tp2 >= tp1:
+        tp2 = round(min(tp1 - atr, il), 6)
+
+    return {
+        "tp1": tp1,
+        "tp2": tp2,
+        "tp1_label": "1.5 ATR (cont)",
+        "tp2_label": "impulse_low",
+        "level_mode": "continuation",
+        "leg_tp1": leg_tp1,
+        "leg_tp2": leg_tp2,
+    }

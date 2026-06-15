@@ -191,6 +191,18 @@ Production promotion только через edge-gate.
 
 **G1:** полный rewrite → `hunt_core/` production-core; `hunt_watch` → `hunt/_legacy/` после cutover.
 
+### 4.1 Interim scope (2026-06-13 ADR)
+
+Пока live n<30 и только dump_active short доказан на gate_edge:
+
+- **Live confirm TG:** short `dump_active` primary path
+- **Advisory TG:** off by default (`HUNT_ADVISORY_TG=0`)
+- **Long TG:** off (`HUNT_LONG_TG=0`, edge_policy)
+- **Block:** confirm TG при `dump_active` + `bias=wait`
+- **Measurement:** prep_shadow + gate_edge per slice before promote
+
+См. [ADR-G2-REVIEW-2026-06-13.md](ADR-G2-REVIEW-2026-06-13.md) · [HUNT_TRUTH_AUDIT.md](HUNT_TRUTH_AUDIT.md)
+
 ---
 
 ## 5. Измеримые критерии успеха (H-B)

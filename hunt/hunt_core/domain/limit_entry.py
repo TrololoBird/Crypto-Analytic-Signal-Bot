@@ -5,8 +5,9 @@ when price trades into the zone (realtime aggTrade or bar wick) - like a limit
 fill on the exchange. Stop/TP apply only **after** activation. Pending plans
 expire by TTL; they are not "cancelled" because price touched SL before fill.
 """
-
 from __future__ import annotations
+
+
 
 import math
 from typing import Any, Literal
@@ -76,7 +77,7 @@ def pending_expiry_minutes_for_signal(
         overrides = getattr(tracking, "setup_ttl_minutes", None) or {}
         if sid in overrides:
             return int(overrides[sid])
-        from hunt_core.domain.strategy_catalog import resolve_setup_ttl_minutes
+        from hunt_core.setups.catalog import resolve_setup_ttl_minutes
 
         catalog_ttl = resolve_setup_ttl_minutes(sid)
         if catalog_ttl > 0:

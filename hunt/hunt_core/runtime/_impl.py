@@ -1,20 +1,22 @@
+from __future__ import annotations
+
 #!/usr/bin/env python3
 """Hunter CLI — lock, signals, argparse (thin app shell)."""
 
-from __future__ import annotations
 
 import argparse
 import asyncio
 import os
 import signal
 
-from hunt_watch.bootstrap import bootstrap
+from hunt_core.bootstrap import bootstrap, require_feature_stack
 
 bootstrap()
+require_feature_stack()
 
 from hunt_core.runtime.cycle import run_loop
 from hunt_core.runtime.settings import request_stop
-from hunt_watch.targets import DEFAULT_SYMBOLS
+from hunt_core.data.universe import DEFAULT_SYMBOLS
 
 
 def _on_signal(*_args: object) -> None:
@@ -23,9 +25,10 @@ def _on_signal(*_args: object) -> None:
 
 def _acquire_single_instance_lock() -> None:
     """Refuse to start if another live watcher holds the lock."""
-    from hunt_watch.paths import DATA
+    from hunt_core.paths import DATA
 
     lock = DATA / "watch.pid"
+    supervised_child = os.environ.get("HUNT_SUPERVISED_CHILD") == "1"
     if lock.exists():
         try:
             other = int(lock.read_text(encoding="utf-8").strip() or "0")
@@ -40,11 +43,16 @@ def _acquire_single_instance_lock() -> None:
                 alive = False
             except PermissionError:
                 alive = True
-            if alive:
+            if alive and not supervised_child:
                 raise SystemExit(
-                    f"watch.py already running (pid={other}); refusing to start a second writer. "
+                    f"hunt_core watch already running (pid={other}); refusing to start a second writer. "
                     f"Kill it first or remove {lock} if stale."
                 )
+            if alive and supervised_child:
+                try:
+                    os.kill(other, signal.SIGTERM)
+                except (ProcessLookupError, PermissionError):
+                    pass
     lock.parent.mkdir(parents=True, exist_ok=True)
     lock.write_text(str(os.getpid()), encoding="utf-8")
 
@@ -57,7 +65,7 @@ def main() -> None:
         default=list(DEFAULT_SYMBOLS),
         help="CLI extras on top of anchors BTC ETH XAU XAG + scanner watchlist",
     )
-    parser.add_argument("--interval", type=int, default=60)
+    parser.add_argument("--interval", type=int, default=30)
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--no-telegram", action="store_true", help="Log only, no Telegram sends")
     args = parser.parse_args()

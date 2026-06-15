@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 import inspect
 import math
 import warnings
@@ -7,13 +8,14 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
 import polars as pl
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
 
 MODULE_STATUS = "internal_only"
-CANONICAL_FEATURE_API = "engine.features._prepare_frame"
+CANONICAL_FEATURE_API = "hunt_core.features.prepare_frame._prepare_frame"
 
 
 def _warn_if_direct_imported() -> None:
@@ -22,8 +24,8 @@ def _warn_if_direct_imported() -> None:
             return
     warnings.warn(
         (
-            "engine.features.microstructure is internal_only; "
-            "use engine.features._prepare_frame for runtime feature preparation."
+            "hunt_core.features.microstructure is internal_only; "
+            "use hunt_core.features.prepare for runtime feature preparation."
         ),
         DeprecationWarning,
         stacklevel=3,
@@ -31,6 +33,62 @@ def _warn_if_direct_imported() -> None:
 
 
 _warn_if_direct_imported()
+
+
+def _bottleneck_move_std(values: np.ndarray, window: int, *, ddof: int = 1) -> np.ndarray:
+    try:
+        import bottleneck as bn
+    except ImportError:
+        return _numpy_move_std(values, window, ddof=ddof)
+    try:
+        return bn.move_std(values, window, min_count=1, ddof=ddof)
+    except Exception:
+        return _numpy_move_std(values, window, ddof=ddof)
+
+
+def _bottleneck_move_mean(values: np.ndarray, window: int) -> np.ndarray:
+    try:
+        import bottleneck as bn
+    except ImportError:
+        return _numpy_move_mean(values, window)
+    try:
+        return bn.move_mean(values, window, min_count=1)
+    except Exception:
+        return _numpy_move_mean(values, window)
+
+
+def _numpy_move_mean(values: np.ndarray, window: int) -> np.ndarray:
+    out = np.full(values.shape, np.nan, dtype=np.float64)
+    for idx in range(values.shape[0]):
+        start = max(0, idx - window + 1)
+        chunk = values[start : idx + 1]
+        if chunk.size:
+            out[idx] = float(np.nanmean(chunk))
+    return out
+
+
+def _numpy_move_std(values: np.ndarray, window: int, *, ddof: int = 1) -> np.ndarray:
+    out = np.full(values.shape, np.nan, dtype=np.float64)
+    for idx in range(values.shape[0]):
+        start = max(0, idx - window + 1)
+        chunk = values[start : idx + 1]
+        if chunk.size >= max(2, ddof + 1):
+            out[idx] = float(np.nanstd(chunk, ddof=ddof))
+        elif chunk.size == 1:
+            out[idx] = 0.0
+    return out
+
+
+def _rolling_std_series(values: pl.Series, window: int, *, ddof: int = 1) -> pl.Series:
+    arr = values.to_numpy().astype(np.float64, copy=False)
+    rolled = _bottleneck_move_std(arr, window, ddof=ddof)
+    return pl.Series(rolled).fill_null(0.0).fill_nan(0.0)
+
+
+def _rolling_mean_series(values: pl.Series, window: int) -> pl.Series:
+    arr = values.to_numpy().astype(np.float64, copy=False)
+    rolled = _bottleneck_move_mean(arr, window)
+    return pl.Series(rolled).fill_null(0.0).fill_nan(0.0)
 
 
 def add_microstructure_features(df: pl.DataFrame) -> pl.DataFrame:
@@ -41,13 +99,16 @@ def add_microstructure_features(df: pl.DataFrame) -> pl.DataFrame:
             [
                 ((pl.col("delta_ratio").clip(0.0, 1.0) - 0.5) * 2.0)
                 .clip(-1.0, 1.0)
-                .fill_null(0.0)
-                .fill_nan(0.0)
                 .alias("signed_order_flow"),
             ]
         )
     else:
-        result = result.with_columns([pl.lit(0.0).alias("signed_order_flow")])
+        result = result.with_columns(
+            [
+                pl.lit(None).cast(pl.Float64).alias("signed_order_flow"),
+                pl.lit(True).alias("signed_order_flow_data_missing"),
+            ]
+        )
 
     if {"bid_qty", "ask_qty"}.issubset(result.columns):
         denom = (pl.col("bid_qty") + pl.col("ask_qty")).clip(lower_bound=1e-9)
@@ -60,7 +121,77 @@ def add_microstructure_features(df: pl.DataFrame) -> pl.DataFrame:
             ]
         )
     else:
-        result = result.with_columns([pl.lit(0.0).alias("tob_imbalance")])
+        result = result.with_columns(
+            [
+                pl.lit(None).cast(pl.Float64).alias("tob_imbalance"),
+                pl.lit(True).alias("tob_imbalance_data_missing"),
+            ]
+        )
+
+    # P1.12: CUSUM of taker buy/sell imbalance as an L0 (scoring-input) column.
+    # Imbalance = 2*delta_ratio-1 in [-1,1]; the CUSUM accumulates the signed
+    # deviation from balanced flow so persistent one-sided aggression compounds.
+    # Mean-reverting (EWM-anchored) so it cannot drift unbounded over a session.
+    if "delta_ratio" in result.columns:
+        imbalance = ((pl.col("delta_ratio") - 0.5) * 2.0).clip(-1.0, 1.0)
+        result = result.with_columns(imbalance.alias("_taker_imbalance"))
+        result = result.with_columns(
+            (
+                pl.col("_taker_imbalance")
+                - pl.col("_taker_imbalance").ewm_mean(span=96, min_periods=1)
+            ).alias("_taker_imbalance_dev")
+        )
+        result = result.with_columns(
+            pl.col("_taker_imbalance_dev")
+            .cum_sum()
+            .clip(-50.0, 50.0)
+            .fill_null(0.0)
+            .fill_nan(0.0)
+            .alias("taker_imbalance_cusum")
+        ).drop(["_taker_imbalance", "_taker_imbalance_dev"])
+    else:
+        result = result.with_columns([pl.lit(0.0).alias("taker_imbalance_cusum")])
+
+    # H2: vol-of-vol — dispersion of short-horizon realized volatility. Uses
+    # realized_vol_20 when the tail-metrics stage has already populated it, else
+    # falls back to the rolling std of log returns so the column is always real.
+    if "realized_vol_20" in result.columns:
+        vov_base = pl.col("realized_vol_20").fill_null(0.0).fill_nan(0.0)
+    elif "close" in result.columns:
+        close = result["close"].cast(pl.Float64, strict=False)
+        log_ret = (close / close.shift(1)).log().fill_null(0.0).fill_nan(0.0)
+        vov_base = _rolling_std_series(log_ret, 20, ddof=1)
+    else:
+        vov_base = None
+    if vov_base is not None:
+        result = result.with_columns(vov_base.alias("_vov_base"))
+        result = result.with_columns(
+            _rolling_std_series(result["_vov_base"], 20, ddof=1).alias("vol_of_vol_20")
+        ).drop("_vov_base")
+    else:
+        result = result.with_columns([pl.lit(0.0).alias("vol_of_vol_20")])
+
+    # H2: liquidation cluster — magnitude of recent forced-liquidation notional
+    # relative to its own rolling baseline, flagging cascade clusters. Sourced
+    # from engine liquidation rollups already merged onto the live frame; 0 when
+    # absent (no liquidation feed for this symbol/window).
+    if {"liquidation_long_notional", "liquidation_short_notional"}.issubset(result.columns):
+        liq_total = pl.col("liquidation_long_notional").fill_null(0.0).fill_nan(0.0) + pl.col(
+            "liquidation_short_notional"
+        ).fill_null(0.0).fill_nan(0.0)
+        result = result.with_columns(liq_total.alias("_liq_total"))
+        liq_baseline = _rolling_mean_series(result["_liq_total"], 20)
+        result = result.with_columns(
+            pl.when(liq_baseline > 0.0)
+            .then(result["_liq_total"] / liq_baseline)
+            .otherwise(0.0)
+            .clip(0.0, 20.0)
+            .fill_null(0.0)
+            .fill_nan(0.0)
+            .alias("liquidation_cluster")
+        ).drop("_liq_total")
+    else:
+        result = result.with_columns([pl.lit(0.0).alias("liquidation_cluster")])
 
     if {"bid_price", "ask_price", "bid_qty", "ask_qty", "close"}.issubset(result.columns):
         microprice = (
@@ -157,7 +288,7 @@ class MicrostructureSnapshot:
         return cls(
             symbol=str(symbol or row.get("symbol") or "").upper(),
             direction=str(direction or row.get("direction") or "long").lower(),
-            price_change_pct=_finite_float(
+            price_change_pct=_pct_points(
                 row.get("price_change_pct", row.get("price_change_percent"))
             ),
             funding_rate=_finite_float(row.get("funding_rate")),

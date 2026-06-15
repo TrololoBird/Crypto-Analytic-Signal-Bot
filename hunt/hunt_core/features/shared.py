@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+
 import polars as pl
 
-from hunt_core.coercion import as_float
+from hunt_core.errors import as_float
 
 REQUIRED_OHLCV_COLUMNS: tuple[str, ...] = ("open", "high", "low", "close", "volume")
 

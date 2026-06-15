@@ -1,0 +1,78 @@
+{
+  "symbols": [
+    "BTCUSDT",
+    "ETHUSDT",
+    "WIFUSDT",
+    "DOGEUSDT",
+    "XAUUSDT",
+    "XAGUSDT"
+  ],
+  "rows": [
+    {
+      "symbol": "BTCUSDT",
+      "error": "NameError: name '_apply_rest_enrichments' is not defined",
+      "price": null,
+      "phase": null,
+      "bias": null,
+      "short_conf": null,
+      "long_conf": null,
+      "short_score": null,
+      "long_score": null
+    },
+    {
+      "symbol": "ETHUSDT",
+      "error": "NameError: name '_apply_rest_enrichments' is not defined",
+      "price": null,
+      "phase": null,
+      "bias": null,
+      "short_conf": null,
+      "long_conf": null,
+      "short_score": null,
+      "long_score": null
+    },
+    {
+      "symbol": "WIFUSDT",
+      "error": "NameError: name '_apply_rest_enrichments' is not defined",
+      "price": null,
+      "phase": null,
+      "bias": null,
+      "short_conf": null,
+      "long_conf": null,
+      "short_score": null,
+      "long_score": null
+    },
+    {
+      "symbol": "DOGEUSDT",
+      "error": "NameError: name '_apply_rest_enrichments' is not defined",
+      "price": null,
+      "phase": null,
+      "bias": null,
+      "short_conf": null,
+      "long_conf": null,
+      "short_score": null,
+      "long_score": null
+    },
+    {
+      "symbol": "XAUUSDT",
+      "error": "NameError: name '_apply_rest_enrichments' is not defined",
+      "price": null,
+      "phase": null,
+      "bias": null,
+      "short_conf": null,
+      "long_conf": null,
+      "short_score": null,
+      "long_score": null
+    },
+    {
+      "symbol": "XAGUSDT",
+      "error": "NameError: name '_apply_rest_enrichments' is not defined",
+      "price": null,
+      "phase": null,
+      "bias": null,
+      "short_conf": null,
+      "long_conf": null,
+      "short_score": null,
+      "long_score": null
+    }
+  ]
+}

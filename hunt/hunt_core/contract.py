@@ -4,13 +4,24 @@ The bot is signal-only: each emitted setup must be directly usable as a
 manual limit-order plan. This module keeps the plan math centralized so
 individual detectors do not drift into point entries or partial target gaps.
 """
-
 from __future__ import annotations
 
+
+
+import ast
+import logging
 import math
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Literal, TypedDict
+
+from hunt_core.errors import DEFENSIVE_EXC
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+LOG = logging.getLogger("bot.contracts")
 
 DEFAULT_SCALE_WEIGHTS: tuple[float, float, float] = (0.5, 0.3, 0.2)
 DEFAULT_TARGET_RR: tuple[float, float, float] = (1.9, 3.0, 5.0)
@@ -35,7 +46,7 @@ def resolve_target_rr(settings: Any | None = None) -> tuple[float, float, float]
         return DEFAULT_TARGET_RR
     try:
         values = tuple(float(item) for item in configured)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return DEFAULT_TARGET_RR
     if len(values) != 3 or not all(math.isfinite(item) and item > 0.0 for item in values):
         return DEFAULT_TARGET_RR
@@ -591,7 +602,7 @@ def validate_signal_contract(
                         )
     try:
         scale_weights = [float(item) for item in scale_weights_raw]
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         scale_weights = []
     if len(scale_weights) < 2:
         issues.append(
@@ -653,3 +664,514 @@ def signal_contract_row(signal: Any) -> dict[str, object]:
         "ok": not issues,
         "issues": [issue.to_dict() for issue in issues],
     }
+
+Direction = Literal["short", "long"]
+BtOutcome = Literal["tp1_hit", "tp2_hit", "sl_hit", "timeout"]
+CloseReason = Literal[
+    "stop_hit",
+    "tp1",
+    "tp2",
+    "invalidate",
+    "lifecycle_stale",
+    "bias_flip",
+    "timeout",
+    "manual",
+    "reclaim",
+]
+
+
+class LifecycleBlock(TypedDict, total=False):
+    phase: str
+    recommended_bias: str
+    short_entry_ok: bool
+    long_entry_ok: bool
+    fall_from_high_pct: float | None
+    bounce_from_low_pct: float | None
+
+
+class DumpBlock(TypedDict, total=False):
+    phase: str
+    score: float | None
+    fuel: float | None
+    triggers: list[str]
+    confirm_hard: list[str]
+    confirmed: bool
+    entry_zone: list[float] | None
+    support_break_level: float | None
+    stop_loss: float | None
+    tp1: float | None
+    tp2: float | None
+    invalidation_above: float | None
+    levels_viable: bool
+    levels_veto: str | None
+
+
+class LongBlock(TypedDict, total=False):
+    confirmed: bool
+    score: float | None
+    fuel: float | None
+    entry_zone: list[float] | None
+    stop_loss: float | None
+    tp1: float | None
+    tp2: float | None
+
+
+class MarketBlock(TypedDict, total=False):
+    taker_5m: float | None
+    oi_chg_1h: float | None
+    oi_z_score: float | None
+    funding_pct: float | None
+    top_ls_1h: float | None
+    depth_imbalance: float | None
+    liquidation_score_5m: float | None
+    microprice_bias: float | None
+
+
+class TickRow(TypedDict, total=False):
+    ts: str
+    symbol: str
+    price: float
+    chg_24h_pct: float | None
+    range_24h_pct: float | None
+    lifecycle: LifecycleBlock
+    dump: DumpBlock
+    long: LongBlock
+    market: MarketBlock
+    regime: dict[str, Any]
+    session: dict[str, Any]
+    book_walls: dict[str, Any]
+
+
+class TrackerFeatureVector(TypedDict, total=False):
+    ts: str | None
+    price: float | None
+    market: dict[str, Any]
+    regime: dict[str, Any]
+    lifecycle_phase: str | None
+    lifecycle_bias: str | None
+    fall_from_high_pct: float | None
+    bounce_from_low_pct: float | None
+    pos_in_range: float | None
+
+
+class SignalRecord(TypedDict, total=False):
+    symbol: str
+    direction: Direction
+    entry_lo: float
+    entry_hi: float
+    stop_loss: float
+    tp1: float
+    tp2: float
+    invalidation_above: float | None
+    invalidation_below: float | None
+    fuel: float | None
+    entry_lifecycle_phase: str | None
+    entry_lifecycle_bias: str | None
+    close_reason: CloseReason | str | None
+    exit_price: float | None
+    pnl_pct: float | None
+    mfe_pct: float | None
+    duration_min: float | None
+    extreme_hi: float | None
+    extreme_lo: float | None
+    entry_message_id: int | None
+    opened_at: str | None
+    closed_at: str | None
+    features_open: TrackerFeatureVector
+    features_peak: TrackerFeatureVector
+    features_close: TrackerFeatureVector
+
+
+class OutcomeRecord(TypedDict, total=False):
+    symbol: str
+    direction: Direction
+    lifecycle_phase: str
+    fuel: float | None
+    entry_lo: float
+    entry_hi: float
+    stop_loss: float
+    tp1: float
+    tp2: float
+    bt_outcome: BtOutcome
+    bt_mfe_pct: float | None
+    bt_mae_pct: float | None
+    bt_candles_to_tp1: int | None
+    opened_at: str | None
+    source: str
+    grade_id: str | None
+
+
+def normalize_tick_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Dedupe positioning==market; ensure nested dicts."""
+    out = dict(row)
+    market = out.get("market") or out.get("positioning") or {}
+    if isinstance(market, dict):
+        out["market"] = dict(market)
+    out.pop("positioning", None)
+    for key in ("lifecycle", "dump", "long", "regime", "session", "book_walls"):
+        val = out.get(key)
+        if val is not None and not isinstance(val, dict):
+            out[key] = {}
+    return out
+
+
+def outcome_from_row(row: dict[str, Any], *, source: str) -> OutcomeRecord:
+    """Build OutcomeRecord from graded JSONL row."""
+    phase = row.get("lifecycle_phase") or row.get("entry_lifecycle_phase") or "unknown"
+    return OutcomeRecord(
+        symbol=str(row.get("symbol", "")),
+        direction=row.get("direction", "short"),  # type: ignore[typeddict-item]
+        lifecycle_phase=str(phase),
+        fuel=row.get("fuel"),
+        entry_lo=float(row.get("entry_lo") or row.get("entry_lo", 0)),
+        entry_hi=float(row.get("entry_hi") or row.get("entry_hi", 0)),
+        stop_loss=float(row.get("stop_loss") or 0),
+        tp1=float(row.get("tp1") or 0),
+        tp2=float(row.get("tp2") or 0),
+        bt_outcome=row.get("bt_outcome", "timeout"),  # type: ignore[typeddict-item]
+        bt_mfe_pct=row.get("bt_mfe_pct"),
+        bt_mae_pct=row.get("bt_mae_pct"),
+        bt_candles_to_tp1=row.get("bt_candles_to_tp1"),
+        opened_at=row.get("opened_at"),
+        source=source,
+        grade_id=row.get("grade_id"),
+    )
+
+
+# --- Feature Contract ---
+
+PUBLIC_FEATURE_SCHEMA_VERSION = "v1"
+PUBLIC_FEATURE_FIELDS: tuple[str, ...] = (
+    "rsi_15m",
+    "rsi_1h",
+    "rsi_4h",
+    "adx_1h",
+    "adx_4h",
+    "atr_pct_15m",
+    "volume_ratio_15m",
+    "macd_histogram_15m",
+    "ema20_above_ema50_15m",
+    "ema50_above_ema200_15m",
+    "ema20_above_ema50_1h",
+    "ema50_above_ema200_1h",
+    "supertrend_dir_1h",
+    "supertrend_dir_15m",
+    "obv_above_ema_15m",
+    "bb_pct_b_15m",
+    "bb_width_15m",
+    "funding_rate",
+    "oi_current",
+    "oi_change_pct",
+    "oi_slope_5m",
+    "ls_ratio",
+    "global_ls_ratio",
+    "top_trader_position_ratio",
+    "top_vs_global_ls_gap",
+    "liquidation_score",
+    "mark_index_spread_bps",
+    "premium_zscore_5m",
+    "premium_slope_5m",
+    "context_snapshot_age_seconds",
+    "depth_imbalance",
+    "microprice_bias",
+    "agg_trade_delta_30s",
+    "aggression_shift",
+    "spot_lead_return_1m",
+    "spot_futures_spread_bps",
+    "mark_price_age_seconds",
+    "ticker_price_age_seconds",
+    "book_ticker_age_seconds",
+    "data_source_mix",
+    "market_regime",
+    "vah_1h",
+    "val_1h",
+    "vah_15m",
+    "val_15m",
+    "funding_rate_zscore_48h",
+    "liquidation_cascade_5m",
+)
+PRIVATE_KEYS = {"balance", "position", "order", "account", "margin"}
+
+
+def validate_public_feature_payload(payload: Mapping[str, Any]) -> None:
+    if any(key in payload for key in PRIVATE_KEYS):
+        msg = f"Private data in public feature payload: {payload.keys()}"
+        raise ValueError(msg)
+    expected = set(PUBLIC_FEATURE_FIELDS)
+    provided = set(payload.keys())
+
+    missing = tuple(sorted(expected - provided))
+    extra = tuple(sorted(provided - expected))
+    if missing or extra:
+        details: list[str] = []
+        if missing:
+            details.append(f"missing={missing}")
+        if extra:
+            details.append(f"extra={extra}")
+        raise ValueError("public feature payload schema mismatch: " + "; ".join(details))
+
+
+def normalize_public_feature_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    validate_public_feature_payload(payload)
+    return {name: payload.get(name) for name in PUBLIC_FEATURE_FIELDS}
+
+
+def _normalized_float(value: Any, default: float | None = None) -> float | None:
+    if value is None:
+        return default
+    try:
+        parsed = float(value)
+    except TypeError, ValueError:
+        return default
+    if math.isnan(parsed) or math.isinf(parsed):
+        return default
+    return parsed
+
+
+def _normalized_bool(value: Any, *, default: bool | None = None) -> bool | None:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return bool(value)
+
+
+def build_public_feature_snapshot(prepared: Any) -> dict[str, Any]:
+    """Build a normalized public feature snapshot from PreparedSymbol-like data."""
+    if prepared is None:
+        return normalize_public_feature_payload(dict.fromkeys(PUBLIC_FEATURE_FIELDS))
+
+    features: dict[str, Any] = {}
+
+    def _frame_value(frame: Any, column: str) -> float | None:
+        if frame is None or getattr(frame, "is_empty", lambda: True)():
+            return None
+        if column not in getattr(frame, "columns", []):
+            return None
+        try:
+            return _normalized_float(frame.item(-1, column))
+        except DEFENSIVE_EXC as exc:
+            LOG.debug("public feature snapshot read failed | column=%s error=%s", column, exc)
+            return None
+
+    def _ema_stack(frame: Any, fast: str, slow: str) -> bool | None:
+        fast_value = _frame_value(frame, fast)
+        slow_value = _frame_value(frame, slow)
+        if fast_value is None or slow_value is None or slow_value <= 0.0:
+            return None
+        return fast_value > slow_value
+
+    work_15m = getattr(prepared, "work_15m", None)
+    work_1h = getattr(prepared, "work_1h", None)
+    work_4h = getattr(prepared, "work_4h", None)
+
+    features["rsi_15m"] = _frame_value(work_15m, "rsi14")
+    features["rsi_1h"] = _frame_value(work_1h, "rsi14")
+    features["rsi_4h"] = _frame_value(work_4h, "rsi14")
+    features["adx_1h"] = _frame_value(work_1h, "adx14")
+    features["adx_4h"] = _frame_value(work_4h, "adx14")
+    features["atr_pct_15m"] = _frame_value(work_15m, "atr_pct")
+    features["volume_ratio_15m"] = _frame_value(work_15m, "volume_ratio20")
+    features["macd_histogram_15m"] = _frame_value(work_15m, "macd_hist")
+
+    features["ema20_above_ema50_15m"] = _normalized_bool(_ema_stack(work_15m, "ema20", "ema50"))
+    features["ema50_above_ema200_15m"] = _normalized_bool(_ema_stack(work_15m, "ema50", "ema200"))
+    features["ema20_above_ema50_1h"] = _normalized_bool(_ema_stack(work_1h, "ema20", "ema50"))
+    features["ema50_above_ema200_1h"] = _normalized_bool(_ema_stack(work_1h, "ema50", "ema200"))
+
+    features["supertrend_dir_1h"] = _frame_value(work_1h, "supertrend_dir")
+    features["supertrend_dir_15m"] = _frame_value(work_15m, "supertrend_dir")
+    features["obv_above_ema_15m"] = _frame_value(work_15m, "obv_above_ema")
+    features["bb_pct_b_15m"] = _frame_value(work_15m, "bb_pct_b")
+    features["bb_width_15m"] = _frame_value(work_15m, "bb_width")
+
+    features["funding_rate"] = _normalized_float(getattr(prepared, "funding_rate", None))
+    features["oi_current"] = _normalized_float(getattr(prepared, "oi_current", None))
+    features["oi_change_pct"] = _normalized_float(getattr(prepared, "oi_change_pct", None))
+    features["oi_slope_5m"] = _normalized_float(getattr(prepared, "oi_slope_5m", None))
+    features["ls_ratio"] = _normalized_float(getattr(prepared, "ls_ratio", None))
+    features["global_ls_ratio"] = _normalized_float(getattr(prepared, "global_ls_ratio", None))
+    features["top_trader_position_ratio"] = _normalized_float(
+        getattr(prepared, "top_trader_position_ratio", None)
+    )
+    features["top_vs_global_ls_gap"] = _normalized_float(
+        getattr(prepared, "top_vs_global_ls_gap", None)
+    )
+    features["liquidation_score"] = _normalized_float(getattr(prepared, "liquidation_score", None))
+    features["mark_index_spread_bps"] = _normalized_float(
+        getattr(prepared, "mark_index_spread_bps", None)
+    )
+    features["premium_zscore_5m"] = _normalized_float(getattr(prepared, "premium_zscore_5m", None))
+    features["premium_slope_5m"] = _normalized_float(getattr(prepared, "premium_slope_5m", None))
+    features["context_snapshot_age_seconds"] = _normalized_float(
+        getattr(prepared, "context_snapshot_age_seconds", None)
+    )
+    features["depth_imbalance"] = _normalized_float(getattr(prepared, "depth_imbalance", None))
+    features["microprice_bias"] = _normalized_float(getattr(prepared, "microprice_bias", None))
+    features["agg_trade_delta_30s"] = _normalized_float(
+        getattr(prepared, "agg_trade_delta_30s", None)
+    )
+    features["aggression_shift"] = _normalized_float(getattr(prepared, "aggression_shift", None))
+    features["spot_lead_return_1m"] = _normalized_float(
+        getattr(prepared, "spot_lead_return_1m", None)
+    )
+    features["spot_futures_spread_bps"] = _normalized_float(
+        getattr(prepared, "spot_futures_spread_bps", None)
+    )
+    features["mark_price_age_seconds"] = _normalized_float(
+        getattr(prepared, "mark_price_age_seconds", None)
+    )
+    features["ticker_price_age_seconds"] = _normalized_float(
+        getattr(prepared, "ticker_price_age_seconds", None)
+    )
+    features["book_ticker_age_seconds"] = _normalized_float(
+        getattr(prepared, "book_ticker_age_seconds", None)
+    )
+    features["data_source_mix"] = (
+        getattr(prepared, "data_source_mix", "futures_only") or "futures_only"
+    )
+    features["market_regime"] = getattr(prepared, "market_regime", "neutral") or "neutral"
+    features["vah_1h"] = _normalized_float(getattr(prepared, "vah_1h", None))
+    features["val_1h"] = _normalized_float(getattr(prepared, "val_1h", None))
+    features["vah_15m"] = _normalized_float(getattr(prepared, "vah_15m", None))
+    features["val_15m"] = _normalized_float(getattr(prepared, "val_15m", None))
+    features["funding_rate_zscore_48h"] = _normalized_float(
+        getattr(prepared, "funding_rate_zscore_48h", None)
+    )
+    cascade = getattr(prepared, "liquidation_cascade_5m", None)
+    if cascade is None:
+        features["liquidation_cascade_5m"] = None
+    else:
+        features["liquidation_cascade_5m"] = bool(cascade)
+
+    return normalize_public_feature_payload(features)
+
+
+# --- Hunt delivery contract (Phase 3b) ---
+
+DeliveryTierKind = Literal["armed", "triggered"]
+DeliveryStageKind = Literal["early", "dump_hunt", "squeeze", "confirm", "analyze"]
+
+
+class SetupDeliveryContract(TypedDict, total=False):
+    """Typed payload for Telegram delivery + tracker registration."""
+
+    symbol: str
+    direction: Literal["short", "long"]
+    setup_id: str
+    delivery_tier: DeliveryTierKind
+    delivery_stage: DeliveryStageKind
+    entry_lo: float
+    entry_hi: float
+    stop_loss: float
+    tp1: float
+    tp2: float
+    tp3: float
+    invalidation_above: float | None
+    invalidation_below: float | None
+    fuel: float | None
+    score: float | None
+    lifecycle_phase: str | None
+    lifecycle_bias: str | None
+    confirm_hard: list[str]
+    triggers: list[str]
+    risk_reward: float | None
+    gate_code: str | None
+    card_html: str | None
+    telegram_message_id: int | None
+    opened_at: str | None
+
+
+def build_setup_delivery_contract(
+    row: dict[str, Any],
+    *,
+    direction: str,
+    setup: dict[str, Any],
+    delivery_tier: str,
+    delivery_stage: DeliveryStageKind = "confirm",
+    gate_code: str | None = None,
+    card_html: str | None = None,
+) -> SetupDeliveryContract:
+    """Materialize delivery contract from live tick row + setup block."""
+    ez = setup.get("entry_zone") or [0, 0]
+    try:
+        entry_lo = float(ez[0])
+        entry_hi = float(ez[1])
+    except (TypeError, ValueError, IndexError):
+        entry_lo = entry_hi = 0.0
+    lc = row.get("lifecycle") if isinstance(row.get("lifecycle"), dict) else {}
+    fuel_key = "dump_fuel" if direction == "short" else "long_fuel"
+    score_key = "dump_score" if direction == "short" else "long_score"
+    tp2 = setup.get("tp2") or setup.get("tp1")
+    return SetupDeliveryContract(
+        symbol=str(row.get("symbol") or "").upper(),
+        direction="short" if direction == "short" else "long",
+        setup_id=str(setup.get("setup_id") or setup.get("phase") or "unknown"),
+        delivery_tier="armed" if str(delivery_tier).lower() == "armed" else "triggered",
+        delivery_stage=delivery_stage,
+        entry_lo=entry_lo,
+        entry_hi=entry_hi,
+        stop_loss=float(setup.get("stop_loss") or 0),
+        tp1=float(setup.get("tp1") or 0),
+        tp2=float(tp2 or 0),
+        tp3=float(tp2 or 0),
+        invalidation_above=setup.get("invalidation_above"),
+        invalidation_below=setup.get("invalidation_below"),
+        fuel=float(setup.get(fuel_key) or 0) if setup.get(fuel_key) is not None else None,
+        score=float(setup.get(score_key) or 0) if setup.get(score_key) is not None else None,
+        lifecycle_phase=str(lc.get("phase") or setup.get("lifecycle_phase") or ""),
+        lifecycle_bias=str(lc.get("recommended_bias") or ""),
+        confirm_hard=list(setup.get("confirm_hard") or []),
+        triggers=list(setup.get("triggers") or []),
+        risk_reward=setup.get("risk_reward"),
+        gate_code=gate_code,
+        card_html=card_html,
+        opened_at=str(row.get("ts") or ""),
+    )
+
+
+# --- Runtime Contract ---
+
+RUNTIME_CALL_PATH_FILES: tuple[Path, ...] = (
+    Path("main.py"),
+    Path("bot/cli.py"),
+    Path("bot/__init__.py"),
+    Path("bot/runtime/bot.py"),
+)
+
+RUNTIME_PUBLIC_IMPORT_CONTRACT: tuple[str, ...] = (
+    "SignalBot",
+    "BotSettings",
+    "load_settings",
+)
+
+SCAFFOLD_IMPORT_BLOCKLIST: tuple[str, ...] = (
+    "scaffold",
+    "experimental",
+    "prototype",
+)
+
+
+def imported_module_names(file_path: Path) -> set[str]:
+    tree = ast.parse(file_path.read_text(encoding="utf-8"))
+    imported_names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported_names.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported_names.add(node.module)
+    return imported_names
+
+
+def assert_runtime_import_contract(imported_names: set[str]) -> None:
+    for blocked in SCAFFOLD_IMPORT_BLOCKLIST:
+        if any(blocked in name for name in imported_names):
+            msg = f"runtime import contract violation: blocked import fragment {blocked!r}"
+            raise ValueError(msg)
+
+
+def assert_runtime_call_path_is_clean() -> None:
+    imported_names: set[str] = set()
+    for file_path in RUNTIME_CALL_PATH_FILES:
+        imported_names.update(imported_module_names(file_path))
+    assert_runtime_import_contract(imported_names)

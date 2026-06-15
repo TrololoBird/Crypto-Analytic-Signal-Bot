@@ -11,7 +11,7 @@
 | contracts | `hunt_core/contracts.py` | **done** | TypedDict |
 | runtime | `hunt_core/runtime/` | **done** | thin `_impl` + `cycle.py` (~1.8k LOC) |
 | data | `hunt_core/data/` | **done** | collect, rest_tiers, lake |
-| market | `hunt_core/market/` | **done** | CCXT REST + Pro watch (no engine REST/WS) |
+| market | `hunt_core/market/` | **done** | CCXT REST + Pro; multi-exchange intel (`cross_exchange.py`) |
 | features | `hunt_core/features/` | **done** | latch, levels (re-export) |
 | detect | `hunt_core/detect/` | **done** | router H-B |
 | gate | `hunt_core/gate/` | **done** | pipeline + edge_policy |
@@ -76,15 +76,30 @@
 
 ## Cutover checklist
 
-- [x] `verify_logic` 125/125 green
-- [x] `run_gate_pipeline` wired в `_impl` (H-B edge + sniper + alert gate)
-- [x] `tick_io.append_tick_rows` — normalized JSONL writes
-- [x] SQLite lake: 64 959 ticks (`hunt/data/lake/hunt_lake.sqlite`)
-- [x] `unified_labels.jsonl` 578 rows
-- [x] `watch.py` 13 LOC thin CLI
-- [ ] jsonl_replay parity via lake (`replay_parity_check.py`) (sample-dependent; expand tick window)
+- [x] `verify_logic` 134/134 green
+- [x] R3: `detect/scoring.py`, `gate/explain.py`, lifecycle/tracker/events ported
+- [x] `check_core_budget` import hygiene (forbidden hunt_watch modules)
+- [x] TF contract: `contracts.TF_EXPORT_KEYS` + 5m WS overlay (`HUNT_KLINE_WS_5M`)
+- [x] jsonl_replay parity via lake (`replay_parity_check.py`) — 14/30 match (46.7%) on sample; JSONL-only 17% (use lake path)
 - [x] `snapshot_symbol` → `data/collect.py` (~1.5k LOC)
 - [x] `run_tick` / `run_loop` → `runtime/cycle.py` (watch smoke `--once` OK)
 - [x] Market plane → `hunt_core/market/` (`ccxt>=4.4` in pyproject); `ws_feed.py` removed
-- [ ] hunt_watch frozen в `_legacy/`
-- [x] graphify update
+- [x] Raw `fapi.binance.com` removed from hunt scripts (`ccxt_klines.py`)
+- [x] Multi-exchange REST+WS (Bybit/OKX/Bitget) — `HUNT_MULTI_EXCHANGE=1`, `HUNT_CROSS_WS=1`
+- [x] WS transport reconnect (`reset_pro_exchange`) on 1006 / NetworkError
+- [x] `live_smoke_5m.py` supervised gate + Telegram startup ping
+- [x] R3 shims frozen — `hunt/_legacy/README.md`; physical move deferred
+
+## Refactor R1–R3 (2026-06-12)
+
+**Проблема:** CCXT Pro и Polars считают/стримят больше, чем участвует в confirm/gate/TG. Побочные пути (`/signal`, replay) расходились с live.
+
+| Фаза | Цель | Статус |
+|------|------|--------|
+| **R1 Unify** | Один dispatch: `evaluate_delivery` → gate + tier; probe/replay/notify | **in progress** — contract + freshness + unified cooldown wired; forming paths partial |
+| **R2 Wire or cut** | WS book→scoring; lean Polars; drop dead streams | **started** — WS depth overlay; liq burst advisory wired |
+| **R3 Cutover** | `signal_engine` → `detect/`; `early_advisory` ported; `alert_explain` → `gate/` | **in progress** — `early_advisory.py` done; `short_dump.py` stub |
+
+**Принцип:** не «использовать всё», а **explicit contract** — `TF_EXPORT_KEYS` + `market` fields, которые читает confirm. Остальное — research/offline или удалить.
+
+**Deps:** `polars`, `polars_ta` (ta/tdx/wq/candles), `polars-ols`, `ccxt>=4.4` — in `pyproject.toml` core; probe via `hunt/scripts/check_polars_plugins.py`. Optional offline: `pip install -e "hunt/[research]"` (`polars-trading`, `polars-ds`). Graceful fallbacks when plta funcs break on Py3.14 (SMA/WMA/KAMA/LINEARREG).

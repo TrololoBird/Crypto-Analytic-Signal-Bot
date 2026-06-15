@@ -2,8 +2,9 @@
 
 Centralizes secret loading so config/model code doesn't duplicate env parsing.
 """
-
 from __future__ import annotations
+
+
 
 import os
 from dataclasses import dataclass

@@ -3,11 +3,13 @@
 Indicators stay Polars-native with optional `polars_ta` for EMA/ROC/OBV.
 Pure-Polars formulas are canonical for Wilder RSI/ATR/ADX, MACD, BB (ddof=0, TradingView parity), and structure.
 """
-
 from __future__ import annotations
+
+
 
 import logging
 import math
+import os
 import threading
 from collections import OrderedDict
 from typing import Any, cast
@@ -15,16 +17,26 @@ from typing import Any, cast
 import polars as pl
 import structlog
 
+from hunt_core.analysis.adx_thresholds import ADX_RANGE_MAX, ADX_TREND_MIN
+from hunt_core.analysis.trend_engine import bias_from_ema_row
 from hunt_core.errors import DEFENSIVE_EXC
+from hunt_core.features.pivots import _swing_points
 
 from ..domain.schemas import PreparedSymbol, SymbolFrames, UniverseSymbol
-from ..market.book_parsers import depth_imbalance_from_book, microprice_bias_from_book
-from ..runtime_policy import (
+from ..market.client import (
+    depth_imbalance_by_zone,
+    depth_imbalance_from_book,
+    detect_wall_clusters,
+    microprice_bias_from_book,
+    normalize_depth_levels,
+    wall_cluster_to_dict,
+)
+from ..domain.policy import (
     configured_context_timeframes,
     configured_primary_timeframe,
 )
 from .microstructure import add_microstructure_features
-from .prepare_columns import resolve_prepare_groups
+from .prepare_columns import resolve_hunt_live_groups, resolve_prepare_groups, resolve_prepare_groups_for_symbol
 from .prepare_frame import (
     _add_advanced_indicators,
     _as_optional_float,
@@ -36,7 +48,6 @@ from .prepare_frame import (
     add_session_cvd,
     has_minimum_bars,
     min_required_bars,
-    take_frame_indicator_fallbacks,
 )
 
 LOG = structlog.get_logger("bot.features.prepare")
@@ -158,57 +169,39 @@ def cache_stats() -> dict[str, float | int]:
 
 
 def _bias_4h(work_4h: pl.DataFrame) -> str:
-    """Determine 4h bias from EMA alignment, confirmed by ADX trend strength."""
+    """Determine 4h bias from canonical EMA stack + ADX filter."""
     if work_4h.is_empty():
         return "neutral"
-
     last = work_4h.row(-1, named=True)
-    close = last["close"]
-    ema20 = last["ema20"]
-    ema50 = last["ema50"]
-    ema200 = last["ema200"]
-    adx = last.get("adx14") or 0.0
-
-    # Require ADX > 15 when available to avoid false trend signals in choppy markets
-    if adx > 0.0 and adx < 15.0:
-        return "neutral"
-
-    if close > ema50 > ema200 and ema20 > ema50:
-        return "uptrend"
-    if close < ema50 < ema200 and ema20 < ema50:
-        return "downtrend"
-    return "neutral"
+    return bias_from_ema_row(
+        float(last["close"]),
+        float(last["ema20"]),
+        float(last["ema50"]),
+        float(last["ema200"]),
+        float(last.get("adx14") or 0.0),
+    )
 
 
 def _bias_1h(work_1h: pl.DataFrame) -> str:
-    """Determine 1h bias from EMA alignment, confirmed by ADX trend strength."""
+    """Determine 1h bias from canonical EMA stack + ADX filter."""
     if work_1h.is_empty():
         return "neutral"
-
     last = work_1h.row(-1, named=True)
-    close = last["close"]
-    ema20 = last["ema20"]
-    ema50 = last["ema50"]
-    ema200 = last["ema200"]
-    adx = last.get("adx14") or 0.0
-
-    # Require ADX > 15 when available to avoid false trend signals in choppy markets
-    if adx > 0.0 and adx < 15.0:
-        return "neutral"
-
-    if close > ema50 > ema200 and ema20 > ema50:
-        return "uptrend"
-    if close < ema50 < ema200 and ema20 < ema50:
-        return "downtrend"
-    return "neutral"
+    return bias_from_ema_row(
+        float(last["close"]),
+        float(last["ema20"]),
+        float(last["ema50"]),
+        float(last["ema200"]),
+        float(last.get("adx14") or 0.0),
+    )
 
 
 def _market_regime(
     work_4h: pl.DataFrame,
     work_1h: pl.DataFrame | None = None,
     work_15m: pl.DataFrame | None = None,
-    threshold_choppy: float = 15.0,
-    threshold_trending: float = 25.0,
+    threshold_choppy: float = ADX_RANGE_MAX,
+    threshold_trending: float = ADX_TREND_MIN,
 ) -> str:
     """Classify regime from 4h strength plus 1h/15m structure."""
     if work_4h.is_empty() or "adx14" not in work_4h.columns:
@@ -235,76 +228,6 @@ def _market_regime(
 # ---------------------------------------------------------------------------
 # Structure-based helpers
 # ---------------------------------------------------------------------------
-
-
-def _swing_points(
-    work: pl.DataFrame,
-    n: int = 3,
-    *,
-    include_unconfirmed_tail: bool = False,
-) -> tuple[pl.Series, pl.Series]:
-    """Detect live-safe swing highs and lows without right-side lookahead.
-
-    A pivot is confirmed only after the following bar has closed:
-    ``high[i-n:i] < high[i]`` and ``high[i] > high[i+1]`` for highs,
-    mirrored for lows. The implementation walks left-to-right and marks the
-    pivot bar only when the confirmation bar is already present in ``work``.
-    It deliberately avoids negative shifts / right-side rolling windows so a
-    strategy cannot see a swing before it would have been known live.
-    """
-    if work.is_empty():
-        return (
-            pl.Series("swing_high", [], dtype=pl.Boolean),
-            pl.Series("swing_low", [], dtype=pl.Boolean),
-        )
-    if "high" not in work.columns or "low" not in work.columns:
-        return (
-            pl.Series("swing_high", [False] * work.height, dtype=pl.Boolean),
-            pl.Series("swing_low", [False] * work.height, dtype=pl.Boolean),
-        )
-
-    lookback = max(1, int(n))
-    highs = [float(value) if value is not None else float("nan") for value in work["high"]]
-    lows = [float(value) if value is not None else float("nan") for value in work["low"]]
-    swing_high_values = [False] * work.height
-    swing_low_values = [False] * work.height
-
-    def _finite(values: list[float]) -> bool:
-        return all(math.isfinite(value) for value in values)
-
-    # confirm_idx is the just-closed candle that confirms pivot_idx.
-    for confirm_idx in range(lookback + 1, work.height):
-        pivot_idx = confirm_idx - 1
-        left_start = pivot_idx - lookback
-        left_highs = highs[left_start:pivot_idx]
-        left_lows = lows[left_start:pivot_idx]
-        pivot_high = highs[pivot_idx]
-        pivot_low = lows[pivot_idx]
-        confirm_high = highs[confirm_idx]
-        confirm_low = lows[confirm_idx]
-
-        if _finite([*left_highs, pivot_high, confirm_high]):
-            swing_high_values[pivot_idx] = (
-                pivot_high > max(left_highs) and pivot_high > confirm_high
-            )
-        if _finite([*left_lows, pivot_low, confirm_low]):
-            swing_low_values[pivot_idx] = pivot_low < min(left_lows) and pivot_low < confirm_low
-
-    if include_unconfirmed_tail and work.height > lookback:
-        tail_idx = work.height - 1
-        left_highs = highs[tail_idx - lookback : tail_idx]
-        left_lows = lows[tail_idx - lookback : tail_idx]
-        tail_high = highs[tail_idx]
-        tail_low = lows[tail_idx]
-        if _finite([*left_highs, tail_high]):
-            swing_high_values[tail_idx] = tail_high > max(left_highs)
-        if _finite([*left_lows, tail_low]):
-            swing_low_values[tail_idx] = tail_low < min(left_lows)
-
-    return (
-        pl.Series("swing_high", swing_high_values, dtype=pl.Boolean),
-        pl.Series("swing_low", swing_low_values, dtype=pl.Boolean),
-    )
 
 
 def _market_structure_1h(work_1h: pl.DataFrame) -> str:
@@ -381,73 +304,15 @@ def _regime_1h_confirmed(work_1h: pl.DataFrame, min_bars: int = 3) -> str:
     return "ranging"
 
 
-def _volume_profile_levels(
-    work: pl.DataFrame,
-    lookback: int = 96,
-    buckets: int = 20,
-    *,
-    value_area_pct: float = 0.70,
-) -> tuple[float | None, float | None, float | None]:
-    """Return POC, VAH, VAL from a volume-profile histogram."""
-    if len(work) < 10:
-        return None, None, None
-
-    tail = work.tail(lookback)
-    price_min = _as_optional_float(tail["low"].min())
-    price_max = _as_optional_float(tail["high"].max())
-    if price_min is None or price_max is None or price_max <= price_min:
-        return price_max, price_max, price_min
-
-    bucket_size = (price_max - price_min) / buckets
-    midpoints = (tail["high"] + tail["low"]) / 2.0
-    v_buckets = ((midpoints - price_min) / bucket_size).floor().cast(pl.Int32).clip(0, buckets - 1)
-    vol_by_bucket = (
-        pl.DataFrame({"b": v_buckets, "v": tail["volume"]}).group_by("b").agg(pl.col("v").sum())
-    )
-    if vol_by_bucket.is_empty():
-        return price_min, price_max, price_min
-
-    rows = sorted(vol_by_bucket.iter_rows(named=True), key=lambda row: int(row["b"]))
-    total_volume = sum(float(row["v"] or 0.0) for row in rows)
-    if total_volume <= 0.0:
-        return price_min, price_max, price_min
-
-    poc_row = max(rows, key=lambda row: float(row["v"] or 0.0))
-    poc_bucket = int(poc_row["b"])
-    poc = float(price_min + (poc_bucket + 0.5) * bucket_size)
-
-    target_volume = total_volume * max(0.5, min(value_area_pct, 0.95))
-    accumulated = float(poc_row["v"] or 0.0)
-    included = {poc_bucket}
-    left = poc_bucket - 1
-    right = poc_bucket + 1
-    while accumulated < target_volume and (left >= 0 or right < buckets):
-        left_vol = 0.0
-        right_vol = 0.0
-        if left >= 0:
-            left_vol = next((float(row["v"] or 0.0) for row in rows if int(row["b"]) == left), 0.0)
-        if right < buckets:
-            right_vol = next(
-                (float(row["v"] or 0.0) for row in rows if int(row["b"]) == right),
-                0.0,
-            )
-        if right_vol >= left_vol and right < buckets:
-            accumulated += right_vol
-            included.add(right)
-            right += 1
-        elif left >= 0:
-            accumulated += left_vol
-            included.add(left)
-            left -= 1
-        else:
-            break
-
-    val = float(price_min + min(included) * bucket_size)
-    vah = float(price_min + (max(included) + 1) * bucket_size)
-    return poc, vah, val
+from hunt_core.features.volume_profile import (
+    VP_BUCKETS_DEFAULT,
+    VP_LOOKBACK_15M,
+    volume_profile_levels as _volume_profile_levels,
+    volume_profile_with_direction as _volume_profile_with_direction,
+)
 
 
-def _volume_poc(work: pl.DataFrame, lookback: int = 96, buckets: int = 20) -> float | None:
+def _volume_poc(work: pl.DataFrame, lookback: int = 96, buckets: int = VP_BUCKETS_DEFAULT) -> float | None:
     poc, _vah, _val = _volume_profile_levels(work, lookback=lookback, buckets=buckets)
     return poc
 
@@ -531,6 +396,28 @@ def _sanity_check_prepared_frame(work: pl.DataFrame, symbol: str, interval: str)
         if not math.isfinite(value):
             defects.append(f"{column}: last bar non-finite ({value})")
 
+    if interval == "15m":
+        flow_bar_cols = (
+            "signed_order_flow",
+            "session_cvd",
+            "tob_imbalance",
+            "rolling_cvd_24h",
+        )
+        for column in flow_bar_cols:
+            if column not in work.columns:
+                continue
+            raw = work[column][-1]
+            if raw is None:
+                defects.append(f"{column}: last bar is null")
+                continue
+            try:
+                value = float(raw)
+            except TypeError, ValueError:
+                defects.append(f"{column}: last bar non-numeric ({raw!r})")
+                continue
+            if not math.isfinite(value):
+                defects.append(f"{column}: last bar non-finite ({value})")
+
     def _range_defect(column: str, low: float, high: float) -> None:
         if column not in work.columns:
             return
@@ -558,6 +445,9 @@ def _sanity_check_prepared_frame(work: pl.DataFrame, symbol: str, interval: str)
 
     _range_defect("rsi14", 0.0, 100.0)
     _range_defect("adx14", 0.0, 100.0)
+    _range_defect("stoch_k14", 0.0, 100.0)
+    _range_defect("stoch_d14", 0.0, 100.0)
+    _range_defect("mfi14", 0.0, 100.0)
     _positive_defect("atr14", allow_zero=False)
     _positive_defect("ema20", allow_zero=False)
     _positive_defect("ema50", allow_zero=False)
@@ -839,15 +729,7 @@ def _enrich_with_ws_data(
     work = add_microstructure_features(work)
     work = add_session_cvd(work)
     work = add_rolling_cvd_24h(work)
-    return work.with_columns(
-        [
-            pl.col("signed_order_flow").fill_null(0.0).fill_nan(0.0),
-            pl.col("session_cvd").fill_null(0.0).fill_nan(0.0),
-            pl.col("rolling_cvd_24h").fill_null(0.0).fill_nan(0.0),
-            pl.col("tob_imbalance").fill_null(0.0).fill_nan(0.0),
-            pl.col("microprice_deviation_pct").fill_null(0.0).fill_nan(0.0),
-        ]
-    )
+    return work
 
 
 def _to_polars(df: object) -> pl.DataFrame:
@@ -902,9 +784,10 @@ def prepare_symbol(
         )
         return None
 
-    active_groups = None
-    if settings is not None and hasattr(settings, "setups"):
-        active_groups = resolve_prepare_groups(settings.setups.enabled_setup_ids())
+    active_groups = resolve_prepare_groups_for_symbol(sym)
+    if os.getenv("HUNT_FULL_PREPARE", "").strip().lower() in {"1", "true", "yes"}:
+        if settings is not None and hasattr(settings, "setups"):
+            active_groups = resolve_prepare_groups(settings.setups.enabled_setup_ids())
 
     work_1h = _cached_prepare_frame(
         _to_polars(frames.df_1h),
@@ -912,7 +795,6 @@ def prepare_symbol(
         interval="1h",
         active_groups=active_groups,
     )
-    data_quality_flags = take_frame_indicator_fallbacks()
     fallback_book = (frames.bid_price, frames.ask_price, frames.bid_qty, frames.ask_qty)
     work_15m = _cached_prepare_frame(
         _to_polars(frames.df_15m),
@@ -922,7 +804,6 @@ def prepare_symbol(
         fallback_book=fallback_book,
         active_groups=active_groups,
     )
-    data_quality_flags.extend(take_frame_indicator_fallbacks())
     if ws_manager is None and (frames.bid_qty is not None or frames.ask_qty is not None):
         work_15m = _enrich_with_ws_data(
             work_15m,
@@ -938,7 +819,19 @@ def prepare_symbol(
             interval="5m",
             active_groups=active_groups,
         )
-        data_quality_flags.extend(take_frame_indicator_fallbacks())
+        # P1.11: overlay fresh 5m WS book/aggTrade/liquidation context onto the
+        # confirm frame; falls back to REST frame untouched when WS is absent.
+        if work_5m is not None and (
+            ws_manager is not None
+            or frames.bid_qty is not None
+            or frames.ask_qty is not None
+        ):
+            work_5m = _enrich_with_ws_data(
+                work_5m,
+                sym,
+                ws_manager,
+                fallback_book=fallback_book,
+            )
     work_4h = None
     if frames.df_4h is not None and not frames.df_4h.is_empty():
         work_4h = _cached_prepare_frame(
@@ -947,7 +840,6 @@ def prepare_symbol(
             interval="4h",
             active_groups=active_groups,
         )
-        data_quality_flags.extend(take_frame_indicator_fallbacks())
 
     prepared_frames: list[tuple[str, pl.DataFrame | None]] = [
         ("1h", work_1h),
@@ -1057,12 +949,52 @@ def prepare_symbol(
         delta_ratio=None,
     )
 
+    nearest_bid_wall: dict[str, Any] | None = None
+    nearest_ask_wall: dict[str, Any] | None = None
+    depth_zone_imbalance: dict[str, float] = {}
+    book_bids = (
+        list(frames.book_bids)
+        if frames.book_bids
+        else normalize_depth_levels(getattr(frames, "bid_levels", None))
+    )
+    book_asks = (
+        list(frames.book_asks)
+        if frames.book_asks
+        else normalize_depth_levels(getattr(frames, "ask_levels", None))
+    )
+    mid_price = None
+    if bid_price is not None and ask_price is not None and bid_price > 0 and ask_price > 0:
+        mid_price = (bid_price + ask_price) / 2.0
+    elif work_15m is not None and not work_15m.is_empty():
+        mid_price = _frame_last("close")
+    daily_volume = float(universe_symbol.quote_volume or 0.0)
+    if mid_price and mid_price > 0 and book_bids and book_asks:
+        depth_zone_imbalance = depth_imbalance_by_zone(book_bids, book_asks, mid_price)
+        bid_clusters = detect_wall_clusters(
+            book_bids,
+            current_price=mid_price,
+            daily_volume=daily_volume,
+            side="bid",
+        )
+        ask_clusters = detect_wall_clusters(
+            book_asks,
+            current_price=mid_price,
+            daily_volume=daily_volume,
+            side="ask",
+        )
+        if bid_clusters:
+            nearest_bid_wall = wall_cluster_to_dict(bid_clusters[0])
+        if ask_clusters:
+            nearest_ask_wall = wall_cluster_to_dict(ask_clusters[0])
+
     liquidation_score = _frame_last("liquidation_score")
 
     work_4h_frame = work_4h if work_4h is not None else pl.DataFrame()
     regime = _market_regime(work_4h_frame, work_1h=work_1h, work_15m=work_15m)
-    profile_1h = _volume_profile_levels(work_1h, lookback=48)
-    profile_15m = _volume_profile_levels(work_15m, lookback=96)
+    profile_1h = _volume_profile_with_direction(work_1h, lookback=48, buckets=VP_BUCKETS_DEFAULT)
+    profile_15m = _volume_profile_with_direction(
+        work_15m, lookback=VP_LOOKBACK_15M, buckets=VP_BUCKETS_DEFAULT
+    )
 
     return PreparedSymbol(
         universe=universe_symbol,
@@ -1082,12 +1014,17 @@ def prepare_symbol(
         regime_1h_confirmed=_regime_1h_confirmed(work_1h),  # 1H context for 15M signals
         poc_1h=profile_1h[0],
         poc_15m=profile_15m[0],
+        poc_direction_1h=profile_1h[3],
+        poc_direction_15m=profile_15m[3],
         vah_1h=profile_1h[1],
         val_1h=profile_1h[2],
         vah_15m=profile_15m[1],
         val_15m=profile_15m[2],
         depth_imbalance=book_depth_imbalance,
         microprice_bias=book_microprice_bias,
+        nearest_bid_wall=nearest_bid_wall,
+        nearest_ask_wall=nearest_ask_wall,
+        depth_zone_imbalance=depth_zone_imbalance,
         depth_imbalance_source="rest_book_l1" if book_depth_imbalance is not None else None,
         microprice_bias_source="rest_book_l1" if book_microprice_bias is not None else None,
         liquidation_score=liquidation_score,
@@ -1095,7 +1032,7 @@ def prepare_symbol(
         primary_timeframe=primary_timeframe,
         context_timeframes=context_timeframes,
         settings=settings,
-        data_quality_flags=sorted(set(data_quality_flags)),
+        data_quality_flags=[],
     )
 
 
