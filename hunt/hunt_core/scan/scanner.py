@@ -3,16 +3,20 @@ from __future__ import annotations
 
 import os
 
-from hunt_core.scan._engine_impl import (
+from hunt_core.scan.predump import (
+    confirm_dump,
+    enrich_dump_setup,
+    phase_dump,
+)
+from hunt_core.scan.prepump import (
+    confirm_long,
+    enrich_long_setup,
+    phase_long,
+)
+from hunt_core.scan._engine_impl import evaluate_early_alert
+from hunt_core.scan.routing import (
     DeliveryMode,
     SetupCandidate,
-    confirm_dump,
-    confirm_long,
-    enrich_dump_setup,
-    enrich_long_setup,
-    evaluate_early_alert,
-    phase_dump,
-    phase_long,
     resolve_delivery_mode,
     route_tick,
 )

@@ -179,6 +179,7 @@ class PreparedSymbol:
     context_snapshot_age_seconds: float | None = None
     data_freshness_flags: tuple[str, ...] = ()
     data_quality_flags: list[str] = field(default_factory=list)
+    factor_panel: dict[str, float | None] = field(default_factory=dict)
     data_source_mix: str = "futures_only"
     degraded: bool = False
     degrade_reason: str | None = None

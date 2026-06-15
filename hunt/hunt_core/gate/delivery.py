@@ -711,7 +711,7 @@ def classify_delivery_tier(
 
     lc = lifecycle if isinstance(lifecycle, dict) else row.get("lifecycle")
     lc_dict = lc if isinstance(lc, dict) else {}
-    from hunt_core.scan._engine_impl import resolve_delivery_mode  # noqa: PLC0415
+    from hunt_core.scan.routing import resolve_delivery_mode  # noqa: PLC0415
 
     mode = resolve_delivery_mode(lc_dict, setup)
 
@@ -1442,7 +1442,7 @@ def collect_report_blockers(
         res = float(setup.get("resistance_break_level") or 0)
         px = float(r.get("price") or 0)
         r5_close = float((r.get("timeframes") or {}).get("5m_closed", {}).get("close") or 0)
-        from hunt_core.scan._engine_impl import long_resistance_chase_veto  # noqa: PLC0415
+        from hunt_core.scan._confirm_shared import long_resistance_chase_veto  # noqa: PLC0415
 
         if long_resistance_chase_veto(res, px, r5_close):
             blockers.append(
@@ -1827,7 +1827,7 @@ def evaluate_alert_gate(
         res = float(setup.get("resistance_break_level") or 0)
         px = float(r.get("price") or 0)
         r5_close = float((r.get("timeframes") or {}).get("5m_closed", {}).get("close") or 0)
-        from hunt_core.scan._engine_impl import long_resistance_chase_veto  # noqa: PLC0415
+        from hunt_core.scan._confirm_shared import long_resistance_chase_veto  # noqa: PLC0415
 
         if long_resistance_chase_veto(res, px, r5_close):
             return GateResult(

@@ -1097,7 +1097,7 @@ def _attach_structure_signals(row: dict[str, Any]) -> None:
     prepared = row.get("_prepared")
     if prepared is None:
         return
-    from hunt_core.scan._engine_impl import detect_pp
+    from hunt_core.features.structure import detect_pp
     from hunt_core.features.chart_patterns import chart_pattern_snapshot
 
     pp: dict[str, Any] = {}

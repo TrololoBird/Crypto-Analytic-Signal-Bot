@@ -10,6 +10,17 @@ from typing import Any, Literal
 
 from hunt_core.data.universe import DEFAULT_MODES
 from hunt_core.deliver.dispatch import SniperConfig
+from hunt_core.domain.config import (
+    COOLDOWN_MINUTES,
+    FORMING_MIN_SCORE,
+    HUNT_MIN_RISK_REWARD,
+    MIN_RISK_REWARD,
+    BOUNCE_MIN_RISK_REWARD,
+    SCAN_INTERVAL_S,
+    SYMBOL_TICK_TIMEOUT_S,
+    TICK_ROTATE_INTERVAL_S,
+    TICK_ROTATE_MIN_BYTES,
+)
 from hunt_core.paths import SESSION_DIR, TELEGRAM_COOLDOWN, TICK_JSONL
 from hunt_core.runtime.logging import configure_script_logging
 
@@ -20,14 +31,6 @@ SYMBOL_TICK_TIMEOUT_S = 180
 
 OUT_PATH = TICK_JSONL
 STATE_PATH = TELEGRAM_COOLDOWN
-SCAN_INTERVAL_S = 900
-TICK_ROTATE_INTERVAL_S = 600
-TICK_ROTATE_MIN_BYTES = 65_536
-COOLDOWN_MINUTES = 45
-FORMING_MIN_SCORE = 45
-MIN_RISK_REWARD = 1.0
-HUNT_MIN_RISK_REWARD = 0.8
-BOUNCE_MIN_RISK_REWARD = 0.5
 
 IGNITION_WINDOW_S = 300
 IGNITION_MIN_PCT = 2.5

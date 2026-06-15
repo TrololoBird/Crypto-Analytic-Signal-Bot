@@ -165,6 +165,29 @@ def evaluate_delivery(
     if not must_ok:
         code = f"must_pass:{must_missing[0] if must_missing else 'unknown'}"
         return GateResult(ok=False, code=code, message=code), None
+    from hunt_core.confluence.confluence import (
+        FAMILY_VOTE_MIN,
+        build_mtf_confluence,
+        family_vote_count,
+    )
+
+    tf = row.get("timeframes") or {}
+    price = float(row.get("price") or row.get("last_price") or 0)
+    mtf = row.get("mtf")
+    if mtf is None and isinstance(tf, dict) and tf and price > 0 and sym:
+        mtf = build_mtf_confluence(
+            sym,
+            tf,
+            price,
+            market=row.get("market") if isinstance(row.get("market"), dict) else None,
+            row=row,
+        )
+        row["mtf"] = mtf
+    if mtf is not None:
+        votes = family_vote_count(mtf, direction=direction)
+        if votes < FAMILY_VOTE_MIN:
+            code = f"family_vote_low:{votes}<{FAMILY_VOTE_MIN}"
+            return GateResult(ok=False, code=code, message=code), None
     gate = run_gate_pipeline(
         direction=direction,
         setup=setup,

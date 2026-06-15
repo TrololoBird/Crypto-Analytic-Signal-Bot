@@ -25,7 +25,7 @@ from hunt_core.analysis.deep_signal import (
     resolve_trade_direction,
     scenario_summary,
 )
-from hunt_core.track.signal_audit import append_audit_log, audit_probe_row, backtest_levels_on_bars
+from hunt_core.track.events import append_audit_log, audit_probe_row, backtest_levels_on_bars
 from hunt_core.track.tracker import load_tracker_state
 from hunt_core.data.universe import PINNED_SYMBOLS
 from hunt_core.params.store import effective_hunt_params

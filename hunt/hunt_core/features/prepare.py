@@ -995,6 +995,9 @@ def prepare_symbol(
     profile_15m = _volume_profile_with_direction(
         work_15m, lookback=VP_LOOKBACK_15M, buckets=VP_BUCKETS_DEFAULT
     )
+    from hunt_core.features.prepare_frame import factor_panel_from_frames
+
+    factor_panel = factor_panel_from_frames(work_15m, work_1h)
 
     return PreparedSymbol(
         universe=universe_symbol,
@@ -1033,6 +1036,7 @@ def prepare_symbol(
         context_timeframes=context_timeframes,
         settings=settings,
         data_quality_flags=[],
+        factor_panel=factor_panel,
     )
 
 

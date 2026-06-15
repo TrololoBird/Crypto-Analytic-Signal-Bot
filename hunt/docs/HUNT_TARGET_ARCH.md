@@ -1,7 +1,7 @@
 # Hunter — target architecture (H-B rewrite)
 
-> **Status:** wave 2 shrink complete (2026-06-14).  
-> **Packages:** `hunt_core/` (~88 files, ~43k hot LOC) · `hunt_research/` (verify + calibrate offline).  
+> **Status:** redesign cutover (2026-06-15).  
+> **Package:** `hunt_core/` (~113 files, ~44k hot LOC budget).  
 > **Product:** [HUNT_PRODUCT_DEFINITION.md](HUNT_PRODUCT_DEFINITION.md)
 
 Canonical detail: [HUNT_ARCHITECTURE.md](HUNT_ARCHITECTURE.md).
@@ -9,10 +9,10 @@ Canonical detail: [HUNT_ARCHITECTURE.md](HUNT_ARCHITECTURE.md).
 ## Production loop
 
 ```
-ingest → features → detect → gate → deliver → track → outcomes
+ingest → features → scan → regime → gate → deliver → track → outcomes
 ```
 
-Offline: `hunt_research/logic_verify.py`, `hunt_research/calibrate/*`.
+Offline: `hunt_core/_dev/check_*` + `check_logic` + CI live-smoke (no separate `hunt_research/` package).
 
 ## Contracts
 
@@ -26,25 +26,29 @@ Single module: [hunt_core/contract.py](../hunt_core/contract.py)
 
 | Layer | Modules |
 |-------|---------|
-| entry | `__main__.py` → `watch` \| `verify` |
-| runtime | `runtime/cycle/_impl.py`, `settings.py`, `telegram_commands.py` |
-| data | `collect.py`, `universe.py`, `lake.py`, `completeness.py` |
+| entry | `__main__.py` → `watch` |
+| runtime | `runtime/cycle/_impl.py`, `tick_assembly.py`, `telegram_commands.py` |
+| data | `collect.py`, `universe.py`, `completeness.py`, `lake.py`, `scanner.py` |
 | market | `factory.py`, `client.py`, `network.py`, `cross.py`, `streams.py` |
-| features | `prepare.py`, `prepare_frame.py`, `prepare_columns.py`, `levels.py` |
-| detect | `engine.py`, `lifecycle.py`, `setup_candidates.py` |
+| features | `prepare_frame.py`, `snapshot.py`, `factors.py`, `structure.py`, `fib.py` |
+| scan | `_dump_core.py`, `_engine_impl.py`, `routing.py`, `predump.py`, `prepump.py`, `presqueeze.py`, `scanner.py` |
+| regime | `leg_fsm.py`, `regime.py` |
+| levels | `levels.py` (canonical SL/TP) |
+| confluence | `confluence.py`, `mtf.py` |
 | gate | `delivery.py`, `policy.py` |
-| deliver | `dispatch.py`, `telegram.py` |
-| track | `tracker.py`, `events.py`, `outcomes.py`, … |
-| analysis | `pinned_deep.py`, `deep_signal.py` |
-| setups | `detectors.py`, `catalog.py` |
-| domain | `config.py` (HuntSettings), `schemas.py`, `policy.py` |
-| verify | `calibrate/verify.py` → `hunt_research.logic_verify` |
+| deliver | `dispatch.py`, `telegram.py`, `templates.py` |
+| track | `tracker.py`, `events.py`, `outcomes.py`, `candidates.py` |
+| analysis | `pinned_deep.py`, `deep_signal.py`, `confluence_grid.py` |
+| setups | `catalog.py`, `scan/detectors.py` |
+| domain | `config.py`, `setup_registry.py`, `schemas.py` |
+| dev gates | `_dev/budget`, `check_*`, `check_logic`, `smoke_signals`, `watch_once_smoke` |
 
 ## Entrypoints
 
 ```bash
 python -m hunt_core watch --interval 60
-python -m hunt_core verify
+python -m hunt_core watch --once --no-telegram --symbols BTCUSDT
+python -m hunt_core._dev.smoke_signals --baseline data/baseline/hunt_baseline.json BTCUSDT ETHUSDT
 ```
 
 No `hunt/scripts/`. No `engine.*` / `bot.*` imports.

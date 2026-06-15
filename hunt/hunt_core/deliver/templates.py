@@ -1,25 +1,29 @@
 """Table-driven Telegram templates (§K / §8D)."""
 from __future__ import annotations
 
+import html
 from typing import Any
 
 
-def format_confirm_strong(row: dict[str, Any], *, direction: str) -> str:
-    sym = str(row.get("symbol") or "").replace("USDT", "-USDT")
+def format_confirm_strong(
+    row: dict[str, Any],
+    *,
+    direction: str,
+    delivery_tier: str = "triggered",
+    confirm_reasons: list[str] | None = None,
+) -> str:
+    """Confirm TG body — delegates to unified delivery card formatter."""
+    from hunt_core.deliver.dispatch import format_delivery_card
+
     setup = row.get("dump") if direction == "short" else row.get("long")
     setup = setup if isinstance(setup, dict) else {}
-    fuel = setup.get("dump_score") if direction == "short" else setup.get("long_score")
-    phase = setup.get("phase") or (row.get("lifecycle") or {}).get("phase")
-    dir_ru = "ШОРТ" if direction == "short" else "ЛОНГ"
-    lines = [
-        f"✅ <b>{sym}</b> · {dir_ru} · CONFIRM",
-        f"Phase: <code>{phase}</code> · fuel: <code>{fuel}</code>",
-    ]
-    for key, label in (("entry_zone", "Entry"), ("stop_loss", "SL"), ("tp1", "TP1"), ("tp2", "TP2")):
-        val = setup.get(key)
-        if val is not None:
-            lines.append(f"{label}: <code>{val}</code>")
-    return "\n".join(lines)
+    return format_delivery_card(
+        row,
+        direction=direction,
+        setup=setup,
+        delivery_tier=delivery_tier,
+        confirm_reasons=confirm_reasons,
+    )
 
 
 def format_advisory_early(row: dict[str, Any], *, note: str) -> str:
@@ -34,4 +38,48 @@ def format_pinned_summary(row: dict[str, Any]) -> str:
     return f"📌 <b>{sym}</b> · {direction}"
 
 
-__all__ = ["format_advisory_early", "format_confirm_strong", "format_pinned_summary"]
+def format_telegram_confirm(
+    row: dict[str, Any],
+    *,
+    direction: str,
+    confirm_reasons: list[str],
+    delivery_tier: str = "triggered",
+) -> str:
+    """Closed-bar confirm card + optional confluence grid."""
+    from hunt_core.analysis.confluence_grid import build_confluence_grid, format_grid_telegram
+
+    setup = row["dump"] if direction == "short" else row["long"]
+    body = format_confirm_strong(
+        {**row, "dump" if direction == "short" else "long": setup},
+        direction=direction,
+        delivery_tier=delivery_tier,
+        confirm_reasons=confirm_reasons,
+    )
+    grid = build_confluence_grid(row)
+    if grid:
+        body = f"{body}\n{format_grid_telegram(grid)}"
+    if confirm_reasons:
+        body = f"{body}\n<i>{html.escape(', '.join(confirm_reasons[:6]))}</i>"
+    return body
+
+
+def format_squeeze_telegram(row: dict[str, Any]) -> str:
+    from hunt_core.deliver.telegram import format_squeeze_telegram as _fmt
+
+    return _fmt(row)
+
+
+def format_followup_telegram_message(followup: Any, row: dict[str, Any]) -> str:
+    from hunt_core.deliver.telegram import format_followup_telegram as _fmt
+
+    return _fmt(followup, row)
+
+
+__all__ = [
+    "format_advisory_early",
+    "format_confirm_strong",
+    "format_followup_telegram_message",
+    "format_pinned_summary",
+    "format_squeeze_telegram",
+    "format_telegram_confirm",
+]

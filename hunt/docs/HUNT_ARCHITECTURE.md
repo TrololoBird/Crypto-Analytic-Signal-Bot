@@ -16,16 +16,16 @@ Standalone **crypto-hunter** package (`hunt/`, import `hunt_core`). No `engine.*
 
 | Metric | Value |
 |--------|-------|
-| `hunt_core/` `.py` files | **~88** (was 137) |
-| hot path LOC | **~43k** (budget gate 43k; stretch 32k) |
-| `hunt_research/` | logic_verify + calibrate offline |
+| `hunt_core/` `.py` files | **~113** (was 137) |
+| hot path LOC | **~44k** (budget gate 44k; stretch 32k) |
+| offline verify | `_dev/check_*` + CI live-smoke |
 
 ## Package layout
 
 ```
 hunt/
 ├── hunt_core/              # production hot path (~88 .py)
-│   ├── __main__.py         # python -m hunt_core [watch|verify]
+│   ├── __main__.py         # python -m hunt_core watch
 │   ├── contract.py         # trade plan + feature payload + delivery contract
 │   ├── market/             # factory, client, network, cross, streams (9 files)
 │   ├── data/               # collect, universe, lake, completeness (5 files)
@@ -33,25 +33,26 @@ hunt/
 │   ├── regime/             # leg_fsm (canonical lifecycle), regime.py
 │   ├── levels/             # levels.py (canonical SL/TP builder)
 │   ├── confluence/         # MTF family-vote + must-pass
-│   ├── scan/               # _engine_impl, predump/prepump/presqueeze, scanner
+│   ├── scan/               # _dump_core, _engine_impl, routing, predump/prepump/presqueeze, scanner
 │   ├── gate/               # delivery, policy (3 files)
 │   ├── deliver/            # dispatch, telegram, digest (4 files)
 │   ├── track/              # tracker, events, outcomes, …
 │   ├── analysis/           # pinned_deep, deep_signal, adx_thresholds, trend_engine
 │   ├── setups/             # detectors, catalog
 │   ├── runtime/            # cycle/_impl, settings, telegram_commands
-│   ├── domain/             # config, schemas, policy, regime, limit_entry
-│   └── calibrate/          # verify.py only (CLI → hunt_research.logic_verify)
-├── hunt_research/          # logic_verify, calibrate/, labels, dollar_bars
+│   ├── domain/             # config, setup_registry, schemas, policy
+│   └── _dev/               # budget, check_*, smoke_signals, watch_once_smoke
 ├── docs/
-└── data/
+└── data/baseline/          # smoke regression snapshots
 ```
+
+Wave 3C scanner split in progress: dump/long logic in `_dump_core.py` (~2106 LOC); adaptive/early in `_engine_impl.py` (~1072 LOC); `predump`/`prepump`/`presqueeze` are thin wrappers until logic moves.
 
 ## Hot path (one watch tick)
 
 ```
 run_loop → market.factory → data.collect.snapshot_symbol
-  → features.prepare → scan._engine_impl + regime.leg_fsm
+  → features.prepare → scan (_dump_core + _engine_impl) + regime.leg_fsm
   → track (prep_shadow, candidates, reconcile)
   → [confirmed] gate.delivery → deliver.dispatch → deliver.telegram
   → [pinned] analysis.pinned_deep + deep_signal
@@ -60,7 +61,7 @@ run_loop → market.factory → data.collect.snapshot_symbol
 ### Delivery invariant
 
 ```
-validate_signal_contract(setup) → evaluate_delivery (gate) → telegram.send
+validate_signal_contract(setup) → must_pass → family_vote → evaluate_delivery (gate) → telegram.send
 ```
 
 ## Entrypoints
@@ -68,8 +69,8 @@ validate_signal_contract(setup) → evaluate_delivery (gate) → telegram.send
 ```bash
 python -m hunt_core watch --interval 60
 python -m hunt_core watch --once --no-telegram
-python -m hunt_core verify
 python -m hunt_core._dev.budget
+python -m hunt_core._dev.smoke_signals --baseline data/baseline/hunt_baseline.json BTCUSDT
 ```
 
 ## Merge policy (post-redesign 2026-06-15)
@@ -77,7 +78,8 @@ python -m hunt_core._dev.budget
 | File | LOC | Policy |
 |------|-----|--------|
 | `runtime/cycle/_impl.py` | ~2500 | watch loop |
-| `scan/_engine_impl.py` | ~3400 | scanner core (shim: `detect/engine.py`) |
+| `scan/_dump_core.py` | ~2100 | dump/long confirm — wave 3C intermediate |
+| `scan/_engine_impl.py` | ~1070 | adaptive/early — wave 3C split target |
 | `regime/leg_fsm.py` | ~1600 | lifecycle FSM |
 | `levels/levels.py` | ~1200 | SL/TP geometry |
 | `gate/delivery.py` | ~2100 | delivery gates |

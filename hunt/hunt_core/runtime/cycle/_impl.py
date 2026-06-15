@@ -115,7 +115,13 @@ from hunt_core.data.collect import (
     sort_symbols_for_tick,
 )
 from hunt_core.data.lake import FeatureLakeWriter
-from hunt_core.data.lake import buffer_tick_rows, flush_tick_buffer
+from hunt_core.data.lake import (
+    buffer_cooldown_state,
+    buffer_tick_rows,
+    buffer_tracker_state,
+    flush_lake,
+    flush_tick_buffer,
+)
 from hunt_core.features.feature_engine import FeatureExtractError, build_feature_vector
 from hunt_core.deliver.digest import (
     DigestCandidate,
@@ -202,7 +208,8 @@ def _refresh_live_price(
 
 
 def _format_squeeze_telegram(row: dict[str, Any]) -> str:
-    from hunt_core.deliver.telegram import format_squeeze_telegram  # noqa: PLC0415
+    from hunt_core.deliver.templates import format_squeeze_telegram
+
     return format_squeeze_telegram(row)
 
 
@@ -233,8 +240,11 @@ def _should_alert(
     lifecycle: Any | None = None,
     row: dict[str, Any] | None = None,
 ) -> bool:
+    """Forming-path gate check — confirm delivery uses evaluate_delivery only."""
     if not isinstance(setup, dict):
         return False
+    if bool(setup.get("confirmed")):
+        return True
     return run_gate_pipeline(
         setup=setup,
         direction=direction,
@@ -253,6 +263,10 @@ def _alert_block_reason(
     lifecycle: Any | None = None,
     row: dict[str, Any] | None = None,
 ) -> str:
+    if not isinstance(setup, dict):
+        return "invalid_setup"
+    if bool(setup.get("confirmed")):
+        return ""
     return run_gate_pipeline(
         setup=setup,
         direction=direction,
@@ -277,8 +291,7 @@ def _load_state() -> dict[str, str]:
 
 
 def _save_state(state: dict[str, str]) -> None:
-    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    STATE_PATH.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    buffer_cooldown_state(state, STATE_PATH)
 
 
 async def _maybe_send_liq_burst_advisory(
@@ -745,17 +758,14 @@ def _format_telegram(
     confirm_reasons: list[str],
     delivery_tier: str = "triggered",
 ) -> str:
-    from hunt_core.analysis.confluence_grid import build_confluence_grid, format_grid_telegram
-    from hunt_core.deliver.templates import format_confirm_strong
+    from hunt_core.deliver.templates import format_telegram_confirm
 
-    setup = row["dump"] if direction == "short" else row["long"]
-    body = format_confirm_strong({**row, "dump" if direction == "short" else "long": setup}, direction=direction)
-    grid = build_confluence_grid(row)
-    if grid:
-        body = f"{body}\n{format_grid_telegram(grid)}"
-    if confirm_reasons:
-        body = f"{body}\n<i>{html.escape(', '.join(confirm_reasons[:6]))}</i>"
-    return body
+    return format_telegram_confirm(
+        row,
+        direction=direction,
+        confirm_reasons=confirm_reasons,
+        delivery_tier=delivery_tier,
+    )
 
 
 # Orphan signals (symbol no longer in watchlist) are re-checked via REST klines.
@@ -883,9 +893,9 @@ def _duration_str(opened: str) -> str:
 
 
 def _format_followup_telegram(followup: Any, row: dict[str, Any]) -> str:
-    from hunt_core.deliver.telegram import format_followup_telegram  # noqa: PLC0415
+    from hunt_core.deliver.templates import format_followup_telegram_message
 
-    return format_followup_telegram(followup, row)
+    return format_followup_telegram_message(followup, row)
 
 
 async def _deliver_followup(
@@ -921,7 +931,7 @@ async def _deliver_followup(
             message_key=fu.message_key,
             now=now,
         )
-    save_tracker_state(tracker_state)
+    buffer_tracker_state(tracker_state)
     LOG.info(
         "watch_followup_sent",
         symbol=fu.symbol,
@@ -1709,10 +1719,13 @@ async def run_tick(
                                     continue
                                 if _top_ls_f >= HUNT_SNIPER_TOP_LS_MAX:
                                     continue
+                        confirmed_setup = bool(setup.get("confirmed"))
+                        confirm_gate = None
+                        confirm_tier: str | None = None
                         if (
                             send_telegram
                             and broadcaster is not None
-                            and not bool(setup.get("confirmed"))
+                            and not confirmed_setup
                         ):
                             if await _maybe_send_early_alert(
                                 broadcaster,
@@ -1726,50 +1739,38 @@ async def run_tick(
                                 now=now,
                             ):
                                 advisory_sent_tick.add(f"{symbol}:{direction}")
-                        if not _should_alert(
-                            setup,
-                            direction=direction,
-                            symbol=symbol,
-                            lifecycle=lifecycle_raw,
-                            row=row,
-                        ):
-                            lc = lifecycle_raw if isinstance(lifecycle_raw, dict) else {}
-                            fuel = float(
-                                setup.get("dump_fuel") or setup.get("long_fuel")
-                                or setup.get("dump_score")
-                                or setup.get("long_score")
-                                or 0
-                            )
-                            if bool(setup.get("confirmed")):
-                                from hunt_core.deliver.dispatch import evaluate_delivery
+                        if confirmed_setup:
+                            from hunt_core.deliver.dispatch import evaluate_delivery
 
-                                gate, _tier = evaluate_delivery(
-                                    row,
-                                    direction=direction,
-                                    setup=setup,
-                                    lifecycle=lifecycle_raw
-                                    if isinstance(lifecycle_raw, dict)
-                                    else None,
-                                    symbol=symbol,
-                                    refresh_live_price=False,
-                                    ws_feed=ws_feed,
-                                )
+                            confirm_gate, confirm_tier = evaluate_delivery(
+                                row,
+                                direction=direction,
+                                setup=setup,
+                                lifecycle=lifecycle_raw
+                                if isinstance(lifecycle_raw, dict)
+                                else None,
+                                symbol=symbol,
+                                refresh_live_price=False,
+                                ws_feed=ws_feed,
+                            )
+                            if not confirm_gate.ok or confirm_tier is None:
+                                lc = lifecycle_raw if isinstance(lifecycle_raw, dict) else {}
                                 LOG.info(
                                     "watch_alert_blocked",
                                     symbol=symbol,
                                     direction=direction,
                                     score=setup.get("dump_score") or setup.get("long_score"),
                                     hunt_phase=lc.get("phase"),
-                                    block_code=gate.code,
-                                    reason=gate.message,
+                                    block_code=confirm_gate.code,
+                                    reason=confirm_gate.message,
                                 )
                                 append_signal_event(
                                     "blocked",
                                     symbol=symbol,
                                     direction=direction,
-                                    detail=gate.message,
+                                    detail=confirm_gate.message,
                                     payload={
-                                        "block_code": gate.code,
+                                        "block_code": confirm_gate.code,
                                         "score": setup.get("dump_score")
                                         or setup.get("long_score"),
                                         "fuel": setup.get("dump_fuel")
@@ -1787,9 +1788,24 @@ async def run_tick(
                                     lifecycle=lifecycle_raw,
                                     now=now,
                                     blocked=True,
-                                    block_code=str(gate.code or ""),
+                                    block_code=str(confirm_gate.code or ""),
                                 )
-                            elif fuel >= effective_hunt_params(symbol).forming_min_score:
+                                continue
+                        elif not _should_alert(
+                            setup,
+                            direction=direction,
+                            symbol=symbol,
+                            lifecycle=lifecycle_raw,
+                            row=row,
+                        ):
+                            lc = lifecycle_raw if isinstance(lifecycle_raw, dict) else {}
+                            fuel = float(
+                                setup.get("dump_fuel") or setup.get("long_fuel")
+                                or setup.get("dump_score")
+                                or setup.get("long_score")
+                                or 0
+                            )
+                            if fuel >= effective_hunt_params(symbol).forming_min_score:
                                 LOG.info(
                                     "watch_setup_forming",
                                     symbol=symbol,
@@ -1877,19 +1893,22 @@ async def run_tick(
                                 tp1=setup.get("tp1"),
                             )
                             continue
-                        from hunt_core.deliver.dispatch import evaluate_delivery
+                        if confirmed_setup:
+                            gate, delivery_tier = confirm_gate, confirm_tier
+                        else:
+                            from hunt_core.deliver.dispatch import evaluate_delivery
 
-                        gate, delivery_tier = evaluate_delivery(
-                            row,
-                            direction=direction,
-                            setup=setup,
-                            lifecycle=lifecycle_raw
-                            if isinstance(lifecycle_raw, dict)
-                            else None,
-                            symbol=symbol,
-                            refresh_live_price=False,
-                            ws_feed=ws_feed,
-                        )
+                            gate, delivery_tier = evaluate_delivery(
+                                row,
+                                direction=direction,
+                                setup=setup,
+                                lifecycle=lifecycle_raw
+                                if isinstance(lifecycle_raw, dict)
+                                else None,
+                                symbol=symbol,
+                                refresh_live_price=False,
+                                ws_feed=ws_feed,
+                            )
                         if not gate.ok or delivery_tier is None:
                             LOG.info(
                                 "watch_telegram_skipped_gate",
@@ -2018,9 +2037,10 @@ async def run_tick(
         return rows
     finally:
         _save_state(state)
-        save_tracker_state(tracker_state)
+        buffer_tracker_state(tracker_state)
         save_prep_shadow_state(prep_shadow_state)
         save_setup_candidates_state(setup_candidates_state)
+        flush_lake()
 
 
 def _build_digest_candidates(
@@ -2514,7 +2534,7 @@ async def run_loop(
                 await asyncio.sleep(min(3.0, remaining))
     finally:
         try:
-            flush_tick_buffer()
+            flush_lake()
         except Exception:
             LOG.exception("tick_buffer_flush_failed")
         feature_lake.close()

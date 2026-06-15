@@ -28,7 +28,7 @@ from hunt_core.analysis.pinned_deep import enrich_pinned_tf_snapshot, prepare_ht
 from hunt_core.analysis.trend_engine import legacy_trend_label, trend_from_snapshot
 from hunt_core.domain.market_regime import symbol_regime_features
 from hunt_core.data.universe import PINNED_SYMBOLS
-from hunt_core.scan._engine_impl import detect_pp
+from hunt_core.features.structure import detect_pp
 from hunt_core.errors import DEFENSIVE_EXC
 from hunt_core.market.client import depth_imbalance_from_book, microprice_bias_from_book
 

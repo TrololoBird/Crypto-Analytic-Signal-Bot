@@ -16,6 +16,16 @@ def main() -> int:
         "market": {"taker_ratio": 1.05, "oi_z": 1.2, "funding_pct": 0.0001},
     }
     panel = build_factor_panel(row)
+    # Prepared-frame columns (cmf20/kama10) are canonical via prepare_frame, not polars_ta_bridge.
+    if "15m" in row.get("timeframes", {}):
+        tf15 = row["timeframes"]["15m"]
+        if tf15.get("cmf20") is not None and "flow_cmf15" not in panel:
+            try:
+                cmf = float(tf15["cmf20"])
+                if math.isfinite(cmf):
+                    panel["flow_cmf15"] = max(-1.0, min(1.0, cmf))
+            except (TypeError, ValueError):
+                pass
     bad: list[str] = []
     for key, val in panel.items():
         if val is None:

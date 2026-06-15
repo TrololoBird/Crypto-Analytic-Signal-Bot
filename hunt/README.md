@@ -18,9 +18,6 @@ python -m hunt_core watch --once --no-telegram
 
 # production loop
 python -m hunt_core watch --interval 60
-
-# logic verification (dev gate)
-python -m hunt_core verify
 ```
 
 Secrets: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` in `.env`.
@@ -31,11 +28,10 @@ Data: `hunt/data/` — see [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ```
 hunt/
-├── hunt_core/          # Canonical: market, data/collect, features, runtime, gate, deliver
-├── hunt_research/      # Offline labels, replay, calibrate extras
+├── hunt_core/          # Canonical: market, data, features, scan, regime, gate, deliver
 ├── docs/               # HUNT_ARCHITECTURE, DEPLOY, LIBRARY_STACK
 ├── config.defaults.toml
-└── data/               # Runtime state + lake
+└── data/               # Runtime state + baseline/
 ```
 
 ## vs main bot
@@ -49,9 +45,17 @@ hunt/
 ## Verification
 
 ```bash
-python -m compileall -q hunt/hunt_core
-python -m hunt_core verify
+cd hunt && PYTHONPATH=.
+python -m compileall -q hunt_core
 python -m hunt_core._dev.budget
+python -m hunt_core._dev.check_scenarios
+python -m hunt_core._dev.smoke_signals --baseline data/baseline/hunt_baseline.json BTCUSDT
+```
+
+Offline logic checks replaced by `_dev/check_*` + CI live-smoke (no `verify` subcommand).
+
+```bash
+python -m hunt_core._dev.check_logic
 ```
 
 ## Docs

@@ -106,6 +106,10 @@ def build_factor_panel(row: dict[str, Any]) -> dict[str, float | None]:
         except (TypeError, ValueError):
             pass
 
+    cmf = factor_from_tf(tf15, "cmf20")
+    if cmf is not None:
+        panel["flow_cmf15"] = _clamp11(cmf)
+
     return panel
 
 

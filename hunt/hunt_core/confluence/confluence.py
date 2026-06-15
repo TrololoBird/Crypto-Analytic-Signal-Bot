@@ -15,11 +15,20 @@ class ConfluenceVote:
 
 
 FAMILIES: tuple[str, ...] = ("trend", "momentum", "flow", "derivatives", "structure")
+FAMILY_VOTE_MIN = 2  # min HTF-aligned families for confirm delivery (§E.3)
 
 
-def family_vote_count(confluence: MTFConfluence | dict[str, Any]) -> int:
+def family_vote_count(
+    confluence: MTFConfluence | dict[str, Any],
+    *,
+    direction: str = "",
+) -> int:
     """One vote per family — anti double-count (§3)."""
     if isinstance(confluence, MTFConfluence):
+        if direction == "short":
+            return int(confluence.short_scenario.htf_count)
+        if direction == "long":
+            return int(confluence.long_scenario.htf_count)
         data = confluence.to_dict() if hasattr(confluence, "to_dict") else confluence.__dict__
     else:
         data = confluence
@@ -49,6 +58,7 @@ def evaluate_must_pass(row: dict[str, Any], *, direction: str) -> tuple[bool, li
 __all__ = [
     "ConfluenceVote",
     "FAMILIES",
+    "FAMILY_VOTE_MIN",
     "MTFConfluence",
     "ScenarioScore",
     "TFSignal",

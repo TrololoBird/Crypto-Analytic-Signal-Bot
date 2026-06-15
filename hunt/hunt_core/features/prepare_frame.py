@@ -292,6 +292,7 @@ def add_session_cvd(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def _cmf(df: pl.DataFrame, period: int = 20) -> pl.Series:
+    """Chaikin Money Flow — canonical hot-path impl (plta CMF not used on prepare path)."""
     width = df["high"] - df["low"]
     mfm = (
         pl.when(width > 0.0)
@@ -623,7 +624,7 @@ def _ichimoku_cloud(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def _kama(df: pl.DataFrame, period: int = 10, fast: int = 2, slow: int = 30) -> pl.Series:
-    """Kaufman Adaptive Moving Average."""
+    """Kaufman Adaptive Moving Average — canonical (plta.KAMA broken on Py3.14)."""
     close = df["close"]
     change = close.diff(period)
     volatility = close.diff().abs().rolling_sum(window_size=period)
@@ -1180,6 +1181,41 @@ def _prepare_frame(
     return work
 
 
+def factor_panel_from_frames(
+    work_15m: pl.DataFrame,
+    work_1h: pl.DataFrame,
+    *,
+    market: dict[str, Any] | None = None,
+) -> dict[str, float | None]:
+    """Build normalized factor panel from prepared Polars frames (§E.1)."""
+    from hunt_core.features.factors import build_factor_panel
+
+    def _last_val(df: pl.DataFrame, col: str) -> float | None:
+        if df.is_empty() or col not in df.columns:
+            return None
+        try:
+            v = float(df[col][-1])
+        except (TypeError, ValueError):
+            return None
+        return v if v == v else None
+
+    row: dict[str, Any] = {
+        "timeframes": {
+            "15m": {
+                "rsi14": _last_val(work_15m, "rsi14"),
+                "cmf20": _last_val(work_15m, "cmf20"),
+                "kama10": _last_val(work_15m, "kama10"),
+            },
+            "1h": {
+                "adx14": _last_val(work_1h, "adx14"),
+                "rsi14": _last_val(work_1h, "rsi14"),
+            },
+        },
+        "market": market or {},
+    }
+    return build_factor_panel(row)
+
+
 # ---------------------------------------------------------------------------
 # 4h bias helper
 # ---------------------------------------------------------------------------
@@ -1194,6 +1230,7 @@ __all__ = [
     "_prepare_frame",
     "add_rolling_cvd_24h",
     "add_session_cvd",
+    "factor_panel_from_frames",
     "has_minimum_bars",
     "min_required_bars",
 ]
