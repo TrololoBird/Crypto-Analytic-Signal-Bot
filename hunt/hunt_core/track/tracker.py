@@ -869,7 +869,7 @@ def _stale_lifecycle_invalidate(
         if opened_phase and lc_phase == opened_phase:
             active["stale_lc_ticks"] = 0
             return None
-        if active.get("tp1_managed") or active.get("tp1_hit"):
+        if active.get("tp1_managed") or active.get("tp1_hit") or active.get("sl_at_breakeven"):
             active["stale_lc_ticks"] = 0
             return None
         if lc_phase in _SHORT_STALE_PHASES:
@@ -890,7 +890,7 @@ def _stale_lifecycle_invalidate(
         if opened_phase and lc_phase == opened_phase:
             active["stale_lc_ticks"] = 0
             return None
-        if active.get("tp1_managed") or active.get("tp1_hit"):
+        if active.get("tp1_managed") or active.get("tp1_hit") or active.get("sl_at_breakeven"):
             active["stale_lc_ticks"] = 0
             return None
         if lc_phase in _LONG_STALE_PHASES:
