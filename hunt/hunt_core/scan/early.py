@@ -626,12 +626,14 @@ EARLY_COOLDOWN_MIN = {
 
 
 def early_telegram_enabled(symbol: str) -> bool:
-    if EARLY_TELEGRAM_ENABLED:
+    # Read env var at call time (not module import time) — dotenv loads after early.py
+    # is first imported by _impl.py, so a module-level constant always sees the default.
+    if os.getenv("HUNT_EARLY_DUMP_TG", "0").strip().lower() in {"1", "true", "yes"}:
         return True
     flags = watchlist_flags(symbol)
     return bool(flags.get("early_telegram") or flags.get("dump_hunt"))
 
-# Prep/start spam without tracker outcomes — per-symbol dump_hunt enables early TG.
+# Kept for any external code that references the constant directly.
 EARLY_TELEGRAM_ENABLED = os.getenv("HUNT_EARLY_DUMP_TG", "0").strip().lower() in {
     "1",
     "true",
